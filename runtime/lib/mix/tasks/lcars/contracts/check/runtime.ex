@@ -885,7 +885,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   @doc """
-  Une porte `eval*` qui ECRIT sur stdout doit d'abord le RECLAMER.
+  Une porte qui ECRIT sur stdout doit d'abord le RECLAMER — porte `eval*` OU tache Mix.
 
   ## Ce que ca a coute, mesure
 
@@ -918,9 +918,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
   ## Ce qu'il mesure exactement
 
-  Une fonction dont le nom commence par `eval` et dont le corps porte `IO.puts/1` (un seul
-  argument — `IO.puts(:stderr, x)` en a deux et ne compte pas) ou la capture `&IO.puts/1`, sans
-  appel a `Fleet.ReleaseDoor.claim_stdout!/0` dans le meme corps.
+  Une fonction dont le corps porte `IO.puts/1` (un seul argument — `IO.puts(:stderr, x)` en a deux
+  et ne compte pas) ou la capture `&IO.puts/1`, sans appel a `Fleet.ReleaseDoor.claim_stdout!/0`
+  dans le meme corps, et qui est l'une des deux formes de porte :
+
+  - une fonction dont le nom commence par `eval` — la porte atteinte par `bin/lcars_fleet eval` ;
+  - le `run/1` d'une tache sous `lib/mix/tasks/` — la porte atteinte par `mix <tache>`.
+
+  Le second cas a ete ajoute le 2026-09-08, apres avoir mesure que le jumeau mix de
+  `Fleet.Roster.eval_tfvars/1` — celui qu'`enroll-catalogue.sh` appelle — ne reclamait pas stdout
+  alors que le jumeau image, lui, etait garde par ce mur meme.
   """
   @spec check_eval_doors_claim_stdout(String.t()) :: Support.result()
   def check_eval_doors_claim_stdout(root) do
@@ -937,10 +944,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     # forme `def f(x) when g` est le piege : la tete est enveloppee dans un `:when`, donc une sonde
     # naive ne scanne aucun corps — et rendrait un vert parfait sur un arbre qui porte TROIS portes
     # nues. Le plancher est pose sous l'etat du jour, pas dessus.
+    tasks = Enum.filter(doors, fn {_f, n, _, _} -> n == :"<the whole task>" end)
+
     broken =
       cond do
-        length(doors) < 6 -> "only #{length(doors)} `eval*` function(s) found (expected 6+)"
-        writers == [] -> "no `eval*` function writes to stdout — the scan matched no IO.puts/1"
+        length(doors) < 15 -> "only #{length(doors)} door(s) found (expected 15+)"
+        writers == [] -> "no door writes to stdout — the scan matched no IO.puts/1"
+        # ⚠ LA GARDE DE LA SECONDE FAMILLE. Si `mix_task?/1` cesse de reconnaitre un module
+        # `Mix.Tasks.*`, les taches disparaissent du scan EN SILENCE et le mur redevient vert sur
+        # la moitie qu'il vient d'apprendre a voir. Une absence ne se distingue pas d'une
+        # conformite : on plante le plancher sous l'etat du jour, huit taches.
+        length(tasks) < 6 -> "only #{length(tasks)} Mix task(s) matched (expected 6+)"
         true -> nil
       end
 
@@ -960,7 +974,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « all claiming it » sans condition affirmerait la
       # conformite dans le rapport meme d'un echec.
       note:
-        "#{length(doors)} `eval*` door(s), #{length(writers)} writing to stdout, " <>
+        "#{length(doors)} door(s) (`eval*` + Mix task `run/1`), #{length(writers)} writing to " <>
+          "stdout, " <>
           if(naked == [], do: "all claiming it", else: "#{length(naked)} NOT claiming it")
     }
   end
@@ -968,10 +983,59 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # ⚠ `def_name/1` (plus bas) DEPLIE le `:when` : la tete d'un `def f(x) when g` y est enveloppee,
   # et sans ce depliage aucun corps n'est atteint. Pas de doublon local de ce depliage : le meme
   # code, deux maisons, est exactement ce que ce fichier refuse partout ailleurs.
+  # ⚠ DEUX FAMILLES, UN SEUL CONTRAT, ET DEUX PORTEES DIFFERENTES. Une porte `eval*` est atteinte
+  # par `bin/lcars_fleet eval` : c'est UNE FONCTION dans un module qui en porte d'autres, donc la
+  # portee du scan est son corps. Une tache Mix est atteinte par `mix <tache>` : le module ENTIER
+  # est la porte, il n'a qu'un point d'entree, et decouper son travail en `defp` ne change pas de
+  # quel flux sort la charge utile.
+  #
+  # Ce sont les DEUX contextes qui existent — un depot avec `mix`, une image livree sans — et le
+  # depot le declare lui-meme : `lcars.catalogue.roles` s'annonce « twin of the release doors ».
+  # Un contrat tenu d'un cote seulement est un contrat que l'autre cote rate.
+  #
+  # Mesure du 2026-09-08 : `mix lcars.catalogue.roles <root> --tfvars 2>/dev/null` — la forme
+  # EXACTE de `enroll-catalogue.sh:120`, dont la sortie devient un `*.auto.tfvars.json` — ne
+  # reclamait pas stdout. Le handler Logger par defaut y ecrit, et le `2>/dev/null` de l'appelant
+  # n'attrape rien puisque le bruit part sur le flux de la charge utile, pas sur stderr.
+  #
+  # ⚠ ET LA PORTEE FONCTION L'AURAIT RATE. Les deux `IO.puts/1` de cette tache vivent dans des
+  # `defp` (`report_names/2`, `report_tfvars/2`), jamais dans `run/1` : un mur qui n'aurait
+  # regarde que le corps de `run/1` aurait rendu un vert parfait sur la porte meme qui a motive son
+  # extension. Mesure a la pose, avant correction de la portee.
+  #
+  # `IO.puts/1` DANS UNE TACHE MIX EST UNE CHARGE UTILE PAR CONSTRUCTION, et c'est mesure, pas
+  # suppose : sur les huit taches `lcars.*`, deux seulement l'emploient (`catalogue.roles`,
+  # `contracts.check`), les six autres passant par `Mix.shell()` pour tout ce qui s'adresse a un
+  # humain. Le discriminant n'est donc pas le nom de la fonction, c'est le flux choisi.
   defp eval_doors_in(path) do
+    ast = quoted!(Path.dirname(path), Path.basename(path))
+
+    if mix_task?(ast) do
+      [{path, :"<the whole task>", ast_writes_stdout?(ast), ast_claims_stdout?(ast)}]
+    else
+      eval_doors_by_function(path, ast)
+    end
+  end
+
+  # ⚠ `use Mix.Task` FAIT FOI, NI LE CHEMIN NI LE NOM DE MODULE, ET LES DEUX AUTRES SONT DES PIEGES
+  # MESURES. Sous `lib/mix/tasks/` vivent DIX-HUIT modules nommes `Mix.Tasks.*` dont dix ne sont
+  # pas des taches : les familles de murs (`…Contracts.Check.Runtime`, ce fichier meme) portent ce
+  # namespace sans etre atteignables par `mix`. Un predicat sur le nom les traitait toutes comme des
+  # portes — mesure du 2026-09-08, a la pose : 18 au lieu de 8, et le plancher d'instrument pose
+  # dessus aurait cache la moitie manquante le jour ou le scan se serait casse.
+  #
+  # `use Mix.Task` est ce que Mix lui-meme exige pour qu'une commande existe : le discriminant du
+  # mur est donc celui du systeme qu'il garde, pas une convention de rangement.
+  defp mix_task?(ast) do
+    ast_any?(ast, fn
+      {:use, _, [{:__aliases__, _, [:Mix, :Task]} | _]} -> true
+      _ -> false
+    end)
+  end
+
+  defp eval_doors_by_function(path, ast) do
     {_, found} =
-      quoted!(Path.dirname(path), Path.basename(path))
-      |> Macro.prewalk([], fn
+      Macro.prewalk(ast, [], fn
         {:def, _, [head | _] = args} = n, acc ->
           case def_name(head) do
             nil -> {n, acc}

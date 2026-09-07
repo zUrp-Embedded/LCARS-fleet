@@ -77,6 +77,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @impl Mix.Task
   def run(args) do
     quiet? = "--quiet" in args
+
+    # Le rapport YAML est un FORMAT, pas une console : le `@moduledoc` le decrit comme tel, et
+    # `--quiet` existe justement pour l'appelant qui ne veut que le code de sortie. Le handler
+    # Logger par defaut ecrit sur le meme stdout, donc un seul `info` emis pendant un mur rendrait
+    # le document illisible pour qui le parse. Meme regle que les portes release, meme primitive.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     Mix.Task.run("compile")
 
     {overall, checks} = run_checks()

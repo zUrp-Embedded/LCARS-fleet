@@ -31,6 +31,14 @@ defmodule Mix.Tasks.Lcars.Catalogue.Roles do
 
   @impl Mix.Task
   def run(argv) do
+    # ⚠ MEME CONTRAT QUE LE JUMEAU IMAGE, MEME GESTE. `Fleet.Roster.eval_main/1` et `eval_tfvars/1`
+    # reclament stdout des leur premiere ligne, et deux murs le tiennent ; ce jumeau-ci portait le
+    # meme contrat dans son `@moduledoc` et rien ne le tenait. Le handler Logger par defaut ecrit
+    # sur ce stdout, dont l'appelant fait un `*.auto.tfvars.json` : une seule ligne de log y devient
+    # du JSON casse, et le `2>/dev/null` de l'appelant ne l'attrape pas — le bruit n'est pas sur
+    # stderr, il est sur le flux de la charge utile.
+    Fleet.ReleaseDoor.claim_stdout!()
+
     {opts, args, _} = OptionParser.parse(argv, switches: [tfvars: :boolean])
 
     case args do

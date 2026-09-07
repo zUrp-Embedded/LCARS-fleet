@@ -26,11 +26,15 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
 
   alias Mix.Tasks.Lcars.Contracts.Check.Runtime
 
-  # Le plancher d'instrument est de 6 portes, ET au moins une ecriture sur stdout : une population
-  # muette ne se distingue pas d'un scanner casse. Les porteuses sont donc CONFORMES — elles
-  # ecrivent et reclament — et l'appelant ajoute celle dont il veut parler.
+  # Trois planchers d'instrument, et chacun garde une absence differente : 15 portes au total, au
+  # moins UNE ecriture sur stdout (une population muette ne se distingue pas d'un scanner casse), et
+  # au moins 6 taches Mix (sans quoi la seconde famille disparait du scan en silence). Les portes de
+  # remplissage sont donc CONFORMES, et l'appelant ajoute celle dont il veut parler.
+  @eval_fillers 14
+  @task_fillers 6
+
   defp filler(:conformes) do
-    Enum.map_join(1..6, "\n", fn i ->
+    Enum.map_join(1..@eval_fillers, "\n", fn i ->
       "  def eval_filler#{i}(x) do\n    Fleet.ReleaseDoor.claim_stdout!()\n" <>
         "    IO.puts(x)\n  end\n"
     end)
@@ -38,12 +42,26 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
 
   # Le meme plancher, mais sans aucune ecriture sur stdout — pour exercer le garde d'instrument.
   defp filler(:muettes) do
-    Enum.map_join(1..6, "\n", fn i ->
+    Enum.map_join(1..@eval_fillers, "\n", fn i ->
       "  def eval_filler#{i}(x) do\n    IO.puts(:stderr, x)\n  end\n"
     end)
   end
 
-  defp tree(extra, kind) do
+  # Des taches Mix qui n'ecrivent PAS sur stdout : elles comblent le plancher de la seconde famille
+  # sans peser sur le compte des ecrivantes, donc sans masquer ce que l'appelant veut mesurer.
+  defp write_task_fillers(root, n) do
+    File.mkdir_p!(Path.join(root, "lib/mix/tasks"))
+
+    for i <- 1..n do
+      File.write!(
+        Path.join(root, "lib/mix/tasks/filler#{i}.ex"),
+        "defmodule Mix.Tasks.Filler#{i} do\n  use Mix.Task\n" <>
+          "  def run(_), do: Mix.shell().info(\"rien sur stdout\")\nend\n"
+      )
+    end
+  end
+
+  defp tree(extra, kind, opts) do
     root = Fleet.TestEnv.tmp_path("eval_doors")
     File.mkdir_p!(Path.join(root, "lib/fleet"))
 
@@ -52,15 +70,22 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
       "defmodule Doors do\n#{filler(kind)}\n#{extra}\nend\n"
     )
 
+    write_task_fillers(root, Keyword.get(opts, :tasks, @task_fillers))
+
+    case Keyword.get(opts, :task_source) do
+      nil -> :ok
+      src -> File.write!(Path.join(root, "lib/mix/tasks/lcars.sujet.ex"), src)
+    end
+
     on_exit(fn -> File.rm_rf!(root) end)
     root
   end
 
-  defp check(extra, kind \\ :conformes),
-    do: Runtime.check_eval_doors_claim_stdout(tree(extra, kind))
+  defp check(extra, kind \\ :conformes, opts \\ []),
+    do: Runtime.check_eval_doors_claim_stdout(tree(extra, kind, opts))
 
   describe "l'instrument repond de lui-meme d'abord" do
-    test "moins de 6 portes : INSTRUMENT BROKEN" do
+    test "trop peu de portes : INSTRUMENT BROKEN" do
       root = Fleet.TestEnv.tmp_path("eval_few")
       File.mkdir_p!(Path.join(root, "lib"))
 
@@ -81,7 +106,100 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
       # arbre conforme, sur un arbre qui portait trois portes nues.
       assert %{status: :fail, evidence: [ev]} = check("", :muettes)
       assert ev =~ "INSTRUMENT BROKEN"
-      assert ev =~ "no `eval*` function writes to stdout"
+      assert ev =~ "no door writes to stdout"
+    end
+
+    test "les taches Mix disparaissent du scan : INSTRUMENT BROKEN" do
+      # ⚠ LA GARDE DE LA SECONDE FAMILLE, ET ELLE A SERVI LE JOUR DE SA POSE. Si `mix_task?/1`
+      # cesse de reconnaitre une tache, la moitie que ce mur vient d'apprendre a voir redevient
+      # invisible — et une absence rend exactement le meme vert qu'une conformite.
+      #
+      # On garde assez de portes `eval*` pour passer le premier plancher : c'est bien la SECONDE
+      # famille qui manque, pas la population entiere.
+      assert %{status: :fail, evidence: [ev]} =
+               check("", :conformes, tasks: 1)
+
+      assert ev =~ "INSTRUMENT BROKEN"
+      assert ev =~ "Mix task(s) matched"
+    end
+  end
+
+  # ── LA SECONDE FAMILLE : LA TACHE MIX ──────────────────────────────────────────────────────────
+  #
+  # Une porte `eval*` est atteinte par `bin/lcars_fleet eval`, une tache Mix par `mix <tache>` :
+  # deux contextes, un depot avec `mix` et une image livree sans, et UN SEUL contrat de flux.
+  # `lcars.catalogue.roles` s'annonce elle-meme « twin of the release doors », et c'est le jumeau
+  # image qui etait garde — pas elle, alors que c'est ELLE qu'`enroll-catalogue.sh` appelle avec un
+  # `2>/dev/null` qui n'attrape rien puisque le bruit sort sur le flux de la charge utile.
+  describe "la seconde famille — une tache Mix est une porte, et sa portee est le MODULE" do
+    defp task(body) do
+      "defmodule Mix.Tasks.Lcars.Sujet do\n  use Mix.Task\n#{body}end\n"
+    end
+
+    test "une tache qui ecrit sans reclamer est NOMMEE" do
+      assert %{status: :fail, evidence: [ev]} =
+               check("", :conformes,
+                 task_source: task("  def run(_), do: IO.puts(\"charge utile\")\n")
+               )
+
+      assert ev =~ "lcars.sujet.ex"
+    end
+
+    test "⚠ L'ECRITURE DANS UN `defp` COMPTE — c'est le cas qui a motive ce mur" do
+      # Les deux `IO.puts/1` de `lcars.catalogue.roles` vivent dans `report_names/2` et
+      # `report_tfvars/2`, jamais dans `run/1`. Un mur de portee FONCTION aurait rendu un vert
+      # parfait sur la porte meme qui l'a fait etendre. La portee d'une tache est son MODULE : elle
+      # n'a qu'un point d'entree, et decouper son travail en `defp` ne change pas de quel flux sort
+      # la charge utile.
+      assert %{status: :fail, evidence: [ev]} =
+               check("", :conformes,
+                 task_source:
+                   task(
+                     "  def run(_), do: rapport(\"x\")\n" <>
+                       "  defp rapport(x), do: IO.puts(x)\n"
+                   )
+               )
+
+      assert ev =~ "lcars.sujet.ex"
+    end
+
+    test "reclamer dans `run/1` couvre l'ecriture faite dans un `defp`" do
+      # La contrepartie de la portee module, et elle est voulue : le geste se pose une fois, en
+      # tete du point d'entree, pour tout ce que la tache imprimera ensuite.
+      assert %{status: :pass} =
+               check("", :conformes,
+                 task_source:
+                   task(
+                     "  def run(_) do\n    Fleet.ReleaseDoor.claim_stdout!()\n" <>
+                       "    rapport(\"x\")\n  end\n" <>
+                       "  defp rapport(x), do: IO.puts(x)\n"
+                   )
+               )
+    end
+
+    test "une tache qui n'ecrit que par `Mix.shell()` n'est pas une ecrivante" do
+      # C'est le cas des six autres taches `lcars.*` : ce qui s'adresse a un humain passe par le
+      # shell de Mix. Exiger le geste d'une tache qui n'ecrit jamais le flux protege ferait du mur
+      # une formalite, et une formalite se contourne par un appel decoratif.
+      assert %{status: :pass} =
+               check("", :conformes,
+                 task_source: task("  def run(_), do: Mix.shell().info(\"bonjour\")\n")
+               )
+    end
+
+    test "⚠ UN MODULE `Mix.Tasks.*` SANS `use Mix.Task` N'EST PAS UNE TACHE" do
+      # Mesure du 2026-09-08 : sous `lib/mix/tasks/` vivent 18 modules nommes `Mix.Tasks.*`, dont
+      # 10 ne sont pas atteignables par `mix` — les familles de murs portent ce namespace sans etre
+      # des commandes. Un predicat sur le NOM les comptait toutes, et le plancher d'instrument pose
+      # sur ce compte gonfle aurait cache la disparition des vraies taches.
+      #
+      # Ici : un module de support qui ecrit sur stdout sans reclamer. Il ne doit rien declencher.
+      assert %{status: :pass} =
+               check("", :conformes,
+                 task_source:
+                   "defmodule Mix.Tasks.Lcars.Sujet.Support do\n" <>
+                     "  def rendu(x), do: IO.puts(x)\nend\n"
+               )
     end
   end
 

@@ -58,7 +58,20 @@ defmodule Fleet.Roster do
     Application.put_env(:lcars_fleet, :catalogue_root, root)
 
     try do
-      Fleet.CapProfile.forge_identity_roles()
+      # ⚠ LA RACINE EST VERIFIEE AVANT DE REPONDRE, ET C'EST LE MEME GARDE QUE `tfvars/1`.
+      # `forge_identity_roles/0` fusionne le catalogue SYSTEME, qui ne vit pas sous `root` : sur une
+      # racine inexistante elle rendait donc `{:ok, ["architect", "chief", "gatekeeper"]}` — trois
+      # vrais noms de role, et un succes. La porte au-dessus (`eval_main/1`, et son jumeau mix)
+      # imprimait ces trois noms et sortait en 0 sur un catalogue qui n'existe pas.
+      #
+      # Le `@doc` d'`eval_main/1` prend deja soin du cas voisin — « a roster silently containing
+      # "catalogue root not readable" would create forge accounts by that name » — et c'est le meme
+      # danger : un enrolement qui croit avoir traite un catalogue qu'il n'a jamais lu. `tfvars/1`
+      # rendait `{:error, :catalogue_declares_no_name}` sur la meme entree ; l'asymetrie entre les
+      # deux portes du meme module etait un oubli, pas une regle.
+      with {:ok, _name} <- catalogue_name() do
+        Fleet.CapProfile.forge_identity_roles()
+      end
     after
       restore(prev)
     end
