@@ -88,5 +88,21 @@ defmodule Fleet.API.BindAddressTest do
 
     System.put_env("LCARS_BIND_HOST", "0.0.0.0")
     assert Fleet.API.Application.listener_children() == without
+
+    # ⚠ L'EGALITE SEULE NE TIENT PAS LA PROMESSE CI-DESSUS. Un enfant ajoute
+    # INCONDITIONNELLEMENT — donc present des deux cotes — la laisse vraie : une adresse serait
+    # revenue et ce temoin resterait vert, alors que son commentaire promet exactement l'inverse
+    # (« si ce test rougit, une adresse est revenue »). L'egalite dit « le reglage n'atteint
+    # rien » ; elle ne dit pas « il n'y a rien a elargir ».
+    #
+    # On epingle donc AUSSI la population : la seule chose que ce superviseur demarre est le socket
+    # de controle, un AF_UNIX. Un `Plug.Cowboy` — le seul chemin vers une adresse TCP — n'a rien a
+    # y faire, quel que soit l'etat de la variable.
+    for enfants <- [without, Fleet.API.Application.listener_children()] do
+      assert length(enfants) == 1, "la population des listeners a change : #{inspect(enfants)}"
+
+      refute inspect(enfants) =~ "Cowboy",
+             "un listener TCP est revenu dans le superviseur API : #{inspect(enfants)}"
+    end
   end
 end

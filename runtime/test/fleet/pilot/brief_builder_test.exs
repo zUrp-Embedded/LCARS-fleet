@@ -132,6 +132,18 @@ defmodule Fleet.Pilot.BriefBuilderTest do
 
       # The criterion is rendered DEFUSED ("Original request (CONTEXT — DO NOT execute)" section) → present.
       assert brief =~ "CRITÈRE-XYZ"
+
+      # ⚠ « DEFUSED » EST DANS LE NOM, ET SEULE LA PRESENCE DU CRITERE ETAIT MESUREE. Rendre le
+      # critere BRUT, sans la section qui le desamorce, laissait ce temoin vert — et un juge lirait
+      # une demande d'humain comme un ordre a executer, ce qui est precisement le defaut que le
+      # desamorcage existe pour fermer. On epingle donc l'ENVELOPPE, pas seulement le contenu.
+      assert brief =~ "DO NOT execute",
+             "le critere est rendu BRUT : rien ne dit au juge que c'est du CONTEXTE"
+
+      [avant, _apres] = String.split(brief, "CRITÈRE-XYZ", parts: 2)
+
+      assert avant =~ "DO NOT execute",
+             "la mention de desamorcage ne PRECEDE pas le critere — elle ne le couvre donc pas"
     end
 
     test "get_issue READ-ERROR → {:error, {:criterion_unavailable, reason}} (NEVER a criterion-less judge)" do

@@ -283,6 +283,17 @@ defmodule Fleet.MCP.PodSocketTest do
       assert %{"result" => %{"tools" => tools}} = rpc(path, 20, "tools/list")
       annonces = tools |> Enum.map(& &1["name"]) |> MapSet.new()
 
+      # ⚠ UNE BOUCLE QUI NE PARCOURT RIEN EST VERTE. La moitie « annonce ⇒ appelable » ci-dessous
+      # est un `for` sur `annonces` : servir une liste VIDE — ou ne servir que les outils de base en
+      # ignorant le profil — la rendait verte sans rien mesurer. Le pod est ouvert avec
+      # `["issue_create"]`, donc l'annonce DOIT au moins le porter, et la population doit etre non
+      # vide avant qu'on la parcoure.
+      assert MapSet.size(annonces) > 0,
+             "tools/list n'annonce RIEN — la boucle ci-dessous ne mesurerait aucun outil"
+
+      assert "issue_create" in annonces,
+             "l'outil accorde au profil n'est pas annonce : #{inspect(MapSet.to_list(annonces))}"
+
       for tool <- annonces do
         %{"result" => %{"content" => [%{"text" => text}]}} = call(path, 21, tool, %{})
 
