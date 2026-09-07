@@ -11,11 +11,14 @@ defmodule Fleet.Pilot.ConflictProbeTest do
   # une erreur de l'outil (`rc=255`), `out` n'est pas un merge rate, c'est le TEXTE D'ERREUR DE GIT,
   # envoye au classifieur comme s'il etait le contenu fusionne.
   #
-  # ⚠ Ce test n'exerce PAS la garde — `merge_file/3` est privee et appelle `Shell.git` par litteral,
-  # sans couture, et forcer un `rc=255` demanderait un git casse. Il epingle la CONSEQUENCE qu'elle
-  # empeche, mesuree : un texte sans marqueur se classe en rapport a ZERO hunk, donc en fichier qui
-  # a fusionne proprement. C'est ce que les totaux de routage tier-0 comptaient sur une panne
-  # d'outil, et c'est ce qui rend la garde load-bearing plutot que cosmetique.
+  # Ce test epingle la CONSEQUENCE que la garde empeche, sur le classifieur pur : un texte sans
+  # marqueur se classe en rapport a ZERO hunk, donc en fichier qui a fusionne proprement. C'est ce
+  # que les totaux de routage tier-0 comptaient sur une panne d'outil.
+  #
+  # ⚠ IL DISAIT AUSSI « forcer un rc=255 demanderait un git casse ». C'EST FAUX CONTRE L'OUTIL, et
+  # la garde est exercee pour de vrai plus bas (« la garde ELLE-MEME »). Mesure du 2026-09-08,
+  # git 2.53.0 : un contenu BINAIRE fait sortir `git merge-file` en 255. Ce n'est pas un git casse,
+  # c'est une PNG dans une PR — l'evenement le plus banal qui soit.
   describe "JG-111 — une sortie d'erreur lue comme du contenu se compte en fichier propre" do
     test "du texte d'erreur git ne porte aucun marqueur → zero conflit, zero residuel" do
       diag = ConflictProbe.diagnose(%{"f.ex" => "fatal: unable to read file\n"})
@@ -214,6 +217,117 @@ defmodule Fleet.Pilot.ConflictProbeTest do
       assert diag.totals.complex == 1
       refute diag.totals.all_trivial?
       refute diag.totals.none_trivial?
+    end
+
+    # ── JG-111, LA GARDE ELLE-MEME ────────────────────────────────────────────────────────────
+    #
+    # `diagnose_refs/4` est publique EXPRES (« isolated so it can be tested against a plain local
+    # repo ») : c'est par la que la garde privee de `merge_file/3` s'atteint, sans couture et sans
+    # doublure. Il ne manquait que l'entree qui la declenche.
+    #
+    # ⚠ ET ELLE EST BANALE. `git merge-file` sort en 255 sur un contenu BINAIRE (mesure du
+    # 2026-09-08, git 2.53.0) — une image, un binaire compile, une fixture opaque, modifies des deux
+    # cotes. Le code retour hors [0, 127] n'est donc pas reserve a une panne d'outil : c'est le
+    # regime NORMAL d'un fichier non textuel, et le rail de conflit en croise a chaque PR d'assets.
+    @tag :tmp_dir
+    test "un fichier BINAIRE en conflit atteint la garde (`rc=255`) et sort en RESIDUEL, jamais propre",
+         %{tmp_dir: dir} do
+      git = fn args -> System.cmd("git", args, cd: dir, stderr_to_stdout: true) end
+
+      git.(["init", "-q", "-b", "master"])
+      git.(["config", "user.email", "t@example.test"])
+      git.(["config", "user.name", "Test"])
+
+      # Un NUL au milieu : c'est ce qui fait declarer le fichier binaire par git.
+      File.write!(Path.join(dir, "logo.png"), <<0x89, "PNG", 0, 0, "base">>)
+      git.(["add", "."])
+      git.(["commit", "-q", "-m", "base"])
+      {base, 0} = git.(["rev-parse", "HEAD"])
+      base = String.trim(base)
+
+      git.(["checkout", "-q", "-b", "ours"])
+      File.write!(Path.join(dir, "logo.png"), <<0x89, "PNG", 0, 0, "ours">>)
+      git.(["commit", "-qam", "ours"])
+
+      git.(["checkout", "-q", base])
+      git.(["checkout", "-q", "-b", "theirs"])
+      File.write!(Path.join(dir, "logo.png"), <<0x89, "PNG", 0, 0, "theirs">>)
+      git.(["commit", "-qam", "theirs"])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {:ok, diag} = ConflictProbe.diagnose_refs(dir, base, "ours", "theirs")
+
+          # LE VERDICT QUE LA GARDE PRODUIT : un residuel conservateur. Sans elle, le texte d'erreur
+          # de git partait au classifieur, n'y portait aucun marqueur, et ce fichier se comptait
+          # `total: 0` — un merge propre, sur un binaire que personne ne peut fusionner.
+          assert diag.totals.total == 1
+          assert diag.totals.complex == 1
+          assert diag.totals.writable == 0
+          refute diag.totals.all_trivial?
+        end)
+
+      # ⚠ L'ASSERTION QUI DISTINGUE LES DEUX CHEMINS VERS `residual_report/0`. Un add/delete rend
+      # exactement les memes totaux, et ce temoin serait vert si `show/3` echouait pour une tout
+      # autre raison. Seul le log dit que c'est bien `merge-file` qui a rendu la main hors garde.
+      assert log =~ "`git merge-file` FAILED"
+      assert log =~ "residuel"
+    end
+
+    # La borne HAUTE de la garde est un contrat de l'outil, pas un choix : `git merge-file` plafonne
+    # son code retour a 127 quand il compte plus de 127 conflits (mesure du 2026-09-08 : 200 hunks
+    # → rc=127). Un fichier tres conflictuel doit donc passer la garde et se faire CLASSER, pas
+    # jeter en residuel — sinon la borne transformerait « beaucoup de conflits » en « panne
+    # d'outil », et le rail conservateur avalerait le cas le plus interessant du tier 0.
+    @tag :tmp_dir
+    test "127 conflits ou plus n'est PAS une panne : le fichier passe la garde et se classe",
+         %{tmp_dir: dir} do
+      git = fn args -> System.cmd("git", args, cd: dir, stderr_to_stdout: true) end
+
+      git.(["init", "-q", "-b", "master"])
+      git.(["config", "user.email", "t@example.test"])
+      git.(["config", "user.name", "Test"])
+
+      lines = fn tag ->
+        Enum.map_join(0..399, "", fn i ->
+          if rem(i, 2) == 0,
+            do: "#{tag}#{i}
+",
+            else: "commun#{i}
+"
+        end)
+      end
+
+      File.write!(Path.join(dir, "gros.txt"), lines.("base"))
+      git.(["add", "."])
+      git.(["commit", "-q", "-m", "base"])
+      {base, 0} = git.(["rev-parse", "HEAD"])
+      base = String.trim(base)
+
+      git.(["checkout", "-q", "-b", "ours"])
+      File.write!(Path.join(dir, "gros.txt"), lines.("ours"))
+      git.(["commit", "-qam", "ours"])
+
+      git.(["checkout", "-q", base])
+      git.(["checkout", "-q", "-b", "theirs"])
+      File.write!(Path.join(dir, "gros.txt"), lines.("theirs"))
+      git.(["commit", "-qam", "theirs"])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {:ok, diag} = ConflictProbe.diagnose_refs(dir, base, "ours", "theirs")
+
+          # ⚠ 200, ET C'EST LE NOMBRE QUI DISCRIMINE. Les totaux comptent des HUNKS, pas des
+          # fichiers : le contenu fusionne a bien ete PARSE, hunk par hunk. Un residuel, lui, rend
+          # exactement `total: 1` — c'est ce qu'on lirait ici si la borne haute rejetait rc=127.
+          assert diag.totals.total == 200
+          assert diag.totals.complex == 200
+          assert diag.totals.trivial == 0
+        end)
+
+      # Le contraire du temoin precedent, et c'est ce couple qui rend la borne mesuree plutot que
+      # recopiee : ici la garde LAISSE PASSER, donc rien ne doit etre journalise.
+      refute log =~ "`git merge-file` FAILED"
     end
   end
 end

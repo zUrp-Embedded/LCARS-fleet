@@ -47,19 +47,28 @@ defmodule Fleet.MCP.ProjectPublishTest do
 
   describe "the worker: fail-closed on the bus" do
     test "a project with no publish binding emits project_publish.failed (not_linked), never a crash" do
-      tmp = TestEnv.tmp_path("gh-pub")
-      File.mkdir_p!(tmp)
-      on_exit(fn -> File.rm_rf(tmp) end)
+      # ⚠ CE TEMOIN NE FABRIQUE PAS SON ETAT : IL LE CONSTATE, ET C'EST LA DIFFERENCE.
+      # `read_binding/1` resout sous `System.user_home!()`, que OTP met en cache au demarrage de la
+      # VM : un `put_env("HOME", …)` deplace `System.get_env/1` et laisse `user_home!/0` ou il
+      # etait (mesure du 2026-08-20). Le decor qui pretendait rediriger la maison a donc ete retire
+      # — il ne faisait rien, et sa presence faisait croire le contraire.
+      #
+      # Reste que ce temoin etait VERT PARCE QUE la maison de l'humain qui joue la suite n'a pas
+      # cette liaison. C'est un fait EXTERIEUR au temoin, qui peut cesser d'etre vrai sans que rien
+      # ne le dise : la seule chose honnete est de verifier la premisse et de le dire fort si elle
+      # tombe, plutot que de la supposer.
+      #
+      # ⚠ ET RIEN NE PEUT ETRE ECRIT SOUS CETTE MAISON DEPUIS UN TEST. `~/.lcars` est l'etat de
+      # l'HUMAIN, pas de la suite ; y poser une liaison pour exercer le chemin nominal empoisonnerait
+      # la machine du lecteur. Le chemin « liaison presente » est donc hors de portee d'ici, et c'est
+      # ecrit plutot que tu.
+      binding_path =
+        Path.join([System.user_home!(), ".lcars", "publish", "fleet__unlinked-demo.json"])
 
-      # ⚠ THIS REDIRECTION DOES NOTHING, and the comment used to claim it did. `read_binding/1`
-      # resolves under `System.user_home!()`, which OTP caches at VM start: `put_env("HOME", …)`
-      # moves `System.get_env/1` and leaves `user_home!/0` where it was (measured 2026-08-20).
-      # The witness is still SOUND — this slug has no binding in the real home either, which is the
-      # state it means to exercise — but it passes for a reason its own setup does not create. Kept
-      # for the isolation of the `on_exit`, no longer described as the mechanism under test.
-      prev_home = System.get_env("HOME")
-      System.put_env("HOME", tmp)
-      on_exit(fn -> if prev_home, do: System.put_env("HOME", prev_home) end)
+      refute File.exists?(binding_path),
+             "PREMISSE FAUSSE : #{binding_path} existe. Ce temoin exerce l'ABSENCE de liaison et " <>
+               "ne peut pas la fabriquer (`user_home!/0` est fige au demarrage de la VM). Retirer " <>
+               "ce fichier, ou changer le slug du temoin pour un nom qui n'existera jamais."
 
       :ok = Bus.subscribe()
 

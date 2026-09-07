@@ -126,6 +126,25 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
     assert :ok = Gate.scan_secrets(dir, base),
            "un jeton sans forme distinctive passe : `:ok` veut dire « aucune forme connue vue »"
+
+    # ⚠ SANS CE QUI SUIT, LE `:ok` CI-DESSUS NE VEUT RIEN DIRE. Un temoin d'espace negatif est vert
+    # sur la limite qu'il decrit ET sur un balayage qui n'a rien lu du tout : supprimer les motifs,
+    # ne pas ouvrir le diff, se tromper de base — tout rend `:ok`. Les temoins parametres au-dessus
+    # couvrent le balayage, mais pas SUR CE DEPOT-CI, et c'est la difference.
+    #
+    # On ajoute donc un jeton de forme CONNUE au meme fichier, dans le meme depot, contre la meme
+    # base : seule la FORME du jeton change entre les deux moities. `:ok` cesse d'etre « la porte
+    # est muette » pour devenir « la porte regarde, et ne reconnait pas cette forme-la ».
+    commit_file(
+      dir,
+      "t.txt",
+      "TOKEN=a3f9c1e8b7d2054613fa8c9e0b1d2f3a4c5e6d70\nAUTRE=ghp_#{String.duplicate("z", 36)}",
+      "meme fichier, forme connue en plus"
+    )
+
+    assert {:error, {:secret_detected, "github_token", _}} = Gate.scan_secrets(dir, base),
+           "meme depot, meme base, meme fichier : c'est la FORME du jeton qui decide, pas un " <>
+             "balayage qui ne tourne pas"
   end
 
   test "F-02 — blacklisted file (.credentials.json) → BLOCKED by name", %{tmp_dir: tmp} do

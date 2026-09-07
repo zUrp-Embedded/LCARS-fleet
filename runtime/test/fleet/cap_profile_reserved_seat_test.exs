@@ -108,6 +108,32 @@ defmodule Fleet.CapProfileReservedSeatTest do
       assert_raise RuntimeError, ~r/INVALID.*do not boot/s, fn -> Image.publish!() end
     end
 
+    # ⚠ LE TEMOIN AU-DESSUS NE MESURE PAS CE QU'IL DIT, ET C'EST POURQUOI CELUI-CI EXISTE.
+    # `spec: {}` est refuse par les DEUX schemas : celui du siege (qui interdit `spec`) et celui du
+    # cap-profile (dont `spec` doit avoir un contenu). Router le siege vers le mauvais schema rend
+    # donc le MEME raise, et « contre SON schema » — ce que la prose revendique — restait tenu par
+    # personne.
+    #
+    # L'entree qui separe les deux : `kind: ReservedSeat` porte par un profil COMPLET ET VALIDE.
+    # `cap-profile.json` type `kind` en simple chaine (pas de `const`) et exige `spec` ; le schema
+    # du siege pose `kind` en `const` et interdit tout le reste. Ce fichier est donc VALIDE sous le
+    # mauvais schema et INVALIDE sous le bon — la seule forme ou le raise prouve le routage.
+    test "le siege est valide contre SON schema, pas contre celui d'a cote", %{tmp_dir: tmp} do
+      profil_complet =
+        :lcars_fleet
+        |> Application.app_dir("priv/catalogue/cap_profile/cap-profiles/engineer.yaml")
+        |> File.read!()
+        |> String.replace("kind: CapabilityProfile", "kind: ReservedSeat")
+        |> String.replace("name: engineer", "name: vulcan")
+        # Slot distinct : deux noms sur un slot leveraient une AUTRE erreur, et le temoin serait
+        # vert sous la mutation pour une raison qui n'a rien a voir avec le schema.
+        |> String.replace("role_index: 3", "role_index: 8")
+
+      File.write!(Path.join(tmp, "vulcan.yaml"), profil_complet)
+
+      assert_raise RuntimeError, ~r/INVALID.*do not boot/s, fn -> Image.publish!() end
+    end
+
     test "an UNKNOWN kind makes publish! raise loud — never mis-validated by a default", %{
       tmp_dir: tmp
     } do

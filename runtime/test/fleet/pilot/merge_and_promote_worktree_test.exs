@@ -60,22 +60,34 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
 
   test "soft-default #3 — jeton du rail MERGE absent → refus AVANT toute tentative, rien a projeter" do
     # ⚠ CE TEST S'APPELAIT « gatekeeper token ABSENT → seal REFUSES » ET IL PASSAIT POUR LA MAUVAISE
-    # RAISON (revue 2026-08-20). Il vide le repertoire de jetons ENTIER : depuis la separation des
+    # RAISON (revue 2026-08-20). Il vidait le repertoire de jetons ENTIER : depuis la separation des
     # rails, c'est le jeton CHIEF qui manque en premier et c'est LUI qui provoque le refus. Le test
     # decrivait donc l'ancien contrat — « sans jeton gatekeeper, le sceau ne fusionne pas » — tout en
     # mesurant autre chose.
     #
+    # ⚠ LE RENOMMER NE SUFFISAIT PAS, ET C'EST LA CORRECTION DU 2026-09-08. Un decor qui retire LES
+    # DEUX jetons ne peut pas dire LEQUEL des deux rails a refuse : intervertir l'ordre de resolution
+    # dans `merge_and_promote` rendait exactement le meme `{:error, :role_token_unavailable}`, et le
+    # temoin restait vert en nommant le mauvais rail. On ne retire donc plus que le jeton du rail
+    # MERGE ; celui du rail decision reste en place, et c'est ce qui rend l'observable discriminant.
+    #
+    # Le temoin suivant fait l'inverse (jeton de decision retire, jeton merge en place) et attend
+    # `{:close_after_merge, _}` : les deux ensemble epinglent QUEL rail refuse a QUEL moment.
+    #
     # Fail-closed intact, et c'est ce qu'on epingle ici : sans le jeton du rail merge, AUCUNE
     # tentative, jamais de repli sur le compte systeme ni sur l'autre rail.
-    empty = TestEnv.tmp_path("no-role-token")
-    File.mkdir_p!(empty)
-    TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
+    TestEnv.delete_role_token!("chief")
 
     assert {:error, :role_token_unavailable} =
              MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
+    # ⚠ LA MOITIE QUI NOMME LE RAIL. Sans elle, le refus pourrait venir du rail decision — c'est
+    # exactement ce que l'ancien decor rendait indiscernable. Aucune ecriture forge du tout : le
+    # sceau s'arrete avant la premiere.
+    refute_received {:merge, _, _, _}
+    refute_received {:comment, _, _, _, _}
     refute_received {:worktree_sync, _, _}
   end
 
