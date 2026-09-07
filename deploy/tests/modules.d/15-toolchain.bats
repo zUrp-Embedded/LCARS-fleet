@@ -65,11 +65,27 @@ _run_apply() {
   run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\" PROV_ELIXIR_PIN_SHA256='$FAKE_SHA'; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; apt_ensure() { echo \"APT-ENSURE \$*\"; }; apply 2>&1"
 }
 
-@test "UNE SOURCE : le pin de la lib est au plancher, mix.exs porte le meme plancher, le Dockerfile les memes pins" {
+@test "UNE SOURCE : le pin, le plancher et les ARG du Dockerfile s'accordent — et le pin SATISFAIT ce que mix.exs exige" {
+  # ⚠ CE TEMOIN A EXIGE L'EGALITE AVEC `mix.exs`, ET C'ETAIT TROP FORT (2026-09-07). `runtime/` n'est
+  # pas le perimetre de l'installeur : le requirement du projet est pose la-bas, le pin et le
+  # plancher ici. Le contrat REEL entre les deux n'est pas « la meme valeur », c'est « ce que le rail
+  # pose satisfait ce que le projet exige » — un pin 1.20.4 satisfait `~> 1.18` comme `~> 1.20`.
+  # Exiger l'egalite forcait l'installeur a editer `mix.exs` pour rester vert : un perimetre qui
+  # deborde sur l'autre par la faute d'une assertion.
   [ -n "$PIN" ] && [ -n "$MIN" ] && [ -n "$OTP" ] && [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]
   [ "${PIN%.*}" = "$MIN" ] || { echo "pin $PIN et plancher $MIN : pas la meme minor"; return 1; }
   local mixreq; mixreq="$(sed -n 's/.*elixir: "~> \([0-9.]*\)".*/\1/p' "$MIX")"
-  [ "$mixreq" = "$MIN" ] || { echo "mix.exs exige ~> $mixreq, la lib $MIN"; return 1; }
+  [ -n "$mixreq" ] || { echo "mix.exs ne declare plus de requirement elixir — l'accord n'a plus de sujet"; return 1; }
+  local rmaj rmin pmaj pmin fmaj fmin
+  rmaj="${mixreq%%.*}"; rmin="${mixreq#*.}"; rmin="${rmin%%.*}"
+  pmaj="${PIN%%.*}";    pmin="${PIN#*.}";    pmin="${pmin%%.*}"
+  fmaj="${MIN%%.*}";    fmin="${MIN#*.}";    fmin="${fmin%%.*}"
+  # `~> M.m` = >= M.m et < (M+1).0 : le pin doit tomber dedans, et le plancher ne doit pas exiger
+  # MOINS que le projet (une machine au plancher doit pouvoir batir).
+  [ "$pmaj" -eq "$rmaj" ] && [ "$pmin" -ge "$rmin" ] \
+    || { echo "le pin $PIN ne satisfait pas « ~> $mixreq » de mix.exs"; return 1; }
+  [ "$fmaj" -eq "$rmaj" ] && [ "$fmin" -ge "$rmin" ] \
+    || { echo "le plancher $MIN est SOUS « ~> $mixreq » de mix.exs : une machine au plancher ne batirait pas"; return 1; }
   [ "$(sed -n 's/^ARG ELIXIR_PIN=\(.*\)$/\1/p' "$DF")" = "$PIN" ] || { echo "Dockerfile ARG ELIXIR_PIN ≠ $PIN"; return 1; }
   [ "$(sed -n 's/^ARG ELIXIR_PIN_SHA256=\(.*\)$/\1/p' "$DF")" = "$SHA" ] || { echo "Dockerfile ARG ELIXIR_PIN_SHA256 ≠ lib"; return 1; }
   [ "$(sed -n 's/^ARG ELIXIR_OTP_MAJOR=\(.*\)$/\1/p' "$DF")" = "$OTP" ] || { echo "Dockerfile ARG ELIXIR_OTP_MAJOR ≠ $OTP"; return 1; }
