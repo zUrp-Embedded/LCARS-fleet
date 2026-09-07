@@ -48,7 +48,13 @@ setup() {
   # tentait de le supprimer, echouait faute de root, et sortait par `verdict_apply` AVANT le bloc
   # qu'on croyait mesurer. Un temoin qui touche la machine qui le joue ne mesure ni l'une ni l'autre.
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/link"
-  export LCARS_LEGACY_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
+  export LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
+  # ⚠ GARDE DE COUTURE, ET ELLE A UNE CICATRICE. `apply` fait `rm -rf "$LCARS_ELIXIR_PREFIX"*` : le
+  # jour ou la variable du module a ete renommee sans ce fichier (2026-09-07), la couture n'a plus
+  # rien couvert et le geste a vise `/opt/elixir-1.18.4`, l'Elixir du poste — sauve par le seul fait
+  # que bats tourne sans root. Un temoin qui joue une branche destructive PROUVE d'abord ou elle tire.
+  [[ "$LCARS_ELIXIR_PREFIX" == "$BATS_TEST_TMPDIR"/* ]] \
+    || { echo "couture Elixir hors du tmp du test : $LCARS_ELIXIR_PREFIX — le module viserait la vraie machine"; return 1; }
   mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt"
 }
 
@@ -123,10 +129,10 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # convergence d'ABSENCE, elle ne depend pas de ce qu'on a a batir. Sauter tout le module sur le
   # discriminant aurait emporte ce nettoyage avec le reste — sans que rien ne le dise.
   paquet
-  ln -sf "${LCARS_LEGACY_ELIXIR_PREFIX}1.14.0/bin/elixir" "$PROV_LINK_DIR/elixir"
+  ln -sf "${LCARS_ELIXIR_PREFIX}1.14.0/bin/elixir" "$PROV_LINK_DIR/elixir"
   toolchain check
   [[ "$output" == *"toolchain non requise"* ]]
-  [[ "$output" == *"TOUJOURS DEVANT apt"* ]]   # le nettoyage a bien ete evalue, pas saute
+  [[ "$output" == *"DEVANT apt"* ]]   # le nettoyage a bien ete evalue, pas saute
 }
 
 @test "LES DEUX MODULES LISENT LE MEME DISCRIMINANT — jamais une moitié de forme" {
@@ -142,20 +148,37 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
     | refute_out 'source-revision'
 }
 
-@test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme les deux paquets" {
+@test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme erlang, et elixir n'y entre PLUS par apt" {
   # ⚠ LA BRANCHE QUI NE FAIT RIEN LAISSE UNE TRACE, et c'est le trou que le geste sur `10-packages`
-  # ne couvrait PAS : celui-la porte sur les depots apt, celui-ci sur `apt_ensure erlang elixir`, qui
-  # n'est appelee QUE si le seuil n'est pas atteint. Machine deja au niveau : ni `apt_installed` ni
-  # `apt_already` n'entraient au journal, et plus rien ne distinguait « LCARS les a poses » de « ils
-  # etaient la avant nous » — la question meme a laquelle le journal existe pour repondre.
+  # ne couvrait PAS : celui-la porte sur les depots apt, celui-ci sur `apt_ensure`, qui n'est appelee
+  # QUE si le seuil n'est pas atteint. Machine deja au niveau : rien n'entrait au journal, et plus
+  # rien ne distinguait « LCARS l'a pose » de « il etait la avant nous » — la question meme a
+  # laquelle le journal existe pour repondre.
+  #
+  # ⚠ ET LA PAIRE A ETE DEFAITE (2026-09-06) : la cible LTS sert Elixir 1.18, le plancher est 1.20 —
+  # erlang reste a apt, Elixir vient du zip officiel epingle. Le journal ne peut donc plus porter
+  # « apt_already … elixir », et l'exiger serait exiger le retour de la distro. La trace d'Elixir,
+  # quand le rail le pose, est `posed_dir` / `posed_link` (mesure : modules.d/15-toolchain.bats).
   checkout                                   # livraison source : le module travaille
   export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal"
+  # Le pin est DEJA pose sous la couture : le module prend la branche « deja pose » et ne telecharge
+  # rien — un temoin ne sort jamais sur le reseau.
+  local pin; pin="$(sed -n 's/^: "${PROV_ELIXIR_PIN:=\([^}]*\)}".*/\1/p' "$PROVISION_LIB")"
+  [ -n "$pin" ]
+  mkdir -p "${LCARS_ELIXIR_PREFIX}${pin}/bin"
+  printf '#!/usr/bin/env bash\necho "%s"\n' "$pin" > "${LCARS_ELIXIR_PREFIX}${pin}/bin/elixir"
+  chmod 0755 "${LCARS_ELIXIR_PREFIX}${pin}/bin/elixir"
+  local b; for b in elixirc mix iex; do
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${LCARS_ELIXIR_PREFIX}${pin}/bin/$b"
+    chmod 0755 "${LCARS_ELIXIR_PREFIX}${pin}/bin/$b"
+  done
   run env PROVISION_LIB="$PROVISION_LIB" PROV_JOURNAL_ACC="$PROV_JOURNAL_ACC" \
-          PROV_LINK_DIR="$PROV_LINK_DIR" LCARS_LEGACY_ELIXIR_PREFIX="$LCARS_LEGACY_ELIXIR_PREFIX" \
+          PROV_LINK_DIR="$PROV_LINK_DIR" LCARS_ELIXIR_PREFIX="$LCARS_ELIXIR_PREFIX" \
           PROV_ELIXIR_OTP_MAJOR=1 PROV_ELIXIR_MIN=0.0.1 \
       bash "$DEPLOY/modules.d/15-toolchain.sh" apply
   grep -q '^apt_already .*erlang' "$PROV_JOURNAL_ACC"
-  grep -q '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
+  [[ "$output" == *"déjà posé"* ]]
+  refute grep -qE '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
 }
 
 # ─── LE PAQUET PORTE LES DEUX MOITIES ───────────────────────────────────────────────────────────

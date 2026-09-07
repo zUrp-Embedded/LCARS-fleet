@@ -151,6 +151,7 @@ dir       /etc/lcars                                   0755  root:root          
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
 dir       /opt/node-<version>                          0755  root:root           wsl+linux
+dir       /opt/elixir-<version>                        0755  root:root           wsl+linux
 
 # ─── ANCRES — fichiers a chemin fixe hors prefixe ───────────────────────────────────────────────
 anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
@@ -196,6 +197,10 @@ link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  
 link      /usr/local/bin/fleet                      -     -                   any
 link      /usr/local/bin/lcars                         -     -                   any
 link      /usr/local/bin/node                          -     -                   wsl+linux
+link      /usr/local/bin/elixir                       -     -                   wsl+linux
+link      /usr/local/bin/elixirc                      -     -                   wsl+linux
+link      /usr/local/bin/mix                          -     -                   wsl+linux
+link      /usr/local/bin/iex                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
 link      /usr/local/bin/npx                           -     -                   wsl+linux
 

@@ -28,7 +28,14 @@ ARG TARGETARCH
 # depuis que le gate a quitté le build. Les paquets restent ceux de 10-packages (le socle des pods,
 # tmux/bubblewrap compris) plus ce que la compilation exige ; `bats` et `python3-pytest` n'y ont
 # plus d'objet et sont retirés (⚖ user 2026-09-04, DI-07 : l'install ne re-atteste pas la source).
-# ⚠ LA TOOLCHAIN ENTRE ICI PAR APT, ET C'EST LE MÊME GESTE QUE `15-toolchain` SUR UN POSTE.
+# ⚠ ERLANG ENTRE ICI PAR APT, ELIXIR PAR LE ZIP OFFICIEL ÉPINGLÉ — LE MÊME GESTE QUE `15-toolchain`
+# SUR UN POSTE. La cible est LTS seulement et 26.04 sert Elixir 1.18 : au-delà, Elixir vient du
+# précompilé de la release (un par majeure OTP), épinglé par version et sha256. Les ARG ci-dessous
+# ont pour défaut les pins de deploy/lib/provision-lib.sh (PROV_ELIXIR_PIN, PROV_ELIXIR_PIN_SHA256,
+# PROV_ELIXIR_OTP_MAJOR) — un témoin tient l'égalité, une source.
+ARG ELIXIR_PIN=1.20.4
+ARG ELIXIR_PIN_SHA256=4389f216eec086b34a08d70a3eb0a649d00e6631987d1cbb649a2f81092f034c
+ARG ELIXIR_OTP_MAJOR=27
 # ⚠ ET L'UID 1000 EST DÉJÀ PRIS DANS LA BASE : `ubuntu:26.04` y pose un humain « ubuntu ». Cet uid
 # est le contrat déclaré au-dessus, et les caches BuildKit du stage suivant le montent EN DUR
 # (`uid=1000`) — renuméroter `builder` casserait les trois `--mount` et le défaut de `LCARS_UID`
@@ -37,9 +44,16 @@ ARG TARGETARCH
 # qui n'a pas déjà l'image, jamais sur celles qui la portent depuis une base antérieure.
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       erlang elixir \
+       erlang \
        tmux bubblewrap git curl jq unzip ca-certificates python3 procps \
     && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL --proto '=https' -m 300 -o /tmp/elixir.zip \
+         "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_PIN}/elixir-otp-${ELIXIR_OTP_MAJOR}.zip" \
+    && echo "${ELIXIR_PIN_SHA256}  /tmp/elixir.zip" | sha256sum -c - \
+    && install -d -m 0755 "/opt/elixir-${ELIXIR_PIN}" \
+    && unzip -q /tmp/elixir.zip -d "/opt/elixir-${ELIXIR_PIN}" && rm -f /tmp/elixir.zip \
+    && for b in elixir elixirc mix iex; do ln -s "/opt/elixir-${ELIXIR_PIN}/bin/$b" "/usr/local/bin/$b"; done \
+    && [ "$(elixir --short-version)" = "${ELIXIR_PIN}" ] \
     && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \

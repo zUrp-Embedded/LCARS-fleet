@@ -100,7 +100,16 @@ PROVISION_LIB_LOADED=1
 # exigence : il est ce que le rail vérifie AVANT de bâtir, pour que l'échec dise « distro trop
 # vieille » au lieu de mourir dans `mix deps.get`. Les deux se déplacent ensemble.
 : "${PROV_ELIXIR_OTP_MAJOR:=27}"
-: "${PROV_ELIXIR_MIN:=1.18}"
+: "${PROV_ELIXIR_MIN:=1.20}"
+# ⚠ ELIXIR N'ENTRE PLUS PAR APT (2026-09-06, branche passe8/elixir-1.20). La cible est LTS seulement :
+# Ubuntu 26.04 sert Elixir 1.18.3 et OTP 27.3, et 1.18 ne recoit plus que des correctifs de securite
+# (Elixir corrige la derniere minor seulement). Elixir 1.20 supporte OTP 27-29 : erlang reste celui
+# de la distro, Elixir vient du zip precompile OFFICIEL de la release (un par majeure OTP), epingle
+# ici par version ET sha256 — le meme pin pour 15-toolchain (poste) et le stage build de l'image
+# (Dockerfile, ARG par defaut ; un temoin tient l'egalite). Le sha est celui de
+# elixir-otp-<OTP>.zip publie avec v<PIN> sur github.com/elixir-lang/elixir/releases.
+: "${PROV_ELIXIR_PIN:=1.20.4}"
+: "${PROV_ELIXIR_PIN_SHA256:=4389f216eec086b34a08d70a3eb0a649d00e6631987d1cbb649a2f81092f034c}"
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 
 # ─── Verdicts / log ───────────────────────────────────────────────────────────────────────────────
