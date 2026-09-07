@@ -47,7 +47,7 @@ services:
     environment:
       # La forge de l'opérateur. Pas de défaut : une URL fausse fait un runner qui tourne et ne
       # sert rien, exactement le silence que ce fichier refuse.
-      GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'URL de TA forge (ex http://10.42.0.118)}"
+      GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'URL de TA forge (ex http://192.0.2.10)}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
       GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
       # ⚠ LE TAG SUIT LA BASE DU `Dockerfile`, ET RIEN NE LE VERIFIE. Un runner qui sert une

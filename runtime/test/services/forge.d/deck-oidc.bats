@@ -147,7 +147,7 @@ apps_with() { # apps_with <uris...>
 # `redirect_uri` en CHAINE EXACTE, donc une entree non declaree est un REFUS, pas une degradation.
 #
 # Mesure du 2026-08-21, poste natif installe a froid, operateur venant d'une autre machine :
-#   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://10.42.0.63:20999/auth/callback.
+#   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://198.51.100.63:20999/auth/callback.
 #     Entrees declarees : http://127.0.0.1:20999/…, http://localhost:20999/… »
 # Le levier existait (`LCARS_DECK_ORIGINS`) ; c'est le DEFAUT qui etait faux.
 
@@ -198,7 +198,7 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
 # ne convergeait jamais, et l'apply repondait « deja pose et vivant » sur un fichier devenu faux.
 #
 # Mesure du 2026-08-21 : `forge.public.url` arrive, `FORGE_PUBLIC_URL` devient
-# `http://10.42.0.63:3000`, apply rejoue → « deja pose et vivant », et `deck-oidc.json` porte toujours
+# `http://198.51.100.63:3000`, apply rejoue → « deja pose et vivant », et `deck-oidc.json` porte toujours
 # `public_url: http://127.0.0.1:3000`. Le bouton d'identification envoyait le visiteur sur SA
 # loopback. C'est la sonde qui repondait a une question voisine : l'enregistrement chez Gitea — vrai —
 # au lieu de l'etat-cible entier.

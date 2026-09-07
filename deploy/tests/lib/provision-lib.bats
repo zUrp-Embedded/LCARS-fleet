@@ -721,9 +721,9 @@ STUB
   module_sh '
     PROV_SUBSTRATE=wsl
     wsl_networking_mode() { echo mirrored; }
-    lan_addr() { echo 10.42.0.63; }
+    lan_addr() { echo 198.51.100.63; }
     advertise_addr 0.0.0.0
-    [ "$PROV_ADVERTISE" = "10.42.0.63" ]
+    [ "$PROV_ADVERTISE" = "198.51.100.63" ]
     [ -z "$PROV_ADVERTISE_WHY" ]
   '
   [ "$status" -eq 0 ]
@@ -746,14 +746,14 @@ STUB
   # la raison perdrait donc la raison, en silence, chez tous ses appelants. Elle pose les DEUX.
   module_sh '
     PROV_SUBSTRATE=linux
-    lan_addr() { echo 10.42.0.63; }
+    lan_addr() { echo 198.51.100.63; }
     out="$(advertise_addr 0.0.0.0)"
     [ -z "$out" ]
     # et la globale posee DANS le sous-shell n en est pas ressortie : le parent est intact.
     [ -z "$PROV_ADVERTISE" ]
     # la seule forme qui marche : appeler, PUIS lire.
     advertise_addr 0.0.0.0
-    [ "$PROV_ADVERTISE" = "10.42.0.63" ]
+    [ "$PROV_ADVERTISE" = "198.51.100.63" ]
   '
   [ "$status" -eq 0 ]
 }

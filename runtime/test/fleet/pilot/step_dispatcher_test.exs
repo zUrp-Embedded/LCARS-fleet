@@ -372,7 +372,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       payload = eng_issue()
 
       project = %{
-        "repo_path" => "http://10.42.0.118/lordzurp/lcars-test.git",
+        "repo_path" => "http://192.0.2.10/lordzurp/lcars-test.git",
         "base_branch" => "main",
         "base_sha" => "cafe1234"
       }

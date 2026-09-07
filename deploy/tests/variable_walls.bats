@@ -991,7 +991,14 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # ou d'un `@doc` (`http://10.42.0.118` comme illustration) et la sortie de banc recopiee dans les
   # README. Ce sont des ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de
   # montrer une URL.
+  # ⚠ CE MUR COMPTAIT LES ADRESSES, PAS LES SITES — ET SA PROPRE PROMESSE EN DEPENDAIT. Le `sort -u`
+  # ci-dessous dedoublonne : une SECONDE occurrence de l'adresse declaree passait sans un mot. Or
+  # le commentaire ci-dessus promet « ce defaut change, et LUI SEUL ». Mesure du 2026-09-07 : il y
+  # en avait DEUX en code — le defaut d'image (`:54`) et `LCARS_SOURCE_REMOTE` (`:108`). Le jour du
+  # basculement GHCR, changer le premier aurait laisse le second pointer la forge, et personne
+  # n'aurait su ou il etait. Les deux sites sont desormais DECLARES, et un troisieme rougit.
   local declaree="10.42.0.118"
+  local sites_attendus=2
 
   local trouvees
   trouvees="$(grep -rhE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
@@ -1014,6 +1021,19 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # Garde d'instrument : l'adresse declaree DOIT etre trouvee, sinon le balayage n'a rien lu.
   printf '%s\n' $trouvees | grep -qx "$declaree" || {
     echo "MUR 15 — « $declaree » introuvable : le balayage ne lit plus le compose d'install" >&2
+    return 1
+  }
+
+  # ET LE NOMBRE DE SITES, parce que l'adresse seule ne dit pas combien de fois elle est gravee.
+  local sites
+  sites="$(grep -rhE "${declaree//./\\.}" \
+             "$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
+             --exclude-dir=tests 2>/dev/null \
+           | sed 's/#.*//' | grep -cE "${declaree//./\\.}" || true)"
+  [ "$sites" -eq "$sites_attendus" ] || {
+    echo "MUR 15 — « $declaree » est gravee $sites fois en code, $sites_attendus declarees." >&2
+    echo "   Un site de plus, c'est une adresse que le basculement GHCR oubliera ; un de moins," >&2
+    echo "   c'est ce compteur qu'il faut baisser dans le meme geste." >&2
     return 1
   }
   [ "$rompu" -eq 0 ] || return 1

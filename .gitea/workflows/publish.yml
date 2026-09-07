@@ -3,7 +3,7 @@ name: Publish image (ADR 012)
 # Un TAG semver poussé → l'image se bâtit DEPUIS CETTE REF (clone frais, jamais un arbre de
 # travail) et part sur la registry configurée. Destination et identité vivent dans la
 # configuration du dépôt/de l'org, jamais ici :
-#   vars.REGISTRY           adresse, port compris si HTTP (ex. 10.42.0.118:80)
+#   vars.REGISTRY           adresse, port compris si HTTP (ex. 192.0.2.10:80)
 #   vars.REGISTRY_USER      compte qui pousse (l'identité réelle est portée par le token)
 #   secrets.REGISTRY_TOKEN  token à portée write:package
 # Changer de destination (forge LAN → GHCR) = changer ces valeurs, pas ce fichier.

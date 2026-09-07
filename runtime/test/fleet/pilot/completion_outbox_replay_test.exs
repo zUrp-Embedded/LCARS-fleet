@@ -47,7 +47,7 @@ defmodule Fleet.Pilot.CompletionOutboxReplayTest do
     %StepRunConsumer{
       repo: "lordzurp/lcars-test",
       remote: "origin",
-      forge_opts: [base_url: "http://10.42.0.118"],
+      forge_opts: [base_url: "http://192.0.2.10"],
       role_emails: fn role -> ["#{role}@lcars.local"] end,
       step_run_completer: completer,
       deliverable_mode_fun: dmode()

@@ -15,7 +15,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:lcars_fleet, :pilot_forge)`:
 
-    * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://10.42.0.118"` (forge NAS).
+    * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://192.0.2.10"` (forge NAS).
     * `:token` — Gitea token, supplied directly by the caller.
     * `:token_file` — an EXPLICIT path. A caller that already holds one (a second forge, a witness).
     * `:account` — a forge ACCOUNT name. The token is ASKED of the authority service, at call time.

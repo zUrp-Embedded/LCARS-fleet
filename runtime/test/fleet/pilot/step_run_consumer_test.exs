@@ -73,7 +73,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       %StepRunConsumer{
         repo: "lordzurp/lcars-test",
         remote: "origin",
-        forge_opts: [base_url: "http://10.42.0.118"],
+        forge_opts: [base_url: "http://192.0.2.10"],
         role_emails: fn role -> ["#{role}@lcars.local"] end,
         step_run_completer: CaptureCompleter,
         deliverable_mode_fun: dmode()
@@ -123,7 +123,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert d.target_branch == "lcars/issue-42-engineer"
       assert d.push? == true
 
-      assert opts[:forge_opts] == [base_url: "http://10.42.0.118"]
+      assert opts[:forge_opts] == [base_url: "http://192.0.2.10"]
     end
 
     test "producer: result.summary -> step_run.eng_summary (the eng's voice, OUTGOING info)" do
@@ -571,7 +571,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
           name: name,
           repo: "lordzurp/lcars-test",
           remote: "origin",
-          forge_opts: [base_url: "http://10.42.0.118"],
+          forge_opts: [base_url: "http://192.0.2.10"],
           role_emails: fn role -> ["#{role}@lcars.local"] end,
           step_run_completer: CaptureCompleter,
           deliverable_mode_fun: dmode(),
