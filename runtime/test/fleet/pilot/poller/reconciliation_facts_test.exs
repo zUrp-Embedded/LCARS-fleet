@@ -33,6 +33,12 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
     StepStubSpawner
   }
 
+  # ⚠ LE GARDIEN D'ARCHITECTE EST DOUBLE PARTOUT DANS CE FICHIER. Sans lui, chaque passe appelle le
+  # VRAI `Fleet.Project.Architect.ensure_alive/2`, qui lit le dossier durable des pods sous le
+  # `~/.lcars` DE L'HUMAIN QUI JOUE LA SUITE : un etat de la machine, hors du banc. Mesure du
+  # 2026-09-07 (profil dans `do_poll`) : 186 a 216 ms PAR DEPOT ET PAR PASSE, contre 0 a 9 ms pour
+  # tout le reste de la passe. C'est un geste d'hermetisme dont la vitesse est la consequence.
+
   describe "reconciliation — orphan locks and quiesced pods" do
     test "reconciliation (B): orphan lock reclaimed at the 2nd tick (grace), not the 1st" do
       # #8 locked but NO live pod (StepStubSpawner.list_pods → []) = confirmed orphan.
@@ -95,6 +101,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: QuiescedJudgeSpawner,
           task_queue: QuiescedTaskQueue
         )
@@ -135,6 +142,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: QuiescedJudgeSpawner,
           task_queue: QuiescedTaskQueue
         )
@@ -168,6 +176,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: QuiescedJudgeSpawner,
           task_queue: ActiveTaskQueue
         )
@@ -197,6 +206,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, []}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: ProjectPipeSpawner,
           task_queue: QuiescedTaskQueue
         )
@@ -236,6 +246,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: LivePodSpawner,
           task_queue: ActiveTaskQueue
         )
@@ -274,6 +285,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue8
         )
@@ -311,6 +323,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueIssue9
         )
@@ -363,6 +376,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pulls: {:ok, pulls}, _test_pid: self()],
           loader: StepStubLoader,
           # LIVE project-scoped engineer, `:completed` task (delivered) on issue-8 — the martine config.
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueCompletedIssue8
         )
@@ -415,6 +429,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
           # LIVE project eng, last task `:completed` (delivered) on issue-8 — publication lost.
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: ProjectPipeSpawner,
           task_queue: ProjectTaskQueueCompletedIssue8
         )
@@ -462,6 +477,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
             _test_fail_remove_label: true
           ],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: StepStubSpawner,
           task_queue: QuiescedTaskQueue
         )
@@ -511,6 +527,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
           # LIVE instance pod (issue-8-engineer) whose task is `:pending` — admitted, never activated.
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: LivePodSpawner,
           task_queue: ParkedPendingTaskQueue
         )
@@ -555,6 +572,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: StepStubSpawner,
           task_queue: GateEvalTaskQueue
         )
@@ -595,6 +613,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: StepStubSpawner,
           task_queue: GateEvalPendingTaskQueue
         )
@@ -636,6 +655,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
           forge_client: StepStubForge,
           forge_opts: [_test_issues: {:ok, issues}, _test_pid: self()],
           loader: StepStubLoader,
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: StepStubSpawner,
           task_queue: GateEvalOtherRepoTaskQueue
         )
@@ -676,6 +696,7 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
 
       {name, _pid} =
         start_entry_poller({:ok, []}, %{},
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
           spawner: FlakySpawner,
           incident_fun: fn op, subject, reason, _o ->
             send(parent, {:incident, op, subject, reason})

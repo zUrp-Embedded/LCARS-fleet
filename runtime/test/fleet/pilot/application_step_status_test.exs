@@ -18,8 +18,19 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
   # Mesure du 2026-08-07 : rouge intermittent sur ce fichier, un run sur plusieurs, `async: false`
   # deja pose — parce que la course n'etait pas entre fichiers mais entre DEUX TESTS DU MEME, et
   # que rien ne les separait qu'un ordonnancement. Un monitor rend l'attente deterministe.
+  # ⚠ ET LE REMPLACANT REPOND. `step_status/0` ne se contente pas de `Process.whereis` : il demande
+  # aussi sa sante a `Fleet.Pilot.PollerTelemetry`, deux fois (`stats/0`, `cycle_stats/0`). Un
+  # remplacant qui dort a l'infini sous ce nom-la fait expirer les deux appels au defaut de cinq
+  # secondes — mesure du 2026-09-07 : DIX SECONDES pour chacun des deux temoins qui montent le rail
+  # entier, sur une suite dont le mur total est de trois minutes. Le `catch :exit` de la sonde rend
+  # alors `:unavailable`, que ces temoins acceptent : le prix etait paye pour rien.
+  #
+  # `:no_data` est une reponse LEGITIME de l'instrument (cf. le temoin « `:no_data` et
+  # `:unavailable` sont sains »), donc repondre ne change aucun verdict — ca les rend immediats.
+  # Meme lecon que le `holder_loop/0` de `pool_slot_test` : une doublure muette n'est pas un stub
+  # bon marche, c'est un timeout pour tout ce qui l'interroge.
   defp spawn_named(name) do
-    pid = spawn(fn -> Process.sleep(:infinity) end)
+    pid = spawn(&repondeur/0)
     Process.register(pid, name)
 
     on_exit(fn ->
@@ -43,6 +54,17 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     end)
 
     pid
+  end
+
+  defp repondeur do
+    receive do
+      {:"$gen_call", from, _demande} ->
+        GenServer.reply(from, :no_data)
+        repondeur()
+
+      _ ->
+        repondeur()
+    end
   end
 
   # F-010: readiness probes the step rail through this function. Without a health-check, a runtime

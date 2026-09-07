@@ -26,6 +26,12 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
   # The Poller's coalescing window is 1_000 ms — margin for CI async.
   @debounce_wait 1_400
 
+  # ⚠ LE GARDIEN D'ARCHITECTE EST DOUBLE PARTOUT DANS CE FICHIER. Sans lui, chaque passe appelle le
+  # VRAI `Fleet.Project.Architect.ensure_alive/2`, qui lit le dossier durable des pods sous le
+  # `~/.lcars` DE L'HUMAIN QUI JOUE LA SUITE : un etat de la machine, hors du banc. Mesure du
+  # 2026-09-07 (profil dans `do_poll`) : 186 a 216 ms PAR DEPOT ET PAR PASSE, contre 0 a 9 ms pour
+  # tout le reste de la passe. C'est un geste d'hermetisme dont la vitesse est la consequence.
+
   defp start_poller!(name) do
     {:ok, pid} =
       Poller.start_link(
@@ -33,6 +39,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
         human: "test-human",
         start_tick?: false,
         protection_reconciler: fn _repo, _opts -> :ok end,
+        architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
         step_dispatch?: true,
         forge_client: EmptyOrgForge,
         forge_opts: []
@@ -116,6 +123,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
         human: "test-human",
         start_tick?: false,
         protection_reconciler: fn _repo, _opts -> :ok end,
+        architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
         step_dispatch?: true,
         forge_client: OneOrphanForge,
         forge_opts: [_test_pid: self()],

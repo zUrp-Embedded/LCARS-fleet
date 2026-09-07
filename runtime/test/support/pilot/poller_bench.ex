@@ -401,7 +401,10 @@ defmodule Fleet.Pilot.PollerBench do
             _test_pid: self()
           ],
           loader: StepStubLoader,
-          spawner: StepStubSpawner
+          spawner: StepStubSpawner,
+          # Même défaut, même raison que dans `start_entry_poller/3` : sans lui la passe lit le
+          # `~/.lcars` de l'humain qui joue la suite, et paie ~200 ms par dépôt et par passe.
+          architect_keeper: fn _repo, _opts -> {:ok, :stub} end
         ] ++ extra
       )
 
@@ -463,7 +466,20 @@ defmodule Fleet.Pilot.PollerBench do
       forge_opts: [_test_issues: project_routes_onto_issues(issues_response, routes)],
       loader: StepStubLoader,
       workflow_map_loader: StepStubWorkflowMapLoader,
-      spawner: StepStubSpawner
+      spawner: StepStubSpawner,
+      # ⚠ LE GARDIEN D'ARCHITECTE EST DOUBLE PAR DEFAUT, ET C'EST UN GESTE D'HERMETISME AVANT
+      # D'ETRE UN GESTE DE VITESSE. Sans lui, chaque passe appelle le VRAI
+      # `Fleet.Project.Architect.ensure_alive/2`, qui lit le dossier durable des pods sous le
+      # `~/.lcars` DE L'HUMAIN QUI JOUE LA SUITE — un état de la machine, hors du banc, que rien
+      # ici ne contrôle ni ne restaure.
+      #
+      # Mesure du 2026-09-07, profil pose dans `do_poll` : `keep_architect` coûtait 186 à 216 ms
+      # PAR DEPOT ET PAR PASSE, contre 0 à 9 ms pour tout le reste de la passe. Le témoin A-10, qui
+      # joue dix passes sur deux dépôts, payait 8,8 s de cela seul.
+      #
+      # Le témoin qui MESURE le gardien pose le sien (`start_keeper_poller/2`) : ce défaut ne le
+      # couvre pas, il couvre les passes où le gardien n'est pas le sujet.
+      architect_keeper: fn _repo, _opts -> {:ok, :stub} end
     ]
 
     {:ok, pid} = Poller.start_link(Keyword.merge(base, extra_opts))
