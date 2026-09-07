@@ -85,7 +85,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
       })
 
   describe "carrying the edges" do
-    test "both directions are rewritten onto the replacement, BEFORE the close" do
+    test "both directions are rewritten onto the replacement" do
       assert %{"supersedes" => 16} = retire(OrderForge)
 
       # what the old one depended on -> the replacement depends on it
@@ -98,11 +98,29 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
     test "the close comes AFTER the edges — a release before the rewiring is the defect itself" do
       retire(OrderForge)
-      # The mailbox order IS the write order.
-      assert_received {:edge, _, _}
-      assert_received {:edge, _, _}
-      assert_received {:comment, 16}
-      assert_received {:close, 16}
+
+      # ⚠ CE TEMOIN PORTAIT LE NOM DE L'ORDRE ET NE TESTAIT QUE LA PRESENCE. `assert_received`
+      # balaie la boite aux lettres pour CHAQUE motif INDEPENDAMMENT : quatre motifs disjoints
+      # reussissent quel que soit l'ordre d'arrivee. Le commentaire d'avant — « the mailbox order
+      # IS the write order » — disait vrai de la BOITE, pas des assertions qui la lisent.
+      # Mutation jouee le 2026-09-07 : fermer le ticket AVANT de recabler les dependances laissait
+      # ce temoin ET son voisin verts, alors que la fenetre de dispatch ainsi ouverte est le defaut
+      # que `do_retire/5` documente en toutes lettres.
+      #
+      # Meme lecon, meme forme que `retire_issue_test` (mesure du 2026-08-08) : on VIDE la boite —
+      # elle EST la trace de l'ordre d'appel, meme processus, envois synchrones — et on compare des
+      # POSITIONS.
+      trace = drain_mailbox()
+
+      aretes = for {m, i} <- Enum.with_index(trace), match?({:edge, _, _}, m), do: i
+      close = Enum.find_index(trace, &match?({:close, 16}, &1))
+
+      assert length(aretes) == 2, "les deux aretes doivent etre ecrites : #{inspect(trace)}"
+      assert close, "le ticket doit etre ferme : #{inspect(trace)}"
+
+      assert Enum.max(aretes) < close,
+             "la fermeture PRECEDE un recablage — c'est la fenetre de dispatch que ce temoin " <>
+               "existe pour fermer : #{inspect(trace)}"
     end
   end
 
@@ -182,6 +200,16 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     test "sans PR vivante, rien n'est ferme cote pulls" do
       retire(OrderForge)
       refute_received {:pr_closed, _}
+    end
+  end
+
+  # La boite aux lettres videe DANS L'ORDRE : la seule facon de juger un ordre d'ecriture avec des
+  # motifs disjoints (cf. le temoin ci-dessus). Jumeau de `retire_issue_test`.
+  defp drain_mailbox(acc \\ []) do
+    receive do
+      msg -> drain_mailbox([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
     end
   end
 end

@@ -688,7 +688,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       refute body =~ "Aucune sonde"
     end
 
-    test "zéro juge → la sonde n'est même pas INTERROGÉE (rien à annoter)" do
+    test "zéro juge → rien n'est annoté (et la sonde EST tout de même interrogée)" do
       # ⚠ CE TEST ÉTAIT TAUTOLOGIQUE : il installait `Unprobed` alors que la clause
       # `probe_note([], _)` court-circuite AVANT de regarder l'état de sonde. L'override n'était
       # jamais consulté, et le test passait avec n'importe quoi — y compris rien.
@@ -702,6 +702,17 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
                  base_branch: "main"
                )
+
+      # ⚠ CE TEMOIN PROMETTAIT « la sonde n'est meme pas INTERROGEE » ET C'EST FAUX CONTRE LE CODE.
+      # Mesure du 2026-09-07 : `{:probed_asked, "fleet/p", "deadbeef"}` arrive bel et bien. La
+      # lecture forge EST depensee sur une PR sans jury, et rien ne le voyait — le temoin jugeait
+      # l'absence d'une phrase dans le commentaire produit, jamais l'appel. Son commentaire d'avant
+      # decrivait un court-circuit (`probe_note([], _)`) qui arrive APRES la lecture, pas avant.
+      #
+      # Le code est vrai : ce temoin dit desormais ce que le sceau FAIT, et l'ecart est nomme au
+      # lieu d'etre tu. Ce qui reste vrai et qui compte : sans jury, aucun verdict n'a ete rendu,
+      # donc l'absence de sonde ne dit rien et RIEN n'est annote.
+      assert_received {:probed_asked, "fleet/p", "deadbeef"}
 
       assert_received {:comment, "fleet/p", 42, body, _}
       refute body =~ "Aucune sonde"
