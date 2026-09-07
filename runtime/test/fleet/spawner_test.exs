@@ -527,22 +527,30 @@ defmodule Fleet.SpawnerTest do
   end
 
   test "count_pods returns the number of active pods" do
-    assert is_integer(Fleet.Spawner.count_pods())
+    # Mi14: count_children reflects the active child as of start_child's {:ok}. NO assertion on an
+    # `initial+1` DELTA: the pod registry is GLOBAL (singleton DynamicSupervisor) shared across
+    # async tests → a concurrent spawn/terminate skews the delta (observed flaky).
+    #
+    # ⚠ MAIS `>= 1` NE DISTINGUAIT PAS UNE CONSTANTE, et `assert is_integer(...)` encore moins :
+    # `def count_pods, do: 1` laissait les deux verts (mutation jouee le 2026-09-07). DEUX pods
+    # semes, plancher a 2 : une constante `1` tombe, et le plancher reste deterministe sous
+    # concurrence (le registre ne peut que contenir PLUS, jamais moins que les deux qu'on vient de
+    # demarrer).
+    for n <- 1..2 do
+      {:ok, _pid} =
+        Fleet.Spawner.spawn_pod(valid_profile(), "issue-count-#{n}",
+          pod_id: "pod-count-#{n}-#{System.unique_integer([:positive])}",
+          allow_no_brief: true,
+          repo_id: @test_repo_id
+        )
+    end
 
-    pod_id = "pod-count-#{System.unique_integer([:positive])}"
+    assert Fleet.Spawner.count_pods() >= 2
 
-    {:ok, _pid} =
-      Fleet.Spawner.spawn_pod(valid_profile(), "issue-count",
-        pod_id: pod_id,
-        allow_no_brief: true,
-        repo_id: @test_repo_id
-      )
-
-    # Mi14: count_children reflects the active child as of start_child's {:ok}. The pod I
-    # just spawned is active → count ≥ 1. NO assertion on an `initial+1` DELTA: the pod
-    # registry is GLOBAL (singleton DynamicSupervisor) shared across async tests → a
-    # concurrent spawn/terminate skews the delta (observed flaky). `≥ 1` is deterministic.
-    assert Fleet.Spawner.count_pods() >= 1
+    # ⚠ CE QUI RESTE HORS DE PORTEE, ET IL FAUT LE DIRE : le cas « flotte VIDE rend 0 ». Un
+    # `max(active, 1)` passerait ce temoin, parce qu'aucun temoin async ne peut observer un
+    # registre global vide. La limite est ecrite plutot que masquee par une assertion qui ne la
+    # couvre pas.
   end
 
   describe "wake_pod/1" do

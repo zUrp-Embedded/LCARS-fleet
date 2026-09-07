@@ -49,9 +49,16 @@ defmodule Fleet.Observation.DeckTest do
   end
 
   test "GET /api/version → 200 JSON build info (read-socket twin of `fleet version`)" do
+    # ⚠ `is_map` EST VRAI DE `%{}`. Perdre toutes les cles — ou les renommer — laissait ce temoin
+    # vert (mutation jouee le 2026-09-07), et le jumeau de `fleet version` cessait de rendre la
+    # moindre information sans que rien ne rougisse. On epingle les cles que le consommateur lit.
     conn = call(:get, "/api/version")
     assert %Plug.Conn{status: 200} = conn
-    assert is_map(Jason.decode!(conn.resp_body))
+
+    assert %{"sha" => sha, "dirty" => dirty, "source" => source} = Jason.decode!(conn.resp_body)
+    assert is_binary(sha) and sha != ""
+    assert is_boolean(dirty)
+    assert source in ~w(release working_tree unknown)
   end
 
   test "GET / → 200 LCARS shell (the 7 decks, no-auth)" do

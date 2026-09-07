@@ -23,8 +23,19 @@ defmodule Fleet.Spawner.PodTmuxTest do
     end
 
     test "sock_base has a non-empty default (agreement with launchers = the LCARS_TMUX_SOCK_BASE export, not equality of defaults)" do
-      assert is_binary(PodTmux.sock_base())
-      assert PodTmux.sock_base() != ""
+      # ⚠ « UNE CHAINE NON VIDE » EST VRAI DE `"x"`. `def sock_base, do: "x"` laissait ce temoin
+      # vert (mutation jouee le 2026-09-07), et le defaut cesserait d'etre sous l'etat de l'humain
+      # — c'est-a-dire hors de `~/.lcars`, la seule racine que le runtime a le droit d'ecrire.
+      # On epingle donc CE QUE LE DEFAUT EST : un chemin absolu sous la racine d'etat declaree par
+      # `Fleet.Layout`, pas une chaine quelconque.
+      base = PodTmux.sock_base()
+
+      assert is_binary(base) and base != ""
+
+      assert String.starts_with?(base, Fleet.Layout.state_dir()),
+             "le defaut sort de la racine d'etat declaree (#{Fleet.Layout.state_dir()}) : #{base}"
+
+      assert Path.type(base) == :absolute, "un socket tmux se resout depuis n'importe quel cwd"
     end
   end
 
