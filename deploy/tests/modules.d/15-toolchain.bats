@@ -20,6 +20,10 @@ setup() {
   export PROVISION_LIB="$LIB" PROVISION_MODULE=15-toolchain
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin" LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
   export PROV_ROOT="$BATS_TEST_TMPDIR/lcars" PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
+  # Meme garde que dans delivery_form.bats : `apply` retire des arbres, il ne doit jamais tirer hors
+  # du tmp du test (cicatrice du 2026-09-07 — une couture renommee visait /opt/elixir-1.18.4).
+  [[ "$LCARS_ELIXIR_PREFIX" == "$BATS_TEST_TMPDIR"/* ]] \
+    || { echo "couture Elixir hors du tmp du test : $LCARS_ELIXIR_PREFIX"; return 1; }
   mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt" "$PROV_ROOT/var"
   PIN="$(sed -n 's/^: "${PROV_ELIXIR_PIN:=\([^}]*\)}".*/\1/p' "$LIB")"
   MIN="$(sed -n 's/^: "${PROV_ELIXIR_MIN:=\([^}]*\)}".*/\1/p' "$LIB")"
