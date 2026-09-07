@@ -80,13 +80,24 @@ defmodule Fleet.MCP.SocketWardenTest do
         # 1st tick: the pod is not registered yet (it is projecting) → suspect.
         # Following ticks: it is there → the orphan is never CONFIRMED.
         :counters.add(counter, 1, 1)
-        if :counters.get(counter, 1) == 1, do: [], else: ["pod-slow"]
+        n = :counters.get(counter, 1)
+
+        # Le tick s'ANNONCE : sans lui, rien ne prouve qu'il a eu lieu (cf. le commentaire du refute).
+        send(parent, {:tick, n})
+        if n == 1, do: [], else: ["pod-slow"]
       end,
       release_fun: fn pod_id ->
         send(parent, {:released, pod_id})
         :ok
       end
     )
+
+    # ⚠ « LA GRACE PROTEGE LA COURSE » N'EST PROUVE QUE SI LES DEUX TICKS ONT EU LIEU. Ce temoin
+    # n'avait qu'une assertion, NEGATIVE : il est vert quand le warden ne tourne pas du tout, quand
+    # son intervalle est trop long pour la fenetre, ou si la grace passait de deux ticks a N. Un
+    # refute sans preuve que le sujet a ete exerce ne mesure rien (revue du 2026-09-06).
+    assert_receive {:tick, 1}, 1_000
+    assert_receive {:tick, 2}, 1_000
 
     refute_receive {:released, "pod-slow"}, 300
   end

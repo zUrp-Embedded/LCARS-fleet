@@ -293,24 +293,23 @@ defmodule Fleet.Observation.DeckTest do
       refute Enum.any?(roles, &String.starts_with?(&1, "favicon"))
     end
 
+    # ⚠ HORS PERIMETRE QUAND L'ARBRE N'EST PAS LA, ET C'EST LE BILAN QUI LE DIT. `assets/` est un
+    # voisin de `runtime/`, et un contexte legitime ne le porte pas : le stage `build` de l'image
+    # copie `fleet` SEUL puis joue ce gate.
+    #
+    # La garde etait un `if File.dir?(brand) do <propriete> else IO.puts(...) end` DANS le corps :
+    # vert la ou rien n'est mesure, et compte comme un succes. C'est le vert creux que
+    # `test_helper.exs` refuse en toutes lettres pour les binaires — meme resolution, meme endroit,
+    # meme bilan : `:requires_brand` est resolu au demarrage et le temoin apparait EXCLU quand
+    # l'arbre manque, jamais passe.
+    @tag :requires_brand
     test "les roles affiches viennent de la MARQUE REELLE du depot" do
-      # ⚠ HORS PERIMETRE QUAND L'ARBRE N'EST PAS LA, JAMAIS ROUGE. `assets/` est un voisin de
-      # `runtime/`, et un contexte legitime ne le porte pas : le stage `build` de l'image copie
-      # `fleet` SEUL puis joue ce gate. Meme doctrine que les listes de provisioning et que
-      # `site.build_inputs` — pas d'arbre du tout = hors perimetre, on le DIT ; arbre present et
-      # incomplet = le vrai defaut.
       brand = Path.expand("../../../../assets/avatars", __DIR__)
+      Application.put_env(:lcars_fleet, :media_root, Path.expand("..", brand))
+      roles = Fleet.Observation.Deck.display_roles()
 
-      if File.dir?(brand) do
-        Application.put_env(:lcars_fleet, :media_root, Path.expand("..", brand))
-        roles = Fleet.Observation.Deck.display_roles()
-
-        for r <- ~w(architect vulcan starfleet) do
-          assert r in roles, "#{r} absent de la marque installee — la source n'est plus assets/"
-        end
-      else
-        # Un skip qui ne dit pas ce qu'il n'a pas mesure est un vert muet.
-        IO.puts("\n  (hors perimetre : #{brand} absent — la marque n'est pas dans cet arbre)")
+      for r <- ~w(architect vulcan starfleet) do
+        assert r in roles, "#{r} absent de la marque installee — la source n'est plus assets/"
       end
     end
   end

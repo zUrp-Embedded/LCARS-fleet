@@ -34,14 +34,27 @@ _ =
 # System.find_executable(...) do <property> else <hollow test> end`) freezes the verdict at COMPILE
 # time on top of the hollow-green: install the binary afterwards and the differential STILL does not
 # exist, because nothing recompiles a test file whose source has not changed.
+#
+# ⚠ ET LES PREREQUIS NE SONT PAS QUE DES BINAIRES. Un arbre FRERE absent (`assets/`, `deploy/`)
+# produisait exactement le vert creux que ce bloc existe pour refuser, sous une autre forme : un
+# `if File.dir?(...) do <propriete> else IO.puts("hors perimetre") end` DANS le corps du test. Il
+# rend VERT, il ne compte nulle part, et le stage `build` de l'image — qui copie `runtime/` SEUL —
+# est justement le contexte ou il ne mesure rien. Meme resolution, meme endroit, meme bilan.
 missing_prerequisites =
-  for {binary, tag} <- [{"curl", :requires_curl}, {"git", :requires_git}],
-      is_nil(System.find_executable(binary)),
-      do: {binary, tag}
+  for {quoi, tag, present?} <- [
+        {"curl", :requires_curl, fn -> System.find_executable("curl") != nil end},
+        {"git", :requires_git, fn -> System.find_executable("git") != nil end},
+        {"assets/ (la marque du depot)", :requires_brand,
+         fn -> File.dir?(Path.expand("../../assets/avatars", __DIR__)) end},
+        {"bin/lcars-toolchain-converge", :requires_toolchain_script,
+         fn -> File.exists?(Path.expand("../bin/lcars-toolchain-converge", __DIR__)) end}
+      ],
+      not present?.(),
+      do: {quoi, tag}
 
-for {binary, tag} <- missing_prerequisites do
+for {quoi, tag} <- missing_prerequisites do
   IO.puts(
-    "test_helper: #{binary} missing on this machine — #{inspect(tag)} tests are EXCLUDED (visible in the bilan)"
+    "test_helper: #{quoi} missing on this machine — #{inspect(tag)} tests are EXCLUDED (visible in the bilan)"
   )
 end
 

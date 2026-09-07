@@ -166,6 +166,7 @@ defmodule Fleet.ToolchainTest do
     # une fixture À LA MAIN : si le render change d'indentation, ils restent verts (audit). CE
     # témoin-ci ferme la classe : la sortie RÉELLE de `render/2` traverse le VRAI `list_under` du
     # script — l'un des deux bouge sans l'autre, il casse.
+    @tag :requires_toolchain_script
     test "render/2 → list_under du convergeur : les paquets ressortent identiques" do
       manifest =
         Toolchain.render(
@@ -188,36 +189,29 @@ defmodule Fleet.ToolchainTest do
       # vide, `eval ""` ne definissait aucune fonction, et le round-trip mourait en `{"", 127}`
       # — « commande introuvable », un diagnostic qui n'accuse ni le script ni le rendu.
       #
-      # SAUTE ET NOMME, jamais un vert silencieux : meme idiome que les graines de
-      # `template_material_test`. La ou `deploy/` existe — gate de l'hote, CI du banc — l'assertion
-      # tourne entiere et c'est la qu'elle vaut.
-      if not File.exists?(script) do
-        IO.puts(
-          "toolchain: ROUND-TRIP NON MESURE ici — deploy/ absent de cet artefact " <>
-            "(contexte build d'image, Dockerfile COPY --exclude=deploy)"
-        )
-      else
-        extracted =
-          {"""
-           set -euo pipefail
-           eval "$(sed -n '/^block_under()/,/^}/p' #{script})"
-           eval "$(sed -n '/^list_under()/,/^}/p' #{script})"
-           list_under "$(block_under "$(cat)" apt)" "  packages"
-           """, manifest}
+      # SAUTE ET NOMME, jamais un vert silencieux — mais le `if` qui portait cette phrase la
+      # DEMENTAIT : sans le script, le corps ne mesurait rien et le temoin comptait PASSE. C'est le
+      # vert creux que `test_helper.exs` refuse en toutes lettres pour les binaires manquants.
+      # `:requires_toolchain_script` est resolu au demarrage, comme `:requires_git` : la ou
+      # `deploy/` manque, ce temoin apparait EXCLU dans le bilan, jamais passe.
+      shell = """
+      set -euo pipefail
+      eval "$(sed -n '/^block_under()/,/^}/p' #{script})"
+      eval "$(sed -n '/^list_under()/,/^}/p' #{script})"
+      list_under "$(block_under "$(cat)" apt)" "  packages"
+      """
 
-        {shell, stdin} = extracted
-        tmp = Fleet.TestEnv.tmp_path("roundtrip")
-        File.write!(tmp <> ".sh", shell)
-        File.write!(tmp <> ".yaml", stdin)
+      tmp = Fleet.TestEnv.tmp_path("roundtrip")
+      File.write!(tmp <> ".sh", shell)
+      File.write!(tmp <> ".yaml", manifest)
 
-        on_exit(fn ->
-          File.rm(tmp <> ".sh")
-          File.rm(tmp <> ".yaml")
-        end)
+      on_exit(fn ->
+        File.rm(tmp <> ".sh")
+        File.rm(tmp <> ".yaml")
+      end)
 
-        {out, 0} = System.cmd("bash", ["-c", "bash #{tmp}.sh < #{tmp}.yaml"])
-        assert String.split(out, "\n", trim: true) == ["python3-yaml", "python3-venv"]
-      end
+      {out, 0} = System.cmd("bash", ["-c", "bash #{tmp}.sh < #{tmp}.yaml"])
+      assert String.split(out, "\n", trim: true) == ["python3-yaml", "python3-venv"]
     end
   end
 end
