@@ -81,7 +81,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
       assert body =~ "n'est PAS armée"
     end
 
-    test "ON : le marqueur de budget est posé AVANT toute convocation" do
+    # Le nom ne promet plus un ordre que ce témoin ne mesure pas : le paragraphe ci-dessous explique
+    # pourquoi l'ordre n'a pas besoin d'un test (dépendance de données, pas séquence), et ce que
+    # celui-ci épingle réellement. Un nom qui promet plus que le corps est la moitié du défaut ;
+    # l'autre moitié était le corps, et elle était déjà traitée.
+    test "ON : le marqueur de budget porte la bonne signature, le bon seuil, et dit que PERSONNE ne s'oppose" do
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, true)
 
       # ⚠ CE TEST N'ÉPINGLE PAS L'ORDRE, et son commentaire le prétendait (revue 2026-08-19). Il

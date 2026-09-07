@@ -492,8 +492,25 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert ctx.step == "build"
     assert ctx.role == "engineer"
 
+    # ⚠ « OFFER-THEN-SPAWN » EST DANS LE NOM, ET RIEN NE LE TENAIT. Une suite d'`assert_received`
+    # balaie la boite pour CHAQUE motif INDEPENDAMMENT : elle reussit que le spawn precede la mise
+    # en file ou non. Or l'ordre EST la propriete — un pod qui demarre avant que son brief soit en
+    # file tire une file VIDE et s'eteint. Meme lecon et meme forme que `retire_issue_test`
+    # (2026-08-08) et `supersede_dependencies_test` : on VIDE la boite DANS L'ORDRE, puis on lit.
+    trace = drain_mailbox()
+
+    i_enq = Enum.find_index(trace, &match?({:enqueued, "o-r-issue-1-gatekeeper", _}, &1))
+    i_spawn = Enum.find_index(trace, &match?({:spawned, "o-r-issue-1-gatekeeper", _}, &1))
+
+    assert i_enq, "aucune mise en file du brief : #{inspect(trace)}"
+    assert i_spawn, "aucun spawn du gatekeeper : #{inspect(trace)}"
+
+    assert i_enq < i_spawn,
+           "le pod est SPAWNE avant que son brief soit en file — il tirera une file vide et " <>
+             "s'eteindra : #{inspect(trace)}"
+
     # Judge naming (reorg 2026-07-19): one pod per eval'd issue, project-bound one-shot.
-    assert_received {:enqueued, "o-r-issue-1-gatekeeper", attrs}
+    {:enqueued, _, attrs} = Enum.at(trace, i_enq)
     assert attrs.role == "gatekeeper"
     assert attrs.metadata["gate_eval"] == true
     assert attrs.metadata["step"] == "build"
@@ -501,13 +518,23 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     assert attrs.metadata["outputs"] == %{"sev" => "high"}
 
     # The one-shot spawn (its boot kick pulls the enqueued brief — no separate wake needed).
-    assert_received {:spawned, "o-r-issue-1-gatekeeper", spawn_opts}
+    {:spawned, _, spawn_opts} = Enum.at(trace, i_spawn)
     assert spawn_opts[:repo] == "o/r"
     assert is_binary(spawn_opts[:brief])
 
-    refute_received {:assignee, _}
-    refute_received {:open_pr, _, _, _}
-    refute_received :unlocked
+    refute Enum.any?(trace, &match?({:assignee, _}, &1)), inspect(trace)
+    refute Enum.any?(trace, &match?({:open_pr, _, _, _}, &1)), inspect(trace)
+    refute Enum.any?(trace, &(&1 == :unlocked)), inspect(trace)
+  end
+
+  # La boite aux lettres videe DANS L'ORDRE : la seule facon de juger un ordre d'ecriture avec des
+  # motifs disjoints. Jumeau de `retire_issue_test` et `supersede_dependencies_test`.
+  defp drain_mailbox(acc \\ []) do
+    receive do
+      msg -> drain_mailbox([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 
   # ⚖ Pinned as it IS (2026-09-05): on `{:escalate, _, _}` the journal entry is REMOVED — the
