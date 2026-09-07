@@ -103,10 +103,28 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
       assert wf =~ "exit 0"
     end
 
-    test "le fait sort sous un préfixe stable, lisible dans les logs du JOB", %{wf: wf} do
+    test "le fait sort sous LE préfixe QUE LE RAIL CHERCHE, lisible dans les logs du JOB", %{
+      wf: wf
+    } do
       # Le rail lit ce marqueur via `Actions.run_logs/3` — qui descend par les jobs, parce que les
       # logs d'un run n'existent pas comme endpoint.
-      assert wf =~ "LCARS-PROBE"
+      #
+      # ⚠ CE TÉMOIN ÉPINGLAIT UN LITTÉRAL, DES DEUX CÔTÉS, ET LEUR ACCORD N'ÉTAIT MESURÉ NULLE
+      # PART. Le workflow livré porte `LCARS-PROBE` et `Probe` porte `@fact_prefix "LCARS-PROBE"` :
+      # renommer l'attribut en `LCARS_PROBE` laissait ce témoin vert, et le rail cessait de trouver
+      # le moindre fait — la sonde tournerait, le juge ne lirait rien, et personne ne rougirait.
+      # On lit donc le préfixe QUE LE CODE UTILISE et on exige que le workflow porte CELUI-LÀ.
+      prefixe =
+        "lib/fleet/mcp/pod_tools/probe.ex"
+        |> File.read!()
+        |> then(&Regex.run(~r/@fact_prefix\s+"([^"]+)"/, &1))
+        |> Enum.at(1)
+
+      assert is_binary(prefixe) and prefixe != ""
+
+      assert wf =~ prefixe,
+             "le workflow livré n'écrit pas le préfixe que `Probe` cherche (#{prefixe}) — " <>
+               "la sonde tournerait et le rail ne lirait aucun fait"
 
       for verdict <- ~w(relevant blind inapplicable) do
         assert wf =~ "verdict=#{verdict}", "le verdict `#{verdict}` n'est émis nulle part"

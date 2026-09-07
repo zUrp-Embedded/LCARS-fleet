@@ -196,9 +196,36 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
   describe "la plomberie est à PeriodicCheck, pas ici" do
     test "le module ne porte AUCUN timer maison" do
+      # ⚠ INTERDIRE DES NOMS SE CONTOURNE PAR UN AUTRE NOM. Les deux `refute` d'avant nommaient
+      # `Process.send_after` et `defp schedule` : reintroduire un timer sous `:timer.send_interval`,
+      # `:erlang.send_after` ou `defp replanifier` les laissait verts, et la plomberie que ce
+      # describe existe pour tenir revenait en silence. On interdit la FORME, pas deux ecritures :
+      # tout ce qui arme un reveil, et toute clause qui recoit un message periodique en dehors de
+      # ce que `PeriodicCheck` route.
       src = File.read!("lib/fleet/admiral/toolchain_reconciler.ex")
-      refute src =~ "Process.send_after"
-      refute src =~ "defp schedule"
+
+      code =
+        for {l, i} <- Enum.with_index(String.split(src, "\n"), 1),
+            not String.starts_with?(String.trim(l), "#"),
+            do: {i, l}
+
+      armes =
+        for {i, l} <- code,
+            Regex.match?(
+              ~r/(send_after|send_interval|start_timer|:timer\.(apply_)?(after|interval))/,
+              l
+            ),
+            do: "#{i}: #{String.trim(l)}"
+
+      assert armes == [],
+             "un timer maison est revenu dans ce module — la plomberie appartient a " <>
+               "`PeriodicCheck` :\n" <> Enum.join(armes, "\n")
+
+      # ET LE POSITIF : c'est bien `PeriodicCheck` qui planifie ici. Sans lui, les `refute`
+      # ci-dessus seraient verts sur un module qui ne planifie plus RIEN du tout.
+      assert src =~ "PeriodicCheck",
+             "plus aucune planification : le reconciliateur ne tourne plus, et l'absence de timer " <>
+               "maison n'est plus une bonne nouvelle"
     end
   end
 

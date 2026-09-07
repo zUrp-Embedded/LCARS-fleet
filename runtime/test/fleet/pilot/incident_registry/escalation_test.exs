@@ -202,9 +202,25 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
     end
 
     test "aucun login en dur ne survit dans ce module" do
+      # ⚠ INTERDIRE DEUX LOGINS N'INTERDIT PAS LE TROISIEME. Les deux `refute` d'avant nommaient
+      # `"starfleet"` et `"admiral"` : coder en dur `"captain"` — ou n'importe quel autre compte —
+      # les laissait verts, et c'est precisement le defaut que ce temoin existe pour fermer (un
+      # siege projete au lieu d'un login devine). On interdit la FORME : toute chaine qui ressemble
+      # a un login de compte dans une ligne de CODE, hors commentaires et hors messages.
       src = File.read!("lib/fleet/pilot/incident_registry/escalation.ex")
-      refute src =~ ~s("starfleet")
-      refute src =~ ~s("admiral")
+
+      suspects =
+        for {l, i} <- Enum.with_index(String.split(src, "\n"), 1),
+            not String.starts_with?(String.trim(l), "#"),
+            Regex.match?(
+              ~r/(assignees?|login|owner|account)\s*[:=>]+\s*(\[\s*)?"[a-z][a-z0-9_-]{2,}"/,
+              l
+            ),
+            do: "#{i}: #{String.trim(l)}"
+
+      assert suspects == [],
+             "un login en dur est revenu dans ce module — le siege se PROJETTE, il ne se devine " <>
+               "pas :\n" <> Enum.join(suspects, "\n")
     end
   end
 end
