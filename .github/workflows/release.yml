@@ -1,0 +1,113 @@
+# SOURCE: .github/workflows/release.yml
+# STATUS: PROTO — UN tag, UN run, TROIS produits : l'image, la Release et ses assets.
+#
+# POURQUOI UN SEUL RUN, ET PAS TROIS GESTES : republier trois choses séparément, c'est se donner
+# trois occasions de diverger — l'image d'un sha, la release d'un autre, les .deb d'un troisième.
+# C'est le défaut DPL-014, et il s'est déjà produit : l'image `lcars-fleet:2` du parc portait la
+# révision d'une branche de test jamais poussée, et le banc a refusé de semer un code dont il ne
+# retrouvait pas l'origine. Ici le tag décide, et tout en descend.
+#
+# L'ORDRE N'EST PAS ARBITRAIRE. L'image d'abord, la Release ensuite, parce que la Release est
+# IMMUABLE (ADR 012) : une release publiée dont l'image manque ne se répare pas, alors qu'une image
+# poussée dont la release manque se rattrape en rejouant. On paie donc le long et le faillible en
+# premier.
+#
+# LE GATE TOURNE ICI, ET C'EST `pack.sh` QUI LE JOUE — le même script qu'un poste de dev, pas une
+# réimplémentation. Il refuse un arbre modifié, joue `mix gate` puis les témoins de l'installeur,
+# bâtit la release Elixir, la doc, le tar, les huit .deb, génère la porte de CETTE version, et
+# publie. Rien de tout cela n'est répété dans ce fichier : un workflow qui redit ce que fait le
+# script finit par dire autre chose.
+#
+# POURQUOI PAS DE REGISTRE APT : GitHub n'en a pas. `forge-publish.sh` le DIT au lieu de le
+# simuler, et les .deb restent tirables comme assets de la Release.
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag à publier (doit exister et être poussé)"
+        required: true
+
+permissions:
+  contents: write   # la Release est un objet du dépôt
+  packages: write   # l'image
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ⚠ `fetch-depth: 0` ET LE TAG, PAS L'ARBRE PAR DÉFAUT. `pack.sh` lit `git rev-parse HEAD` et
+      # refuse un arbre modifié ; `forge-publish.sh` refuse un commit que la forge ne connaît pas.
+      # Un checkout superficiel suffirait au build mais pas au verdict — on prend l'historique.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # Le pin du produit, pas une version au hasard : `deploy/lib/provision-lib.sh` porte
+      # PROV_ELIXIR_PIN / PROV_ELIXIR_OTP_MAJOR, et le gate a un témoin qui exige que le pin, le
+      # plancher et les ARG du Dockerfile s'accordent. On les LIT plutôt que de les recopier.
+      - name: Le pin de la toolchain, lu dans la lib
+        id: pin
+        run: |
+          set -euo pipefail
+          elixir="$(sed -n 's/^: *"${PROV_ELIXIR_PIN:=\(.*\)}"/\1/p' deploy/lib/provision-lib.sh | head -1)"
+          otp="$(sed -n 's/^: *"${PROV_ELIXIR_OTP_MAJOR:=\(.*\)}"/\1/p' deploy/lib/provision-lib.sh | head -1)"
+          [ -n "$elixir" ] && [ -n "$otp" ] || { echo "pin introuvable dans provision-lib.sh — la lib a changé de forme"; exit 1; }
+          echo "elixir=$elixir" >> "$GITHUB_OUTPUT"
+          echo "otp=$otp" >> "$GITHUB_OUTPUT"
+          echo "toolchain : Elixir $elixir sur OTP $otp"
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.pin.outputs.otp }}
+          elixir-version: ${{ steps.pin.outputs.elixir }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24   # `pack.sh` bâtit AUSSI la doc (assets/github.io) — sans node, pas de doc
+
+      - name: Connexion au registre du dépôt
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Noms dérivés du dépôt (GHCR exige des minuscules)
+        id: noms
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # 1. L'IMAGE — la plus longue et la plus faillible, donc la première.
+      - name: L'image, puis le registre
+        run: |
+          docker buildx build \
+            --build-arg "GIT_SHA=$(git rev-parse --short=8 HEAD)" \
+            --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg "VERSION=${{ steps.noms.outputs.tag }}" \
+            -f deploy/docker/Dockerfile \
+            -t "${{ steps.noms.outputs.image }}:${{ steps.noms.outputs.tag }}" \
+            -t "${{ steps.noms.outputs.image }}:latest" \
+            --push .
+
+      # 2. LA RELEASE — gate, artefacts, porte, publication. Le jeton ne passe jamais en argv :
+      #    `pack.sh` le lit dans l'environnement, `forge-publish.sh` le donne à curl par `-K -`.
+      - name: Le pack, et la publication
+        env:
+          LCARS_PACK_FORGE: https://github.com
+          LCARS_PACK_OWNER: ${{ github.repository_owner }}
+          LCARS_PACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export LCARS_PACK_REPO="${GITHUB_REPOSITORY#*/}"
+          export LCARS_PACK_DIR="${RUNNER_TEMP}/lcars-packs"
+          ./pack.sh --publish
+
+      - name: Ce que le registre porte maintenant
+        run: docker buildx imagetools inspect "${{ steps.noms.outputs.image }}:${{ steps.noms.outputs.tag }}"
