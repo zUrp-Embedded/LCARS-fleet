@@ -208,83 +208,7 @@ defmodule Fleet.TaskQueue.Server do
           else: {:reply, {:error, :no_active_work_item}, state}
 
       %WorkItem{} = work_item ->
-        case result["work_item_id"] || result[:work_item_id] do
-          tid when tid != nil and tid != work_item.id ->
-            {:reply, {:error, :work_item_id_mismatch}, state}
-
-          # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and matching `@active_states` here would
-          # leave that to accident.
-          #
-          # `@active_states` is `[:pending, :assigned]`, so such a branch accepts a `:pending` item
-          # — one the pod never pulled. Nothing exploits it, for a reason that is not a rule: the id
-          # is only obtainable through `get_work_item`, which transitions the item to `:assigned` on
-          # its way out. The guarantee "the pod saw the brief before closing it" is then a property
-          # of who knows an id, not of the state machine. A confused pod, a misplaced retry or a
-          # future caller holding an id another way would each turn it off silently.
-          #
-          # The distinction already exists in the codebase — `Poller.Reconciliation` keys its own
-          # ownership rule on `@pulled_states [:assigned]` for exactly this reason. Applying it here
-          # is consistency, not a new invention.
-          #
-          # AFTER the id check and not before, deliberately: a stale id submitted while a pending
-          # item is active must still answer `:work_item_id_mismatch`, which names the real problem.
-          # Refusing on the state first would report "not pulled" about a mandate the pod never
-          # meant to close — an instrument answering the neighbouring question.
-          _ok when work_item.state == :pending ->
-            {:reply, {:error, :work_item_not_pulled}, state}
-
-          _ok ->
-            clean_result =
-              result
-              |> Map.delete("work_item_id")
-              |> Map.delete(:work_item_id)
-              |> put_runtime_brief(work_item)
-
-            completed = %{
-              work_item
-              | state: :completed,
-                completed_at: now(),
-                result: clean_result
-            }
-
-            ev =
-              event(:"work_item.completed", completed, %{
-                work_item_id: completed.id,
-                role: completed.role,
-                issue_id: completed.issue_id,
-                result: clean_result,
-                metadata: completed.metadata
-              })
-
-            # BROADCAST BEFORE COMMIT (CI-03). `work_item.completed` is LIFECYCLE load-bearing (the double-hop
-            # STARTS here: the pod consumes it in `:monitoring` → `pod.completed` → StepRunConsumer). The terminal
-            # `:completed` state is committed ONLY after the delivery is confirmed — same ordering doctrine as
-            # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
-            # failure NOTHING is committed: the item STAYS active (`:assigned`) → `find_active`
-            # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
-            # `:double_submit_ignored`/"already received" on an UNdelivered item. Commit first and a
-            # lost broadcast leaves a terminal `:completed` plus a false success at retry.
-            #
-            # ⚠ AN IMPLICATION, NEVER `⟺`: a biconditional is false in the direction that matters,
-            # since zero subscriber yields `:ok` and not an error. The discipline needs only the
-            # implication below — a refusal proves nobody got it — and reading it as an equivalence
-            # turns "the bus accepted" into "a consumer received", which nothing here establishes
-            # (cf. `Broadcast.required`, which states what `:ok` does not buy).
-            # INVARIANT this rests on: `required_broadcast {:error} ⟹ ZERO subscriber delivered`. True on the
-            # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
-            # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
-            # dispatch — cf. `Broadcast.required`). So an item stays active only if NOBODY received → re-emission
-            # never double-delivers. A future clustered/async Bus (partial delivery before error) would break it.
-            # Across-restart durability stays the forge reconciliation (F-C050), NOT this ephemeral broker.
-            case required_broadcast(state, ev) do
-              :ok ->
-                new_state = state |> put_work_item(completed)
-                {:reply, {:ok, completed}, new_state}
-
-              {:error, _} = err ->
-                {:reply, err, state}
-            end
-        end
+        submit_into(work_item, result, state)
     end
   end
 
@@ -402,6 +326,86 @@ defmodule Fleet.TaskQueue.Server do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp submit_into(work_item, result, state) do
+    case result["work_item_id"] || result[:work_item_id] do
+      tid when tid != nil and tid != work_item.id ->
+        {:reply, {:error, :work_item_id_mismatch}, state}
+
+      # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and matching `@active_states` here would leave
+      # that to accident.
+      #
+      # `@active_states` is `[:pending, :assigned]`, so such a branch accepts a `:pending` item —
+      # one the pod never pulled. Nothing exploits it, for a reason that is not a rule: the id is
+      # only obtainable through `get_work_item`, which transitions the item to `:assigned` on its
+      # way out. The guarantee "the pod saw the brief before closing it" is then a property of who
+      # knows an id, not of the state machine. A confused pod, a misplaced retry or a future caller
+      # holding an id another way would each turn it off silently.
+      #
+      # The distinction already exists in the codebase — `Poller.Reconciliation` keys its own
+      # ownership rule on `@pulled_states [:assigned]` for exactly this reason. Applying it here is
+      # consistency, not a new invention.
+      #
+      # AFTER the id check and not before, deliberately: a stale id submitted while a pending item
+      # is active must still answer `:work_item_id_mismatch`, which names the real problem.
+      # Refusing on the state first would report "not pulled" about a mandate the pod never meant
+      # to close — an instrument answering the neighbouring question.
+      _ok when work_item.state == :pending ->
+        {:reply, {:error, :work_item_not_pulled}, state}
+
+      _ok ->
+        commit_submission(work_item, result, state)
+    end
+  end
+
+  defp commit_submission(work_item, result, state) do
+    clean_result =
+      result
+      |> Map.delete("work_item_id")
+      |> Map.delete(:work_item_id)
+      |> put_runtime_brief(work_item)
+
+    completed = %{
+      work_item
+      | state: :completed,
+        completed_at: now(),
+        result: clean_result
+    }
+
+    ev =
+      event(:"work_item.completed", completed, %{
+        work_item_id: completed.id,
+        role: completed.role,
+        issue_id: completed.issue_id,
+        result: clean_result,
+        metadata: completed.metadata
+      })
+
+    # BROADCAST BEFORE COMMIT (CI-03). `work_item.completed` is LIFECYCLE load-bearing (the double-hop
+    # STARTS here: the pod consumes it in `:monitoring` → `pod.completed` → StepRunConsumer). The terminal
+    # `:completed` state is committed ONLY after the delivery is confirmed — same ordering doctrine as
+    # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
+    # failure NOTHING is committed: the item STAYS active (`:assigned`) → `find_active`
+    # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
+    # `:double_submit_ignored`/"already received" on an UNdelivered item. Commit first and a
+    # lost broadcast leaves a terminal `:completed` plus a false success at retry.
+    #
+    # ⚠ AN IMPLICATION, NEVER `⟺`: a biconditional is false in the direction that matters,
+    # since zero subscriber yields `:ok` and not an error. The discipline needs only the
+    # implication below — a refusal proves nobody got it — and reading it as an equivalence
+    # turns "the bus accepted" into "a consumer received", which nothing here establishes
+    # (cf. `Broadcast.required`, which states what `:ok` does not buy).
+    # INVARIANT this rests on: `required_broadcast {:error} ⟹ ZERO subscriber delivered`. True on the
+    # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
+    # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
+    # dispatch — cf. `Broadcast.required`). So an item stays active only if NOBODY received → re-emission
+    # never double-delivers. A future clustered/async Bus (partial delivery before error) would break it.
+    # Across-restart durability stays the forge reconciliation (F-C050), NOT this ephemeral broker.
+    case required_broadcast(state, ev) do
+      :ok -> {:reply, {:ok, completed}, put_work_item(state, completed)}
+      {:error, _} = err -> {:reply, err, state}
+    end
+  end
 
   defp find_active(work_items, pod_id) do
     work_items

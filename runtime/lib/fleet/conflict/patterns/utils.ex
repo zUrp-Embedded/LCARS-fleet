@@ -314,27 +314,32 @@ defmodule Fleet.Conflict.Patterns.Utils do
   end
 
   defp pair_winner(a, b, w) do
-    cmp =
-      case {parse_semver(a), parse_semver(b)} do
-        {{:ok, sa}, {:ok, sb}} ->
-          compare_semver(sa, sb)
-
-        _ ->
-          if Regex.match?(@re_datetime, a) and Regex.match?(@re_datetime, b) do
-            cond do
-              a < b -> -1
-              a > b -> 1
-              true -> 0
-            end
-          else
-            :error
-          end
-      end
-
-    case cmp do
+    case compare_tokens(a, b) do
       :error -> {:halt, :error}
       0 -> {:cont, w}
       c -> resolve_winner(if(c > 0, do: :ours, else: :theirs), w)
+    end
+  end
+
+  # DEUX VOCABULAIRES ORDONNES, ET RIEN D'AUTRE : semver, puis horodatage. `:error` n'est pas « les
+  # deux sont egaux », c'est « je ne sais pas les ordonner » — et l'appelant en fait un `:halt`,
+  # parce qu'un conflit qu'on ne sait pas trancher ne se tranche pas au hasard.
+  defp compare_tokens(a, b) do
+    case {parse_semver(a), parse_semver(b)} do
+      {{:ok, sa}, {:ok, sb}} -> compare_semver(sa, sb)
+      _ -> compare_datetimes(a, b)
+    end
+  end
+
+  defp compare_datetimes(a, b) do
+    if Regex.match?(@re_datetime, a) and Regex.match?(@re_datetime, b) do
+      cond do
+        a < b -> -1
+        a > b -> 1
+        true -> 0
+      end
+    else
+      :error
     end
   end
 

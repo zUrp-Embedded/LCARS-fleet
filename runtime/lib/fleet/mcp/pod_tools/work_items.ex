@@ -49,31 +49,26 @@ defmodule Fleet.MCP.PodTools.WorkItems do
         {:error, :work_item_id_required}
 
       work_item_id ->
-        case TaskQueue.submit_result(pod_id, Map.put(payload, "work_item_id", work_item_id)) do
-          {:ok, _task} ->
-            {:ok, "Result received by the fleet. Task closed."}
-
-          {:error, :no_active_work_item} ->
-            {:error, :no_active_work_item}
-
-          {:error, :double_submit_ignored} ->
-            {:ok, "Result already received (ignored)."}
-
-          {:error, :work_item_id_mismatch} ->
-            {:error, :work_item_id_mismatch}
-
-          # The pod is closing a mandate it never pulled. Surfaced as an ERROR and not softened:
-          # unlike a double submit, nothing about this one is idempotent — there is no earlier
-          # delivery to point at, and answering `{:ok, ...}` would acknowledge work that was never
-          # even read.
-          {:error, :work_item_not_pulled} ->
-            {:error, :work_item_not_pulled}
-
-          {:error, {:broadcast_failed, _reason}} ->
-            {:error, :broadcast_failed}
-        end
+        pod_id
+        |> TaskQueue.submit_result(Map.put(payload, "work_item_id", work_item_id))
+        |> submit_outcome()
     end
   end
+
+  # CE QUE LA FILE REPOND, TRADUIT POUR LE POD. Deux des six reponses ne sont pas des erreurs de son
+  # point de vue, et c'est tout l'interet de les avoir cote a cote.
+  defp submit_outcome({:ok, _task}), do: {:ok, "Result received by the fleet. Task closed."}
+
+  defp submit_outcome({:error, :double_submit_ignored}),
+    do: {:ok, "Result already received (ignored)."}
+
+  # ⚠ LE POD FERME UN MANDAT QU'IL N'A JAMAIS TIRE. Remonte comme une ERREUR et pas adouci :
+  # contrairement au double envoi, rien ici n'est idempotent — il n'y a aucune livraison anterieure
+  # a pointer, et repondre `{:ok, …}` accuserait reception d'un travail qui n'a meme pas ete lu.
+  defp submit_outcome({:error, :work_item_not_pulled}), do: {:error, :work_item_not_pulled}
+  defp submit_outcome({:error, :no_active_work_item}), do: {:error, :no_active_work_item}
+  defp submit_outcome({:error, :work_item_id_mismatch}), do: {:error, :work_item_id_mismatch}
+  defp submit_outcome({:error, {:broadcast_failed, _reason}}), do: {:error, :broadcast_failed}
 
   # Accept the canonical top-level correlator or a judge payload's explicit copy.
   defp effective_work_item_id(args, payload) do

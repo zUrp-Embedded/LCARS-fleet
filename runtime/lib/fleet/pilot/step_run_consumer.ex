@@ -345,63 +345,63 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # completer parce qu'on n'a pas pu ecrire un fichier echangerait une degradation bornee contre un
   # blocage.
   defp handle_pod_completed(p, state) do
-    _ =
-      case CompletionOutbox.put(p) do
-        {:ok, _key} ->
-          :ok
-
-        {:error, :no_work_item_id} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning(
-            "StepRunConsumer: completion NON journalisee #{p["issue_id"]} (#{inspect(reason)}) — " <>
-              "elle se deroule, mais une mort de la Task la perdrait (6-127)"
-          )
-      end
+    _ = journalise_completion(p)
 
     outcome = maybe_complete(p, state)
+    _ = purge_outbox(p, outcome)
+    completion_reply(p, outcome, state)
+  end
 
-    # RETRAIT SUR LES SEULS ETATS OU IL N'Y A PLUS RIEN A REPRENDRE. `{:error, _}` GARDE l'entree :
-    # c'est precisement le cas que la fiche vise (chaine interrompue), et la rejouer est sans effet
-    # sur les etapes deja faites.
-    #
-    # ⚠ `{:escalate, …}` RETIRE, et le trou est nomme plutot que comble a moitie : ce chemin range
-    # son contexte d'evaluation EN MEMOIRE (`state.gate_evals`), donc un redemarrage le perd de
-    # toute facon. Le rendre durable est un AUTRE mecanisme, et la preuve de sortie de 6-127 ne
-    # porte pas sur lui — ses trois points de mort (avant push, apres push avant PR, apres PR avant
-    # unlock) sont tous DANS la chaine, couverts ci-dessus.
-    case outcome do
-      {:ok, _} -> CompletionOutbox.delete(p)
-      {:skip, _} -> CompletionOutbox.delete(p)
-      {:escalate, _, _} -> CompletionOutbox.delete(p)
-      _ -> :ok
-    end
+  defp journalise_completion(p) do
+    case CompletionOutbox.put(p) do
+      {:ok, _key} ->
+        :ok
 
-    case outcome do
-      {:ok, _outcome} ->
-        {:noreply, state}
-
-      {:escalate, corr, eval_ctx} ->
-        Logger.info(
-          "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
-        )
-
-        eval_ctx = Map.put(eval_ctx, :stored_at, System.monotonic_time(:millisecond))
-
-        {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
-
-      {:skip, reason} ->
-        Logger.debug("StepRunConsumer: skip #{p["issue_id"]} (#{inspect(reason)})")
-        {:noreply, state}
+      {:error, :no_work_item_id} ->
+        :ok
 
       {:error, reason} ->
         Logger.warning(
-          "StepRunConsumer: end-of-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}"
+          "StepRunConsumer: completion NON journalisee #{p["issue_id"]} (#{inspect(reason)}) — " <>
+            "elle se deroule, mais une mort de la Task la perdrait (6-127)"
         )
-
-        {:noreply, state}
     end
+  end
+
+  # RETRAIT SUR LES SEULS ETATS OU IL N'Y A PLUS RIEN A REPRENDRE. `{:error, _}` GARDE l'entree :
+  # c'est precisement le cas que la fiche vise (chaine interrompue), et la rejouer est sans effet
+  # sur les etapes deja faites.
+  #
+  # ⚠ `{:escalate, …}` RETIRE, et le trou est nomme plutot que comble a moitie : ce chemin range
+  # son contexte d'evaluation EN MEMOIRE (`state.gate_evals`), donc un redemarrage le perd de toute
+  # facon. Le rendre durable est un AUTRE mecanisme, et la preuve de sortie de 6-127 ne porte pas
+  # sur lui — ses trois points de mort (avant push, apres push avant PR, apres PR avant unlock)
+  # sont tous DANS la chaine, couverts ci-dessus.
+  defp purge_outbox(p, {:ok, _}), do: CompletionOutbox.delete(p)
+  defp purge_outbox(p, {:skip, _}), do: CompletionOutbox.delete(p)
+  defp purge_outbox(p, {:escalate, _, _}), do: CompletionOutbox.delete(p)
+  defp purge_outbox(_p, _outcome), do: :ok
+
+  defp completion_reply(_p, {:ok, _outcome}, state), do: {:noreply, state}
+
+  defp completion_reply(p, {:escalate, corr, eval_ctx}, state) do
+    Logger.info(
+      "StepRunConsumer: gate→gatekeeper #{p["issue_id"]} step=#{eval_ctx.step} corr=#{inspect(corr)}"
+    )
+
+    eval_ctx = Map.put(eval_ctx, :stored_at, System.monotonic_time(:millisecond))
+
+    {:noreply, %{state | gate_evals: Map.put(state.gate_evals, corr, eval_ctx)}}
+  end
+
+  defp completion_reply(p, {:skip, reason}, state) do
+    Logger.debug("StepRunConsumer: skip #{p["issue_id"]} (#{inspect(reason)})")
+    {:noreply, state}
+  end
+
+  defp completion_reply(p, {:error, reason}, state) do
+    Logger.warning("StepRunConsumer: end-of-step-run FAIL #{p["issue_id"]}: #{inspect(reason)}")
+    {:noreply, state}
   end
 
   # Undated contexts are retained.
