@@ -29,6 +29,32 @@ fp_curl() {
 # fp_err <fichier-corps> → le `message` de la forge, court — ou rien
 fp_err() { jq -r '.message // empty' "$1" 2>/dev/null | head -c 200; }
 
+# fp_urlenc <nom> → le nom, sûr dans une QUERY STRING
+#
+# ⚠ LE « + » D'UNE RÉVISION DEBIAN DEVIENT UNE ESPACE, ET LA RELEASE DEVIENT INUTILISABLE. Les huit
+# `.deb` portent `0.9.0-20260908.1310+g48fa4a4b` : envoyés bruts dans `?name=`, le serveur décode le
+# `+` en espace (règle `application/x-www-form-urlencoded`) et STOCKE l'asset sous
+# `…1310 g48fa4a4b…`. Mesuré le 2026-09-08 sur une vraie publication :
+#     …1310+g48fa4a4b_all.deb    → 404      ← le nom que la porte a gravé en dur
+#     …1310%20g48fa4a4b_all.deb  → 200      ← ce que la forge a stocké
+# La porte d'une version ne pouvait donc pas tirer SES PROPRES paquets, et rien ne le disait : les
+# assets montaient tous en 201. C'est le genre de panne qu'aucune doublure n'attrape — il a fallu
+# publier pour de bon, puis tirer.
+#
+# Percent-encodage complet plutôt qu'un `+`→`%2B` ciblé : le prochain caractère réservé dans un nom
+# de paquet (`~` d'une pré-version, `:` d'un epoch Debian) tomberait dans le même trou.
+fp_urlenc() {
+  local s="$1" i c out=''
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) printf -v c '%%%02X' "'$c"; out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 # fp_release_body <tiroir> <sha-source> → le texte de la release : d'où elle vient, comment on la pose,
 # et les sommes (celles que le tiroir porte déjà — on ne recalcule pas ce que la porte a en dur)
 fp_release_body() {
@@ -108,13 +134,14 @@ fp_publish_dist() {
 
   # 3. les assets — TOUT le tiroir. L'HÔTE DIFFÈRE CHEZ GITHUB, et la forme du corps aussi :
   #    `uploads.github.com`, corps binaire, `Content-Type` explicite. Un multipart (`-F`) y rend 422.
+  local nq
   for f in "$dist"/*; do
-    [[ -f "$f" ]] || continue; n="$(basename "$f")"
+    [[ -f "$f" ]] || continue; n="$(basename "$f")"; nq="$(fp_urlenc "$n")"
     if [[ "$dialect" == github ]]; then
       code="$(fp_curl "$body" -X POST -H 'Content-Type: application/octet-stream' \
-                --data-binary "@$f" "https://uploads.github.com/repos/$owner/$repo/releases/$id/assets?name=$n")"
+                --data-binary "@$f" "https://uploads.github.com/repos/$owner/$repo/releases/$id/assets?name=$nq")"
     else
-      code="$(fp_curl "$body" -X POST -F "attachment=@$f" "$api/releases/$id/assets?name=$n")"
+      code="$(fp_curl "$body" -X POST -F "attachment=@$f" "$api/releases/$id/assets?name=$nq")"
     fi
     [[ "$code" == 201 ]] || { echo "fp: REFUS (${code:-vide}) sur l'asset $n — $(fp_err "$body"). La release « $tag » reste en BROUILLON (id $id) : supprime-la sur la forge avant de rejouer." >&2; return 1; }
     echo "fp: asset ← $n"

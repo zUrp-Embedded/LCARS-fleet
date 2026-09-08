@@ -172,3 +172,24 @@ _pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zUrp-Embed
   [[ "$output" == *"source apt : deb [signed-by=/etc/apt/keyrings/lcars-fleet.asc] http://forge.test/api/packages/fleet/debian resolute main"* ]]
   ! grep -q 'uploads.github.com' "$TRACE"
 }
+
+@test "le « + » d'une revision Debian part ENCODE — sinon la forge stocke une espace et la porte rend 404" {
+  # ⚠ MESURE DU 2026-09-08, SUR UNE VRAIE PUBLICATION. Les .deb portent `…1310+g48fa4a4b`. Envoye
+  # brut dans `?name=`, le serveur decode le `+` en espace et stocke `…1310 g48fa4a4b…`. L'asset
+  # monte en 201, tout parait vert — et la porte de la version, qui a le nom AVEC le `+` grave en
+  # dur, rend 404 sur son propre paquet. Aucune doublure n'attrape ca : il faut publier puis tirer.
+  printf 'd' > "$DIST/lcars_0.9.0-20260908.1310+g48fa4a4b_amd64.deb"
+  _pub; [ "$status" -eq 0 ]
+  grep -q 'assets?name=lcars_0.9.0-20260908.1310%2Bg48fa4a4b_amd64.deb$' "$TRACE" \
+    || { echo "le + n'est pas encode dans ?name= :"; grep 'g48fa4a4b' "$TRACE"; return 1; }
+  ! grep -qE 'assets\?name=[^ ]*1310\+g48' "$TRACE" \
+    || { echo "un + brut est parti dans une query string"; return 1; }
+}
+
+@test "fp_urlenc : ce qui est sur passe tel quel, le reste est percent-encode" {
+  run bash -c ". '$LIB'; fp_urlenc 'lcars_0.9.0-1310+g48_amd64.deb'; echo; fp_urlenc 'a~b-c_d.e'; echo; fp_urlenc 'x y:z'"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n 1p <<< "$output")" = 'lcars_0.9.0-1310%2Bg48_amd64.deb' ]
+  [ "$(sed -n 2p <<< "$output")" = 'a~b-c_d.e' ]
+  [ "$(sed -n 3p <<< "$output")" = 'x%20y%3Az' ]
+}
