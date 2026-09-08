@@ -539,13 +539,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # CI-08 — BOUNDED retry of THE terminal issue unlock (mirror of `MergeAndPromote.{close,set_stage_merged}_with_retry`).
-  # This is the LAST reconciliation of the poller-driven promote: after the explicit close, the open-issue poll no
-  # longer revisits the issue, so a lost unlock has no natural retry. A transient blip (HTTP 500 / lock contention)
-  # self-heals on retry; `unlock` is idempotent (`remove_label` no-ops if absent, `stop_stopwatch` 409 → :ok), so a
-  # re-run is safe. Immediate retries (poller tick — a momentary hiccup dominates; no sleep, same stance as the seal
-  # retries). NOT propagated (the promote genuinely succeeded — merged + sealed + closed); the caller logs LOUD on
-  # persistent failure and keeps `{:ok, {:merged, _}}`.
+  # CI-08 — BOUNDED retry of THE terminal issue unlock (mirror of
+  # `MergeAndPromote.{close,set_stage_merged}_with_retry`). This is the LAST reconciliation of the poller-driven
+  # promote: after the explicit close, the open-issue poll no longer revisits the issue, so a lost unlock has no natural
+  # retry. A transient blip (HTTP 500 / lock contention) self-heals on retry; `unlock` is idempotent (`remove_label`
+  # no-ops if absent, `stop_stopwatch` 409 → :ok), so a re-run is safe. Immediate retries (poller tick — a momentary
+  # hiccup dominates; no sleep, same stance as the seal retries). NOT propagated (the promote genuinely succeeded —
+  # merged + sealed + closed); the caller logs LOUD on persistent failure and keeps `{:ok, {:merged, _}}`.
   @issue_unlock_attempts 3
   defp finalize_issue_unlock(%Ctx{} = ctx, issue_n, producer, attempt \\ 1) do
     case Fleet.Pilot.StepRunCompleter.unlock(

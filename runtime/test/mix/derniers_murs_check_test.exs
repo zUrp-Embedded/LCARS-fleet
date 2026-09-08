@@ -365,7 +365,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
       ]
 
     @projection "  def wire(t), do: %{\"inputSchema\" => t.schema}\n"
-    @paire "  test \"x\" do\n    assert Map.has_key?(t, \"inputSchema\")\n" <>
+    @paire ~s|  test "x" do\n    assert Map.has_key?(t, "inputSchema")\n| <>
              "    refute Map.has_key?(t, \"input_schema\")\n  end\n"
 
     test "la projection et la paire assert/refute → vert" do
@@ -793,6 +793,99 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
       root = arbre([reconciliation([]), dependant("lib/fleet/pilot/x.ex")])
 
       assert %{status: :fail, evidence: [ev]} = Events.check_pulled_states_declared(root)
+      assert ev =~ "INSTRUMENT BROKEN"
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  describe "mcp.vitrine_single_line — une presentation publique tronquee en silence" do
+    # Le build du site lit `# vitrine:` par une regex qui capture jusqu'a la fin de la LIGNE
+    # (`assets/github.io/src/lib/tools.js`). La replier n'allonge pas le texte : elle le tronque sur
+    # la page publique, sans que rien ne le dise. C'est cette contrainte qui justifie les
+    # `credo:disable-for-next-line` sur la longueur de ces lignes-la — et un mur, pas un
+    # commentaire, est ce qui rend une exemption de lint tenue.
+    defp outils_mcp(blocs) do
+      corps =
+        Enum.map_join(blocs, "\n", fn {nom, lignes} ->
+          "  deftool \"#{nom}\" do\n" <> Enum.map_join(lignes, "", &"    #{&1}\n") <> "  end\n"
+        end)
+
+      [{"lib/fleet/mcp/pod_tools.ex", "defmodule Fleet.MCP.PodTools do\n#{corps}end\n"}]
+    end
+
+    @ok [
+      {"run_probe", ["# vitrine: Fait jouer une sonde et rend son fait brut.", "meta(:x)"]},
+      {"open_issue", ["# vitrine: Delegue une brique a la fleet.", "meta(:y)"]}
+    ]
+
+    test "une ligne de vitrine par outil, sans continuation → vert" do
+      assert %{status: :pass, evidence: []} =
+               Tools.check_vitrine_single_line(arbre(outils_mcp(@ok)))
+    end
+
+    test "un `deftool` sans vitrine est nomme — le build du site le refuserait" do
+      root = arbre(outils_mcp([{"muet", ["meta(:x)"]} | @ok]))
+
+      assert %{status: :fail, evidence: [ev]} = Tools.check_vitrine_single_line(root)
+      assert ev =~ "muet"
+      assert ev =~ "aucune ligne"
+    end
+
+    test "⚠ UNE CONTINUATION EST LE VRAI PIEGE — le texte reste entier dans le fichier" do
+      # La page n'en montre que la premiere moitie, et le fichier a l'air parfaitement correct.
+      # C'est le mode de panne MUET que ce mur existe pour fermer.
+      root =
+        arbre(
+          outils_mcp([
+            {"coupe",
+             ["# vitrine: Une presentation qui deborde", "# et se poursuit ici.", "meta(:x)"]}
+            | @ok
+          ])
+        )
+
+      assert %{status: :fail, evidence: [ev]} = Tools.check_vitrine_single_line(root)
+      assert ev =~ "coupe"
+      assert ev =~ "perdu"
+    end
+
+    test "un commentaire ORDINAIRE apres la vitrine n'est pas une continuation… si" do
+      # ⚠ CE TEMOIN DIT UNE LIMITE ASSUMEE. Le mur ne distingue pas une continuation d'un
+      # commentaire de code qui suivrait immediatement : les deux se lisent pareil, et le doute
+      # penche du cote strict. Une ligne vide entre les deux leve l'ambiguite, et c'est ce que la
+      # remediation demande.
+      root =
+        arbre(
+          outils_mcp([
+            {"aere",
+             ["# vitrine: Une presentation nette.", "", "# un commentaire de code", "meta(:x)"]}
+            | @ok
+          ])
+        )
+
+      assert %{status: :pass, evidence: []} = Tools.check_vitrine_single_line(root)
+    end
+
+    test "deux lignes `# vitrine:` : une seule est lue, donc c'est une faute" do
+      root =
+        arbre(
+          outils_mcp([
+            {"double", ["# vitrine: la premiere", "# vitrine: la seconde", "meta(:x)"]} | @ok
+          ])
+        )
+
+      assert %{status: :fail, evidence: [ev]} = Tools.check_vitrine_single_line(root)
+      assert ev =~ "2 lignes"
+    end
+
+    test "une vitrine VIDE est une faute — le site afficherait un nom nu" do
+      root = arbre(outils_mcp([{"vide", ["# vitrine:", "meta(:x)"]} | @ok]))
+
+      assert %{status: :fail, evidence: [ev]} = Tools.check_vitrine_single_line(root)
+      assert ev =~ "VIDE"
+    end
+
+    test "aucun `deftool` lu → INSTRUMENT CASSE" do
+      assert %{status: :fail, evidence: [ev]} = Tools.check_vitrine_single_line(arbre([]))
       assert ev =~ "INSTRUMENT BROKEN"
     end
   end

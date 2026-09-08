@@ -1358,7 +1358,7 @@ defmodule Fleet.Forge.ClientTest do
   # from the WS1 write lock (only system_starfleet sets the labels), not a read-time filter.
   # ============================================================
   describe "get_route/3 — via wfmap/* + stage/* labels" do
-    test "wfmap/brief-gate + stage/build → {:ok, {\"brief-gate\", \"build\"}}" do
+    test ~s|wfmap/brief-gate + stage/build → {:ok, {"brief-gate", "build"}}| do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200,
@@ -1373,7 +1373,7 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.get_route("fleet/lcars", 42, opts(handlers))
     end
 
-    test "the map comes from the DATA: wfmap/gkchain + stage/review → {:ok, {\"gkchain\", \"review\"}}" do
+    test ~s|the map comes from the DATA: wfmap/gkchain + stage/review → {:ok, {"gkchain", "review"}}| do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/labels"} =>
           {200, [%{"name" => "wfmap/gkchain"}, %{"name" => "stage/review"}]}

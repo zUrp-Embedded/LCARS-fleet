@@ -41,6 +41,7 @@ defmodule Fleet.Pilot.DispatcherBench do
 
   # ── the stubbed seams ──
   defmodule StubForge do
+    @moduledoc false
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
 
     # ⚠ BAVARD SUR UN SEUL MARQUEUR, et c'est ce qui permet de l'épingler sans changer la boîte aux
@@ -188,6 +189,7 @@ defmodule Fleet.Pilot.DispatcherBench do
   # `dispatch_review/2` instead of skipping (the wall only runs when the forge can name the head).
   # Mirrored by REFLECTION: an inventory kept by hand drifts the day `StubForge` grows a function.
   defmodule WallStubForge do
+    @moduledoc false
     for {name, arity} <- StubForge.__info__(:functions) do
       args = Macro.generate_arguments(arity, __MODULE__)
 
@@ -199,6 +201,7 @@ defmodule Fleet.Pilot.DispatcherBench do
   end
 
   defmodule StubLoader do
+    @moduledoc false
     def load("engineer"),
       do:
         {:ok,
@@ -242,6 +245,7 @@ defmodule Fleet.Pilot.DispatcherBench do
   end
 
   defmodule StubSpawner do
+    @moduledoc false
     # Faithful to the real `Spawner.spawn_pod/3` contract: returns `{:ok, pid()}`, NOT a string
     # (a string return masked the PID interpolation bug caught by the PASSE-9 dogfood).
     def spawn_pod(_profile, issue_id, opts) do
@@ -267,6 +271,7 @@ defmodule Fleet.Pilot.DispatcherBench do
   # GATE: a project-scoped role already alive → the dispatcher DEFERS (`:role_busy`), it neither
   # spawns nor rebriefs a busy pod. (Rebrief-on-alive stays possible for `instance` scoped ones.)
   defmodule StubSpawnerAlive do
+    @moduledoc false
     def spawn_pod(_profile, issue_id, opts) do
       send(self(), {:spawned, issue_id, opts})
       {:ok, self()}
@@ -290,11 +295,13 @@ defmodule Fleet.Pilot.DispatcherBench do
 
   # F181: broker failing every enqueue → simulates a POST-lock failure (pod already spawned).
   defmodule FailTaskQueue do
+    @moduledoc false
     def enqueue(_pod_id, _attrs), do: {:error, :broker_down}
   end
 
   # SLOT-FREEZE: engineer as PIPE (lifetime_scope: pipe) → the gate takes the pipe-aware path (vs one-shot).
   defmodule StubLoaderPipe do
+    @moduledoc false
     def load("engineer"),
       do:
         {:ok,
@@ -310,6 +317,7 @@ defmodule Fleet.Pilot.DispatcherBench do
   # Pipe spawner CONFIGURABLE via the process dict (`:pipe_state`) — one stub for the gate's 4 states.
   # pod_info exposes conditions + has_active_task (like the real pod); reprovision_pipe_workspace traces.
   defmodule StubSpawnerPipe do
+    @moduledoc false
     def spawn_pod(_p, t, o) do
       send(self(), {:spawned, t, o})
       {:ok, self()}
@@ -348,6 +356,7 @@ defmodule Fleet.Pilot.DispatcherBench do
 
   # F075: loader that SIGNALS every load(role) → allows asserting a SINGLE load per dispatch.
   defmodule CountingLoader do
+    @moduledoc false
     def load(role) do
       send(self(), {:f075_loaded, role})
 

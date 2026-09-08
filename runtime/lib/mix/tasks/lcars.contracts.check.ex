@@ -163,6 +163,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Artifact.check_sanctuary_contained(root),
         Artifact.check_no_legacy_config_namespace(root),
         Tools.check_mcp_wire_inputschema(root),
+        Tools.check_vitrine_single_line(root),
         Tools.check_mcp_tools_gated(root),
         Tools.check_mcp_tool_effects(root),
         Tools.check_cap_profile_project_keys(root),

@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     test "tous les types consommes declares → vert" do
       root =
         arbre([
-          yaml("  \"pod.completed\": []\n  \"pod.jamais_declare\": []\n"),
+          yaml(~s|  "pod.completed": []\n  "pod.jamais_declare": []\n|),
           {"lib/fleet/truc.ex", @consommateur}
         ])
 
@@ -379,7 +379,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
         arbre([
           {"lib/fleet/labels.ex",
            "defmodule Fleet.Labels do\n" <>
-             "  def type_for_destination(\"d1\"), do: \"type:d1\"\n" <>
+             ~s|  def type_for_destination("d1"), do: "type:d1"\n| <>
              "  def visual_types, do: Enum.map(@destinations, &type_for_destination/1)\n" <>
              "end\n"}
         ])

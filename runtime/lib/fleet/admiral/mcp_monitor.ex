@@ -44,8 +44,8 @@ defmodule Fleet.Admiral.MCPMonitor do
   use GenServer
   require Logger
 
-  alias Fleet.PeriodicCheck
   alias Fleet.EventRouter.Bus
+  alias Fleet.PeriodicCheck
 
   @default_interval_ms 60_000
   @default_target {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}

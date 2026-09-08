@@ -70,10 +70,8 @@ defmodule Fleet.MCP.SeamConformanceTest do
         |> Enum.filter(fn mod ->
           mod
           |> Atom.to_string()
-          |> String.starts_with?("Elixir.Fleet.MCP.PodTools.Delegation.")
-        end)
-        |> Enum.filter(fn mod ->
-          Code.ensure_loaded?(mod) and function_exported?(mod, :behaviour_info, 1)
+          |> String.starts_with?("Elixir.Fleet.MCP.PodTools.Delegation.") and
+            Code.ensure_loaded?(mod) and function_exported?(mod, :behaviour_info, 1)
         end)
         |> MapSet.new()
 

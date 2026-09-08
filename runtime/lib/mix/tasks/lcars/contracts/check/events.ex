@@ -23,15 +23,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
 
   # ── Implemented checks ───────────────────────────────────────────────
 
-  # Event consumers must match `%Fleet.Event{}`, never the legacy tuple
-  # `{atom, %{"event_type" => ...}}` — a consumer left on the tuple is
-  # dead against the canonical struct (it matches nothing anymore) and the drift is silent.
-  # This check measures the real CODE of the targets below and flags any residual
-  # `"event_type" =>` read.
-  # An instance of the B family (residue_check). The `confirm` = the pattern itself post-strip: an `"event_type" =>` mention in a COMMENT (doc of the legacy-tuple
-  # removal) does not count as a violation (otherwise the gate would flag its own documentation).
-  # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
-  # what the name claims.
+  # Event consumers must match `%Fleet.Event{}`, never the legacy tuple `{atom, %{"event_type" => ...}}` — a consumer
+  # left on the tuple is dead against the canonical struct (it matches nothing anymore) and the drift is silent. This
+  # check measures the real CODE of the targets below and flags any residual `"event_type" =>` read. An instance of the
+  # B family (residue_check). The `confirm` = the pattern itself post-strip: an `"event_type" =>` mention in a COMMENT
+  # (doc of the legacy-tuple removal) does not count as a violation (otherwise the gate would flag its own
+  # documentation). SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching what the
+  # name claims.
   @doc false
   @spec check_event_consumers_canon(String.t()) :: Support.result()
   def check_event_consumers_canon(root) do

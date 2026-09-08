@@ -19,6 +19,19 @@ defmodule Fleet.MCP.PodTools do
       tickets, dependencies, escalations, and the external publish surface.
 
   ⚠ N'ENUMERE PAS LES OUTILS ICI — une liste posee dans ce paragraphe a deja derive DEUX fois.
+  ## ⚠ La ligne `# vitrine:` est un FORMAT DE LIGNE UNIQUE, pas de la prose libre
+
+  Le build du site la lit par une regex qui capture jusqu'a la fin de la ligne
+  (`assets/github.io/src/lib/tools.js`, `extractVitrine/1`) et FAIT ECHOUER le build quand un
+  `deftool` n'en porte pas. La replier sur deux lignes n'allongerait pas le texte : elle le
+  TRONQUERAIT en silence sur la page publique.
+
+  C'est pourquoi ces lignes-la, et elles seules, portent un `credo:disable-for-next-line` sur la
+  longueur maximale — une contrainte externe mesuree, pas un lint qui derange. Le mur
+  `mcp.vitrine_single_line` tient la propriete du cote runtime : le build du site est une AUTRE
+  porte, et `site.build_inputs` existe justement parce que ses gardes ne tournent pas quand ce
+  build ne se declenche pas.
+
   L'AUTORITE est l'ensemble des `deftool`, juste en dessous, et un mur la lit PAR L'AST : il refuse
   tout outil qui n'est ni pod-scope ni role-gated, et toute clause de dispatch sans schema. Un outil
   absent d'une prose est un commentaire perime ; un outil absent de ce mur n'existe pas.
@@ -192,8 +205,8 @@ defmodule Fleet.MCP.PodTools do
           "description" =>
             "Le résultat structuré de ta tâche. SI TU ES UN JUGE : l'enveloppe de verdict " <>
               "(`decision`, `reason`, …) ET, sous `details.findings`, la charge MACHINE de tes " <>
-              "findings — `%{\"findings\" => [%{\"severity\" => \"critical\"|\"important\"|" <>
-              "\"minor\", \"category\" => …, \"description\" => …}, …]}`. Ta prose est lue par " <>
+              ~s(findings — `%{"findings" => [%{"severity" => "critical"|"important"|) <>
+              ~s("minor", "category" => …, "description" => …}, …]}`. Ta prose est lue par ) <>
               "des humains ; cette charge est lue par le RAIL : c'est elle qui permet à la carte du " <>
               "projet de peser ton verdict au lieu de seulement le compter. L'omettre ne casse rien " <>
               "et ne perd que ça — mais elle est perdue pour de bon."
@@ -231,6 +244,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "run_probe" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Fait jouer une sonde nommée sur la forge et rend son fait brut : le juge mesure le livrable au lieu de seulement l'opiner.
     meta do
       name("Run Probe")
@@ -272,6 +286,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "issue_create" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Délègue une brique d'implémentation à la fleet : ouvre un ticket prêt à livrer (engineer → PR → revue → merge).
     meta do
       name("Create Issue")
@@ -291,13 +306,13 @@ defmodule Fleet.MCP.PodTools do
           "human summary, unchanged. Inline `brief` → the SYSTEM owns the commit; `brief_ref`/" <>
           "`brief_sha` supplied → they name a doc ALREADY on the forge — this pointer is NEVER a " <>
           "vehicle to get your local commits pushed: to hand FILES to the producer, use `lot`. " <>
-          "Returns {\"status\":\"issue_created\",\"issue\":N," <>
+          ~s(Returns {"status":"issue_created","issue":N,) <>
           "\"title\":<echoed as registered — confirm your number-to-title association on it>}. " <>
           "REWORK of a rejected/abandoned ticket: pass `supersedes: <old issue number>` — the " <>
           "fleet then RETIRES the old ticket itself (system comment + close; never two live " <>
           "tickets for one brick, never close anything yourself — you have no close tool). " <>
           "Refused if the old ticket has a LIVE PR (let it land or escalate). The result echoes " <>
-          "{\"supersedes\":N}; a \"supersede_warning\" means the old ticket could NOT be closed — " <>
+          ~s({"supersedes":N}; a "supersede_warning" means the old ticket could NOT be closed — ) <>
           "relay it to your human. " <>
           "ORDER between tickets: `depends_on: [N, ...]` — the fleet writes the edges and the " <>
           "admission holds the ticket back while a blocker is open. Declare the SAME constraint " <>
@@ -392,7 +407,7 @@ defmodule Fleet.MCP.PodTools do
           "how long will it live?) — rubber-duck, not assessor: you NEVER weigh criticality yourself, " <>
           "you relay the human's card choice. If the human declares NOTHING (no card), pass nothing: " <>
           "the project is recorded undeclared on the default card. " <>
-          "Returns {\"status\":\"onboarded\",\"repo\":...}; then use `issue_create` to deliver bricks " <>
+          ~s(Returns {"status":"onboarded","repo":...}; then use `issue_create` to deliver bricks ) <>
           "INTO this project — the repo comes from your pod's binding, `issue_create` takes NO " <>
           "`project` parameter."
       )
@@ -413,6 +428,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_open" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Relance un projet déjà sur le conteneur : remet son architecte debout (idempotent), sans écrire forge ni disque.
     meta do
       name("Open Project")
@@ -474,7 +490,7 @@ defmodule Fleet.MCP.PodTools do
           "filtered out (importing takes a COPY and leaves the original with its owner, so " <>
           "without that filter it would be offered again on every pass). " <>
           "Takes NO argument: the human is the one this fleet runs for. " <>
-          "Returns {\"status\":\"listed\",\"human\":...,\"candidates\":[\"<login>/<name>\", ...]}. " <>
+          ~s(Returns {"status":"listed","human":...,"candidates":["<login>/<name>", ...]}. ) <>
           "An unreachable org makes this REFUSE rather than return a short list — a list missing " <>
           "an org would offer to import what is already in."
       )
@@ -501,6 +517,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "forge_link" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Lie un projet à une forge : déclare où il publie ; ne publie rien (l'approve + le merge humain restent les gates).
     meta do
       name("Link Publish Target")
@@ -528,6 +545,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "deposit_import" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Adopte dans un catalogue un dépôt déposé par ton humain ; gate d'adoption à l'entrée, l'original reste chez lui.
     meta do
       name("Import Deposit")
@@ -561,6 +579,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_adopt" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Publie sur la forge un projet qui n'existait que sur le disque — l'inverse de l'import, le local jamais écrasé.
     meta do
       name("Adopt Project")
@@ -599,6 +618,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_import" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Rapatrie un dépôt d'une forge externe (GitHub/GitLab) : historique complet, sens unique, via le gate d'adoption.
     meta do
       name("Import External Project")
@@ -642,7 +662,7 @@ defmodule Fleet.MCP.PodTools do
       description(
         "PHASE 2 — publish an internal project to its LINKED external forge (GitHub or GitLab, both " <>
           "first-class) as a rolling PR/MR. ASYNC: returns " <>
-          "{\"status\":\"queued\",\"repo\":...} immediately (a full history rewrite is minutes on a " <>
+          ~s[{"status":"queued","repo":...} immediately (a full history rewrite is minutes on a ] <>
           "large repo), " <>
           "and the outcome — the PR/MR url or a failure — arrives later on the fleet bus " <>
           "(project_publish.done / .failed). The external token NEVER enters a pod: the rail runs " <>
@@ -676,7 +696,7 @@ defmodule Fleet.MCP.PodTools do
           "project's architect stops (it comes back at reopen). REOPEN: `project_open` (immediate " <>
           "full reopen, clears the marker), or a human closing the marker issue in the forge UI " <>
           "(the rail resumes; the architect self-respawns at the first pending escalation). " <>
-          "`full_name` = `owner/name`. Returns {\"status\":\"closed\",\"outcome\":\"closed\"|" <>
+          ~s(`full_name` = `owner/name`. Returns {"status":"closed","outcome":"closed"|) <>
           "\"already_closed\",\"marker_issue\":N,\"architect\":...}."
       )
     end
@@ -705,8 +725,8 @@ defmodule Fleet.MCP.PodTools do
           "ledger). The branch protection re-sizes itself on the new card's jury in the same act. " <>
           "RELAY to the human: tickets already routed keep their engraved card — the revision " <>
           "applies to FUTURE tickets only. `full_name` = `owner/name`. Returns " <>
-          "{\"status\":\"card_revised\",\"outcome\":\"revised\"|\"unchanged\",\"card\":...," <>
-          "\"previous_card\":...}; \"unchanged\" = the identical declaration already stands " <>
+          ~s({"status":"card_revised","outcome":"revised"|"unchanged","card":...,) <>
+          ~s("previous_card":...}; "unchanged" = the identical declaration already stands ) <>
           "(honest no-op, nothing pushed). OPTIONAL `max_fan` = how many tickets THIS project may " <>
           "run at once (1..15). Omit it and the fleet default answers; set it to 1 to watch one " <>
           "pipeline end to end WITHOUT slowing the other projects down."
@@ -740,8 +760,8 @@ defmodule Fleet.MCP.PodTools do
           "existing file IS the defect. `justification` REQUIRED — it replaces someone's work, it " <>
           "is not played by accident. RELAY to the human: a pull request ALREADY open keeps its " <>
           "own rail until its producer fixes it or it rebases; this repairs the SOURCE the next " <>
-          "branches inherit. `full_name` = `owner/name`. Returns {\"status\":\"ci_rail_reset\"," <>
-          "\"outcome\":\"reset\"|\"unchanged\",\"files\":[...]}; \"unchanged\" = the shipped " <>
+          ~s(branches inherit. `full_name` = `owner/name`. Returns {"status":"ci_rail_reset",) <>
+          ~s("outcome":"reset"|"unchanged","files":[...]}; "unchanged" = the shipped ) <>
           "rail already stands (honest no-op, nothing pushed)."
       )
     end
@@ -792,22 +812,22 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "Check the state of a delegated issue of YOUR project (issue + linked PR). " <>
-          "`number` = the issue number. Returns {\"issue\":N,\"title\":...,\"outcome\":...} " <>
+          ~s(`number` = the issue number. Returns {"issue":N,"title":...,"outcome":...} ) <>
           "plus \"pr\" only when there is something true to say. `outcome` values: " <>
           "\"merged\" (closed BY the merge — the delivery proof; only chain issue N+1 on this) | " <>
           "\"closed_without_merge\" (closed WITHOUT delivery: abandon/rejection — do NOT chain) | " <>
-          "\"in_review\" (PR open, review running) | \"open\" (no PR yet) | " <>
+          ~s["in_review" (PR open, review running) | "open" (no PR yet) | ] <>
           "\"unknown\" (forge unreachable — retry, decide nothing on it). " <>
           "`pr` = {number,state,merged,review,verdicts,reviews} of the fleet PR — the review trail " <>
           "SURVIVES the merge (how it was judged stays readable after delivery). `review` is the " <>
-          "merge gate's own predicate: \"approved\" | \"pending\" | \"changes_requested\" | " <>
-          "\"no_jury\" | \"unknown\" (read failed). `verdicts` maps each judge to its verdict; " <>
-          "`reviews` gives the SUBSTANCE of each one — [{\"login\",\"verdict\"," <>
-          "\"submitted_at\",\"body\"}], oldest first. Two approvals are the same value in " <>
+          ~s(merge gate's own predicate: "approved" | "pending" | "changes_requested" | ) <>
+          ~s["no_jury" | "unknown" (read failed). `verdicts` maps each judge to its verdict; ] <>
+          ~s(`reviews` gives the SUBSTANCE of each one — [{"login","verdict",) <>
+          ~s("submitted_at","body"}], oldest first. Two approvals are the same value in ) <>
           "`verdicts` and are not the same thing: read `body` and `submitted_at` before treating " <>
           "a verdict as a judgement. An empty `body` is a fact, not a missing field. The " <>
           "`reviews` key is ABSENT when no verdict is in force. The `pr` key is ABSENT when no " <>
-          "fleet PR exists (nothing to say); {\"error\":\"forge_unreachable\"} means the PR read " <>
+          ~s[fleet PR exists (nothing to say); {"error":"forge_unreachable"} means the PR read ] <>
           "failed — never confuse it with 'no PR'."
       )
     end
@@ -822,6 +842,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "scratch" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Pose une pensée dans le brouillon du workshop, geste réflexe : le système commit/pousse ; ça ajoute seulement, ne coupe jamais.
     meta do
       name("Scratch")
@@ -878,6 +899,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "toolchain_request" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Demande un outil que le conteneur n'a pas (compilateur, runtime, cross) ; un humain admin approuve — pas pour une dépendance de projet.
     meta do
       name("Request a Toolchain")
@@ -903,7 +925,7 @@ defmodule Fleet.MCP.PodTools do
           "`evidence` is read BY THE HUMAN and by nobody else: paste the error that stopped you, " <>
           "VERBATIM. It is what they judge on, and a request whose evidence is a paraphrase gets " <>
           "refused for lack of one.\n" <>
-          "Returns {\"status\":\"toolchain_requested\",\"pr\":N}. A refusal comes back on your " <>
+          ~s(Returns {"status":"toolchain_requested","pr":N}. A refusal comes back on your ) <>
           "ticket; it is not a failure of this call."
       )
     end
@@ -994,6 +1016,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "card_list" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Liste le catalogue des cartes de validation, à présenter au cadrage : choisir la carte, c'est déclarer la criticité.
     meta do
       name("List Workflow Cards")
@@ -1018,6 +1041,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "catalogue_list" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Liste les catalogues que ce conteneur sert — l'offre dans laquelle un projet est enrôlé, en amont du choix de la carte.
     meta do
       name("List Catalogues")
@@ -1071,8 +1095,8 @@ defmodule Fleet.MCP.PodTools do
           "CONVERSATION, where `issue_status` renders a tracking VERDICT. Use it before " <>
           "replying with `issue_comment` (never answer a thread you have not read), and to read " <>
           "what a human or a worker wrote back to you. `number` = the issue number. Returns " <>
-          "{\"issue\":N,\"title\",\"state\",\"body\",\"labels\",\"comments\":[{\"author\"," <>
-          "\"body\",\"created_at\"}]}. If \"comments\" is ABSENT and \"comments_error\":" <>
+          ~s({"issue":N,"title","state","body","labels","comments":[{"author",) <>
+          ~s("body","created_at"}]}. If "comments" is ABSENT and "comments_error":) <>
           "\"forge_unreachable\" is set, the THREAD read failed — retry; never treat it as an " <>
           "empty thread."
       )
@@ -1111,6 +1135,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "dependency_add" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Déclare qu'un ticket dépend d'un autre, après coup — bloque la clôture du dépendant tant que le bloqueur est ouvert.
     meta do
       name("Add Dependency")
@@ -1164,6 +1189,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "emergency_stop" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
     # vitrine: Le frein : ferme tout ce que la fleet a en vol — pour casser un emballement. Le travail en cours est perdu.
     meta do
       name("Emergency Stop")
@@ -1198,8 +1224,8 @@ defmodule Fleet.MCP.PodTools do
 
       description(
         "LIST the projects on this container — the counterpart of the project gestures you already " <>
-          "have. Takes no argument. Returns {\"count\":N,\"projects\":[{\"name\",\"repo\"," <>
-          "\"card\",\"card_source\",\"state\"}]}. `card_source` says whether the " <>
+          ~s(have. Takes no argument. Returns {"count":N,"projects":[{"name","repo",) <>
+          ~s("card","card_source","state"}]}. `card_source` says whether the ) <>
           "validation card was DECLARED by a human (`declared`), never declared (`undeclared` — " <>
           "the fleet default applies at burn time), or unreadable (`invalid`/`unreadable`): a " <>
           "project that declared nothing is NOT the same as one that chose the default. `state` " <>

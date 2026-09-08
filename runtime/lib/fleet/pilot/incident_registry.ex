@@ -420,11 +420,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp server(opts), do: Keyword.get(opts, :server, __MODULE__)
   defp now(opts), do: opts[:now] || DateTime.to_iso8601(DateTime.utc_now())
 
-  # Recurrence cooldown of the sysadmin escalation: default 1 h (a durable failure keeps ONE
-  # open issue as its alarm instead of one per tick — otherwise ~2 880 issues/day,
-  # self-amplified by the webhook kick). Seam `:escalation_cooldown_ms` (tests) overrides the
-  # config knob `:pilot_incident_escalation_cooldown_ms`. Entries without a stamp (pre-cooldown WAL/forge, or escalation never done)
-  # → nil → the gate lets the escalation through (back-compat = old behavior).
+  # Recurrence cooldown of the sysadmin escalation: default 1 h (a durable failure keeps ONE open issue as its alarm
+  # instead of one per tick — otherwise ~2 880 issues/day, self-amplified by the webhook kick). Seam
+  # `:escalation_cooldown_ms` (tests) overrides the config knob `:pilot_incident_escalation_cooldown_ms`. Entries
+  # without a stamp (pre-cooldown WAL/forge, or escalation never done) → nil → the gate lets the escalation through
+  # (back-compat = old behavior).
   @escalation_cooldown_ms 3_600_000
 
   defp under_cooldown(nil, _now_iso, _cooldown_ms), do: nil

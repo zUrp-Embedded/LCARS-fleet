@@ -57,26 +57,24 @@ defmodule Fleet.Forge.Client.Signing do
       {:ok, comments} when is_list(comments) ->
         # Counted markers trust the system author; observability markers may opt into any author.
         trusted =
-          cond do
-            Keyword.get(opts, :dedup_any_author, false) ->
-              {:ok, comments}
+          if Keyword.get(opts, :dedup_any_author, false) do
+            {:ok, comments}
+          else
+            # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
+            # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
+            # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
+            # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
+            # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
+            case trusted_logins(config, opts) do
+              {:ok, logins} ->
+                {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-            true ->
-              # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
-              # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
-              # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-              # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
-              # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
-              case trusted_logins(config, opts) do
-                {:ok, logins} ->
-                  {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
-
-                # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
-                # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
-                # sait pas QUI a ecrit quoi.
-                {:error, why} ->
-                  {:unverified, {:trusted_logins, why}}
-              end
+              # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
+              # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
+              # sait pas QUI a ecrit quoi.
+              {:error, why} ->
+                {:unverified, {:trusted_logins, why}}
+            end
           end
 
         case trusted do

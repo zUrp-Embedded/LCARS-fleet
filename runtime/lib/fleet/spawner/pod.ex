@@ -688,18 +688,16 @@ defmodule Fleet.Spawner.Pod do
 
   # Publication deadlines lift a stuck flag unless a live publish observation says to re-arm.
   def handle_event({:timeout, :publish_deadline}, :fire, _state, data) do
-    cond do
-      # Live observation outranks the arithmetic backstop; the mark clears in an `after` block.
-      Publishing.publishing?(data) and Fleet.Publish.InFlight.in_flight?(data.pod_id) ->
-        Logger.warning(
-          "pod #{data.pod_id} :publish_deadline fired but a publish is IN FLIGHT — re-arming " <>
-            "(observed live, not reset; observation over arithmetic)"
-        )
+    # Live observation outranks the arithmetic backstop; the mark clears in an `after` block.
+    if Publishing.publishing?(data) and Fleet.Publish.InFlight.in_flight?(data.pod_id) do
+      Logger.warning(
+        "pod #{data.pod_id} :publish_deadline fired but a publish is IN FLIGHT — re-arming " <>
+          "(observed live, not reset; observation over arithmetic)"
+      )
 
-        {:keep_state_and_data, [Publishing.arm_publish_deadline_action(data)]}
-
-      true ->
-        do_publish_deadline_lift(data)
+      {:keep_state_and_data, [Publishing.arm_publish_deadline_action(data)]}
+    else
+      do_publish_deadline_lift(data)
     end
   end
 

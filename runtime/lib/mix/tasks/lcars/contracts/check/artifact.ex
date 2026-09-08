@@ -147,7 +147,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # L'absence se lit au niveau de L'ARBRE, comme pour les listes de provisioning : pas d'arbre du
     # tout = hors perimetre, on passe EN LE DISANT (jamais un vert muet sur du terrain non mesure).
     # Arbre present mais workflow illisible = le vrai defaut, et il reste rouge.
-    if not File.dir?(lib) do
+    if File.dir?(lib) do
+      check_site_build_inputs_measured(wf, lib, repo)
+    else
       %{
         id: "site.build_inputs",
         status: :pass,
@@ -159,8 +161,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
           "HORS PERIMETRE — assets/github.io absent de cet arbre (le stage image `build` ne copie " <>
             "que runtime/), donc le filtre `paths:` n'est pas mesure ici"
       }
-    else
-      check_site_build_inputs_measured(wf, lib, repo)
     end
   end
 

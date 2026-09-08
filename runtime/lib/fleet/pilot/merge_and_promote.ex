@@ -561,36 +561,36 @@ defmodule Fleet.Pilot.MergeAndPromote do
     do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
 
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
-    with {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: ref}} <-
-           wall_inputs(forge, repo, forge_opts, opts) do
-      case Fleet.Workflow.Provenance.Verifier.verify_content(statement,
-             work_dir: work_dir,
-             project_dir: project_dir
-           ) do
-        :ok ->
-          :ok
+    case wall_inputs(forge, repo, forge_opts, opts) do
+      {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: ref}} ->
+        case Fleet.Workflow.Provenance.Verifier.verify_content(statement,
+               work_dir: work_dir,
+               project_dir: project_dir
+             ) do
+          :ok ->
+            :ok
 
-        {:error, reason} ->
-          Logger.error(
-            "MergeAndPromote: #{repo}##{issue_n} provenance INCOHERENT (#{inspect(reason)}) — " <>
-              "merge REFUSED (the statement lies about the brick; deterministic wall, no LLM)"
-          )
-
-          # User-facing trace on the PR (FR), best-effort — the refusal itself is the wall.
-          _ =
-            comment(
-              forge,
-              repo,
-              pr_number,
-              "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
-                "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
-                "Rien n'est mergé tant que la traçabilité ment.",
-              Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
+          {:error, reason} ->
+            Logger.error(
+              "MergeAndPromote: #{repo}##{issue_n} provenance INCOHERENT (#{inspect(reason)}) — " <>
+                "merge REFUSED (the statement lies about the brick; deterministic wall, no LLM)"
             )
 
-          {:error, {:provenance_incoherent, reason}}
-      end
-    else
+            # User-facing trace on the PR (FR), best-effort — the refusal itself is the wall.
+            _ =
+              comment(
+                forge,
+                repo,
+                pr_number,
+                "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
+                  "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
+                  "Rien n'est mergé tant que la traçabilité ment.",
+                Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
+              )
+
+            {:error, {:provenance_incoherent, reason}}
+        end
+
       {:skip, why} ->
         Logger.warning(
           "MergeAndPromote: #{repo}##{issue_n} provenance wall SKIPPED (#{inspect(why)}) — " <>

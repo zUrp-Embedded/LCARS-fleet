@@ -14,9 +14,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
 
   import Fleet.Pilot.DispatcherBench
 
-  alias Fleet.Pilot.DispatcherBench.{
-    StubSpawnerAlive
-  }
+  alias Fleet.Pilot.DispatcherBench.StubSpawnerAlive
 
   describe "dispatch_review/2 — the CI gate on the PR rail" do
     test "merge blocked by a RED CI → PRODUCER rework, not a human (the rung, 2026-08-03)" do

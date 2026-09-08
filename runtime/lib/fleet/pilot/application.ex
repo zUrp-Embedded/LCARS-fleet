@@ -336,18 +336,19 @@ defmodule Fleet.Pilot.Application do
       # the StepRunConsumer: distinct concern, the failure burst does not share the completion's mailbox.
       {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 16},
       {IncidentConsumer, runner: &IncidentConsumer.offload_async/1},
-      # Serializer that aligns the local clone after merge: projects the merged branch onto the
-      # FACE's worktree (`main` → code face, `ops` → ops face). Started BEFORE Poller + StepRunConsumer — its two merge triggers
-      # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
-      # alignments (one `git` at a time per worktree, against index corruption).
+      # Serializer that aligns the local clone after merge: projects the merged branch onto the FACE's worktree (`main`
+      # → code face, `ops` → ops face). Started BEFORE Poller + StepRunConsumer — its two merge triggers (`promote_pr` /
+      # `StepRunCompleter.promote`) — so it serializes their potentially concurrent alignments (one `git` at a time per
+      # worktree, against index corruption).
       Fleet.Project.WorktreeSync,
       # The architects' per-project activity feed (Bus consumer → fleet.feed in each arch pod_dir +
       # the single informational wake on the :delivered unlock). Rides the step rail: its lines ARE
       # step milestones — same lifecycle, hermetic in tests for free (step off).
       Fleet.Pilot.ArchFeed,
-      # Neither `:repo` to the Poller (org-membership discovery), nor `:repo`/`:remote` to the StepRunConsumer (per-step-run).
-      # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
-      # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).
+      # Neither `:repo` to the Poller (org-membership discovery), nor `:repo`/`:remote` to the StepRunConsumer
+      # (per-step-run). The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller
+      # reads them (state-machine). subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the
+      # truth).
       {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
       {StepRunConsumer, forge_opts: [], step_run_runner: &StepRunConsumer.offload_async/2}
     ]

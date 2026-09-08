@@ -209,33 +209,25 @@ defmodule Fleet.Project.WorktreeSync do
   defp do_fetch_issue_refs(repo, issue_n, state) do
     dir = Path.join(state.root, Layout.project_name(repo))
 
-    cond do
-      not File.dir?(Path.join(dir, ".git")) ->
-        {:error, {:no_local_clone, dir}}
+    if File.dir?(Path.join(dir, ".git")) do
+      spec = "refs/heads/lcars/issue-#{issue_n}-*:refs/lcars/pr/#{issue_n}/*"
 
-      true ->
-        spec = "refs/heads/lcars/issue-#{issue_n}-*:refs/lcars/pr/#{issue_n}/*"
+      with :ok <- GitOps.run(["-C", dir, "fetch", "--force", "origin", spec], auth: true),
+           {:ok, out} <-
+             GitOps.read(
+               ["-C", dir, "for-each-ref", "--format=%(refname)", "refs/lcars/pr/#{issue_n}/"],
+               auth: false
+             ) do
+        refs = out |> String.split("\n", trim: true)
 
-        with :ok <- GitOps.run(["-C", dir, "fetch", "--force", "origin", spec], auth: true),
-             {:ok, out} <-
-               GitOps.read(
-                 [
-                   "-C",
-                   dir,
-                   "for-each-ref",
-                   "--format=%(refname)",
-                   "refs/lcars/pr/#{issue_n}/"
-                 ],
-                 auth: false
-               ) do
-          refs = out |> String.split("\n", trim: true)
+        Logger.info(
+          "WorktreeSync: #{repo}##{issue_n} → #{length(refs)} ref(s) readable in #{dir}"
+        )
 
-          Logger.info(
-            "WorktreeSync: #{repo}##{issue_n} → #{length(refs)} ref(s) readable in #{dir}"
-          )
-
-          {:ok, refs}
-        end
+        {:ok, refs}
+      end
+    else
+      {:error, {:no_local_clone, dir}}
     end
   end
 

@@ -63,33 +63,31 @@ defmodule Fleet.Workflow.Provenance do
       when is_binary(work_dir) and is_binary(livrable_sha) and livrable_sha != "" do
     {subject_workspace, opts} = Keyword.pop(opts, :subject_workspace)
 
-    cond do
-      not safe_path_segment?(livrable_sha) ->
-        # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
-        # separator/traversal (`/`, `\`, `..`) would escape the ops dir. It IS a git commit
-        # digest (hex) in production — a value carrying a path separator is refused, never
-        # trusted as a path segment. (Layout sanitizes too — belt kept: this refuses LOUDLY
-        # instead of silently mangling a corrupt anchor into a plausible name.)
-        {:error, {:invalid_livrable_sha, livrable_sha}}
+    # BND-120: `livrable_sha` is interpolated into the provenance FILE PATH. A
+    # separator/traversal (`/`, `\`, `..`) would escape the ops dir. It IS a git commit
+    # digest (hex) in production — a value carrying a path separator is refused, never
+    # trusted as a path segment. (Layout sanitizes too — belt kept: this refuses LOUDLY
+    # instead of silently mangling a corrupt anchor into a plausible name.)
+    if safe_path_segment?(livrable_sha) do
+      ref = Fleet.Layout.provenance_ref(statement_name(livrable_sha, attrs))
 
-      true ->
-        ref = Fleet.Layout.provenance_ref(statement_name(livrable_sha, attrs))
-
-        with :ok <- subject_reachable(subject_workspace, livrable_sha),
-             {:ok, json} <- encode(statement(attrs)),
-             {:ok, _commit_sha, _push} <-
-               OpsObjectSync.commit_object(
-                 work_dir,
-                 ref,
-                 json,
-                 Keyword.put(opts, :label, "provenance")
-               ) do
-          # The push state is DELIBERATELY not surfaced here: a provenance statement is an audit
-          # artifact whose consumers read it from the worktree, and this function's result is
-          # already `%{path:, ref:}` — a caller wanting the publication asks the object, not the
-          # emitter. Matched explicitly so a future third element cannot slip through unread.
-          {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
-        end
+      with :ok <- subject_reachable(subject_workspace, livrable_sha),
+           {:ok, json} <- encode(statement(attrs)),
+           {:ok, _commit_sha, _push} <-
+             OpsObjectSync.commit_object(
+               work_dir,
+               ref,
+               json,
+               Keyword.put(opts, :label, "provenance")
+             ) do
+        # The push state is DELIBERATELY not surfaced here: a provenance statement is an audit
+        # artifact whose consumers read it from the worktree, and this function's result is
+        # already `%{path:, ref:}` — a caller wanting the publication asks the object, not the
+        # emitter. Matched explicitly so a future third element cannot slip through unread.
+        {:ok, %{path: Path.join(work_dir, ref), ref: ref}}
+      end
+    else
+      {:error, {:invalid_livrable_sha, livrable_sha}}
     end
   end
 

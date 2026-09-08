@@ -177,7 +177,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
         depot([
           {"runtime/lib/fleet/toolchain.ex",
            "defmodule Fleet.Toolchain do\n" <>
-             "  def ops_repo, do: Application.get_env(:lcars_fleet, :k, \"fleet/\" <> \"ops\")\n" <>
+             ~s|  def ops_repo, do: Application.get_env(:lcars_fleet, :k, "fleet/" <> "ops")\n| <>
              "end\n"}
           | miroirs_ops(@ops)
         ])

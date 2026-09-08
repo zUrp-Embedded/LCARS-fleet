@@ -141,13 +141,13 @@ defmodule Fleet.TaskQueue.Server do
         {:reply, err, state}
 
       {:ok, work_item} ->
-        # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod:
-        # the `:pending` never pulled (drop) AND the in-flight `:assigned` (→ `:cleared`). A re-brief
-        # replaces the old one: the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness
-        # MUST be held here, not only at read: keeping a stale `:assigned` alongside the new pending
-        # would leave it ACTIVE and invisible to the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but
-        # MASKS the leak → unbounded "2 actives/pod" state, invariant violated). Uniqueness held AT WRITE →
-        # `find_active`/`max_by` becomes moot (at most 1 active/pod by construction).
+        # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod: the
+        # `:pending` never pulled (drop) AND the in-flight `:assigned` (→ `:cleared`). A re-brief replaces the old one:
+        # the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness MUST be held here,
+        # not only at read: keeping a stale `:assigned` alongside the new pending would leave it ACTIVE and invisible to
+        # the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but MASKS the leak → unbounded "2
+        # actives/pod" state, invariant violated). Uniqueness held AT WRITE → `find_active`/`max_by` becomes moot (at
+        # most 1 active/pod by construction).
         {state, superseded} = supersede_active(state, pod_id)
 
         new_state = state |> put_work_item(work_item)

@@ -48,9 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     rel = "lib/fleet/workflow/gates.ex"
     gates_path = Path.join(root, rel)
 
-    if not File.exists?(gates_path) do
-      broken_result("gates.no_runtime_seam", rel)
-    else
+    if File.exists?(gates_path) do
       gates_seams =
         gates_path
         |> File.read!()
@@ -69,6 +67,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
         evidence: gates_seams,
         note: "Gates purity: no runtime seam (app-env read / apply) inside system machinery"
       }
+    else
+      broken_result("gates.no_runtime_seam", rel)
     end
   end
 
@@ -433,8 +433,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
   # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
   # kills the long-lived forever/pipe/run pods at cycle 2). The cancellation is not a home-made
-  # impl (`Process.cancel_timer`) but NATIVE to `gen_statem`: `:result_deadline` is a **state_timeout of the `:monitoring` state**, and the
-  # `:monitoring → :extracting` transition (triggered by the result arriving,
+  # impl (`Process.cancel_timer`) but NATIVE to `gen_statem`: `:result_deadline` is a **state_timeout of the
+  # `:monitoring` state**, and the `:monitoring → :extracting` transition (triggered by the result arriving,
   # `work_item.completed`) AUTOMATICALLY cancels this state_timeout (a state_timeout is
   # cancelled at the state change). So this check verifies the TWO pillars of this
   # native invariant in pod.ex:
@@ -1132,13 +1132,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           "line the door prints for a forge that did not answer",
       status: if(files != [] and missing == [], do: :pass, else: :fail),
       evidence:
-        cond do
-          files == [] ->
-            ["INSTRUMENT BROKEN — no file defines an `eval` door AND names Fleet.Forge"]
-
-          true ->
-            Enum.sort(missing)
-        end,
+        if(files == [],
+          do: ["INSTRUMENT BROKEN — no file defines an `eval` door AND names Fleet.Forge"],
+          else: Enum.sort(missing)
+        ),
       note: "#{length(files)} forge-reaching `eval` door file(s), each starting its own transport"
     }
   end
@@ -1292,28 +1289,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
         {n_bin + b, bad ++ Enum.map(u, fn {line, form} -> "#{rel}:#{line} — #{form}" end)}
       end)
 
-    cond do
-      # Population guard: the rails call `load!/2` at a dozen sites; zero means the walker no
-      # longer recognises the call shape, and a wall that sees nothing must not stay green. The
-      # unary sites found so far ride along, so a regression that both removes binary sites and
-      # adds a unary one still names the culprit.
-      binary < 5 ->
-        broken_result(
-          id,
-          "Loader.load!/2 call sites (only #{binary}, expected 5+)" <>
-            if(unary == [], do: "", else: "; unary seen: #{Enum.join(unary, " · ")}")
-        )
-
-      true ->
-        %{
-          id: id,
-          remediation:
-            "pass the catalogue: `Loader.load!(name, Loader.card_opts_for_repo(repo))` (or the " <>
-              "`loader_opts` already in scope), and hand `&Loader.load!/2` to `safe_load/3`",
-          status: if(unary == [], do: :pass, else: :fail),
-          evidence: unary,
-          note: "#{binary} binary site(s) across lib/; #{length(unary)} unary"
-        }
+    # Population guard: the rails call `load!/2` at a dozen sites; zero means the walker no
+    # longer recognises the call shape, and a wall that sees nothing must not stay green. The
+    # unary sites found so far ride along, so a regression that both removes binary sites and
+    # adds a unary one still names the culprit.
+    if binary < 5 do
+      broken_result(
+        id,
+        "Loader.load!/2 call sites (only #{binary}, expected 5+)" <>
+          if(unary == [], do: "", else: "; unary seen: #{Enum.join(unary, " · ")}")
+      )
+    else
+      %{
+        id: id,
+        remediation:
+          "pass the catalogue: `Loader.load!(name, Loader.card_opts_for_repo(repo))` (or the " <>
+            "`loader_opts` already in scope), and hand `&Loader.load!/2` to `safe_load/3`",
+        status: if(unary == [], do: :pass, else: :fail),
+        evidence: unary,
+        note: "#{binary} binary site(s) across lib/; #{length(unary)} unary"
+      }
     end
   end
 

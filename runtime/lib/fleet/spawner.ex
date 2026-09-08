@@ -449,8 +449,10 @@ defmodule Fleet.Spawner do
     killed =
       Fleet.Spawner.Registry
       |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
-      |> Enum.filter(&String.starts_with?(&1, prefix))
-      |> Enum.filter(fn pod_id -> kill_pod(pod_id) == :ok end)
+      # ⚠ LE `and` COURT-CIRCUITE, ET C'EST CE QUI GARDE L'EFFET DE BORD. `kill_pod/1` n'est
+      # appele que sur les pods dont le prefixe correspond — exactement comme les deux filtres
+      # enchaines d'avant, en un seul parcours.
+      |> Enum.filter(&(String.starts_with?(&1, prefix) and kill_pod(&1) == :ok))
       |> Enum.sort()
 
     if killed != [] do

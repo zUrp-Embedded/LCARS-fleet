@@ -242,11 +242,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     |> List.to_string()
   end
 
-  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read a mirror
-  # through `code_of/1` wherever a comment could carry the value: on the RAW body, a file whose CODE carries the wrong value stays green
-  # as long as the right one appears in a COMMENT — and the context that makes it likely is the
-  # ordinary one: `# Note: was <old value>` on the very line a migration touches. Measured on three
-  # of them: code mutated + the pattern quoted in a comment → `status: pass` without the strip.
+  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read a mirror through `code_of/1`
+  # wherever a comment could carry the value: on the RAW body, a file whose CODE carries the wrong value stays green as
+  # long as the right one appears in a COMMENT — and the context that makes it likely is the ordinary one: `# Note: was
+  # <old value>` on the very line a migration touches. Measured on three of them: code mutated + the pattern quoted in a
+  # comment → `status: pass` without the strip.
   #
   # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
   # strips comments on every sweep. Same doctrine here, in the other language.

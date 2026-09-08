@@ -353,9 +353,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
         org: org,
         description: Map.get(args, "description", pitch),
         pitch: pitch,
-        # Criticality declaration RELAYED from the human (nil entries = undeclared → the
-        # onboard records an HONEST undeclared default (the delegation default card), marked undeclared; never fabricated facts,
-        # never a wall — a blocked declaration teaches the human to lie to the arch).
+        # Criticality declaration RELAYED from the human (nil entries = undeclared → the onboard records an HONEST
+        # undeclared default (the delegation default card), marked undeclared; never fabricated facts, never a wall — a
+        # blocked declaration teaches the human to lie to the arch).
         justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
         onboarded_by: onboarder_role

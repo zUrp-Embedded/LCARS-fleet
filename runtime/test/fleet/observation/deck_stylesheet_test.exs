@@ -44,10 +44,9 @@ defmodule Fleet.Observation.DeckStylesheetTest do
     |> then(&Regex.scan(~r/\.(-?[_a-zA-Z][\w-]*)/, &1))
     |> Enum.map(fn [_, name] -> name end)
     |> Enum.uniq()
-    |> Enum.reject(&MapSet.member?(@not_emitted_by_the_view, &1))
     # The view holds BOTH the markup and the JS that builds the live rows: a name present anywhere
     # in that file reaches a browser at some point. Absent from it, it reaches one never.
-    |> Enum.reject(&String.contains?(view, &1))
+    |> Enum.reject(&(MapSet.member?(@not_emitted_by_the_view, &1) or String.contains?(view, &1)))
     |> Enum.sort()
   end
 

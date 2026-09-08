@@ -126,28 +126,26 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     #
     # `not alive_before?` is load-bearing: re-briefing a LIVE pipe pod starts no child, so gating it
     # at saturation would starve the very pipe holding the seat.
-    cond do
-      not alive_before? and not has_free_slot?(spawner, role, profile, spawn_opts) ->
-        Logger.info(
-          "StepDispatcher: role bucket FULL (max_pods_per_role) → defer role=#{role} " <>
-            "pod=#{pod_id} #{log_ctx} (no lock taken; re-dispatch when a seat frees)"
-        )
+    if alive_before? or has_free_slot?(spawner, role, profile, spawn_opts) do
+      locked_spawn_step(
+        seams,
+        pod_id,
+        role,
+        profile,
+        brief,
+        spawn_opts,
+        lock_target,
+        {issue_id, issue_number},
+        alive_before?,
+        log_ctx
+      )
+    else
+      Logger.info(
+        "StepDispatcher: role bucket FULL (max_pods_per_role) → defer role=#{role} " <>
+          "pod=#{pod_id} #{log_ctx} (no lock taken; re-dispatch when a seat frees)"
+      )
 
-        {:skipped, :role_at_capacity}
-
-      true ->
-        locked_spawn_step(
-          seams,
-          pod_id,
-          role,
-          profile,
-          brief,
-          spawn_opts,
-          lock_target,
-          {issue_id, issue_number},
-          alive_before?,
-          log_ctx
-        )
+      {:skipped, :role_at_capacity}
     end
   end
 
@@ -281,11 +279,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
         {:ok, degraded_order(brief), []}
 
-      # `{:work_dir_missing, _}` is governed by the SAME lever as the poller's admission gate
-      # (`:require_onboarded`), not by a second one: both enforce the one policy "a project this
-      # fleet serves exists on disk", at two depths. The hermetic test baseline turns it off
-      # because the suite drives fictional repos — and there it degrades to the plain inline brief,
-      # so a test asserting a dispatch is asserting a dispatch and not this gate. Two keys for one policy would diverge at the first change.
+      # `{:work_dir_missing, _}` is governed by the SAME lever as the poller's admission gate (`:require_onboarded`),
+      # not by a second one: both enforce the one policy "a project this fleet serves exists on disk", at two depths.
+      # The hermetic test baseline turns it off because the suite drives fictional repos — and there it degrades to the
+      # plain inline brief, so a test asserting a dispatch is asserting a dispatch and not this gate. Two keys for one
+      # policy would diverge at the first change.
       {:error, {:work_dir_missing, _} = cause} ->
         if require_onboarded?() do
           refuse_order(repo, issue_number, role, cause)

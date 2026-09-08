@@ -523,10 +523,10 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # System onboarding. Route present → passthrough `{:ok, route}`. Route nil (routeless issue:
-  # create_issue does not write the workflow_map; or a raw human issue) → engraves the project's
-  # declared card (or the workshop rail's) at its first step → `{:onboarded, step}` (dispatch_issue defers: skip this tick, the next one
-  # sees it routed). Route posted by the SYSTEM (system forge token). Failure → `{:error, {:onboard, _}}`.
+  # System onboarding. Route present → passthrough `{:ok, route}`. Route nil (routeless issue: create_issue does not
+  # write the workflow_map; or a raw human issue) → engraves the project's declared card (or the workshop rail's) at its
+  # first step → `{:onboarded, step}` (dispatch_issue defers: skip this tick, the next one sees it routed). Route posted
+  # by the SYSTEM (system forge token). Failure → `{:error, {:onboard, _}}`.
   defp ensure_workflow_map_or_onboard(
          _forge,
          _repo,

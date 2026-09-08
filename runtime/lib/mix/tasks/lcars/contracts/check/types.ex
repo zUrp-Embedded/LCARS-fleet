@@ -156,12 +156,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
     impls = for {n, lo, hi, true} <- defs, a <- lo..hi, into: MapSet.new(), do: {n, a}
 
-    defs
-    |> Enum.reject(fn {name, _lo, _hi, impl?} -> impl? or name in @behaviour_callbacks end)
-    |> Enum.reject(fn {name, lo, hi, _} ->
-      Enum.any?(lo..hi, fn a ->
-        MapSet.member?(specs, {name, a}) or MapSet.member?(impls, {name, a})
-      end)
+    Enum.reject(defs, fn {name, lo, hi, impl?} ->
+      impl? or name in @behaviour_callbacks or
+        Enum.any?(lo..hi, fn a ->
+          MapSet.member?(specs, {name, a}) or MapSet.member?(impls, {name, a})
+        end)
     end)
     |> Enum.map(fn {name, _lo, hi, _} -> "#{name}/#{hi}" end)
   end

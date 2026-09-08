@@ -782,10 +782,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       inconnues =
         racines
-        |> Enum.reject(&(&1 == expected))
-        |> Enum.reject(&(&1 in etrangeres))
-        |> Enum.reject(&Regex.match?(versionnee, &1))
-        |> Enum.reject(&(not Regex.match?(pas_une_racine, &1)))
+        |> Enum.reject(fn r ->
+          r == expected or r in etrangeres or Regex.match?(versionnee, r) or
+            not Regex.match?(pas_une_racine, r)
+        end)
         |> Enum.sort()
 
       cond do
@@ -990,66 +990,62 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     # ⚠ DECLARE PAR SON NOM, pas par un motif : l'arbre de travail des agents.
     hors_face = ["/home/projects.work"]
 
-    cond do
-      length(faces) < 3 or Enum.any?(faces, fn {_, v} -> is_nil(v) end) ->
-        %{
-          id: id,
-          remediation: remediation,
-          status: :fail,
-          evidence: ["lib/fleet/layout.ex"],
-          note:
-            "the faces no longer read as frozen literals in Fleet.Layout " <>
-              "(#{length(faces)} clause(s) found, #{length(racines)} with a readable root) — " <>
-              "nothing was compared"
-        }
+    if length(faces) < 3 or Enum.any?(faces, fn {_, v} -> is_nil(v) end) do
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/layout.ex"],
+        note:
+          "the faces no longer read as frozen literals in Fleet.Layout " <>
+            "(#{length(faces)} clause(s) found, #{length(racines)} with a readable root) — " <>
+            "nothing was compared"
+      }
+    else
+      # `..` : ce check porte sur le depot ENTIER, pas sur `runtime/` seul. Le filtre residuel
+      # ne garde que ce que `@corpus_skip` ne couvre pas — et il porte sur le chemin relatif a
+      # la base REELLE du scan, pas a `root`, sans quoi tout ce qui vit hors de `runtime/` y
+      # echappe.
+      base = Path.expand(Path.join(root, ".."))
 
-      true ->
-        # `..` : ce check porte sur le depot ENTIER, pas sur `runtime/` seul. Le filtre residuel
-        # ne garde que ce que `@corpus_skip` ne couvre pas — et il porte sur le chemin relatif a
-        # la base REELLE du scan, pas a `root`, sans quoi tout ce qui vit hors de `runtime/` y
-        # echappe.
-        base = Path.expand(Path.join(root, ".."))
+      vues =
+        corpus_files(base)
+        |> Enum.reject(&String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/"))
+        |> Enum.reduce(MapSet.new(), &collect_face_roots/2)
 
-        vues =
-          corpus_files(base)
-          |> Enum.reject(
-            &String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/")
-          )
-          |> Enum.reduce(MapSet.new(), &collect_face_roots/2)
+      inconnues =
+        vues
+        |> Enum.reject(&(&1 in racines or &1 in hors_face))
+        |> Enum.sort()
 
-        inconnues =
-          vues
-          |> Enum.reject(&(&1 in racines or &1 in hors_face))
-          |> Enum.sort()
+      cond do
+        not Enum.all?(racines, &MapSet.member?(vues, &1)) ->
+          broken_result(id, "occurrence of every declared face root in the corpus")
 
-        cond do
-          not Enum.all?(racines, &MapSet.member?(vues, &1)) ->
-            broken_result(id, "occurrence of every declared face root in the corpus")
+        inconnues == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: [],
+            note:
+              "the #{length(racines)} faces declared by Fleet.Layout.face_root/1 " <>
+                "(#{Enum.join(racines, ", ")}) are the only /home/projects roots in the corpus, " <>
+                "plus #{length(hors_face)} declared non-face tree"
+          }
 
-          inconnues == [] ->
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: [],
-              note:
-                "the #{length(racines)} faces declared by Fleet.Layout.face_root/1 " <>
-                  "(#{Enum.join(racines, ", ")}) are the only /home/projects roots in the corpus, " <>
-                  "plus #{length(hors_face)} declared non-face tree"
-            }
-
-          true ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: inconnues,
-              note:
-                "Fleet.Layout declares #{Enum.join(racines, ", ")} — " <>
-                  "#{length(inconnues)} other /home/projects root(s) are neither a face nor " <>
-                  "declared: " <> Enum.join(inconnues, ", ")
-            }
-        end
+        true ->
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: inconnues,
+            note:
+              "Fleet.Layout declares #{Enum.join(racines, ", ")} — " <>
+                "#{length(inconnues)} other /home/projects root(s) are neither a face nor " <>
+                "declared: " <> Enum.join(inconnues, ", ")
+          }
+      end
     end
   end
 
@@ -1300,8 +1296,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       |> Path.join("lib/**/*.ex")
       |> Path.wildcard()
       |> Enum.map(&Path.relative_to(&1, root))
-      |> Enum.reject(&String.starts_with?(&1, "lib/fleet/forge/"))
-      |> Enum.reject(&checker_source?/1)
+      |> Enum.reject(&(String.starts_with?(&1, "lib/fleet/forge/") or checker_source?(&1)))
 
     fautes = Enum.flat_map(fichiers, &forge_shape_reads(root, &1))
 

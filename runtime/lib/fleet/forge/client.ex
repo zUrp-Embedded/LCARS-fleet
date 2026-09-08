@@ -1149,30 +1149,28 @@ defmodule Fleet.Forge.Client do
     role = ForgeProtocol.step_run_marker_role(c["body"])
     author = get_in(c, ["user", "login"])
 
-    cond do
-      author == bot ->
-        {:cont, {:ok, n + 1}}
+    if author == bot do
+      {:cont, {:ok, n + 1}}
+    else
+      case role_login(role, opts) do
+        {:ok, ^author} ->
+          {:cont, {:ok, n + 1}}
 
-      true ->
-        case role_login(role, opts) do
-          {:ok, ^author} ->
-            {:cont, {:ok, n + 1}}
+        {:ok, _other} ->
+          {:cont, {:ok, n}}
 
-          {:ok, _other} ->
-            {:cont, {:ok, n}}
+        # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
+        # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
+        # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
+        # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
+        {:error, :role_token_unavailable} ->
+          {:cont, {:ok, n}}
 
-          # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
-          # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
-          # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
-          # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
-          {:error, :role_token_unavailable} ->
-            {:cont, {:ok, n}}
-
-          # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
-          # que de rendre un total qui pourrait etre bas.
-          {:error, reason} ->
-            {:halt, {:error, {:role_login_unresolved, role, reason}}}
-        end
+        # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
+        # que de rendre un total qui pourrait etre bas.
+        {:error, reason} ->
+          {:halt, {:error, {:role_login_unresolved, role, reason}}}
+      end
     end
   end
 

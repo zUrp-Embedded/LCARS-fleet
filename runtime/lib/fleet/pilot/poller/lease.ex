@@ -336,14 +336,15 @@ defmodule Fleet.Pilot.Poller.Lease do
       case seams.forge.route_from_labels(Payload.labels(issue)) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
-          # The lease reads on the ROUTE (append-only, robust), NEVER on the success of the load of the
-          # workflow_map. A PRESENT route = a workflow_run already entered into the machine. ENGAGED iff the current step
-          # is not the 1st of the workflow_map (workflow_run advanced between two step_runs). If the workflow_map fails to load
-          # TRANSIENTLY (network/forge nil), we CANNOT exclude that this workflow_run is advanced → fail-closed:
-          # we classify it ENGAGED (lease HELD). Otherwise a nil-workflow_map would lose the lease of an engaged workflow_run →
-          # a 2nd issue of the same repo would start a 2nd workflow_run (loss of serialization). The dispatch of ITS
-          # step fails-loud if the workflow_map is missing (workflow_map re-read on the StepDispatcher side), but the lease does NOT release
-          # for all that. WorkflowMap back at the next tick → precise classification resumed.
+          # The lease reads on the ROUTE (append-only, robust), NEVER on the success of the load of the workflow_map. A
+          # PRESENT route = a workflow_run already entered into the machine. ENGAGED iff the current step is not the 1st
+          # of the workflow_map (workflow_run advanced between two step_runs). If the workflow_map fails to load
+          # TRANSIENTLY (network/forge nil), we CANNOT exclude that this workflow_run is advanced → fail-closed: we
+          # classify it ENGAGED (lease HELD). Otherwise a nil-workflow_map would lose the lease of an engaged
+          # workflow_run → a 2nd issue of the same repo would start a 2nd workflow_run (loss of serialization). The
+          # dispatch of ITS step fails-loud if the workflow_map is missing (workflow_map re-read on the StepDispatcher
+          # side), but the lease does NOT release for all that. WorkflowMap back at the next tick → precise
+          # classification resumed.
           workflow_map = load_workflow_map_or_nil(workflow_map_name, seams)
           engaged = is_nil(workflow_map) or not first_step?(workflow_map, step)
           {engaged, [prefetched_route: route, prefetched_workflow_map: workflow_map]}
@@ -404,8 +405,8 @@ defmodule Fleet.Pilot.Poller.Lease do
     _ -> :escalation_skipped
   end
 
-  # Is the step the 1st of the workflow_map (= routed but not advanced = QUEUED)? workflow_map anomaly → `true`
-  # (treated as "not engaged": the dispatch fail-loud will surface it, never a lease wedge by an unreadable workflow_map).
+  # Is the step the 1st of the workflow_map (= routed but not advanced = QUEUED)? workflow_map anomaly → `true` (treated
+  # as "not engaged": the dispatch fail-loud will surface it, never a lease wedge by an unreadable workflow_map).
   defp first_step?(workflow_map, step) do
     case Fleet.Pilot.WorkflowMapNav.first_step(workflow_map) do
       {:ok, {first, _role}} -> step == first

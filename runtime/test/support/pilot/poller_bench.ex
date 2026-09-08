@@ -11,6 +11,7 @@ defmodule Fleet.Pilot.PollerBench do
   alias Fleet.Pilot.Poller
 
   defmodule StepStubForge do
+    @moduledoc false
     # L'admission lit les preconditions avant de DEMARRER un ticket : un stub sans cette lecture
     # ne peut pas voir la porte, et la laisserait disparaitre sans qu'un test rougisse.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
@@ -139,6 +140,7 @@ defmodule Fleet.Pilot.PollerBench do
   end
 
   defmodule StepStubLoader do
+    @moduledoc false
     def load("engineer"),
       do:
         {:ok,
@@ -163,6 +165,7 @@ defmodule Fleet.Pilot.PollerBench do
 
   # WORKFLOW_MAP loader (load!/1) — distinct from the CapProfile loader above (load/1).
   defmodule StepStubWorkflowMapLoader do
+    @moduledoc false
     # 1-step (engineer producer): an issue routed here (step=build=1st) is QUEUED (not started).
     def load!("qa-build") do
       %{
@@ -186,6 +189,7 @@ defmodule Fleet.Pilot.PollerBench do
   end
 
   defmodule StepStubSpawner do
+    @moduledoc false
     # PASSE-9 — real `Spawner.spawn_pod/3` shape = {:ok, pid()}, NEVER a string: a consumer
     # re-interpolating the pid would break in prod.
     def spawn_pod(_profile, issue_id, opts) do
@@ -208,30 +212,35 @@ defmodule Fleet.Pilot.PollerBench do
 
   # F-037 / #25: a LIVE pod with a REPO-SCOPED pod_id (`<repo-slug>-issue-<n>-<role>`, real PodId format).
   defmodule LivePodSpawner do
+    @moduledoc false
     def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-engineer"}]
   end
 
   # TaskQueue stub: the pod has an ACTIVE task → it legitimately OWNS its lock.
   defmodule ActiveTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :assigned}
   end
 
   # SLOT-FREEZE: a project-scoped PIPE eng (pod_id `<repo>-engineer`, WITHOUT `-issue-N-` — the
   # resident eng that handles N issues sequentially, 1 process = 1 Desktop slot).
   defmodule ProjectPipeSpawner do
+    @moduledoc false
     def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-engineer"}]
   end
 
   # TaskQueue stub: the project eng is working BRICK 8 (issue_id "issue-8") -> it owns #8.
   defmodule ProjectTaskQueueIssue8 do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :assigned}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
 
   # TaskQueue stub: the project eng is working ANOTHER brick (9) -> it does NOT own #8.
   defmodule ProjectTaskQueueIssue9 do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :assigned}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-9"}
   end
@@ -262,6 +271,7 @@ defmodule Fleet.Pilot.PollerBench do
   # the capture goes through the registered test listener (`:reap_test_listener`), same reason the
   # forge stub threads `_test_pid`.
   defmodule QuiescedJudgeSpawner do
+    @moduledoc false
     def spawn_pod(_profile, _issue_id, _opts), do: {:ok, self()}
     def list_pods, do: [%{pod_id: "lordzurp-lcars-test-issue-8-consultant"}]
     def wake_pod(_pod_id), do: :ok
@@ -275,6 +285,7 @@ defmodule Fleet.Pilot.PollerBench do
   # TaskQueue stub: the judge DELIVERED its verdict (terminal task) → no active task, owns nothing.
   # `enqueue`/`list_active`: the awaits-arch fixture also walks the arch-offer path on the tick.
   defmodule QuiescedTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :completed}
     def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
     def list_active, do: []
@@ -287,6 +298,7 @@ defmodule Fleet.Pilot.PollerBench do
   # reclaimed). `pod_active_issue_id` returns "issue-8" but is no longer reached: the
   # `pod_has_active_task?` filter short-circuits before (a `:completed` is no longer active).
   defmodule ProjectTaskQueueCompletedIssue8 do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :completed}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
@@ -296,6 +308,7 @@ defmodule Fleet.Pilot.PollerBench do
   # "active" but NOT pulled: a PARKED admission owns no lock. Twin of ProjectTaskQueueCompletedIssue8,
   # `:pending` instead of `:completed`.
   defmodule ParkedPendingTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, :pending}
     def pod_active_issue_id(_pod_id), do: {:ok, "issue-8"}
   end
@@ -304,6 +317,7 @@ defmodule Fleet.Pilot.PollerBench do
   # carries brick #8 of THIS repo (self-describing MA-03 metadata: gate_eval + resume_n +
   # resume_payload.repository). No live pod otherwise (the producer is done): exactly the eval window.
   defmodule GateEvalTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, nil}
 
     def list_active do
@@ -324,6 +338,7 @@ defmodule Fleet.Pilot.PollerBench do
   # it (wake lost, kick net exhausted). An eval without an executor owns nothing — twin of
   # GateEvalTaskQueue with :pending instead of :assigned (enqueued, never pulled).
   defmodule GateEvalPendingTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, nil}
 
     def list_active do
@@ -343,6 +358,7 @@ defmodule Fleet.Pilot.PollerBench do
   # G1 — TaskQueue stub: a pulled eval exists but for ANOTHER repo → it does NOT own the #8 ref
   # of lordzurp/lcars-test (multi-project: the ref's repo comes from the resume_payload).
   defmodule GateEvalOtherRepoTaskQueue do
+    @moduledoc false
     def pod_status(_pod_id), do: {:ok, nil}
 
     def list_active do
@@ -364,6 +380,7 @@ defmodule Fleet.Pilot.PollerBench do
   # upstream, canonical order), only the tmux wake failed. Used to prove the contract "failed wake
   # ⇒ lease TAKEN".
   defmodule FailingWakeRecovery do
+    @moduledoc false
     def wake(_pod_id, _respawn_fun, _opts), do: {:error, {:escalated, :not_found}}
   end
 
@@ -373,6 +390,7 @@ defmodule Fleet.Pilot.PollerBench do
   # poller (load_workflow_map_or_nil) AND the StepDispatcher (load_workflow_map) rescue it into
   # nil/`{:error}`.
   defmodule NilWorkflowMapForQa2Loader do
+    @moduledoc false
     def load!("qa-2"), do: raise("workflow_map qa-2 unavailable (simulated transient failure)")
 
     def load!("qa-build"),

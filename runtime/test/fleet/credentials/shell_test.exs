@@ -255,12 +255,12 @@ defmodule Fleet.Credentials.ShellTest do
 
       enfants =
         File.ls!("/proc")
-        |> Enum.filter(&Regex.match?(~r/^\d+$/, &1))
         |> Enum.filter(fn p ->
-          case stat.(p) do
-            %{ppid: pp} -> pp == to_string(os_pid)
-            _ -> false
-          end
+          Regex.match?(~r/^\d+$/, p) and
+            case stat.(p) do
+              %{ppid: pp} -> pp == to_string(os_pid)
+              _ -> false
+            end
         end)
 
       enfant_chef? =

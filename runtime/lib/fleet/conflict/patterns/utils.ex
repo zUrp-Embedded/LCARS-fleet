@@ -308,10 +308,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
     else
       Enum.zip(o_tok, t_tok)
       |> Enum.reduce_while(winner, fn {a, b}, w ->
-        cond do
-          a == b -> {:cont, w}
-          true -> pair_winner(a, b, w)
-        end
+        if a == b, do: {:cont, w}, else: pair_winner(a, b, w)
       end)
     end
   end

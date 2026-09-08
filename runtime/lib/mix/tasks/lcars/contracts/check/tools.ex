@@ -358,6 +358,120 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # check locks the CONTRACT at the gate: the projection exists in the code AND the
   # anti-regression test exists (deleting the test is visible to the gate — belt over
   # the ExUnit net).
+  @doc """
+  Chaque `deftool` porte UNE ligne `# vitrine:`, et elle tient sur une seule ligne.
+
+  ## Pourquoi un mur, et pourquoi de ce cote-ci
+
+  Le build du site lit cette ligne par une regex qui capture jusqu'a la fin de la ligne
+  (`assets/github.io/src/lib/tools.js`, `extractVitrine/1`) et refuse un `deftool` qui n'en porte
+  pas. Deux raisons de la garder AUSSI ici :
+
+    * cette porte-la est un AUTRE gate (GitHub Actions), et `site.build_inputs` existe justement
+      parce que ses gardes ne servent a rien quand le build ne se declenche pas ;
+    * c'est cette contrainte qui justifie les `credo:disable-for-next-line` sur la longueur des
+      lignes `# vitrine:` de `pod_tools.ex`. Une exemption de lint adossee a un commentaire est une
+      exemption que le prochain lecteur retire ; adossee a un mur, elle est tenue.
+
+  ## Ce qu'il mesure
+
+  Pour chaque `deftool "<nom>" do … end` : exactement une ligne `# vitrine:` dans le corps, un
+  texte non vide, et RIEN apres elle sur une ligne de continuation (`#` suivi de texte
+  immediatement en dessous), qui serait perdue en silence sur la page publique.
+  """
+  @spec check_vitrine_single_line(String.t()) :: Support.result()
+  def check_vitrine_single_line(root) do
+    id = "mcp.vitrine_single_line"
+    rel = "lib/fleet/mcp/pod_tools.ex"
+
+    lignes =
+      case File.read(Path.join(root, rel)) do
+        {:ok, src} -> String.split(src, "\n")
+        _ -> []
+      end
+
+    outils = deftool_blocs(lignes)
+
+    fautes =
+      Enum.flat_map(outils, fn {nom, debut, corps} ->
+        vitrines =
+          for {l, k} <- Enum.with_index(corps),
+              [_, texte] <- [Regex.run(~r/#\s*vitrine:\s*(.*)$/, l)],
+              do: {k, String.trim(texte)}
+
+        case vitrines do
+          [] ->
+            ["#{rel}:#{debut} #{nom} : aucune ligne `# vitrine:` — le build du site refuserait"]
+
+          [_, _ | _] ->
+            [
+              "#{rel}:#{debut} #{nom} : #{length(vitrines)} lignes `# vitrine:` — une seule est lue"
+            ]
+
+          [{k, texte}] ->
+            suite = Enum.at(corps, k + 1, "")
+
+            cond do
+              texte == "" ->
+                ["#{rel}:#{debut} #{nom} : ligne `# vitrine:` VIDE"]
+
+              # ⚠ LA CONTINUATION EST LE VRAI PIEGE, et elle est INVISIBLE : le texte reste
+              # complet dans le fichier, la page n'en montre que la premiere moitie.
+              Regex.match?(~r/^\s*#\s*\S/, suite) and
+                  not Regex.match?(~r/#\s*(vitrine:|credo:)/, suite) ->
+                [
+                  "#{rel}:#{debut + k + 1} #{nom} : la ligne `# vitrine:` est SUIVIE d'un " <>
+                    "commentaire — le site ne lit que la premiere ligne, le reste est perdu " <>
+                    "en silence"
+                ]
+
+              true ->
+                []
+            end
+        end
+      end)
+
+    if measured_nothing?(outils) do
+      broken_result(id, "deftool bloc in #{rel}")
+    else
+      %{
+        id: id,
+        remediation:
+          "poser UNE ligne `# vitrine: <texte FR>` par `deftool`, sans continuation — le build du " <>
+            "site la lit jusqu'a la fin de la ligne et n'en lit pas une seconde",
+        status: if(fautes == [], do: :pass, else: :fail),
+        evidence: Enum.sort(fautes),
+        note: "#{length(outils)} deftool(s), chacun avec sa ligne `# vitrine:` unique"
+      }
+    end
+  end
+
+  # `{nom, ligne_de_debut, lignes_du_corps}` par `deftool`. Lecture ligne a ligne et non a l'AST :
+  # une ligne `# vitrine:` est un COMMENTAIRE, donc absente de l'AST — c'est tout le point (elle ne
+  # part jamais dans la charge MCP de l'agent).
+  defp deftool_blocs(lignes) do
+    {blocs, _} =
+      Enum.reduce(Enum.with_index(lignes, 1), {[], nil}, fn {l, n}, {acc, courant} ->
+        cond do
+          match = Regex.run(~r/^  deftool "([a-z_]+)" do\s*$/, l) ->
+            {acc, {Enum.at(match, 1), n, []}}
+
+          is_nil(courant) ->
+            {acc, nil}
+
+          Regex.match?(~r/^  end\s*$/, l) ->
+            {nom, debut, corps} = courant
+            {acc ++ [{nom, debut, Enum.reverse(corps)}], nil}
+
+          true ->
+            {nom, debut, corps} = courant
+            {acc, {nom, debut, [l | corps]}}
+        end
+      end)
+
+    blocs
+  end
+
   @doc false
   @spec check_mcp_wire_inputschema(String.t()) :: Support.result()
   def check_mcp_wire_inputschema(root) do
