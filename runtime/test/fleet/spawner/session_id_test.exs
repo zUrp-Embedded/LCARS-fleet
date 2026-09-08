@@ -9,6 +9,7 @@ defmodule Fleet.Spawner.SessionIdTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Spawner.Pod.SessionMint
   alias Fleet.Spawner.SessionId
 
   @uid 1017
@@ -122,19 +123,19 @@ defmodule Fleet.Spawner.SessionIdTest do
       }
 
     test "uid 9999 → nominal, l'identite est encodee" do
-      id = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 9999, repo_id: 7)
+      id = SessionMint.mint(cap("engineer"), uid: 9999, repo_id: 7)
       assert id =~ ~r/^[0-9a-f]badcafe-9999-4dad-babe-0007dec0de/
     end
 
     test "uid 10000 → ArgumentError qui NOMME l'uid et la borne" do
       assert_raise ArgumentError, ~r/uid 10000 is outside the <UID>.*0\.\.9999/s, fn ->
-        Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 10_000, repo_id: 7)
+        SessionMint.mint(cap("engineer"), uid: 10_000, repo_id: 7)
       end
     end
 
     test "uid 65534 (nobody) → meme refus nomme" do
       assert_raise ArgumentError, ~r/uid 65534 is outside/, fn ->
-        Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 65_534, repo_id: 7)
+        SessionMint.mint(cap("engineer"), uid: 65_534, repo_id: 7)
       end
     end
 
@@ -148,7 +149,7 @@ defmodule Fleet.Spawner.SessionIdTest do
       }
 
       assert_raise ArgumentError, ~r/uid 100000 is outside/, fn ->
-        Fleet.Spawner.Pod.SessionMint.mint(fleet, uid: 100_000)
+        SessionMint.mint(fleet, uid: 100_000)
       end
     end
 
@@ -156,8 +157,8 @@ defmodule Fleet.Spawner.SessionIdTest do
     # tient parce qu'on REFUSE au lieu de replier : il n'existe aucun couple d'uid distincts rendant
     # la meme identite.
     test "deux uid valides distincts donnent deux identites distinctes" do
-      a = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 1000, repo_id: 7)
-      b = Fleet.Spawner.Pod.SessionMint.mint(cap("engineer"), uid: 9000, repo_id: 7)
+      a = SessionMint.mint(cap("engineer"), uid: 1000, repo_id: 7)
+      b = SessionMint.mint(cap("engineer"), uid: 9000, repo_id: 7)
       refute a == b
     end
   end

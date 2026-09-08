@@ -24,6 +24,8 @@ defmodule Fleet.Spawner.PodTmux do
 
   require Logger
 
+  alias Fleet.Credentials.Shell
+
   @tmux_bin "tmux"
   # WALL bound for tmux/pkill: these are load-bearing on teardown/wake/health paths. A wedged tmux server
   # (or a `pkill` that hangs on a stuck process) under a bare System.cmd would block the CALLING GenServer
@@ -76,16 +78,12 @@ defmodule Fleet.Spawner.PodTmux do
     sock = sock_path(pod_id)
 
     _ =
-      Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock, "kill-server"],
-        timeout_ms: @tmux_timeout_ms
-      )
+      Shell.run(@tmux_bin, ["-S", sock, "kill-server"], timeout_ms: @tmux_timeout_ms)
 
     case pkill_pattern(pod_id) do
       {:ok, pattern} ->
         _ =
-          Fleet.Credentials.Shell.run("pkill", ["-9", "-f", pattern],
-            timeout_ms: @tmux_timeout_ms
-          )
+          Shell.run("pkill", ["-9", "-f", pattern], timeout_ms: @tmux_timeout_ms)
 
         :ok
 
@@ -235,9 +233,7 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   defp tmux(pod_id, args) do
-    case Fleet.Credentials.Shell.run(@tmux_bin, ["-S", sock_path(pod_id) | args],
-           timeout_ms: @tmux_timeout_ms
-         ) do
+    case Shell.run(@tmux_bin, ["-S", sock_path(pod_id) | args], timeout_ms: @tmux_timeout_ms) do
       {:ok, {out, code}} -> {out, code}
       {:error, {:timeout, ms}} -> {"tmux timeout (#{ms}ms)", 124}
       {:error, {:exit, reason}} -> {"tmux exec error: #{inspect(reason)}", 125}

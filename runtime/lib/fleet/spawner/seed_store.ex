@@ -25,6 +25,7 @@ defmodule Fleet.Spawner.SeedStore do
   require Logger
 
   alias Fleet.Slug
+  alias Fleet.Spawner.SessionId
 
   # Budget for the JSONL scans (`first_round/1`, `seed_records/1`): these run in the pod's
   # GenStatem callback during CAPTURE and BEFORE teardown — an enormous, malformed or
@@ -287,7 +288,7 @@ defmodule Fleet.Spawner.SeedStore do
   """
   @spec capture_slot_bridge(Path.t(), String.t()) :: :ok | :none | {:error, term()}
   def capture_slot_bridge(pod_dir, uuid) when is_binary(pod_dir) and is_binary(uuid) do
-    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+    with {:ok, uuid} <- SessionId.cast(uuid),
          {:ok, jsonl} <- Fleet.Spawner.Pod.SessionFiles.latest_jsonl(pod_dir),
          %{} = live <- seed_records(jsonl),
          true <- rc_registered?(live) || :none do
@@ -308,7 +309,7 @@ defmodule Fleet.Spawner.SeedStore do
   """
   @spec slot_seed(String.t()) :: {:ok, Path.t()} | :none
   def slot_seed(uuid) when is_binary(uuid) do
-    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+    with {:ok, uuid} <- SessionId.cast(uuid),
          path = slot_path(uuid),
          {:ok, %{size: size}} when size > 0 <- File.stat(path) do
       {:ok, path}
@@ -319,7 +320,7 @@ defmodule Fleet.Spawner.SeedStore do
 
   # Slot preservation is best-effort after the seed body has already been restored.
   defp maybe_inject_slot_bridge(dest, uuid) do
-    with {:ok, uuid} <- Fleet.Spawner.SessionId.cast(uuid),
+    with {:ok, uuid} <- SessionId.cast(uuid),
          sidecar = slot_path(uuid),
          true <- File.exists?(sidecar),
          {:ok, raw} <- File.read(sidecar),

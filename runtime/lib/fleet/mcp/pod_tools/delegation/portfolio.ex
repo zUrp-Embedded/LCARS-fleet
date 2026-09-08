@@ -18,6 +18,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   alias Fleet.Catalogue
   alias Fleet.MCP.PodTools.Delegation.{Gate, Render}
   alias Fleet.MCP.PodTools.ProjectPublish
+  alias Fleet.Workflow.Loader
 
   @doc """
   Creates a project through the onboarding seam after the server-side gate.
@@ -65,20 +66,18 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
   @spec delete_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, args, state) when is_binary(full_name) and is_map(args) do
-    cond do
-      not delete_armed?() ->
-        Logger.warning(
-          "Delegation: delete_project(#{full_name}) REFUSED — disarmed by deployment " <>
-            "(config :lcars_fleet, #{inspect(@delete_flag)} is not true)"
-        )
+    if delete_armed?() do
+      case Gate.require_onboarder(state) do
+        {:error, reason} -> {:error, reason}
+        {:ok, _role} -> do_delete_project(full_name, args)
+      end
+    else
+      Logger.warning(
+        "Delegation: delete_project(#{full_name}) REFUSED — disarmed by deployment " <>
+          "(config :lcars_fleet, #{inspect(@delete_flag)} is not true)"
+      )
 
-        {:error, :delete_project_disabled}
-
-      true ->
-        case Gate.require_onboarder(state) do
-          {:error, reason} -> {:error, reason}
-          {:ok, _role} -> do_delete_project(full_name, args)
-        end
+      {:error, :delete_project_disabled}
     end
   end
 
@@ -289,9 +288,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   # the human picks the card from »), sur un catalogue au lieu de N.
   defp catalogue_cards do
     pairs =
-      Enum.flat_map(Fleet.Workflow.Loader.card_scopes(), fn %{catalogue: cat, dir: dir} ->
+      Enum.flat_map(Loader.card_scopes(), fn %{catalogue: cat, dir: dir} ->
         opts = [workflow_maps_root: dir]
-        Enum.map(Fleet.Workflow.Loader.canon_names!(opts), &{cat, &1, opts})
+        Enum.map(Loader.canon_names!(opts), &{cat, &1, opts})
       end)
 
     {:ok, pairs}
@@ -305,7 +304,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   defp put_catalogue(card, cat), do: Map.put(card, "catalogue", cat)
 
   defp read_card(name, opts) do
-    card = Fleet.Workflow.Loader.load!(name, opts)
+    card = Loader.load!(name, opts)
 
     {:ok,
      %{

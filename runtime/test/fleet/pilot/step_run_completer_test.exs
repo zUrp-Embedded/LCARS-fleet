@@ -7,8 +7,11 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   # `:require_onboarded` flake: restore-on-exit makes the value right AFTER the test and wrong
   # DURING it, for everyone else.
 
+  alias Fleet.CapProfile.Image
   alias Fleet.Pilot.ForgeStubs.MergeFailForge
   alias Fleet.Pilot.StepRunCompleter
+  alias Fleet.Test.BizCatalogueFixture
+  alias Fleet.Workflow.Loader
 
   # Forge stub that RECORDS the call order (send to the test) to verify the
   # canonical §5 sequence: comment → state → (close|assignee) → unlock.
@@ -1415,22 +1418,22 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # `standard` lives in `biz` only; a default loader that drops the catalogue falls back to
       # the project card's jury (the bundled default). No `:workflow_map_loader` in the opts: the
       # completer's own default is the subject.
-      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
-      :ok = Fleet.CapProfile.Image.publish!()
-      :ok = Fleet.Workflow.Loader.publish_image!()
+      :ok = Image.publish!()
+      :ok = Loader.publish_image!()
 
       on_exit(fn ->
-        Fleet.CapProfile.Image.unpublish()
-        Fleet.Workflow.Loader.unpublish_all_images()
+        Image.unpublish()
+        Loader.unpublish_all_images()
       end)
 
-      judge = Fleet.Test.BizCatalogueFixture.judge()
+      judge = BizCatalogueFixture.judge()
       # The PROJECT declares the jury-less card, so the fallback (engraved card unloadable in the
       # wrong root) convenes nobody; `[judge]` can only come from `standard` read in `biz`. The
       # producer signs as `engineer` — the bench holds its token, the step role is not the point.
       code_root = Path.join(tmp, "projects")
-      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+      BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
 
       step_run = producer_step_run(:review, %{repo: "biz/boutique", workflow_map: "standard"})
 
@@ -1451,19 +1454,19 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       # The project DECLARES `standard` (jury `[code-reviewer]`, a name the delegation card does
       # not carry): the fallback must read THAT card, not the delegation default the same fallback
       # would reach through `Roles.jury(nil, _)` — the two replies differ, so the witness can tell.
-      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
-      :ok = Fleet.CapProfile.Image.publish!()
-      :ok = Fleet.Workflow.Loader.publish_image!()
+      :ok = Image.publish!()
+      :ok = Loader.publish_image!()
 
       on_exit(fn ->
-        Fleet.CapProfile.Image.unpublish()
-        Fleet.Workflow.Loader.unpublish_all_images()
+        Image.unpublish()
+        Loader.unpublish_all_images()
       end)
 
-      judge = Fleet.Test.BizCatalogueFixture.judge()
+      judge = BizCatalogueFixture.judge()
       code_root = Path.join(tmp, "projects")
-      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "standard")
+      BizCatalogueFixture.declare_project!(code_root, "boutique", "standard")
 
       step_run =
         producer_step_run(:review, %{

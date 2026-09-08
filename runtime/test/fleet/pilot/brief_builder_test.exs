@@ -12,6 +12,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.BriefBuilder
+  alias Fleet.Workflow.BriefArtifact
 
   # Minimal forge seam: `get_predecessor_result` (the DELIVERABLE) + `issue_get` (the CRITERION),
   # driven by `forge_opts` (`:_pred`, `:_issue`) → a single stub serves the ok/error cases.
@@ -492,7 +493,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
       {:ok, %{ref: ref, sha: sha}} =
-        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE DOC COMPLET.\n", name_hint: "my-slug")
+        BriefArtifact.commit(work_dir, "LE DOC COMPLET.\n", name_hint: "my-slug")
 
       {ref, sha}
     end
@@ -553,7 +554,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
       {:ok, %{ref: ref, sha: sha}} =
-        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE CRITÈRE COMPLET.\n", name_hint: "crit")
+        BriefArtifact.commit(work_dir, "LE CRITÈRE COMPLET.\n", name_hint: "crit")
 
       {ref, sha}
     end
@@ -739,7 +740,7 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
       {:ok, %{ref: ref, sha: sha}} =
-        Fleet.Workflow.BriefArtifact.commit(work_dir, "LE BRIEF À JUGER.\n", name_hint: "brf")
+        BriefArtifact.commit(work_dir, "LE BRIEF À JUGER.\n", name_hint: "brf")
 
       body = "Résumé.\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, "acme/widget")
 

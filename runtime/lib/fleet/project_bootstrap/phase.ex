@@ -20,6 +20,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
   mounts/credentials by `bwrap_launch.sh`.
   """
 
+  alias Fleet.Credentials.Shell
+
   defmodule Clone do
     @moduledoc """
     Phase 2 — CLONE the feature branch OR skip (permanent pod / no repo).
@@ -238,7 +240,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # the fetched history; and its targeted `fetch origin <sha>` fallback stays for the
                # anomalous case it exists for.
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(
+                 Shell.git(
                    @hooks_off ++
                      ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
                    git_opts
@@ -256,7 +258,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
                # possible). Bare env (no auth/network).
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
+                 Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
                    env: []
                  ),
                :ok <- install_trailer_hook(ws, cap_profile),
@@ -342,9 +344,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # parce que ca ne leve pas.
                {:ok, {_, 0}} <- pin_work_base(ws, project),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
+                 Shell.git(@hooks_off ++ ["-C", ws, "clean", "-fdx"], env: []),
                {:ok, {_, 0}} <-
-                 Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature],
+                 Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-B", feature],
                    env: []
                  ),
                :ok <- sanitize_workspace(ws) do
@@ -488,7 +490,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # (bounded twice total, never per-path). A directory victim contributes every tracked file
     # under its prefix (skip-worktree is a per-FILE index bit).
     defp skip_worktree_tracked(ws, paths) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "ls-files", "-z"], env: []) do
+      case Shell.git(@hooks_off ++ ["-C", ws, "ls-files", "-z"], env: []) do
         {:ok, {out, 0}} ->
           tracked = out |> String.split(<<0>>, trim: true) |> MapSet.new()
 
@@ -512,7 +514,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     defp flag_skip_worktree(_ws, []), do: :ok
 
     defp flag_skip_worktree(ws, targets) do
-      case Fleet.Credentials.Shell.git(
+      case Shell.git(
              @hooks_off ++ ["-C", ws, "update-index", "--skip-worktree", "--"] ++ targets,
              env: []
            ) do
@@ -545,7 +547,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     """
     @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
     def read_original_claude_md(ws) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"],
+      case Shell.git(@hooks_off ++ ["-C", ws, "show", "HEAD:CLAUDE.md"],
              env: []
            ) do
         {:ok, {content, 0}} -> {:ok, content}
@@ -583,7 +585,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     end
 
     defp do_pin_base_sha(ws, sha) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
+      case Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
              env: []
            ) do
         {:ok, {_, 0}} = ok ->
@@ -593,9 +595,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # The local `reset` failed (`sha` absent locally) → targeted NETWORK fetch (forge auth + anti-prompt
           # bound via `git_env/0`), then local re-reset. Fetch failure (incl. timeout/exit) →
           # propagated as-is to the `with` → `{:clone_failed, ...}`.
-          case Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", "--", sha]) do
+          case Shell.git(@hooks_off ++ ["-C", ws, "fetch", "origin", "--", sha]) do
             {:ok, {_, 0}} ->
-              Fleet.Credentials.Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
+              Shell.git(@hooks_off ++ ["-C", ws, "reset", "--hard", sha, "--"],
                 env: []
               )
 
@@ -667,7 +669,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     defp fetch_work_base(ws, base) do
       if Fleet.GitRef.valid?(base) do
-        Fleet.Credentials.Shell.git(
+        Shell.git(
           @hooks_off ++
             ["-C", ws, "fetch", "--no-tags", "origin", "+refs/heads/#{base}:refs/lcars/base"]
         )
@@ -682,7 +684,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # (mono-branche : le clone cree bien la branche locale, mais c'est un detail de `git clone` et
     # pas un invariant qu'on veut porter ici) ; nommer `base_sha` echouerait quand il est absent.
     defp local_work_base(ws) do
-      Fleet.Credentials.Shell.git(
+      Shell.git(
         @hooks_off ++ ["-C", ws, "update-ref", "refs/lcars/base", "HEAD"],
         env: []
       )

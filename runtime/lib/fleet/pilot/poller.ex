@@ -61,6 +61,7 @@ defmodule Fleet.Pilot.Poller do
 
   alias Fleet.Forge.Payload
   alias Fleet.Opts
+  alias Fleet.Pilot.IncidentRegistry
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
 
@@ -612,7 +613,7 @@ defmodule Fleet.Pilot.Poller do
           "this lasts (fail-safe), so an orphaned lock outlives its pod"
       )
 
-      incident = state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+      incident = state.incident_fun || (&IncidentRegistry.record_or_escalate/4)
 
       _ =
         try do
@@ -733,7 +734,7 @@ defmodule Fleet.Pilot.Poller do
         "PR, the same file), so it will repeat until someone looks."
     )
 
-    escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+    escalate = state.escalate_fun || (&IncidentRegistry.escalate_gated/5)
 
     _ =
       escalate.(
@@ -814,7 +815,7 @@ defmodule Fleet.Pilot.Poller do
           "telemetry reports zero counts."
       )
 
-      escalate = state.escalate_fun || (&Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+      escalate = state.escalate_fun || (&IncidentRegistry.escalate_gated/5)
 
       _ =
         escalate.(
@@ -1130,7 +1131,7 @@ defmodule Fleet.Pilot.Poller do
       repo: state.repo,
       forge_opts: state.forge_opts,
       workflow_map_loader: state.workflow_map_loader || Fleet.Workflow.Loader,
-      incident_fun: state.incident_fun || (&Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
+      incident_fun: state.incident_fun || (&IncidentRegistry.record_or_escalate/4)
     }
   end
 

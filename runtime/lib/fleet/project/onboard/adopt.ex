@@ -8,6 +8,7 @@ defmodule Fleet.Project.Onboard.Adopt do
   residu, soit supprimer le travail de quelqu'un d'autre.
   """
 
+  alias Fleet.Forge.WriteSpacing
   alias Fleet.Layout
   alias Fleet.Project.GitOps
   alias Fleet.Project.Onboard
@@ -98,7 +99,7 @@ defmodule Fleet.Project.Onboard.Adopt do
   end
 
   defp finish_adopt(full_name, url, dirs, states, name, opts) do
-    with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+    with :ok <- WriteSpacing.gap(opts),
          :ok <- Repo.seed_protocol_labels(full_name, opts),
          :ok <- Faces.set_origin(dirs.code, url),
          :ok <- Onboard.ensure_declaration(dirs.code, full_name, opts),
@@ -110,7 +111,7 @@ defmodule Fleet.Project.Onboard.Adopt do
              "ci(adopt): rail CI du depot (.gitea/workflows)"
            ),
          :ok <- Faces.push(dirs.code, "main", true),
-         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+         :ok <- WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
              states.ops,
@@ -121,7 +122,7 @@ defmodule Fleet.Project.Onboard.Adopt do
              name,
              opts
            ),
-         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+         :ok <- WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
              states.workshop,

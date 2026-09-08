@@ -12,6 +12,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   import ExUnit.CaptureLog
 
   alias Fleet.Spawner.CanonProof
+  alias Fleet.Test.CatalogueIsolation
 
   test "the shipped canon proves spawn-ready — every role, defaults + each optional" do
     log = capture_log(fn -> assert :ok = CanonProof.prove_all!() end)
@@ -27,7 +28,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   test "an EMPTY catalogue is a refusal — nothing to prove means nothing can spawn", %{
     tmp_dir: tmp
   } do
-    Fleet.Test.CatalogueIsolation.isolate!(tmp)
+    CatalogueIsolation.isolate!(tmp)
 
     assert_raise RuntimeError, ~r/EMPTY/, fn -> CanonProof.prove_all!() end
   end
@@ -53,7 +54,7 @@ defmodule Fleet.Spawner.CanonProofTest do
         incompatible: []
     """)
 
-    Fleet.Test.CatalogueIsolation.isolate!(tmp)
+    CatalogueIsolation.isolate!(tmp)
 
     assert_raise RuntimeError, ~r/"ghostly".*NOT.*spawn-ready/s, fn ->
       CanonProof.prove_all!()
@@ -63,7 +64,7 @@ defmodule Fleet.Spawner.CanonProofTest do
   @tag :tmp_dir
   test "an unenumerable catalogue is a refusal, never a vacuous pass", %{tmp_dir: tmp} do
     missing = Path.join(tmp, "nowhere")
-    Fleet.Test.CatalogueIsolation.isolate!(missing)
+    CatalogueIsolation.isolate!(missing)
 
     assert_raise RuntimeError, ~r/not enumerable/, fn ->
       CanonProof.prove_all!()

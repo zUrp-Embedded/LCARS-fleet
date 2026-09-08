@@ -16,6 +16,7 @@ defmodule Fleet.Workflow.CardRolesTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Workflow.CardRoles
+  alias Fleet.Workflow.Loader
 
   setup do
     root = Fleet.TestEnv.tmp_path("cr")
@@ -176,7 +177,7 @@ defmodule Fleet.Workflow.CardRolesTest do
       # `declarable_card/3`) lisent le meme champ absent : elles tombent ensemble.
       opts = workshop_card(root, "atelier")
 
-      assert %{"scope" => "ticket"} = Fleet.Workflow.Loader.load!("atelier", opts)
+      assert %{"scope" => "ticket"} = Loader.load!("atelier", opts)
 
       assert {:error, {:card_not_project_scoped, "atelier", "ticket"}} =
                Fleet.Project.Declaration.declarable_card("atelier", nil, opts)
@@ -205,7 +206,7 @@ defmodule Fleet.Workflow.CardRolesTest do
       """)
 
       opts = [workflow_maps_root: dir]
-      assert %{"scope" => "project"} = Fleet.Workflow.Loader.load!("ordinaire", opts)
+      assert %{"scope" => "project"} = Loader.load!("ordinaire", opts)
       assert :ok = Fleet.Project.Declaration.declarable_card("ordinaire", nil, opts)
     end
 
@@ -213,7 +214,7 @@ defmodule Fleet.Workflow.CardRolesTest do
       # Le schema borne le champ a `project|ticket`, donc « explicite » ne veut pas dire « libre » :
       # ce qui est teste est que la derivation n'ECRASE pas ce que l'auteur a ecrit.
       opts = workshop_card(root, "atelier", "\n  scope: ticket")
-      assert %{"scope" => "ticket"} = Fleet.Workflow.Loader.load!("atelier", opts)
+      assert %{"scope" => "ticket"} = Loader.load!("atelier", opts)
     end
 
     test "la CONTRADICTION `face: workshop` + `scope: project` est REFUSEE, en NOMMANT la carte",
@@ -232,10 +233,10 @@ defmodule Fleet.Workflow.CardRolesTest do
         Keyword.fetch!(opts, :workflow_maps_root)
       )
 
-      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+      on_exit(&Loader.unpublish_all_images/0)
 
       assert_raise RuntimeError, ~r/atelier.*face: workshop.*scope: project/s, fn ->
-        Fleet.Workflow.Loader.publish_image!()
+        Loader.publish_image!()
       end
     end
   end

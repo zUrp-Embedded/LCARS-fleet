@@ -5,6 +5,7 @@ defmodule Fleet.SPBuilderImageTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Spawner.Pod.Assets
   alias Fleet.SPBuilder.Image
 
   @moduletag :tmp_dir
@@ -101,11 +102,11 @@ defmodule Fleet.SPBuilderImageTest do
     File.write!(custom, "# custom MUTATED\n")
 
     assert {:ok, "# custom proto\n"} =
-             Fleet.Spawner.Pod.Assets.read_protocole_user(fleet_facing())
+             Assets.read_protocole_user(fleet_facing())
 
     # Restart-republish → the new epoch (and proof the mutation was reachable all along).
     Image.unpublish()
-    assert {:ok, served} = Fleet.Spawner.Pod.Assets.read_protocole_user(fleet_facing())
+    assert {:ok, served} = Assets.read_protocole_user(fleet_facing())
     assert served =~ "MUTATED"
   end
 
@@ -167,7 +168,7 @@ defmodule Fleet.SPBuilderImageTest do
     }
 
     assert {:error, {:agent_draft_missing, _, _}} =
-             Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
+             Assets.read_agent_draft(profile)
 
     File.write!(
       Path.join(drafts, "agent-late-role-base.md"),
@@ -178,13 +179,13 @@ defmodule Fleet.SPBuilderImageTest do
            "fixture must be readable on disk"
 
     assert {:error, {:agent_draft_missing, _, _}} =
-             Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
+             Assets.read_agent_draft(profile)
 
     # Restart-republish → the new epoch admits it, which is the only way in.
     Image.unpublish()
     :ok = Image.publish!()
 
-    assert {:ok, content} = Fleet.Spawner.Pod.Assets.read_agent_draft(profile)
+    assert {:ok, content} = Assets.read_agent_draft(profile)
     assert content =~ "an SP the epoch never admitted"
   end
 
@@ -200,7 +201,7 @@ defmodule Fleet.SPBuilderImageTest do
       metadata: %{"name" => "chef-de-projet"}
     }
 
-    assert {:ok, borrowed} = Fleet.Spawner.Pod.Assets.read_agent_draft(renamed)
+    assert {:ok, borrowed} = Assets.read_agent_draft(renamed)
 
     own = %Fleet.CapProfile{
       kind: "CapabilityProfile",
@@ -208,7 +209,7 @@ defmodule Fleet.SPBuilderImageTest do
       metadata: %{"name" => "architect"}
     }
 
-    assert {:ok, ^borrowed} = Fleet.Spawner.Pod.Assets.read_agent_draft(own),
+    assert {:ok, ^borrowed} = Assets.read_agent_draft(own),
            "the renamed role must receive the SAME bytes, not a lookalike"
   end
 
@@ -226,7 +227,7 @@ defmodule Fleet.SPBuilderImageTest do
       }
 
       assert {:error, {:agent_draft_invalid_role, ^hostile}} =
-               Fleet.Spawner.Pod.Assets.read_agent_draft(profile),
+               Assets.read_agent_draft(profile),
              "systemPrompt=#{inspect(hostile)} must be refused as a role, not resolved as a path"
     end
   end

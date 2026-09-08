@@ -2,7 +2,13 @@ defmodule Fleet.Spawner.PodTest do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Publish.InFlight
   alias Fleet.Spawner.LaunchBackend.StubBackend
+  alias Fleet.Spawner.Pod
+  alias Fleet.Spawner.Pod.Backend
+  alias Fleet.Spawner.Pod.Kick
+  alias Fleet.Spawner.Pod.StateFs
+  alias Fleet.Spawner.SessionId
 
   # G24-9 (F-CONT-RISK) — minimum disallowedTools required by Fleet.CapProfile.validate/1
   # (wired at spawn, Z2; cf. cap_profile.ex @disallowed_minimum_strict/_prefix). Every
@@ -76,24 +82,24 @@ defmodule Fleet.Spawner.PodTest do
 
   describe "kick_keyword/3 (#5.2 — kick keyword based on the ACK + the two gates)" do
     test "not yet polled → 'engage' (bootstrap-arm, never gated by the GLOBAL knob)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true) == "engage"
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, true) == "engage"
+      assert Kick.kick_keyword(false, true, true) == "engage"
+      assert Kick.kick_keyword(false, false, true) == "engage"
     end
 
     test "already polled + knob on → 'wake' (fallback)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true) == "wake"
+      assert Kick.kick_keyword(true, true, true) == "wake"
     end
 
     test "already polled + knob off → nil (flag-only, no send-keys)" do
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, false, true) == nil
+      assert Kick.kick_keyword(true, false, true) == nil
     end
 
     test "profile gate off → nil for EVERYTHING, engage included (human-terminal class)" do
       # Live 2026-07-19: a resumed starfleet (front-desk, Desktop bridge) took the bootstrap engage
       # drizzle to the cap — the cap-profile gate must mute the engage too, not just the wake.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false) == nil
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, false, false) == nil
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, false) == nil
+      assert Kick.kick_keyword(false, true, false) == nil
+      assert Kick.kick_keyword(false, false, false) == nil
+      assert Kick.kick_keyword(true, true, false) == nil
     end
 
     test "REGRESSION — resume is NOT an input: an unarmed pod gets engage however it was started" do
@@ -106,31 +112,31 @@ defmodule Fleet.Spawner.PodTest do
       # A witness that encodes a premise instead of a behaviour protects whatever the premise is
       # wrong about. What the loop must key on is the OBSERVABLE state of the rail — the handler's
       # `monitor_armed?` stop — never how the pod was started.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, true) == "engage"
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(true, true, true) == "wake"
+      assert Kick.kick_keyword(false, true, true) == "engage"
+      assert Kick.kick_keyword(true, true, true) == "wake"
 
       # And the human-terminal class stays mute, which is what actually held the starfleet scar:
       # it is `wake_send_keys: false` on the profile that gates it, not the resume flag.
-      assert Fleet.Spawner.Pod.Kick.kick_keyword(false, true, false) == nil
+      assert Kick.kick_keyword(false, true, false) == nil
     end
   end
 
   describe "acked?/3 (#5.2 F3 — the loop control = the ACK, not a proxy)" do
     test "wake: brief pull = ACK (regardless of polled)" do
-      assert Fleet.Spawner.Pod.Kick.acked?(true, false, false)
-      assert Fleet.Spawner.Pod.Kick.acked?(true, false, true)
+      assert Kick.acked?(true, false, false)
+      assert Kick.acked?(true, false, true)
     end
 
     test "bootstrap: poll = ACK (no brief to pull, last_poll is enough)" do
-      assert Fleet.Spawner.Pod.Kick.acked?(false, true, true)
+      assert Kick.acked?(false, true, true)
     end
 
     test "bootstrap not yet polled → NO ACK (we keep kicking 'engage')" do
-      refute Fleet.Spawner.Pod.Kick.acked?(false, true, false)
+      refute Kick.acked?(false, true, false)
     end
 
     test "worker not yet pulled → NO ACK even if polled (polled counts ONLY for bootstrap)" do
-      refute Fleet.Spawner.Pod.Kick.acked?(false, false, true)
+      refute Kick.acked?(false, false, true)
     end
   end
 
@@ -168,7 +174,7 @@ defmodule Fleet.Spawner.PodTest do
 
   defp spawn_via_supervisor(args) do
     StubBackend.set_parent(self())
-    Fleet.Spawner.Pod.start_link(args)
+    Pod.start_link(args)
   end
 
   defp build_args(pod_id, issue_id) do
@@ -768,7 +774,7 @@ defmodule Fleet.Spawner.PodTest do
       GenServer.call(pid, :info)
 
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
-      expected = Fleet.Spawner.SessionId.encode(0, Fleet.CapProfile.kill_class(sf), 4242, 0)
+      expected = SessionId.encode(0, Fleet.CapProfile.kill_class(sf), 4242, 0)
       assert content["session_id"] == expected
     end
 
@@ -785,7 +791,7 @@ defmodule Fleet.Spawner.PodTest do
 
       # role 2, class from the fixture's lifetime_scope, uid 4242, repo 7 — the per-project identity.
       expected =
-        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+        SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       assert content["session_id"] == expected
     end
@@ -859,7 +865,7 @@ defmodule Fleet.Spawner.PodTest do
       content = File.read!(state_fs_path(pod_id)) |> Jason.decode!()
 
       expected =
-        Fleet.Spawner.SessionId.encode(3, Fleet.CapProfile.kill_class(valid_profile()), 4242, 161)
+        SessionId.encode(3, Fleet.CapProfile.kill_class(valid_profile()), 4242, 161)
 
       assert content["session_id"] == expected
     end
@@ -870,7 +876,7 @@ defmodule Fleet.Spawner.PodTest do
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
 
       uuid =
-        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+        SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # The identity's seed sits in the seed store (captured by a previous life).
       Application.put_env(:lcars_fleet, :spawner_seed_store_root, Path.join(tmp_dir, "seeds"))
@@ -918,7 +924,7 @@ defmodule Fleet.Spawner.PodTest do
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
 
       uuid =
-        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+        SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # Snapshot of a PREVIOUS fleet life (stale/absent boot_id) — non-terminal phase.
       state_path = state_fs_path(pod_id)
@@ -970,7 +976,7 @@ defmodule Fleet.Spawner.PodTest do
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
 
       uuid =
-        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+        SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       state_path = state_fs_path(pod_id)
       File.mkdir_p!(Path.dirname(state_path))
@@ -1010,7 +1016,7 @@ defmodule Fleet.Spawner.PodTest do
 
       # the pod's deterministic uuid (class from fixture, uid injected, ITS repo) — the GC targets THIS name.
       uuid =
-        Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
+        SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 
       # simulates a surviving pod_dir (failed teardown): the deterministic UUID's jsonl already lingers.
       stale =
@@ -1280,7 +1286,7 @@ defmodule Fleet.Spawner.PodTest do
     # F-C037 — 3-state decision at the deadline FIRE (testable seam without an unreachable TaskQueue).
     test "F-C037 :idle → lapse (:keep_state_and_data, NO re-arm) — pod between two tasks" do
       data = %{pod_id: "p-idle", cap_profile: valid_profile()}
-      assert :keep_state_and_data = Fleet.Spawner.Pod.result_deadline_fire(:idle, data)
+      assert :keep_state_and_data = Pod.result_deadline_fire(:idle, data)
     end
 
     test "F-C037 :unknown (broker unreachable) → RE-ARMS the deadline, never a lapse (else orphaned hung pod)" do
@@ -1291,7 +1297,7 @@ defmodule Fleet.Spawner.PodTest do
       data = %{pod_id: "p-unknown", cap_profile: valid_profile()}
 
       assert {:keep_state_and_data, actions} =
-               Fleet.Spawner.Pod.result_deadline_fire(:unknown, data)
+               Pod.result_deadline_fire(:unknown, data)
 
       assert Enum.any?(actions, fn
                {:state_timeout, ms, :result_deadline} when is_integer(ms) -> true
@@ -1873,13 +1879,13 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-inflight-#{System.unique_integer([:positive])}"
       data = %{conditions: MapSet.new([:publishing]), pod_id: pod_id}
 
-      Fleet.Publish.InFlight.mark(pod_id)
-      on_exit(fn -> Fleet.Publish.InFlight.clear(pod_id) end)
+      InFlight.mark(pod_id)
+      on_exit(fn -> InFlight.clear(pod_id) end)
 
       result =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:keep_state_and_data, [{{:timeout, :publish_deadline}, ms, :fire}]} =
-                   Fleet.Spawner.Pod.handle_event(
+                   Pod.handle_event(
                      {:timeout, :publish_deadline},
                      :fire,
                      :monitoring,
@@ -1897,11 +1903,11 @@ defmodule Fleet.Spawner.PodTest do
       data = %{conditions: MapSet.new([:publishing]), pod_id: pod_id}
 
       # No mark → not in flight → the lift is safe.
-      refute Fleet.Publish.InFlight.in_flight?(pod_id)
+      refute InFlight.in_flight?(pod_id)
 
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:keep_state, new_data, [{{:timeout, :publish_deadline}, :infinity, :fire}]} =
-                 Fleet.Spawner.Pod.handle_event(
+                 Pod.handle_event(
                    {:timeout, :publish_deadline},
                    :fire,
                    :monitoring,
@@ -1930,7 +1936,7 @@ defmodule Fleet.Spawner.PodTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:keep_state, new_data, [{{:timeout, :publish_deadline}, :infinity, :fire}]} =
-                   Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+                   Pod.handle_event(:info, ev, :monitoring, data)
 
           refute :publishing in new_data.conditions
         end)
@@ -1961,7 +1967,7 @@ defmodule Fleet.Spawner.PodTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert :keep_state_and_data =
-                   Fleet.Spawner.Pod.handle_event(:info, ev, :monitoring, data)
+                   Pod.handle_event(:info, ev, :monitoring, data)
         end)
 
       assert log =~ "deliverable.publish_lost"
@@ -2044,7 +2050,7 @@ defmodule Fleet.Spawner.PodTest do
       {:os_pid, os_pid} = Port.info(port, :os_pid)
       assert os_alive?(os_pid)
 
-      assert :ok = Fleet.Spawner.Pod.Backend.terminate_pod_port(port)
+      assert :ok = Backend.terminate_pod_port(port)
       Process.sleep(400)
       refute os_alive?(os_pid)
     end
@@ -2057,13 +2063,13 @@ defmodule Fleet.Spawner.PodTest do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
       # port now closed: a raw Port.close would raise ArgumentError.
-      assert :ok = Fleet.Spawner.Pod.Backend.safe_port_close(port)
+      assert :ok = Backend.safe_port_close(port)
     end
 
     test "terminate_pod_port on an already closed port → :ok (idempotent teardown)" do
       port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["60"]])
       true = Port.close(port)
-      assert :ok = Fleet.Spawner.Pod.Backend.terminate_pod_port(port)
+      assert :ok = Backend.terminate_pod_port(port)
     end
   end
 
@@ -2465,7 +2471,7 @@ defmodule Fleet.Spawner.PodTest do
       snap = write_snapshot!(tmp, pod_id, "succeeded")
       pod_dir = seed_pod_dir!(tmp, pod_id)
 
-      assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
+      assert :ok = StateFs.clear_terminal_snapshot(pod_id, valid_profile())
 
       refute File.exists?(snap)
       refute File.exists?(pod_dir)
@@ -2477,7 +2483,7 @@ defmodule Fleet.Spawner.PodTest do
         snap = write_snapshot!(tmp, pod_id, phase)
         pod_dir = seed_pod_dir!(tmp, pod_id)
 
-        assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
+        assert :ok = StateFs.clear_terminal_snapshot(pod_id, valid_profile())
         refute File.exists?(snap)
         refute File.exists?(pod_dir)
       end
@@ -2488,7 +2494,7 @@ defmodule Fleet.Spawner.PodTest do
       snap = write_snapshot!(tmp, pod_id, "monitoring")
       pod_dir = seed_pod_dir!(tmp, pod_id)
 
-      assert :ok = Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, valid_profile())
+      assert :ok = StateFs.clear_terminal_snapshot(pod_id, valid_profile())
 
       assert File.exists?(snap)
       assert File.exists?(pod_dir)
@@ -2496,7 +2502,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "idempotent no-op if no snapshot", %{tmp_dir: _tmp} do
       assert :ok =
-               Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(
+               StateFs.clear_terminal_snapshot(
                  "issue-404-engineer",
                  valid_profile()
                )
@@ -2516,7 +2522,7 @@ defmodule Fleet.Spawner.PodTest do
 
       # The refusal is SURFACED (structured verdict), never a fake :ok that a caller would read as "erased".
       assert {:error, [error: {:state_dir, :path_escape}, error: {:pod_dir, :path_escape}]} =
-               Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(victim, victim)
+               StateFs.rm_terminal_artifacts(victim, victim)
 
       assert File.exists?(Path.join(victim, "precious")),
              "rm_terminal_artifacts erased a dir OUTSIDE the root — the path-escape guard does not hold"
@@ -2530,7 +2536,7 @@ defmodule Fleet.Spawner.PodTest do
       pod_dir = seed_pod_dir!(tmp, pod_id)
       state_dir = Path.dirname(snap)
 
-      assert :ok = Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir)
+      assert :ok = StateFs.rm_terminal_artifacts(state_dir, pod_dir)
       refute File.exists?(state_dir)
       refute File.exists?(pod_dir)
     end
@@ -2568,7 +2574,7 @@ defmodule Fleet.Spawner.PodTest do
             # The verdict is SURFACED (:eacces at the final rmdir), no longer swallowed to a fake :ok —
             # the caller (clear_terminal_snapshot) can then avoid logging "erased" over a survivor.
             assert {:error, [error: {:state_dir, :eacces}]} =
-                     Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
+                     StateFs.rm_terminal_artifacts(state_dir, pod_dir, opts)
           end)
 
         assert log =~ "tombstone erase FAILED"

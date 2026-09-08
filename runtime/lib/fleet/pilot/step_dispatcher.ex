@@ -36,6 +36,8 @@ defmodule Fleet.Pilot.StepDispatcher do
   alias Fleet.Forge.Payload
   alias Fleet.Labels
   alias Fleet.Pilot.BriefBuilder
+  alias Fleet.Pilot.WorkflowMapNav
+  alias Fleet.Workflow.Loader
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
   alias Fleet.Opts
@@ -131,7 +133,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # Loader seam keeps route resolution hermetic in tests.
     # ARITY 2: the seam carries WHICH CATALOGUE answers. A unary stub still works (WorkflowMapNav
     # dispatches on arity) — a fixture answers for the one catalogue it fabricates.
-    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2)
+    workflow_map_loader = Keyword.get(opts, :workflow_map_loader, &Loader.load!/2)
 
     case decide(payload) do
       {:skip, reason} ->
@@ -347,8 +349,7 @@ defmodule Fleet.Pilot.StepDispatcher do
       # policy and the rework budget of a PR are read under the card of the PR's OWN catalogue
       # only through a binary default (wall `workflow.loader_arity`, 2026-09-05). A unary seam is
       # still honoured — every stub is one.
-      workflow_map_loader:
-        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2),
+      workflow_map_loader: Keyword.get(opts, :workflow_map_loader, &Loader.load!/2),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
@@ -567,7 +568,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # hit rather than dying inside a load on a name nobody chose.
     with {:ok, workflow_map_name} <- refute_missing_rail(workflow_map_name),
          {:ok, workflow_map} <- load_workflow_map(workflow_map_name, workflow_map_loader, repo),
-         {:ok, {step, _role}} <- Fleet.Pilot.WorkflowMapNav.first_step(workflow_map),
+         {:ok, {step, _role}} <- WorkflowMapNav.first_step(workflow_map),
          {:ok, _} <- forge.post_route(repo, number, workflow_map_name, step, forge_opts) do
       {:onboarded, step}
     else
@@ -746,14 +747,14 @@ defmodule Fleet.Pilot.StepDispatcher do
   # on a push whose permissions are not the problem.
   defp load_workflow_map(workflow_map_name, workflow_map_loader, repo),
     do:
-      Fleet.Pilot.WorkflowMapNav.safe_load(
+      WorkflowMapNav.safe_load(
         workflow_map_loader,
         workflow_map_name,
-        Fleet.Workflow.Loader.card_opts_for_repo(repo)
+        Loader.card_opts_for_repo(repo)
       )
 
   defp workflow_map_step_role(workflow_map, workflow_map_name, step) do
-    case Fleet.Pilot.WorkflowMapNav.step_role(workflow_map, step) do
+    case WorkflowMapNav.step_role(workflow_map, step) do
       {:ok, role} when is_binary(role) -> {:ok, role}
       _ -> {:error, {:workflow_map_step_unknown, workflow_map_name, step}}
     end

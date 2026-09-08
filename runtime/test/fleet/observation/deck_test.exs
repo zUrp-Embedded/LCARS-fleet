@@ -3,6 +3,8 @@ defmodule Fleet.Observation.DeckTest do
   Deck `:8091` tested via `Plug.Test` (never a real socket — hermetic
   invariant, `start_listener: false` in test). Read-only, no-auth.
   """
+  alias Fleet.Observation.Deck
+
   # Ecrit `:media_root` dans l'app env, globale au noeud : sync, comme les 38 autres suites qui
   # font un `put_env`. Celle-ci etait la seule async — une course qui attend un second lecteur.
   use ExUnit.Case, async: false
@@ -11,22 +13,22 @@ defmodule Fleet.Observation.DeckTest do
   @opts Fleet.Observation.Deck.init([])
 
   defp call(method, path) do
-    conn(method, path) |> Fleet.Observation.Deck.call(@opts)
+    conn(method, path) |> Deck.call(@opts)
   end
 
   describe "roles_for_display/1 — F-C125 (unreadable catalog ≠ empty)" do
     test "{:error, reason} → propagated (NOT flattened to []) — /table will surface the error, not a lying « aucun rôle »" do
       # `Fleet.CapProfile.list/0` is DELIBERATELY fail-loud (missing dir :enoent / corrupted YAML / collision).
       # The deck must NOT collapse that into [] (a lie during a broken cap-profile deployment).
-      assert {:error, :enoent} = Fleet.Observation.Deck.roles_for_display({:error, :enoent})
+      assert {:error, :enoent} = Deck.roles_for_display({:error, :enoent})
 
       assert {:error, {:invalid_yaml, "x"}} =
-               Fleet.Observation.Deck.roles_for_display({:error, {:invalid_yaml, "x"}})
+               Deck.roles_for_display({:error, {:invalid_yaml, "x"}})
     end
 
     test "{:ok, names} → {:ok, filtered list} (Memory-X excluded, typed shape)" do
-      assert {:ok, []} = Fleet.Observation.Deck.roles_for_display({:ok, []})
-      assert {:ok, roles} = Fleet.Observation.Deck.roles_for_display({:ok, ["monk-archivist"]})
+      assert {:ok, []} = Deck.roles_for_display({:ok, []})
+      assert {:ok, roles} = Deck.roles_for_display({:ok, ["monk-archivist"]})
       refute "monk-archivist" in roles
     end
   end
@@ -104,14 +106,14 @@ defmodule Fleet.Observation.DeckTest do
   # pas un trou ») et F-C125 juste au-dessus.
   describe "6-057 — pod_view/2 : le role est la donnee, l'icone est l'affichage" do
     test "role sans asset → le ROLE est servi, seule l'ICONE tombe au generique" do
-      view = Fleet.Observation.Deck.pod_view(pod("chief"), ~w(architect reviewer))
+      view = Deck.pod_view(pod("chief"), ~w(architect reviewer))
 
       assert view.role == "chief"
       assert view.role_icon == nil
     end
 
     test "role avec asset → les deux" do
-      view = Fleet.Observation.Deck.pod_view(pod("architect"), ~w(architect reviewer))
+      view = Deck.pod_view(pod("architect"), ~w(architect reviewer))
 
       assert view.role == "architect"
       assert view.role_icon == "architect"
@@ -121,7 +123,7 @@ defmodule Fleet.Observation.DeckTest do
     # rend `[]`. Avant, TOUS les roles disparaissaient d'un coup ; maintenant seules les icones.
     test "aucune icone lisible → AUCUN role masque", %{} do
       for role <- ~w(chief architect reviewer) do
-        view = Fleet.Observation.Deck.pod_view(pod(role), [])
+        view = Deck.pod_view(pod(role), [])
         assert view.role == role, "un repertoire d'assets illisible ne doit masquer aucun role"
         assert view.role_icon == nil
       end
@@ -132,7 +134,7 @@ defmodule Fleet.Observation.DeckTest do
     # empecher. `nil` ici veut vraiment dire « pas de role ».
     test "TEMOIN — un role non-binaire reste exclu du JSON, aux deux champs" do
       for bad <- [nil, :architect, 42] do
-        view = Fleet.Observation.Deck.pod_view(pod(bad), ~w(architect))
+        view = Deck.pod_view(pod(bad), ~w(architect))
         assert view.role == nil
         assert view.role_icon == nil
       end
@@ -295,7 +297,7 @@ defmodule Fleet.Observation.DeckTest do
 
       # Et la liste des roles se lit dans l'arbre `avatars/`, jamais ailleurs : le favicon est un
       # frere, il ne peut pas fuiter dans les roles.
-      roles = Fleet.Observation.Deck.display_roles()
+      roles = Deck.display_roles()
       assert "architect" in roles
       refute Enum.any?(roles, &String.starts_with?(&1, "favicon"))
     end
@@ -313,7 +315,7 @@ defmodule Fleet.Observation.DeckTest do
     test "les roles affiches viennent de la MARQUE REELLE du depot" do
       brand = Path.expand("../../../../assets/avatars", __DIR__)
       Application.put_env(:lcars_fleet, :media_root, Path.expand("..", brand))
-      roles = Fleet.Observation.Deck.display_roles()
+      roles = Deck.display_roles()
 
       for r <- ~w(architect vulcan starfleet) do
         assert r in roles, "#{r} absent de la marque installee — la source n'est plus assets/"

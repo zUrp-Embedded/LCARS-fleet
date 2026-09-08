@@ -17,6 +17,8 @@ defmodule Fleet.Spawner.PodKickTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod
+  alias Fleet.Spawner.Pod.TaskProbe
+  alias Fleet.Spawner.Pod.TurnFlag
 
   # The kick is state-insensitive (it matches on `data.tmux_session`): we pass an arbitrary
   # state name (:monitoring) as the 3rd argument of handle_event/4.
@@ -127,15 +129,15 @@ defmodule Fleet.Spawner.PodKickTest do
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
-    Fleet.Spawner.Pod.TurnFlag.write(dir, nil)
+    TurnFlag.write(dir, nil)
     File.write!(Path.join(dir, "turn.flag.seen"), File.read!(Path.join(dir, "turn.flag")))
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
 
     # PROVE the state reaches the DELIVERY branch (not acked): polled, not pulled, delivered.
-    assert Fleet.Spawner.Pod.TaskProbe.polled?(data)
-    refute Fleet.Spawner.Pod.TaskProbe.brief_pulled?(pod)
-    assert Fleet.Spawner.Pod.TurnFlag.delivered?(dir)
+    assert TaskProbe.polled?(data)
+    refute TaskProbe.brief_pulled?(pod)
+    assert TurnFlag.delivered?(dir)
 
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
@@ -151,12 +153,12 @@ defmodule Fleet.Spawner.PodKickTest do
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
     # Flag written, but .seen absent (Monitor never emitted) → delivered? false.
-    Fleet.Spawner.Pod.TurnFlag.write(dir, nil)
+    TurnFlag.write(dir, nil)
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
 
-    assert Fleet.Spawner.Pod.TaskProbe.polled?(data)
-    refute Fleet.Spawner.Pod.TurnFlag.delivered?(dir)
+    assert TaskProbe.polled?(data)
+    refute TurnFlag.delivered?(dir)
 
     # Not delivered + fake pod (no REPL/tmux server) → falls through to the retry rail (reschedule n+1).
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
@@ -177,8 +179,8 @@ defmodule Fleet.Spawner.PodKickTest do
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
 
-    refute Fleet.Spawner.Pod.TaskProbe.polled?(data)
-    assert Fleet.Spawner.Pod.TurnFlag.monitor_armed?(dir)
+    refute TaskProbe.polled?(data)
+    assert TurnFlag.monitor_armed?(dir)
 
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)

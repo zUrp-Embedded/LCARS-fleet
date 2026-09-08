@@ -8,6 +8,7 @@ defmodule Fleet.CatalogueTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Catalogue
+  alias Fleet.Workflow.Loader
 
   @moduletag :tmp_dir
 
@@ -242,8 +243,8 @@ defmodule Fleet.CatalogueTest do
       premier = install_card(install(home, "premier"), "carte-une")
       second = install_card(install(home, "second"), "carte-deux")
 
-      on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
-      :ok = Fleet.Workflow.Loader.publish_image!()
+      on_exit(&Loader.unpublish_all_images/0)
+      :ok = Loader.publish_image!()
 
       # Chaque racine porte SON image, et elle ne contient que ses cartes : les catalogues ne
       # fusionnent pas — une carte nomme des roles, et un role appartient au catalogue qui le declare.
@@ -252,12 +253,12 @@ defmodule Fleet.CatalogueTest do
             {second, "carte-deux", "carte-une"}
           ] do
         opts = [workflow_maps_root: Path.join(dir, Catalogue.rel(:workflow_maps))]
-        assert Fleet.Workflow.Loader.canon_names!(opts) == [attendue]
+        assert Loader.canon_names!(opts) == [attendue]
         # `load!` rend la carte APLATIE (metadata + spec fusionnes), pas l'arbre du YAML.
         assert %{"name" => ^attendue, "steps" => %{"build" => _}} =
-                 Fleet.Workflow.Loader.load!(attendue, opts)
+                 Loader.load!(attendue, opts)
 
-        refute absente in Fleet.Workflow.Loader.canon_names!(opts),
+        refute absente in Loader.canon_names!(opts),
                "les cartes ne doivent pas fusionner entre catalogues"
       end
     end

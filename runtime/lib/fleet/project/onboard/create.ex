@@ -9,6 +9,7 @@ defmodule Fleet.Project.Onboard.Create do
   protection de `main`.
   """
 
+  alias Fleet.Forge.WriteSpacing
   alias Fleet.Layout
   alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
@@ -86,7 +87,7 @@ defmodule Fleet.Project.Onboard.Create do
   end
 
   defp finish_onboard(full_name, dirs, name, opts) do
-    with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+    with :ok <- WriteSpacing.gap(opts),
          {:ok, url} <- Repo.repo_url(full_name, opts),
          :ok <- Repo.seed_protocol_labels(full_name, opts),
          :ok <- Faces.clone_main(url, dirs.code),
@@ -94,7 +95,7 @@ defmodule Fleet.Project.Onboard.Create do
          :ok <- Onboard.write_declaration(dirs.code, full_name, opts),
          :ok <- Faces.commit(dirs.code, "chore(onboard): scaffold initial du projet"),
          :ok <- Faces.push(dirs.code, "main", false),
-         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+         :ok <- WriteSpacing.gap(opts),
          :ok <-
            build_writer_face(
              full_name,
@@ -105,7 +106,7 @@ defmodule Fleet.Project.Onboard.Create do
              name,
              opts
            ),
-         :ok <- Fleet.Forge.WriteSpacing.gap(opts),
+         :ok <- WriteSpacing.gap(opts),
          :ok <-
            build_writer_face(
              full_name,

@@ -12,7 +12,9 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]
 
+  alias Fleet.Pilot.CompletionOutbox
   alias Fleet.Pilot.StepRunConsumer
+  alias Fleet.Pilot.StepRunConsumer.Verdict
   alias Fleet.Pilot.StubTaskQueue
 
   # Forge sim: §5 (abandon/await) + PR primitives. Step_run counter via forge_opts[:_step_runs].
@@ -553,13 +555,13 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       )
 
     # The payload IS journalable (a `work_item_id`-less one would make the refute below vacuous).
-    assert {:ok, _} = Fleet.Pilot.CompletionOutbox.put(event.payload)
-    assert Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi))
+    assert {:ok, _} = CompletionOutbox.put(event.payload)
+    assert Enum.any?(CompletionOutbox.pending(), &(&1["work_item_id"] == wi))
 
     assert {:noreply, _} = StepRunConsumer.handle_info(event, hc())
     assert_received {:enqueued, "o-r-issue-1-gatekeeper", _}
 
-    refute Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi)),
+    refute Enum.any?(CompletionOutbox.pending(), &(&1["work_item_id"] == wi)),
            "an escalated completion is acknowledged in the journal, by choice"
   end
 
@@ -823,16 +825,16 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     # sank v1) → refused: halt_invalid → human escalation. The decision stays valid, but the
     # verdict is malformed.
     assert "continue" ==
-             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+             Verdict.gate_decision(%{
                "decision" => "continue",
                "reason" => "criterion ok"
              })
 
     assert "halt_invalid" ==
-             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{"decision" => "continue"})
+             Verdict.gate_decision(%{"decision" => "continue"})
 
     assert "halt_invalid" ==
-             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+             Verdict.gate_decision(%{
                "decision" => "continue",
                "reason" => ""
              })
@@ -856,7 +858,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert "halt_invalid" ==
-                 Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+                 Verdict.gate_decision(%{
                    "decision" => "continue",
                    "reason" => "criterion ok",
                    "details" => "oops",
@@ -864,7 +866,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
                  })
 
         assert "halt_invalid" ==
-                 Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+                 Verdict.gate_decision(%{
                    "decision" => "continue",
                    "reason" => "criterion ok",
                    "chain" => [%{"step" => "reading"}, 42]
@@ -876,7 +878,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
     # Well-typed optional fields still cross.
     assert "continue" ==
-             Fleet.Pilot.StepRunConsumer.Verdict.gate_decision(%{
+             Verdict.gate_decision(%{
                "decision" => "continue",
                "reason" => "criterion ok",
                "details" => %{"critere" => "ok"},

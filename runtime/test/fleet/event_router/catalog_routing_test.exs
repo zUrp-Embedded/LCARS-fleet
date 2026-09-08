@@ -7,6 +7,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.EventRouter.Catalog
 
   setup do
     prior_types = Bus.authorized_event_types()
@@ -25,7 +26,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
-    assert :ok = Fleet.EventRouter.Catalog.load!()
+    assert :ok = Catalog.load!()
     routing = Bus.event_routing()
 
     # Bascule 2026-08-19 (brouette) : plus une route de severite max — une route incident a porte IMMEDIATE
@@ -85,7 +86,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/not a canonical source/, fn ->
-      Fleet.EventRouter.Catalog.load!()
+      Catalog.load!()
     end
   end
 
@@ -111,7 +112,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
-    assert_raise RuntimeError, fn -> Fleet.EventRouter.Catalog.load!() end
+    assert_raise RuntimeError, fn -> Catalog.load!() end
   end
 
   @tag :tmp_dir
@@ -133,7 +134,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/without escalate_kind/, fn ->
-      Fleet.EventRouter.Catalog.load!()
+      Catalog.load!()
     end
   end
 
@@ -153,7 +154,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
     assert_raise RuntimeError, ~r/INVALID against events/, fn ->
-      Fleet.EventRouter.Catalog.load!()
+      Catalog.load!()
     end
   end
 end

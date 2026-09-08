@@ -6,6 +6,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]
 
+  alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.PublishConsumer
 
   defmodule StubSpawner do
@@ -127,8 +128,8 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   end
 
   test "acte4 #32: fully empty name → spawn.failed emitted (visible drop, not a mute warning)" do
-    :ok = Fleet.EventRouter.Bus.subscribe()
-    on_exit(fn -> Fleet.EventRouter.Bus.unsubscribe() end)
+    :ok = Bus.subscribe()
+    on_exit(fn -> Bus.unsubscribe() end)
     {pid, _} = start_consumer()
 
     send(
@@ -176,7 +177,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "RAISING dispatch → spawn.failed event emitted on the Bus (the drop is no longer silent)" do
     # E-04: the REST API already answered 202 "queued"; if the dispatch raises, the spawn is dropped.
     # Without `spawn.failed`, the admin believes the pod is queued → no signal. We capture the alarm on the Bus.
-    :ok = Fleet.EventRouter.Bus.subscribe()
+    :ok = Bus.subscribe()
     {pid, _} = start_consumer(RaisingOnSpawnSpawner)
 
     send(
@@ -212,7 +213,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
     # `rescue` covers exceptions only — a backend that `exit`s (GenServer.call on a dead
     # spawner) killed the consumer: supervisor restart hid the drop, the 202-acked request was
     # lost WITHOUT its alarm. The `catch kind, reason` must normalize exit/throw the same way.
-    :ok = Fleet.EventRouter.Bus.subscribe()
+    :ok = Bus.subscribe()
     {pid, _} = start_consumer(ExitingSpawner)
 
     send(
@@ -239,7 +240,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   test "F-C044: CapProfile.load fail → spawn.failed emitted (the load drop is no longer silent)" do
     # Same requirement as the RAISE case, but for an ORDINARY {:error} (ghost name → load KO): the admin
     # got their 202, the pod is never born → the alarm must reach the Bus (observation read-model), not just a log.
-    :ok = Fleet.EventRouter.Bus.subscribe()
+    :ok = Bus.subscribe()
     {pid, _} = start_consumer()
 
     send(
@@ -264,7 +265,7 @@ defmodule Fleet.Spawner.PublishConsumerTest do
   end
 
   test "F-C044: spawn_pod {:error} → spawn.failed emitted (202 queued, 0 pod → alarm, not silence)" do
-    :ok = Fleet.EventRouter.Bus.subscribe()
+    :ok = Bus.subscribe()
     {pid, _} = start_consumer(ErrorOnSpawnSpawner)
 
     send(

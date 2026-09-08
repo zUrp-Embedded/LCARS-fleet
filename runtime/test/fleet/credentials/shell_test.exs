@@ -6,6 +6,7 @@ defmodule Fleet.Credentials.ShellTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Credentials.Shell
+  alias Fleet.Test.OsProbe
 
   describe "run/3 — total opts (parse at the edge: never a raise outside {:ok}|{:error})" do
     test "non-integer / negative timeout_ms → {:error, {:bad_opt, {:timeout_ms, _}}}" do
@@ -149,7 +150,7 @@ defmodule Fleet.Credentials.ShellTest do
       # After the deadline: the OS pid must be dead (killed via brutal_kill → port closed → SIGKILL).
       assert eventually_dead_os_pid?(child_pid, 40),
              "the external process (pid #{child_pid}) survives its deadline — the bound does not " <>
-               "kill the child (/proc state: #{inspect(Fleet.Test.OsProbe.state(child_pid))})"
+               "kill the child (/proc state: #{inspect(OsProbe.state(child_pid))})"
     end
 
     test "run/3 default env = [] (run/3 is the bare primitive, git/2 injects git_env)" do
@@ -199,7 +200,7 @@ defmodule Fleet.Credentials.ShellTest do
       assert eventually_dead_os_pid?(desc_pid, 40),
              "the detached DESCENDANT (pid #{desc_pid}) survives the deadline — the bound only kills " <>
                "the top-level, not the process-group (C1 regression). /proc state: " <>
-               "#{inspect(Fleet.Test.OsProbe.state(desc_pid))}"
+               "#{inspect(OsProbe.state(desc_pid))}"
 
       # Safety net: if the test fails, do not leave the sleep running for 30s.
       on_exit(fn -> System.cmd("kill", ["-KILL", desc_pid], stderr_to_stdout: true) end)
@@ -375,5 +376,5 @@ defmodule Fleet.Credentials.ShellTest do
   # different question, with the same answer only where pid 1 reaps orphans. In a gitea-actions job
   # container pid 1 is `/bin/sleep`, an orphan killed there stays `Z` forever, and the C1 test below
   # went red on a bound that had worked perfectly. Cf. `Fleet.Test.OsProbe`.
-  defp eventually_dead_os_pid?(pid, tries), do: Fleet.Test.OsProbe.eventually_dead?(pid, tries)
+  defp eventually_dead_os_pid?(pid, tries), do: OsProbe.eventually_dead?(pid, tries)
 end

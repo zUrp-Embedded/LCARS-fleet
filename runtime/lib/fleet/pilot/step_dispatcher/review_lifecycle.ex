@@ -49,7 +49,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # judge/rework spawn (via RoleDispatch), never a fork.
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
   alias Fleet.Pilot.StepDispatcher.Spawn
+  alias Fleet.Pilot.WorkflowMapNav
   alias Fleet.Project.Roles
+  alias Fleet.Workflow.Loader
 
   # BOUNDED remediation (rework forge-native budget / merge-failure classification) — DECIDES, then
   # descends back onto RoleDispatch (producer re-spawn) or ArchEscalation (human wall).
@@ -136,10 +138,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
                ctx.forge_opts
              ),
            {:ok, workflow_map} <-
-             Fleet.Pilot.WorkflowMapNav.safe_load(
+             WorkflowMapNav.safe_load(
                ctx.workflow_map_loader,
                map_name,
-               Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
+               Loader.card_opts_for_repo(ctx.repo)
              ) do
         {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}
       else
@@ -320,10 +322,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              ctx.forge_opts
            ),
          {:ok, map} when is_map(map) <-
-           Fleet.Pilot.WorkflowMapNav.safe_load(
+           WorkflowMapNav.safe_load(
              ctx.workflow_map_loader,
              map_name,
-             Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
+             Loader.card_opts_for_repo(ctx.repo)
            ) do
       {:ok, map}
     else

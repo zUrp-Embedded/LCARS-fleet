@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
+  alias Fleet.SPBuilder.Blocks
+
   # Z4 — Mix task classified into the boundary of its subject (Fleet.SPBuilder).
   use Boundary, classify_to: Fleet.SPBuilder
 
@@ -69,7 +71,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     blocks = Fleet.Catalogue.sp_blocks_root()
     map = read_map(blocks)
 
-    :ok = Fleet.SPBuilder.Blocks.audit!(catalogue_roles!(), map)
+    :ok = Blocks.audit!(catalogue_roles!(), map)
 
     if map == %{} do
       Mix.shell().info(
@@ -78,9 +80,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
       )
     else
       roles =
-        Fleet.SPBuilder.Blocks.generate!(blocks, Fleet.Catalogue.sp_drafts_root(),
-          confined?: confined?
-        )
+        Blocks.generate!(blocks, Fleet.Catalogue.sp_drafts_root(), confined?: confined?)
 
       Mix.shell().info("Per-role SPs generated (#{length(roles)}): #{Enum.join(roles, ", ")}")
     end
@@ -92,7 +92,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   # the absence is a shape rather than a fault.
   defp read_map(blocks) do
     if blocks |> Path.join("sp-map.yaml") |> File.regular?() do
-      Fleet.SPBuilder.Blocks.role_map(blocks)
+      Blocks.role_map(blocks)
     else
       %{}
     end

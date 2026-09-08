@@ -32,6 +32,7 @@ defmodule Fleet.Project.Declaration do
   require Logger
 
   alias Fleet.Layout
+  alias Fleet.Project.Roles
   alias Fleet.Workflow.Loader
 
   # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Ce fichier atterrit a la racine d'un
@@ -272,7 +273,7 @@ defmodule Fleet.Project.Declaration do
       declaration["pipeline_default"]
     else
       {:error, :enoent} ->
-        Fleet.Project.Roles.delegation_workflow_map(opts)
+        Roles.delegation_workflow_map(opts)
 
       other ->
         Logger.warning(
@@ -295,7 +296,7 @@ defmodule Fleet.Project.Declaration do
               )
           end
 
-        Fleet.Project.Roles.delegation_workflow_map(opts)
+        Roles.delegation_workflow_map(opts)
     end
   end
 
@@ -336,7 +337,7 @@ defmodule Fleet.Project.Declaration do
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
       "justification" => justification || default_justification(card),
-      "pipeline_default" => card || Fleet.Project.Roles.delegation_workflow_map(opts)
+      "pipeline_default" => card || Roles.delegation_workflow_map(opts)
     }
 
     # Written ONLY when declared. A key absent means "the fleet default", and materializing that

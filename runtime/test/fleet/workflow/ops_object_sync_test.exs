@@ -11,6 +11,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   # knob (put_env_restoring); a concurrent suite hitting the fallback would log-bleed.
   use ExUnit.Case, async: false
 
+  alias Fleet.Workflow.OpsObject
   alias Fleet.Workflow.OpsObjectSync
 
   @moduletag :tmp_dir
@@ -66,7 +67,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       # Pre-commit directly (as if the server had landed our transaction just before we timed out).
       # No `push:` opt, so the direct call did not even attempt one.
       assert {:ok, sha, :not_requested} =
-               Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "landed\n", label: "t")
+               OpsObject.commit_object(tmp, "briefs/x.md", "landed\n", label: "t")
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -117,7 +118,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       # behind its back (the deceptive case).
       slow_engine = fn work_dir, ref, content, opts ->
         Process.sleep(80)
-        Fleet.Workflow.OpsObject.commit_object(work_dir, ref, content, opts)
+        OpsObject.commit_object(work_dir, ref, content, opts)
       end
 
       name = :"ops_sync_slow_#{System.unique_integer([:positive])}"
@@ -177,10 +178,10 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       git_init(tmp)
 
       {:ok, ours, _push} =
-        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1 ours\n", label: "t")
+        OpsObject.commit_object(tmp, "briefs/x.md", "V1 ours\n", label: "t")
 
       {:ok, theirs, _push} =
-        Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2 theirs\n", label: "t")
+        OpsObject.commit_object(tmp, "briefs/x.md", "V2 theirs\n", label: "t")
 
       assert ours != theirs
       # The tip is THEIRS: the premise of the test, and what used to end the story.
@@ -204,11 +205,11 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       # The adverse half: widening the readback from the tip to the history must not turn it into a
       # yes-machine. A ref with real history, and a version that was never committed to it.
       git_init(tmp)
-      {:ok, _, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
-      {:ok, _, _} = Fleet.Workflow.OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
+      {:ok, _, _} = OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
+      {:ok, _, _} = OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
 
       assert :not_committed =
-               Fleet.Workflow.OpsObject.committed_sha(tmp, "briefs/x.md", "never written\n")
+               OpsObject.committed_sha(tmp, "briefs/x.md", "never written\n")
     end
 
     test "serializer DEAD (:noproc exit) → typed :ops_sync_unavailable, never a caller crash", %{

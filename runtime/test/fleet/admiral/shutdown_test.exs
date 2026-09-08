@@ -9,6 +9,8 @@ defmodule Fleet.Admiral.ShutdownTest do
   use ExUnit.Case, async: false
   import Fleet.Test.Barrier, only: [settle: 1]
 
+  alias Fleet.Admiral.Shutdown
+
   @box Fleet.Admiral.ShutdownTest.Box
 
   defmodule StubDispatcher do
@@ -60,21 +62,21 @@ defmodule Fleet.Admiral.ShutdownTest do
 
   test "NoOp default → begin/drain :ok, immediate drain (0 in-flight)" do
     name = start_sd([])
-    assert :ok = Fleet.Admiral.Shutdown.begin(name: name, grace_ms: 200)
-    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 200)
+    assert :ok = Shutdown.begin(name: name, grace_ms: 200)
+    assert :ok = Shutdown.drain_in_flight(name: name, grace_ms: 200)
   end
 
   test "backend sequence [2,1,0] → real drain converges" do
     box([2, 1, 0])
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
+    assert :ok = Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
     assert %{seq: []} = Agent.get(@box, & &1)
   end
 
   test "backend always >0 → drain times out but :reply :ok (shutdown proceeds)" do
     box(List.duplicate(3, 100))
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 300)
+    assert :ok = Shutdown.drain_in_flight(name: name, grace_ms: 300)
   end
 
   test "debounce (CI-02): a LONE transient 0 does NOT conclude — needs N consecutive 0s" do
@@ -84,7 +86,7 @@ defmodule Fleet.Admiral.ShutdownTest do
     # would remain.
     box([1, 0, 1, 0, 0, 0])
     name = start_sd(dispatcher: StubDispatcher, drain_confirmations: 3)
-    assert :ok = Fleet.Admiral.Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
+    assert :ok = Shutdown.drain_in_flight(name: name, grace_ms: 5_000)
     assert %{seq: []} = Agent.get(@box, & &1)
     assert %{status: :drained} = settle(name)
   end
@@ -92,7 +94,7 @@ defmodule Fleet.Admiral.ShutdownTest do
   test "begin calls refuse_new_jobs" do
     box([0])
     name = start_sd(dispatcher: StubDispatcher)
-    assert :ok = Fleet.Admiral.Shutdown.begin(name: name, grace_ms: 300)
+    assert :ok = Shutdown.begin(name: name, grace_ms: 300)
     assert %{refused: true} = Agent.get(@box, & &1)
   end
 end

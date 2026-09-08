@@ -25,19 +25,21 @@ defmodule Fleet.Spawner.SeamDefaultsTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Spawner.McpSocketProvisioner
+
   test "MCPSocketProvisioner: the canonical default is the real fleet_mcp side" do
     # Asserted on `default/0` rather than through `resolved/0`: reaching the fallback would mean
     # deleting the key globally, and an async suite would then hand the REAL provisioner to
     # whatever pod test is mid-flight. A hazard bought to test a constant is a bad trade.
-    assert Fleet.Spawner.McpSocketProvisioner.default() == Fleet.MCP.PodSocketSupervisor
+    assert McpSocketProvisioner.default() == Fleet.MCP.PodSocketSupervisor
   end
 
   test "MCPSocketProvisioner: a configured provisioner still WINS over the default" do
     # The other half of the contract. Without it, `resolved/0` could return the default
     # unconditionally and the test above would still pass — the seam would be sealed shut.
-    assert Fleet.Spawner.McpSocketProvisioner.resolved() == Fleet.Spawner.MCPSocketStub
+    assert McpSocketProvisioner.resolved() == Fleet.Spawner.MCPSocketStub
 
-    refute Fleet.Spawner.McpSocketProvisioner.resolved() ==
-             Fleet.Spawner.McpSocketProvisioner.default()
+    refute McpSocketProvisioner.resolved() ==
+             McpSocketProvisioner.default()
   end
 end

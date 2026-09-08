@@ -10,6 +10,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.CapProfile.Image
   alias Fleet.Project.Roles
 
   # Un defaut est une exigence qui a renonce a etre verifiee : avant, un catalogue sans producteur
@@ -27,18 +28,18 @@ defmodule Fleet.Project.RolesStructuralTest do
     # a la sortie — sans ca, la depublication survit au fichier et tout le reste du run resout ses
     # roles par le disque au lieu de l'image. Le `root_dir`, lui, etait deja restaure : c'est
     # l'asymetrie entre les deux etats globaux du meme setup qui l'a rendue invisible.
-    published_before = Fleet.CapProfile.Image.published()
+    published_before = Image.published()
 
     on_exit(fn ->
       File.rm_rf(tmp)
 
       case published_before do
-        %{} = image -> Fleet.CapProfile.Image.republish(image)
+        %{} = image -> Image.republish(image)
         _ -> :ok
       end
     end)
 
-    Fleet.CapProfile.Image.unpublish()
+    Image.unpublish()
     {:ok, dir: tmp}
   end
 
@@ -172,10 +173,10 @@ defmodule Fleet.Project.RolesStructuralTest do
 
     # Regime IMAGE — le siege est INDEXE (pas de pourriture derriere l'exclusion), donc c'est bien
     # la branche qui le voit passer.
-    Fleet.CapProfile.Image.publish!()
-    on_exit(fn -> Fleet.CapProfile.Image.unpublish() end)
+    Image.publish!()
+    on_exit(fn -> Image.unpublish() end)
 
-    assert %{index: index} = Fleet.CapProfile.Image.published()
+    assert %{index: index} = Image.published()
 
     assert Map.has_key?(index, "vulcan"),
            "le siege doit etre dans l'index, sinon on ne teste rien"

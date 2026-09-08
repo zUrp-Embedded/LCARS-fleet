@@ -9,6 +9,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   # Same stance as the other Quiesce-mutating suites (control_router_test, quiesce_test — both async:false).
   use ExUnit.Case, async: false
 
+  alias Fleet.Shutdown.Quiesce
   alias Fleet.Spawner.PermanentWarden
 
   defp start_warden(respawn_fun, opts \\ []) do
@@ -218,8 +219,8 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     # test the DEFAULT path (not the seam): quiesce ON → no respawn; quiesce OFF → respawn.
     parent = self()
 
-    Fleet.Shutdown.Quiesce.refuse!()
-    on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
+    Quiesce.refuse!()
+    on_exit(&Quiesce.resume!/0)
 
     start_warden(
       fn role ->
@@ -237,7 +238,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     # reason — but the next step (quiesce OFF → respawn) proves quiesce is what gates.
     refute_receive {:respawn, _}, 200
 
-    Fleet.Shutdown.Quiesce.resume!()
+    Quiesce.resume!()
     # Drain over → the next tick re-derives and respawns the missing architect.
     assert_receive {:respawn, "architect"}, 1_000
   end

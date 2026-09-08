@@ -50,6 +50,7 @@ defmodule Fleet.MCP.PodSocketTest do
   use ExUnit.Case, async: false
 
   alias Fleet.MCP.PodSocketSupervisor
+  alias Fleet.MCP.PodTools
   alias Fleet.TaskQueue
 
   setup do
@@ -679,12 +680,12 @@ defmodule Fleet.MCP.PodSocketTest do
     # comportement CONCU : un re-submit rejoue honnetement tant que la diffusion n'a pas ete
     # confirmee, et c'est ce qui repare une completion perdue. La `TaskQueue` est deja l'autorite de
     # ces semantiques — poser un second arbitre devant donnerait deux proprietaires a un mecanisme.
-    assert Fleet.MCP.PodTools.tool_effect("submit_result") == :protocol
-    assert Fleet.MCP.PodTools.tool_effect("get_work_item") == :protocol
+    assert PodTools.tool_effect("submit_result") == :protocol
+    assert PodTools.tool_effect("get_work_item") == :protocol
 
     # Et la direction sure pour ce qu'on ne connait pas : un outil non declare est traite comme une
     # mutation, jamais dispatche nu.
-    assert Fleet.MCP.PodTools.tool_effect("outil_qui_n_existe_pas") == :unknown
+    assert PodTools.tool_effect("outil_qui_n_existe_pas") == :unknown
   end
 
   test "SOC-EFF-005: readiness counts the `*/sock`, not the dirs — a stray dir does not fake 'orphaned'",

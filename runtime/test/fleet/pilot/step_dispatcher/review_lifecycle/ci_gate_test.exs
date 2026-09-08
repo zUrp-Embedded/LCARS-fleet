@@ -1,6 +1,7 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   use ExUnit.Case, async: true
 
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
@@ -402,7 +403,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       # comprise et on a ferme par defaut ». Le log, lui, le peut.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+          assert ReviewLifecycle.issue_card_ci(
                    "lcars/issue-7-engineer",
                    card_ctx(canon_loader())
                  ) == :required
@@ -419,7 +420,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
       # rien distinguer. Maintenant qu'il est le seul chemin vers `:ignore`, il mesure la
       # DEROGATION — et workshop-direct est le cas ou elle est mecaniquement obligatoire (aucun runner
       # ne sert une PR basee sur ops).
-      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+      assert ReviewLifecycle.issue_card_ci(
                "lcars/issue-9-scribe",
                card_ctx(canon_loader())
              ) == :ignore
@@ -434,7 +435,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+          assert ReviewLifecycle.issue_card_ci(
                    "lcars/issue-7-engineer",
                    card_ctx(loader)
                  ) == :required
@@ -485,7 +486,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
 
       ctx = card_ctx(canon_loader(), code_root: tmp, workflow_maps_root: maps)
 
-      assert Fleet.Pilot.StepDispatcher.ReviewLifecycle.issue_card_ci(
+      assert ReviewLifecycle.issue_card_ci(
                "lcars/issue-8-engineer",
                ctx
              ) == :required

@@ -5,8 +5,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   # celui-ci ; la mesure de cette classe de collision est chez `merge_failure_dispatch_test`.
   use ExUnit.Case, async: false
 
+  alias Fleet.CapProfile.Image
   alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StubTaskQueue
+  alias Fleet.Test.BizCatalogueFixture
+  alias Fleet.Workflow.Loader
 
   import Fleet.Pilot.DispatcherBench
 
@@ -886,21 +889,21 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # bundled catalogue: a default loader that drops the catalogue cannot load it, falls back to
       # the project card, and adopts the DEFAULT jury on this PR. No `:workflow_map_loader` here:
       # the rail's own default is the subject.
-      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
-      :ok = Fleet.CapProfile.Image.publish!()
-      :ok = Fleet.Workflow.Loader.publish_image!()
+      :ok = Image.publish!()
+      :ok = Loader.publish_image!()
 
       on_exit(fn ->
-        Fleet.CapProfile.Image.unpublish()
-        Fleet.Workflow.Loader.unpublish_all_images()
+        Image.unpublish()
+        Loader.unpublish_all_images()
       end)
 
-      judge = Fleet.Test.BizCatalogueFixture.judge()
+      judge = BizCatalogueFixture.judge()
       # The PROJECT declares the jury-less card: the rail's fallback (engraved card unloadable)
       # would adopt nobody, so `[judge]` can only come from the engraved `standard` read in `biz`.
       code_root = Path.join(tmp, "projects")
-      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+      BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
 
       opts =
         dispatch_opts(
@@ -922,25 +925,25 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       # The engraved route names `strict` (jury `[code-reviewer]`, `ci: required`); the project
       # declares `no-jury` (jury `[]`, `ci: ignore`). Two readers, one resolution: both answers come
       # from `strict` when a route is engraved, both from `no-jury` when none is.
-      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
-      :ok = Fleet.CapProfile.Image.publish!()
-      :ok = Fleet.Workflow.Loader.publish_image!()
+      :ok = Image.publish!()
+      :ok = Loader.publish_image!()
 
       on_exit(fn ->
-        Fleet.CapProfile.Image.unpublish()
-        Fleet.Workflow.Loader.unpublish_all_images()
+        Image.unpublish()
+        Loader.unpublish_all_images()
       end)
 
-      judge = Fleet.Test.BizCatalogueFixture.judge()
+      judge = BizCatalogueFixture.judge()
       code_root = Path.join(tmp, "projects")
-      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+      BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
 
       ctx = fn route ->
         %Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx{
           forge: StubForge,
           loader: StubLoader,
-          workflow_map_loader: &Fleet.Workflow.Loader.load!/2,
+          workflow_map_loader: &Loader.load!/2,
           spawner: StubSpawner,
           task_queue: StubTaskQueue,
           resolver: fn _r, _o -> {:ok, nil} end,

@@ -1,4 +1,6 @@
 defmodule Fleet.GitTest do
+  alias Fleet.Workflow.Git
+
   # async: false — the push timeout-readback tests mutate the GLOBAL :git_push_runner seam; a
   # concurrent real-git push test in this file would otherwise pick up the stub runner.
   use ExUnit.Case, async: false
@@ -64,7 +66,7 @@ defmodule Fleet.GitTest do
       commit_initial(ws)
       File.write!(Path.join(ws, "feature.md"), "delivered by worker\n")
 
-      assert {:ok, <<_::binary-size(40)>>} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      assert {:ok, <<_::binary-size(40)>>} = Git.commit(valid_opts(ws))
 
       {author_line, 0} = System.cmd("git", ["log", "-1", "--format=%an <%ae>"], cd: ws)
       {committer_line, 0} = System.cmd("git", ["log", "-1", "--format=%cn <%ce>"], cd: ws)
@@ -84,7 +86,7 @@ defmodule Fleet.GitTest do
       File.write!(Path.join(ws, "ignored.txt"), "should not be committed\n")
 
       opts = Map.put(valid_opts(ws), :add_paths, ["docs/"])
-      assert {:ok, _} = Fleet.Workflow.Git.commit(opts)
+      assert {:ok, _} = Git.commit(opts)
 
       {staged_files, 0} = System.cmd("git", ["show", "--name-only", "--format=", "HEAD"], cd: ws)
       assert String.trim(staged_files) == "docs/X.md"
@@ -92,21 +94,21 @@ defmodule Fleet.GitTest do
 
     test "fail-closed: missing workspace", %{tmp_dir: tmp} do
       assert {:error, :workspace_missing} =
-               Fleet.Workflow.Git.commit(valid_opts(Path.join(tmp, "nope")))
+               Git.commit(valid_opts(Path.join(tmp, "nope")))
     end
 
     test "fail-closed: workspace is not a git repo", %{tmp_dir: tmp} do
       ws = Path.join(tmp, "not-git")
       File.mkdir_p!(ws)
 
-      assert {:error, :not_a_git_workspace} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      assert {:error, :not_a_git_workspace} = Git.commit(valid_opts(ws))
     end
 
     test "fail-closed: nothing to commit → :nothing_to_commit", %{tmp_dir: tmp} do
       ws = init_workspace(Path.join(tmp, "ws-empty"))
       commit_initial(ws)
       # NO modification after the seed → git commit refuses.
-      assert {:error, :nothing_to_commit} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      assert {:error, :nothing_to_commit} = Git.commit(valid_opts(ws))
     end
 
     test "fail-closed: missing opts", %{tmp_dir: tmp} do
@@ -114,7 +116,7 @@ defmodule Fleet.GitTest do
       commit_initial(ws)
 
       opts = valid_opts(ws) |> Map.delete(:author_email) |> Map.delete(:message)
-      assert {:error, {:missing_opts, missing}} = Fleet.Workflow.Git.commit(opts)
+      assert {:error, {:missing_opts, missing}} = Git.commit(opts)
       assert :author_email in missing
       assert :message in missing
     end
@@ -135,7 +137,7 @@ defmodule Fleet.GitTest do
 
       # Without `--`, `git add --all` would stage sneaky.txt → {:ok}. With `--`, "--all" is a literal
       # pathspec (absent) → failure: the option-injection is neutralized (nothing mass-staged).
-      assert {:error, _} = Fleet.Workflow.Git.commit(opts)
+      assert {:error, _} = Git.commit(opts)
     end
 
     test "F-014: invalid add_paths (empty / non-binary / empty element) → :invalid_add_paths",
@@ -147,7 +149,7 @@ defmodule Fleet.GitTest do
       for bad <- [[], [123], ["", "ok"], "not-a-list"] do
         opts = Map.put(valid_opts(ws), :add_paths, bad)
 
-        assert {:error, :invalid_add_paths} = Fleet.Workflow.Git.commit(opts),
+        assert {:error, :invalid_add_paths} = Git.commit(opts),
                "add_paths #{inspect(bad)}"
       end
     end
@@ -157,7 +159,7 @@ defmodule Fleet.GitTest do
       ws = init_workspace(Path.join(tmp, "ws-f046"))
 
       for bad <- ["-c", "--receive-pack=touch /tmp/pwn", "--exec=x"] do
-        assert {:error, {:invalid_remote, ^bad}} = Fleet.Workflow.Git.push(ws, bad, "HEAD:main"),
+        assert {:error, {:invalid_remote, ^bad}} = Git.push(ws, bad, "HEAD:main"),
                "remote #{inspect(bad)}"
       end
     end
@@ -166,7 +168,7 @@ defmodule Fleet.GitTest do
       ws = init_workspace(Path.join(tmp, "ws-f046b"))
 
       assert {:error, {:invalid_refspec, "--force"}} =
-               Fleet.Workflow.Git.push(ws, "origin", "--force")
+               Git.push(ws, "origin", "--force")
     end
   end
 
@@ -185,13 +187,13 @@ defmodule Fleet.GitTest do
 
       File.write!(Path.join(ws, "feature.md"), "post-extract payload\n")
 
-      assert {:ok, sha} = Fleet.Workflow.Git.commit(valid_opts(ws))
+      assert {:ok, sha} = Git.commit(valid_opts(ws))
       # commit/1 does NOT touch the remote (content/publication separation)…
       {bare_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       refute String.trim(bare_head) == sha
 
       # …push/3 is what publishes.
-      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "main:main")
+      assert {:ok, true} = Git.push(ws, "origin", "main:main")
       {bare_sha, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(bare_sha) == sha
     end
@@ -218,7 +220,7 @@ defmodule Fleet.GitTest do
         end
       end)
 
-      assert {:ok, true} = Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
+      assert {:ok, true} = Git.push("/ws", "origin", "HEAD:main")
     end
 
     test "push TIMES OUT and the remote holds a DIFFERENT SHA → the timeout stands" do
@@ -239,7 +241,7 @@ defmodule Fleet.GitTest do
       end)
 
       assert {:error, {:git_push_timeout, _}} =
-               Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
+               Git.push("/ws", "origin", "HEAD:main")
     end
 
     test "push TIMES OUT and the remote has NO such ref → the timeout stands (push did not land)" do
@@ -253,7 +255,7 @@ defmodule Fleet.GitTest do
       end)
 
       assert {:error, {:git_push_timeout, _}} =
-               Fleet.Workflow.Git.push("/ws", "origin", "HEAD:main")
+               Git.push("/ws", "origin", "HEAD:main")
     end
   end
 
@@ -266,7 +268,7 @@ defmodule Fleet.GitTest do
       commit_initial(ws, "C1")
 
       # initial push → the remote has C1.
-      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+      assert {:ok, true} = Git.push(ws, "origin", "HEAD:main")
 
       # rewrite history (amend = new sha diverging from the remote — like a resolution rebase).
       {_o, 0} = System.cmd("git", ["commit", "--amend", "-m", "C1-rebase"], cd: ws)
@@ -274,7 +276,7 @@ defmodule Fleet.GitTest do
 
       # a normal push would be "non-fast-forward" → do_push retries `--force` → lands (without it,
       # the resolution rebase NEVER lands and the PR stays in conflict, the live PR#4 bug).
-      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+      assert {:ok, true} = Git.push(ws, "origin", "HEAD:main")
 
       {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(remote_head) == String.trim(rewritten)
@@ -292,7 +294,7 @@ defmodule Fleet.GitTest do
       commit_initial(ws, "C1")
 
       # our first push → remote at C1; ws records refs/remotes/origin/main = C1 (the lease basis).
-      assert {:ok, true} = Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+      assert {:ok, true} = Git.push(ws, "origin", "HEAD:main")
 
       # a DUPLICATE/racing producer pushes a commit we never observed → the remote tip moves past C1
       # while OUR remote-tracking ref still says C1 (no fetch happened in our workspace).
@@ -312,7 +314,7 @@ defmodule Fleet.GitTest do
       # a BLIND --force (the old code) would obliterate the racer's commit. The LEASE expects our stale
       # C1, the remote is elsewhere → git declines → we surface :git_push_lease_stale, never clobber.
       assert {:error, {:git_push_lease_stale, "main", _out}} =
-               Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+               Git.push(ws, "origin", "HEAD:main")
 
       # the racing producer's commit is intact on the remote (no silent data loss).
       {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
@@ -354,7 +356,7 @@ defmodule Fleet.GitTest do
       on_exit(fn -> File.rm(counter) end)
 
       assert {:error, {:git_push_failed, rc, out}} =
-               Fleet.Workflow.Git.push(ws, "origin", "HEAD:main")
+               Git.push(ws, "origin", "HEAD:main")
 
       assert rc != 0
       assert out =~ "declined" or out =~ "rejected"

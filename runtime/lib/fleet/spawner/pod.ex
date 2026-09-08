@@ -100,6 +100,9 @@ defmodule Fleet.Spawner.Pod do
   alias Fleet.Spawner.Pod.SessionMint
   alias Fleet.Spawner.Pod.StateFs
   alias Fleet.Spawner.Pod.TaskProbe
+  alias Fleet.Spawner.Pod.TurnFlag
+  alias Fleet.Spawner.PodTmux
+  alias Fleet.Spawner.SeedStore
   alias Fleet.SPBuilder
 
   @type state_name ::
@@ -317,7 +320,7 @@ defmodule Fleet.Spawner.Pod do
     # The flag rail is per-LIFE: clear any turn.flag/.seen surviving a prior life (the pod_dir persists
     # a crash/restart) so the NEW Monitor's arming — not stale files — is what the bootstrap/wake gates
     # read. Done for resume too: the pending work is re-dispatched via the TaskQueue, not a stale flag.
-    Fleet.Spawner.Pod.TurnFlag.reset(data.pod_dir)
+    TurnFlag.reset(data.pod_dir)
     {:next_state, :projecting, data, [{:next_event, :internal, :proceed}]}
   end
 
@@ -588,7 +591,7 @@ defmodule Fleet.Spawner.Pod do
     case Fleet.ProjectBootstrap.Phase.Clone.reset_in_place(data.pod_dir, eff_cap, opts) do
       {:ok, ws, branch} ->
         # Git isolation succeeded; a failed /clear is visible but does not undo the disk reset.
-        case Fleet.Spawner.PodTmux.send_keys(data.pod_id, "/clear") do
+        case PodTmux.send_keys(data.pod_id, "/clear") do
           :ok ->
             Logger.info(
               "pod #{data.pod_id} workspace reprovisioned COLD (#{ws} branch=#{branch}) + /clear"
@@ -732,7 +735,7 @@ defmodule Fleet.Spawner.Pod do
       # Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case (result deadline + drift/periodic
       # monitors), not a delivery failure. The wake fires ONLY on genuine non-delivery (a dead
       # Monitor: `.seen` never catches up → this stays false → the send-keys/`wake.failed` rails below run).
-      polled and Fleet.Spawner.Pod.TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
+      polled and TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
         Logger.debug(
           "pod #{data.pod_id} wake: Monitor delivered (turn.flag == turn.flag.seen) → loop stopped, no send-keys"
         )
@@ -750,7 +753,7 @@ defmodule Fleet.Spawner.Pod do
       # a resumed pod reaches neither this stop nor an engage, and burns its whole cap in silence
       # (measured). THIS armed-stop is the real guard, and it
       # is keyed on what is observable — the rail being live — not on how the pod was started.
-      not polled and Fleet.Spawner.Pod.TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
+      not polled and TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
         Logger.debug(
           "pod #{data.pod_id} bootstrap: Monitor armed (turn.flag.seen) → loop stopped (rail is live)"
         )
@@ -779,7 +782,7 @@ defmodule Fleet.Spawner.Pod do
           "issue_id" => data.issue_id,
           "reason" => reason,
           "reason_detail" => reason_detail,
-          "pane" => Fleet.Spawner.PodTmux.capture_pane(data.pod_id)
+          "pane" => PodTmux.capture_pane(data.pod_id)
         })
 
         {:keep_state_and_data, [cancel_kick_action()]}
@@ -798,7 +801,7 @@ defmodule Fleet.Spawner.Pod do
       not TaskProbe.repl_up?(data.pod_id) ->
         {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
 
-      Fleet.Spawner.PodTmux.alive?(data.pod_id) ->
+      PodTmux.alive?(data.pod_id) ->
         _ = Kick.kick_send(data, polled)
         {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
 
@@ -811,7 +814,7 @@ defmodule Fleet.Spawner.Pod do
 
   # RC-visible pods poll boundedly for a slot record; failure never touches the core loop.
   def handle_event({:timeout, :capture_slot}, {:attempt, n}, :monitoring, data) do
-    case Fleet.Spawner.SeedStore.capture_slot_bridge(data.pod_dir, data.session_id) do
+    case SeedStore.capture_slot_bridge(data.pod_dir, data.session_id) do
       :ok ->
         Logger.debug(
           "pod #{data.pod_id} Desktop slot captured (bridge_status → sidecar) — stable on next boot"
@@ -1121,7 +1124,7 @@ defmodule Fleet.Spawner.Pod do
 
       project ->
         _ =
-          Fleet.Spawner.SeedStore.checkpoint(
+          SeedStore.checkpoint(
             data.pod_dir,
             project,
             cap_profile_name(data.cap_profile),
@@ -1269,7 +1272,7 @@ defmodule Fleet.Spawner.Pod do
         %{base | resume: true}
 
       true ->
-        case Fleet.Spawner.SeedStore.slot_seed(base.session_id) do
+        case SeedStore.slot_seed(base.session_id) do
           {:ok, seed} ->
             %{base | resume: true, opts: Keyword.put(base.opts, :recall_seed_jsonl, seed)}
 
@@ -1286,7 +1289,7 @@ defmodule Fleet.Spawner.Pod do
       base.pod_dir,
       ".claude",
       "projects",
-      Fleet.Spawner.SeedStore.slugify(cwd),
+      SeedStore.slugify(cwd),
       "#{base.session_id}.jsonl"
     ]
     |> Path.join()

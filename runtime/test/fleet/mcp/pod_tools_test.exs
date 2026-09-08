@@ -13,6 +13,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
   alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
+  alias Fleet.MCP.PodTools.Delegation.Gate
   alias Fleet.TaskQueue
   alias Fleet.TestEnv
 
@@ -3122,7 +3123,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # son catalogue). Ce qu'elle achetait, en echange de rien : un comportement qui change quand un
       # TIERS installe un catalogue portant le meme nom de carte.
       assert {:error, {:catalogue_required, orgs}} =
-               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"workflow_map" => "standard"})
+               Gate.resolve_org(%{"workflow_map" => "standard"})
 
       assert "aaa" in orgs and "fleet" in orgs
     end
@@ -3135,15 +3136,15 @@ defmodule Fleet.MCP.PodToolsTest do
       assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
 
       assert {:error, {:catalogue_required, ["fleet"]}} =
-               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{})
+               Gate.resolve_org(%{})
     end
 
     test "`catalogue` explicite : accepte s'il est installe, refuse sinon — en le NOMMANT" do
       assert {:ok, "aaa"} =
-               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => "aaa"})
+               Gate.resolve_org(%{"catalogue" => "aaa"})
 
       assert {:error, {:catalogue_not_installed, "jamais-vu", _gestes}} =
-               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => "jamais-vu"})
+               Gate.resolve_org(%{"catalogue" => "jamais-vu"})
     end
 
     test "une chaine VIDE n'est pas une reponse — elle vaut l'absence" do
@@ -3151,7 +3152,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # produirait un refus `catalogue_not_installed ""`, qui accuse l'appelant d'avoir nomme un
       # catalogue inconnu la ou il n'a rien nomme du tout.
       assert {:error, {:catalogue_required, _}} =
-               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => ""})
+               Gate.resolve_org(%{"catalogue" => ""})
     end
   end
 end

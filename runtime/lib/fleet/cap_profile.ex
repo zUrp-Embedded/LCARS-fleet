@@ -54,6 +54,7 @@ defmodule Fleet.CapProfile do
   alias Fleet.CapProfile.CanonicalJson
   alias Fleet.CapProfile.Catalog
   alias Fleet.CapProfile.DisallowedTools
+  alias Fleet.CapProfile.Image
   alias Fleet.CapProfile.Schema
   alias Fleet.Catalogue
 
@@ -187,7 +188,7 @@ defmodule Fleet.CapProfile do
   """
   @spec roles_with_capability(atom() | String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def roles_with_capability(cap) do
-    case Fleet.CapProfile.Image.published() do
+    case Image.published() do
       %{index: index} ->
         # LES DEUX BRANCHES DOIVENT RENDRE LA MEME CHOSE. La branche sans image passe par
         # `Catalog.list/1`, qui filtre les `ReservedSeat` (`spawnable?/1`, BL-6-45) ; sans le filtre
@@ -1025,8 +1026,8 @@ defmodule Fleet.CapProfile do
     |> Enum.uniq()
   end
 
-  defp published_image(nil), do: Fleet.CapProfile.Image.published()
-  defp published_image(root) when is_binary(root), do: Fleet.CapProfile.Image.published(root)
+  defp published_image(nil), do: Image.published()
+  defp published_image(root) when is_binary(root), do: Image.published(root)
 
   defp to_struct(raw), do: to_struct(raw, nil)
 

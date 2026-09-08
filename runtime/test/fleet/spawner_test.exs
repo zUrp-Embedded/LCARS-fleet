@@ -20,6 +20,7 @@ defmodule Fleet.SpawnerTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.LaunchBackend.StubBackend
+  alias Fleet.Spawner.Pod.TurnFlag
 
   # G24-9 (F-CONT-RISK) — minimum disallowedTools required by validate/1 wired at spawn
   # (Z2; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
@@ -580,9 +581,9 @@ defmodule Fleet.SpawnerTest do
          %{
            tmp_dir: tmp
          } do
-      assert :ok = Fleet.Spawner.Pod.TurnFlag.write(tmp)
+      assert :ok = TurnFlag.write(tmp)
       t1 = File.read!(Path.join(tmp, "turn.flag"))
-      assert :ok = Fleet.Spawner.Pod.TurnFlag.write(tmp)
+      assert :ok = TurnFlag.write(tmp)
       t2 = File.read!(Path.join(tmp, "turn.flag"))
       # watch.sh fires on `cur != last` → every write MUST change the content.
       assert t1 != t2
@@ -594,7 +595,7 @@ defmodule Fleet.SpawnerTest do
     test "TurnFlag.write with MESSAGE: typed info wake — '<token> <message>', one line, newlines flattened",
          %{tmp_dir: tmp} do
       assert :ok =
-               Fleet.Spawner.Pod.TurnFlag.write(tmp, "info : brique fleet/x#12 LIVRÉE\nsur main")
+               TurnFlag.write(tmp, "info : brique fleet/x#12 LIVRÉE\nsur main")
 
       content = tmp |> Path.join("turn.flag") |> File.read!() |> String.trim()
 
@@ -609,7 +610,7 @@ defmodule Fleet.SpawnerTest do
          %{
            tmp_dir: tmp
          } do
-      assert :ok = Fleet.Spawner.Pod.TurnFlag.write(Path.join(tmp, "nope/missing"))
+      assert :ok = TurnFlag.write(Path.join(tmp, "nope/missing"))
     end
   end
 

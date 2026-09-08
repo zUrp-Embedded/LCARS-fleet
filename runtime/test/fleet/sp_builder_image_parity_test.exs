@@ -15,6 +15,7 @@ defmodule Fleet.SPBuilderImageParityTest do
   use ExUnit.Case, async: false
 
   alias Fleet.CapProfile
+  alias Fleet.Spawner.Pod.Assets
   alias Fleet.SPBuilder
 
   # Every role of the shipped canon — the parity claim is about what pods really get, so the list
@@ -82,10 +83,10 @@ defmodule Fleet.SPBuilderImageParityTest do
       }
 
       :ok = SPBuilder.publish_image!()
-      assert {:ok, from_image} = Fleet.Spawner.Pod.Assets.read_protocole_user(cap)
+      assert {:ok, from_image} = Assets.read_protocole_user(cap)
 
       SPBuilder.Image.unpublish()
-      assert {:ok, from_disk} = Fleet.Spawner.Pod.Assets.read_protocole_user(cap)
+      assert {:ok, from_disk} = Assets.read_protocole_user(cap)
 
       assert from_image == from_disk, "interlocutor #{who}: image and disk regimes disagree"
     end
@@ -117,7 +118,7 @@ defmodule Fleet.SPBuilderImageParityTest do
     end)
 
     assert {:ok, cap} = CapProfile.load(role)
-    assert {:ok, content} = Fleet.Spawner.Pod.Assets.read_agent_draft(cap)
+    assert {:ok, content} = Assets.read_agent_draft(cap)
 
     assert content =~ marker,
            "Pod.Assets a lu un autre arbre que celui que `:sp_drafts_root` designe"

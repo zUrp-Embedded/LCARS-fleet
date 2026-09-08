@@ -1,4 +1,6 @@
 defmodule Fleet.Pilot.ApplicationStepGuardsTest do
+  alias Fleet.Workflow.Loader
+
   # async: false — mutates the global `:lcars_fleet` config (pilot_step_dispatch?/pilot_poll_repo/...).
   use ExUnit.Case, async: false
 
@@ -10,7 +12,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :workflow_workflow_maps_root)
     # step_children! publishes the catalogue image; :persistent_term outlives the test —
     # erase every image so no test serves another test's proven catalogue.
-    on_exit(fn -> Fleet.Workflow.Loader.unpublish_all_images() end)
+    on_exit(fn -> Loader.unpublish_all_images() end)
     :ok
   end
 
@@ -162,8 +164,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
 
     # The catalogue mutates after boot: the runtime keeps serving the PROVEN card.
     File.rm!(Path.join(tmp, "proven.yaml"))
-    assert %{"name" => "proven"} = Fleet.Workflow.Loader.load!("proven")
-    assert Fleet.Workflow.Loader.canon_names() == ["proven"]
+    assert %{"name" => "proven"} = Loader.load!("proven")
+    assert Loader.canon_names() == ["proven"]
   end
 
   test "F-C061 V2 (cards): a card jury with a NON-role login (human) → raise at boot",
@@ -221,9 +223,9 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     end
 
     Application.put_env(:lcars_fleet, :workflow_workflow_maps_root, tmp)
-    on_exit(&Fleet.Workflow.Loader.unpublish_all_images/0)
+    on_exit(&Loader.unpublish_all_images/0)
 
-    err = assert_raise RuntimeError, fn -> Fleet.Workflow.Loader.publish_image!() end
+    err = assert_raise RuntimeError, fn -> Loader.publish_image!() end
     assert err.message =~ "atelier-deux, atelier-un"
     assert err.message =~ "One card per catalogue"
   end

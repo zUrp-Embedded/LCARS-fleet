@@ -16,6 +16,9 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Project.Roles
+  alias Fleet.Workflow.Loader
+
   @judge "code-reviewer"
 
   # The catalogue itself is a shared fixture (`Fleet.Test.BizCatalogueFixture`): the same second
@@ -25,11 +28,11 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
     # The image IS the catalogue at runtime — validating against the disk would not be the boot.
     :ok = Fleet.CapProfile.Image.publish!()
-    :ok = Fleet.Workflow.Loader.publish_image!()
+    :ok = Loader.publish_image!()
 
     on_exit(fn ->
       Fleet.CapProfile.Image.unpublish()
-      Fleet.Workflow.Loader.unpublish_all_images()
+      Loader.unpublish_all_images()
     end)
 
     :ok
@@ -66,7 +69,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
       })
     )
 
-    assert [@judge] = Fleet.Project.Roles.project_jury("biz/boutique", code_root: code_root)
+    assert [@judge] = Roles.project_jury("biz/boutique", code_root: code_root)
   end
 
   @tag :tmp_dir
@@ -81,10 +84,10 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     # `biz` ne livre aucune carte a producteur `face: workshop` : il n'a donc PAS de rail doc, et
     # c'est la bonne reponse. Le dispatcher la refuse ensuite en nommant le fait (`refute_missing_rail`)
     # au lieu de faire tourner un role qui n'existe pas dans cette org.
-    assert Fleet.Project.Roles.workshop_workflow_map(catalogue_root: "biz/boutique") == nil
+    assert Roles.workshop_workflow_map(catalogue_root: "biz/boutique") == nil
 
     # Et le catalogue par defaut garde le sien : la resolution est scopee, pas cassee.
-    assert Fleet.Project.Roles.workshop_workflow_map() == "workshop-direct"
+    assert Roles.workshop_workflow_map() == "workshop-direct"
   end
 
   @tag :tmp_dir
@@ -154,7 +157,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @tag :tmp_dir
   test "le scope porte la racine du catalogue a cote du repertoire de cartes" do
-    scopes = Fleet.Workflow.Loader.card_scopes()
+    scopes = Loader.card_scopes()
     biz = Enum.find(scopes, &(&1.catalogue == "biz"))
 
     refute biz == nil

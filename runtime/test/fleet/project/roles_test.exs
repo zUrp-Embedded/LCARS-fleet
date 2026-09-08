@@ -13,6 +13,7 @@ defmodule Fleet.Project.RolesTest do
 
   import ExUnit.CaptureLog
 
+  alias Fleet.Project.Declaration
   alias Fleet.Project.Roles
 
   test "producer_role: RESOLU par capability, jamais un litteral — et l'opt garde la main" do
@@ -55,7 +56,7 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Project.Declaration.write(proj,
+        Declaration.write(proj,
           justification: "light card",
           workflow_map: "c1-light"
         )
@@ -66,7 +67,7 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(poc)
 
       :ok =
-        Fleet.Project.Declaration.write(poc,
+        Declaration.write(poc,
           justification: "throwaway",
           workflow_map: "c0-poc"
         )
@@ -106,7 +107,7 @@ defmodule Fleet.Project.RolesTest do
       # elle a ete declaree, le catalogue l'a perdue depuis. On le fabrique en editant la
       # declaration ecrite, ce qui la garde schema-valide par construction.
       :ok =
-        Fleet.Project.Declaration.write(proj,
+        Declaration.write(proj,
           justification: "card lost by the catalogue since",
           workflow_map: "standard-qa"
         )
@@ -136,7 +137,7 @@ defmodule Fleet.Project.RolesTest do
       File.mkdir_p!(proj)
 
       :ok =
-        Fleet.Project.Declaration.write(proj,
+        Declaration.write(proj,
           justification: "x",
           workflow_map: "standard-qa"
         )

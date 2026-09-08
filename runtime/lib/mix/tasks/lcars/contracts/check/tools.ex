@@ -392,44 +392,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
     outils = deftool_blocs(lignes)
 
-    fautes =
-      Enum.flat_map(outils, fn {nom, debut, corps} ->
-        vitrines =
-          for {l, k} <- Enum.with_index(corps),
-              [_, texte] <- [Regex.run(~r/#\s*vitrine:\s*(.*)$/, l)],
-              do: {k, String.trim(texte)}
-
-        case vitrines do
-          [] ->
-            ["#{rel}:#{debut} #{nom} : aucune ligne `# vitrine:` — le build du site refuserait"]
-
-          [_, _ | _] ->
-            [
-              "#{rel}:#{debut} #{nom} : #{length(vitrines)} lignes `# vitrine:` — une seule est lue"
-            ]
-
-          [{k, texte}] ->
-            suite = Enum.at(corps, k + 1, "")
-
-            cond do
-              texte == "" ->
-                ["#{rel}:#{debut} #{nom} : ligne `# vitrine:` VIDE"]
-
-              # ⚠ LA CONTINUATION EST LE VRAI PIEGE, et elle est INVISIBLE : le texte reste
-              # complet dans le fichier, la page n'en montre que la premiere moitie.
-              Regex.match?(~r/^\s*#\s*\S/, suite) and
-                  not Regex.match?(~r/#\s*(vitrine:|credo:)/, suite) ->
-                [
-                  "#{rel}:#{debut + k + 1} #{nom} : la ligne `# vitrine:` est SUIVIE d'un " <>
-                    "commentaire — le site ne lit que la premiere ligne, le reste est perdu " <>
-                    "en silence"
-                ]
-
-              true ->
-                []
-            end
-        end
-      end)
+    fautes = Enum.flat_map(outils, &vitrine_faute(&1, rel))
 
     if measured_nothing?(outils) do
       broken_result(id, "deftool bloc in #{rel}")
@@ -443,6 +406,46 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         evidence: Enum.sort(fautes),
         note: "#{length(outils)} deftool(s), chacun avec sa ligne `# vitrine:` unique"
       }
+    end
+  end
+
+  # Le verdict d'UN `deftool`. A part de son appelant : le mur enchaine trois questions
+  # (presence, unicite, continuation) et les melanger a la construction du resultat rend une
+  # fonction que personne ne relit.
+  defp vitrine_faute({nom, debut, corps}, rel) do
+    vitrines =
+      for {l, k} <- Enum.with_index(corps),
+          [_, texte] <- [Regex.run(~r/#\s*vitrine:\s*(.*)$/, l)],
+          do: {k, String.trim(texte)}
+
+    case vitrines do
+      [] ->
+        ["#{rel}:#{debut} #{nom} : aucune ligne `# vitrine:` — le build du site refuserait"]
+
+      [_, _ | _] ->
+        [
+          "#{rel}:#{debut} #{nom} : #{length(vitrines)} lignes `# vitrine:` — une seule est lue"
+        ]
+
+      [{_k, ""}] ->
+        ["#{rel}:#{debut} #{nom} : ligne `# vitrine:` VIDE"]
+
+      [{k, _texte}] ->
+        vitrine_continuation(nom, rel, Enum.at(corps, k + 1, ""), debut + k + 1)
+    end
+  end
+
+  # ⚠ LA CONTINUATION EST LE VRAI PIEGE, ET ELLE EST INVISIBLE : le texte reste complet dans le
+  # fichier, la page n'en montre que la premiere moitie.
+  defp vitrine_continuation(nom, rel, suite, ligne) do
+    if Regex.match?(~r/^\s*#\s*\S/, suite) and
+         not Regex.match?(~r/#\s*(vitrine:|credo:)/, suite) do
+      [
+        "#{rel}:#{ligne} #{nom} : la ligne `# vitrine:` est SUIVIE d'un commentaire — le site ne " <>
+          "lit que la premiere ligne, le reste est perdu en silence"
+      ]
+    else
+      []
     end
   end
 
