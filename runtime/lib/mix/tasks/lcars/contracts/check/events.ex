@@ -517,14 +517,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         derived? = reads.(:destinations) and reads.(:type_for_destination)
         literals = b |> collect_strings() |> Enum.sort()
 
-        %{
-          id: "labels.visual_types_derived",
+        measured_verdict("labels.visual_types_derived", %{
           remediation:
             "une clause de `type_for_destination/1` sans sa destination dans `@destinations` " <>
               "produit un type visuel que `visual_types/0` ne seme pas — il naitra gris et sans " <>
               "description, comme `type:workshop` pendant seize jours",
-          status: if(n_clauses == n_dest and derived? and literals == [], do: :pass, else: :fail),
-          evidence:
+          # ⚠ TROIS TERMES, TROIS CONSTATS SEPARES. Le verdict est un `and` a trois : comptes egaux,
+          # derivation constatee, aucun litteral. Les rendre ensemble est ce qui permet a un temoin
+          # d'exercer chaque terme — un `and` de N termes demande N entrees.
+          findings:
             if(n_clauses == n_dest,
               do: [],
               else: [
@@ -537,12 +538,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
                   "#{rel}: visual_types/0 ne lit pas @destinations via type_for_destination/1"
                 ]
               ) ++
-              Enum.map(
-                literals,
-                &"#{rel}: visual_types/0 ecrit un type en dur: #{inspect(&1)}"
-              ),
+              Enum.map(literals, &"#{rel}: visual_types/0 ecrit un type en dur: #{inspect(&1)}"),
           note: "visual_types derives from type_for_destination over @destinations"
-        }
+        })
     end
   end
 

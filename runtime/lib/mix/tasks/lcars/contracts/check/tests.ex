@@ -94,37 +94,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # recorded floor, which is state that rots. One decidable question, answered without state.
   @spec check_doctest_declarations_have_examples(String.t()) :: Support.result()
   def check_doctest_declarations_have_examples(root) do
-    declarations =
-      Path.wildcard(Path.join(root, "test/**/*.exs"))
-      |> Enum.flat_map(fn f ->
-        case File.read(f) do
-          {:ok, src} ->
-            Regex.scan(~r/^\s*doctest\s+([A-Za-z0-9_.]+)/m, src, capture: :all_but_first)
+    declarations = doctest_declarations(root)
 
-          _ ->
-            []
-        end
-      end)
-      |> List.flatten()
-      |> Enum.uniq()
+    # An unresolvable module is NOT reported as empty: the derivation may simply be wrong for a
+    # module whose file does not follow the convention, and accusing it would be the wall crying
+    # about its own blind spot. It is counted apart, in the note.
+    {resolved, unresolved} =
+      Enum.split_with(declarations, &File.exists?(doctest_source(root, &1)))
 
     empty =
-      Enum.filter(declarations, fn mod ->
-        path = Path.join([root, "lib", Macro.underscore(mod) <> ".ex"])
-
-        case File.read(path) do
-          {:ok, src} -> not String.contains?(src, "iex>")
-          # An unresolvable module is NOT reported as empty: the derivation may simply be wrong for
-          # a module whose file does not follow the convention, and accusing it would be the wall
-          # crying about its own blind spot.
-          _ -> false
-        end
-      end)
-
-    unresolved =
-      Enum.reject(declarations, fn mod ->
-        File.exists?(Path.join([root, "lib", Macro.underscore(mod) <> ".ex"]))
-      end)
+      Enum.filter(resolved, &(not String.contains?(File.read!(doctest_source(root, &1)), "iex>")))
 
     measured_verdict("tests.doctest_declarations_have_examples", %{
       remediation:
@@ -278,6 +257,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
           "#{checked - length(strays)} adosse(s) a une source" <> Support.skipped_note(skipped)
     })
   end
+
+  # Les modules qu'un `doctest` declare, dans tout l'arbre de temoins.
+  defp doctest_declarations(root) do
+    Path.wildcard(Path.join(root, "test/**/*.exs"))
+    |> Enum.flat_map(fn f ->
+      case File.read(f) do
+        {:ok, src} ->
+          Regex.scan(~r/^\s*doctest\s+([A-Za-z0-9_.]+)/m, src, capture: :all_but_first)
+
+        _ ->
+          []
+      end
+    end)
+    |> List.flatten()
+    |> Enum.uniq()
+  end
+
+  # La derivation nom de module -> fichier source. Approximative par nature : un module qui ne suit
+  # pas la convention ne se resout pas, et c'est pourquoi l'appelant le compte a part.
+  defp doctest_source(root, mod), do: Path.join([root, "lib", Macro.underscore(mod) <> ".ex"])
 
   @doc false
   # CE QU'UN NOM DE FICHIER DOIT DIRE, ET POURQUOI L'APPROXIMATION SE PROPAGE ICI PLUS QU'AILLEURS.
@@ -553,62 +552,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   @spec check_test_corpora_on_record(String.t()) :: Support.result()
   def check_test_corpora_on_record(root) do
     repo = Path.expand("..", root)
-
-    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (a test framework checked out
-    # in-tree would be one), and without it the scan reports a corpus that is a folder.
-    found =
-      case System.cmd(
-             "find",
-             [
-               repo,
-               # ELAGUAGE D'ABORD, filtre ensuite. Les quatre arbres ci-dessous ne sont jamais
-               # PARCOURUS : `.git` et `_build` par volume, `runtime/tmp` parce qu'il bouge sous les
-               # pieds de find (cf. la course decrite au-dessus), les virtualenvs parce qu'ils
-               # portent des centaines de suites amont qui ne sont ni a nous ni a declarer —
-               # les exclure EST la declaration.
-               "(",
-               "-name",
-               ".git",
-               "-o",
-               "-name",
-               "_build",
-               "-o",
-               "-name",
-               ".venv",
-               "-o",
-               "-name",
-               "site-packages",
-               "-o",
-               "-path",
-               "*/runtime/tmp",
-               ")",
-               "-prune",
-               "-o",
-               "-type",
-               "f",
-               "(",
-               "-name",
-               "*.bats",
-               "-o",
-               "-name",
-               "test_*.py",
-               "-o",
-               "-name",
-               "*_test.py",
-               ")",
-               "-print"
-             ],
-             stderr_to_stdout: true
-           ) do
-        {out, 0} ->
-          out
-          |> String.split("\n", trim: true)
-          |> Enum.map(&Path.relative_to(&1, repo))
-          |> Enum.filter(&test_corpus_member?/1)
-
-        _ ->
-          []
-      end
+    found = corpus_files_on_disk(repo)
 
     unknown =
       found
@@ -618,39 +562,72 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       |> Enum.map(&Path.dirname/1)
       |> Enum.uniq()
 
-    broken =
-      cond do
-        not File.dir?(Path.join(repo, "runtime/test")) ->
-          "#{repo} does not look like the repo root — nothing was scanned"
-
-        found == [] ->
-          "no .bats file found under #{repo}; this check measured nothing"
-
-        true ->
-          nil
-      end
-
     gated = Enum.count(@test_corpora, fn {_, v} -> v == :gated end)
     gated_by = Enum.count(@test_corpora, fn {_, v} -> match?({:gated_by, _}, v) end)
 
-    # ⚠ `:gated` EST UNE INTENTION, PAS UNE MESURE. Sans confrontation a ce que la porte JOUE
-    # reellement, un corpus marque « gate » ici pendant que la porte a cesse de le decouvrir serait
-    # certifie couvert par ce mur — dont le sujet est precisement « un corpus que personne ne
-    # joue ». On DEMANDE donc a chaque porte la liste de ce qu elle joue (`--list-corpora`), au
-    # lieu de la deduire de notre propre table.
-    porte_liste = fn script ->
-      chemin = Path.join(repo, script)
+    measured_verdict("tests.corpora_on_record", %{
+      remediation:
+        "wire the corpus into a gate (runtime/test/shell_gate.sh for the runtime, deploy/gate.sh " <>
+          "for the installer), or add it to @test_corpora as {:out, why} — a corpus nobody runs " <>
+          "reports a coverage it does not provide",
+      broken:
+        cond do
+          not File.dir?(Path.join(repo, "runtime/test")) ->
+            "#{repo} does not look like the repo root — nothing was scanned"
 
-      if File.regular?(chemin) do
-        case System.cmd("bash", [chemin, "--list-corpora"], stderr_to_stdout: true) do
-          {out, 0} -> String.split(out, "\n", trim: true)
-          _ -> :error
-        end
-      else
-        :error
-      end
+          found == [] ->
+            "no .bats file found under #{repo}"
+
+          true ->
+            nil
+        end,
+      # Un corpus hors table et une porte muette sont deux defauts distincts du meme mur : le
+      # premier dit « personne ne sait que ca existe », le second « on croit le jouer et non ».
+      findings:
+        if(unknown == [], do: [], else: ["test corpora on no record: #{inspect(unknown)}"]) ++
+          unplayable_corpora(repo),
+      note:
+        "#{length(found)} test files (bats + python) over #{length(@test_corpora)} corpora — " <>
+          "#{gated} gated by the runtime door, #{gated_by} by another door (ASKED, not assumed), " <>
+          "#{length(@test_corpora) - gated - gated_by} deliberately out ON RECORD"
+    })
+  end
+
+  # ELAGUAGE D'ABORD, filtre ensuite. Les quatre arbres ci-dessous ne sont jamais PARCOURUS :
+  # `.git` et `_build` par volume, `runtime/tmp` parce qu'il bouge sous les pieds de find, les
+  # virtualenvs parce qu'ils portent des centaines de suites amont qui ne sont ni a nous ni a
+  # declarer — les exclure EST la declaration.
+  #
+  # `-type f` est porteur : un REPERTOIRE peut s'appeler `*.bats` (un framework de test sorti
+  # dans l'arbre en serait un), et sans lui le scan rapporte un corpus qui est un dossier.
+  @corpus_find_prune ~w[( -name .git -o -name _build -o -name .venv -o -name site-packages -o
+                        -path */runtime/tmp ) -prune -o -type f
+                        ( -name *.bats -o -name test_*.py -o -name *_test.py ) -print]
+
+  defp corpus_files_on_disk(repo) do
+    case System.cmd("find", [repo | @corpus_find_prune], stderr_to_stdout: true) do
+      {out, 0} ->
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Path.relative_to(&1, repo))
+        |> Enum.filter(&test_corpus_member?/1)
+
+      _ ->
+        []
     end
+  end
 
+  # ⚠ `:gated` EST UNE INTENTION, PAS UNE MESURE. Sans confrontation a ce que la porte JOUE
+  # reellement, un corpus marque « gate » ici pendant que la porte a cesse de le decouvrir serait
+  # certifie couvert par ce mur — dont le sujet est precisement « un corpus que personne ne joue ».
+  # On DEMANDE donc a chaque porte la liste de ce qu'elle joue (`--list-corpora`), au lieu de la
+  # deduire de notre propre table.
+  #
+  # ⚠ ON N'INTERROGE QUE POUR UN CORPUS PRESENT DANS CET ARBRE. Un corpus declare mais absent
+  # (artefact runtime-only, arbre partiel) n'a pas de porte a interroger : exiger la sienne ferait
+  # rougir ce mur sur ce qu'il n'a pas a mesurer ici. Present et sa porte muette, en revanche, EST
+  # le defaut — et c'est le seul cas ou la question se pose.
+  defp unplayable_corpora(repo) do
     listings =
       [{:gated, "runtime/test/shell_gate.sh"} | Enum.map(@test_corpora, fn {_, v} -> v end)]
       |> Enum.flat_map(fn
@@ -659,40 +636,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         _ -> []
       end)
       |> Enum.uniq()
-      |> Map.new(&{&1, porte_liste.(&1)})
+      |> Map.new(&{&1, door_listing(repo, &1)})
 
-    # ⚠ ON N INTERROGE QUE POUR UN CORPUS PRESENT DANS CET ARBRE. Un corpus declare mais absent
-    # (artefact runtime-only, arbre partiel) n a pas de porte a interroger : exiger la sienne ferait
-    # rougir ce mur sur ce qu il n a pas a mesurer ici. Present et sa porte muette, en revanche, EST
-    # le defaut — et c est le seul cas ou la question se pose.
-    injouables =
-      @test_corpora
-      |> Enum.filter(fn {corpus, _} -> File.dir?(Path.join(repo, corpus)) end)
-      |> Enum.flat_map(fn
-        {corpus, :gated} -> verifie_porte(corpus, "runtime/test/shell_gate.sh", listings)
-        {corpus, {:gated_by, s}} -> verifie_porte(corpus, s, listings)
-        _ -> []
-      end)
+    @test_corpora
+    |> Enum.filter(fn {corpus, _} -> File.dir?(Path.join(repo, corpus)) end)
+    |> Enum.flat_map(fn
+      {corpus, :gated} -> verifie_porte(corpus, "runtime/test/shell_gate.sh", listings)
+      {corpus, {:gated_by, s}} -> verifie_porte(corpus, s, listings)
+      _ -> []
+    end)
+  end
 
-    %{
-      id: "tests.corpora_on_record",
-      remediation:
-        "wire the corpus into a gate (runtime/test/shell_gate.sh for the runtime, deploy/gate.sh " <>
-          "for the installer), or add it to @test_corpora as {:out, why} — a corpus nobody runs " <>
-          "reports a coverage it does not provide",
-      status: if(is_nil(broken) and unknown == [] and injouables == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken -> ["INSTRUMENT BROKEN — #{broken}"]
-          unknown != [] -> ["test corpora on no record: #{inspect(unknown)}"]
-          injouables != [] -> injouables
-          true -> []
-        end,
-      note:
-        "#{length(found)} test files (bats + python) over #{length(@test_corpora)} corpora — " <>
-          "#{gated} gated by the runtime door, #{gated_by} by another door (ASKED, not assumed), " <>
-          "#{length(@test_corpora) - gated - gated_by} deliberately out ON RECORD"
-    }
+  defp door_listing(repo, script) do
+    chemin = Path.join(repo, script)
+
+    with true <- File.regular?(chemin),
+         {out, 0} <- System.cmd("bash", [chemin, "--list-corpora"], stderr_to_stdout: true) do
+      String.split(out, "\n", trim: true)
+    else
+      _ -> :error
+    end
   end
 
   # Confronte un corpus a ce que SA porte annonce jouer. Le mot `:gated` de la table dit une

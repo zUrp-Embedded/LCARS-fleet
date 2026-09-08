@@ -833,29 +833,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   def check_eval_doors_resolve(root) do
     id = "runtime.eval_doors_resolve"
 
-    modules =
-      root
-      |> Path.join("lib/**/*.ex")
-      |> Path.wildcard()
-      |> Enum.flat_map(fn f ->
-        src = File.read!(f)
-
-        Regex.scan(~r/^defmodule\s+([A-Za-z0-9_.]+)\s+do/m, src)
-        |> Enum.map(fn [_, nom] -> {nom, src} end)
-      end)
-      |> Map.new()
-
-    portes =
-      ["bin/*", "etc/*"]
-      |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
-      |> Enum.filter(&File.regular?/1)
-      |> Enum.flat_map(fn f ->
-        f
-        |> File.read!()
-        |> then(&Regex.scan(~r/eval\s+"([A-Za-z0-9_.]+)\.([a-z_][A-Za-z0-9_?!]*)\(/, &1))
-        |> Enum.map(fn [_, mod, fun] -> {Path.relative_to(f, root), mod, fun} end)
-      end)
-      |> Enum.uniq()
+    modules = source_by_module(root)
+    portes = eval_calls_in_scripts(root)
 
     # ⚠ PAS DE `src = …` DANS LA COMPREHENSION, ET C'EST TOUT L'OBJET DE CETTE FORME. Une
     # affectation posee entre deux filtres EST un filtre : `src = Map.get(modules, mod)` rend `nil`
@@ -904,6 +883,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
             else: "#{length(absents)} NON resolue(s)"
           )
     }
+  end
+
+  # `%{"Fleet.X" => source}` — la source de chaque module de `lib/`, indexee par son nom ECRIT. On
+  # lit le nom du `defmodule`, pas un atome resolu : ce mur compare ce que les SCRIPTS ecrivent a ce
+  # que l'arbre porte, et un script ne connait que des noms.
+  defp source_by_module(root) do
+    root
+    |> Path.join("lib/**/*.ex")
+    |> Path.wildcard()
+    |> Enum.flat_map(fn f ->
+      src = File.read!(f)
+
+      ~r/^defmodule\s+([A-Za-z0-9_.]+)\s+do/m
+      |> Regex.scan(src)
+      |> Enum.map(fn [_, nom] -> {nom, src} end)
+    end)
+    |> Map.new()
+  end
+
+  # Les `eval "Mod.fun("` ecrits par les scripts de `bin/` et `etc/` — la seule chose qui traverse
+  # la frontiere de langage, et qu'aucune etape du gate ne lit a part ce mur.
+  defp eval_calls_in_scripts(root) do
+    ["bin/*", "etc/*"]
+    |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.flat_map(fn f ->
+      ~r/eval\s+"([A-Za-z0-9_.]+)\.([a-z_][A-Za-z0-9_?!]*)\(/
+      |> Regex.scan(File.read!(f))
+      |> Enum.map(fn [_, mod, fun] -> {Path.relative_to(f, root), mod, fun} end)
+    end)
+    |> Enum.uniq()
   end
 
   @doc """

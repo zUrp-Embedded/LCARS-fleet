@@ -823,27 +823,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         broken_result("cap_profile.project_keys_declared", "key written into the project map")
 
       true ->
-        %{
-          id: "cap_profile.project_keys_declared",
+        measured_verdict("cap_profile.project_keys_declared", %{
           remediation:
             "declare the new `spec.project` key in the catalogue schema (an operator may set it) " <>
               "or in `Fleet.CapProfile.runtime_project_keys/0` (the pilot injects it) — never both, " <>
               "never neither",
-          status: if(undeclared == [] and both == [], do: :pass, else: :fail),
-          evidence:
-            cond do
-              undeclared != [] ->
-                ["#{resolver_rel}: project keys declared nowhere #{inspect(undeclared)}"]
-
-              both != [] ->
-                ["#{schema_rel}: keys declared as BOTH catalogue and runtime #{inspect(both)}"]
-
-              true ->
-                []
-            end,
+          # « declaree nulle part » et « declaree des deux cotes » sont les deux moities de « jamais
+          # les deux, jamais aucun » : elles se rapportent ensemble.
+          findings:
+            if(undeclared == [],
+              do: [],
+              else: ["#{resolver_rel}: project keys declared nowhere #{inspect(undeclared)}"]
+            ) ++
+              if(both == [],
+                do: [],
+                else: [
+                  "#{schema_rel}: keys declared as BOTH catalogue and runtime #{inspect(both)}"
+                ]
+              ),
           note:
             "#{MapSet.size(schema_keys)} catalogue keys + #{MapSet.size(runtime_keys)} runtime-injected, disjoint"
-        }
+        })
     end
   end
 
