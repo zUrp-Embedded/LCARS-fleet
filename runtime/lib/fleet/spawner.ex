@@ -192,32 +192,9 @@ defmodule Fleet.Spawner do
       # resolved forge-side; permanent `permanent-<name>-ts`; admin) is NOT necessarily controlled → a `/` or `..`
       # would traverse out of `~/pods`. Path-safe charset guard + `..` rejection → a CLEAR refusal, never a
       # traversed path (all legitimate pod_ids — UUID / catalogue / step — pass).
-      if valid_pod_id?(pod_id) do
-        # DETERMINISTIC pod id (stable, no timestamp suffix): a re-dispatch falls back on the same
-        # `pod_id`. If a terminal TOMBSTONE (`state.json` :succeeded/:released/:killed) from a previous
-        # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch → orphan
-        # loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
-        # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
-        # AND THE RESULT IS READ. An incomplete erase means the tombstone SURVIVES, so the pod we
-        # are about to start would read it, class `:release`, and stop right after teardown: a
-        # spawn that returns `{:ok, pid}` and produces nothing, then loops poller-side on the next
-        # tick. Refusing here is the only outcome that does not lie — the caller gets a stable
-        # error it can defer on, instead of a success it has to discover was empty.
-        case Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts) do
-          {:error, _reasons} ->
-            Logger.error(
-              "Spawner: spawn_pod refused for #{pod_id} — a terminal tombstone survives its erase " <>
-                "(see errors above). Starting would produce a pod that releases without working."
-            )
-
-            {:error, :terminal_tombstone_not_cleared}
-
-          :ok ->
-            spawn_pod_child(cap_profile, issue_id, pod_id, opts)
-        end
-      else
-        {:error, :invalid_pod_id}
-      end
+      if valid_pod_id?(pod_id),
+        do: spawn_after_tombstone_clear(cap_profile, issue_id, pod_id, opts),
+        else: {:error, :invalid_pod_id}
     else
       {:error, :no_lifetime_scope} ->
         Logger.error(
@@ -259,6 +236,31 @@ defmodule Fleet.Spawner do
   # `(role, nil)` bucket — a per-role cap silently gone fleet-wide. The forge id IS there
   # (`SessionMint` requires it and refuses loudly without), and it is what `<REPO4>` of the
   # session_id encodes: bucket and identity then designate the same object.
+  # DETERMINISTIC pod id (stable, no timestamp suffix): a re-dispatch falls back on the same
+  # `pod_id`. If a terminal TOMBSTONE (`state.json` :succeeded/:released/:killed) from a previous
+  # cycle survives, `recover_or_init` would read it → `:release` → SILENT stop without launch →
+  # orphan loop poller-side. We clear the tombstone (state + pod_dir) BEFORE spawn → FRESH init.
+  # No-op if no snapshot / snapshot in flight (recovery :resume/:recreate left intact).
+  # AND THE RESULT IS READ. An incomplete erase means the tombstone SURVIVES, so the pod we are
+  # about to start would read it, class `:release`, and stop right after teardown: a spawn that
+  # returns `{:ok, pid}` and produces nothing, then loops poller-side on the next tick. Refusing
+  # here is the only outcome that does not lie — the caller gets a stable error it can defer on,
+  # instead of a success it has to discover was empty.
+  defp spawn_after_tombstone_clear(cap_profile, issue_id, pod_id, opts) do
+    case Fleet.Spawner.Pod.StateFs.clear_terminal_snapshot(pod_id, cap_profile, opts) do
+      :ok ->
+        spawn_pod_child(cap_profile, issue_id, pod_id, opts)
+
+      {:error, _reasons} ->
+        Logger.error(
+          "Spawner: spawn_pod refused for #{pod_id} — a terminal tombstone survives its erase " <>
+            "(see errors above). Starting would produce a pod that releases without working."
+        )
+
+        {:error, :terminal_tombstone_not_cleared}
+    end
+  end
+
   defp spawn_pod_child(cap_profile, issue_id, pod_id, opts) do
     args = %{
       cap_profile: cap_profile,

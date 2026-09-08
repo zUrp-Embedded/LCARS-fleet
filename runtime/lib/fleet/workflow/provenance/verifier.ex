@@ -119,17 +119,18 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   defp brief_coherent(work_dir, statement, expected) do
     case get_in(statement, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) do
       claimed when is_binary(claimed) and claimed != "" ->
-        with :ok <- commit_exists(work_dir, claimed, {:unknown_brief_commit, claimed}) do
-          case expected do
-            nil -> :ok
-            ^claimed -> :ok
-            other -> {:error, {:brief_mismatch, claimed, other}}
-          end
-        end
+        with :ok <- commit_exists(work_dir, claimed, {:unknown_brief_commit, claimed}),
+             do: brief_matches(claimed, expected)
 
       _ ->
         # C-DEGRADED: absent claimed digest is valid.
         :ok
     end
   end
+
+  # RIEN D'ATTENDU N'EST PAS UN DESACCORD : l'appelant qui ne fournit pas de commit de brief ne
+  # demande que l'existence, verifiee juste au-dessus.
+  defp brief_matches(_claimed, nil), do: :ok
+  defp brief_matches(claimed, claimed), do: :ok
+  defp brief_matches(claimed, other), do: {:error, {:brief_mismatch, claimed, other}}
 end

@@ -323,17 +323,22 @@ defmodule Fleet.Forge.Client.Repo do
       when is_binary(org) and is_binary(team) and is_binary(username) do
     with {:ok, config} <- resolve_config(opts),
          {:ok, teams} <- paginated_teams(config, org) do
-      case Enum.find(teams, &(is_map(&1) and &1["name"] == team)) do
-        nil ->
-          {:ok, false}
+      teams
+      |> Enum.find(&(is_map(&1) and &1["name"] == team))
+      |> member_of_team(config, username)
+    end
+  end
 
-        %{"id" => id} ->
-          case http_get(config, "/teams/#{id}/members/#{encode_seg(username)}") do
-            {:ok, _} -> {:ok, true}
-            {:error, {:http, 404, _}} -> {:ok, false}
-            {:error, _} = err -> err
-          end
-      end
+  # UNE EQUIPE QUI N'EXISTE PAS N'EST PAS UNE ERREUR DE LECTURE : personne n'en est membre, et la
+  # reponse est aussi ferme que le 404 d'en dessous. C'est le `{:error, _}` qui remonte, lui, parce
+  # que « je n'ai pas su demander » ne vaut pas « non ».
+  defp member_of_team(nil, _config, _username), do: {:ok, false}
+
+  defp member_of_team(%{"id" => id}, config, username) do
+    case http_get(config, "/teams/#{id}/members/#{encode_seg(username)}") do
+      {:ok, _} -> {:ok, true}
+      {:error, {:http, 404, _}} -> {:ok, false}
+      {:error, _} = err -> err
     end
   end
 
@@ -394,21 +399,30 @@ defmodule Fleet.Forge.Client.Repo do
           {:ok, protection_outcome()} | {:error, term()}
   def protect_branch(repo, rule, opts \\ []) when is_binary(repo) and is_map(rule) do
     with {:ok, config} <- resolve_config(opts) do
-      case http_post(config, "/repos/#{encode_repo(repo)}/branch_protections", rule) do
-        {:ok, _} ->
-          {:ok, :created}
-
-        {:error, {:http, code, %{"message" => msg}}}
-        when code in [403, 409, 422] and is_binary(msg) ->
-          if String.contains?(msg, "already exist"),
-            do: converge_existing_protection(config, repo, rule),
-            else: {:error, {:http, code, %{"message" => msg}}}
-
-        {:error, _} = err ->
-          err
-      end
+      config
+      |> http_post("/repos/#{encode_repo(repo)}/branch_protections", rule)
+      |> protection_outcome(config, repo, rule)
     end
   end
+
+  defp protection_outcome({:ok, _}, _config, _repo, _rule), do: {:ok, :created}
+
+  # LA FORGE REFUSE UNE REGLE DEJA POSEE AVEC TROIS CODES DIFFERENTS selon la version, et le seul
+  # discriminant stable est le texte. Un « existe deja » est le chemin nominal d'un re-onboarding :
+  # on converge. Tout autre refus sous les memes codes reste une erreur.
+  defp protection_outcome(
+         {:error, {:http, code, %{"message" => msg}}} = err,
+         config,
+         repo,
+         rule
+       )
+       when code in [403, 409, 422] and is_binary(msg) do
+    if String.contains?(msg, "already exist"),
+      do: converge_existing_protection(config, repo, rule),
+      else: err
+  end
+
+  defp protection_outcome({:error, _} = err, _config, _repo, _rule), do: err
 
   defp converge_existing_protection(config, repo, rule) do
     rule_name = Map.fetch!(rule, :rule_name)

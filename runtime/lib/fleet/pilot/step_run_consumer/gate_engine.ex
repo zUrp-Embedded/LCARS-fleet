@@ -63,21 +63,27 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   def resolve_next(payload, n, %Seams{} = seams, producer? \\ nil) do
     case {payload["workflow_map"], payload["step"]} do
       {workflow_map_name, step} when is_binary(workflow_map_name) and is_binary(step) ->
-        with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name, payload) do
-          cond do
-            lifecycle_stage?(workflow_map, step) ->
-              no_workflow_map_resolve(payload, seams, producer?)
-
-            inherited_route?(workflow_map, step, payload["role"]) ->
-              no_workflow_map_resolve(payload, seams, producer?)
-
-            true ->
-              gate_decide(workflow_map, step, payload, n, seams, producer?)
-          end
-        end
+        with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name, payload),
+             do: mapped_resolve(workflow_map, step, payload, n, seams, producer?)
 
       _ ->
         no_workflow_map_resolve(payload, seams, producer?)
+    end
+  end
+
+  # DEUX ECHAPPEES VERS LE CHEMIN SANS CARTE, et elles ne disent pas la meme chose : une etape de
+  # cycle de vie n'appartient a aucune carte, une route heritee appartient a une AUTRE. Dans les
+  # deux cas la carte chargee ne decide rien, et c'est la resolution nue qui reprend la main.
+  defp mapped_resolve(workflow_map, step, payload, n, seams, producer?) do
+    cond do
+      lifecycle_stage?(workflow_map, step) ->
+        no_workflow_map_resolve(payload, seams, producer?)
+
+      inherited_route?(workflow_map, step, payload["role"]) ->
+        no_workflow_map_resolve(payload, seams, producer?)
+
+      true ->
+        gate_decide(workflow_map, step, payload, n, seams, producer?)
     end
   end
 

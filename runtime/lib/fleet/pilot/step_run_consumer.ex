@@ -578,6 +578,17 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
+  # LE BROUILLON PART DANS TOUS LES CAS, l'escalade seulement pour les causes terminales : un
+  # `workflow_map` illisible doit laisser une trace lisible meme quand il ne merite pas de reveiller
+  # l'architecte.
+  defp gate_error(reason, n, role, state) do
+    emit_workflow_map_failed_draft(reason, n, role)
+
+    if TerminalEscalation.terminal_escalate?(reason),
+      do: TerminalEscalation.escalate_terminal_error(reason, n, role, terminal_seams(state)),
+      else: {:error, reason}
+  end
+
   defp run_step_run_classified(payload, n, role, is_producer?, state) do
     if is_producer? and
          TerminalEscalation.blocked_flag?(
@@ -587,17 +598,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     else
       case GateEngine.resolve_next(payload, n, gate_seams(state), is_producer?) do
         {:error, reason} ->
-          emit_workflow_map_failed_draft(reason, n, role)
-
-          if TerminalEscalation.terminal_escalate?(reason),
-            do:
-              TerminalEscalation.escalate_terminal_error(
-                reason,
-                n,
-                role,
-                terminal_seams(state)
-              ),
-            else: {:error, reason}
+          gate_error(reason, n, role, state)
 
         {:escalate, corr, eval_ctx} ->
           {:escalate, corr, eval_ctx}

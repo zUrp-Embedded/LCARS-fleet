@@ -110,16 +110,18 @@ defmodule Fleet.Workflow.OpsObject do
   defp find_committed_version(work_dir, ref, content) do
     case Git.commits_touching(work_dir, ref, @readback_history_depth) do
       {:ok, shas} ->
-        # Skip unreadable commits; the probe must not turn them into a false negative.
-        Enum.find_value(shas, :not_committed, fn sha ->
-          case Git.show(work_dir, sha, ref) do
-            {:ok, ^content} -> {:ok, sha}
-            _ -> nil
-          end
-        end)
+        Enum.find_value(shas, :not_committed, &commit_holding(work_dir, &1, ref, content))
 
       {:error, _reason} ->
         :not_committed
+    end
+  end
+
+  # Skip unreadable commits; the probe must not turn them into a false negative.
+  defp commit_holding(work_dir, sha, ref, content) do
+    case Git.show(work_dir, sha, ref) do
+      {:ok, ^content} -> {:ok, sha}
+      _ -> nil
     end
   end
 

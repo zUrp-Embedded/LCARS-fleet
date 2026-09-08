@@ -486,52 +486,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # l'IDENTITE qui arrete le chronometre DIFFERE selon l'appelant. Les fondre coupleraient le
           # sceau au cycle de vie du verrou ET forkeraient cette identite. Ce qui converge est la
           # discipline — verifier puis annoncer — pas les deux gestes.
-          case finalize_issue_unlock(ctx, issue_n, producer) do
-            :ok ->
-              # ⚠ CE LOG NE DIT NI « rebase » NI « gatekeeper sealed » : le merge est signé
-              # `chief`, et `rebase` n'est la méthode que sur une PR propre. Un opérateur qui
-              # filtre ses logs sur « gatekeeper » pour auditer les merges croiserait ensuite le
-              # fil Gitea, y trouverait `system_chief`, et enquêterait sur une contradiction qui
-              # n'existerait que dans ce texte.
-              Logger.info(
-                "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
-                  "(judges OK → chief merged, gatekeeper promoted + explicit close ; " <>
-                  "eng killed, issue lock released)"
-              )
-
-            {:error, reason} ->
-              Logger.error(
-                "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} MERGED+SEALED+CLOSED " <>
-                  "but issue lock NOT released (#{inspect(reason)}) — residual lcars-in-flight + running " <>
-                  "stopwatch on the CLOSED issue, NOT re-polled (open-issue poll skips it) — an incident is " <>
-                  "opened on the forge, and the cleanup is MANUAL: no rail reclaims it"
-              )
-
-              # AUCUN RAIL NE RECLAME CE VERROU : les deux `warden` du depot portent sur les PODS,
-              # aucun ne retire d'etiquette de forge ; et le poller ne lit que `list_open_issues/2`,
-              # donc cette issue fermee n'est plus jamais vue. Un log qui promettrait un rattrapage
-              # automatique mentirait, et « manual » suppose qu'un humain le lise — ce que la
-              # doctrine D1 refuse pour tout ce qui est load-bearing.
-              #
-              # L'incident est le seul canal DURABLE qui existe : une issue sur la forge,
-              # que l'operateur voit sans avoir a fouiller les journaux du BEAM. Il ne converge pas
-              # tout seul — c'est un appel a la main, et il le dit.
-              escalate =
-                Keyword.get(
-                  ctx.opts,
-                  :escalate_fun,
-                  &Fleet.Pilot.IncidentRegistry.escalate_gated/5
-                )
-
-              _ =
-                escalate.(
-                  :issue_lock_residual,
-                  "#{ctx.repo}##{issue_n}",
-                  {:unlock_failed, reason},
-                  "issue_lock_residual:#{ctx.repo}##{issue_n}",
-                  ctx.forge_opts
-                )
-          end
+          log_unlock_outcome(
+            finalize_issue_unlock(ctx, issue_n, producer),
+            ctx,
+            pr_number,
+            issue_n
+          )
 
           {:ok, {:merged, pr_number}}
 
@@ -549,6 +509,50 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # hiccup dominates; no sleep, same stance as the seal retries). NOT propagated (the promote genuinely succeeded —
   # merged + sealed + closed); the caller logs LOUD on persistent failure and keeps `{:ok, {:merged, _}}`.
   @issue_unlock_attempts 3
+  # ⚠ CE LOG NE DIT NI « rebase » NI « gatekeeper sealed » : le merge est signé `chief`, et
+  # `rebase` n'est la méthode que sur une PR propre. Un opérateur qui filtre ses logs sur
+  # « gatekeeper » pour auditer les merges croiserait ensuite le fil Gitea, y trouverait
+  # `system_chief`, et enquêterait sur une contradiction qui n'existerait que dans ce texte.
+  defp log_unlock_outcome(:ok, ctx, pr_number, issue_n) do
+    Logger.info(
+      "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
+        "(judges OK → chief merged, gatekeeper promoted + explicit close ; " <>
+        "eng killed, issue lock released)"
+    )
+  end
+
+  # AUCUN RAIL NE RECLAME CE VERROU : les deux `warden` du depot portent sur les PODS, aucun ne
+  # retire d'etiquette de forge ; et le poller ne lit que `list_open_issues/2`, donc cette issue
+  # fermee n'est plus jamais vue. Un log qui promettrait un rattrapage automatique mentirait, et
+  # « manual » suppose qu'un humain le lise — ce que la doctrine D1 refuse pour tout ce qui est
+  # load-bearing.
+  #
+  # L'incident est le seul canal DURABLE qui existe : une issue sur la forge, que l'operateur voit
+  # sans avoir a fouiller les journaux du BEAM. Il ne converge pas tout seul — c'est un appel a la
+  # main, et il le dit.
+  defp log_unlock_outcome({:error, reason}, ctx, pr_number, issue_n) do
+    Logger.error(
+      "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} MERGED+SEALED+CLOSED " <>
+        "but issue lock NOT released (#{inspect(reason)}) — residual lcars-in-flight + running " <>
+        "stopwatch on the CLOSED issue, NOT re-polled (open-issue poll skips it) — an incident is " <>
+        "opened on the forge, and the cleanup is MANUAL: no rail reclaims it"
+    )
+
+    escalate =
+      Keyword.get(ctx.opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5)
+
+    _ =
+      escalate.(
+        :issue_lock_residual,
+        "#{ctx.repo}##{issue_n}",
+        {:unlock_failed, reason},
+        "issue_lock_residual:#{ctx.repo}##{issue_n}",
+        ctx.forge_opts
+      )
+
+    :ok
+  end
+
   defp finalize_issue_unlock(%Ctx{} = ctx, issue_n, producer, attempt \\ 1) do
     case Fleet.Pilot.StepRunCompleter.unlock(
            ctx.forge,

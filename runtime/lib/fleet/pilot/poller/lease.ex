@@ -225,29 +225,12 @@ defmodule Fleet.Pilot.Poller.Lease do
             # La contrainte porte sur le DÉMARRAGE, jamais sur la poursuite : un run ENGAGÉ est
             # déjà passé au-dessus (clause précédente), et l'interrompre en vol le coincerait.
             true ->
-              case open_blockers(issue, seams) do
-                {:ok, []} ->
-                  {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
-                  {acc2, if(started?, do: fan + 1, else: fan)}
-
-                {:ok, [blocker | _]} ->
-                  {acc2, _} =
-                    Admission.refuse({:depends, blocker}, item_opts, issue["number"], wait, acc)
-
-                  {acc2, fan}
-
-                {:error, why} ->
-                  {acc2, _} =
-                    Admission.refuse(
-                      {:depends_unreadable, why},
-                      item_opts,
-                      issue["number"],
-                      wait,
-                      acc
-                    )
-
-                  {acc2, fan}
-              end
+              dispatch_unless_blocked(
+                open_blockers(issue, seams),
+                {payload, item_opts, issue["number"], wait},
+                {acc, fan},
+                seams
+              )
           end
       end)
 
@@ -272,6 +255,26 @@ defmodule Fleet.Pilot.Poller.Lease do
   #
   # Du côté du ticket, une porte illisible et une porte fermée sont le MÊME fait — il est arrêté là,
   # personne ne travaille dessus. La distinction vit dans la RAISON du skip, où elle est actionnable.
+  # LA PLACE N'EST PRISE QUE SI LE RUN A REELLEMENT DEMARRE : `started?` faux laisse `fan` intact,
+  # sans quoi un refus en aval consommerait un siege que personne n'occupe.
+  #
+  # ⚠ « BLOQUEUR ILLISIBLE » N'EST PAS « AUCUN BLOQUEUR ». Les deux refusent, avec deux raisons
+  # distinctes — un depend non lu qui dispatcherait quand meme rendrait cette lecture decorative.
+  defp dispatch_unless_blocked({:ok, []}, {payload, item_opts, _n, _wait}, {acc, fan}, seams) do
+    {acc2, started?} = step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
+    {acc2, if(started?, do: fan + 1, else: fan)}
+  end
+
+  defp dispatch_unless_blocked({:ok, [blocker | _]}, {_p, item_opts, n, wait}, {acc, fan}, _seams) do
+    {acc2, _} = Admission.refuse({:depends, blocker}, item_opts, n, wait, acc)
+    {acc2, fan}
+  end
+
+  defp dispatch_unless_blocked({:error, why}, {_p, item_opts, n, wait}, {acc, fan}, _seams) do
+    {acc2, _} = Admission.refuse({:depends_unreadable, why}, item_opts, n, wait, acc)
+    {acc2, fan}
+  end
+
   defp open_blockers(issue, %Seams{} = seams) do
     case seams.forge.issue_dependencies(seams.repo, Map.get(issue, "number"), seams.forge_opts) do
       {:ok, deps} when is_list(deps) ->

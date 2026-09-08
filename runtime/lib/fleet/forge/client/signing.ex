@@ -55,29 +55,7 @@ defmodule Fleet.Forge.Client.Signing do
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
-        # Counted markers trust the system author; observability markers may opt into any author.
-        trusted =
-          if Keyword.get(opts, :dedup_any_author, false) do
-            {:ok, comments}
-          else
-            # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
-            # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
-            # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-            # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
-            # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
-            case trusted_logins(config, opts) do
-              {:ok, logins} ->
-                {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
-
-              # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
-              # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
-              # sait pas QUI a ecrit quoi.
-              {:error, why} ->
-                {:unverified, {:trusted_logins, why}}
-            end
-          end
-
-        case trusted do
+        case trusted_comments(comments, config, opts) do
           {:unverified, _} = unverified ->
             unverified
 
@@ -90,24 +68,45 @@ defmodule Fleet.Forge.Client.Signing do
     end
   end
 
+  # Counted markers trust the system author; observability markers may opt into any author.
+  defp trusted_comments(comments, config, opts) do
+    if Keyword.get(opts, :dedup_any_author, false) do
+      {:ok, comments}
+    else
+      # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant ecrit
+      # quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur » laisserait un tiers
+      # SUPPRIMER un commentaire legitime en postant sa signature en premier ; s'y limiter rendrait
+      # la dedup aveugle a tout ce qui est signe par un role, c'est-a-dire a la quasi-totalite de ce
+      # qu'elle garde.
+      keep_trusted(comments, trusted_logins(config, opts))
+    end
+  end
+
+  defp keep_trusted(comments, {:ok, logins}),
+    do: {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
+
+  # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun commentaire de
+  # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a ecrit quoi.
+  defp keep_trusted(_comments, {:error, why}), do: {:unverified, {:trusted_logins, why}}
+
   @doc false
   # Les logins autorises a poser un marqueur que le runtime relira.
   @spec trusted_logins(Transport.config(), keyword()) ::
           {:ok, [String.t()]} | {:error, term()}
   def trusted_logins(config, opts) do
     with {:ok, bot} <- forge_bot_login(config, opts) do
-      case Keyword.get(opts, :dedup_role) do
-        role when is_binary(role) ->
-          case Fleet.Forge.Client.role_login(role, opts) do
-            {:ok, login} -> {:ok, [bot, login]}
-            # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
-            # publication pour une question de dedup.
-            {:error, _} -> {:ok, [bot]}
-          end
-
-        _ ->
-          {:ok, [bot]}
-      end
+      with_role_login(bot, Keyword.get(opts, :dedup_role), opts)
     end
   end
+
+  defp with_role_login(bot, role, opts) when is_binary(role) do
+    case Fleet.Forge.Client.role_login(role, opts) do
+      {:ok, login} -> {:ok, [bot, login]}
+      # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
+      # publication pour une question de dedup.
+      {:error, _} -> {:ok, [bot]}
+    end
+  end
+
+  defp with_role_login(bot, _role, _opts), do: {:ok, [bot]}
 end

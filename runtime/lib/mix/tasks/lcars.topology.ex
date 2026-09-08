@@ -225,20 +225,27 @@ defmodule Mix.Tasks.Lcars.Topology do
 
       _ ->
         {h, acc} =
-          case Map.get(graph, mod, []) |> Enum.filter(&Map.has_key?(graph, &1)) do
-            [] ->
-              {0, acc}
-
-            deps ->
-              Enum.reduce(deps, {-1, acc}, fn d, {mx, a} ->
-                {hd, a2} = height(d, graph, a)
-                {max(mx, hd), a2}
-              end)
-              |> then(fn {mx, a} -> {mx + 1, a} end)
-          end
+          graph
+          |> Map.get(mod, [])
+          |> Enum.filter(&Map.has_key?(graph, &1))
+          |> deps_height(graph, acc)
 
         {h, Map.put(acc, mod, h)}
     end
+  end
+
+  # UNE FEUILLE EST A HAUTEUR ZERO ; tout le reste est un cran au-dessus de sa plus haute
+  # dependance. Le `-1` de depart est ce qui rend ce `+1` exact sur une liste non vide.
+  defp deps_height([], _graph, acc), do: {0, acc}
+
+  defp deps_height(deps, graph, acc) do
+    {mx, a} =
+      Enum.reduce(deps, {-1, acc}, fn d, {mx, a} ->
+        {hd, a2} = height(d, graph, a)
+        {max(mx, hd), a2}
+      end)
+
+    {mx + 1, a}
   end
 
   # ── rendering ─────────────────────────────────────────────────────────────

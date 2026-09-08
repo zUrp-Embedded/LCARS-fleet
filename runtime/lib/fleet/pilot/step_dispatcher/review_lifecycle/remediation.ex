@@ -66,26 +66,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
              # Same budget bounds consecutive same-base publish failures.
              {:ok, publish_fails} <-
                count_publish_failures(ctx, issue_n) do
-          cond do
-            publish_fails > budget ->
-              ArchEscalation.escalate_publish_failures(
-                Ctx.arch_seams(ctx),
-                pr_number,
-                head,
-                %{publish_failures: publish_fails, budget: budget}
-              )
-
-            rounds <= budget ->
-              RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
-
-            true ->
-              ArchEscalation.escalate_rework(
-                Ctx.arch_seams(ctx),
-                pr_number,
-                head,
-                %{rounds: rounds, budget: budget}
-              )
-          end
+          rework_verdict(pr_number, head, producer_role, ctx, {budget, rounds, publish_fails})
         else
           # Unverifiable brake escalates instead of looping blind.
           {:error, reason} ->
@@ -132,6 +113,32 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # freins voisins : pas d'état en RAM, un compteur qu'un humain peut lire sur l'issue. Il se compte
   # par `count_comments_marked/4`, le même compteur que le rail conflit — un seul mécanisme.
   #
+  # DEUX COMPTEURS, UN SEUL BUDGET, ET L'ORDRE DECIDE. Les echecs de publication passent AVANT les
+  # rounds : un producteur qui n'arrive plus a publier ne sera pas aide par un rework de plus, et
+  # relancer sur le meme mode masquerait la vraie cause derriere un budget de rounds qui s'epuise.
+  defp rework_verdict(pr_number, head, producer_role, ctx, {budget, rounds, publish_fails}) do
+    cond do
+      publish_fails > budget ->
+        ArchEscalation.escalate_publish_failures(
+          Ctx.arch_seams(ctx),
+          pr_number,
+          head,
+          %{publish_failures: publish_fails, budget: budget}
+        )
+
+      rounds <= budget ->
+        RoleDispatch.dispatch(:rework, pr_number, head, producer_role, ctx)
+
+      true ->
+        ArchEscalation.escalate_rework(
+          Ctx.arch_seams(ctx),
+          pr_number,
+          head,
+          %{rounds: rounds, budget: budget}
+        )
+    end
+  end
+
   # ⚠ LE MARQUEUR EST POSÉ APRÈS UN SPAWN RÉEL, jamais avant. `dispatch_rework` rend
   # `{:skipped, :role_busy}` ou `{:skipped, :role_at_capacity}` sans rien lancer : marquer là
   # dépenserait un round que personne n'a joué, et le budget se viderait sur une file d'attente.
@@ -146,16 +153,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
                  Protocol.ci_rework_prefix(issue_n),
                  ctx.forge_opts
                ) do
-          if spent >= budget do
-            ArchEscalation.escalate_rework(
-              Ctx.arch_seams(ctx),
-              pr_number,
-              head,
-              %{ci_reworks: spent, budget: budget}
-            )
-          else
-            record_ci_rework(pr_number, head, issue_n, ctx, dispatch_rework(pr_number, head, ctx))
-          end
+          ci_rework_verdict(pr_number, head, issue_n, ctx, {budget, spent})
         else
           # Un frein invérifiable escalade, il ne boucle pas en aveugle — même posture que
           # `dispatch_rework`.
@@ -170,6 +168,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
       :error ->
         {:skipped, :not_fleet_branch}
+    end
+  end
+
+  defp ci_rework_verdict(pr_number, head, issue_n, ctx, {budget, spent}) do
+    if spent >= budget do
+      ArchEscalation.escalate_rework(
+        Ctx.arch_seams(ctx),
+        pr_number,
+        head,
+        %{ci_reworks: spent, budget: budget}
+      )
+    else
+      record_ci_rework(pr_number, head, issue_n, ctx, dispatch_rework(pr_number, head, ctx))
     end
   end
 

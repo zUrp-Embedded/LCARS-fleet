@@ -493,6 +493,19 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   end
 
   # Creates as the role and assigns the human owner.
+  # LE LABEL DE DESTINATION MONTE AVEC LA CREATION, jamais apres : un ticket workshop cree sans son
+  # label existe, le temps d'un tick, comme un ticket de projet — et le poller le routerait comme
+  # tel. Un label irresolvable fait donc echouer la creation au lieu de la laisser partir nue.
+  defp with_destination_label(@workshop_destination, issue_opts, forge, repo, author_opts) do
+    case forge.repo_label_id(repo, Labels.destination_workshop(), author_opts) do
+      {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
+      {:error, reason} -> {:error, {:destination_label_unresolved, inspect(reason)}}
+    end
+  end
+
+  defp with_destination_label(_destination, issue_opts, _forge, _repo, _author_opts),
+    do: {:ok, issue_opts}
+
   defp do_create_issue(forge, repo, title, brief, author_opts, destination) do
     # Human ownership is distinct from the producing role.
     case Fleet.Credentials.Human.current() do
@@ -502,16 +515,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
         # The destination label rides the CREATE so polling cannot route an unlabeled workshop issue as
         # project work.
         issue_opts_result =
-          case destination do
-            @workshop_destination ->
-              case forge.repo_label_id(repo, Labels.destination_workshop(), author_opts) do
-                {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
-                {:error, reason} -> {:error, {:destination_label_unresolved, inspect(reason)}}
-              end
-
-            _ ->
-              {:ok, issue_opts}
-          end
+          with_destination_label(destination, issue_opts, forge, repo, author_opts)
 
         with {:ok, issue_opts} <- issue_opts_result do
           case forge.create_issue(repo, title, brief, issue_opts) do

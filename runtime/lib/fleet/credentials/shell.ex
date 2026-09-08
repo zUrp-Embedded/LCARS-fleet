@@ -189,56 +189,52 @@ defmodule Fleet.Credentials.Shell do
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
-    case parse_run(args, opts) do
-      {:error, _} = err ->
-        err
+    with {:ok, timeout_ms, max_output_bytes, env, cd} <- parse_run(args, opts),
+         {:ok, exe, setsid} <- resolve_executables(cmd) do
+      launch(setsid, exe, args, {timeout_ms, max_output_bytes, env, cd})
+    end
+  end
 
-      {:ok, timeout_ms, max_output_bytes, env, cd} ->
-        case {System.find_executable(cmd), System.find_executable("setsid")} do
-          {nil, _} ->
-            {:error, {:exit, {:enoent, cmd}}}
+  # `setsid` est la precondition du groupe tue par construction (Linux : toujours present via
+  # util-linux). Absent = on NE PEUT PAS garantir l'invariant « tout le groupe meurt » -> fail-closed,
+  # plutot qu'un faux sentiment de securite avec un `System.cmd` nu.
+  defp resolve_executables(cmd) do
+    case {System.find_executable(cmd), System.find_executable("setsid")} do
+      {nil, _} -> {:error, {:exit, {:enoent, cmd}}}
+      {_exe, nil} -> {:error, {:exit, {:enoent, "setsid"}}}
+      {exe, setsid} -> {:ok, exe, setsid}
+    end
+  end
 
-          {_exe, nil} ->
-            # `setsid` est la precondition du groupe tue par construction (Linux : toujours present
-            # via util-linux). Absent = on NE PEUT PAS garantir l'invariant « tout le groupe meurt »
-            # -> fail-closed, plutot qu'un faux sentiment de securite avec un `System.cmd` nu.
-            {:error, {:exit, {:enoent, "setsid"}}}
+  # ⚠ L'ENVELOPPE RESTE — les deux etats de `setsid` et pourquoi la retirer casse hors du poste ou
+  # on l'a mesuree sont dans le `@moduledoc`.
+  #
+  # `-w` GARDE L'ENVELOPPE VIVANTE comme parent du vrai processus : sans lui elle fork-and-die, et
+  # l'`os_pid` du port ne pointe plus sur rien d'utile.
+  defp launch(setsid, exe, args, {timeout_ms, max_output_bytes, env, cd}) do
+    port_opts =
+      [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        :hide,
+        {:args, ["-w", exe | args]},
+        {:env, to_charlist_env(env)}
+      ]
+      |> maybe_put_cd(cd)
 
-          {exe, setsid} ->
-            # ⚠ L'ENVELOPPE RESTE — les deux etats de `setsid` et pourquoi la retirer casse hors du
-            # poste ou on l'a mesuree sont dans le `@moduledoc`.
-            #
-            # `-w` GARDE L'ENVELOPPE VIVANTE comme parent du vrai processus : sans lui elle
-            # fork-and-die, et l'`os_pid` du port ne pointe plus sur rien d'utile.
-            port_opts =
-              [
-                :binary,
-                :exit_status,
-                :stderr_to_stdout,
-                :hide,
-                {:args, ["-w", exe | args]},
-                {:env, to_charlist_env(env)}
-              ]
-              |> maybe_put_cd(cd)
+    with {:ok, port} <- safe_port_open(setsid, port_opts) do
+      # `Port.info(:os_pid)` returns `nil` if the port is ALREADY closed (an ultra-fast command
+      # finished between open and info) → no group to kill (the process is already gone); the
+      # {:data}/{:exit_status} messages are still in the mailbox and `collect` drains them. nil = no-kill.
+      os_pid = os_pid(port)
 
-            case safe_port_open(setsid, port_opts) do
-              {:error, _} = err ->
-                err
-
-              {:ok, port} ->
-                # `Port.info(:os_pid)` returns `nil` if the port is ALREADY closed (an ultra-fast command
-                # finished between open and info) → no group to kill (the process is already gone); the
-                # {:data}/{:exit_status} messages are still in the mailbox and `collect` drains them. nil = no-kill.
-                os_pid = os_pid(port)
-
-                # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
-                # dripping output never pushes the deadline back (wall, not idle-gap). The group to kill is
-                # resolved at KILL time by `kill_scope/1`, which covers both `setsid` states (6-031) — nothing
-                # here depends on when the wrapper forks.
-                deadline = System.monotonic_time(:millisecond) + timeout_ms
-                collect(port, os_pid, timeout_ms, deadline, [], 0, max_output_bytes)
-            end
-        end
+      # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
+      # dripping output never pushes the deadline back (wall, not idle-gap). The group to kill is
+      # resolved at KILL time by `kill_scope/1`, which covers both `setsid` states (6-031) — nothing
+      # here depends on when the wrapper forks.
+      deadline = System.monotonic_time(:millisecond) + timeout_ms
+      collect(port, os_pid, timeout_ms, deadline, [], 0, max_output_bytes)
     end
   end
 

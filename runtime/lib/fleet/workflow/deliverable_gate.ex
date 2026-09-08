@@ -153,30 +153,28 @@ defmodule Fleet.Workflow.DeliverableGate do
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
     case git(workspace, ["log", "--first-parent", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
-      {out, 0} ->
-        # Remove only the record terminator so empty identity fields remain rejectable.
-        case out do
-          "" ->
-            :ok
+      {out, 0} -> identity_verdict(out, allowed)
+      {out, rc} -> {:error, classify_git_error(out, rc)}
+    end
+  end
 
-          _ ->
-            emails =
-              out
-              |> String.replace_suffix("\n", "")
-              |> String.split("\n")
-              |> Enum.map(&String.trim/1)
+  # UNE PLAGE VIDE EST VALIDE — un livrable sans commit propre n'a aucune identite a refuser.
+  defp identity_verdict("", _allowed), do: :ok
 
-            allowed_set = MapSet.new(allowed)
+  defp identity_verdict(out, allowed) do
+    allowed_set = MapSet.new(allowed)
 
-            # Empty email is rejected and rendered readably in diagnostics.
-            case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
-              [] -> :ok
-              bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
-            end
-        end
+    emails =
+      out
+      # Remove only the record terminator so empty identity fields remain rejectable.
+      |> String.replace_suffix("\n", "")
+      |> String.split("\n")
+      |> Enum.map(&String.trim/1)
 
-      {out, rc} ->
-        {:error, classify_git_error(out, rc)}
+    # Empty email is rejected and rendered readably in diagnostics.
+    case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
+      [] -> :ok
+      bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
     end
   end
 

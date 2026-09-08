@@ -388,17 +388,23 @@ defmodule Fleet.Workflow.Git do
 
   def push(workspace, remote, refspecs) when is_list(refspecs) and refspecs != [] do
     with :ok <- validate_cli_arg(remote, :invalid_remote),
-         :ok <-
-           Enum.reduce_while(refspecs, :ok, fn r, _ ->
-             case validate_cli_arg(r, :invalid_refspec) do
-               :ok -> {:cont, :ok}
-               err -> {:halt, err}
-             end
-           end),
+         :ok <- validate_refspecs(refspecs),
          # DR-024: malformed forge credentials fail before a push attempt.
          {:ok, auth_env} <- Fleet.Credentials.ForgeAuth.git_env_result() do
       do_push(workspace, remote, refspecs, auth_env)
     end
+  end
+
+  # LE PREMIER REFSPEC FAUTIF ARRETE TOUT, et il l'arrete AVANT le push : une liste dont un seul
+  # element est malforme ne doit pas partir a moitie. C'est la meme regle qu'en dessous (un push,
+  # plusieurs refspecs, un verdict), appliquee un cran plus tot, a la validation.
+  defp validate_refspecs(refspecs) do
+    Enum.reduce_while(refspecs, :ok, fn r, _ ->
+      case validate_cli_arg(r, :invalid_refspec) do
+        :ok -> {:cont, :ok}
+        err -> {:halt, err}
+      end
+    end)
   end
 
   # Git parses positional args starting with `-` as options; reject them fail-closed.
@@ -502,22 +508,9 @@ defmodule Fleet.Workflow.Git do
       {:ok, expected} ->
         lease = "--force-with-lease=#{target}:#{expected}"
 
-        case run_push(workspace, remote, refspecs, [lease], auth_env) do
-          {:ok, {_out, 0}} ->
-            {:ok, true}
-
-          {:ok, {out, rc}} ->
-            # Distinguish a moved remote from an ordinary push failure.
-            if lease_stale?(out),
-              do: {:error, {:git_push_lease_stale, target, String.trim(out)}},
-              else: {:error, {:git_push_failed, rc, String.trim(out)}}
-
-          {:error, {:timeout, _ms}} ->
-            {:error, {:git_push_timeout, push_timeout_ms()}}
-
-          {:error, {:exit, reason}} ->
-            {:error, {:git_push_exit, reason}}
-        end
+        workspace
+        |> run_push(remote, refspecs, [lease], auth_env)
+        |> leased_push_verdict(target)
 
       :absent ->
         {:error, {:git_push_no_lease_basis, target}}
@@ -526,6 +519,23 @@ defmodule Fleet.Workflow.Git do
         {:error, {:git_push_no_lease_basis, {target, reason}}}
     end
   end
+
+  # LE BAIL PERIME N'EST PAS UN ECHEC DE PUSH ORDINAIRE : c'est « quelqu'un a bouge la ref sous
+  # nous », et l'appelant en haut du rail decide autre chose dans ce cas. Le distinguer ici est la
+  # seule facon de ne pas le noyer dans le `git_push_failed` generique.
+  defp leased_push_verdict({:ok, {_out, 0}}, _target), do: {:ok, true}
+
+  defp leased_push_verdict({:ok, {out, rc}}, target) do
+    if lease_stale?(out),
+      do: {:error, {:git_push_lease_stale, target, String.trim(out)}},
+      else: {:error, {:git_push_failed, rc, String.trim(out)}}
+  end
+
+  defp leased_push_verdict({:error, {:timeout, _ms}}, _target),
+    do: {:error, {:git_push_timeout, push_timeout_ms()}}
+
+  defp leased_push_verdict({:error, {:exit, reason}}, _target),
+    do: {:error, {:git_push_exit, reason}}
 
   # The remote-side target is the final refspec segment.
   defp target_of_refspec(refspec), do: refspec |> String.split(":") |> List.last()

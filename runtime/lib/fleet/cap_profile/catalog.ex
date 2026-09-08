@@ -486,20 +486,23 @@ defmodule Fleet.CapProfile.Catalog do
     # business `rubber-duck` overlay replaces the system's; declaring nothing is the point.
     dirs
     |> Enum.flat_map(&Path.wildcard(Path.join([&1, "modop", "*/profile.yaml"])))
-    |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
-      name = path |> Path.dirname() |> Path.basename()
+    |> Enum.reduce_while({:ok, %{}}, &snapshot_step/2)
+  end
 
-      cond do
-        Map.has_key?(acc, name) ->
-          {:cont, {:ok, acc}}
+  # PREMIER TROUVE GAGNE, et il gagne AVANT la lecture : un nom deja retenu ne fait meme pas ouvrir
+  # le fichier d'apres. Un overlay metier casse ne peut donc pas faire echouer un snapshot ou celui
+  # du systeme etait deja le vainqueur.
+  defp snapshot_step(path, {:ok, acc}) do
+    name = path |> Path.dirname() |> Path.basename()
 
-        true ->
-          case read_modop_yaml(path) do
-            {:ok, raw} -> {:cont, {:ok, Map.put(acc, name, raw)}}
-            {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
-          end
+    if Map.has_key?(acc, name) do
+      {:cont, {:ok, acc}}
+    else
+      case read_modop_yaml(path) do
+        {:ok, raw} -> {:cont, {:ok, Map.put(acc, name, raw)}}
+        {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
       end
-    end)
+    end
   end
 
   @doc """

@@ -353,39 +353,12 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # brief is enqueued, the system escalation exists → not a dead-end, re-wake at the next tick), but
       # the dispatch is NOT a silent success — it surfaces `{:error, {:wake_unreached, …}}` → the poller
       # counts it in `errors` (honest tally + err_streak/telemetry reflect the real unreachability).
-      case wake_recovery.(
-             pod_id,
-             fn -> maybe_spawn(spawner, false, profile, issue_id, spawn_opts) end,
-             wake_fun: fn p -> safe_wake(spawner, p) end
-           ) do
-        :ok ->
-          Logger.info(
-            "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx}"
-          )
-
-          {:ok, {:spawned, pod_id, role}}
-
-        {:error, reason} ->
-          # AUCUNE compensation : verrou garde — le pod EST dispatche, l'objet EST en vol — brief
-          # garde, pod garde. Seul le reveil a rate.
-          #
-          # ⚠ ET LA REPRISE NE VIENT PAS D'UN RE-WAKE : le dispatcher ne repasse pas tant que
-          # `lcars-in-flight` est pose, et aucun site de wake n'est periodique. Elle vient de la
-          # RECLAMATION D'ORPHELIN du poller, dont la regle de propriete est `@pulled_states` : un
-          # brief enfile mais jamais TIRE ne possede pas son verrou, le pull etant l'ACK durable que
-          # le reveil a atterri. Le verrou devient donc suspect, la grace court, il est reclame, et
-          # le dispatch peut reprendre.
-          #
-          # La nuance explique le DELAI — une grace, pas un tick — et dit ou regarder quand ca ne
-          # repart pas.
-          Logger.warning(
-            "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
-              "BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on next tick ; " <>
-              "tally = error, not silently dispatched)"
-          )
-
-          {:error, {:wake_unreached, pod_id, role, reason}}
-      end
+      wake_recovery.(
+        pod_id,
+        fn -> maybe_spawn(spawner, false, profile, issue_id, spawn_opts) end,
+        wake_fun: fn p -> safe_wake(spawner, p) end
+      )
+      |> wake_outcome(order, alive_before?)
     else
       {:error, _} = err ->
         # A POST-lock step failed → compensation (removal of the lock, else stuck forever).
@@ -482,6 +455,36 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:ok, _pid} -> {:ok, :spawned}
       {:error, _} = err -> err
     end
+  end
+
+  defp wake_outcome(:ok, %Order{} = order, alive_before?) do
+    Logger.info(
+      "StepDispatcher: #{disposition(alive_before?)} role=#{order.role} pod=#{order.pod_id} " <>
+        "#{order.log_ctx}"
+    )
+
+    {:ok, {:spawned, order.pod_id, order.role}}
+  end
+
+  # AUCUNE compensation : verrou garde — le pod EST dispatche, l'objet EST en vol — brief garde,
+  # pod garde. Seul le reveil a rate.
+  #
+  # ⚠ ET LA REPRISE NE VIENT PAS D'UN RE-WAKE : le dispatcher ne repasse pas tant que
+  # `lcars-in-flight` est pose, et aucun site de wake n'est periodique. Elle vient de la
+  # RECLAMATION D'ORPHELIN du poller, dont la regle de propriete est `@pulled_states` : un brief
+  # enfile mais jamais TIRE ne possede pas son verrou, le pull etant l'ACK durable que le reveil a
+  # atterri. Le verrou devient donc suspect, la grace court, il est reclame, et le dispatch peut
+  # reprendre.
+  #
+  # La nuance explique le DELAI — une grace, pas un tick — et dit ou regarder quand ca ne repart pas.
+  defp wake_outcome({:error, reason}, %Order{} = order, alive_before?) do
+    Logger.warning(
+      "StepDispatcher: #{disposition(alive_before?)} role=#{order.role} pod=#{order.pod_id} " <>
+        "#{order.log_ctx} BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on " <>
+        "next tick ; tally = error, not silently dispatched)"
+    )
+
+    {:error, {:wake_unreached, order.pod_id, order.role, reason}}
   end
 
   defp disposition(true = _alive_before?), do: "re-briefed (pod alive, context kept)"

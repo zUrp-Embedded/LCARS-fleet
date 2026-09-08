@@ -427,21 +427,32 @@ defmodule Fleet.Project.Onboard.Import do
     |> Path.join("**/CLAUDE.md")
     |> Path.wildcard(match_dot: true)
     |> Enum.reject(&(".git" in Path.split(Path.relative_to(&1, scratch))))
-    |> Enum.reduce_while(:ok, fn path, :ok ->
-      rel = Path.relative_to(path, scratch)
+    |> Enum.reduce_while(:ok, &scan_one_md(&1, &2, scratch))
+  end
 
-      case File.read(path) do
-        {:ok, content} ->
-          case Fleet.ReceptionFilter.scan(content) do
-            :clean -> {:cont, :ok}
-            {:match, label, _excerpt} -> {:halt, {:error, {:hostile_material, label, rel}}}
-          end
+  defp scan_one_md(path, :ok, scratch) do
+    rel = Path.relative_to(path, scratch)
 
-        {:error, reason} ->
-          # Unreadable instruction material in a fresh clone: refused, never waved through.
-          {:halt, {:error, {:unreadable_material, rel, reason}}}
-      end
-    end)
+    case File.read(path) do
+      {:ok, content} -> filter_verdict(Fleet.ReceptionFilter.scan(content), rel)
+      # Unreadable instruction material in a fresh clone: refused, never waved through.
+      {:error, reason} -> {:halt, {:error, {:unreadable_material, rel, reason}}}
+    end
+  end
+
+  defp filter_verdict(:clean, _rel), do: {:cont, :ok}
+
+  defp filter_verdict({:match, label, _excerpt}, rel),
+    do: {:halt, {:error, {:hostile_material, label, rel}}}
+
+  # Le renommage n'est tente QUE quand les deux cas au-dessus sont ecartes : ni deja `main`, ni une
+  # `origin/main` distante qui ferait de ce renommage une collision.
+  defp rename_to_main(scratch, head) do
+    case Shell.git(["-C", scratch, "branch", "-m", head, "main"], env: []) do
+      {:ok, {_, 0}} -> :ok
+      {:ok, {out, code}} -> {:error, {:branch_rename_failed, {code, String.slice(out, 0, 300)}}}
+      {:error, reason} -> {:error, {:branch_rename_failed, reason}}
+    end
   end
 
   # Three cases (plan F6): a half-migrated repo (default=master AND a remote main) is REFUSED —
@@ -460,25 +471,9 @@ defmodule Fleet.Project.Onboard.Import do
       remote_main? = "origin/main" in String.split(remotes_out, "\n", trim: true)
 
       cond do
-        head == "main" ->
-          :ok
-
-        remote_main? ->
-          {:error, {:branch_collision, {head, "main"}}}
-
-        true ->
-          case Shell.git(["-C", scratch, "branch", "-m", head, "main"],
-                 env: []
-               ) do
-            {:ok, {_, 0}} ->
-              :ok
-
-            {:ok, {out, code}} ->
-              {:error, {:branch_rename_failed, {code, String.slice(out, 0, 300)}}}
-
-            {:error, reason} ->
-              {:error, {:branch_rename_failed, reason}}
-          end
+        head == "main" -> :ok
+        remote_main? -> {:error, {:branch_collision, {head, "main"}}}
+        true -> rename_to_main(scratch, head)
       end
     else
       other -> {:error, {:default_branch_unreadable, other}}

@@ -851,15 +851,7 @@ defmodule Fleet.Pilot.Poller do
 
     with {:ok, issues} <- forge.list_open_issues(state.repo, scoped_opts),
          {:ok, pulls} <- forge.list_open_pulls(state.repo, scoped_opts) do
-      # BL-6-30 — a PARKED project (open `[lcars-parked]` marker issue, read in the SAME listing
-      # as everything else: zero added I/O, zero RAM state) closes the step rail for this repo.
-      if parked?(issues) do
-        parked_skip(state, repo_prior)
-      else
-        Process.delete({__MODULE__, :parked_logged, state.repo})
-        if mode == :tick, do: keep_architect(state)
-        step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods)
-      end
+      step_do_poll_parked_or_live(state, mode, started, {issues, pulls}, repo_prior, pods)
     else
       {:error, reason} ->
         # Log + telemetry only: the per-repo error state is NOT threaded up (cross-tick error
@@ -870,6 +862,18 @@ defmodule Fleet.Pilot.Poller do
         # → empty.
         tally = log_repo_list_error(state, reason, started)
         {tally, repo_prior, MapSet.new()}
+    end
+  end
+
+  # BL-6-30 — a PARKED project (open `[lcars-parked]` marker issue, read in the SAME listing as
+  # everything else: zero added I/O, zero RAM state) closes the step rail for this repo.
+  defp step_do_poll_parked_or_live(state, mode, started, {issues, pulls}, repo_prior, pods) do
+    if parked?(issues) do
+      parked_skip(state, repo_prior)
+    else
+      Process.delete({__MODULE__, :parked_logged, state.repo})
+      if mode == :tick, do: keep_architect(state)
+      step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods)
     end
   end
 

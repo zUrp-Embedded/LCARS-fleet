@@ -286,16 +286,20 @@ defmodule Fleet.Conflict.Patterns.Utils do
       nil
     else
       Enum.zip(ours, theirs)
-      |> Enum.reduce_while(nil, fn {o, t}, winner ->
-        case line_winner(o, t, winner) do
-          :error -> {:halt, :error}
-          w -> {:cont, w}
-        end
-      end)
+      |> Enum.reduce_while(nil, &line_step/2)
       |> case do
         :error -> nil
         winner -> winner
       end
+    end
+  end
+
+  # UNE SEULE LIGNE INORDONNABLE ARRETE TOUT LE FICHIER. `:error` remonte en `:halt` parce qu'un
+  # verdict rendu sur les lignes restantes serait un verdict rendu sur une comparaison incomplete.
+  defp line_step({o, t}, winner) do
+    case line_winner(o, t, winner) do
+      :error -> {:halt, :error}
+      w -> {:cont, w}
     end
   end
 
@@ -307,11 +311,12 @@ defmodule Fleet.Conflict.Patterns.Utils do
       :error
     else
       Enum.zip(o_tok, t_tok)
-      |> Enum.reduce_while(winner, fn {a, b}, w ->
-        if a == b, do: {:cont, w}, else: pair_winner(a, b, w)
-      end)
+      |> Enum.reduce_while(winner, &token_step/2)
     end
   end
+
+  # Deux jetons identiques n'elisent personne : ils laissent le gagnant courant intact.
+  defp token_step({a, b}, w), do: if(a == b, do: {:cont, w}, else: pair_winner(a, b, w))
 
   defp pair_winner(a, b, w) do
     case compare_tokens(a, b) do

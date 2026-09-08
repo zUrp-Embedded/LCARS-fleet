@@ -685,25 +685,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   # Rend `{racines_vues, nombre_de_fichiers_porteurs}` : le second est ce que la note affiche pour
   # qu'un lecteur sache sur quoi le verdict porte.
   defp scan_corpus_roots(root, motif, tronque \\ nil) do
-    Enum.reduce(corpus_files(root), {MapSet.new(), 0}, fn path, {acc, n} ->
-      case File.read(path) do
-        {:ok, body} ->
-          vus =
-            body
-            |> String.split("\n")
-            |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-            |> Enum.flat_map(&Regex.scan(motif, &1))
-            |> Enum.map(&hd/1)
-            |> then(fn l -> if tronque, do: Enum.map(l, tronque), else: l end)
-            |> MapSet.new()
-
-          {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
-
-        _ ->
-          {acc, n}
-      end
+    Enum.reduce(corpus_files(root), {MapSet.new(), 0}, fn path, acc ->
+      corpus_root_step(File.read(path), acc, motif, tronque)
     end)
   end
+
+  # UN FICHIER ILLISIBLE N'APPORTE RIEN ET N'ACCUSE RIEN. Le compte de fichiers porteurs, lui, ne
+  # monte que si CE fichier a vu quelque chose — c'est ce que la note affiche.
+  defp corpus_root_step({:ok, body}, {acc, n}, motif, tronque) do
+    vus =
+      body
+      |> String.split("\n")
+      |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+      |> Enum.flat_map(&Regex.scan(motif, &1))
+      |> Enum.map(&hd/1)
+      |> then(fn l -> if tronque, do: Enum.map(l, tronque), else: l end)
+      |> MapSet.new()
+
+    {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
+  end
+
+  defp corpus_root_step(_unreadable, acc, _motif, _tronque), do: acc
 
   # LA MEME LECTURE, DANS UN AUTRE FICHIER. `layout_literal/2` est le cas particulier de
   # `Fleet.Layout` ; celle-ci sert les autorites qui vivent ailleurs, avec leur propre forme.

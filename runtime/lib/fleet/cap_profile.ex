@@ -264,14 +264,19 @@ defmodule Fleet.CapProfile do
       when is_atom(loader) and is_binary(role) and is_list(extra_modops) do
     with {:ok, base} <- load_in(loader, role, root),
          :ok <- validate_extra_modops(base, extra_modops) do
-      active = default_modops(base) ++ extra_modops
+      compose_or_stamp(loader, base, default_modops(base) ++ extra_modops)
+    end
+  end
 
-      if Fleet.Opts.exported?(loader, :compose, 2) do
-        with {:ok, composed} <- loader.compose(base, active),
-             do: {:ok, %{composed | active_modops: active}}
-      else
-        {:ok, %{base | active_modops: active}}
-      end
+  # UN LOADER SANS `compose/2` REND SA BASE, ESTAMPILLEE QUAND MEME. L'ensemble actif est ce que
+  # `SPBuilder.compose/3` relira ; ne pas l'inscrire ferait qu'un stub de test resoudrait un profil
+  # dont personne ne peut plus dire quels modops etaient actifs.
+  defp compose_or_stamp(loader, base, active) do
+    if Fleet.Opts.exported?(loader, :compose, 2) do
+      with {:ok, composed} <- loader.compose(base, active),
+           do: {:ok, %{composed | active_modops: active}}
+    else
+      {:ok, %{base | active_modops: active}}
     end
   end
 
@@ -820,14 +825,7 @@ defmodule Fleet.CapProfile do
 
       to_login =
         Catalogue.installed_catalogues()
-        |> Enum.reduce(%{}, fn %{name: cat, root: root}, acc ->
-          dir = Path.join(root, Catalogue.rel(:cap_profiles))
-
-          case forge_roster(dir) do
-            {:ok, roster} -> Enum.reduce(roster, acc, &put_login(&2, &1.name, system_names, cat))
-            {:error, _} -> acc
-          end
-        end)
+        |> Enum.reduce(%{}, &catalogue_logins(&1, &2, system_names))
         # The system roles themselves, for a deployment whose business catalogues declare none.
         |> then(fn acc ->
           Enum.reduce(system_roster, acc, &put_login(&2, &1.name, system_names, "system"))
@@ -835,6 +833,17 @@ defmodule Fleet.CapProfile do
 
       {:ok,
        %{to_login: to_login, to_role: Map.new(to_login, fn {r, l} -> {String.downcase(l), r} end)}}
+    end
+  end
+
+  # UN CATALOGUE ILLISIBLE NE FAIT PAS TOMBER LA CARTE DES COMPTES : il n'apporte simplement aucun
+  # nom. Le roster systeme, lui, est lu a part et son echec remonte — c'est lui le plancher.
+  defp catalogue_logins(%{name: cat, root: root}, acc, system_names) do
+    dir = Path.join(root, Catalogue.rel(:cap_profiles))
+
+    case forge_roster(dir) do
+      {:ok, roster} -> Enum.reduce(roster, acc, &put_login(&2, &1.name, system_names, cat))
+      {:error, _} -> acc
     end
   end
 

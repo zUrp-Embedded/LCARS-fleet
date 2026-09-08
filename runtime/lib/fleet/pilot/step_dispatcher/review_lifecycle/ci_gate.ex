@@ -204,12 +204,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     with {:ok, runs} <- runs_fun.(ctx.repo, sha, [], ctx.forge_opts) do
       labels =
         runs
-        |> Enum.flat_map(fn run ->
-          case jobs_fun.(ctx.repo, Map.get(run, "id"), ctx.forge_opts) do
-            {:ok, jobs} -> jobs
-            _ -> []
-          end
-        end)
+        |> Enum.flat_map(&jobs_of_run(&1, jobs_fun, ctx))
         |> Enum.filter(&unclaimed?/1)
         |> Enum.flat_map(&Payload.labels/1)
         |> Enum.uniq()
@@ -248,6 +243,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   defp forge_actions,
     do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
 
+  # UNE COURSE ILLISIBLE N'APPORTE AUCUN JOB, elle n'annule pas les autres : le garde ne conclut
+  # que sur ce qu'il a pu lire, et la liste vide rend la main a l'attente bornee d'origine.
+  defp jobs_of_run(run, jobs_fun, %Ctx{} = ctx) do
+    case jobs_fun.(ctx.repo, Map.get(run, "id"), ctx.forge_opts) do
+      {:ok, jobs} -> jobs
+      _ -> []
+    end
+  end
+
   defp default_runs_for_sha(repo, sha, filters, opts),
     do: forge_actions().runs_for_sha(repo, sha, filters, opts)
 
@@ -258,20 +262,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     opts = Keyword.put(ctx.forge_opts, :ref, ref)
 
     Enum.reduce_while(@workflow_dirs, :no, fn dir, acc ->
-      case lister.(ctx.repo, dir, opts) do
-        {:ok, names} ->
-          if Enum.any?(names, &workflow_file?/1), do: {:halt, :yes}, else: {:cont, acc}
-
-        # The directory is absent — that is an ANSWER, and it is "not here".
-        {:error, :not_found} ->
-          {:cont, acc}
-
-        # Anything else is a forge we could not read. Unknown, and unknown is not absent.
-        {:error, _} ->
-          {:cont, :unknown}
-      end
+      workflow_dir_verdict(lister.(ctx.repo, dir, opts), acc)
     end)
   end
+
+  defp workflow_dir_verdict({:ok, names}, acc),
+    do: if(Enum.any?(names, &workflow_file?/1), do: {:halt, :yes}, else: {:cont, acc})
+
+  # The directory is absent — that is an ANSWER, and it is "not here".
+  defp workflow_dir_verdict({:error, :not_found}, acc), do: {:cont, acc}
+
+  # Anything else is a forge we could not read. Unknown, and unknown is not absent.
+  defp workflow_dir_verdict({:error, _}, _acc), do: {:cont, :unknown}
 
   defp workflow_file?(name) when is_binary(name),
     do: String.ends_with?(name, ".yml") or String.ends_with?(name, ".yaml")

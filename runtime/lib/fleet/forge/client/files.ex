@@ -56,10 +56,7 @@ defmodule Fleet.Forge.Client.Files do
              "/repos/#{encode_repo(repo)}/contents/#{encode_path(path)}?ref=#{URI.encode_www_form(ref)}"
            ) do
         {:ok, %{"content" => b64, "sha" => sha}} ->
-          case Base.decode64(b64, ignore: :whitespace) do
-            {:ok, content} -> {:ok, %{content: content, sha: sha}}
-            :error -> {:error, :decode_failed}
-          end
+          decoded_file(Base.decode64(b64, ignore: :whitespace), sha)
 
         {:error, {:http, 404, _}} ->
           {:error, :not_found}
@@ -69,6 +66,11 @@ defmodule Fleet.Forge.Client.Files do
       end
     end
   end
+
+  # UN CORPS ILLISIBLE N'EST PAS UN FICHIER ABSENT : `:decode_failed` se distingue du 404 juste
+  # au-dessus, parce que l'appelant qui ecrira ensuite a besoin du SHA, et qu'il ne l'a pas ici.
+  defp decoded_file({:ok, content}, sha), do: {:ok, %{content: content, sha: sha}}
+  defp decoded_file(:error, _sha), do: {:error, :decode_failed}
 
   @doc """
   Names of the entries at `path` for `:ref` — `{:error, :not_found}` when the directory is absent.
