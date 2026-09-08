@@ -17,7 +17,10 @@
 #     Elle détecte ce que la machine PERMET, demande ce que tu VEUX quand
 #     les deux sont possibles, annonce ce que ça prend, et délègue.
 #
-#       --workstation   LCARS s'installe DANS ce système (WSL2 seulement).
+#       --workstation   LCARS s'installe DANS ce système. WSL2, ou un Linux natif
+#                       DÉCLARÉ machine dédiée (LCARS_ALLOW_ANY_HOST=1) : le rail
+#                       possède /etc et /opt/lcars, il reprend ce qu'il a posé
+#                       mais ne restaure pas ce qu'il a modifié avant lui.
 #                       Modèle 3 zones : SOURCE (ce checkout) → INSTALL
 #                       (/opt/lcars/runtime, RO) → STATE (~/.lcars per-humain).
 #       --container           LCARS tourne dans un conteneur. Rien hors de ton

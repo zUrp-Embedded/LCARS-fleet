@@ -276,7 +276,7 @@ human     /home/<human>/.lcars                         0700  <human>:-          
 human     /home/<human>/.lcars/log                     0700  <human>:-           any
 human     /home/<human>/.lcars/fleet.env            0600  <human>:-           any
 human     /home/<human>/pods                           0700  <human>:-           any
-human     /home/<human>/.local/bin/claude              0755  <human>:-           any
+human:unset  /home/<human>/.local/bin/claude               0755  <human>:-        any
 
 # ─── L'ARBRE `~/.claude` — TROIS NATURES, TROIS TRAITS ──────────────────────────────────────────
 # Il etait entierement absent de cette table, et les trois lignes qui suivent ne se distinguent que

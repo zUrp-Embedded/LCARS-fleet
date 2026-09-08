@@ -128,6 +128,35 @@ setup() {
   [[ "$output" != *"pas de défaut sûr"* ]]
 }
 
+@test "GARDE CAPACITAIRE : sans user-namespaces, un substrat wsl est REFUSE et nomme WSL1" {
+  # ⚠ LE SEUL TEMOIN QUI TOUCHAIT CETTE GARDE LA NEUTRALISE, et c'est legitime : le decor du
+  # `setup` stubbe `unshare` a 0 pour declarer la premisse « des namespaces disponibles », sinon
+  # le temoin du bandeau rougirait sur la sonde au lieu de mesurer le bandeau (AppArmor refuse
+  # `unshare` aux binaires sans profil depuis Ubuntu 24.04). Consequence : la garde elle-meme
+  # n'etait jouee NULLE PART — elle pouvait disparaitre sans qu'une chaine rougisse. RP-09,
+  # « un mur, ou rien », que le chantier n'avait pas tenu sur son propre geste.
+  #
+  # Ici on stubbe dans l'autre sens : `unshare` qui ECHOUE, c'est-a-dire un WSL1. La porte doit
+  # refuser AVANT toute question, et nommer la sortie — `wsl --set-version`, la seule qui marche.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
+  chmod 0755 "$BINDIR/unshare"
+  run bash "$SRC" --substrate wsl --check < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"namespaces"* ]]
+  [[ "$output" == *"bwrap"* ]]
+  [[ "$output" == *"wsl --set-version"* ]]
+  # Et elle refuse AVANT le bilan : une machine qui ne peut pas porter de pod n'a pas a choisir.
+  [[ "$output" != *"Bilan"* ]] || { echo "la garde a laisse passer jusqu'au bilan"; return 1; }
+}
+
+@test "GARDE CAPACITAIRE : elle ne mord QUE sur wsl — un docker sans namespaces passe" {
+  # La contre-epreuve, sans quoi le temoin ci-dessus passerait aussi sur une garde qui refuse TOUT.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
+  chmod 0755 "$BINDIR/unshare"
+  run env LCARS_DOCKER=1 bash "$SRC" --substrate docker --check < /dev/null
+  [[ "$output" != *"wsl --set-version"* ]] || { echo "la garde WSL1 mord sur un substrat docker"; return 1; }
+}
+
 @test "--workstation hors WSL est REFUSE, et le refus donne la voie qui marche" {
   run env LCARS_DOCKER=1 bash "$SRC" --workstation < /dev/null
   [ "$status" -ne 0 ]
