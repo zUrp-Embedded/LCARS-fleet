@@ -1609,7 +1609,16 @@ defmodule Fleet.Pilot.PollerTest do
           loader: fn -> %{} end
         )
 
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      # Meme course que dans `pool_slot_test.exs` (2026-09-07) : `Process.alive?/1` ne ferme rien —
+      # le processus peut mourir entre la sonde et le `stop`, qui sort alors en `:noproc` DANS le
+      # on_exit, et le test passe est compte echoue. On attrape la sortie.
+      on_exit(fn ->
+        try do
+          GenServer.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
 
       gone =
         ExUnit.CaptureLog.capture_log(fn ->

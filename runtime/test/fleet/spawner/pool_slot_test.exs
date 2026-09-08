@@ -22,9 +22,19 @@ defmodule Fleet.Spawner.PoolSlotTest do
     {:ok, holders} = Agent.start_link(fn -> [] end)
 
     on_exit(fn ->
-      if Process.alive?(holders) do
+      # ⚠ `Process.alive?/1` NE FERME PAS LA COURSE, ET C'EST CE QU'ELLE PROMETTAIT. L'Agent est LIE
+      # au processus de test, qu'ExUnit fait mourir quand le test finit : il peut disparaitre ENTRE
+      # la sonde et l'appel qui suit, et `Agent.get/2` comme `Agent.stop/1` sortent alors en
+      # `:noproc` — dans le `on_exit`, donc le test est compte ECHOUE apres etre passe.
+      # Mesure du 2026-09-07 : rouge dans la suite complete (machine chargee), vert seul, MEME
+      # toolchain — un flake d'origine, pas une regression du bump. On ATTRAPE la sortie au lieu de
+      # la predire ; les porteurs sont tues tant qu'on peut encore les lire, et un Agent deja mort
+      # n'a de toute facon plus rien a arreter.
+      try do
         holders |> Agent.get(& &1) |> Enum.each(&Process.exit(&1, :kill))
         Agent.stop(holders)
+      catch
+        :exit, _ -> :ok
       end
     end)
 
