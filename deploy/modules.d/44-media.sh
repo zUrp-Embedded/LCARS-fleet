@@ -53,6 +53,31 @@ SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 NPM_BIN="${LCARS_NPM_BIN:-npm}"
 
 doc_dir() { echo "$MEDIA_ROOT/doc"; }
+# ⚠ LE TAMPON DE LA DOC — SANS LUI, CE MODULE REBÂTIT ET REPOSE À CHAQUE APPLY. Mesuré le
+# 2026-09-08 sur le banc 2005 : trois `provision apply` de suite, douze objets « POSÉ » stables,
+# dont `share/doc/index.html` dont le mtime CHANGE à chaque passage. Deux gestes non idempotents
+# l'un derrière l'autre : `npm ci` + `npm run build`, puis `poser_doc` qui remplace l'arbre ENTIER
+# (scaffold + promote). Le journal D1 du 2026-09-01 affirmait « apply sur état complet → 0
+# changement » et disait que c'était le plus fort des deux tests ; il ne passait plus, et rien ne
+# le rejouait.
+#
+# Le tampon vit À CÔTÉ de `doc/`, pas dedans : `prov_promote_dir` remplace le répertoire final, il
+# emporterait un tampon qui y serait posé. Même motif que `.helpers-revision` de `62`.
+doc_stamp() { echo "$MEDIA_ROOT/.doc-revision"; }
+# doc_a_jour -> 0 si la doc posée sort de CETTE révision, et qu'on peut l'affirmer
+#
+# ⚠ UN ARBRE MODIFIÉ NE COURT-CIRCUITE JAMAIS. `prov_source_rev` suffixe « +local » dès qu'un
+# fichier suivi diffère — mais le suffixe est le MÊME pour deux modifications différentes. Un
+# tampon « abc12345+local » ne dirait donc pas si le site a changé depuis le dernier build. Sur un
+# arbre sale on rebâtit, faute de pouvoir savoir ; sur un arbre propre — le banc, la production —
+# la comparaison est exacte.
+doc_a_jour() {
+  local rev; rev="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  [[ -n "$rev" && "$rev" != "inconnue" && "$rev" != *"+local" ]] || return 1
+  [[ -s "$(doc_dir)/index.html" ]] || return 1
+  [[ -r "$(doc_stamp)" ]] || return 1
+  [[ "$(head -n1 "$(doc_stamp)" | tr -d '[:space:]')" == "$rev" ]]
+}
 
 check() {
   local t src n
@@ -126,6 +151,12 @@ build_doc() {
     return 0
   fi
 
+  # LE COURT-CIRCUIT, AVANT `npm` : rebâtir ce qui est déjà posé pour cette révision coûte un
+  # `npm ci` + un build à chaque convergence, et fait mentir le compteur de changement.
+  if doc_a_jour; then
+    p_ok "doc du deck à jour ($(doc_dir), révision $(prov_source_rev)) — rien à rebâtir"
+    return 0
+  fi
   command -v "$NPM_BIN" >/dev/null 2>&1 \
     || { p_fail "npm absent — 16-node pose le précompilé épinglé ; joue-le d'abord"; verdict_apply; }
 
@@ -157,6 +188,12 @@ poser_doc() {
   cp -a "$SITE_SRC/dist/." "$partial/" \
     || { p_fail "doc non copiable ($SITE_SRC/dist → $(doc_dir))"; rm -rf "$partial"; verdict_apply; }
   prov_promote_dir "$partial" "$(doc_dir)" || verdict_apply   # journalise le nom FINAL
+  # Le tampon APRÈS la pose : il atteste ce qui est en place, jamais une intention. Une révision
+  # « inconnue » ou « +local » n'est pas écrite — un tampon qu'on ne pourra pas comparer ne dit rien.
+  local rev; rev="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  if [[ -n "$rev" && "$rev" != "inconnue" && "$rev" != *"+local" ]]; then
+    write_atomic "$(doc_stamp)" 0644 "$MEDIA_OWNER" <<<"$rev" || true
+  fi
   p_chg "doc du deck posée ($(doc_dir), base $SITE_BASE)"
 }
 

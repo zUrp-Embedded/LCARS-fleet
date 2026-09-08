@@ -99,6 +99,12 @@ dir       /opt/lcars/share                                  0755  root:root     
 dir       /opt/lcars/share/avatars                     0755  root:root           any
 dir       /opt/lcars/share/favicon                     0755  root:root           any
 dir       /opt/lcars/share/doc                         0755  root:root           any
+# ⚠ LE TAMPON DE LA DOC, ET IL EST « cond » : `44-media` ne l'ecrit QUE sur un arbre propre — une
+# revision « inconnue » (archive sans .git) ou « +local » (arbre modifie) ne se compare pas, donc
+# ne s'ecrit pas. Sans lui, ce module rebatissait et REPOSAIT la doc a chaque apply : mesure du
+# 2026-09-08, banc 2005, trois apply de suite et le mtime d'index.html qui change chaque fois.
+# A COTE de `doc/`, jamais dedans : `prov_promote_dir` remplace le repertoire final.
+anchor:cond /opt/lcars/share/.doc-revision             0644  root:root           any
 # ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
 # HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
 # du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait le

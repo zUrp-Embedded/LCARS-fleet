@@ -72,37 +72,6 @@ setup() {
 
 mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 
-# ─── DI-12 : L'INSTRUMENT DU FLAKE, PARCE QU'UN ROUGE MUET SE REJOUE A L'AVEUGLE ─────────────────
-#
-# Trois temoins de ce fichier — celui-ci mis a part, les trois marques `di12` ci-dessous — rougissent
-# sous `bats -j 8` sans que le code ait change (registre : work/beyond_#6/FLAKES.md, DI-12, ouvert le
-# 2026-09-04, jamais reproduit a la demande). Ils sont VERTS SEULS ; le rouge n'apparait qu'en
-# parallele, donc l'enquete a lieu DANS la passe qui rougit ou nulle part.
-#
-# ⚠ ET ILS N'IMPRIMAIENT RIEN. `[ "$status" -eq 0 ]` nu rend « failed » et le numero de ligne ;
-# `--print-output-on-failure` ajoute la sortie du dernier `run`, et RIEN sur l'etat du decor. Or la
-# seule piste restante de DI-12 porte precisement sur cet etat : un temoin qui LIT le repertoire du
-# tmpfiles pendant qu'un autre y a un `.prov.XXXXXX` en vol (le mktemp de `write_atomic`) verrait un
-# fichier de trop. Ce que ce diagnostic imprime — le contenu du conf ET le listing du repertoire —
-# est ce qui distingue cette hypothese de sa concurrente. Sans lui on ne peut que rejouer.
-#
-# Trois temoins instrumentes, pas deux : un flake a trois faces dont on n'eclaire que deux se
-# reproduira sur la troisieme, et l'enquete recommencera a froid.
-di12() {
-  {
-    echo "=== DI-12 (flake connu, cf. work/beyond_#6/FLAKES.md) : $* ==="
-    echo "--- statut : ${status-<aucun run>}"
-    echo "--- sortie :"; echo "${output-<aucun run>}"
-    echo "--- $LCARS_TMPFILES_CONF :"
-    if [ -e "$LCARS_TMPFILES_CONF" ]; then cat "$LCARS_TMPFILES_CONF"; else echo "<absent>"; fi
-    # LE LISTING EST L'INSTRUMENT, pas un ornement : un `.prov.XXXXXX` visible ici DEMONTRE
-    # l'hypothese du temporaire en vol ; son absence l'ECARTE et renvoie a l'autre piste.
-    echo "--- $(dirname "$LCARS_TMPFILES_CONF") :"; ls -la "$(dirname "$LCARS_TMPFILES_CONF")" 2>&1
-    echo "--- passes bats concurrentes : $(pgrep -c -x bats 2>/dev/null || echo '?')"
-  } >&2
-  return 1
-}
-
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   run head -6 "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
   [[ "$output" == *"SOURCE:"* ]]
@@ -210,16 +179,64 @@ di12() {
   [ "$output" = "$(PROV_SUBSTRATE=linux bash -c "source '$MOD' >/dev/null 2>&1; prov_runtime_dirs | wc -l" | tr -d ' ')" ]
 }
 
+# ─── DI-12 : LE FLAKE SE DÉNONCE, À DÉFAUT DE SE LAISSER REPRODUIRE ─────────────────────────────
+#
+# ⚠ TROIS TÉMOINS DE CE FICHIER ROUGISSENT ~1 FOIS PAR PASSE COMPLÈTE SOUS `bats -j 8`, tous sur le
+# tmpfiles, tous verts SEULS (chantier deploy-independance, DI-12 : rouvert le 2026-09-04, jamais
+# corrigé). Ce qui a déjà été éliminé, par mesure, pour que personne ne repaie l'enquête :
+#   · `LCARS_TMPFILES_CONF` est sous `$BATS_TEST_TMPDIR` — décor isolé par témoin ;
+#   · `write_atomic` fait son `mktemp "$dir/.prov.XXXXXX"` dans le répertoire de DESTINATION, avec
+#     suffixe aléatoire — pas de collision de nom entre deux témoins ;
+#   · `forge-gestures.sh builtin-human` est PUREMENT LOCAL (il imprime `$BUILTIN_HUMAN`) — aucun
+#     réseau, donc la charge ne peut pas le faire échouer par délai (mesuré le 2026-09-08) ;
+#   · `builtin-human` 60/60 et `id -u` 400/400 identiques en parallèle (chantier).
+# Et 16 passes de plus le 2026-09-08 — 10 du fichier, 6 du répertoire, sous la charge d'un gate
+# complet : toutes vertes. Le flake existe, il ne se commande pas.
+#
+# ⚠ D'OÙ CE HELPER PLUTÔT QU'UNE ENQUÊTE DE PLUS. On ne force pas une course à se produire ; on fait
+# qu'elle LIVRE son diagnostic le jour où elle arrive. Les témoins concernés l'appellent avant
+# d'échouer : le prochain rouge portera l'état au lieu d'ouvrir une nouvelle série de dix passes.
+# Registre : `work/beyond_#6/FLAKES.md`.
+# ⚠ ET IL N'IMPRIMAIT NI `$status` NI `$output` — L'ÉTAT DU DÉCOR SANS CE QUE LE TÉMOIN EN A LU.
+# `[ "$status" -eq 0 ]` nu rend « failed » et un numéro de ligne ; `--print-output-on-failure`
+# ajoute la sortie du dernier `run` mais RIEN du décor. Les deux moitiés sont nécessaires : le
+# décor dit ce qu'il y AVAIT, la sortie dit ce que le module en a FAIT, et c'est leur écart qui
+# désigne la course. Relecture hostile du 2026-09-08.
+#
+# ⚠ ET TROIS TÉMOINS, PAS DEUX. Le troisième — « le compteur de changement VOIT l'écriture » — est
+# la face mesurée sur la porte COMPLÈTE (598/1178), celle qu'on ne rejoue pas à la demande, et il
+# n'était pas instrumenté. Un flake à trois faces dont on n'éclaire que deux se reproduit sur la
+# troisième, et l'enquête recommence à froid.
+di12_etat() { # <pourquoi> — imprime ce que le témoin VOYAIT, et REND 1 : il remplace l'assertion
+  {
+    echo "── DI-12 : état au moment du rouge — $* ──────────────────────"
+    echo "  statut      : ${status-<aucun run>}"
+    echo "  sortie      :"; printf '%s\n' "${output-<aucun run>}" | sed 's/^/    | /'
+    echo "  conf        : $LCARS_TMPFILES_CONF"
+    echo "  existe      : $([[ -f "$LCARS_TMPFILES_CONF" ]] && echo oui || echo NON)"
+    [[ -f "$LCARS_TMPFILES_CONF" ]] && { echo "  contenu     :"; sed 's/^/    | /' "$LCARS_TMPFILES_CONF"; }
+    echo "  humain      : $(PROV_SUBSTRATE=linux bash -c "source '$MOD' >/dev/null 2>&1; prov_console_human" 2>&1)"
+    echo "  table       :"; PROV_SUBSTRATE=linux bash -c "source '$MOD' >/dev/null 2>&1; prov_runtime_dirs" 2>&1 | sed 's/^/    | /'
+    # LE LISTING EST L'INSTRUMENT, pas un ornement : un `.prov.XXXXXX` visible ici DÉMONTRE
+    # l'hypothèse du temporaire en vol ; son absence l'ÉCARTE et renvoie à l'autre piste.
+    echo "  voisins     :"; ls -la "$(dirname "$LCARS_TMPFILES_CONF")" 2>&1 | sed 's/^/    | /'
+    echo "  passes bats : $(pgrep -c -x bats 2>/dev/null || echo '?')"
+    echo "  charge      : $(uptime | sed 's/.*load average: //')"
+    echo "──────────────────────────────────────────────────────────────"
+  } >&2
+  return 1
+}
+
 @test "apply pose la declaration, et check la voit" {
-  # di12 : instrumente (1/3) — voir le bloc DI-12 en tete de fichier.
+  # di12_etat : instrumente (1/3) — voir le bloc DI-12 en tete de fichier.
   PROV_SUBSTRATE=linux mod 'apply_tmpfiles'
-  [ "$status" -eq 0 ] || di12 "apply_tmpfiles a rendu $status"
-  [ -f "$LCARS_TMPFILES_CONF" ] || di12 "apply_tmpfiles n'a pas laisse le fichier"
-  [[ "$(stat -c %a "$LCARS_TMPFILES_CONF")" == "644" ]] || di12 "mode $(stat -c %a "$LCARS_TMPFILES_CONF"), attendu 644"
+  [ "$status" -eq 0 ] || di12_etat "apply_tmpfiles a rendu $status"
+  [ -f "$LCARS_TMPFILES_CONF" ] || di12_etat "apply_tmpfiles n'a pas laisse le fichier"
+  [[ "$(stat -c %a "$LCARS_TMPFILES_CONF")" == "644" ]] || di12_etat "mode $(stat -c %a "$LCARS_TMPFILES_CONF"), attendu 644"
 
   PROV_SUBSTRATE=linux mod 'check_tmpfiles'
-  [ "$status" -eq 0 ] || di12 "check_tmpfiles a rendu $status"
-  [[ "$output" == *"OK"* ]] || di12 "check_tmpfiles ne dit pas OK sur sa propre pose"
+  [ "$status" -eq 0 ] || di12_etat "check_tmpfiles a rendu $status"
+  [[ "$output" == *"OK"* ]] || di12_etat "check_tmpfiles ne dit pas OK sur sa propre pose"
 }
 
 @test "declaration ABSENTE = drift, et le drift dit la CONSEQUENCE (la fleet ne demarrera pas)" {
@@ -233,11 +250,11 @@ di12() {
 }
 
 @test "declaration PERIMEE = drift — un contenu qui ne suit plus la table ment au boot" {
-  # di12 : instrumente (2/3) — voir le bloc DI-12 en tete de fichier.
+  # di12_etat : instrumente (2/3) — voir le bloc DI-12 en tete de fichier.
   printf 'd /run/quelque-part-dautre 0755 root root -\n' > "$LCARS_TMPFILES_CONF"
   PROV_SUBSTRATE=linux mod 'check_tmpfiles'
-  [ "$status" -eq 0 ] || di12 "check_tmpfiles a rendu $status sur une declaration perimee"
-  [[ "$output" == *"ne correspond plus"* ]] || di12 "le drift n'est pas nomme « ne correspond plus »"
+  [ "$status" -eq 0 ] || di12_etat "check_tmpfiles a rendu $status sur une declaration perimee"
+  [[ "$output" == *"ne correspond plus"* ]] || di12_etat "le drift n'est pas nomme « ne correspond plus »"
 }
 
 @test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
@@ -274,11 +291,11 @@ di12() {
   # `printf … | write_atomic` : le dernier element d'un pipeline est un sous-shell, `PROV_CHANGED`
   # y etait incremente puis perdu. Le fichier etait ecrit, l'apply disait « rien change ». Le mur
   # I1bis (idiom_walls.bats) interdit la forme ; ce temoin pinne le compteur.
-  # di12 : instrumente (3/3) — voir le bloc DI-12 en tete de fichier. C'est la face du flake
+  # di12_etat : instrumente (3/3) — voir le bloc DI-12 en tete de fichier. C'est la face du flake
   # mesuree sur la porte COMPLETE (598/1178), celle qu'on ne rejoue pas a la demande.
   PROV_SUBSTRATE=linux mod 'PROV_CHANGED=0; apply_tmpfiles; echo "changed=$PROV_CHANGED"'
-  [ "$status" -eq 0 ] || di12 "apply_tmpfiles a rendu $status"
-  [[ "$output" == *"changed=1"* ]] || di12 "le compteur ne rapporte pas l'ecriture"
+  [ "$status" -eq 0 ] || di12_etat "apply_tmpfiles a rendu $status"
+  [[ "$output" == *"changed=1"* ]] || di12_etat "le compteur ne rapporte pas l'ecriture"
 }
 
 # ─── LOT 14 : SUR DOCKER, LE MODULE MESURE CE QUE L'IMAGE POSE — ET RIEN D'AUTRE ────────────────
