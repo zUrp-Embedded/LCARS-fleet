@@ -47,6 +47,34 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
   require Logger
 
+  defmodule Seal do
+    @moduledoc """
+    Le SUJET du sceau : de quelle PR, de quel ticket et pour quel producteur il s'agit, plus les
+    deux jeux d'options qui le suivent partout.
+
+    Ces sept valeurs voyageaient en parametres positionnels a travers `seal_with_method`, `do_seal`
+    et `converge_postconditions` — neuf a dix arguments chacune. ⚠ ET DEUX D'ENTRE ELLES SONT DES
+    ENTIERS VOISINS : `pr_number` et `issue_n`. Les intervertir compile, passe les types, et ferme
+    le mauvais ticket sur une brique fusionnee. Nommes, l'inversion ne se compile plus.
+
+    `forge_opts` et `opts` ne fusionnent PAS : le premier est ce qui part a la forge (base_url,
+    jeton), le second ce que l'appelant a decide du sceau (branche de base, racines injectees). Les
+    confondre ferait partir des reglages de dispatch dans une requete HTTP.
+    """
+    @enforce_keys [:forge, :repo, :pr_number, :issue_n, :producer, :forge_opts, :opts]
+    defstruct @enforce_keys
+
+    @type t :: %__MODULE__{
+            forge: module(),
+            repo: String.t(),
+            pr_number: integer(),
+            issue_n: integer(),
+            producer: String.t(),
+            forge_opts: keyword(),
+            opts: keyword()
+          }
+  end
+
   @doc "The decision rail's role. Re-export of the single authority `Fleet.Project.Roles.gatekeeper_role/0`."
   @spec gatekeeper_role() :: String.t()
   defdelegate gatekeeper_role(), to: Fleet.Project.Roles
@@ -159,13 +187,15 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
           {:ok, merge_opts} ->
             seal_with_method(
-              forge,
-              repo,
-              pr_number,
-              issue_n,
-              producer,
-              forge_opts,
-              opts,
+              %Seal{
+                forge: forge,
+                repo: repo,
+                pr_number: pr_number,
+                issue_n: issue_n,
+                producer: producer,
+                forge_opts: forge_opts,
+                opts: opts
+              },
               merge_opts,
               method
             )
@@ -173,17 +203,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
     end
   end
 
-  defp seal_with_method(
-         forge,
-         repo,
-         pr_number,
-         issue_n,
-         producer,
-         forge_opts,
-         opts,
-         merge_opts,
-         method
-       ) do
+  defp seal_with_method(%Seal{} = seal, merge_opts, method) do
+    %Seal{forge: forge, repo: repo, pr_number: pr_number, issue_n: issue_n} = seal
+    %Seal{forge_opts: forge_opts, opts: opts} = seal
     # PROVENANCE WALL (Phase 2 of the verifier brief) — SYSTEMATIC, card-independent
     # (a zero-judge card still passes here: the mechanical floor is not the card's to
     # disarm). The deliverable's triplet must be COHERENT before the merge; an ABSENT
@@ -204,18 +226,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
         # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
         # TRAVELS DOWN past the merge: the note is only posted once the merge is REAL, cf.
         # `note_wall_not_run/5`.
-        do_seal(
-          forge,
-          repo,
-          pr_number,
-          issue_n,
-          producer,
-          forge_opts,
-          opts,
-          merge_opts,
-          wall,
-          method
-        )
+        do_seal(seal, merge_opts, wall, method)
     end
   end
 
@@ -241,18 +252,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
     )
   end
 
-  defp do_seal(
-         forge,
-         repo,
-         pr_number,
-         issue_n,
-         producer,
-         forge_opts,
-         opts,
-         merge_opts,
-         wall,
-         method
-       ) do
+  defp do_seal(%Seal{} = seal, merge_opts, wall, method) do
+    %Seal{forge: forge, repo: repo, pr_number: pr_number, issue_n: issue_n} = seal
+    %Seal{producer: producer, forge_opts: forge_opts} = seal
     # Marker vocabulary = ForgeProtocol (build+parse co-located — the parse side resolves the
     # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
@@ -311,17 +313,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
     after_merge = fn ->
       note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
 
-      converge_postconditions(
-        forge,
-        repo,
-        pr_number,
-        issue_n,
-        body,
-        signature,
-        forge_opts,
-        opts,
-        producer
-      )
+      converge_postconditions(seal, body, signature)
     end
 
     case do_merge(forge, repo, pr_number, merge_opts, method) do
@@ -355,17 +347,10 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # The whole POST-merge queue — seal comment, stage/merged, explicit close, worktree sync —
   # in ONE place, reached from the two proofs of a done merge: the nominal `:ok` of the POST,
   # and the server readback after an ambiguous error. Nothing here can un-merge anything.
-  defp converge_postconditions(
-         forge,
-         repo,
-         pr_number,
-         issue_n,
-         body,
-         signature,
-         forge_opts,
-         opts,
-         producer
-       ) do
+  defp converge_postconditions(%Seal{} = seal, body, signature) do
+    %Seal{forge: forge, repo: repo, pr_number: pr_number, issue_n: issue_n} = seal
+    %Seal{producer: producer, forge_opts: forge_opts, opts: opts} = seal
+
     # ⚖ LE JETON DU RAIL DÉCISION SE RÉSOUT ICI, ET PAS PLUS TÔT. Le merge est fait — cette moitié
     # du sceau est la PROMOTION, elle appartient au gatekeeper, et elle est la seule à avoir besoin
     # de lui. Le résoudre en tête aurait fait dépendre la TENTATIVE de merge d'un jeton qui ne la

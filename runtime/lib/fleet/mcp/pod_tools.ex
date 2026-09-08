@@ -1356,18 +1356,19 @@ defmodule Fleet.MCP.PodTools do
           _ -> nil
         end
 
-      case Delegation.Issues.create_issue(
-             title,
-             brief,
-             state,
-             brief_pointer(args),
-             summary,
-             args["supersedes"],
-             args["destination"],
-             args["depends_on"],
-             args["lot"],
-             args["criteria"]
-           ) do
+      req = %Delegation.Issues.Request{
+        title: title,
+        brief: brief,
+        brief_pointer: brief_pointer(args),
+        summary: summary,
+        supersedes: args["supersedes"],
+        destination: args["destination"],
+        depends_on: args["depends_on"],
+        lot: args["lot"],
+        criteria: args["criteria"]
+      }
+
+      case Delegation.Issues.create_issue(req, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end

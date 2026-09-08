@@ -33,6 +33,47 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # code path while the description says otherwise.
   @workshop_destination Labels.destination_workshop_token()
 
+  defmodule Request do
+    @moduledoc """
+    LA DEMANDE DE DELEGATION, telle que l'architecte l'ecrit : les neuf champs de l'outil MCP
+    `delegate_implementation`, ni plus ni moins.
+
+    Ils voyageaient en dix parametres positionnels dont sept optionnels a defaut `nil`. ⚠ SIX
+    D'ENTRE EUX SONT DE TYPES COMPATIBLES — `summary`, `destination`, `lot`, `criteria` sont des
+    chaines ou `nil` — donc en intervertir deux compile, passe les types, et cree un ticket dont le
+    resume est la destination. Le handler MCP les lit deja par leur nom dans `args` ; ils le gardent.
+
+    Pas d'`@enforce_keys` au-dela des deux obligatoires : les sept autres SONT optionnels dans le
+    schema de l'outil, et leur `nil` est une reponse, pas un oubli.
+    """
+    @enforce_keys [:title, :brief]
+    defstruct [
+      :title,
+      :brief,
+      :brief_pointer,
+      :summary,
+      :supersedes,
+      :destination,
+      :depends_on,
+      :lot,
+      :criteria
+    ]
+
+    @type t :: %__MODULE__{
+            title: String.t(),
+            brief: String.t(),
+            # `{ref, sha}` de l'ordre deja materialise par l'appelant, ou `nil`.
+            brief_pointer: {String.t(), String.t()} | nil,
+            summary: String.t() | nil,
+            # Le NUMERO du ticket que celui-ci remplace (l'ancien est retire par le systeme).
+            supersedes: integer() | nil,
+            destination: String.t() | nil,
+            depends_on: [integer()] | nil,
+            lot: String.t() | nil,
+            criteria: String.t() | nil
+          }
+  end
+
   @doc """
   Places a forge issue ready for the poller — architect gate included.
 
@@ -49,32 +90,20 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge),
   `{:lot_unpublishable, name, reason}` (a lot was named and could not be published).
   """
-  @spec create_issue(
-          String.t(),
-          String.t(),
-          map(),
-          {String.t(), String.t()} | nil,
-          String.t() | nil,
-          integer() | nil,
-          String.t() | nil,
-          [integer()] | nil,
-          String.t() | nil,
-          String.t() | nil
-        ) ::
-          {:ok, map()} | {:error, term()}
-  def create_issue(
-        title,
-        brief,
-        state,
-        brief_pointer \\ nil,
-        summary \\ nil,
-        supersedes \\ nil,
-        destination \\ nil,
-        depends_on \\ nil,
-        lot \\ nil,
-        criteria \\ nil
-      )
+
+  @spec create_issue(Request.t(), map()) :: {:ok, map()} | {:error, term()}
+  def create_issue(%Request{title: title, brief: brief} = req, state)
       when is_binary(title) and is_binary(brief) do
+    %Request{
+      brief_pointer: brief_pointer,
+      summary: summary,
+      supersedes: supersedes,
+      destination: destination,
+      depends_on: depends_on,
+      lot: lot,
+      criteria: criteria
+    } = req
+
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
     # gate (the pod's spawn binding): the arch has "the project", it never names
     # a repo over the wire (no param to refuse = no leak that other repos exist). The arch then
@@ -183,12 +212,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
              create_and_finish(
                forge,
                repo,
-               title,
-               full_body,
+               {title, full_body},
                identity,
-               destination,
-               depends_on,
-               supersedes,
+               %{destination: destination, depends_on: depends_on, supersedes: supersedes},
                target_state
              ) do
         {:ok, with_dedup_unverified(created, dedup)}
@@ -196,19 +222,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # Split out of `create_issue/10` so the lot's `with` stays readable: the creation and everything
+  # Split out of `create_issue/2` so the lot's `with` stays readable: the creation and everything
   # the forge owes the ticket afterwards (dependency edges, supersede retirement).
-  defp create_and_finish(
-         forge,
-         repo,
-         title,
-         full_body,
-         identity,
-         destination,
-         depends_on,
-         supersedes,
-         target_state
-       ) do
+  defp create_and_finish(forge, repo, {title, full_body}, identity, routing, target_state) do
+    %{destination: destination, depends_on: depends_on, supersedes: supersedes} = routing
+
     case do_create_issue(forge, repo, title, full_body, [token: identity.token], destination) do
       {:ok, result} ->
         # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge

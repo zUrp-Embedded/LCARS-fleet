@@ -211,11 +211,9 @@ defmodule Fleet.Pilot.StepDispatcher do
           case BriefBuilder.build_brief(
                  profile,
                  role,
-                 forge,
-                 repo,
+                 %BriefBuilder.Access{forge: forge, repo: repo, forge_opts: forge_opts},
                  number,
                  issue,
-                 forge_opts,
                  route,
                  step_spec
                ) do
@@ -255,14 +253,17 @@ defmodule Fleet.Pilot.StepDispatcher do
                   wake_recovery:
                     Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
                 },
-                pod_id,
-                role,
-                profile,
-                brief,
-                spawn_opts,
-                number,
-                number,
-                log_ctx
+                %Spawn.Order{
+                  pod_id: pod_id,
+                  role: role,
+                  profile: profile,
+                  brief: brief,
+                  spawn_opts: spawn_opts,
+                  # Rail producteur : l'objet verrouille EST le ticket enfile.
+                  lock_target: number,
+                  issue_number: number,
+                  log_ctx: log_ctx
+                }
               )
 
             # Refuse criterion-less judge; retry without taking a lock.

@@ -71,6 +71,51 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           }
   end
 
+  defmodule Order do
+    @moduledoc """
+    L'ORDRE a dispatcher : ce qui decrit le travail, la ou `Seams` decrit le monde.
+
+    Jumelle de `Seams`, et pour la meme raison. Les huit champs voyageaient en parametres
+    positionnels a travers trois fonctions du rail — `spawn_step`, `locked_spawn_step`,
+    `locked_spawn_step_run` — soit neuf a dix arguments chacune. Un appelant qui intervertit deux
+    entiers voisins (`lock_target` et `issue_number` sont tous deux des numeros de la forge)
+    compile, passe les types, et verrouille le mauvais objet.
+
+    `@enforce_keys` sur les huit : un ordre incomplet ne se construit pas.
+    """
+    @enforce_keys [
+      :pod_id,
+      :role,
+      :profile,
+      :brief,
+      :spawn_opts,
+      :lock_target,
+      :issue_number,
+      :log_ctx
+    ]
+    defstruct @enforce_keys
+
+    @type t :: %__MODULE__{
+            # Le pod vise (`issue-<n>-<role>` ou la forme projet).
+            pod_id: String.t(),
+            # Le role dispatche.
+            role: String.t(),
+            # Son cap-profile resolu.
+            profile: Fleet.CapProfile.t(),
+            # Le TEXTE de l'ordre a l'entree ; il devient le POINTEUR apres materialisation.
+            brief: String.t(),
+            # Les opts de spawn (dont `:brief_kind`, `:ops_root`, et l'ordre lui-meme).
+            spawn_opts: keyword(),
+            # ⚠ L'OBJET VERROUILLE — numero d'issue OU de PR selon le rail. Distinct de
+            # `issue_number` : sur le rail de revue, on verrouille la PR et on enfile sur l'issue.
+            lock_target: integer(),
+            # Le numero d'issue, pour l'`issue_id` ET l'enfilement.
+            issue_number: integer(),
+            # Le contexte de log de l'appelant.
+            log_ctx: String.t()
+          }
+  end
+
   # ============================================================
   # Cluster H — spawn leaf (SINGLE-AUTHORITY)
   # ============================================================
@@ -83,34 +128,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   NEVER a living re-brief). `lock_target` = the locked object (issue number | PR number);
   `issue_number` = the issue number for the `issue_id` AND the enqueue; `log_ctx` = caller log context.
   """
-  @spec spawn_step(
-          Seams.t(),
-          String.t(),
-          String.t(),
-          Fleet.CapProfile.t(),
-          String.t(),
-          keyword(),
-          integer(),
-          integer(),
-          String.t()
-        ) ::
+  @spec spawn_step(Seams.t(), Order.t()) ::
           {:ok, {:spawned, String.t(), String.t()}}
           | {:skipped, :role_at_capacity}
           | {:error, term()}
-  def spawn_step(
-        %Seams{} = seams,
-        pod_id,
-        role,
-        profile,
-        brief,
-        spawn_opts,
-        lock_target,
-        issue_number,
-        log_ctx
-      ) do
+  def spawn_step(%Seams{} = seams, %Order{} = order) do
     %Seams{spawner: spawner} = seams
+    %Order{pod_id: pod_id, role: role, profile: profile, spawn_opts: spawn_opts} = order
 
-    issue_id = Fleet.Pilot.IssueId.compose(issue_number)
+    issue_id = Fleet.Pilot.IssueId.compose(order.issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
     # ⚠ PRE-VOL DE CAPACITE AVANT LE VERROU FORGE. Le mur qui refuse vraiment est DANS le spawn,
@@ -127,22 +153,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # `not alive_before?` is load-bearing: re-briefing a LIVE pipe pod starts no child, so gating it
     # at saturation would starve the very pipe holding the seat.
     if alive_before? or has_free_slot?(spawner, role, profile, spawn_opts) do
-      locked_spawn_step(
-        seams,
-        pod_id,
-        role,
-        profile,
-        brief,
-        spawn_opts,
-        lock_target,
-        {issue_id, issue_number},
-        alive_before?,
-        log_ctx
-      )
+      locked_spawn_step(seams, order, issue_id, alive_before?)
     else
       Logger.info(
         "StepDispatcher: role bucket FULL (max_pods_per_role) → defer role=#{role} " <>
-          "pod=#{pod_id} #{log_ctx} (no lock taken; re-dispatch when a seat frees)"
+          "pod=#{pod_id} #{order.log_ctx} (no lock taken; re-dispatch when a seat frees)"
       )
 
       {:skipped, :role_at_capacity}
@@ -150,18 +165,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # The lock→spawn→enqueue→wake sequence + compensation, reached only past the pre-flight gates.
-  defp locked_spawn_step(
-         %Seams{repo: repo} = seams,
-         pod_id,
-         role,
-         profile,
-         brief,
-         spawn_opts,
-         lock_target,
-         {issue_id, issue_number},
-         alive_before?,
-         log_ctx
-       ) do
+  defp locked_spawn_step(%Seams{repo: repo} = seams, %Order{} = order, issue_id, alive_before?) do
+    %Order{role: role, brief: brief, spawn_opts: spawn_opts, issue_number: issue_number} = order
     # Brief PHYSIQUE : materialise UNE fois avant le spawn, le pointeur partant a la fois dans les
     # opts de spawn et dans l'enfilement.
     #
@@ -210,15 +215,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
         locked_spawn_step_run(
           seams,
-          pod_id,
-          role,
-          profile,
-          brief,
-          spawn_opts,
-          lock_target,
-          {issue_id, issue_number},
-          alive_before?,
-          log_ctx
+          %Order{order | brief: brief, spawn_opts: spawn_opts},
+          issue_id,
+          alive_before?
         )
     end
   end
@@ -327,16 +326,21 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
            forge_opts: forge_opts,
            wake_recovery: wake_recovery
          },
-         pod_id,
-         role,
-         profile,
-         brief,
-         spawn_opts,
-         lock_target,
-         {issue_id, issue_number},
-         alive_before?,
-         log_ctx
+         %Order{} = order,
+         issue_id,
+         alive_before?
        ) do
+    %Order{
+      pod_id: pod_id,
+      role: role,
+      profile: profile,
+      brief: brief,
+      spawn_opts: spawn_opts,
+      lock_target: lock_target,
+      issue_number: issue_number,
+      log_ctx: log_ctx
+    } = order
+
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          _ = start_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),

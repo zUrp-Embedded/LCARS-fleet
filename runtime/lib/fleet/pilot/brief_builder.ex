@@ -17,6 +17,22 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   require Logger
 
+  defmodule Access do
+    @moduledoc """
+    L'ACCES FORGE : le triplet qui voyage ensemble partout dans ce depot — le module client, le
+    depot vise, et les options de transport.
+
+    C'est deja ce que `StepDispatcher.Spawn.Seams` bundle, et pour la meme raison. Ici il fait
+    passer `build_brief` de dix parametres positionnels a huit, mais le gain n'est pas le compte :
+    `forge` et `repo` etaient separes par rien, et `forge_opts` par cinq positions de plus. Les
+    dissocier a l'appel est une faute qui compile.
+    """
+    @enforce_keys [:forge, :repo, :forge_opts]
+    defstruct @enforce_keys
+
+    @type t :: %__MODULE__{forge: module(), repo: String.t(), forge_opts: keyword()}
+  end
+
   # The mount NAMES (transport_brief_v2): a pod reads its material from `~/issues/<name>`, and the
   # name says WHAT the material is, never "mandate" (a concept, not a file). A producer and the brief
   # judge (scoper) read the BRIEF; a deliverable judge reads the CRITERIA. One attribute per name so
@@ -272,29 +288,17 @@ defmodule Fleet.Pilot.BriefBuilder do
   @spec build_brief(
           Fleet.CapProfile.t(),
           String.t(),
-          module(),
-          String.t(),
+          Access.t(),
           integer(),
           map(),
-          keyword(),
           {String.t(), String.t()} | term(),
           map(),
           keyword()
         ) ::
           {:ok, String.t(), String.t(), map() | nil}
           | {:error, {:criterion_unavailable, term()}}
-  def build_brief(
-        profile,
-        role,
-        forge,
-        repo,
-        number,
-        issue,
-        forge_opts,
-        route,
-        step_spec,
-        opts \\ []
-      ) do
+  def build_brief(profile, role, %Access{} = access, number, issue, route, step_spec, opts \\ []) do
+    %Access{repo: repo} = access
     # POINTER resolution FIRST (E4): a consequential brief lives as a doc committed in
     # ops; the ticket body then carries summary + `Brief: <ref> @ <commit>` (composed by
     # the delegation tool, notation in Fleet.Layout). Resolved HERE, once, for every path
@@ -303,18 +307,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     # rail; never a guessed brief). `:none` → the body IS the brief (inline PoC path, both
     # channels honest, same downstream).
     with {:ok, issue} <- resolve_issue_brief(issue, repo, opts) do
-      case do_build_brief(
-             profile,
-             role,
-             forge,
-             repo,
-             number,
-             issue,
-             forge_opts,
-             route,
-             step_spec,
-             opts
-           ) do
+      case do_build_brief(profile, role, access, number, issue, route, step_spec, opts) do
         # THE MANDATE MOUNT LEAVES WITH THE BRIEF. `do_build_brief` surfaces the `{ref, sha}` the
         # order actually references AND the `filename` the order names it by; we wrap them into the
         # spawn's `:mandate` here, ONCE, so every dispatch path (initial and PR-driven) sets it from
@@ -347,18 +340,9 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp mandate_from_source(_source, _filename, _repo, _opts), do: nil
 
-  defp do_build_brief(
-         profile,
-         role,
-         forge,
-         repo,
-         number,
-         issue,
-         forge_opts,
-         route,
-         step_spec,
-         opts
-       ) do
+  defp do_build_brief(profile, role, %Access{} = access, number, issue, route, step_spec, opts) do
+    %Access{forge: forge, repo: repo, forge_opts: forge_opts} = access
+
     # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — it
     # drives a worker profile as a JUDGE for one step without duplicating the profile. NO canon role
     # uses it today. The mechanism stays because it is the generic way to answer

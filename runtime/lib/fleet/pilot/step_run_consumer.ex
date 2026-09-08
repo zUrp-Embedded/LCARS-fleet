@@ -610,9 +610,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
             payload,
             n,
             role,
-            intent,
-            next_assignee,
-            next_step,
+            %{
+              intent: intent,
+              next_assignee: next_assignee,
+              next_step: next_step,
+              comment_body: nil,
+              judge_target: nil
+            },
             state,
             is_producer?
           )
@@ -688,26 +692,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  defp complete_business_step_run(
-         payload,
-         n,
-         role,
-         intent,
-         next_assignee,
-         next_step,
-         state,
-         producer?,
-         comment_body \\ nil,
-         judge_target \\ nil
-       ) do
-    route = %{
-      intent: intent,
-      next_assignee: next_assignee,
-      next_step: next_step,
-      comment_body: comment_body,
-      judge_target: judge_target
-    }
-
+  # ⚠ LA ROUTE ARRIVE DEJA FORMEE, ET C'EST L'APPELANT QUI LA CONNAIT. Ses cinq champs voyageaient
+  # en positionnels pour etre recomposes en map des la premiere ligne : deux d'entre eux
+  # (`next_assignee`, `next_step`) sortent d'un meme tuple chez les deux appelants, et les deux
+  # derniers etaient des defauts optionnels qu'un appel sur trois oubliait de nommer.
+  defp complete_business_step_run(payload, n, role, route, state, producer?) do
     run_completion(state, "##{n}", %{pod_id: payload["pod_id"], issue: n}, fn ->
       case StepRunBuild.build(payload, n, role, route, build_seams(state), producer?) do
         {:error, _} = err ->
@@ -843,13 +832,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
             payload,
             n,
             role,
-            intent,
-            next_assignee,
-            next_step,
+            %{
+              intent: intent,
+              next_assignee: next_assignee,
+              next_step: next_step,
+              comment_body: trace,
+              judge_target: Map.get(ctx, :judge_target)
+            },
             state,
-            is_producer?,
-            trace,
-            Map.get(ctx, :judge_target)
+            is_producer?
           )
         end
 

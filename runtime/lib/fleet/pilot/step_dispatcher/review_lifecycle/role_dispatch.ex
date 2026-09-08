@@ -166,18 +166,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          # `refs/lcars/base` included. Non-conflict kinds keep today's path byte-for-byte.
          :ok <- maybe_refresh_conflict_base(kind, decision, ctx.spawner, pod_id, project) do
       # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
-      case review_brief(
-             kind,
-             profile,
-             role,
-             forge,
-             repo,
-             issue_n,
-             forge_opts,
-             route,
-             pr_number,
-             review_opts
-           ) do
+      case review_brief(kind, ctx, profile, role, issue_n, route, pr_number, review_opts) do
         {:ok, brief, brief_kind, mandate} ->
           project_slug = Fleet.Layout.project_slug(repo)
 
@@ -216,14 +205,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
               forge_opts: ctx.forge_opts,
               wake_recovery: ctx.wake_recovery
             },
-            pod_id,
-            role,
-            profile,
-            brief,
-            spawn_opts,
-            pr_number,
-            issue_n,
-            log_ctx
+            %Spawn.Order{
+              pod_id: pod_id,
+              role: role,
+              profile: profile,
+              brief: brief,
+              spawn_opts: spawn_opts,
+              # ⚠ RAIL DE REVUE : on VERROUILLE LA PR et on ENFILE SUR L'ISSUE. Les deux etaient
+              # des entiers voisins en position ; nommes, l'inversion ne se compile plus.
+              lock_target: pr_number,
+              issue_number: issue_n,
+              log_ctx: log_ctx
+            }
           )
 
         # The DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
@@ -327,63 +320,50 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   # cannot read for itself: the CI fact the GATE has already measured (`CiGate`). Re-reading it in
   # the builder would create a SECOND truth — two forge calls, two shas, two possible answers on
   # one dispatch. The gate decides, the brief quotes it.
-  defp review_brief(:judge, profile, role, forge, repo, issue_n, forge_opts, route, _pr, opts),
+  defp review_brief(:judge, %Ctx{} = ctx, profile, role, issue_n, route, _pr, opts),
     do:
       BriefBuilder.build_brief(
         profile,
         role,
-        forge,
-        repo,
+        %BriefBuilder.Access{forge: ctx.forge, repo: ctx.repo, forge_opts: ctx.forge_opts},
         issue_n,
         %{},
-        forge_opts,
         route,
         %{},
         opts
       )
 
-  defp review_brief(:rework, _profile, role, forge, repo, _issue_n, forge_opts, route, pr, _opts),
-    do: {:ok, BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route), "worker", nil}
+  defp review_brief(:rework, %Ctx{} = ctx, _profile, role, _issue_n, route, pr, _opts),
+    do:
+      {:ok, BriefBuilder.rework_brief(role, ctx.forge, ctx.repo, pr, ctx.forge_opts, route),
+       "worker", nil}
 
   # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
   # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
   # APPROVED — main simply moved under the branch).
-  defp review_brief(
-         :conflict_rework,
-         _profile,
-         role,
-         forge,
-         repo,
-         _issue_n,
-         forge_opts,
-         route,
-         pr,
-         opts
-       ),
-       do:
-         {:ok,
-          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
-            conflict: :producer,
-            base_branch: Keyword.fetch!(opts, :pr_base_branch)
-          ), "worker", nil}
+  defp review_brief(:conflict_rework, %Ctx{} = ctx, _profile, role, _issue_n, route, pr, opts),
+    do:
+      {:ok,
+       BriefBuilder.rework_brief(role, ctx.forge, ctx.repo, pr, ctx.forge_opts, route,
+         conflict: :producer,
+         base_branch: Keyword.fetch!(opts, :pr_base_branch)
+       ), "worker", nil}
 
   # Conflict-rework EXCEPTION pass (tier 2 — Remediation.dispatch_exception_rework): same dispatch,
   # outsider voice. It is not resuming its own work and has no brief of its own to preserve.
   defp review_brief(
          :conflict_rework_exception,
+         %Ctx{} = ctx,
          _profile,
          role,
-         forge,
-         repo,
          _issue_n,
-         forge_opts,
          route,
          pr,
          opts
        ),
        do:
          {:ok,
-          BriefBuilder.rework_brief(role, forge, repo, pr, forge_opts, route,
+          BriefBuilder.rework_brief(role, ctx.forge, ctx.repo, pr, ctx.forge_opts, route,
             conflict: :exception,
             base_branch: Keyword.fetch!(opts, :pr_base_branch)
           ), "worker", nil}

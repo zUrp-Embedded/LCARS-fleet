@@ -145,14 +145,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
       assert {:error, {:order_not_materialized, {:work_dir_missing, _}}} =
                Spawn.spawn_step(
                  seams(FreshSpawner),
-                 "pod-x",
-                 "engineer",
-                 profile(),
-                 "brief",
-                 [],
-                 42,
-                 42,
-                 "ctx"
+                 %Spawn.Order{
+                   pod_id: "pod-x",
+                   role: "engineer",
+                   profile: profile(),
+                   brief: "brief",
+                   spawn_opts: [],
+                   lock_target: 42,
+                   issue_number: 42,
+                   log_ctx: "ctx"
+                 }
                )
 
       refute_received {:add_label, _}
@@ -163,14 +165,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
       assert {:error, {:order_not_materialized, :no_brief}} =
                Spawn.spawn_step(
                  seams(FreshSpawner),
-                 "pod-x",
-                 "engineer",
-                 profile(),
-                 "",
-                 [],
-                 42,
-                 42,
-                 "ctx"
+                 %Spawn.Order{
+                   pod_id: "pod-x",
+                   role: "engineer",
+                   profile: profile(),
+                   brief: "",
+                   spawn_opts: [],
+                   lock_target: 42,
+                   issue_number: 42,
+                   log_ctx: "ctx"
+                 }
                )
 
       refute_received {:add_label, _}
@@ -200,14 +204,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:ok, {:spawned, _pod, "engineer"}} =
              Spawn.spawn_step(
                seams(RecordingSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               order,
-               [repo_id: 7, ops_root: tmp],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: order,
+                 spawn_opts: [repo_id: 7, ops_root: tmp],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     assert_received {:spawn_opts, spawn_opts}
@@ -264,14 +270,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:ok, _} =
              Spawn.spawn_step(
                seams(RecordingSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               order,
-               [repo_id: 7, ops_root: tmp],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: order,
+                 spawn_opts: [repo_id: 7, ops_root: tmp],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     assert_received {:spawn_opts, spawn_opts}
@@ -308,15 +316,17 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:ok, _} =
              Spawn.spawn_step(
                seams(RecordingSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               order,
-               # EXACTLY what the dispatcher builds: the order text under `:brief`.
-               [repo_id: 7, ops_root: tmp, brief: order],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: order,
+                 # EXACTLY what the dispatcher builds: the order text under `:brief`.
+                 spawn_opts: [repo_id: 7, ops_root: tmp, brief: order],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     assert_received {:spawn_opts, spawn_opts}
@@ -343,14 +353,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:ok, _} =
              Spawn.spawn_step(
                seams(RecordingSpawner),
-               "pod-y",
-               "engineer",
-               profile(),
-               order,
-               [repo_id: 7, ops_root: Path.join(tmp, "absent"), brief: order],
-               43,
-               43,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-y",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: order,
+                 spawn_opts: [repo_id: 7, ops_root: Path.join(tmp, "absent"), brief: order],
+                 lock_target: 43,
+                 issue_number: 43,
+                 log_ctx: "ctx"
+               }
              )
 
     assert_received {:spawn_opts, spawn_opts}
@@ -371,14 +383,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
         assert {:ok, {:spawned, _, _}} =
                  Spawn.spawn_step(
                    seams(RecordingSpawner),
-                   "pod-x",
-                   "engineer",
-                   no_identity,
-                   "brief",
-                   [repo_id: 7],
-                   42,
-                   42,
-                   "ctx"
+                   %Spawn.Order{
+                     pod_id: "pod-x",
+                     role: "engineer",
+                     profile: no_identity,
+                     brief: "brief",
+                     spawn_opts: [repo_id: 7],
+                     lock_target: 42,
+                     issue_number: 42,
+                     log_ctx: "ctx"
+                   }
                  )
       end)
 
@@ -399,14 +413,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
         assert {:ok, {:spawned, _, _}} =
                  Spawn.spawn_step(
                    seams(RecordingSpawner),
-                   "pod-x",
-                   "scribe",
-                   profile(),
-                   "brief",
-                   [repo_id: 7],
-                   42,
-                   42,
-                   "ctx"
+                   %Spawn.Order{
+                     pod_id: "pod-x",
+                     role: "scribe",
+                     profile: profile(),
+                     brief: "brief",
+                     spawn_opts: [repo_id: 7],
+                     lock_target: 42,
+                     issue_number: 42,
+                     log_ctx: "ctx"
+                   }
                  )
       end)
 
@@ -421,14 +437,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:skipped, :role_at_capacity} =
              Spawn.spawn_step(
                seams(FullRoleSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               "brief",
-               [repo_id: 7],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [repo_id: 7],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     refute_received {:add_label, _}
@@ -438,14 +456,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   test "the pre-flight asks the SAME bucket the wall will refuse on" do
     Spawn.spawn_step(
       seams(BucketRecordingSpawner),
-      "pod-x",
-      "engineer",
-      profile(),
-      "brief",
-      [repo_id: 7],
-      42,
-      42,
-      "ctx"
+      %Spawn.Order{
+        pod_id: "pod-x",
+        role: "engineer",
+        profile: profile(),
+        brief: "brief",
+        spawn_opts: [repo_id: 7],
+        lock_target: 42,
+        issue_number: 42,
+        log_ctx: "ctx"
+      }
     )
 
     # `(role, repo_id, slot_scope)` — the three arguments `PoolSlot.allocate/3` takes. The scope
@@ -467,14 +487,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
              {:skipped, :role_at_capacity},
              Spawn.spawn_step(
                seams(LivePodFullRoleSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               "brief",
-               [repo_id: 7],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [repo_id: 7],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
            )
   end
@@ -497,14 +519,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:skipped, :role_at_capacity} =
              Spawn.spawn_step(
                seams(WallRefusesSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               "brief",
-               [repo_id: 7],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [repo_id: 7],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     # The lock WAS taken (we got past the pre-flight) and the compensation removed it.
@@ -524,14 +548,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:error, :launch_failed} =
              Spawn.spawn_step(
                seams(BrokenSpawner),
-               "pod-x",
-               "engineer",
-               profile(),
-               "brief",
-               [repo_id: 7],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-x",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [repo_id: 7],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
   end
 
@@ -539,14 +565,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:ok, {:spawned, "pod-alive", "engineer"}} =
              Spawn.spawn_step(
                seams(FullAliveSpawner),
-               "pod-alive",
-               "engineer",
-               profile(),
-               "brief",
-               [],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-alive",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     # the lock IS taken (the pod is working the issue), no kill/compensation
@@ -558,14 +586,16 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     assert {:error, :max_children} =
              Spawn.spawn_step(
                seams(ToctouSpawner),
-               "pod-t",
-               "engineer",
-               profile(),
-               "brief",
-               [],
-               42,
-               42,
-               "ctx"
+               %Spawn.Order{
+                 pod_id: "pod-t",
+                 role: "engineer",
+                 profile: profile(),
+                 brief: "brief",
+                 spawn_opts: [],
+                 lock_target: 42,
+                 issue_number: 42,
+                 log_ctx: "ctx"
+               }
              )
 
     # the lock was taken THEN compensated (remove_label) — the TOCTOU net holds

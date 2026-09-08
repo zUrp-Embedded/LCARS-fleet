@@ -43,11 +43,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     case BriefBuilder.build_brief(
            judge_profile(),
            "reviewer",
-           StubForge,
-           "acme/widget",
+           %BriefBuilder.Access{
+             forge: StubForge,
+             repo: "acme/widget",
+             forge_opts: forge_opts
+           },
            42,
            %{},
-           forge_opts,
            {"pipe", "review"},
            %{},
            opts
@@ -63,11 +65,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
     BriefBuilder.build_brief(
       judge_profile(),
       "reviewer",
-      StubForge,
-      "acme/widget",
+      %BriefBuilder.Access{
+        forge: StubForge,
+        repo: "acme/widget",
+        forge_opts: forge_opts
+      },
       42,
       %{},
-      forge_opts,
       {"pipe", "review"},
       %{},
       opts
@@ -277,11 +281,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
                BriefBuilder.build_brief(
                  judge_profile(),
                  "reviewer",
-                 StubForge,
-                 "acme/widget",
+                 %BriefBuilder.Access{
+                   forge: StubForge,
+                   repo: "acme/widget",
+                   forge_opts: [_issue: {:ok, %{"body" => body}}]
+                 },
                  42,
                  %{},
-                 [_issue: {:ok, %{"body" => body}}],
                  {"pipe", "review"},
                  %{},
                  ops_root: tmp
@@ -472,11 +478,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       case BriefBuilder.build_brief(
              worker_profile(),
              "engineer",
-             StubForge,
-             "acme/widget",
+             %BriefBuilder.Access{
+               forge: StubForge,
+               repo: "acme/widget",
+               forge_opts: []
+             },
              42,
              issue,
-             [],
              {"pipe", "build"},
              %{},
              opts
@@ -722,11 +730,13 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       BriefBuilder.build_brief(
         scoper_profile(),
         "scoper",
-        StubForge,
-        "acme/widget",
+        %BriefBuilder.Access{
+          forge: StubForge,
+          repo: "acme/widget",
+          forge_opts: []
+        },
         42,
         issue_map,
-        [],
         {"brief-gate", "brief-review"},
         %{"judge_target" => "brief"},
         opts
