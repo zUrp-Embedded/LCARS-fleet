@@ -857,13 +857,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       end)
       |> Enum.uniq()
 
+    # ⚠ PAS DE `src = …` DANS LA COMPREHENSION, ET C'EST TOUT L'OBJET DE CETTE FORME. Une
+    # affectation posee entre deux filtres EST un filtre : `src = Map.get(modules, mod)` rend `nil`
+    # quand le module n'existe pas, `nil` est faux, et la porte disparaissait du resultat en
+    # silence. Le cas le plus GRAVE des deux — un script qui nomme un module entierement disparu —
+    # etait donc le seul que ce mur ne pouvait pas voir, pendant que son message annoncait de le
+    # distinguer (« module introuvable » etait du code mort).
+    exporte? = fn mod, fun ->
+      src = Map.get(modules, mod)
+      is_binary(src) and Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)
+    end
+
     absents =
-      for {rel, mod, fun} <- portes,
-          src = Map.get(modules, mod),
-          not (is_binary(src) and
-                 Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)),
-          do:
-            "#{rel}: #{mod}.#{fun} — #{if src, do: "le module ne l'exporte pas", else: "module introuvable"}"
+      portes
+      |> Enum.reject(fn {_rel, mod, fun} -> exporte?.(mod, fun) end)
+      |> Enum.map(fn {rel, mod, fun} ->
+        cause =
+          if Map.has_key?(modules, mod),
+            do: "le module ne l'exporte pas",
+            else: "module introuvable"
+
+        "#{rel}: #{mod}.#{fun} — #{cause}"
+      end)
 
     broken = if length(portes) < 3, do: "only #{length(portes)} eval door(s) found (expected 3+)"
 
@@ -880,7 +895,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           absents != [] -> Enum.sort(absents)
           true -> []
         end,
-      note: "#{length(portes)} porte(s) `eval` nommee(s) par les scripts, chacune resolue"
+      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « chacune resolue » inconditionnel affirmait la
+      # conformite dans le rapport meme d'un echec. Meme regle que le mur voisin sur stdout.
+      note:
+        "#{length(portes)} porte(s) `eval` nommee(s) par les scripts, " <>
+          if(absents == [],
+            do: "chacune resolue",
+            else: "#{length(absents)} NON resolue(s)"
+          )
     }
   end
 
