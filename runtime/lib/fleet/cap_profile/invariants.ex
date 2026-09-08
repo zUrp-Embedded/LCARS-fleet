@@ -103,6 +103,19 @@ defmodule Fleet.CapProfile.Invariants do
   @spec lifetime_scope_enum() :: [String.t()]
   def lifetime_scope_enum, do: @lifetime_scope_enum
 
+  @doc """
+  Returns the code-side `containment` enum used by the schema drift test.
+
+  EXPOSEE POUR LA MEME RAISON QUE SA JUMELLE, ET L'ECART A COUTE PLUS CHER ICI. Cette constante
+  decide du BAC A SABLE : `bwrap?/1` en derive, et un profil qui n'est pas `bwrap` prend le chemin
+  hote — `Egress.provision/3` rend `{:ok, nil}` (aucun proxy CONNECT) et `SpawnAdmission` le range
+  avec les host-native. Tant que le schema typait `containment` en `"string"` nu, cette liste etait
+  le SEUL portail sur la valeur, et elle n'etait epinglee par aucun temoin : y ajouter un mot
+  passait `validate/1`, passait le schema, et ne faisait rougir aucun des 3 774 tests.
+  """
+  @spec containment_enum() :: [String.t()]
+  def containment_enum, do: @containment_enum
+
   defp check_containment(%CapProfile{metadata: meta}) do
     if Map.get(meta, "containment") in @containment_enum, do: :ok, else: :error
   end

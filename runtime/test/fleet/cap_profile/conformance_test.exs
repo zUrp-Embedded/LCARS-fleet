@@ -12,6 +12,8 @@ defmodule Fleet.CapProfile.ConformanceTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.CapProfile.Invariants
+
   @schema_path Path.join([
                  __DIR__,
                  "..",
@@ -220,8 +222,26 @@ defmodule Fleet.CapProfile.ConformanceTest do
         "enum"
       ])
 
-    assert schema_ls == Fleet.CapProfile.Invariants.lifetime_scope_enum(),
-           "lifetime_scope drift: schema #{inspect(schema_ls)} ≠ code #{inspect(Fleet.CapProfile.Invariants.lifetime_scope_enum())}"
+    assert schema_ls == Invariants.lifetime_scope_enum(),
+           "lifetime_scope drift: schema #{inspect(schema_ls)} ≠ code #{inspect(Invariants.lifetime_scope_enum())}"
+
+    # ⚠ LE CONFINEMENT, ET IL A ETE LE SEUL DES DEUX SANS SA MOITIE SCHEMA. Mesure du 2026-09-08 :
+    # `metadata.containment` etait type `"string"` NU, donc `@containment_enum` etait le SEUL portail
+    # sur une valeur qui decide du bac a sable — `bwrap?/1` en derive, et un profil non-bwrap prend
+    # le chemin hote (aucun proxy CONNECT, range avec les host-native par `SpawnAdmission`).
+    #
+    # Y ajouter un mot — l'edition qui se lit « on supporte docker maintenant » — passait
+    # `validate/1`, passait le schema, et ne faisait rougir AUCUN des 3 774 tests. Les deux temoins
+    # qui pretendaient garder l'invariant posaient la meme unique valeur hors-liste (`"ad-hoc"`), et
+    # elargir une liste blanche ne rougit que le membre qu'on y ajoute, jamais celui qu'on teste.
+    #
+    # C'est l'ecart avec `lifetime_scope` juste au-dessus qui est le fait : la technique etait a
+    # quinze lignes, elle n'avait pas ete appliquee a celui des deux qui garde l'isolation.
+    schema_ct =
+      get_in(raw, ["properties", "metadata", "properties", "containment", "enum"])
+
+    assert schema_ct == Invariants.containment_enum(),
+           "containment drift: schema #{inspect(schema_ct)} \u2260 code #{inspect(Invariants.containment_enum())}"
 
     # slot_scope is NO LONGER a schema enum: it DERIVES from lifetime_scope
     # (`CapProfile.slot_scope/1`, one-shot→instance / else→project) → no copy left to lock here.
