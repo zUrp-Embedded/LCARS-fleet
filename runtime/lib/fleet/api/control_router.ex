@@ -63,92 +63,74 @@ defmodule Fleet.API.ControlRouter do
       {:ok, payload} ->
         do_broadcast_spawn(conn, payload)
 
-      {:error, {:forbidden_fields, fields}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "unauthorized fields on /api/admin/spawn",
-            forbidden: Enum.sort(fields)
-          })
-        )
-
-      {:error, {:invalid_pod_id, value}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "invalid pod_id (expected [A-Za-z0-9._-], no '..')",
-            value: inspect(value)
-          })
-        )
-
-      {:error, {:invalid_issue_id, value}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{error: "invalid issue_id (expected a string)", value: inspect(value)})
-        )
-
-      {:error, :brief_required} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "brief required (one-shot cap-profile)",
-            reason:
-              "one-shot lifetime_scope without `brief`: the pod would leave with no work. Provide `brief`."
-          })
-        )
-
-      {:error, :missing_cap_profile} ->
-        send_resp(conn, 400, ~s|{"error":"cap_profile_name (or role) required"}|)
-
-      {:error, {:cap_profile, name, reason}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{error: "unknown cap_profile: #{name}", reason: inspect(reason)})
-        )
-
-      {:error, {:role_reserved, name}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "reserved seat: #{name}",
-            reason:
-              "the role is declared in the catalogue as a ReservedSeat (kept identity, " <>
-                "closed box) — not spawnable until its full CapabilityProfile exists"
-          })
-        )
-
-      {:error, {:fleet_scope_occupied, name, pod_id}} ->
-        send_resp(
-          conn,
-          409,
-          Jason.encode!(%{
-            error: "fleet-scope role already running: #{name} (pod #{pod_id})",
-            reason:
-              "role_index 0 is the fleet-level slot and there is exactly one per fleet. " <>
-                "A second pod would be spawned, receive nothing, and escalate on a wake nobody " <>
-                "answers. Talk to the running one through its terminal (`lcars attach #{pod_id}`) " <>
-                "instead of spawning another."
-          })
-        )
-
-      {:error, {:host_native_forbidden, name}} ->
-        send_resp(
-          conn,
-          422,
-          Jason.encode!(%{
-            error: "host-native cap_profile forbidden via /api/admin/spawn: #{name}",
-            reason:
-              "containment != bwrap — host-native goes through its dedicated path, not the spawn API"
-          })
-        )
+      {:error, cause} ->
+        {status, corps} = admission_refusal(cause)
+        send_resp(conn, status, Jason.encode!(corps))
     end
   end
+
+  # LES NEUF REFUS DE L'ADMISSION, chacun avec son code et sa RAISON. Ils vivaient en branches d'un
+  # `case` melange a l'envoi HTTP : le corps de la reponse et le fait de la poster sont deux
+  # choses, et les separer est ce qui rend la table des refus lisible d'un coup d'oeil.
+  #
+  # ⚠ CHAQUE `reason` EST UNE ACTION, PAS UNE PARAPHRASE DU CODE. C'est un humain qui lit cette
+  # reponse, souvent sans acces au code : « role_index 0 est le siege de flotte » ne sert a rien
+  # sans « parle a celui qui tourne, par son terminal ».
+  defp admission_refusal({:forbidden_fields, fields}),
+    do: {422, %{error: "unauthorized fields on /api/admin/spawn", forbidden: Enum.sort(fields)}}
+
+  defp admission_refusal({:invalid_pod_id, value}),
+    do:
+      {422, %{error: "invalid pod_id (expected [A-Za-z0-9._-], no '..')", value: inspect(value)}}
+
+  defp admission_refusal({:invalid_issue_id, value}),
+    do: {422, %{error: "invalid issue_id (expected a string)", value: inspect(value)}}
+
+  defp admission_refusal(:brief_required),
+    do:
+      {422,
+       %{
+         error: "brief required (one-shot cap-profile)",
+         reason:
+           "one-shot lifetime_scope without `brief`: the pod would leave with no work. Provide `brief`."
+       }}
+
+  defp admission_refusal(:missing_cap_profile),
+    do: {400, %{error: "cap_profile_name (or role) required"}}
+
+  defp admission_refusal({:cap_profile, name, reason}),
+    do: {422, %{error: "unknown cap_profile: #{name}", reason: inspect(reason)}}
+
+  defp admission_refusal({:role_reserved, name}),
+    do:
+      {422,
+       %{
+         error: "reserved seat: #{name}",
+         reason:
+           "the role is declared in the catalogue as a ReservedSeat (kept identity, " <>
+             "closed box) — not spawnable until its full CapabilityProfile exists"
+       }}
+
+  defp admission_refusal({:fleet_scope_occupied, name, pod_id}),
+    do:
+      {409,
+       %{
+         error: "fleet-scope role already running: #{name} (pod #{pod_id})",
+         reason:
+           "role_index 0 is the fleet-level slot and there is exactly one per fleet. " <>
+             "A second pod would be spawned, receive nothing, and escalate on a wake nobody " <>
+             "answers. Talk to the running one through its terminal (`lcars attach #{pod_id}`) " <>
+             "instead of spawning another."
+       }}
+
+  defp admission_refusal({:host_native_forbidden, name}),
+    do:
+      {422,
+       %{
+         error: "host-native cap_profile forbidden via /api/admin/spawn: #{name}",
+         reason:
+           "containment != bwrap — host-native goes through its dedicated path, not the spawn API"
+       }}
 
   # CE 202 EST ADOSSE A DEUX MECANISMES, ET LES NOMMER ICI EST CE QUI L'EMPECHE DE SE LIRE COMME UN
   # « accepte » NU, sans moyen de savoir ce qui le rattrape.

@@ -87,27 +87,34 @@ defmodule Fleet.Forge.Client.Transport do
   # TROIS SOURCES, ORDONNEES, ET AUCUN REPLI IMPLICITE. Un jeton fourni, un chemin fourni, un compte
   # a demander — et si aucune n'est la, un refus qui le dit. L'ordre est celui du SPECIFIQUE vers le
   # GENERAL : ce que l'appelant tient de la main gagne sur ce que le conteneur a configure.
+  # TROIS SOURCES DE JETON, DANS L'ORDRE DE PRECEDENCE : la valeur en clair, le fichier, l'autorite.
+  # `non_vide/2` porte la garde commune — une option presente mais vide n'est PAS une source, et la
+  # laisser passer ferait echouer l'appel HTTP au lieu de nommer la configuration.
   defp resolve_token(opts) do
     cond do
-      is_binary(token = Keyword.get(opts, :token)) and token != "" ->
-        {:ok, token}
+      token = non_vide(opts, :token) -> {:ok, token}
+      path = non_vide(opts, :token_file) -> read_token_file(path)
+      account = non_vide(opts, :account) -> token_from_authority(account)
+      true -> {:error, {:config, :no_token_source}}
+    end
+  end
 
-      is_binary(path = Keyword.get(opts, :token_file)) and path != "" ->
-        read_token_file(path)
+  defp non_vide(opts, cle) do
+    case Keyword.get(opts, cle) do
+      v when is_binary(v) and v != "" -> v
+      _ -> nil
+    end
+  end
 
-      is_binary(account = Keyword.get(opts, :account)) and account != "" ->
-        # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un
-        # jeton mis en cache ici reprendrait exactement la peremption infinie que cette regle retire.
-        # Le cout est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du
-        # bruit. Le jour ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra
-        # le dire ailleurs que dans un `defp`.
-        case Fleet.Credentials.ForgeAuth.token_for(account) do
-          {:ok, token} -> {:ok, token}
-          {:error, cause} -> {:error, {:config, {:authority, account, cause}}}
-        end
-
-      true ->
-        {:error, {:config, :no_token_source}}
+  # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un jeton
+  # mis en cache ici reprendrait exactement la peremption infinie que cette regle retire. Le cout
+  # est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du bruit. Le jour
+  # ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra le dire ailleurs
+  # que dans un `defp`.
+  defp token_from_authority(account) do
+    case Fleet.Credentials.ForgeAuth.token_for(account) do
+      {:ok, token} -> {:ok, token}
+      {:error, cause} -> {:error, {:config, {:authority, account, cause}}}
     end
   end
 
@@ -262,16 +269,11 @@ defmodule Fleet.Forge.Client.Transport do
       {:ok, %Response{status: status, body: items} = resp}
       when status in 200..299 and is_list(items) ->
         acc = [items | acc]
-        got = Enum.reduce(acc, 0, fn page_items, n -> n + length(page_items) end)
-        total = total_count(resp)
 
-        cond do
-          # Une page vide est la fin, quoi qu'annonce le total : elle borne le cas ou le serveur
-          # rend moins que ce qu'il compte (filtrage de droits) sans nous laisser tourner.
-          items == [] -> {:ok, collect(acc)}
-          is_integer(total) and got >= total -> {:ok, collect(acc)}
-          is_nil(total) and length(items) < @page_limit -> {:ok, collect(acc)}
-          true -> do_paginate(config, path_base, query, unwrap, page + 1, acc)
+        if last_page?(items, acc, total_count(resp)) do
+          {:ok, collect(acc)}
+        else
+          do_paginate(config, path_base, query, unwrap, page + 1, acc)
         end
 
       {:ok, %Response{status: status, body: body}} when status in 200..299 ->
@@ -283,6 +285,20 @@ defmodule Fleet.Forge.Client.Transport do
       {:error, exception} ->
         {:error, {:transport, exception}}
     end
+  end
+
+  # LES TROIS FACONS DE SAVOIR QU'ON A TOUT LU, et l'ordre compte.
+  #
+  # Une page VIDE est la fin quoi qu'annonce le total : elle borne le cas ou le serveur rend moins
+  # que ce qu'il compte (filtrage de droits) sans nous laisser tourner. Les deux autres sont le
+  # total annonce quand il existe, et la page courte quand il n'existe pas.
+  defp last_page?([], _acc, _total), do: true
+
+  defp last_page?(items, acc, total) do
+    got = Enum.reduce(acc, 0, fn page_items, n -> n + length(page_items) end)
+
+    (is_integer(total) and got >= total) or
+      (is_nil(total) and length(items) < @page_limit)
   end
 
   # The envelope is taken BEFORE the shape guard, so a body that is neither a list nor the expected

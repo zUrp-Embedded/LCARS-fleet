@@ -264,31 +264,32 @@ defmodule Fleet.Credentials.Shell do
     env = Keyword.get(opts, :env, [])
     cd = Keyword.get(opts, :cd)
 
-    cond do
-      # FIRST, and the order is the point: an unknown key means the caller's intent was never
-      # applied at all. Reporting a value problem before a key problem would send the reader to
-      # inspect a setting that was never read.
-      (unknown = Enum.uniq(Keyword.keys(opts)) -- @run_opts) != [] ->
+    # L'ORDRE EST LE POINT, et la premiere garde est a part pour ca : une cle inconnue veut dire que
+    # l'intention de l'appelant n'a JAMAIS ete appliquee. Rapporter un probleme de valeur avant un
+    # probleme de cle enverrait le lecteur inspecter un reglage qui n'a pas ete lu.
+    case Enum.uniq(Keyword.keys(opts)) -- @run_opts do
+      [] ->
+        with :ok <- valide(Enum.all?(args, &is_binary/1), :args),
+             :ok <- valide(entier_positif?(timeout_ms), {:timeout_ms, timeout_ms}),
+             :ok <-
+               valide(entier_positif?(max_output_bytes), {:max_output_bytes, max_output_bytes}),
+             :ok <- valide(paires_de_binaires?(env), {:env, env}),
+             :ok <- valide(is_nil(cd) or is_binary(cd), {:cd, cd}) do
+          {:ok, timeout_ms, max_output_bytes, env, cd}
+        end
+
+      unknown ->
         {:error, {:bad_opt, {:unknown, unknown}}}
-
-      not Enum.all?(args, &is_binary/1) ->
-        {:error, {:bad_opt, :args}}
-
-      not (is_integer(timeout_ms) and timeout_ms > 0) ->
-        {:error, {:bad_opt, {:timeout_ms, timeout_ms}}}
-
-      not (is_integer(max_output_bytes) and max_output_bytes > 0) ->
-        {:error, {:bad_opt, {:max_output_bytes, max_output_bytes}}}
-
-      not (is_list(env) and Enum.all?(env, &match?({k, v} when is_binary(k) and is_binary(v), &1))) ->
-        {:error, {:bad_opt, {:env, env}}}
-
-      not (is_nil(cd) or is_binary(cd)) ->
-        {:error, {:bad_opt, {:cd, cd}}}
-
-      true ->
-        {:ok, timeout_ms, max_output_bytes, env, cd}
     end
+  end
+
+  defp valide(true, _quoi), do: :ok
+  defp valide(false, quoi), do: {:error, {:bad_opt, quoi}}
+
+  defp entier_positif?(v), do: is_integer(v) and v > 0
+
+  defp paires_de_binaires?(env) do
+    is_list(env) and Enum.all?(env, &match?({k, v} when is_binary(k) and is_binary(v), &1))
   end
 
   # `Port.open` can still raise (badarg on a malformed spec/opts that slipped past the parse) → keep the
