@@ -223,14 +223,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
               |> Enum.sort()
 
             zones = Map.fetch!(@test_zones, troot)
-
-            bad =
-              Enum.reject(dirs, fn d ->
-                [head | _] = Path.split(d)
-
-                head in zones or
-                  Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, d])) end)
-              end)
+            bad = Enum.reject(dirs, &adosse?(&1, zones, sroots, root))
 
             {n + length(dirs), acc ++ Enum.map(bad, &"#{troot}/#{&1}"), abs, skp}
         end
@@ -386,28 +379,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
         lines
         |> test_blocks()
-        |> Enum.flat_map(fn {a, b} ->
-          # ⚠ `a..b` AVEC UN PAS EXPLICITE. Un `@test` a corps VIDE rend `b == a - 1`, et un
-          # `first..last` decroissant prend en Elixir un pas de -1 : sans pas explicite le bloc est
-          # parcouru A L'ENVERS, `List.last(code)` designe la PREMIERE ligne et l'exemption
-          # « negation terminale » tombe sur la mauvaise (le warning d'Elixir le dit).
-          code =
-            if(b < a, do: [], else: Enum.to_list(a..b//1))
-            |> Enum.filter(fn n ->
-              l = Enum.at(lines, n, "")
-              String.trim(l) != "" and not String.starts_with?(String.trim_leading(l), "#")
-            end)
-
-          last = List.last(code)
-
-          Enum.filter(code, fn n ->
-            l = Enum.at(lines, n)
-
-            negation?(l) and n != last and
-              not String.contains?(logical_line(lines, n), "||")
-          end)
-          |> Enum.map(&"#{Path.relative_to(f, root)}:#{&1 + 1}")
-        end)
+        |> Enum.flat_map(&inert_negations(&1, lines))
+        |> Enum.map(&"#{Path.relative_to(f, root)}:#{&1 + 1}")
       end)
 
     measured_verdict("tests.negations_bite", %{
@@ -421,25 +394,49 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
     })
   end
 
+  # Un dossier de temoins est ADOSSE s'il vit dans une zone declaree sans source (helpers, donnees,
+  # sondes) ou si une source existe en face, sous l'une des racines de son arbre.
+  defp adosse?(dir, zones, sroots, root) do
+    [head | _] = Path.split(dir)
+    head in zones or Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, dir])) end)
+  end
+
+  # ⚠ `a..b` AVEC UN PAS EXPLICITE. Un `@test` a corps VIDE rend `b == a - 1`, et un `first..last`
+  # decroissant prend en Elixir un pas de -1 : sans pas explicite le bloc est parcouru A L'ENVERS,
+  # `List.last(code)` designe la PREMIERE ligne, et l'exemption « negation terminale » tombe sur la
+  # mauvaise (le warning d'Elixir le dit).
+  defp inert_negations({a, b}, lines) do
+    code =
+      if(b < a, do: [], else: Enum.to_list(a..b//1))
+      |> Enum.filter(&code_line?(Enum.at(lines, &1, "")))
+
+    last = List.last(code)
+
+    Enum.filter(code, fn n ->
+      negation?(Enum.at(lines, n)) and n != last and
+        not String.contains?(logical_line(lines, n), "||")
+    end)
+  end
+
+  defp code_line?(l),
+    do: String.trim(l) != "" and not String.starts_with?(String.trim_leading(l), "#")
+
   # Les bornes {premiere, derniere} de chaque bloc `@test … { … }`, par comptage d'accolades.
   defp test_blocks(lines) do
     lines
     |> Enum.with_index()
-    |> Enum.reduce({[], nil, 0}, fn {l, i}, {acc, start, depth} ->
-      cond do
-        is_nil(start) and String.starts_with?(l, "@test ") ->
-          {acc, i, count_braces(l)}
-
-        is_nil(start) ->
-          {acc, nil, 0}
-
-        true ->
-          d = depth + count_braces(l)
-          if d <= 0, do: {[{start + 1, i - 1} | acc], nil, 0}, else: {acc, start, d}
-      end
-    end)
+    |> Enum.reduce({[], nil, 0}, &block_step/2)
     |> elem(0)
     |> Enum.reverse()
+  end
+
+  defp block_step({l, i}, {acc, nil, _depth}) do
+    if String.starts_with?(l, "@test "), do: {acc, i, count_braces(l)}, else: {acc, nil, 0}
+  end
+
+  defp block_step({l, i}, {acc, start, depth}) do
+    d = depth + count_braces(l)
+    if d <= 0, do: {[{start + 1, i - 1} | acc], nil, 0}, else: {acc, start, d}
   end
 
   defp count_braces(l),

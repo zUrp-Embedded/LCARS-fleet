@@ -160,20 +160,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     {lists, skipped} = split_out_of_scope(lists)
 
     {evidence, remediations} =
-      Enum.reduce(lists, {[], []}, fn {label, roles, remediation}, {ev, rem} ->
-        case roles do
-          nil ->
-            {ev ++ ["#{label}: list not readable — fail-closed (partial checkout?)"],
-             rem ++ [remediation]}
-
-          list ->
-            missing = canon -- list
-            extra = list -- canon
-            ev2 = if missing != [], do: ["#{label}: MISSING #{inspect(missing)}"], else: []
-            ev3 = if extra != [], do: ["#{label}: EXTRA #{inspect(extra)}"], else: []
-            rem2 = if missing != [] or extra != [], do: [remediation], else: []
-            {ev ++ ev2 ++ ev3, rem ++ rem2}
-        end
+      Enum.reduce(lists, {[], []}, fn entree, {ev, rem} ->
+        {ev2, rem2} = compare_provisioning_list(entree, canon)
+        {ev ++ ev2, rem ++ rem2}
       end)
 
     # LES TROIS LISTES DE PLACEMENT SONT DANS LE VERROU, meme defaut un cran plus bas que les quatre
@@ -490,15 +479,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # evidence says which mirror is short. A wall holding one of two mirrors is green on a fleet
   # whose `wsl` and `linux` substrates create no zone at all.
   defp read_provision_zone_paths(path) do
-    case File.read(path) do
-      {:ok, content} ->
-        case Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
-          [] -> nil
-          rows -> rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
-        end
-
-      _ ->
-        nil
+    with {:ok, content} <- File.read(path),
+         [_ | _] = rows <- Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
+      rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
+    else
+      _ -> nil
     end
   end
 
@@ -508,15 +493,50 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   defp read_list(path, regex, format) do
     with {:ok, content} <- File.read(path),
          [_, inner] <- Regex.run(regex, content) do
-      case format do
-        :plain ->
-          inner |> String.split() |> Enum.sort()
-
-        :quoted ->
-          ~r/"([^"]+)"/ |> Regex.scan(inner) |> Enum.map(fn [_, s] -> s end) |> Enum.sort()
-      end
+      split_list(inner, format)
     else
       _ -> nil
+    end
+  end
+
+  defp split_list(inner, :plain), do: inner |> String.split() |> Enum.sort()
+
+  defp split_list(inner, :quoted),
+    do: ~r/"([^"]+)"/ |> Regex.scan(inner) |> Enum.map(fn [_, s] -> s end) |> Enum.sort()
+
+  # UNE LISTE DE PROVISIONING CONFRONTEE AU CANON, dans les deux sens. `nil` = fail-closed : la
+  # liste n'a pas ete lue, ce qui n'est pas « elle est vide » — une liste vide accuserait chaque
+  # role du canon avec le mauvais message.
+  defp compare_provisioning_list({label, nil, remediation}, _canon),
+    do: {["#{label}: list not readable — fail-closed (partial checkout?)"], [remediation]}
+
+  defp compare_provisioning_list({label, list, remediation}, canon) do
+    missing = canon -- list
+    extra = list -- canon
+
+    ev =
+      if(missing != [], do: ["#{label}: MISSING #{inspect(missing)}"], else: []) ++
+        if(extra != [], do: ["#{label}: EXTRA #{inspect(extra)}"], else: [])
+
+    {ev, if(ev == [], do: [], else: [remediation])}
+  end
+
+  # UN DEFAUT DE PLACEMENT CONFRONTE A LA DERIVATION. `nil` est fail-closed pour la meme raison que
+  # ci-dessus : ne pas savoir lire n'est pas un accord.
+  defp placement_gap(key, tf_path, derived) do
+    rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
+    hard = read_list(tf_path, rx, :quoted)
+    want = Enum.sort(Map.get(derived, key, []))
+
+    cond do
+      hard == nil ->
+        ["forge.tf var.#{key} default: not readable — fail-closed"]
+
+      Enum.sort(hard) == want ->
+        []
+
+      true ->
+        ["forge.tf var.#{key} default #{inspect(Enum.sort(hard))} != derivation #{inspect(want)}"]
     end
   end
 
@@ -544,25 +564,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     if File.dir?(Path.expand("../deploy", root)) and File.dir?(catalogue) do
       case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->
-          ev =
-            Enum.flat_map(~w(writers judges externals), fn key ->
-              rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
-              hard = read_list(tf_path, rx, :quoted)
-              want = Enum.sort(Map.get(derived, key, []))
-
-              cond do
-                hard == nil ->
-                  ["forge.tf var.#{key} default: not readable — fail-closed"]
-
-                Enum.sort(hard) == want ->
-                  []
-
-                true ->
-                  [
-                    "forge.tf var.#{key} default #{inspect(Enum.sort(hard))} != derivation #{inspect(want)}"
-                  ]
-              end
-            end)
+          ev = Enum.flat_map(~w(writers judges externals), &placement_gap(&1, tf_path, derived))
 
           {ev, @placement_checked}
 

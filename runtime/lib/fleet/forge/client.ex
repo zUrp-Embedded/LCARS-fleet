@@ -183,12 +183,9 @@ defmodule Fleet.Forge.Client do
       if current == [login] do
         {:ok, :already}
       else
-        case http_patch(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}", %{
-               assignees: [login]
-             }) do
-          {:ok, _} -> {:ok, :set}
-          {:error, _} = err -> err
-        end
+        config
+        |> http_patch("/repos/#{encode_repo(repo)}/issues/#{issue_number}", %{assignees: [login]})
+        |> acted(:set)
       end
     end
   end
@@ -209,12 +206,9 @@ defmodule Fleet.Forge.Client do
       if sig && Signing.signed_or_warn(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
-        case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
-               body: body
-             }) do
-          {:ok, _} -> {:ok, :posted}
-          {:error, _} = err -> err
-        end
+        config
+        |> http_post("/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{body: body})
+        |> acted(:posted)
       end
     end
   end
@@ -234,13 +228,9 @@ defmodule Fleet.Forge.Client do
           {:ok, :already_absent}
 
         %{"id" => id} ->
-          case http_delete(
-                 config,
-                 "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels/#{id}"
-               ) do
-            {:ok, _} -> {:ok, :removed}
-            {:error, _} = err -> err
-          end
+          config
+          |> http_delete("/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels/#{id}")
+          |> acted(:removed)
       end
     end
   end
@@ -309,6 +299,23 @@ defmodule Fleet.Forge.Client do
       lift_in_flight_on_retire(repo, issue_number, kind, opts)
       {:ok, :closed}
     end
+  end
+
+  # `{:ok, _}` d'une ecriture forge -> `{:ok, <ce qui a ete fait>}`. Le corps de la reponse n'est
+  # jamais lu sur ces trois chemins : ce que l'appelant veut savoir est l'ACTE, pas la charge.
+  defp acted({:ok, _}, verbe), do: {:ok, verbe}
+  defp acted({:error, _} = err, _verbe), do: err
+
+  defp merge_marker_number(comment) do
+    case ForgeProtocol.parse_merge_marker(comment["body"] || "") do
+      {:ok, n} -> n
+      :error -> nil
+    end
+  end
+
+  defp escalation_marker_body(comment) do
+    body = is_map(comment) and comment["body"]
+    if is_binary(body) and ForgeProtocol.escalation_marker?(body), do: body
   end
 
   defp fetch_closure_kind(opts) do
@@ -556,16 +563,11 @@ defmodule Fleet.Forge.Client do
           {:ok, integer()} | {:error, term()}
   def get_pr_for_branch(repo, head, base, opts \\ [])
       when is_binary(repo) and is_binary(head) and is_binary(base) do
-    with {:ok, config} <- resolve_config(opts) do
-      case paginate(config, "/repos/#{encode_repo(repo)}/pulls", "state=open") do
-        {:ok, pulls} ->
-          case Enum.find(pulls, &pr_matches_head?(&1, head, base)) do
-            %{"number" => number} -> {:ok, number}
-            _ -> {:error, :pr_not_found}
-          end
-
-        {:error, _} = err ->
-          err
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, pulls} <- paginate(config, "/repos/#{encode_repo(repo)}/pulls", "state=open") do
+      case Enum.find(pulls, &pr_matches_head?(&1, head, base)) do
+        %{"number" => number} -> {:ok, number}
+        _ -> {:error, :pr_not_found}
       end
     end
   end
@@ -902,12 +904,7 @@ defmodule Fleet.Forge.Client do
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       comments
       |> Enum.reverse()
-      |> Enum.find_value(fn c ->
-        case ForgeProtocol.parse_merge_marker(c["body"] || "") do
-          {:ok, n} -> n
-          :error -> nil
-        end
-      end)
+      |> Enum.find_value(&merge_marker_number/1)
       |> case do
         nil -> :none
         pr_number -> get_pull(repo, pr_number, opts)
@@ -1224,10 +1221,7 @@ defmodule Fleet.Forge.Client do
       body =
         comments
         |> Enum.reverse()
-        |> Enum.find_value(fn c ->
-          b = is_map(c) and c["body"]
-          if is_binary(b) and ForgeProtocol.escalation_marker?(b), do: b
-        end)
+        |> Enum.find_value(&escalation_marker_body/1)
 
       {:ok, body}
     end
