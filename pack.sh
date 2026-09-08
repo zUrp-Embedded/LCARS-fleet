@@ -261,6 +261,18 @@ cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/
 # s'ajoutent ici, côte à côte, pour la même raison.
 mkdir -p "$STAGE/$ROOT/$SITE_SRC"
 cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable apres le build ($SITE_SRC/dist)"
+# ⚠ LE KIT EST VERIFIE AVANT D'ETRE SCELLE, ET IL NE L'ETAIT PAS. `gen-contents.sh` faisait ce
+# rapprochement — une ancre declaree dont la source manque, un `bin/<nom>` que `release.manifest`
+# nomme sans qu'il soit la, un auxiliaire que `62` embarque et qui n'existe pas — mais il tournait
+# APRES cette ligne : la verification protegeait les huit `.deb` et JAMAIS le tar. Un kit incomplet
+# partait donc en archive, et seule la chaine Debian s'en apercevait. Elle s'en va (lot 2 du plan
+# `terrain-controle`) ; la verification, elle, remonte ici et change de bord.
+# shellcheck source=deploy/lib/kit-verify.sh
+. deploy/lib/kit-verify.sh
+kit_verifie "$STAGE/$ROOT" "runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
+  || die "kit incomplet — rien n'a ete scelle (les manques sont nommes ci-dessus)"
+say "kit verifie : ce que les listes declarent est dans l'arbre"
+
 tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 ( cd "$PACK_DIR" && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
 

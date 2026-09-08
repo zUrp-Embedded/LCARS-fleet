@@ -195,7 +195,12 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -qE 'cp -a "\$SITE_SRC/dist"' "$pack"            # et il l EMPORTE
   # les deux produits partent cote a cote, pour la meme raison : gitignores, donc hors `git archive`
   local n_rel n_doc
-  n_rel="$(grep -n '_build/prod/rel/lcars_fleet' "$pack" | tail -1 | cut -d: -f1)"
+  # ⚠ LA COPIE, PAS « LA DERNIERE MENTION ». Ce temoin prenait `tail -1` de toutes les lignes qui
+  # citent `_build/prod/rel/lcars_fleet` — une approximation qui tenait tant que la derniere etait
+  # la copie. Elle a cesse de l'etre : `pack.sh` passe desormais ce chemin au mur du kit
+  # (`kit_verifie`, apres la doc), et le temoin rougissait sur un ordre pourtant intact. Ce qu'il
+  # doit mesurer est le GESTE de copie, et lui seul.
+  n_rel="$(grep -n 'cp -a runtime/_build/prod/rel/lcars_fleet' "$pack" | head -1 | cut -d: -f1)"
   n_doc="$(grep -n 'cp -a "\$SITE_SRC/dist"' "$pack" | head -1 | cut -d: -f1)"
   [ -n "$n_rel" ] && [ -n "$n_doc" ]
   [ "$n_rel" -lt "$n_doc" ]
