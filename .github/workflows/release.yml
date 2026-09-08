@@ -89,6 +89,20 @@ jobs:
           test -x "$HOME/.local/bin/claude" || { echo "l'installeur n'a pas posé ~/.local/bin/claude"; exit 1; }
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # ⚠ LES QUATRE OUTILS DE `shell_gate`, ET IL REFUSE DE SAUTER CE QU'IL NE PEUT PAS JOUER —
+      # c'est ce qui les rend obligatoires plutôt qu'optionnels : « ECHEC: pytest absent — les
+      # lcars_tests de token-saver ne peuvent pas tourner (pas de skip silencieux) ». Un corpus que
+      # personne ne joue pourrit en annonçant une couverture qu'il ne fournit pas.
+      # Mesuré au deuxième run réel (2026-09-08) : la suite ExUnit passait à 3583/3583 et le gate
+      # rougissait ici, après huit minutes.
+      - uses: bats-core/bats-action@4.0.0
+      - name: Les outils du shell_gate (shellcheck, ruff, pytest)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          pip install --quiet --break-system-packages ruff pytest
+          shellcheck --version | head -2; ruff --version; pytest --version
+
       - name: Connexion au registre du dépôt
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 

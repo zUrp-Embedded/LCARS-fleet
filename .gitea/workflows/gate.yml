@@ -129,8 +129,14 @@ jobs:
       # d'un runner ephemere ou aucun venv ne survit a l'etape suivante. `ruff --version` est
       # IMPRIME pour la meme raison que celle de shellcheck : une divergence de verdict entre la CI
       # et un poste doit se lire sur cette ligne au lieu de se deviner.
-      - name: Ruff (plancher python de shell_gate)
-        run: pip install --quiet --break-system-packages ruff && ruff --version
+      # ⚠ PYTEST EST DANS LA MÊME LIGNE QUE RUFF, ET IL Y MANQUAIT. `shell_gate` REFUSE de sauter ce
+      # qu'il ne peut pas jouer — « ECHEC: pytest absent — les lcars_tests de token-saver ne peuvent
+      # pas tourner (pas de skip silencieux) » — donc son absence n'est pas un test en moins, c'est
+      # un gate rouge. Découvert le 2026-09-08 en jouant ce gate sur un runner GitHub, le premier
+      # qui l'ait exécuté pour de bon : la suite ExUnit passait 3583/3583 et la chaîne cassait ici.
+      # Ce workflow avait le même trou ; il n'avait simplement jamais tourné.
+      - name: Ruff et pytest (planchers python de shell_gate)
+        run: pip install --quiet --break-system-packages ruff pytest && ruff --version && pytest --version
 
       - name: Cache Mix
         uses: actions/cache@v4
