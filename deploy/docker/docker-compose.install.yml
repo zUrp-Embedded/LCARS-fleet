@@ -13,28 +13,23 @@
 # ne peut pas tirer l'image, il le dit, et c'est le seul diagnostic possible.
 #
 # ─── L'IMAGE ───────────────────────────────────────────────────────────────────────────────────
-# `LCARS_IMAGE` porte le nom COMPLET, registry comprise. Le defaut pointe la forge LAN de ce
-# deploiement (10.42.0.118) parce que c'est la seule registry ou l'image existe REELLEMENT
-# aujourd'hui. ADR 012 vise GHCR pour la release publique ; tant que `publish.yml` n'existe pas,
-# mettre un defaut GHCR serait un chemin qui rend 404 — un defaut qui ment est pire qu'un defaut
-# local. Le jour ou GHCR est alimente, ce defaut change, et lui seul.
+# `LCARS_IMAGE` porte le nom COMPLET, registry comprise. Le defaut pointe GHCR, ou l'image est
+# publiee par le workflow du depot et TIRABLE ANONYMEMENT.
 #
-# Registry en HTTP pur : Docker REFUSE par defaut. Il faut la declarer dans `insecure-registries`
-# (Docker Desktop → Settings → Docker Engine, puis Apply & Restart — le daemon redemarre, ce n'est
-# pas un rechargement a chaud).
+# LA CONDITION DE SORTIE EST REMPLIE (mesure du 2026-09-08). Ce defaut pointait la forge LAN
+# `10.42.0.118:80` faute de registry publique — « un defaut qui ment est pire qu'un defaut local »,
+# et la sortie annoncee etait « le jour ou GHCR est alimente, ce defaut change, et lui seul ».
+# Il l'est : paquet publie par `.github/workflows/image.yml`, rattache au depot
+# (`repo=zUrp-Embedded/LCARS-temp`), visibilite `public`, manifeste tire sans jeton en `HTTP 200`,
+# `docker pull` mesure depuis un poste dont `~/.docker/config.json` vaut `{}`.
 #
-# LE PORT EST DANS LE NOM, ET CE N'EST PAS COSMETIQUE. Le daemon parle HTTPS et ne se replie en
-# HTTP que si la clef EXACTE du nom d'image, port compris, est declaree insecure :
-#   - `10.42.0.118/...`    → il vise :443, ou rien n'ecoute ici : refus reseau, et le repli HTTP
-#                            ne se declenche jamais sur un refus de connexion.
-#   - `10.42.0.118:80/...` → il obtient une reponse en clair sur :80 et ne se replie que si
-#                            `10.42.0.118:80`, port compris, figure dans les registries insecure.
-# Il faut donc `"insecure-registries": ["10.42.0.118", "10.42.0.118:80"]`, et referencer l'image
-# AVEC le port. Meme regle de clef exacte pour les credentials : un `docker login` sur la forme
-# sans port ne vaut pas pour la forme avec port.
+# PLUS AUCUNE REGISTRY EN HTTP PUR, donc plus d'`insecure-registries` a declarer dans le daemon,
+# et plus de piege de clef exacte avec le port. GHCR parle HTTPS et sert les paquets publics sans
+# `docker login`.
 #
-# Pour installer A COTE du dev, forcer un autre projet a la ligne de commande :
-#   docker compose -f docker-compose.install.yml -p lcars-install up -d
+# ⚠ LE NOM EST CELUI DU DEPOT DE TEST. `LCARS-temp` est la ou la chaine se mesure sans bruler le
+# nom definitif ; le jour ou la facade nait, ce defaut change — et lui seul, c'est encore ce que le
+# mur des adresses garde.
 #
 # ─── CE QUI EST COPIE A L'IDENTIQUE DEPUIS LE COMPOSE DE DEV, ET POURQUOI ───────────────────────
 # ports, volumes, cap_add, security_opt, logging, restart : une install qui divergerait du dev sur
@@ -42,8 +37,28 @@
 # les commentaires de `docker-compose.yml` — elles ne sont pas recopiees ici : deux copies d'une
 # meme justification derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
 #
-# USAGE : docker compose -f docker-compose.install.yml up -d
-# (depuis ce repertoire ; aucune source du projet n'est necessaire — ce fichier suffit)
+# ─── USAGE ─────────────────────────────────────────────────────────────────────────────────────
+#   export LCARS_STORE_PREFIX=lcars LCARS_ADMIRAL=<ton login>
+#   for v in cache toolchains sysroots state; do docker volume create "$LCARS_STORE_PREFIX-$v"; done
+#   docker compose -f docker-compose.install.yml up -d
+#
+# ⚠ « CE FICHIER SUFFIT » ETAIT FAUX, ET LA MESURE LE DIT (2026-09-08, banc vierge, dossier vide).
+# Quatre refus successifs avant que LCARS tourne, et aucun n'est un accident :
+#   1. `LCARS_STORE_PREFIX` n'a pas de defaut → compose refuse de PARSER le fichier. C'est VOULU :
+#      un `:-lcars` ferait retomber deux installations sur le meme magasin sans un mot, et la lib
+#      (`store.sh`) refuse deja sans prefixe — un defaut ici les ferait diverger.
+#   2. les quatre volumes du magasin sont `external: true` → « external volume not found ». Voulu
+#      aussi : l'externalite est ce qui empeche un `down -v` d'emporter des heures de toolchain, et
+#      compose ne sait pas creer un volume externe. D'ou la boucle.
+#   3. `security_opt: seccomp=./lcars-hardened-seccomp.json` est un chemin RELATIF → il faut ce
+#      second fichier a cote. L'INSTALL, c'est DEUX fichiers de ce repertoire, pas un.
+#   4. sans `LCARS_ADMIRAL`, le conteneur MONTE mais reste en attente : il n'a ni forge ou lire le
+#      #1, ni semence pour le siege, et il le DIT (« EN ATTENTE DE CONFIGURATION »). Pas de defaut
+#      possible — le siege est un login d'humain, pas une constante.
+#
+# Pour installer A COTE d'un dev ou d'un autre banc, tout se decale ensemble :
+#   docker compose -f docker-compose.install.yml -p lcars-install up -d
+#   (et LCARS_STORE_PREFIX=lcars-install, LCARS_SSH_PORT, LCARS_LANDING_PORT_BIND)
 
 name: lcars
 
@@ -51,7 +66,7 @@ services:
   lcars:
     # Le defaut pointe la derniere image PUBLIEE, et ne bouge que dans le geste qui publie —
     # un defaut en avance sur la registry rend un 404 a la premiere install venue.
-    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.2}"
+    image: "${LCARS_IMAGE:-ghcr.io/zurp-embedded/lcars-temp:main}"
     # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
     # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
     # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
@@ -105,7 +120,7 @@ services:
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
       # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
       # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.
-      LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-http://10.42.0.118/fleet/lcars.git}"
+      LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-https://github.com/zUrp-Embedded/LCARS-temp.git}"
       LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
     ports:
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
@@ -157,7 +172,7 @@ volumes:
   # plus, d'ou le `name:` derive du projet. Cf. `docker-compose.yml`, source unique.
   lcars-cache:
     external: true
-    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait)}-cache"
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait ; a la main, cf. USAGE en tete)}-cache"
   lcars-toolchains:
     external: true
     name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"

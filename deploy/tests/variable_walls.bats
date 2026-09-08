@@ -973,70 +973,54 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ "$rompu" -eq 0 ] || return 1
 }
 
-@test "MUR 15: aucune adresse de LAN gravee, sauf celle qui est declaree et sa raison" {
-  # ⚠ CE MUR NE RETIRE PAS L'ADRESSE EXISTANTE, ET C'EST DELIBERE. `docker-compose.install.yml`
-  # defaute l'image sur `10.42.0.118:80` et son commentaire dit pourquoi, avec sa condition de
-  # sortie : « c'est la seule registry ou l'image existe REELLEMENT aujourd'hui. ADR 012 vise GHCR
-  # pour la release publique ; tant que `publish.yml` n'existe pas, mettre un defaut GHCR serait un
-  # chemin qui rend 404 — un defaut qui ment est pire qu'un defaut local. Le jour ou GHCR est
-  # alimente, ce defaut change, et LUI SEUL. »
+@test "MUR 15: AUCUNE adresse de LAN gravee en code — le compte declare est ZERO" {
+  # ⚠ CE MUR A CHANGE DE SUJET LE 2026-09-08, PARCE QUE SA CONDITION DE SORTIE EST TOMBEE.
+  # Il gardait UNE adresse tolereee (`10.42.0.118`) et comptait ses SITES (deux : le defaut d'image
+  # et `LCARS_SOURCE_REMOTE`), parce que le compose d'install ne pouvait pointer nulle part ailleurs :
+  # aucune registry publique ne portait l'image, et « un defaut qui ment est pire qu'un defaut
+  # local ». La promesse ecrite etait : « le jour ou GHCR est alimente, ce defaut change, et LUI
+  # SEUL ».
   #
-  # Ce mur garde exactement cette derniere phrase : LUI SEUL. Une seconde adresse gravee ailleurs
-  # rendrait la promesse fausse — il faudrait alors en changer deux, et personne ne saurait ou est
-  # la seconde. Le §4 du chantier disait « les defauts du compose cessent de pointer une machine » ;
-  # la mesure dit autre chose : le defaut est unique, documente, et sa raison tient. Ce qui manquait
-  # n'etait pas de le retirer, c'etait d'empecher le deuxieme.
+  # GHCR EST ALIMENTE (mesure du 2026-09-08 : paquet publie par le workflow du depot, rattache,
+  # public, manifeste anonyme en HTTP 200, `docker pull` sans compte). Les deux sites ont bascule
+  # dans le meme geste — exactement ce que le compte de sites servait a garantir. Il ne reste rien
+  # a tolerer, donc le compte declare devient ZERO et ce mur redevient ce qu'il aurait toujours du
+  # etre : aucune adresse de machine dans le code livre.
   #
-  # LES DEUX FORMES DE PROSE SONT HORS SUJET et le mur ne les lit pas : les exemples d'un template
-  # ou d'un `@doc` (`http://10.42.0.118` comme illustration) et la sortie de banc recopiee dans les
-  # README. Ce sont des ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de
-  # montrer une URL.
-  # ⚠ CE MUR COMPTAIT LES ADRESSES, PAS LES SITES — ET SA PROPRE PROMESSE EN DEPENDAIT. Le `sort -u`
-  # ci-dessous dedoublonne : une SECONDE occurrence de l'adresse declaree passait sans un mot. Or
-  # le commentaire ci-dessus promet « ce defaut change, et LUI SEUL ». Mesure du 2026-09-07 : il y
-  # en avait DEUX en code — le defaut d'image (`:54`) et `LCARS_SOURCE_REMOTE` (`:108`). Le jour du
-  # basculement GHCR, changer le premier aurait laisse le second pointer la forge, et personne
-  # n'aurait su ou il etait. Les deux sites sont desormais DECLARES, et un troisieme rougit.
-  local declaree="10.42.0.118"
-  local sites_attendus=2
+  # LES DEUX FORMES DE PROSE RESTENT HORS SUJET et le mur ne les lit pas : les exemples d'un
+  # template ou d'un `@doc`, et la sortie de banc recopiee dans les README. Ce sont des
+  # ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de montrer une URL.
+  # C'est pourquoi le balayage coupe les commentaires (`sed 's/#.*//'`) avant de compter.
+  local racines=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc")
+  local motif='(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
+
+  # GARDE D'INSTRUMENT — elle ne peut plus s'appuyer sur une adresse attendue, puisqu'on n'en
+  # attend aucune. Un mur qui n'accuse jamais et un balayage qui ne lit rien rendent le meme vert :
+  # on prouve donc que le motif MORD, sur un decor pose ici.
+  printf 'image: "10.42.0.118:80/fleet/lcars:2"\n' > "$BATS_TEST_TMPDIR/appat.yml"
+  grep -hE "$motif" "$BATS_TEST_TMPDIR/appat.yml" >/dev/null || {
+    echo "MUR 15 — le motif ne reconnait plus une adresse de LAN : l'instrument est casse" >&2
+    return 1
+  }
+  local r
+  for r in "${racines[@]}"; do
+    [ -d "$r" ] || { echo "MUR 15 — racine balayee absente : $r (l'instrument ne lit plus rien)" >&2; return 1; }
+  done
 
   local trouvees
-  trouvees="$(grep -rhE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
-                "$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
-                --exclude-dir=tests 2>/dev/null \
-              | sed 's/#.*//' \
-              | grep -oE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
-              | sort -u || true)"
+  trouvees="$(grep -rhE "$motif" "${racines[@]}" --exclude-dir=tests 2>/dev/null \
+              | sed 's/#.*//' | grep -oE "$motif" | sort -u || true)"
 
-  local rompu=0 ip
-  for ip in $trouvees; do
-    [ "$ip" = "$declaree" ] && continue
-    # Les reseaux docker par defaut (172.16/12) sont attribues par le daemon, pas graves par nous ;
-    # une occurrence en code les nomme quand meme, donc on ne les exempte PAS : si elle est la,
-    # quelqu'un l'a ecrite.
-    echo "MUR 15 rompu — adresse de LAN gravee : « $ip ». La seule declaree est « $declaree »," >&2
-    echo "   et son commentaire promet qu'elle change SEULE le jour ou GHCR est alimente." >&2
-    rompu=1
-  done
-  # Garde d'instrument : l'adresse declaree DOIT etre trouvee, sinon le balayage n'a rien lu.
-  printf '%s\n' $trouvees | grep -qx "$declaree" || {
-    echo "MUR 15 — « $declaree » introuvable : le balayage ne lit plus le compose d'install" >&2
+  [ -z "$trouvees" ] || {
+    echo "MUR 15 rompu — adresse(s) de LAN gravee(s) en code : $(echo $trouvees)" >&2
+    echo "   Le compte declare est ZERO depuis le basculement GHCR. Une adresse de machine dans" >&2
+    echo "   le code livre est un defaut qui ne marche que chez nous — nomme la registry, la forge" >&2
+    echo "   ou l'hote par une variable, pas par son IP." >&2
+    # Ou est-elle ? Le refus doit nommer le fichier, pas seulement l'adresse.
+    grep -rnE "$motif" "${racines[@]}" --exclude-dir=tests 2>/dev/null \
+      | grep -vE '^[^:]+:[0-9]+: *#' | sed 's/^/   /' >&2
     return 1
   }
-
-  # ET LE NOMBRE DE SITES, parce que l'adresse seule ne dit pas combien de fois elle est gravee.
-  local sites
-  sites="$(grep -rhE "${declaree//./\\.}" \
-             "$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
-             --exclude-dir=tests 2>/dev/null \
-           | sed 's/#.*//' | grep -cE "${declaree//./\\.}" || true)"
-  [ "$sites" -eq "$sites_attendus" ] || {
-    echo "MUR 15 — « $declaree » est gravee $sites fois en code, $sites_attendus declarees." >&2
-    echo "   Un site de plus, c'est une adresse que le basculement GHCR oubliera ; un de moins," >&2
-    echo "   c'est ce compteur qu'il faut baisser dans le meme geste." >&2
-    return 1
-  }
-  [ "$rompu" -eq 0 ] || return 1
 }
 
 @test "MUR 16: le fichier d'environnement de l'humain — un chemin, deux ecrivains, un lecteur" {
