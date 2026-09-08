@@ -125,6 +125,14 @@ _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/
 # `pull` d'image privee echouerait en accusant le reseau. Le repli qui ecrit un `config.json` reduit
 # aux seuls `cliPluginsExtraDirs` EFFACE ces clefs : il ne sert que quand il n'y a rien a preserver.
 # Le repli n'existe que pour une machine sans python3 : il n'a rien a preserver, il ecrase.
+# ⚠ SC2120 EST FAUX ICI, ET IL NE SE VOIT PAS SUR TOUS LES POSTES. Le `[<dir>]` de la signature est
+# OPTIONNEL par conception — l'appelant qui n'a pas de répertoire en laisse un être créé. Shellcheck
+# 0.9 signale « references arguments, but none are ever passed » ; 0.11 ne le signale plus. Le
+# plancher du gate étant « aucun signalement >= warning », le même arbre passait sur mon poste
+# (0.11.0, depuis pip) et rougissait sur un runner GitHub (0.9.0, depuis apt) — mesuré le
+# 2026-09-08. La leçon est plus large que cette ligne : un plancher d'outil NON ÉPINGLÉ ne rend pas
+# un verdict reproductible, et c'est la version la plus ancienne qui décide.
+# shellcheck disable=SC2120
 _docker_plugin_config() {
   local dir="${1:-}" plug src
   plug="$(_docker_mount_plugins)"
