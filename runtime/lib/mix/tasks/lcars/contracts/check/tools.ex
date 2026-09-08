@@ -586,32 +586,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
           nil
       end
 
-    %{
-      id: "mcp.tools_gated",
+    measured_verdict("mcp.tools_gated", %{
       remediation:
         "give the tool a gate: bind the channel identity in its handle_tool_call head " <>
           "(%{pod_id: pod_id}) AND derive the tool's subject from it in the body, or route it " <>
           "through a Delegation function guarded by require_architect/require_onboarder — " <>
           "tools/call does not re-check tools/list, and receiving pod_id is not using it",
-      status: if(is_nil(broken) and ungated == [] and undeclared == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken ->
-            ["#{tools_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-
-          ungated != [] ->
-            ["#{tools_rel}: ungated tools #{inspect(ungated)}"]
-
-          undeclared != [] ->
-            ["#{tools_rel}: dispatched without a deftool #{inspect(undeclared)}"]
-
-          true ->
-            []
-        end,
+      broken: broken && "#{tools_rel}: #{broken}",
+      findings:
+        if(ungated == [], do: [], else: ["#{tools_rel}: ungated tools #{inspect(ungated)}"]) ++
+          if(undeclared == [],
+            do: [],
+            else: ["#{tools_rel}: dispatched without a deftool #{inspect(undeclared)}"]
+          ),
       note:
         "#{MapSet.size(declared)} tools, each pod-scoped or role-gated; " <>
           "#{MapSet.size(gated_fns)} delegations carry a require_* gate"
-    }
+    })
   end
 
   # 6-106 — L'EXHAUSTIVITE DE LA CLASSIFICATION DES OUTILS, MECANIQUE OU RIEN.
@@ -652,29 +643,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
           nil
       end
 
-    %{
-      id: "mcp.tool_effects",
+    measured_verdict("mcp.tool_effects", %{
       remediation:
         "declare the tool's world-effect in `@tool_effects` of Fleet.MCP.PodTools, next to its " <>
           "deftool: `:mutation` (changes the world → single-flight), `:protocol` (the pod's own " <>
           "IN/OUT channel, whose re-emission is designed and owned by the TaskQueue) or `:read`",
-      status: if(is_nil(broken) and unclassified == [] and orphan == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken ->
-            ["#{tools_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-
-          unclassified != [] ->
-            ["#{tools_rel}: tools with no declared effect #{inspect(unclassified)}"]
-
-          orphan != [] ->
-            ["#{tools_rel}: @tool_effects names no tool declares #{inspect(orphan)}"]
-
-          true ->
-            []
-        end,
+      broken: broken && "#{tools_rel}: #{broken}",
+      # ⚠ LES DEUX SENS SONT RAPPORTES ENSEMBLE, et c'est un changement volontaire : le `cond`
+      # d'avant taisait les orphelins des qu'un outil n'etait pas classe. Deux desaccords opposes
+      # d'une meme table se lisent mieux cote a cote que l'un apres l'autre, en deux passes.
+      findings:
+        if(unclassified == [],
+          do: [],
+          else: ["#{tools_rel}: tools with no declared effect #{inspect(unclassified)}"]
+        ) ++
+          if(orphan == [],
+            do: [],
+            else: ["#{tools_rel}: @tool_effects names no tool declares #{inspect(orphan)}"]
+          ),
       note: "#{MapSet.size(declared)} tools, each with a declared world-effect"
-    }
+    })
   end
 
   # 6-136 — UN MODOP QUI ORDONNE UN OUTIL QUE SON PORTEUR N'A PAS **GELE LE POD**, ET RIEN NE LE
@@ -958,28 +946,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         true -> nil
       end
 
-    %{
-      id: "roles.capabilities_exercisable",
+    measured_verdict("roles.capabilities_exercisable", %{
       remediation:
         "either drop the capability from the cap-profile, or add at least one of the tools it " <>
           "gates to that role's allowedTools — a capability that opens no reachable tool " <>
           "authorizes nothing and misdescribes the role",
-      status: if(is_nil(broken) and inert == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken ->
-            ["delegation family: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-
-          inert != [] ->
-            Enum.sort(inert)
-
-          true ->
-            []
-        end,
+      broken: broken && "delegation family: #{broken}",
+      findings: Enum.sort(inert),
       note:
         "#{map_size(tools_by_capability)} tool-gated capabilities derived from the AST; " <>
           "card-selected and runtime-resolved capabilities are out of scope by nature"
-    }
+    })
   end
 
   # `require_x(...)` whose body asks `role_has_capability?(_, :cap)` — the gate, and the
@@ -1124,28 +1101,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         true -> nil
       end
 
-    %{
-      id: "mcp.seam_surface_declared",
+    measured_verdict("mcp.seam_surface_declared", %{
       remediation:
         "declare the op as a @callback of the behaviour that covers its path " <>
           "(ForgeClient / EscalationForge / DependencyForge / ProjectOnboard) — " <>
           "conforming/2 vouches only for what a behaviour declares",
-      status: if(is_nil(broken) and undeclared == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken ->
-            ["delegation family: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-
-          undeclared != [] ->
-            ["delegation family: called through a seam, declared nowhere: #{inspect(undeclared)}"]
-
-          true ->
-            []
-        end,
+      broken: broken && "delegation family: #{broken}",
+      findings:
+        if(undeclared == [],
+          do: [],
+          else: [
+            "delegation family: called through a seam, declared nowhere: #{inspect(undeclared)}"
+          ]
+        ),
       note:
         "#{length(called)} seam calls covered by #{MapSet.size(declared)} callbacks " <>
           "over #{length(behaviours)} behaviours"
-    }
+    })
   end
 
   # Remote calls on a VARIABLE (`forge.close_pr(...)`), which in `Delegation` are seam calls and
@@ -1219,24 +1191,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         true -> nil
       end
 
-    %{
-      id: "forge.payload_fields_read",
+    measured_verdict("forge.payload_fields_read", %{
       remediation:
         "either read the field where it answers a real question, or move it to " <>
           "@forge_unread_fields WITH what is known about why — including \"no reason recorded\" " <>
           "when that is the truth",
-      status: if(is_nil(broken) and unread == [] and resurrected == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-          unread != [] -> ["fields that LOST their last reader: #{inspect(Enum.sort(unread))}"]
-          resurrected != [] -> ["now read, remove from the allowlist: #{inspect(resurrected)}"]
-          true -> []
-        end,
+      broken: broken,
+      findings:
+        if(unread == [],
+          do: [],
+          else: ["fields that LOST their last reader: #{inspect(Enum.sort(unread))}"]
+        ) ++
+          if(resurrected == [],
+            do: [],
+            else: ["now read, remove from the allowlist: #{inspect(resurrected)}"]
+          ),
       note:
         "#{length(@forge_read_fields)} fields read, #{map_size(@forge_unread_fields)} deliberately " <>
           "not (1 of them with no reason recorded — that is a queue, not an answer)"
-    }
+    })
   end
 
   # ── Forge mutations: which have a door, and for whom ─────────────────
@@ -1308,24 +1281,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         true -> nil
       end
 
-    %{
-      id: "forge.mutations_exposed",
+    measured_verdict("forge.mutations_exposed", %{
       remediation:
         "expose the capability through a gated delegation tool, or record it in " <>
           "@forge_mutations_runtime_only with WHY it stays runtime-only",
-      status: if(is_nil(broken) and undecided == [] and stale == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-          undecided != [] -> ["mutations with no door and no decision: #{inspect(undecided)}"]
-          stale != [] -> ["listed runtime-only but no longer a mutation: #{inspect(stale)}"]
-          true -> []
-        end,
+      broken: broken,
+      findings:
+        if(undecided == [],
+          do: [],
+          else: ["mutations with no door and no decision: #{inspect(undecided)}"]
+        ) ++
+          if(stale == [],
+            do: [],
+            else: ["listed runtime-only but no longer a mutation: #{inspect(stale)}"]
+          ),
       note:
         "#{length(@forge_mutations)} forge mutations — " <>
           "#{length(@forge_mutations) - map_size(@forge_mutations_runtime_only)} reachable by a " <>
           "tool, #{map_size(@forge_mutations_runtime_only)} runtime-only ON RECORD"
-    }
+    })
   end
 
   # A quoted key anywhere in `lib/`, MINUS `lib/mix/tasks/`. Deliberately coarse on the pattern: the

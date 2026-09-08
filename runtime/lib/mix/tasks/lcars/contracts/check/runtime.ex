@@ -970,36 +970,39 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
     broken =
       cond do
-        length(doors) < 15 -> "only #{length(doors)} door(s) found (expected 15+)"
-        writers == [] -> "no door writes to stdout — the scan matched no IO.puts/1"
+        # Le chemin balaye est NOMME dans la phrase : un instrument casse doit dire OU il n'a rien
+        # trouve, sinon le lecteur cherche dans l'arbre entier.
+        length(doors) < 15 ->
+          "lib/**/*.ex: only #{length(doors)} door(s) found (expected 15+)"
+
+        writers == [] ->
+          "lib/**/*.ex: no door writes to stdout — the scan matched no IO.puts/1"
+
         # ⚠ LA GARDE DE LA SECONDE FAMILLE. Si `mix_task?/1` cesse de reconnaitre un module
         # `Mix.Tasks.*`, les taches disparaissent du scan EN SILENCE et le mur redevient vert sur
         # la moitie qu'il vient d'apprendre a voir. Une absence ne se distingue pas d'une
         # conformite : on plante le plancher sous l'etat du jour, huit taches.
-        length(tasks) < 6 -> "only #{length(tasks)} Mix task(s) matched (expected 6+)"
-        true -> nil
+        length(tasks) < 6 ->
+          "lib/**/*.ex: only #{length(tasks)} Mix task(s) matched (expected 6+)"
+
+        true ->
+          nil
       end
 
-    %{
-      id: id,
+    measured_verdict(id, %{
       remediation:
         "call `Fleet.ReleaseDoor.claim_stdout!/0` at the top of the door, before anything that " <>
           "can log: the default Logger handler writes to stdout, and a door's stdout is a " <>
           "CONTRACT read by a shell — a log line there becomes part of a URL or breaks a JSON",
-      status: if(is_nil(broken) and naked == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken -> ["lib/**/*.ex: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-          naked != [] -> Enum.sort(naked)
-          true -> []
-        end,
+      broken: broken,
+      findings: Enum.sort(naked),
       # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « all claiming it » sans condition affirmerait la
       # conformite dans le rapport meme d'un echec.
       note:
         "#{length(doors)} door(s) (`eval*` + Mix task `run/1`), #{length(writers)} writing to " <>
           "stdout, " <>
           if(naked == [], do: "all claiming it", else: "#{length(naked)} NOT claiming it")
-    }
+    })
   end
 
   # ⚠ `def_name/1` (plus bas) DEPLIE le `:when` : la tete d'un `def f(x) when g` y est enveloppee,

@@ -188,18 +188,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     {placement, placement_note} = check_placement_defaults(root, tf_path)
     evidence = evidence ++ placement
 
-    evidence =
-      if canon == [], do: ["canon catalogue empty/not found — fail-closed"], else: evidence
-
-    %{
-      id: "roles.provisioning_locked",
+    measured_verdict("roles.provisioning_locked", %{
       remediation:
-        case remediations do
-          [] -> "—"
-          rems -> Enum.join(Enum.uniq(rems), " ; ")
-        end,
-      status: if(evidence == [] and canon != [], do: :pass, else: :fail),
-      evidence: evidence,
+        if(remediations == [], do: "—", else: Enum.join(Enum.uniq(remediations), " ; ")),
+      broken: if(canon == [], do: "canon catalogue empty/not found — fail-closed"),
+      findings: evidence,
       note:
         "four-list STRICT equality (BL-6-45)" <>
           placement_note <>
@@ -207,7 +200,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
           "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
           "ROLES == PROV_ROLES — any delta is a defect, named" <>
           skipped_note(skipped)
-    }
+    })
   end
 
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
@@ -690,31 +683,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
           is_nil(shell_default(src, var)),
           do: "#{var} (#{file})"
 
-    %{
-      id: "catalogue.install_paths_locked",
+    measured_verdict("catalogue.install_paths_locked", %{
       remediation:
         "make bin/lcars and deploy/lib/provision-lib.sh agree with Fleet.Layout (@platform_root, " <>
           "@catalogues_dirname, @installed_catalogues_root) — provisioning that converges a " <>
           "directory the runtime does not read reports every catalogue installed and serves none",
-      status:
-        if(not is_nil(expected) and mismatches == [] and missing == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          is_nil(expected) ->
-            [
-              "#{layout}: INSTRUMENT BROKEN — a catalogue path attribute is gone or renamed; " <>
-                "this check measured nothing"
-            ]
-
-          missing != [] ->
-            [
-              "no shell default for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
-                "the path"
-            ]
-
-          true ->
-            Enum.sort(mismatches)
-        end,
+      broken:
+        if(is_nil(expected),
+          do: "#{layout}: a catalogue path attribute is gone or renamed"
+        ),
+      # ⚠ DEUX PANNES OPPOSEES, ET ELLES SE DISENT SEPAREMENT. « cette moitie ne porte plus le
+      # chemin » et « elle en porte un autre » envoient le lecteur a des endroits differents ; les
+      # fondre lui ferait chercher une divergence de valeur la ou il n'y a plus de valeur.
+      findings:
+        if(missing == [],
+          do: Enum.sort(mismatches),
+          else: [
+            "no shell default for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
+              "the path"
+          ]
+        ),
       note:
         "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}" <>
           if(deploy?,
@@ -722,7 +710,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
             else:
               " · #{lib} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
           )
-    }
+    })
   end
 
   # The provisioning lib carries ONE of the two paths — the installed cache, which `45-catalogues`

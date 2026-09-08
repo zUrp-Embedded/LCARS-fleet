@@ -294,17 +294,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         max_missing = max_expected |> MapSet.difference(from_max) |> Enum.sort()
         max_extra = from_max |> MapSet.difference(max_expected) |> Enum.sort()
 
-        %{
-          id: "findings.severities_aligned",
+        measured_verdict("findings.severities_aligned", %{
           remediation:
             "une severite ecrite d'un seul cote est soit refusee au fil (le juge perd sa charge " <>
               "entiere, cf. le cas `none`), soit acceptee et jamais comparee au `block_at`",
-          status:
-            if(code_only == [] and schema_only == [] and max_missing == [] and max_extra == [],
-              do: :pass,
-              else: :fail
-            ),
-          evidence:
+          findings:
             Enum.map(code_only, &"absente de l'enum severity: #{inspect(&1)}") ++
               Enum.map(schema_only, &"absente de severities/0: #{inspect(&1)}") ++
               Enum.map(max_missing, &"absente de l'enum severity_max: #{inspect(&1)}") ++
@@ -312,7 +306,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
           note:
             "findings severity vocabulary: severities/0 == enum severity, " <>
               "et == enum severity_max prive de #{inspect(@severity_max_empty)}"
-        }
+        })
     end
   end
 

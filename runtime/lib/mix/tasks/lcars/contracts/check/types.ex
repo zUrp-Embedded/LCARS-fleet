@@ -58,26 +58,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
         end
       end)
 
-    %{
-      id: "types.public_functions_spec",
+    measured_verdict("types.public_functions_spec", %{
       remediation:
         "donne un `@spec` a la fonction — sans lui, Dialyzer l'analyse avec le contrat le plus " <>
           "permissif qu'il puisse inferer, et `:extra_return`/`:missing_return` n'ont rien a " <>
           "comparer. Un `@impl` n'en a pas besoin : son contrat vit dans le behaviour",
-      status: if(files != [] and manquantes == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          files == [] ->
-            ["INSTRUMENT BROKEN — aucun fichier source lu sous lib/"]
-
-          manquantes != [] ->
-            Enum.map(manquantes, fn {f, ns} -> "#{f}: #{Enum.join(ns, ", ")}" end)
-
-          true ->
-            []
-        end,
+      broken: if(files == [], do: "aucun fichier source lu sous lib/"),
+      findings: Enum.map(manquantes, fn {f, ns} -> "#{f}: #{Enum.join(ns, ", ")}" end),
       note: "public functions carrying a @spec (@impl excluded), #{length(files)} files scanned"
-    }
+    })
   end
 
   # Les callbacks dont le contrat vit dans leur BEHAVIOUR — meme exclusion que le jumeau
@@ -132,27 +121,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   defp stmts_of(single), do: [single]
 
   defp scope_gap(stmts) do
-    {defs, specs} =
-      Enum.reduce(stmts, {{[], MapSet.new()}, false}, fn stmt, {{ds, ss}, impl?} ->
-        case stmt do
-          # Le module imbrique a son propre monde (`module_bodies/1` le visite a part).
-          {:defmodule, _, _} ->
-            {{ds, ss}, false}
-
-          {:@, _, [{:impl, _, _}]} ->
-            {{ds, ss}, true}
-
-          {:@, _, [{:spec, _, [spec]}]} ->
-            {{ds, spec_unit(spec, ss)}, false}
-
-          {kind, _, [head | _]} when kind in [:def, :defdelegate, :defmacro] ->
-            {{def_unit(head, ds, impl?), ss}, false}
-
-          _ ->
-            {{ds, ss}, false}
-        end
-      end)
-      |> elem(0)
+    {defs, specs} = stmts |> Enum.reduce({{[], MapSet.new()}, false}, &scope_step/2) |> elem(0)
 
     impls = for {n, lo, hi, true} <- defs, a <- lo..hi, into: MapSet.new(), do: {n, a}
 
@@ -164,6 +133,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     end)
     |> Enum.map(fn {name, _lo, hi, _} -> "#{name}/#{hi}" end)
   end
+
+  # UN PAS DU BALAYAGE D'UNE PORTEE : l'accumulateur porte les definitions vues, les specs vues, et
+  # le drapeau « le `@impl` juste au-dessus ». Ce drapeau est la raison de la reduction — un `@impl`
+  # ne s'attache pas a la definition dans l'AST, il la PRECEDE.
+  defp scope_step({:defmodule, _, _}, {{ds, ss}, _impl?}), do: {{ds, ss}, false}
+  defp scope_step({:@, _, [{:impl, _, _}]}, {{ds, ss}, _impl?}), do: {{ds, ss}, true}
+
+  defp scope_step({:@, _, [{:spec, _, [spec]}]}, {{ds, ss}, _impl?}),
+    do: {{ds, spec_unit(spec, ss)}, false}
+
+  defp scope_step({kind, _, [head | _]}, {{ds, ss}, impl?})
+       when kind in [:def, :defdelegate, :defmacro],
+       do: {{def_unit(head, ds, impl?), ss}, false}
+
+  defp scope_step(_stmt, {{ds, ss}, _impl?}), do: {{ds, ss}, false}
 
   # `{nom, arite_min, arite_max}` — l'intervalle vient des arguments a valeur par defaut.
   defp def_unit({:when, _, [inner | _]}, acc, impl?), do: def_unit(inner, acc, impl?)
@@ -225,27 +209,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
     scanned = length(Path.wildcard(Path.join([root, "lib", "**", "*.ex"])))
 
-    %{
-      id: "docs.public_functions_documented",
+    measured_verdict("docs.public_functions_documented", %{
       remediation:
         "give the function an `@doc` saying its contract — or `@doc false` if it is public only " <>
           "for a reason the reader must not take as an API. `h Module.fun` answering nothing is " <>
           "the source becoming the contract by default",
-      status: if(scanned > 0 and undocumented == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          scanned == 0 ->
-            ["INSTRUMENT BROKEN — no source file scanned under lib/"]
-
-          undocumented != [] ->
-            Enum.map(undocumented, fn {p, n} -> "#{p}: #{Enum.join(n, ", ")}" end)
-
-          true ->
-            []
-        end,
+      broken: if(scanned == 0, do: "no source file scanned under lib/"),
+      findings: Enum.map(undocumented, fn {p, n} -> "#{p}: #{Enum.join(n, ", ")}" end),
       note:
         "#{scanned} modules scanned, #{length(undocumented)} carrying an undocumented public function"
-    }
+    })
   end
 
   # NESTING IS THE POPULATION, NOT A DETAIL OF IT. Matching `^  def` — EXACTLY two spaces, the

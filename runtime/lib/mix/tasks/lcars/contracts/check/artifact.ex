@@ -194,23 +194,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
       end)
       |> Enum.sort()
 
-    %{
-      id: "site.build_inputs",
-      status: if(File.exists?(wf) and read != [] and uncovered == [], do: :pass, else: :fail),
+    measured_verdict("site.build_inputs", %{
       remediation:
         "ajouter les chemins manquants au `paths:` de .github/workflows/site.yml — le build du " <>
           "site LIT ces fichiers, donc un changement qui ne les declenche pas laisse la plaquette " <>
           "decrire la version d'avant, en silence",
-      evidence:
+      # ⚠ LES DEUX GARDES DISENT « fail-closed », ET LE MOT COMPTE : ici l'arbre du site EST la, donc
+      # l'instrument devait mesurer quelque chose. C'est distinct du hors-perimetre, qui passe au
+      # vert en le disant (cf. `check_site_build_inputs/1`, juste au-dessus).
+      broken:
         cond do
-          not File.exists?(wf) -> [".github/workflows/site.yml INTROUVABLE — fail-closed"]
-          read == [] -> ["aucune entree derivee de #{Path.relative_to(lib, repo)} — fail-closed"]
-          true -> Enum.map(uncovered, &"lu par le build, HORS paths: #{&1}")
+          not File.exists?(wf) -> ".github/workflows/site.yml INTROUVABLE — fail-closed"
+          read == [] -> "aucune entree derivee de #{Path.relative_to(lib, repo)} — fail-closed"
+          true -> nil
         end,
+      findings: Enum.map(uncovered, &"lu par le build, HORS paths: #{&1}"),
       note:
         "le filtre `paths:` du workflow doit couvrir toute source runtime que le site lit " <>
           "(#{length(read)} derivees)"
-    }
+    })
   end
 
   # Les chemins repo-relatifs que le build du site ouvre, en {chemin, :file | :dir}.
@@ -435,24 +437,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     missing = MapSet.difference(bearing, listed) |> Enum.sort()
     extra = MapSet.difference(listed, bearing) |> Enum.sort()
 
-    if broken do
-      broken_result("template.gitea_expansion", broken)
-    else
-      %{
-        id: "template.gitea_expansion",
-        status: if(missing == [] and extra == [], do: :pass, else: :fail),
-        remediation:
-          "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
-            "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
-            "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
-        evidence:
-          Enum.map(missing, &"porteur NON liste: #{&1}") ++
-            Enum.map(extra, &"liste mais sans variable: #{&1}"),
-        note:
-          "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
-            "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
-      }
-    end
+    measured_verdict("template.gitea_expansion", %{
+      remediation:
+        "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
+          "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
+          "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
+      broken: broken,
+      # LES DEUX SENS : un porteur hors liste sort avec ses litteraux, une entree listee sans
+      # variable apprend au lecteur que ce fichier est expanse alors qu'il ne l'est pas.
+      findings:
+        Enum.map(missing, &"porteur NON liste: #{&1}") ++
+          Enum.map(extra, &"liste mais sans variable: #{&1}"),
+      note:
+        "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
+          "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
+    })
   end
 
   # WHAT THE PROVEN-IMAGE REGIME IS ACTUALLY WORTH, AND THE ONE SWITCH THAT VOIDS IT. `SPBuilder`
