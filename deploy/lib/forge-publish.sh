@@ -37,10 +37,35 @@ fp_release_body() {
   for f in "$dist"/*.sha256; do [[ -f "$f" ]] || continue; printf '    %s\n' "$(head -1 "$f")"; done
 }
 
+# fp_dialect <forge> → `github` | `gitea`
+#
+# ⚠ DEUX FORGES, UN SEUL GESTE — ET LA DIFFÉRENCE N'EST PAS COSMÉTIQUE. La forme d'URL de
+# TÉLÉCHARGEMENT est commune (c'est ce que la porte grave, cf. en-tête), mais l'API de PUBLICATION
+# diverge sur trois points, et sur trois seulement :
+#   · la base       : `<forge>/api/v1/repos/o/r`   contre  `https://api.github.com/repos/o/r`
+#   · les assets    : `POST …/assets?name=` en multipart  contre  un HÔTE À PART
+#                     (`uploads.github.com`) en corps binaire — un multipart y rend 422
+#   · le registre Debian : GitHub N'EN A PAS. On ne le simule pas, on le DIT.
+# Tout le reste — l'immutabilité, la sonde de commit, le brouillon, la publication d'un coup — est
+# identique, donc n'est écrit qu'une fois.
+fp_dialect() {
+  case "${1%/}" in
+    https://github.com|http://github.com|https://api.github.com|https://www.github.com) echo github ;;
+    *) echo gitea ;;
+  esac
+}
+
 # fp_publish_dist <forge> <owner> <repo> <tag> <tiroir> <sha-source> <distribution-debian> [component]
 fp_publish_dist() {
   local forge="${1%/}" owner="$2" repo="$3" tag="$4" dist="$5" target="$6" ddist="$7" comp="${8:-main}"
-  local api="$forge/api/v1/repos/$owner/$repo" body code id f n
+  local body code id f n
+  local dialect; dialect="$(fp_dialect "$forge")"
+  local api web
+  if [[ "$dialect" == github ]]; then
+    api="https://api.github.com/repos/$owner/$repo"; web="https://github.com"
+  else
+    api="$forge/api/v1/repos/$owner/$repo"; web="$forge"
+  fi
   [[ -n "${FP_TOKEN:-}" ]] || { echo "fp: REFUS — FP_TOKEN absent (le jeton, dans l'environnement — jamais en argv)" >&2; return 1; }
   [[ -d "$dist" ]] || { echo "fp: REFUS — le tiroir $dist n'existe pas" >&2; return 1; }
   command -v jq >/dev/null || { echo "fp: REFUS — jq absent (la release se décrit en JSON)" >&2; return 1; }
@@ -81,15 +106,29 @@ fp_publish_dist() {
   id="$(jq -r '.id // empty' "$body" 2>/dev/null)"
   [[ "$id" =~ ^[0-9]+$ ]] || { echo "fp: la forge n'a pas rendu l'id de la release « $tag » (brouillon créé ? vérifie sur la forge)" >&2; return 1; }
 
-  # 3. les assets — TOUT le tiroir
+  # 3. les assets — TOUT le tiroir. L'HÔTE DIFFÈRE CHEZ GITHUB, et la forme du corps aussi :
+  #    `uploads.github.com`, corps binaire, `Content-Type` explicite. Un multipart (`-F`) y rend 422.
   for f in "$dist"/*; do
     [[ -f "$f" ]] || continue; n="$(basename "$f")"
-    code="$(fp_curl "$body" -X POST -F "attachment=@$f" "$api/releases/$id/assets?name=$n")"
+    if [[ "$dialect" == github ]]; then
+      code="$(fp_curl "$body" -X POST -H 'Content-Type: application/octet-stream' \
+                --data-binary "@$f" "https://uploads.github.com/repos/$owner/$repo/releases/$id/assets?name=$n")"
+    else
+      code="$(fp_curl "$body" -X POST -F "attachment=@$f" "$api/releases/$id/assets?name=$n")"
+    fi
     [[ "$code" == 201 ]] || { echo "fp: REFUS (${code:-vide}) sur l'asset $n — $(fp_err "$body"). La release « $tag » reste en BROUILLON (id $id) : supprime-la sur la forge avant de rejouer." >&2; return 1; }
     echo "fp: asset ← $n"
   done
 
   # 4. les .deb au registre Debian de l'owner. 409 = déjà là : un paquet publié ne se réécrit pas.
+  #
+  # ⚠ GITHUB N'A PAS DE REGISTRE DEBIAN, ET ON NE LE SIMULE PAS. Les `.deb` sont montés à l'étape 3
+  # comme assets — donc téléchargeables, et `apt install ./lcars_*.deb` marche — mais il n'y a pas
+  # de source `apt` à déclarer. Le taire ferait croire à une voie qui n'existe pas ; inventer une
+  # URL en ferait une qui rend 404 à la première install venue.
+  if [[ "$dialect" == github ]]; then
+    echo "fp: registre Debian — GitHub n'en a pas. Les .deb sont dans la release (assets) : « sudo apt install ./lcars_*.deb » après téléchargement. Pas de source apt sur cette forge."
+  else
   for f in "$dist"/*.deb; do
     [[ -f "$f" ]] || continue; n="$(basename "$f")"
     code="$(fp_curl "$body" -X PUT --upload-file "$f" "$forge/api/packages/$owner/debian/pool/$ddist/$comp/upload")"
@@ -99,11 +138,16 @@ fp_publish_dist() {
       *) echo "fp: REFUS (${code:-vide}) au registre Debian pour $n — $(fp_err "$body"). La release « $tag » reste en brouillon (id $id)." >&2; return 1 ;;
     esac
   done
+  fi
 
   # 5. publiée d'un coup
   code="$(fp_curl "$body" -X PATCH -H 'Content-Type: application/json' --data-binary '{"draft":false}' "$api/releases/$id")"
   [[ "$code" == 200 ]] || { echo "fp: REFUS (${code:-vide}) à la publication du brouillon $id — $(fp_err "$body")" >&2; return 1; }
-  echo "fp: release $forge/$owner/$repo/releases/tag/$tag — $(find "$dist" -maxdepth 1 -type f | wc -l) assets"
-  echo "fp: source apt : deb [signed-by=/etc/apt/keyrings/lcars-$owner.asc] $forge/api/packages/$owner/debian $ddist $comp"
-  echo "fp:   clé     : $forge/api/packages/$owner/debian/repository.key"
+  echo "fp: release $web/$owner/$repo/releases/tag/$tag — $(find "$dist" -maxdepth 1 -type f | wc -l) assets"
+  # La source apt ne se dit QUE là où elle existe : une ligne `deb …` pour une forge qui n'a pas de
+  # registre serait une commande qui rend 404 à celui qui la copie.
+  if [[ "$dialect" != github ]]; then
+    echo "fp: source apt : deb [signed-by=/etc/apt/keyrings/lcars-$owner.asc] $forge/api/packages/$owner/debian $ddist $comp"
+    echo "fp:   clé     : $forge/api/packages/$owner/debian/repository.key"
+  fi
 }

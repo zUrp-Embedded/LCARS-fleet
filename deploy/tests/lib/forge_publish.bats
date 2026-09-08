@@ -124,3 +124,51 @@ SH
   [ "$status" -ne 0 ]; [[ "$output" == *"le tiroir"*"n'existe pas"* ]]
   [ ! -s "$TRACE" ]
 }
+
+# ─── LE DIALECTE GITHUB (lot GHCR, 2026-09-08) ──────────────────────────────────────────────────
+#
+# La forme d'URL de TÉLÉCHARGEMENT est commune aux deux forges — c'est ce que la porte grave. C'est
+# l'API de PUBLICATION qui diverge, sur trois points et trois seulement. Ces témoins les tiennent :
+# une base différente, un HÔTE À PART pour les assets, et l'absence de registre Debian qu'on DIT au
+# lieu de la simuler.
+
+_pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zUrp-Embedded LCARS-temp 0.1-abc '$DIST' deadbeefcafe resolute main"; }
+
+@test "GITHUB : le dialecte se lit sur la forge, et lui seul décide" {
+  run bash -c ". '$LIB'; fp_dialect https://github.com; fp_dialect https://github.com/; fp_dialect http://10.42.0.118; fp_dialect https://gitea.example.org"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | tr '\n' ' ')" = "github github gitea gitea " ]
+}
+
+@test "GITHUB : l'API est api.github.com, et les assets partent sur uploads.github.com" {
+  _pub_gh; [ "$status" -eq 0 ]
+  [ "$(sed -n 1p "$TRACE")" = "GET https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases/tags/0.1-abc" ]
+  [ "$(sed -n 2p "$TRACE")" = "GET https://api.github.com/repos/zUrp-Embedded/LCARS-temp/git/commits/deadbeefcafe" ]
+  [ "$(sed -n 3p "$TRACE")" = "POST https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases" ]
+  # TOUT le tiroir monte, et par l'hôte d'upload — jamais par api.github.com
+  [ "$(grep -c '^POST https://uploads.github.com/repos/zUrp-Embedded/LCARS-temp/releases/42/assets?name=' "$TRACE")" -eq 6 ]
+  ! grep -q 'POST https://api.github.com/.*/assets' "$TRACE" \
+    || { echo "un asset est parti sur api.github.com : GitHub y rend 422"; return 1; }
+  [ "$(tail -1 "$TRACE")" = "PATCH https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases/42" ]
+}
+
+@test "GITHUB : aucun registre Debian n'est appelé, et l'absence se DIT" {
+  _pub_gh; [ "$status" -eq 0 ]
+  ! grep -q 'debian/pool' "$TRACE" || { echo "un PUT est parti vers un registre Debian que GitHub n'a pas"; return 1; }
+  [[ "$output" == *"GitHub n'en a pas"* ]]
+  [[ "$output" == *"apt install ./lcars_*.deb"* ]]
+  # ET AUCUNE LIGNE `deb …` : une source apt pour une forge sans registre rend 404 à qui la copie.
+  ! [[ "$output" == *"source apt :"* ]] || { echo "une source apt est annoncee sur une forge qui n'en a pas"; return 1; }
+}
+
+@test "GITHUB : l'URL rendue est celle du web, pas celle de l'API" {
+  _pub_gh; [ "$status" -eq 0 ]
+  [[ "$output" == *"release https://github.com/zUrp-Embedded/LCARS-temp/releases/tag/0.1-abc — 6 assets"* ]]
+}
+
+@test "GITEA : le dialecte par défaut n'a rien perdu — registre Debian et source apt sont toujours là" {
+  _pub; [ "$status" -eq 0 ]
+  [ "$(grep -c 'PUT http://forge.test/api/packages/fleet/debian/pool/resolute/main/upload' "$TRACE")" -eq 2 ]
+  [[ "$output" == *"source apt : deb [signed-by=/etc/apt/keyrings/lcars-fleet.asc] http://forge.test/api/packages/fleet/debian resolute main"* ]]
+  ! grep -q 'uploads.github.com' "$TRACE"
+}
