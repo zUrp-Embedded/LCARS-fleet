@@ -8,7 +8,7 @@
 | | |
 |---|---|
 | 🇫🇷 | **[README_fr.md](README_fr.md)** — installer, entrer, premier projet |
-| 🇬🇧 | **[README_EN.md](README_EN.md)** — install, get in, first project |
+| 🇬🇧 | **[README_EN.md](README_EN.md)** — *work in progress*: the English version described an older product and was emptied rather than left to mislead. Use the French one meanwhile. |
 
 <!--
 CE FICHIER EXISTE POUR UNE SEULE RAISON, ET ELLE N'EST PAS DECORATIVE : `README.md` est le nom que

@@ -72,6 +72,37 @@ setup() {
 
 mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 
+# ─── DI-12 : L'INSTRUMENT DU FLAKE, PARCE QU'UN ROUGE MUET SE REJOUE A L'AVEUGLE ─────────────────
+#
+# Trois temoins de ce fichier — celui-ci mis a part, les trois marques `di12` ci-dessous — rougissent
+# sous `bats -j 8` sans que le code ait change (registre : work/beyond_#6/FLAKES.md, DI-12, ouvert le
+# 2026-09-04, jamais reproduit a la demande). Ils sont VERTS SEULS ; le rouge n'apparait qu'en
+# parallele, donc l'enquete a lieu DANS la passe qui rougit ou nulle part.
+#
+# ⚠ ET ILS N'IMPRIMAIENT RIEN. `[ "$status" -eq 0 ]` nu rend « failed » et le numero de ligne ;
+# `--print-output-on-failure` ajoute la sortie du dernier `run`, et RIEN sur l'etat du decor. Or la
+# seule piste restante de DI-12 porte precisement sur cet etat : un temoin qui LIT le repertoire du
+# tmpfiles pendant qu'un autre y a un `.prov.XXXXXX` en vol (le mktemp de `write_atomic`) verrait un
+# fichier de trop. Ce que ce diagnostic imprime — le contenu du conf ET le listing du repertoire —
+# est ce qui distingue cette hypothese de sa concurrente. Sans lui on ne peut que rejouer.
+#
+# Trois temoins instrumentes, pas deux : un flake a trois faces dont on n'eclaire que deux se
+# reproduira sur la troisieme, et l'enquete recommencera a froid.
+di12() {
+  {
+    echo "=== DI-12 (flake connu, cf. work/beyond_#6/FLAKES.md) : $* ==="
+    echo "--- statut : ${status-<aucun run>}"
+    echo "--- sortie :"; echo "${output-<aucun run>}"
+    echo "--- $LCARS_TMPFILES_CONF :"
+    if [ -e "$LCARS_TMPFILES_CONF" ]; then cat "$LCARS_TMPFILES_CONF"; else echo "<absent>"; fi
+    # LE LISTING EST L'INSTRUMENT, pas un ornement : un `.prov.XXXXXX` visible ici DEMONTRE
+    # l'hypothese du temporaire en vol ; son absence l'ECARTE et renvoie a l'autre piste.
+    echo "--- $(dirname "$LCARS_TMPFILES_CONF") :"; ls -la "$(dirname "$LCARS_TMPFILES_CONF")" 2>&1
+    echo "--- passes bats concurrentes : $(pgrep -c -x bats 2>/dev/null || echo '?')"
+  } >&2
+  return 1
+}
+
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   run head -6 "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
   [[ "$output" == *"SOURCE:"* ]]
@@ -180,14 +211,15 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 }
 
 @test "apply pose la declaration, et check la voit" {
+  # di12 : instrumente (1/3) — voir le bloc DI-12 en tete de fichier.
   PROV_SUBSTRATE=linux mod 'apply_tmpfiles'
-  [ "$status" -eq 0 ]
-  [ -f "$LCARS_TMPFILES_CONF" ]
-  [[ "$(stat -c %a "$LCARS_TMPFILES_CONF")" == "644" ]]
+  [ "$status" -eq 0 ] || di12 "apply_tmpfiles a rendu $status"
+  [ -f "$LCARS_TMPFILES_CONF" ] || di12 "apply_tmpfiles n'a pas laisse le fichier"
+  [[ "$(stat -c %a "$LCARS_TMPFILES_CONF")" == "644" ]] || di12 "mode $(stat -c %a "$LCARS_TMPFILES_CONF"), attendu 644"
 
   PROV_SUBSTRATE=linux mod 'check_tmpfiles'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"OK"* ]]
+  [ "$status" -eq 0 ] || di12 "check_tmpfiles a rendu $status"
+  [[ "$output" == *"OK"* ]] || di12 "check_tmpfiles ne dit pas OK sur sa propre pose"
 }
 
 @test "declaration ABSENTE = drift, et le drift dit la CONSEQUENCE (la fleet ne demarrera pas)" {
@@ -201,10 +233,11 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 }
 
 @test "declaration PERIMEE = drift — un contenu qui ne suit plus la table ment au boot" {
+  # di12 : instrumente (2/3) — voir le bloc DI-12 en tete de fichier.
   printf 'd /run/quelque-part-dautre 0755 root root -\n' > "$LCARS_TMPFILES_CONF"
   PROV_SUBSTRATE=linux mod 'check_tmpfiles'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ne correspond plus"* ]]
+  [ "$status" -eq 0 ] || di12 "check_tmpfiles a rendu $status sur une declaration perimee"
+  [[ "$output" == *"ne correspond plus"* ]] || di12 "le drift n'est pas nomme « ne correspond plus »"
 }
 
 @test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
@@ -241,9 +274,11 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   # `printf … | write_atomic` : le dernier element d'un pipeline est un sous-shell, `PROV_CHANGED`
   # y etait incremente puis perdu. Le fichier etait ecrit, l'apply disait « rien change ». Le mur
   # I1bis (idiom_walls.bats) interdit la forme ; ce temoin pinne le compteur.
+  # di12 : instrumente (3/3) — voir le bloc DI-12 en tete de fichier. C'est la face du flake
+  # mesuree sur la porte COMPLETE (598/1178), celle qu'on ne rejoue pas a la demande.
   PROV_SUBSTRATE=linux mod 'PROV_CHANGED=0; apply_tmpfiles; echo "changed=$PROV_CHANGED"'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"changed=1"* ]]
+  [ "$status" -eq 0 ] || di12 "apply_tmpfiles a rendu $status"
+  [[ "$output" == *"changed=1"* ]] || di12 "le compteur ne rapporte pas l'ecriture"
 }
 
 # ─── LOT 14 : SUR DOCKER, LE MODULE MESURE CE QUE L'IMAGE POSE — ET RIEN D'AUTRE ────────────────
@@ -387,7 +422,15 @@ check_on() {
     n=$((n + 1))
     [ "$row" = "$mode $owner" ] || { echo "$path — manifeste « $row », table « $mode $owner »"; bad=1; }
   done <<<"$output"
-  [ "$n" -ge 12 ] || { echo "seulement $n lignes comparees — le decor ne rend pas la table"; return 1; }
+  # ⚠ LA GARDE D'INSTRUMENT SE DERIVE, ELLE NE SE FIGE PAS. Elle disait `-ge 12`, et la mesure du
+  # 2026-09-08 rend exactement 12 : le litteral etait posé sur la valeur du jour, donc il ne
+  # garantissait plus rien au-dessus et rougissait au premier retrait legitime d'une entree. Ce qui
+  # doit etre vrai n'est pas « au moins douze », c'est « TOUTES les entrees durables sont passees
+  # par la comparaison, et il y en a ». Les deux mordent : une entree absente du manifeste fait
+  # `continue` sans incrementer, et un decor qui ne rend rien laisse `attendu` a zero.
+  local attendu; attendu="$(awk '$1 != "" && $1 !~ /^\/run\//' <<<"$output" | grep -c .)"
+  [ "$attendu" -gt 0 ] || { echo "la table ne rend AUCUNE entree durable — le decor ne rend pas la table"; return 1; }
+  [ "$n" -eq "$attendu" ] || { echo "$n lignes comparees sur $attendu entrees durables — il en manque $((attendu - n)) au manifeste"; return 1; }
   [ "$bad" -eq 0 ]
 }
 

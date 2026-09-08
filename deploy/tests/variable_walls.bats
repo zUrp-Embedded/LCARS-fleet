@@ -991,7 +991,15 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # template ou d'un `@doc`, et la sortie de banc recopiee dans les README. Ce sont des
   # ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de montrer une URL.
   # C'est pourquoi le balayage coupe les commentaires (`sed 's/#.*//'`) avant de compter.
-  local racines=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc")
+  # ⚠ LE TITRE DIT « EN CODE », LE BALAYAGE NE LISAIT QUE QUATRE RACINES. Mesuré par relecture
+  # hostile le 2026-09-08 : des appâts posés dans `runtime/lib/` (toute l'application Elixir livrée),
+  # `runtime/config/` (`runtime.exs`, l'endroit le plus naturel pour un hôte par défaut) et à la
+  # racine (`install.sh`, `pack.sh`) laissaient ce mur VERT. Un mur dont le périmètre est plus
+  # étroit que sa promesse ne protège pas : il certifie.
+  local racines=("$REPO/deploy" "$REPO/install.sh" "$REPO/pack.sh" \
+                 "$REPO/runtime/lib" "$REPO/runtime/config" "$REPO/runtime/priv" \
+                 "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
+                 "$REPO/catalogues")
   local motif='(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
 
   # GARDE D'INSTRUMENT — elle ne peut plus s'appuyer sur une adresse attendue, puisqu'on n'en
@@ -1004,8 +1012,22 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   }
   local r
   for r in "${racines[@]}"; do
-    [ -d "$r" ] || { echo "MUR 15 — racine balayee absente : $r (l'instrument ne lit plus rien)" >&2; return 1; }
+    [ -e "$r" ] || { echo "MUR 15 — chemin balaye absent : $r (l'instrument ne lit plus rien)" >&2; return 1; }
   done
+  # ⚠ ET ON PROUVE QUE LE BALAYAGE LIT VRAIMENT CES CHEMINS, pas seulement qu'ils existent : un
+  # appât posé pour CHAQUE racine doit ressortir. Sans ça, des options de `grep` qui changent ou un
+  # chemin qui se déplace rendraient un vert sur du vide — la forme d'échec qui certifie. On mesure
+  # sur des copies sous le bac à sable : le mur ne modifie jamais l'arbre.
+  local sonde="$BATS_TEST_TMPDIR/sonde-mur15"; rm -rf "$sonde"; mkdir -p "$sonde"
+  local i=0 r2
+  for r2 in "${racines[@]}"; do
+    i=$((i + 1))
+    if [ -d "$r2" ]; then mkdir -p "$sonde/d$i"; printf 'x 10.42.0.118 x\n' > "$sonde/d$i/appat.sh"
+    else printf 'x 10.42.0.118 x\n' > "$sonde/f$i.sh"; fi
+  done
+  local vus; vus="$(grep -rhE "$motif" "$sonde" 2>/dev/null | grep -cE "$motif" || true)"
+  [ "$vus" -eq "${#racines[@]}" ] \
+    || { echo "MUR 15 — l'instrument ne voit que $vus appats sur ${#racines[@]} : le balayage ne lit pas ce qu'il annonce" >&2; return 1; }
 
   local trouvees
   trouvees="$(grep -rhE "$motif" "${racines[@]}" --exclude-dir=tests 2>/dev/null \

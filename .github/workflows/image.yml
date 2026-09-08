@@ -15,9 +15,17 @@ permissions:
   contents: read
   packages: write
 
+# Même règle que `release.yml` : une borne, et un seul run à la fois par ref — deux pushes
+# rapprochés sur main pousseraient deux images sous le même tag `:main`, et c'est la seconde arrivée
+# qui gagnerait, pas la plus récente.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   image:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

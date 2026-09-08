@@ -20,10 +20,44 @@
 
 # fp_curl <fichier-corps> <args curl…> → le code HTTP sur stdout (VIDE si curl n'a pas répondu),
 # le corps dans <fichier-corps>. FP_CURL est la doublure des témoins.
+# ⚠ LE JETON EST VALIDÉ AVANT D'ENTRER DANS LA CONFIG, PARCE QU'UNE CONFIG CURL S'INJECTE.
+# `-K -` protège le jeton de `/proc` — et ouvre une autre porte : la config est un FORMAT, pas une
+# chaîne opaque. Mesuré le 2026-09-08 avec `curl --libcurl` :
+#   · un jeton portant un `"` fait envoyer un en-tête TRONQUÉ — « token ab » pour `ab"cd` : un
+#     préfixe du jeton part sur le réseau et la forge rend un 401 que rien n'explique ;
+#   · un jeton portant un SAUT DE LIGNE fait exécuter les lignes suivantes COMME DES OPTIONS —
+#     `user-agent = "INJECTE"` est arrivé jusqu'à `CURLOPT_USERAGENT`. `output = …` écrirait un
+#     fichier arbitraire, `--config` en lirait un autre. Le geste qui existe pour protéger le jeton
+#     devient le geste qui exécute ce qu'il contient.
+# Le jeu accepté est celui des jetons réels des deux forges — 40 hex chez Gitea, `ghp_`/`ghs_`/
+# `github_pat_` + alphanumérique et `_` chez GitHub. Tout le reste est un REFUS NOMMÉ, et le refus
+# ne réimprime pas le jeton : il dit sa longueur et le rang du premier caractère fautif.
+fp_token_sain() {
+  local t="${FP_TOKEN:?FP_TOKEN absent (le jeton, dans l environnement)}" i c
+  if [[ "$t" =~ ^[A-Za-z0-9._-]+$ ]]; then return 0; fi
+  for (( i = 0; i < ${#t}; i++ )); do
+    c="${t:i:1}"
+    [[ "$c" =~ [A-Za-z0-9._-] ]] || break
+  done
+  echo "ECHEC: FP_TOKEN porte un caractere que la config curl interprete (rang $((i + 1)) sur ${#t})." >&2
+  echo "       Un jeton de forge est alphanumerique (. _ - admis) ; un guillemet tronque l en-tete," >&2
+  echo "       un saut de ligne fait executer la suite comme des options curl. Le jeton n est pas reimprime." >&2
+  return 1
+}
+
 fp_curl() {
   local out="$1"; shift
-  printf 'header = "Authorization: token %s"\n' "${FP_TOKEN:?FP_TOKEN absent (le jeton, dans l environnement)}" \
-    | "${FP_CURL:-curl}" -sS -K - -o "$out" -w '%{http_code}' -m "${FP_TIMEOUT:-300}" "$@" 2>/dev/null || true
+  fp_token_sain || return 1
+  # ⚠ UN MUR SUR L'INACTIVITÉ, PAS SUR LA DURÉE TOTALE. `-m 300` seul coupe une montée SAINE : le
+  # plus gros asset pèse 47 Mo (`lcars-tofu`, mesuré le 2026-09-08), soit 1,25 Mbit/s montants
+  # exigés — au-dessus de ce qu'un lien domestique fournit. Ce qu'on veut refuser est un serveur
+  # MUET, pas un lien lent : moins d'1 ko/s pendant 60 s est une mort, 47 Mo en dix minutes est un
+  # succès. `-m` reste, en filet très large, pour le cas où le flux goutte indéfiniment.
+  printf 'header = "Authorization: token %s"\n' "$FP_TOKEN" \
+    | "${FP_CURL:-curl}" -sS -K - -o "$out" -w '%{http_code}' \
+        --connect-timeout "${FP_CONNECT_TIMEOUT:-20}" \
+        --speed-limit "${FP_SPEED_LIMIT:-1024}" --speed-time "${FP_SPEED_TIME:-60}" \
+        -m "${FP_TIMEOUT:-1800}" "$@" 2>/dev/null || true
 }
 
 # fp_err <fichier-corps> → le `message` de la forge, court — ou rien
@@ -44,6 +78,14 @@ fp_err() { jq -r '.message // empty' "$1" 2>/dev/null | head -c 200; }
 # Percent-encodage complet plutôt qu'un `+`→`%2B` ciblé : le prochain caractère réservé dans un nom
 # de paquet (`~` d'une pré-version, `:` d'un epoch Debian) tomberait dans le même trou.
 fp_urlenc() {
+  # ⚠ `LC_ALL=C` OU LA FONCTION REPRODUIT LE BUG QU'ELLE CORRIGE. En locale UTF-8, `${s:i:1}` rend un
+  # CARACTÈRE et `printf '%02X' "'$c"` son POINT DE CODE, pas ses octets : « € » sortait en `%20AC`,
+  # c'est-à-dire une ESPACE suivie du littéral « AC » — exactement la cicatrice `+`→espace que cette
+  # fonction existe pour fermer. « café » sortait en `caf%E9` (du Latin-1, pas de l'UTF-8 valide).
+  # Mesuré le 2026-09-08 par une relecture hostile. En C, `${s:i:1}` itère les OCTETS et le
+  # percent-encodage est correct : `café` -> `caf%C3%A9`, `€` -> `%E2%82%AC`.
+  # La déclaration est LOCALE à la fonction : elle ne touche pas l'appelant.
+  local LC_ALL=C
   local s="$1" i c out=''
   for (( i = 0; i < ${#s}; i++ )); do
     c="${s:i:1}"
@@ -74,9 +116,25 @@ fp_release_body() {
 #   · le registre Debian : GitHub N'EN A PAS. On ne le simule pas, on le DIT.
 # Tout le reste — l'immutabilité, la sonde de commit, le brouillon, la publication d'un coup — est
 # identique, donc n'est écrit qu'une fois.
+# ⚠ ON RECONNAÎT UN HÔTE, PAS UNE CHAÎNE EXACTE — la liste de motifs littéraux d'avant rendait
+# `gitea` sur `https://github.com/owner/repo` (une URL avec un chemin), sur `HTTPS://GITHUB.COM`, et
+# sur `https://user@github.com/…` que `pack.sh:327` peut dériver d'un remote authentifié. Un faux
+# négatif n'échoue pas franchement : la publication part sur `https://github.com/api/v1/repos/…`,
+# reçoit 404 à l'étape 1 (lu comme « absente, on continue »), puis 404 à l'étape 1b — et le refus
+# accuse alors LE MAUVAIS OBJET : « le commit n'est pas sur la forge, git push puis rejoue », sur un
+# commit déjà poussé. Trouvé par relecture hostile le 2026-09-08.
+#
+# `github.example.com` reste `gitea` : GitHub Enterprise a la même API que github.com sur un autre
+# hôte, mais nous n'en avons aucun et deviner serait pire — le jour où il y en a un, il se déclare.
 fp_dialect() {
-  case "${1%/}" in
-    https://github.com|http://github.com|https://api.github.com|https://www.github.com) echo github ;;
+  local u="${1%/}" hote
+  u="${u,,}"                       # l'hôte est insensible à la casse (RFC 3986 § 3.2.2)
+  u="${u#*://}"                    # le schéma s'il y en a un
+  u="${u%%/*}"                     # tout ce qui suit l'hôte : chemin, requête, fragment
+  hote="${u##*@}"                  # les identifiants d'un remote authentifié
+  hote="${hote%%:*}"               # le port
+  case "$hote" in
+    github.com|www.github.com|api.github.com|uploads.github.com) echo github ;;
     *) echo gitea ;;
   esac
 }
@@ -103,7 +161,24 @@ fp_publish_dist() {
   #    une garde qui ne peut pas mesurer ne laisse pas passer)
   code="$(fp_curl "$body" "$api/releases/tags/$tag")"
   case "$code" in
-    404) ;;
+    404)
+      # ⚠ 404 NE VEUT PAS DIRE « RIEN » SUR GITHUB. `GET /releases/tags/{tag}` n'adresse que les
+      # releases PUBLIÉES : un BROUILLON du même tag rend 404 et passerait ici. Or l'en-tête de ce
+      # fichier promet « une release du tag qui existe (brouillon compris) est un REFUS », et le
+      # mode de panne nominal du workflow est justement un envoi coupé qui laisse un brouillon —
+      # « une image poussée dont la release manque se rattrape en rejouant ». Sans cette sonde, le
+      # rejeu crée un SECOND brouillon, remonte tout, publie, et laisse un orphelin sans un mot.
+      # Trouvé par relecture hostile le 2026-09-08. Sur Gitea, `GET .../tags/` voit les brouillons :
+      # la sonde y est redondante, pas fausse — on la joue pour les deux, une garde ne se dédouble pas.
+      if [[ "$dialect" == github ]]; then
+        code="$(fp_curl "$body" "$api/releases?per_page=100")"
+        if [[ "$code" == 200 ]] && jq -e --arg t "$tag" 'any(.[]; .tag_name == $t)' "$body" >/dev/null 2>&1; then
+          echo "fp: REFUS — un BROUILLON du tag « $tag » existe déjà sur $web/$owner/$repo (invisible à GET /releases/tags/, qui ne voit que les publiées). ADR 012 : supprime-le sur la forge avant de rejouer, ce script ne le fait pas." >&2
+          return 1
+        fi
+        [[ "$code" == 200 ]] || { echo "fp: REFUS (${code:-vide}) — impossible de lister les releases de $owner/$repo pour chercher un brouillon : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1; }
+      fi
+      ;;
     200) echo "fp: REFUS — la release « $tag » existe déjà sur $forge/$owner/$repo ($(jq -r 'if .draft then "brouillon" else "publiée" end' "$body" 2>/dev/null)). ADR 012 : un tag publié ne se réécrit jamais — pour la refaire, supprime-la sur la forge, ce script ne le fait pas." >&2; return 1 ;;
     401|403) echo "fp: REFUS ($code) — le jeton ne lit pas $owner/$repo (portée write:repository requise, en plus de write:package)" >&2; return 1 ;;
     *) echo "fp: REFUS — la forge ne répond pas sur $api/releases/tags/$tag (code ${code:-vide}) : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1 ;;

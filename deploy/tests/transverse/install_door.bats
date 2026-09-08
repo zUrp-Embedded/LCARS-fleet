@@ -138,7 +138,12 @@ setup() {
   #
   # Ici on stubbe dans l'autre sens : `unshare` qui ECHOUE, c'est-a-dire un WSL1. La porte doit
   # refuser AVANT toute question, et nommer la sortie — `wsl --set-version`, la seule qui marche.
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
+  # ⚠ LE STUB NOTE CE QU'ON LUI DEMANDE, il ne se contente pas d'échouer. Un stub aveugle aux
+  # arguments laisse la garde cesser de sonder la CAPACITÉ sans qu'un témoin bouge : remplacer
+  # `unshare -Ur true` par `unshare --version` rendait la garde inerte (elle réussit toujours sur
+  # une vraie machine) et les deux témoins restaient VERTS. Mesuré par relecture hostile le
+  # 2026-09-08. On exige donc que la porte demande bien la création d'un user-namespace.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$BATS_TEST_TMPDIR/unshare.argv" > "$BINDIR/unshare"
   chmod 0755 "$BINDIR/unshare"
   run bash "$SRC" --substrate wsl --check < /dev/null
   [ "$status" -ne 0 ]
@@ -147,14 +152,33 @@ setup() {
   [[ "$output" == *"wsl --set-version"* ]]
   # Et elle refuse AVANT le bilan : une machine qui ne peut pas porter de pod n'a pas a choisir.
   [[ "$output" != *"Bilan"* ]] || { echo "la garde a laisse passer jusqu'au bilan"; return 1; }
+  # LA SONDE DEMANDE BIEN UN USER-NAMESPACE — `-U` (ou `--user`), et un `-r`/`--map-root-user` :
+  # c'est ce qui distingue une mesure de capacite d'un `unshare --version` qui reussit toujours.
+  [[ -s "$BATS_TEST_TMPDIR/unshare.argv" ]] \
+    || { echo "la porte n'a pas appele unshare du tout"; return 1; }
+  grep -qE '(^| )-[a-zA-Z]*U|--user' "$BATS_TEST_TMPDIR/unshare.argv" \
+    || { echo "la sonde n'a pas demande de USER-namespace : $(cat "$BATS_TEST_TMPDIR/unshare.argv")"; return 1; }
+  grep -qE '(^| )-[a-zA-Z]*r|--map-root-user' "$BATS_TEST_TMPDIR/unshare.argv" \
+    || { echo "la sonde ne demande pas la projection de root : elle ne mesure pas ce que bwrap exige"; return 1; }
 }
 
-@test "GARDE CAPACITAIRE : elle ne mord QUE sur wsl — un docker sans namespaces passe" {
+@test "GARDE CAPACITAIRE : elle ne mord QUE sur wsl — ni docker ni linux ne recoivent WSL1" {
   # La contre-epreuve, sans quoi le temoin ci-dessus passerait aussi sur une garde qui refuse TOUT.
+  # ⚠ LES DEUX AUTRES SUBSTRATS, PAS UN SEUL. N'eprouver que `docker` laissait passer une garde
+  # elargie a `!= docker` : un poste Linux natif sans user-namespaces — le defaut d'Ubuntu >= 24.04,
+  # que le decor de ce fichier documente lui-meme — aurait ete refuse avec un message qui parle de
+  # WSL1 et propose `wsl --set-version`, sur une machine ou WSL n'existe pas. Mesure par relecture
+  # hostile le 2026-09-08 : la mutation passait, 85 temoins verts.
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
   chmod 0755 "$BINDIR/unshare"
-  run env LCARS_DOCKER=1 bash "$SRC" --substrate docker --check < /dev/null
-  [[ "$output" != *"wsl --set-version"* ]] || { echo "la garde WSL1 mord sur un substrat docker"; return 1; }
+  local sub
+  for sub in docker linux; do
+    run env LCARS_DOCKER=1 bash "$SRC" --substrate "$sub" --check < /dev/null
+    [[ "$output" != *"wsl --set-version"* ]] \
+      || { echo "la garde WSL1 mord sur le substrat « $sub » : elle propose wsl --set-version a une machine qui n'est pas WSL"; return 1; }
+    [[ "$output" != *"Pas de namespaces utilisateur"* ]] \
+      || { echo "le refus de namespaces frappe le substrat « $sub », que la garde ne vise pas"; return 1; }
+  done
 }
 
 @test "--workstation hors WSL est REFUSE, et le refus donne la voie qui marche" {
@@ -929,9 +953,19 @@ SPY
   # detache d'ou on l'appelle, sous la forme litterale « (no branch) » — qui arrive en tete et donne
   # `--branch '(no branch)'`, donc « Remote branch (no branch) not found ». Mesure du 2026-09-08.
   local dest="$BATS_TEST_TMPDIR/clone-pipe" ref
+  # ⚠ `refs/remotes` AUSSI, SINON LE TEMOIN SKIP DANS LE SCENARIO QU'IL DIT MESURER. `actions/checkout`
+  # avec `ref: <tag>` ne cree AUCUNE ref locale : `refs/heads` est vide, la derivation rend vide, et
+  # le temoin se saute — sur le build de release, precisement le cas que ce commentaire invoque.
+  # Mesure par relecture hostile le 2026-09-08. `refs/remotes/origin/*`, lui, est peuple ; on le
+  # clone par son nom court (`origin/main` -> `main`), que `git clone --branch` accepte.
   ref="$(git -C "$REPO" symbolic-ref --quiet --short HEAD \
          || git -C "$REPO" for-each-ref --format='%(refname:short)' --contains HEAD refs/heads 2>/dev/null | head -1)"
-  [[ -n "$ref" ]] || skip "aucune branche ne contient HEAD dans $REPO — la porte ne sait cloner qu'une ref nommee"
+  if [[ -z "$ref" ]]; then
+    ref="$(git -C "$REPO" for-each-ref --format='%(refname:short)' --contains HEAD refs/remotes 2>/dev/null \
+           | grep -v HEAD$ | head -1)"
+    ref="${ref#*/}"                                  # `origin/main` -> `main`
+  fi
+  [[ -n "$ref" ]] || skip "aucune ref, locale ou distante, ne contient HEAD dans $REPO — la porte ne sait cloner qu'une ref nommee"
   run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --source '$ref'"
   [[ "$output" == *"source"* ]]
   [ -x "$dest/deploy/provision" ]

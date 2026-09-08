@@ -64,9 +64,17 @@ name: lcars
 
 services:
   lcars:
+    # ⚠ UN TAG DE VERSION, PAS `:main` — ET LE COMMENTAIRE D'EN DESSOUS EXPLIQUE POURQUOI. `:main`
+    # est reecrit par `.github/workflows/image.yml` a CHAQUE push sur main : deux installs a deux
+    # dates portent alors du code different sous le meme nom, et `pull_policy: missing` gele chaque
+    # machine sur son premier pull, definitivement. Le defaut d'install doit designer une RELEASE —
+    # ce que `release.yml` produit — pas la tete d'une branche. Trouve par relecture hostile le
+    # 2026-09-08 : le defaut pointait `:main` sous un commentaire qui affirmait « ne bouge que dans
+    # le geste qui publie ».
+    #
     # Le defaut pointe la derniere image PUBLIEE, et ne bouge que dans le geste qui publie —
     # un defaut en avance sur la registry rend un 404 a la premiere install venue.
-    image: "${LCARS_IMAGE:-ghcr.io/zurp-embedded/lcars-temp:main}"
+    image: "${LCARS_IMAGE:-ghcr.io/zurp-embedded/lcars-temp:0.9.0-test3}"
     # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
     # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
     # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.

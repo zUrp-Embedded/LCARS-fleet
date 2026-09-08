@@ -2,4 +2,9 @@
 
 # LCARS-fleet
 
-WiP
+**WiP.** This English page described a product that no longer exists — an archive to untar, a single
+rail, no channels, no packages — so it was emptied rather than left to mislead. Rewriting it waits
+until the install path settles.
+
+Meanwhile, everything is in **[README_fr.md](README_fr.md)**: requirements, the three install routes,
+the channel, and how to tear it all down.

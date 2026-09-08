@@ -37,9 +37,23 @@ permissions:
   contents: write   # la Release est un objet du dépôt
   packages: write   # l'image
 
+# ⚠ UNE BORNE, PARCE QU'UN JOB SANS FIN NE REND PAS UN VERDICT TARDIF — IL N'EN REND AUCUN, et
+# l'absence de rouge se lit comme du vert. Mesuré ici même : le pas vendor a pendu 41 minutes avant
+# qu'on l'annule à la main. La même règle que les deux gates de `.gitea/workflows/gate.yml`, qui la
+# portent en `timeout(1)` ; ici la clé du job suffit, c'est GitHub qui exécute.
+# 90 min : `pack.sh` enchaîne `mix gate`, les 1447 témoins de l'installeur, npm, huit nfpm et la
+# montée des assets — mesuré à ~25 min sur un runner froid. Le triple du pire vert, jamais la médiane.
+#
+# ⚠ ET UNE CONCURRENCE PAR TAG. Deux runs du même tag publieraient deux fois : le second prend le
+# refus d'immutabilité au mieux, laisse un brouillon au pire.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       # ⚠ `fetch-depth: 0` ET LE TAG, PAS L'ARBRE PAR DÉFAUT. `pack.sh` lit `git rev-parse HEAD` et
       # refuse un arbre modifié ; `forge-publish.sh` refuse un commit que la forge ne connaît pas.
@@ -82,15 +96,18 @@ jobs:
       #
       # C'est un `curl … | bash`, ce que la porte de LCARS refuse pour ELLE-MÊME. Ici c'est
       # l'installeur d'un tiers sur un runner jetable, pas notre produit sur la machine de quelqu'un.
-      # ⚠ `< /dev/null` ET UNE BORNE, PARCE QUE CE PAS A DEJA PENDU 41 MINUTES. Sans redirection,
-      # l'installeur hérite du stdin du runner et peut attendre une réponse que personne ne donnera ;
-      # sans borne, le job ne rend AUCUN verdict — et l'absence de rouge se lit comme du vert. Même
-      # cicatrice que `ssh … 'bash -s'` où apt mange le reste du script sur stdin.
-      # `timeout` sort en 124 : un mur, pas un silence.
+      # ⚠ CE PAS A PENDU 41 MINUTES (mesuré, run annulé à la main). D'où la borne : sans elle le job
+      # ne rend AUCUN verdict, et l'absence de rouge se lit comme du vert. `timeout` sort en 124 :
+      # un mur, pas un silence.
       - name: Le binaire vendor du siège (le gate le résout en dur)
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=30s 5m bash -c 'curl -fsSL https://claude.ai/install.sh | bash' < /dev/null
+          # ⚠ `curl … | bash < /dev/null` EST UN PLACEBO, mesuré : la redirection s'applique au
+          # `bash -c` externe et à `curl`, JAMAIS au bash de droite du pipe, dont fd 0 EST le pipe —
+          # avant comme après. L'installeur mange donc bien la suite de son propre script s'il lit
+          # stdin. On télécharge, PUIS on exécute avec un stdin vide pour de bon.
+          curl -fsSL https://claude.ai/install.sh -o "$RUNNER_TEMP/claude-install.sh"
+          timeout --signal=TERM --kill-after=30s 5m bash "$RUNNER_TEMP/claude-install.sh" < /dev/null
           test -x "$HOME/.local/bin/claude" || { echo "l'installeur n'a pas posé ~/.local/bin/claude"; exit 1; }
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -104,9 +121,33 @@ jobs:
       - name: Les outils du shell_gate (shellcheck, ruff, pytest)
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          pip install --quiet --break-system-packages ruff pytest
-          shellcheck --version | head -2; ruff --version; pytest --version
+          # ⚠ ÉPINGLÉS, PARCE QU'UN PLANCHER D'OUTIL QUI FLOTTE NE REND PAS UN VERDICT
+          # REPRODUCTIBLE — et c'est la version la plus ANCIENNE qui décide. Mesuré le 2026-09-08 :
+          # le même arbre passait sur un poste (shellcheck 0.11.0, Ubuntu 26.04) et rougissait sur
+          # un runner (0.9.0, Ubuntu 24.04) sur un SC2120 que 0.11 ne signale plus. La leçon avait
+          # été écrite dans `deploy/lib/docker-endpoint.sh` sans être appliquée ici.
+          # ⚠ ET LE PIN DE SHELLCHECK MANQUAIT ALORS QUE CE COMMENTAIRE DISAIT « ÉPINGLÉS » : seuls
+          # ruff et pytest l'étaient, shellcheck venait d'`apt`, donc de la date de l'image. Corrigé
+          # le 2026-09-08 par relecture hostile — la ligne d'à côté disait le contraire du code.
+          # ⚠ LE BINAIRE OFFICIEL, VERSION FIXE ET SOMME VERIFIEE — PAS LE PAQUET DE LA DISTRO.
+          # `apt install shellcheck` sert ce que l'image du runner porte ce mois-ci : 0.9.0 sur
+          # Ubuntu 24.04, 0.11.0 sur 26.04. Mesure du 2026-09-08 : le MEME arbre passait sur un
+          # poste (0.11.0) et rougissait sur un runner (0.9.0) sur un SC2120 que 0.11 ne signale
+          # plus — un verdict qui depend de la date de l'image n'est pas un verdict.
+          # 0.9.0 et pas la derniere : c'est la version la plus ANCIENNE qui decide, parce qu'un
+          # controle retire en amont ne rend pas le code correct pour autant. Monter ce pin est un
+          # geste delibere, avec la somme d'a cote.
+          v=0.9.0
+          sha=700324c6dd0ebea0117591c6cc9d7350d9c7c5c287acbad7630fa17b1d4d9e2f
+          t="${RUNNER_TEMP:-/tmp}"
+          curl -fsSL --retry 3 --max-time 120 -o "$t/sc.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.x86_64.tar.xz"
+          echo "$sha  $t/sc.tar.xz" | sha256sum -c -
+          tar -xJf "$t/sc.tar.xz" -C "$t"
+          sudo install -m 0755 "$t/shellcheck-v$v/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version | head -2
+          pip install --quiet --break-system-packages 'ruff==0.16.6' 'pytest==8.3.4'
+          ruff --version; pytest --version
 
       - name: Connexion au registre du dépôt
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -116,7 +157,18 @@ jobs:
         run: |
           set -euo pipefail
           echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          # ⚠ PAS `GITHUB_REF_NAME` SEUL. Sur un `workflow_dispatch`, il vaut la BRANCHE choisie
+          # dans l'UI, pas `inputs.tag` — alors que le checkout, lui, prend bien le tag. Une
+          # publication manuelle de 1.2.3 bâtissait donc le code du tag et le poussait en `:main`,
+          # écrasant le tag roulant, avec `VERSION=main` gravé dans l'image, pendant que `pack.sh`
+          # (qui fait `git describe --exact-match`) nommait la Release 1.2.3. C'est exactement la
+          # divergence DPL-014 que l'en-tête dit prévenir. Trouvé par relecture hostile le 2026-09-08.
+          tag="${{ inputs.tag }}"; tag="${tag:-$GITHUB_REF_NAME}"
+          case "$tag" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "le tag « $tag » n'est pas une version : ce workflow publie une VERSION, pas une branche"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -129,7 +181,7 @@ jobs:
             --build-arg "VERSION=${{ steps.noms.outputs.tag }}" \
             -f deploy/docker/Dockerfile \
             -t "${{ steps.noms.outputs.image }}:${{ steps.noms.outputs.tag }}" \
-            -t "${{ steps.noms.outputs.image }}:latest" \
+            ${{ contains(steps.noms.outputs.tag, '-') && ' ' || format('-t {0}:latest', steps.noms.outputs.image) }} \
             --push .
 
       # 2. LA RELEASE — gate, artefacts, porte, publication. Le jeton ne passe jamais en argv :

@@ -119,7 +119,25 @@ jobs:
       # et une divergence de verdict entre la CI et un poste se lit alors sur cette ligne au lieu de
       # se deviner.
       - name: ShellCheck (shell_gate)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck && shellcheck --version
+        run: |
+          set -euo pipefail
+          # ⚠ LE BINAIRE OFFICIEL, VERSION FIXE ET SOMME VERIFIEE — PAS LE PAQUET DE LA DISTRO.
+          # `apt install shellcheck` sert ce que l'image du runner porte ce mois-ci : 0.9.0 sur
+          # Ubuntu 24.04, 0.11.0 sur 26.04. Mesure du 2026-09-08 : le MEME arbre passait sur un
+          # poste (0.11.0) et rougissait sur un runner (0.9.0) sur un SC2120 que 0.11 ne signale
+          # plus — un verdict qui depend de la date de l'image n'est pas un verdict.
+          # 0.9.0 et pas la derniere : c'est la version la plus ANCIENNE qui decide, parce qu'un
+          # controle retire en amont ne rend pas le code correct pour autant. Monter ce pin est un
+          # geste delibere, avec la somme d'a cote.
+          v=0.9.0
+          sha=700324c6dd0ebea0117591c6cc9d7350d9c7c5c287acbad7630fa17b1d4d9e2f
+          t="${RUNNER_TEMP:-/tmp}"
+          curl -fsSL --retry 3 --max-time 120 -o "$t/sc.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.x86_64.tar.xz"
+          echo "$sha  $t/sc.tar.xz" | sha256sum -c -
+          tar -xJf "$t/sc.tar.xz" -C "$t"
+          sudo install -m 0755 "$t/shellcheck-v$v/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version | head -2
 
       # ⚠ MEME RAISON QUE SHELLCHECK, ET MEME EXIGENCE : `shell_gate` fait ECHOUER le gate si `ruff`
       # est absent, plutot que de sauter le plancher python en silence. Sans cette etape la CI
@@ -136,7 +154,13 @@ jobs:
       # qui l'ait exécuté pour de bon : la suite ExUnit passait 3583/3583 et la chaîne cassait ici.
       # Ce workflow avait le même trou ; il n'avait simplement jamais tourné.
       - name: Ruff et pytest (planchers python de shell_gate)
-        run: pip install --quiet --break-system-packages ruff pytest && ruff --version && pytest --version
+        run: |
+          set -euo pipefail
+          # ⚠ EPINGLES, ET AUX MEMES VERSIONS QUE `.github/workflows/release.yml`. Deux portes qui
+          # jugent le meme arbre avec deux versions d'outil rendent deux verdicts, et c'est celle
+          # qu'on ne joue pas ce jour-la qui a raison. Mesure du 2026-09-08 sur shellcheck.
+          pip install --quiet --break-system-packages 'ruff==0.16.6' 'pytest==8.3.4'
+          ruff --version && pytest --version
 
       - name: Cache Mix
         uses: actions/cache@v4

@@ -7,7 +7,7 @@
 ### Firmware-as-a-Service.
 *Pas mal non ? C'est français.*
 
-*(In English: [README_EN.md](README_EN.md).)*
+*(In English: [README_EN.md](README_EN.md) — work in progress, see this page meanwhile.)*
 
 Une flotte d'agents qui tourne sur ta machine : une forge git, un runner CI, des agents tenus par
 leur rôle, et un tableau de bord — le tout monté par une commande, en conteneurs, sans rien

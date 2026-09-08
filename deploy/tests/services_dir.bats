@@ -50,21 +50,55 @@ copied() {
 #
 # CE QUI RESTE VRAI ET NON TRIVIAL, C'EST QUE LES DEUX RAILS POSENT LA MÊME CHOSE. Un fichier qui
 # n'est nommé nulle part ne survit que par ces deux lignes ; si l'une disparaît, il atteint un rail
-# et pas l'autre — sans un mot, parce qu'aucune LISTE ne le mentionne. Le témoin exige donc les
-# DEUX, et accuse les fichiers non nommés dès qu'il n'y en a plus qu'une.
-bulk_docker() { grep -qE '^COPY( --[^ ]+)* runtime/services +/' "$DOCKERFILE"; }
-bulk_poste()  { sed -n '/^EMBEDDED=(/,/)/p' "$MOD" | tr ' ()' '\n\n\n' | grep -qx 'services'; }
-# appele <chemin-relatif> — quelqu'un, HORS de services/, nomme-t-il ce chemin ?
+# et pas l'autre — sans un mot, parce qu'aucune LISTE ne le mentionne.
 #
-# ⚠ C'EST CE QUI REMPLACE « est-il pose ? », DEVENU TRIVIAL. Les deux poses en bloc font arriver
-# TOUT fichier range ici sur les deux machines : repondre « oui » pour chacun rendrait le temoin
-# vert sur du vide. La question qui discrimine encore est celle que l'en-tete de ce fichier pose
-# depuis le debut — « un fichier range est un fichier dont plus personne ne se demande s'il sert » —
-# et elle se mesure : un fichier que RIEN n'appelle est une exploration garee.
-# Mesure du 2026-09-08 : les 12 fichiers non nommes et non-README ont de 1 a 22 appelants.
-appele() {
-  git -C "$REPO" grep -l -- "$1" -- . ':!runtime/services' >/dev/null 2>&1
+# ⚠ CE SONT DEUX PROPRIÉTÉS, ET ELLES NE SE MÉLANGENT PAS — cette prose disait le contraire, et le
+# code ne l'a jamais fait (relecture hostile du 2026-09-08). La PROPRIÉTÉ 2 exige de CHAQUE fichier
+# une déclaration ou une exemption NOMMÉE avec son poseur ; elle n'appelle `bulk_*` que pour rendre
+# son message d'échec lisible. La PROPRIÉTÉ 3, elle, exige les deux poses en bloc — parce que ce
+# sont elles, et elles seules, qui portent les 12 fichiers exemptés jusqu'aux machines.
+# ⚠ CES DEUX SONDES ETAIENT FAUSSES DANS LES DEUX SENS, mesure par relecture hostile le 2026-09-08.
+#   · `bulk_docker` ne regardait NI la destination NI la strate : `COPY runtime/services /tmp/poubelle`
+#     passait, et un COPY deplace dans la strate `build` (jetee) aussi — le scenario meme que cette
+#     propriete pretend fermer. Il rougissait en revanche sur `COPY runtime/services/ /opt/...` (slash
+#     final, forme Docker idiomatique), sur un double espace, et sur la forme JSON.
+#   · `bulk_poste` : la plage `sed '/^EMBEDDED=(/,/)/' ` cherche la fin APRES la ligne de debut ;
+#     le tableau tenant sur une ligne, elle courait jusqu'au premier `)` suivant — quatre lignes de
+#     commentaire incluses. `services` dans un commentaire voisin suffisait a rendre VERT.
+#     Et `EMBEDDED=("etc" "services" "bin")` (quotage shellcheck) rougissait.
+# On lit donc la SOURCE et la DESTINATION, on tolere les formes equivalentes, et on ne lit que la
+# ligne du tableau.
+bulk_docker() { # le COPY en bloc pose-t-il services/ SOUS le prefixe du produit, dans la strate finale ?
+  awk '
+    /^FROM /            { strate = $0 }
+    /^COPY /            {
+      ligne = $0
+      gsub(/^COPY[ \t]+(--[^ \t]+[ \t]+)*/, "", ligne)
+      gsub(/[",\[\]]/, " ", ligne)                       # la forme JSON compte aussi
+      n = split(ligne, ch, /[ \t]+/)
+      src = ch[1]; dst = ch[n]
+      sub(/\/$/, "", src); sub(/\/$/, "", dst)            # le slash final ne change rien
+      if (src == "runtime/services" && dst ~ /^\/opt\/lcars\/services$/ && strate !~ /AS (build|site|verify)$/) trouve = 1
+    }
+    END { exit(trouve ? 0 : 1) }
+  ' "$DOCKERFILE"
 }
+bulk_poste() { # `services` est-il dans le TABLEAU EMBEDDED, et pas dans un commentaire voisin ?
+  grep -E '^EMBEDDED=\(' "$MOD" | sed 's/#.*//' | tr ' ()"' '\n\n\n\n' | grep -qx 'services'
+}
+# ⚠ `appele()` A ETE RETIRE LE 2026-09-08, ET C'EST UNE RETRACTATION. Il demandait « quelqu'un
+# ecrit-il cette chaine hors de services/ ? » et pretendait mesurer « quelqu'un l'appelle ». Une
+# relecture hostile l'a casse en deux appats : `gate.sh` et `lib/provision-lib.sh` poses ici, gares,
+# declares NULLE PART — VERTS, parce que ces noms apparaissent 31 et 84 fois ailleurs dans le depot.
+# Pire, c'etait une REGRESSION : l'ancien temoin exigeait HELPERS ou COPY pour tout fichier de
+# premier niveau et accusait `gate.sh` ; le mien le laissait passer. Le message du commit `2c585572`
+# affirmait « rien n'a ete perdu » — c'etait faux, et mesurable en une commande.
+#
+# La regle redevient donc : TOUT fichier est DECLARE. Les 16 fichiers racine le sont deja (verifie).
+# Les cinq repertoires que ni HELPERS ni un COPY nominatif ne nomment sont EXEMPTES A LA LIGNE, avec
+# leur poseur reel — meme motif que les exemptions d'ISO 2/2 dans `system_manifest.bats` : « une
+# ligne par objet, jamais une regex ». Elargir cette liste sans nommer le poseur rouvrirait la porte
+# exacte que ce temoin ferme.
 # declare_couvre <chemin-relatif> — le chemin lui-même, ou un de ses RÉPERTOIRES ancêtres, est-il
 # nommé ? `COPY runtime/services/forge-recipe …` couvre `forge-recipe/gate.sh`, et c'est voulu :
 # nommer un répertoire est une déclaration, nommer chacun de ses fichiers serait une liste à tenir.
@@ -125,10 +159,28 @@ declare_couvre() {
     # exacte que ce temoin ferme.
     [[ "$(basename "$base")" == "README.md" ]] && continue
     declare_couvre "$base" && continue
-    # Non nomme dans une liste : alors il faut qu'il soit APPELE. Un fichier ni declare ni appele
-    # n'est tenu que par les deux poses en bloc — il arrive sur les machines et personne ne s'en
-    # sert : c'est exactement l'exploration garee que ce temoin existe pour attraper.
-    appele "$base" && continue
+    # ⚠ EXEMPTIONS NOMMEES — une ligne par repertoire, avec SON poseur. Ces cinq arbres ne sont
+    # nommes ni par HELPERS ni par un COPY : ils n'arrivent que par les deux poses en bloc, que la
+    # PROPRIETE 3 tient a part. Chacun est ici parce qu'un appelant reel le lit, verifie le
+    # 2026-09-08 par `git grep -l "services/<d>"` hors de son propre arbre.
+    # ⚠ PAR FICHIER, PAS PAR REPERTOIRE. Un `forge.d/*` exempterait tout fichier POSE dans forge.d/ —
+    # exactement l'exploration garee que ce temoin existe pour attraper, et le relecteur l'a montre
+    # en glissant un `lib/provision-lib.sh` mort dans un repertoire exempte. Une ligne par objet,
+    # avec son appelant reel (verifie le 2026-09-08 par `git grep -l` hors de son propre arbre).
+    case "$base" in
+      agent/claude-automode.json) continue ;;  # human.d/70-human.sh
+      container/boot.sh)          continue ;;  # ENTRYPOINT du Dockerfile
+      container/init.sh)          continue ;;  # boot.sh, 25-directories
+      forge.d/catalogues.sh)      continue ;;  # 45-catalogues
+      forge.d/deck-oidc.sh)       continue ;;  # 66-deck-oidc
+      forge.d/ops-branch.sh)      continue ;;  # 65-ops-branch
+      forge.d/tokens.sh)          continue ;;  # 63-forge-tokens
+      human.d/40-claude-bin.sh)   continue ;;  # 60-deploy (convergeur d'humains)
+      human.d/70-human.sh)        continue ;;  # 60-deploy, provision-lib
+      human.d/75-projects.sh)     continue ;;  # 60-deploy
+      lib/human-protocol.sh)      continue ;;  # provision-lib, 22-fleet-human
+      lib/module-protocol.sh)     continue ;;  # provision-lib, 63-forge-tokens
+    esac
     bad+=("$base")
   done < <(cd "$SERVICES" && git ls-files)
   [ "${#bad[@]}" -eq 0 ] || {
@@ -141,13 +193,15 @@ declare_couvre() {
 }
 
 @test "PROPRIETE 3 : les DEUX rails posent l'arbre entier — c'est ce qui tient les fichiers non nommes" {
-  # ⚠ SANS CE TEMOIN, LA PROPRIETE 2 SERAIT VERTE POUR UNE RAISON QU'ELLE NE DIRAIT PAS. 15 fichiers
+  # ⚠ SANS CE TEMOIN, LA PROPRIETE 2 SERAIT VERTE POUR UNE RAISON QU'ELLE NE DIRAIT PAS. 12 fichiers
   # sur 48 (agent/, container/, forge.d/, human.d/, lib/) ne sont nommes NULLE PART : ni dans
-  # HELPERS, ni dans un COPY. Ils n'arrivent sur les machines que par ces deux lignes-ci. Les
+  # HELPERS, ni dans un COPY — ce sont exactement les 12 exemptions nominatives de la PROPRIETE 2,
+  # comptees le 2026-09-08 (48 suivis, 4 README, 12 exemptes, 32 nommes). Le chiffre disait 15, et
+  # aucun compte ne le rendait. Ils n'arrivent sur les machines que par ces deux lignes-ci. Les
   # mesurer separement, c'est nommer la dependance au lieu de la subir — et rendre le refus lisible
   # le jour ou l'une des deux part.
   bulk_docker || { echo "le Dockerfile ne pose plus l'arbre entier (COPY runtime/services /...)" >&2
-                   echo "  15 fichiers non nommes n'atteignent plus le CONTENEUR — declare-les, ou remets le COPY" >&2; false; }
+                   echo "  12 fichiers non nommes n'atteignent plus le CONTENEUR — declare-les, ou remets le COPY" >&2; false; }
   bulk_poste  || { echo "62-runtime-helpers n'embarque plus 'services' (EMBEDDED)" >&2
-                   echo "  15 fichiers non nommes n'atteignent plus le POSTE — declare-les, ou remets-le dans EMBEDDED" >&2; false; }
+                   echo "  12 fichiers non nommes n'atteignent plus le POSTE — declare-les, ou remets-le dans EMBEDDED" >&2; false; }
 }

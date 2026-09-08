@@ -126,6 +126,11 @@ NAME="lcars-fleet-${VERSION}-${SHA}-otp${OTP}-${ARCH}"
 # (mesure du 2026-09-08, sept minutes de gate payées pour un `..`). Le refus arrive APRÈS le gate,
 # la release et la doc : le plus tard possible pour la faute la plus bête. `realpath -m` résout sans
 # exiger que le répertoire existe — il est créé plus bas.
+# ⚠ ET IL RÉSOUT AUSSI LES LIENS SYMBOLIQUES, ce que cette prose ne disait pas (mesuré le
+# 2026-09-08 : `realpath -m <lien>/x` rend le chemin RÉEL). C'est voulu — nFPM reçoit un chemin sans
+# ambiguïté — mais ça veut dire que le tiroir ANNONCÉ peut différer de celui que l'opérateur a tapé,
+# sur un poste dont le `/home` est un lien. Le chemin imprimé plus bas est le résolu : c'est celui-là
+# qui compte, et c'est pour ça qu'il est imprimé.
 PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
 PACK_DIR="$(realpath -m "$PACK_DIR")"
 OUT="$PACK_DIR/${NAME}.tar.gz"
