@@ -888,8 +888,22 @@ SPY
   #
   # ⚠ PAS DE `< /dev/null` : il ecraserait le pipe, et bash lirait /dev/null comme script. Le `read`
   # de la pause va chercher /dev/tty tout seul, et retombe sur le refus sans TTY.
-  local dest="$BATS_TEST_TMPDIR/clone-pipe"
-  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --source \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
+  #
+  # ⚠ LA REF SE DERIVE, ELLE NE SE LIT PAS AVEC `rev-parse --abbrev-ref`. En HEAD DETACHE cette
+  # commande rend litteralement « HEAD », et la porte fait `git clone --branch HEAD` — qui echoue.
+  # Le detache n'est pas un cas tordu : c'est ce que produit un `git worktree add --detach` (mesure
+  # du 2026-09-08, ou ce temoin a rougi seul dans un pack) ET ce que `actions/checkout` produit sur
+  # un TAG — donc exactement le build de release en CI. `symbolic-ref` echoue proprement en detache,
+  # d'ou le repli : une branche qui contient HEAD, sinon le nom par defaut.
+  # ⚠ ET LE REPLI NE PEUT PAS ETRE UN SHA : la porte clone avec `--branch`, qui refuse un sha.
+  # ⚠ `for-each-ref refs/heads` ET PAS `git branch --contains` : ce dernier liste AUSSI le worktree
+  # detache d'ou on l'appelle, sous la forme litterale « (no branch) » — qui arrive en tete et donne
+  # `--branch '(no branch)'`, donc « Remote branch (no branch) not found ». Mesure du 2026-09-08.
+  local dest="$BATS_TEST_TMPDIR/clone-pipe" ref
+  ref="$(git -C "$REPO" symbolic-ref --quiet --short HEAD \
+         || git -C "$REPO" for-each-ref --format='%(refname:short)' --contains HEAD refs/heads 2>/dev/null | head -1)"
+  [[ -n "$ref" ]] || skip "aucune branche ne contient HEAD dans $REPO — la porte ne sait cloner qu'une ref nommee"
+  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --source '$ref'"
   [[ "$output" == *"source"* ]]
   [ -x "$dest/deploy/provision" ]
   # Le clone appartient a CELUI QUI A LANCE, jamais a root.
