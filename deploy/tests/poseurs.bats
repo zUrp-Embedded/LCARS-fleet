@@ -116,13 +116,40 @@ setup() {
   # Les deux `find … chmod` rattrapaient les modes et JAMAIS les proprietaires. Un arbre systeme
   # portait donc l'identite de qui avait lance l'install, et changeait de proprietaire selon QUI
   # deployait — sur un objet que la table declare `root:root`.
+  # ⚠ CE TEMOIN PINNAIT UNE FORME (`chown -R root:root "$MEDIA_ROOT"`), PAS LA PROPRIETE — et la
+  # forme a du changer pour une raison mesuree : un `chown -R` inconditionnel touche TOUT l'arbre a
+  # chaque apply, donc son ctime, donc le module comptait une mutation sur un arbre identique
+  # (mesure du 2026-09-08, banc 2005 : share/avatars mode et proprietaire inchanges, ctime
+  # 1788879613 -> 1788879798). La propriete, elle, ne bouge pas : le contenu est rendu a root, et
+  # APRES les chmod. On la mesure donc sans imposer la forme, et on exige EN PLUS que le geste soit
+  # conditionnel — un chown qui s'applique a tout est le defaut qu'on vient de retirer.
   local mod="$MODS/44-media.sh"
-  grep -q 'chown -R root:root "$MEDIA_ROOT"' "$mod"
-  # APRES les chmod : un chown qui precederait serait defait par rien, mais l'ordre dit l'intention
+  # 1. un chown vers root:root porte sur l'arbre des medias, quelle que soit sa forme
+  grep -qE 'chown (-[hR] )*root:root' "$mod" \
+    || { echo "plus aucun chown vers root:root dans 44-media : le contenu garderait l'identite de la source (« cp -a » la preserve)"; return 1; }
+  # 2. il est CONDITIONNEL — il ne touche que ce qui devie
+  grep -qE '! -user root -o ! -group root' "$mod" \
+    || { echo "le chown de 44-media n'est plus filtre : il touchera tout l'arbre a chaque apply (ctime), et le module comptera une mutation sur un arbre identique"; return 1; }
+  # 3. `-h` : un chown SANS lui suit les liens, et devient une primitive de chown root sur une CIBLE
+  #    ARBITRAIRE. `chown -R` ne les suivait pas ; le passage au `find … -exec chown` a introduit la
+  #    regression. Mesure du 2026-09-08 : sans `-h`, le lien garde son proprietaire et la CIBLE
+  #    change — donc find le reselectionne a chaque passe (1, 1, 1…), et le geste ne converge
+  #    jamais. Avec `-h` : 1 puis 0, cible intacte.
+  grep -qE 'chown -h root:root' "$mod" \
+    || { echo "le chown de 44-media n'est plus en -h : il suivrait les liens (chown root sur une cible arbitraire) et ne convergerait jamais"; return 1; }
+  # 4. APRES les chmod : un chown qui precederait serait defait par rien, mais l'ordre dit l'intention
+  # ⚠ L'APPEL, PAS LA LIGNE `find` : les deux chmod ont ete EXTRAITS dans `media_modes` pour etre
+  # mesurables sans root (cf. `44-media.bats`, LES MODES), et leur `find` vit desormais dans la
+  # definition de la fonction — au-dessus de tout, y compris du chown. C'est l'ordre des GESTES dans
+  # `apply` qui porte l'intention, donc l'ordre de l'appel. `tail -1` : la definition d'abord, puis
+  # l'appel ; c'est le second qu'on veut.
   local n_chmod n_chown
-  n_chmod="$(grep -n 'find "$MEDIA_ROOT" -type f' "$mod" | head -1 | cut -d: -f1)"
-  n_chown="$(grep -n 'chown -R root:root' "$mod" | head -1 | cut -d: -f1)"
-  [ "$n_chmod" -lt "$n_chown" ]
+  n_chmod="$(grep -n 'media_modes "$MEDIA_ROOT"' "$mod" | tail -1 | cut -d: -f1)"
+  n_chown="$(grep -nE 'exec chown (-[hR] )*root:root' "$mod" | head -1 | cut -d: -f1)"
+  [ -n "$n_chmod" ] || { echo "aucun appel « media_modes \"\$MEDIA_ROOT\" » dans 44-media : les modes ne sont plus poses, ou la fonction a change de nom"; return 1; }
+  [ -n "$n_chown" ] || { echo "aucun chown vers root:root dans 44-media"; return 1; }
+  [ "$n_chmod" -lt "$n_chown" ] \
+    || { echo "le chown (l. $n_chown) precede la pose des modes (l. $n_chmod) — l'ordre dit l'intention"; return 1; }
 }
 
 # ─── C6 — LA COPIE EMBARQUEE PORTE CE DONT LE RAIL POSE A BESOIN ────────────────────────────────

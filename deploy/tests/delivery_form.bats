@@ -238,9 +238,20 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # Ce qui change est QUI a bati le dist, pas ce qu on en fait. Deux copies de la pose deriveraient
   # sur le mode, le proprietaire ou l atomicite, et une des deux formes servirait une doc que
   # personne n a relue.
+  # ⚠ CE TEMOIN PINNAIT LA CHAINE `cp -a "$SITE_SRC/dist/."`, ET LA FORME A DU CHANGER pour une
+  # raison mesuree : le `.` designe le REPERTOIRE source, donc `cp -a` recopiait ses attributs sur la
+  # destination — le mode et le proprietaire du checkout par-dessus ceux que `prov_scaffold_dir`
+  # venait de poser. Et `-exec … \;` rendait 0 meme quand `cp` echouait (mesure du 2026-09-08 : rc 0
+  # sous `\;`, rc 1 sous `+`). La PROPRIETE, elle, n'a pas bouge : le dist ne se copie qu'a UN seul
+  # endroit. On la mesure sans imposer la forme — sinon le prochain correctif juste rougit ici.
   local media="$DEPLOY/modules.d/44-media.sh"
   [ "$(grep -c 'poser_doc' "$media")" -ge 3 ]           # la fonction + ses deux appelants
-  [ "$(grep -c 'cp -a "\$SITE_SRC/dist/\."' "$media")" -eq 1 ]
+  # les lignes de CODE (commentaires exclus) qui copient le dist, quelle que soit la primitive
+  local n_copies
+  n_copies="$(grep -vE '^\s*#' "$media" | grep -E '\$SITE_SRC/dist' | grep -cE '\b(cp|rsync|install)\b')"
+  [ "$n_copies" -eq 1 ] \
+    || { echo "$n_copies gestes copient \$SITE_SRC/dist — une seule pose, sinon les deux formes derivent"; \
+         grep -vE '^\s*#' "$media" | grep -nE '\$SITE_SRC/dist' >&2; return 1; }
 }
 
 # ─── CE QUE LA PREMIERE INSTALL BINAIRE REELLE A TROUVE (banc 2006, 2026-09-01) ─────────────────
