@@ -72,6 +72,23 @@ jobs:
         with:
           node-version: 24   # `pack.sh` bâtit AUSSI la doc (assets/github.io) — sans node, pas de doc
 
+      # ⚠ LE GATE EXIGE LE BINAIRE `claude`, ET AUCUN MODULE DE L'INSTALLEUR NE LE POSE. Le runtime
+      # le résout en dur — `raise "vendor: claude binary not found in ~/.local/bin of … (fail-loud)"`
+      # — donc 67 témoins de `Fleet.Spawner.*` rougissent sur un runner nu. Mesuré au premier run
+      # réel de ce workflow (2026-09-08) : 3514/3583 passés, et la totalité des échecs de pod tenait
+      # à ce fichier absent. La dépendance existait depuis toujours ; elle n'avait jamais été vue
+      # parce que le gate n'avait jamais tourné ailleurs que sur nos postes, où `claude` est installé
+      # par l'humain.
+      #
+      # C'est un `curl … | bash`, ce que la porte de LCARS refuse pour ELLE-MÊME. Ici c'est
+      # l'installeur d'un tiers sur un runner jetable, pas notre produit sur la machine de quelqu'un.
+      - name: Le binaire vendor du siège (le gate le résout en dur)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash
+          test -x "$HOME/.local/bin/claude" || { echo "l'installeur n'a pas posé ~/.local/bin/claude"; exit 1; }
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Connexion au registre du dépôt
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
