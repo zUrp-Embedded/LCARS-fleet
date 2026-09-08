@@ -156,6 +156,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
       case project["repo_path"] do
         nil ->
+          # Pas de depot : l'espace de travail est un repertoire vide, et c'est un etat NOMINAL
+          # (pod permanent, carte sans code). Il se cree quand meme — bwrap lie strictement, une
+          # source absente n'est pas un montage vide mais un launcher qui meurt.
           ws = Fleet.Layout.pod_workspace_path(pod_dir)
 
           case File.mkdir_p(ws) do
@@ -164,141 +167,147 @@ defmodule Fleet.ProjectBootstrap.Phase do
           end
 
         repo_url ->
-          # This module is the PRODUCER (it creates and returns the workspace); Pod RECOMPUTES it.
-          # Both read `Fleet.Layout` — the foundation owns the literal because neither consumer may
-          # depend on the other (Spawner already deps ProjectBootstrap; the reverse edge cycles).
-          ws = Fleet.Layout.pod_workspace_path(pod_dir)
-
-          # Idempotence of the deterministic re-dispatch: a DEAD predecessor pod (timeout/crash) leaves its
-          # workspace on disk; since the pod_id is deterministic (`<repo-slug>-issue-N-role`), the
-          # re-dispatch lands on the SAME pod_dir → `git clone` would refuse ("destination already exists
-          # and is not an empty directory") → PERMANENT wedge of the issue (a pod that times out otherwise
-          # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
-          # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
-          # just after, a fresh clone is always correct). The slate is cleaned through the MORGUE,
-          # never a mute shredder: a deadline-killed producer leaves 10+ min of uncommitted work
-          # in ws, and a bare rm_rf erases it — deliverable loss is the house's
-          # top severity. A residual ws MOVES to `<ws>.morgue` (previous morgue replaced: ONE
-          # generation kept — the operator salvage window, not an archive), logged ERROR.
-          morgue_residual_workspace(ws)
-
-          ref = project["reference_repo_path"]
-
-          # ASSERTED, never defaulted (face-projet): the resolver ALWAYS engraves
-          # `base_branch` in the project map — the face decision made once at dispatch. The old
-          # `|| "main"` would be dead code on the live path and a substituting default on any
-          # other: a project map without a base_branch has skipped the face decision, and cloning
-          # the code face over it buries exactly that.
-          base =
-            project["base_branch"] ||
-              raise(ArgumentError,
-                message:
-                  "Phase.Clone: project map for #{inspect(project["repo"])} carries no " <>
-                    "\"base_branch\" — the face is decided at dispatch and threaded, never " <>
-                    "re-defaulted here (single-default-site doctrine, face-projet)."
-              )
-
-          # Clean world: branch = `feature/<slug>` WITHOUT the pod_id (the agent must not re-read its
-          # pod_id in its own branch — containment). The slug comes from the dispatcher (sanitized issue
-          # title); default `work`. The slug carries no `pod-`/`pod_` prefix (the branch does not
-          # leak the pod's identity).
-          slug = Keyword.get(opts, :slug, "work")
-          feature = "feature/#{slug}"
-          ref_args = if ref, do: ["--reference", ref], else: []
-
-          # The NETWORK clone's deadline is calibrable by the caller (`:git_timeout_ms`), default = the
-          # wrapper's (30s). The spawner can tighten it; the tests use it to prove the bounding
-          # (clone to a URL that hangs → killed within the deadline, no zombie pod).
-          git_opts = Keyword.take(opts, [:git_timeout_ms]) |> rename_timeout_key()
-
-          # Clone/checkout BOUNDED by construction via `Fleet.Credentials.Shell.git/2` (runs under
-          # `setsid`; an absolute wall deadline kills the whole process-group `kill -KILL -<pgid>`;
-          # `GIT_TERMINAL_PROMPT=0` set by `git_env/0`). An unbounded `git`
-          # would freeze the `Fleet.Spawner.Pod` (GenServer) if the network clone hung — or if the git
-          # prompts for lack of a credential, with no TTY → zombie pod / wedged issue. The wrapper kills the
-          # child git if the deadline expires and returns a typed error → the pod does not stay frozen. `Shell.git/2`
-          # injects `git_env/0` (anti-prompt + forge auth).
-          # base_branch (catalogue/brief) + feature (built from the dispatcher slug) VALIDATED as git refs
-          # BEFORE they reach `git clone --branch`/`checkout` (R1-07/08): a malformed ref → a CLEAR typed
-          # error, not a cryptic git failure. `Fleet.GitRef` = the foundation check-ref-format authority.
-          with true <- Fleet.GitRef.valid?(base) or {:invalid_base_branch, base},
-               true <- Fleet.GitRef.valid?(feature) or {:invalid_feature_branch, feature},
-               # `--single-branch`: the workspace needs `base` and the feature branch it cuts from
-               # it, and nothing else. Without it the clone brings EVERY branch of the repo — under
-               # a per-ticket fan-out, that is every neighbour's feature branch, unmerged and
-               # possibly wrong, sitting one `git checkout` away from an agent whose whole job is
-               # to reason from `base`. The cost is not the bytes (the forge is local); it is that
-               # the material is THERE, and a world projected for a pod is exactly the material it
-               # should reason from.
-               #
-               # History is KEPT (no `--depth`): `git log`/`git blame` are legitimate tools for
-               # understanding code, and this is the code face. The doc mount is the asymmetric
-               # twin — a doc is consulted in its present state, so it shallows.
-               #
-               # `pin_base_sha` is unaffected: a pinned `base_sha` is an ancestor of `base` by
-               # construction (the rail captures it from an ls-remote of that branch), so it is in
-               # the fetched history; and its targeted `fetch origin <sha>` fallback stays for the
-               # anomalous case it exists for.
-               {:ok, {_, 0}} <-
-                 Shell.git(
-                   @hooks_off ++
-                     ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
-                   git_opts
-                 ),
-               # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
-               # BEFORE the feature-branch. Eliminates the window "the pod clones a base the rail did not
-               # capture" (same-role race): `base..HEAD` will contain ONLY the pod's commits.
-               # Axiom set AT the clone boundary (not verified "observable post-hoc").
-               {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
-               # `refs/lcars/base` — LA BASE CONTRE LAQUELLE CE TRAVAIL SE JUGE, materialisee ICI
-               # parce que le pod ne peut pas la poser lui-meme (`update-ref` est dans sa denylist
-               # git) et parce que, pour un juge, elle n'est meme pas dans son clone.
-               {:ok, {_, 0}} <- pin_work_base(ws, project),
-               # `checkout -b` is local (no network, does not prompt) but ALSO goes through the bounded
-               # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
-               # possible). Bare env (no auth/network).
-               {:ok, {_, 0}} <-
-                 Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
-                   env: []
-                 ),
-               :ok <- install_trailer_hook(ws, cap_profile),
-               :ok <- sanitize_workspace(ws) do
-            {:ok, ws, feature}
-          else
-            {:invalid_base_branch, b} ->
-              {:error, {:clone_failed, {:invalid_base_branch, b}}}
-
-            # Named, and BEFORE the catch-all: the fall-through would have dressed them as
-            # `{:git_exit, ...}`, i.e. a refusal reported as a git failure that never happened. The
-            # two shapes differ (`{:invalid_base_sha, _}` bare, `{:error, {:invalid_pr_base_branch,
-            # _}}` wrapped) because their producers do not share a convention -- which is exactly
-            # why they are matched explicitly rather than left to the union.
-            {:invalid_base_sha, s} ->
-              {:error, {:clone_failed, {:invalid_base_sha, s}}}
-
-            {:error, {:invalid_pr_base_branch, b}} ->
-              {:error, {:clone_failed, {:invalid_pr_base_branch, b}}}
-
-            {:error, {:sanitize_failed, _}} = err ->
-              err
-
-            {:invalid_feature_branch, f} ->
-              {:error, {:clone_failed, {:invalid_feature_branch, f}}}
-
-            {:ok, {out, code}} ->
-              {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
-
-            {:error, {:timeout, ms}} ->
-              {:error, {:clone_failed, {:git_timeout, ms}}}
-
-            {:error, {:exit, reason}} ->
-              {:error, {:clone_failed, {:git_exit, reason}}}
-
-            {:error, reason} ->
-              {:error, {:clone_failed, {:git_exit, reason}}}
-          end
+          clone_into_workspace(pod_dir, cap_profile, project, repo_url, opts)
       end
     end
+
+    defp clone_into_workspace(pod_dir, cap_profile, project, repo_url, opts) do
+      # This module is the PRODUCER (it creates and returns the workspace); Pod RECOMPUTES it.
+      # Both read `Fleet.Layout` — the foundation owns the literal because neither consumer may
+      # depend on the other (Spawner already deps ProjectBootstrap; the reverse edge cycles).
+      ws = Fleet.Layout.pod_workspace_path(pod_dir)
+
+      # Idempotence of the deterministic re-dispatch: a DEAD predecessor pod (timeout/crash) leaves its
+      # workspace on disk; since the pod_id is deterministic (`<repo-slug>-issue-N-role`), the
+      # re-dispatch lands on the SAME pod_dir → `git clone` would refuse ("destination already exists
+      # and is not an empty directory") → PERMANENT wedge of the issue (a pod that times out otherwise
+      # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
+      # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
+      # just after, a fresh clone is always correct). The slate is cleaned through the MORGUE,
+      # never a mute shredder: a deadline-killed producer leaves 10+ min of uncommitted work
+      # in ws, and a bare rm_rf erases it — deliverable loss is the house's
+      # top severity. A residual ws MOVES to `<ws>.morgue` (previous morgue replaced: ONE
+      # generation kept — the operator salvage window, not an archive), logged ERROR.
+      morgue_residual_workspace(ws)
+
+      ref = project["reference_repo_path"]
+
+      # ASSERTED, never defaulted (face-projet): the resolver ALWAYS engraves
+      # `base_branch` in the project map — the face decision made once at dispatch. The old
+      # `|| "main"` would be dead code on the live path and a substituting default on any
+      # other: a project map without a base_branch has skipped the face decision, and cloning
+      # the code face over it buries exactly that.
+      base =
+        project["base_branch"] ||
+          raise(ArgumentError,
+            message:
+              "Phase.Clone: project map for #{inspect(project["repo"])} carries no " <>
+                "\"base_branch\" — the face is decided at dispatch and threaded, never " <>
+                "re-defaulted here (single-default-site doctrine, face-projet)."
+          )
+
+      # Clean world: branch = `feature/<slug>` WITHOUT the pod_id (the agent must not re-read its
+      # pod_id in its own branch — containment). The slug comes from the dispatcher (sanitized issue
+      # title); default `work`. The slug carries no `pod-`/`pod_` prefix (the branch does not
+      # leak the pod's identity).
+      slug = Keyword.get(opts, :slug, "work")
+      feature = "feature/#{slug}"
+      ref_args = if ref, do: ["--reference", ref], else: []
+
+      # The NETWORK clone's deadline is calibrable by the caller (`:git_timeout_ms`), default = the
+      # wrapper's (30s). The spawner can tighten it; the tests use it to prove the bounding
+      # (clone to a URL that hangs → killed within the deadline, no zombie pod).
+      git_opts = Keyword.take(opts, [:git_timeout_ms]) |> rename_timeout_key()
+
+      # Clone/checkout BOUNDED by construction via `Fleet.Credentials.Shell.git/2` (runs under
+      # `setsid`; an absolute wall deadline kills the whole process-group `kill -KILL -<pgid>`;
+      # `GIT_TERMINAL_PROMPT=0` set by `git_env/0`). An unbounded `git`
+      # would freeze the `Fleet.Spawner.Pod` (GenServer) if the network clone hung — or if the git
+      # prompts for lack of a credential, with no TTY → zombie pod / wedged issue. The wrapper kills the
+      # child git if the deadline expires and returns a typed error → the pod does not stay frozen. `Shell.git/2`
+      # injects `git_env/0` (anti-prompt + forge auth).
+      # base_branch (catalogue/brief) + feature (built from the dispatcher slug) VALIDATED as git refs
+      # BEFORE they reach `git clone --branch`/`checkout` (R1-07/08): a malformed ref → a CLEAR typed
+      # error, not a cryptic git failure. `Fleet.GitRef` = the foundation check-ref-format authority.
+      with true <- Fleet.GitRef.valid?(base) or {:invalid_base_branch, base},
+           true <- Fleet.GitRef.valid?(feature) or {:invalid_feature_branch, feature},
+           # `--single-branch`: the workspace needs `base` and the feature branch it cuts from
+           # it, and nothing else. Without it the clone brings EVERY branch of the repo — under
+           # a per-ticket fan-out, that is every neighbour's feature branch, unmerged and
+           # possibly wrong, sitting one `git checkout` away from an agent whose whole job is
+           # to reason from `base`. The cost is not the bytes (the forge is local); it is that
+           # the material is THERE, and a world projected for a pod is exactly the material it
+           # should reason from.
+           #
+           # History is KEPT (no `--depth`): `git log`/`git blame` are legitimate tools for
+           # understanding code, and this is the code face. The doc mount is the asymmetric
+           # twin — a doc is consulted in its present state, so it shallows.
+           #
+           # `pin_base_sha` is unaffected: a pinned `base_sha` is an ancestor of `base` by
+           # construction (the rail captures it from an ls-remote of that branch), so it is in
+           # the fetched history; and its targeted `fetch origin <sha>` fallback stays for the
+           # anomalous case it exists for.
+           {:ok, {_, 0}} <-
+             Shell.git(
+               @hooks_off ++
+                 ["clone"] ++ ref_args ++ ["--branch", base, "--single-branch", repo_url, ws],
+               git_opts
+             ),
+           # If the forge-driven rail PINNED a base_sha (out-of-pod ls-remote), we pin HEAD onto it
+           # BEFORE the feature-branch. Eliminates the window "the pod clones a base the rail did not
+           # capture" (same-role race): `base..HEAD` will contain ONLY the pod's commits.
+           # Axiom set AT the clone boundary (not verified "observable post-hoc").
+           {:ok, {_, 0}} <- pin_base_sha(ws, project["base_sha"]),
+           # `refs/lcars/base` — LA BASE CONTRE LAQUELLE CE TRAVAIL SE JUGE, materialisee ICI
+           # parce que le pod ne peut pas la poser lui-meme (`update-ref` est dans sa denylist
+           # git) et parce que, pour un juge, elle n'est meme pas dans son clone.
+           {:ok, {_, 0}} <- pin_work_base(ws, project),
+           # `checkout -b` is local (no network, does not prompt) but ALSO goes through the bounded
+           # wrapper: invariant = no bare `System.cmd git` on this path (no unbounded git
+           # possible). Bare env (no auth/network).
+           {:ok, {_, 0}} <-
+             Shell.git(@hooks_off ++ ["-C", ws, "checkout", "-b", feature],
+               env: []
+             ),
+           :ok <- install_trailer_hook(ws, cap_profile),
+           :ok <- sanitize_workspace(ws) do
+        {:ok, ws, feature}
+      else
+        autre -> clone_refusal(autre)
+      end
+    end
+
+    # LES NEUF SORTIES DU CLONE, TRADUITES EN UN SEUL `{:clone_failed, _}`. Elles vivaient dans le
+    # `else` du `with`, ou l'ORDRE est porteur — et il l'est toujours ici, les clauses etant
+    # essayees dans l'ordre d'ecriture.
+    defp clone_refusal({:invalid_base_branch, b}),
+      do: {:error, {:clone_failed, {:invalid_base_branch, b}}}
+
+    # Nommees, et AVANT le fourre-tout : la chute l'aurait habillee en `{:git_exit, ...}`, c'est-a-
+    # dire un refus rapporte comme un echec git qui n'a jamais eu lieu. Les deux formes different
+    # (`{:invalid_base_sha, _}` nue, `{:error, {:invalid_pr_base_branch, _}}` enveloppee) parce que
+    # leurs producteurs ne partagent pas de convention — raison de plus pour les nommer.
+    defp clone_refusal({:invalid_base_sha, sha}),
+      do: {:error, {:clone_failed, {:invalid_base_sha, sha}}}
+
+    defp clone_refusal({:error, {:invalid_pr_base_branch, b}}),
+      do: {:error, {:clone_failed, {:invalid_pr_base_branch, b}}}
+
+    defp clone_refusal({:error, {:sanitize_failed, _}} = err), do: err
+
+    defp clone_refusal({:invalid_feature_branch, f}),
+      do: {:error, {:clone_failed, {:invalid_feature_branch, f}}}
+
+    defp clone_refusal({:ok, {out, code}}),
+      do: {:error, {:clone_failed, {code, String.slice(out, 0, 500)}}}
+
+    defp clone_refusal({:error, {:timeout, ms}}),
+      do: {:error, {:clone_failed, {:git_timeout, ms}}}
+
+    defp clone_refusal({:error, {:exit, reason}}),
+      do: {:error, {:clone_failed, {:git_exit, reason}}}
+
+    defp clone_refusal({:error, reason}), do: {:error, {:clone_failed, {:git_exit, reason}}}
 
     @doc """
     IN-PLACE reset of a RESIDENT pod's workspace (slot-freeze pipe) — NO rm_rf. The `ws` is

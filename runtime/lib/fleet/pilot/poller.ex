@@ -472,21 +472,7 @@ defmodule Fleet.Pilot.Poller do
         # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL sur une levee : laisser `acc_s` inchange perdrait
         # les suspects de ce depot, donc remettrait a zero la grace de deux ticks qui protege ses
         # verrous. Un depot non traite n'est pas un depot sans suspects.
-        {tally, suspects, awaits} =
-          Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
-                                                                                  {acc_t, acc_s,
-                                                                                   acc_a} = acc ->
-            repo_state = %{base | repo: repo}
-
-            try do
-              {t, s, a} = step_do_poll(repo_state, mode, pods)
-              {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
-            rescue
-              e -> repo_poll_crash(repo_state, e, acc)
-            catch
-              kind, reason -> repo_poll_crash(repo_state, {kind, reason}, acc)
-            end
-          end)
+        {tally, suspects, awaits} = fold_repos(repos, base, mode, pods)
 
         # Arch net — FLEET-GLOBAL action on the UNIQUE arch pod, decided ONCE per tick on the
         # cross-repo union (inside the per-repo loop, the first repo would stamp the cooldown and
@@ -502,50 +488,72 @@ defmodule Fleet.Pilot.Poller do
         # protection out of line with the CURRENT jury — with nothing to say so.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
-        # The CYCLE, measured AT ITS OWN SCALE — strictly distinct from `[:poller, :poll]`, which
-        # is emitted PER REPO (every emission carries `repo:`). A distribution over `:poll` cannot
-        # answer "how long does a full pass take": it describes one repo, and the number of repos
-        # appears nowhere in it. Yet it is the duration of the PASS that decides whether a value
-        # frozen at its start (a `base_sha`, a pod snapshot) can go stale before it ends.
-        #
-        # `started` is captured BEFORE `list_org_repos`, so the measurement covers everything a
-        # pass does: discovery, the pod snapshot, the SERIAL fold of the R repos, and the two
-        # fleet-global passes (arch net, protection recheck). Not just its visible part.
-        # DECOUVERTS ET SERVIS SONT DEUX COMPTES, et l'ecart entre les deux est le seul etat que
-        # cette boucle ne savait pas dire. Un depot ecarte rend `Lease.zero_tally()`, exactement
-        # comme un depot servi qui n'avait rien a faire : une flotte qui ne PEUT rien produire est
-        # donc indiscernable d'une flotte au repos, et c'est ce qu'un banc a montre — deux heures,
-        # 268 cycles, readiness verte, un seul depot, jamais servi.
-        #
-        # `onboarded?/1` est le predicat qui decide DEJA du skip, appele ici plutot que recopie :
-        # deux definitions de « servi » divergeraient, et c'est la divergence qui rendrait le
-        # compte faux sans que personne ne le voie. Le cout est un `File.dir?` par depot et par
-        # cycle, sur une passe mesuree a 33 ms.
-        :telemetry.execute(
-          [:lcars_fleet, :pilot_poller, :cycle],
-          %{
-            duration_ms: elapsed_ms(started),
-            repos: length(repos),
-            served: Enum.count(repos, &onboarded?/1)
-          },
-          %{status: :ok, mode: mode, orgs: state.orgs}
-        )
+        emit_cycle(started, mode, state.orgs, :ok, repos)
 
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
 
       {:error, reason} ->
-        # A pass that fails at discovery IS a pass, and it has a duration. Dropping it would make
-        # the cycle's p95 prettier than reality on exactly the case an operator watches — the same
-        # blindness that capturing `started` after the slow call already avoided. `repos: 0` is not
-        # filler: no repo was folded.
-        :telemetry.execute(
-          [:lcars_fleet, :pilot_poller, :cycle],
-          %{duration_ms: elapsed_ms(started), repos: 0, served: 0},
-          %{status: :error, mode: mode, orgs: state.orgs}
-        )
+        emit_cycle(started, mode, state.orgs, :error, [])
 
         handle_poll_error(state, {:discover_repos, reason}, started)
     end
+  end
+
+  # ⚠ LE FILET EST ICI, PAR DEPOT, ET IL NE REMPLACE PAS CELUI DU DESSUS. `safe_poll/2` capture
+  # au-dessus du fold, donc une levee y privait de service TOUS les depots suivants — et comme la
+  # cause est deterministe, a chaque tick. `safe_poll/2` garde son role pour ce qui est hors du fold.
+  #
+  # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL sur une levee : laisser `acc_s` inchange perdrait les
+  # suspects de ce depot, donc remettrait a zero la grace de deux ticks qui protege ses verrous. Un
+  # depot non traite n'est pas un depot sans suspects.
+  defp fold_repos(repos, base, mode, pods) do
+    Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
+                                                                            {acc_t, acc_s, acc_a} =
+                                                                              acc ->
+      repo_state = %{base | repo: repo}
+
+      try do
+        {t, s, a} = step_do_poll(repo_state, mode, pods)
+        {Lease.merge_tally(acc_t, t), MapSet.union(acc_s, s), MapSet.union(acc_a, a)}
+      rescue
+        e -> repo_poll_crash(repo_state, e, acc)
+      catch
+        kind, reason -> repo_poll_crash(repo_state, {kind, reason}, acc)
+      end
+    end)
+  end
+
+  # LE CYCLE, MESURE A SON ECHELLE — strictement distinct de `[:poller, :poll]`, emis PAR DEPOT. Une
+  # distribution sur `:poll` ne peut pas repondre a « combien de temps prend une passe complete » :
+  # elle decrit un depot, et le nombre de depots n'y apparait nulle part. Or c'est la duree de la
+  # PASSE qui decide si une valeur gelee a son debut (un `base_sha`, un instantane de pods) peut
+  # perimer avant sa fin.
+  #
+  # `started` est capture AVANT `list_org_repos`, donc la mesure couvre tout ce qu'une passe fait :
+  # decouverte, instantane de pods, fold SERIEL des R depots, et les deux passes globales.
+  #
+  # ⚠ UNE PASSE QUI ECHOUE A LA DECOUVERTE EST UNE PASSE, et elle a une duree. La jeter rendrait le
+  # p95 du cycle plus joli que la realite sur exactement le cas qu'un operateur surveille.
+  #
+  # DECOUVERTS ET SERVIS SONT DEUX COMPTES, et l'ecart entre les deux est le seul etat que cette
+  # boucle ne savait pas dire. Un depot ecarte rend `Lease.zero_tally()`, exactement comme un depot
+  # servi qui n'avait rien a faire : une flotte qui ne PEUT rien produire etait donc indiscernable
+  # d'une flotte au repos — mesure de banc, deux heures, 268 cycles, readiness verte, un seul depot,
+  # jamais servi.
+  #
+  # `onboarded?/1` est le predicat qui decide DEJA du skip, appele ici plutot que recopie : deux
+  # definitions de « servi » divergeraient, et c'est la divergence qui rendrait le compte faux sans
+  # que personne ne le voie.
+  defp emit_cycle(started, mode, orgs, status, repos) do
+    :telemetry.execute(
+      [:lcars_fleet, :pilot_poller, :cycle],
+      %{
+        duration_ms: elapsed_ms(started),
+        repos: length(repos),
+        served: Enum.count(repos, &onboarded?/1)
+      },
+      %{status: status, mode: mode, orgs: orgs}
+    )
   end
 
   # Throttled desired-state pass: every repo whose last recheck is older than the period

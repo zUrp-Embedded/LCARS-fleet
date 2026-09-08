@@ -296,30 +296,32 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     locked_prs = for p <- pulls, locked?(p), into: MapSet.new(), do: p["number"]
 
     pods
-    |> Enum.flat_map(fn pod ->
-      pod_id = pod[:pod_id]
-
-      case parse_pod_ref(pod_id, seams.repo) do
-        [{repo, phase, n}] ->
-          locked? =
-            (phase == :issue and MapSet.member?(locked_issues, n)) or
-              (phase == :pr and MapSet.member?(locked_prs, n))
-
-          # Reap ONLY on an ESTABLISHED idle. `:unknown` (the queue did not answer) defers to the
-          # next tick — see `pod_task_state/2` for why an uncertain pod is never classed dead.
-          if locked? or pod_task_state(seams.task_queue, pod_id) != :idle,
-            do: [],
-            else: [{repo, :pod, pod_id}]
-
-        _ ->
-          []
-      end
-    end)
+    |> Enum.flat_map(&quiesced_pod(&1, seams, locked_issues, locked_prs))
     |> MapSet.new()
   rescue
     _ -> MapSet.new()
   catch
     _, _ -> MapSet.new()
+  end
+
+  # Reap ONLY on an ESTABLISHED idle. `:unknown` (the queue did not answer) defers to the next tick
+  # — see `pod_task_state/2` for why an uncertain pod is never classed dead.
+  defp quiesced_pod(pod, %Seams{} = seams, locked_issues, locked_prs) do
+    pod_id = pod[:pod_id]
+
+    case parse_pod_ref(pod_id, seams.repo) do
+      [{repo, phase, n}] ->
+        locked? =
+          (phase == :issue and MapSet.member?(locked_issues, n)) or
+            (phase == :pr and MapSet.member?(locked_prs, n))
+
+        if locked? or pod_task_state(seams.task_queue, pod_id) != :idle,
+          do: [],
+          else: [{repo, :pod, pod_id}]
+
+      _ ->
+        []
+    end
   end
 
   # The reap is the NOMINAL end-of-life of a per-brick pod (a one-shot never

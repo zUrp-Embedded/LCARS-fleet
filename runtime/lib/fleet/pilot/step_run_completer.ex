@@ -936,29 +936,36 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp record_pr_open_failure(outcome, _step_run, _sha, _opts), do: outcome
 
+  # SANS LIVRABLE, LE SHA DU STEP-RUN EST LA SEULE ANCRE — et son absence est une erreur, pas un
+  # defaut : un step-run sans livrable NI sha n'a rien a quoi rattacher son marqueur.
   defp step1_publish(step_run, deliverable) do
     case Map.get(step_run, :deliverable_opts) do
-      nil ->
-        case Map.get(step_run, :step_run_sha) do
-          sha when is_binary(sha) and sha != "" -> {:ok, sha}
-          _ -> {:error, {:publish, :no_deliverable_no_step_run_sha}}
-        end
+      nil -> step_run_sha_only(step_run)
+      d_opts when is_map(d_opts) -> publish_deliverable(step_run, deliverable, d_opts)
+    end
+  end
 
-      d_opts when is_map(d_opts) ->
-        publish = fn ->
-          case deliverable.publish(d_opts) do
-            {:ok, %{commit_sha: sha}} -> {:ok, Map.get(step_run, :step_run_sha, sha)}
-            {:error, reason} -> {:error, {:publish, reason}}
-          end
-        end
+  defp step_run_sha_only(step_run) do
+    case Map.get(step_run, :step_run_sha) do
+      sha when is_binary(sha) and sha != "" -> {:ok, sha}
+      _ -> {:error, {:publish, :no_deliverable_no_step_run_sha}}
+    end
+  end
 
-        case Map.get(step_run, :pod_id) do
-          pod_id when is_binary(pod_id) ->
-            Fleet.Publish.InFlight.while_publishing(pod_id, publish)
+  # ⚠ LA MARQUE `in_flight` NE SE POSE QUE S'IL Y A UN POD A MARQUER. Elle borne la fenetre pendant
+  # laquelle le deadline de publication du pod ne doit pas le tuer ; sans pod_id, il n'y a personne
+  # a proteger et la publication se fait nue.
+  defp publish_deliverable(step_run, deliverable, d_opts) do
+    publish = fn ->
+      case deliverable.publish(d_opts) do
+        {:ok, %{commit_sha: sha}} -> {:ok, Map.get(step_run, :step_run_sha, sha)}
+        {:error, reason} -> {:error, {:publish, reason}}
+      end
+    end
 
-          _ ->
-            publish.()
-        end
+    case Map.get(step_run, :pod_id) do
+      pod_id when is_binary(pod_id) -> Fleet.Publish.InFlight.while_publishing(pod_id, publish)
+      _ -> publish.()
     end
   end
 

@@ -46,21 +46,22 @@ defmodule Fleet.SlugPropertyTest do
               :root
             ])
         ) do
-      base = Enum.join(segs, "/")
-
-      case shape do
-        :abs -> "/srv/" <> base
-        :rel -> base
-        :dot -> "./" <> base
-        :dotdot -> "/srv/" <> base <> "/.."
-        :climb -> "/srv/" <> base <> "/../../../.."
-        :double_slash -> "//srv//" <> base
-        :trailing -> "/srv/" <> base <> "/"
-        :empty -> ""
-        :root -> "/"
-      end
+      shaped(shape, Enum.join(segs, "/"))
     end
   end
+
+  # LES NEUF FORMES DE RACINE QU'UN APPELANT PEUT ENVOYER, chacune une clause. Elles ne sont pas des
+  # variantes de style : `:climb` et `:dotdot` sont les deux traversees, `:empty` et `:root` les
+  # deux degenerescences, et c'est leur presence dans la table qui fait que la propriete les tire.
+  defp shaped(:abs, base), do: "/srv/" <> base
+  defp shaped(:rel, base), do: base
+  defp shaped(:dot, base), do: "./" <> base
+  defp shaped(:dotdot, base), do: "/srv/" <> base <> "/.."
+  defp shaped(:climb, base), do: "/srv/" <> base <> "/../../../.."
+  defp shaped(:double_slash, base), do: "//srv//" <> base
+  defp shaped(:trailing, base), do: "/srv/" <> base <> "/"
+  defp shaped(:empty, _base), do: ""
+  defp shaped(:root, _base), do: "/"
 
   # Names: valid slugs AND everything a payload/catalogue may send in their place.
   defp name_gen do

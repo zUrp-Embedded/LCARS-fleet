@@ -97,23 +97,31 @@ defmodule Fleet.Pilot.ArchWake do
         end
 
       _free_or_terminal_or_never ->
-        case enqueue_mandate(task_queue, pod_id, repo, n) do
-          :ok ->
-            ensure_arch(ensure, repo, spawner, via)
+        offer_fresh_mandate(task_queue, spawner, repo, n, pod_id, via, ensure)
+    end
+  end
 
-            case wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)") do
-              :ok -> :offered
-              {:error, _} -> :wake_unreached
-            end
+  # ⚠ LE MANDAT D'ABORD, LE REVEIL ENSUITE, ET JAMAIS L'INVERSE. Un reveil sans contenu est la
+  # course au reveil parasite : le pod se leve, ne trouve rien a tirer, et repart — pendant que le
+  # label reste pose. L'enfilement rate ne reveille donc personne ; le label est intact et le filet
+  # de reconciliation reessaie.
+  defp offer_fresh_mandate(task_queue, spawner, repo, n, pod_id, via, ensure) do
+    case enqueue_mandate(task_queue, pod_id, repo, n) do
+      :ok ->
+        ensure_arch(ensure, repo, spawner, via)
 
-          {:error, reason} ->
-            Logger.warning(
-              "ArchWake: [#{via}] mandate enqueue KO (#{repo}##{n}): #{inspect(reason)} — " <>
-                "NO wake sent (signal without content is the spurious-wake race); label intact, net retries"
-            )
-
-            {:error, {:enqueue, reason}}
+        case wake(spawner, pod_id, via, "mandate #{repo}##{n} enqueued (arch was free)") do
+          :ok -> :offered
+          {:error, _} -> :wake_unreached
         end
+
+      {:error, reason} ->
+        Logger.warning(
+          "ArchWake: [#{via}] mandate enqueue KO (#{repo}##{n}): #{inspect(reason)} — " <>
+            "NO wake sent (signal without content is the spurious-wake race); label intact, net retries"
+        )
+
+        {:error, {:enqueue, reason}}
     end
   end
 

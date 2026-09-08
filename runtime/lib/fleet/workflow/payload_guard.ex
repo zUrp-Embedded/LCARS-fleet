@@ -94,34 +94,43 @@ defmodule Fleet.Workflow.PayloadGuard do
   def apply_files(_workspace, _other, _opts), do: {:error, :no_files_in_payload}
 
   defp validate_files(workspace, files) do
-    expanded_ws = Path.expand(workspace)
-
     Enum.reduce_while(files, :ok, fn
       # Empty path would otherwise become an opaque directory write error.
       %{"path" => rel_path, "content" => content}, :ok
       when is_binary(rel_path) and rel_path != "" and is_binary(content) ->
-        full = Path.expand(Path.join(workspace, rel_path))
-
-        cond do
-          not (full == expanded_ws or String.starts_with?(full, expanded_ws <> "/")) ->
-            {:halt, {:error, {:path_traversal, rel_path}}}
-
-          dotgit_component?(rel_path) ->
-            {:halt, {:error, {:dotgit_path, rel_path}}}
-
-          gitattributes_basename?(rel_path) and arms_filter_or_diff?(content) ->
-            {:halt, {:error, {:dangerous_gitattributes, rel_path}}}
-
-          symlink_in_chain?(workspace, rel_path) ->
-            {:halt, {:error, {:symlink_escape, rel_path}}}
-
-          true ->
-            {:cont, :ok}
+        case file_refusal(workspace, rel_path, content) do
+          nil -> {:cont, :ok}
+          cause -> {:halt, {:error, cause}}
         end
 
       bad, :ok ->
         {:halt, {:error, {:invalid_payload_file, inspect(bad)}}}
     end)
+  end
+
+  # LES QUATRE FACONS DE SORTIR DU WORKSPACE, dans l'ordre du moins au plus cher a mesurer : la
+  # traversee de chemin est un calcul, l'echappement par lien symbolique touche le disque. `nil` =
+  # rien a refuser.
+  defp file_refusal(workspace, rel_path, content) do
+    expanded_ws = Path.expand(workspace)
+    full = Path.expand(Path.join(workspace, rel_path))
+
+    cond do
+      not (full == expanded_ws or String.starts_with?(full, expanded_ws <> "/")) ->
+        {:path_traversal, rel_path}
+
+      dotgit_component?(rel_path) ->
+        {:dotgit_path, rel_path}
+
+      gitattributes_basename?(rel_path) and arms_filter_or_diff?(content) ->
+        {:dangerous_gitattributes, rel_path}
+
+      symlink_in_chain?(workspace, rel_path) ->
+        {:symlink_escape, rel_path}
+
+      true ->
+        nil
+    end
   end
 
   # Match `.git` as a path component, not `.gitignore` or `foo.git`.

@@ -137,25 +137,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   def list_workflow_cards(state) do
     with {:ok, _role} <- Gate.require_onboarder(state),
          {:ok, pairs} <- catalogue_cards() do
-      {cards, unreadable} =
-        Enum.reduce(pairs, {[], []}, fn {cat, name, opts}, {ok, bad} ->
-          # TWO axes, and both must hold for a card to be OFFERED here. `status: canon` = it is a
-          # production card and not a smoke/demo fixture. `scope: project` = it is declarable for a
-          # WHOLE project, which is the only question this listing asks — the human is choosing a
-          # project's criticality. A ticket-scoped card (`workshop-direct`, reached by an issue's
-          # genre) was offered here and should never have been: presenting a choice that cannot be
-          # made at this scope invites exactly the declaration the rest of the rail then refuses.
-          case read_card(name, opts) do
-            {:ok, %{"status" => "canon", "scope" => "project"} = card} ->
-              {[put_catalogue(card, cat) | ok], bad}
-
-            {:ok, _technical_or_ticket_scoped} ->
-              {ok, bad}
-
-            :error ->
-              {ok, [if(cat, do: "#{cat}/#{name}.yaml", else: "#{name}.yaml") | bad]}
-          end
-        end)
+      {cards, unreadable} = Enum.reduce(pairs, {[], []}, &offerable_card/2)
 
       # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR, meme regle que chez `list_catalogues/1` :
       # `{_, offer, bad}` filtre aussi `bad == []`, donc les intervertir poserait `"unreadable" => []`
@@ -286,6 +268,26 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   # des deux cotes et un nom seul ne designe plus rien. Le guichet presente donc l'offre ENTIERE en
   # une fois — c'est deja ce que son commentaire d'outil promettait (« framing FIRST: the catalogue
   # the human picks the card from »), sur un catalogue au lieu de N.
+
+  # DEUX AXES, et les deux doivent tenir pour qu'une carte soit OFFERTE ici. `status: canon` = c'est
+  # une carte de production, pas une fixture de fumee ou de demo. `scope: project` = elle est
+  # declarable pour un PROJET ENTIER, la seule question que ce listing pose — l'humain choisit la
+  # criticite d'un projet. Une carte a portee TICKET (`workshop-direct`, atteinte par le genre d'une
+  # issue) y a ete offerte et n'aurait jamais du l'etre : presenter un choix qui ne peut pas se
+  # faire a cette portee invite exactement la declaration que le reste du rail refuse ensuite.
+  defp offerable_card({cat, name, opts}, {ok, bad}) do
+    case read_card(name, opts) do
+      {:ok, %{"status" => "canon", "scope" => "project"} = card} ->
+        {[put_catalogue(card, cat) | ok], bad}
+
+      {:ok, _technical_or_ticket_scoped} ->
+        {ok, bad}
+
+      :error ->
+        {ok, [if(cat, do: "#{cat}/#{name}.yaml", else: "#{name}.yaml") | bad]}
+    end
+  end
+
   defp catalogue_cards do
     pairs =
       Enum.flat_map(Loader.card_scopes(), fn %{catalogue: cat, dir: dir} ->

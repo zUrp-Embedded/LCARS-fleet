@@ -183,65 +183,74 @@ defmodule Fleet.Project.Architect do
         {:error, {:repo_id_unresolved, repo, reason}}
 
       true ->
-        {:ok, repo_id} = repo_id_result
-
-        # The role is RESOLVED by the `project_delegate` capability, never named — same source as
-        # the gate that admits the call (`Delegation.require_architect/1`, B-03). Naming it here
-        # would gate correctly on a renamed delegate and then ensure a role the catalogue lacks.
-        case Fleet.CapProfile.resolve(loader, Fleet.Project.Roles.project_delegate_role()) do
-          {:ok, cap} ->
-            pod_id = pod_id_for(name)
-
-            spawn_opts = [
-              pod_id: pod_id,
-              # The repo the pod is BOUND to — exposed by `pod_info` so the MCP delegation tools
-              # resolve "the project" from the channel identity (the arch never names it).
-              repo: repo,
-              repo_id: repo_id,
-              rc_name: Layout.pod_label(name, "architect"),
-              project_slug: name,
-              # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
-              # face and it is `workshop` — the face it produces on. `ops` is the record it is judged
-              # against, so it reads it and cannot touch it; `code` goes through the pipeline like
-              # everyone else's.
-              #
-              # ORDER MATTERS HERE. `pod_cwd/3` falls back to the FIRST rw mount for a pod with no
-              # project remap, and `pod_mounts_env/3` keeps the FIRST occurrence of a path. Putting
-              # the two read-only faces ahead of the writable one is therefore not cosmetic.
-              mounts: [
-                %{"mode" => "ro", "path" => proj_dir},
-                %{"mode" => "ro", "path" => work_dir},
-                %{"mode" => "rw", "path" => doc_dir}
-              ]
-            ]
-
-            case spawner.spawn_pod(cap, pod_id, spawn_opts) do
-              {:ok, _pid} ->
-                Logger.info(
-                  "Project.Architect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
-                )
-
-                {:ok, pod_id}
-
-              {:error, {:already_started, _pid}} ->
-                {:ok, pod_id}
-
-              {:error, reason} = err ->
-                Logger.error(
-                  "Project.Architect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
-                    "retried on the next open/escalation trigger"
-                )
-
-                err
-            end
-
-          {:error, reason} = err ->
-            Logger.error(
-              "Project.Architect: architect cap-profile load/compose failed (#{inspect(reason)})"
-            )
-
-            err
-        end
+        spawn_architect(
+          repo,
+          name,
+          repo_id_result,
+          {proj_dir, work_dir, doc_dir},
+          spawner,
+          loader
+        )
     end
+  end
+
+  # ⚠ L'ORDRE DES MONTAGES N'EST PAS COSMETIQUE. `pod_cwd/3` retombe sur le PREMIER montage rw pour
+  # un pod sans remap de projet, et `pod_mounts_env/3` garde la PREMIERE occurrence d'un chemin :
+  # poser les deux faces en lecture seule devant la face inscriptible est ce qui donne au pod le bon
+  # repertoire de travail.
+  #
+  # Le monde de l'arch (cf. son moduledoc) : des repertoires HOTES vivants, pas un clone gele. UNE
+  # seule face inscriptible, `workshop` — celle sur laquelle il produit. `ops` est le registre
+  # contre lequel il est juge, donc il le lit et ne peut pas y toucher ; `code` passe par le
+  # pipeline comme celui de tout le monde.
+  defp spawn_architect(repo, name, {:ok, repo_id}, {proj_dir, work_dir, doc_dir}, spawner, loader) do
+    # The role is RESOLVED by the `project_delegate` capability, never named — same source as the
+    # gate that admits the call (`Delegation.require_architect/1`, B-03). Naming it here would gate
+    # correctly on a renamed delegate and then ensure a role the catalogue lacks.
+    case Fleet.CapProfile.resolve(loader, Fleet.Project.Roles.project_delegate_role()) do
+      {:ok, cap} ->
+        pod_id = pod_id_for(name)
+
+        spawn_opts = [
+          pod_id: pod_id,
+          # The repo the pod is BOUND to — exposed by `pod_info` so the MCP delegation tools
+          # resolve "the project" from the channel identity (the arch never names it).
+          repo: repo,
+          repo_id: repo_id,
+          rc_name: Layout.pod_label(name, "architect"),
+          project_slug: name,
+          mounts: [
+            %{"mode" => "ro", "path" => proj_dir},
+            %{"mode" => "ro", "path" => work_dir},
+            %{"mode" => "rw", "path" => doc_dir}
+          ]
+        ]
+
+        architect_spawn_outcome(spawner.spawn_pod(cap, pod_id, spawn_opts), repo, pod_id)
+
+      {:error, reason} = err ->
+        Logger.error(
+          "Project.Architect: architect cap-profile load/compose failed (#{inspect(reason)})"
+        )
+
+        err
+    end
+  end
+
+  defp architect_spawn_outcome({:ok, _pid}, repo, pod_id) do
+    Logger.info("Project.Architect: architect ensured for #{repo} (pod #{pod_id}, spawned)")
+    {:ok, pod_id}
+  end
+
+  defp architect_spawn_outcome({:error, {:already_started, _pid}}, _repo, pod_id),
+    do: {:ok, pod_id}
+
+  defp architect_spawn_outcome({:error, reason} = err, repo, _pod_id) do
+    Logger.error(
+      "Project.Architect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
+        "retried on the next open/escalation trigger"
+    )
+
+    err
   end
 end

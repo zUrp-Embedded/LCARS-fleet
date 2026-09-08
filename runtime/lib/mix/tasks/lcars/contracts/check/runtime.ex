@@ -842,38 +842,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     # silence. Le cas le plus GRAVE des deux — un script qui nomme un module entierement disparu —
     # etait donc le seul que ce mur ne pouvait pas voir, pendant que son message annoncait de le
     # distinguer (« module introuvable » etait du code mort).
-    exporte? = fn mod, fun ->
-      src = Map.get(modules, mod)
-      is_binary(src) and Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)
-    end
-
     absents =
       portes
-      |> Enum.reject(fn {_rel, mod, fun} -> exporte?.(mod, fun) end)
-      |> Enum.map(fn {rel, mod, fun} ->
-        cause =
-          if Map.has_key?(modules, mod),
-            do: "le module ne l'exporte pas",
-            else: "module introuvable"
-
-        "#{rel}: #{mod}.#{fun} — #{cause}"
-      end)
+      |> Enum.reject(fn {_rel, mod, fun} -> exporte?(modules, mod, fun) end)
+      |> Enum.map(&porte_absente(modules, &1))
 
     broken = if length(portes) < 3, do: "only #{length(portes)} eval door(s) found (expected 3+)"
 
-    %{
-      id: id,
+    measured_verdict(id, %{
       remediation:
         "re-exporte la fonction depuis le module que le script nomme (`defdelegate`), ou change " <>
           "le script : une porte `eval` est un appel qui traverse une frontiere de langage, et " <>
           "aucune etape du gate ne lit cette chaine a part ce mur",
-      status: if(is_nil(broken) and absents == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-          absents != [] -> Enum.sort(absents)
-          true -> []
-        end,
+      broken: broken,
+      findings: Enum.sort(absents),
       # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « chacune resolue » inconditionnel affirmait la
       # conformite dans le rapport meme d'un echec. Meme regle que le mur voisin sur stdout.
       note:
@@ -882,7 +864,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
             do: "chacune resolue",
             else: "#{length(absents)} NON resolue(s)"
           )
-    }
+    })
+  end
+
+  defp exporte?(modules, mod, fun) do
+    src = Map.get(modules, mod)
+    is_binary(src) and Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)
+  end
+
+  # ⚠ LA CAUSE SE LIT SUR `Map.has_key?`, PAS SUR LA VERITE DE `src`. Les deux pannes envoient le
+  # lecteur a des endroits differents — chercher une fonction dans un module qui n'existe pas est
+  # une perte de temps que le message evite.
+  defp porte_absente(modules, {rel, mod, fun}) do
+    cause =
+      if Map.has_key?(modules, mod), do: "le module ne l'exporte pas", else: "module introuvable"
+
+    "#{rel}: #{mod}.#{fun} — #{cause}"
   end
 
   # `%{"Fleet.X" => source}` — la source de chaque module de `lib/`, indexee par son nom ECRIT. On

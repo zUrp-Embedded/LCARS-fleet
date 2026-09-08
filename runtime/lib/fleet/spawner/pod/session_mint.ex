@@ -51,6 +51,24 @@ defmodule Fleet.Spawner.Pod.SessionMint do
     # stop holding. Refusing beats folding, for the reason already arbitrated for <REPO4>: a `rem`
     # would give two humans one deterministic identity, and a pod would resume the other one's
     # conversation.
+    guard_uid_bound!(uid, cap_profile)
+    mint_id(cap_profile, uid, repo, Keyword.get(opts, :pool, 0))
+  end
+
+  # LA BORNE <UID> EST REFUSEE ICI, exactement comme sa jumelle <REPO4> (DR-020). Les deux sont
+  # quatre chiffres decimaux de la meme identite, les deux sont gardees en dur dans
+  # `SessionId.encode/5`, et les deux ont besoin d'un refus DIAGNOSTIQUE cote appelant : laissee a
+  # la garde de l'encodeur, la panne est un `FunctionClauseError` nu — et pas sur un chemin
+  # exotique : `encode/5` est atteinte par CHAQUE role catalogue, portee flotte comprise, donc sur
+  # un hote dont l'humain siege au-dessus de 9999 AUCUN POD NE PEUT ETRE CREE, avec une erreur qui
+  # ne nomme ni l'uid ni la borne.
+  #
+  # 0..9999 est une hypothese de DEPLOIEMENT et le moduledoc de `SessionId` le dit : les uid de
+  # bureau y entrent, les plages userns/subuid des conteneurs vivent a 100000+, et `deploy/docker`
+  # est precisement l'endroit ou elle peut cesser de tenir. Refuser vaut mieux que replier, pour la
+  # raison deja arbitree sur <REPO4> : un `rem` donnerait a deux humains une seule identite
+  # deterministe, et un pod reprendrait la conversation de l'autre.
+  defp guard_uid_bound!(uid, cap_profile) do
     unless is_integer(uid) and uid in 0..9999 do
       raise ArgumentError,
             "SessionMint.mint: runtime human uid #{inspect(uid)} is outside the <UID> " <>
@@ -60,34 +78,24 @@ defmodule Fleet.Spawner.Pod.SessionMint do
               "is a DEPLOYMENT assumption of the hexspeak format: run the fleet under a uid below " <>
               "10000, or widen the format."
     end
+  end
 
+  # POOL — l'index de creneau alloue au demarrage de l'enfant par `Fleet.Spawner.PoolSlot`. Defaut 0
+  # pour tout appelant qui n'alloue pas (des tests qui construisent leurs args a la main) : 0 est le
+  # siege RESERVE, donc un pod non alloue porte la valeur qui dit « hors du fan-out gere » plutot
+  # que d'entrer en collision avec un pod alloue.
+  defp mint_id(cap_profile, uid, repo, pool) do
     cond do
       not Fleet.CapProfile.catalogued?(cap_profile) ->
         UUID.uuid4()
 
-      # FLEET-SCOPE ≡ `role_index 0` — the ONLY pod with no project dimension, and the identity IS
-      # the test: no separate `fleet_level` flag to keep in agreement with it.
+      # FLEET-SCOPE ≡ `role_index 0` — le SEUL pod sans dimension projet, et l'identite EST le test :
+      # pas de drapeau `fleet_level` separe a tenir en accord avec elle.
       Fleet.CapProfile.role_index(cap_profile) == 0 ->
-        Fleet.Spawner.SessionId.encode(
-          Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.kill_class(cap_profile),
-          uid,
-          0x0000,
-          Keyword.get(opts, :pool, 0)
-        )
+        encode_id(cap_profile, uid, 0x0000, pool)
 
       is_integer(repo) and repo in 0..9999 ->
-        Fleet.Spawner.SessionId.encode(
-          Fleet.CapProfile.role_index(cap_profile),
-          Fleet.CapProfile.kill_class(cap_profile),
-          uid,
-          repo,
-          # POOL — the slot index allocated at the child's start by `Fleet.Spawner.PoolSlot`.
-          # Default 0 for any caller that does not allocate (tests building args by hand): 0 is the
-          # RESERVED seat, so an unallocated pod carries the value that says "outside the managed
-          # fan-out" rather than colliding with an allocated one.
-          Keyword.get(opts, :pool, 0)
-        )
+        encode_id(cap_profile, uid, repo, pool)
 
       is_integer(repo) ->
         # DR-020
@@ -102,5 +110,15 @@ defmodule Fleet.Spawner.Pod.SessionMint do
                 "without repo_id — the forge did not resolve the id (forge down?). " <>
                 "We do not fabricate a random UUID."
     end
+  end
+
+  defp encode_id(cap_profile, uid, repo, pool) do
+    Fleet.Spawner.SessionId.encode(
+      Fleet.CapProfile.role_index(cap_profile),
+      Fleet.CapProfile.kill_class(cap_profile),
+      uid,
+      repo,
+      pool
+    )
   end
 end
