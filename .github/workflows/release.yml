@@ -82,10 +82,15 @@ jobs:
       #
       # C'est un `curl … | bash`, ce que la porte de LCARS refuse pour ELLE-MÊME. Ici c'est
       # l'installeur d'un tiers sur un runner jetable, pas notre produit sur la machine de quelqu'un.
+      # ⚠ `< /dev/null` ET UNE BORNE, PARCE QUE CE PAS A DEJA PENDU 41 MINUTES. Sans redirection,
+      # l'installeur hérite du stdin du runner et peut attendre une réponse que personne ne donnera ;
+      # sans borne, le job ne rend AUCUN verdict — et l'absence de rouge se lit comme du vert. Même
+      # cicatrice que `ssh … 'bash -s'` où apt mange le reste du script sur stdin.
+      # `timeout` sort en 124 : un mur, pas un silence.
       - name: Le binaire vendor du siège (le gate le résout en dur)
         run: |
           set -euo pipefail
-          curl -fsSL https://claude.ai/install.sh | bash
+          timeout --signal=TERM --kill-after=30s 5m bash -c 'curl -fsSL https://claude.ai/install.sh | bash' < /dev/null
           test -x "$HOME/.local/bin/claude" || { echo "l'installeur n'a pas posé ~/.local/bin/claude"; exit 1; }
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
