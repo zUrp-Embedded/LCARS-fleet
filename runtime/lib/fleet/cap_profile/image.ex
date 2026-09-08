@@ -46,6 +46,40 @@ defmodule Fleet.CapProfile.Image do
     :ok
   end
 
+  # Branch on kind (BL-6-45): a ReservedSeat is validated against ITS schema — every entry is proven
+  # at boot, none rots unvalidated behind its exclusion from the spawnable world. Three exits, the
+  # third a raise: an unknown kind is a broken deploy artifact, refused loud here rather than
+  # mis-validated against whichever schema a default would pick.
+  #
+  # SCHEMA ONLY, and that is a smaller promise than it looks: the schema types
+  # `scope.disallowedTools` as an array of strings and constrains NOTHING about its contents, so a
+  # profile that passes here can still violate the `g24_*` containment invariants — the ones that
+  # keep `web_search`, `code_execution` and friends away from every role.
+  #
+  # Those are checked on the COMPOSED profile (overlays merged, baseline denylist resolved), which
+  # does not exist yet at this point: `Fleet.Spawner.CanonProof.prove_all!/0` at boot, and
+  # `Pod.gate_cap_profile/1` in `:allocating` — the latter unconditional and on every launching
+  # pod's path. Publication is therefore deliberately the weakest of the three checks, and an
+  # over-provisioned profile fails at spawn rather than here.
+  defp validate_entry!({role, raw}) do
+    case Schema.validate(raw, schema_kind!(role, Map.get(raw, "kind"))) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        raise "CapProfile.Image: profile #{role} INVALID (#{inspect(reason)}) — " <>
+                "proven-good image at boot, or do not boot"
+    end
+  end
+
+  defp schema_kind!(_role, "CapabilityProfile"), do: :cap_profile
+  defp schema_kind!(_role, "ReservedSeat"), do: :reserved_seat
+
+  defp schema_kind!(role, other) do
+    raise "CapProfile.Image: entry #{role} declares unknown kind #{inspect(other)} — " <>
+            "proven-good image at boot, or do not boot"
+  end
+
   defp publish_scope!(root, scope) do
     index =
       case Catalog.snapshot_roles(scope) do
@@ -57,43 +91,7 @@ defmodule Fleet.CapProfile.Image do
                   "proven-good image required at boot, refusing to publish"
       end
 
-    Enum.each(index, fn {role, raw} ->
-      # Branch on kind (BL-6-45): a ReservedSeat is validated against ITS schema — every entry
-      # is proven at boot, none rots unvalidated behind its exclusion from the spawnable world.
-      # Three exits, the third a raise: an unknown kind is a broken deploy artifact, refused
-      # loud here rather than mis-validated against whichever schema a default would pick.
-      schema_kind =
-        case Map.get(raw, "kind") do
-          "CapabilityProfile" ->
-            :cap_profile
-
-          "ReservedSeat" ->
-            :reserved_seat
-
-          other ->
-            raise "CapProfile.Image: entry #{role} declares unknown kind #{inspect(other)} — " <>
-                    "proven-good image at boot, or do not boot"
-        end
-
-      # SCHEMA ONLY, and that is a smaller promise than it looks: the schema types
-      # `scope.disallowedTools` as an array of strings and constrains NOTHING about its contents,
-      # so a profile that passes here can still violate the `g24_*` containment invariants — the
-      # ones that keep `web_search`, `code_execution` and friends away from every role.
-      #
-      # Those are checked on the COMPOSED profile (overlays merged, baseline denylist resolved),
-      # which does not exist yet at this point: `Fleet.Spawner.CanonProof.prove_all!/0` at boot, and
-      # `Pod.gate_cap_profile/1` in `:allocating` — the latter unconditional and on every launching
-      # pod's path. Publication is therefore deliberately the weakest of the three checks, and an
-      # over-provisioned profile fails at spawn rather than here.
-      case Schema.validate(raw, schema_kind) do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          raise "CapProfile.Image: profile #{role} INVALID (#{inspect(reason)}) — " <>
-                  "proven-good image at boot, or do not boot"
-      end
-    end)
+    Enum.each(index, &validate_entry!/1)
 
     ensure_role_indexes_unique!(index, root)
 

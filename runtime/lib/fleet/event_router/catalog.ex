@@ -119,70 +119,69 @@ defmodule Fleet.EventRouter.Catalog do
 
   defp build_routing!(events) do
     for {type, %{"source" => source, "action" => action} = route} <- events, into: %{} do
-      # (Pas de rail de severite separe ni de gardes de prefixe : la seule garde de cet esprit est
-      # plus bas — une route `incident` a porte immediate exige un `escalate_kind` NOMME.)
-      if route["incident"] && action != "incident" do
-        raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
-      end
-
-      incident =
-        case route["incident"] do
-          %{"op" => op, "subject" => subject} = inc ->
-            # LA PORTE EST DECLARATIVE : `immediate` = issue des la PREMIERE
-            # occurrence (escalate_gated, cooldown seul) ; `recurrence` (defaut) = 1re notee,
-            # recidive escaladee (record_or_escalate). Le perimetre est borne : la porte
-            # declarative vaut pour les evenements ROUTES PAR CETTE TABLE ; les kinds tires depuis
-            # le code appellent leur porte au site — on ne re-decrit pas des chemins de code ici.
-            gate =
-              case inc["gate"] do
-                nil ->
-                  :recurrence
-
-                "recurrence" ->
-                  :recurrence
-
-                "immediate" ->
-                  :immediate
-
-                other ->
-                  raise "Catalog: #{type} declares incident gate=#{inspect(other)} " <>
-                          "(expected \"immediate\" or \"recurrence\")"
-              end
-
-            # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
-            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue. Refus au BOOT, pas
-            # au premier incident.
-            if gate == :immediate and is_nil(inc["escalate_kind"]) do
-              raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
-                      "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>
-                      "an unnamed kind would crash at the first incident instead of at boot"
-            end
-
-            %{
-              op: op,
-              subject: subject,
-              gate: gate,
-              escalate_kind: inc["escalate_kind"] && String.to_atom(inc["escalate_kind"]),
-              forward: Enum.map(inc["forward"] || [], &String.to_atom/1)
-            }
-
-          nil ->
-            nil
-        end
-
-      source_atom = String.to_atom(source)
-
-      unless Fleet.Event.valid_source?(source_atom) do
-        raise "Catalog: #{type} declares source=#{source}, not a canonical source " <>
-                "(expected one of #{inspect(Fleet.Event.canonical_sources())})"
-      end
+      source_atom = canonical_source!(type, source)
 
       {{source_atom, String.to_atom(type)},
-       %{
-         action: String.to_atom(action),
-         incident: incident
-       }}
+       %{action: String.to_atom(action), incident: incident_route!(type, action, route)}}
     end
+  end
+
+  defp canonical_source!(type, source) do
+    atom = String.to_atom(source)
+
+    unless Fleet.Event.valid_source?(atom) do
+      raise "Catalog: #{type} declares source=#{source}, not a canonical source " <>
+              "(expected one of #{inspect(Fleet.Event.canonical_sources())})"
+    end
+
+    atom
+  end
+
+  # (Pas de rail de severite separe ni de gardes de prefixe : la seule garde de cet esprit est
+  # celle du kind nomme, plus bas — une route `incident` a porte immediate exige un `escalate_kind`.)
+  defp incident_route!(type, action, route) do
+    if route["incident"] && action != "incident" do
+      raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
+    end
+
+    case route["incident"] do
+      %{"op" => op, "subject" => subject} = inc ->
+        gate = incident_gate!(type, inc["gate"])
+
+        # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
+        # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue. Refus au BOOT, pas au
+        # premier incident.
+        if gate == :immediate and is_nil(inc["escalate_kind"]) do
+          raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
+                  "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>
+                  "an unnamed kind would crash at the first incident instead of at boot"
+        end
+
+        %{
+          op: op,
+          subject: subject,
+          gate: gate,
+          escalate_kind: inc["escalate_kind"] && String.to_atom(inc["escalate_kind"]),
+          forward: Enum.map(inc["forward"] || [], &String.to_atom/1)
+        }
+
+      nil ->
+        nil
+    end
+  end
+
+  # LA PORTE EST DECLARATIVE : `immediate` = issue des la PREMIERE occurrence (escalate_gated,
+  # cooldown seul) ; `recurrence` (defaut) = 1re notee, recidive escaladee (record_or_escalate).
+  # Le perimetre est borne : la porte declarative vaut pour les evenements ROUTES PAR CETTE TABLE ;
+  # les kinds tires depuis le code appellent leur porte au site — on ne re-decrit pas des chemins de
+  # code ici.
+  defp incident_gate!(_type, nil), do: :recurrence
+  defp incident_gate!(_type, "recurrence"), do: :recurrence
+  defp incident_gate!(_type, "immediate"), do: :immediate
+
+  defp incident_gate!(type, other) do
+    raise "Catalog: #{type} declares incident gate=#{inspect(other)} " <>
+            "(expected \"immediate\" or \"recurrence\")"
   end
 
   @doc "Returns the configured registry path or its default under `priv/`."

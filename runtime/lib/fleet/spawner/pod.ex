@@ -708,105 +708,19 @@ defmodule Fleet.Spawner.Pod do
   def handle_event({:timeout, :kick}, {:attempt, n}, _state, %{tmux_session: session} = data)
       when is_binary(session) do
     bootstrap? = TaskProbe.no_pending_brief?(data.pod_id)
-
     polled = TaskProbe.polled?(data)
     cap = if bootstrap?, do: Kick.kick_bootstrap_max(), else: Kick.kick_max_attempts()
 
-    retry =
-      cond do
-        bootstrap? -> Kick.kick_bootstrap_retry_ms()
-        polled -> Kick.wake_retry_ms()
-        true -> Kick.kick_retry_ms()
-      end
-
-    cond do
-      Kick.acked?(TaskProbe.brief_pulled?(data.pod_id), bootstrap?, polled) ->
-        Logger.debug(
-          "pod #{data.pod_id} acked (pull/poll) → kick stopped (carrier rail takes over)"
-        )
-
+    case kick_stop_reason(data, bootstrap?, polled) do
+      {:stop, pourquoi} ->
+        Logger.debug("pod #{data.pod_id} #{pourquoi}")
         {:keep_state_and_data, [cancel_kick_action()]}
 
-      # WAKE branch only (a polled pod: the in-pod Monitor is armed). If the Monitor has DELIVERED this
-      # turn — turn.flag == turn.flag.seen, `watch.sh` recorded what it emitted — its one job is done:
-      # the agent HAS the turn, whatever it decides (pull, or legitimately not — an info judgment, or
-      # "already done"). Keying the fallback on get_work_item mistook that decision for a missed turn,
-      # so a busy or judging agent got a spurious `wake` typed in, then a false `wake.failed` at the cap.
-      # Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case (result deadline + drift/periodic
-      # monitors), not a delivery failure. The wake fires ONLY on genuine non-delivery (a dead
-      # Monitor: `.seen` never catches up → this stays false → the send-keys/`wake.failed` rails below run).
-      polled and TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
-        Logger.debug(
-          "pod #{data.pod_id} wake: Monitor delivered (turn.flag == turn.flag.seen) → loop stopped, no send-keys"
-        )
+      :continue when n >= cap ->
+        abandon_kick(data, n, bootstrap?)
 
-        {:keep_state_and_data, [cancel_kick_action()]}
-
-      # BOOTSTRAP branch (not polled): the Monitor is ARMED (`turn.flag.seen` exists) → the flag rail is
-      # LIVE, so engage's one job (get the agent to arm its rail) is done. Stop, whether the agent polls
-      # now or takes its brief via the rail ("Monitor event: ton tour"). A pod lands here right after
-      # ÉTAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
-      #
-      # ⚠ THIS CLAUSE IS WHAT MAKES A RESUMED POD SAFE TO TYPE INTO, and "a RESUMED pod self-arms
-      # and lands here with NO engage sent" is the opposite of true. It does not self-arm: `TurnFlag`
-      # clears `.seen` at EVERY launch, resumed included and by design. Gated on `resume?` instead,
-      # a resumed pod reaches neither this stop nor an engage, and burns its whole cap in silence
-      # (measured). THIS armed-stop is the real guard, and it
-      # is keyed on what is observable — the rail being live — not on how the pod was started.
-      not polled and TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
-        Logger.debug(
-          "pod #{data.pod_id} bootstrap: Monitor armed (turn.flag.seen) → loop stopped (rail is live)"
-        )
-
-        {:keep_state_and_data, [cancel_kick_action()]}
-
-      # Flag-only human terminals with no brief have no meaningful bootstrap action.
-      bootstrap? and not Kick.profile_send_keys?(data) ->
-        Logger.debug(
-          "pod #{data.pod_id} bootstrap kick canceled (profile is flag-only, nothing pending)"
-        )
-
-        {:keep_state_and_data, [cancel_kick_action()]}
-
-      n >= cap ->
-        phase = if bootstrap?, do: :bootstrap, else: :wake
-
-        Logger.warning(
-          "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalating"
-        )
-
-        {reason, reason_detail} = Event.reason_fields({:no_ack, phase})
-
-        Events.lossy_broadcast("wake.failed", %{
-          "pod_id" => data.pod_id,
-          "issue_id" => data.issue_id,
-          "reason" => reason,
-          "reason_detail" => reason_detail,
-          "pane" => PodTmux.capture_pane(data.pod_id)
-        })
-
-        {:keep_state_and_data, [cancel_kick_action()]}
-
-      # THE REPL IS NOT UP YET — AND TYPING INTO IT IS NOT A NO-OP. tmux buffers what is sent to a
-      # session whose TUI has not started, and the TUI then replays each buffered line as its own
-      # submission. The loop's stop condition cannot fire during that window either: every ACK it
-      # knows (`pulled`/`polled`) requires a turn, which requires the REPL. So every kick fired
-      # during a cold start is a guaranteed duplicate — measured: 15 s + 6 x 2.5 s of
-      # cadence against a 20-40 s bwrap cold start = a scribe with SEVEN `engage` in its REPL,
-      # seven spurious turns on one dispatch.
-      # `repl_up?` is the in-band proof that exists in that window: the pod's MCP client speaks on
-      # its socket at TUI init, before any turn. We keep counting attempts — a REPL that never
-      # comes up must still end in the `wake.failed` escalation, and it now says the truth (the
-      # agent never showed up) instead of "it never answered our seven kicks".
-      not TaskProbe.repl_up?(data.pod_id) ->
-        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
-
-      PodTmux.alive?(data.pod_id) ->
-        _ = Kick.kick_send(data, polled)
-        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
-
-      true ->
-        {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
+      :continue ->
+        kick_or_wait(data, n, kick_retry_ms(bootstrap?, polled), polled)
     end
   end
 
@@ -1016,6 +930,98 @@ defmodule Fleet.Spawner.Pod do
   # mandate is declared (`:mandate` present) but cannot be materialized: the order REFERENCES this
   # file, so a pod without it would read its order from nothing — it does not start, it defers. No
   # `:mandate` (an inline/degraded order, nothing to mount) is the no-op branch, not a failure.
+  # LES QUATRE RAISONS D'ARRETER LA BOUCLE, chacune avec sa preuve observable. Elles sont a part de
+  # l'action parce qu'elles repondent toutes a la meme question — « le rail a-t-il pris le relais ? »
+  # — et que les melanger a l'envoi rendait une fonction dont aucune branche ne se relit seule.
+  defp kick_stop_reason(data, bootstrap?, polled) do
+    cond do
+      Kick.acked?(TaskProbe.brief_pulled?(data.pod_id), bootstrap?, polled) ->
+        {:stop, "acked (pull/poll) → kick stopped (carrier rail takes over)"}
+
+      # WAKE branch only (a polled pod: the in-pod Monitor is armed). If the Monitor has DELIVERED
+      # this turn — turn.flag == turn.flag.seen, `watch.sh` recorded what it emitted — its one job
+      # is done: the agent HAS the turn, whatever it decides (pull, or legitimately not — an info
+      # judgment, or "already done"). Keying the fallback on get_work_item mistook that decision for
+      # a missed turn, so a busy or judging agent got a spurious `wake` typed in, then a false
+      # `wake.failed` at the cap. Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case
+      # (result deadline + drift/periodic monitors), not a delivery failure. The wake fires ONLY on
+      # genuine non-delivery (a dead Monitor: `.seen` never catches up → this stays false → the
+      # send-keys/`wake.failed` rails below run).
+      polled and TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
+        {:stop,
+         "wake: Monitor delivered (turn.flag == turn.flag.seen) → loop stopped, no send-keys"}
+
+      # BOOTSTRAP branch (not polled): the Monitor is ARMED (`turn.flag.seen` exists) → the flag rail
+      # is LIVE, so engage's one job (get the agent to arm its rail) is done. Stop, whether the agent
+      # polls now or takes its brief via the rail ("Monitor event: ton tour"). A pod lands here right
+      # after ETAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
+      #
+      # ⚠ THIS CLAUSE IS WHAT MAKES A RESUMED POD SAFE TO TYPE INTO, and "a RESUMED pod self-arms
+      # and lands here with NO engage sent" is the opposite of true. It does not self-arm:
+      # `TurnFlag` clears `.seen` at EVERY launch, resumed included and by design. Gated on
+      # `resume?` instead, a resumed pod reaches neither this stop nor an engage, and burns its
+      # whole cap in silence (measured). THIS armed-stop is the real guard, and it is keyed on what
+      # is observable — the rail being live — not on how the pod was started.
+      not polled and TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
+        {:stop, "bootstrap: Monitor armed (turn.flag.seen) → loop stopped (rail is live)"}
+
+      # Flag-only human terminals with no brief have no meaningful bootstrap action.
+      bootstrap? and not Kick.profile_send_keys?(data) ->
+        {:stop, "bootstrap kick canceled (profile is flag-only, nothing pending)"}
+
+      true ->
+        :continue
+    end
+  end
+
+  defp kick_retry_ms(bootstrap?, polled) do
+    cond do
+      bootstrap? -> Kick.kick_bootstrap_retry_ms()
+      polled -> Kick.wake_retry_ms()
+      true -> Kick.kick_retry_ms()
+    end
+  end
+
+  defp abandon_kick(data, n, bootstrap?) do
+    phase = if bootstrap?, do: :bootstrap, else: :wake
+
+    Logger.warning(
+      "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalating"
+    )
+
+    {reason, reason_detail} = Event.reason_fields({:no_ack, phase})
+
+    Events.lossy_broadcast("wake.failed", %{
+      "pod_id" => data.pod_id,
+      "issue_id" => data.issue_id,
+      "reason" => reason,
+      "reason_detail" => reason_detail,
+      "pane" => PodTmux.capture_pane(data.pod_id)
+    })
+
+    {:keep_state_and_data, [cancel_kick_action()]}
+  end
+
+  # ⚠ LE REPL N'EST PAS ENCORE LA — ET TAPER DEDANS N'EST PAS UN NO-OP. tmux met en tampon ce qu'on
+  # envoie a une session dont la TUI n'a pas demarre, et la TUI rejoue ensuite chaque ligne tamponnee
+  # comme sa propre soumission. La condition d'arret de la boucle ne peut pas se declencher pendant
+  # cette fenetre non plus : tout ACK qu'elle connait (`pulled`/`polled`) exige un tour, qui exige le
+  # REPL. Donc chaque kick tire pendant un demarrage a froid est un doublon garanti — mesure : 15 s
+  # + 6 x 2,5 s de cadence contre un demarrage a froid bwrap de 20-40 s = un scribe avec SEPT
+  # `engage` dans son REPL, sept tours parasites sur un seul dispatch.
+  #
+  # `repl_up?` est la preuve en bande qui existe dans cette fenetre : le client MCP du pod parle sur
+  # sa socket a l'init de la TUI, avant tout tour. On continue de compter les tentatives — un REPL
+  # qui ne monte jamais doit quand meme finir sur l'escalade `wake.failed`, et elle dit desormais la
+  # verite (l'agent ne s'est jamais montre) au lieu de « il n'a jamais repondu a nos sept kicks ».
+  defp kick_or_wait(data, n, retry, polled) do
+    if TaskProbe.repl_up?(data.pod_id) and PodTmux.alive?(data.pod_id) do
+      _ = Kick.kick_send(data, polled)
+    end
+
+    {:keep_state_and_data, [schedule_kick_action(n + 1, retry)]}
+  end
+
   defp materialize_mandate(%{opts: opts, pod_dir: pod_dir} = _data) do
     case Keyword.get(opts, :mandate) do
       %{ref: ref, sha: sha, ops_path: ops_path} = mandate ->

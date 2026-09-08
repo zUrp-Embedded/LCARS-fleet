@@ -188,69 +188,87 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
     # BL-6-20
     if judge_kind?(payload, spec) do
-      # `_with_reason` ET PAS `gate_decision/1` : le motif du refus de schema voyage jusqu'au ctx,
-      # parce que la passe de correction (B4) promet au juge de lui dire CE QUI N'ALLAIT PAS. Il
-      # journalise puis jete, il laisserait `VerdictCorrection` lire une cle que personne ne pose —
-      # donc demander au juge de deviner, ce qu'elle promet justement d'eviter.
-      {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
-      trace = Verdict.verdict_comment(payload["role"], decision, result)
-
-      ctx = %{
-        n: n,
-        role: payload["role"],
-        payload: payload,
-        workflow_map: workflow_map,
-        step: step,
-        judge_target: Map.get(spec, "judge_target"),
-        invalid_reason: invalid_reason
-      }
-
-      {:judge_verdict, decision, trace, ctx}
+      judge_verdict(workflow_map, step, spec, payload, n, result)
     else
-      case Fleet.Workflow.Gates.evaluate(spec, system_over_declared(spec, result, payload), %{}) do
-        :pass ->
-          case producer_fact(producer?, payload, seams) do
-            {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
-            {:error, _} = err -> err
-          end
+      spec
+      |> Fleet.Workflow.Gates.evaluate(system_over_declared(spec, result, payload), %{})
+      |> gate_outcome(workflow_map, step, payload, n, seams, producer?, result)
+    end
+  end
 
-        {:fail, reason} ->
-          Logger.info(
-            "StepRunConsumer: gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}"
-          )
+  # `_with_reason` ET PAS `gate_decision/1` : le motif du refus de schema voyage jusqu'au ctx, parce
+  # que la passe de correction (B4) promet au juge de lui dire CE QUI N'ALLAIT PAS. Il journalise
+  # puis jette, il laisserait `VerdictCorrection` lire une cle que personne ne pose — donc demander
+  # au juge de deviner, ce qu'elle promet justement d'eviter.
+  defp judge_verdict(workflow_map, step, spec, payload, n, result) do
+    {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
 
-          case sign_failed_run(seams, n, payload["role"], step, reason) do
-            :ok -> tag(:rework, rebound(workflow_map, n, seams))
-            {:error, err} -> {:error, {:gate_fail_unsigned, err}}
-          end
+    ctx = %{
+      n: n,
+      role: payload["role"],
+      payload: payload,
+      workflow_map: workflow_map,
+      step: step,
+      judge_target: Map.get(spec, "judge_target"),
+      invalid_reason: invalid_reason
+    }
 
-        {:human_approval, reason} ->
-          {:error, {:human_approval_required, reason}}
+    {:judge_verdict, decision, Verdict.verdict_comment(payload["role"], decision, result), ctx}
+  end
 
-        {:dispatch_gatekeeper, _info} ->
-          case GatekeeperEscalation.dispatch(
-                 workflow_map,
-                 step,
-                 result,
-                 payload,
-                 n,
-                 payload["role"],
-                 seams.escalation
-               ) do
-            {:ok, corr} ->
-              {:escalate, corr,
-               %{
-                 n: n,
-                 role: payload["role"],
-                 payload: payload,
-                 workflow_map: workflow_map,
-                 step: step
-               }}
+  # LES QUATRE SORTIES DE LA PORTE, une clause chacune. Elles etaient les quatre branches d'un `case`
+  # imbrique dans un `if`, lui-meme dans une fonction qui resolvait aussi le spec et depliait
+  # l'enveloppe : quatre metiers pour une seule lecture possible.
+  defp gate_outcome(:pass, workflow_map, step, payload, _n, seams, producer?, _result) do
+    case producer_fact(producer?, payload, seams) do
+      {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
+      {:error, _} = err -> err
+    end
+  end
 
-            {:error, reason} ->
-              {:error, {:gatekeeper_dispatch, reason}}
-          end
-      end
+  defp gate_outcome({:fail, reason}, workflow_map, step, payload, n, seams, _producer?, _result) do
+    Logger.info("StepRunConsumer: gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}")
+
+    case sign_failed_run(seams, n, payload["role"], step, reason) do
+      :ok -> tag(:rework, rebound(workflow_map, n, seams))
+      {:error, err} -> {:error, {:gate_fail_unsigned, err}}
+    end
+  end
+
+  defp gate_outcome({:human_approval, reason}, _wm, _step, _payload, _n, _seams, _prod?, _result),
+    do: {:error, {:human_approval_required, reason}}
+
+  defp gate_outcome(
+         {:dispatch_gatekeeper, _info},
+         workflow_map,
+         step,
+         payload,
+         n,
+         seams,
+         _p,
+         result
+       ) do
+    case GatekeeperEscalation.dispatch(
+           workflow_map,
+           step,
+           result,
+           payload,
+           n,
+           payload["role"],
+           seams.escalation
+         ) do
+      {:ok, corr} ->
+        {:escalate, corr,
+         %{
+           n: n,
+           role: payload["role"],
+           payload: payload,
+           workflow_map: workflow_map,
+           step: step
+         }}
+
+      {:error, reason} ->
+        {:error, {:gatekeeper_dispatch, reason}}
     end
   end
 
