@@ -68,19 +68,26 @@ defmodule Fleet.Conflict.Diff do
     dp =
       Enum.reduce(1..n//1, %{}, fn i, dp ->
         Enum.reduce(1..m//1, dp, fn j, dp ->
-          val =
-            if elem(av, i - 1) == elem(bv, j - 1) do
-              Map.get(dp, {i - 1, j - 1}, 0) + 1
-            else
-              max(Map.get(dp, {i - 1, j}, 0), Map.get(dp, {i, j - 1}, 0))
-            end
-
-          Map.put(dp, {i, j}, val)
+          Map.put(dp, {i, j}, lcs_cell(dp, av, bv, i, j))
         end)
       end)
 
     backtrack(av, bv, dp, n, m, [])
   end
+
+  # UNE CELLULE DE LA MATRICE LCS : egalite -> la diagonale plus un, sinon le meilleur des deux
+  # voisins. Sortie de la double reduction pour que celle-ci ne porte plus que le parcours.
+  defp lcs_cell(dp, av, bv, i, j) do
+    if elem(av, i - 1) == elem(bv, j - 1) do
+      Map.get(dp, {i - 1, j - 1}, 0) + 1
+    else
+      max(Map.get(dp, {i - 1, j}, 0), Map.get(dp, {i, j - 1}, 0))
+    end
+  end
+
+  # L'index de base d'une operation ANCREE (`:keep` ou `:remove`) — une insertion n'en a pas.
+  defp anchored_index(%{type: t, index: i}) when t in [:keep, :remove], do: i + 1
+  defp anchored_index(_op), do: nil
 
   defp backtrack(_av, _bv, _dp, 0, _j, acc), do: acc
   defp backtrack(_av, _bv, _dp, _i, 0, acc), do: acc
@@ -189,13 +196,7 @@ defmodule Fleet.Conflict.Diff do
 
     case forward do
       nil ->
-        backward =
-          Enum.find_value((len - 1)..0//-1, fn j ->
-            op = elem(diff_v, j)
-            if op.type in [:keep, :remove], do: op.index + 1, else: nil
-          end)
-
-        backward || 0
+        Enum.find_value((len - 1)..0//-1, &anchored_index(elem(diff_v, &1))) || 0
 
       idx ->
         idx
@@ -244,7 +245,7 @@ defmodule Fleet.Conflict.Diff do
       if overlap? do
         {:error, :overlap}
       else
-        all = Enum.sort_by(ours_edits ++ theirs_edits, fn e -> {e.base_start, e.base_end} end)
+        all = Enum.sort_by(ours_edits ++ theirs_edits, &{&1.base_start, &1.base_end})
         {:ok, reconstruct(all, List.to_tuple(base), 0, [])}
       end
     end

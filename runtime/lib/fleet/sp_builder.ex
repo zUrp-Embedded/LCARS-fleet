@@ -227,10 +227,7 @@ defmodule Fleet.SPBuilder do
             end)
             |> Enum.split_with(fn {_name, path} -> path != nil end)
 
-          case missing do
-            [] -> {:ok, Enum.map(present, fn {_name, path} -> path end)}
-            _ -> {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
-          end
+          skills_verdict(present, missing)
 
         unsafe ->
           {:error, {:skills_unsafe, unsafe}}
@@ -272,12 +269,7 @@ defmodule Fleet.SPBuilder do
   defp read_modop_fragments(modop_bundles, root) do
     case sp_image(root) do
       %{modop_sp: fragments} ->
-        Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-          case Map.fetch(fragments, name) do
-            {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
-            :error -> {:halt, {:error, {:modop_bundle_missing, name}}}
-          end
-        end)
+        Enum.reduce_while(modop_bundles, {:ok, []}, &fragment_step(&1, &2, fragments))
         |> case do
           {:ok, list} -> {:ok, Enum.reverse(list)}
           error -> error
@@ -355,12 +347,26 @@ defmodule Fleet.SPBuilder do
 
         Catalogue.tree_scope(scope_root, :subagent_templates)
         |> Catalogue.find_in("subagent-#{name}.md")
-        |> case do
-          nil -> :error
-          path -> with {:error, _} <- File.read(path), do: :error
-        end
+        |> read_or_error()
     end
   end
+
+  # LE REFUS EST FAIL-LOUD, ET C'EST LE POINT : filtrer silencieusement une skill absente laisserait
+  # un pod REVENDIQUER une skill qui n'existe pas.
+  defp skills_verdict(present, []), do: {:ok, Enum.map(present, fn {_name, path} -> path end)}
+
+  defp skills_verdict(_present, missing),
+    do: {:error, {:skills_missing, Enum.map(missing, fn {name, _path} -> name end)}}
+
+  defp fragment_step(name, {:ok, acc}, fragments) do
+    case Map.fetch(fragments, name) do
+      {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
+      :error -> {:halt, {:error, {:modop_bundle_missing, name}}}
+    end
+  end
+
+  defp read_or_error(nil), do: :error
+  defp read_or_error(path), do: with({:error, _} <- File.read(path), do: :error)
 
   defp modop_fragments_concat([]), do: ""
 

@@ -258,16 +258,7 @@ defmodule Fleet.Workflow.DeliverableGate do
         # `CLAUDE.md` would plant (or delete) directive material in the target repo at harvest.
         # Same per-commit listing as the secret scan below: zero extra git call. The ROOT
         # CLAUDE.md stays legitimate (a scribe may document the project).
-        case Enum.find(files, &forbidden_governance_path?/1) do
-          nil ->
-            case Enum.find(files, &Regex.match?(@secret_file_re, &1)) do
-              nil -> :ok
-              f -> {:error, {:secret_detected, "blacklisted_file", f}}
-            end
-
-          f ->
-            {:error, {:forbidden_path_in_diff, f}}
-        end
+        forbidden_file(files)
 
       {out, rc} ->
         {:error, classify_git_error(out, rc)}
@@ -354,13 +345,29 @@ defmodule Fleet.Workflow.DeliverableGate do
   # La premiere forme de secret reconnue dans un texte, ou `:ok`. Le NOM de la forme voyage avec le
   # refus : « un secret » sans dire lequel envoie l'auteur relire tout son diff.
   defp refuse_secret(texte, ou) do
-    case Enum.find_value(@secret_patterns, fn {re, kind} ->
-           if Regex.match?(re, texte), do: kind, else: nil
-         end) do
+    case Enum.find_value(@secret_patterns, &matched_secret_kind(&1, texte)) do
       nil -> :ok
       kind -> {:error, {:secret_detected, kind, ou}}
     end
   end
+
+  # DEUX REFUS DE FICHIER, DANS L'ORDRE. Un chemin de gouvernance passe avant un nom de fichier
+  # blackliste : le premier dit QUI n'a pas le droit d'ecrire la, le second dit QUOI ne doit jamais
+  # partir. Les confondre nommerait la mauvaise regle a l'auteur.
+  defp forbidden_file(files) do
+    cond do
+      f = Enum.find(files, &forbidden_governance_path?/1) ->
+        {:error, {:forbidden_path_in_diff, f}}
+
+      f = Enum.find(files, &Regex.match?(@secret_file_re, &1)) ->
+        {:error, {:secret_detected, "blacklisted_file", f}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp matched_secret_kind({re, kind}, texte), do: if(Regex.match?(re, texte), do: kind)
 
   # Le sha d'un commit dont AUCUNE valeur de trailer ne commence par le role attendu. Un chunk sans
   # separateur n'a pas de trailer du tout : il ne prouve rien, donc il n'accuse rien.

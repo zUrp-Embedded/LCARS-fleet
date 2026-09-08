@@ -440,15 +440,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
           {:ok, %{"status" => "commented", "number" => number, "idempotent" => true}}
 
         dedup ->
-          case forge.post_comment(repo, number, with_op_marker(body, marker),
-                 token: identity.token
-               ) do
-            {:ok, _} ->
-              {:ok, with_dedup_unverified(%{"status" => "commented", "number" => number}, dedup)}
-
-            {:error, reason} ->
-              {:error, {:comment_failed, reason}}
-          end
+          repo
+          |> forge.post_comment(number, with_op_marker(body, marker), token: identity.token)
+          |> comment_outcome(number, dedup)
       end
     else
       {:error, :role_token_unavailable} = err ->
@@ -891,13 +885,16 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
+  defp comment_outcome({:ok, _}, number, dedup),
+    do: {:ok, with_dedup_unverified(%{"status" => "commented", "number" => number}, dedup)}
+
+  defp comment_outcome({:error, reason}, _number, _dedup), do: {:error, {:comment_failed, reason}}
+
   # Best-effort idempotency: a failed readback falls through to creation.
   defp find_open_issue_with_marker(forge, repo, marker) do
     case forge.list_open_issues(repo, []) do
       {:ok, issues} ->
-        case Enum.find(issues, fn issue ->
-               String.contains?(Map.get(issue, "body") || "", marker)
-             end) do
+        case Enum.find(issues, &String.contains?(Map.get(&1, "body") || "", marker)) do
           nil -> :none
           issue -> {:ok, issue}
         end

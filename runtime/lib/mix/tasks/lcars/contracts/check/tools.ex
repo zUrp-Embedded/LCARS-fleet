@@ -1124,6 +1124,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # nothing else. `no_parens` nodes are field access (`identity.token`), not calls.
   defp seam_calls(ast) do
     ast
+    # ⚠ DEPLIE AVANT DE COMPTER. Un `repo |> forge.post_comment(n, body, opts)` se lit TROIS
+    # arguments sur le noeud d'appel : le mur accusait alors une op parfaitement declaree, et
+    # aurait manque une op tubee reellement absente du behaviour.
+    |> unpipe()
     |> collect(fn
       {{:., _, [{var, _, nil}, fun]}, meta, args} when is_atom(var) and is_atom(fun) ->
         if meta[:no_parens] == true, do: nil, else: {fun, length(args)}

@@ -345,16 +345,7 @@ defmodule Fleet.CapProfile.Catalog do
   def read_modops(modop_set, root) when is_list(modop_set) do
     case published_for(root) do
       %{overlays: overlays} ->
-        Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-          case Map.fetch(overlays, name) do
-            {:ok, raw} ->
-              {:cont, {:ok, [raw | acc]}}
-
-            :error ->
-              Logger.warning("Catalog: modop not in the published image: #{inspect(name)}")
-              {:halt, {:error, :modop_not_found}}
-          end
-        end)
+        Enum.reduce_while(modop_set, {:ok, []}, &overlay_step(&1, &2, overlays))
         |> case do
           {:ok, modops} -> {:ok, Enum.reverse(modops)}
           error -> error
@@ -394,11 +385,8 @@ defmodule Fleet.CapProfile.Catalog do
         case found ||
                Fleet.Slug.confined_join(Path.join(List.first(scope, root_dir()), "modop"), name) do
           path when is_binary(path) ->
-            with {:ok, raw} <- decode_yaml(path),
-                 :ok <- Schema.validate_modop_keys(raw),
-                 :ok <- Schema.validate(raw, :modop) do
-              {:cont, {:ok, [raw | acc]}}
-            else
+            case read_modop_yaml(path) do
+              {:ok, raw} -> {:cont, {:ok, [raw | acc]}}
               {:error, reason} -> {:halt, {:error, reason}}
             end
 
@@ -421,6 +409,30 @@ defmodule Fleet.CapProfile.Catalog do
     case result do
       {:ok, modops} -> {:ok, Enum.reverse(modops)}
       error -> error
+    end
+  end
+
+  # UN MODOP DE L'IMAGE PUBLIEE. Absent = l'image ne le porte pas, ce qui est un refus et pas une
+  # composition partielle : un pod dont un mode manque n'est pas un pod diminue, c'est un pod dont
+  # personne ne sait ce qu'il fait.
+  defp overlay_step(name, {:ok, acc}, overlays) do
+    case Map.fetch(overlays, name) do
+      {:ok, raw} ->
+        {:cont, {:ok, [raw | acc]}}
+
+      :error ->
+        Logger.warning("Catalog: modop not in the published image: #{inspect(name)}")
+        {:halt, {:error, :modop_not_found}}
+    end
+  end
+
+  # LA LECTURE D'UN MODOP SUR DISQUE, avec ses deux validations. Les trois etapes voyagent ensemble
+  # partout ou un overlay se lit : les separer laisserait un site en valider deux sur trois.
+  defp read_modop_yaml(path) do
+    with {:ok, raw} <- decode_yaml(path),
+         :ok <- Schema.validate_modop_keys(raw),
+         :ok <- Schema.validate(raw, :modop) do
+      {:ok, raw}
     end
   end
 
@@ -477,16 +489,15 @@ defmodule Fleet.CapProfile.Catalog do
     |> Enum.reduce_while({:ok, %{}}, fn path, {:ok, acc} ->
       name = path |> Path.dirname() |> Path.basename()
 
-      if Map.has_key?(acc, name) do
-        {:cont, {:ok, acc}}
-      else
-        with {:ok, raw} <- decode_yaml(path),
-             :ok <- Schema.validate_modop_keys(raw),
-             :ok <- Schema.validate(raw, :modop) do
-          {:cont, {:ok, Map.put(acc, name, raw)}}
-        else
-          {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
-        end
+      cond do
+        Map.has_key?(acc, name) ->
+          {:cont, {:ok, acc}}
+
+        true ->
+          case read_modop_yaml(path) do
+            {:ok, raw} -> {:cont, {:ok, Map.put(acc, name, raw)}}
+            {:error, reason} -> {:halt, {:error, {:invalid_overlay, name, reason}}}
+          end
       end
     end)
   end

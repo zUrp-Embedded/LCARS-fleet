@@ -1353,15 +1353,4 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
     acc
   end
-
-  # `lhs |> f(args)` → `f(lhs, args)`, at every depth: the AST of a pipe keeps the piped value in
-  # the `|>` node, so an arity read on the call node alone is off by one in BOTH directions
-  # (`n |> Loader.load!()` reads as zero arguments, `n |> Loader.load!(o)` as one).
-  defp unpipe(ast) do
-    Macro.prewalk(ast, fn
-      {:|>, _, [lhs, {call, meta, args}]} when is_list(args) -> {call, meta, [lhs | args]}
-      {:|>, _, [lhs, {call, meta, nil}]} -> {call, meta, [lhs]}
-      node -> node
-    end)
-  end
 end

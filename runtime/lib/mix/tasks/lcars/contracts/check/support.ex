@@ -383,19 +383,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   defp corpus_walk(dir, acc) do
     case File.ls(dir) do
       {:ok, entries} ->
-        Enum.reduce(entries, acc, fn e, a ->
-          path = Path.join(dir, e)
-
-          cond do
-            e in @corpus_skip -> a
-            File.dir?(path) -> corpus_walk(path, a)
-            File.regular?(path) -> [path | a]
-            true -> a
-          end
-        end)
+        Enum.reduce(entries, acc, &corpus_entry(Path.join(dir, &1), &1, &2))
 
       _ ->
         acc
+    end
+  end
+
+  defp corpus_entry(_path, nom, acc) when nom in @corpus_skip, do: acc
+
+  defp corpus_entry(path, _nom, acc) do
+    cond do
+      File.dir?(path) -> corpus_walk(path, acc)
+      File.regular?(path) -> [path | acc]
+      true -> acc
     end
   end
 
@@ -443,6 +444,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @doc false
   @spec quoted!(String.t(), String.t()) :: Macro.t()
   def quoted!(root, rel), do: root |> Path.join(rel) |> File.read!() |> Code.string_to_quoted!()
+
+  @doc """
+  `lhs |> f(args)` → `f(lhs, args)`, a toute profondeur.
+
+  ⚠ L'AST D'UN TUBE GARDE LA VALEUR TUBEE DANS LE NOEUD `|>`, donc une lecture d'ARITE sur le noeud
+  d'appel seul est fausse DANS LES DEUX SENS : `n |> f()` se lit zero argument, `n |> f(o)` un seul.
+  Un mur qui compte les arguments d'un appel doit deplier AVANT de compter, sinon il rate les
+  violations tubees et accuse les appels sains.
+
+  Mesure du 2026-09-08 : `mcp.seam_surface_declared` accusait `post_comment: 3` — un appel a QUATRE
+  arguments dont le premier passait par un tube. `workflow.loader_arity` avait deja la lecon, dans
+  son coin ; elle vit ici maintenant.
+  """
+  @spec unpipe(Macro.t()) :: Macro.t()
+  def unpipe(ast) do
+    Macro.prewalk(ast, fn
+      {:|>, _, [lhs, {call, meta, args}]} when is_list(args) -> {call, meta, [lhs | args]}
+      {:|>, _, [lhs, {call, meta, nil}]} -> {call, meta, [lhs]}
+      node -> node
+    end)
+  end
 
   @doc false
   @spec def_name(Macro.t()) :: atom() | nil

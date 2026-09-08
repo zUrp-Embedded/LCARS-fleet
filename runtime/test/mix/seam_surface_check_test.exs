@@ -129,6 +129,37 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
     end
   end
 
+  describe "⚠ LE TUBE, ET L'ARITE QU'IL DEPLACE" do
+    # Mesure du 2026-09-08 : ce mur a accuse `post_comment: 3` sur un appel a QUATRE arguments dont
+    # le premier passait par un tube. L'AST d'un `|>` garde la valeur tubee dans le noeud du pipe,
+    # donc une lecture d'arite sur le noeud d'APPEL seul est fausse — et elle l'est DANS LES DEUX
+    # SENS : elle accuse un appel sain, et elle raterait une op tubee reellement absente du
+    # behaviour, qui est le defaut que ce mur existe pour attraper.
+    #
+    # `workflow.loader_arity` portait deja la lecon dans son coin ; `Support.unpipe/1` la porte
+    # maintenant pour les deux.
+    test "un appel TUBE et declare passe — l'arite se compte apres depliage" do
+      assert %{status: :pass} =
+               check(["repo |> forge.post_comment(n, body, [])"])
+    end
+
+    test "un appel TUBE et NON declare est attrape — le depliage ne rend pas le mur aveugle" do
+      result = check(["repo |> forge.pas_un_callback(n, body, [])"])
+
+      assert result.status == :fail
+      assert [ev] = result.evidence
+      assert ev =~ "pas_un_callback"
+    end
+
+    test "un tube SANS parentheses se deplie aussi — `x |> f` est un appel a un argument" do
+      # C'est l'autre moitie de `unpipe/1` : `{call, meta, nil}` au lieu d'une liste d'arguments.
+      # Sans elle, `repo |> forge.list_open_issues()` se lirait zero argument.
+      result = check(["repo |> forge.pas_un_callback()"])
+
+      assert result.status == :fail
+    end
+  end
+
   describe "against the real tree" do
     test "the repo passes — every seam op the delegation calls is written down somewhere" do
       result = Tools.check_mcp_seam_surface(File.cwd!())

@@ -152,14 +152,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
         case File.read(path) do
           {:ok, body} ->
-            case String.trim(body) do
-              "" ->
-                warn_projection_missing(path, :empty)
-                nil
-
-              login ->
-                login
-            end
+            projected_login(String.trim(body), path)
 
           {:error, _} ->
             warn_projection_missing(path, :absent)
@@ -232,15 +225,25 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp find_open_incident(list_fun, repo, marker) do
     case list_fun.(repo, []) do
       {:ok, issues} when is_list(issues) ->
-        Enum.find_value(issues, :none, fn issue ->
-          body = Map.get(issue, "body") || ""
-          num = Map.get(issue, "number")
-          if is_integer(num) and String.contains?(body, marker), do: {:ok, num}
-        end)
+        Enum.find_value(issues, :none, &issue_bearing_marker(&1, marker))
 
       other ->
         {:unverified, other}
     end
+  end
+
+  # LA PROJECTION D'UN LOGIN DE ROLE, LUE SUR DISQUE. Un fichier VIDE n'est pas un login vide :
+  # c'est une projection absente, et le silence ferait ecrire l'issue sous un nom nul.
+  defp projected_login("", path) do
+    warn_projection_missing(path, :empty)
+    nil
+  end
+
+  defp projected_login(login, _path), do: login
+
+  defp issue_bearing_marker(issue, marker) do
+    num = Map.get(issue, "number")
+    if is_integer(num) and String.contains?(Map.get(issue, "body") || "", marker), do: {:ok, num}
   end
 
   # La phrase que le doublon eventuel portera, dans le CORPS de l'issue — pas seulement dans un log

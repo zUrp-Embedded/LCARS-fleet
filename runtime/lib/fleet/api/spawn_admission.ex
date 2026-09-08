@@ -113,9 +113,7 @@ defmodule Fleet.API.SpawnAdmission do
         payload =
           raw
           |> Map.take(["cap_profile_name", "role", "issue_id"])
-          |> Map.reject(fn {k, v} ->
-            k in ["cap_profile_name", "role"] and presence(v) == nil
-          end)
+          |> Map.reject(&blank_identity_key?/1)
           |> maybe_put_opts(opts)
 
         {:ok, payload}
@@ -158,6 +156,10 @@ defmodule Fleet.API.SpawnAdmission do
   defp maybe_put_opts(payload, opts), do: Map.put(payload, "opts", opts)
 
   defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
+
+  # Une cle d'identite PRESENTE MAIS VIDE n'est pas une identite : la garder ferait resoudre un
+  # cap-profile nomme `""`.
+  defp blank_identity_key?({k, v}), do: k in ["cap_profile_name", "role"] and presence(v) == nil
 
   defp presence(v) when is_binary(v) and v != "", do: v
   defp presence(_), do: nil

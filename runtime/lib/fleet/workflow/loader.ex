@@ -302,10 +302,7 @@ defmodule Fleet.Workflow.Loader do
   def card_scopes do
     case Application.get_env(:lcars_fleet, :workflow_workflow_maps_root) do
       nil ->
-        Enum.flat_map(Fleet.Catalogue.installed_catalogues(), fn %{name: name, root: root} ->
-          dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
-          if File.dir?(dir), do: [%{catalogue: name, dir: dir, root: root}], else: []
-        end)
+        Enum.flat_map(Fleet.Catalogue.installed_catalogues(), &workflow_map_dir/1)
 
       dir ->
         # A fine override points at a fixture belonging to no catalogue: no name, and no root to
@@ -405,12 +402,16 @@ defmodule Fleet.Workflow.Loader do
             :no_image
 
           image ->
-            case Map.fetch(image, name) do
-              {:ok, card} -> {:ok, card}
-              :error -> :not_in_image
-            end
+            with :error <- Map.fetch(image, name), do: :not_in_image
         end
     end
+  end
+
+  # Un catalogue installe n'a pas forcement de cartes : son absence de repertoire est un fait
+  # normal, pas une erreur — on ne le compte simplement pas.
+  defp workflow_map_dir(%{name: name, root: root}) do
+    dir = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+    if File.dir?(dir), do: [%{catalogue: name, dir: dir, root: root}], else: []
   end
 
   defp image_names(opts) do

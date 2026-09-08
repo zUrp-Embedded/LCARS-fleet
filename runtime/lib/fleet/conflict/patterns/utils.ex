@@ -207,7 +207,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
         else
           total = total + length(tokenize_line(o))
           {new_diff, ok?} = compare_tokens(o_tok, t_tok, diff)
-          if ok?, do: {:cont, {new_diff, total, true}}, else: {:halt, {new_diff, total, false}}
+          {if(ok?, do: :cont, else: :halt), {new_diff, total, ok?}}
         end
       end)
 
