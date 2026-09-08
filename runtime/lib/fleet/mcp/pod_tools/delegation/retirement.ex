@@ -37,21 +37,22 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   end
 
   defp copy_edges(issues, write_fun) do
-    Enum.reduce_while(issues, :ok, fn issue, :ok ->
-      case Map.get(issue, "number") do
-        n when is_integer(n) ->
-          case write_fun.(n) do
-            {:ok, _} -> {:cont, :ok}
-            # Already written (replay): the target carries the edge, which is what we wanted.
-            {:error, {:http, 409, _}} -> {:cont, :ok}
-            {:error, _} = err -> {:halt, err}
-          end
-
-        _ ->
-          {:halt, {:error, {:edge_without_number, issue}}}
-      end
-    end)
+    Enum.reduce_while(issues, :ok, &copy_one_edge(&1, &2, write_fun))
   end
+
+  # UNE ARETE SANS NUMERO ARRETE LA COPIE : la porter « au mieux » laisserait le nouveau ticket avec
+  # une dependance en moins, sans que rien ne le dise.
+  defp copy_one_edge(issue, :ok, write_fun) do
+    case Map.get(issue, "number") do
+      n when is_integer(n) -> edge_written(write_fun.(n))
+      _ -> {:halt, {:error, {:edge_without_number, issue}}}
+    end
+  end
+
+  defp edge_written({:ok, _}), do: {:cont, :ok}
+  # Already written (replay): the target carries the edge, which is what we wanted.
+  defp edge_written({:error, {:http, 409, _}}), do: {:cont, :ok}
+  defp edge_written({:error, _} = err), do: {:halt, err}
 
   @doc """
   Stops everything in flight, fleet-wide: a brake, not a kill.

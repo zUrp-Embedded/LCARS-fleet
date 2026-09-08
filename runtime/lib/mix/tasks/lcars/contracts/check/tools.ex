@@ -343,11 +343,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       {:deftool, _, [name | _]} = node when is_binary(name) -> node
       _ -> nil
     end)
-    |> Enum.flat_map(fn tool ->
-      collect(tool, fn
-        {:description, _, [arg]} -> Enum.join(collect(arg, &if(is_binary(&1), do: &1)), " ")
-        _ -> nil
-      end)
+    |> Enum.flat_map(&description_calls/1)
+  end
+
+  # UN TEXTE PAR APPEL `description/1`, chaine `<>` recollee : c'est la lecture ligne a ligne qui
+  # en avait cache treize.
+  defp description_calls(tool) do
+    collect(tool, fn
+      {:description, _, [arg]} -> Enum.join(collect(arg, &if(is_binary(&1), do: &1)), " ")
+      _ -> nil
     end)
   end
 

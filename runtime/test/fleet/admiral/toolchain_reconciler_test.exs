@@ -345,6 +345,15 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   # et le service y résout LUI-MÊME la tête de la branche protégée : ce module ne dit plus QUOI
   # appliquer, il dit « converge ».
 
+  # `nil` ferme SANS ecrire : c'est la doublure du service qui accepte puis raccroche, et le rail
+  # doit distinguer ce silence d'une reponse vide.
+  defp answer_once({:ok, conn}, reply) do
+    if reply, do: :gen_tcp.send(conn, reply <> "\n")
+    :gen_tcp.close(conn)
+  end
+
+  defp answer_once(_accept_failed, _reply), do: :ok
+
   # Un serveur de socket unix qui rend UNE ligne puis ferme. `nil` = il ferme sans rien écrire.
   defp fake_privileged(reply) do
     path = Path.join(System.tmp_dir!(), "tc-#{System.unique_integer([:positive])}.sock")
@@ -352,17 +361,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     {:ok, listen} =
       :gen_tcp.listen(0, [{:ifaddr, {:local, path}}, :binary, packet: :line, active: false])
 
-    {:ok, _} =
-      Task.start(fn ->
-        case :gen_tcp.accept(listen, 5_000) do
-          {:ok, conn} ->
-            if reply, do: :gen_tcp.send(conn, reply <> "\n")
-            :gen_tcp.close(conn)
-
-          _ ->
-            :ok
-        end
-      end)
+    {:ok, _} = Task.start(fn -> answer_once(:gen_tcp.accept(listen, 5_000), reply) end)
 
     Application.delete_env(:lcars_fleet, :toolchain_converger)
     Application.put_env(:lcars_fleet, :toolchain_socket, path)

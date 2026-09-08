@@ -196,21 +196,25 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   defp load_all(roles, loader) do
-    case Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
-           case loader.(role) do
-             {:ok, %CapProfile{} = cp} ->
-               {:cont, {:ok, [cp | acc]}}
-
-             {:error, reason} ->
-               Logger.error(
-                 "PermanentBoot: cap-profile #{role} not loadable (#{inspect(reason)}) — boot fail-loud"
-               )
-
-               {:halt, {:error, {:cap_profile_load_failed, role, reason}}}
-           end
-         end) do
+    case Enum.reduce_while(roles, {:ok, []}, &load_one(&1, &2, loader)) do
       {:ok, acc} -> {:ok, Enum.reverse(acc)}
       {:error, _} = err -> err
+    end
+  end
+
+  # UN SEUL ROLE ILLISIBLE ARRETE LE BOOT, bruyamment : une flotte qui demarre avec un role en
+  # moins est une flotte dont personne ne sait quels pods permanents manquent.
+  defp load_one(role, {:ok, acc}, loader) do
+    case loader.(role) do
+      {:ok, %CapProfile{} = cp} ->
+        {:cont, {:ok, [cp | acc]}}
+
+      {:error, reason} ->
+        Logger.error(
+          "PermanentBoot: cap-profile #{role} not loadable (#{inspect(reason)}) — boot fail-loud"
+        )
+
+        {:halt, {:error, {:cap_profile_load_failed, role, reason}}}
     end
   end
 

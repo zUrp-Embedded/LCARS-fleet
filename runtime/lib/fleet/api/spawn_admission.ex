@@ -184,6 +184,20 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
+  # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none` reste REFUSÉ sur ce
+  # chemin générique — sauf si l'opérateur le dit EXPLICITEMENT (`host_native_ack: true`, posé par
+  # `lcars admiral`, jamais par un chemin auto : le dispatcher ne passe pas par cette porte et n'a
+  # pas le champ). C'est la doctrine de la fiche : *« une décision de posture, qui se rouvre en la
+  # nommant »* — on nomme le GESTE (l'acquittement), jamais un nom de rôle (rien ne se key sur une
+  # chaîne de rôle).
+  defp admit_containment(cap, name, ack?) do
+    cond do
+      CapProfile.bwrap?(cap) -> {:ok, cap}
+      ack? -> {:ok, cap}
+      true -> {:error, {:host_native_forbidden, name}}
+    end
+  end
+
   defp host_native_ack?(raw) when is_map(raw), do: raw["host_native_ack"] == true
   defp host_native_ack?(_), do: false
 
@@ -193,23 +207,7 @@ defmodule Fleet.API.SpawnAdmission do
         # Admission gates the effective profile, including default modops.
         case CapProfile.resolve(CapProfile, name) do
           {:ok, cap} ->
-            cond do
-              CapProfile.bwrap?(cap) ->
-                {:ok, cap}
-
-              # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none`
-              # reste REFUSÉ sur ce chemin générique — sauf si l'opérateur le dit EXPLICITEMENT
-              # (`host_native_ack: true`, posé par `lcars admiral`, jamais par un chemin auto : le
-              # dispatcher ne passe pas par cette porte et n'a pas le champ). C'est la doctrine de
-              # la fiche : *« une décision de posture, qui se rouvre en la nommant »* — on nomme le
-              # GESTE (l'acquittement), jamais un nom de rôle (rien ne se key sur une chaîne de
-              # rôle).
-              ack? ->
-                {:ok, cap}
-
-              true ->
-                {:error, {:host_native_forbidden, name}}
-            end
+            admit_containment(cap, name, ack?)
 
           # A ReservedSeat is its OWN refusal (BL-6-45), not an "unknown cap_profile": the seat
           # exists, the box is closed — wrapped as {:cap_profile, ...} the router would render

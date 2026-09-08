@@ -128,26 +128,7 @@ defmodule Fleet.SPBuilder.Image do
     # prompt declares a role whose SP it does not carry — and that is LEGAL, because the name means
     # the same thing on both sides. The lie needs a name introduced by one catalogue and prompted by
     # another that never heard of it.
-    carried =
-      Enum.reduce([scope_root, Catalogue.system_root()], %{}, fn root, acc ->
-        cap_dir = Path.join(root, Catalogue.rel(:cap_profiles))
-        drafts_dir = Path.join(root, Catalogue.rel(:sp_drafts))
-
-        case Fleet.CapProfile.index_of(cap_dir) do
-          {:ok, index} ->
-            Enum.reduce(Map.keys(index), acc, fn role, acc ->
-              Map.update(
-                acc,
-                role,
-                sp_carried?(index, drafts_dir, role),
-                &(&1 or sp_carried?(index, drafts_dir, role))
-              )
-            end)
-
-          {:error, _} ->
-            acc
-        end
-      end)
+    carried = Enum.reduce([scope_root, Catalogue.system_root()], %{}, &carried_in_root/2)
 
     orphans = carried |> Enum.reject(&elem(&1, 1)) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
 
@@ -165,6 +146,24 @@ defmodule Fleet.SPBuilder.Image do
   # `systemPrompt` is honoured WITHOUT following it: whether the borrowed role resolves is
   # `read_agent_draft/1`'s answer and the spawn proof's to enforce. This one asks only whether the
   # catalogue SAID where the behaviour comes from — declaring the reuse IS carrying the SP.
+  # UN `or` ACCUMULE SUR LE ROLE, pas sur le catalogue : un role porte par l'un des deux arbres
+  # n'est pas orphelin, meme si l'autre le declare sans le prompter.
+  defp carried_in_root(root, acc) do
+    cap_dir = Path.join(root, Catalogue.rel(:cap_profiles))
+    drafts_dir = Path.join(root, Catalogue.rel(:sp_drafts))
+
+    case Fleet.CapProfile.index_of(cap_dir) do
+      {:ok, index} ->
+        Enum.reduce(Map.keys(index), acc, fn role, acc ->
+          carried? = sp_carried?(index, drafts_dir, role)
+          Map.update(acc, role, carried?, &(&1 or carried?))
+        end)
+
+      {:error, _} ->
+        acc
+    end
+  end
+
   defp sp_carried?(index, drafts_dir, role) do
     borrowed = index |> Map.get(role, %{}) |> get_in(["spec", "systemPrompt"])
 

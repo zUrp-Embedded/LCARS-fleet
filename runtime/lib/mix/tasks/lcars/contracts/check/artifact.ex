@@ -272,45 +272,47 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     #    Deux passes suffisent : ces fichiers ne chainent jamais plus loin.
     consts =
       Enum.reduce(1..2, %{}, fn _, acc ->
-        Regex.scan(~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/, src)
-        |> Enum.reduce(acc, fn [_, name, base, rest], m ->
-          case site_resolve(base, rest, m, here_dir) do
-            {:ok, p} ->
-              Map.put(m, name, p)
-
-            # ⚠ UNE CONSTANTE DYNAMIQUE N'EST PAS UN PREFIXE, ET LA RECORDER MENTIRAIT. `const path
-            # = join(dir, f)` nomme un FICHIER dont le dernier segment est inconnu ; ranger `dir`
-            # sous le nom `path` ferait resoudre un futur `join(path, 'x')` vers un chemin qui
-            # n'existe pas, et le contrat conclurait sur une lecture imaginaire.
-            #
-            # Ne rien retenir ne perd rien : la passe des USAGES voit le meme `join` et rend
-            # `{dir, :dir}`, c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un
-            # glob, et nommer trois fichiers ne le ferme pas.
-            #
-            # ⚠ CETTE CLAUSE EST OBLIGATOIRE, et son absence n'est pas inerte : `site_resolve` rend
-            # TROIS formes, et un `case` qui n'en connait que deux tombe par CaseClauseError sur la
-            # premiere constante dynamique du site — un contrat qui CRASHE ne dit
-            # rien, ni pass ni fail (`assets/github.io/src/lib/catalogue.js:81`).
-            {:dynamic, _} ->
-              m
-
-            :error ->
-              m
-          end
-        end)
+        ~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/
+        |> Regex.scan(src)
+        |> Enum.reduce(acc, &record_const(&1, &2, here_dir))
       end)
 
     # 2. Les usages : tout `join(<base>, …)` dont la base est `here` ou une constante connue.
-    Regex.scan(~r/join\(\s*(\w+)\s*,([^)]*)\)/, src)
-    |> Enum.flat_map(fn [_, base, rest] ->
-      case site_resolve(base, rest, consts, here_dir) do
-        # Un segment non litteral : on ne sait pas QUEL fichier, on sait dans quel repertoire.
-        {:dynamic, p} -> [{p, :dir}]
-        {:ok, p} -> if p == "", do: [], else: [{p, :file}]
-        :error -> []
-      end
-    end)
+    ~r/join\(\s*(\w+)\s*,([^)]*)\)/
+    |> Regex.scan(src)
+    |> Enum.flat_map(&site_input(&1, consts, here_dir))
     |> Enum.uniq()
+  end
+
+  # Un segment non litteral : on ne sait pas QUEL fichier, on sait dans quel repertoire — et c'est
+  # l'exigence la plus forte, un repertoire ouvert reclamant un glob.
+  defp site_input([_, base, rest], consts, here_dir) do
+    case site_resolve(base, rest, consts, here_dir) do
+      {:dynamic, p} -> [{p, :dir}]
+      {:ok, p} -> if p == "", do: [], else: [{p, :file}]
+      :error -> []
+    end
+  end
+
+  # ⚠ UNE CONSTANTE DYNAMIQUE N'EST PAS UN PREFIXE, ET LA RECORDER MENTIRAIT. `const path =
+  # join(dir, f)` nomme un FICHIER dont le dernier segment est inconnu ; ranger `dir` sous le nom
+  # `path` ferait resoudre un futur `join(path, 'x')` vers un chemin qui n'existe pas, et le
+  # contrat conclurait sur une lecture imaginaire.
+  #
+  # Ne rien retenir ne perd rien : la passe des USAGES voit le meme `join` et rend `{dir, :dir}`,
+  # c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un glob, et nommer trois
+  # fichiers ne le ferme pas.
+  #
+  # ⚠ LES DEUX CLAUSES DE REJET SONT OBLIGATOIRES, et leur absence n'est pas inerte : `site_resolve`
+  # rend TROIS formes, et un filtrage qui n'en connait que deux tombe par FunctionClauseError sur la
+  # premiere constante dynamique du site — un contrat qui CRASHE ne dit rien, ni pass ni fail
+  # (`assets/github.io/src/lib/catalogue.js:81`).
+  defp record_const([_, name, base, rest], m, here_dir) do
+    case site_resolve(base, rest, m, here_dir) do
+      {:ok, p} -> Map.put(m, name, p)
+      {:dynamic, _} -> m
+      :error -> m
+    end
   end
 
   # base + segments -> chemin repo-relatif. `here` = racine (les quatre `..` l'y ramenent).

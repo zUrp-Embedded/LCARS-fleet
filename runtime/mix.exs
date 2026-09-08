@@ -94,6 +94,20 @@ defmodule LcarsFleet.MixProject do
         # dozens of files out of format — measured, 86 of them.
         "format --check-formatted",
         "compile --warnings-as-errors",
+        # CREDO STRICT, ET IL EST UN PLANCHER — pas un outil qu'on lance. Place ici pour la meme
+        # raison que `format` juste au-dessus : c'est un signal sur la SOURCE, il coute une dizaine
+        # de secondes, et il n'a rien a apprendre du comportement que la suite mesure ensuite.
+        #
+        # CANARI JOUE, comme pour `test_gate` : un module volontairement imbrique a quatre niveaux
+        # fait rendre 8 a `mix credo --strict`, et la chaine S'ARRETE LA — l'echo place derriere
+        # dans un `mix do` n'est jamais atteint. Ce pas se comporte donc comme ses cinq voisins, et
+        # pas comme `test`, dont c'est precisement l'exception qui a coute dix commits (BL-6-69).
+        #
+        # AUCUN CHECK DESACTIVE, aucun seuil desserre : `.credo.exs` reste les 69 checks aux seuils
+        # stock. La seule exemption du depot est nominative et adossee a un mur — les treize lignes
+        # `# vitrine:` de `pod_tools.ex`, chacune avec son `credo:disable-for-next-line`, et le mur
+        # `mcp.vitrine_single_line` qui refuse qu'elles passent a la ligne.
+        "credo --strict",
         # WRAPPED, and never the bare `"test"`. `mix test` is the ONLY step of
         # this chain that does not HALT it: it posts its exit status through `System.at_exit` and
         # hands control back, so `format`, `shell_gate`, `contracts.check` and `topology` all stop
@@ -134,24 +148,27 @@ defmodule LcarsFleet.MixProject do
     ]
   end
 
-  # CE QUE `gate` NE COUVRE PAS, ET POURQUOI — parce qu'une dep presente et configuree se lit comme
-  # une promesse (6-139). `credo` est declaree, `.credo.exs` existe, et l'alias ne l'appelle pas :
-  # un lecteur en conclut raisonnablement qu'un `mix gate` vert prouve les regles Credo. Il ne les
-  # prouve pas.
+  # CREDO EST ENTRE DANS LA CHAINE, ET CE QUI L'EN TENAIT DEHORS MERITE DE RESTER ECRIT — parce que
+  # l'argument reviendra, et qu'il etait faux (6-139).
   #
-  # `mix credo` rend exit 30. La MESURE se relance (`mix credo --format oneline | cut -d\' \' -f2`),
-  # elle ne se recopie pas ici : un compte grave dans un commentaire est faux au commit suivant
-  # (mesure : un ecart de 53 signalements sur un compte ecrit ici).
+  # L'ETAT D'AVANT : `credo` etait declaree, `.credo.exs` existait, et l'alias ne l'appelait pas.
+  # Une dep presente et configuree se lit comme une promesse : un lecteur en concluait
+  # raisonnablement qu'un `mix gate` vert prouvait les regles Credo. Il ne les prouvait pas.
   #
-  # CE QUE CREDO TIENT, PAR CLASSE — ca, ca ne derive pas : des pistes de REFACTORING (imbrication,
-  # complexite cyclomatique, arite), des points de LISIBILITE (ordre des alias, modules imbriques
-  # non alias), des suggestions de CONCEPTION (`TODO`, expressions repetees). Les `.credo.exs` est
-  # le fichier genere par defaut : 69 checks aux seuils stock, jamais arbitres.
+  # LA JUSTIFICATION D'ALORS ETAIT CIRCULAIRE : « l'ajouter rendrait la chaine rouge en permanence ».
+  # C'est la description de la dette, pas une raison de la garder. Elle a ete payee — 627
+  # signalements a zero — et les deux issues qui auraient produit un vert CREUX ont ete refusees
+  # explicitement : aucun check desactive pour faire baisser un compte, et aucun cliquet numerique
+  # qui aurait fige le desordre du jour en plancher.
   #
-  # L'ajouter a la chaine la rendrait rouge en permanence, et la rendre verte demande un tri avec
-  # ses arbitrages — pas une ligne d'alias. Credo reste donc un outil qu'on LANCE, jamais un
-  # plancher que le gate tient, et c'est ecrit ici pour que personne n'ait a le deduire de son
-  # absence.
+  # CE QUE LE PLANCHER TIENT, PAR CLASSE : des pistes de REFACTORING (imbrication, complexite
+  # cyclomatique, arite), des points de LISIBILITE (ordre des alias, modules imbriques non alias),
+  # des suggestions de CONCEPTION (`TODO`, expressions repetees). 69 checks aux seuils stock.
+  #
+  # ⚠ ET LE COMPTE NE SE RECOPIE PAS ICI. Un chiffre grave dans un commentaire est faux au commit
+  # suivant — mesure : un ecart de 53 signalements sur un compte ecrit a cet endroit meme. Le seul
+  # compte qui vaille est celui que `mix credo --strict` rend maintenant, et il vaut zero par
+  # construction : la chaine s'arrete des le premier.
 
   # `mix gate` step: the ExUnit suite, as a SUBPROCESS so its failure halts the chain.
   #

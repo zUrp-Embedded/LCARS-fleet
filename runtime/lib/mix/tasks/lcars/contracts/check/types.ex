@@ -193,19 +193,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   @spec check_public_functions_documented(String.t()) :: Support.result()
   def check_public_functions_documented(root) do
     undocumented =
-      Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
-      |> Enum.flat_map(fn path ->
-        case File.read(path) do
-          {:ok, src} ->
-            case undocumented_public_functions(src) do
-              [] -> []
-              names -> [{Path.relative_to(path, root), names}]
-            end
-
-          _ ->
-            []
-        end
-      end)
+      [root, "lib", "**", "*.ex"]
+      |> Path.join()
+      |> Path.wildcard()
+      |> Enum.flat_map(&undocumented_entry(&1, root))
 
     scanned = length(Path.wildcard(Path.join([root, "lib", "**", "*.ex"])))
 
@@ -238,6 +229,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   # public for a mechanical reason and not as an API. Treating it as a miss would push its authors to
   # write a hollow `@doc` instead, which is worse — a sentence nobody meant, in the place a reader
   # trusts most.
+  # UN FICHIER ILLISIBLE N'ACCUSE PERSONNE, et il ne se compte pas non plus : `scanned` compte les
+  # fichiers TROUVES, pas les fichiers LUS — c'est la garde d'instrument juste en dessous qui tient
+  # le cas ou le balayage entier ne voit rien.
+  defp undocumented_entry(path, root) do
+    with {:ok, src} <- File.read(path),
+         [_ | _] = names <- undocumented_public_functions(src) do
+      [{Path.relative_to(path, root), names}]
+    else
+      _ -> []
+    end
+  end
+
   defp undocumented_public_functions(src) do
     otp =
       ~w(start_link init child_spec handle_call handle_cast handle_info terminate code_change handle_continue)

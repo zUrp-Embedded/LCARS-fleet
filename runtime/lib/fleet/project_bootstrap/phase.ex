@@ -501,16 +501,12 @@ defmodule Fleet.ProjectBootstrap.Phase do
     defp skip_worktree_tracked(ws, paths) do
       case Shell.git(@hooks_off ++ ["-C", ws, "ls-files", "-z"], env: []) do
         {:ok, {out, 0}} ->
-          tracked = out |> String.split(<<0>>, trim: true) |> MapSet.new()
-
           rels = Enum.map(paths, &Path.relative_to(&1, ws))
 
-          targets =
-            Enum.filter(tracked, fn t ->
-              Enum.any?(rels, fn r -> t == r or String.starts_with?(t, r <> "/") end)
-            end)
-
-          flag_skip_worktree(ws, targets)
+          out
+          |> String.split(<<0>>, trim: true)
+          |> Enum.filter(&covered_by?(&1, rels))
+          |> then(&flag_skip_worktree(ws, &1))
 
         {:ok, {out, code}} ->
           {:error, {:sanitize_failed, {:ls_files, code, String.slice(out, 0, 300)}}}
@@ -519,6 +515,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
           {:error, {:sanitize_failed, {:ls_files, reason}}}
       end
     end
+
+    # Une victime REPERTOIRE apporte tous les fichiers traques sous son prefixe : `skip-worktree`
+    # est un bit par FICHIER dans l'index, il n'existe pas au niveau d'un repertoire.
+    defp covered_by?(tracked, rels),
+      do: Enum.any?(rels, fn r -> tracked == r or String.starts_with?(tracked, r <> "/") end)
 
     defp flag_skip_worktree(_ws, []), do: :ok
 

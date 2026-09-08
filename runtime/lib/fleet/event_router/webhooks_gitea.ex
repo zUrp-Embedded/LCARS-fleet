@@ -226,18 +226,22 @@ defmodule Fleet.EventRouter.WebhooksGitea do
             {:error, :secret_missing}
 
           trimmed ->
-            sig = conn |> get_req_header("x-gitea-signature") |> List.first() || ""
-            body = conn.assigns[:raw_body] || ""
-            expected = compute_hmac(trimmed, body)
-
-            if Plug.Crypto.secure_compare(sig, expected),
-              do: :ok,
-              else: {:error, :hmac_mismatch}
+            compare_signature(conn, trimmed)
         end
 
       {:error, _} ->
         {:error, :secret_missing}
     end
+  end
+
+  # `secure_compare/2` ET PAS `==` : la comparaison doit etre a temps constant, sinon la signature
+  # se devine octet par octet. Une signature absente vaut `""`, qui echoue comme n'importe quelle
+  # autre — jamais comme une absence de controle.
+  defp compare_signature(conn, secret) do
+    sig = conn |> get_req_header("x-gitea-signature") |> List.first() || ""
+    expected = compute_hmac(secret, conn.assigns[:raw_body] || "")
+
+    if Plug.Crypto.secure_compare(sig, expected), do: :ok, else: {:error, :hmac_mismatch}
   end
 
   @doc """

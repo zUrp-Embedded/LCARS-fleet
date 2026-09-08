@@ -95,19 +95,21 @@ defmodule Fleet.Project.Onboard.Migration do
   # trois sont absentes — la moitie forge est juste, et le rapport ment. Un appelant qui
   # affiche la liste visee affirme un travail qu'il n'a pas fait.
   defp repoint_faces(dirs, url) do
-    Enum.reduce_while(Map.values(dirs), {:ok, []}, fn dir, {:ok, done} ->
-      if File.dir?(Path.join(dir, ".git")) do
-        case GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false) do
-          :ok -> {:cont, {:ok, [dir | done]}}
-          {:error, reason} -> {:halt, {:error, {:remote_repoint_failed, dir, reason}}}
-        end
-      else
-        # Une face absente n'est pas un echec : un projet peut n'avoir jamais ete ouvert ICI. Le
-        # transfert forge a deja eu lieu, et refuser maintenant laisserait les deux moities en
-        # desaccord. Elle n'entre simplement pas dans le compte rendu.
-        {:cont, {:ok, done}}
+    Enum.reduce_while(Map.values(dirs), {:ok, []}, &repoint_one(&1, &2, url))
+  end
+
+  # Une face absente n'est pas un echec : un projet peut n'avoir jamais ete ouvert ICI. Le transfert
+  # forge a deja eu lieu, et refuser maintenant laisserait les deux moities en desaccord. Elle
+  # n'entre simplement pas dans le compte rendu.
+  defp repoint_one(dir, {:ok, done}, url) do
+    if File.dir?(Path.join(dir, ".git")) do
+      case GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false) do
+        :ok -> {:cont, {:ok, [dir | done]}}
+        {:error, reason} -> {:halt, {:error, {:remote_repoint_failed, dir, reason}}}
       end
-    end)
+    else
+      {:cont, {:ok, done}}
+    end
   end
 
   @doc """

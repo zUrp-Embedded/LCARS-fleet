@@ -86,28 +86,27 @@ defmodule Fleet.Conflict do
 
     with {:ok, segments} <- Parser.segments(content) do
       {output, hunks_rev, all_resolved?} =
-        Enum.reduce(segments, {[], [], true}, fn
-          {:text, lines}, {out, hs, ok} ->
-            {out ++ lines, hs, ok}
-
-          {:conflict, raw}, {out, hs, ok} ->
-            hunk = Classifier.to_hunk(raw)
-
-            case try_resolve(hunk, min) do
-              # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here
-              # on: nothing may be appended for this hunk. ⚠ ET SURTOUT PAS UNE RECONSTRUCTION DU
-              # BLOC DE MARQUEURS : elle ecrirait des labels FIXES (`<<<<<<< ours`) la ou git ecrit
-              # la BRANCHE ou la revision, donc le jour ou quelqu'un consommerait ce `out`, un merge
-              # partiel expedierait des fichiers dont les marqueurs ont perdu LES NOMS PAR LESQUELS
-              # UN HUMAIN RESOUT.
-              {:ok, lines} -> {out ++ lines, [hunk | hs], ok}
-              :unresolved -> {out, [hunk | hs], false}
-            end
-        end)
+        Enum.reduce(segments, {[], [], true}, &segment_step(&1, &2, min))
 
       hunks = Enum.reverse(hunks_rev)
       merged = if all_resolved? and hunks != [], do: Enum.join(output, "\n"), else: nil
       {:ok, %Report{merged: merged, hunks: hunks, stats: stats(hunks)}}
+    end
+  end
+
+  defp segment_step({:text, lines}, {out, hs, ok}, _min), do: {out ++ lines, hs, ok}
+
+  # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here on: nothing may
+  # be appended for this hunk. ⚠ ET SURTOUT PAS UNE RECONSTRUCTION DU BLOC DE MARQUEURS : elle
+  # ecrirait des labels FIXES (`<<<<<<< ours`) la ou git ecrit la BRANCHE ou la revision, donc le
+  # jour ou quelqu'un consommerait ce `out`, un merge partiel expedierait des fichiers dont les
+  # marqueurs ont perdu LES NOMS PAR LESQUELS UN HUMAIN RESOUT.
+  defp segment_step({:conflict, raw}, {out, hs, ok}, min) do
+    hunk = Classifier.to_hunk(raw)
+
+    case try_resolve(hunk, min) do
+      {:ok, lines} -> {out ++ lines, [hunk | hs], ok}
+      :unresolved -> {out, [hunk | hs], false}
     end
   end
 

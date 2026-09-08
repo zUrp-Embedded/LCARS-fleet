@@ -41,23 +41,25 @@ defmodule Fleet.Workflow.CatalogueGuards do
     for {scope, root} <- card_scopes(opts),
         map_name <- Loader.canon_names!(scope),
         role <- Loader.load!(map_name, scope)["jury"] do
-      case Fleet.CapProfile.load(role, root) do
-        {:ok, cp} ->
-          kind = Fleet.CapProfile.brief_kind(cp)
-
-          unless kind == "judge" do
-            raise "catalogue: workflow map #{map_name} jury contains #{inspect(role)} whose cap-profile " <>
-                    "is NOT a judge (brief_kind=#{inspect(kind)}) — the jury must be judge roles. Fix the card."
-          end
-
-        {:error, reason} ->
-          raise "catalogue: workflow map #{map_name} jury contains #{inspect(role)} that does NOT resolve " <>
-                  "to a cap-profile (#{inspect(reason)}) — a non-role login in a jury WEDGES at dispatch " <>
-                  "(no cap-profile → :no_role). Fix the card."
-      end
+      validate_jury_role!(Fleet.CapProfile.load(role, root), map_name, role)
     end
 
     :ok
+  end
+
+  defp validate_jury_role!({:ok, cp}, map_name, role) do
+    kind = Fleet.CapProfile.brief_kind(cp)
+
+    unless kind == "judge" do
+      raise "catalogue: workflow map #{map_name} jury contains #{inspect(role)} whose cap-profile " <>
+              "is NOT a judge (brief_kind=#{inspect(kind)}) — the jury must be judge roles. Fix the card."
+    end
+  end
+
+  defp validate_jury_role!({:error, reason}, map_name, role) do
+    raise "catalogue: workflow map #{map_name} jury contains #{inspect(role)} that does NOT resolve " <>
+            "to a cap-profile (#{inspect(reason)}) — a non-role login in a jury WEDGES at dispatch " <>
+            "(no cap-profile → :no_role). Fix the card."
   end
 
   @doc "Warns when a catalogue ships no card with a `face: workshop` producer — a legitimate deployment, said."

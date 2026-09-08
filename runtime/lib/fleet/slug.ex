@@ -122,17 +122,22 @@ defmodule Fleet.Slug do
       |> Path.relative_to(expanded_root)
       |> Path.split()
       |> Enum.reject(&(&1 == "."))
-      |> Enum.reduce_while(expanded_root, fn segment, acc ->
-        path = Path.join(acc, segment)
-
-        case File.lstat(path) do
-          {:ok, %File.Stat{type: :symlink}} -> {:halt, false}
-          _ -> {:cont, path}
-        end
-      end)
+      |> Enum.reduce_while(expanded_root, &descend_link_free/2)
       |> is_binary()
     else
       false
+    end
+  end
+
+  # UN LIEN SUR N'IMPORTE QUEL COMPOSANT ARRETE LA DESCENTE. Le `false` qui remonte n'est pas un
+  # chemin, et c'est ce que l'appelant lit : `is_binary/1` distingue « descendu jusqu'au bout » de
+  # « stoppe sur un lien ».
+  defp descend_link_free(segment, acc) do
+    path = Path.join(acc, segment)
+
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> {:halt, false}
+      _ -> {:cont, path}
     end
   end
 

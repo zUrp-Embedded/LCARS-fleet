@@ -26,7 +26,7 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 |---|---|
 | `lib/fleet/<dom>/` | un domaine par dossier, sa façade `lib/fleet/<dom>.ex`, sa carte `README.md` |
 | `lib/fleet/*.ex` sans dossier | les modules **foundation** : vocabulaire et validation purs, `deps: []` |
-| `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (74 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` ; et `test.view`, la lecture d'un témoin sans sa prose (voir `test/README.md`) |
+| `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (75 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` ; et `test.view`, la lecture d'un témoin sans sa prose (voir `test/README.md`) |
 | `bin/` | les launchers N0/N1 des pods, `fleet` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
 | `etc/` | lancement et release : `fleet.env.template` (catalogue des env vars), `release.manifest` — les outils d'install (`deploy-release.sh`, `enroll-catalogue.sh`) vivent dans `deploy/lib/` |
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
@@ -49,10 +49,14 @@ mix gate                              # LA porte ; la chaîne fait autorité dan
 MIX_ENV=prod mix release              # _build/prod/rel/lcars_fleet, ERTS embarqué
 ```
 
-`mix gate` enchaîne, dans cet ordre : format, compile strict, ExUnit, `shell_gate` (python du
-bridge MCP, bats de `test/`, `git-hooks/tests`, `.claude/skills/*/tests`, `lcars_tests` de
-token-saver), `lcars.contracts.check`, `lcars.topology --check`, dialyzer strict, sobelow au seuil
-`High`. Chaque étape arrête la chaîne, ExUnit compris.
+`mix gate` enchaîne, dans cet ordre : format, compile strict, `credo --strict`, ExUnit,
+`shell_gate` (python du bridge MCP, bats de `test/`, `git-hooks/tests`, `.claude/skills/*/tests`,
+`lcars_tests` de token-saver), `lcars.contracts.check`, `lcars.topology --check`, dialyzer strict,
+sobelow au seuil `High`. Chaque étape arrête la chaîne, ExUnit compris.
+
+Credo tient les 69 checks aux seuils stock, **aucun désactivé** : la seule exemption du dépôt est
+nominative, treize lignes `# vitrine:` de `pod_tools.ex` adossées au mur `mcp.vitrine_single_line`.
+`test/mix/gate_composition_test.exs` épingle la composition de la chaîne et cette exemption.
 
 Ce que le gate **ne couvre pas** : `deploy/tests` (sa porte est `deploy/gate.sh`), les sondes
 manuelles de `test/probes/` et `test/integration/` (listées dans `etc/README.md`), et la règle de

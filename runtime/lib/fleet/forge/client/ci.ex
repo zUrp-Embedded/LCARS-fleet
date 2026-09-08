@@ -40,23 +40,23 @@ defmodule Fleet.Forge.Client.CI do
   def red_contexts(statuses) do
     statuses
     |> Enum.group_by(& &1["context"])
-    |> Enum.flat_map(fn
-      {context, group} when is_binary(context) ->
-        if Enum.all?(group, &is_integer(&1["id"])) do
-          latest = Enum.max_by(group, & &1["id"])
-
-          if latest["status"] in ~w(failure error),
-            do: [red_context(context, latest)],
-            else: []
-        else
-          []
-        end
-
-      _ ->
-        []
-    end)
+    |> Enum.flat_map(&latest_if_red/1)
     |> Enum.sort_by(& &1.context)
   end
+
+  # LE PLUS RECENT SEUL DECIDE — un contexte rouge puis re-joue vert n'est plus rouge. Et un groupe
+  # dont un seul `id` n'est pas un entier n'est pas ordonnable : on n'en tire aucun verdict plutot
+  # que d'elire un « plus recent » arbitraire.
+  defp latest_if_red({context, group}) when is_binary(context) do
+    if Enum.all?(group, &is_integer(&1["id"])) do
+      latest = Enum.max_by(group, & &1["id"])
+      if latest["status"] in ~w(failure error), do: [red_context(context, latest)], else: []
+    else
+      []
+    end
+  end
+
+  defp latest_if_red(_group), do: []
 
   @doc false
   # Le couple {contexte, url} d'une entree en echec, ou `nil`.

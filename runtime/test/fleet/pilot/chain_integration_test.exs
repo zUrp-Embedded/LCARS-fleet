@@ -87,19 +87,21 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     def get_route(pid, _r, _n, _o) do
       ls = get(pid)["labels"] || []
 
-      val = fn prefix ->
-        Enum.find_value(ls, fn l ->
-          name = l["name"]
-
-          if is_binary(name) and String.starts_with?(name, prefix),
-            do: String.replace_prefix(name, prefix, "")
-        end)
-      end
-
-      case {val.("wfmap/"), val.("stage/")} do
+      case {label_suffix(ls, "wfmap/"), label_suffix(ls, "stage/")} do
         {map, step} when is_binary(map) and is_binary(step) -> {:ok, {map, step}}
         _ -> :none
       end
+    end
+
+    # La valeur portee par l'etiquette de ce prefixe, ou `nil` : le nom NON binaire est ecarte
+    # explicitement, une etiquette malformee ne devant pas ressembler a une absence d'etiquette.
+    defp label_suffix(labels, prefix) do
+      Enum.find_value(labels, fn l ->
+        name = l["name"]
+
+        if is_binary(name) and String.starts_with?(name, prefix),
+          do: String.replace_prefix(name, prefix, "")
+      end)
     end
 
     # Stage alone (PR lifecycle: review/merged), mutex: removes the existing stage/*, keeps wfmap/*.
@@ -125,29 +127,33 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     # ── PR ──
     def open_pr(pid, _r, head, base, _title, _o) do
       Agent.get_and_update(pid, fn s ->
-        case Enum.find(s.prs, fn {_, pr} -> open_match?(pr, head, base) end) do
-          {num, _} ->
-            {{:ok, num}, s}
-
-          nil ->
-            num = s.seq + 1
-
-            pr = %{
-              "number" => num,
-              # #5.2 D1 — faithful to the real thing: the fleet ALWAYS assigns the human to the PR
-              # (assign_human_step, step_run_completer:560). Otherwise dispatch_review skips
-              # :foreign (client-side PR scoping).
-              "assignees" => [%{"login" => "human"}],
-              "head" => %{"ref" => head},
-              "base" => %{"ref" => base},
-              "state" => "open",
-              "requested_reviewers" => [],
-              "labels" => []
-            }
-
-            {{:ok, num}, %{s | seq: num, prs: Map.put(s.prs, num, pr)}}
-        end
+        s.prs
+        |> Enum.find(fn {_, pr} -> open_match?(pr, head, base) end)
+        |> reuse_or_open(s, head, base)
       end)
+    end
+
+    # Une PR deja ouverte sur le meme couple (head, base) est REUTILISEE : la vraie forge refuse
+    # d'en ouvrir une seconde, et une doublure qui en creerait une masquerait ce refus.
+    defp reuse_or_open({num, _pr}, s, _head, _base), do: {{:ok, num}, s}
+
+    defp reuse_or_open(nil, s, head, base) do
+      num = s.seq + 1
+
+      pr = %{
+        "number" => num,
+        # #5.2 D1 — faithful to the real thing: the fleet ALWAYS assigns the human to the PR
+        # (assign_human_step, step_run_completer:560). Otherwise dispatch_review skips
+        # :foreign (client-side PR scoping).
+        "assignees" => [%{"login" => "human"}],
+        "head" => %{"ref" => head},
+        "base" => %{"ref" => base},
+        "state" => "open",
+        "requested_reviewers" => [],
+        "labels" => []
+      }
+
+      {{:ok, num}, %{s | seq: num, prs: Map.put(s.prs, num, pr)}}
     end
 
     defp open_match?(pr, head, base),

@@ -200,9 +200,7 @@ defmodule Fleet.Application.CatalogueVerify do
         raise "business catalogue advice: #{cap_root} unreadable (#{inspect(reason)})"
 
       {:ok, index} ->
-        roles = Map.to_list(index)
-
-        unless Enum.any?(roles, fn {_n, raw} -> get_in(raw, ["spec", "brief_kind"]) == "judge" end) do
+        unless Enum.any?(index, &judge_role?/1) do
           Logger.warning(
             "business catalogue advice: this catalogue declares NO judge (`brief_kind: judge`). " <>
               "Legitimate — a card may carry `jury: []` and mean it — but nothing here can " <>
@@ -213,6 +211,8 @@ defmodule Fleet.Application.CatalogueVerify do
         :ok
     end
   end
+
+  defp judge_role?({_name, raw}), do: get_in(raw, ["spec", "brief_kind"]) == "judge"
 
   # Runs one stage. `[]` on success, a one-element finding list on any raise/throw — the boot raises,
   # the verifier collects, so the caller sees every failure the deployment would have hit.

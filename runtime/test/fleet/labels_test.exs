@@ -80,15 +80,7 @@ defmodule Fleet.LabelsTest do
     @decide_skip_pattern ~r/\{:skip,\s*(:[a-z_]+|\{:[a-z_]+)/
 
     defp reasons_produced_in_lib do
-      from_all =
-        Path.wildcard("lib/**/*.ex")
-        |> Enum.flat_map(fn path ->
-          body = File.read!(path)
-
-          Enum.flat_map(@skip_producer_patterns, fn rx ->
-            rx |> Regex.scan(body) |> Enum.map(fn [_, r] -> r end)
-          end)
-        end)
+      from_all = "lib/**/*.ex" |> Path.wildcard() |> Enum.flat_map(&reasons_in_file/1)
 
       from_decide =
         @decide_skip_file
@@ -97,6 +89,15 @@ defmodule Fleet.LabelsTest do
         |> Enum.map(fn [_, r] -> r end)
 
       (from_all ++ from_decide) |> Enum.uniq() |> Enum.sort()
+    end
+
+    # Les raisons produites par UN fichier, tous motifs confondus.
+    defp reasons_in_file(path) do
+      body = File.read!(path)
+
+      Enum.flat_map(@skip_producer_patterns, fn rx ->
+        rx |> Regex.scan(body) |> Enum.map(fn [_, r] -> r end)
+      end)
     end
 
     # `":foo"` → l'atome ; `"{:foo"` → la forme tuple, sondée avec un argument quelconque.

@@ -92,25 +92,29 @@ defmodule Fleet.Pilot.ConflictApply do
         :ok
 
       {:error, {:git_failed, _, _code, _}} ->
-        case unmerged_files(wt) do
-          {:ok, []} ->
-            _ = GitOps.run(["-C", wt, "merge", "--abort"])
-            {:error, :merge_failed}
-
-          {:ok, files} ->
-            case resolve_all(wt, files) do
-              :ok -> GitOps.run(["-C", wt, "commit", "--no-edit"], author: author())
-              {:error, _} = err -> abort(wt, err)
-            end
-
-          {:error, _} = err ->
-            abort(wt, err)
-        end
+        resolve_unmerged(wt, unmerged_files(wt))
 
       {:error, _} = err ->
         err
     end
   end
+
+  # UN MERGE QUI ECHOUE SANS LAISSER DE FICHIER EN CONFLIT N'EST PAS UN CONFLIT : c'est un echec
+  # git d'une autre nature, et rien ici ne sait le resoudre. On avorte plutot que de commiter un
+  # arbre qu'on n'a pas compris.
+  defp resolve_unmerged(wt, {:ok, []}) do
+    _ = GitOps.run(["-C", wt, "merge", "--abort"])
+    {:error, :merge_failed}
+  end
+
+  defp resolve_unmerged(wt, {:ok, files}) do
+    case resolve_all(wt, files) do
+      :ok -> GitOps.run(["-C", wt, "commit", "--no-edit"], author: author())
+      {:error, _} = err -> abort(wt, err)
+    end
+  end
+
+  defp resolve_unmerged(wt, {:error, _} = err), do: abort(wt, err)
 
   defp unmerged_files(wt) do
     case GitOps.read(["-C", wt, "diff", "--name-only", "--diff-filter=U"]) do

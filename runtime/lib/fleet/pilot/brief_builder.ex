@@ -616,21 +616,22 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp digest_detail(payload) when is_map(payload) do
     case Map.get(payload, "findings") do
-      [] ->
-        "a mesuré, aucun finding"
-
-      list when is_list(list) ->
-        case list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies() do
-          sev when map_size(sev) == 0 -> "#{length(list)} finding(s), sévérités non lisibles"
-          sev -> Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
-        end
-
-      _ ->
-        "charge de forme inattendue"
+      [] -> "a mesuré, aucun finding"
+      list when is_list(list) -> severity_tally(list)
+      _ -> "charge de forme inattendue"
     end
   end
 
   defp digest_detail(_), do: "pas de mesure"
+
+  # DES FINDINGS SANS SEVERITE LISIBLE NE SE COMPTENT PAS POUR ZERO : leur nombre est dit, et
+  # l'illisibilite avec. Un « aucun finding » sur une liste pleine serait le pire des deux.
+  defp severity_tally(list) do
+    case list |> Enum.map(& &1["severity"]) |> Enum.reject(&is_nil/1) |> Enum.frequencies() do
+      sev when map_size(sev) == 0 -> "#{length(list)} finding(s), sévérités non lisibles"
+      sev -> Enum.map_join(sev, ", ", fn {s, n} -> "#{n}× #{s}" end)
+    end
+  end
 
   defp ci_line(sha, contexts) do
     "CI VERTE sur `#{String.slice(sha, 0, 8)}` — le rail machine a rendu VERT. Ce fait t'est " <>

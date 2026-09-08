@@ -208,19 +208,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
         # zero lines, i.e. compliance. A moved file trips the first half; a chmod trips the second,
         # and nothing in the output tells them apart. Reading once also removes the window between
         # the test and the read.
-        case File.read(abs) do
-          {:ok, content} ->
-            content
-            |> grep_content(opts.pattern)
-            |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
-            |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
-
-          {:error, reason} ->
-            [
-              "#{rel}:MISSING(#{reason}) — residue-check target unreadable " <>
-                "(hollow-green guard, R0-EVT-012)"
-            ]
-        end
+        residue_of_file(File.read(abs), rel, opts.pattern, confirm)
       end)
 
     # The existing hollow-green guard below covers a NAMED file that vanished. It cannot cover a
@@ -238,6 +226,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
       }
     end
   end
+
+  defp residue_of_file({:ok, content}, rel, pattern, confirm) do
+    content
+    |> grep_content(pattern)
+    |> Enum.filter(fn {_ln, line} -> Regex.match?(confirm, strip_comment(line)) end)
+    |> Enum.map(fn {ln, _} -> "#{rel}:#{ln}" end)
+  end
+
+  defp residue_of_file({:error, reason}, rel, _pattern, _confirm),
+    do: [
+      "#{rel}:MISSING(#{reason}) — residue-check target unreadable " <>
+        "(hollow-green guard, R0-EVT-012)"
+    ]
 
   # Family C — evidence-list: `items` = [{ok?, message}], conditions evaluated at the
   # call site (grep, File.exists?, …). All true = pass; each false

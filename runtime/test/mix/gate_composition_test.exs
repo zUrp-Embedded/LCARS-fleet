@@ -52,13 +52,71 @@ defmodule Mix.GateCompositionTest do
              "pas un detail de ligne de commande"
   end
 
-  test "6-139 — Credo n'y est PAS, et c'est une decision ecrite, pas un oubli" do
-    # L'inverse du test precedent, et il vaut autant. `mix credo` rend exit 30 sur ce depot (583
-    # signalements) : l'ajouter rendrait la chaine rouge en permanence. Le jour ou quelqu'un l'y
-    # met, ce test tombe et l'oblige a mesurer d'abord — ce qui est exactement le geste manquant.
-    refute Enum.any?(string_steps(), &String.starts_with?(&1, "credo")),
-           "credo est entre dans le gate : mesurer `mix credo` AVANT, et mettre a jour la " <>
-             "justification de `aliases/0` — 583 signalements au 2026-08-14"
+  # ⚠ CE TEMOIN A ETE RETOURNE, ET C'EST SA REUSSITE. Il disait « credo n'y est PAS, et c'est une
+  # decision ecrite » ; il a tenu cette decision jusqu'a ce que quelqu'un la change, et il est tombe
+  # le jour ou elle a change — ce qui est exactement le geste qu'il demandait. La dette a ete payee
+  # (627 signalements a zero, aucun check desactive) et c'est la nouvelle decision qui est epinglee
+  # ici, avec la meme force.
+  test "6-139 — Credo est DANS la chaine, en `--strict`" do
+    assert "credo --strict" in string_steps(),
+           "credo est sorti du gate : ce n'est pas une ligne d'alias qu'on retire, c'est un " <>
+             "plancher. Le retirer demande d'ecrire POURQUOI dans `aliases/0`, comme son absence " <>
+             "l'avait exige avant lui"
+  end
+
+  # LE MODE EST LE CONTRAT, pas seulement la presence — meme raison que le seuil de Sobelow
+  # juste au-dessus. `mix credo` nu n'exerce qu'une partie des checks : le depot a ete mis a zero
+  # en `--strict`, et y entrer sans le mode laisserait passer la moitie de ce qui a ete paye.
+  test "6-139 — le mode strict fait partie du plancher, pas de la ligne de commande" do
+    credo_step = Enum.find(string_steps(), &String.starts_with?(&1, "credo"))
+
+    assert credo_step, "aucune etape credo dans la chaine"
+
+    assert String.contains?(credo_step, "--strict"),
+           "l'etape credo est `#{credo_step}` : sans `--strict`, la chaine tient un plancher plus " <>
+             "bas que celui qui a ete paye"
+  end
+
+  # ⚠ LA SEULE EXEMPTION DU DEPOT EST NOMINATIVE, ET ELLE EST ADOSSEE A UN MUR. Treize lignes
+  # `# vitrine:` de `pod_tools.ex` portent une directive chacune, parce que le build du site les lit
+  # par une regex qui capture jusqu'a la fin de la ligne. Une exemption GLOBALE — un check retire de
+  # `.credo.exs`, un seuil desserre — serait le vert creux que tout ce chantier a refuse : ce temoin
+  # le refuse mecaniquement.
+  #
+  # ⚠ ON COMPTE DES DIRECTIVES, PAS DES MENTIONS. Deux commentaires de ce depot EXPLIQUENT
+  # l'exemption en la citant entre backticks ; les compter ferait rougir ce temoin sur de la prose
+  # et apprendrait au prochain lecteur a ne plus l'ecrire. Une directive reelle NOMME son check,
+  # c'est ce que la regex exige.
+  @exemption_rx ~r/^\s*#\s*credo:disable-for-next-line\s+Credo\./
+
+  test "aucun check n'a ete desactive pour faire entrer credo" do
+    config = File.read!(Path.join(File.cwd!(), ".credo.exs"))
+
+    refute String.contains?(config, "checks: %{disabled:"),
+           "`.credo.exs` porte une liste `disabled:` — desactiver un check pour faire baisser un " <>
+             "compte est exactement le vert creux que ce plancher existe pour interdire"
+
+    sources = Path.wildcard(Path.join(File.cwd!(), "lib/**/*.ex"))
+
+    # Garde d'instrument : un glob qui ne ramasse rien rendrait `%{}`, et `%{} == %{}` n'aurait
+    # jamais rien mesure.
+    assert length(sources) > 100, "le balayage n'a vu que #{length(sources)} sources sous lib/"
+
+    exemptions =
+      sources
+      |> Enum.flat_map(fn path ->
+        path
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.filter(&Regex.match?(@exemption_rx, &1))
+        |> Enum.map(fn _ -> Path.relative_to(path, File.cwd!()) end)
+      end)
+      |> Enum.frequencies()
+
+    assert exemptions == %{"lib/fleet/mcp/pod_tools.ex" => 13},
+           "les exemptions credo du depot ont bouge : #{inspect(exemptions)}. Chacune doit etre " <>
+             "nominative ET adossee a un mur qui dit pourquoi la regle ne s'applique pas ici " <>
+             "(ici : `mcp.vitrine_single_line`, pour une ligne que le build du site lit entiere)"
   end
 
   test "sobelow est atteignable dans l'environnement que le gate force" do

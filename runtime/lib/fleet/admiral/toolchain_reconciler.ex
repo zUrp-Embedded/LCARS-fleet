@@ -218,24 +218,27 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     # forge exotique pourraient rendre plus large).
     with true <- Payload.base_ref(pr) == branch,
          {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
-      case pr_outcome(pr) do
-        :open ->
-          :ok
-
-        :merged ->
-          if applied?(branch_result),
-            do: drain(item_repo, item_issue, pr, :merged),
-            else: :ok
-
-        :refused ->
-          drain(item_repo, item_issue, pr, :refused)
-      end
+      drain_outcome(pr_outcome(pr), {item_repo, item_issue, pr}, branch_result)
     else
       # Une PR vers la branche protégée SANS marqueur n'est pas à nous (posée à la main) ; une PR
       # d'une autre base n'est pas du rail. Ni geste ni bruit.
       _ -> :ok
     end
   end
+
+  # UNE PR FUSIONNEE NE DRAINE QUE SI LA BRANCHE A REELLEMENT APPLIQUE : un merge dont le
+  # reconciliateur n'a rien tire laisserait le verrou en place, et le tick suivant retentera.
+  # Un refus, lui, draine dans tous les cas — il n'y a rien a attendre.
+  defp drain_outcome(:open, _work_item, _branch_result), do: :ok
+
+  defp drain_outcome(:merged, {item_repo, item_issue, pr}, branch_result) do
+    if applied?(branch_result),
+      do: drain(item_repo, item_issue, pr, :merged),
+      else: :ok
+  end
+
+  defp drain_outcome(:refused, {item_repo, item_issue, pr}, _branch_result),
+    do: drain(item_repo, item_issue, pr, :refused)
 
   defp pr_outcome(pr) do
     cond do

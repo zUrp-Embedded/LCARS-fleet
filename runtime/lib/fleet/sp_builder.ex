@@ -219,18 +219,8 @@ defmodule Fleet.SPBuilder do
       plain = Enum.reject(whitelist, &String.contains?(&1, ":"))
 
       case Enum.reject(plain, &Fleet.Slug.valid?/1) do
-        [] ->
-          {present, missing} =
-            plain
-            |> Enum.map(fn name ->
-              {name, Enum.find(Enum.map(roots, &Path.join(&1, name)), &File.exists?/1)}
-            end)
-            |> Enum.split_with(fn {_name, path} -> path != nil end)
-
-          skills_verdict(present, missing)
-
-        unsafe ->
-          {:error, {:skills_unsafe, unsafe}}
+        [] -> located_skills(plain, roots)
+        unsafe -> {:error, {:skills_unsafe, unsafe}}
       end
     end
   end
@@ -353,6 +343,17 @@ defmodule Fleet.SPBuilder do
 
   # LE REFUS EST FAIL-LOUD, ET C'EST LE POINT : filtrer silencieusement une skill absente laisserait
   # un pod REVENDIQUER une skill qui n'existe pas.
+  # LA PREMIERE RACINE QUI PORTE LE NOM GAGNE — meme regle de precedence que partout ailleurs. Un
+  # nom qu'aucune racine ne porte reste ici avec `nil`, ce que le verdict transforme en manquant.
+  defp located_skills(plain, roots) do
+    plain
+    |> Enum.map(fn name ->
+      {name, Enum.find(Enum.map(roots, &Path.join(&1, name)), &File.exists?/1)}
+    end)
+    |> Enum.split_with(fn {_name, path} -> path != nil end)
+    |> then(fn {present, missing} -> skills_verdict(present, missing) end)
+  end
+
   defp skills_verdict(present, []), do: {:ok, Enum.map(present, fn {_name, path} -> path end)}
 
   defp skills_verdict(_present, missing),

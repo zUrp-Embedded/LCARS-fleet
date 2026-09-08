@@ -69,17 +69,19 @@ defmodule Fleet.CapProfile.Schema do
             # riche, c'est une TRACE — le detail va au rail operateur, la ou on le cherche.
             Logger.error("CapProfile.Schema: #{kind} REFUSED — #{describe_violations(errors)}")
 
-            case kind do
-              :cap_profile -> {:error, :invalid_schema}
-              :reserved_seat -> {:error, :invalid_schema}
-              :modop -> {:error, :invalid_modop}
-            end
+            refusal(kind)
         end
 
       {:error, :schema_unavailable} = err ->
         err
     end
   end
+
+  # L'ATOME DE RETOUR NE BOUGE PAS : les trois sont le contrat gele de `load/1` et `compose/2`, et
+  # les appelants branchent dessus. Le detail, lui, est parti au journal juste au-dessus.
+  defp refusal(:cap_profile), do: {:error, :invalid_schema}
+  defp refusal(:reserved_seat), do: {:error, :invalid_schema}
+  defp refusal(:modop), do: {:error, :invalid_modop}
 
   # BORNE, ET LA TRONCATURE SE DIT. Un fichier franchement faux produit des dizaines de violations,
   # et noyer la trace sous elles la rend aussi illisible que le silence qu'on repare. On en montre

@@ -359,6 +359,39 @@ defmodule Fleet.CapProfile.Catalog do
   # Le chemin du `profile.yaml` d'un modop sous UNE racine, ou nil. Le nom reste CONFINE sous
   # chaque racine : essayer la suivante ne doit pas affaiblir ce qui rend un nom non fiable sur
   # comme segment de chemin.
+  # TROIS REPONSES, TROIS CAUSES DISTINCTES : trouve et lu, trouve nulle part (le `confined_join`
+  # rend alors le repertoire ATTENDU, que le journal nomme), ou un nom qui ne se confine pas. Les
+  # fondre ferait chercher un fichier absent la ou c'est le NOM qui etait refuse.
+  defp disk_modop_step(name, {:ok, acc}, scope) do
+    found = Enum.find_value(scope, &modop_profile_path(&1, name))
+    fallback = Fleet.Slug.confined_join(Path.join(List.first(scope, root_dir()), "modop"), name)
+
+    disk_modop_read(found || fallback, name, acc)
+  end
+
+  defp disk_modop_read(path, _name, acc) when is_binary(path) do
+    case read_modop_yaml(path) do
+      {:ok, raw} -> {:cont, {:ok, [raw | acc]}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
+
+  defp disk_modop_read({:ok, dir}, name, _acc) do
+    Logger.warning(
+      "Catalog: modop not found: #{inspect(name)} at #{Path.join(dir, "profile.yaml")}"
+    )
+
+    {:halt, {:error, :modop_not_found}}
+  end
+
+  defp disk_modop_read({:error, _slug_or_escape}, name, _acc) do
+    Logger.warning(
+      "Catalog: modop name not confined (slug/traversal): #{inspect(name)} — refused"
+    )
+
+    {:halt, {:error, :invalid_modop}}
+  end
+
   defp modop_profile_path(root, name) do
     with {:ok, dir} <- Fleet.Slug.confined_join(Path.join(root, "modop"), name),
          path = Path.join(dir, "profile.yaml"),
@@ -378,33 +411,7 @@ defmodule Fleet.CapProfile.Catalog do
     # path segment.
     scope = disk_scope(catalogue_root)
 
-    result =
-      Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        found = Enum.find_value(scope, &modop_profile_path(&1, name))
-
-        case found ||
-               Fleet.Slug.confined_join(Path.join(List.first(scope, root_dir()), "modop"), name) do
-          path when is_binary(path) ->
-            case read_modop_yaml(path) do
-              {:ok, raw} -> {:cont, {:ok, [raw | acc]}}
-              {:error, reason} -> {:halt, {:error, reason}}
-            end
-
-          {:ok, dir} ->
-            Logger.warning(
-              "Catalog: modop not found: #{inspect(name)} at #{Path.join(dir, "profile.yaml")}"
-            )
-
-            {:halt, {:error, :modop_not_found}}
-
-          {:error, _slug_or_escape} ->
-            Logger.warning(
-              "Catalog: modop name not confined (slug/traversal): #{inspect(name)} — refused"
-            )
-
-            {:halt, {:error, :invalid_modop}}
-        end
-      end)
+    result = Enum.reduce_while(modop_set, {:ok, []}, &disk_modop_step(&1, &2, scope))
 
     case result do
       {:ok, modops} -> {:ok, Enum.reverse(modops)}

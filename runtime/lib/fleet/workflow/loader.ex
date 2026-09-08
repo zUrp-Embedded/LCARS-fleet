@@ -392,18 +392,13 @@ defmodule Fleet.Workflow.Loader do
   # Still not a search path: one root, one image, no superseding. A card names roles and a role
   # belongs to the catalogue declaring it; merging images would describe a fleet nobody assembled.
   defp image_card(name, opts) do
-    case image_root(opts) do
-      :hermetic ->
-        :no_image
-
-      root ->
-        case published_image(root) do
-          nil ->
-            :no_image
-
-          image ->
-            with :error <- Map.fetch(image, name), do: :not_in_image
-        end
+    with root when root != :hermetic <- image_root(opts),
+         image when not is_nil(image) <- published_image(root) do
+      with :error <- Map.fetch(image, name), do: :not_in_image
+    else
+      # Pas de racine nommee, ou une racine sans image publiee : la lecture disque directe reprend
+      # la main. C'est le cas hermetique d'une fixture, et il doit le rester.
+      _ -> :no_image
     end
   end
 

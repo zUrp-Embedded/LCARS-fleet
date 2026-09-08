@@ -1177,33 +1177,7 @@ defmodule Fleet.Spawner.Pod do
       {:ok, json} ->
         case Jason.decode(json) do
           {:ok, %{"session_id" => sid, "phase" => phase_str} = snap} when is_binary(sid) ->
-            if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
-              phase = Recovery.phase_from_string(phase_str) || :launching
-
-              # ⚠ 6-108 — LE REROLL EST LA BONNE REPONSE, ET NE PAS LE « CORRIGER » EN REPRISE.
-              #
-              # Ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT : ce qui l'a tue est, jusqu'a preuve
-              # du contraire, DANS la session qu'on s'appreterait a reprendre — un tour qui fait
-              # exploser le backend, un transcript tronque, un etat que le vendor refuse. Reprendre,
-              # c'est RE-ENTRER DANS LE POISON, et la reprise etant automatique, ca boucle. Le
-              # `PermanentWarden` borne les degats, il ne les evite pas.
-              #
-              # On echange donc une perte BORNEE — le contexte d'une session — contre une perte NON
-              # BORNEE : un pod qui ne redemarre plus.
-              #
-              # Les autres branches repondent a une AUTRE question, « qu'est-ce qui ACCUSE cette
-              # session ? » : un arret propre laisse le meme snapshot non terminal, et un `state.json`
-              # absent ne designe rien. Ici, et ici seulement, quelque chose l'accuse.
-              Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
-            else
-              # Previous-epoch snapshots use the normal live/seed/fresh decision.
-              Logger.info(
-                "pod #{base.pod_id} recover: state.json from a PREVIOUS fleet life " <>
-                  "(stale epoch) → unified seed decision (not a crash recovery)"
-              )
-
-              maybe_slot_resume(base)
-            end
+            recover_from_snapshot(base, snap, phase_str)
 
           _ ->
             Logger.error(
@@ -1221,6 +1195,35 @@ defmodule Fleet.Spawner.Pod do
         )
 
         base
+    end
+  end
+
+  # ⚠ 6-108 — LE REROLL EST LA BONNE REPONSE, ET NE PAS LE « CORRIGER » EN REPRISE.
+  #
+  # Ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT : ce qui l'a tue est, jusqu'a preuve du
+  # contraire, DANS la session qu'on s'appreterait a reprendre — un tour qui fait exploser le
+  # backend, un transcript tronque, un etat que le vendor refuse. Reprendre, c'est RE-ENTRER DANS LE
+  # POISON, et la reprise etant automatique, ca boucle. Le `PermanentWarden` borne les degats, il ne
+  # les evite pas.
+  #
+  # On echange donc une perte BORNEE — le contexte d'une session — contre une perte NON BORNEE : un
+  # pod qui ne redemarre plus.
+  #
+  # Les autres branches repondent a une AUTRE question, « qu'est-ce qui ACCUSE cette session ? » :
+  # un arret propre laisse le meme snapshot non terminal, et un `state.json` absent ne designe rien.
+  # Ici, et ici seulement, quelque chose l'accuse.
+  defp recover_from_snapshot(base, snap, phase_str) do
+    if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
+      phase = Recovery.phase_from_string(phase_str) || :launching
+      Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
+    else
+      # Previous-epoch snapshots use the normal live/seed/fresh decision.
+      Logger.info(
+        "pod #{base.pod_id} recover: state.json from a PREVIOUS fleet life " <>
+          "(stale epoch) → unified seed decision (not a crash recovery)"
+      )
+
+      maybe_slot_resume(base)
     end
   end
 

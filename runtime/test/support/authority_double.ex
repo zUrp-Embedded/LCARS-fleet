@@ -154,21 +154,21 @@ defmodule Fleet.Test.AuthorityDouble do
       dir =
         Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || "/opt/lcars/var/tokens"
 
-      case File.read(Path.join(dir, "#{account}.gitea_token")) do
-        {:ok, raw} ->
-          # `no_role_token` COUVRE AUSSI LE FICHIER VIDE, comme dans le vrai service. Rendre une
-          # ligne vide ferait passer « aucun jeton » pour « ce jeton-ci », et le refus arriverait
-          # de la forge, en 401, loin d'ici.
-          case String.trim(raw) do
-            "" -> "FAIL:no_role_token"
-            token -> token
-          end
-
-        {:error, _} ->
-          "FAIL:no_role_token"
-      end
+      token_or_fail(File.read(Path.join(dir, "#{account}.gitea_token")))
     else
       "FAIL:bad_role"
     end
   end
+
+  # `no_role_token` COUVRE AUSSI LE FICHIER VIDE, comme dans le vrai service. Rendre une ligne vide
+  # ferait passer « aucun jeton » pour « ce jeton-ci », et le refus arriverait de la forge, en 401,
+  # loin d'ici.
+  defp token_or_fail({:ok, raw}) do
+    case String.trim(raw) do
+      "" -> "FAIL:no_role_token"
+      token -> token
+    end
+  end
+
+  defp token_or_fail({:error, _}), do: "FAIL:no_role_token"
 end

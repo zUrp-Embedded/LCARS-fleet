@@ -73,20 +73,7 @@ defmodule Fleet.MCP.Supervisor do
       # `:unknown`, never a hollow operational state » — et il vaut pour les deux operandes.
       with {:ok, sockets} <- active_sockets(),
            {:ok, deaf} <- deaf_pods() do
-        orphaned = length(deaf)
-
-        if orphaned > 0 do
-          {:degraded,
-           %{
-             acceptor_supervisor: true,
-             sockets: sockets,
-             socket_files: sockets + orphaned,
-             deaf_pods: Enum.sort(deaf),
-             note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
-           }}
-        else
-          {:operational, %{acceptor_supervisor: true, sockets: sockets}}
-        end
+        deaf_verdict(sockets, deaf)
       else
         {:error, reason} ->
           {:unknown,
@@ -143,6 +130,25 @@ defmodule Fleet.MCP.Supervisor do
   # `count_children` sur un superviseur vivant ne devrait pas echouer — mais « ne devrait pas » est
   # exactement ce que ce module refuse ailleurs : un `0` rendu par une lecture cassee est
   # indiscernable d'un `0` mesure, et il ferait rendre `:operational` a un statut aveugle.
+  # LE COMPTE DES SOURDS VIENT DE `deaf_pods/0`, PAS D'UNE SECONDE SOUSTRACTION. Recalculer ici
+  # `fichiers - enfants` donnerait un resultat qui peut contredire l'incident qu'il accompagne, et
+  # un statut plus facile a lire qu'un incident est celui qu'on croit.
+  defp deaf_verdict(sockets, []),
+    do: {:operational, %{acceptor_supervisor: true, sockets: sockets}}
+
+  defp deaf_verdict(sockets, deaf) do
+    orphaned = length(deaf)
+
+    {:degraded,
+     %{
+       acceptor_supervisor: true,
+       sockets: sockets,
+       socket_files: sockets + orphaned,
+       deaf_pods: Enum.sort(deaf),
+       note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
+     }}
+  end
+
   defp active_sockets do
     %{active: active} = DynamicSupervisor.count_children(PodSocketSupervisor)
     {:ok, active}

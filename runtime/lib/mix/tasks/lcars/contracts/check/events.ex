@@ -500,48 +500,48 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         broken_result("labels.visual_types_derived", "def visual_types/0 in #{rel}")
 
       true ->
-        n_clauses = length(clauses)
-        n_dest = hd(destinations)
-        b = hd(body)
-
-        reads = fn name ->
-          [] !=
-            collect(b, fn
-              {:@, _, [{^name, _, _}]} -> :ref
-              {^name, _, _} -> :ref
-              {:/, _, [{^name, _, _}, _]} -> :ref
-              _ -> nil
-            end)
-        end
-
-        derived? = reads.(:destinations) and reads.(:type_for_destination)
-        literals = b |> collect_strings() |> Enum.sort()
-
-        measured_verdict("labels.visual_types_derived", %{
-          remediation:
-            "une clause de `type_for_destination/1` sans sa destination dans `@destinations` " <>
-              "produit un type visuel que `visual_types/0` ne seme pas — il naitra gris et sans " <>
-              "description, comme `type:workshop` pendant seize jours",
-          # ⚠ TROIS TERMES, TROIS CONSTATS SEPARES. Le verdict est un `and` a trois : comptes egaux,
-          # derivation constatee, aucun litteral. Les rendre ensemble est ce qui permet a un temoin
-          # d'exercer chaque terme — un `and` de N termes demande N entrees.
-          findings:
-            if(n_clauses == n_dest,
-              do: [],
-              else: [
-                "#{rel}: #{n_clauses} clause(s) type_for_destination/1 pour #{n_dest} @destinations"
-              ]
-            ) ++
-              if(derived?,
-                do: [],
-                else: [
-                  "#{rel}: visual_types/0 ne lit pas @destinations via type_for_destination/1"
-                ]
-              ) ++
-              Enum.map(literals, &"#{rel}: visual_types/0 ecrit un type en dur: #{inspect(&1)}"),
-          note: "visual_types derives from type_for_destination over @destinations"
-        })
+        visual_types_verdict(rel, length(clauses), hd(destinations), hd(body))
     end
+  end
+
+  defp visual_types_verdict(rel, n_clauses, n_dest, body) do
+    derived? = reads_name?(body, :destinations) and reads_name?(body, :type_for_destination)
+    literals = body |> collect_strings() |> Enum.sort()
+
+    measured_verdict("labels.visual_types_derived", %{
+      remediation:
+        "une clause de `type_for_destination/1` sans sa destination dans `@destinations` " <>
+          "produit un type visuel que `visual_types/0` ne seme pas — il naitra gris et sans " <>
+          "description, comme `type:workshop` pendant seize jours",
+      # ⚠ TROIS TERMES, TROIS CONSTATS SEPARES. Le verdict est un `and` a trois : comptes egaux,
+      # derivation constatee, aucun litteral. Les rendre ensemble est ce qui permet a un temoin
+      # d'exercer chaque terme — un `and` de N termes demande N entrees.
+      findings:
+        if(n_clauses == n_dest,
+          do: [],
+          else: [
+            "#{rel}: #{n_clauses} clause(s) type_for_destination/1 pour #{n_dest} @destinations"
+          ]
+        ) ++
+          if(derived?,
+            do: [],
+            else: ["#{rel}: visual_types/0 ne lit pas @destinations via type_for_destination/1"]
+          ) ++
+          Enum.map(literals, &"#{rel}: visual_types/0 ecrit un type en dur: #{inspect(&1)}"),
+      note: "visual_types derives from type_for_destination over @destinations"
+    })
+  end
+
+  # Une reference au NOM, sous ses trois formes d'AST : l'attribut `@x`, l'appel `x(...)`, et la
+  # capture `&x/1`. En rater une ferait dire au mur « ne lit pas » d'un corps qui lit.
+  defp reads_name?(body, name) do
+    [] !=
+      collect(body, fn
+        {:@, _, [{^name, _, _}]} -> :ref
+        {^name, _, _} -> :ref
+        {:/, _, [{^name, _, _}, _]} -> :ref
+        _ -> nil
+      end)
   end
 
   # The events.yaml key IS the event `type` (the `source` is a separate field,

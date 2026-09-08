@@ -167,19 +167,19 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   @spec parse_ls_remote_out(String.t()) :: {:ok, String.t()} | {:error, term()}
   def parse_ls_remote_out(out) do
     case out |> String.split("\n", trim: true) |> List.first() do
-      nil ->
-        {:error, :no_ref}
-
-      line ->
-        case line |> String.split() |> List.first() do
-          sha when is_binary(sha) ->
-            if Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
-              do: {:ok, sha},
-              else: {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
-
-          nil ->
-            {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
-        end
+      nil -> {:error, :no_ref}
+      line -> full_sha(line |> String.split() |> List.first(), line)
     end
   end
+
+  # RIEN D'AUTRE QU'UN SHA COMPLET NE FAIT UN PIN. Une ligne vide, un ref abrege, un message
+  # d'erreur de la forge : tout tombe sur la meme reponse, parce qu'un pin de base approximatif
+  # ferait cloner autre chose que ce qui a ete resolu.
+  defp full_sha(sha, line) when is_binary(sha) do
+    if Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
+      do: {:ok, sha},
+      else: {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
+  end
+
+  defp full_sha(nil, line), do: {:error, {:malformed_ls_remote, String.slice(line, 0, 80)}}
 end

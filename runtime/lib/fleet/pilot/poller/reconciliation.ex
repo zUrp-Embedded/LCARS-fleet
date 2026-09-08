@@ -398,24 +398,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # enfilee mais jamais tiree est une admission dont le reveil n'a jamais ATTERRI : le pod est
     # PARKE, pas au travail. C'est un etat « actif », donc le compter comme propriete laisserait un
     # pod parke masquer son verrou POUR TOUJOURS. Le pull est l'ACK durable que le reveil a atterri.
-    pod_refs =
-      Enum.reduce_while(pods, MapSet.new(), fn pod, acc ->
-        pod_id = pod[:pod_id]
-
-        case pod_pull_state(tq, pod_id) do
-          :unknown ->
-            {:halt, :error}
-
-          :not_pulled ->
-            {:cont, acc}
-
-          :pulled ->
-            case owned_refs_for_pod(pod_id, repo, tq) do
-              :unknown -> {:halt, :error}
-              {:ok, refs} -> {:cont, MapSet.union(acc, MapSet.new(refs))}
-            end
-        end
-      end)
+    pod_refs = Enum.reduce_while(pods, MapSet.new(), &pod_owned_step(&1, &2, tq, repo))
 
     case pod_refs do
       :error -> :error
@@ -425,6 +408,27 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _ -> :error
   catch
     _, _ -> :error
+  end
+
+  # UNE SEULE LECTURE INCERTAINE INVALIDE TOUT LE JEU. Rendre l'union partielle ferait passer un
+  # verrou legitime pour orphelin, et la reclamation tuerait un pod au travail : `:error` remonte
+  # donc en `:halt`, et l'appelant s'abstient plutot que de conclure sur une propriete incomplete.
+  defp pod_owned_step(pod, acc, tq, repo) do
+    pod_id = pod[:pod_id]
+
+    case pod_pull_state(tq, pod_id) do
+      :unknown ->
+        {:halt, :error}
+
+      :not_pulled ->
+        {:cont, acc}
+
+      :pulled ->
+        case owned_refs_for_pod(pod_id, repo, tq) do
+          :unknown -> {:halt, :error}
+          {:ok, refs} -> {:cont, MapSet.union(acc, MapSet.new(refs))}
+        end
+    end
   end
 
   # G1 — refs owned by the ACTIVE GATEKEEPER EVALS of the broker. The source of truth already exists:

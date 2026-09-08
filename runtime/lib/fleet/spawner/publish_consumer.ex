@@ -125,34 +125,36 @@ defmodule Fleet.Spawner.PublishConsumer do
       # F-C044
       emit_spawn_failed(payload, :name_missing_or_empty)
     else
-      case Fleet.CapProfile.resolve(Fleet.CapProfile, name) do
-        {:ok, cap_profile} ->
-          case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
-            {:ok, _pod_ref} ->
-              Logger.info("PublishConsumer: spawn dispatched name=#{name} issue=#{issue_id}")
-
-            {:error, reason} ->
-              Logger.warning(
-                "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
-                  "reason=#{inspect(reason)}"
-              )
-
-              # F-C044
-              emit_spawn_failed(payload, {:spawn_pod, reason})
-          end
-
-        {:error, reason} ->
-          Logger.warning(
-            "PublishConsumer: CapProfile.load fail name=#{name} reason=#{inspect(reason)}"
-          )
-
-          # F-C044
-          emit_spawn_failed(payload, {:cap_profile_load, reason})
-      end
+      Fleet.CapProfile.resolve(Fleet.CapProfile, name)
+      |> spawn_resolved(payload, state, {name, issue_id, opts})
     end
   end
 
   # Alarm loss is non-fatal but loud: the original request was already acknowledged.
+  # LES DEUX ECHECS SONT DISTINGUES DANS L'EVENEMENT : `:cap_profile_load` dit que le role n'existe
+  # pas, `:spawn_pod` qu'il existe et n'a pas demarre. Les fondre laisserait l'operateur chercher un
+  # role manquant la ou c'est le demarrage qui a rate (F-C044).
+  defp spawn_resolved({:ok, cap_profile}, payload, state, {name, issue_id, opts}) do
+    case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
+      {:ok, _pod_ref} ->
+        Logger.info("PublishConsumer: spawn dispatched name=#{name} issue=#{issue_id}")
+
+      {:error, reason} ->
+        Logger.warning(
+          "PublishConsumer: spawn_pod fail name=#{name} issue=#{issue_id} " <>
+            "reason=#{inspect(reason)}"
+        )
+
+        emit_spawn_failed(payload, {:spawn_pod, reason})
+    end
+  end
+
+  defp spawn_resolved({:error, reason}, payload, _state, {name, _issue_id, _opts}) do
+    Logger.warning("PublishConsumer: CapProfile.load fail name=#{name} reason=#{inspect(reason)}")
+
+    emit_spawn_failed(payload, {:cap_profile_load, reason})
+  end
+
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
     # Keep the signature stable and JSON-safe; variable detail remains separate.
     {reason_cat, reason_detail} = Event.reason_fields(reason)

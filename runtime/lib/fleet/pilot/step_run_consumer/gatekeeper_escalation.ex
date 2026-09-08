@@ -134,23 +134,26 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
         brief: brief
       ]
 
-      case seams.spawner.spawn_pod(cap, pod_id, spawn_opts) do
-        {:ok, _pid} ->
-          :ok
-
-        {:error, {:already_started, _pid}} ->
-          wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
-
-          wake_recovery.(
-            pod_id,
-            fn -> seams.spawner.spawn_pod(cap, pod_id, spawn_opts) end,
-            wake_fun: fn pod -> seams.spawner.wake_pod(pod) end,
-            op: "gatekeeper-wake"
-          )
-
-        {:error, _reason} = err ->
-          err
-      end
+      seams.spawner.spawn_pod(cap, pod_id, spawn_opts)
+      |> spawned_or_woken(seams, cap, pod_id, spawn_opts)
     end
   end
+
+  # `:already_started` N'EST PAS UNE ERREUR ICI : le gatekeeper est un pod a identite stable, et le
+  # trouver vivant est le cas nominal d'une seconde escalade. Il reste a le REVEILLER — sans quoi
+  # l'escalade rendrait `:ok` sur un pod qui dort.
+  defp spawned_or_woken({:ok, _pid}, _seams, _cap, _pod_id, _spawn_opts), do: :ok
+
+  defp spawned_or_woken({:error, {:already_started, _pid}}, seams, cap, pod_id, spawn_opts) do
+    wake_recovery = seams.wake_recovery || (&Fleet.Pilot.WakeRecovery.wake/3)
+
+    wake_recovery.(
+      pod_id,
+      fn -> seams.spawner.spawn_pod(cap, pod_id, spawn_opts) end,
+      wake_fun: fn pod -> seams.spawner.wake_pod(pod) end,
+      op: "gatekeeper-wake"
+    )
+  end
+
+  defp spawned_or_woken({:error, _reason} = err, _seams, _cap, _pod_id, _spawn_opts), do: err
 end

@@ -237,10 +237,7 @@ defmodule Fleet.Conflict.Diff do
       ours_edits = extract_edits(ours_diff, :ours)
       theirs_edits = extract_edits(theirs_diff, :theirs)
 
-      overlap? =
-        Enum.any?(ours_edits, fn oe ->
-          Enum.any?(theirs_edits, fn te -> edits_overlap?(oe, te) end)
-        end)
+      overlap? = Enum.any?(ours_edits, &overlapped?(&1, theirs_edits))
 
       if overlap? do
         {:error, :overlap}
@@ -250,6 +247,10 @@ defmodule Fleet.Conflict.Diff do
       end
     end
   end
+
+  # Un seul intervalle commun suffit : la fusion est refusee des la premiere paire qui se touche.
+  defp overlapped?(ours_edit, theirs_edits),
+    do: Enum.any?(theirs_edits, &edits_overlap?(ours_edit, &1))
 
   defp reconstruct([], base_v, base_idx, acc) do
     tail = Enum.map(base_idx..(tuple_size(base_v) - 1)//1, &elem(base_v, &1))

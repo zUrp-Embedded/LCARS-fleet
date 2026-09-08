@@ -93,18 +93,18 @@ defmodule Fleet.Admiral.AuditConsumerResubscribeTest do
   end
 
   defp wait_count(name, min) do
-    Enum.reduce_while(1..50, false, fn _, _ ->
-      case Process.whereis(name) do
-        pid when is_pid(pid) ->
-          if settle(pid).events_count >= min,
-            do: {:halt, true},
-            else: Process.sleep(20) && {:cont, false}
-
-        _ ->
-          Process.sleep(20) && {:cont, false}
-      end
-    end)
+    Enum.reduce_while(1..50, false, fn _, _ -> count_reached?(Process.whereis(name), min) end)
   end
+
+  # LE PROCESSUS PEUT ETRE ABSENT A CE TOUR — il redemarre. On attend, on n'accuse pas : c'est le
+  # COMPTE qui decide, et seulement quand il y a quelqu'un pour le rendre.
+  defp count_reached?(pid, min) when is_pid(pid) do
+    if settle(pid).events_count >= min,
+      do: {:halt, true},
+      else: Process.sleep(20) && {:cont, false}
+  end
+
+  defp count_reached?(_absent, _min), do: Process.sleep(20) && {:cont, false}
 
   @tag :resubscribe
   test "killed consumer → restarted by the supervisor → receives POST-restart events" do

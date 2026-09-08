@@ -89,14 +89,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
     case resolve_identity(pod_id) do
       {:ok, %{role: role} = identity} ->
         # B-03: authorize the capability, never a role name.
-        if role_has_capability?(role, :project_delegate) do
-          case Map.get(identity, :repo) do
-            repo when is_binary(repo) and repo != "" -> {:ok, %{role: role, repo: repo}}
-            _ -> {:error, :repo_unbound}
-          end
-        else
-          {:error, :forbidden_not_architect}
-        end
+        if role_has_capability?(role, :project_delegate),
+          do: bound_repo(role, Map.get(identity, :repo)),
+          else: {:error, :forbidden_not_architect}
 
       {:error, _reason} = err ->
         err
@@ -104,6 +99,13 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
   end
 
   def require_architect(_state), do: {:error, :pod_id_required}
+
+  # LA CAPACITE NE SUFFIT PAS : un architecte dont l'identite de canal ne porte aucun depot ne peut
+  # deleguer NULLE PART, et `:repo_unbound` le dit au lieu de laisser passer un depot vide.
+  defp bound_repo(role, repo) when is_binary(repo) and repo != "",
+    do: {:ok, %{role: role, repo: repo}}
+
+  defp bound_repo(_role, _repo), do: {:error, :repo_unbound}
 
   # Onboarding also resolves its capability from channel identity, never the wire.
   @doc false

@@ -208,73 +208,20 @@ defmodule Fleet.Pilot.StepDispatcher do
           # Computed ONCE → serves the spawn-file AND the TaskQueue brief (that the pod pulls via get_work_item).
           # Without it, enqueue_brief would re-enqueue the raw `issue["body"]` → a judge would pull the executable
           # BUILD brief instead of the GateBrief.
-          case BriefBuilder.build_brief(
-                 profile,
-                 role,
-                 %BriefBuilder.Access{forge: forge, repo: repo, forge_opts: forge_opts},
-                 number,
-                 issue,
-                 route,
-                 step_spec
-               ) do
-            {:ok, brief, brief_kind, mandate} ->
-              spawn_opts =
-                build_spawn_opts(
-                  %{
-                    brief: brief,
-                    brief_kind: brief_kind,
-                    pod_id: pod_id,
-                    role: role,
-                    number: number,
-                    slug: slug,
-                    project: project,
-                    route: route,
-                    mandate: mandate
-                  },
-                  forge,
-                  repo,
-                  forge_opts
-                )
-
-              # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
-              # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
-              # seams struct at this site (the 6 seams, not the whole `opts` — armored boundary).
-              log_ctx =
-                "issue=#{repo}##{number} " <>
-                  "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
-
-              Spawn.spawn_step(
-                %Spawn.Seams{
-                  forge: forge,
-                  spawner: spawner,
-                  task_queue: task_queue,
-                  repo: repo,
-                  forge_opts: forge_opts,
-                  wake_recovery:
-                    Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
-                },
-                %Spawn.Order{
-                  pod_id: pod_id,
-                  role: role,
-                  profile: profile,
-                  brief: brief,
-                  spawn_opts: spawn_opts,
-                  # Rail producteur : l'objet verrouille EST le ticket enfile.
-                  lock_target: number,
-                  issue_number: number,
-                  log_ctx: log_ctx
-                }
-              )
-
-            # Refuse criterion-less judge; retry without taking a lock.
-            {:error, {:criterion_unavailable, reason}} ->
-              Logger.warning(
-                "StepDispatcher: judge criterion unavailable issue=#{repo}##{number} role=#{role} → " <>
-                  "#{inspect(reason)} (skip, retry — refuse criterion-less judge)"
-              )
-
-              {:skipped, :criterion_unavailable}
-          end
+          BriefBuilder.build_brief(
+            profile,
+            role,
+            %BriefBuilder.Access{forge: forge, repo: repo, forge_opts: forge_opts},
+            number,
+            issue,
+            route,
+            step_spec
+          )
+          |> spawn_producer(
+            %{pod_id: pod_id, role: role, profile: profile, number: number, slug: slug},
+            %{project: project, route: route, repo: repo},
+            {forge, spawner, task_queue, forge_opts, opts}
+          )
         else
           {:skipped, :role_busy} ->
             # Occupied project role defers without lock.
@@ -292,6 +239,69 @@ defmodule Fleet.Pilot.StepDispatcher do
             {:error, {phase, reason}}
         end
     end
+  end
+
+  # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake + compensation).
+  # Producer: lock + issue_id keyed on the ISSUE (number). We build the seams struct at this site
+  # (the 6 seams, not the whole `opts` — armored boundary).
+  defp spawn_producer({:ok, brief, brief_kind, mandate}, who, where, wires) do
+    %{pod_id: pod_id, role: role, profile: profile, number: number, slug: slug} = who
+    %{project: project, route: route, repo: repo} = where
+    {forge, spawner, task_queue, forge_opts, opts} = wires
+
+    spawn_opts =
+      build_spawn_opts(
+        %{
+          brief: brief,
+          brief_kind: brief_kind,
+          pod_id: pod_id,
+          role: role,
+          number: number,
+          slug: slug,
+          project: project,
+          route: route,
+          mandate: mandate
+        },
+        forge,
+        repo,
+        forge_opts
+      )
+
+    log_ctx =
+      "issue=#{repo}##{number} " <>
+        "project=#{if(project, do: project["base_sha"], else: "none")} route=#{inspect(route)}"
+
+    Spawn.spawn_step(
+      %Spawn.Seams{
+        forge: forge,
+        spawner: spawner,
+        task_queue: task_queue,
+        repo: repo,
+        forge_opts: forge_opts,
+        wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3)
+      },
+      %Spawn.Order{
+        pod_id: pod_id,
+        role: role,
+        profile: profile,
+        brief: brief,
+        spawn_opts: spawn_opts,
+        # Rail producteur : l'objet verrouille EST le ticket enfile.
+        lock_target: number,
+        issue_number: number,
+        log_ctx: log_ctx
+      }
+    )
+  end
+
+  # Refuse criterion-less judge; retry without taking a lock.
+  defp spawn_producer({:error, {:criterion_unavailable, reason}}, who, where, _wires) do
+    Logger.warning(
+      "StepDispatcher: judge criterion unavailable issue=#{where.repo}##{who.number} " <>
+        "role=#{who.role} → #{inspect(reason)} (skip, retry — refuse criterion-less judge)"
+    )
+
+    {:skipped, :criterion_unavailable}
   end
 
   @doc """

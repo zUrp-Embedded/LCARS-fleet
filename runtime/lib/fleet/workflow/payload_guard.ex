@@ -190,17 +190,20 @@ defmodule Fleet.Workflow.PayloadGuard do
   # SEUL fichier est invalide n'ecrit RIEN. Supprimer la validation globale pour ne garder que le
   # controle tardif echangerait une propriete prouvee contre une fenetre a peine plus courte.
   defp write_validated_files(workspace, files) do
-    Enum.reduce_while(files, :ok, fn
-      %{"path" => rel_path, "content" => content}, :ok ->
-        if symlink_in_chain?(workspace, rel_path) do
-          {:halt, {:error, {:symlink_escape, rel_path}}}
-        else
-          case write_replacing(Path.join(workspace, rel_path), content) do
-            :ok -> {:cont, :ok}
-            {:error, reason} -> {:halt, {:error, {:file_write_failed, rel_path, reason}}}
-          end
-        end
-    end)
+    Enum.reduce_while(files, :ok, &write_one_validated(&1, &2, workspace))
+  end
+
+  # LE LIEN EST RE-VERIFIE JUSTE AVANT L'ECRITURE, fichier par fichier : c'est la passe 2 decrite
+  # au-dessus, et son refus arrete la boucle entiere.
+  defp write_one_validated(%{"path" => rel_path, "content" => content}, :ok, workspace) do
+    if symlink_in_chain?(workspace, rel_path) do
+      {:halt, {:error, {:symlink_escape, rel_path}}}
+    else
+      case write_replacing(Path.join(workspace, rel_path), content) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, {:file_write_failed, rel_path, reason}}}
+      end
+    end
   end
 
   # Le temporaire vit dans le MEME repertoire que la cible : `rename` n'est atomique qu'a

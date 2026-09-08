@@ -518,40 +518,36 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
           with_destination_label(destination, issue_opts, forge, repo, author_opts)
 
         with {:ok, issue_opts} <- issue_opts_result do
-          case forge.create_issue(repo, title, brief, issue_opts) do
-            {:ok, number} ->
-              # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
-              # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
-              # the default workflow_map on any assigned routeless issue (cf. `Fleet.Pilot`).
-              # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
-              # onboarded the same way.) The visual TYPE is a label for humans — NEVER routing: the
-              # result is discarded, nothing mechanical reads it, and its absence is directly
-              # visible on the issue in the forge UI. It is DERIVED from the destination, not fixed: a
-              # workshop ticket wearing `type:feature` contradicts the card its own destination routes
-              # it to, and the contradiction is only visible to the human it misleads.
-              _ =
-                forge.add_label(repo, number, Labels.type_for_destination(destination), [])
-
-              # Axiom: the repo is NEVER named back to the arch — it has "the
-              # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
-              # association instead of presuming it (protocol-carried correlation, not memory).
-              {:ok,
-               %{
-                 "status" => "issue_created",
-                 "issue" => number,
-                 "title" => title,
-                 "assignee" => human
-               }}
-
-            {:error, reason} ->
-              {:error, {:issue_creation_failed, inspect(reason)}}
-          end
+          forge.create_issue(repo, title, brief, issue_opts)
+          |> created_issue(forge, repo, title, human, destination)
         end
 
       {:error, reason} ->
         {:error, {:human_unresolved, inspect(reason)}}
     end
   end
+
+  # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING (burning the
+  # workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns the default
+  # workflow_map on any assigned routeless issue (cf. `Fleet.Pilot`). A single actor creates+assigns;
+  # the system routes. (Uniform: a routeless human issue is onboarded the same way.) The visual TYPE
+  # is a label for humans — NEVER routing: the result is discarded, nothing mechanical reads it, and
+  # its absence is directly visible on the issue in the forge UI. It is DERIVED from the destination,
+  # not fixed: a workshop ticket wearing `type:feature` contradicts the card its own destination
+  # routes it to, and the contradiction is only visible to the human it misleads.
+  #
+  # Axiom: the repo is NEVER named back to the arch — it has "the project". `title` is ECHOED as
+  # registered so the arch CONFIRMS the number↔title association instead of presuming it
+  # (protocol-carried correlation, not memory).
+  defp created_issue({:ok, number}, forge, repo, title, human, destination) do
+    _ = forge.add_label(repo, number, Labels.type_for_destination(destination), [])
+
+    {:ok,
+     %{"status" => "issue_created", "issue" => number, "title" => title, "assignee" => human}}
+  end
+
+  defp created_issue({:error, reason}, _forge, _repo, _title, _human, _destination),
+    do: {:error, {:issue_creation_failed, inspect(reason)}}
 
   # Reads the issue PR across open, closed, and merged states.
   defp issue_pr_status(forge, repo, number) do

@@ -97,13 +97,17 @@ defmodule Fleet.MCP.AccessorSeamConformanceTest do
         {acc_name, fun, arity} <- calls(ast, accs) do
       impl = Map.fetch!(accs, acc_name)
 
-      status =
-        case Code.ensure_loaded(impl) do
-          {:module, _} -> if function_exported?(impl, fun, arity), do: :ok, else: :missing
-          {:error, _} -> :unresolved
-        end
+      {Path.relative_to(path, @lib_root), impl, fun, arity, seam_status(impl, fun, arity)}
+    end
+  end
 
-      {Path.relative_to(path, @lib_root), impl, fun, arity, status}
+  # `:unresolved` N'EST PAS `:missing`. Un module qu'on n'a pas su charger ne prouve rien sur la
+  # couture ; le confondre avec « la fonction n'existe pas » accuserait un seam sain des que le
+  # chargement echoue.
+  defp seam_status(impl, fun, arity) do
+    case Code.ensure_loaded(impl) do
+      {:module, _} -> if function_exported?(impl, fun, arity), do: :ok, else: :missing
+      {:error, _} -> :unresolved
     end
   end
 
