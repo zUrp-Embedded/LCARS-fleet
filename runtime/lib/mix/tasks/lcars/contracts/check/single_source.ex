@@ -83,62 +83,49 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         "silence"
 
     expected =
-      case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
-        {:ok, src} ->
-          # ⚠ ANCRE EN FIN DE LIGNE, ET SANS CA LE FAIL-CLOSED EST UN FAUX. Sans `\s*$`, la regex
-          # accepte un PREFIXE : `do: "tool_" <> "request"` se lit `"tool_"`, et le check compare
-          # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
-          # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
-          # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure sur le
-          # jumeau `forge.system_account_single_source`, en jouant la mutation.
-          case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
-            [_, name] -> name
-            _ -> nil
-          end
+      source_literal(root, "lib/fleet/toolchain.ex", ~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m)
 
-        _ ->
-          nil
-      end
-
-    case checked do
-      [] ->
+    cond do
+      checked == [] ->
         out_of_scope(id, "no mirror tree present", skipped)
 
-      _ ->
-        if is_nil(expected) do
-          unreadable_authority(
-            id,
-            remediation,
-            "lib/fleet/toolchain.ex",
-            "Fleet.Toolchain.branch/0"
-          )
-        else
-          bad = Enum.flat_map(checked, &branch_freeze_gap(&1, root, expected))
+      is_nil(expected) ->
+        unreadable_authority(
+          id,
+          remediation,
+          "lib/fleet/toolchain.ex",
+          "Fleet.Toolchain.branch/0"
+        )
 
-          if bad == [] do
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: checked,
-              note:
-                "#{inspect(expected)} declared by Fleet.Toolchain.branch/0 and copied by the " <>
-                  "#{length(checked)} readers that carry it; no tunable left" <>
-                  skipped_note(skipped)
-            }
-          else
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: Enum.map(bad, &elem(&1, 0)),
-              note:
-                "authority says #{inspect(expected)} — " <>
-                  Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-                  skipped_note(skipped)
-            }
-          end
-        end
+      true ->
+        branch_verdict(id, remediation, expected, checked, skipped, root)
+    end
+  end
+
+  # LE VERDICT DU GEL DE BRANCHE, a part de la resolution de son autorite et de son perimetre.
+  defp branch_verdict(id, remediation, expected, checked, skipped, root) do
+    bad = Enum.flat_map(checked, &branch_freeze_gap(&1, root, expected))
+
+    if bad == [] do
+      %{
+        id: id,
+        remediation: "—",
+        status: :pass,
+        evidence: checked,
+        note:
+          "#{inspect(expected)} declared by Fleet.Toolchain.branch/0 and copied by the " <>
+            "#{length(checked)} readers that carry it; no tunable left" <> skipped_note(skipped)
+      }
+    else
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: Enum.map(bad, &elem(&1, 0)),
+        note:
+          "authority says #{inspect(expected)} — " <>
+            Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <> skipped_note(skipped)
+      }
     end
   end
 
@@ -384,155 +371,169 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   """
   @spec check_private_dir_single_source(String.t()) :: Support.result()
   def check_private_dir_single_source(root) do
-    id = "layout.private_dir_single_source"
+    {values, broken, skipped} = private_dir_declarations(root)
+    private_dir_verdict(root, values, broken, skipped)
+  end
 
-    remediation =
-      "make every declaration of the secrets directory name the same path, and the manifest " <>
-        "create exactly that path — no authority is designated, so agreement IS the invariant"
+  @private_dir_remediation "make every declaration of the secrets directory name the same path, " <>
+                             "and the manifest create exactly that path — no authority is " <>
+                             "designated, so agreement IS the invariant"
 
-    # Chaque porteur : {fichier, regex de capture, ce qu'il est}. Le PERIMETRE se dit par fichier —
-    # `lib/` part avec l'image, `deploy/` non.
-    holders = [
-      # Ancre de fin de ligne, meme raison que les trois voisins : une valeur composee doit rendre
-      # la declaration ILLISIBLE, jamais un prefixe.
+  # Chaque porteur : {fichier, regex de capture, ce qu'il est}. Le PERIMETRE se dit par fichier —
+  # `lib/` part avec l'image, `deploy/` non.
+  #
+  # Ancre de fin de ligne sur le premier, meme raison que les trois verrous voisins : une valeur
+  # composee doit rendre la declaration ILLISIBLE, jamais un prefixe.
+  #
+  # Lot 6 (2026-09-04) : les chemins uid-map et master-token du conteneur etaient graves en dur dans
+  # l'entrypoint ; ils DERIVENT desormais du `LCARS_PRIVATE_DIR` du protocole de module
+  # (`container/init.sh` compose `$LCARS_PRIVATE_DIR/forge-uid.map`). Ce defaut-la est le porteur qui
+  # compte cote produit — meme forme que le defaut de provisioning.
+  defp private_dir_holders do
+    [
       {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
       {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
        "the provisioning default"},
       {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
-      # Lot 6 (2026-09-04) : the container's uid-map and master-token paths used to be carved into the
-      # entrypoint as literals; they are now DERIVED from the product module protocol's
-      # `LCARS_PRIVATE_DIR` (container/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
-      # the holder that counts on the product side — the same shape as the provisioning default.
       {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
        "the product module protocol's default"}
     ]
+  end
 
-    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
-    # racine UNE fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au
-    # litteral des quatre autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus
-    # parfaitement d'accord — et la seule facon de faire taire ce faux rouge serait de RECOPIER le
-    # littéral dans provision-lib, c'est-a-dire de reintroduire la copie que ce mur existe pour
-    # interdire. Un mur qui punit la forme correcte pousse a la forme fausse.
-    #
-    # La resolution est DELIBEREMENT bornee aux defauts `: "${VAR:=valeur}"` de provision-lib, une
-    # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait
-    # pas resoudre reste telle quelle et le desaccord se voit — c'est le comportement d'avant.
-    prov_defauts =
-      case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
-        {:ok, src} ->
-          ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
-          |> Regex.scan(src)
-          |> Map.new(fn [_, nom, val] -> {nom, val} end)
+  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa racine UNE
+  # fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au litteral des quatre
+  # autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus parfaitement d'accord —
+  # et la seule facon de faire taire ce faux rouge serait de RECOPIER le litteral dans
+  # provision-lib, c'est-a-dire de reintroduire la copie que ce mur existe pour interdire. Un mur
+  # qui punit la forme correcte pousse a la forme fausse.
+  #
+  # La resolution est DELIBEREMENT bornee aux defauts `: "${VAR:=valeur}"` de provision-lib, une
+  # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait pas
+  # resoudre reste telle quelle et le desaccord se voit.
+  defp prov_defaults(root) do
+    case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
+      {:ok, src} ->
+        ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
+        |> Regex.scan(src)
+        |> Map.new(fn [_, nom, val] -> {nom, val} end)
 
-        _ ->
-          %{}
-      end
-
-    resoudre = fn v ->
-      Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, v, fn entier, nom ->
-        Map.get(prov_defauts, nom, entier)
-      end)
+      _ ->
+        %{}
     end
+  end
 
-    read_holder = fn {rel, rx, what} ->
-      case File.read(Path.expand(rel, root)) do
-        {:ok, body} ->
-          # Les deux corrections se composent et aucune ne suffit seule : `code_of/1` ecarte les
-          # declarations qui ne vivent que dans un commentaire, `resoudre/1` rend sa valeur a une
-          # declaration derivee. L'une repond a « ou lit-on ? », l'autre a « que vaut ce qu'on lit ? ».
-          case Regex.run(rx, code_of(body)) do
-            [_, v] -> {:ok, rel, what, resoudre.(v)}
-            _ -> {:unreadable, rel, what}
-          end
-
-        _ ->
-          {:absent, rel, what}
-      end
-    end
+  # `{valeurs_lisibles, illisibles, arbres_sautes}` — la LECTURE, a part du verdict.
+  defp private_dir_declarations(root) do
+    defauts = prov_defaults(root)
 
     {in_scope, out} =
-      Enum.split_with(holders, fn {rel, _, _} ->
+      Enum.split_with(private_dir_holders(), fn {rel, _, _} ->
         mirror_scope(rel, root) == :required
       end)
 
-    results = Enum.map(in_scope, read_holder)
-    values = for {:ok, rel, what, v} <- results, do: {rel, what, v}
+    results = Enum.map(in_scope, &read_private_dir_holder(&1, root, defauts))
 
-    broken =
-      for {:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}
+    {for({:ok, rel, what, v} <- results, do: {rel, what, v}),
+     for({:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}),
+     out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()}
+  end
 
-    skipped = out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+  defp read_private_dir_holder({rel, rx, what}, root, defauts) do
+    # Les deux corrections se composent et aucune ne suffit seule : `code_of/1` ecarte les
+    # declarations qui ne vivent que dans un commentaire, la resolution rend sa valeur a une
+    # declaration derivee. L'une repond a « ou lit-on ? », l'autre a « que vaut ce qu'on lit ? ».
+    with {:ok, body} <- File.read(Path.expand(rel, root)),
+         [_, v] <- Regex.run(rx, code_of(body)) do
+      {:ok, rel, what,
+       Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, v, fn entier, nom ->
+         Map.get(defauts, nom, entier)
+       end)}
+    else
+      {:error, _} -> {:absent, rel, what}
+      _ -> {:unreadable, rel, what}
+    end
+  end
 
-    cond do
-      # Moins de DEUX declarations lisibles : il n'y a pas d'accord a verifier. On le DIT, on ne
-      # rend pas un vert muet — c'est la regle de tout ce fichier.
-      length(values) < 2 and broken == [] ->
-        out_of_scope(id, "fewer than two declarations present", skipped)
+  # Moins de DEUX declarations lisibles : il n'y a pas d'accord a verifier. On le DIT, on ne rend
+  # pas un vert muet — c'est la regle de tout ce fichier.
+  defp private_dir_verdict(_root, values, broken, skipped)
+       when length(values) < 2 and broken == [],
+       do:
+         out_of_scope(
+           "layout.private_dir_single_source",
+           "fewer than two declarations present",
+           skipped
+         )
 
-      broken != [] ->
-        %{
-          id: id,
-          remediation: remediation,
-          status: :fail,
-          evidence: Enum.map(broken, &elem(&1, 0)),
-          note:
-            "a declaration no longer reads as a frozen literal — " <>
-              Enum.map_join(broken, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-              skipped_note(skipped)
-        }
+  defp private_dir_verdict(_root, _values, [_ | _] = broken, skipped) do
+    %{
+      id: "layout.private_dir_single_source",
+      remediation: @private_dir_remediation,
+      status: :fail,
+      evidence: Enum.map(broken, &elem(&1, 0)),
+      note:
+        "a declaration no longer reads as a frozen literal — " <>
+          Enum.map_join(broken, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+          skipped_note(skipped)
+    }
+  end
 
-      true ->
-        distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
-        [expected | _] = distinct
+  defp private_dir_verdict(root, values, _broken, skipped) do
+    distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
+    [expected | _] = distinct
 
-        manifest_rel = "../deploy/system.manifest"
-        manifest_scoped? = tree_scope(Path.expand("../deploy", root)) == :required
+    if length(distinct) > 1 do
+      %{
+        id: "layout.private_dir_single_source",
+        remediation: @private_dir_remediation,
+        status: :fail,
+        evidence: Enum.map(values, fn {rel, _, _} -> rel end),
+        note:
+          "#{length(distinct)} different paths declared for one directory — " <>
+            Enum.map_join(values, " · ", fn {f, what, v} -> "#{f} (#{what}): #{v}" end) <>
+            skipped_note(skipped)
+      }
+    else
+      manifest_verdict(root, values, expected, skipped)
+    end
+  end
 
-        manifest_ok? =
-          not manifest_scoped? or
-            case File.read(Path.expand(manifest_rel, root)) do
-              {:ok, m} -> Regex.match?(~r/^dir\s+#{Regex.escape(expected)}\s/m, m)
-              _ -> false
-            end
+  # LE MANIFESTE CREE-T-IL CE QUE TOUT LE MONDE DECLARE ? Un accord parfait sur un repertoire que
+  # rien ne cree laisse le conteneur monter sans lui.
+  defp manifest_verdict(root, values, expected, skipped) do
+    rel = "../deploy/system.manifest"
+    scoped? = tree_scope(Path.expand("../deploy", root)) == :required
 
-        cond do
-          length(distinct) > 1 ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: Enum.map(values, fn {rel, _, _} -> rel end),
-              note:
-                "#{length(distinct)} different paths declared for one directory — " <>
-                  Enum.map_join(values, " · ", fn {f, what, v} -> "#{f} (#{what}): #{v}" end) <>
-                  skipped_note(skipped)
-            }
+    ok? =
+      not scoped? or
+        (match?({:ok, m} when is_binary(m), File.read(Path.expand(rel, root))) and
+           Regex.match?(
+             ~r/^dir\s+#{Regex.escape(expected)}\s/m,
+             File.read!(Path.expand(rel, root))
+           ))
 
-          not manifest_ok? ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: [manifest_rel],
-              note:
-                "every declaration says #{inspect(expected)} but the manifest creates no such " <>
-                  "directory — the container would come up without it" <> skipped_note(skipped)
-            }
-
-          true ->
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: values |> Enum.map(fn {rel, _, _} -> rel end) |> Enum.uniq(),
-              note:
-                "#{length(values)} declaration(s) agree on #{inspect(expected)}" <>
-                  if(manifest_scoped?, do: ", and the manifest creates it", else: "") <>
-                  skipped_note(skipped)
-            }
-        end
+    if ok? do
+      %{
+        id: "layout.private_dir_single_source",
+        remediation: "—",
+        status: :pass,
+        evidence: values |> Enum.map(fn {rel, _, _} -> rel end) |> Enum.uniq(),
+        note:
+          "#{length(values)} declaration(s) agree on #{inspect(expected)}" <>
+            if(scoped?, do: ", and the manifest creates it", else: "") <> skipped_note(skipped)
+      }
+    else
+      %{
+        id: "layout.private_dir_single_source",
+        remediation: @private_dir_remediation,
+        status: :fail,
+        evidence: [rel],
+        note:
+          "every declaration says #{inspect(expected)} but the manifest creates no such " <>
+            "directory — the container would come up without it" <> skipped_note(skipped)
+      }
     end
   end
 
@@ -676,6 +677,111 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
+  # UN BALAYAGE DE CORPUS, PARAMETRE PAR SON MOTIF. Les verrous `/opt` et `/run` ne differaient que
+  # par la regex et une troncature ; leur boucle etait recopiee, imbriquee a trois niveaux, et
+  # portait deux fois la meme regle non ecrite — les COMMENTAIRES sont retires avant la lecture,
+  # sans quoi un chemin cite dans une phrase compte comme une declaration.
+  #
+  # Rend `{racines_vues, nombre_de_fichiers_porteurs}` : le second est ce que la note affiche pour
+  # qu'un lecteur sache sur quoi le verdict porte.
+  defp scan_corpus_roots(root, motif, tronque \\ nil) do
+    Enum.reduce(corpus_files(root), {MapSet.new(), 0}, fn path, {acc, n} ->
+      case File.read(path) do
+        {:ok, body} ->
+          vus =
+            body
+            |> String.split("\n")
+            |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+            |> Enum.flat_map(&Regex.scan(motif, &1))
+            |> Enum.map(&hd/1)
+            |> then(fn l -> if tronque, do: Enum.map(l, tronque), else: l end)
+            |> MapSet.new()
+
+          {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
+
+        _ ->
+          {acc, n}
+      end
+    end)
+  end
+
+  # LA MEME LECTURE, DANS UN AUTRE FICHIER. `layout_literal/2` est le cas particulier de
+  # `Fleet.Layout` ; celle-ci sert les autorites qui vivent ailleurs, avec leur propre forme.
+  #
+  # ⚠ L'ANCRE DE FIN DE LIGNE EST DANS LA REGEX DE L'APPELANT, ET C'EST LA MOITIE QUI COMPTE. Sans
+  # `\s*$`, la regex accepte un PREFIXE : `do: "tool_" <> "request"` se lit `"tool_"`, et le verrou
+  # compare les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il rougit —
+  # donc le defaut ne passe pas — mais en accusant dix fichiers sains d'un ecart qu'ils n'ont pas.
+  # Mesure sur `forge.system_account_single_source`, en jouant la mutation.
+  defp source_literal(root, rel, motif) do
+    with {:ok, src} <- File.read(Path.expand(rel, root)),
+         [_, v] <- Regex.run(motif, src) do
+      v
+    else
+      _ -> nil
+    end
+  end
+
+  # LA SOURCE DE L'AUTORITE, LUE UNE FOIS. Quatre verrous de ce fichier la relisent, chacun avec sa
+  # propre imbrication `case File.read → case Regex.run`. Deux niveaux pour repondre a une question
+  # binaire : la valeur, ou rien.
+  defp layout_source(root) do
+    case File.read(Path.expand("lib/fleet/layout.ex", root)) do
+      {:ok, src} -> src
+      _ -> nil
+    end
+  end
+
+  # ⚠ ANCRE DE FIN DE LIGNE, ET SANS ELLE LE FAIL-CLOSED EST UN FAUX. La regex accepterait un
+  # PREFIXE : `@platform_root "/opt/" <> "lcars"` se lirait `"/opt/"`, et le verrou comparerait les
+  # miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il rougirait — donc le
+  # defaut ne passe pas — mais en accusant dix fichiers sains d'un ecart qu'ils n'ont pas.
+  defp layout_literal(root, attr) do
+    with src when is_binary(src) <- layout_source(root),
+         [_, v] <- Regex.run(~r/@#{attr}\s+"([^"]+)"\s*$/m, src) do
+      v
+    else
+      _ -> nil
+    end
+  end
+
+  # Les faces se lisent par leurs CLAUSES, pas par une liste : `face_root("code"), do: @code_root`
+  # dit a la fois le nom de la face et l'attribut qui porte sa racine. `{face, nil}` quand
+  # l'attribut ne se lit plus comme un litteral gele — l'appelant en fait un echec, pas un silence.
+  defp declared_faces(root) do
+    case layout_source(root) do
+      nil ->
+        []
+
+      src ->
+        ~r/def face_root\("([a-z]+)"\), do: @([a-z_]+)/
+        |> Regex.scan(src)
+        |> Enum.map(fn [_, face, attr] -> {face, layout_literal(root, attr)} end)
+    end
+  end
+
+  # LE VERDICT D'UN BALAYAGE DE RACINES : garde d'instrument, puis accord ou liste des intruses.
+  # Les trois verrous de racine le partagent — leur difference est ce qu'ils BALAIENT, pas comment
+  # ils concluent, et trois `cond` recopies auraient derive un a un.
+  defp roots_verdict(id, remediation, opts) do
+    cond do
+      not opts.autorite_vue? ->
+        broken_result(id, opts.attendue)
+
+      opts.intruses == [] ->
+        %{id: id, remediation: "—", status: :pass, evidence: [], note: opts.note_ok}
+
+      true ->
+        %{
+          id: id,
+          remediation: remediation,
+          status: :fail,
+          evidence: opts.intruses,
+          note: opts.note_ko
+        }
+    end
+  end
+
   @doc """
   The platform root is declared ONCE, in `Fleet.Layout`, and the corpus repeats that literal in
   scores of places. This makes them agree.
@@ -726,17 +832,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       "/opt/decor-autre"
     ]
 
-    expected =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, src} ->
-          case Regex.run(~r/@platform_root\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
+    expected = layout_literal(root, "platform_root")
 
     if is_nil(expected) do
       unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@platform_root")
@@ -760,25 +856,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # nothing » plutot qu'un vert creux), mais il ne mesure rien,
       # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
       {racines, fichiers} =
-        corpus_files(root)
-        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
-          case File.read(path) do
-            {:ok, body} ->
-              vus =
-                body
-                |> String.split("\n")
-                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                |> Enum.flat_map(&Regex.scan(~r|/opt/\.?[A-Za-z0-9_.-]+|, &1))
-                |> Enum.map(&hd/1)
-                |> Enum.map(&Regex.replace(~r|(/opt/\.?[A-Za-z0-9_-]+).*|, &1, "\\1"))
-                |> MapSet.new()
-
-              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
-
-            _ ->
-              {acc, n}
-          end
-        end)
+        scan_corpus_roots(
+          root,
+          ~r|/opt/\.?[A-Za-z0-9_.-]+|,
+          &Regex.replace(~r|(/opt/\.?[A-Za-z0-9_-]+).*|, &1, "\\1")
+        )
 
       inconnues =
         racines
@@ -788,36 +870,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         end)
         |> Enum.sort()
 
-      cond do
-        # Garde d'instrument : l'autorite DOIT figurer parmi les racines vues. Si elle n'y est pas,
-        # le balayage n'a pas lu le corpus — et un ensemble vide n'accuse personne.
-        not MapSet.member?(racines, expected) ->
-          broken_result(id, "occurrence of #{expected} in the corpus")
-
-        inconnues == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "#{inspect(expected)} declared by Fleet.Layout @platform_root is the ONLY LCARS root " <>
-                "under /opt (#{fichiers} files carry a /opt path; #{length(etrangeres)} foreign " <>
-                "roots declared, versioned toolchains excluded by shape)"
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: inconnues,
-            note:
-              "authority says #{inspect(expected)} — #{length(inconnues)} other root(s) under " <>
-                "/opt are neither the authority nor declared foreign: " <>
-                Enum.join(inconnues, ", ")
-          }
-      end
+      # Garde d'instrument : l'autorite DOIT figurer parmi les racines vues. Si elle n'y est pas,
+      # le balayage n'a pas lu le corpus — et un ensemble vide n'accuse personne.
+      roots_verdict(id, remediation, %{
+        autorite_vue?: MapSet.member?(racines, expected),
+        attendue: "occurrence of #{expected} in the corpus",
+        intruses: inconnues,
+        note_ok:
+          "#{inspect(expected)} declared by Fleet.Layout @platform_root is the ONLY LCARS root " <>
+            "under /opt (#{fichiers} files carry a /opt path; #{length(etrangeres)} foreign " <>
+            "roots declared, versioned toolchains excluded by shape)",
+        note_ko:
+          "authority says #{inspect(expected)} — #{length(inconnues)} other root(s) under " <>
+            "/opt are neither the authority nor declared foreign: " <> Enum.join(inconnues, ", ")
+      })
     end
   end
 
@@ -852,42 +918,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       "every `/run` path of LCARS starts with `Fleet.Layout` `@runtime_root` — a second runtime " <>
         "root means a socket written where nobody listens, on a tmpfs that forgets between boots"
 
-    expected =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, src} ->
-          case Regex.run(~r/@runtime_root\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
+    expected = layout_literal(root, "runtime_root")
 
     if is_nil(expected) do
       unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@runtime_root")
     else
+      # ⚠ ON NE RETIENT QUE CE QUI NOMME LCARS. `/run/user`, `/run/systemd`, `/run/sshd`
+      # appartiennent au systeme : les compter ferait accuser la machine hote.
       {vus, porteurs} =
-        corpus_files(root)
-        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
-          case File.read(path) do
-            {:ok, body} ->
-              # ⚠ ON NE RETIENT QUE CE QUI NOMME LCARS. `/run/user`, `/run/systemd`, `/run/sshd`
-              # appartiennent au systeme : les compter ferait accuser la machine hote.
-              vus =
-                body
-                |> String.split("\n")
-                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                |> Enum.flat_map(&Regex.scan(~r|/run/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*|, &1))
-                |> Enum.map(&hd/1)
-                |> MapSet.new()
-
-              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
-
-            _ ->
-              {acc, n}
-          end
-        end)
+        scan_corpus_roots(root, ~r|/run/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*|)
 
       # ⚠ UN PREFIXE N'EST PAS UNE APPARTENANCE, ET LA MUTATION L'A MONTRE. `String.starts_with?`
       # seul laisse passer `/run/lcarsx/...` : il commence bien par `/run/lcars`. C'est la TROISIEME
@@ -902,36 +941,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       orphelins = vus |> Enum.reject(sous_la_racine?) |> Enum.sort()
 
-      cond do
-        # Garde d'instrument : sans une seule occurrence de l'autorite, le balayage n'a rien lu et
-        # un ensemble vide n'accuse personne.
-        not Enum.any?(vus, sous_la_racine?) ->
-          broken_result(id, "occurrence of #{expected} in the corpus")
-
-        orphelins == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "every LCARS path under /run starts with #{inspect(expected)}, declared by " <>
-                "Fleet.Layout @runtime_root (#{MapSet.size(vus)} distinct ROOTS — the scan stops " <>
-                "at the first `/`, so `/run/lcars/authority/roles.sock` counts as `/run/lcars` — " <>
-                "across #{porteurs} files)"
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: orphelins,
-            note:
-              "authority says #{inspect(expected)} — #{length(orphelins)} LCARS path(s) under " <>
-                "/run do not start with it: " <> Enum.join(orphelins, ", ")
-          }
-      end
+      # Garde d'instrument : sans une seule occurrence de l'autorite, le balayage n'a rien lu et
+      # un ensemble vide n'accuse personne.
+      roots_verdict(id, remediation, %{
+        autorite_vue?: Enum.any?(vus, sous_la_racine?),
+        attendue: "occurrence of #{expected} in the corpus",
+        intruses: orphelins,
+        note_ok:
+          "every LCARS path under /run starts with #{inspect(expected)}, declared by " <>
+            "Fleet.Layout @runtime_root (#{MapSet.size(vus)} distinct ROOTS — the scan stops " <>
+            "at the first `/`, so `/run/lcars/authority/roles.sock` counts as `/run/lcars` — " <>
+            "across #{porteurs} files)",
+        note_ko:
+          "authority says #{inspect(expected)} — #{length(orphelins)} LCARS path(s) under " <>
+            "/run do not start with it: " <> Enum.join(orphelins, ", ")
+      })
     end
   end
 
@@ -963,27 +987,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       "every `/home/projects*` root is a face declared by `Fleet.Layout.face_root/1` — a root the " <>
         "declaration does not know is a tree the runtime will never look at"
 
-    src =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, s} -> s
-        _ -> nil
-      end
-
-    # Les faces se lisent par leurs CLAUSES, pas par une liste : `face_root("code"), do: @code_root`
-    # dit a la fois le nom de la face et l'attribut qui porte sa racine.
-    faces =
-      if src do
-        ~r/def face_root\("([a-z]+)"\), do: @([a-z_]+)/
-        |> Regex.scan(src)
-        |> Enum.map(fn [_, face, attr] ->
-          case Regex.run(~r/@#{attr}\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> {face, v}
-            _ -> {face, nil}
-          end
-        end)
-      else
-        []
-      end
+    faces = declared_faces(root)
 
     racines = faces |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1)
 

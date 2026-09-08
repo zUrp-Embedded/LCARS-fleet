@@ -22,9 +22,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   verifiees.
   """
 
-  # Pas d'`import Support` ici : cette famille n'emprunte aucun combinateur. Elle lit le disque
-  # directement, parce que sa population EST l'arborescence — un mur qui compte des dossiers ne se
-  # pose pas les memes questions qu'un mur qui grep du code. Seul le type du verdict est partage.
+  # Cette famille lit le disque DIRECTEMENT — sa population EST l'arborescence, et un mur qui compte
+  # des dossiers ne se pose pas les memes questions qu'un mur qui grep du code. Elle n'emprunte donc
+  # aucun combinateur de LECTURE.
+  #
+  # Ce qu'elle partage, c'est la forme du VERDICT : garde de population d'abord, constats ensuite.
+  # Elle la recopiait a l'identique dans chacun de ses murs, et une recopie derive — c'est ainsi que
+  # la meme phrase d'instrument casse a fini ecrite en deux langues dans ce fichier.
+  import Mix.Tasks.Lcars.Contracts.Check.Support, only: [measured_verdict: 2]
+
   alias Mix.Tasks.Lcars.Contracts.Check.Support
 
   # EVERY test corpus in the repo — bats AND python — and what happens to it. `:gated` = shell_gate discovers it;
@@ -120,35 +126,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         File.exists?(Path.join([root, "lib", Macro.underscore(mod) <> ".ex"]))
       end)
 
-    broken =
-      cond do
-        declarations == [] ->
-          "no `doctest` declaration found under test/; this check measured nothing"
-
-        length(unresolved) == length(declarations) ->
-          "no declared module resolved to a source file"
-
-        true ->
-          nil
-      end
-
-    %{
-      id: "tests.doctest_declarations_have_examples",
+    measured_verdict("tests.doctest_declarations_have_examples", %{
       remediation:
         "restore the `iex>` examples in the module, or drop the `doctest` line — a declaration " <>
           "over a module with no example is a test file that looks covered and runs nothing",
-      status: if(is_nil(broken) and empty == [], do: :pass, else: :fail),
-      evidence:
+      broken:
         cond do
-          broken ->
-            ["INSTRUMENT BROKEN — #{broken}"]
+          declarations == [] ->
+            "no `doctest` declaration found under test/"
 
-          empty != [] ->
-            ["doctest declared over a module with NO `iex>` example: #{inspect(empty)}"]
+          length(unresolved) == length(declarations) ->
+            "no declared module resolved to a source file"
 
           true ->
-            []
+            nil
         end,
+      findings:
+        if(empty == [],
+          do: [],
+          else: ["doctest declared over a module with NO `iex>` example: #{inspect(empty)}"]
+        ),
       # Le compte, pas l'affirmation : « all backed » se lit encore quand l'evidence juste au-dessus
       # nomme un module qui ne l'est pas. Une note qui contredit son propre verdict apprend a son
       # lecteur a ne plus la lire.
@@ -158,7 +155,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
             do: "",
             else: " (#{length(unresolved)} module(s) unresolved, not judged)"
           )
-    }
+    })
   end
 
   # LES DEUX ARBRES DE TEMOINS, ET LEURS RACINES. Le depot porte DEUX programmes : le runtime
@@ -260,36 +257,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         end
       end)
 
-    %{
-      id: "tests.dirs_mirror_source",
+    measured_verdict("tests.dirs_mirror_source", %{
       remediation:
         "deplacer le temoin sous le dossier qui reflete sa cible, ou nommer sa zone dans " <>
           "@test_zones si elle n'a legitimement pas de source en face — un chemin de test qui ne " <>
           "reflete rien se lit comme une absence de couverture ; et si c'est un ARBRE entier qui " <>
           "manque, corriger sa cle dans @test_source_roots plutot que de la laisser pointer le vide",
-      status: if(checked > 0 and strays == [] and absents == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          absents != [] ->
-            Enum.map(
-              absents,
-              &("#{&1}/ : arbre DECLARE dans @test_source_roots, absent du disque — " <>
-                  "ce mur n'a lu aucun de ses temoins")
-            )
-
-          checked == 0 ->
-            ["INSTRUMENT CASSE — aucun dossier de temoins trouve ; ce mur n'a rien mesure"]
-
-          strays != [] ->
-            Enum.map(strays, &"#{&1}/ : aucune source en face")
-
-          true ->
-            []
-        end,
+      broken: if(checked == 0, do: "aucun dossier de temoins trouve"),
+      # ⚠ UN ARBRE DECLARE MAIS ABSENT PASSE AVANT LES EGARES, et l'ordre est l'invariant : sa
+      # presence veut dire que ce mur n'a lu AUCUN temoin de cet arbre-la, donc que la liste des
+      # egares ne porte que sur ce qu'il a vu.
+      findings:
+        Enum.map(
+          absents,
+          &("#{&1}/ : arbre DECLARE dans @test_source_roots, absent du disque — " <>
+              "ce mur n'a lu aucun de ses temoins")
+        ) ++ if(absents == [], do: Enum.map(strays, &"#{&1}/ : aucune source en face"), else: []),
       note:
         "#{checked} dossier(s) de temoins sur #{map_size(@test_source_roots)} arbre(s) declare(s), " <>
           "#{checked - length(strays)} adosse(s) a une source" <> Support.skipped_note(skipped)
-    }
+    })
   end
 
   @doc false
@@ -348,31 +335,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         end
       end)
 
-    %{
-      id: "tests.witness_naming",
+    measured_verdict("tests.witness_naming", %{
       remediation:
         "nommer le temoin `<cible>_test.py` ou `<cible>_test.exs` — l'extension `.bats` suffit, " <>
           "les autres non ; ou le sortir vers une zone qui ne porte pas de temoins " <>
           "(support/, fixtures/, probes/, integration/)",
-      status: if(files != [] and misnamed == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          files == [] ->
-            [
-              "INSTRUMENT CASSE — aucun fichier trouve dans les deux arbres ; ce mur n'a rien mesure"
-            ]
-
-          misnamed != [] ->
-            Enum.map(misnamed, fn f ->
-              "#{f} : ni `.bats`, ni `_test#{Path.extname(f)}` — un lecteur ne peut pas dire si c'est un temoin"
-            end)
-
-          true ->
-            []
-        end,
+      broken: if(files == [], do: "aucun fichier trouve dans les deux arbres"),
+      findings:
+        Enum.map(misnamed, fn f ->
+          "#{f} : ni `.bats`, ni `_test#{Path.extname(f)}` — un lecteur ne peut pas dire si c'est un temoin"
+        end),
       note:
         "#{length(files)} temoins dans les deux arbres, #{length(files) - length(misnamed)} nommes selon la regle"
-    }
+    })
   end
 
   @doc false
@@ -436,26 +411,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         end)
       end)
 
-    %{
-      id: "tests.negations_bite",
+    measured_verdict("tests.negations_bite", %{
       remediation:
         "remplacer `! cmd` par `refute cmd` (ou `cmd | refute_out 'motif'` pour un tube) — sous " <>
           "bats une negation suivie d'une autre instruction est INERTE, donc verte au moment ou ce " <>
           "qu'elle interdit arrive",
-      status: if(files != [] and inert == [], do: :pass, else: :fail),
-      evidence:
-        cond do
-          files == [] ->
-            ["INSTRUMENT CASSE — aucun .bats trouve ; ce mur n'a rien mesure"]
-
-          inert != [] ->
-            Enum.map(inert, &"#{&1} : negation NON terminale et non gardee — inerte")
-
-          true ->
-            []
-        end,
+      broken: if(files == [], do: "aucun .bats trouve"),
+      findings: Enum.map(inert, &"#{&1} : negation NON terminale et non gardee — inerte"),
       note: "#{length(files)} suites bats, #{length(inert)} assertion(s) niee(s) inerte(s)"
-    }
+    })
   end
 
   # Les bornes {premiere, derniere} de chaque bloc `@test … { … }`, par comptage d'accolades.
@@ -558,35 +522,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
     distinct = bodies |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
     short? = length(copies) < length(trees)
 
-    %{
-      id: "tests.refute_copies_agree",
+    measured_verdict("tests.refute_copies_agree", %{
       remediation:
         "reporter la correction sur TOUTES les copies de refute.bash — une seule mise a jour rend " <>
           "un corpus plus permissif que l'autre sans casser le moindre test",
-      status: if(copies != [] and not short? and length(distinct) <= 1, do: :pass, else: :fail),
-      evidence:
+      broken:
         cond do
           copies == [] ->
-            [
-              "INSTRUMENT CASSE — aucun refute.bash trouve, alors que des temoins font `load refute`"
-            ]
+            "aucun refute.bash trouve, alors que des temoins font `load refute`"
 
           short? ->
-            [
-              "INSTRUMENT CASSE — #{length(copies)} copie(s) vue(s) pour #{length(trees)} arbre(s) " <>
-                "lu(s) (#{Enum.join(trees, ", ")}) : une copie seule s'accorde toujours avec elle-meme"
-            ]
-
-          length(distinct) > 1 ->
-            Enum.map(bodies, fn {f, h} -> "#{f}: corps #{h}" end)
+            "#{length(copies)} copie(s) vue(s) pour #{length(trees)} arbre(s) lu(s) " <>
+              "(#{Enum.join(trees, ", ")}) : une copie seule s'accorde toujours avec elle-meme"
 
           true ->
-            []
+            nil
         end,
+      findings:
+        if(length(distinct) > 1,
+          do: Enum.map(bodies, fn {f, h} -> "#{f}: corps #{h}" end),
+          else: []
+        ),
       note:
         "#{length(copies)} copie(s) de refute.bash dans #{length(trees)} arbre(s), " <>
           "#{length(distinct)} corps distinct(s)" <> Support.skipped_note(skipped)
-    }
+    })
   end
 
   @doc false

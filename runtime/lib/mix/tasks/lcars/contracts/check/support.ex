@@ -137,6 +137,44 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   def measured_nothing?(population) when is_list(population), do: population == []
   def measured_nothing?(%MapSet{} = population), do: MapSet.size(population) == 0
 
+  @doc """
+  LE VERDICT D'UN MUR, dans la forme que ce fichier impose a tous : une garde de population, des
+  constats, une note.
+
+  Les trente murs du gate la recopiaient un a un — un `cond` a trois branches et un `if` dans le
+  `status`, soit deux a trois points de complexite cyclomatique par mur pour zero decision propre.
+  Recopiee, elle DERIVE : trois d'entre eux avaient perdu la garde de population, et « rien a
+  signaler » y sortait identique a « je n'ai rien regarde ».
+
+  L'ordre des clauses est l'invariant : un instrument casse se dit AVANT les constats, parce qu'un
+  scan qui n'a rien lu ne peut pas conclure a une conformite.
+
+    * `:broken` — la chaine decrivant ce que l'instrument n'a pas trouve, ou `nil` ;
+    * `:findings` — les constats, chacun deja redige ;
+    * `:remediation` et `:note` — tels quels.
+  """
+  @spec measured_verdict(String.t(), map()) :: result()
+  def measured_verdict(id, opts) do
+    broken = Map.get(opts, :broken)
+    findings = Map.fetch!(opts, :findings)
+
+    %{
+      id: id,
+      remediation: Map.fetch!(opts, :remediation),
+      status: if(is_nil(broken) and findings == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          # ⚠ MOT POUR MOT LA PHRASE DE `broken_result/2`. Deux formulations pour un meme etat, ce
+          # sont deux choses a chercher pour l'operateur — et des temoins qui epinglent l'une
+          # deviennent aveugles a l'autre.
+          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          findings != [] -> findings
+          true -> []
+        end,
+      note: Map.fetch!(opts, :note)
+    }
+  end
+
   @doc false
   @spec broken_result(String.t(), String.t()) :: result()
   def broken_result(id, what) do

@@ -21,6 +21,12 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
   """
   use ExUnit.Case, async: true
 
+  # ⚠ LA PHRASE DE L'INSTRUMENT CASSE EST EN ANGLAIS, ET C'EST UNE CORRECTION. Ce fichier de murs
+  # ecrivait « INSTRUMENT CASSE » la ou tous les autres ecrivent « INSTRUMENT BROKEN » — deux
+  # formulations pour un meme etat, donc deux choses a chercher pour l'operateur, et des temoins
+  # qui epinglent l'une deviennent aveugles a l'autre. Le combinateur `Support.measured_verdict/2`
+  # n'en porte plus qu'une.
+
   alias Mix.Tasks.Lcars.Contracts.Check.Tests
 
   # ⚠ LA FORME DU DECOR EST IMPOSEE PAR LES MURS EUX-MEMES, et pas par confort. Trois d'entre eux
@@ -96,9 +102,9 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
       assert %{status: :pass, evidence: []} = Tests.check_witness_naming(root)
     end
 
-    test "arbre VIDE → INSTRUMENT CASSE, jamais un vert propre" do
+    test "arbre VIDE → INSTRUMENT BROKEN, jamais un vert propre" do
       assert %{status: :fail, evidence: [ev]} = Tests.check_witness_naming(depot([]))
-      assert ev =~ "INSTRUMENT CASSE"
+      assert ev =~ "INSTRUMENT BROKEN"
     end
   end
 
@@ -146,9 +152,9 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
       assert %{status: :pass, evidence: []} = Tests.check_negations_bite(root)
     end
 
-    test "aucun `.bats` → INSTRUMENT CASSE" do
+    test "aucun `.bats` → INSTRUMENT BROKEN" do
       assert %{status: :fail, evidence: [ev]} = Tests.check_negations_bite(depot([]))
-      assert ev =~ "INSTRUMENT CASSE"
+      assert ev =~ "INSTRUMENT BROKEN"
     end
   end
 
@@ -187,7 +193,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
       assert %{status: :pass, evidence: []} = Tests.check_refute_copies_agree(root)
     end
 
-    test "⚠ UNE SEULE COPIE VUE POUR DEUX ARBRES → INSTRUMENT CASSE, pas un accord" do
+    test "⚠ UNE SEULE COPIE VUE POUR DEUX ARBRES → INSTRUMENT BROKEN, pas un accord" do
       # C'EST LE DEFAUT QUE CE MUR A DEJA EU (relecture hostile du 2026-09-04). Un wildcard qui ne
       # lisait qu'un arbre rendait `distinct == 1`, donc `<= 1`, donc vert — et le mur imprimait
       # lui-meme sa preuve : « 1 copie(s), 1 corps distinct(s) ». Une copie seule s'accorde toujours
@@ -196,7 +202,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
         depot(fichiers: [{"runtime/test/refute.bash", refute_bash("runtime/test/refute.bash")}])
 
       assert %{status: :fail, evidence: [ev]} = Tests.check_refute_copies_agree(root)
-      assert ev =~ "INSTRUMENT CASSE"
+      assert ev =~ "INSTRUMENT BROKEN"
       assert ev =~ "s'accorde toujours avec elle-meme"
     end
   end
