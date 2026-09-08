@@ -324,9 +324,12 @@ module_field() { # $1=file $2=FIELD → valeur (vide si absent)
   sed -n "s/^# ${2}: *//p" "$1" | head -1
 }
 
+# ⚠ LA REPONSE VIENT DE LA LIB, ELLE N'EST PLUS RECOPIEE ICI. Ce `case` et celui de
+# `prov_dir_scope` (`25-directories`) repondaient a la meme question avec deux separateurs ; depuis
+# qu'un substrat en SATISFAIT un autre (`incus` couvre `linux`, cf. `prov_substrate_satisfait`),
+# deux reponses voudraient dire que le rail s'applique la ou la table ne se mesure pas.
 substrate_in() { # $1=liste (`any` ou mots séparés par des espaces) → 0 si $SUBSTRATE dedans
-  [[ "$1" == "any" ]] && return 0
-  case " $1 " in *" $SUBSTRATE "*) return 0 ;; *) return 1 ;; esac
+  prov_substrate_satisfait "$1" "$SUBSTRATE"
 }
 
 declare -a SELECTED=() EFFECTIVE=()

@@ -1826,3 +1826,98 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
   run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel"
   [[ "$output" == "kit" ]]
 }
+
+# ─── LA RACINE EST UN FAIT — RP-28, TRANCHÉ LE 2026-09-08 ───────────────────────────────────────
+#
+# ⚖ user : « on s'installe QUE dans des environnements contrôlés : docker, WSL et incus. donc on
+# s'en bat les couilles du système, on impose notre arbo. /opt/lcars/ fixe et non modifiable. »
+#
+# ⚠ CE QUI EXISTAIT AVANT ÉTAIT UNE PROSE, PAS UN VERROU : le commentaire disait « ce n'est pas un
+# bouton d'opérateur, la surcharge existe pour les TÉMOINS » au-dessus d'un `: "${PROV_ROOT:=…}"`
+# qui honore l'environnement sans condition. Ces trois témoins tiennent les trois bords — ce qui est
+# refusé, ce qui doit continuer de passer, et le fait que le refus DISE pourquoi.
+
+@test "RACINE : une surcharge de PROV_ROOT hors temoin est un REFUS, et le geste ne demarre pas" {
+  run env -u BATS_TEST_TMPDIR PROV_ROOT=/tmp/ailleurs bash -c ". '$LIB'; echo ATTEINT"
+  [ "$status" -ne 0 ] || { echo "une racine deplacee a ete acceptee hors temoin : $output"; return 1; }
+  [[ "$output" != *ATTEINT* ]] || { echo "le refus n'a pas arrete le chargement de la lib"; return 1; }
+}
+
+@test "RACINE : le refus NOMME la racine posee, la racine vraie, et ce qu'une racine qui glisse coute" {
+  # Un refus qui dit seulement « non » se contourne par essais ; celui-ci doit rendre le geste juste
+  # evident — changer de TERRAIN, pas de racine.
+  run env -u BATS_TEST_TMPDIR PROV_ROOT=/tmp/ailleurs bash -c ". '$LIB'"
+  [[ "$output" == *"/tmp/ailleurs"* ]] || { echo "le refus ne dit pas ce qui a ete pose : $output"; return 1; }
+  [[ "$output" == *"/opt/lcars"* ]]    || { echo "le refus ne dit pas la racine vraie : $output"; return 1; }
+  [[ "$output" == *"manifeste"* ]]     || { echo "le refus ne dit pas ce que ca coute : $output"; return 1; }
+  [[ "$output" == *"terrain"* ]]       || { echo "le refus ne dit pas le geste juste : $output"; return 1; }
+}
+
+@test "RACINE : un TEMOIN peut toujours la deplacer — sinon ce verrou ferme le corpus entier" {
+  # LE TEMOIN DU TEMOIN. 13 surcharges dans 7 fichiers de temoins (mesure du 2026-09-08) : un verrou
+  # qui les refuserait rendrait la moitie du corpus injouable, et serait retire le lendemain.
+  run bash -c "export BATS_TEST_TMPDIR='$BATS_TEST_TMPDIR' PROV_ROOT='$BATS_TEST_TMPDIR/opt'; . '$LIB'; echo \"racine=\$PROV_ROOT\""
+  [ "$status" -eq 0 ] || { echo "un temoin s'est fait refuser sa racine : $output"; return 1; }
+  [[ "$output" == *"racine=$BATS_TEST_TMPDIR/opt"* ]] || { echo "la racine du temoin n'a pas ete honoree : $output"; return 1; }
+}
+
+@test "RACINE : sans surcharge, elle vaut /opt/lcars — et la valeur canon a UNE declaration" {
+  run env -u BATS_TEST_TMPDIR -u PROV_ROOT bash -c ". '$LIB'; echo \"racine=\$PROV_ROOT canon=\$PROV_ROOT_CANON\""
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"racine=/opt/lcars canon=/opt/lcars"* ]] || { echo "$output"; return 1; }
+  # ⚠ ET LE LITTERAL N'EST ECRIT QU'UNE FOIS DANS LA LIB. Deux ecritures d'une meme racine, c'est
+  # la porte ouverte a ce qu'une seule des deux soit corrigee — le defaut que le mur des racines
+  # (`racines_ssot.bats`) existe pour fermer.
+  # (en CODE : la prose peut la citer autant qu'elle veut, c'est ce qui s'EXECUTE qui compte)
+  local n_lit; n_lit="$(grep -vE '^\s*#' "$LIB" | grep -c '/opt/lcars')"
+  [ "$n_lit" -eq 1 ] \
+    || { echo "le litteral /opt/lcars apparait $n_lit fois en CODE dans la lib — une racine a deux ecritures :"; \
+         grep -vE '^\s*#' "$LIB" | grep -n '/opt/lcars' >&2; return 1; }
+}
+
+# ─── QUEL SUBSTRAT SATISFAIT QUELLE LISTE — LOT 1 DU PLAN TERRAIN CONTRÔLÉ ──────────────────────
+#
+# ⚠ SANS CES TÉMOINS, LA PROPRIÉTÉ CENTRALE DU LOT PASSE À LA TRAPPE : mesuré le 2026-09-08, retirer
+# l'équivalence `incus`→`linux` ne faisait rougir AUCUN cas du dépôt, alors qu'elle décide si 14
+# modules (« APPLY-ON: wsl linux ») et 25 lignes du manifeste (« wsl+linux ») s'appliquent ou non
+# dans une instance Incus. Un rail qui saute 14 modules en silence sur le terrain que le plan bénit.
+
+@test "SUBSTRAT/LISTE : « incus » satisfait une liste « linux » — les deux separateurs" {
+  # Les deux appelants historiques n'ecrivaient pas la liste pareil : `substrate_in` lit
+  # « wsl linux » (espaces, en-tete de module), `prov_dir_scope` lit « wsl+linux » (colonne du
+  # manifeste). Une seule fonction repond aux deux, donc elle doit comprendre les deux.
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl linux' incus"
+  [ "$status" -eq 0 ] || { echo "« wsl linux » n'accueille pas incus — 14 modules sautes"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' incus"
+  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas incus — 25 lignes du manifeste hors portee"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait any incus"
+  [ "$status" -eq 0 ] || { echo "« any » n'accueille pas incus"; return 1; }
+}
+
+@test "SUBSTRAT/LISTE : la reciproque est FAUSSE — un Linux natif n'est pas jetable" {
+  # ⚠ C'EST LA MOITIÉ QUI DONNE SON SENS À L'AUTRE. `incus` satisfait `linux` parce qu'une instance
+  # EST un Linux natif du point de vue des gestes — apt, systemd, /etc. L'inverse dirait qu'une
+  # machine de quelqu'un est un terrain jetable, et ouvrirait le rail sur exactement ce que la garde
+  # de cible refuse.
+  run bash -c ". '$LIB'; prov_substrate_satisfait incus linux"
+  [ "$status" -ne 0 ] || { echo "un Linux natif se declare couvert par une liste « incus »"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait incus wsl"
+  [ "$status" -ne 0 ] || { echo "WSL se declare couvert par une liste « incus »"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait linux docker"
+  [ "$status" -ne 0 ] || { echo "docker se declare couvert par une liste « linux » — l'image pose, le rail non"; return 1; }
+}
+
+@test "SUBSTRAT/LISTE : le rail et la TABLE repondent par la MEME fonction, pas par deux copies" {
+  # ⚠ DEUX REPONSES A CETTE QUESTION, C'EST LE RAIL QUI POSE LA OU LA TABLE NE MESURE PAS. Les deux
+  # `case` d'origine ont ete remplaces par un appel ; ce temoin refuse leur retour.
+  local runner="$BATS_TEST_DIRNAME/../../provision" dirs="$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
+  grep -q 'prov_substrate_satisfait' "$runner" \
+    || { echo "deploy/provision ne delegue plus la comparaison de substrat"; return 1; }
+  grep -q 'prov_substrate_satisfait' "$dirs" \
+    || { echo "25-directories ne delegue plus la comparaison de substrat"; return 1; }
+  # et aucun des deux ne refait la comparaison a la main
+  ! grep -qE 'case " \$1 " in \*" \$SUBSTRATE "\*' "$runner" \
+    || { echo "substrate_in a retrouve sa comparaison locale"; return 1; }
+  ! grep -qE 'case "\+\$col\+" in \*"\+\$sub\+"\*' "$dirs" \
+    || { echo "prov_dir_scope a retrouve sa comparaison locale"; return 1; }
+}

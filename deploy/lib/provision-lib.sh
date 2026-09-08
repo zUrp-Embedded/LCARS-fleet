@@ -27,7 +27,36 @@ PROVISION_LIB_LOADED=1
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-endpoint.sh"
 
 # ─── Données par défaut — une SEULE définition, consommée par tous les modules ───────────────────
-: "${PROV_ROOT:=/opt/lcars}"
+
+# ⚠ LA RACINE EST UN FAIT, PAS UN BOUTON D'OPÉRATEUR — ET ELLE NE L'ÉTAIT PAS.
+#
+# ⚖ user 2026-09-08 : « on s'installe QUE dans des environnements contrôlés : docker, WSL et incus.
+# donc on s'en bat les couilles du système, on impose notre arbo. /opt/lcars/ fixe et non
+# modifiable. » C'est la décision qui tranche RP-28, ouvert le 2026-08-29 : la prose disait déjà
+# « ce n'est pas un bouton d'opérateur, la surcharge existe pour les TÉMOINS », au-dessus d'un
+# `: "${PROV_ROOT:=/opt/lcars}"` qui honore l'environnement SANS CONDITION. Rien ne distinguait un
+# témoin d'un opérateur à l'exécution : la prose promettait un verrou qui n'existait pas.
+#
+# CE QUE COÛTERAIT UNE RACINE QUI GLISSE : `deploy/system.manifest` déclare le mode et le
+# propriétaire de chaque objet SOUS cette racine, et sept lecteurs de production en dépendent. Une
+# racine déplacée en silence ne casse rien tout de suite — elle rend fausses toutes les mesures qui
+# s'y réfèrent, et le drift se lit comme de la conformité.
+#
+# LE SIGNE RETENU EST `BATS_TEST_TMPDIR`, que seul un témoin porte. Ce n'est pas une barrière contre
+# quelqu'un qui veut passer outre — c'en est une contre l'accident, et c'est tout ce qu'on lui
+# demande. Mesuré avant de poser le verrou : 13 surcharges dans le dépôt, TOUTES dans des témoins
+# (7 fichiers), ZÉRO hors témoins. Il ne casse donc aucun appelant réel.
+PROV_ROOT_CANON=/opt/lcars
+if [[ -n "${PROV_ROOT:-}" && "${PROV_ROOT}" != "$PROV_ROOT_CANON" && -z "${BATS_TEST_TMPDIR:-}" ]]; then
+  printf 'ECHEC: PROV_ROOT est pose a « %s » dans l environnement, et la racine du produit est FIXE (%s).\n' \
+    "$PROV_ROOT" "$PROV_ROOT_CANON" >&2
+  printf '       LCARS ne s installe que sur un terrain controle — docker, WSL, incus — ou il impose son\n' >&2
+  printf '       arborescence. Le manifeste declare mode et proprietaire SOUS cette racine ; la deplacer\n' >&2
+  printf '       rendrait fausse chaque mesure qui s y refere, sans que rien ne rougisse.\n' >&2
+  printf '       Pour poser ailleurs : un autre terrain, pas une autre racine.\n' >&2
+  exit 1
+fi
+: "${PROV_ROOT:=$PROV_ROOT_CANON}"
 
 : "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/deploy-release.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
@@ -61,7 +90,15 @@ PROVISION_LIB_LOADED=1
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
-: "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
+# ⚠ ET CELLE-CI PORTAIT LA RACINE EN DUR, seule de sa famille : `PROV_CATALOGUES_WORK` et
+# `PROV_TOKENS_DIR`, vingt lignes plus haut, derivent de `$PROV_ROOT` ; celle-ci ecrivait
+# `/opt/lcars/var/catalogues`. Deux ecritures d'une meme racine — exactement ce que le commentaire
+# JUSTE EN DESSOUS refuse pour l'ancienne adresse, et ce que `racines_ssot.bats` existe pour fermer.
+# Consequence mesurable : un temoin qui deplace `PROV_ROOT` voyait `WORK` et `TOKENS` suivre son bac
+# a sable pendant que `CATALOGUES_DIR` designait la VRAIE arborescence de la machine — d'ou
+# l'export explicite que `25-directories.bats` porte pour s'en proteger. Trouve le 2026-09-08 par le
+# temoin du verrou de la racine, qui compte les litteraux.
+: "${PROV_CATALOGUES_DIR:=$PROV_ROOT/var/catalogues}"
 # ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache a vecu
 # sous `/home` ; deux gestes nomment encore cette adresse — `45-catalogues` pour DIRE que le
 # reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
@@ -658,6 +695,42 @@ prov_manifest_gid() {
   # table dit qu'on a le droit de le poser, elle ne dit pas lequel. Rendre le tiret tel quel ferait
   # un `groupadd -g -`, c'est-a-dire un refus a l'execution la ou l'intention etait « n'impose rien ».
   awk -v g="$grp" '{ c=$1; sub(/:.*/, "", c) } c=="group" && $2==g && $3!="-" { print $3; exit }' "$f"
+}
+
+# ─── QUEL SUBSTRAT SATISFAIT QUELLE LISTE — UNE SEULE REPONSE, DEUX APPELANTS ──────────────────
+#
+# ⚠ DEUX LIEUX COMPARAIENT LE SUBSTRAT, AVEC DEUX SEPARATEURS ET AUCUN LIEN : `substrate_in`
+# (`deploy/provision`, listes separees par des ESPACES : « APPLY-ON: wsl linux ») et
+# `prov_dir_scope` (`25-directories`, colonne du manifeste separee par des `+` : « wsl+linux »).
+# Tant que la seule question etait « ce mot est-il dans cette liste », les deux pouvaient diverger
+# sans consequence. Des qu'un substrat en SATISFAIT un autre, la reponse doit etre unique — sinon
+# le rail s'applique et la table ne se mesure pas, ou l'inverse, sur le meme terrain.
+#
+# ⚠ ET C'EST EXACTEMENT CE QU'INCUS DEMANDE. Mesure du 2026-09-08 : 14 modules declarent
+# « APPLY-ON: wsl linux » et 25 lignes du manifeste portent « wsl+linux ». Un substrat `incus` qui
+# ne satisferait que son propre nom serait exclu de TOUT le rail poste — 14 modules sautes, en
+# silence, sur le terrain que le plan benit.
+#
+# POURQUOI `incus` SATISFAIT `linux`, ET PAS L'INVERSE : dans une instance Incus, tout ce que fait
+# le rail linux s'applique tel quel — apt, systemd, /etc, les comptes. C'est un Linux natif, avec
+# une difference qui ne concerne QUE la garde de cible : c'est un terrain jetable, donc il n'a pas
+# besoin du consentement qu'une machine de quelqu'un exige. On le distingue pour la GARDE, on le
+# confond pour les GESTES. L'inverse serait faux : un Linux natif n'est pas jetable.
+#
+# La reciproque a un cout connu et accepte : une liste qui voudrait `linux` SANS `incus` ne peut
+# plus s'ecrire. Aucune n'en a besoin aujourd'hui — `05-host-consent` est le seul module `linux`
+# seul, et son objet (le consentement d'une machine qu'on garde) est precisement ce dont une
+# instance jetable n'a que faire. Le jour ou il en faudrait une, elle s'ecrira en toutes lettres.
+prov_substrate_satisfait() { # <liste> [substrat] -> 0 si le substrat est couvert par la liste
+  local liste="$1" sub="${2:-${PROV_SUBSTRATE:-$(detect_substrate)}}" mot
+  [[ "$liste" == any ]] && return 0
+  liste="${liste//+/ }"
+  for mot in $liste; do
+    [[ "$mot" == "$sub" ]] && return 0
+    # `incus` est un `linux` dont on ne demande pas le consentement : il satisfait ses listes.
+    [[ "$mot" == linux && "$sub" == incus ]] && return 0
+  done
+  return 1
 }
 
 # prov_manifest_substrate <chemin> -> la colonne substrat que la TABLE declare pour cet objet, ou vide

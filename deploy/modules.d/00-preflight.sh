@@ -99,7 +99,11 @@ check() {
       # rend le verdict du module non conforme — mais la porte ne lit pas le verdict, elle lit le
       # fait `consent=none`, qui rend le rail POSTE impossible sans toucher au rail CONTENEUR.
       p_fact consent none
-      p_fail "HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /opt/lcars, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici. Sur du Linux natif, clone le dépôt et sers-toi de ce que tu veux — ou LCARS_ALLOW_ANY_HOST=1 si tu sais ce que tu fais"
+      # ⚠ LE MESSAGE NOMME LES TROIS TERRAINS, ET IL N'EN NOMMAIT QU'UN. Il disait « le poste de
+      # travail LCARS, c'est WSL2 » — vrai jusqu'au 2026-09-08, faux depuis : ⚖ user, « on s'installe
+      # QUE dans des environnements contrôlés : docker, WSL et incus ». Un refus qui ne nomme qu'une
+      # issue sur trois envoie l'opérateur vers la plus coûteuse.
+      p_fail "HORS CIBLE : LCARS s'installe sur un terrain qu'on peut DÉTRUIRE — une distro WSL2, une instance Incus, un conteneur (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /opt/lcars, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 ». Sur un hôte Linux : « incus launch images:ubuntu/24.04 <nom> », puis relance dedans. Sur cette machine-ci, si elle est dédiée : LCARS_ALLOW_ANY_HOST=1"
     fi
   else
     p_fact consent sans-objet

@@ -14,9 +14,42 @@
 LCARS_DOCKER_ENDPOINT_LOADED=1
 
 # ─── detect_substrate — ou tourne-t-on ? ─────────────────────────────────────────────────────────
+#
+# ⚠ UNE INSTANCE INCUS SE DECLARAIT `linux`, ET LA GARDE REFUSAIT L'ENVIRONNEMENT QUE LA CIBLE
+# BENIT. Mesure du 2026-09-07 sur `.63`, dans une instance :
+#
+#     FAIL 00-preflight: HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesure : linux)
+#
+# Deux faits en un : le prefixe ne distinguait pas un conteneur systeme d'un bare-metal, et la garde
+# tirait sur la cible. ⚖ user 2026-09-08 : « on s'installe QUE dans des environnements controles :
+# docker, WSL et incus ». Une classe de terrain qu'on ne sait pas nommer ne peut pas etre benie.
+#
+# L'ORDRE N'EST PAS ARBITRAIRE : docker D'ABORD, parce qu'un conteneur Docker tourne tres bien DANS
+# une instance Incus (mesure du 2026-09-07 : `security.nesting` + les deux interceptions) et doit
+# alors se declarer `docker`, pas `incus`. La question est « quel terrain m'entoure au plus pres ».
+#
+# LES TROIS SONDES, ET POURQUOI TROIS :
+#   · `/dev/incus/sock` — l'API devlxd d'Incus, exposee DANS l'instance. Le signe le plus specifique.
+#   · `/dev/lxd/sock` — la meme chose sous LXD, dont Incus est le fork. Meme CLASSE de terrain :
+#     conteneur systeme, init complet, arborescence a nous. On ne les distingue pas, et le nom
+#     `incus` couvre les deux — le distinguer demanderait un geste qui differe, il n'y en a pas.
+#   · `/run/systemd/container` valant exactement `lxc` — le repli quand devlxd n'est pas expose
+#     (`security.devlxd=false`). ⚠ SON EXISTENCE NE PROUVE RIEN : mesure du 2026-09-08, ce fichier
+#     est PRESENT sur WSL et vaut `wsl`. C'est son CONTENU qui discrimine, jamais sa presence.
+#
+# ⚠ CE QUI N'EST PAS ENCORE MESURE : les deux sockets, dans une vraie instance. L'hote de mesure
+# demande `incus admin init` et l'appartenance a `incus-admin` — deux gestes root, demandes a
+# lordzurp le 2026-09-08. Les temoins ci-dessous jouent la sonde sur un DECOR (`LCARS_SUBSTRATE_ROOT`),
+# ce qui verifie l'ordre et la discrimination, pas la presence reelle du fichier sur un terrain reel.
+#
+# `LCARS_SUBSTRATE_ROOT` est la couture des temoins, jamais un bouton : elle prefixe les chemins
+# sondes. Vide en production, ou tous ces chemins sont absolus.
 detect_substrate() {
-  if [[ -f /.dockerenv || "${LCARS_DOCKER:-}" == "1" ]]; then echo docker
-  elif grep -qi microsoft /proc/version 2>/dev/null; then echo wsl
+  local r="${LCARS_SUBSTRATE_ROOT:-}"
+  if [[ -f "$r/.dockerenv" || "${LCARS_DOCKER:-}" == "1" ]]; then echo docker
+  elif [[ -S "$r/dev/incus/sock" || -S "$r/dev/lxd/sock" ]]; then echo incus
+  elif [[ "$(cat "$r/run/systemd/container" 2>/dev/null)" == lxc ]]; then echo incus
+  elif grep -qi microsoft "$r/proc/version" 2>/dev/null; then echo wsl
   else echo linux
   fi
 }

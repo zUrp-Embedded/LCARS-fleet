@@ -122,8 +122,11 @@ prov_dir_scope() {
   local path="$1" sub col v
   sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
   col="$(prov_manifest_substrate "$path")"
-  if [[ -n "$col" && "$col" != any ]]; then
-    case "+$col+" in *"+$sub+"*) ;; *) echo substrate; return 0 ;; esac
+  # ⚠ MEME REPONSE QUE `substrate_in` DU RAIL, ET C'EST LA LIB QUI LA DONNE. Ce `case` comparait
+  # des mots exacts ; depuis qu'`incus` satisfait `linux`, une entree « wsl+linux » doit se mesurer
+  # dans une instance Incus — sinon le rail la pose et la table la declare hors portee.
+  if [[ -n "$col" ]] && ! prov_substrate_satisfait "$col" "$sub"; then
+    echo substrate; return 0
   fi
   if [[ "$sub" == docker ]]; then
     while read -r v; do

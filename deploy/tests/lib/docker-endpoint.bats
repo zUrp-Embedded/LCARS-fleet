@@ -281,3 +281,62 @@ sonde() { # sonde <socket> — joue docker_endpoint avec une CLI muette ; rend D
   [[ "$output" == *"v=0"* ]]
   [[ "$output" == *"m=1"* ]]
 }
+
+# ─── LE SUBSTRAT « incus » — LOT 1 DU PLAN TERRAIN CONTRÔLÉ ─────────────────────────────────────
+#
+# ⚠ UNE INSTANCE INCUS SE DÉCLARAIT `linux`, ET LA GARDE REFUSAIT LA CIBLE QUE LE PLAN BÉNIT.
+# Mesure du 2026-09-07 sur `.63`, dans une instance : « FAIL 00-preflight: HORS CIBLE : le poste de
+# travail LCARS, c'est WSL2 (substrat mesuré : linux) ». Ces témoins jouent la sonde sur un DÉCOR
+# (`LCARS_SUBSTRATE_ROOT`) : ils vérifient l'ORDRE et la DISCRIMINATION, pas la présence réelle des
+# sockets sur un terrain réel — cette mesure-là attend un hôte Incus (gestes root demandés).
+
+_sub_decor() { # un decor de substrat sous un chemin COURT (une socket UNIX ne depasse pas 108 octets)
+  SUBROOT="$(mktemp -d /tmp/lcars-sub-XXXXXX)"
+  mkdir -p "$SUBROOT/dev/incus" "$SUBROOT/dev/lxd" "$SUBROOT/run/systemd" "$SUBROOT/proc"
+}
+_sub_sock() { python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('$1')"; }
+_sub() { run env -u LCARS_DOCKER LCARS_SUBSTRATE_ROOT="$SUBROOT" bash -c ". '$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh'; detect_substrate"; }
+
+@test "SUBSTRAT : la socket devlxd d'Incus donne « incus », et LXD la meme classe" {
+  _sub_decor
+  _sub_sock "$SUBROOT/dev/incus/sock"
+  _sub; [ "$output" = incus ] || { echo "/dev/incus/sock donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  rm -f "$SUBROOT/dev/incus/sock"
+  _sub_sock "$SUBROOT/dev/lxd/sock"
+  # ⚠ MEME NOM POUR LXD : conteneur systeme, init complet, arborescence a nous — meme classe de
+  # terrain, memes gestes. Les distinguer demanderait un geste qui differe ; il n'y en a pas.
+  _sub; [ "$output" = incus ] || { echo "/dev/lxd/sock donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  rm -rf "$SUBROOT"
+}
+
+@test "SUBSTRAT : sans devlxd, « container=lxc » sert de repli — mais son CONTENU, pas sa presence" {
+  # ⚠ `/run/systemd/container` EXISTE SUR WSL, et y vaut `wsl` (mesure du 2026-09-08 sur ce poste).
+  # Une sonde qui testerait sa presence classerait donc WSL en conteneur systeme. La moitie basse de
+  # ce temoin est ce qui empeche d'ecrire cette faute-la.
+  _sub_decor
+  echo lxc > "$SUBROOT/run/systemd/container"
+  _sub; [ "$output" = incus ] || { echo "« container=lxc » donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  echo wsl > "$SUBROOT/run/systemd/container"
+  echo "Linux version 5.15 microsoft-standard" > "$SUBROOT/proc/version"
+  _sub; [ "$output" = wsl ] || { echo "« container=wsl » sur un noyau microsoft donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  rm -rf "$SUBROOT"
+}
+
+@test "SUBSTRAT : docker DANS une instance incus se declare « docker » — le terrain le PLUS PROCHE" {
+  # Mesure du 2026-09-07 : docker tourne dans une instance Incus (`security.nesting` + les deux
+  # interceptions). Le module qui s'y execute est dans un conteneur Docker : c'est ce terrain-la
+  # qui decide de ses gestes, pas celui qui l'entoure.
+  _sub_decor
+  _sub_sock "$SUBROOT/dev/incus/sock"
+  touch "$SUBROOT/.dockerenv"
+  _sub; [ "$output" = docker ] || { echo "docker dans incus donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  rm -rf "$SUBROOT"
+}
+
+@test "SUBSTRAT : un decor NU reste « linux » — la sonde n'invente pas un terrain" {
+  # LE TEMOIN DU TEMOIN : sans lui, une sonde qui rendrait « incus » a tout coup passerait les trois
+  # du dessus.
+  _sub_decor
+  _sub; [ "$output" = linux ] || { echo "un decor vide donne « $output »"; rm -rf "$SUBROOT"; return 1; }
+  rm -rf "$SUBROOT"
+}
