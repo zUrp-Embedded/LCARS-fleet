@@ -118,7 +118,16 @@ NAME="lcars-fleet-${VERSION}-${SHA}-otp${OTP}-${ARCH}"
 # poste où ce changement a été fait ; c'est un dossier de la v1, que `25-directories` a justement
 # cessé de poser. Un chemin d'installation particulier gravé dans le produit est une panne pour tous
 # les autres. `LCARS_PACK_DIR` est là pour ceux qui veulent choisir.
+#
+# ⚠ ET IL SE NORMALISE, PARCE QU'UN OUTIL DE LA CHAÎNE NE LE FAIT PAS. nFPM reçoit ce chemin dans
+# les `contents:` des huit YAML ; sur un `LCARS_PACK_DIR` qui porte un `..` (le cas nominal quand on
+# packe depuis un worktree : `<wt>/../lcars-packs`), il échoue en perdant la barre initiale —
+# « Glob failed: …/deck-static/addon-fit.js: stat static prefix … stat tmp/…: invalid argument »
+# (mesure du 2026-09-08, sept minutes de gate payées pour un `..`). Le refus arrive APRÈS le gate,
+# la release et la doc : le plus tard possible pour la faute la plus bête. `realpath -m` résout sans
+# exiger que le répertoire existe — il est créé plus bas.
 PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
+PACK_DIR="$(realpath -m "$PACK_DIR")"
 OUT="$PACK_DIR/${NAME}.tar.gz"
 
 # ─── LE GATE, PUIS LA RELEASE — dans cet ordre et sans échappatoire ──────────────────────────────

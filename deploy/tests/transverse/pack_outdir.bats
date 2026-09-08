@@ -88,3 +88,23 @@ resolve_in() { # <racine simulee> [valeur de LCARS_PACK_DIR]
     [ "$l" -ge "$pose" ] || { echo "PACK_DIR employe l.$l, avant son affectation l.$pose" >&2; return 1; }
   done
 }
+
+@test "le tiroir est NORMALISE — un chemin qui REMONTE casse nFPM, pas le pack" {
+  # ⚠ MESURE DU 2026-09-08, ET ELLE A COUTE SEPT MINUTES DE GATE. En packant depuis un worktree, le
+  # tiroir naturel est `<worktree>/../lcars-packs`. nFPM recoit ce chemin dans les `contents:` des
+  # huit YAML et echoue en PERDANT LA BARRE INITIALE :
+  #   « Glob failed: …/deck-static/addon-fit.js: stat static prefix … stat tmp/…: invalid argument »
+  # Le refus arrive apres le gate, la release et la doc — le plus tard possible pour la faute la
+  # plus bete. La resolution normalise donc, et ce temoin le tient.
+  local root="$BATS_TEST_TMPDIR/depot" out
+  out="$(resolve_in "$root" "$BATS_TEST_TMPDIR/depot/../ailleurs")"
+  [ "$(dirname "$out")" = "$BATS_TEST_TMPDIR/ailleurs" ] \
+    || { echo "le tiroir garde son « .. » : $out — nFPM le refusera"; return 1; }
+  case "$out" in *..*) echo "un « .. » survit dans $out"; return 1 ;; esac
+}
+
+@test "un tiroir RELATIF devient absolu — nFPM et le scp d'apres n'ont pas le meme cwd" {
+  local out
+  out="$(resolve_in "$BATS_TEST_TMPDIR/depot" "tiroir-relatif")"
+  case "$out" in /*) ;; *) echo "le tiroir reste relatif : $out"; return 1 ;; esac
+}
