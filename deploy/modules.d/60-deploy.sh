@@ -92,7 +92,7 @@ build_sha() {
 }
 release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}" ]] && printf '%s\n' "${#d[@]}" || printf '0\n'; }
 
-# ─── LE CANAL : CE QUE CE MODULE ECRIT APRES AVOIR POSE, ET CE QU'IL NE FAIT PLUS SOUS `deb` ─────
+# ─── LE CANAL : CE QUE CE MODULE ECRIT APRES AVOIR POSE ─────────────────────────────────────────
 #
 # Ce module est LE poseur de la release, donc c'est lui qui dit QUI l'a posee (`prov_channel`, lib) :
 # `kit` quand `deploy-release.sh` a reutilise la release d'un paquet — `.source-revision` a la racine
@@ -101,18 +101,13 @@ release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}
 # laisserait une machine qui se dit « kit » et n'a rien. Il s'ecrit aussi sur les deux sorties ou la
 # release est DEJA en place (rejeu depuis la copie, raccourci « rien a batir ») : une machine posee
 # avant ce tampon ne le recevrait sinon jamais, et la porte la lirait « jamais posee » a vie.
-#
-# ⚠ SOUS `deb`, CE MODULE NE POSE RIEN — ni `deploy-release.sh`, ni elagage, ni liens : dpkg possede
-# `$PROV_PREFIX` et les liens du PATH. `apply` se reduit a `check`, qui mesure comme aujourd'hui et
-# ajoute ce que `dpkg -V` dit du prefixe ; le drift se converge par le paquet, pas par ce rail. Et le
-# canal ne s'ecrit JAMAIS ici sous `deb` : le postinst du paquet l'a ecrit, il ne se reecrit pas.
+# Ce module ECRIT le canal et ne le LIT jamais : la lecture est l'affaire du preflight.
 poser_canal() { # poser_canal — le canal de CETTE pose : kit si la release venait d'un paquet, source sinon
   prov_channel_write "$(prov_channel_here)"
 }
 
-check() { # check [--dpkg] — les mesures d'aujourd'hui ; avec --dpkg (canal deb), celle du paquet en tete
+check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
-  [[ "${1:-}" != "--dpkg" ]] || prov_dpkg_report "sous $PROV_PREFIX" "$PROV_PREFIX"
 
   # ⚠ « ABSENTE » SE DIT D'UN PREFIXE QU'ON PEUT TRAVERSER. `$PROV_PREFIX` est `0750 root:fleet` :
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
@@ -309,11 +304,7 @@ apply() {
 }
 
 case "${1:?usage: 60-deploy.sh <check|apply>}" in
-  check|apply)
-    # ⚠ UNE LECTURE DU CANAL, ICI, ET UN SEUL BRANCHEMENT. Sous `deb` dpkg possede la release :
-    # `apply` ne pose rien et se reduit a `check`, qui ajoute ce que dpkg dit. Un canal illisible
-    # est un verdict rouge avant tout geste (prov_channel_or_verdict).
-    prov_channel_or_verdict "$1"
-    if poseur_is_dpkg; then check --dpkg; elif [[ "$1" == "apply" ]]; then apply; else check; fi ;;
+  check) check ;;
+  apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

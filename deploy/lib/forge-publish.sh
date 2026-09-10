@@ -2,21 +2,21 @@
 # SOURCE: deploy/lib/forge-publish.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-05
-# STATUS: PROTO-V2 — publier UNE version sur la forge : la Release (tout le tiroir) et le registre Debian (les .deb)
+# STATUS: PROTO-V2 — publier UNE version sur la forge : la Release (tout le tiroir)
 #
 # Sourcée par pack.sh (--publish) — et par la CI sur tag, qui joue LE MÊME pack.sh. Zéro état : la
 # forge, l'owner, le dépôt, le tag et le tiroir sont des ARGUMENTS ; le jeton est FP_TOKEN, dans
 # l'environnement, et il ne passe JAMAIS en argv (`curl -K -` : lisible dans /proc de tout l'hôte,
 # cicatrice 6-141) ni sur une sortie.
 #
-# LA RELEASE NAÎT EN BROUILLON. Les assets montent dessus, les .deb vont au registre, PUIS elle est
+# LA RELEASE NAÎT EN BROUILLON. Les assets montent dessus, PUIS elle est
 # publiée d'un coup. Un envoi coupé laisse un brouillon — visible, nommé dans le refus, que l'opérateur
 # supprime sur la forge avant de rejouer — jamais une release publiée à moitié pleine, et jamais un
 # tag « réparé » : une release du tag qui existe (brouillon compris) est un REFUS (ADR 012).
 #
 # Forme d'URL commune à Gitea et GitHub : <forge>/<owner>/<repo>/releases/download/<tag>/<asset> —
 # c'est CETTE base que la porte de la version porte en dur (door-gen.sh), donc le tiroir doit
-# monter ENTIER : tar, .deb, .sha256, install.sh, install.sh.sha256, .minisig quand la clé est là.
+# monter ENTIER : tar, .sha256, install.sh, install.sh.sha256, .minisig quand la clé est là.
 
 # fp_curl <fichier-corps> <args curl…> → le code HTTP sur stdout (VIDE si curl n'a pas répondu),
 # le corps dans <fichier-corps>. FP_CURL est la doublure des témoins.
@@ -65,18 +65,16 @@ fp_err() { jq -r '.message // empty' "$1" 2>/dev/null | head -c 200; }
 
 # fp_urlenc <nom> → le nom, sûr dans une QUERY STRING
 #
-# ⚠ LE « + » D'UNE RÉVISION DEBIAN DEVIENT UNE ESPACE, ET LA RELEASE DEVIENT INUTILISABLE. Les huit
-# `.deb` portent `0.9.0-20260908.1310+g48fa4a4b` : envoyés bruts dans `?name=`, le serveur décode le
-# `+` en espace (règle `application/x-www-form-urlencoded`) et STOCKE l'asset sous
-# `…1310 g48fa4a4b…`. Mesuré le 2026-09-08 sur une vraie publication :
+# ⚠ UN CARACTÈRE RÉSERVÉ DANS UN NOM D'ASSET REND LA RELEASE INUTILISABLE. Mesuré le 2026-09-08 sur
+# une vraie publication, avec les `.deb` d'alors (`0.9.0-20260908.1310+g48fa4a4b`) : envoyé brut
+# dans `?name=`, le serveur décode le `+` en espace (règle `application/x-www-form-urlencoded`) et
+# STOCKE l'asset sous `…1310 g48fa4a4b…` :
 #     …1310+g48fa4a4b_all.deb    → 404      ← le nom que la porte a gravé en dur
 #     …1310%20g48fa4a4b_all.deb  → 200      ← ce que la forge a stocké
 # La porte d'une version ne pouvait donc pas tirer SES PROPRES paquets, et rien ne le disait : les
 # assets montaient tous en 201. C'est le genre de panne qu'aucune doublure n'attrape — il a fallu
-# publier pour de bon, puis tirer.
-#
-# Percent-encodage complet plutôt qu'un `+`→`%2B` ciblé : le prochain caractère réservé dans un nom
-# de paquet (`~` d'une pré-version, `:` d'un epoch Debian) tomberait dans le même trou.
+# publier pour de bon, puis tirer. Les `.deb` sont partis (2026-09-11) ; l'encodage reste, parce
+# que le prochain caractère réservé dans un nom d'asset (`+`, `~`, `:`) tomberait dans le même trou.
 fp_urlenc() {
   # ⚠ `LC_ALL=C` OU LA FONCTION REPRODUIT LE BUG QU'ELLE CORRIGE. En locale UTF-8, `${s:i:1}` rend un
   # CARACTÈRE et `printf '%02X' "'$c"` son POINT DE CODE, pas ses octets : « € » sortait en `%20AC`,
@@ -109,11 +107,10 @@ fp_release_body() {
 #
 # ⚠ DEUX FORGES, UN SEUL GESTE — ET LA DIFFÉRENCE N'EST PAS COSMÉTIQUE. La forme d'URL de
 # TÉLÉCHARGEMENT est commune (c'est ce que la porte grave, cf. en-tête), mais l'API de PUBLICATION
-# diverge sur trois points, et sur trois seulement :
+# diverge sur deux points, et sur deux seulement :
 #   · la base       : `<forge>/api/v1/repos/o/r`   contre  `https://api.github.com/repos/o/r`
 #   · les assets    : `POST …/assets?name=` en multipart  contre  un HÔTE À PART
 #                     (`uploads.github.com`) en corps binaire — un multipart y rend 422
-#   · le registre Debian : GitHub N'EN A PAS. On ne le simule pas, on le DIT.
 # Tout le reste — l'immutabilité, la sonde de commit, le brouillon, la publication d'un coup — est
 # identique, donc n'est écrit qu'une fois.
 # ⚠ ON RECONNAÎT UN HÔTE, PAS UNE CHAÎNE EXACTE — la liste de motifs littéraux d'avant rendait
@@ -139,9 +136,9 @@ fp_dialect() {
   esac
 }
 
-# fp_publish_dist <forge> <owner> <repo> <tag> <tiroir> <sha-source> <distribution-debian> [component]
+# fp_publish_dist <forge> <owner> <repo> <tag> <tiroir> <sha-source>
 fp_publish_dist() {
-  local forge="${1%/}" owner="$2" repo="$3" tag="$4" dist="$5" target="$6" ddist="$7" comp="${8:-main}"
+  local forge="${1%/}" owner="$2" repo="$3" tag="$4" dist="$5" target="$6"
   local body code id f n
   local dialect; dialect="$(fp_dialect "$forge")"
   local api web
@@ -180,7 +177,7 @@ fp_publish_dist() {
       fi
       ;;
     200) echo "fp: REFUS — la release « $tag » existe déjà sur $forge/$owner/$repo ($(jq -r 'if .draft then "brouillon" else "publiée" end' "$body" 2>/dev/null)). ADR 012 : un tag publié ne se réécrit jamais — pour la refaire, supprime-la sur la forge, ce script ne le fait pas." >&2; return 1 ;;
-    401|403) echo "fp: REFUS ($code) — le jeton ne lit pas $owner/$repo (portée write:repository requise, en plus de write:package)" >&2; return 1 ;;
+    401|403) echo "fp: REFUS ($code) — le jeton ne lit pas $owner/$repo (portée write:repository requise)" >&2; return 1 ;;
     *) echo "fp: REFUS — la forge ne répond pas sur $api/releases/tags/$tag (code ${code:-vide}) : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1 ;;
   esac
 
@@ -222,34 +219,8 @@ fp_publish_dist() {
     echo "fp: asset ← $n"
   done
 
-  # 4. les .deb au registre Debian de l'owner. 409 = déjà là : un paquet publié ne se réécrit pas.
-  #
-  # ⚠ GITHUB N'A PAS DE REGISTRE DEBIAN, ET ON NE LE SIMULE PAS. Les `.deb` sont montés à l'étape 3
-  # comme assets — donc téléchargeables, et `apt install ./lcars_*.deb` marche — mais il n'y a pas
-  # de source `apt` à déclarer. Le taire ferait croire à une voie qui n'existe pas ; inventer une
-  # URL en ferait une qui rend 404 à la première install venue.
-  if [[ "$dialect" == github ]]; then
-    echo "fp: registre Debian — GitHub n'en a pas. Les .deb sont dans la release (assets) : « sudo apt install ./lcars_*.deb » après téléchargement. Pas de source apt sur cette forge."
-  else
-  for f in "$dist"/*.deb; do
-    [[ -f "$f" ]] || continue; n="$(basename "$f")"
-    code="$(fp_curl "$body" -X PUT --upload-file "$f" "$forge/api/packages/$owner/debian/pool/$ddist/$comp/upload")"
-    case "$code" in
-      201) echo "fp: debian $ddist/$comp ← $n" ;;
-      409) echo "fp: REFUS — $n existe déjà dans le registre Debian de $owner ($ddist/$comp) : un paquet publié ne se réécrit pas. La release « $tag » reste en brouillon (id $id)." >&2; return 1 ;;
-      *) echo "fp: REFUS (${code:-vide}) au registre Debian pour $n — $(fp_err "$body"). La release « $tag » reste en brouillon (id $id)." >&2; return 1 ;;
-    esac
-  done
-  fi
-
-  # 5. publiée d'un coup
+  # 4. publiée d'un coup
   code="$(fp_curl "$body" -X PATCH -H 'Content-Type: application/json' --data-binary '{"draft":false}' "$api/releases/$id")"
   [[ "$code" == 200 ]] || { echo "fp: REFUS (${code:-vide}) à la publication du brouillon $id — $(fp_err "$body")" >&2; return 1; }
   echo "fp: release $web/$owner/$repo/releases/tag/$tag — $(find "$dist" -maxdepth 1 -type f | wc -l) assets"
-  # La source apt ne se dit QUE là où elle existe : une ligne `deb …` pour une forge qui n'a pas de
-  # registre serait une commande qui rend 404 à celui qui la copie.
-  if [[ "$dialect" != github ]]; then
-    echo "fp: source apt : deb [signed-by=/etc/apt/keyrings/lcars-$owner.asc] $forge/api/packages/$owner/debian $ddist $comp"
-    echo "fp:   clé     : $forge/api/packages/$owner/debian/repository.key"
-  fi
 }

@@ -194,9 +194,9 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 
 # ─── LE CANAL : QUI A POSE, ET CE QUE CET ARBRE POSERAIT (lot 2 du chantier release) ───────────
 
-@test "CANAL : le fait « channel » dit qui a pose (source, kit, deb) ou « aucun », et « channel_tree » ce que cet arbre poserait" {
+@test "CANAL : le fait « channel » dit qui a pose (source, kit) ou « aucun », et « channel_tree » ce que cet arbre poserait" {
   local v
-  for v in source kit deb; do
+  for v in source kit; do
     mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
     preflight linux
     [ "$(fact channel)" = "$v" ] || { echo "channel=$(fact channel), attendu $v"; return 1; }

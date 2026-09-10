@@ -223,7 +223,7 @@ check() {
 
   # ─── LE CANAL : QUI A POSÉ LE PRODUIT SUR CETTE MACHINE, ET CE QUE CET ARBRE POSERAIT ────────
   #
-  # `channel` est le fait de la MACHINE (`prov_channel` : source, kit, deb, aucun) ; `channel_tree`
+  # `channel` est le fait de la MACHINE (`prov_channel` : source, kit, aucun) ; `channel_tree`
   # est ce que CET arbre écrirait s'il posait (kit si c'est un paquet, source sinon — `prov_channel_here`).
   # La porte et `workstation` les comparent : un canal sur un autre est un REFUS qui nomme le
   # geste, jamais une conversion. Le même canal est une mise à jour ; `aucun`, une première pose.

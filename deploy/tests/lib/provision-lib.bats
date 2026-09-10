@@ -1642,10 +1642,10 @@ canal() { # canal <code bash> — la lib sourcee, verdicts a zero, sous le decor
   run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod; . \"\$LIB\" >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0 PROV_DRIFT=0; $1"
 }
 
-@test "prov_channel : les trois valeurs se lisent, et l absence du fichier dit « aucun »" {
+@test "prov_channel : les deux valeurs se lisent, et l absence du fichier dit « aucun »" {
   canal_decor
   local v
-  for v in source kit deb; do
+  for v in source kit; do
     printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
     canal 'prov_channel; echo "global=$PROV_CHANNEL"'
     [ "$status" -eq 0 ]
@@ -1664,7 +1664,7 @@ canal() { # canal <code bash> — la lib sourcee, verdicts a zero, sous le decor
   printf 'snap\n' > "$LCARS_CHANNEL_FILE"
   canal 'prov_channel >/dev/null || echo "rc=$?"; echo "failed=$PROV_FAILED global=[$PROV_CHANNEL]"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"*"source, kit ou deb"* ]]
+  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"*"source ou kit"* ]]
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"failed=1 global=[]"* ]]
   # et le chemin du fichier fautif est nomme : c'est lui qu'on corrige
@@ -1707,38 +1707,6 @@ canal() { # canal <code bash> — la lib sourcee, verdicts a zero, sous le decor
   [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
 }
 
-@test "poseur_is_dpkg : vrai sous deb, faux sous source/kit/aucun — et il EXIGE la lecture prealable" {
-  canal_decor
-  local v attendu
-  for v in source kit deb aucun; do
-    if [[ "$v" == aucun ]]; then rm -f "$LCARS_CHANNEL_FILE"; else printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"; fi
-    [[ "$v" == deb ]] && attendu=oui || attendu=non
-    canal 'prov_channel >/dev/null; if poseur_is_dpkg; then echo oui; else echo non; fi'
-    [ "$output" = "$attendu" ] || { echo "canal $v : poseur_is_dpkg dit $output, attendu $attendu"; return 1; }
-  done
-  # sans lecture, `set -u` le dit — un module qui branche sans avoir lu ne rend pas « non » en silence
-  canal 'poseur_is_dpkg && echo oui || echo non'
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"PROV_CHANNEL"* ]]
-}
-
-@test "prov_channel_or_verdict : un canal illisible rend le verdict ROUGE du verbe, avant tout geste" {
-  canal_decor
-  printf 'snap\n' > "$LCARS_CHANNEL_FILE"
-  canal 'prov_channel_or_verdict apply; echo "PAS ATTEINT"'
-  [ "$status" -eq 1 ]                       # verdict_apply : 1 = echec
-  refute_out 'PAS ATTEINT' <<<"$output"
-  [[ "$output" == *"FAIL"*"illisible"* ]]
-  canal 'prov_channel_or_verdict check; echo "PAS ATTEINT"'
-  [ "$status" -eq 2 ]                       # verdict_check : 2 = echec de sonde
-  refute_out 'PAS ATTEINT' <<<"$output"
-  # et un canal lisible laisse passer, en posant la globale que le predicat lit
-  printf 'deb\n' > "$LCARS_CHANNEL_FILE"
-  canal 'prov_channel_or_verdict apply; echo "canal=$PROV_CHANNEL"'
-  [ "$status" -eq 0 ]
-  [ "$output" = "canal=deb" ]
-}
-
 # ─── CE QUE DPKG DIT — une doublure, jamais le dpkg de la machine ───────────────────────────────
 dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PATH qui repond ce qu'on lui dit
   local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
@@ -1754,63 +1722,6 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
   } > "$d/dpkg"
   chmod 0755 "$d/dpkg"
   export PATH="$d:$PATH"
-}
-
-@test "prov_dpkg_verify : les LIGNES de dpkg -V font le drift, pas son rc — et la racine filtre" {
-  dpkg_double 'install ok installed' '??5?????? c /etc/lcars/lcars.bashrc' 'missing   /opt/lcars/runtime/bin/lcars' '??5??????   /opt/lcars/services/console.sh'
-  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
-  [[ "$output" == *"rc=1"* ]]
-  [[ "$output" == *"/etc/lcars/lcars.bashrc"* ]]
-  [[ "$output" == *"/opt/lcars/runtime/bin/lcars"* ]]
-  [[ "$output" == *"/opt/lcars/services/console.sh"* ]]
-  # sous une racine : seuls ses chemins — et /opt/lcars/runtime ne couvre pas /opt/lcars/runtimex
-  canal 'prov_dpkg_verify lcars /opt/lcars/runtime || echo "rc=$?"'
-  [[ "$output" == *"rc=1"* ]]
-  [[ "$output" == *"/opt/lcars/runtime/bin/lcars"* ]]
-  refute_out 'bashrc|console\.sh' <<<"$output"
-  canal 'prov_dpkg_verify lcars /opt/lcars/runtim || echo "rc=$?"'
-  [[ "$output" == *"rc=0"* ]] || [ -z "$output" ]
-  refute_out '/opt/lcars' <<<"$output"
-}
-
-@test "prov_dpkg_verify : rien a redire = rc 0 et silence ; dpkg absent = 2 ; paquet inconnu = 3" {
-  dpkg_double 'install ok installed'
-  canal 'prov_dpkg_verify lcars; echo "rc=$?"'
-  [ "$output" = "rc=0" ]
-  dpkg_double ''
-  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
-  [ "$output" = "rc=3" ]
-  dpkg_double 'deinstall ok config-files'
-  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
-  [ "$output" = "rc=3" ]
-  # dpkg absent du PATH : 2, et aucune ligne — la lib ne devine pas ce qu'elle ne peut pas mesurer
-  canal 'PATH=/nonexistent prov_dpkg_verify lcars || echo "rc=$?"'
-  [ "$output" = "rc=2" ]
-  # le nom du paquet a UNE source dans la lib, et elle se surcharge
-  canal 'echo "$PROV_DEB_PACKAGE"'
-  [ "$output" = "lcars" ]
-  LCARS_DEB_PACKAGE=lcars-autre canal 'echo "$PROV_DEB_PACKAGE"'
-  [ "$output" = "lcars-autre" ]
-}
-
-@test "prov_dpkg_report : le verdict de dpkg, rendu UNE fois pour 60 et 62 — OK, DRIFT « réinstalle », WARN sans dpkg, DRIFT paquet inconnu ; et il rend toujours 0" {
-  dpkg_double 'install ok installed'
-  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
-  [[ "$output" == *"OK"*"dpkg -V lcars : rien à redire sous /x"*"rc=0 drift=0"* ]]
-  dpkg_double 'install ok installed' 'missing   /x/a' '??5?????? c /y/b'
-  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
-  [[ "$output" == *"DRIFT"*"1 fichier(s) altéré(s) ou manquant(s) sous /x (premier : /x/a)"*"apt install --reinstall lcars"*"rc=0 drift=1"* ]]
-  # N racines : les deux comptent
-  canal 'prov_dpkg_report "ici" /x /y; echo "rc=$? drift=$PROV_DRIFT"'
-  [[ "$output" == *"2 fichier(s)"*"rc=0 drift=1"* ]]
-  # sans racine : tout
-  canal 'prov_dpkg_report "partout"; echo "rc=$?"'
-  [[ "$output" == *"2 fichier(s)"*"partout"* ]]
-  dpkg_double ''
-  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
-  [[ "$output" == *"DRIFT"*"paquet lcars est inconnu de dpkg"*"apt install lcars"*"rc=0 drift=1"* ]]
-  canal 'PATH=/nonexistent prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
-  [[ "$output" == *"WARN"*"dpkg est absent d'ici"*"rc=0 drift=0"* ]]
 }
 
 @test "prov_channel : un produit POSE sans tampon = « inconnu » (pose avant le tampon) — ni aucun, ni un canal" {

@@ -362,14 +362,13 @@ canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la r
   checkout; run lib 'prov_channel_here'; [ "$output" = source ]
 }
 
-@test "CANAL : sous deb, 60-deploy n'ecrit JAMAIS le canal — apply est branche sur check avant d'atteindre poser_canal" {
-  # Le seul ecrivain du canal sur ce rail est `poser_canal`, et il ne vit que dans `apply()` ; sous
-  # `deb` le dispatch ne joue pas `apply`. Deux faits, mesures separement.
+@test "CANAL : 60-deploy ECRIT le canal (poser_canal, dans apply seulement) et ne le LIT jamais" {
+  # Le seul ecrivain du canal sur ce rail est `poser_canal`, et il ne vit que dans `apply()` ; la
+  # lecture est l'affaire du preflight — aucun module ne branche dessus depuis que `deb` est parti.
   local mod="$DEPLOY/modules.d/60-deploy.sh" code
   code="$(grep -vE '^\s*#' "$mod")"
   [ "$(grep -c 'prov_channel_write' <<<"$code")" -eq 1 ]                 # dans poser_canal seul
   sed -n '/^poser_canal()/,/^}/p' "$mod" | grep -q 'prov_channel_write'
   sed -n '/^check()/,/^}/p' "$mod" | grep -vE '^\s*#' | refute_out 'poser_canal|prov_channel_write'
-  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$mod" | grep -vE '^\s*#')"
-  grep -q 'if poseur_is_dpkg; then check --dpkg' <<<"$disp"
+  refute_out 'prov_channel( |$|\))|poseur_is_dpkg|prov_channel_or_verdict|PROV_CHANNEL\b' <<<"$code"
 }

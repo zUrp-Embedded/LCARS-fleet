@@ -29,25 +29,10 @@
 # compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
 # personne ne vérifie à ta place.
 #
-# ─── ET LES PAQUETS DEBIAN, DEPUIS LE MÊME ARBRE (lot 3, 2026-09-05) ────────────────────────────
-#
-# Le tar et les `.deb` sont DEUX EMBALLAGES DU MÊME CONTENU, sortis du même run : après le tar, ce
-# script pose nFPM dans le tiroir des outils (téléchargement épinglé par sha256 — `deploy/pkg/
-# prep-nfpm.sh`), prépare `lcars-tofu` (`prep-tofu.sh` : le binaire de 46-tofu et le miroir de
-# providers), fait DÉRIVER les `contents:` du stage et de `deploy/system.manifest` (`gen-contents.sh`
-# — une source pour les modes, jamais deux), puis joue `nfpm package -p deb` sur chaque YAML de
-# `deploy/pkg/`. L'invariant tient pour les deux : les bits du `.deb` sont ceux du stage attesté.
-# `--no-deb` s'en passe (un poste sans réseau : nFPM et tofu se téléchargent).
-#
-# USAGE : deploy/pack.sh            gate + release + DOC + tar + .deb (+ push si une forge est configurée)
-#         deploy/pack.sh            construit et mesure : le tar, les .deb, la porte — dans le tiroir, rien n'en sort
-#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir) et le registre Debian (les .deb)
+# USAGE : deploy/pack.sh            gate + release + DOC + tar + porte — dans le tiroir, rien n'en sort
+#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir)
 #         deploy/pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
-#         deploy/pack.sh --no-deb   pas de paquets Debian (ni nFPM ni tofu ne sont téléchargés)
-# ENV   : LCARS_PACK_DIR  où poser le tar et les .deb (défaut : `lcars-packs` à côté du checkout) ;
-#                         les outils du pack vivent dans `$LCARS_PACK_DIR/.tools`, jamais dans l'arbre
-#         LCARS_DEB_RELEASE la révision Debian des .deb (défaut : `AAAAMMJJ.HHMM+g<sha>` — la version
-#                         est celle de `runtime/mix.exs`, la révision est le tampon du tiroir de dev)
+# ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
 #         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
 #         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
 #                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
@@ -62,13 +47,11 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 PUBLISH=0
-DEB=1
 for _arg in "$@"; do
   case "$_arg" in
     --publish) PUBLISH=1 ;;
     --no-push) PUBLISH=0 ;;   # l'ancien nom du défaut (les bancs et les journaux le portent)
-    --no-deb)  DEB=0 ;;
-    *) echo "pack: option inconnue: $_arg (--publish | --no-push | --no-deb)" >&2; exit 1 ;;
+    *) echo "pack: option inconnue: $_arg (--publish | --no-push)" >&2; exit 1 ;;
   esac
 done
 unset _arg
@@ -122,18 +105,16 @@ NAME="lcars-fleet-${VERSION}-${SHA}-otp${OTP}-${ARCH}"
 # cessé de poser. Un chemin d'installation particulier gravé dans le produit est une panne pour tous
 # les autres. `LCARS_PACK_DIR` est là pour ceux qui veulent choisir.
 #
-# ⚠ ET IL SE NORMALISE, PARCE QU'UN OUTIL DE LA CHAÎNE NE LE FAIT PAS. nFPM reçoit ce chemin dans
-# les `contents:` des huit YAML ; sur un `LCARS_PACK_DIR` qui porte un `..` (le cas nominal quand on
-# packe depuis un worktree : `<wt>/../lcars-packs`), il échoue en perdant la barre initiale —
-# « Glob failed: …/deck-static/addon-fit.js: stat static prefix … stat tmp/…: invalid argument »
-# (mesure du 2026-09-08, sept minutes de gate payées pour un `..`). Le refus arrive APRÈS le gate,
-# la release et la doc : le plus tard possible pour la faute la plus bête. `realpath -m` résout sans
-# exiger que le répertoire existe — il est créé plus bas.
-# ⚠ ET IL RÉSOUT AUSSI LES LIENS SYMBOLIQUES, ce que cette prose ne disait pas (mesuré le
-# 2026-09-08 : `realpath -m <lien>/x` rend le chemin RÉEL). C'est voulu — nFPM reçoit un chemin sans
-# ambiguïté — mais ça veut dire que le tiroir ANNONCÉ peut différer de celui que l'opérateur a tapé,
-# sur un poste dont le `/home` est un lien. Le chemin imprimé plus bas est le résolu : c'est celui-là
-# qui compte, et c'est pour ça qu'il est imprimé.
+# ⚠ ET IL SE NORMALISE. Un `LCARS_PACK_DIR` qui porte un `..` (le cas nominal quand on packe depuis
+# un worktree : `<wt>/../lcars-packs`) ou qui est relatif donne un tiroir dont le nom dépend du cwd
+# de celui qui le lit — et le `scp` d'après n'a pas celui du pack. Cicatrice du 2026-09-08 : un
+# outil de la chaîne Debian, partie depuis, échouait sur ce `..` APRÈS le gate, la release et la
+# doc — sept minutes payées pour la faute la plus bête. `realpath -m` résout sans exiger que le
+# répertoire existe — il est créé plus bas.
+# ⚠ ET IL RÉSOUT AUSSI LES LIENS SYMBOLIQUES (mesuré le 2026-09-08 : `realpath -m <lien>/x` rend le
+# chemin RÉEL). C'est voulu — un chemin sans ambiguïté — mais ça veut dire que le tiroir ANNONCÉ peut
+# différer de celui que l'opérateur a tapé, sur un poste dont le `/home` est un lien. Le chemin
+# imprimé plus bas est le résolu : c'est celui-là qui compte, et c'est pour ça qu'il est imprimé.
 PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
 PACK_DIR="$(realpath -m "$PACK_DIR")"
 OUT="$PACK_DIR/${NAME}.tar.gz"
@@ -264,12 +245,12 @@ cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/
 # s'ajoutent ici, côte à côte, pour la même raison.
 mkdir -p "$STAGE/$ROOT/$SITE_SRC"
 cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable apres le build ($SITE_SRC/dist)"
-# ⚠ LE KIT EST VERIFIE AVANT D'ETRE SCELLE, ET IL NE L'ETAIT PAS. `gen-contents.sh` faisait ce
-# rapprochement — une ancre declaree dont la source manque, un `bin/<nom>` que `release.manifest`
-# nomme sans qu'il soit la, un auxiliaire que `62` embarque et qui n'existe pas — mais il tournait
-# APRES cette ligne : la verification protegeait les huit `.deb` et JAMAIS le tar. Un kit incomplet
-# partait donc en archive, et seule la chaine Debian s'en apercevait. Elle s'en va (lot 2 du plan
-# `terrain-controle`) ; la verification, elle, remonte ici et change de bord.
+# ⚠ LE KIT EST VERIFIE AVANT D'ETRE SCELLE, ET IL NE L'ETAIT PAS. Ce rapprochement — une ancre
+# declaree dont la source manque, un `bin/<nom>` que `release.manifest` nomme sans qu'il soit la,
+# un auxiliaire que `62` embarque et qui n'existe pas — vivait dans la chaine Debian et tournait
+# APRES cette ligne : il protegeait les `.deb` et JAMAIS le tar. Un kit incomplet partait donc en
+# archive. La chaine Debian est partie (2026-09-11) ; la verification, elle, est restee ici, du bon
+# cote du tar.
 # shellcheck source=lib/kit-verify.sh
 . deploy/lib/kit-verify.sh
 kit_verifie "$STAGE/$ROOT" "runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
@@ -282,49 +263,6 @@ tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
 say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
-
-# ─── LES .deb — DEPUIS LE STAGE DU TAR, PAS UN AUTRE ARBRE ───────────────────────────────────────
-# Le stage vit encore (le `trap` ne l'efface qu'à la sortie) : c'est le MÊME arbre assemblé que le
-# tar vient d'emporter, doc et release comprises. Les YAML générés vont à côté du stage, jamais
-# dedans — le tar est déjà fermé, et rien de ce qui suit n'y entre.
-if [[ "$DEB" -eq 1 ]]; then
-  TOOLS="$PACK_DIR/.tools"
-  case "$ARCH" in
-    x86_64)        DEB_ARCH=amd64 ;;
-    aarch64|arm64) DEB_ARCH=arm64 ;;
-    *) die "architecture sans nom Debian : $ARCH — « --no-deb » pour le tar seul" ;;
-  esac
-  # La version est celle du produit (mix.exs) ; la révision Debian porte le tampon du tiroir et le
-  # sha, pour qu'un pack suivant du même 0.9.0 soit une MISE À JOUR aux yeux d'apt.
-  DEB_VERSION="$(awk -F'"' '/^ *version: *"/ && !v { v = $2 } END { print v }' runtime/mix.exs)"
-  [[ -n "$DEB_VERSION" ]] || die "version illisible dans runtime/mix.exs — pas de .deb sans version"
-  DEB_RELEASE="${LCARS_DEB_RELEASE:-$(date +%Y%m%d.%H%M)+g$SHA}"
-
-  say "nfpm (épinglé) → $TOOLS…"
-  NFPM="$(bash deploy/pkg/prep-nfpm.sh --tools "$TOOLS")" || die "nfpm non posé — le tar est là ; « --no-deb » pour s'en passer"
-  say "lcars-tofu : binaire et miroir de providers → $TOOLS/tofu…"
-  bash deploy/pkg/prep-tofu.sh --tools "$TOOLS" --stage "$STAGE/$ROOT" --arch "$DEB_ARCH" >/dev/null \
-    || die "outillage tofu non préparé — le tar est là ; « --no-deb » pour s'en passer"
-  say "client de console (xterm.js, pins de 62) → $TOOLS/deck-static…"
-  bash deploy/pkg/prep-deck-static.sh --tools "$TOOLS" >/dev/null \
-    || die "client de console non préparé — le tar est là ; « --no-deb » pour s'en passer"
-  say "contents dérivés de la table et du stage…"
-  bash deploy/pkg/gen-contents.sh --stage "$STAGE/$ROOT" --out "$STAGE/.pkg" --tools "$TOOLS" \
-    || die "génération des contents en échec — le tar est là"
-  export LCARS_ARCH="$DEB_ARCH" LCARS_VERSION="$DEB_VERSION" LCARS_DEB_RELEASE="$DEB_RELEASE"
-  while read -r _pkg; do
-    [[ -n "$_pkg" ]] || continue
-    _nfpm_out="$("$NFPM" package -f "$STAGE/.pkg/$_pkg.yaml" -p deb -t "$PACK_DIR" 2>&1)" \
-      || die "nfpm a refusé $_pkg : $_nfpm_out"
-    _deb="$(sed -n 's/^created package: //p' <<<"$_nfpm_out")"
-    [[ -s "$_deb" ]] || die "nfpm n'a pas dit où est $_pkg ($_nfpm_out)"
-    ( cd "$PACK_DIR" && sha256sum "$(basename "$_deb")" > "$(basename "$_deb").sha256" )
-    say "deb    : $_deb ($(du -h "$_deb" | cut -f1))"
-  done < "$STAGE/.pkg/packages.list"
-  say "version Debian : ${DEB_VERSION}-${DEB_RELEASE} ($DEB_ARCH) — « sudo apt install ./lcars-demo_… » pour le banc"
-else
-  say "--no-deb : pas de paquets Debian (ni nfpm ni tofu téléchargés) — le tar seul"
-fi
 
 # ─── LE TIROIR DE LA VERSION, ET LA PORTE QUI LA CONNAIT ────────────────────────────────────────
 # La porte d'UNE version porte les sha256 de SES artefacts en dur (curl_bash_2026 § 07, lot 4) :
@@ -340,7 +278,7 @@ fi
 TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
 DIST="$PACK_DIR/dist/$TAG"
 mkdir -p "$DIST"
-for _f in "$OUT" "${OUT}.sha256" "$PACK_DIR"/*"+g${SHA}"_*.deb "$PACK_DIR"/*"+g${SHA}"_*.deb.sha256; do
+for _f in "$OUT" "${OUT}.sha256"; do
   [[ -f "$_f" ]] || continue
   ln -f "$_f" "$DIST/$(basename "$_f")"
 done
@@ -352,19 +290,18 @@ say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
 bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
 
-# ─── LA PUBLICATION (--publish) : LA RELEASE DE LA FORGE ET LE REGISTRE DEBIAN ─────────────────
-# (50-PUBLISH § 1) La Release porte TOUT le tiroir de la version — tar, .deb, sha256, la porte et sa
+# ─── LA PUBLICATION (--publish) : LA RELEASE DE LA FORGE ──────────────────────────────────────
+# (50-PUBLISH § 1) La Release porte TOUT le tiroir de la version — tar, sha256, la porte et sa
 # somme, les .minisig quand la clé est là — à la forme d'URL commune à Gitea et GitHub :
 # <forge>/<owner>/<repo>/releases/download/<tag>/<asset>. C'est CETTE base que la porte de la version
 # porte en dur (DOOR_BASE, ci-dessus) : publier ailleurs, c'est publier une porte qui ne trouve pas
-# ses artefacts. Les .deb vont AUSSI au registre Debian de l'owner (`apt install lcars-demo` depuis
-# une source apt). L'immutabilité est la nôtre : une release du tag qui existe = refus nommé, rien
+# ses artefacts. L'immutabilité est la nôtre : une release du tag qui existe = refus nommé, rien
 # réécrit (ADR 012). Le geste vit dans deploy/lib/forge-publish.sh — à blanc dans ses témoins, le
 # même sur le poste et dans la CI sur tag (publish.yml), qui joue CE script.
 #
 # L'ancien étage poussait le tar seul au paquet `generic` de la forge : la Release le remplace — un
-# seul endroit, la forme d'URL que la porte connaît, et les .deb avec.
-[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar, les .deb et la porte restent dans $DIST"; exit 0; }
+# seul endroit, la forme d'URL que la porte connaît.
+[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et la porte restent dans $DIST"; exit 0; }
 
 # LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire le code, donc la version doit atterrir
 # au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour une forge,
@@ -377,9 +314,8 @@ FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
 # un littéral partirait sur la forge ET dans chaque tar que ce script produit — le paquet livrerait
 # la clé de la forge qui le sert. Il vient de l'environnement (la CI : un secret du runner) ou d'un
 # fichier posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
-# dépôt. Portées : write:package (le registre) ET write:repository (la release est un objet du
-# dépôt) — distinctes chez Gitea, aucune ne se déduit de l'autre ; celui des `git push` n'a pas la
-# première. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
+# dépôt. Portée : write:repository (la release est un objet du dépôt) — distincte chez Gitea de
+# celle des paquets, et celui des `git push` ne l'a pas forcément. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
 # un état se calcule AVANT d'être dit (cicatrice du 2026-08-25 : « jeton : trouvé9172f605… »).
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
@@ -388,15 +324,11 @@ TOKEN="${LCARS_PACK_TOKEN:-}"
 _tok_state="absent"
 [[ -n "$TOKEN" ]] && _tok_state="trouvé"
 say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
-[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:package + write:repository)"
+[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portée write:repository)"
 
-# La distribution du registre Debian est celle du BUILDER (les .deb ne dépendent pas d'une version
-# d'Ubuntu : le socle est un Depends, pas une ABI) — LCARS_PACK_DEBIAN_DIST la pose autrement.
-DEBIAN_DIST="${LCARS_PACK_DEBIAN_DIST:-$( . /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-stable}")}"
-
-say "publication → $FORGE/$OWNER/$REPO, release $TAG, registre Debian $DEBIAN_DIST/main…"
+say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 # shellcheck source=lib/forge-publish.sh
 . deploy/lib/forge-publish.sh
-FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" "$DEBIAN_DIST" main \
+FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
   || die "publication interrompue — voir ci-dessus"
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

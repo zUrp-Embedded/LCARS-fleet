@@ -23,11 +23,11 @@ setup() {
   [ -f "$GEN" ] && [ -f "$TEMPLATE" ]
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
   printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
-  printf 'deb1\n' > "$DIST/lcars_0.9.0_amd64.deb"
-  printf 'deb2\n' > "$DIST/lcars-workstation_0.9.0_amd64.deb"
+  printf 'a1\n' > "$DIST/annexe-a.bin"
+  printf 'b2\n' > "$DIST/annexe-b.bin"
   # les derives : ecartes de la table, jamais des artefacts
-  printf 'x  y\n' > "$DIST/lcars_0.9.0_amd64.deb.sha256"
-  printf 'sig\n'  > "$DIST/lcars_0.9.0_amd64.deb.minisig"
+  printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
+  printf 'sig\n'  > "$DIST/annexe-a.bin.minisig"
 }
 
 gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
@@ -55,7 +55,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   # chaque artefact y est, et sa somme est celle du fichier (sha256sum -c relit la table)
   ( cd "$DIST" && printf '%s\n' "$table" | sha256sum -c --quiet --strict )
   [ "$(printf '%s\n' "$table" | grep -c .)" -eq 3 ]
-  local a; for a in lcars-fleet-0.9.0-otp27-x86_64.tar.gz lcars_0.9.0_amd64.deb lcars-workstation_0.9.0_amd64.deb; do
+  local a; for a in lcars-fleet-0.9.0-otp27-x86_64.tar.gz annexe-a.bin annexe-b.bin; do
     [ "$(grep -c "  $a\$" <<<"$table")" -eq 1 ] || { echo "$a manque a la table"; return 1; }
   done
   # les derives et la porte elle-meme n'y sont PAS
@@ -127,8 +127,8 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
   grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
   grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
-  local l_deb l_door; l_deb="$(grep -nE '"\$NFPM" package' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
-  [ "$l_deb" -lt "$l_door" ]
+  local l_tar l_door; l_tar="$(grep -nE '^tar -czf "\$OUT"' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
+  [ -n "$l_tar" ] && [ -n "$l_door" ] && [ "$l_tar" -lt "$l_door" ]
   # LCARS_DOOR_BASE surcharge la base (les bancs servent en local)
   grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
 }

@@ -146,52 +146,6 @@ dpkg_double() { # dpkg_double <lignes de dpkg -V…> — un `dpkg` du PATH qui d
 empreinte() { find "$PROV_PREFIX" "$PROV_LINK_DIR" -printf '%p %m %s %y\n' | sort; }
 module() { run bash "$MOD" "$1"; }   # le dispatch ENTIER : c'est lui qui lit le canal
 
-@test "CANAL deb : apply ne touche PAS au disque — ni deploy-release.sh, ni elagage, ni liens — et se reduit a check" {
-  decor_canal deb
-  dpkg_double
-  : > "$PROV_PREFIX/bin/fleet_v2"                       # un intrus que l'apply retirerait sous source
-  ln -s "$PROV_PREFIX/bin/fleet_v2" "$PROV_LINK_DIR/fleet_v2"
-  rm -f "$PROV_LINK_DIR/fleet"                          # et un lien que l'apply poserait
-  local avant; avant="$(empreinte)"
-  module apply
-  [ "$status" -eq 1 ]                                   # verdict de CHECK : 1 = drift (l'intrus), pas 2 (apply + drift)
-  [[ "$output" == *"dpkg -V lcars : rien à redire sous $PROV_PREFIX"* ]]
-  [[ "$output" == *"DRIFT"*"intrus $PROV_PREFIX/bin/fleet_v2"* ]]
-  [ ! -e "$MARQUEUR" ] || { echo "deploy-release.sh a ete APPELE sous deb"; return 1; }
-  [ "$(empreinte)" = "$avant" ] || { echo "le disque a bouge sous deb :"; diff <(echo "$avant") <(empreinte); return 1; }
-  [ -e "$PROV_PREFIX/bin/fleet_v2" ] && [ -L "$PROV_LINK_DIR/fleet_v2" ] && [ ! -e "$PROV_LINK_DIR/fleet" ]
-  refute_out 'POSÉ|retiré' <<<"$output"
-  # et le canal n'est JAMAIS reecrit sous deb : c'est le postinst du paquet qui l'a ecrit
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "deb" ]
-}
-
-@test "CANAL deb : quand dpkg -V parle SOUS le prefixe, le drift dit « réinstalle le paquet » — et ce qui est hors prefixe ne compte pas ici" {
-  decor_canal deb
-  dpkg_double "missing   $PROV_PREFIX/bin/lcars" '??5?????? c /etc/lcars/lcars.bashrc' "??5??????   $PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  module check
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"DRIFT"*"dpkg -V lcars : 2 fichier(s) altéré(s) ou manquant(s) sous $PROV_PREFIX (premier : $PROV_PREFIX/bin/lcars)"* ]]
-  [[ "$output" == *"apt install --reinstall lcars"* ]]
-  refute_out 'lcars\.bashrc' <<<"$output"
-  # sous source, la meme doublure ne parle pas : dpkg n'est consulte que sous deb
-  printf 'source\n' > "$LCARS_CHANNEL_FILE"
-  module check
-  refute_out 'dpkg' <<<"$output"
-}
-
-@test "CANAL deb : un paquet inconnu de dpkg, ou un dpkg absent, se DIT — jamais un vert par defaut" {
-  decor_canal deb
-  local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$d/dpkg"; chmod 0755 "$d/dpkg"; PATH="$d:$PATH" module check
-  [[ "$output" == *"DRIFT"*"paquet lcars est inconnu de dpkg"*"apt install lcars"* ]]
-  # ⚠ UN PATH « SANS dpkg » NE CONTIENT PAS /usr/bin — la machine qui joue ce temoin en a un. Le
-  # miroir garde tout ce que le module et la lib appellent, et rien qui s'appelle dpkg*.
-  local m="$BATS_TEST_TMPDIR/sans-dpkg"; mkdir -p "$m"
-  local f; for f in /usr/bin/*; do [[ -d "$f" || "${f##*/}" == dpkg* ]] || ln -sfn "$f" "$m/${f##*/}"; done
-  PATH="$m" module check
-  [[ "$output" == *"WARN"*"dpkg est absent d'ici"* ]]
-}
-
 @test "CANAL source/kit : le canal s'ecrit APRES la pose, et il dit KIT quand la release venait d'un paquet" {
   decor_canal aucun
   DECOR_MOD="$BATS_TEST_TMPDIR/mod.sh"; sed '/^case "${1:?usage/,$d' "$MOD" > "$DECOR_MOD"
@@ -214,24 +168,4 @@ module() { run bash "$MOD" "$1"; }   # le dispatch ENTIER : c'est lui qui lit le
   [ "$(grep -c 'poser_canal || verdict_apply' <<<"$corps")" -eq 3 ]
   # le seul ecrivain est poser_canal : aucun prov_channel_write nu dans apply
   refute grep -q 'prov_channel_write' <<<"$corps"
-}
-
-@test "CANAL illisible : rien n'est mesure ni pose — verdict rouge du verbe, avant tout geste" {
-  decor_canal snap
-  module apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"* ]]
-  [ ! -e "$MARQUEUR" ]
-  refute_out 'release posée|POSÉ' <<<"$output"
-  module check
-  [ "$status" -eq 2 ]
-}
-
-@test "CANAL : le dispatch lit le canal UNE fois et branche — poseur_is_dpkg, pas des « si deb » partout" {
-  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$MOD" | grep -vE '^\s*#')"
-  [ "$(grep -c 'prov_channel_or_verdict "\$1"' <<<"$disp")" -eq 1 ]
-  grep -q 'if poseur_is_dpkg; then check --dpkg; elif \[\[ "\$1" == "apply" \]\]; then apply; else check; fi' <<<"$disp"
-  # hors du dispatch, le module ne relit jamais le canal
-  local corps; corps="$(sed '/^case "${1:?usage/,$d' "$MOD" | grep -vE '^\s*#')"
-  refute grep -qE 'prov_channel( |$|\))|poseur_is_dpkg|PROV_CHANNEL\b' <<<"$corps"
 }

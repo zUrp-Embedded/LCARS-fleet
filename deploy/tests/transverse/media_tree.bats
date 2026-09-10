@@ -286,25 +286,3 @@ mod() { run bash "$MOD" "$1"; }
 }
 
 # ─── LE CANAL : SOUS `deb`, LA DOC ET LES MEDIAS SONT AU PAQUET (lot 2, 2026-09-05) ────────────
-
-@test "CANAL deb : apply ne pose NI les medias NI la doc — il MESURE, et npm n'est jamais appele" {
-  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"
-  mod apply
-  [ "$status" -eq 1 ]                                   # le verdict de CHECK : drift, rien n'est pose
-  [ ! -d "$LCARS_MEDIA_ROOT" ]
-  [ ! -s "$NPM_TRACE" ] || { echo "npm a ete appele sous deb :"; cat "$NPM_TRACE"; return 1; }
-  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars absent"* ]]
-  [[ "$output" == *"doc absente"* ]]
-  refute_out 'POSÉ' <<<"$output"
-  # et le meme decor SANS canal pose — la mesure n'a pas remplace la pose, elle ne vaut que sous deb
-  rm -f "$LCARS_CHANNEL_FILE"
-  mod apply
-  [ -d "$LCARS_MEDIA_ROOT/avatars" ]
-}
-
-@test "CANAL : le dispatch de 44 lit le canal UNE fois et branche apply sur check sous deb" {
-  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$MOD" | grep -vE '^\s*#')"
-  [ "$(grep -c 'prov_channel_or_verdict "\$1"' <<<"$disp")" -eq 1 ]
-  grep -q 'if poseur_is_dpkg; then check; elif \[\[ "\$1" == "apply" \]\]; then apply; else check; fi' <<<"$disp"
-  sed '/^case "${1:?usage/,$d' "$MOD" | grep -vE '^\s*#' | refute_out 'prov_channel|poseur_is_dpkg|PROV_CHANNEL'
-}

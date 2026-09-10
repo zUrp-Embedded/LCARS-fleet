@@ -303,11 +303,11 @@ kit() { # kit <nom> [--sans-sha256|--sha256-faux] -> un kit.tar.gz (racine lcars
 }
 ws() { run bash "$WS" up "$@"; }
 
-@test "--from : l usage l instruit — les trois formes, et le refus de melange" {
+@test "--from : l usage l instruit — les deux formes, et le refus de melange" {
   run bash "$SRC" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--from <kit.tar.gz>"* ]]
-  [[ "$output" == *".deb"* ]]
+  refute_out '\.deb' <<<"$output"
   [[ "$output" == *"sans --from"* ]]
   [[ "$output" == *"ne se pose pas sur un autre"* ]]
 }
@@ -323,45 +323,12 @@ ws() { run bash "$WS" up "$@"; }
   grep -q '^PROVISION:doctor --only 00-preflight' "$TRACE"    # le fait vient du preflight, pas d'une sonde a nous
 }
 
-@test "REFUS : un .deb ne se pose pas sur une machine installee par kit, ni un kit sur une machine deb — le meme canal, lui, continue" {
-  arbre channel=kit channel_tree=source
-  : > "$BATS_TEST_TMPDIR/x.deb"
-  ws --from "$BATS_TEST_TMPDIR/x.deb"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « kit »"*"poserait « deb »"* ]]
-  refute_out 'SUDO:|APT:' < "$TRACE"
-  arbre channel=deb channel_tree=source
-  local k; k="$(kit k1)"
-  ws --from "$k"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « deb »"*"poserait « kit »"*"apt install"* ]]
-  [ ! -d "$HOME/.lcars/kits" ]                                  # rien n'a ete detare
-  # le MEME canal est une mise a jour : deb sur deb passe a apt
-  ws --from "$BATS_TEST_TMPDIR/x.deb"
-  [ "$status" -eq 0 ]
-  grep -q '^SUDO:apt-get install -y --no-install-recommends ' "$TRACE"
-}
-
 @test "REFUS : un canal ILLISIBLE est un refus qui nomme le fichier — jamais « source par defaut »" {
   arbre channel=invalide channel_tree=source
   ws
   [ "$status" -eq 1 ]
   [[ "$output" == *"ILLISIBLE"*"/channel"* ]]
   refute_out 'SUDO:' < "$TRACE"
-}
-
-@test "DEB : --from <x.deb> [<y.deb>] = « sudo apt-get install -y --no-install-recommends <chemins absolus> », le seul sudo — provision n'est PAS appele par ce script" {
-  arbre channel=aucun channel_tree=source
-  mkdir -p "$BATS_TEST_TMPDIR/paquets"; : > "$BATS_TEST_TMPDIR/paquets/lcars_1.deb"; : > "$BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb"
-  ( cd "$BATS_TEST_TMPDIR/paquets" && bash "$WS" up --from lcars_1.deb --from lcars-tofu_1.deb ) > "$BATS_TEST_TMPDIR/out" 2>&1
-  [ "$?" -eq 0 ]
-  grep -qx "SUDO:apt-get install -y --no-install-recommends $BATS_TEST_TMPDIR/paquets/lcars_1.deb $BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb" "$TRACE"
-  refute grep -qE '^(SUDO:.*workstation|PROVISION:apply)' "$TRACE"
-  [[ "$(cat "$BATS_TEST_TMPDIR/out")" == *"postinst écrit le canal « deb »"* ]]
-  # un .deb introuvable est un refus, avant apt
-  ws --from "$BATS_TEST_TMPDIR/absent.deb"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"paquet introuvable"* ]]
 }
 
 @test "KIT : --from <kit.tar.gz> verifie le .sha256, detare SOUS L'HUMAIN dans ~/.lcars/kits/<nom>/, et escalade avec le REPERTOIRE du kit" {
@@ -411,7 +378,7 @@ ws() { run bash "$WS" up "$@"; }
   # un repertoire sans deploy/provision n'est rien de connu
   ws --from "$BATS_TEST_TMPDIR/detare"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ni un .deb, ni un kit.tar.gz, ni un kit détaré"* ]]
+  [[ "$output" == *"ni un kit.tar.gz, ni un kit détaré"* ]]
   # et un tar sans deploy/provision dedans
   mkdir -p "$BATS_TEST_TMPDIR/vide/x"; tar -czf "$BATS_TEST_TMPDIR/kits/vide.tar.gz" -C "$BATS_TEST_TMPDIR/vide" x
   ws --from "$BATS_TEST_TMPDIR/kits/vide.tar.gz"
@@ -419,15 +386,12 @@ ws() { run bash "$WS" up "$@"; }
   [[ "$output" == *"n'est pas un kit LCARS"* ]]
 }
 
-@test "MELANGE : un .deb et un kit dans le meme --from est un refus ; deux kits aussi" {
+@test "MELANGE : deux kits dans le meme --from est un refus — un seul arbre se pose" {
   arbre channel=aucun channel_tree=source
-  : > "$BATS_TEST_TMPDIR/x.deb"; local k; k="$(kit k3)"
-  ws --from "$BATS_TEST_TMPDIR/x.deb" --from "$k"
+  local k1 k2; k1="$(kit k3)"; k2="$(kit k4)"
+  ws --from "$k1" --from "$k2"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"un seul kit à la fois, et pas de .deb avec"* ]]
-  ws --from "$k" --from "$BATS_TEST_TMPDIR/x.deb"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"on ne mélange pas un .deb et un kit"* ]]
+  [[ "$output" == *"un seul kit à la fois"* ]]
   refute_out 'SUDO:|APT:' < "$TRACE"
 }
 
@@ -459,26 +423,6 @@ ws() { run bash "$WS" up "$@"; }
   [[ "$output" == *"uninstall [--yes]"* ]]
 }
 
-@test "uninstall sous « deb » : « sudo apt purge <paquet>* » (le nom vient de la LIB, jamais ecrit ici), --yes devient -y, tout autre drapeau est REFUSE" {
-  arbre channel=deb channel_tree=source
-  run bash "$WS" uninstall
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"canal « deb »"*"apt purge"*"postrm"* ]]
-  grep -qxF 'SUDO:apt purge lcars*' "$TRACE"
-  refute grep -q '^PROVISION:uninstall' "$TRACE"
-  : > "$TRACE"
-  run bash "$WS" uninstall --yes
-  grep -qxF 'SUDO:apt purge -y lcars*' "$TRACE"
-  : > "$TRACE"
-  run bash "$WS" uninstall --humans
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ne prend que --yes"*"--humans"* ]]
-  refute_out 'SUDO:|APT:' < "$TRACE"
-  # le nom du paquet est celui de la lib (PROV_DEB_PACKAGE), pas un litteral de ce script
-  local code; code="$(grep -vE '^\s*#' "$SRC")"
-  grep -q 'apt purge "${yes\[@\]}" "${PROV_DEB_PACKAGE}\*"' <<<"$code"
-}
-
 @test "uninstall sous kit/source/aucun : « provision uninstall <options> » — sans --yes AUCUNE escalade (le plan ne coute pas un mot de passe), avec --yes l escalade porte le verbe" {
   arbre channel=kit channel_tree=source
   run bash "$WS" uninstall --humans
@@ -505,11 +449,12 @@ ws() { run bash "$WS" up "$@"; }
   refute_out 'SUDO:|APT:|PROVISION:uninstall' < "$TRACE"
 }
 
-@test "CANAL inconnu (produit pose sans tampon) : un .deb est REFUSE avec le geste (kit ou uninstall), un kit passe" {
+@test "CANAL inconnu (produit pose sans tampon) : un kit passe, un checkout aussi — le rail reprend et ecrit le tampon" {
   local f="$BATS_TEST_TMPDIR/facts-inconnu"; printf 'channel=inconnu\nchannel_tree=kit\n' > "$f"
-  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange deb; echo PASSE"
-  [[ "$output" == *"FAIL:"*"SANS tampon"* ]]
-  refute_out 'PASSE' <<<"$output"
-  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange kit; echo PASSE"
-  [[ "$output" == *"PASSE"* ]]
+  local v
+  for v in kit source; do
+    run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange $v; echo PASSE"
+    [[ "$output" == *"PASSE"* ]] || { echo "inconnu refuse « $v » :"; echo "$output"; return 1; }
+    refute_out 'FAIL:' <<<"$output"
+  done
 }

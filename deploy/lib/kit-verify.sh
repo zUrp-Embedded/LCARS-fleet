@@ -4,25 +4,23 @@
 # STARDATE: 2026-09-08
 # STATUS: PROTO — le kit porte-t-il ce que les LISTES déclarent ? Le mur, avant que le tar ne ferme
 #
-# ─── POURQUOI CE FICHIER EXISTE, ET CE QU'IL REMPLACE ───────────────────────────────────────────
+# ─── POURQUOI CE FICHIER EXISTE, ET CE QU'IL A REMPLACÉ───────────────────────────────────────────
 #
-# `deploy/pkg/gen-contents.sh` dérivait les `contents:` nFPM de la table et du stage, et vérifiait
-# AU PASSAGE que les deux disaient la même chose : une ancre déclarée dont la source manque, un
-# `bin/<nom>` que `release.manifest` nomme sans qu'il soit là, un auxiliaire que `62-runtime-helpers`
-# embarque et qui n'existe pas. Chacun de ces cas y était un refus nommé.
+# La chaîne `.deb` (retirée le 2026-09-11) dérivait les `contents:` de ses paquets de la table et du
+# stage, et vérifiait AU PASSAGE que les deux disaient la même chose : une ancre déclarée dont la
+# source manque, un `bin/<nom>` que `release.manifest` nomme sans qu'il soit là, un auxiliaire que
+# `62-runtime-helpers` embarque et qui n'existe pas. Chacun de ces cas y était un refus nommé.
 #
-# La chaîne `.deb` disparaît (lot 2 du plan `terrain-controle`). Sans ce fichier, cette vérification
-# partirait avec elle, et PERSONNE ne referait le rapprochement : le tar serait scellé sur un kit
-# dont rien n'atteste qu'il porte ce que les listes promettent.
+# Sans ce fichier, cette vérification serait partie avec elle, et PERSONNE ne referait le
+# rapprochement : le tar serait scellé sur un kit dont rien n'atteste qu'il porte ce que les listes
+# promettent.
 #
-# ⚠ ET IL ARRIVE PLUS TÔT QU'ELLE. `pack.sh` scelle le tar à la ligne du `tar -czf` puis appelait
-# `gen-contents.sh` APRÈS : la vérification protégeait donc les huit `.deb` et JAMAIS le tar. Un kit
-# incomplet partait en archive, et seul le paquet Debian s'en apercevait — sur une chaîne qu'on
-# s'apprête à retirer. Ce mur-ci se joue AVANT le scellement : c'est le tar qui est refusé.
+# ⚠ ET IL ARRIVE PLUS TÔT QU'ELLE. `pack.sh` scelle le tar à la ligne du `tar -czf` et la chaîne
+# Debian tournait APRÈS : la vérification protégeait les `.deb` et JAMAIS le tar. Un kit incomplet
+# partait en archive. Ce mur-ci se joue AVANT le scellement : c'est le tar qui est refusé.
 #
-# ⚠ CE QU'IL NE FAIT PAS : le découpage en paquets (`pkg_of`), les modes nFPM, les conffiles. Tout
-# cela est du PACKAGING, et le packaging s'en va. Ici, une seule question : « ce que les listes
-# nomment est-il dans le kit ? »
+# Une seule question ici : « ce que les listes nomment est-il dans le kit ? » — pas de découpage en
+# paquets, pas de modes, pas de conffiles : c'était du packaging, et le packaging est parti.
 #
 # USAGE : . kit-verify.sh ; kit_verifie <stage>   → 0 si le kit est complet, 1 sinon (manques NOMMÉS)
 

@@ -103,13 +103,13 @@ jobs:
           [ "$rev" = "$GIT_SHA" ] || { echo "REFUS : label revision ($rev) != ref buildée ($GIT_SHA)"; exit 1; }
           echo "publié : $IMAGE (revision $rev)"
 
-  # ─── LA VERSION : tar, .deb, porte — la Release de la forge et le registre Debian (lot 5) ────────
+  # ─── LA VERSION : tar, porte — la Release de la forge (lot 5) ───────────────────────────────────
   # LE MÊME pack.sh que sur le poste ; « qui appuie » est la seule différence. Le job porte la
   # toolchain de gate.yml (BEAM épinglé par les planchers du provisionnement, bats, shellcheck, ruff)
   # parce que pack.sh COMMENCE par le gate : une version qui n'a pas passé le gate n'existe pas. Il
   # tourne à côté du job-image, pas après : les deux publient un objet différent du même tag, et
   # chacun porte son immutabilité (ADR 012 — le job-image sur le paquet container, pack.sh sur la
-  # Release). Le jeton est un secret du runner (PACK_TOKEN : write:package + write:repository), lu
+  # Release). Le jeton est un secret du runner (PACK_TOKEN : write:repository), lu
   # dans l'environnement par pack.sh — jamais en argv, jamais imprimé.
   release:
     runs-on: ubuntu-latest
@@ -124,7 +124,7 @@ jobs:
           set -eu
           got="$(git rev-parse HEAD)"
           [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA"; exit 1; }
-          [ -n "${{ secrets.PACK_TOKEN }}" ] || { echo 'REFUS : secrets.PACK_TOKEN absent (write:package + write:repository)'; exit 1; }
+          [ -n "${{ secrets.PACK_TOKEN }}" ] || { echo 'REFUS : secrets.PACK_TOKEN absent (write:repository)'; exit 1; }
           # le tag est celui de la ref : c'est lui que pack.sh lit (git describe --exact-match)
           [ "$(git describe --tags --exact-match)" = "${GITHUB_REF_NAME}" ] || { echo "REFUS : HEAD ne porte pas le tag ${GITHUB_REF_NAME}"; exit 1; }
 
@@ -167,7 +167,7 @@ jobs:
         working-directory: runtime
         run: mix deps.get
 
-      - name: pack.sh --publish (gate, release, tar, .deb, porte → Release + registre Debian)
+      - name: pack.sh --publish (gate, release, tar, porte → Release)
         env:
           LCARS_PACK_TOKEN: ${{ secrets.PACK_TOKEN }}
           LCARS_PACK_FORGE: ${{ github.server_url }}

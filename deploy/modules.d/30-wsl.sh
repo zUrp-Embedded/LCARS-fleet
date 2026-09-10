@@ -52,13 +52,11 @@ gpg_socket_mask_path() { # vide quand l'humain n'a pas de home — a l'appelant 
 }
 
 # ⚠ docker.io À CÔTÉ DE DOCKER DESKTOP : DEUX DAEMONS, ET LE SOCKET DE DESKTOP ÉCRASÉ. Mesuré sur
-# 2004 (2026-09-05) : `apt install lcars-demo` SEUL laisse apt prendre `docker.io` — la première
-# alternative de « docker.io | docker-ce | lcars-docker-desktop » — 23 paquets, et son postinst pose
+# 2004 (2026-09-05, du temps des .deb) : un `apt install` qui prend `docker.io` — 23 paquets — pose
 # SON /var/run/docker.sock par-dessus celui que Desktop tend au distro ; après purge il ne reste
 # aucun daemon joignable (00 FAIL, 48 FAIL, 61 muet, convergeur mort). Ce n'est pas un drift : le
-# poste est CASSÉ. Le rail ne l'enlève pas (sous deb apt tient le verrou, et un daemon ne se retire
-# pas à l'insu de l'opérateur) : il le DIT, avec le geste entier, et le verdict est rouge — le
-# postinst qui tourne pendant ce même `apt install` s'arrête là, au lieu de monter une forge sur un
+# poste est CASSÉ. Le rail ne l'enlève pas (un daemon ne se retire pas à l'insu de l'opérateur) :
+# il le DIT, avec le geste entier, et le verdict est rouge — au lieu de monter une forge sur un
 # daemon qui va disparaître. La condition est la présence de la CLI que Desktop monte dans le
 # distro (docker-endpoint.sh la nomme) : sans Desktop, docker.io est LE daemon, et c'est voulu.
 docker_io_next_to_desktop() { dpkg -s docker.io >/dev/null 2>&1 && [[ -x "$(_docker_mount_cli)" ]]; }
@@ -105,15 +103,10 @@ check() {
 
 apply() {
   if docker_io_next_to_desktop; then
-    # même verdict qu'au check : rien à poser tant que le daemon est double — et le dire ici arrête
-    # le postinst qui tourne pendant l'`apt install` fautif, avant de monter quoi que ce soit dessus
+    # même verdict qu'au check : rien à poser tant que le daemon est double
     p_fail "$DOCKER_IO_DESKTOP_GESTE"
   fi
-  if dpkg -s snapd >/dev/null 2>&1 && poseur_is_dpkg; then
-    # sous PAQUET, apt tient le verrou dpkg : purger snapd d'ici est un rc 100 (mesure 2004). On DIT
-    # le geste ; le reste du module (wsl.conf, socket gpg, credsStore) sont des fichiers, ils se posent.
-    p_drift "snapd présent (casse systemd --user sous WSL) — sous canal deb ce module ne l'enlève pas : « sudo apt remove --purge snapd », puis « sudo dpkg --configure -a »"
-  elif dpkg -s snapd >/dev/null 2>&1; then
+  if dpkg -s snapd >/dev/null 2>&1; then
     run_quiet env DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd || verdict_apply
     rm -rf /snap /var/snap /var/lib/snapd
     if dpkg -s snapd >/dev/null 2>&1; then
@@ -208,9 +201,7 @@ apply() {
 }
 
 case "${1:?usage: 30-wsl.sh <check|apply>}" in
-  check|apply)
-    # une seule lecture du canal, nue, au dispatch (prov_channel_or_verdict) — comme 60 et 62
-    prov_channel_or_verdict "$1"
-    if [[ "$1" == "apply" ]]; then apply; else check; fi ;;
+  check) check ;;
+  apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

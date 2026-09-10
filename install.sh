@@ -38,15 +38,13 @@
 #       --check         sonde read-only, rien n'est modifié.
 #       --dry-run       tout jusqu'au bilan, PLUS ce que la sortie ferait — les artefacts et leurs
 #                       sha256 attendus, la commande du rail — sans rien télécharger ni poser.
-#       --uninstall     relais au désinstalleur du canal en place (lu au préflight) : apt purge sous
-#                       « deb », « provision uninstall » sinon — par deploy/workstation uninstall,
-#                       qui a le sudo. Ce qui suit « -- » lui part (--yes, --humans, --annexes).
+#       --uninstall     relais au désinstalleur (« provision uninstall ») par deploy/workstation
+#                       uninstall, qui a le sudo. Ce qui suit « -- » lui part (--yes, --humans, --annexes).
 #                       Le conteneur, lui, se défait par deploy/container reset.
 #       --from-release  la provenance « release » même depuis un checkout : l'artefact de CETTE
 #                       version, téléchargé dans ~/.lcars/kits/<version>/ et VÉRIFIÉ — sha256 en
 #                       dur dans cette porte, signature minisign si l'outil est là (dit sinon).
 #                       C'est le mouvement SOURCE d'une porte pipée (curl … | bash).
-#       --tar           sous Debian/Ubuntu, le kit plutôt que les .deb de la version.
 #       --source [REF]  la provenance « source », pour qui veut compiler : git clone AU TAG de cette
 #                       porte, ou REF (une branche, un tag) — jamais main sans le dire. Remplace
 #                       --branch, qui est REFUSÉ.
@@ -132,7 +130,7 @@ sums() { cat <<'SUMS'              # @@DOOR_SUMS_BEGIN@@ « <sha256>  <artefact>
 SUMS
 }                                  # @@DOOR_SUMS_END@@
 SOURCE_REF="$LCARS_DOOR_VERSION"   # --source : git clone AU TAG de cette porte, jamais main sans le dire
-WANT_SOURCE=0; FROM_RELEASE=0; WANT_TAR=0; DRY_RUN=0; UNINSTALL=0
+WANT_SOURCE=0; FROM_RELEASE=0; DRY_RUN=0; UNINSTALL=0
 DOCTOR_MODE=0
 RAIL=""              # workstation | container — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
@@ -177,7 +175,6 @@ while [[ $# -gt 0 ]]; do
     --branch) echo "  --branch est retire : --source [<tag|branche>] clone AU TAG de cette porte ($LCARS_DOOR_VERSION), jamais main sans le dire." >&2
               exit 1 ;;
     --from-release) FROM_RELEASE=1; shift ;;
-    --tar)          WANT_TAR=1; shift ;;
     --dry-run)      DRY_RUN=1; shift ;;
     --uninstall)    UNINSTALL=1; shift ;;
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
@@ -201,7 +198,7 @@ while [[ $# -gt 0 ]]; do
         echo "  --workstation | --container   le rail · --bench  les annexes · --check  sonde read-only"
         echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
         echo "  --dry-run  ce que la sortie ferait, sans rien poser · --uninstall  relais au désinstalleur du canal"
-        echo "  --from-release  l'artefact de CETTE version, vérifié · --tar  le kit plutôt que les .deb"
+        echo "  --from-release  l'artefact de CETTE version, vérifié"
         echo "  --source [REF]  git clone AU TAG de cette porte (ou REF) · --repo URL  son dépôt"
       fi
       exit 0 ;;
@@ -236,44 +233,19 @@ sortie_dite() {
 # ─── LE MOUVEMENT SOURCE, PROVENANCE « release » — des definitions, rien ne s'execute ici ───────
 #
 # Pipee, cette porte n'a pas d'arbre, et le preflight vit dans le kit. Elle va donc chercher
-# l'artefact de SA version (40-PORTE § 2) : le kit TOUJOURS — c'est l'arbre (deploy/, provision,
-# workstation) — et sous Debian/Ubuntu les .deb du rail poste en plus, que le rail tend a apt.
-# os/arch se lisent ICI, avant tout arbre : c'est la seule lecture de la porte qui ne vient pas du
-# module, et elle ne sert qu'a NOMMER des fichiers — le preflight re-mesure les deux ensuite.
-door_os() { # debian | autre — /etc/os-release, ID ou ID_LIKE (LCARS_OS_RELEASE : couture de décor)
-  local ids; ids="$(sed -n 's/^ID=//p;s/^ID_LIKE=//p' "${LCARS_OS_RELEASE:-/etc/os-release}" 2>/dev/null | tr -d '"' | tr '\n' ' ' || true)"
-  case " $ids " in *" debian "*|*" ubuntu "*) echo debian ;; *) echo autre ;; esac
-}
+# l'artefact de SA version (40-PORTE § 2) : le kit — c'est l'arbre (deploy/, provision,
+# workstation). L'arch se lit ICI, avant tout arbre : c'est la seule lecture de la porte qui ne
+# vient pas du module, et elle ne sert qu'a NOMMER un fichier — le preflight la re-mesure ensuite.
 sum_of() { # sum_of <artefact> -> son sha256 dans la table ; rc 1 s'il n'y est pas
   local s n; while read -r s n; do [[ "$n" == "$1" ]] && { echo "$s"; return 0; }; done < <(sums); return 1
 }
-# assets_for <os> <arch> -> les NOMS des artefacts que cette machine prend, par convention (00-OBJECTIF
-# § 3 ; le lot 3 les produit, et c'est le SEUL endroit ou la porte les connait) :
-#   · `lcars-fleet-<v>-<otp>-<arch>.tar.gz`  le kit, en premier, toujours — l'otp se lit dans la table ;
-#   · sous Debian sans --tar, `<paquet>_<v>_<amd64|arm64|all>.deb` : lcars et lcars-workstation sont
-#     DUS (absents de la table = refus, jamais un silence), lcars-tofu vient s'il est empaquete, et
-#     --bench ajoute lcars-forge et lcars-bench (§ 3bis : un drapeau devient une liste de paquets).
+# assets_for <arch> -> le NOM de l'artefact que cette machine prend, par convention (00-OBJECTIF
+# § 3 ; pack.sh le produit, et c'est le SEUL endroit ou la porte le connait) :
+#   `lcars-fleet-<v>-<otp>-<arch>.tar.gz`  le kit — l'otp se lit dans la table, jamais compose.
 assets_for() {
-  local v="$LCARS_DOOR_VERSION" da="$2" s n p kit=""
-  case "$2" in x86_64) da=amd64 ;; aarch64) da=arm64 ;; esac
-  while read -r s n; do [[ "$n" == lcars-fleet-"$v"-*-"$2".tar.gz ]] && { kit="$n"; break; }; done < <(sums)
-  [[ -n "$kit" ]] || return 0          # sans kit, rien : il est l'arbre, les .deb ne se tendent pas sans lui
-  echo "$kit"
-  [[ "$1" == "debian" && "$WANT_TAR" -eq 0 ]] || return 0
-  # Les .deb portent la VERSION DEBIAN (mix.exs + revision, deploy/pkg) et l'arch de leur contenu
-  # (amd64, ou all pour un meta-paquet) : la porte ne compose pas ces noms, elle les LIT dans sa
-  # table — un paquet par prefixe, celui de cette arch ou `all`. Mesure 2003 (2026-09-05) : la porte
-  # composait `lcars_<tag>_amd64.deb`, la table portait `lcars_0.9.0-…_amd64.deb` — refus juste, nom faux.
-  # L'ORDRE EST CELUI DES DEPENDANCES (mesure 2003) : apt lit la ligne dans l'ordre, et pour
-  # `docker.io | docker-ce | lcars-docker-desktop` il prend docker.io si le paquet vide n'est pas
-  # ENCORE dans la transaction — sous WSL il tirait 23 paquets pour un daemon deja la. Docker Desktop
-  # d'abord, tofu avant la forge, le socle avant le rail.
-  local -a pk=(); grep -qi microsoft /proc/version 2>/dev/null && pk+=(lcars-docker-desktop_)
-  pk+=(lcars-tofu_ lcars_ lcars-workstation_); [[ "$WITH_BENCH" -eq 0 ]] || pk+=(lcars-forge_ lcars-bench_)
-  for p in "${pk[@]}"; do
-    n=""; while read -r s m; do case "$m" in "$p"*"_${da}.deb"|"$p"*"_all.deb") n="$m"; break ;; esac; done < <(sums)
-    if [[ -n "$n" ]]; then echo "$n"; elif [[ "$p" != lcars-tofu_ && "$p" != lcars-docker-desktop_ ]]; then echo "${p}?_${da}.deb"; fi
-  done
+  local v="$LCARS_DOOR_VERSION" s n
+  while read -r s n; do [[ "$n" == lcars-fleet-"$v"-*-"$1".tar.gz ]] && { echo "$n"; return 0; }; done < <(sums)
+  return 0
 }
 fetch() { # fetch <url> <fichier> — `--proto '=https' --tlsv1.2 -fsSL` (§ 07.6) ; http n'entre que par LCARS_DOOR_INSECURE_HTTP=1
   local proto='=https'; [[ -z "${LCARS_DOOR_INSECURE_HTTP:-}" ]] || proto='=http,https'
@@ -309,20 +281,19 @@ signature() {
     || { rm -f "$f" "$f.minisig"; echo "  ${R}signature de $a INVALIDE (minisign) — rien n'est posé.${N}"; return 1; }
   echo "  $a : signature vérifiée (minisign)"
 }
-# source_release — le mouvement SOURCE d'une porte pipee (ou --from-release) : les artefacts de SA
-# version dans ~/.lcars/kits/<version>/, verifies, le kit detare → c'est l'arbre. Pose DEBS.
+# source_release — le mouvement SOURCE d'une porte pipee (ou --from-release) : le kit de SA version
+# dans ~/.lcars/kits/<version>/, verifie, detare → c'est l'arbre.
 source_release() {
-  local os arch a s manque=0
-  os="$(door_os)"; arch="$(uname -m)"
-  mapfile -t ASSETS < <(assets_for "$os" "$arch")
+  local arch a s manque=0
+  arch="$(uname -m)"
+  mapfile -t ASSETS < <(assets_for "$arch")
   [[ -n "${ASSETS[0]:-}" ]] || {
     echo "  ${R}aucun kit $LCARS_DOOR_VERSION pour $arch dans la table de cette porte.${N}"
     echo "  Le gabarit du dépôt ne télécharge rien : lance-le depuis un checkout, ou prends la porte d'une release."
     exit 1
   }
-  DEBS=("${ASSETS[@]:1}")
   KITS_DIR="$HOME/.lcars/kits/$LCARS_DOOR_VERSION"
-  echo "  ${W}source${N} : release ${W}$LCARS_DOOR_VERSION${N} — $BASE → $KITS_DIR/  (os $os, arch $arch)"
+  echo "  ${W}source${N} : release ${W}$LCARS_DOOR_VERSION${N} — $BASE → $KITS_DIR/  (arch $arch)"
   for a in "${ASSETS[@]}"; do
     if s="$(sum_of "$a")"; then printf '    %-56s sha256 %s\n' "$a" "$s"; else printf '    %-56s sha256 ABSENT DE LA TABLE\n' "$a"; manque=1; fi
   done
@@ -332,7 +303,7 @@ source_release() {
     # un kit de CETTE version deja detare (une pose precedente) est un arbre : le preflight peut jouer
     if [[ ! -x "$KITS_DIR/lcars_install/deploy/provision" ]]; then
       echo "  Pas d'arbre ici — le préflight vit dans le kit. La sortie serait :"
-      printf '    deploy/workstation up'; for a in "${DEBS[@]}"; do printf ' --from %s' "$KITS_DIR/$a"; done; echo ""
+      echo "    deploy/workstation up"
       exit 0
     fi
     SCRIPT_DIR="$KITS_DIR/lcars_install"; return 0
@@ -388,7 +359,7 @@ EOF
 # clone appartenait a root, et `git` le lisait ensuite en « dubious ownership ». Ici il n'y a pas
 # d'escalade du tout — git (--source) ou curl (release) est le seul prerequis de cette etape.
 BASE="${LCARS_DOOR_BASE:-${DOOR_BASE:-${REPO_URL%.git}/releases/download/$LCARS_DOOR_VERSION}}"
-KITS_DIR=""; PROVENANCE=""; declare -a DEBS=() FROM=()
+KITS_DIR=""; PROVENANCE=""
 if [[ "$WANT_SOURCE" -eq 1 ]]; then
   command -v git >/dev/null 2>&1 || {
     echo "  ${R}git est absent, et c'est le seul prérequis de cette étape.${N}"
@@ -421,11 +392,10 @@ PROVISION="$SCRIPT_DIR/deploy/provision"
   echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est la source."
   exit 1
 }
-for _d in "${DEBS[@]}"; do FROM+=(--from "$KITS_DIR/$_d"); done
 case "$PROVENANCE" in
   source)  echo "  ${W}provenance${N} : source — $SCRIPT_DIR, HEAD $(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo inconnu)" ;;
   kit)     echo "  ${W}provenance${N} : kit — $SCRIPT_DIR" ;;
-  release) echo "  ${W}provenance${N} : release $LCARS_DOOR_VERSION — le kit dans $SCRIPT_DIR${FROM[*]:+, paquets : ${DEBS[*]}}" ;;
+  release) echo "  ${W}provenance${N} : release $LCARS_DOOR_VERSION — le kit dans $SCRIPT_DIR" ;;
 esac
 
 echo ""
@@ -465,13 +435,11 @@ remesurer() { # rejoue le préflight et recharge les faits — la SEULE façon d
 remesurer
 
 # ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT — la porte DIT, le rail FAIT ─────────
-# Le desinstalleur d'une machine est celui de son canal : les paquets sous « deb » (apt purge, le
-# postrm joue le desinstalleur), le journal et le manifeste (provision uninstall) sinon. La porte n'a
+# Le desinstalleur d'une machine est `provision uninstall` (le journal et le manifeste). La porte n'a
 # pas de sudo : `deploy/workstation uninstall` l'a, et lit le MEME fait. Ce qui suit `--` lui part.
 if [[ "$UNINSTALL" -eq 1 ]]; then
   case "$(fait channel)" in
     invalide) echo "  ${R}le canal d'installation de cette machine est ILLISIBLE — rien n'est fait ; le préflight nomme le fichier.${N}"; exit 1 ;;
-    deb)      _geste="apt purge des paquets de LCARS (le postrm joue le désinstalleur)" ;;
     *)        _geste="provision uninstall (journal + manifeste) — sans --yes, il n'imprime que son plan" ;;
   esac
   echo "  ${W}--uninstall${N} : canal « $(fait channel) » → $_geste"
@@ -565,16 +533,16 @@ fi
 [[ "$DOCKER_OK" -eq 1 ]] || CONTENEUR_POURQUOI="$(fait docker_why)"
 # ─── LE CANAL : UN CANAL NE SE POSE PAS SUR UN AUTRE — jamais en silence, jamais de conversion ───
 # `channel` = qui a posé cette machine (préflight). Ce que CETTE porte poserait est `channel_tree`
-# (ce que l'arbre écrirait : source, ou kit) — sauf quand la release a rendu des .deb : alors c'est
-# « deb », et un kit détaré sous une machine deb est une mise à jour par le même canal SEULEMENT
-# avec --tar. Le même canal est une mise à jour ; « aucun », une première pose. Le rail conteneur
-# ne pose rien sur la machine : le canal ne le concerne pas. Le geste nommé est celui du canal en place.
-VOULU="$(fait channel_tree)"; [[ "${#DEBS[@]}" -eq 0 ]] || VOULU=deb
+# (ce que l'arbre écrirait : source, ou kit). Le même canal est une mise à jour ; « aucun », une
+# première pose ; « inconnu » (posé avant le tampon), un kit ou une source le reprennent et écrivent
+# le tampon. Le rail conteneur ne pose rien sur la machine : le canal ne le concerne pas. Le geste
+# nommé est celui du canal en place.
+VOULU="$(fait channel_tree)"
 case "$(fait channel)" in
   ""|aucun|"$VOULU") ;;
-  inconnu) [[ "$VOULU" == deb ]] && POSTE_POURQUOI="cette machine porte un LCARS posé SANS tampon de canal (avant le tampon) — un paquet .deb ne se pose pas dessus : mets-la à jour par un kit (« --tar », qui écrit le tampon), ou « sudo deploy/provision uninstall --yes » d'abord" ;;
+  inconnu) ;;
   invalide) POSTE_POURQUOI="le canal d'installation de cette machine est ILLISIBLE (le préflight nomme le fichier) — corrige-le avant de poser quoi que ce soit" ;;
-  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord (bash install.sh --uninstall le relaie), ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte avec --tar · deb : deploy/workstation up --from <paquet>.deb, ou cette porte pipée sous Debian)" ;;
+  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord (bash install.sh --uninstall le relaie), ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte)" ;;
 esac
 
 bilan_menu() {
@@ -986,13 +954,12 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
 fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   # ce que le RAIL ferait, dit ici parce que c'est la question du drapeau — le sudo est la-bas
-  if [[ "${#FROM[@]}" -gt 0 ]]; then echo "  le rail ferait : sudo apt-get install -y --no-install-recommends ${DEBS[*]}  (canal deb — le postinst joue provision apply)"
-  else echo "  le rail ferait : sudo provision apply  (canal $VOULU)"; fi
-  sortie_dite "$WORKSTATION" up "${PASSTHRU[@]}" "${FROM[@]}"
+  echo "  le rail ferait : sudo provision apply  (canal $VOULU)"
+  sortie_dite "$WORKSTATION" up "${PASSTHRU[@]}"
 fi
 echo ""
 echo "  ${W}up${N} — la sortie qui suit est celle de deploy/workstation"
-exec "$WORKSTATION" up "${PASSTHRU[@]}" "${FROM[@]}"
+exec "$WORKSTATION" up "${PASSTHRU[@]}"
 
 }
 

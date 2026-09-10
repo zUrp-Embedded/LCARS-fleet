@@ -38,21 +38,6 @@ mod() { run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; source '$MOD'
   [[ "$output" == *"tmux"* ]]
 }
 
-@test "le socle est EXACTEMENT le Depends: de deploy/pkg/lcars.yaml — une liste, deux lecteurs" {
-  local want got
-  want="$(sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^\s*#|^PACKAGES=|^\)' | tr -s ' \n' '\n' | grep -v '^$' | sort)"
-  got="$(awk '/^depends:/{f=1;next} f && /^  - /{sub(/^  - /,""); print; next} f && !/^  /{f=0}' "$BATS_TEST_DIRNAME/../../pkg/lcars.yaml" | sort)"
-  [ -n "$want" ] && [ -n "$got" ]
-  [ "$want" = "$got" ] || { echo "10-packages :"; echo "$want"; echo "lcars.yaml :"; echo "$got"; return 1; }
-}
-
-@test "canal deb : apply n'appelle JAMAIS apt — un paquet absent se DIT avec le geste" {
-  printf 'deb\n' > "$LCARS_CHANNEL_FILE"
-  run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; bash '$SRC' apply"
-  [ ! -e "$BATS_TEST_TMPDIR/apt.trace" ] || { echo "apt a ete appele :"; cat "$BATS_TEST_TMPDIR/apt.trace"; return 1; }
-  [[ "$output" == *"DRIFT"*"sous canal deb"*"sudo apt install"* ]]
-}
-
 @test "canal kit/source : apply passe par apt (apt_ensure)" {
   printf 'kit\n' > "$LCARS_CHANNEL_FILE"
   run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; bash '$SRC' apply"

@@ -4,10 +4,10 @@
 # STARDATE: 2026-09-08
 # STATUS: bats tests for kit-verify.sh — le kit porte-t-il ce que les listes declarent ?
 #
-# CE QUE CES TEMOINS FERMENT. `gen-contents.sh` verifiait ce rapprochement AU PASSAGE, en derivant
-# les `contents:` nFPM ; la chaine `.deb` disparait (lot 2 du plan `terrain-controle`) et cette
-# verification serait partie avec elle. Pire : elle arrivait APRES le scellement du tar, donc elle
-# ne protegeait que les huit paquets. Ici elle protege le tar, et ces temoins la mesurent.
+# CE QUE CES TEMOINS FERMENT. La chaine `.deb` (retiree le 2026-09-11) verifiait ce rapprochement
+# AU PASSAGE, en derivant les `contents:` de ses paquets ; sans ce fichier la verification serait
+# partie avec elle. Pire : elle arrivait APRES le scellement du tar, donc elle ne protegeait que
+# les paquets. Ici elle protege le tar, et ces temoins la mesurent.
 #
 # ⚠ CHAQUE TEMOIN RETIRE UNE SEULE CHOSE D'UN DECOR COMPLET. C'est ce qui distingue un mur qui
 # MESURE d'un mur qui refuse tout : le premier temoin verifie qu'un kit complet PASSE, et chacun des

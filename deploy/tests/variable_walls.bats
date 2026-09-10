@@ -672,18 +672,10 @@ PYX
   # fleet.json      — ADMIN-OWNED. `Fleet.SystemConfig` le LIT au boot ; rien ne le cree, et c'est
   #                   voulu : le provisionnement ne pose pas les reglages de l'administrateur.
   # install.journal — l'artefact de l'INSTALLEUR lui-meme (`deploy/provision`), pas un etat converge.
-  # channel         — LE CANAL (`source | kit | deb`, 00-OBJECTIF § 6) : ecrit par QUI POSE — le
-  #                   postinst du .deb (lot 3, `deploy/pkg/lcars/postinst`) — et lu par le rail. Sa
-  #                   ligne dans la table arrive avec son lecteur cote lib (lot 2) ; ISO 2/2 refuserait
-  #                   aujourd'hui une declaration dont le poseur vit hors de son corpus (deploy/pkg).
-  # forge.conf      — ADMIN-OWNED, comme fleet.json : l'adresse d'une forge FOURNIE (`FORGE_BASE_URL=`),
-  #                   ecrite par l'operateur, lue par `deploy/pkg/lcars-workstation/postinst` quand
-  #                   lcars-forge n'est pas la. Aucun paquet ne le pose.
-  # provision.conf  — ADMIN-OWNED, meme classe : les clefs PROV_* que l'administrateur veut donner au
-  #                   provisionnement joue par un postinst (un paquet ne pose pas de question, il lit
-  #                   un fichier — lot 3c, banc 2004 : le port du deck sur un reseau WSL partage).
-  #                   Aucun paquet ne le pose.
-  local hors_manifeste="fleet.json install.journal channel forge.conf provision.conf"
+  # (`channel` a quitte cette liste : la table le declare, ecrit par `60-deploy`, lu par `prov_channel`.
+  #  `forge.conf` et `provision.conf` aussi : seuls les postinst des .deb les lisaient, et la chaine
+  #  .deb est partie le 2026-09-11 — plus aucun porteur ne les nomme.)
+  local hors_manifeste="fleet.json install.journal"
 
   : > "$BATS_TEST_TMPDIR/etcl"
   local f

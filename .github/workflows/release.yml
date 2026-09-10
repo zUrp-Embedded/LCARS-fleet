@@ -2,7 +2,7 @@
 # STATUS: PROTO — UN tag, UN run, TROIS produits : l'image, la Release et ses assets.
 #
 # POURQUOI UN SEUL RUN, ET PAS TROIS GESTES : republier trois choses séparément, c'est se donner
-# trois occasions de diverger — l'image d'un sha, la release d'un autre, les .deb d'un troisième.
+# trois occasions de diverger — l'image d'un sha, la release d'un autre, la porte d'un troisième.
 # C'est le défaut DPL-014, et il s'est déjà produit : l'image `lcars-fleet:2` du parc portait la
 # révision d'une branche de test jamais poussée, et le banc a refusé de semer un code dont il ne
 # retrouvait pas l'origine. Ici le tag décide, et tout en descend.
@@ -14,12 +14,10 @@
 #
 # LE GATE TOURNE ICI, ET C'EST `pack.sh` QUI LE JOUE — le même script qu'un poste de dev, pas une
 # réimplémentation. Il refuse un arbre modifié, joue `mix gate` puis les témoins de l'installeur,
-# bâtit la release Elixir, la doc, le tar, les huit .deb, génère la porte de CETTE version, et
+# bâtit la release Elixir, la doc, le tar, génère la porte de CETTE version, et
 # publie. Rien de tout cela n'est répété dans ce fichier : un workflow qui redit ce que fait le
 # script finit par dire autre chose.
 #
-# POURQUOI PAS DE REGISTRE APT : GitHub n'en a pas. `forge-publish.sh` le DIT au lieu de le
-# simuler, et les .deb restent tirables comme assets de la Release.
 name: Release
 
 on:
@@ -41,7 +39,7 @@ permissions:
 # l'absence de rouge se lit comme du vert. Mesuré ici même : le pas vendor a pendu 41 minutes avant
 # qu'on l'annule à la main. La même règle que les deux gates de `.gitea/workflows/gate.yml`, qui la
 # portent en `timeout(1)` ; ici la clé du job suffit, c'est GitHub qui exécute.
-# 90 min : `pack.sh` enchaîne `mix gate`, les 1447 témoins de l'installeur, npm, huit nfpm et la
+# 90 min : `pack.sh` enchaîne `mix gate`, les témoins de l'installeur, npm et la
 # montée des assets — mesuré à ~25 min sur un runner froid. Le triple du pire vert, jamais la médiane.
 #
 # ⚠ ET UNE CONCURRENCE PAR TAG. Deux runs du même tag publieraient deux fois : le second prend le

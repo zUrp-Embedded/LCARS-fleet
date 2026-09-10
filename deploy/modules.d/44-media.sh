@@ -395,11 +395,7 @@ apply() {
 }
 
 case "${1:?usage: 44-media.sh <check|apply>}" in
-  check|apply)
-    # ⚠ UNE LECTURE DU CANAL, ICI, ET UN SEUL BRANCHEMENT. Sous `deb` la doc et les medias sont
-    # possedes par le paquet `lcars` : ce module MESURE (check) et ne pose rien — le drift se
-    # converge par le paquet. Un canal illisible est un verdict rouge avant tout geste.
-    prov_channel_or_verdict "$1"
-    if poseur_is_dpkg; then check; elif [[ "$1" == "apply" ]]; then apply; else check; fi ;;
+  check) check ;;
+  apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac
