@@ -101,7 +101,7 @@ _run_apply() {
   grep -q 'elixir --short-version)" = "${ELIXIR_PIN}"' <<<"$build"
 }
 
-@test "APPLY pose le pin : zip telecharge et verifie, arbre sous le prefixe, quatre liens, journal posed_dir/posed_link" {
+@test "APPLY pose le pin : zip telecharge et verifie, arbre sous le prefixe, quatre liens" {
   FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"; _fake_zip "$PIN" "$FAKE_ZIP"; FAKE_SHA="$(sha256sum "$FAKE_ZIP" | cut -c1-64)"
   _run_apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -109,8 +109,6 @@ _run_apply() {
   local b; for b in elixir elixirc mix iex; do
     [ "$(readlink -f "$PROV_LINK_DIR/$b")" = "$(readlink -f "${LCARS_ELIXIR_PREFIX}${PIN}/bin/$b")" ] || { echo "lien $b faux"; return 1; }
   done
-  grep -q "posed_dir ${LCARS_ELIXIR_PREFIX}${PIN}" "$PROV_JOURNAL_ACC"
-  grep -q "posed_link $PROV_LINK_DIR/elixir" "$PROV_JOURNAL_ACC"
   [[ "$output" == *"Elixir $PIN (${LCARS_ELIXIR_PREFIX}${PIN} ; planchers $OTP / $MIN)"* ]]
   [ ! -e "$BATS_TEST_TMPDIR/opt/.elixir-${PIN}.zip" ]
   # erlang deja au plancher : apt n'est pas appele, le journal dit « trouve »

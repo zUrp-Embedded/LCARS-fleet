@@ -498,10 +498,10 @@ else
     # l'interieur lirait du vide et la fusion serait silencieusement sans effet. shellcheck le dit
     # (SC2094, « read and write the same file in the same pipeline ») et il a raison.
     _journal_ancien=""
-    # ⚠ LES CLEFS D'INVENTAIRE S'ENUMERENT, ELLES NE SE DEVINENT PAS A UN PREFIXE : `^posed_`
-    # matcherait `posed_at`, et la METADONNEE de la passe se fusionnerait avec les inventaires —
+    # ⚠ LES CLEFS D'INVENTAIRE S'ENUMERENT, ELLES NE SE DEVINENT PAS A UN PREFIXE : un motif large
+    # attraperait `posed_at`, et la METADONNEE de la passe se fusionnerait avec les inventaires —
     # le fichier porterait deux `posed_at`, dont un accumulant tous les horodatages.
-    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already|posed_(dir|file|link|group|docker|apt_repo)) ' "$JOURNAL_FILE" || true)"
+    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already) ' "$JOURNAL_FILE" || true)"
     if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
       {
         echo "# SOURCE: $JOURNAL_FILE"
@@ -528,12 +528,12 @@ else
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
         # ⚠ LE JOURNAL FUSIONNE AVEC LE PRECEDENT, IL NE LE REECRIT PAS. Le rail est CONCU pour etre
         # rejoue : a la seconde passe les paquets sont deja presents, donc `apt_installed` serait
-        # VIDE et l'uninstall ne retirerait plus rien. Le fichier dirait « ce qui a ete pose sur
+        # VIDE et l'audit perdrait ce que LCARS a pose. Le fichier dirait « ce qui a ete pose sur
         # cette machine » en decrivant la DERNIERE PASSE.
         #
         # ⚠ ET LA FUSION NE VAUT QUE POUR CE QUI EST CUMULATIF : `posed_at`, `source_rev`,
         # `substrate`, `prefix`, `modules` decrivent LA passe et s'ecrasent. Seuls les inventaires
-        # `apt_*` et `posed_*` s'additionnent.
+        # `apt_*` s'additionnent.
         { printf '%s\n' "$_journal_ancien"; cat "$PROV_JOURNAL_ACC"; } \
         | awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
              END { for (k in acc) {

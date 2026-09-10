@@ -571,7 +571,6 @@ write_atomic() {
   mv -f "$tmp" "$dest" || { rm -f "$tmp"; p_fail "write_atomic: mv final: $dest"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "$dest"
-  prov_journal_note posed_file "$dest"
 }
 
 # ─── ensure_mode <path> <mode> [owner:group] — converge mode/owner, verdict par re-stat ──────────
@@ -634,25 +633,18 @@ ensure_dir() {
   if [[ ! -d "$path" ]]; then
     mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "dir $path"
-    prov_journal_note posed_dir "$path"
   fi
   ensure_mode "$path" "$mode" "$owner"
 }
 
 # ─── prov_scaffold_dir / prov_promote_dir — L'ECHAFAUDAGE NE SE JOURNALISE PAS (M8) ─────────────
 #
-# ⚠ LE JOURNAL ACCUMULAIT DES CHEMINS D'ECHAFAUDAGE (relecture hostile du 2026-09-04). Les poseurs
-# atomiques (`16-node`, `44-media`, `62-runtime-helpers`) creaient leur `.partial` / `.new` par
-# `ensure_dir`, qui note `posed_dir` : le journal du banc portait `/opt/node-24.20.0.partial`,
-# `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin,…}.new` — des repertoires qui
-# n'existent plus une seconde apres la bascule. Ceux qu'aucun ancetre declare n'absorbe remontent
-# dans la ligne « hors table » du plan d'uninstall : du bruit sur la seule ligne dont tout
-# l'interet est que l'operateur ne peut PAS en deviner le contenu.
-#
-# Un repertoire d'echafaudage se note APRES la bascule, SOUS SON NOM FINAL — et c'est la primitive
-# qui bascule qui le note, pour que « ce qu'une primitive pose, elle le note » reste vrai (le
-# temoin du journal interdit `prov_journal_note posed_dir` dans un module). Ni compteur ni « POSÉ »
-# ici : la bascule est le geste que le module annonce lui-meme.
+# ⚠ NE DE LA RELECTURE HOSTILE DU 2026-09-04 : les poseurs atomiques (`16-node`, `44-media`,
+# `62-runtime-helpers`) creaient leur `.partial` / `.new` par `ensure_dir`, et le journal du
+# desinstalleur d'alors portait ces repertoires qui n'existent plus une seconde apres la bascule.
+# Les inventaires du journal sont partis avec lui (2026-09-11) ; la paire scaffold/promote reste,
+# parce qu'un echafaudage n'est pas un objet pose : il se cree hors compteur, et la bascule est le
+# geste que le module annonce lui-meme. Ni compteur ni « POSÉ » ici.
 prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
   local path="$1" mode="$2" owner="${3:-}"
   prov_refuse_symlink_path "$path" || return 1
@@ -667,7 +659,6 @@ prov_promote_dir() { # prov_promote_dir <echafaudage> <final> — bascule (rm -r
   [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir: destination vide ou racine"; return 1; }
   rm -rf -- "$to"
   mv -- "$from" "$to" || { p_fail "prov_promote_dir: bascule refusée: $from → $to"; return 1; }
-  prov_journal_note posed_dir "$to"
   return 0
 }
 
@@ -775,7 +766,6 @@ ensure_group() {
     run_quiet groupadd "${args[@]}" "$grp" || return 1
     getent group "$grp" >/dev/null || { p_fail "groupe $grp absent après groupadd"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp${gid:+ (gid $gid, table)}"
-    prov_journal_note posed_group "$grp"
     return 0
   fi
   local cur; cur="$(getent group "$grp" | cut -d: -f3)"
@@ -830,7 +820,6 @@ ensure_symlink() {
   ln -sfn "$target" "$link" || { p_fail "ensure_symlink: ln refusé: $link"; return 1; }
   [[ "$(readlink "$link")" == "$target" ]] || { p_fail "ensure_symlink: cible inattendue après ln: $link"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$link → $target"
-  prov_journal_note posed_link "$link"
 }
 
 # ─── ensure_managed_block <file> <marker> <mode> [owner:group] — bloc géré BEGIN/END ─────────────
@@ -889,9 +878,9 @@ fetch_verify() {
 # il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est muette et
 # rend 0 — un appelant n'a jamais à savoir si le journal existe.
 #
-# ⚠ LA NOTE VIT DANS LES PRIMITIVES, JAMAIS DANS LES MODULES : la poser dans chaque module
-# demanderait à chaque site d'appel de S'EN SOUVENIR, et un poseur qui doit se souvenir oubliera.
-# Ici, le prochain poseur est tracé par construction, sans qu'aucun module ne change.
+# Deux clefs depuis le 2026-09-11 : `apt_installed` (ce que `apt_ensure` a posé) et `apt_already`
+# (ce qu'il a trouvé), que `provision audit` relit. Les inventaires `posed_*` que les primitives
+# notaient servaient au désinstalleur, parti avec la chaîne .deb.
 prov_journal_note() { # prov_journal_note <clef> <valeur…>
   [[ -n "${PROV_JOURNAL_ACC:-}" ]] || return 0
   [[ "$#" -ge 2 ]] || return 0

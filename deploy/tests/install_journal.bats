@@ -12,7 +12,7 @@
 #
 # ⚠ ELLE N'EST CONNAISSABLE QU'AVANT L'INSTALL. Une seconde plus tard, `dpkg -s` repond « present »
 # pour les deux listes et plus rien ne distingue ce que LCARS a pose de ce que l'operateur avait
-# deja. Un uninstall qui l'ignore retire des paquets de quelqu'un d'autre — pire que d'en laisser.
+# deja. Un audit qui l'ignore compterait comme notres des paquets de quelqu'un d'autre.
 #
 # ⚠ ET LE CANAL EST UN FICHIER, PARCE QUE LES MODULES SONT DES PROCESSUS. Le runner ouvre
 # l'accumulateur avant la boucle, les modules y notent, il le scelle apres. Meme lecon que
@@ -275,51 +275,12 @@ SH
 # metadonnees et deux colonnes apt. Zero repertoire, zero fichier, zero lien, zero groupe —
 # `prov_journal_note` avait DEUX appelants, tous deux dans `apt_ensure`.
 
-@test "PRIMITIVES : \`ensure_dir\` note ce qu'il pose, sans qu'un module y pense" {
-  lib "PROV_JOURNAL_ACC='$ACC'; ensure_dir '$BATS_TEST_TMPDIR/n1' 0755 >/dev/null"
-  grep -qE "^posed_dir $BATS_TEST_TMPDIR/n1\$" "$ACC"
-}
-
-@test "PRIMITIVES : un repertoire DEJA la ne se note pas — on note la POSE, pas la passe" {
-  mkdir -p "$BATS_TEST_TMPDIR/n2"
-  lib "PROV_JOURNAL_ACC='$ACC'; ensure_dir '$BATS_TEST_TMPDIR/n2' 0755 >/dev/null"
-  refute grep -q 'posed_dir' "$ACC"
-}
-
-@test "PRIMITIVES : \`write_atomic\` et \`ensure_symlink\` notent aussi" {
-  lib "PROV_JOURNAL_ACC='$ACC'; echo x | write_atomic '$BATS_TEST_TMPDIR/f1' 0644 >/dev/null"
-  lib "PROV_JOURNAL_ACC='$ACC'; ensure_symlink '$BATS_TEST_TMPDIR/l1' '$BATS_TEST_TMPDIR/f1' >/dev/null"
-  grep -qE "^posed_file $BATS_TEST_TMPDIR/f1\$" "$ACC"
-  grep -qE "^posed_link $BATS_TEST_TMPDIR/l1\$" "$ACC"
-}
-
-@test "PRIMITIVES : la note est dans la LIB, pas dans les modules" {
-  # ⚠ LA PROPRIETE, ET PAS LE NOMBRE. La poser dans chaque module demanderait a 53 sites d'appel de
-  # s'en souvenir — un poseur qui doit se souvenir oubliera, et c'est exactement ce qui s'est passe
-  # pour les deux modules qui sondent avant `apt_ensure`.
-  #
-  # ⚠ ET LA PROPRIETE N'EST PAS « AUCUN MODULE NE NOTE ». Premiere version ecrite comme ca — elle est
-  # tombee des qu'un module a du noter un nom de projet compose, que RIEN dans la lib ne peut
-  # connaitre : il se derive de `PROV_FORGE_PROJECT`, surchargeable au drapeau. La regle juste est
-  # plus etroite : ce qu'une PRIMITIVE pose, elle le note elle-meme ; un module ne note que ce
-  # qu'aucune primitive ne voit passer.
-  local n_lib
-  n_lib="$(grep -c 'prov_journal_note ' "$LIB")"
-  [ "$n_lib" -ge 6 ]
-  # Les quatre clefs du systeme de fichiers sont l'affaire de la lib, et d'elle seule.
-  local cle
-  for cle in posed_dir posed_file posed_link posed_group; do
-    grep -q "prov_journal_note $cle" "$LIB" || { echo "la lib ne note pas $cle"; return 1; }
-    refute grep -qh "prov_journal_note $cle" "$BATS_TEST_DIRNAME"/../modules.d/*.sh
-  done
-}
-
 # ─── LA FUSION ──────────────────────────────────────────────────────────────────────────────────
 #
 # MESURE DU 2026-08-28, banc vierge, DEUX passes d'apply :
 #   passe 1 installe 16 paquets  -> apt_installed = les 16
 #   passe 2 les trouve presents  -> apt_already = 16, apt_installed = VIDE
-#   uninstall                    -> « rien a retirer », et les 16 restent
+#   (le desinstalleur d'alors   -> « rien a retirer », et les 16 restaient)
 # `jq`, `socat`, `erlang`, `ttyd` etaient la en `ii`, poses par LCARS, invisibles au verbe qui devait
 # les retirer. Le rail est CONCU pour etre rejoue : ce n'est pas un cas de bord, c'est le nominal.
 
@@ -337,13 +298,11 @@ SH
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
   local body; body="$(code "$RUNNER")"
-  # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
-  # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
-  # ⚠ LA LISTE DES CLEFS CUMULATIVES GRANDIT, ET LE MOTIF DOIT SUIVRE SANS SE RELACHER.
-  # `posed_apt_repo` s'y est ajoute (le depot docker pose sous condition). Le nommer une a une reste
-  # le point : `^posed_` attraperait `posed_at`, la METADONNEE de la passe, qui se ferait fusionner
-  # et ferait porter DEUX dates au journal.
-  grep -qE 'apt_installed\|apt_already\|posed_\(dir\|file\|link\|group\|docker\|apt_repo\)' <<<"$body"
+  # ⚠ LES CLEFS SE NOMMENT. Un motif large attraperait `posed_at`, qui est la METADONNEE de la
+  # passe : elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur
+  # banc. (Les inventaires `posed_*` du desinstalleur sont partis le 2026-09-11 ; restent les deux
+  # clefs apt, que l'audit relit.)
+  grep -qE 'apt_installed\|apt_already' <<<"$body"
   refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
 }
 
@@ -376,12 +335,10 @@ SH
 # a la bascule. Ceux qu'aucun ancetre declare n'absorbe remontaient dans la ligne « hors table »
 # du plan d'uninstall, la seule dont l'operateur ne peut pas deviner le contenu.
 
-@test "M8 : prov_scaffold_dir ne note RIEN ; prov_promote_dir note le nom FINAL, jamais l'echafaudage" {
+@test "M8 : prov_scaffold_dir puis prov_promote_dir — l'echafaudage disparait, le final est la" {
   lib "PROV_JOURNAL_ACC='$ACC'; prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
   [ -f "$BATS_TEST_TMPDIR/final/x" ] && [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
-  grep -qE "^posed_dir $BATS_TEST_TMPDIR/final\$" "$ACC"
-  refute grep -q 'partial' "$ACC"
 }
 
 @test "M8 : prov_promote_dir REMPLACE un final existant (la bascule est un rm -rf + mv, comme avant)" {

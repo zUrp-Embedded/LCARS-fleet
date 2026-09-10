@@ -502,19 +502,19 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   [[ "$output" == *"RESTAURÉ"* ]]
 }
 
-@test "depot docker : ce qui EXISTAIT DEJA n'entre jamais au journal comme POSE par nous" {
+@test "depot docker : ce qui EXISTAIT DEJA est RESTAURE tel quel sur echec, jamais efface" {
   mkdir -p "$BATS_TEST_TMPDIR/keyrings"
   echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$BATS_TEST_TMPDIR/docker.list"
   echo "CLE-DE-L-OPERATEUR"          > "$BATS_TEST_TMPDIR/keyrings/docker.asc"
 
   repo_echec
-  # `posed_apt_repo` autorise `uninstall` a retirer. L'y inscrire ferait detruire, des mois plus
-  # tard et par un autre geste, le depot docker d'un operateur.
-  refute grep -q 'posed_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
-  grep -q 'found_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
+  # le depot de l'operateur est remis tel quel — un objet que LCARS n'a jamais pose ne s'efface pas
+  [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
+  [[ "$output" == *"RESTAURÉ"* ]]
 }
 
-@test "depot docker : ce que NOUS avons posé est bien retiré sur echec, et le journal le dit" {
+@test "depot docker : ce que NOUS avons posé est bien retiré sur echec, et le refus le dit" {
   # Le sens qui manquait : sans lui, un module qui ne toucherait plus JAMAIS a rien passerait les
   # deux temoins ci-dessus en ayant cesse de nettoyer derriere lui.
   rm -f "$BATS_TEST_TMPDIR/docker.list" "$BATS_TEST_TMPDIR/keyrings/docker.asc"
@@ -522,6 +522,5 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   [ "$status" -ne 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
   [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
-  grep -q 'posed_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
   [[ "$output" == *"n'était là avant cette passe"* ]]
 }

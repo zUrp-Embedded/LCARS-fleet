@@ -107,9 +107,6 @@ ensure_docker_repo() {
     sauve="$(mktemp -d)"
     [[ "$list_avant" -eq 1 ]] && cp -p "$DOCKER_LIST"    "$sauve/list" 2>/dev/null
     [[ "$key_avant"  -eq 1 ]] && cp -p "$DOCKER_KEYRING" "$sauve/key"  2>/dev/null
-    prov_journal_note found_apt_repo \
-      "$([[ "$list_avant" -eq 1 ]] && echo "$DOCKER_LIST")" \
-      "$([[ "$key_avant"  -eq 1 ]] && echo "$DOCKER_KEYRING")"
   fi
 
   ensure_dir "$(dirname "$DOCKER_KEYRING")" 0755 root:root || return 1
@@ -123,17 +120,9 @@ ensure_docker_repo() {
 deb [arch=$arch signed-by=$DOCKER_KEYRING] $url $codename stable
 EOF
   # `update` ciblé : la source vient d'apparaître, `apt_ensure` ne trouverait rien sans lui.
-  # LE JOURNAL TRANCHE, ET C'EST LE MECANISME QUI EXISTE DEJA POUR EXACTEMENT CETTE QUESTION. Il ne
-  # decrit pas ce qu'on a le DROIT de poser (c'est le metier de la table) mais ce que CETTE passe A
-  # pose sur CETTE machine. `uninstall` ne retire donc que ce que le journal revendique — jamais le
-  # depot d'un operateur qui l'avait avant nous.
-  # ⚠ SEULEMENT CE QU'ON A CREE. Le journal autorise le retrait ; y inscrire un fichier qui etait
-  # deja la ferait retirer par `uninstall` le depot docker d'un operateur — un objet que LCARS n'a
-  # jamais pose et dont d'autres choses sur sa machine dependent.
-  local -a poses=()
-  [[ "$list_avant" -eq 0 ]] && poses+=("$DOCKER_LIST")
-  [[ "$key_avant"  -eq 0 ]] && poses+=("$DOCKER_KEYRING")
-  [[ "${#poses[@]}" -gt 0 ]] && prov_journal_note posed_apt_repo "${poses[@]}"
+  # ⚠ SEULEMENT CE QU'ON A CREE SE RETIRE SUR ECHEC (ci-dessous) : `list_avant` / `key_avant`, lus
+  # AVANT d'ecrire, distinguent le depot docker d'un operateur — un objet que LCARS n'a jamais pose
+  # et dont d'autres choses sur sa machine dependent — de ce que cette passe vient de poser.
 
   if ! run_quiet apt-get update -o Dir::Etc::sourcelist="$DOCKER_LIST" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
     # Le rollback rend la machine a son etat d'AVANT — ce qui veut dire restaurer ce qui existait et

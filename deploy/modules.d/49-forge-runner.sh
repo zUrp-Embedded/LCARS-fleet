@@ -70,7 +70,6 @@ converge_ci_runner() {
     rm -f "$out"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
-    prov_journal_note posed_docker "$PROV_RUNNER_PROJECT"
     return 0
   fi
 

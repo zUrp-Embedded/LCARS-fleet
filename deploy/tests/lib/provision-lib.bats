@@ -243,15 +243,13 @@ STUB
 
 }
 
-@test "ensure_group : la branche qui CREE — groupadd joue, le compteur bouge, le journal note" {
+@test "ensure_group : la branche qui CREE — groupadd joue, le compteur bouge" {
   _bin_groupes
   module_sh '
     PATH="$BIN_GROUPES:$PATH"
-    export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
     ensure_group groupe-decor 4242
     [ "$PROV_CHANGED" -eq 1 ]
     grep -q "GROUPADD:-g 4242 groupe-decor" "$BATS_TEST_TMPDIR/trace"
-    grep -q "posed_group groupe-decor" "$PROV_JOURNAL_ACC"
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
