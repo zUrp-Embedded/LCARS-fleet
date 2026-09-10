@@ -42,10 +42,16 @@ setup() {
 bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
 # Tout fichier des deux arbres qui NOMME le binaire de release — hors temoins, doc, et ce que mix
 # ou node deposent. `runtime/tmp` bouge sous les pieds des suites ExUnit, on ne le lit pas.
+# ⚠ `pack.sh` EST EXCLU PAR SON NOM, ET C'EST LE SEUL : il ne POSE ni ne JOUE la release, il la
+# BATIT et l'EMBARQUE — c'est lui qui passe a `kit_verifie` le chemin `_build/prod/rel/…` que la
+# lib du kit refuse de connaitre (`kit_verify.bats`). Tant qu'il vivait a la racine du depot, ce
+# balayage ne le lisait pas ; deplace sous `deploy/` (2026-09-09), il entrait dans un compte qui
+# exige zero. L'exclusion est nominative pour rougir le jour ou il change de nom.
 porteurs_de_release() {
   grep -rlE '/rel/lcars_fleet/bin/lcars_fleet' "$R/deploy" "$R/runtime" \
     --exclude-dir=tests --exclude-dir=test --exclude-dir=_build --exclude-dir=deps \
-    --exclude-dir=node_modules --exclude-dir=tmp --exclude-dir=.git --exclude='*.md' 2>/dev/null | sort
+    --exclude-dir=node_modules --exclude-dir=tmp --exclude-dir=.git --exclude='*.md' \
+    --exclude=pack.sh 2>/dev/null | sort
 }
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {

@@ -122,7 +122,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
 }
 
 @test "pack.sh : la porte de la version est generee APRES les artefacts, dans un tiroir PAR VERSION (dist/<tag>) par liens durs" {
-  local pk="$BATS_TEST_DIRNAME/../../../pack.sh"
+  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
   local body; body="$(grep -vE '^\s*#' "$pk")"
   grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
   grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"

@@ -189,7 +189,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # batissait sur place. Depuis que `16-node` lit le discriminant, une cible qui installe un paquet
   # n'a plus node — donc si le paquet n'apporte pas la doc, PERSONNE ne la batira jamais, et le
   # drift « doc du deck absente » ne se converge par aucun geste.
-  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  local pack="$BATS_TEST_DIRNAME/../pack.sh"
   [ -f "$pack" ]
   grep -q 'npm run build' "$pack"                       # il la BATIT
   grep -qE 'cp -a "\$SITE_SRC/dist"' "$pack"            # et il l EMPORTE
@@ -212,7 +212,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 @test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
   # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
   # un fichier de plus dans le tar, et un drift de plus sur la cible.
-  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  local pack="$BATS_TEST_DIRNAME/../pack.sh"
   local media="$DEPLOY/modules.d/44-media.sh"
   grep -qE '^SITE_SRC="\$\{LCARS_SITE_SRC:-assets/github\.io\}"' "$pack"
   grep -qE 'SITE_SRC="\$\{LCARS_SITE_SRC:-\$\(repo_root\)/assets/github\.io\}"' "$media"
@@ -270,7 +270,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # Mesure : le tar portait la doc que la section neuve venait de batir — donc l arbre avait bien
   # tourne — ET la version HEAD des modules, sans le correctif qui va avec. `44-media` est mort sur
   # « npm absent », le message exact que ce correctif absent devait empecher.
-  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  local pack="$BATS_TEST_DIRNAME/../pack.sh"
   grep -qE 'git diff --quiet HEAD .*\|\| die' "$pack"
   # et le refus arrive AVANT le gate : echouer apres sept minutes de compilation est une punition
   local n_refus n_gate
@@ -285,7 +285,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 @test "PACK : le tampon ne porte plus « +local » — il decrit le PAQUET, pas l arbre" {
   # Il mentait dans les DEUX sens : il disait « arbre modifie » d un paquet qui ne contenait AUCUNE
   # de ces modifications. `+local` garde tout son sens dans `prov_source_rev`, qui decrit un arbre.
-  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  local pack="$BATS_TEST_DIRNAME/../pack.sh"
   grep -vE '^\s*#' "$pack" | refute_out '\+local'
   grep -q 'rev-parse --short=8 HEAD' "$pack"
 }
@@ -321,7 +321,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 @test "PACK : la release est assemblee dans un repertoire VIDE, et le paquet est refuse si elle porte plus d'une lib ou un tampon qui n'est pas HEAD" {
   # 2026-09-05, banc 2003 : le tar portait une lib/lcars_fleet-0.1.0 de passe5 a cote de la 0.9.0 —
   # `mix release --overwrite` ne nettoie pas. Le pack vide d'abord, puis atteste : une lib, sha = HEAD.
-  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  local pack="$BATS_TEST_DIRNAME/../pack.sh"
   [ -f "$pack" ]
   local body; body="$(grep -vE '^\s*#' "$pack")"
   grep -qE '^rm -rf runtime/_build/prod/rel/lcars_fleet$' <<<"$body"

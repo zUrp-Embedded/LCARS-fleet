@@ -349,7 +349,7 @@ tar_line() { dpkg-deb --fsys-tarfile "$(deb_of "$1")" | tar -tv | grep -E " \./$
   grep -q 'emit_dir "$ROOT/deck-static" 0755' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
   grep -q 'deck-static/\$(basename "\$_f")" 0644' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
   # pack.sh prepare le tiroir AVANT gen-contents
-  local pk="$BATS_TEST_DIRNAME/../../../pack.sh"
+  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
   local l_prep l_gen; l_prep="$(grep -n 'prep-deck-static.sh --tools' "$pk" | head -1 | cut -d: -f1)"; l_gen="$(grep -n 'gen-contents.sh --stage' "$pk" | head -1 | cut -d: -f1)"
   [ -n "$l_prep" ] && [ -n "$l_gen" ] && [ "$l_prep" -lt "$l_gen" ]
 }

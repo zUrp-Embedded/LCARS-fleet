@@ -49,7 +49,7 @@ setup() {
   grep -q '^NFPM_VERSION=2.47.0$' "$PKG/prep-nfpm.sh"
   grep -q '^NFPM_SHA256_X86_64=0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783$' "$PKG/prep-nfpm.sh"
   grep -q '^NFPM_SHA256_ARM64=1c0f5f2999b9a974bfb04fdb0cc3306096de530ac5dbb25d739cc5f5219c919c$' "$PKG/prep-nfpm.sh"
-  grep -vE '^\s*#' "$REPO/pack.sh" | refute_out '[0-9a-f]{40}'
+  grep -vE '^\s*#' "$REPO/deploy/pack.sh" | refute_out '[0-9a-f]{40}'
 }
 
 stage_decor() { # un stage minimal pour prep-tofu : le module 46 (les pins), la table, la recette
@@ -112,12 +112,12 @@ TOFU
 }
 
 @test "pack.sh : --no-deb est instruit, et la chaine deb suit l'ordre nfpm -> tofu -> contents -> nfpm package, APRES le tar" {
-  local u; u="$(sed -n '/^# USAGE/,/^# EXIT/p' "$REPO/pack.sh")"
+  local u; u="$(sed -n '/^# USAGE/,/^# EXIT/p' "$REPO/deploy/pack.sh")"
   grep -q -- '--no-deb' <<<"$u"
   grep -q -- '--no-push' <<<"$u"
   grep -q -- '--publish' <<<"$u"
   grep -q 'LCARS_DEB_RELEASE' <<<"$u"
-  local code; code="$(grep -vE '^\s*#' "$REPO/pack.sh")"
+  local code; code="$(grep -vE '^\s*#' "$REPO/deploy/pack.sh")"
   local n_tar n_nfpm n_tofu n_gen n_pkg n_push
   n_tar="$(grep -n 'tar -czf "\$OUT"' <<<"$code" | head -1 | cut -d: -f1)"
   n_nfpm="$(grep -n 'prep-nfpm.sh' <<<"$code" | head -1 | cut -d: -f1)"
@@ -137,7 +137,7 @@ TOFU
 }
 
 @test "pack.sh --publish (lot 5) : rien ne sort sans le drapeau, l'etage vient APRES la porte, le geste est celui de forge-publish.sh, le jeton n'est jamais imprime" {
-  local code; code="$(grep -vE '^\s*#' "$REPO/pack.sh")"
+  local code; code="$(grep -vE '^\s*#' "$REPO/deploy/pack.sh")"
   # le defaut ne publie pas ; --no-push est l'ancien nom du defaut, encore accepte
   grep -qE '^PUBLISH=0$' <<<"$code"
   grep -qE '^\s+--publish\)\s+PUBLISH=1' <<<"$code"

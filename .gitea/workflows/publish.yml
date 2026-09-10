@@ -174,7 +174,7 @@ jobs:
           LCARS_PACK_OWNER: ${{ github.repository_owner }}
           LCARS_PACK_REPO: ${{ github.event.repository.name }}
           LCARS_PACK_DIR: ${{ runner.temp }}/lcars-packs
-        run: timeout --signal=TERM --kill-after=60s 50m ./pack.sh --publish
+        run: timeout --signal=TERM --kill-after=60s 50m ./deploy/pack.sh --publish
 
       - name: Preuve — la release du tag est sur la forge, publiée, avec sa porte
         env:

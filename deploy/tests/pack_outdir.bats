@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/transverse/pack_outdir.bats
+# SOURCE: deploy/tests/pack_outdir.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for pack.sh — le paquet atterrit HORS de l'arbre, et le chemin est derive
@@ -24,10 +24,10 @@
 #   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
 # shellcheck disable=SC2013,SC2034
 
-load ../refute
+load refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../pack.sh"
+  SUT="$BATS_TEST_DIRNAME/../pack.sh"
   [ -f "$SUT" ] || skip "pack.sh introuvable depuis $BATS_TEST_DIRNAME"
   # les deux lignes qui decident du chemin, telles qu'elles sont dans le fichier
   RESOLVE="$(grep -E '^(PACK_DIR|OUT)=' "$SUT")"

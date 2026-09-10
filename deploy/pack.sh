@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: pack.sh
+# SOURCE: deploy/pack.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
 # STATUS: le paquet — gate, release, tar, et pousse sur la forge
@@ -39,11 +39,11 @@
 # `deploy/pkg/`. L'invariant tient pour les deux : les bits du `.deb` sont ceux du stage attesté.
 # `--no-deb` s'en passe (un poste sans réseau : nFPM et tofu se téléchargent).
 #
-# USAGE : ./pack.sh            gate + release + DOC + tar + .deb (+ push si une forge est configurée)
-#         ./pack.sh            construit et mesure : le tar, les .deb, la porte — dans le tiroir, rien n'en sort
-#         ./pack.sh --publish  … puis la Release de la forge (tout le tiroir) et le registre Debian (les .deb)
-#         ./pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
-#         ./pack.sh --no-deb   pas de paquets Debian (ni nFPM ni tofu ne sont téléchargés)
+# USAGE : deploy/pack.sh            gate + release + DOC + tar + .deb (+ push si une forge est configurée)
+#         deploy/pack.sh            construit et mesure : le tar, les .deb, la porte — dans le tiroir, rien n'en sort
+#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir) et le registre Debian (les .deb)
+#         deploy/pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
+#         deploy/pack.sh --no-deb   pas de paquets Debian (ni nFPM ni tofu ne sont téléchargés)
 # ENV   : LCARS_PACK_DIR  où poser le tar et les .deb (défaut : `lcars-packs` à côté du checkout) ;
 #                         les outils du pack vivent dans `$LCARS_PACK_DIR/.tools`, jamais dans l'arbre
 #         LCARS_DEB_RELEASE la révision Debian des .deb (défaut : `AAAAMMJJ.HHMM+g<sha>` — la version
@@ -56,7 +56,10 @@
 # EXIT  : 0 le paquet est là · 1 gate rouge, build KO, doc KO, ou push refusé
 
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")"
+# ⚠ CE SCRIPT VIT SOUS `deploy/` ET TRAVAILLE DEPUIS LA RACINE DU DEPOT : tout ce qui suit
+# (`deploy/gate.sh`, `runtime/_build`, `assets/github.io`, `git archive`, le tiroir a cote du
+# clone) est relatif a elle, pas au dossier du script.
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 PUBLISH=0
 DEB=1
@@ -267,7 +270,7 @@ cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable apres l
 # APRES cette ligne : la verification protegeait les huit `.deb` et JAMAIS le tar. Un kit incomplet
 # partait donc en archive, et seule la chaine Debian s'en apercevait. Elle s'en va (lot 2 du plan
 # `terrain-controle`) ; la verification, elle, remonte ici et change de bord.
-# shellcheck source=deploy/lib/kit-verify.sh
+# shellcheck source=lib/kit-verify.sh
 . deploy/lib/kit-verify.sh
 kit_verifie "$STAGE/$ROOT" "runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
   || die "kit incomplet — rien n'a ete scelle (les manques sont nommes ci-dessus)"
@@ -392,7 +395,7 @@ say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 DEBIAN_DIST="${LCARS_PACK_DEBIAN_DIST:-$( . /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-stable}")}"
 
 say "publication → $FORGE/$OWNER/$REPO, release $TAG, registre Debian $DEBIAN_DIST/main…"
-# shellcheck source=deploy/lib/forge-publish.sh
+# shellcheck source=lib/forge-publish.sh
 . deploy/lib/forge-publish.sh
 FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" "$DEBIAN_DIST" main \
   || die "publication interrompue — voir ci-dessus"

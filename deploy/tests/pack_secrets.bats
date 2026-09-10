@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/transverse/pack_secrets.bats
+# SOURCE: deploy/tests/pack_secrets.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for pack.sh — ce que le packageur DIT d'un secret, jamais le secret
 #
 # CE QUE CE CORPUS FERME, ET IL EST NE D'UNE FUITE REELLE. Mesure du 2026-08-25, sortie de
-# `./pack.sh` sur une machine sans remote http :
+# `deploy/pack.sh` sur une machine sans remote http :
 #
 #     pack: forge ou jeton indeterminables — le tar est dans dist/, pousse-le a la main si tu veux
 #     pack:   forge : <aucun remote origin http> · jeton : trouve9172f605fa091018d1857f1d776d5a39…
@@ -24,10 +24,10 @@
 # mesurerait l'orthographe d'une correction, pas son effet : la prochaine forme fautive s'ecrira
 # autrement. On extrait le bloc, on lui donne un jeton sentinelle, et on regarde ce qui sort.
 
-load ../refute
+load refute
 
 setup() {
-  PACK="$BATS_TEST_DIRNAME/../../../pack.sh"
+  PACK="$BATS_TEST_DIRNAME/../pack.sh"
   [ -f "$PACK" ]
   # Un jeton qui ne ressemble a rien d'autre : s'il apparait dans la sortie, il vient de la ligne.
   SENTINEL="s3cr3t-de-forge-a-ne-jamais-imprimer"

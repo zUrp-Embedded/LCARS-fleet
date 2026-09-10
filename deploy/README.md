@@ -235,7 +235,7 @@ hors policy Debian, et l'assume dans son `control`. Une machine, un canal : le `
 `.deb` par-dessus une install kit ou source (`/etc/lcars/channel`), et dit le geste.
 
 **Ce qu'il faut sur le poste qui packe** : le réseau (nFPM et tofu se téléchargent, épinglés ; le
-miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en passe. La version des
+miroir de providers se bâtit), et rien d'autre — `deploy/pack.sh --no-deb` s'en passe. La version des
 `.deb` est celle de `runtime/mix.exs` ; la révision (`AAAAMMJJ.HHMM+g<sha>`) est le tampon du tiroir.
 
 ### Ce qu'un paquet lit, et ce qu'il laisse
@@ -256,8 +256,8 @@ miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en pa
   (conffiles de ttyd, outils d'util-linux-extra) : `apt autoremove --purge`.
 ### Publier une version — `pack.sh --publish` (lot 5 du chantier release)
 
-`./pack.sh` construit et mesure : le gate, le tar, les `.deb`, la porte de la version — tout dans
-le tiroir `dist/<tag>/`, rien n'en sort. **`./pack.sh --publish`** joue le même run puis un étage de
+`deploy/pack.sh` construit et mesure : le gate, le tar, les `.deb`, la porte de la version — tout dans
+le tiroir `dist/<tag>/`, rien n'en sort. **`deploy/pack.sh --publish`** joue le même run puis un étage de
 plus (`deploy/lib/forge-publish.sh`) :
 
 1. **la Release de la forge**, sur le tag, avec TOUT le tiroir en assets (tar, `.deb`, `.sha256`,

@@ -994,9 +994,9 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # ⚠ LE TITRE DIT « EN CODE », LE BALAYAGE NE LISAIT QUE QUATRE RACINES. Mesuré par relecture
   # hostile le 2026-09-08 : des appâts posés dans `runtime/lib/` (toute l'application Elixir livrée),
   # `runtime/config/` (`runtime.exs`, l'endroit le plus naturel pour un hôte par défaut) et à la
-  # racine (`install.sh`, `pack.sh`) laissaient ce mur VERT. Un mur dont le périmètre est plus
+  # racine (`install.sh`, et `pack.sh` qui y vivait encore) laissaient ce mur VERT. Un mur dont le périmètre est plus
   # étroit que sa promesse ne protège pas : il certifie.
-  local racines=("$REPO/deploy" "$REPO/install.sh" "$REPO/pack.sh" \
+  local racines=("$REPO/deploy" "$REPO/install.sh" \
                  "$REPO/runtime/lib" "$REPO/runtime/config" "$REPO/runtime/priv" \
                  "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
                  "$REPO/catalogues")

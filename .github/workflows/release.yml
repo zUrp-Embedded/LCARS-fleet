@@ -195,7 +195,7 @@ jobs:
           set -euo pipefail
           export LCARS_PACK_REPO="${GITHUB_REPOSITORY#*/}"
           export LCARS_PACK_DIR="${RUNNER_TEMP}/lcars-packs"
-          ./pack.sh --publish
+          ./deploy/pack.sh --publish
 
       - name: Ce que le registre porte maintenant
         run: docker buildx imagetools inspect "${{ steps.noms.outputs.image }}:${{ steps.noms.outputs.tag }}"
