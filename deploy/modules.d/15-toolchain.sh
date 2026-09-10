@@ -210,9 +210,9 @@ apply() {
   if ! command -v erl >/dev/null || [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]]; then
     apt_ensure erlang || verdict_apply
   else
-    # ⚠ LE CAS OÙ L'ON NE FAIT RIEN LAISSE QUAND MÊME UNE TRACE : trouvé, donc jamais repris par uninstall.
+    # ⚠ LE CAS OÙ L'ON NE FAIT RIEN LAISSE QUAND MÊME UNE TRACE : trouvé, pas posé — le journal le distingue.
     prov_journal_note apt_already erlang
-    p_ok "Erlang/OTP déjà au plancher — trouvé, donc jamais repris par « uninstall »"
+    p_ok "Erlang/OTP déjà au plancher — trouvé, pas posé"
   fi
 
   # Elixir : le zip officiel du pin, vérifié, sous /opt/elixir-<pin>, quatre liens dans PROV_LINK_DIR.

@@ -38,9 +38,6 @@
 #       --check         sonde read-only, rien n'est modifié.
 #       --dry-run       tout jusqu'au bilan, PLUS ce que la sortie ferait — les artefacts et leurs
 #                       sha256 attendus, la commande du rail — sans rien télécharger ni poser.
-#       --uninstall     relais au désinstalleur (« provision uninstall ») par deploy/workstation
-#                       uninstall, qui a le sudo. Ce qui suit « -- » lui part (--yes, --humans, --annexes).
-#                       Le conteneur, lui, se défait par deploy/container reset.
 #       --from-release  la provenance « release » même depuis un checkout : l'artefact de CETTE
 #                       version, téléchargé dans ~/.lcars/kits/<version>/ et VÉRIFIÉ — sha256 en
 #                       dur dans cette porte, signature minisign si l'outil est là (dit sinon).
@@ -130,7 +127,7 @@ sums() { cat <<'SUMS'              # @@DOOR_SUMS_BEGIN@@ « <sha256>  <artefact>
 SUMS
 }                                  # @@DOOR_SUMS_END@@
 SOURCE_REF="$LCARS_DOOR_VERSION"   # --source : git clone AU TAG de cette porte, jamais main sans le dire
-WANT_SOURCE=0; FROM_RELEASE=0; DRY_RUN=0; UNINSTALL=0
+WANT_SOURCE=0; FROM_RELEASE=0; DRY_RUN=0
 DOCTOR_MODE=0
 RAIL=""              # workstation | container — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
@@ -176,7 +173,6 @@ while [[ $# -gt 0 ]]; do
               exit 1 ;;
     --from-release) FROM_RELEASE=1; shift ;;
     --dry-run)      DRY_RUN=1; shift ;;
-    --uninstall)    UNINSTALL=1; shift ;;
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
     # ports et nom d'instance : validés par `provision`, jamais ici
@@ -197,7 +193,7 @@ while [[ $# -gt 0 ]]; do
         echo "install.sh $LCARS_DOOR_VERSION — LA porte d'entrée."
         echo "  --workstation | --container   le rail · --bench  les annexes · --check  sonde read-only"
         echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
-        echo "  --dry-run  ce que la sortie ferait, sans rien poser · --uninstall  relais au désinstalleur du canal"
+        echo "  --dry-run  ce que la sortie ferait, sans rien poser"
         echo "  --from-release  l'artefact de CETTE version, vérifié"
         echo "  --source [REF]  git clone AU TAG de cette porte (ou REF) · --repo URL  son dépôt"
       fi
@@ -434,20 +430,6 @@ remesurer() { # rejoue le préflight et recharge les faits — la SEULE façon d
 }
 remesurer
 
-# ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT — la porte DIT, le rail FAIT ─────────
-# Le desinstalleur d'une machine est `provision uninstall` (le journal et le manifeste). La porte n'a
-# pas de sudo : `deploy/workstation uninstall` l'a, et lit le MEME fait. Ce qui suit `--` lui part.
-if [[ "$UNINSTALL" -eq 1 ]]; then
-  case "$(fait channel)" in
-    invalide) echo "  ${R}le canal d'installation de cette machine est ILLISIBLE — rien n'est fait ; le préflight nomme le fichier.${N}"; exit 1 ;;
-    *)        _geste="provision uninstall (journal + manifeste) — sans --yes, il n'imprime que son plan" ;;
-  esac
-  echo "  ${W}--uninstall${N} : canal « $(fait channel) » → $_geste"
-  [[ -x "$SCRIPT_DIR/deploy/workstation" ]] || { echo "  ${R}deploy/workstation introuvable — ce geste exige l'arbre complet.${N}"; exit 1; }
-  [[ "$DRY_RUN" -eq 0 ]] || sortie_dite "$SCRIPT_DIR/deploy/workstation" uninstall "${DELEGATE_ARGS[@]}"
-  exec "$SCRIPT_DIR/deploy/workstation" uninstall "${DELEGATE_ARGS[@]}"
-fi
-
 for t in git curl; do
   if [[ "$(fait "$t")" == "oui" ]]; then say_ok "$t"; else say_miss "$t — apt install $t"; fi
 done
@@ -520,13 +502,10 @@ if [[ "$SUBSTRATE" == "wsl" ]]; then
 elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
   :
 elif [[ "$SUBSTRATE" == "linux" ]]; then
-  # ⚠ « N'A PAS DE DESINSTALLEUR » ETAIT FAUX, ET LE MEME FICHIER DISAIT L'INVERSE 98 LIGNES PLUS
-  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
-  #
-  # Ce que ce refus doit dire est plus precis, et c'est ce qui aide a decider : le rail POSSEDE la
-  # machine, il sait REPRENDRE ce qu'il a pose, et il ne sait pas RESTAURER ce qu'il a modifie
-  # avant lui. La nuance est le vrai contenu de l'avertissement — pas une absence d'outil.
-  POSTE_POURQUOI="linux natif non déclaré. Ce rail est réservé à WSL2, ou à une machine DÉDIÉE qui l'assume : il possède /etc et /opt/lcars. « provision uninstall » reprend ce qu'il a posé, mais un retour à l'identique demande un instantané. Pour l'assumer : LCARS_ALLOW_ANY_HOST=1"
+  # Ce que ce refus doit dire, et c'est ce qui aide a decider : le rail POSSEDE la machine (/etc,
+  # /opt/lcars, des paquets, un groupe) et RIEN ne le retire — il n'y a pas de desinstalleur, un
+  # terrain se refait (⚖ 2026-09-11). C'est le vrai contenu de l'avertissement.
+  POSTE_POURQUOI="linux natif non déclaré. Ce rail est réservé à WSL2, ou à une machine DÉDIÉE qui l'assume : il possède /etc et /opt/lcars, et rien ne le retire — un terrain se refait. Pour l'assumer : LCARS_ALLOW_ANY_HOST=1"
 else
   POSTE_POURQUOI="substrat « $SUBSTRATE ». Ce rail est réservé à WSL2, ou à une machine DÉDIÉE déclarée telle par LCARS_ALLOW_ANY_HOST=1"
 fi
@@ -542,7 +521,7 @@ case "$(fait channel)" in
   ""|aucun|"$VOULU") ;;
   inconnu) ;;
   invalide) POSTE_POURQUOI="le canal d'installation de cette machine est ILLISIBLE (le préflight nomme le fichier) — corrige-le avant de poser quoi que ce soit" ;;
-  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord (bash install.sh --uninstall le relaie), ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte)" ;;
+  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte), ou refais le terrain — il est jetable" ;;
 esac
 
 bilan_menu() {
@@ -647,8 +626,8 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo ""
       echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
       echo "  Ce rail va posséder cette machine : paquets, groupe système, /opt/lcars."
-      echo "  « provision uninstall » retire ce que le journal a noté ; le reste, la convergence"
-      echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
+      echo "  Rien ne le retire : ce rail n'a pas de désinstalleur, un terrain se refait."
+      echo "  Et rien de LCARS n'est mesuré sur ce substrat."
     else
       echo ""
       echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en conteneur :"

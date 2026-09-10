@@ -2,7 +2,7 @@
 # STARDATE: (posée par /push-github)
 # STATUS: data, not code — CE QUE LE PROVISIONNEMENT A LE DROIT DE POSER SUR UNE MACHINE.
 # ⚠ IL N'A AUCUN LECTEUR AU MOMENT OU IL EST POSE, ET C'EST VOULU. Trois gestes le liront
-# (`20-groups` pour les GID, `25-directories` pour sa table, `provision uninstall` a l'envers) ;
+# (`20-groups` pour les GID, `25-directories` pour sa table) ;
 # aucun ne peut etre ecrit avant lui. C'etait le trou d'ordre du corpus d'alice : trois gestes
 # bloques sur un objet que personne n'avait la charge de creer.
 #
@@ -90,7 +90,7 @@ anchor    /opt/lcars/.helpers-revision                 0644  root:root          
 # ⚠ POSES PAR L'IMAGE, DONC VRAIS SUR DOCKER — `any`, et c'etait `wsl+linux` (lot 14, 2026-09-05).
 # Le stage runtime du Dockerfile pose `tofu/providers` (`mkdir -p`, puis `chmod -R a+rX`) et les
 # quatre `share/*` (`COPY`, puis `chmod -R a+rX`) : la table disait « n'existe pas sur docker » de
-# six repertoires que l'image LIVRE, et l'audit comme l'uninstall lisaient ce mensonge.
+# six repertoires que l'image LIVRE, et l'audit (comme l'uninstall d'alors) lisait ce mensonge.
 # `image_layout.bats` tient la liste de ce que l'image pose ET que cette table connait : chaque
 # ligne en est declaree pour docker.
 dir       /opt/lcars/tofu                              0755  root:root           any
@@ -118,7 +118,7 @@ anchor:cond /opt/lcars/share/.doc-revision             0644  root:root          
 dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
 # ⚠ IL ETAIT EN `/home/catalogues` JUSQU'AU 2026-09-01. Le cache des catalogues installes est du
 # materiel operator-facing, et il vivait la ou l'operateur regarde deja. Ce placement etait paye par
-# cette ligne meme — `dir` et pas `preserve`, donc un uninstall le retire. La promesse est devenue
+# cette ligne meme — `dir` et pas `preserve`, donc pas de l'etat. La promesse est devenue
 # intenable le jour ou `/home` est sorti du perimetre ENTIER : un cache pose sous `/home` serait cree
 # par chaque install et retire par aucune. La SSoT est `Fleet.Layout.@installed_catalogues_root`.
 dir       /opt/lcars/var/catalogues                    0750  root:fleet          any

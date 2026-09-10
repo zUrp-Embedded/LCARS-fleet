@@ -213,7 +213,7 @@ setup() {
 @test "machine dédiée: AVEC le drapeau, la porte laisse passer et DIT ce que ça prend" {
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
   [[ "$output" == *"déclaré DÉDIÉ"* ]]
-  [[ "$output" == *"provision uninstall"* ]]
+  [[ "$output" == *"Rien ne le retire"* ]]
   # Elle est passée : le bandeau du rail poste est imprimé, donc le garde de substrat est franchi.
   [[ "$output" == *"RAIL POSTE"* ]]
   [[ "$output" != *"réservé à WSL2"* ]]
@@ -1097,12 +1097,12 @@ _porte_canal() { # _porte_canal <channel> <channel_tree> <args de la porte…>
   run bash "$fake/install.sh" "$@" < /dev/null
 }
 
-@test "CANAL : --workstation sur une machine installee par kit est REFUSE, et le refus nomme le geste — uninstall, ou le meme canal" {
+@test "CANAL : --workstation sur une machine installee par kit est REFUSE, et le refus nomme le geste — le meme canal, ou refaire le terrain" {
   _porte_canal kit source --workstation
   [ "$status" -ne 0 ]
   [[ "$output" == *"Ce rail n'est pas possible ici"* ]]
   [[ "$output" == *"installée par « kit »"*"poserait « source »"* ]]
-  [[ "$output" == *"provision uninstall --yes"* ]]
+  [[ "$output" == *"refais le terrain"* ]]
   [[ "$output" == *"--from <kit.tar.gz>"* ]]
   refute_out 'RAIL POSTE' <<<"$output"          # rien apres le refus : ni banniere, ni delegue
 }
@@ -1450,44 +1450,6 @@ DOUBLE
   run bash "$fake/install.sh" --dry-run < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bilan"*"--dry-run sans rail"* ]]
-}
-
-# ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT ────────────────────────────────────
-#
-# La porte n'a pas de sudo, et le desinstalleur en a besoin : elle DIT quel desinstalleur est celui
-# de cette machine (deb → apt purge ; kit/source → provision uninstall), et relaie a
-# `deploy/workstation uninstall`, qui lit le meme fait et escalade. L'espion mesure l'argv.
-
-_porte_uninstall() { # _porte_uninstall <channel> <args…> -> run la porte sur un arbre dont workstation est un espion
-  local ch="$1"; shift
-  local fake; fake="$(_fake_tree 0 0)"
-  _faux_provision "$fake" "${_faits_sains[@]}" "channel=$ch" "channel_tree=source"
-  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$fake/deploy/workstation"; chmod 0755 "$fake/deploy/workstation"
-  run bash "$fake/install.sh" "$@" < /dev/null
-}
-
-@test "--uninstall relaie a « deploy/workstation uninstall » : provision uninstall dit, et ce qui suit -- lui part" {
-  _porte_uninstall kit --uninstall -- --yes --humans
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"canal « kit » → provision uninstall"*"sans --yes"* ]]
-  [[ "$output" == *"WORKSTATION:uninstall --yes --humans"* ]]
-  refute_out 'Bilan|RAIL POSTE|1 ou 2' <<<"$output"       # pas de menu : on ne pose rien
-  _porte_uninstall aucun --uninstall
-  [[ "$output" == *"canal « aucun » → provision uninstall"*"WORKSTATION:uninstall"* ]]
-  # la porte ne fait pas le sudo elle-meme : aucun apt, aucun provision, aucun sudo dans son code
-  local code; code="$(grep -vE '^\s*#' "$SRC")"
-  refute grep -qE 'exec (sudo|apt|"\$PROVISION" uninstall)' <<<"$code"
-}
-
-@test "--uninstall sur un canal ILLISIBLE refuse ; avec --dry-run, il nomme le relais et ne l'appelle pas" {
-  _porte_uninstall invalide --uninstall
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ILLISIBLE"* ]]
-  refute_out 'WORKSTATION:' <<<"$output"
-  _porte_uninstall kit --uninstall --dry-run -- --yes
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"canal « kit »"*"La sortie serait :"*"deploy/workstation uninstall --yes"* ]]
-  refute_out 'WORKSTATION:' <<<"$output"
 }
 
 @test "CANAL inconnu (produit pose SANS tampon, avant le tampon) : un kit ou une source continuent, et ecrivent le tampon" {

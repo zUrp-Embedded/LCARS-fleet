@@ -149,7 +149,7 @@ STUB
 }
 
 @test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {
-  grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|uninstall\|audit\)' "$RUNNER"
+  grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|audit\)' "$RUNNER"
 }
 
 # ─── relecture hostile 2026-09-04 : un joker EN TETE couvrait l'univers ─────────────────────────

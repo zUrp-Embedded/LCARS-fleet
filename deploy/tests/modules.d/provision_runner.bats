@@ -60,8 +60,8 @@ setup() {
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
-  # lot 10 : uninstall et audit vivent a cote du runner, sources par lui
-  cp "$SRC/lib/provision-uninstall.sh" "$SRC/lib/provision-audit.sh" "$SANDBOX/lib/"
+  # lot 10 : audit vit a cote du runner, source par lui
+  cp "$SRC/lib/provision-audit.sh" "$SANDBOX/lib/"
   cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
@@ -122,9 +122,9 @@ EOF
   [[ "$output" == *"container/init.sh"* ]]
   refute grep -q "60-deploystub" "$RUN_LOG"
 }
-@test "docker n'est PAS un rail : uninstall y est refuse aussi — doctor et list restent" {
+@test "docker n'est PAS un rail : update y est refuse aussi — doctor et list restent" {
   stub_module 60-deploystub "wsl linux" any human
-  run "$SANDBOX/provision" uninstall --substrate docker
+  run "$SANDBOX/provision" update --substrate docker
   [ "$status" -eq 1 ]
   [[ "$output" == *"docker n'est pas un rail"* ]]
   run "$SANDBOX/provision" doctor --substrate docker

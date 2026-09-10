@@ -336,8 +336,7 @@ SH
 @test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
-  # lot 10 : la desinstallation vit dans lib/provision-uninstall.sh, sourcee par le runner
-  local body; body="$(code "$RUNNER"; code "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh")"
+  local body; body="$(code "$RUNNER")"
   # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
   # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
   # ⚠ LA LISTE DES CLEFS CUMULATIVES GRANDIT, ET LE MOTIF DOIT SUIVRE SANS SE RELACHER.
@@ -345,9 +344,6 @@ SH
   # le point : `^posed_` attraperait `posed_at`, la METADONNEE de la passe, qui se ferait fusionner
   # et ferait porter DEUX dates au journal.
   grep -qE 'apt_installed\|apt_already\|posed_\(dir\|file\|link\|group\|docker\|apt_repo\)' <<<"$body"
-  # et la clef neuve est bien cumulative des DEUX cotes : notee a la pose, relue au plan
-  grep -q 'posed_apt_repo' <<<"$body" \
-    || { echo "le runner ne lit plus posed_apt_repo — le depot pose sous condition redevient orphelin"; return 1; }
   refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
 }
 

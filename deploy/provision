@@ -46,29 +46,6 @@
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
-#   provision uninstall [--substrate S] [--humans] [--annexes] [--keep-state] [--dpkg PAQUET] [--yes]
-#
-# ⚠ `uninstall` MANQUAIT A CETTE LISTE, et c'est le seul verbe qui detruit. Un operateur qui lit
-# l'en-tete ne pouvait pas savoir qu'il existe, ni — surtout — que SANS `--yes` il n'execute RIEN :
-# il imprime le plan complet de ce qu'il retirerait, et sort. Le mode « lister sans detruire » n'est
-# donc pas un drapeau a trouver, c'est le DEFAUT ; lui donner en plus un nom (`--dry-run`) ajouterait
-# une piece mobile pour renommer ce qui se passe deja quand on ne demande rien.
-#   `--yes`     execute. Demande root, parce qu'il retire des objets systeme.
-#   `--humans`  retire aussi les COMPTES unix des personnes. ⚠ JAMAIS leur home : `/home` est hors
-#               du perimetre entier, par tous les binaires — ni un `rm`, ni un `userdel -r`.
-#   `--annexes` retire aussi les ANNEXES docker (§ 13) — la forge et le runner CI. SANS lui elles
-#               sont GARDEES, et c'est le defaut : la forge est le PET du corpus, elle porte les
-#               depots et le backlog. Un banc se jette par `bench-down.sh`, dont c'est le metier ;
-#               `uninstall` desinstalle un DEPLOIEMENT et n'a pas a emporter ce qui le nourrit.
-#               Les volumes restent dans les deux cas — ce drapeau ne touche que conteneurs+reseau.
-#   `--keep-state` garde l'ETAT de la machine : `<racine>/var` (jetons, journal, catalogues) et
-#               `/etc/lcars` (siege, transport des services, canal), ainsi que les comptes et
-#               groupes de service qui les possedent. C'est le `remove` d'un paquet ; sans lui,
-#               c'est le `purge`. Un ancetre d'une racine d'etat n'est retire que s'il est vide.
-#   `--dpkg P`  sous le canal `deb` : ce qu'un AUTRE paquet que `P` possede (`dpkg-query -S`) n'est
-#               pas a ce script — dpkg le retire avec son paquet. Sans lui, `provision uninstall`
-#               emporterait `/usr/local/bin/tofu` pendant que `lcars-tofu` est encore installe, et
-#               les deux desinstalleurs divergeraient (« une machine, un canal », 00-OBJECTIF § 6).
 #
 # `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
 # Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
@@ -122,13 +99,8 @@ CMD="${1:-}"; shift || true
 SUBSTRATE="auto"
 PORCELAIN=0
 ENV_FILE=""
-UNINSTALL_YES=0
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
-UNINSTALL_HUMANS=0
-UNINSTALL_ANNEXES=0
-UNINSTALL_KEEP_STATE=0
-UNINSTALL_DPKG_PKG=""
 declare -a ONLY=()
 
 # ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
@@ -172,11 +144,6 @@ while [[ $# -gt 0 ]]; do
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
-    --yes)       UNINSTALL_YES=1; shift ;;
-    --humans)    UNINSTALL_HUMANS=1; shift ;;
-    --annexes)   UNINSTALL_ANNEXES=1; shift ;;
-    --keep-state) UNINSTALL_KEEP_STATE=1; shift ;;
-    --dpkg)      UNINSTALL_DPKG_PKG="${2:?--dpkg attend un nom de paquet}"; shift 2 ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS : ce parseur consomme tout `$@` avant que le verbe ne
     # tourne, donc un argument positionnel meurt sur « option inconnue » sans jamais l'atteindre.
@@ -186,7 +153,7 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|update|list|uninstall|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|update|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
 [[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
 
 if [[ -n "$ENV_FILE" ]]; then
@@ -236,9 +203,9 @@ case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (
 # ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
 # bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/container/), et rien ne
 # se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
-# l'image (doctor au build) et de `list` — jamais un substrat qu'on converge ou qu'on désinstalle.
+# l'image (doctor au build) et de `list` — jamais un substrat qu'on converge.
 case "$CMD" in
-  apply|uninstall|update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
+  apply|update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
   L'image se bâtit (deploy/docker/Dockerfile, « deploy/container build »), se vérifie au build (stage verify,
   « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
   (runtime/services/container/init.sh). Pour l'instance : « deploy/container status » · « deploy/container down »." ;;
@@ -435,21 +402,14 @@ fi
 JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
 MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 
-# ⚖ lot 10 (point 10) : `uninstall` et `audit` ne vivent plus dans le fichier du runner — ils sont
-# sources d'a cote, avec les memes globales. Le runner ne porte que le runner.
-# shellcheck source=lib/provision-uninstall.sh
-. "$(dirname "$PROVISION_LIB")/provision-uninstall.sh"
+# ⚖ lot 10 (point 10) : `audit` ne vit pas dans le fichier du runner — il est source d'a cote, avec
+# les memes globales. Le runner ne porte que le runner. (`uninstall` etait source ici aussi ; il est
+# parti le 2026-09-11 : un terrain se refait, il ne se desinstalle pas.)
 # shellcheck source=lib/provision-audit.sh
 . "$(dirname "$PROVISION_LIB")/provision-audit.sh"
 
 if [[ "$CMD" == "audit" ]]; then
   audit_run "$AUDIT_BEFORE" "$AUDIT_AFTER"
-  exit $?
-fi
-if [[ "$CMD" == "uninstall" ]]; then
-  [[ "$UNINSTALL_YES" -ne 1 || "$EUID" -eq 0 ]] \
-    || die "uninstall --yes demande root (il retire des objets systeme) — sans --yes, il imprime son plan"
-  uninstall_run
   exit $?
 fi
 if [[ "$CMD" == "apply" ]]; then
@@ -552,8 +512,8 @@ else
         echo "#"
         echo "# ⚠ apt_installed / apt_already EST LA RAISON D'ETRE DE CE FICHIER. La distinction"
         echo "# n'est connaissable QU'AVANT l'install : une seconde plus tard, dpkg repond"
-        echo "# « present » pour les deux. Un uninstall qui l'ignore retire des paquets que"
-        echo "# l'operateur avait avant — pire que d'en laisser."
+        echo "# « present » pour les deux. Un audit qui l'ignore compterait comme notres les"
+        echo "# fichiers de paquets que l'operateur avait avant."
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
         echo "substrate     $SUBSTRATE"

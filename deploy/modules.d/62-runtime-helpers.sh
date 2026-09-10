@@ -455,7 +455,7 @@ BLOC
   # aurait recopie sous `/opt/lcars` a chaque apply. `dist/` (476 Ko) RESTE : en livraison binaire
   # c'est lui que `44-media` pose, puisque rien ne le batit sur la cible.
   # ⚖ user 2026-09-04 (Q2 du chantier deploy-independance) : « on copie deploy, sans les tests ».
-  # La copie sert au doctor et a l'uninstall — 1188 cas bats n'y servent a rien, et `.dockerignore`
+  # La copie sert au doctor — 1188 cas bats n'y servent a rien, et `.dockerignore`
   # tient le meme dossier hors de l'image. Exclusion BORNEE a `deploy` : un `tests/` a la racine
   # d'un autre arbre embarque n'est pas le sujet de ce trait.
   local -a _only

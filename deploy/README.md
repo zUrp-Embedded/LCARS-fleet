@@ -115,16 +115,15 @@ version et son `install.sh.sha256` — un témoin tient que la porte générée 
 lignes. `--source [REF]` (qui remplace `--branch`, refusé) est la provenance source pour qui veut
 compiler : `git clone --branch <tag de la porte>`, jamais `main` sans le dire. `--dry-run` va
 jusqu'au bilan et DIT la sortie (artefacts et sha256 attendus, l'argv du rail) sans rien
-télécharger ni poser. `--uninstall` relaie à `deploy/workstation uninstall`, qui joue
-`provision uninstall` (escaladé seulement sous `--yes`) — le sudo est là, jamais dans la porte.
+télécharger ni poser.
 
 **Le canal** (lot 2 du chantier release) : `/etc/lcars/channel` dit QUI a posé le produit — `source`
 (un checkout) ou `kit` (un paquet `pack.sh`), écrit par `60-deploy` après la pose ; aucun module ne
 le lit. `deploy/workstation up --from <kit.tar.gz>` vérifie le `.sha256` s'il est à côté (le dit
 sinon), détare sous l'humain dans `~/.lcars/kits/<nom>/` et joue `provision apply` DEPUIS le kit ;
 sans `--from`, ce checkout. `00-preflight` rend le fait `channel=`, et la porte comme `workstation`
-REFUSENT de poser un canal sur un autre, en nommant le geste (`provision uninstall` d'abord, ou une
-mise à jour par le même canal). Le troisième canal, `deb`, est parti avec la chaîne .deb (2026-09-11).
+REFUSENT de poser un canal sur un autre, en nommant le geste (une mise à jour par le même canal, ou
+refaire le terrain). Le troisième canal, `deb`, est parti avec la chaîne .deb (2026-09-11).
 
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
 vérification d'autorité — le remote, normalisé en `host/owner/repo`, doit être **exactement égal** à
@@ -218,6 +217,11 @@ immutabilité.
 
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
+- **Pas de désinstalleur** (⚖ 2026-09-11) : LCARS s'installe sur un terrain qu'on peut DÉTRUIRE —
+  une distro WSL2, un conteneur — et un terrain se refait, il ne se désinstalle pas. `provision
+  uninstall` (601 lignes, 68 témoins, ses classes `--humans`/`--annexes`/`--keep-state`) est parti
+  avec la chaîne `.deb` qui lui donnait son second poseur. `provision audit` reste : il mesure une
+  machine contre la table, il ne retire rien.
 - **Pas d'users Linux par rôle** : un pod = un process bwrap sous l'UID de l'humain ; les rôles
   sont des cap-profiles du runtime + des comptes forge.
 - **Pas de yq / fleet.yaml** : la donnée est plate (env + listes), jq suffit.
