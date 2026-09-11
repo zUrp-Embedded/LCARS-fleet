@@ -3,8 +3,8 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: PROTO-V2 — les jetons de rôle : un APPELANT du geste de forge du produit (runtime/services/forge.d/tokens.sh)
-# APPLY-ON: any
-# CHECK-ON: any
+# APPLY-ON: wsl linux
+# CHECK-ON: wsl linux
 # NEEDS: root
 # AFTER: 45-catalogues 48-forge-host 61-forge-structure
 

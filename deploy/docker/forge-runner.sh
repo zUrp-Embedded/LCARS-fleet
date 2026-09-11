@@ -20,7 +20,7 @@
 #                         (--admin-token <tok> | --admin-token-file <chemin>)
 #                         [--instance-url http://gitea:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/lcars]
-#                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
+#                         [--labels "shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
 #                         [--accept-generic]
 # EXIT  : 0 runner enregistre (et job verifie si --verify-repo) · 1 arguments · 2 la forge refuse
 #         3 le runner ne s'enregistre pas · 4 le job de verification ne passe pas
@@ -84,11 +84,10 @@ check_labels() {
   if [[ -z "$LABELS" ]]; then
     [[ "$ACCEPT_GENERIC" -eq 1 ]] && { say "labels: defaut generique ACCEPTE (--accept-generic) — ce runner ne sait pas jouer mix gate"; return 0; }
     cat >&2 <<'EOM'
-[forge-runner] REFUS : aucun --labels, donc le defaut de runner-compose.yml — dont l'image `elixir`
-[forge-runner]   est celle de BASE du stage build : Elixir et rien d'autre. `mix gate` y meurt sur
-[forge-runner]   `git` introuvable, et le runner aura l'air vert. Sortie :
-[forge-runner]     docker build --target build -t lcars-build:<tag> -f deploy/docker/Dockerfile .
-[forge-runner]     forge-runner.sh ... --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
+[forge-runner] REFUS : aucun --labels, donc le defaut de runner-compose.yml — un defaut qu'on ne
+[forge-runner]   choisit pas, on le SUBIT, et un runner qui sert un label qu'on n'a pas voulu a
+[forge-runner]   l'air vert. Sortie :
+[forge-runner]     forge-runner.sh ... --labels "shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
 [forge-runner]   Un banc qui ne veut que le rail CI du template : --accept-generic (c'est une decision).
 EOM
     exit 1
@@ -113,7 +112,7 @@ EOM
   if [[ ${#missing[@]} -gt 0 ]]; then
     say "REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : ${missing[*]}"
     say "  un runner annonce le label quand meme et rate chaque job qui le demande."
-    say "  construis-la (docker build --target build -t <image> ...) ou corrige --labels."
+    say "  bâtis-la (deploy/pack.sh pose lcars-fleet:<tag>), tire-la d un registre, ou corrige --labels."
     exit 1
   fi
   say "labels: ${LABELS//,/ }"
@@ -235,7 +234,7 @@ say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volum
 #
 # Depuis que le runner tourne en `dind-rootless`, ses jobs parlent a un daemon QUI LUI APPARTIENT,
 # et non plus a celui de la machine. Ce daemon demarre vide : les images publiques, il les tire
-# tout seul ; les images LOCALES — `lcars-build:<tag>` en tete, qu'aucun registre au monde ne porte
+# tout seul ; les images LOCALES — celles que pack.sh pose sans les publier, qu'aucun registre ne porte
 # — il ne peut pas les connaitre. Sans cette etape, le label `elixir` est annonce et chaque job qui
 # le demande echoue sur une image introuvable : le « runner vert qui rate tous ses jobs » que
 # l'etape 0 refuse deja, une couche plus bas.

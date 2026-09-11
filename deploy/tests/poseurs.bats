@@ -40,6 +40,9 @@ setup() {
   # apres avoir annonce « forge jetable + runner CI + humain de demo ». Un drapeau accepte qui ne
   # fait rien est pire qu'un drapeau refuse : le refus laisse chercher, le silence laisse croire.
   grep -q 'export PROV_FORGE_MONTEE=1' "$PORTE"
+  # et le banc du POSTE nomme son humain de demo comme celui du conteneur (ISO, ⚖ user 2026-09-11)
+  grep -q 'export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"' "$PORTE"
+  grep -qE '^ESCALADE_ENV=\(.*LCARS_BUILTIN_HUMAN' "$DEPLOY/workstation"
   # et il traverse le `sudo` — ce qui n'est pas dans ESCALADE_ENV meurt a l'escalade, sans un mot
   grep -q 'PROV_FORGE_MONTEE' "$DEPLOY/workstation"
   grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_MONTEE' "$DEPLOY/workstation"

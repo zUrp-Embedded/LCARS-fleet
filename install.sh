@@ -30,9 +30,9 @@
 #                         --container   fournit les annexes — forge jetable, runner CI,
 #                                 humain de démonstration — en un geste.
 #                         --workstation  la forge est montée ICI même si
-#                                 FORGE_BASE_URL est posée. Rien d'autre : le
-#                                 runner et l'humain de démo n'existent que sur
-#                                 un banc, et le banc nomme le sien.
+#                                 FORGE_BASE_URL est posée, avec son runner CI
+#                                 et le même humain de démo que le conteneur :
+#                                 les deux installs sont ISO à la fin.
 #                       L'humain EST une annexe : un déploiement de travail n'en
 #                       sème aucun, les personnes s'inscrivent sur la forge.
 #       --check         sonde read-only, rien n'est modifié.
@@ -150,14 +150,15 @@ while [[ $# -gt 0 ]]; do
     --container)            RAIL=container; shift ;;
     # ─── UN SEUL AXE (§ 13) ─────────────────────────────────────────────────
     #
-    # `--bench`  axe FORGE : montée par nous, ou fournie (FORGE_BASE_URL). Sur le conteneur, `--bench`
+    # `--bench`  axe FORGE : montée par nous, ou fournie (FORGE_BASE_URL). Sur les deux rails, `--bench`
     # monte aussi le banc — runner CI et humain de démo — et c'est le banc qui NOMME cet humain
-    # (`bench-forge-bootstrap.sh`, `LCARS_BUILTIN_HUMAN`). Un déploiement de travail n'en sème
-    # aucun : les personnes s'inscrivent sur la forge, le convergeur les matérialise.
+    # (`LCARS_BUILTIN_HUMAN` : `bench-forge-bootstrap.sh` pour le conteneur, cette porte pour le
+    # poste). Un déploiement de travail n'en sème aucun : les personnes s'inscrivent sur la forge,
+    # le convergeur les matérialise.
     --bench)          WITH_BENCH=1; shift ;;
     # ⚠ REFUSE, PAS IGNORE — même règle que `--consented` : un drapeau retiré doit RATER.
     --disposable) echo "  --disposable est retire : un deploiement ne seme pas d'humain de demonstration." >&2
-                  echo "  Le banc (--container --bench) nomme le sien ; les personnes s'inscrivent sur la forge." >&2
+                  echo "  Le banc (--bench, sur les deux rails) nomme le sien ; les personnes s'inscrivent sur la forge." >&2
                   exit 1 ;;
     # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
     # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
@@ -923,10 +924,14 @@ WORKSTATION="$SCRIPT_DIR/deploy/workstation"
 #
 # CE QU'IL FAIT ICI, ET C'EST TOUT CE QUE LE § 13 LUI DONNE : l'axe FORGE, « monte-la-moi ». Sur ce
 # rail la montée est déjà le défaut quand `FORGE_BASE_URL` est absente ; l'apport du drapeau est donc
-# de monter QUAND MÊME si elle est posée. Le runner CI et l'humain de démo sont le BANC, qui
-# n'existe que sur le conteneur, et qui nomme son humain lui-même.
+# de monter QUAND MÊME si elle est posée. Et le banc NOMME son humain de démo, sur ce rail comme
+# sur le conteneur — ⚖ user 2026-09-11 : « les install doivent être ISO à la fin ». Le nom traverse
+# le sudo par l'ESCALADE_ENV de workstation ; 61 le passe au geste de forge sans le nommer, 64 le
+# matérialise par le convergeur, `accept` le demande à `forge-gestures.sh builtin-human`. Un
+# déploiement de TRAVAIL, lui, ne sème toujours personne : sans --bench, la variable reste vide.
 if [[ "$WITH_BENCH" -eq 1 ]]; then
   export PROV_FORGE_MONTEE=1
+  export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
 fi
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$WORKSTATION" doctor "${PASSTHRU[@]}"

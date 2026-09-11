@@ -292,30 +292,22 @@ seed_project() {
   [[ "$output" != *"EN ÉCHEC"* ]]
 }
 
-# ─── `build` rend DEUX images, et la seconde ne sortait de nulle part ────────────────────────────
+# ─── `build` DELEGUE A pack.sh — le kit, puis l'image, par le meme rail ─────────────────────────
+#
+# Jusqu'au 2026-09-11 `build` rendait DEUX images : `compose build` depuis le checkout, puis un
+# second `docker build --target build` qui etiquetait le jumeau `lcars-build:<tag>` du label
+# `elixir`. Le Dockerfile n'est plus un jumeau — il pose le kit par les modules — et le kit ne se
+# fabrique que par pack.sh (gate, release, doc, tar, image). `build` n'a donc rien a faire lui-meme.
 
-@test "build etiquette le jumeau lcars-build — le toolchain que le runner CI sert" {
-  # LE DEFAUT MESURE (2026-08-18, install sur une Debian vierge, chemin exact du README) : forge,
-  # conteneur, tokens, creds, admin tous verts, puis `bench-up` **exit 6** — « pas d'image lcars-build:2
-  # pour le label elixir ». Aucun script du depot ne construisait ce jumeau : chaque mention en
-  # etait une CONSIGNE adressee a l'operateur. Sur une machine de dev les deux existaient parce
-  # qu'un jour on avait joue la consigne ; sur une machine neuve, jamais. Et ce n'est pas une
-  # degradation : la carte canon declare `ci: required`, donc le banc REFUSE de monter.
-  run bash "$SRC" build
-
-  [ "$status" -eq 0 ]
-  grep -q -- "compose .*build" "$CALLS"
-  grep -q -- "build --target build -t lcars-build:2" "$CALLS"
-}
-
-@test "le tag du jumeau SUIT celui du runtime — c'est la regle que bench-up applique" {
-  # `bench-up.sh` derive `lcars-build:<tag>` du tag de l'image de banc. Un jumeau fige a `:2`
-  # pendant que le runtime part sur `:v4` rendrait un runner qui sert le toolchain d'un AUTRE build
-  # — vert, et faux.
-  LCARS_IMAGE=lcars-fleet:v4 run bash "$SRC" build
-
-  [ "$status" -eq 0 ]
-  grep -q -- "build --target build -t lcars-build:v4" "$CALLS"
+@test "build DELEGUE a pack.sh — aucun docker build, aucun compose build ici" {
+  local stub="$BATS_TEST_TMPDIR/pack-stub"
+  printf '#!/usr/bin/env bash\necho "PACK:$*"\n' > "$stub"; chmod 0755 "$stub"
+  LCARS_PACK_BIN="$stub" run bash "$SRC" build --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"PACK:--no-image"* ]]
+  refute grep -qE -- "compose .*build|build --target" "$CALLS"
+  # et le defaut d'image est celui que pack.sh pose : `lcars-fleet:local`
+  grep -qE '^: "\$\{LCARS_IMAGE:=lcars-fleet:local\}"' "$SRC"
 }
 
 # ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────

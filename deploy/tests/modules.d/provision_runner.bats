@@ -110,17 +110,17 @@ EOF
   grep -q "10-pkgstub:check" "$RUN_LOG"
 }
 
-@test "docker n'est PAS un rail : apply y est REFUSE en nommant le build, verify et l'init produit" {
-  # ⚖ user 2026-09-04 (Q1, lot 7). La doctrine D6 (« apply sur docker = check ») est morte avec le
-  # boot qui rejouait l'installeur : rien ne se converge dans une image, elle se BATIT.
+@test "docker : apply SE JOUE — c'est ainsi que l'image se batit — et la selection reste celle des en-tetes" {
+  # ⚖ user 2026-09-04 (Q1) : rien ne se converge dans une image AU BOOT, elle se BATIT. Depuis le
+  # 2026-09-11 elle se batit PAR CE RAIL (Dockerfile : `provision apply --substrate docker`), donc
+  # apply y est un geste legitime — au build, jamais au boot. Un module hors substrat n'y est pas
+  # selectionne ; un module qui declare `docker` s'y applique.
   stub_module 60-deploystub "wsl linux" any human
+  stub_module 61-imagestub "wsl linux docker" any nobody
   run "$SANDBOX/provision" apply --substrate docker
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"docker n'est pas un rail"* ]]
-  [[ "$output" == *"Dockerfile"* ]]
-  [[ "$output" == *"verify"* ]]
-  [[ "$output" == *"container/init.sh"* ]]
-  refute grep -q "60-deploystub" "$RUN_LOG"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "60-deploystub:apply" "$RUN_LOG"
+  grep -q "61-imagestub:apply" "$RUN_LOG"
 }
 @test "docker n'est PAS un rail : update y est refuse aussi — doctor et list restent" {
   stub_module 60-deploystub "wsl linux" any human

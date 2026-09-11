@@ -28,8 +28,10 @@ set -euo pipefail
 # c'est `60-deploy` qui n'a pas abouti, et le verdict le nomme.
 #
 # ⚠ CE MODULE NE NOMME AUCUN HUMAIN. Le seul déclarant du nom de l'humain intégré est
-# `forge-gestures.sh` (`LCARS_BUILTIN_HUMAN`, posé par le banc et par lui seul) ; un poste de
-# travail ne sème personne.
+# `forge-gestures.sh` (`LCARS_BUILTIN_HUMAN`, posé par le BANC et par lui seul — `bench-forge-bootstrap.sh`
+# pour le conteneur, `install.sh --bench` pour le poste, ⚖ user 2026-09-11 : les deux installs sont
+# ISO) ; ce module le laisse traverser vers le geste sans le lire. Un déploiement de travail ne sème
+# personne.
 
 : "${PROV_FORGE_HOST_PORT:=21000}"
 

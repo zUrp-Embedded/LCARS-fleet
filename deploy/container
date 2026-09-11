@@ -216,18 +216,15 @@ cmd_pull() {
 }
 
 cmd_build() {
-  build_env
-  compose build "$@"
-
-  # `docker build` et non `compose build` : compose ne construit que les services declares, et le
-  # stage `build` n'en est pas un. Le TAG derive de celui du runtime — c'est la regle que
-  # `bench-up.sh` applique pour trouver son jumeau (`lcars-fleet:v4` -> `lcars-build:v4`).
-  local tag="lcars-build:${LCARS_IMAGE##*:}"
-  echo "container: étiquetage du jumeau de build ($tag — le toolchain que le runner CI sert)"
-  "$DOCKER" build --target build -t "$tag" \
-    --build-arg "GIT_SHA=$LCARS_GIT_SHA" --build-arg "BUILD_DATE=$LCARS_BUILD_DATE" \
-    -f "$SCRIPT_DIR/deploy/docker/Dockerfile" "$SCRIPT_DIR" \
-    || { echo "container: jumeau de build NON étiqueté — le banc refusera de monter (bench-up, exit 6)" >&2; return 1; }
+  # ─── UN SEUL PIPELINE : le kit, puis l'image, par pack.sh ──────────────────────────────────────
+  # ⚖ user 2026-09-10 : pas de jumeau. `compose build` depuis le checkout et le second `docker build
+  # --target build` (le jumeau `lcars-build` du label `elixir`) sont partis avec le Dockerfile qui les
+  # justifiait. pack.sh refuse un arbre modifié, joue le gate, scelle le kit, et pose l'image depuis
+  # ce kit — `lcars-fleet:<tag>` et `lcars-fleet:local`, celle que `up` prend par défaut.
+  # `LCARS_PACK_BIN` est la couture des témoins, jamais un bouton.
+  local pack="${LCARS_PACK_BIN:-$SCRIPT_DIR/deploy/pack.sh}"
+  echo "container: build = deploy/pack.sh (gate, kit, image) — plusieurs minutes"
+  exec "$pack" "$@"
 }
 
 cmd_up() {
@@ -249,7 +246,7 @@ cmd_up() {
   local img="$LCARS_IMAGE"
   if ! $DOCKER image inspect "$img" >/dev/null 2>&1; then
     echo "container: image « $img » absente — un up ne la fabrique pas." >&2
-    echo "   en DEV   : deploy/container build      (plusieurs minutes, une fois)" >&2
+    echo "   en DEV   : deploy/container build      (pack.sh : gate, kit, image — plusieurs minutes)" >&2
     echo "   en PROD  : deploy/container pull        (tire « $img » — le gate a déjà été joué par le rail qui l'a bâtie)" >&2
     exit 1
   fi
@@ -624,7 +621,7 @@ EOF
 # SANS repli (`${…:?}`) : deux defauts independants qui s'accordent par coincidence sont ce qui a
 # produit B1 (relecture hostile 2026-09-04, M12). Exportes : compose est un processus fils.
 : "${LCARS_SSH_PORT:=127.0.0.1:2222}"
-: "${LCARS_IMAGE:=lcars-fleet:2}"
+: "${LCARS_IMAGE:=lcars-fleet:local}"
 export LCARS_SSH_PORT LCARS_IMAGE
 : "${LCARS_FORGE_PORT:=127.0.0.1:3300}"
 

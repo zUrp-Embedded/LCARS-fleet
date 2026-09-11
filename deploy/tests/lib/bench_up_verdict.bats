@@ -276,7 +276,7 @@ run_bench() {
   [[ "$output" != *"banc PRET"* ]]
 }
 
-@test "les labels derives portent les QUATRE, dont « ubuntu-latest »" {
+@test "les labels derives portent les TROIS, dont « ubuntu-latest » — et plus le label elixir" {
   # ⚖ USER 2026-08-21. `ubuntu-latest` est le `runs-on` par DEFAUT de l'ecosysteme : tout workflow
   # importe, tout exemple copie d'ailleurs, toute action tierce le nomme. Sans lui le banc refuse ces
   # jobs EN SILENCE — la forge les garde en attente d'un runner qui ne viendra pas, 45 min, puis
@@ -288,16 +288,9 @@ run_bench() {
   [ "$status" -eq 0 ]
   run cat "$RUNNER_ARGV"
   [[ "$output" == *"shell:docker://alpine:3.20"* ]]
-  [[ "$output" == *"elixir:docker://lcars-build:"* ]]
+  [[ "$output" != *"elixir:"* ]]
   [[ "$output" == *"dood:docker://docker:cli"* ]]
   [[ "$output" == *"ubuntu-latest:docker://catthehacker/ubuntu:act-latest"* ]]
-}
-
-@test "6-133: pas d'image pour le label elixir → PAS PRET, exit 6" {
-  echo 1 > "$BUILD_IMG_RC"
-  run_bench
-  [ "$status" -eq 6 ]
-  [[ "$output" == *"PAS PRET"* ]]
 }
 
 @test "6-133: forge-runner.sh en echec → PAS PRET, exit 6" {
@@ -341,21 +334,6 @@ run_bench() {
   [[ "$output" == *"PAS PRET"* ]]
 }
 
-@test "6-133bis: la branche « pas d'image » DIT quelque chose — elle mourait en 127, muette" {
-  # TROUVE EN INSTRUMENTANT, et la fiche ne le voit pas. Son message contenait `ci: required` entre
-  # BACKTICKS dans une chaine a guillemets DOUBLES : bash y lisait une substitution de commande,
-  # executait `ci:`, echouait, et `set -euo pipefail` tuait le script — exit 127, pour seul message
-  # « ci:: command not found ». Cette branche ne remplissait donc pas RUNNER_STATE : elle mourait
-  # AVANT de l'ecrire. Le test epingle le DIAGNOSTIC, pas le code : un message reecrit sans
-  # echappement ramenerait la panne en silence.
-  echo 1 > "$BUILD_IMG_RC"
-  run_bench
-  [ "$status" -ne 127 ]
-  [[ "$output" != *"command not found"* ]]
-  [[ "$output" == *"lcars-build"* ]]
-  [[ "$output" == *"ci: required"* ]]
-}
-
 @test "6-133bis: la branche « pas de master token » non plus" {
   # Meme defaut, meme ligne, deuxieme occurrence : la corriger a un seul endroit l'aurait laissee.
   #
@@ -373,7 +351,7 @@ run_bench() {
 }
 
 @test "6-133: le bloc de details est imprime AVANT le refus — on repare avec, pas sans" {
-  echo 1 > "$BUILD_IMG_RC"
+  echo 1 > "$RUNNER_RC"
   run_bench
   [ "$status" -eq 6 ]
   [[ "$output" == *"runner    :"* ]]

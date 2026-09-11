@@ -1,68 +1,18 @@
-# .dockerignore — contexte de build = la racine du repo (cf. deploy/docker/).
-# WHITELIST : tout est exclu, on n'embarque QUE ce que le Dockerfile consomme. Un contexte
-# minimal = build rapide, zéro fuite (pas de work/, pas de credentials, pas de PoC) et un cache
-# qui ne s'invalide pas pour un fichier sans rapport.
-*
-!runtime
-!deploy
-!catalogues
-!LICENSE
-# LA DOC ENTRE DANS LE CONTEXTE, ET SEULEMENT CE QU'ELLE LIT. Le stage `site` du Dockerfile batit
-# la plaquette depuis le meme arbre ; sans ces lignes il meurt sur « /assets/github.io: not found »,
-# parce que ce fichier est une allowlist (`*` puis des exceptions) et non une denylist.
-!assets/github.io
-!assets/avatars
-!assets/favicon
-# ... et surtout PAS ses 173 Mo de dependances, ni ses sorties : `npm ci` les reconstruit dans le
-# stage, et `public/` y est regenere par `collect-assets.mjs`. Les envoyer multiplierait par cent le
-# contexte de CHAQUE build, y compris ceux qui ne touchent pas au site.
-assets/github.io/node_modules
-assets/github.io/dist
+# SOURCE: .dockerignore
+# Le contexte de `docker build` est le KIT de pack.sh (`lcars_install/`), jamais un checkout :
+# l'image se pose par `provision apply` depuis cet arbre (deploy/docker/Dockerfile). Tout ce que le
+# kit porte compte — la release sous runtime/_build/prod/rel, la doc sous assets/github.io/dist —
+# et ce qui suit n'a rien a faire dans une image : ni un depot git, ni des dependances de dev.
+.git
+**/node_modules
+**/.astro
 assets/github.io/public
-assets/github.io/.astro
-
-# Re-exclusions DANS ce qui est inclus (dernier match gagne) : artefacts de build locaux et
-# état d'éditeur — jamais dans une image (le stage build refait deps proprement).
-runtime/_build
 runtime/deps
 runtime/tmp
 runtime/.elixir_ls
-# ⚠ LE CACHE tofu ET L'ETAT tofu — MEME REGLE QUE `node_modules` CI-DESSUS, ET ELLE MANQUAIT ICI.
-# `!fleet` fait entrer l'arbre entier ; la recette de la charte forge y traine, sur le poste d'un
-# operateur qui l'a jouee, un `.terraform` de 73 Mo (le miroir de providers) que l'image REFAIT elle-
-# meme trois lignes plus bas — donc 73 Mo envoyes a chaque build pour etre ecrases.
-# ⚠ ET SURTOUT UN `terraform.tfstate`, QUI PORTE LES JETONS DE LA FORGE. `forge-gestures.sh` l'ecrit
-# noir sur blanc : « cmd_apply joue la recette DANS $RECIPE_DIR, donc y laisse un terraform.tfstate ».
-# Un contexte de build qui l'emporte le grave dans un layer d'image, ou il reste lisible meme si une
-# instruction ulterieure l'efface. Ce fichier dit lui-meme la regle — « zero fuite » — en tete.
+runtime/_build/dev
+runtime/_build/test
 runtime/services/forge-recipe/.terraform
 runtime/services/forge-recipe/instance/.terraform
 runtime/services/forge-recipe/**/*.tfstate
 runtime/services/forge-recipe/**/*.tfstate.*
-runtime/services/forge-recipe/**/*.tfvars
-runtime/services/forge-recipe/**/crash.log
-
-# ─── LE KIT DE `pack.sh`, ET C'EST CE FICHIER QUI EMPÊCHAIT L'IMAGE DE S'EN SERVIR ──────────────
-# `deploy/lib/deploy-release.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
-# plus une release dans `_build/prod/rel` disent « paquet », et il rend 0 sans gate ni compilation.
-# `pack.sh` produit exactement cette forme. Le rail poste en profite, l'install y roule en trente
-# secondes — et l'image, elle, rebâtissait, parce que les deux lignes qui le lui permettent
-# n'étaient pas écrites ICI : `runtime/_build` juste au-dessus emportait la release, et le `*` de tête
-# emportait `.source-revision`.
-#
-# ⚠ CE N'EST PAS UN ASSOUPLISSEMENT DE LA RÈGLE DU DESSUS. `_build` reste exclu EN ENTIER : seul
-# `prod/rel` — l'arbre que `pack.sh` a attesté, rien de `dev/`, rien de `test/` — franchit. Un
-# `!runtime/_build` nu embarquerait les artefacts de compilation du poste dans le contexte de chaque
-# build, ce que la ligne d'origine existe pour empêcher.
-#
-# ⚠ ET UN CHECKOUT ORDINAIRE NE PORTE NI L'UN NI L'AUTRE : ces deux lignes n'ajoutent RIEN au
-# contexte quand ils sont absents. C'est ce qui rend le geste sûr des deux côtés — depuis un kit
-# détaré l'image pose, depuis un clone elle compile, et rien à changer entre les deux.
-!runtime/_build/prod/rel
-!.source-revision
-
-# ⚖ user 2026-09-04 (Q2 du chantier deploy-independance) : « on copie deploy, sans les tests ».
-# `COPY deploy /opt/lcars/deploy` embarque l'installeur pour le doctor et l'uninstall du conteneur ;
-# ses 1188 cas bats n'y servent a rien, et aucun stage ne les joue (le gate de l'installeur est
-# `deploy/gate.sh`, chez le batisseur). Meme trait que la copie du poste par `62-runtime-helpers`.
-deploy/tests

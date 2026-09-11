@@ -81,7 +81,7 @@ fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s
 # d'un process root, lisible par tout compte local. Un secret traverse par un FICHIER
 # (`$PROV_TOKENS_DIR`), jamais par cette liste — c'est la meme frontiere que le shim docker, qui
 # ecarte explicitement `*TOKEN*`, `*PASSWORD*` et `*SECRET*` de ce qu'il repasse.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE FORGE_BASE_URL FORGE_PUBLIC_URL)
+ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
 
 escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0
@@ -228,6 +228,24 @@ bandeau_final() {
   prov_box_emit --rule "       LCARS-FLEET v2 — PROVISIONING TERMINÉ" "${corps[@]}"
 }
 
+# seed_bench_creds <humain> — les creds claude du siège chez l'humain de démo du banc, 0600, ou
+# l'absence DITE. `LCARS_CREDS_SRC` est la couture des témoins (le défaut est celles du siège).
+seed_bench_creds() {
+  local human="$1" seat="${SUDO_USER:-}" src home grp
+  home="$(getent passwd "$human" | cut -d: -f6 || true)"
+  [[ -n "$home" ]] || { echo "  creds claude : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
+  src="${LCARS_CREDS_SRC:-$(getent passwd "$seat" 2>/dev/null | cut -d: -f6)/.claude/.credentials.json}"
+  [[ -r "$src" ]] || { echo "  creds claude NON posées chez « $human » : le siège « ${seat:-?} » n'en a pas ($src) — aucun pod ne pourra penser. Geste : « claude », /login, /exit chez le siège, puis rejoue"; return 0; }
+  grp="$(id -gn "$human")"
+  if install -d -m 0700 -o "$human" -g "$grp" "$home/.claude" \
+     && install -m 0600 -o "$human" -g "$grp" "$src" "$home/.claude/.credentials.json"; then
+    echo "  creds claude posées chez « $human » (copie de celles de « $seat », 0600) — le spawn-boundary passera"
+  else
+    echo "  creds claude NON posées chez « $human » (copie refusée) — aucun pod ne pourra penser"
+  fi
+  return 0
+}
+
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
   # ─── --from : les artefacts, séparés de ce qui va à provision ────────────────────────────────
@@ -308,6 +326,14 @@ cmd_up() {
       exit "$rc"
       ;;
   esac
+
+  # ─── LE BANC POSE LES CREDS CLAUDE CHEZ SON HUMAIN — ISO avec bench-up (--creds-from) ─────────
+  # ⚖ user 2026-09-11 : les deux installs sont ISO à la fin. bench-up copie ~/.claude/.credentials.json
+  # de l'opérateur chez l'humain de démo du conteneur ; ici l'opérateur est le siège (SUDO_USER) et
+  # l'humain de démo est celui que la porte a nommé (LCARS_BUILTIN_HUMAN, vide hors --bench). Sans
+  # creds chez le siège, on le DIT : aucun pod ne pourra penser, et « fleet start » le refusera en
+  # nommant le geste d'identité.
+  [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || seed_bench_creds "$LCARS_BUILTIN_HUMAN"
 
   # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ────────────────────────────────────────────────
   # ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette

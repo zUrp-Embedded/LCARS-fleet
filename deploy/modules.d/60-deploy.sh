@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — deploy du runtime : orchestre deploy/lib/deploy-release.sh (l'autorité build+pose) puis verrouille RO
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 15-toolchain

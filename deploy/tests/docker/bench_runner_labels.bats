@@ -35,10 +35,10 @@ setup() {
   # Knows two images and nothing else. `image inspect` on anything else fails, which is exactly
   # what a daemon does for an image nobody built.
   # Le daemon connait deux images au depart. `pull` ACQUIERT — sauf ce que `PULLABLE` refuse : une
-  # image locale (`lcars-build:<tag>`) n'est sur aucun registre, et c'est la difference que la garde
+  # image locale (`outil-local:<tag>`) n'est sur aucun registre, et c'est la difference que la garde
   # doit garder entre « pas encore tiree » et « n'existe nulle part ».
   KNOWN="$BATS_TEST_TMPDIR/known"
-  printf 'alpine:3.20\nlcars-build:9\n' > "$KNOWN"
+  printf 'alpine:3.20\noutil-local:9\n' > "$KNOWN"
   UNPULLABLE="$BATS_TEST_TMPDIR/unpullable"
   : > "$UNPULLABLE"
   cat > "$BINDIR/dockerstub" <<EOF
@@ -49,8 +49,8 @@ if [[ "\$1 \$2" == "image inspect" ]]; then
 fi
 if [[ "\$1" == "pull" ]]; then
   img="\${@: -1}"
-  # Un tag LOCAL (\`lcars-build:*\`) n'est sur aucun registre — le tir echoue, comme en vrai.
-  case "\$img" in lcars-build:*) exit 1 ;; esac
+  # Un tag LOCAL (\`outil-local:*\`) n'est sur aucun registre — le tir echoue, comme en vrai.
+  case "\$img" in outil-local:*) exit 1 ;; esac
   grep -qxF "\$img" "$UNPULLABLE" && exit 1
   echo "\$img" >> "$KNOWN"
   exit 0
@@ -88,7 +88,7 @@ run_runner() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUS"* ]]
   # A refusal that does not say how to proceed is an obstacle, not a wall.
-  [[ "$output" == *"--target build"* ]]
+  [[ "$output" == *"--labels"* ]]
   [[ "$output" == *"--accept-generic"* ]]
   # Upstream of the forge: nothing was minted, nothing registered.
   refute grep -q '^CURL' "$CALLS"
@@ -105,20 +105,20 @@ run_runner() {
 }
 
 @test "an image no daemon can resolve is REFUSED — the runner would announce it anyway" {
-  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:absente"
+  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://outil-local:absente"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"lcars-build:absente"* ]]
+  [[ "$output" == *"outil-local:absente"* ]]
   [[ "$output" == *"rate chaque job"* ]]
   refute grep -q '^CURL' "$CALLS"
 }
 
 @test "labels whose images all resolve pass, and the check reaches the forge after" {
-  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:9"
+  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://outil-local:9"
 
   [[ "$output" == *"labels:"* ]]
   grep -q "image inspect alpine:3.20" "$CALLS"
-  grep -q "image inspect lcars-build:9" "$CALLS"
+  grep -q "image inspect outil-local:9" "$CALLS"
   grep -q '^CURL' "$CALLS"
 }
 
@@ -150,15 +150,15 @@ run_runner() {
 }
 
 @test "une image que le tir ne ramene pas reste un REFUS, et il nomme le build" {
-  # La distinction qui compte : `lcars-build:<tag>` n'est sur aucun registre. Tirer echoue, l'image
+  # La distinction qui compte : une image locale (`outil-local:<tag>`) n'est sur aucun registre. Tirer echoue, l'image
   # reste absente, et le refus doit rester celui qui nomme la commande de build — pas un message de
   # registre que personne ne peut suivre.
-  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:absente"
+  run_runner --labels "shell:docker://alpine:3.20,elixir:docker://outil-local:absente"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUS"* ]]
-  [[ "$output" == *"lcars-build:absente"* ]]
-  [[ "$output" == *"--target build"* ]]
+  [[ "$output" == *"outil-local:absente"* ]]
+  [[ "$output" == *"pack.sh"* ]]
   refute grep -q '^CURL' "$CALLS"
 }
 

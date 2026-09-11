@@ -213,9 +213,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 # deux valeurs, et RIEN qui les compare : c'est le temoin qui manquait autant que la valeur. Le
 # second test ci-dessous est ce temoin, et il vaut independamment du compte qu'on choisit.
 
-@test "MUR 5: le deck ne se depose plus sur une identite partagee, et son compte existe des DEUX cotes" {
+@test "MUR 5: le deck ne se depose plus sur une identite partagee, et son compte existe — pose par 21 sur les deux terrains" {
   local landing="$REPO/runtime/services/console-landing.sh"
-  local dockerfile="$REPO/deploy/docker/Dockerfile"
   local mod="$REPO/deploy/modules.d/21-service-accounts.sh"
 
   # Le drop ne nomme plus `nobody` : ni en uid, ni en gid.
@@ -226,7 +225,6 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
   # LES DEUX RAILS POSENT LE COMPTE. En verifier un seul laisserait l'autre demarrer un `setpriv`
   # vers un nom que `/etc/passwd` ne connait pas — et `setpriv` echoue alors en parlant de lui-meme.
-  grep -q 'useradd --system .* lcars-system' "$dockerfile"
   code_of "$mod" | grep -q 'SYSTEM_USER="\${PROV_SYSTEM_USER:-lcars-system}"'
   code_of "$mod" | grep -q -- '-g "\$SYSTEM_GROUP" -- "\$SYSTEM_USER"'
 }
@@ -268,7 +266,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   done
 }
 
-@test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau, sur les DEUX rails" {
+@test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau — le poste et le conteneur" {
   # ⚠ LE PARTAGE QUI TIENT TOUT LE MODELE : celui qui DETIENT ne peut pas escalader, celui qui
   # ESCALADE ne detient rien. `lcars-authority` porte les secrets de la forge et tourne sous un
   # compte systeme ; `lcars-converger` porte `useradd` et n'ouvre aucun secret.
@@ -278,7 +276,6 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
   local unit="$REPO/deploy/modules.d/64-services.sh"
   local entry="$REPO/runtime/services/container/boot.sh"
-  local dockerfile="$REPO/deploy/docker/Dockerfile"
 
   # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
   code_of "$unit" | sed -n '/lcars-catalogue)/,/^      ;;/p' | grep -q 'User='
@@ -288,7 +285,6 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # RAIL CONTENEUR : le service est depose par setpriv, et le compte existe dans l'image.
   code_of "$entry" | grep -q 'setpriv .*catalogue-executor.py\|setpriv[^|]*\\$'
   code_of "$entry" | grep -q 'catalogue-executor.py'
-  grep -q 'useradd --system .* lcars-authority' "$dockerfile"
 
   # LE COMPTE EST POSE PAR LE RAIL POSTE AUSSI — sinon `User=` designe un compte absent et l'unite
   # meurt au demarrage sur `failed to determine user credentials`.
@@ -320,13 +316,6 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   local attendu
   attendu="$(sed -n 's/^: "${PROV_AUTHORITY_USER:=\([a-z-]*\)}"$/\1/p' "$REPO/deploy/lib/provision-lib.sh")"
   [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans provision-lib.sh" >&2; return 1; }
-
-  code_of "$REPO/deploy/docker/Dockerfile" \
-    | grep -qE "useradd.*[[:space:]]${attendu}([[:space:]]|\\\\|$)" || {
-      echo "MUR 4 bis rompu — le Dockerfile ne CREE pas le compte « $attendu » (useradd)" >&2
-      code_of "$REPO/deploy/docker/Dockerfile" | grep -nE 'useradd.*lcars' >&2
-      return 1
-    }
 
   code_of "$REPO/runtime/services/container/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {

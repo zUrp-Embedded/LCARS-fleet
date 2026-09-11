@@ -92,21 +92,6 @@ mod() { run bash "$MOD" "$1"; }
   [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
 }
 
-@test "les pins sont IDENTIQUES a ceux du Dockerfile — deux rails, deux mecanismes, UNE version" {
-  local k from_mod from_docker
-  for k in TOFU_SHA256_AMD64 TOFU_SHA256_ARM64; do
-    from_mod="$(grep -oE "^${k}=[0-9a-f]+" "$MOD" | cut -d= -f2)"
-    from_docker="$(grep -oE "ARG ${k}=[0-9a-f]+" "$DOCKERFILE" | cut -d= -f2)"
-    [ -n "$from_mod" ]
-    [ -n "$from_docker" ]
-    [ "$from_mod" = "$from_docker" ]
-  done
-  local v_mod v_docker
-  v_mod="$(grep -oE 'LCARS_TOFU_VERSION:-[0-9.]+' "$MOD" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-  v_docker="$(grep -oE '^ARG TOFU_VERSION=[0-9.]+' "$DOCKERFILE" | cut -d= -f2)"
-  [ "$v_mod" = "$v_docker" ]
-}
-
 @test "l'absence de tofu se DIT avec sa consequence" {
   mod check
   [ "$status" -eq 1 ]

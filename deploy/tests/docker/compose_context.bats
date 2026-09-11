@@ -1,43 +1,36 @@
 #!/usr/bin/env bats
 # SOURCE: deploy/tests/docker/compose_context.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-04
-# STATUS: bats tests — le contexte de build du compose est la RACINE du depot, et le Dockerfile s'y lit
+# STARDATE: 2026-09-11
+# STATUS: bats tests for docker-compose.yml + Dockerfile — l'image vient de pack.sh, le compose ne BATIT pas
 #
-# DI-09 (lot 11), DI-08 : un contexte de compose faux passe vert au gate (rien ne le joue) et rouge au
-# premier `container build`. Le Dockerfile fait `COPY fleet …`, `COPY deploy …`, `COPY catalogues …`,
-# `COPY assets …` : son contexte est la racine du depot, deux niveaux au-dessus de `deploy/docker/`.
+# Jusqu'au 2026-09-11 le compose portait un bloc `build:` (contexte `../..`, la racine du depot) et
+# ces temoins tenaient ce contexte d'accord avec chaque COPY du Dockerfile. Le contexte est
+# maintenant le KIT de pack.sh (`docker build … "$STAGE/$ROOT"`), jamais un checkout : un
+# `compose build` n'aurait plus de sens, et c'est ce que ces deux temoins tiennent.
 
 load ../refute
 
 setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
-  ROOT="$(cd "$DOCKER/../.." && pwd)"
   CF="$DOCKER/docker-compose.yml"
-  [ -f "$CF" ]
+  DF="$DOCKER/Dockerfile"
+  [ -f "$CF" ] && [ -f "$DF" ]
 }
 
-@test "le contexte est ../.. depuis deploy/docker — la racine du depot — et le Dockerfile s'y resout" {
-  local ctx df
-  ctx="$(sed -n 's/^\s*context:\s*//p' "$CF" | head -1)"
-  df="$(sed -n 's/^\s*dockerfile:\s*//p' "$CF" | head -1)"
-  [ "$ctx" = "../.." ]
-  [ "$(cd "$DOCKER/$ctx" && pwd)" = "$ROOT" ]
-  [ -f "$DOCKER/$ctx/$df" ]
-  [ "$(cd "$DOCKER/$ctx" && readlink -f "$df")" = "$(readlink -f "$DOCKER/Dockerfile")" ]
+@test "le compose n'a AUCUN bloc build: — l'image se nomme (image:), elle vient de pack.sh" {
+  refute grep -qE '^\s*build:' "$CF"
+  refute grep -qE '^\s*context:' "$CF"
+  refute grep -qE '^\s*dockerfile:' "$CF"
+  grep -qE '^\s*image:' "$CF"
 }
 
-@test "chaque COPY du Dockerfile designe un chemin qui EXISTE sous ce contexte (sauf --from, qui lit un stage)" {
-  local src bad=0
-  while read -r src; do
-    # Un motif OPTIONNEL — UN caractere entre crochets en FIN de nom (`.source-revisio[n]`, cf.
-    # eb388ef5d) — n'exige rien. Tout autre crochet est un chemin comme un autre et se verifie :
-    # ecarter `*[*` laissait passer n'importe quel COPY fautif portant un crochet (relecture
-    # hostile 2026-09-04, M3).
-    case "$src" in *\[?\]) continue ;; esac
-    [[ -e "$ROOT/$src" ]] || { echo "COPY $src : absent sous $ROOT" >&2; bad=1; }
-  done < <(grep -vE '^\s*#' "$DOCKER/Dockerfile" | grep -E '^COPY ' | grep -v -- '--from=' \
-           | sed -E 's/^COPY\s+//; s/--[a-z-]+(=\S+)?\s+//g' | awk '{ for (i = 1; i < NF; i++) print $i }' \
-           | sort -u)
-  [ "$bad" -eq 0 ]
+@test "le Dockerfile ne copie QUE le contexte entier vers /src — le kit, tel que pack.sh le scelle" {
+  local copies; copies="$(grep -vE '^\s*#' "$DF" | grep -E '^COPY ' | grep -v -- '--from=')"
+  [ "$(grep -c . <<<"$copies")" -eq 1 ]
+  grep -qE '^COPY --chown=builder:builder \. /src/lcars_install$' <<<"$copies"
+  # et pack.sh batit bien depuis le stage du kit, avec ce Dockerfile
+  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
+  grep -qE -- '-f "\$STAGE/\$ROOT/deploy/docker/Dockerfile"' "$pk"
+  grep -qE '"\$STAGE/\$ROOT" \\$' "$pk"
 }

@@ -411,6 +411,19 @@ ws() { run bash "$WS" up "$@"; }
   sed -n '/^kit_deballer()/,/^}/p' "$SRC" | grep -q 'EUID'
 }
 
+@test "BANC : les creds claude du siege sont posees chez l humain de demo (ISO bench-up), et l absence est DITE" {
+  local fn; fn="$(sed -n '/^seed_bench_creds()/,/^}/p' "$SRC")"
+  [ -n "$fn" ]
+  # un humain que le convergeur n'a pas materialise : rien n'est pose, et c'est dit
+  run bash -c "$fn; seed_bench_creds n-existe-pas-$$"
+  [[ "$output" == *"n'existe pas encore"* ]]
+  # l'humain existe (nous), mais le siege n'a pas de creds : dit, avec le geste d'identite
+  run bash -c "$fn; LCARS_CREDS_SRC='$BATS_TEST_TMPDIR/absent.json' SUDO_USER=$(id -un) seed_bench_creds $(id -un)"
+  [[ "$output" == *"NON posées"*"n'en a pas"*"/login"* ]]
+  # et hors --bench (LCARS_BUILTIN_HUMAN vide), cmd_up ne l'appelle pas : un deploiement ne seme rien
+  grep -q '\[\[ -z "${LCARS_BUILTIN_HUMAN:-}" \]\] || seed_bench_creds "$LCARS_BUILTIN_HUMAN"' "$SRC"
+}
+
 @test "CANAL inconnu (produit pose sans tampon) : un kit passe, un checkout aussi — le rail reprend et ecrit le tampon" {
   local f="$BATS_TEST_TMPDIR/facts-inconnu"; printf 'channel=inconnu\nchannel_tree=kit\n' > "$f"
   local v

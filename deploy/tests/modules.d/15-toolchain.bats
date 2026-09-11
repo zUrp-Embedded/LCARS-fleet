@@ -65,7 +65,7 @@ _run_apply() {
   run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\" PROV_ELIXIR_PIN_SHA256='$FAKE_SHA'; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; apt_ensure() { echo \"APT-ENSURE \$*\"; }; apply 2>&1"
 }
 
-@test "UNE SOURCE : le pin, le plancher et les ARG du Dockerfile s'accordent — et le pin SATISFAIT ce que mix.exs exige" {
+@test "UNE SOURCE : le pin et le plancher s'accordent — et le pin SATISFAIT ce que mix.exs exige" {
   # ⚠ CE TEMOIN A EXIGE L'EGALITE AVEC `mix.exs`, ET C'ETAIT TROP FORT (2026-09-07). `runtime/` n'est
   # pas le perimetre de l'installeur : le requirement du projet est pose la-bas, le pin et le
   # plancher ici. Le contrat REEL entre les deux n'est pas « la meme valeur », c'est « ce que le rail
@@ -86,19 +86,6 @@ _run_apply() {
     || { echo "le pin $PIN ne satisfait pas « ~> $mixreq » de mix.exs"; return 1; }
   [ "$fmaj" -eq "$rmaj" ] && [ "$fmin" -ge "$rmin" ] \
     || { echo "le plancher $MIN est SOUS « ~> $mixreq » de mix.exs : une machine au plancher ne batirait pas"; return 1; }
-  [ "$(sed -n 's/^ARG ELIXIR_PIN=\(.*\)$/\1/p' "$DF")" = "$PIN" ] || { echo "Dockerfile ARG ELIXIR_PIN ≠ $PIN"; return 1; }
-  [ "$(sed -n 's/^ARG ELIXIR_PIN_SHA256=\(.*\)$/\1/p' "$DF")" = "$SHA" ] || { echo "Dockerfile ARG ELIXIR_PIN_SHA256 ≠ lib"; return 1; }
-  [ "$(sed -n 's/^ARG ELIXIR_OTP_MAJOR=\(.*\)$/\1/p' "$DF")" = "$OTP" ] || { echo "Dockerfile ARG ELIXIR_OTP_MAJOR ≠ $OTP"; return 1; }
-}
-
-@test "le stage build de l'image : erlang par apt, PAS elixir ; le zip verifie par sha256 ; les quatre liens" {
-  local build; build="$(sed -n '/AS build$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
-  grep -qE '^\s+erlang \\$' <<<"$build" || { echo "erlang n'est plus dans la liste apt du stage build"; return 1; }
-  refute_out 'erlang elixir' <<<"$build"
-  grep -q 'elixir-otp-${ELIXIR_OTP_MAJOR}.zip' <<<"$build"
-  grep -q 'sha256sum -c' <<<"$build"
-  grep -q 'for b in elixir elixirc mix iex; do ln -s' <<<"$build"
-  grep -q 'elixir --short-version)" = "${ELIXIR_PIN}"' <<<"$build"
 }
 
 @test "APPLY pose le pin : zip telecharge et verifie, arbre sous le prefixe, quatre liens" {

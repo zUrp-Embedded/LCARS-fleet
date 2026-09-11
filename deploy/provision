@@ -205,7 +205,7 @@ case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (
 # se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
 # l'image (doctor au build) et de `list` — jamais un substrat qu'on converge.
 case "$CMD" in
-  apply|update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
+  update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
   L'image se bâtit (deploy/docker/Dockerfile, « deploy/container build »), se vérifie au build (stage verify,
   « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
   (runtime/services/container/init.sh). Pour l'instance : « deploy/container status » · « deploy/container down »." ;;

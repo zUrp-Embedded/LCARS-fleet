@@ -99,15 +99,6 @@ mod() { run bash "$MOD" "$1"; }
   [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
 }
 
-@test "les arbres poses sont EXACTEMENT ceux que le Dockerfile pose — deux rails, un contenu" {
-  # C'est la definition du trou : ce que l'image livre et que le rail natif ne livrait pas.
-  local t
-  for t in avatars favicon; do
-    grep -qE "^COPY assets/$t +/opt/lcars/share/$t" "$DOCKERFILE"
-    grep -vE '^\s*#' "$MOD" | grep -q "MEDIA_TREES=(.*$t"
-  done
-}
-
 @test "la doc EST batie et posee — elle n'est pas accessoire" {
   # ⚖ USER 2026-08-22 : « j'ai pas envie de taper un site remote pour afficher la doc locale ».
   #
@@ -117,16 +108,6 @@ mod() { run bash "$MOD" "$1"; }
   # `404 not found` nu sur l'onglet Doc du deck.
   mod apply
   [ -s "$LCARS_MEDIA_ROOT/doc/index.html" ]
-}
-
-@test "la BASE du deck voyage jusqu'au build — sinon chaque URL d'asset est fausse" {
-  # `astro.config.mjs` fait `base = LCARS_SITE_BASE || '/'`. GitHub Pages batit pour la racine, le
-  # deck sert sous `/doc/` : recopier l'artefact Pages ici donnerait un site aux assets casses. Le
-  # Dockerfile pose la meme variable pour la meme raison.
-  mod apply
-  grep -q '^base=/doc/$' "$NPM_TRACE"
-  grep -q "^LCARS_SITE_BASE=/doc/" "$BATS_TEST_DIRNAME/../../docker/Dockerfile" \
-    || grep -q "ENV LCARS_SITE_BASE=/doc/" "$BATS_TEST_DIRNAME/../../docker/Dockerfile"
 }
 
 @test "npm absent : ECHEC NOMME qui pointe le module qui le pose" {
@@ -276,13 +257,6 @@ mod() { run bash "$MOD" "$1"; }
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars : 755 $me ≠ 750 $me"* ]] || { echo "$output"; return 1; }
-}
-
-@test "MODE : l'image normalise share/ comme l'apply (ni setgid ni ecriture groupe) — ce que 44 relit au build en sort au mode de la table" {
-  # Un COPY PRESERVE les modes du contexte de build : un clone a umask 002 est en 2775/664, et
-  # `a+rX` seul les laissait. Au build, `44 check` compare a `0755 root:root` (table) : sans cette
-  # ligne, `verify` rougirait sur un contexte ordinaire — ou ne rougirait que sur celui d'un autre.
-  grep -qE '^RUN chmod -R a\+rX,g-s,go-w /opt/lcars/share$' "$DOCKERFILE"
 }
 
 # ─── LE CANAL : SOUS `deb`, LA DOC ET LES MEDIAS SONT AU PAQUET (lot 2, 2026-09-05) ────────────

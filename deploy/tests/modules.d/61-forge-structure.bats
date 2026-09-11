@@ -165,11 +165,12 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
 }
 
 @test "le depot de demo est recable, la REFERENCE se demande a son autorite — ce module ne la nomme pas" {
-  local racines racine
-  racines="$(sed -nE 's|^COPY[[:space:]]+catalogues[[:space:]]+([^[:space:]]+)[[:space:]]*$|\1|p' \
-               "$BATS_TEST_DIRNAME/../../docker/Dockerfile" | grep -v '^/src/' || true)"
-  [ "$(printf '%s\n' "$racines" | grep -c .)" -eq 1 ]
-  racine="$racines"
+  # La racine LIVREE est celle que Fleet.Layout declare (@platform_root + @catalogues_dirname) ; sur
+  # les deux terrains c'est 62 qui embarque `catalogues/` du kit a cet endroit — le COPY de l'image
+  # d'avant etait un jumeau, parti le 2026-09-11.
+  local layout="$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/layout.ex" racine
+  racine="$(sed -n 's/^\s*@platform_root\s*"\([^"]*\)".*/\1/p' "$layout")/$(sed -n 's/^\s*@catalogues_dirname\s*"\([^"]*\)".*/\1/p' "$layout")"
+  [[ "$racine" =~ ^/[^/]+/[^/]+/[^/]+$ ]] || { echo "racine livree illisible dans Fleet.Layout : « $racine »"; return 1; }
   grep -q "DEMO_CATALOGUE=\"\${LCARS_DEMO_CATALOGUE:-$racine/web-demo}\"" "$G"
   code | grep -q 'LCARS_DEMO_CATALOGUE='
   # ⚠ LA REFERENCE N'EST PLUS PASSEE : 48 la derivait par `mix run` ; le geste la demande lui-meme

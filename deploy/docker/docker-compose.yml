@@ -59,12 +59,6 @@ name: lcars
 
 services:
   lcars:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile
-      args:
-        GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
-        BUILD_DATE: "${LCARS_BUILD_DATE:-unknown}"
     # LE TAG EST UNE VARIABLE, ET CE N'EST PAS DU CONFORT. Ecrit en dur, un `compose build` ECRASE
     # ce tag pour tout le monde — y compris un banc qui TOURNE et qui le reference : le conteneur
     # vivant n'est pas touche (il tient son image par son id), mais l'image d'origine cesse d'etre

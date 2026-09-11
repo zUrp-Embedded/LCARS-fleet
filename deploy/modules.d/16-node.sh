@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — Node précompilé PINNÉ : le toolchain qui bâtit la DOC du produit
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 # ⚠ COREPACK N'EST PAS LA TROISIÈME VOIE QU'IL SEMBLE ÊTRE. Il est là (`node-corepack` chez apt, et
@@ -64,15 +64,13 @@ check_doc_batie() {
   p_ok "doc du deck bâtie et posée ($DECK_DOC, $n fichiers)"
 }
 
-# ⚠ DEUX CHEMINS, UNE SEULE QUESTION : « y a-t-il quelque chose a batir ici ? ». Le substrat docker
-# repondait non depuis toujours (la doc sort du stage « site » de l'image) ; une livraison BINAIRE
-# repond non pour la meme raison, sur un poste — `pack.sh` a bati la doc en meme temps que la release.
-# Les separer produirait un poste qui telecharge 60 Mo de toolchain node pour ne rien batir.
-rien_a_batir() { [[ "${PROV_SUBSTRATE:-}" == "docker" ]] || prov_delivery_is_binary; }
-rien_a_batir_car() {
-  if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then echo "stage « site » de l'image"
-  else echo "livraison binaire — bâtie par pack.sh"; fi
-}
+# ⚠ UNE SEULE QUESTION : « y a-t-il quelque chose a batir ici ? », et c'est la LIVRAISON qui repond,
+# jamais le substrat. Une livraison BINAIRE (le kit de `pack.sh`, sur un poste comme dans l'image :
+# depuis le 2026-09-11 l'image se batit par ce meme rail, depuis ce meme kit) porte la doc deja
+# batie ; poser node pour ne rien batir telechargerait 60 Mo de toolchain pour rien. Le `case`
+# substrat d'avant supposait un stage « site » de l'image qui n'existe plus.
+rien_a_batir() { prov_delivery_is_binary; }
+rien_a_batir_car() { echo "livraison binaire — bâtie par pack.sh"; }
 
 check() {
   if rien_a_batir; then

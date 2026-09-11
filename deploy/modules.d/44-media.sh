@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — les médias partagés (avatars, favicon) : le jumeau FICHIER du trou ISO des paquets
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 16-node

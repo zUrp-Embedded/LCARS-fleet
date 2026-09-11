@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: PROTO-V2 — OpenTofu et son miroir de providers, SUR LA MACHINE : la structure de forge n'a plus besoin d'une image
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 

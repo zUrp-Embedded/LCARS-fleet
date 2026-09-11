@@ -391,7 +391,6 @@ code_of() { sed 's/#.*//' "$1"; }
   #
   # Le rail natif ne cite pas le gid : il le lit dans la table par `prov_manifest_gid`, ce qui EST
   # la bonne forme — l'accord sur le gid y est structurel, pas recopie. On garde donc son GESTE.
-  need deploy/docker/Dockerfile     "groupadd -g $gid $nom([[:space:]]|\\\\|$)"  "la creation dans l'image (gid $gid)"
   need deploy/modules.d/20-groups.sh "ensure_group \"\\\$PROV_CONSOLE_GROUP\""    "la creation sur le rail natif"
   need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
@@ -808,8 +807,6 @@ PYX
   # (2) Les autres porteurs nomment le MEME compte, chacun sur son geste.
   need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
       echo "MUR 13 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }; }
-  need13 deploy/docker/Dockerfile   "useradd .*-g $nom $nom([[:space:]]|\\\\|$)" "la creation dans l'image"
-  need13 deploy/docker/Dockerfile   "groupadd --system $nom([[:space:]]|\\\\|$)"  "le groupe dans l'image"
   need13 runtime/services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
   need13 deploy/system.manifest      "^anchor[[:space:]]+/etc/lcars/deck-oidc.json[[:space:]]+0640[[:space:]]+root:$nom" \
                                      "le proprietaire du secret OIDC"

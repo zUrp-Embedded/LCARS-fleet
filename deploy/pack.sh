@@ -29,10 +29,13 @@
 # compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
 # personne ne vérifie à ta place.
 #
-# USAGE : deploy/pack.sh            gate + release + DOC + tar + porte — dans le tiroir, rien n'en sort
-#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir)
+# USAGE : deploy/pack.sh            gate + release + DOC + tar + porte + IMAGE — dans le tiroir et le daemon, rien n'en sort
+#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir) et l'image au registre
+#         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit — et le dit)
 #         deploy/pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
 # ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
+#         LCARS_PACK_IMAGE le nom local de l'image (défaut `lcars-fleet` : tags `<tag>` et `local`)
+#         LCARS_PACK_REGISTRY le registre du --publish (défaut : l'hôte de la forge, ou ghcr.io chez GitHub)
 #         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
 #         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
 #                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
@@ -47,11 +50,13 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 PUBLISH=0
+IMAGE=1
 for _arg in "$@"; do
   case "$_arg" in
     --publish) PUBLISH=1 ;;
+    --no-image) IMAGE=0 ;;
     --no-push) PUBLISH=0 ;;   # l'ancien nom du défaut (les bancs et les journaux le portent)
-    *) echo "pack: option inconnue: $_arg (--publish | --no-push)" >&2; exit 1 ;;
+    *) echo "pack: option inconnue: $_arg (--publish | --no-image | --no-push)" >&2; exit 1 ;;
   esac
 done
 unset _arg
@@ -290,6 +295,32 @@ say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
 bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
 
+# ─── L'IMAGE — LE MEME KIT, POSE PAR LE MEME RAIL, DANS UN CONTENEUR ────────────────────────────
+# ⚖ user 2026-09-10 : « pack.sh devrait récupérer la construction du container et sa publication »
+# — pas de jumeau. Le contexte du build est le stage du kit (release et doc dedans : livraison
+# binaire, rien ne se compile) ; le Dockerfile joue `provision apply --substrate docker` puis, au
+# stage verify, `provision doctor` — les mêmes modules que le poste, sélectionnés par leurs
+# en-têtes. L'image porte le tag de la version ET `<nom>:local`, le nom que `deploy/container up`
+# et le banc prennent par défaut. `--no-image` s'en passe, et le dit.
+IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
+if [[ "$IMAGE" -eq 1 ]]; then
+  # shellcheck source=lib/docker-endpoint.sh
+  . deploy/lib/docker-endpoint.sh
+  docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
+  say "image → $IMAGE_NAME:$TAG (le kit posé par le rail, puis son doctor)…"
+  "$PROV_DOCKER_BIN" build \
+      -f "$STAGE/$ROOT/deploy/docker/Dockerfile" \
+      --build-arg GIT_SHA="$_rev" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
+      -t "$IMAGE_NAME:$TAG" -t "$IMAGE_NAME:local" \
+      "$STAGE/$ROOT" \
+    || die "image NON bâtie — le rail a rougi dans le conteneur (le kit et la porte sont là, dans $DIST)"
+  _img_rev="$("$PROV_DOCKER_BIN" image inspect "$IMAGE_NAME:$TAG" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+  [[ "$_img_rev" == "$_rev" ]] || die "l'image dit « $_img_rev », le kit $_rev — deux révisions dans une même version, rien ne sort"
+  say "image : $IMAGE_NAME:$TAG (révision $_img_rev), aussi $IMAGE_NAME:local"
+else
+  say "--no-image : pas d'image — le kit et la porte seulement"
+fi
+
 # ─── LA PUBLICATION (--publish) : LA RELEASE DE LA FORGE ──────────────────────────────────────
 # (50-PUBLISH § 1) La Release porte TOUT le tiroir de la version — tar, sha256, la porte et sa
 # somme, les .minisig quand la clé est là — à la forme d'URL commune à Gitea et GitHub :
@@ -301,7 +332,7 @@ say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) f
 #
 # L'ancien étage poussait le tar seul au paquet `generic` de la forge : la Release le remplace — un
 # seul endroit, la forme d'URL que la porte connaît.
-[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et la porte restent dans $DIST"; exit 0; }
+[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et la porte restent dans $DIST, l'image dans le daemon"; exit 0; }
 
 # LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire le code, donc la version doit atterrir
 # au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour une forge,
@@ -314,8 +345,9 @@ FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
 # un littéral partirait sur la forge ET dans chaque tar que ce script produit — le paquet livrerait
 # la clé de la forge qui le sert. Il vient de l'environnement (la CI : un secret du runner) ou d'un
 # fichier posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
-# dépôt. Portée : write:repository (la release est un objet du dépôt) — distincte chez Gitea de
-# celle des paquets, et celui des `git push` ne l'a pas forcément. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
+# dépôt. Portées : write:repository (la release est un objet du dépôt) ET write:package (l'image
+# va au registre de l'owner) — distinctes chez Gitea, aucune ne se déduit de l'autre ; celui des
+# `git push` n'a pas la seconde. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
 # un état se calcule AVANT d'être dit (cicatrice du 2026-08-25 : « jeton : trouvé9172f605… »).
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
@@ -324,11 +356,35 @@ TOKEN="${LCARS_PACK_TOKEN:-}"
 _tok_state="absent"
 [[ -n "$TOKEN" ]] && _tok_state="trouvé"
 say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
-[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portée write:repository)"
+[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:repository + write:package)"
 
-say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 # shellcheck source=lib/forge-publish.sh
 . deploy/lib/forge-publish.sh
+
+# ─── L'IMAGE D'ABORD, LA RELEASE ENSUITE — parce que la Release est IMMUABLE (ADR 012) ──────────
+# Une release publiée dont l'image manque ne se répare pas ; une image poussée dont la release
+# manque se rattrape en rejouant. Le registre est celui de la forge (`<hôte>/<owner>/<repo>`), ou
+# ghcr.io chez GitHub ; un tag qui existe déjà est un refus, jamais une réécriture. Le jeton est
+# celui de la release (write:package), lu sur stdin — jamais en argv.
+if [[ "$IMAGE" -eq 1 ]]; then
+  _registry="${LCARS_PACK_REGISTRY:-}"
+  if [[ -z "$_registry" ]]; then
+    if [[ "$(fp_dialect "$FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${FORGE#*://}"; _registry="${_registry%%/*}"; fi
+  fi
+  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
+  printf '%s' "$TOKEN" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
+    || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
+  if "$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" >/dev/null 2>&1; then
+    die "--publish : $IMAGE_REMOTE existe déjà — un tag publié ne se réécrit jamais (ADR 012) ; pour refaire, supprime-le sur la forge, ce script ne le fait pas"
+  fi
+  say "image → $IMAGE_REMOTE…"
+  "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
+    || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est PAS créée (rien à réparer sur la forge)"
+  "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true
+  say "image publiée : $IMAGE_REMOTE"
+fi
+
+say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
   || die "publication interrompue — voir ci-dessus"
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

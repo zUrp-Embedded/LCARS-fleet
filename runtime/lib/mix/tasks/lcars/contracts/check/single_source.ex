@@ -221,8 +221,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   `catalogues_shipped_dir/0` (`@platform_root` + `@catalogues_dirname`) is where the IMAGE deposits
   its seeds; `catalogues_installed_dir/0` (`@installed_catalogues_root`) is the cache the forge
-  restores into. Nine files carry one of the two: the BEAM declares them, the Dockerfile CREATES
-  the shipped tree, the manifest creates the installed one, and five shell/CLI readers copy them.
+  restores into. Eight files carry one of the two: the BEAM declares them, `62-runtime-helpers`
+  creates the shipped tree (on a workstation and in the image alike, since the image is posed by
+  the same rail), the manifest creates the installed one, and five shell/CLI readers copy them.
   They cannot share a literal across the language boundary, so `Layout` DECLARES and the rest copy.
 
   ⚠ `bin/lcars` NAMES THIS LOCK in its comment: *"C'est un fait ecrit deux fois, dans deux langages
@@ -308,10 +309,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the demo catalogue the forge gesture publishes"},
         {"services/forge-gestures.sh", ~r/\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}/,
          "the installed root the forge gesture reads"},
-        # ⚠ LE CREATEUR, PAS UN LECTEUR — et c'est le miroir qui compte le plus. Si le `COPY` ne
-        # suit pas l'autorite, la fleet lit un arbre que l'image n'a jamais ecrit.
-        {"../deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
-         "the image COPY that creates the shipped tree"},
+        # Le CREATEUR de l'arbre livre est le meme sur les deux terrains depuis le 2026-09-11 :
+        # `62-runtime-helpers` embarque `catalogues/` du kit sous la racine (EMBEDDED_ROOT) — sur un
+        # poste comme dans l'image, que le rail pose (deploy/docker/Dockerfile). Le `COPY` de l'image
+        # d'avant etait un jumeau ; il n'y a plus de second createur a tenir d'accord.
         {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
         {"../deploy/lib/provision-lib.sh",

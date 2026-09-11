@@ -3,8 +3,8 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: PROTO-V2 — le client OAuth2 du deck : un APPELANT du geste de forge du produit (runtime/services/forge.d/deck-oidc.sh)
-# APPLY-ON: any
-# CHECK-ON: any
+# APPLY-ON: wsl linux
+# CHECK-ON: wsl linux
 # NEEDS: root
 # AFTER: 21-service-accounts 63-forge-tokens
 

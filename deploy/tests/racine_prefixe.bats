@@ -122,24 +122,17 @@ porteurs_de_release() {
   [ "$nb" -eq 0 ] || { echo "AUCUN chemin de release BATIE attendu, $nb trouve(s) — la devinette entre paquet et prefixe est revenue" >&2; return 1; }
 }
 
-@test "LE DOCKERFILE construit, copie et cable sous le MEME prefixe" {
-  # Cinq gestes : le `LCARS_INSTALL_PREFIX=` du build, le `COPY` depuis l'etage de build, le
-  # `chown -R`, le `chmod -R` et les deux `ln -sf`. Un seul en desaccord donne une image ou le
-  # runtime est pose a un endroit et les symlinks pointent ailleurs — `lcars` en « No such file ».
-  local d="$R/deploy/docker/Dockerfile" n
-  # ⚠ `\b` N'EST PAS UNE BORNE DE CHEMIN, ET CE MUR ETAIT MORT. Mutation jouee le 2026-08-29 :
-  # `LCARS_INSTALL_PREFIX=/opt/lcars/runtime-drift` dans le Dockerfile — le test restait VERT. `\b`
-  # marque une frontiere de MOT : le tiret n'est pas un caractere de mot, donc `runtime-drift`
-  # satisfait `runtime\b`. Tout suffixe commencant par un tiret, un point ou un espace passait. Ce
-  # qui borne un chemin dans un `ENV`/`ARG`, c'est l'espace, la fin de ligne ou le slash suivant.
-  grep -qE "LCARS_INSTALL_PREFIX=$ATTENDU([[:space:]/]|\$)" "$d" \
-    || { echo "le build du Dockerfile n'installe pas sous « $ATTENDU »" >&2; return 1; }
-  grep -qE "^COPY --from=build $ATTENDU $ATTENDU\$" "$d" \
-    || { echo "le COPY du Dockerfile ne porte pas « $ATTENDU » des deux cotes" >&2; return 1; }
-  n="$(grep -cE "(chown -R|chmod -R).* $ATTENDU( |\$)" "$d" || true)"
-  [ "$n" -eq 2 ] || { echo "attendu 2 verrouillages (chown/chmod) sur « $ATTENDU », vu $n" >&2; return 1; }
-  n="$(grep -cE "ln -sf $ATTENDU/bin/" "$d" || true)"
-  [ "$n" -eq 2 ] || { echo "attendu 2 symlinks depuis « $ATTENDU/bin/ », vu $n" >&2; return 1; }
+@test "LE DOCKERFILE ne construit, ne copie ni ne cable RIEN sous le prefixe — c'est le rail qui le pose" {
+  # Jusqu'au 2026-09-11 l'image posait la release a la main (LCARS_INSTALL_PREFIX au build, COPY,
+  # chown/chmod, deux ln -sf) et ce mur tenait les cinq gestes d'accord avec le prefixe. Ils sont
+  # partis : l'image se pose par `provision apply`, donc par 60-deploy, le meme poseur que le poste.
+  # Un prefixe qui reviendrait dans le Dockerfile serait le jumeau qui revient.
+  local d="$R/deploy/docker/Dockerfile"
+  grep -vE '^\s*#' "$d" | grep -q 'provision apply --substrate docker' \
+    || { echo "le Dockerfile ne joue plus le rail (provision apply --substrate docker)" >&2; return 1; }
+  grep -vE '^\s*#' "$d" | grep -qE "$ATTENDU([[:space:]/]|\$)" \
+    && { echo "le Dockerfile nomme le prefixe « $ATTENDU » — un geste sur la release hors du rail :" >&2; grep -nE "$ATTENDU" "$d" >&2; return 1; }
+  return 0
 }
 
 @test "LA TABLE declare ce prefixe, et c'est le meme" {

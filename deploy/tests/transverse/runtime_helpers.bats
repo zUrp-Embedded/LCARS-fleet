@@ -202,38 +202,6 @@ helpers() {
 
 # ─── LES DEUX RAILS DISENT LA MEME VERSION ──────────────────────────────────────────────────────
 
-@test "les pins du client de terminal sont IDENTIQUES a ceux du Dockerfile" {
-  # Deux rails, deux mecanismes, UNE version. Un bump joue d'un seul cote donnerait deux consoles
-  # qui ne se comportent pas pareil, et c'est le genre d'ecart qu'on ne voit qu'a l'usage.
-  local k
-  for k in XTERM_JS_SHA256 XTERM_CSS_SHA256 XTERM_FIT_SHA256; do
-    local from_mod from_docker
-    from_mod="$(grep -oE "^${k}=[0-9a-f]+" "$MOD" | cut -d= -f2)"
-    from_docker="$(grep -oE "ARG ${k}=[0-9a-f]+" "$DOCKERFILE" | cut -d= -f2)"
-    [ -n "$from_mod" ]
-    [ -n "$from_docker" ]
-    [ "$from_mod" = "$from_docker" ]
-  done
-}
-
-@test "la liste des auxiliaires est le MIROIR du COPY de l'image — sans entrypoint.sh" {
-  # ⚠ CE TEMOIN PROMETTAIT « et reciproquement » ET NE LE FAISAIT PAS. Il portait une liste
-  # RECOPIEE de huit noms et verifiait un seul sens ; un auxiliaire ajoute au module sans son `COPY`
-  # passait au vert, et le rail conteneur demarrait un service sur un fichier absent. Les deux sens
-  # sont derives, maintenant, et c'est ce qui rend la phrase vraie.
-  local n
-  while read -r n; do
-    grep -q "COPY runtime/services/$n */opt/lcars/$n" "$DOCKERFILE"
-  done < <(helpers)
-
-  # ⚠ LE SENS INVERSE A DEMENAGE, IL N'A PAS DISPARU. Il vivait ici avec deux exemptions nommees, et
-  # il ne regardait qu'une destination — `/opt/lcars/X`. Le temoin « TOUTE destination » plus bas le
-  # remplace : il lit les `COPY` QUELLE QUE SOIT leur cible, et accepte les trois poseurs du module
-  # (executables, donnees, binaires nommes). Le garder ici en double aurait fait deux regles pour un
-  # fait, dont une plus etroite — et c'est toujours la plus etroite qu'on croit avoir lue.
-  refute grep -qE '^\s+entrypoint\.sh$' "$MOD"
-}
-
 # La seconde table du module : <source> <destination> <mode>, une par ligne.
 data_srcs() {
   sed -n '/^DATA=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d '"' \
@@ -249,47 +217,6 @@ data_srcs() {
 # Ce filet RESTE : il attrape le jour ou quelqu'un pose un fichier de `services/` par un `install`
 # nu au lieu d'une table. Il rend vide aujourd'hui, et c'est le bon etat.
 sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' | sort -u; }
-
-@test "TOUTE destination de l'image a un poseur sur le rail poste — pas seulement /opt/lcars" {
-  # ⚠ LE MUR PRECEDENT NE VOYAIT QU'UN MOTIF : `COPY runtime/services/X /opt/lcars/X`. Ce que le
-  # Dockerfile pose AILLEURS lui echappait par CONSTRUCTION — pas par exemption, par angle mort.
-  # Un fichier y vivait deja : `COPY runtime/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
-  # et par RIEN sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
-  # `/etc/skel` : en conteneur un humain recevait le prompt LCARS et ses alias, sur un poste le
-  # `.bashrc` de la distribution. Deux environnements pour un meme role, silencieux des deux cotes.
-  #
-  # Ce temoin lit TOUTES les lignes `COPY runtime/services/...` quelle que soit leur destination, et
-  # exige que chaque source soit posee par le module — en executable (`HELPERS`) ou en donnee
-  # (`DATA`). L'exemption se reduit a `entrypoint.sh`, qui n'a aucun sens hors conteneur.
-  # ⚠ IL Y A UNE TROISIEME VOIE, ET ELLE N'EST PAS UNE EXEMPTION. `HELPERS` et `DATA` existent parce
-  # que l'image pose ces fichiers AILLEURS que la ou la copie embarquee les met — `console.sh` va en
-  # `/opt/lcars/console.sh`, pas en `/opt/lcars/services/console.sh` — donc le module doit les
-  # y poser explicitement. Une source dont le `COPY` vise EXACTEMENT la destination de la boucle
-  # `EMBEDDED` n'a, elle, rien a poser en plus : `EMBEDDED` copie `runtime/services` EN ENTIER, donc
-  # elle y est deja. C'est le cas de la recette de la charte forge depuis qu'elle a quitte
-  # `deploy/deps` — un repertoire, pas un fichier, qu'aucune des deux tables ne peut nommer.
-  #
-  # ⚠ LA CONDITION EST DOUBLE, ET LA SECONDE MOITIE EST CE QUI EMPECHE LE TROU : la destination doit
-  # coincider ET `services` doit reellement figurer dans `EMBEDDED`. Le retirer de cette liste — le
-  # defaut deja vu deux fois, sur `services` puis sur `bin` — rouvrirait ce temoin au lieu de le
-  # laisser vert sur une couverture qui n'existe plus.
-  local n dest vus=0
-  while read -r n dest; do
-    case "$n" in entrypoint.sh) continue ;; esac
-    vus=$((vus + 1))
-    helpers        | grep -qx "$n" && continue
-    data_srcs      | grep -qx "$n" && continue
-    sources_citees | grep -qx "$n" && continue
-    if [ "$dest" = "/opt/lcars/services/$n" ] \
-       && grep -qE '^EMBEDDED=\(.*\bservices\b' "$MOD"; then continue; fi
-    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : runtime/services/$n (destination $dest)"
-    return 1
-  done < <(sed -n 's|^COPY runtime/services/\([^ ]*\) \{1,\}\([^ ]*\).*|\1 \2|p' "$DOCKERFILE")
-
-  # ⚠ GARDE D'INSTRUMENT : un `sed` casse rend zero ligne, et zero ligne examinee se lit comme un
-  # accord parfait. C'est la forme exacte du defaut que ce temoin vient fermer.
-  [ "$vus" -ge 10 ] || { echo "seulement $vus COPY examinees — l'extraction est cassee"; return 1; }
-}
 
 @test "les DONNEES sont posees a leur destination, avec leur mode, et identiques a la source" {
   stub_curl "peu importe"

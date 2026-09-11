@@ -25,17 +25,16 @@ setup() {
 }
 mod() { run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; source '$MOD' >/dev/null 2>&1; $1"; }
 
-@test "livraison SOURCE : le socle de compilation est demande" {
+@test "la BASELINE des pods (venv, pip, compilateur) est demandee sur TOUTE livraison — source comme binaire" {
+  # Elle vivait dans BUILD_PACKAGES, « source seulement », et l'image la posait a la main pour ses
+  # pods : deux rails, deux verites — un poste installe par kit n'avait pas de venv pour ses pods.
+  # Depuis le 2026-09-11 (le jumeau Dockerfile est parti), une seule liste, sur chaque terrain.
   mod 'effective_packages'
-  [[ "$output" == *"build-essential"* ]]
-  [[ "$output" == *"tmux"* ]]
-}
-
-@test "livraison BINAIRE (tampon a la racine) : le socle de compilation n'est PAS demande — un kit ou un paquet arrivent compiles" {
+  [[ "$output" == *"build-essential"* ]] && [[ "$output" == *"python3-venv"* ]] && [[ "$output" == *"tmux"* ]]
   printf 'abcd1234\n' > "$ROOT/.source-revision"
   mod 'effective_packages'
-  refute_out 'build-essential|pkg-config|python3-dev' <<<"$output"
-  [[ "$output" == *"tmux"* ]]
+  [[ "$output" == *"build-essential"* ]] && [[ "$output" == *"python3-venv"* ]] && [[ "$output" == *"tmux"* ]]
+  grep -vE '^\s*#' "$SRC" | refute_out 'BUILD_PACKAGES'
 }
 
 @test "canal kit/source : apply passe par apt (apt_ensure)" {

@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — paquets runtime (apt) + sonde bwrap RÉELLE (le sandbox tourne, pas « le paquet est là »)
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 00-preflight
@@ -29,9 +29,9 @@ PACKAGES=(
   # paquets python populaires livrent des wheels manylinux et ne compilent rien ; ceux qui restent
   # compilent des extensions C, les modules npm natifs veulent node-gyp, et les crates rust en
   # `-sys` veulent cc + pkg-config + le `-dev` de la lib C visée.
-  # ⚠ LE SOCLE DE COMPILATION (build-essential…) N'EST PLUS ICI : il vit dans BUILD_PACKAGES, demande
-  # sur une livraison SOURCE seulement — un kit arrive compile (mesure 2004, 2026-09-05, du temps des
-  # .deb : six drifts « absent » sur un poste installe par paquet).
+  # ⚠ LE SOCLE DE COMPILATION (build-essential…) est plus bas, dans la baseline des pods — il a vecu
+  # dans une seconde liste « livraison SOURCE seulement » (mesure 2004, 2026-09-05, du temps des
+  # .deb : six drifts « absent » sur un poste installe par paquet), partie le 2026-09-11.
   # ⚠ `sudo` A PERDU SA JUSTIFICATION ECRITE AVEC LA REGLE QU'ELLE CITAIT. Elle disait que ce paquet
   # est « ce que la regle etroite de 45-sudoers-toolchain designe » — cette regle est retiree, et la
   # phrase est partie avec elle. Ce qui reste vrai, et qui n'etait ecrit nulle part : c'est le RAIL
@@ -46,6 +46,18 @@ PACKAGES=(
   # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
   # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.
   ttyd
+  # ─── LA BASELINE D'OUTILLAGE DES PODS — un besoin RUNTIME, sur CHAQUE terrain ─────────────────
+  # Sans ces paquets un pod ne produit que du bash, du HTML et du python NU : ni venv, ni pip, ni
+  # compilateur — chaque dépendance de projet passerait par une approbation humaine. python3-venv
+  # n'est pas un confort, c'est le seul chemin (PEP 668 actif sur ubuntu 26.04 : pip hors venv
+  # ÉCHOUE par conception). build-essential + python3-dev + pkg-config + libssl-dev sont pour la
+  # QUEUE : le paquet sans wheel qui compile ses extensions C, node-gyp, les crates -sys.
+  # ⚠ ILS VIVAIENT DANS BUILD_PACKAGES, « livraison SOURCE seulement » — et l'image les posait à la
+  # main pour ses pods (le jumeau Dockerfile, retiré le 2026-09-11). Deux rails, deux vérités : un
+  # poste installé par kit n'avait pas de venv pour ses pods. Une seule liste, ici.
+  python3-venv python3-pip build-essential pkg-config python3-dev libssl-dev
+  # le confort de shell d'un humain dans le conteneur (l'image les posait, le poste les a par sa distro)
+  less bash-completion
 )
 
 # ⚠ `linux` SEULEMENT, ET LES DEUX AUTRES SUBSTRATS SONT DES REFUS RAISONNÉS :
@@ -53,8 +65,6 @@ PACKAGES=(
 #                `docker-endpoint.sh` le trouve sans qu'aucun paquet ne soit installé ici ; poser
 #                un paquet docker dans la distro y fabriquerait un SECOND daemon, concurrent du premier.
 #   · `docker` — on est DANS le conteneur ; il n'y a rien à installer et rien à monter.
-# La queue de compilation (extensions C, node-gyp, crates -sys) : livraison SOURCE seulement.
-BUILD_PACKAGES=(build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip)
 LINUX_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
 DOCKER_KEYRING="${LCARS_DOCKER_KEYRING:-/etc/apt/keyrings/docker.asc}"
@@ -159,8 +169,6 @@ EOF
 # empêcher, et ce n'est pas à cette fonction de la commettre.
 effective_packages() {
   printf '%s\n' "${PACKAGES[@]}"
-  # le socle de compilation : livraison SOURCE seulement (kit et paquet arrivent compiles)
-  prov_delivery_is_binary || printf '%s\n' "${BUILD_PACKAGES[@]}"
   if [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && ! docker_endpoint >/dev/null 2>&1; then
     printf '%s\n' "${LINUX_PACKAGES[@]}"
   fi
@@ -215,7 +223,9 @@ apply() {
     ensure_docker_repo || verdict_apply
   fi
   apt_ensure "${pkgs[@]}" || verdict_apply
-  if probe_bwrap; then
+  if [[ "${PROV_KERNEL_PROBES:-1}" == "0" ]]; then
+    p_warn "sonde bwrap NON jouée (PROV_KERNEL_PROBES=0 : ce noyau n'est pas celui de la cible) — elle se joue au boot"
+  elif probe_bwrap; then
     p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
   else
     p_fail "bwrap installé mais le sandbox minimal ÉCHOUE (user $PROV_HUMAN) — arbitrage requis : sysctl kernel.apparmor_restrict_unprivileged_userns=0 OU profil AppArmor pour bwrap ; re-lance ensuite"

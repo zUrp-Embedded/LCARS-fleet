@@ -1014,52 +1014,6 @@ STUB
     || { echo "PROV_ELIXIR_MIN absent de $LIB : plus rien ne dit quel Elixir la distro doit au moins servir"; return 1; }
 }
 
-@test "les deux etages de l'image partent de la MEME base, digest compris" {
-  local dockerfile="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  [ -f "$dockerfile" ]
-
-  local build runtime
-  build="$(sed -n 's/^ARG BUILD_IMAGE=//p' "$dockerfile")"
-  runtime="$(sed -n 's/^ARG RUNTIME_IMAGE=//p' "$dockerfile")"
-
-  # ⚠ GARDE D'INSTRUMENT : deux extractions ratees rendent deux chaines VIDES, donc EGALES. Un mur
-  # qui compare du vide a du vide est vert sur n'importe quelle derive.
-  [ -n "$build" ]   || { echo "extraction ratee : ARG BUILD_IMAGE dans $dockerfile"; return 1; }
-  [ -n "$runtime" ] || { echo "extraction ratee : ARG RUNTIME_IMAGE dans $dockerfile"; return 1; }
-
-  [ "$build" = "$runtime" ] \
-    || { echo "les deux etages divergent — build « $build », runtime « $runtime ». L'ERTS bundle au build n'est chez lui au runtime que si la base est la meme."; return 1; }
-
-  # Et cette base EST la cible du rail poste, pas une distro tierce.
-  [[ "$build" == ubuntu:* ]] \
-    || { echo "base « $build » : le rail poste cible ubuntu, l'image doit batir dessus"; return 1; }
-  [[ "$build" == *@sha256:* ]] \
-    || { echo "base « $build » sans digest : l'immutabilite ne se declare pas, elle s'epingle"; return 1; }
-}
-
-@test "les deux rails demandent erlang a apt et Elixir au MEME zip epingle — un mecanisme, deux fichiers" {
-  # 2026-09-06 (passe8/elixir-1.20) : la cible LTS sert Elixir 1.18, le plancher est 1.20. Erlang
-  # reste celui de la distro sur les deux rails ; Elixir vient du precompile officiel, epingle
-  # dans cette lib — le Dockerfile en porte les memes valeurs en ARG (15-toolchain.bats tient
-  # l'egalite des pins, ici on tient la FORME : ni l'un ni l'autre ne redemande elixir a apt).
-  local dockerfile="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  local mod="$BATS_TEST_DIRNAME/../../modules.d/15-toolchain.sh"
-  [ -f "$dockerfile" ] && [ -f "$mod" ]
-
-  grep -qE '^\s+erlang \\$' "$dockerfile" \
-    || { echo "l'etage build du Dockerfile ne demande plus « erlang » a apt"; return 1; }
-  ! grep -qE '^\s+erlang elixir \\?$' "$dockerfile" \
-    || { echo "l'etage build du Dockerfile redemande elixir a apt : la distro LTS sert 1.18"; return 1; }
-  grep -q 'elixir-otp-${ELIXIR_OTP_MAJOR}.zip' "$dockerfile" \
-    || { echo "le Dockerfile ne prend plus Elixir au zip officiel epingle"; return 1; }
-  grep -qE 'apt_ensure erlang( \|\|| *$)' "$mod" \
-    || { echo "15-toolchain ne demande plus « erlang » a apt"; return 1; }
-  ! grep -qE 'apt_ensure erlang elixir' "$mod" \
-    || { echo "15-toolchain redemande elixir a apt"; return 1; }
-  grep -q 'fetch_verify "$ELIXIR_ZIP_URL" "$PROV_ELIXIR_PIN_SHA256"' "$mod" \
-    || { echo "15-toolchain ne prend plus Elixir au zip officiel epingle par la lib"; return 1; }
-}
-
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
   # ⚠ TROISIEME INCARNATION DE B5 DANS LA MEME JOURNEE. `ip` n'existe pas partout — l'image du job
   # CI ne l'a pas — et sous `pipefail` une commande introuvable rend 127 que le pipeline propage :

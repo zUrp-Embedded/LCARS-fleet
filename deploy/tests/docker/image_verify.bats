@@ -32,42 +32,17 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   grep -qE '^\s*&& printf .*> /verified' <<<"$v"
 }
 
-@test "verify ne demande QUE ce que l'image pose — ni volume, ni forge, ni boot" {
+@test "verify joue le doctor SANS --only, depuis la copie que 62 embarque — la selection est celle des CHECK-ON" {
+  # L'ancien verify copiait deploy/ lui-meme et nommait neuf modules par --only : une selection
+  # ecrite dans le Dockerfile, contre la regle « une difference de terrain s'exprime par une
+  # selection d'en-tete ». Depuis que le rail pose l'image (2026-09-11), 62 embarque deploy/ sous
+  # /opt/lcars comme sur un poste, et le doctor s'y joue entier : ce qui n'est pas mesurable sur
+  # ce substrat le dit par CHECK-ON, pas par une liste ici.
   local v; v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
-  local m
-  # 25-directories est dans la liste depuis le lot 14 : c'est le seul module du stage qui mesure un
-  # MODE (`stat`). Sa table melange volumes et /run, mais il les ecarte lui-meme sur docker, par le
-  # substrat du manifeste et les VOLUME du Dockerfile (25-directories.bats, « docker : »).
-  for m in 10-packages 16-node 21-service-accounts 25-directories 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services; do
-    grep -q -- "--only $m" <<<"$v" || { echo "verify ne demande pas $m" >&2; return 1; }
-  done
-  # 20-groups mesure l'appartenance du SIEGE, qui n'existe qu'au boot ; la sonde bwrap de 10-packages
-  # mesure le noyau — verify la debranche (`PROV_KERNEL_PROBES=0`), elle se joue au boot.
+  grep -qE '/opt/lcars/deploy/provision doctor --substrate docker' <<<"$v"
+  refute grep -qE -- '--only' <<<"$v"
+  refute grep -qE '^COPY ' <<<"$v"
   grep -q 'PROV_KERNEL_PROBES=0' <<<"$v"
-  # ⚠ « NE DEMANDE QUE » SE MESURE PAR LE COMPLEMENT (relecture hostile 2026-09-04, M10). Une liste
-  # noire de sept noms laissait huit modules dans aucune des deux listes : un `--only 49-forge-runner`
-  # ajoute au stage — il parle a une forge — passait vert. Ici : tout `--only` du stage est dans la
-  # liste blanche, et tout module de modules.d/ hors liste blanche est absent du stage.
-  local blanche=" 10-packages 16-node 21-service-accounts 25-directories 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services "
-  local demande
-  while read -r demande; do
-    [ -n "$demande" ] || continue
-    [[ "$blanche" == *" $demande "* ]] || { echo "verify demande $demande, qui n'est pas dans la liste de ce que l'image POSE" >&2; return 1; }
-  done < <(grep -oE -- '--only [0-9]{2}-[a-z-]+' <<<"$v" | sed 's/^--only //')
-  local f n=0
-  for f in "$BATS_TEST_DIRNAME"/../../modules.d/[0-9][0-9]-*.sh; do
-    m="$(basename "$f" .sh)"; n=$((n + 1))
-    [[ "$blanche" == *" $m "* ]] && continue
-    refute grep -q -- "--only $m" <<<"$v"
-  done
-  [ "$n" -ge 20 ] || { echo "seulement $n modules lus dans modules.d — l'instrument ne lit plus le repertoire" >&2; return 1; }
-}
-
-@test "deploy/ entre dans verify, a la place que le doctor connait — et c'est LA que 62 le retrouvera quand runtime ne l'aura plus" {
-  local v; v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
-  grep -qE '^COPY deploy /opt/lcars/deploy$' <<<"$v"
-  # la meme revision que le LABEL : 62 compare deux fois la meme verite
-  grep -qE 'PROV_SOURCE_REV="\$\{GIT_SHA\}"' <<<"$v"
 }
 
 @test "final DEPEND de verify par le marqueur — un stage dont personne ne depend n'est pas bati" {
@@ -96,12 +71,4 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   grep -qE '/opt/lcars/\.verified' <<<"$job"
   # le job ne pousse RIEN : bâtir n'est pas publier (publish.yml le fait, sur un tag)
   refute grep -qE 'docker push|docker login' <<<"$job"
-}
-
-@test "le stage RUNTIME ne porte plus deploy/ — seul verify le copie, et final repart de runtime" {
-  # ⚖ user 2026-09-04 (Q1, lot 7) : rien dans le conteneur ne lit /opt/lcars/deploy.
-  local r; r="$(sed -n '/^FROM .* AS runtime$/,/^FROM runtime AS verify$/p' "$DF" | grep -vE '^\s*#|`#')"
-  refute grep -qE '^COPY deploy ' <<<"$r"
-  refute grep -q '/opt/lcars/deploy' <<<"$r"
-  code | grep -qE '^FROM runtime AS final$'
 }

@@ -3,8 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — toolchain de BUILD : Erlang/OTP par apt, Elixir par le zip officiel ÉPINGLÉ ; deux planchers
-# APPLY-ON: wsl linux
-# CHECK-ON: wsl linux
+# APPLY-ON: wsl linux docker
+# CHECK-ON: wsl linux docker
 # NEEDS: root
 # (CHECK-ON sans docker — délibéré, et ce n'est PAS le « 10/15 CHECK-ON » du plan ADR §11 pris au
 # mot : la toolchain vit dans le STAGE BUILD de l'image, pas dans le conteneur runtime. L'état-cible

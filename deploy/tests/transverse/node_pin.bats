@@ -29,9 +29,8 @@
 
 setup() {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/16-node.sh"
-  DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   SITE_WF="$BATS_TEST_DIRNAME/../../../.github/workflows/site.yml"
-  [ -f "$MOD" ] && [ -f "$DOCKERFILE" ] && [ -f "$SITE_WF" ]
+  [ -f "$MOD" ] && [ -f "$SITE_WF" ]
 }
 
 # La majeure de chacun des trois. Chaque extraction est nommee : une seule qui rate rendrait une
@@ -42,18 +41,17 @@ maj_module()   { sed -n 's/^NODE_VERSION="${LCARS_NODE_VERSION:-\([0-9]\+\)\..*/
 # la chaine VIDE, et deux extractions vides sont EGALES — le mur serait devenu vert a vide au moment
 # meme ou on l'epinglait. La garde d'instrument du test l'aurait attrape ; le motif est corrige pour
 # qu'elle n'ait pas a le faire.
-maj_image()    { sed -n 's/^FROM node:\([0-9]\+\)-slim[^ ]* AS site.*/\1/p' "$DOCKERFILE"; }
 maj_workflow() { sed -n 's/^ *node-version: *\([0-9]\+\) *$/\1/p' "$SITE_WF"; }
 
-@test "les trois producteurs de la doc sont sur la MEME majeure de node" {
-  local m i w
-  m="$(maj_module)"; i="$(maj_image)"; w="$(maj_workflow)"
+@test "les deux producteurs de la doc sont sur la MEME majeure de node — le poste (16) et le site en ligne" {
+  # Le stage « site » de l'image est parti avec le jumeau Dockerfile (2026-09-11) : la doc de l'image
+  # est celle du kit, batie par pack.sh sur le poste — donc par 16-node. Il reste deux producteurs.
+  local m w
+  m="$(maj_module)"; w="$(maj_workflow)"
 
   [ -n "$m" ] || { echo "extraction ratee : NODE_VERSION dans $MOD"; return 1; }
-  [ -n "$i" ] || { echo "extraction ratee : FROM node:<maj>-slim AS site dans $DOCKERFILE"; return 1; }
   [ -n "$w" ] || { echo "extraction ratee : node-version dans $SITE_WF"; return 1; }
 
-  [ "$m" = "$i" ] || { echo "majeure node : module $m, image $i — deux resolveurs de modules pour une meme doc"; return 1; }
   [ "$m" = "$w" ] || { echo "majeure node : module $m, workflow GitHub $w — la doc en ligne ne serait pas celle du deck"; return 1; }
 }
 

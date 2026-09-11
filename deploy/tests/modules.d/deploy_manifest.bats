@@ -166,42 +166,38 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   ' "$2" | tr '\n' ' '
 }
 
-@test "tout paquet du RUNTIME de l'image est sur le rail natif — l'autre sens, celui qui a coute" {
+@test "l'image ne pose par apt qu'un SOCLE — chaque paquet est sur le rail (10-packages), ou image-only et NOMME" {
+  # Jusqu'au 2026-09-11 l'image reposait a la main la liste de 10-packages, et ce temoin tenait les
+  # deux copies egales. L'image se pose maintenant par le rail : la seule liste apt du Dockerfile est
+  # le socle qu'il faut AVANT de jouer le rail (curl, git, sudo, ca-certificates) et ce que seule une
+  # image demande (tini pour le PID 1, openssh-server pour la porte d'entree). Tout le reste vient
+  # de 10-packages. Un paquet qui reviendrait ici serait le jumeau qui revient.
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
 
-  # Le stage RUNTIME seul : celui qui decrit le conteneur livre, pas l'atelier de build.
   local image
-  image="$(sed -n '/^FROM ${RUNTIME_IMAGE} AS runtime/,/^COPY --from=build/p' "$DOCKERFILE" \
+  image="$(grep -vE '^\s*#' "$DOCKERFILE" \
     | sed -n '/apt-get install/,/rm -rf \/var\/lib\/apt/p' \
-    | grep -vE '^\s*`#' \
     | tr ' \\' '\n\n' \
     | grep -vE '^$|apt-get|install|-y|--no-install-recommends|DEBIAN_FRONTEND|&&|^rm$|-rf|/var/lib/apt' \
     | sort -u)"
-  [ -n "$image" ]
+  [ -n "$image" ] || { echo "aucune liste apt lue dans le Dockerfile — l'instrument est casse"; return 1; }
+  [ "$(printf '%s\n' "$image" | grep -c .)" -le 8 ] || { echo "l'image pose $(printf '%s\n' "$image" | grep -c .) paquets : ce n'est plus un socle" >&2; printf '%s\n' "$image" >&2; return 1; }
 
-  # BUILD_PACKAGES en fait partie : le socle de compilation vit sur un poste SOURCE et dans l'image —
-  # « le magasin d'outillage qui absorbe extensions C, node-gyp, crates -sys reste docker »
-  # (cible.md § 6) — mais pas sur un poste installe par kit ou par paquet (lot 3b, 2026-09-05).
-  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'BUILD_PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") "
-
-  # Ce que l'image seule a le droit de porter, et POURQUOI :
+  local native; native=" $(native_list 'PACKAGES' "$PKG") "
   #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
   #   openssh-server  — la porte d'admin du CONTENEUR. Sur un poste, l'acces reseau appartient a son
-  #                     proprietaire : l'operateur est deja connecte quand ce rail tourne, et lui
-  #                     ouvrir un sshd serait decider de son exposition a sa place.
-  #   less, bash-completion — le confort de qui vit DANS le conteneur (une console, un shell) ;
-  #                     sur un poste ils sont « absents par decision » (cible.md § 6) : le socle du
-  #                     paquet lcars est le strict necessaire, et 10-packages EST ce Depends.
-  local exempt=" tini openssh-server less bash-completion "
-
+  #                     proprietaire : lui ouvrir un sshd serait decider de son exposition a sa place.
+  local exempt=" tini openssh-server "
   local miss=""
   for p in $image; do
-    [[ "$exempt" == *" $p "* ]] && continue
-    [[ "$native" == *" $p "* ]] || miss="$miss $p"
+    [[ "$native" == *" $p "* || "$exempt" == *" $p "* ]] || miss+=" $p"
   done
-  [ -z "$miss" ] || { echo "paquets du runtime de l'image ABSENTS du rail natif :$miss" >&2; false; }
+  [ -z "$miss" ] || { echo "dans le socle de l'image mais ni sur le rail ni image-only nomme :$miss" >&2; return 1; }
+  # et le rail, lui, ne demande AUCUN paquet image-only
+  for p in tini openssh-server; do
+    [[ "$native" != *" $p "* ]] || { echo "$p est sur le rail poste — il n'a rien a y faire" >&2; return 1; }
+  done
 }
 
 @test "les exemptions sont NOMMEES dans le temoin, pas glissees dans une liste" {

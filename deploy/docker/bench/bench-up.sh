@@ -74,7 +74,7 @@ BIND="0.0.0.0"
 # que les autres composent — l'IP de cette machine sur son reseau — et `--advertise` la remplace
 # quand la derivation se trompe (plusieurs interfaces, un nom DNS, un reverse-proxy).
 ADVERTISE=""
-IMAGE="lcars-fleet:2"
+IMAGE="lcars-fleet:local"
 RUNNER_LABELS=""
 WITH_RUNNER=1
 CREDS_FROM="$HOME/.claude/.credentials.json"
@@ -481,31 +481,15 @@ RUNNER_SERT=0
 # `catthehacker/ubuntu:act-latest` est l'image de reference de `act` pour ce label — publique, donc
 # `seed_dind_images` la tire elle-meme dans le daemon embarque du runner.
 #
-# Les trois autres restent ce qu'ils sont : des labels A NOUS, servis par des images a nous
-# (`lcars-build` est locale, elle se seme par `docker save`). Celui-ci est le seul emprunte a
-# l'exterieur, et c'est pour ca qu'il est nomme a part.
+# Les deux autres sont des labels A NOUS. Le label `elixir` et son image `lcars-build` (le jumeau
+# de build du Dockerfile d'avant) sont partis le 2026-09-11 : le gate se joue sur `ubuntu-latest`,
+# qui tire sa toolchain lui-meme (setup-beam), comme n'importe quel workflow de l'ecosysteme.
 if [[ -z "$RUNNER_LABELS" ]]; then
-  BUILD_IMG="lcars-build:${IMAGE##*:}"
-  if "$DOCKER_BIN" image inspect "$BUILD_IMG" >/dev/null 2>&1; then
-    RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://$BUILD_IMG,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
-  fi
+  RUNNER_LABELS="shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
 fi
 
 if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="NON demarre (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
-elif [[ -z "$RUNNER_LABELS" ]]; then
-  # ⚠ LES BACKTICKS SONT ECHAPPES, ET CE N'EST PAS DE LA COQUETTERIE. Dans une chaine a GUILLEMETS
-  # DOUBLES, `ci: required` est une SUBSTITUTION DE COMMANDE : bash executait `ci:`, ne le trouvait
-  # pas, et `set -euo pipefail` tuait le script — exit 127, pour seul message « ci:: command not
-  # found ». Cette branche et la suivante ne « remplissaient » donc pas RUNNER_STATE : elles
-  # mouraient AVANT de l'ecrire, sans diagnostic, ce que 6-133 ne voit pas. Mesure faite en
-  # atteignant la branche depuis un test.
-  RUNNER_STATE="ABSENT — pas d'image lcars-build:${IMAGE##*:} pour le label elixir (CI indisponible).
-  ⚠ CE N'EST PAS UNE DEGRADATION, C'EST UN BLOCAGE : la carte canon declare \`ci: required\`, donc
-  le gate attend un statut sur chaque PR, 45 min, puis ESCALADE. Aucun jury n'est convoque
-  entre-temps — rien ne sera livre sur ce banc tant qu'aucun runner ne sert le label.
-              Sortie : docker build --target build -t lcars-build:${IMAGE##*:} -f deploy/docker/Dockerfile .
-              puis rejouer forge-runner.sh, ou --runner-labels pour choisir soi-meme"
 elif [[ -z "$MASTER_TOKEN" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else

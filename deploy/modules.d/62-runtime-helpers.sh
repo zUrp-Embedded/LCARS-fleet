@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: PROTO-V2 — les auxiliaires runtime du rail POSTE : ce que le `COPY` du Dockerfile pose côté image
-# APPLY-ON: wsl linux
+# APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
 set -euo pipefail
