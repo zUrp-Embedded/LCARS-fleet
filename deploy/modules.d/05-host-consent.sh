@@ -24,10 +24,6 @@ consent_body() {
 }
 
 check() {
-  if consent_sans_objet; then
-    p_ok "consentement sans objet : instance Incus — le terrain se détruit, il ne se garde pas"
-    verdict_check
-  fi
   local f; f="$(prov_consent_file)"
   if [[ -s "$f" ]]; then
     p_ok "consentement machine enregistré ($f)"
@@ -41,21 +37,7 @@ check() {
   verdict_check
 }
 
-# ⚠ SANS OBJET SUR UN TERRAIN JETABLE, ET IL FAUT LE DIRE PLUTOT QUE DE WARNER. Depuis qu'`incus`
-# satisfait les listes `linux` (`prov_substrate_satisfait`), ce module est SELECTIONNE dans une
-# instance Incus — et il y warnait « rien à enregistrer » à chaque apply. Or il n'y a rien à
-# consentir : le consentement existe pour une machine que quelqu'un GARDE, et une instance se
-# détruit. ⚖ user 2026-09-08 : « ya pas de machine réellement installée, à part les bancs jetables.
-# qui sont jetables. » Un module qui n'a rien à faire le DIT une fois ; il ne warne pas en boucle.
-consent_sans_objet() { # 0 si le terrain est jetable par construction
-  [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" == incus ]]
-}
-
 apply() {
-  if consent_sans_objet; then
-    p_ok "consentement sans objet : instance Incus — le terrain se détruit, il ne se garde pas"
-    verdict_apply
-  fi
   local f; f="$(prov_consent_file)"
   if [[ -s "$f" ]]; then
     p_ok "consentement machine déjà enregistré ($f)"

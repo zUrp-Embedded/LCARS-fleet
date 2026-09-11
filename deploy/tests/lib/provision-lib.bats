@@ -1784,36 +1784,30 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
          grep -vE '^\s*#' "$LIB" | grep -n '/opt/lcars' >&2; return 1; }
 }
 
-# ─── QUEL SUBSTRAT SATISFAIT QUELLE LISTE — LOT 1 DU PLAN TERRAIN CONTRÔLÉ ──────────────────────
+# ─── QUEL SUBSTRAT SATISFAIT QUELLE LISTE ────────────────────────────────────────────────────────
 #
-# ⚠ SANS CES TÉMOINS, LA PROPRIÉTÉ CENTRALE DU LOT PASSE À LA TRAPPE : mesuré le 2026-09-08, retirer
-# l'équivalence `incus`→`linux` ne faisait rougir AUCUN cas du dépôt, alors qu'elle décide si 14
-# modules (« APPLY-ON: wsl linux ») et 25 lignes du manifeste (« wsl+linux ») s'appliquent ou non
-# dans une instance Incus. Un rail qui saute 14 modules en silence sur le terrain que le plan bénit.
+# Une seule fonction lit les deux separateurs des listes de substrat : « wsl linux » (en-tete de
+# module) et « wsl+linux » (colonne du manifeste). Un mot ne satisfait que lui-meme, `any` accueille
+# tout. (Du 2026-09-08 au 2026-09-11, `incus` satisfaisait `linux` — parti avec le terrain Incus.)
 
-@test "SUBSTRAT/LISTE : « incus » satisfait une liste « linux » — les deux separateurs" {
-  # Les deux appelants historiques n'ecrivaient pas la liste pareil : `substrate_in` lit
-  # « wsl linux » (espaces, en-tete de module), `prov_dir_scope` lit « wsl+linux » (colonne du
-  # manifeste). Une seule fonction repond aux deux, donc elle doit comprendre les deux.
-  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl linux' incus"
-  [ "$status" -eq 0 ] || { echo "« wsl linux » n'accueille pas incus — 14 modules sautes"; return 1; }
-  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' incus"
-  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas incus — 25 lignes du manifeste hors portee"; return 1; }
-  run bash -c ". '$LIB'; prov_substrate_satisfait any incus"
-  [ "$status" -eq 0 ] || { echo "« any » n'accueille pas incus"; return 1; }
+@test "SUBSTRAT/LISTE : les deux separateurs disent la meme chose, et « any » accueille tout" {
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl linux' linux"
+  [ "$status" -eq 0 ] || { echo "« wsl linux » n'accueille pas linux"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' linux"
+  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas linux — 25 lignes du manifeste hors portee"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' wsl"
+  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas wsl"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait any docker"
+  [ "$status" -eq 0 ] || { echo "« any » n'accueille pas docker"; return 1; }
 }
 
-@test "SUBSTRAT/LISTE : la reciproque est FAUSSE — un Linux natif n'est pas jetable" {
-  # ⚠ C'EST LA MOITIÉ QUI DONNE SON SENS À L'AUTRE. `incus` satisfait `linux` parce qu'une instance
-  # EST un Linux natif du point de vue des gestes — apt, systemd, /etc. L'inverse dirait qu'une
-  # machine de quelqu'un est un terrain jetable, et ouvrirait le rail sur exactement ce que la garde
-  # de cible refuse.
-  run bash -c ". '$LIB'; prov_substrate_satisfait incus linux"
-  [ "$status" -ne 0 ] || { echo "un Linux natif se declare couvert par une liste « incus »"; return 1; }
-  run bash -c ". '$LIB'; prov_substrate_satisfait incus wsl"
-  [ "$status" -ne 0 ] || { echo "WSL se declare couvert par une liste « incus »"; return 1; }
+@test "SUBSTRAT/LISTE : un mot ne satisfait que lui-meme — docker n'est pas dans « linux », ni wsl" {
   run bash -c ". '$LIB'; prov_substrate_satisfait linux docker"
   [ "$status" -ne 0 ] || { echo "docker se declare couvert par une liste « linux » — l'image pose, le rail non"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait linux wsl"
+  [ "$status" -ne 0 ] || { echo "WSL se declare couvert par une liste « linux »"; return 1; }
+  run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' docker"
+  [ "$status" -ne 0 ] || { echo "docker se declare couvert par « wsl+linux »"; return 1; }
 }
 
 @test "SUBSTRAT/LISTE : le rail et la TABLE repondent par la MEME fonction, pas par deux copies" {

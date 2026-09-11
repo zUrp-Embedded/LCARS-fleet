@@ -119,26 +119,7 @@ preflight() { export PROVISION_MODULE=00-preflight; run bash "$MODS/00-preflight
   [[ "$output" != *"accepté une fois sur cette machine"* ]]
 }
 
-# ─── UN TERRAIN JETABLE N'A RIEN A CONSENTIR — LOT 1 DU PLAN TERRAIN CONTRÔLÉ ───────────────────
-#
-# ⚠ CE MODULE EST DEVENU JOIGNABLE SUR INCUS SANS QUE PERSONNE NE LE DECIDE : depuis que `incus`
-# satisfait les listes `linux` (`prov_substrate_satisfait`, pose pour que les 14 modules
-# « APPLY-ON: wsl linux » s'appliquent dans une instance), celui-ci — seul module `linux` SEUL — est
-# selectionne lui aussi. Il y warnait « rien a enregistrer » a chaque apply. ⚖ user 2026-09-08 :
-# « ya pas de machine reellement installee, a part les bancs jetables. qui sont jetables. »
-
-@test "CONSENTEMENT : sur une instance Incus, c'est SANS OBJET — et le module le DIT" {
-  run env PROV_SUBSTRATE=incus LCARS_HOST_CONSENT_FILE="$BATS_TEST_TMPDIR/consent" \
-    bash "$MODS/05-host-consent.sh" apply
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"sans objet"* ]] || { echo "le module ne dit pas qu'il n'a rien a faire : $output"; return 1; }
-  [[ "$output" != *WARN* ]] || { echo "il warne encore sur un terrain jetable : $output"; return 1; }
-  [ ! -e "$BATS_TEST_TMPDIR/consent" ] || { echo "un consentement a ete ecrit sur un terrain jetable"; return 1; }
-}
-
-@test "CONSENTEMENT : sur du Linux natif, il garde tout son objet — le temoin du temoin" {
-  # Sans lui, un module qui se declarerait « sans objet » PARTOUT passerait celui du dessus, et le
-  # consentement d'une machine que quelqu'un garde disparaitrait sans qu'une chaine rougisse.
+@test "CONSENTEMENT : sur du Linux natif consenti, le marqueur s'ecrit — et le module ne se declare jamais sans objet" {
   run env PROV_SUBSTRATE=linux LCARS_ALLOW_ANY_HOST=1 LCARS_HOST_CONSENT_FILE="$BATS_TEST_TMPDIR/consent" \
     LCARS_HOST_CONSENT_OWNER="$(id -un):$(id -gn)" bash "$MODS/05-host-consent.sh" apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

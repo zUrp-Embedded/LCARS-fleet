@@ -123,8 +123,8 @@ prov_dir_scope() {
   sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
   col="$(prov_manifest_substrate "$path")"
   # ⚠ MEME REPONSE QUE `substrate_in` DU RAIL, ET C'EST LA LIB QUI LA DONNE. Ce `case` comparait
-  # des mots exacts ; depuis qu'`incus` satisfait `linux`, une entree « wsl+linux » doit se mesurer
-  # dans une instance Incus — sinon le rail la pose et la table la declare hors portee.
+  # des mots exacts ; la lib est l'unique lecteur des deux separateurs (« wsl linux », « wsl+linux »)
+  # — deux reponses voudraient dire que le rail pose ce que la table declare hors portee.
   if [[ -n "$col" ]] && ! prov_substrate_satisfait "$col" "$sub"; then
     echo substrate; return 0
   fi

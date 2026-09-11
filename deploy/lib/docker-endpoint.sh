@@ -24,31 +24,18 @@ LCARS_DOCKER_ENDPOINT_LOADED=1
 # tirait sur la cible. ⚖ user 2026-09-08 : « on s'installe QUE dans des environnements controles :
 # docker, WSL et incus ». Une classe de terrain qu'on ne sait pas nommer ne peut pas etre benie.
 #
-# L'ORDRE N'EST PAS ARBITRAIRE : docker D'ABORD, parce qu'un conteneur Docker tourne tres bien DANS
-# une instance Incus (mesure du 2026-09-07 : `security.nesting` + les deux interceptions) et doit
-# alors se declarer `docker`, pas `incus`. La question est « quel terrain m'entoure au plus pres ».
+# L'ORDRE N'EST PAS ARBITRAIRE : docker D'ABORD — un conteneur Docker peut tourner dans un autre
+# terrain, et c'est lui qui decide des gestes. La question est « quel terrain m'entoure au plus pres ».
 #
-# LES TROIS SONDES, ET POURQUOI TROIS :
-#   · `/dev/incus/sock` — l'API devlxd d'Incus, exposee DANS l'instance. Le signe le plus specifique.
-#   · `/dev/lxd/sock` — la meme chose sous LXD, dont Incus est le fork. Meme CLASSE de terrain :
-#     conteneur systeme, init complet, arborescence a nous. On ne les distingue pas, et le nom
-#     `incus` couvre les deux — le distinguer demanderait un geste qui differe, il n'y en a pas.
-#   · `/run/systemd/container` valant exactement `lxc` — le repli quand devlxd n'est pas expose
-#     (`security.devlxd=false`). ⚠ SON EXISTENCE NE PROUVE RIEN : mesure du 2026-09-08, ce fichier
-#     est PRESENT sur WSL et vaut `wsl`. C'est son CONTENU qui discrimine, jamais sa presence.
-#
-# ⚠ CE QUI N'EST PAS ENCORE MESURE : les deux sockets, dans une vraie instance. L'hote de mesure
-# demande `incus admin init` et l'appartenance a `incus-admin` — deux gestes root, demandes a
-# lordzurp le 2026-09-08. Les temoins ci-dessous jouent la sonde sur un DECOR (`LCARS_SUBSTRATE_ROOT`),
-# ce qui verifie l'ordre et la discrimination, pas la presence reelle du fichier sur un terrain reel.
+# DEUX SONDES : `.dockerenv` (ou `LCARS_DOCKER=1`) pour docker, le noyau microsoft de `/proc/version`
+# pour WSL ; tout le reste est `linux`. Incus (devlxd, `container=lxc`) a ete un troisieme terrain du
+# 2026-09-08 au 2026-09-11 (lot 1) : sorti de la cible (02-CIBLE § 1), il est parti avec ses sondes.
 #
 # `LCARS_SUBSTRATE_ROOT` est la couture des temoins, jamais un bouton : elle prefixe les chemins
 # sondes. Vide en production, ou tous ces chemins sont absolus.
 detect_substrate() {
   local r="${LCARS_SUBSTRATE_ROOT:-}"
   if [[ -f "$r/.dockerenv" || "${LCARS_DOCKER:-}" == "1" ]]; then echo docker
-  elif [[ -S "$r/dev/incus/sock" || -S "$r/dev/lxd/sock" ]]; then echo incus
-  elif [[ "$(cat "$r/run/systemd/container" 2>/dev/null)" == lxc ]]; then echo incus
   elif grep -qi microsoft "$r/proc/version" 2>/dev/null; then echo wsl
   else echo linux
   fi

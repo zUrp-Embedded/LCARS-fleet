@@ -50,7 +50,7 @@ PROV_ROOT_CANON=/opt/lcars
 if [[ -n "${PROV_ROOT:-}" && "${PROV_ROOT}" != "$PROV_ROOT_CANON" && -z "${BATS_TEST_TMPDIR:-}" ]]; then
   printf 'ECHEC: PROV_ROOT est pose a « %s » dans l environnement, et la racine du produit est FIXE (%s).\n' \
     "$PROV_ROOT" "$PROV_ROOT_CANON" >&2
-  printf '       LCARS ne s installe que sur un terrain controle — docker, WSL, incus — ou il impose son\n' >&2
+  printf '       LCARS ne s installe que sur un terrain controle — docker, WSL — ou il impose son\n' >&2
   printf '       arborescence. Le manifeste declare mode et proprietaire SOUS cette racine ; la deplacer\n' >&2
   printf '       rendrait fausse chaque mesure qui s y refere, sans que rien ne rougisse.\n' >&2
   printf '       Pour poser ailleurs : un autre terrain, pas une autre racine.\n' >&2
@@ -697,29 +697,15 @@ prov_manifest_gid() {
 # sans consequence. Des qu'un substrat en SATISFAIT un autre, la reponse doit etre unique — sinon
 # le rail s'applique et la table ne se mesure pas, ou l'inverse, sur le meme terrain.
 #
-# ⚠ ET C'EST EXACTEMENT CE QU'INCUS DEMANDE. Mesure du 2026-09-08 : 14 modules declarent
-# « APPLY-ON: wsl linux » et 25 lignes du manifeste portent « wsl+linux ». Un substrat `incus` qui
-# ne satisferait que son propre nom serait exclu de TOUT le rail poste — 14 modules sautes, en
-# silence, sur le terrain que le plan benit.
-#
-# POURQUOI `incus` SATISFAIT `linux`, ET PAS L'INVERSE : dans une instance Incus, tout ce que fait
-# le rail linux s'applique tel quel — apt, systemd, /etc, les comptes. C'est un Linux natif, avec
-# une difference qui ne concerne QUE la garde de cible : c'est un terrain jetable, donc il n'a pas
-# besoin du consentement qu'une machine de quelqu'un exige. On le distingue pour la GARDE, on le
-# confond pour les GESTES. L'inverse serait faux : un Linux natif n'est pas jetable.
-#
-# La reciproque a un cout connu et accepte : une liste qui voudrait `linux` SANS `incus` ne peut
-# plus s'ecrire. Aucune n'en a besoin aujourd'hui — `05-host-consent` est le seul module `linux`
-# seul, et son objet (le consentement d'une machine qu'on garde) est precisement ce dont une
-# instance jetable n'a que faire. Le jour ou il en faudrait une, elle s'ecrira en toutes lettres.
+# (Du 2026-09-08 au 2026-09-11, un substrat en satisfaisait un autre : `incus` couvrait `linux`,
+# pour jouer le rail poste dans une instance jetable. Incus est sorti de la cible ; la fonction ne
+# compare plus que des mots, et reste l'unique lecteur des deux separateurs.)
 prov_substrate_satisfait() { # <liste> [substrat] -> 0 si le substrat est couvert par la liste
   local liste="$1" sub="${2:-${PROV_SUBSTRATE:-$(detect_substrate)}}" mot
   [[ "$liste" == any ]] && return 0
   liste="${liste//+/ }"
   for mot in $liste; do
     [[ "$mot" == "$sub" ]] && return 0
-    # `incus` est un `linux` dont on ne demande pas le consentement : il satisfait ses listes.
-    [[ "$mot" == linux && "$sub" == incus ]] && return 0
   done
   return 1
 }
