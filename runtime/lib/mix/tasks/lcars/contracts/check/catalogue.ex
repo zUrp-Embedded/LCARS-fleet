@@ -675,7 +675,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     mismatches =
       for {file, src, wanted} <- sources,
           {var, want} <- wanted,
-          got = shell_default(src, var),
+          got = resolved_default(src, var),
           got != want,
           do: "#{var}: #{file} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
 
@@ -740,6 +740,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
       [_, default] -> default
       nil -> nil
+    end
+  end
+
+  # Le defaut, RESOLU quand il est derive : `$PROV_ROOT/var/catalogues` vaut ce que la racine vaut,
+  # et la racine est ecrite UNE fois (`PROV_ROOT_CANON`, lot 0). Une declaration derivee est une
+  # declaration, pas un desaccord — `Support.shell_defaults/1`. Un litteral se resout a lui-meme.
+  defp resolved_default(source, var) do
+    case shell_default(source, var) do
+      nil -> nil
+      raw -> Support.resolve_shell(Support.shell_defaults(source), raw)
     end
   end
 end

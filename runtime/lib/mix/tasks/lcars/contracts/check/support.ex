@@ -300,6 +300,68 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   def code_of(body),
     do: body |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1)
 
+  # ─── LES DEFAUTS DU SHELL DE L'INSTALLEUR, ET CE QU'ILS VALENT ────────────────────────────────
+  #
+  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Depuis le lot 0 du chantier
+  # terrain-controle (2026-09-08), `provision-lib.sh` nomme sa racine UNE fois — une affectation
+  # nue, `PROV_ROOT_CANON=/opt/lcars` — et compose tout le reste : `: "${PROV_ROOT:=$PROV_ROOT_CANON}"`,
+  # `: "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"`. Les murs qui comparaient ces defauts au litteral
+  # des autres porteurs rendaient « 2 chemins pour un repertoire » sur un corpus parfaitement
+  # d'accord, et verrouillaient `mix release` (R7) sur un faux rouge — mesure du 2026-09-09 sur le
+  # banc 2007 (60-deploy FAIL), puis du 2026-09-11 (3 contrats rouges, 71 verts). La seule facon de
+  # faire taire ce rouge sans ceci etait de RECOPIER le litteral dans la lib — la copie que ces murs
+  # existent pour interdire.
+  #
+  # La resolution est DELIBEREMENT bornee : les defauts `: "${VAR:=valeur}"` et les affectations
+  # nues `VAR=valeur` de premier niveau (hors commentaire, hors fonction), substitues jusqu'au point
+  # fixe — cinq passes au plus. Ce n'est pas un interpreteur shell : une variable qu'on ne sait pas
+  # resoudre reste telle quelle, et le desaccord se voit.
+  @doc false
+  @spec shell_defaults(String.t()) :: %{optional(String.t()) => String.t()}
+  def shell_defaults(src) do
+    code = code_of(src)
+
+    defauts =
+      ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
+      |> Regex.scan(code)
+      |> Map.new(fn [_, nom, val] -> {nom, val} end)
+
+    nues =
+      ~r/^([A-Z_][A-Z0-9_]*)=([^\s"'$][^\s]*)\s*$/m
+      |> Regex.scan(code)
+      |> Map.new(fn [_, nom, val] -> {nom, val} end)
+
+    Map.merge(nues, defauts)
+  end
+
+  @doc false
+  @spec resolve_shell(%{optional(String.t()) => String.t()}, String.t()) :: String.t()
+  def resolve_shell(defaults, value), do: do_resolve_shell(defaults, value, 5)
+
+  defp do_resolve_shell(_defaults, value, 0), do: value
+
+  defp do_resolve_shell(defaults, value, passes) do
+    next =
+      Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, value, fn entier, nom ->
+        Map.get(defaults, nom, entier)
+      end)
+
+    if next == value, do: value, else: do_resolve_shell(defaults, next, passes - 1)
+  end
+
+  # `{brut, resolu}` : la forme que le fichier PORTE (celle qu'un miroir doit retrouver au mot pres)
+  # et ce qu'elle VAUT (ce qu'une autorite doit egaler). `nil` : pas de defaut pour ce nom.
+  @doc false
+  @spec shell_default_resolved(String.t(), String.t()) :: {String.t(), String.t()} | nil
+  def shell_default_resolved(src, var) do
+    defaults = shell_defaults(src)
+
+    case Map.get(defaults, var) do
+      nil -> nil
+      raw -> {raw, resolve_shell(defaults, raw)}
+    end
+  end
+
   defp do_strip_comment([], acc, _in_str), do: acc
   defp do_strip_comment([?# | _rest], acc, false), do: acc
 

@@ -283,6 +283,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     else
       shipped = Path.join(platform, dirname)
 
+      # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION. Depuis le lot 0, provision-lib compose
+      # `$PROV_ROOT/var/catalogues` depuis une racine ecrite UNE fois ; on accepte la forme que la
+      # lib PORTE si elle se resout a la valeur de l'autorite — sinon on exige le litteral, et le
+      # miroir rougit en nommant le fichier (Support.shell_default_resolved/2).
+      lib_installed_form =
+        case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
+          {:ok, lib_src} ->
+            case Support.shell_default_resolved(lib_src, "PROV_CATALOGUES_DIR") do
+              {raw, ^installed} -> raw
+              _ -> installed
+            end
+
+          _ ->
+            installed
+        end
+
       mirrors = [
         {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
          "the CLI's shipped-catalogue default"},
@@ -299,7 +315,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
         {"../deploy/lib/provision-lib.sh",
-         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(installed)}\}"/,
+         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(lib_installed_form)}\}"/,
          "the provisioning default"}
       ]
 
@@ -409,18 +425,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   # provision-lib, c'est-a-dire de reintroduire la copie que ce mur existe pour interdire. Un mur
   # qui punit la forme correcte pousse a la forme fausse.
   #
-  # La resolution est DELIBEREMENT bornee aux defauts `: "${VAR:=valeur}"` de provision-lib, une
-  # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait pas
-  # resoudre reste telle quelle et le desaccord se voit.
+  # La resolution vit dans `Support.shell_defaults/1` + `resolve_shell/2` : les defauts
+  # `: "${VAR:=valeur}"` ET les affectations nues de premier niveau (`PROV_ROOT_CANON=/opt/lcars`,
+  # la racine ecrite UNE fois), jusqu'au point fixe, cinq passes au plus — ce n'est pas un
+  # interpreteur shell. Une variable qu'on ne sait pas resoudre reste telle quelle et le desaccord
+  # se voit.
   defp prov_defaults(root) do
     case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
-      {:ok, src} ->
-        ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
-        |> Regex.scan(src)
-        |> Map.new(fn [_, nom, val] -> {nom, val} end)
-
-      _ ->
-        %{}
+      {:ok, src} -> Support.shell_defaults(src)
+      _ -> %{}
     end
   end
 
@@ -446,10 +459,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     # declaration derivee. L'une repond a « ou lit-on ? », l'autre a « que vaut ce qu'on lit ? ».
     with {:ok, body} <- File.read(Path.expand(rel, root)),
          [_, v] <- Regex.run(rx, code_of(body)) do
-      {:ok, rel, what,
-       Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, v, fn entier, nom ->
-         Map.get(defauts, nom, entier)
-       end)}
+      {:ok, rel, what, Support.resolve_shell(defauts, v)}
     else
       {:error, _} -> {:absent, rel, what}
       _ -> {:unreadable, rel, what}

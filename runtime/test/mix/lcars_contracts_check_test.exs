@@ -21,6 +21,43 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check.Support
   alias Mix.Tasks.Lcars.Contracts.Check.Types
 
+  # ─── UNE DECLARATION DERIVEE EST UNE DECLARATION (lot 0 du chantier terrain-controle) ───────────
+  #
+  # `provision-lib.sh` ecrit sa racine UNE fois (`PROV_ROOT_CANON=/opt/lcars`) et compose ses
+  # defauts dessus. Trois contrats comparaient ces defauts au litteral des autres porteurs et
+  # rougissaient sur un corpus d'accord — R7 refusait `mix release`, 60-deploy mourait sur le banc
+  # 2007 (2026-09-09). Le resolveur partage ci-dessous ferme ce faux rouge sans recopier le litteral.
+  describe "Support.shell_defaults/1 + resolve_shell/2 — une declaration DERIVEE se resout" do
+    test "la racine ecrite une fois (affectation nue) se propage a travers deux etages de defauts" do
+      src = """
+      PROV_ROOT_CANON=/opt/lcars
+      : "${PROV_ROOT:=$PROV_ROOT_CANON}"
+      : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # le store partage
+      : "${PROV_CATALOGUES_DIR:=$PROV_ROOT/var/catalogues}"
+      """
+
+      d = Support.shell_defaults(src)
+      assert Support.resolve_shell(d, "$PROV_TOKENS_DIR") == "/opt/lcars/var/tokens"
+
+      assert Support.shell_default_resolved(src, "PROV_CATALOGUES_DIR") ==
+               {"$PROV_ROOT/var/catalogues", "/opt/lcars/var/catalogues"}
+    end
+
+    test "une variable inconnue reste telle quelle — le desaccord se voit, il ne se devine pas" do
+      d = Support.shell_defaults(": \"${PROV_X:=$AILLEURS/x}\"\n")
+      assert Support.resolve_shell(d, "$PROV_X") == "$AILLEURS/x"
+      assert Support.shell_default_resolved("rien ici", "PROV_X") == nil
+    end
+
+    test "une affectation nue en COMMENTAIRE, indentee, ou quotee ne compte pas" do
+      src =
+        "# PROV_ROOT_CANON=/faux\n  PROV_LOCAL=/dans/une/fonction\n" <>
+          "PROV_QUOTE=\"$AUTRE\"\nPROV_ROOT_CANON=/opt/lcars\n"
+
+      assert Support.shell_defaults(src) == %{"PROV_ROOT_CANON" => "/opt/lcars"}
+    end
+  end
+
   # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « deploy
   # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
   # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
