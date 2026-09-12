@@ -146,6 +146,10 @@ setup() {
   grep -q 'absent' <<<"$bloc"
   grep -q 'fait consent' <<<"$bloc"
   grep -q 'fait substrat' <<<"$bloc"
+  # la tranche joue le préflight, les paquets et le moteur docker, dans cet ordre ; seul l'ENV vaut consentement
+  grep -q -- '--only 00-preflight --only 10-packages --only 12-docker-engine' <<<"$bloc"
+  grep -q '"$(fait consent)" == "env" ]]' <<<"$bloc"
+  refute grep -q 'fichier' <<<"$bloc"
 }
 
 @test "MIGRE : la MESURE est rejouee apres la tranche paquets" {

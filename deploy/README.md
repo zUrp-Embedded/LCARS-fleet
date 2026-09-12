@@ -65,8 +65,8 @@ morte avec le modèle).
 5. **La frontière est l'API docker.** LCARS agit à partir d'elle et au-dessus : conteneurs,
    volumes, réseaux, et ce qui vit dedans. En dessous — daemon, paquets, kernel, réseau de
    l'hôte — il est INVITÉ, et un invité ne pose rien. UN seul acte le rend propriétaire, et cet
-   acte a un nom : `LCARS_ALLOW_ANY_HOST` / `/etc/lcars/host-consent`. C'est le rail POSTE, et
-   lui seul.
+   acte a un nom : `LCARS_ALLOW_ANY_HOST`, exigé à chaque passe sur une machine Linux dédiée.
+   C'est le rail POSTE, et lui seul.
 
    Quatre gestes la portent, et c'est d'eux qu'elle se lit :
    - le bandeau du rail conteneur promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
@@ -74,7 +74,7 @@ morte avec le modèle).
      `sources.list.d`, unité systemd, groupe) ;
    - la même branche s'interdit l'`exec sudo`, sans quoi l'image sort bâtie en root : elle ne peut
      pas poser un paquet ;
-   - `10-packages.sh` pose `docker-ce` sur le substrat `linux` seul, gardé par
+   - `12-docker-engine.sh` pose `docker-ce` sur le substrat `linux` seul, gardé par
      `LCARS_ALLOW_ANY_HOST` — le rail poste, celui à qui la machine a été donnée ;
    - `00-preflight.sh` refuse le rail poste hors WSL sans ce drapeau : « on ne le lâche pas sur une
      machine dont on ne sait pas si c'est celle de quelqu'un ».
@@ -156,8 +156,8 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|
 | 00-preflight | any | any | planchers OS/bash/arch/RAM/disque/WSL2/userns — sondes actionnables, zéro mutation |
-| 05-host-consent | linux | linux | le consentement de l'opérateur à modifier CETTE machine, rendu DURABLE (`/etc/lcars/host-consent`) — seconde source de 00-preflight, parce qu'un daemon ou un convergeur n'a pas l'environnement de celui qui a tapé la commande |
 | 10-packages | wsl linux docker | any | tmux, bubblewrap, git, curl, jq, unzip + **sonde bwrap RÉELLE** (un sandbox tourne sous l'humain) |
+| 12-docker-engine | linux | linux | docker-ce depuis le dépôt upstream, posé une fois si aucun daemon ne répond ; ensuite le daemon est constaté, jamais touché. Sous WSL le daemon vient de Docker Desktop, dans le conteneur on est dedans |
 | 15-toolchain | wsl linux docker | wsl linux docker | Erlang apt (plancher OTP) + Elixir précompilé PINNÉ sha256 (/opt, symlinks) — build only, jamais dans le conteneur runtime |
 | 16-node | wsl linux docker | any | Node précompilé PINNÉ — le toolchain qui bâtit la DOC du produit |
 | 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |

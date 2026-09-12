@@ -85,15 +85,8 @@ prov_dirs() {
     "/var/lib/lcars 0755 root:root" \
     "/var/tmp/lcars 0755 root:root" \
     "/var/tmp/lcars/toolchain-work 0700 root:root" \
-    `# ⚠ POSE PAR DEUX \`dirname\`, NOMME PAR PERSONNE — et c'est la meme situation que le prefixe` \
-    `# ci-dessus. \`05-host-consent:51\` et \`64-services:427\` le creent en derivant le dossier de` \
-    `# LEUR fichier ; aucun des deux ne le declare. Il nait donc du mode et du proprietaire que le` \
-    `# premier arrive lui donne, et il disparaitrait le jour ou ces deux modules cesseraient d'y` \
-    `# ecrire — sans que la table, qui le declare, ait bouge.` \
-    `#` \
-    `# Les deux \`dirname\` RESTENT : \`05-host-consent\` tourne au rang 05, vingt rangs avant ce` \
-    `# poseur, et il a besoin du dossier a ce moment-la. Ce qu'on ajoute ici n'est pas la creation,` \
-    `# c'est la CONVERGENCE — le mode et le proprietaire relus a chaque passe, depuis un seul site.` \
+    `# 64-services le cree aussi par dirname de son fichier ; ici, le mode et le proprietaire` \
+    `# sont relus a chaque passe depuis la table.` \
     "/etc/lcars 0755 root:root"
   prov_runtime_dirs
 }

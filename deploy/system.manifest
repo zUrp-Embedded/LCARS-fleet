@@ -165,7 +165,6 @@ anchor    /etc/systemd/system/lcars-landing.service    0644  root:root          
 anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           wsl+linux
 anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           wsl+linux
 anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           wsl+linux
-anchor    /etc/lcars/host-consent                      0644  root:root           linux
 anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any
 # ⚠ LE CANAL : QUI A POSE LE PRODUIT (lot 2 du chantier release, 2026-09-05). Une ligne — `source`

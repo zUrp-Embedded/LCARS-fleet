@@ -295,11 +295,11 @@ cmd_up() {
   # déclarée, ce serait une promesse que `00-preflight` refusera dix secondes plus tard.
   if [[ "$(fait docker)" == "absent" ]] \
      && [[ "$(fait substrat)" == "linux" ]] \
-     && [[ "$(fait consent)" == "env" || "$(fait consent)" == "fichier" ]]; then
+     && [[ "$(fait consent)" == "env" ]]; then
     echo ""
-    echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
-    "$PROVISION" apply "${args[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
-      || echo "  la tranche paquets n'a pas tout convergé — 48-forge-host dira ce qui manque."
+    echo "  docker est absent : les paquets et docker-ce sont posés d'abord."
+    "$PROVISION" apply "${args[@]}" --only 00-preflight --only 10-packages --only 12-docker-engine \
+      || echo "  la tranche paquets n'a pas convergé — 48-forge-host dira ce qui manque."
     # LA MESURE SE REJOUE : le fait valait « absent » il y a trente secondes, et la suite du rail
     # travaillerait sinon sur une photographie prise avant l'installation.
     mesurer

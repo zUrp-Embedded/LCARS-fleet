@@ -73,17 +73,6 @@ setup() {
   # aucune voie sur le poste natif. Sans cette ligne ces temoins ne mesurent pas la selection des
   # modules, ils mesurent la session de qui les lance — et ils rougissent tous ensemble sur
   # « verrou: emplacement sur indisponible ».
-  # ⚠ LE DECOR POSSEDE AUSSI LE MARQUEUR DE CONSENTEMENT, ET IL A FALLU UNE MACHINE PROVISIONNEE
-  # POUR LE VOIR. `00-preflight` accepte le Linux natif sur DEUX sources : `LCARS_ALLOW_ANY_HOST`
-  # dans l'environnement — que le setup efface deja — ou `/etc/lcars/host-consent`, un fichier REEL
-  # de la machine. Le second est arrive le 2026-08-21 ; le temoin « un substrat linux est REFUSE »
-  # s'est mis a lire l'etat de l'hote au lieu de mesurer la regle.
-  #
-  # Mesure du meme jour, install a froid : `05-host-consent` pose le marqueur, et TRENTE LIGNES plus
-  # bas le gate de la release joue ce temoin, qui echoue. Vert sur un poste de dev qui n'a pas de
-  # marqueur, rouge sur toute machine que LCARS a installee — c'est-a-dire exactement celle ou ce
-  # gate tourne pour de vrai.
-  export LCARS_HOST_CONSENT_FILE="$BATS_TEST_TMPDIR/etc/lcars/host-consent"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 0700 "$XDG_RUNTIME_DIR"

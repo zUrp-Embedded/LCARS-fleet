@@ -238,7 +238,8 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
 # Gitea) et refuse sans docker. Aucun module ne le posait : sur une Ubuntu vierge l'install mourait
 # au module 48, et tout ce qui suit sortait en derive pour une cause qui n'etait pas la sienne.
 
-pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
+pkg_mod()    { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
+engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
 
 @test "docker n'est PAS dans la liste des deux rails — il n'a rien a faire dans l'image" {
   # `PACKAGES` est la liste que les DEUX rails obtiennent par apt, et le temoin d'egalite ci-dessus
@@ -257,42 +258,12 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
   [[ "$output" != *"docker"* ]]
 }
 
-@test "docker : pose sur linux SEULEMENT, et SEULEMENT si aucun daemon ne repond" {
-  # ⚠ CETTE REGLE EST DEVENUE CONDITIONNELLE, DONC LE TEMOIN TESTE LES DEUX BRANCHES. Il n'en
-  # testait qu'une, et ma condition l'a rendu dependant de la MACHINE : sur un poste ou docker
-  # repond, `eff linux` ne contient plus `docker.io` et le temoin tombait — en mesurant l'hote au
-  # lieu de la regle. Sixieme occurrence de ce piege en deux jours.
-  #
-  # LE FOND : la majorite des postes Linux ont docker par le depot upstream, et le rail y pose
-  # DESORMAIS le meme empaquetage (⚖ user 2026-08-23). Ce qui protege l'operateur n'est donc plus le
-  # choix du paquet mais la CONDITION : aucun daemon ne repond. Poser une source apt tierce sur une
-  # machine qui a deja docker serait ajouter un depot dont elle n'a pas besoin — la branche « 0 »
-  # ci-dessous est ce qui l'interdit, et c'est elle qu'il faut garder verte.
-  local head="$BATS_TEST_TMPDIR/pkg-head.sh"
-  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
-
-  # La sonde est DOUBLEE, dans les deux sens. C'est la seule facon de mesurer une condition sans
-  # mesurer la machine qui joue le test.
-  eff() { # eff <substrat> <0 si un daemon repond | 1 sinon>
-    PROV_SUBSTRATE="$1" DOCKER_ANSWERS="$2" \
-    PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
-      bash -c 'source "$1" >/dev/null 2>&1
-               docker_endpoint() { return "$DOCKER_ANSWERS"; }
-               effective_packages' _ "$head" 2>/dev/null | tr '\n' ' '
-  }
-
-  # aucun daemon : le rail POSE docker, c'est sa raison d'etre sur ce substrat
-  [[ "$(eff linux 1)" == *"docker-ce"* ]]
-  [[ "$(eff linux 1)" == *"docker-compose-plugin"* ]]
-  # un daemon repond : on ne pose RIEN, et on ne retire rien non plus
-  [[ "$(eff linux 0)" != *"docker-ce"* ]]
-  [[ "$(eff linux 0)" != *"docker-compose-plugin"* ]]
-  # les autres substrats ne le posent JAMAIS, quelle que soit la sonde
-  [[ "$(eff wsl 1)"    != *"docker-ce"* ]]
-  [[ "$(eff docker 1)" != *"docker-ce"* ]]
-  # et la liste commune reste la, dans tous les cas
-  [[ "$(eff docker 1)" == *"bubblewrap"* ]]
-  [[ "$(eff linux 0)"  == *"bubblewrap"* ]]
+@test "docker-ce vit dans 12-docker-engine, sur le substrat linux seul ; 10-packages n'en parle plus" {
+  grep -q '^# APPLY-ON: linux$' "$(engine_mod)"
+  grep -q '^# CHECK-ON: linux$' "$(engine_mod)"
+  grep -q 'docker-ce' "$(engine_mod)"
+  grep -q '^PACKAGES=(' "$(pkg_mod)"
+  grep -vE '^\s*#' "$(pkg_mod)" | refute_out 'docker-ce|ensure_docker_repo|LINUX_PACKAGES'
 }
 
 @test "check et apply lisent la MEME liste — deux derivations repondraient differemment" {
@@ -359,7 +330,7 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 # plus tard, sur un message de depot introuvable que personne ne rattachera a LCARS.
 repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine jamais mesuree
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
   run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
           LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
           LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
@@ -431,7 +402,7 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
   # On compte les appels a `fetch_verify` : deux passes, UN seul appel. La sonde reseau, elle, a le
   # droit de rejouer — c'est une lecture, elle ne pose rien.
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
   run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
           LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
           LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
@@ -467,7 +438,7 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
 
 repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
   run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
           LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
           LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
@@ -495,7 +466,7 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   # ne repart PAS comme avant, avec un fichier present pour le prouver.
   [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
   [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
-  [[ "$output" == *"RESTAURÉ"* ]]
+  [[ "$output" == *"restauré"* ]]
 }
 
 @test "depot docker : ce qui EXISTAIT DEJA est RESTAURE tel quel sur echec, jamais efface" {
@@ -507,7 +478,7 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   # le depot de l'operateur est remis tel quel — un objet que LCARS n'a jamais pose ne s'efface pas
   [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
   [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
-  [[ "$output" == *"RESTAURÉ"* ]]
+  [[ "$output" == *"restauré"* ]]
 }
 
 @test "depot docker : ce que NOUS avons posé est bien retiré sur echec, et le refus le dit" {
@@ -518,5 +489,5 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   [ "$status" -ne 0 ]
   [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
   [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
-  [[ "$output" == *"n'était là avant cette passe"* ]]
+  [[ "$output" == *"n'était là avant"* ]]
 }
