@@ -1,14 +1,8 @@
 defmodule Fleet.Workflow.PinningTest do
   @moduledoc """
-  A long emission becomes an immutable object with a name; a short one is left alone.
-
-  The problem is not verbosity. A long verdict pasted into a review is unreadable in the UI,
-  unquotable — nothing addresses a version of it — and EDITABLE: a human who amends the comment
-  amends the only copy, and nothing records that it changed.
-
-  The half that matters most is the failure: a commit that does not land must NOT produce a
-  pointer. A long comment is cosmetic; a citation naming nothing is a lie that survives, because the
-  reader assumes the doc exists and blames its own search.
+  Tests rendered previews and fallback using a stubbed commit function.
+  Successful local results produce pointers regardless of publication state;
+  returned errors preserve the full body. No Git object or remote link is resolved.
   """
   use ExUnit.Case, async: true
 
@@ -69,8 +63,7 @@ defmodule Fleet.Workflow.PinningTest do
       refute posted =~ "ligne 9"
       assert posted =~ "22 lignes de plus"
 
-      # transport_brief_v2 — the pin is a unified CLICKABLE link (label + commit-browse URL), the same
-      # notation the brief/criteria pointers use. No bare `ref @ sha` on the surface.
+      # With repo supplied, use Layout's clickable commit pointer notation.
       assert posted =~
                "Verdict: [le verdict](/o/r/src/commit/#{@sha}/verdicts/issue-42-qualifier.md)"
 
@@ -89,8 +82,7 @@ defmodule Fleet.Workflow.PinningTest do
       five_hundred = pin(long(500), ok_commit()) |> String.trim_trailing() |> String.split("\n")
 
       assert length(thirty) == length(five_hundred)
-      # Longer than a body that just fits under the threshold (10), and deliberately so: what
-      # matters is the ceiling, not beating the inline case.
+      # The preview overhead can exceed ten lines; these fixed metadata cases stay bounded.
       assert length(thirty) <= 14
     end
 
@@ -104,9 +96,7 @@ defmodule Fleet.Workflow.PinningTest do
           commit_fun: ok_commit()
         )
 
-      # Defensive fallback: a caller that omits the repo still gets a VALID pointer (the machine
-      # parser reads it), never a broken link with an empty repo. The link is the norm, not a
-      # precondition of pinning at all.
+      # Without repo, check the legacy text form; no parser is invoked here.
       assert posted =~ "Verdict: verdicts/issue-42-qualifier.md @ #{@sha}"
       refute posted =~ "/src/commit/"
     end
@@ -117,10 +107,7 @@ defmodule Fleet.Workflow.PinningTest do
       posted =
         pin(long(), fn _, _, _, _ -> {:ok, @sha, :local_only} end)
 
-      # Deliberate asymmetry with the failure branch below: a commit that did not happen leaves the
-      # pointer naming nothing, ever. An object committed but not yet pushed exists, is addressable
-      # by sha, and reaches the forge at the branch's next successful push. Inlining it would trade
-      # a temporary lateness for a permanently unquotable wall of text.
+      # A local-only result still produces a link; this test does not establish availability.
       assert posted =~
                "Verdict: [le verdict](/o/r/src/commit/#{@sha}/verdicts/issue-42-qualifier.md)"
 
@@ -161,10 +148,8 @@ defmodule Fleet.Workflow.PinningTest do
     alias Fleet.Layout
 
     test "the four trees are distinct, and none is a suffix inside another" do
-      # The collision that forced the rule: a verdict on a delivery and a gate-decision trace share
-      # the same (issue, role) pair, and a conflict report shares the PR. Filed together, the second
-      # write displaces the first while its pointer keeps naming it — git holds both versions, and
-      # the citation silently points at the wrong one.
+      # Distinct artifact families avoid overwriting the current file for another act.
+      # This checks three unequal refs, despite the historical title saying four trees.
       refs = [
         Layout.verdict_ref(42, "qualifier"),
         Layout.gate_verdict_ref(42, "qualifier"),
@@ -180,8 +165,7 @@ defmodule Fleet.Workflow.PinningTest do
       gate = Layout.gate_verdict_ref(42, "gatekeeper")
 
       refute verdict == gate
-      # Same axis the brief trees already use: `briefs/` is a worker order, `gate-briefs/` a judge
-      # order. The vocabulary existed; the verdict side had only half of it.
+      # Brief and verdict families both separate worker artifacts from gate artifacts.
       assert String.starts_with?(verdict, "verdicts/")
       assert String.starts_with?(gate, "gate-verdicts/")
       assert String.ends_with?(verdict, "issue-42-gatekeeper.md")
@@ -192,9 +176,7 @@ defmodule Fleet.Workflow.PinningTest do
       assert Layout.conflict_ref(7) == "conflicts/pr-7.md"
     end
 
-    # C1 2026-08-18 — the machine verdict is NOT a fourth tree: prose and machine are two
-    # RENDERINGS of the same act (this judge, this delivery), so they share tree and basename
-    # and differ only by extension. The nature-based split above separates ACTS, not formats.
+    # Prose and machine findings represent one act: same tree/basename, different extension.
     test "the machine verdict shares the prose verdict's tree and basename — one act, two renderings" do
       assert Layout.verdict_findings_ref(42, "qualifier") == "verdicts/issue-42-qualifier.json"
 

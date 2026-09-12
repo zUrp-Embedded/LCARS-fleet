@@ -1,87 +1,37 @@
 defmodule Fleet.Workflow.PayloadGuard do
   @moduledoc """
-  Placement + SECURITY-validation of an UNTRUSTED file payload into a
-  workspace: "write what the pod produced, without letting it escape the
-  workspace or arm the world-side git plumbing". Standalone filter — it knows
-  nothing about deliverable modes, the gate, nor the push: it only knows a
-  workspace and an adversarial `%{"path" => …, "content" => …}` list.
+  Validates payload paths and writes replacement files into a workspace.
+  All entries are checked before the write pass: lexical containment, .git path
+  components, filter=/diff= assignments in payload .gitattributes, and existing
+  symlinks in the relative path chain. This checks submitted files, not every
+  existing workspace file or Git configuration.
 
-  SOLE authority for deliverable placement, which makes a divergent placement
-  unrepresentable. 2 passes:
-  (1) validate ALL paths before any write — a partially INVALID payload writes
-  NOTHING; (2) write — a `File.write` failure mid-pass stops there and returns
-  the error, files already written REMAIN (no rollback), but the caller
-  (`Deliverable.materialize_content`) short-circuits on the error so nothing
-  partial is ever committed.
+  Symlinks are checked again before each write. A same-directory temporary file
+  is renamed over the destination, replacing a final symlink instead of following
+  its target. Parent directories can still change after the check, and temporary
+  files are not opened exclusively. The workspace root itself is trusted; these
+  operations do not provide race-free confinement against a concurrent writer.
 
-  ## The 4 closed vectors (fail-closed, first refusal returned)
-
-    * **Path traversal** — the `Path.expand` of the join must stay under the
-      workspace (a `../` resolved outside the root → `{:path_traversal, path}`).
-    * **`.git` component** — a payload writing UNDER `.git/` (at any level)
-      would rewrite the repo config: `.git/config` (arming a
-      `filter.<name>.clean` executed by the system-side `git add` that
-      follows), `.git/hooks/pre-commit`, etc. → arbitrary command execution
-      world-side at commit time. The pod NEVER lays down its own git plumbing
-      via the payload → `{:dotgit_path, path}`. (The system-side commit is what
-      turns this content into a deliverable, so the payload is consumed AFTER
-      the write → the guard MUST be here, before the write.)
-    * **armed `.gitattributes`** — a `.gitattributes` whose content ARMS a
-      `filter=` or a `diff=` diverts system-side `git add`/`git log -p` toward
-      an external command. `core.attributesFile=/dev/null` neutralizes ONLY
-      the GLOBAL file; the IN-TREE `.gitattributes` stays honored and is NOT
-      disablable via `-c` (git has no "disable all filters"). The ONLY real
-      lock on this vector is therefore THIS content refusal →
-      `{:dangerous_gitattributes, path}`. `Fleet.Credentials.Shell` closes the
-      GLOBAL-config vector and leaves this one to us ON PURPOSE — weakening the
-      clause below removes the only net, and nothing upstream will catch it.
-    * **Symlink in the chain** — `Path.expand` is LEXICAL (resolves `..`, NOT
-      symlinks): a symlink checked into the cloned repo
-      (`out -> /home/<human>/.claude`) passes the prefix check, but
-      `File.write` FOLLOWS the symlink → write OUTSIDE the workspace. Refuse if
-      an EXISTING component of the path is a symlink → `{:symlink_escape, path}`.
-      ⚠ **Checked TWICE, and the second time is the one that matters**: the pod
-      is still alive when this runs and its workspace is mounted RW, so a link
-      planted BETWEEN the validation and the write would be followed by a pass
-      that only trusted pass 1 (6-047). The write itself replaces rather than
-      writes through — `rename(2)` operates on the link, never on its target.
-      What remains open, bounded and stated at the write site: a link planted on
-      a PARENT directory inside that same window.
-
-  The single public entry (`apply_files/3`) chains validation then write:
-  writing without validating is impossible by construction (validation is not
-  an optional exposed step). Its third argument carries the `:after_validate`
-  TEST seam only — production calls it with two.
+  Initial validation refusal writes nothing. A write-pass refusal or error leaves
+  earlier writes in place, without rollback. Deliverable stops that call before
+  commit, but residual files remain available to later operations.
   """
 
   @doc """
-  Validates then writes `files` (list of `%{"path" => rel, "content" => bin}`)
-  under `workspace`. 2 passes: EVERYTHING is validated (cf. moduledoc —
-  traversal, `.git`, armed `.gitattributes`, symlink) before the SLIGHTEST
-  write.
+  Applies a nonempty list of maps with binary path/content and nonempty path.
+  Returns :ok, :no_files_in_payload, :invalid_payload_file, a path refusal, or
+  :file_write_failed inside {:error, ...}. A late :symlink_escape can follow writes
+  of earlier entries. Extra map keys are ignored.
 
-  ## Exit codes
-    * `:ok` — all files written
-    * `{:error, :no_files_in_payload}` — empty list or not a list
-    * `{:error, {:invalid_payload_file, repr}}` — entry without binary
-      `path`/`content`, or empty `path` (a path `""` would pass the checks then
-      `File.write` on the dir = opaque `:eisdir` — clean rejection upstream)
-    * `{:error, {:path_traversal | :dotgit_path | :dangerous_gitattributes |
-      :symlink_escape, rel_path}}` — vector refused (nothing is written)
-    * `{:error, {:file_write_failed, rel_path, reason}}` — write KO in pass 2
-      (files already written remain — no rollback; the caller stops on the
-      error, so the partial state is never committed)
+  Optional :after_validate is a zero-arity test hook between validation and writing;
+  it runs in the caller and its exceptions are not rescued.
   """
   @spec apply_files(Path.t(), term(), keyword()) :: :ok | {:error, term()}
   def apply_files(workspace, files, opts \\ [])
 
   def apply_files(workspace, files, opts) when is_list(files) and files != [] do
     with :ok <- validate_files(workspace, files) do
-      # SEAM `:after_validate` — LE SEUL MOYEN DE PROUVER CE QUI SUIT. Le defaut de 6-047 est une
-      # COURSE entre les deux passes : dans un monde sans concurrence, le correctif est
-      # OBSERVATIONNELLEMENT IDENTIQUE a l'ancien code, donc intestable — et un test qui ne rougit
-      # pas sans le fix ne prouve rien (P-09). Ce point d'insertion laisse un test poser le lien
-      # exactement la ou le pod le poserait. Absent en production : `nil`, aucun appel.
+      # Insert a deterministic race between passes; absent in normal calls.
       case Keyword.get(opts, :after_validate) do
         f when is_function(f, 0) -> f.()
         _ -> :ok
@@ -108,9 +58,7 @@ defmodule Fleet.Workflow.PayloadGuard do
     end)
   end
 
-  # LES QUATRE FACONS DE SORTIR DU WORKSPACE, dans l'ordre du moins au plus cher a mesurer : la
-  # traversee de chemin est un calcul, l'echappement par lien symbolique touche le disque. `nil` =
-  # rien a refuser.
+  # Cheap lexical checks precede filesystem symlink inspection; nil means no refusal.
   defp file_refusal(workspace, rel_path, content) do
     expanded_ws = Path.expand(workspace)
     full = Path.expand(Path.join(workspace, rel_path))
@@ -163,38 +111,13 @@ defmodule Fleet.Workflow.PayloadGuard do
     end
   end
 
-  # ⚠ VALIDER PUIS ECRIRE EN DEUX PASSES LAISSE UNE FENETRE, et le pod y ecrit (6-047). La passe 1
-  # constate qu'aucun composant n'est un lien ; la passe 2 ecrit — entre les deux, le pod, qui tourne
-  # toujours et dont l'espace de travail est monte RW, pose le lien. `File.write` le SUIT, et
-  # l'ecriture reputee confinee atterrit ou le lien pointe.
-  #
-  # DEUX GESTES, ET ILS NE FERMENT PAS LA MEME CHOSE :
-  #
-  #   1. LA CHAINE EST RE-VERIFIEE JUSTE AVANT CHAQUE ECRITURE — tous les composants, le dernier
-  #      compris (`symlink_in_chain?`). Ca ne supprime pas la course, ca la reduit d'un « toute la
-  #      passe » a un « ce fichier-ci ».
-  #
-  #   2. ON N'ECRIT PAS SUR LA CIBLE, ON LA REMPLACE. `rename(2)` opere sur le LIEN, jamais sur ce
-  #      qu'il designe : un lien pose au DERNIER composant est ECRASE par le fichier, et sa victime
-  #      n'est pas touchee. Mesure faite avant d'y adosser quoi que ce soit. C'est ce qui ferme
-  #      STRUCTURELLEMENT le residu que le point 1 laisse sur le dernier composant — entre son
-  #      `lstat` et l'ecriture.
-  #
-  # ⚠ CE QUI RESTE OUVERT, ET IL FAUT LE SAVOIR EN LISANT : un lien pose sur un REPERTOIRE PARENT
-  # entre la re-verification et le rename est toujours suivi, par `mkdir_p` comme par le rename.
-  # Rien dans ce langage ne permet un `openat(O_NOFOLLOW)` par composant — ni `File.write`, ni
-  # `:file.open`. La fenetre est bornee, pas supprimee ; la supprimer demanderait une NIF, donc une
-  # decision, pas un correctif.
-  #
-  # LA PASSE 1 RESTE, et elle n'est pas redondante : sa raison est ailleurs — un payload dont UN
-  # SEUL fichier est invalide n'ecrit RIEN. Supprimer la validation globale pour ne garder que le
-  # controle tardif echangerait une propriete prouvee contre une fenetre a peine plus courte.
+  # Keep the global pass so an initially invalid payload writes nothing. Per-file
+  # checks narrow the later race window but do not eliminate parent-directory races.
   defp write_validated_files(workspace, files) do
     Enum.reduce_while(files, :ok, &write_one_validated(&1, &2, workspace))
   end
 
-  # LE LIEN EST RE-VERIFIE JUSTE AVANT L'ECRITURE, fichier par fichier : c'est la passe 2 decrite
-  # au-dessus, et son refus arrete la boucle entiere.
+  # Recheck before each write; a late refusal stops the remaining files.
   defp write_one_validated(%{"path" => rel_path, "content" => content}, :ok, workspace) do
     if symlink_in_chain?(workspace, rel_path) do
       {:halt, {:error, {:symlink_escape, rel_path}}}
@@ -206,9 +129,8 @@ defmodule Fleet.Workflow.PayloadGuard do
     end
   end
 
-  # Le temporaire vit dans le MEME repertoire que la cible : `rename` n'est atomique qu'a
-  # l'interieur d'un systeme de fichiers, et un `/tmp` separe le rendrait silencieusement non
-  # atomique (copie + unlink), donc de nouveau interruptible.
+  # Same-directory temporary avoids cross-filesystem rename failure. Rename replaces
+  # the final directory entry; parent components can still be redirected concurrently.
   defp write_replacing(full_path, content) do
     dir = Path.dirname(full_path)
     tmp = Path.join(dir, ".lcars-payload-#{:erlang.unique_integer([:positive])}")

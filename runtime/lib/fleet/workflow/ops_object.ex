@@ -1,20 +1,16 @@
 defmodule Fleet.Workflow.OpsObject do
   @moduledoc """
-  The ONE parametric mechanic "commit an object into the ops worktree" — engine, no
-  business: write the file, commit it atomically (`add_paths: [ref]`, one object per commit),
-  publish best-effort. `BriefArtifact` (briefs) and `Provenance` (statements) are pure
-  BUSINESS layers (naming, content) plugged onto this mechanic; duplicating it per artifact
-  family would be the exact anti-pattern the engine/business axiom forbids.
+  Writes and commits ops artifacts for BriefArtifact and Provenance, with optional
+  best-effort publication. The returned SHA identifies a commit holding the version.
 
-  **Identity = the introducing COMMIT sha** (returned by `commit_object/4`). Idempotent via
-  git: same path + same content ⇒ no new commit, the introducing commit is returned
-  (`Git.last_commit_sha/2`); different content ⇒ a new commit on the same path (a VERSION —
-  git history is the ledger, nothing is ever rewritten).
+  Use OpsObjectSync to serialize cooperating writers. Direct calls take no lock;
+  callers must supply trusted paths and an exclusive worktree with a clean index.
+  add_paths stages one path but Git commits the whole index. Writes and commits
+  are not rolled back on later failures.
 
-  **Publication is BEST-EFFORT on top of the local truth** (F-15): `push: :ops` (the
-  single owner of the `{"origin", "ops"}` target) or an explicit `{remote, refspec}`;
-  a push failure logs LOUD and keeps the local success — the branch catches up whole at the
-  next successful push. Local commit failure remains a real failure.
+  When disk content already matches, a bounded history probe can return an existing
+  commit without pushing, even if push was requested. This can leave dirty worktree
+  content differing from HEAD when an older version was restored on disk.
   """
 
   require Logger
@@ -25,24 +21,15 @@ defmodule Fleet.Workflow.OpsObject do
   @ops_push {"origin", "ops"}
 
   @doc """
-  Commits `content` at `ref` (ops-relative) inside `work_dir` and returns
-  `{:ok, commit_sha, push_state}` — the introducing commit (the version's identity), and what
-  happened to the publication.
+  Writes content at ref under work_dir and returns {:ok, sha, push_state}.
+  Paths are joined without containment checks. Materialization requires :label;
+  :author defaults to ForgeIdentity's system identity. Optional :push accepts :ops
+  (origin, ops) or {remote, refspec}.
 
-  `push_state` is carried rather than dropped, and it is NOT a boolean because three different
-  things are not "false": `:pushed` (the push ran and landed), `:local_only` (it ran and failed —
-  the object exists here and nowhere else), `:not_requested` (no `:push` opt: nobody asked). A
-  caller that CITES this commit to a human — `Pinning` rendering `<ref> @ <sha>` — is naming
-  something that MAY NOT BE REACHABLE, and the answer exists inside `maybe_push/2`: dropping it
-  there throws the fact away ONE FUNCTION BEFORE ITS READER.
-
-  `opts`:
-  - `:label` — commit-message prefix (`"<label>: <ref>"`), REQUIRED (the artifact family
-    speaks its name in the log rail).
-  - `:author` — `{name, email}`, system default.
-  - `:push` — `:ops` | `{remote, refspec}` | absent (local only, tests).
-
-  `{:error, term()}`: work_dir missing / non-git, write failure, local git failure (fail-loud).
+  :pushed means Git.push returned success; :local_only means a push error was
+  returned, not proof that nothing reached the remote. :not_requested also covers
+  an idempotent hit that skipped a requested push. Local file/Git errors propagate;
+  invalid options can raise. This function does not verify remote reachability.
   """
   @type push_state :: :pushed | :local_only | :not_requested
 
@@ -56,30 +43,10 @@ defmodule Fleet.Workflow.OpsObject do
       not File.dir?(work_dir) ->
         {:error, {:work_dir_missing, work_dir}}
 
-      # ⚠ `File.read/1` ET NON `File.read!/1` (6-081). Le couple `File.exists?` puis `File.read!`
-      # est un check-then-act : entre les deux, le fichier peut disparaitre ou devenir illisible, et
-      # la variante `!` LEVE — dans une expression booleenne ou l'echec de lecture voulait
-      # simplement dire « contenu different ». Ce code tourne dans le `handle_call` de
-      # `OpsObjectSync` : la levee tue le SERIALISEUR de `work/ops` et tous les appels en attente
-      # recoivent un `:exit`.
+      # A failed non-bang read means content differs; it must not crash the serializer.
       File.read(abs) == {:ok, content} ->
-        # ⚠ LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE (6-048). Rendre ici `Git.last_commit_sha/2` —
-        # le dernier commit ayant TOUCHE ce chemin — sans verifier que le contenu A CE COMMIT est
-        # celui qu'on annonce rend le sha d'une version PRECEDENTE des qu'un fichier a ete ecrit
-        # puis non commite (le commit a echoue, `materialize/5` laisse l'ecriture).
-        #
-        # Ce sha remonte jusqu'aux pointeurs d'epinglage — `Brief: <ref> @ <sha>` dans le corps du
-        # ticket, avec la phrase « ce qui fait foi est le doc ci-dessous, A CE COMMIT EXACT ». Un
-        # juge qui resout le pointeur lirait alors autre chose que ce qu'on lui a promis, sans
-        # qu'aucune erreur ne se leve. D'ou `committed_sha/3` : un commit de l'historique dont le
-        # contenu A CE CHEMIN vaut `content`, ou rien.
-        #
-        # `:not_committed` = residu de crash (ecrit, jamais commite) → on materialise pour lui
-        # donner une identite.
-        #
-        # Aucun push n'est tente ici et aucun n'est revendique : le hit idempotent ne dit rien de
-        # l'endroit ou l'objet a ete publie, et `:not_requested` est la reponse honnete a une
-        # question que cette branche n'a jamais posee.
+        # Disk equality alone can describe a write left behind by a failed commit.
+        # Verify bytes in history before citing a SHA. A hit skips publication.
         case committed_sha(work_dir, ref, content) do
           {:ok, sha} -> {:ok, sha, :not_requested}
           :not_committed -> materialize(work_dir, abs, ref, content, opts)
@@ -94,8 +61,10 @@ defmodule Fleet.Workflow.OpsObject do
   @readback_history_depth 50
 
   @doc """
-  Read-only bounded probe for a content version's introducing SHA. Searches history,
-  not the tip, so concurrent writers cannot turn a landed version into a false negative.
+  Searches the latest 50 commits touching ref for the first readable version with
+  matching bytes. Returns {:ok, sha} or :not_committed. Git errors and unreadable
+  versions are treated as misses; older matching versions may be outside the bound.
+  This identifies content in history, not which invocation wrote it.
   """
   @spec committed_sha(Path.t(), String.t(), String.t()) :: {:ok, String.t()} | :not_committed
   def committed_sha(work_dir, ref, content)
@@ -117,7 +86,7 @@ defmodule Fleet.Workflow.OpsObject do
     end
   end
 
-  # Skip unreadable commits; the probe must not turn them into a false negative.
+  # Unreadable commits are skipped; the search can therefore miss a committed version.
   defp commit_holding(work_dir, sha, ref, content) do
     case Git.show(work_dir, sha, ref) do
       {:ok, ^content} -> {:ok, sha}
@@ -133,13 +102,8 @@ defmodule Fleet.Workflow.OpsObject do
     end
   end
 
-  # A racing identical write recovers its introducing commit.
-  #
-  # ⚠ LE MEME APPEL QUE LE RACCOURCI PLUS HAUT REFUSE, ET ICI IL EST SAIN — ne pas « harmoniser »
-  # les deux. `:nothing_to_commit` PROUVE que l'arbre egale HEAD pour ce chemin ; le dernier commit
-  # touchant `ref` est donc celui qui l'a mis a sa valeur courante, et cette valeur est `content`.
-  # Le raccourci, lui, ne savait que l'ARBRE DE TRAVAIL, ce qui ne dit rien de HEAD : c'est toute la
-  # difference entre les deux sites, et elle tient a la garde, pas a l'appel.
+  # After staging, nothing_to_commit permits the last-touching SHA fallback only
+  # under exclusive workspace access; concurrent changes or filters can alter that premise.
   defp commit_or_recover(work_dir, ref, opts) do
     case Git.commit(commit_opts(work_dir, ref, opts)) do
       {:ok, sha} -> {:ok, sha}
@@ -161,14 +125,12 @@ defmodule Fleet.Workflow.OpsObject do
       committer_name: name,
       committer_email: email,
       message: "#{label}: #{ref}",
-      # One object per commit.
+      # Stage this object; any unrelated pre-staged paths still join the commit.
       add_paths: [ref]
     }
   end
 
-  # Returns the push STATE instead of a uniform `:ok`. The publication stays BEST-EFFORT — a failed
-  # push never fails the commit, the local object is the truth and the branch catches up at the next
-  # successful push — but "it failed" and "it was never asked" stop being the same answer.
+  # Push errors keep local success; future publication depends on a later successful push.
   @spec maybe_push(Path.t(), keyword()) :: push_state()
   defp maybe_push(work_dir, opts) do
     case Keyword.get(opts, :push) do

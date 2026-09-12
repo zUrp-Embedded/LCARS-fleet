@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.Provenance.VerifierTest do
   @moduledoc """
-  The deterministic triplet verifier — the one NON-LLM wall on traceability. Each brief
-  criterion (E1..E4) locked with a PASS and a FAIL case against REAL git repos; the
-  C-DEGRADED trap (an absent claim PASSES — mirror of the emitter's honesty) locked last.
+  Exercises statement parsing, local commit existence, ancestry and optional brief
+  matching against real Git repositories. Missing claims pass by design; these
+  checks do not validate a brief file's content or remote publication.
   """
   use ExUnit.Case, async: true
 
@@ -43,7 +43,7 @@ defmodule Fleet.Workflow.Provenance.VerifierTest do
 
   defp write_statement(tmp, name, attrs) do
     {:ok, %{ref: ref}} = Provenance.emit(tmp, attrs)
-    # emit names by issue/livrable — rename when the test wants a specific name
+    # name is unused here; emit derives the ref from the attributes.
     if name, do: :ok
     ref
   end
@@ -136,7 +136,7 @@ defmodule Fleet.Workflow.Provenance.VerifierTest do
     ref = write_statement(tmp, nil, %{livrable_sha: livrable, input_sha: base, issue: 11})
     assert :ok = Verifier.verify(ref, work_dir: tmp)
 
-    # no input_sha either (1/3) → still :ok — a healthy degraded state is never a failure
+    # Omitting input_sha skips ancestry checks too.
     ref2 = write_statement(tmp, nil, %{livrable_sha: livrable, issue: 12})
     assert :ok = Verifier.verify(ref2, work_dir: tmp)
   end

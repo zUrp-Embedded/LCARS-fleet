@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.ProvenanceTest do
   @moduledoc """
-  The SHA triplet (in-toto/SLSA provenance). `statement/1` is pure (tested without I/O); `emit/3`
-  engraves + commits into a real temp git repo. The hard point: an absent brief_sha must NEVER
-  produce an invented digest — it engraves input→output and omits the configSource digest.
+  Tests statement fields and local ops commits. Missing brief digest and debug
+  visibility stay omitted. JSON decoding and type labels do not establish SLSA
+  schema compliance; idempotency here repeats all attributes, not just the SHA.
   """
   use ExUnit.Case, async: true
 
@@ -27,7 +27,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
         issue: 4
       })
 
-    # deliverable = git commit → `gitCommit` digest; brief = introducing COMMIT → `gitCommit` too (homogeneous).
+    # Both declared anchors use gitCommit.
     assert [%{"digest" => %{"gitCommit" => "LSHA"}}] = s["subject"]
     assert get_in(s, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) == "BSHA"
     assert get_in(s, ["predicate", "invocation", "configSource", "uri"]) == "briefs/BSHA.md"
@@ -48,13 +48,12 @@ defmodule Fleet.Workflow.ProvenanceTest do
 
     refute Map.has_key?(cs, "digest")
     assert cs["uri"] == "briefs/unknown.md"
-    # input→output engraved anyway (2 out of 3 beats 0, never a lie).
+    # Other supplied anchors survive the omitted brief digest.
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
   end
 
   test "statement: the DEBUG mode is stamped in invocation.environment (a builder property)" do
-    # A pod a human could attach to and type into is not the same builder as an unattended one.
-    # The triplet only serves an auditor if it is falsifiable about that.
+    # Record the caller's explicit debug flag as builder context.
     on = Provenance.statement(%{livrable_sha: "LSHA", debug_visibility: true})
     off = Provenance.statement(%{livrable_sha: "LSHA", debug_visibility: false})
 
@@ -64,9 +63,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
   end
 
   test "statement: an UNSTATED debug mode is omitted, never certified clean" do
-    # Same rule as the brief digest: a missing key means "this runtime did not say", never "we
-    # certify it was clean". Inventing a `false` here would be a provenance that lies about its
-    # builder, which is the one thing this object exists not to do.
+    # Missing debug information must not become an invented false claim.
     s = Provenance.statement(%{livrable_sha: "LSHA", input_sha: "ISHA"})
 
     refute Map.has_key?(s["predicate"]["invocation"], "environment")
@@ -118,9 +115,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
 
   test "BND-120 : livrable_sha with a separator/traversal → refused (never interpolated as a path segment)",
        %{tmp_dir: tmp} do
-    # livrable_sha is interpolated into `provenance/<sha>.json`: a `/` or `..` would escape
-    # the ops. It is a git digest (hex) in prod; a value carrying a separator is refused BEFORE
-    # any write.
+    # Reject these path fragments before writing; this is not full SHA validation.
     for hostile <- ["../../etc/passwd", "a/b", "..", "x/../y"] do
       assert {:error, {:invalid_livrable_sha, ^hostile}} =
                Provenance.emit(tmp, %{livrable_sha: hostile}),

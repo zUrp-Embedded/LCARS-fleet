@@ -1,8 +1,13 @@
 defmodule Fleet.Workflow.Provenance.Verifier do
   @moduledoc """
-  Deterministically verifies provenance plumbing with JSON and Git: claimed
-  deliverable, base ancestry, and brief commit. C-DEGRADED/DR-010 means an absent
-  claimed brief digest passes; the verifier checks claims, not completeness.
+  Checks statement type labels, the first subject's local commit, optional input
+  ancestry, and an optional claimed brief commit. C-DEGRADED/DR-010 permits missing
+  claims, even when expected_brief_sha is supplied. This is not signature, schema
+  compliance, artifact-content or publication verification.
+
+  Git accepts revision expressions; identifiers are not restricted to full SHAs.
+  Nested shapes are assumed map-like: malformed structures can raise during get_in.
+  Git nonzero exits in commit probes are classified as missing commits.
   """
 
   alias Fleet.Workflow.Git
@@ -19,8 +24,9 @@ defmodule Fleet.Workflow.Provenance.Verifier do
           | {:brief_mismatch, String.t(), String.t()}
 
   @doc """
-  Verifies parsed statement type, deliverable commit, base ancestry, and any claimed
-  brief commit. `:work_dir` is required; `:project_dir` and expected brief are optional.
+  Reads ref joined under required :work_dir, without path containment validation.
+  :project_dir defaults to work_dir. The brief commit is checked in work_dir;
+  :expected_brief_sha, when non-nil, is compared only if a brief digest is claimed.
   """
   @spec verify(String.t(), keyword()) :: :ok | {:error, failure()}
   def verify(ref, opts) when is_binary(ref) and is_list(opts) do
@@ -29,11 +35,9 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   end
 
   @doc """
-  Same verification, on a statement already IN HAND (the git object pushed with the brick).
-
-  The attestation does not live in a file whose name a reader must guess: it rides
-  `refs/lcars/provenance/<sha>`, pushed in the same `git push` as the deliverable (BL-6-43). The
-  caller has read it, so this takes the CONTENT — nothing here computes a path any more.
+  Verifies supplied JSON without locating or fetching an attestation ref.
+  Requires :project_dir after successful parsing; :work_dir defaults to project_dir
+  for brief commit checks. Unlike verify/2, project_dir has no work_dir fallback.
   """
   @spec verify_content(String.t(), keyword()) :: :ok | {:error, failure()}
   def verify_content(json, opts) when is_binary(json) and is_list(opts) do
@@ -128,8 +132,7 @@ defmodule Fleet.Workflow.Provenance.Verifier do
     end
   end
 
-  # RIEN D'ATTENDU N'EST PAS UN DESACCORD : l'appelant qui ne fournit pas de commit de brief ne
-  # demande que l'existence, verifiee juste au-dessus.
+  # Without an expected SHA, a claimed brief is checked for commit existence only.
   defp brief_matches(_claimed, nil), do: :ok
   defp brief_matches(claimed, claimed), do: :ok
   defp brief_matches(claimed, other), do: {:error, {:brief_mismatch, claimed, other}}

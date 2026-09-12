@@ -1,52 +1,23 @@
 defmodule Fleet.Workflow.OpsObjectSync do
   @moduledoc """
-  Per-node SERIALIZER in front of `Fleet.Workflow.OpsObject` — the ops worktree gate.
+  Serializes cooperating ops writers through one node-global GenServer, including
+  best-effort push. work_dir is payload, not a routing key: unrelated projects queue
+  behind each other. Direct OpsObject callers and separate server instances bypass
+  this serialization.
 
-  `OpsObject.commit_object/4` is the single parametric engine (write → `git add`/commit → best-effort
-  push) but it runs DIRECTLY on the shared ops worktree, and its writers are concurrent across
-  domains: briefs materialize both from MCP connections and from the poller dispatch, provenance from
-  a pool of completion `Task`s. Two operations on the SAME project's work_dir can collide on
-  `.git/index.lock`, or observe a HEAD that moved between OpsObject's idempotency probe and the
-  commit. This GenServer closes that by construction — same move as `Fleet.Project.WorktreeSync` for
-  the post-merge `reset --hard`: it handles one message at a time → ONE git transaction at a time,
-  whatever the number of triggers. `OpsObject` stays the untouched engine; this is only the gate.
+  Calls return the artifact SHA synchronously. Pilot.Application supervises the
+  singleton independently of step dispatch; the test configuration disables it.
+  An unregistered atom name falls back to a direct write, with a warning when
+  pilot_start_ops_object_sync is truthy. A dead PID instead follows exit recovery.
 
-  The gate is deliberately WIDER than the hazard it closes, and that widening is the thing to know
-  before touching it: the collision is per-`work_dir` (one worktree per project → one `.git/index.lock`
-  per project), but the serializer is ONE node-global process — `work_dir` travels as payload, never as
-  a routing key. So a commit for project B queues behind project A's even though they share no lock. It
-  is a chosen simplicity (no Registry, no per-project process lifecycle); its price is cross-project
-  head-of-line blocking, bounded by the caller's call budget and widened by the push staying inside
-  the transaction. A queue whose composed budget exceeds that call timeout does not lose its result:
-  on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`, no
-  lock) and returns the sha if the transaction landed — so a false-negative timeout cannot make a
-  landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
-  head-of-line blocking ever bites. What the suite pins (BL-6-43.4) is the ROUTING KEY — the server is
-  the only address, `work_dir` is payload — which is the first thing a sharding refactor changes. It
-  deliberately does NOT pin mutual exclusion across `work_dir`s by timing: proving "these two never
-  overlapped" takes a clock, and a clock in a test buys flakiness rather than truth.
+  Call timeout does not cancel queued work. Recovery probes up to 50 path-history
+  commits, then tries an ordered drain and probes again. A matching version yields
+  :unknown publication state: it need not have been written by this invocation.
+  Read errors, history limits and concurrent external changes can produce misses
+  even after drain; the logs' definitive-failure claims are stronger than the probe.
 
-  ## SYNCHRONOUS (unlike WorktreeSync)
-
-  WorktreeSync is a cast (the merge does not wait, the clone is a mirror). Here the return — the
-  introducing COMMIT sha — IS the committed object's IDENTITY, consumed by `BriefArtifact`/`Provenance`.
-  So `commit_object/4` is a `call`: it serializes AND returns the sha. The best-effort push stays inside
-  the transaction; moving it out of the critical section stays safe if throughput ever demands it (it
-  touches refs, not `.git/index.lock`, and is already race-tolerant).
-
-  ## Always-on in prod + `Process.whereis` fallback (hermetic in test)
-
-  Supervised by `Fleet.Pilot.Application`, NOT gated on `:pilot_step_dispatch?`: MCP `issue_create`
-  materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node boots. When
-  the process is up, every writer funnels through it. When it is NOT registered, `commit_object/4`
-  falls back to a DIRECT `OpsObject` call: the LOCAL transaction is identical, only the cross-writer
-  serialization is skipped. Not a masked failure — an optional serialization layer, exactly like
-  WorktreeSync's cast being dropped when it is not started.
-
-  **In `:test` the singleton is NOT started** (`pilot_start_ops_object_sync: false`): the whole suite
-  takes the direct fallback, so `OpsObject`'s logs stay in the CALLER's process — routing
-  every async test's write through one shared process would serialize + relocate those logs and worsen
-  `capture_log` bleed.
+  Call and drain budgets default to 60 seconds each; Git probes have their own
+  per-command budgets, so recovery is not bounded by one call timeout.
   """
 
   use GenServer
@@ -71,9 +42,8 @@ defmodule Fleet.Workflow.OpsObjectSync do
   end
 
   @doc """
-  Serialized `OpsObject.commit_object/4` on the global singleton — same signature (arity 4), same
-  return. Routes through the process when it is up (one git transaction at a time per node); falls back
-  to a direct `OpsObject` call otherwise (cf. moduledoc).
+  Calls the singleton, or writes directly when its name is unregistered.
+  Returns the engine result, with :unknown push state for recovered history hits.
   """
   @spec commit_object(Path.t(), String.t(), String.t(), keyword()) ::
           {:ok, String.t(), OpsObject.push_state() | :unknown} | {:error, term()}
@@ -81,9 +51,9 @@ defmodule Fleet.Workflow.OpsObjectSync do
     do: commit_object(__MODULE__, work_dir, ref, content, opts)
 
   @doc """
-  Explicit-server variant: routes through `server` (name or pid) when it is alive, else the direct
-  `OpsObject` fallback. Lets a test drive an ISOLATED instance (custom name) without touching the
-  global singleton that the rest of the suite resolves.
+  Accepts an atom name or PID for an isolated serializer. An unregistered name
+  uses the direct fallback; a dead PID triggers readback and may return
+  :ops_sync_unavailable. Other GenServer address forms are not implemented.
   """
   @spec commit_object(GenServer.server(), Path.t(), String.t(), String.t(), keyword()) ::
           {:ok, String.t(), OpsObject.push_state() | :unknown} | {:error, term()}
@@ -127,20 +97,9 @@ defmodule Fleet.Workflow.OpsObjectSync do
     end
   end
 
-  # ⚠ THE READBACK PATHS ANSWER `:unknown` FOR THE PUSH, and that is not a shrug. `committed_sha/3`
-  # proves the COMMIT landed — it walks the ref's history read-only. It says nothing about the
-  # publication, because the reply that carried the push outcome is exactly what the caller lost by
-  # timing out. `:local_only` would claim a failure nobody observed; `:pushed` would invent a
-  # success. The fourth state exists because the other three would each be a lie here.
-  #
-  # The two-step post-timeout verdict. Step 1: immediate readback — landed? Step 2 (the step whose
-  # absence made a negative verdict a LIE): drain-confirm. The server processes its mailbox in
-  # order, so a sync ping enqueued NOW returns only after our original {:commit, …} has fully run —
-  # the readback after it is DEFINITIVE: landed-late ({:ok, sha}, the caller never wrongly told
-  # failure while the effect lands behind its back) or genuinely not-landed (the commit RAN and
-  # failed server-side; its error reply was lost with our abandoned call — surfaced as the same
-  # `:ops_sync_timeout` shape, logged as definitive). A ping that itself times out = server wedged →
-  # the only remaining honestly-ambiguous case.
+  # A lost reply loses push outcome. History can establish matching committed content
+  # only. The drain is ordered after this caller's original request, but a negative
+  # bounded probe still does not prove that the request never committed.
   defp confirm_after_timeout(pid, work_dir, ref, content, reason) do
     case OpsObject.committed_sha(work_dir, ref, content) do
       {:ok, sha} ->
@@ -195,6 +154,6 @@ defmodule Fleet.Workflow.OpsObjectSync do
     {:reply, state.commit_fun.(work_dir, ref, content, opts), state}
   end
 
-  # FIFO mailbox makes this an ordered drain confirmation.
+  # The same caller's drain request follows its earlier commit request.
   def handle_call(:drain_confirm, _from, state), do: {:reply, :drained, state}
 end

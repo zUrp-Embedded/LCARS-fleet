@@ -1,14 +1,10 @@
 defmodule Fleet.Workflow.OpsObjectSyncTest do
   @moduledoc """
-  CI-11 — the ops write serializer. `OpsObject` is the untouched engine; this GenServer is the
-  gate that funnels concurrent git transactions (briefs from several MCP connections + the poller,
-  provenance from up to 16 completion Tasks) ONE at a time onto the shared worktree, against the
-  `.git/index.lock` + moving-HEAD race. Real temp git repo (`git init`) — the gate commits for real,
-  through an ISOLATED instance the setup starts: the app's always-on singleton is OFF in `:test` for
-  hermeticity (see the setup note), so each test drives its own named server via `commit_object/5`.
+  Tests a named serializer with real temporary Git repositories and injected
+  timeout engines. The production singleton is disabled in test configuration.
+  Concurrent writes, history recovery and direct fallback have separate cases.
   """
-  # async: false — the bypass-visibility tests mutate the GLOBAL :start_ops_object_sync
-  # knob (put_env_restoring); a concurrent suite hitting the fallback would log-bleed.
+  # Mutates global :pilot_start_ops_object_sync and timeout settings; restore after each test.
   use ExUnit.Case, async: false
 
   alias Fleet.Workflow.OpsObject
@@ -16,9 +12,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
   @moduletag :tmp_dir
 
-  # ISOLATED instance (unique name per test): the global singleton is OFF in :test (hermeticity), so we
-  # drive the explicit-server `commit_object/5` on our own process — the serialized path proven without
-  # touching (or being touched by) any other async test.
+  # A separate named instance exercises the serialized path without the app singleton.
   setup do
     name = :"ops_sync_#{System.unique_integer([:positive])}"
     pid = start_supervised!({OpsObjectSync, name: name})
@@ -54,8 +48,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       :ok
     end
 
-    # A process that receives the $gen_call but NEVER replies → the caller's GenServer.call times out,
-    # exactly like a server still grinding through a composed-budget queue.
+    # A process that never handles its mailbox forces call and drain timeouts.
     defp dead_air_server do
       spawn(fn -> Process.sleep(:infinity) end)
     end
@@ -71,10 +64,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          # `:unknown`, and it is the point of the readback path: `committed_sha/3` proves the
-          # COMMIT landed and says NOTHING about a publication. The reply that carried the push
-          # outcome is exactly what the timeout lost — reporting `:local_only` here would invent an
-          # observation, reporting `:pushed` would invent a success.
+          # History identifies committed content without observing its publication.
           assert {:ok, ^sha, :unknown} =
                    OpsObjectSync.commit_object(dead_air_server(), tmp, "briefs/x.md", "landed\n",
                      label: "t"
@@ -112,10 +102,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
          %{tmp_dir: tmp} do
       git_init(tmp)
 
-      # Engine slowed beyond the 30ms call budget: the caller times out MID-WORK, the server keeps
-      # going and lands the commit — the exact window where the old single immediate readback
-      # answered :not_committed and the caller wrongly reported failure while the effect landed
-      # behind its back (the deceptive case).
+      # Inject a commit slower than the call budget but shorter than the drain budget.
       slow_engine = fn work_dir, ref, content, opts ->
         Process.sleep(80)
         OpsObject.commit_object(work_dir, ref, content, opts)
@@ -146,8 +133,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
          %{tmp_dir: tmp} do
       git_init(tmp)
 
-      # Slow AND failing engine: the caller times out, the server finishes with an error (whose
-      # reply is lost with the abandoned call). After the drain the readback is definitive.
+      # The injected engine returns an error after the initial call times out.
       failing_engine = fn _w, _r, _c, _o ->
         Process.sleep(80)
         {:error, :engine_says_no}
@@ -170,11 +156,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
     test "a version DISPLACED at the tip still confirms — the readback asks 'did MY commit land'",
          %{tmp_dir: tmp} do
-      # The deceptive case a tip-identity readback got wrong. Two writers on ONE ref: ours lands
-      # first, a second overwrites it. Our commit is in the history, is real, is pushable — and
-      # asking "is my content at the TIP" answered no, so the caller was told `:ops_sync_timeout`
-      # and the log called that DEFINITIVE. A caller acting on it retries and overwrites the
-      # version that displaced ours.
+      # A newer version must not hide the earlier committed content during recovery.
       git_init(tmp)
 
       {:ok, ours, _push} =
@@ -202,8 +184,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     end
 
     test "a version that NEVER landed is still not confirmed by a history walk", %{tmp_dir: tmp} do
-      # The adverse half: widening the readback from the tip to the history must not turn it into a
-      # yes-machine. A ref with real history, and a version that was never committed to it.
+      # Negative control: real path history must not confirm unrelated content.
       git_init(tmp)
       {:ok, _, _} = OpsObject.commit_object(tmp, "briefs/x.md", "V1\n", label: "t")
       {:ok, _, _} = OpsObject.commit_object(tmp, "briefs/x.md", "V2\n", label: "t")
@@ -220,8 +201,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
       ref = Process.monitor(dead)
       assert_receive {:DOWN, ^ref, :process, ^dead, _}, 1_000
 
-      # The old catch handled ONLY {:timeout, _}: a :noproc exit PROPAGATED and crashed the
-      # best-effort provenance caller for a serializer hiccup.
+      # A dead PID must produce a typed result instead of propagating the call exit.
       assert {:error, {:ops_sync_unavailable, _}} =
                OpsObjectSync.commit_object(dead, tmp, "briefs/z.md", "x\n", label: "t")
     end
@@ -259,8 +239,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     git_init(tmp)
     n = 12
 
-    # N concurrent writers of DISTINCT objects into the ONE repo. Direct on the worktree these race on
-    # `.git/index.lock` (some `git commit` fail); through the singleton they queue → every one commits.
+    # Concurrent distinct writes through one server must all return successfully.
     results =
       1..n
       |> Task.async_stream(
@@ -277,33 +256,14 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     assert Enum.all?(results, &match?({:ok, _sha, _push}, &1)),
            "every serialized commit must succeed: #{inspect(results)}"
 
-    # N distinct objects, serialized → N commits (no lost/failed write, no corrupt index).
+    # Commit count checks that serialized writes remain separate.
     assert commit_count(tmp) == "#{n}"
   end
 
   test "the scope is NODE-GLOBAL: two DIFFERENT work_dirs go through the SAME server (BL-6-43.4)",
        %{tmp_dir: tmp, server: srv} do
-    # ⚠ HISTORICAL, and it must read as such: the module USED TO say "NO test pins the node-wide
-    # scope, so a green suite would not by itself prove such a change safe". THIS test is what
-    # closed that gap on 2026-08-03 (BL-6-43.4), and the module now says so. The old sentence is
-    # quoted here only to name what was missing — it is NOT the current state.
-    #
-    # That distinction cost two false confirmations on 2026-08-05: an audit grepped the sentence,
-    # read it as live, and reported the scope as unpinned; a second pass "verified" it against a
-    # truncated listing that stopped before this line. A verbatim obsolete claim living inside its
-    # own fix is a trap for whoever searches rather than reads.
-    #
-    # What the gap WAS: the CI-11 test above proves serialization within ONE work_dir, and a
-    # per-work_dir sharding would keep it green while silently dropping the cross-project guarantee.
-    #
-    # What is pinned here is the ROUTING KEY: `work_dir` travels as PAYLOAD, the server is the only
-    # address. Two unrelated repos are committed through one explicitly-named instance, and both
-    # must land. A refactor that derived the process from `work_dir` could not satisfy this call
-    # shape — it would have to resolve elsewhere, and this test is where it says so.
-    #
-    # What is NOT pinned, deliberately: mutual exclusion ACROSS work_dirs by timing. Proving "these
-    # two never overlapped" needs a clock, and a clock in a test buys flakiness rather than truth.
-    # The structural property is the one a refactor breaks first.
+    # Both work_dirs are payload to one explicit server. This checks that call shape
+    # and resulting files, not overlap timing or the production singleton's routing.
     a = Path.join(tmp, "project-a")
     b = Path.join(tmp, "project-b")
     File.mkdir_p!(a)
@@ -334,8 +294,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
   end
 
   test "the PROD-config bypass is LOUD: serializer absent while config starts it → warning per call" do
-    # The optional-layer posture is documented; what could not stand is the SILENT bypass in
-    # a booted daemon (restart window / crash loop): the gate's absence must be visible.
+    # A missing serializer warns when configuration says it should be running.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_start_ops_object_sync, true)
 
     log =
@@ -371,13 +330,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     refute log =~ "serializer NOT registered"
   end
 
-  # 6-048 — LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE. Le raccourci d'idempotence rendait
-  # `Git.last_commit_sha/2` — le dernier commit ayant TOUCHE ce chemin — sans verifier que le
-  # contenu A CE COMMIT est celui qu'on annonce. Un fichier ecrit puis non commite suffit.
-  #
-  # Ce sha remonte jusqu'aux pointeurs d'epinglage : `Brief: <ref> @ <sha>` dans le corps du ticket,
-  # avec la phrase « ce qui fait foi est le doc ci-dessous, A CE COMMIT EXACT ». Un juge qui resout
-  # le pointeur lit alors une version PRECEDENTE, sans qu'aucune erreur ne se leve.
+  # Disk content left after a failed commit must not inherit a previous version's SHA.
   describe "6-048 — le sha rendu porte le contenu annonce" do
     alias Fleet.Workflow.OpsObject
 
@@ -403,8 +356,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
 
     test "TEMOIN — contenu deja commite : le raccourci rend bien SON commit, sans en creer",
          %{tmp_dir: tmp} do
-      # Sans ce temoin, un correctif qui re-commiterait a chaque appel passerait le test precedent
-      # et ferait de l'idempotence une illusion — un commit par appel dans le journal de `work/ops`.
+      # Positive control: matching committed content must not create another commit.
       git_init(tmp)
 
       assert {:ok, sha1, _} = OpsObject.commit_object(tmp, "briefs/x.md", "stable\n", label: "t")
@@ -440,24 +392,18 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     end
   end
 
-  # 6-081 — `File.exists?/1` PUIS `File.read!/1` est un check-then-act, et la variante `!` LEVE
-  # dans une expression booleenne ou l'echec de lecture voulait dire « contenu different ». Ce code
-  # tourne dans le `handle_call` du serialiseur : la levee le TUE, et tous les appels en attente
-  # recoivent un `:exit`.
+  # Non-bang reads let unreadable paths reach a returned write error instead of a server crash.
   describe "6-081 — un fichier illisible ne tue pas le serialiseur de work/ops" do
     test "chemin devenu un REPERTOIRE : materialise ou echoue, mais le serveur survit",
          %{tmp_dir: tmp, server: srv, name: name} do
       git_init(tmp)
 
-      # Un repertoire la ou un fichier est attendu : `File.exists?` rend true, `File.read!` LEVE
-      # (`:eisdir`). C'est la forme reproductible du disparait-entre-les-deux, et elle passe par le
-      # meme chemin de code.
+      # A directory deterministically makes File.read fail; this does not reproduce a timed race.
       File.mkdir_p!(Path.join(tmp, "briefs/x.md"))
 
       _ = OpsObjectSync.commit_object(srv, tmp, "briefs/x.md", "content\n", label: "t")
 
-      # LA propriete : le serialiseur est toujours vivant et repond encore. Le sort de CET appel
-      # importe moins que le fait que les suivants ne recoivent pas un `:exit`.
+      # Check server identity and a subsequent successful request, beyond mere liveness.
       assert Process.alive?(srv)
       assert Process.whereis(name) == srv
 

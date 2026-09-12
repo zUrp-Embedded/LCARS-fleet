@@ -1,62 +1,35 @@
 defmodule Fleet.Workflow.Pinning do
   @moduledoc """
-  What an agent EMITS on the forge: a short body on the surface, the full text committed and cited.
+  Renders long bodies as the first eight lines plus a citation to the full text
+  committed in ops. More than ten newline-separated segments triggers pinning;
+  a trailing newline counts as an extra segment.
 
-  The problem it solves is not verbosity. A long verdict pasted into a review is unreadable in the
-  Gitea UI, it is unquotable (nothing addresses a version of it), and it is EDITABLE — a human who
-  amends the comment amends the only copy, and nothing records that it changed. Committing the full
-  text and citing `<ref> @ <sha>` makes the emission an immutable object with a name, and leaves on
-  the surface exactly what a human scanning the PR needs.
-
-  Below the threshold, this does nothing. A pointer to four lines costs more than the four lines —
-  the reader has to follow it to learn there is nothing to follow.
-
-  ## The failure semantic is the load-bearing part
-
-  If the commit fails, the FULL BODY is posted inline and the failure is logged LOUD. A long comment
-  is a cosmetic problem; a pointer to an object that does not exist is a lie, and it is the kind
-  that survives — the reader assumes the doc is somewhere and blames its own search. Noisy rather
-  than false, the same trade the retirement path already makes.
-
-  ## The summary is a TRUNCATION, deliberately
-
-  It keeps the first lines and says so. Anything cleverer — first paragraph, extracted headline —
-  would let the summary misrepresent the body it points at, and the summary is the part a human
-  reads and stops at. A truncation cannot claim something the text does not say.
+  Missing destination or a returned commit error keeps the full body inline.
+  Any successful commit result produces a pointer regardless of push state, so
+  the link may not be remotely readable. This renderer neither posts to the forge
+  nor guarantees eventual publication. A truncation is labeled as such; it is not
+  a semantic summary and can cut Markdown structures or qualifications.
   """
 
   require Logger
 
   alias Fleet.Workflow.OpsObjectSync
 
-  # Above this, the body is committed and cited. Below, it is posted as-is. Set at the point where a
-  # comment stops fitting in a glance in the Gitea UI — it is a readability threshold, not a cost
-  # one: a LAN commit+push costs hundreds of milliseconds, which is not what makes an emission
-  # expensive.
+  # Keep short bodies inline: the pointer itself adds reading overhead.
   @threshold_lines 10
 
-  # How much of the body survives on the surface. The pinned form lands around 14 lines — LONGER
-  # than a body that just fits under the threshold, and that is fine: the property that matters is
-  # that it is BOUNDED. Thirty lines and five hundred produce the same fourteen, which is the whole
-  # win. Trading summary lines to get under the threshold would buy a claim nobody needs and cost
-  # the reader the only part they actually read.
+  # Preview line limit, independent of the threshold; no byte-length limit.
   @summary_lines 8
 
   @doc """
-  Renders `body` for posting: either as-is, or as a summary plus a `<kind>: <ref> @ <sha>` pointer.
+  Returns body unchanged or a truncated preview with a version pointer.
+  Pinning needs non-nil :work_dir and :ref; these values are not otherwise validated.
+  :kind defaults to Doc, :label to emission. A binary :repo delegates the link to
+  Fleet.Layout; otherwise the pointer uses <kind>: <ref> @ <sha>.
 
-  `opts`:
-    * `:work_dir` — the project's ops worktree (REQUIRED to pin; absent → always inline)
-    * `:ref` — ops-relative ref to commit at (REQUIRED to pin)
-    * `:kind` — the pointer keyword and the noun of the disclaimer, e.g. `"Verdict"`
-    * `:repo` — `owner/name`, for the clickable commit-browse link in the pointer (absent → the
-      legacy `<kind>: <ref> @ <sha>` line, still parseable; `Pinning` stays total either way)
-    * `:label` — commit-message prefix handed to `OpsObject` (default `"emission"`)
-    * `:commit_fun` — seam (tests): `(work_dir, ref, content, opts) -> {:ok, sha, push_state} |
-      {:error, term}`
-
-  Always returns a body to post. It never returns an error: an emission that cannot be pinned is
-  still an emission that must reach the forge.
+  :commit_fun can replace OpsObjectSync.commit_object/4 and receives label: and
+  push: :ops. Returned {:error, reason} falls back inline; exceptions, unexpected
+  callback results and invalid option types are not rescued.
   """
   @spec render(String.t(), keyword()) :: String.t()
   def render(body, opts \\ []) when is_binary(body) do
@@ -80,17 +53,12 @@ defmodule Fleet.Workflow.Pinning do
     commit = Keyword.get(opts, :commit_fun, &OpsObjectSync.commit_object/4)
 
     case commit.(work_dir, ref, body, label: label, push: :ops) do
-      # `:local_only` does NOT fall back to inlining, and that is a deliberate asymmetry with the
-      # commit failure below. A commit that did not happen leaves the pointer naming nothing, ever.
-      # A push that did not land leaves an object that exists, is addressable by sha, and reaches
-      # the forge at the branch's next successful push — the citation is late, not false. Inlining
-      # it would trade a temporary lateness for a permanently unquotable wall of text.
+      # Keep the citation for every successful local result, even unobserved/failed push.
       {:ok, sha, _push_state} ->
         pointer_body(body, ref, sha, Keyword.get(opts, :kind, "Doc"), repo)
 
       {:error, reason} ->
-        # INLINE, not a pointer. See the moduledoc: a dangling citation is worse than a long comment
-        # because the reader trusts it and looks for the object.
+        # Preserve the complete body when the engine returns an error.
         Logger.warning(
           "Emission: #{ref} NOT committed (#{inspect(reason)}) — full body posted inline instead " <>
             "of a pointer that would name nothing"
@@ -112,17 +80,13 @@ defmodule Fleet.Workflow.Pinning do
     |> Kernel.<>("\n")
   end
 
-  # The unified `<kind>: [label](url)` link when the repo is known (the norm — every caller passes
-  # it); the legacy `<kind>: <ref> @ <sha>` as a defensive fallback so `Pinning` stays TOTAL (it never
-  # returns an error) if a caller omits the repo. Both are the one notation `Fleet.Layout` owns.
+  # Missing/non-binary repo retains the legacy pointer notation.
   defp pointer_line(kind, ref, sha, repo) when is_binary(repo),
     do: Fleet.Layout.pointer_line(kind, ref, sha, repo)
 
   defp pointer_line(kind, ref, sha, _repo), do: "#{kind}: #{ref} @ #{sha}"
 
-  # The architect's sentence, structure kept verbatim; only the NOUN follows what is being cited.
-  # Saying "ordre de mission" over a verdict would be false, and the sentence exists precisely to
-  # stop a reader from acting on the wrong artifact.
+  # Name the artifact kind so the disclaimer applies to briefs and verdicts alike.
   defp disclaimer(kind) do
     "Ce qui précède est un résumé, pas le #{String.downcase(kind)}. Ce qui fait foi est le doc " <>
       "ci-dessous, à ce commit exact — éditer ce résumé ne le change pas."
