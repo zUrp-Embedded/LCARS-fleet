@@ -3,15 +3,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: PROTO-V2 — les volumes du MAGASIN : ce qui coute du temps a refabriquer
-# NE MONTE JAMAIS UN VOLUME SUR LA RACINE DU MAGASIN — SEULEMENT SUR SES ENFANTS. La racine a
-# deja un locataire porte par la COUCHE CONTENEUR : `PROV_CATALOGUES_WORK`, cree par
-# `25-directories.sh`. Un volume monte a la racine le masquerait — l'etat tofu des catalogues
-# disparaitrait derriere un point de montage vide, sans un message. Les volumes de ce fichier sont
-# ses FRERES, jamais son parent.
-#
-# `external: true` (pose par le compose, pas ici) les met hors projet, donc `compose down -v` ne peut
-# pas les emporter. En echange ils doivent exister AVANT le `up`, sinon compose refuse de demarrer :
-# c'est `store_ensure_volumes` qui les pose, et TOUT geste qui monte le conteneur doit l'appeler.
 
 LCARS_STORE_TREES=(
   cache        # npm, pip, cargo, hex — perdre coute de la BANDE PASSANTE. Purgeable de routine.
@@ -20,12 +11,6 @@ LCARS_STORE_TREES=(
   state        # env.d/ et egress.d/ — ETAT CONVERGE, pas un artefact. Petit, et sa perte est MUETTE.
 )
 
-# store_volume_name <nature> — le nom REEL du volume docker pour cette installation.
-#
-# ⚠ GARDE EXPLICITE, PAS `${VAR:?message}` : (1) `:?` tue le SHELL ENTIER, il ne rend pas la main a
-# l'appelant qui voudrait decider ; (2) le mot du `:?` subit la suppression des quotes, donc les
-# apostrophes DISPARAISSENT du message affiche — « l'identite de l'installation » sort en
-# « lidentite de linstallation ».
 store_volume_name() {
   if [[ -z "${LCARS_STORE_PREFIX:-}" ]]; then
     echo "store: LCARS_STORE_PREFIX absent — le nom du projet compose EST l'identite d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
@@ -35,9 +20,6 @@ store_volume_name() {
   printf '%s-%s' "$LCARS_STORE_PREFIX" "$1"
 }
 
-# store_volume_names — les quatre noms reels, un par ligne. Rend non-zero si le prefixe manque, et
-# n'ecrit RIEN dans ce cas : une liste partielle serait pire qu'une liste vide (l'appelant qui
-# detruit en effacerait une partie et croirait avoir fini).
 store_volume_names() {
   local nature name
   for nature in "${LCARS_STORE_TREES[@]}"; do
@@ -46,17 +28,6 @@ store_volume_names() {
   done
 }
 
-# store_ensure_volumes <docker-bin> — cree ce qui manque, ne touche a rien d'autre.
-#
-# `docker volume create` est IDEMPOTENT sur un volume existant (il rend son nom et sort 0) : rien a
-# sonder avant, et rien qui puisse ecraser le contenu d'un volume deja la. On ne cree JAMAIS avec
-# des options (labels, driver) : un volume deja present les ignore en silence, et deux bancs le
-# creeraient differemment selon lequel a demarre le premier.
-#
-# ⚠ LES NOMS SE CAPTURENT AVANT LA BOUCLE, PAS EN SUBSTITUTION DE PROCESSUS. `while read … < <(f)`
-# JETTE le code de retour de `f` : prefixe absent => zero ligne => la boucle ne tourne pas => `rc`
-# reste 0 et le geste rend un SUCCES MUET, sur un magasin qui n'existe pas. La substitution de
-# commande, elle, propage.
 store_ensure_volumes() {
   local docker_bin="${1:-docker}" vol rc=0 names
   names="$(store_volume_names)" || return 1
@@ -69,7 +40,6 @@ store_ensure_volumes() {
   return "$rc"
 }
 
-# store_destroy_volumes <docker-bin> — DETRUIT le magasin de CETTE installation.
 store_destroy_volumes() {
   local docker_bin="${1:-docker}" vol rc=0 names
   names="$(store_volume_names)" || return 1
@@ -79,10 +49,6 @@ store_destroy_volumes() {
   return "$rc"
 }
 
-# store_spared_line — CE QUE LA DESTRUCTION EPARGNE, dit par celui qui sait.
-# NE S'APPELLE QUE D'UN GESTE AUQUEL LE MAGASIN SURVIT — `container reset` reinitialise un conteneur, il ne
-# jette pas l'installation. Un geste qui JETTE detruit (`store_destroy_volumes`) : y annoncer une
-# epargne serait un mensonge sur le mot.
 store_spared_line() {
   local names
   names="$(store_volume_names)" || return 1

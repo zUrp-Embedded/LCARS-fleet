@@ -4,10 +4,6 @@
 # STARDATE: 2026.255
 # STATUS: bats tests for deploy/lib/deploy-release.sh atomic-swap helpers (crash-safe deploy)
 #
-# The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
-# a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the
-# extracted atomic_swap_dir / atomic_swap_file directly (source guard = no mix build) and prove the
-# live target is never destroyed before the new one is verified, and the previous is kept.
 
 load ../refute
 
@@ -37,7 +33,6 @@ teardown() { rm -rf "$TMP"; }
   run atomic_swap_dir "$TMP/src" "$TMP/dst" "bin/lcars_fleet"
   [ "$status" -ne 0 ]
   [[ "$output" == *"build stage invalide"* ]]
-  # The live install survived a bad build — the exact loss the old rm -rf caused.
   grep -q old "$TMP/dst/bin/lcars_fleet"
   [ ! -e "$TMP/dst.staging.$$" ]
 }
@@ -53,9 +48,6 @@ teardown() { rm -rf "$TMP"; }
 }
 
 @test "build_release runs the GATE before the release (gate->build continuation)" {
-  # A fake mix on PATH records the order of subcommands. The release must be TIED to the gate:
-  # `mix gate` before `mix release`, on the same tree — the SHA identifies the artifact, the gate
-  # qualifies it.
   mkdir -p "$TMP/binstub"
   cat > "$TMP/binstub/mix" << 'MIX'
 #!/usr/bin/env bash
@@ -68,7 +60,6 @@ MIX
   PATH="$TMP/binstub:$PATH" run build_release "$TMP"
   [ "$status" -eq 0 ]
 
-  # Order: deps.get, then gate, then release.
   grep -n gate "$MIX_CALL_LOG"
   gate_line="$(grep -n 'gate' "$MIX_CALL_LOG" | head -1 | cut -d: -f1)"
   rel_line="$(grep -n 'release' "$MIX_CALL_LOG" | head -1 | cut -d: -f1)"
@@ -119,15 +110,10 @@ MIX
   [[ "$output" == *"sourced-ok"* ]]
 }
 
-# --- guards: the deploy refuses the two ways it silently produced a wrong result -------------------
-
-@test "refuse_root: root is refused (the gate is not valid under root)" {
+@test "refuse_root : root est refusé, avec la conséquence et le compte attendu" {
   run refuse_root 0
   [ "$status" -ne 0 ]
-  [[ "$output" == *"root"* ]]
-  # The message must carry the REASON, not just the refusal: a reader who only sees "refused"
-  # reaches for sudo again.
-  [[ "$output" == *"gate"* ]]
+  [[ "$output" == *"lancé en root — le build laisserait des artefacts root dans l'arbre source"*"compte propriétaire"* ]]
 }
 
 @test "refuse_root: an ordinary uid passes" {
@@ -136,12 +122,6 @@ MIX
 }
 
 @test "refuse_root: called with NO argument, the default IS the effective uid" {
-  # The two tests above only ever drive the seam. Nothing pinned what the seam falls back to, so
-  # the default could have been anything -- and it was `${EUID:-$(id -u)}`, a fallback against a
-  # variable bash always sets, i.e. a branch no run of this suite could reach.
-  #
-  # The assertion is a COMPARISON, not a value: it holds whoever runs the suite, root included,
-  # and it is exactly the claim "no argument means my own uid".
   run refuse_root
   local bare_status="$status"
   run refuse_root "$EUID"
@@ -154,34 +134,19 @@ MIX
 }
 
 @test "require_prefix_writable: walks UP to the first existing parent" {
-  # The prefix usually does not exist yet; what matters is whether we may create it. Checking the
-  # leaf alone would pass on any path at all.
   run require_prefix_writable "$TMP/a/b/c/d"
   [ "$status" -eq 0 ]
 }
 
 @test "require_prefix_writable: a non-writable destination FAILS before the build" {
-  # The probe must land on the first EXISTING ancestor and test THAT one. A sibling that happens to
-  # be writable inside a read-only parent is not the question: creating `$TMP/ro/prefix` needs write
-  # on `$TMP/ro` itself.
   mkdir -p "$TMP/ro"
   chmod 500 "$TMP/ro"
   run require_prefix_writable "$TMP/ro/prefix"
   chmod 700 "$TMP/ro"
   [ "$status" -ne 0 ]
   [[ "$output" == *"non inscriptible"* ]]
-  # And it must NOT send the reader back to sudo — that is the loop this pair exists to break.
   [[ "$output" == *"sudo"* ]]
 }
-
-# 6-110 — LE COMPTEUR ETAIT POSE ET JAMAIS LU. `link_fail=1` s'ecrivait dans la boucle, puis le
-# script annoncait `OK` inconditionnellement et rendait 0. Une install lancee sans droit sur
-# `$LINK_DIR` se declarait en place alors que ses commandes PATH sont ABSENTES — ou pire, pointent
-# encore sur une version precedente : le `ln -sf` echoue, l'ancien lien survit, et l'operateur lance
-# une release qu'il croit neuve.
-#
-# La boucle est extraite en fonction pour etre jouee SANS un `mix release` de trois minutes : le
-# defaut vit dans son verdict, jamais dans le build. Vrai systeme de fichiers de bout en bout.
 
 @test "6-110: un lien requis qui echoue rend NON-ZERO — le compteur est enfin lu" {
   PREFIX="$TMP/prefix"
@@ -199,8 +164,6 @@ MIX
 }
 
 @test "6-110: TEMOIN — un lien qui passe rend ZERO et annonce les liens poses" {
-  # Sans ce temoin, une fonction qui echouerait toujours passerait le test precedent, et l'install
-  # ne dirait plus jamais OK.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/bin"
   MF_FILES=(fleet)
@@ -214,8 +177,6 @@ MIX
 }
 
 @test "6-110: une entree NON-link ne compte pas — seul le cablage requis decide" {
-  # Le manifest distingue les fichiers livres des fichiers CABLES. Faire echouer l'install sur un
-  # fichier qu'on n'a jamais promis de lier serait un mur invente.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
   MF_FILES=(fleet pas_un_lien)
@@ -230,9 +191,6 @@ MIX
 }
 
 @test "6-110: l'ANCIEN lien survit a l'echec — c'est le pire cas, pas un cas theorique" {
-  # `ln -sf` qui echoue ne detruit rien : le lien precedent reste en place et pointe sur l'ancienne
-  # release. Sans verdict, l'operateur lance une version qu'il croit remplacee. Le test epingle les
-  # deux moities : le lien ancien est toujours la, ET la fonction refuse.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
   # shellcheck disable=SC2034  # entrees de `wire_path_links`, la fonction sous test
@@ -250,14 +208,6 @@ MIX
   [ "$(readlink "$LINK_DIR/fleet")" = "$TMP/ancienne/bin/fleet" ]
 }
 
-# ─── S4 : LE MANIFESTE SE JOUE DANS LES DEUX SENS — CE QU'IL NE NOMME PAS S'EN VA ──────────────
-#
-# ⚠ RELECTURE HOSTILE DU 2026-09-04, MESURE AU BANC apres le renommage `fleet_v2` -> `fleet` :
-# `/opt/lcars/runtime/bin/fleet_v2` et `/usr/local/bin/fleet_v2 -> …/bin/fleet_v2` toujours en
-# place, `60-deploy=OK`. La pose iterait sur les entrees du manifest et n'enlevait rien. Un humain
-# qui tapait `fleet_v2` obtenait le lanceur d'AVANT sur une machine declaree conforme.
-# Meme forme que `wire_path_links` : la boucle est une fonction, jouee sans `mix release`.
-
 @test "S4 : un intrus de \$PREFIX/bin est retire, ET son symlink du PATH, une ligne par retrait" {
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/bin"
@@ -273,7 +223,6 @@ MIX
   [ ! -L "$LINK_DIR/fleet_v2" ]
   [[ "$output" == *"retire $PREFIX/bin/fleet_v2 (absent du manifest)"* ]]
   [[ "$output" == *"retire symlink $LINK_DIR/fleet_v2"* ]]
-  # ce que le manifest nomme reste, lien compris
   [ -e "$PREFIX/bin/fleet" ]
   [ -e "$PREFIX/bin/lcars" ]
   [ -L "$LINK_DIR/fleet" ]
@@ -296,8 +245,6 @@ MIX
 }
 
 @test "S4 : un symlink que l'humain ne peut pas retirer se DIT et ne fait pas echouer la pose" {
-  # Le script tourne en humain ; `/usr/local/bin` est a root. Le lien pointe sur un fichier que
-  # l'on vient de retirer : le dire est la moitie du geste, 60-deploy fait l'autre en root.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
   MF_FILES=(fleet)

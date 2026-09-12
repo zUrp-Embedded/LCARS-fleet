@@ -3,12 +3,7 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: PROTO-V2 — l'audit de la machine (`provision audit`) de `provision`, sourcé par lui (lot 10 : le runner ne porte plus que le runner)
-#
-# Ce fichier n'est pas un programme : `provision` le source apres sa lib, avec ses globales
-# (SUBSTRATE, JOURNAL_FILE, SELF, les drapeaux) en place. Il n'a pas de garde `PROVISION_LIB:?`
-# parce qu'il n'est lisible que par le runner qui le source.
 
-# ─── audit — LA TABLE CONTRE LA MACHINE ─────────────────────────────────────────────────────────
 audit_run() {
   local avant="${1:-}" apres="${2:-}"
   [[ -r "$avant" && -r "$apres" ]] \
@@ -24,9 +19,6 @@ audit_run() {
   couvert() {
     local p="$1" d
     for d in "${declares[@]}"; do
-      # ⚠ UN JOKER EN TETE (`person <human>`) N'EST PAS UN CHEMIN, ET SON PREFIXE VIDE COUVRAIT
-      # L'UNIVERS : `[[ "$p" == ""* ]]` est vrai de tout. Relecture hostile du 2026-09-04 : deux
-      # chemins bidon rendaient « la machine ne porte rien que la table ne declare ».
       [[ "$d" == /* ]] || continue
       case "$d" in
         *"<"*) d="${d%%<*}"; [[ -n "$d" && "$p" == "$d"* ]] && return 0 ;;
@@ -36,25 +28,16 @@ audit_run() {
     return 1
   }
 
-  # ⚠ ET IL SE JOUE SUR LA MACHINE DANS L'ETAT QUE DECRIT SON « APRES », PAS PLUS TARD : `dpkg -L`
-  # interroge ce qui est installe MAINTENANT. Rejoue apres une desinstallation, il ne rend plus rien
-  # et les fichiers des paquets ressortent tous comme non declares.
   local -A _apt=()
   local _dpkg="${LCARS_DPKG:-dpkg}"
   if [[ -r "$JOURNAL_FILE" ]] && command -v "$_dpkg" >/dev/null 2>&1; then
     local _pkg _f
-    # ⚠ ECLATEMENT VOULU : `apt_installed` porte UNE ligne de noms separes par des espaces, et c'est
-    # le mot qu'on veut, pas la ligne. Un `while read` lirait la ligne entiere comme un seul paquet.
     # shellcheck disable=SC2013
     for _pkg in $(awk '$1=="apt_installed"{ $1=""; print }' "$JOURNAL_FILE"); do
       while read -r _f; do [[ -n "$_f" ]] && _apt["$_f"]=1; done < <("$_dpkg" -L "$_pkg" 2>/dev/null || true)
     done
   fi
 
-  # ⚠ ON COMPARE DES CHEMINS, PAS DES LIGNES (M5, relecture hostile du 2026-09-04). La ligne du
-  # releve porte `<type> <mode> <uid>:<gid> <chemin>` : comparee entiere, un simple chmod sur un
-  # chemin PREEXISTANT en faisait un objet « apparu ». Les trois premieres colonnes sont coupees
-  # des deux cotes avant le `comm` ; ce qui reste est le chemin, espaces compris.
   local n_apparu=0 n_nu=0 n_apt=0 p
   while read -r p; do
     [[ -n "$p" ]] || continue

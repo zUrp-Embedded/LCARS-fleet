@@ -4,12 +4,6 @@
 # STARDATE: 2026-09-05
 # STATUS: bats tests for deploy/lib/door-gen.sh — la porte d'une version : constantes remplies, table complete, sha juste
 #
-# CE QUI EST EN JEU. La porte d'une release porte EN DUR les sha256 de SES artefacts (curl_bash_2026
-# § 07.2) : une table qui en oublie un laisse la porte refuser un artefact legitime — ou, pire, un
-# generateur qui recopie mal une constante tend la table de personne. Ces temoins mesurent le
-# generateur sur un tiroir factice : ce qu'il ecrit, ce qu'il ecarte, ce qu'il refuse.
-#
-# ⚠ SC2016 : ces temoins LISENT du code ; leurs motifs portent des `$VAR` qui doivent atteindre l'outil.
 # shellcheck disable=SC2016
 
 load ../refute
@@ -26,15 +20,12 @@ setup() {
   printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
   printf 'a1\n' > "$DIST/annexe-a.bin"
   printf 'b2\n' > "$DIST/annexe-b.bin"
-  # les derives : ecartes de la table, jamais des artefacts
   printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
   printf 'sig\n'  > "$DIST/annexe-a.bin.minisig"
 }
 
 gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
 sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
-  # ⚠ UN SAUT DE LIGNE, PAS UN `;` : la derniere ligne de la fonction porte un commentaire (le
-  # marqueur), et `}  # …; sums` appellerait sums DANS le commentaire — c'est-a-dire jamais.
   bash -c "$(sed -n '/^sums() {/,/^}/p' "$1")"$'\nsums'
 }
 
@@ -53,13 +44,11 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   gen; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -f "$DIST/install.sh" ]
   local table; table="$(sums_of "$DIST/install.sh")"
-  # chaque artefact y est, et sa somme est celle du fichier (sha256sum -c relit la table)
   ( cd "$DIST" && printf '%s\n' "$table" | sha256sum -c --quiet --strict )
   [ "$(printf '%s\n' "$table" | grep -c .)" -eq 3 ]
   local a; for a in lcars-fleet-0.9.0-otp27-x86_64.tar.gz annexe-a.bin annexe-b.bin; do
     [ "$(grep -c "  $a\$" <<<"$table")" -eq 1 ] || { echo "$a manque a la table"; return 1; }
   done
-  # les derives et la porte elle-meme n'y sont PAS
   refute_out 'sha256|minisig|install\.sh' <<<"$table"
 }
 
@@ -71,7 +60,6 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   grep -qE '^DOOR_BASE="https://forge\.test/o/r/releases/download/0\.9\.0" +# @@DOOR_BASE@@' "$porte"
   grep -qE '^MINISIGN_PUBKEY="RWQcle" +# @@DOOR_PUBKEY@@' "$porte"
   grep -qE '^LCARS_DOOR_VERSION="0\.9\.0" +# @@DOOR_VERSION@@' "$porte"
-  # chaque marqueur survit, une fois : la porte generee reste un gabarit lisible
   local m; for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_SUMS_BEGIN DOOR_SUMS_END; do
     [ "$(grep -c "@@$m@@" "$porte")" -eq 1 ]
   done
@@ -83,7 +71,6 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ -f "$DIST/install.sh.sha256" ]
   ( cd "$DIST" && sha256sum -c --quiet --strict install.sh.sha256 )
   [[ "$output" == *"sha256 de la porte : $(cut -d' ' -f1 < "$DIST/install.sh.sha256")"* ]]
-  # regenerer change la porte ? non : meme entree, meme sortie, meme sha (reproductible)
   local avant; avant="$(cat "$DIST/install.sh.sha256")"
   gen; [ "$status" -eq 0 ]
   [ "$(cat "$DIST/install.sh.sha256")" = "$avant" ]
@@ -93,12 +80,10 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   PUB="" gen; [ "$status" -eq 0 ]
   [[ "$output" == *"AUCUNE cle publique"*"NON verifiee"* ]]
   grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
-  # un minisign.pub dans le tiroir suffit : sa seconde ligne est la cle
   printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
   PUB="" gen; [ "$status" -eq 0 ]
   grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
   refute_out 'AUCUNE cle' <<<"$output"
-  # et minisign.pub n'entre pas dans la table
   refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
 }
 
@@ -132,9 +117,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ -n "$l_tar" ]
   [ -n "$l_door" ]
   [ "$l_tar" -lt "$l_door" ]
-  # LCARS_DOOR_BASE surcharge la base (les bancs servent en local)
   grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
-  # le compose et le profil seccomp de la version entrent au tiroir, donc dans la table de la porte
   grep -qE '^for _f in deploy/docker/docker-compose\.yml deploy/docker/lcars-hardened-seccomp\.json' <<<"$body"
   grep -qE 'artefact de la version introuvable' <<<"$body"
 }
