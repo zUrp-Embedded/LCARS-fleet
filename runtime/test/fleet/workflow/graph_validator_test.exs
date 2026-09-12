@@ -7,7 +7,7 @@ defmodule Fleet.Workflow.GraphValidatorTest do
 
   alias Fleet.Workflow.GraphValidator
 
-  # Minimal step spec. `needs` omitted = root (the Loader normalizes absent `needs` → []).
+  # GraphValidator defaults omitted needs to []; Loader leaves the step map unchanged.
   defp step(needs \\ nil) do
     base = %{"role" => "noop"}
     if needs, do: Map.put(base, "needs", needs), else: base

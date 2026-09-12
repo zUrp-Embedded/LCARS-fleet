@@ -1,8 +1,7 @@
 defmodule Fleet.GitTest do
   alias Fleet.Workflow.Git
 
-  # async: false — the push timeout-readback tests mutate the GLOBAL :git_push_runner seam; a
-  # concurrent real-git push test in this file would otherwise pick up the stub runner.
+  # Mutates the shared :workflow_git_push_runner application setting.
   use ExUnit.Case, async: false
 
   @moduletag :tmp_dir
@@ -21,10 +20,7 @@ defmodule Fleet.GitTest do
     File.mkdir_p!(path)
     {_out, 0} = System.cmd("git", ["init", "--initial-branch=main", path])
 
-    # Default local config — otherwise git refuses commits without user.*, and some
-    # hooks too. Our code forces GIT_AUTHOR_*/GIT_COMMITTER_* via env, but git reads
-    # user.name/user.email for the commit even when the env is set on some versions;
-    # we set them to neutralize that.
+    # Identity for direct fixture Git commits, which do not use ForgeAuth.
     {_out, 0} = System.cmd("git", ["config", "user.name", "init-only"], cd: path)
     {_out, 0} = System.cmd("git", ["config", "user.email", "init@example.com"], cd: path)
 
@@ -135,8 +131,7 @@ defmodule Fleet.GitTest do
 
       opts = Map.put(valid_opts(ws), :add_paths, ["--all"])
 
-      # Without `--`, `git add --all` would stage sneaky.txt → {:ok}. With `--`, "--all" is a literal
-      # pathspec (absent) → failure: the option-injection is neutralized (nothing mass-staged).
+      # The option-like pathspec names no file; this assertion checks refusal.
       assert {:error, _} = Git.commit(opts)
     end
 
@@ -200,9 +195,8 @@ defmodule Fleet.GitTest do
   end
 
   describe "push/3 — timeout readback (a push that landed before the local kill is confirmed)" do
-    # A real push timeout that lands on the remote is impractical to induce; the git_push_runner seam
-    # simulates the timeout while the readback (rev-parse local + ls-remote) is answered by the same
-    # stub. The SHA is the idempotency key: match → landed, mismatch → the timeout stands.
+    # Timeout and readback are stubbed: tests the comparison decision,
+    # not a real timeout or publication of accompanying refs.
     setup do
       on_exit(fn -> Application.delete_env(:lcars_fleet, :workflow_git_push_runner) end)
       :ok
@@ -274,17 +268,15 @@ defmodule Fleet.GitTest do
       {_o, 0} = System.cmd("git", ["commit", "--amend", "-m", "C1-rebase"], cd: ws)
       {rewritten, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: ws)
 
-      # a normal push would be "non-fast-forward" → do_push retries `--force` → lands (without it,
-      # the resolution rebase NEVER lands and the PR stays in conflict, the live PR#4 bug).
+      # Divergence retries with --force-with-lease against recorded remote-tracking state.
       assert {:ok, true} = Git.push(ws, "origin", "HEAD:main")
 
       {remote_head, 0} = System.cmd("git", ["rev-parse", "main"], cd: bare)
       assert String.trim(remote_head) == String.trim(rewritten)
     end
 
-    # NB naming (as above): the tmp_dir path embeds the test name into git's output; the name must avoid
-    # every substring the classifiers key on — `non_fast_forward?` (non-fast-forward / fetch first) AND
-    # `lease_stale?` (stale info / rejected) — hence "declines" / "kept", not "rejected"/"stale".
+    # Git echoes tmp_dir, including test names. Avoid non-fast-forward, fetch first,
+    # stale info and rejected where they must not trigger output classifiers.
     test "a racing producer advanced the remote: the leased force declines, the other commit is kept",
          %{
            tmp_dir: tmp
@@ -321,26 +313,15 @@ defmodule Fleet.GitTest do
       assert String.trim(remote_head) == String.trim(concurrent_sha)
     end
 
-    # NB naming: the ExUnit tmp_dir is derived from the test name; git embeds that path in its error
-    # output. The name must NOT contain the substrings classified by `non_fast_forward?` (otherwise the
-    # path pollutes `out` and makes a false positive). Hence a deliberately neutral wording.
+    # Keep classifier substrings out of test names echoed in Git path diagnostics.
     test "MA-05: push refused by a server hook triggers NO brutal retry", %{tmp_dir: tmp} do
       bare = init_bare_repo(Path.join(tmp, "remote.git"))
       ws = init_workspace(Path.join(tmp, "ws"), remote_url: bare)
       commit_initial(ws, "C1")
 
-      # pre-receive hook that REFUSES every push → git emits "[remote rejected] … pre-receive hook
-      # declined" (the substring `rejected` WITHOUT `non-fast-forward`). Without MA-05,
-      # `non_fast_forward?` matched `rejected` → wrongful `--force` retry (forced rewrite over a
-      # server-side guard).
-      #
-      # DISCRIMINANT: the hook COUNTS its invocations (1 `x` line/call in a witness file). A single
-      # normal push → 1 invocation. If the fix regresses and attempts `--force`, git re-runs the push
-      # (force does NOT bypass a pre-receive) → 2 invocations. The COUNT proves the absence of a
-      # force retry, where observing the remote could not (force-declined fails like push-declined).
-      # The counter lives in a path WITHOUT special characters: the ExUnit tmp_dir embeds the test
-      # name (parentheses, `→`, `≠`) which, interpolated unquoted into the hook's `sh`, would break
-      # the redirection.
+      # Count hook invocations to distinguish one rejected attempt from a rejected retry;
+      # unchanged remote state alone cannot distinguish them. The counter uses a simple
+      # path because the generated shell redirects into it without quoting.
       counter =
         Fleet.TestEnv.tmp_path("ma05_hook_calls")
 
@@ -361,7 +342,7 @@ defmodule Fleet.GitTest do
       assert rc != 0
       assert out =~ "declined" or out =~ "rejected"
 
-      # THE test: the hook was invoked only ONCE → no `--force` retry (which would have re-triggered it).
+      # A retry would invoke the rejecting hook again.
       invocations = counter |> File.read!() |> String.split("\n", trim: true) |> length()
 
       assert invocations == 1,

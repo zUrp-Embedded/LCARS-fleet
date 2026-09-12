@@ -5,11 +5,7 @@ defmodule Fleet.Workflow.LoaderTest do
   alias Fleet.Workflow.Loader
 
   setup %{tmp_dir: tmp_dir} do
-    # `put_env_restoring` ET PAS `put_env` + `delete_env` : la clef EST posee ailleurs
-    # (`config/runtime.exs:581`, depuis `LCARS_WORKFLOW_MAPS_ROOT`), donc l'ancien couple ne
-    # restaurait pas — il SUPPRIMAIT, et laissait derriere lui un ambiant que ce fichier n'avait pas
-    # trouve. `restore_env_on_exit` capture par `fetch_env` : absente elle est re-supprimee, posee
-    # elle est re-posee telle quelle.
+    # Restore prior value or absence: runtime configuration may already set this key.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :workflow_workflow_maps_root, tmp_dir)
     :ok
   end
@@ -29,8 +25,7 @@ defmodule Fleet.Workflow.LoaderTest do
             role: noop
       """)
 
-      # Normalized shape `%{"name", "steps"}`: the envelope (kind/metadata/spec)
-      # is unwrapped at load; only `name` (from metadata) and `steps` survive.
+      # This partial match does not enumerate all retained normalized fields.
       assert %{"name" => "minimal", "steps" => %{"only" => _}} =
                Loader.load!("minimal")
     end
@@ -76,7 +71,7 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    # Containment (WI-E3): a non-slug workflow_map/pipeline name NEVER traverses the root.
+    # Reject traversing names before constructing the YAML path.
     test "traversing pipeline name (../) → REFUSED before Path.join", %{tmp_dir: tmp_dir} do
       # Plants an escape target: `<root>/../escape.yaml`.
       File.write!(Path.join([tmp_dir, "..", "escape.yaml"]), """
@@ -160,9 +155,7 @@ defmodule Fleet.Workflow.LoaderTest do
       assert step["judge_target"] == "brief"
     end
 
-    # SECURITY property (boundary): a brief_kind outside {worker, judge} is rejected at LOAD
-    # (fail-closed at the boundary). It can NEVER reach the dispatcher to be inferred as
-    # worker there (executable brief for a role that should have been defused).
+    # Schema validation rejects this out-of-vocabulary brief_kind.
     test "out-of-vocab brief_kind → rejected at load (raise)", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "bad_kind.yaml"), """
       kind: WorkflowMap
@@ -207,9 +200,7 @@ defmodule Fleet.Workflow.LoaderTest do
   end
 
   describe "canon_names!/1 — guard enumeration" do
-    # `Path.wildcard` flattens a missing root and an empty catalogue into the same `[]`,
-    # which makes every "for each canon card" guard vacuously true. The bang form keeps
-    # the three states distinct; these tests pin each one.
+    # Missing and empty roots must not make boot enumeration guards vacuously pass.
     test "missing root → raise naming the root and its config sources", %{tmp_dir: tmp_dir} do
       missing = Path.join(tmp_dir, "nowhere")
 
@@ -282,8 +273,7 @@ defmodule Fleet.Workflow.LoaderTest do
       assert Loader.canon_names() == ["steady"]
       assert Loader.canon_names!() == ["steady"]
 
-      # A card that exists on disk but not in the image is refused BY NAME (never a
-      # silent half-epoch mixing proven and unproven cards).
+      # An existing image refuses unknown names without disk fallback.
       assert_raise RuntimeError, ~r/not in the published catalogue image/, fn ->
         Loader.load!("late")
       end
@@ -312,16 +302,13 @@ defmodule Fleet.Workflow.LoaderTest do
 
       assert_raise RuntimeError, ~r/schema .*invalid/, fn -> Loader.publish_image!() end
 
-      # No image → the readers still enumerate the DISK (both cards visible): the failed
-      # publish left no partial epoch behind.
+      # Tests failure within one directory, not atomicity across catalogues.
       assert Loader.canon_names() == ["broken", "steady"]
     end
   end
 
   describe "load!/2 — graph validation" do
-    # Schema-VALID (needs = array of strings) but graph-INVALID: `b` refers to a nonexistent
-    # step. The schema lets it through (inter-step constraint inexpressible in draft-07);
-    # the graph linter raises at load — otherwise silent phantom edge → frozen pipeline.
+    # Schema accepts string dependencies; graph validation detects this phantom reference.
     test "workflow_map with a phantom needs (passes the schema) → graph linter raise", %{
       tmp_dir: tmp_dir
     } do
@@ -346,8 +333,7 @@ defmodule Fleet.Workflow.LoaderTest do
       end
     end
 
-    # Anti-regression guard: every canon workflow_map must pass the graph linter.
-    # A canon workflow_map failing here = either a real workflow_map bug, or an invariant too strict.
+    # Require a nonempty bundled catalogue and load every card through schema and graph checks.
     test "all canon workflow_maps pass the linter" do
       canon_dir = Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/workflow_maps")
 

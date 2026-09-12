@@ -1,11 +1,12 @@
 defmodule Fleet.Workflow.Git do
   @moduledoc """
-  System-side, bounded git publication.
+  System-side Git operations with per-command timeouts (30 seconds by default).
 
-  `commit/1` and `push/3` remain separate so the deliverable gate runs between
-  content and publication. Git configuration is neutralized for pod-written
-  workspaces; no caller-controlled force or `--no-verify` is composed. A retry
-  of an explicit non-fast-forward uses `--force-with-lease` only.
+  commit/1 and push/3 are separate so a deliverable gate can run between them.
+  Shell supplies safe configuration arguments. Positional validation rejects empty
+  and option-like arguments, not Git refspec semantics: caller-supplied + force
+  refspecs and deletion refspecs are accepted. Calls require exclusive workspace
+  access if the caller needs a stable commit between validation and publication.
   """
 
   require Logger
@@ -37,7 +38,9 @@ defmodule Fleet.Workflow.Git do
   @hooks_off Shell.git_safe_config_args()
 
   @doc """
-  Commits paths in `workspace` without pushing and returns the resulting HEAD SHA.
+  Stages add_paths (default ["."]) and commits the entire index, including paths
+  already staged by another operation. Returns HEAD after the commit; failures do
+  not roll back staged files or a completed commit. Paths retain Git pathspec semantics.
   """
   @spec commit(opts) :: {:ok, String.t()} | {:error, term()}
   def commit(opts) when is_map(opts) do
@@ -69,10 +72,6 @@ defmodule Fleet.Workflow.Git do
       {true, true} -> :ok
     end
   end
-
-  # ============================================================
-  # Git ops
-  # ============================================================
 
   defp git_add(opts) do
     paths = Map.get(opts, :add_paths, ["."])
@@ -194,7 +193,9 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  Tests whether `sha` names a commit; an unknown SHA is `{:ok, false}`.
+  Tests whether sha resolves to a commit; revision expressions are accepted.
+  Every nonzero Git exit becomes {:ok, false}, including errors other than absence.
+  Shell failures remain typed errors.
   """
   @spec commit_exists?(Path.t(), String.t()) :: {:ok, boolean()} | {:error, term()}
   def commit_exists?(workspace, sha) do
@@ -291,26 +292,17 @@ defmodule Fleet.Workflow.Git do
   @provenance_ref_prefix "refs/lcars/provenance/"
 
   @doc """
-  The ref that carries the attestation OF one commit: `refs/lcars/provenance/<sha>`.
-
-  KEYED ON THE SHA, and that is the whole design (BL-6-43). An attestation whose NAME derives from
-  the head of the branch lets a head that moves after the engrave make the reader compute a name
-  NOBODY HAS WRITTEN — and a proof about another commit reads exactly like no proof at all. A ref
-  named after the commit cannot be looked up wrong: it exists for that commit or it does not
-  exist.
-
-  A fresh name per attested commit also removes the concurrency that a shared ref (a notes ref)
-  would have introduced on the publication path: two pods publishing at once write two DIFFERENT
-  refs, so neither can be a non-fast-forward, and nothing has to be forced or leased.
+  Returns refs/lcars/provenance/<sha> without validating the SHA.
+  Naming by commit keeps lookup independent of a moving branch head and separates
+  attestations for different commits. Writers for the same commit still share a ref.
   """
   @spec provenance_ref(String.t()) :: String.t()
   def provenance_ref(sha) when is_binary(sha) and sha != "", do: @provenance_ref_prefix <> sha
 
   @doc """
-  Writes `json` as a git BLOB in `workspace` and points `provenance_ref(sha)` at it.
-
-  Local only — no network. The ref is pushed by the caller IN THE SAME `git push` as the deliverable
-  (cf. `push/3`), which is what makes the brick and its proof land together or not at all.
+  Writes json bytes as a local Git blob and unconditionally updates provenance_ref(sha).
+  Does not validate JSON, its relation to sha, or an existing ref value. An update
+  failure can leave the blob behind. Publication is a separate caller operation.
   """
   @spec write_provenance(Path.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def write_provenance(workspace, sha, json)
@@ -320,10 +312,9 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  Reads back the attestation of `sha` from `dir`, or `{:error, :no_provenance_ref}`.
-
-  `dir` is a clone that has already fetched the ref. The read is `cat-file -p` on a blob: no
-  worktree, no checkout, nothing to leave behind.
+  Reads cat-file -p output at the local provenance ref; does not fetch, check out,
+  or validate object type/JSON. Every nonzero Git exit becomes :no_provenance_ref,
+  including errors other than a missing ref; Shell failures remain distinct.
   """
   @spec read_provenance(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def read_provenance(dir, sha) when is_binary(sha) and sha != "" do
@@ -338,10 +329,8 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # Le contenu transite par un fichier HORS du worktree, jamais par l'argv ni par le worktree
-  # lui-meme : l'autorite shell n'a pas de stdin (par construction — elle borne un groupe de
-  # processus, elle ne lui parle pas), et deposer le JSON dans l'espace de travail du producteur
-  # salirait l'arbre que la porte de livrable vient de verifier.
+  # Shell has no stdin interface. A temporary file outside the worktree avoids
+  # passing content in argv or dirtying the tree just checked by the deliverable gate.
   defp hash_object(workspace, json) do
     tmp =
       Path.join(System.tmp_dir!(), "lcars-provenance-#{System.unique_integer([:positive])}.json")
@@ -373,14 +362,18 @@ defmodule Fleet.Workflow.Git do
   end
 
   @doc """
-  Pushes one or SEVERAL refspecs through the bounded system publication path, in ONE `git push`.
+  Pushes one or more refspecs in one command, without --atomic: refs can land
+  partially even when Git reports an error. Malformed credentials prevent an attempt.
 
-  ⚠ THE LIST IS THE POINT, NOT A CONVENIENCE (BL-6-43). A deliverable and the attestation that
-  proves it must land TOGETHER or not at all. Two successive pushes give two outcomes, so one can
-  succeed alone — and every failure mode of the provenance rail came from exactly that: a brick on
-  the forge whose proof was written elsewhere, later, best-effort. One `git push`, several refspecs,
-  one verdict: git updates the refs it can and returns non-zero if any was rejected, so a partial
-  landing is REPORTED instead of being a silent half-publication.
+  A nonzero result whose text contains non-fast-forward or fetch first triggers
+  one retry leased against the first target's local remote-tracking SHA, without
+  fetching. Other refspecs have no added lease. Rejection classification also uses
+  output substrings, not a structured server verdict.
+
+  Initial timeout recovery compares only the first source commit and remote target,
+  read after the timeout; equality returns success even if other refs are missing.
+  A timeout during the leased retry has no readback. Default Shell calls are bounded
+  individually; an injected runner controls its own execution and error shapes.
   """
   @spec push(Path.t(), String.t(), String.t() | [String.t()]) :: {:ok, true} | {:error, term()}
   def push(workspace, remote, refspec) when is_binary(refspec),
@@ -395,9 +388,7 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # LE PREMIER REFSPEC FAUTIF ARRETE TOUT, et il l'arrete AVANT le push : une liste dont un seul
-  # element est malforme ne doit pas partir a moitie. C'est la meme regle qu'en dessous (un push,
-  # plusieurs refspecs, un verdict), appliquee un cran plus tot, a la validation.
+  # Validate every argument before issuing the command; Git validates refspec syntax.
   defp validate_refspecs(refspecs) do
     Enum.reduce_while(refspecs, :ok, fn r, _ ->
       case validate_cli_arg(r, :invalid_refspec) do
@@ -420,17 +411,13 @@ defmodule Fleet.Workflow.Git do
         {:ok, true}
 
       {:ok, {out, rc}} ->
-        # Explicit non-fast-forward alone may retry with a lease; never blind-force.
+        # Classification examines the whole output, including any echoed paths.
         if non_fast_forward?(out),
           do: force_push(workspace, remote, refspecs, auth_env),
           else: {:error, {:git_push_failed, rc, String.trim(out)}}
 
       {:error, {:timeout, _ms}} ->
-        # A timed-out local process may have pushed; confirm remote SHA before retrying.
-        # LE PREMIER refspec est celui du LIVRABLE, et c'est le seul dont la confirmation ait un
-        # sens : les suivants sont des refs NEUVES (une par sha atteste), donc sans historique a
-        # comparer et sans rejet possible. Si la branche a atterri, elles ont atterri avec elle —
-        # meme paquet, meme acte reseau.
+        # Only the first ref is compared; this says nothing about accompanying attestations.
         confirm_push_after_timeout(workspace, remote, hd(refspecs), auth_env)
 
       {:error, {:exit, reason}} ->
@@ -438,7 +425,7 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # Confirm timeout outcome only when source and remote target SHA are equal.
+  # Equality is observed after timeout; the log's claim about when it landed is stronger.
   defp confirm_push_after_timeout(workspace, remote, refspec, auth_env) do
     target = target_of_refspec(refspec)
     src = source_of_refspec(refspec)
@@ -496,10 +483,7 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # A force retry requires our recorded remote-tracking SHA as lease basis.
-  # Meme raison qu'au-dessus : le bail porte sur la branche du livrable (le premier refspec), pas sur
-  # les refs d'attestation qui l'accompagnent — forcer une ref neuve n'aurait aucun sens, et un bail
-  # sur elle n'aurait rien a verrouiller.
+  # Lease only the first target against recorded remote-tracking state; no fetch here.
   defp force_push(workspace, remote, refspecs, auth_env) do
     refspec = hd(refspecs)
     target = target_of_refspec(refspec)
@@ -520,9 +504,8 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # LE BAIL PERIME N'EST PAS UN ECHEC DE PUSH ORDINAIRE : c'est « quelqu'un a bouge la ref sous
-  # nous », et l'appelant en haut du rail decide autre chose dans ce cas. Le distinguer ici est la
-  # seule facon de ne pas le noyer dans le `git_push_failed` generique.
+  # The caller distinguishes stale-lease errors, but the classifier also matches
+  # generic "rejected" output and therefore does not establish a concurrent ref move.
   defp leased_push_verdict({:ok, {_out, 0}}, _target), do: {:ok, true}
 
   defp leased_push_verdict({:ok, {out, rc}}, target) do
@@ -557,7 +540,7 @@ defmodule Fleet.Workflow.Git do
     end
   end
 
-  # Git reports a refused lease as stale or rejected.
+  # Text heuristic: generic rejection can also be classified as a stale lease.
   defp lease_stale?(out) do
     o = String.downcase(out)
     String.contains?(o, "stale info") or String.contains?(o, "rejected")
@@ -577,7 +560,7 @@ defmodule Fleet.Workflow.Git do
   defp git_runner,
     do: Application.get_env(:lcars_fleet, :workflow_git_push_runner, &Shell.git/2)
 
-  # Retry only explicit history divergence, never generic rejection or server policy refusal.
+  # Output substring heuristic, not a structured check of the rejected ref or reason.
   defp non_fast_forward?(out) do
     o = String.downcase(out)
 

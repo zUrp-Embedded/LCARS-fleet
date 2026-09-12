@@ -1,6 +1,8 @@
 defmodule Fleet.Workflow.GraphValidator do
   @moduledoc """
-  Pure workflow graph linter after schema validation. It rejects phantom edges,
+  Workflow graph linter after schema validation. Step values must be maps with
+  list-valued `needs` when present; an omitted `needs` defaults to `[]`.
+  It rejects phantom edges,
   non-single roots, unreachable steps, cycles, and fan-out for the sequential runtime.
   """
 
@@ -14,9 +16,9 @@ defmodule Fleet.Workflow.GraphValidator do
   Validates a card's step graph: no phantom edge, exactly one root, all reachable, acyclic, no
   fan-out.
 
-  Returns the FIRST violation as `{:error, {kind, detail}}` — `describe/1` renders it for a human.
-  A single root and a single successor are not graph theory for its own sake: the engine walks the
-  card one step at a time, so a fork would leave a branch nobody advances.
+  Returns `{:error, {kind, detail}}` in that check order; `describe/1` renders it.
+  The engine advances one successor at a time. Repeated dependencies count as
+  repeated edges and can trigger fan-out rejection.
   """
   @spec validate(steps()) :: :ok | {:error, error()}
   def validate(steps) when is_map(steps) do
@@ -87,7 +89,7 @@ defmodule Fleet.Workflow.GraphValidator do
     end
   end
 
-  # Kahn sort leaves cyclic nodes unvisited.
+  # Kahn's unvisited set includes cycles and any descendants blocked by them.
   defp check_acyclic(steps, successors) do
     in_degree = Map.new(steps, fn {name, spec} -> {name, length(needs(spec))} end)
     ready = for {name, 0} <- in_degree, do: name

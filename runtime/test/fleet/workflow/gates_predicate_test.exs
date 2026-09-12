@@ -1,7 +1,7 @@
 defmodule Fleet.Workflow.Gates.PredicateTest do
   @moduledoc """
-  Gate rule predicate evaluator (R3). Covers the exact corpus of `standard-qa` /
-  `audit-only` rule-strings + fail-closed on absent facts.
+  Literal examples of bare facts, comparisons and conjunction, plus malformed-input
+  regressions. This test does not read catalogue cards.
   """
   use ExUnit.Case, async: true
 
@@ -79,6 +79,7 @@ defmodule Fleet.Workflow.Gates.PredicateTest do
   end
 
   describe "fail-closed totality (non-string rule / non-map outputs → false, no crash)" do
+    # Direct Predicate calls; Gates now checks string rule elements first.
     test "non-string rule (map) → false (the hard gate calls eval? on unfiltered items)" do
       refute Predicate.eval?(%{"name" => "r1"}, %{"all_tests_pass" => true})
     end
@@ -97,19 +98,14 @@ defmodule Fleet.Workflow.Gates.PredicateTest do
     import ExUnit.CaptureLog
 
     test "a multi-word RHS is NOT a defect — it compares as the whole string" do
-      # The moduledoc named this a "known limitation" for a year, and an audit reported it as a
-      # defect on that basis. Both branches, so the note can never be re-derived from one.
+      # Both outcomes exercise the complete multi-word operand.
       refute Predicate.eval?("severity_max != very critical", %{"severity_max" => "very critical"})
 
       assert Predicate.eval?("severity_max != very critical", %{"severity_max" => "important"})
     end
 
     test "`AND` INSIDE an operand splits the rule and answers WRONG — named, not fixed" do
-      # "important" != "very AND critical" is TRUE. The conjunction is cut before any parsing, so
-      # the rule becomes `severity_max != very` (true) AND the atom `critical` (false) → false.
-      # The canon corpus has no such operand; fixing it needs quoting in the grammar. This test
-      # exists so the day a workflow introduces one, the behaviour is documented rather than
-      # discovered as a gate that rejects for no visible reason.
+      # Splits into a true comparison and the absent atom critical; no quoting is supported.
       refute Predicate.eval?("severity_max != very AND critical", %{"severity_max" => "important"})
     end
 
@@ -130,18 +126,13 @@ defmodule Fleet.Workflow.Gates.PredicateTest do
           refute Predicate.eval?("absent_fact", %{})
         end)
 
-      # LE REFUTE NOMME SES PROPRES REGLES, et ce n'est pas de la precision decorative :
-      # `capture_log/1` capture le DEVICE, pas le processus. Le fichier est `async: true`, deux
-      # autres fichiers de test font parler ce meme avertissement, et un refute global tombait donc
-      # quand un voisin ecrivait pendant la fenetre — vert en isolation, rouge en suite complete,
-      # une fois sur quatre. L'intention du test est « CETTE regle ne fait pas rale la machine » :
-      # l'avertissement porte `inspect(term)`, donc le nom de la regle suffit a le dire sans
-      # dependre de qui d'autre journalise au meme instant.
+      # capture_log can include concurrent warnings; reject only these rules' names.
       refute log =~ "all_tests_pass"
       refute log =~ "absent_fact"
     end
 
     test "a malformed rule still returns FALSE — the signal is added, the policy is unchanged" do
+      # Only the false-valued literal key is tested; a true value would pass the fallback.
       capture_log(fn ->
         refute Predicate.eval?("tasks count >= 1", %{"tasks count >= 1" => false})
       end)

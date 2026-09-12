@@ -1,5 +1,5 @@
 defmodule Fleet.Workflow.GatesTest do
-  # async: Gates.evaluate/3 is a pure function (no application env, no global state).
+  # No shared application configuration is mutated.
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Gates
@@ -41,10 +41,7 @@ defmodule Fleet.Workflow.GatesTest do
     end
 
     test "hard: EMPTY rules → {:fail} (enforcing nothing = fail-closed, never :pass by vacuity)" do
-      # Soft-pass hole #4: `Enum.all?([]) == true` → a hard gate with empty rules passed while
-      # validating NOTHING (a gate meant to block — all_tests_pass, severity != critical — crossed
-      # empty-handed). A hard gate without rules is MALFORMED → {:fail} via the fail-closed
-      # catch-all, never a :pass by vacuity.
+      # Empty hard rules must not pass through Enum.all?([]) vacuity.
       step = %{"gate" => %{"type" => "hard", "rules" => []}}
       assert {:fail, _} = Gates.evaluate(step, %{}, %{})
     end
@@ -60,9 +57,7 @@ defmodule Fleet.Workflow.GatesTest do
     end
 
     test "terminal human_approval_required (predicates OK) → {:human_approval, _} (escalation, not auto-pass)" do
-      # D2: verdict DISTINCT from {:fail} — a human approval is not a gate failure, it is an
-      # escalation (the rail routes to await_arch directly). Fail-closed preserved: never a
-      # silent :pass.
+      # Human approval is a distinct escalation result, not a failed rule.
       step = %{
         "gate" => %{
           "type" => "terminal",
@@ -99,8 +94,7 @@ defmodule Fleet.Workflow.GatesTest do
 
   describe "MA-11 — closed sum: malformed gate → {:fail} fail-closed (NO crash)" do
     test "hard WITHOUT rule nor rules → {:fail} (was a FunctionClauseError → singleton crash)" do
-      # Without the catch-all: no clause matched `{type:hard}` without `rule`/`rules`
-      # → FunctionClauseError bubbled up to the StepRunConsumer (singleton) → crash.
+      # In-memory callers can bypass schema validation.
       step = %{"gate" => %{"type" => "hard"}}
       assert {:fail, reason} = Gates.evaluate(step, %{"x" => 1}, %{})
       assert reason =~ "malformed"
@@ -127,14 +121,7 @@ defmodule Fleet.Workflow.GatesTest do
     end
 
     test "hard with rules = LIST of NON-STRING items (maps) → {:fail}, no FunctionClauseError (singleton crash)" do
-      # Asymmetry: the hard gate (`is_list(rules)`) called `Predicate.eval?` on EACH item
-      # WITHOUT filtering non-strings (the terminal one filters via
-      # `Enum.all?(rules, &is_binary/1)`). A NON-SCHEMATIZED override (in-memory workflow_map
-      # bypassing the loader's schema — there is no flat entry point: an envelope-less YAML fails the
-      # schema before normalize) carrying a hard gate with `rules` = list of maps raised
-      # FunctionClauseError inside Predicate → it bubbled up unwrapped to the StepRunConsumer
-      # (singleton) → crash. The total `Predicate.eval?/2` net (non-string item → false) makes
-      # the gate fail-closed.
+      # Gates rejects non-string rules before Predicate evaluation.
       step = %{
         "gate" => %{"type" => "hard", "rules" => [%{"name" => "r1", "match" => %{"a" => 1}}]}
       }
@@ -182,9 +169,7 @@ defmodule Fleet.Workflow.GatesTest do
     end
 
     test "INVERSE TWIN — a genuinely unsatisfied string rule keeps its OWN message" do
-      # The distinction is the whole point: "the work did not satisfy the rule" sends a reader to
-      # the deliverable, "the shape is wrong" sends them to the card. Collapsing them sent every
-      # reader to the wrong place.
+      # Distinguish malformed-card diagnostics from unsatisfied rules.
       assert {:fail, msg} =
                Gates.evaluate(hard(["all_tests_pass"]), %{"all_tests_pass" => false}, %{})
 
