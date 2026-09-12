@@ -4,13 +4,7 @@ defmodule Fleet.DurableLogTest do
   require Logger
 
   @moduledoc """
-  BL-6-41 — `config :logger, level:` was the project's only logger config: every load-bearing
-  warning lived in the daemon's tmux ring buffer and died with it.
-
-  What is pinned here is the CONTRACT, not the formatting: warning+ reaches the file, info does
-  not, the parent directory is created (a handler that installs and writes nowhere is the exact
-  defect this closes), and a failure to install never takes the boot down — a trace that refuses
-  to let the fleet start has become the incident it was meant to record.
+  Warning-level file logging, parent creation, idempotent attachment and diagnosed mkdir failure.
   """
 
   alias Fleet.DurableLog
@@ -43,9 +37,7 @@ defmodule Fleet.DurableLogTest do
     assert trace =~ "publish_deadline fired for pod-42"
     assert trace =~ "pr-open-fail issue-7"
 
-    # NO ANSI. Measured on a live bench before this assertion existed: the file carried
-    # `\e[33m`/`\e[0m` around every line, inherited from the console's colour setting. A trace
-    # exists to be read after the fact — escape codes break a grep and a parser alike.
+    # Console colours must not leak into a file consumed by grep/parsers.
     refute trace =~ "\e["
   end
 
@@ -87,8 +79,6 @@ defmodule Fleet.DurableLogTest do
     log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = DurableLog.attach() end)
 
     assert log =~ "DurableLog: NOT installed"
-    # The consequence is spelled out: a bare "could not install" tells an operator nothing about
-    # what they just lost.
     assert log =~ "no recoverable trace"
     refute :lcars_durable_log in :logger.get_handler_ids()
   end

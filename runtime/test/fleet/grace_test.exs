@@ -1,9 +1,6 @@
 defmodule Fleet.GraceTest do
   @moduledoc """
-  `Fleet.Grace.two_tick/2` — the two-tick grace, proven once here. Its callers (`PodWarden`,
-  `SocketWarden`, `Poller.Reconciliation`) each used to carry the same three lines; what is pinned
-  is the contract they all relied on: act only on what was already a suspect, carry the rest, drop
-  what vanished.
+  Two-tick partition: act on confirmed suspects, carry fresh candidates, drop vanished ones.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties

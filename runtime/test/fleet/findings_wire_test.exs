@@ -13,9 +13,7 @@ defmodule Fleet.FindingsWireTest do
     end
 
     test "le JSON survit aux caractères qui cassent une regex naïve" do
-      # Le motif est du texte arbitraire écrit par un agent : accolades, guillemets, backticks et
-      # sauts de ligne DANS les valeurs. C'est la raison pour laquelle `last_block/1` découpe au
-      # lieu de matcher.
+      # Findings can contain JSON punctuation, fences and newlines inside their string values.
       f = %{
         "findings" => [
           %{"description" => "le test contient ```json et {\"une\": \"accolade\"}\net un saut"}
@@ -26,8 +24,6 @@ defmodule Fleet.FindingsWireTest do
     end
 
     test "un juge sans verdict machine poste EXACTEMENT le corps d'aujourd'hui" do
-      # La compat byte-for-byte est le contrat de C1 comme de C2 : un juge legacy ne doit pas voir
-      # sa review changer d'un octet parce que le fil existe.
       assert FindingsWire.render(nil) == ""
     end
   end
@@ -43,8 +39,6 @@ defmodule Fleet.FindingsWireTest do
     end
 
     test "bloc présent mais JSON cassé → {:error, :undecodable}, jamais :none" do
-      # Une main humaine peut éditer un corps de review sur la forge. « personne n'a écrit » et
-      # « quelqu'un a écrit et c'est cassé » n'accusent pas la même chose — seul le second accuse.
       body =
         "prose\n\n#{FindingsWire.marker()}\n```json\n{\"findings\": [ceci n'est pas du JSON}\n```"
 
@@ -63,9 +57,7 @@ defmodule Fleet.FindingsWireTest do
 
   describe "le juge ne peut pas masquer le bloc du système" do
     test "un marqueur cité dans la prose du juge ne gagne pas contre celui d'en bas" do
-      # Le système appende TOUJOURS après la prose : c'est pourquoi le DERNIER marqueur gagne.
-      # Sans cette règle, un juge qui cite le format (ou le recopie de travers) détournerait la
-      # lecture du gate vers son propre texte.
+      # The appended system block must win over a marker quoted earlier in judge prose.
       leurre = "#{FindingsWire.marker()}\n```json\n{\"findings\": [\"leurre\"]}\n```"
       body = "Le juge explique le format :\n\n" <> leurre <> FindingsWire.render(findings())
 
@@ -75,11 +67,7 @@ defmodule Fleet.FindingsWireTest do
 
   describe "F-3 — le corps est ÉDITABLE, et le parseur ne doit pas dépendre du contraire" do
     test "une main qui répond avec un bloc de code APRÈS le nôtre ne casse plus la lecture" do
-      # LE CAS MESURÉ (2026-08-19). La règle « notre barrière est la dernière » était vraie au
-      # rendu et fausse dès qu'un humain répondait dans le même corps sur la forge. Un ```bash
-      # ajouté rendait `{:error, :undecodable}` — et un cran plus haut, ça EFFAÇAIT le blocage
-      # d'une carte au lieu de le lever : une zone grise qui devait un arbitrage était scellée
-      # `:approved`.
+      # Review bodies remain editable; an appended code block must not hide a critical finding.
       charge = %{"findings" => [%{"severity" => "critical", "category" => "tests"}]}
 
       corps =
@@ -91,8 +79,6 @@ defmodule Fleet.FindingsWireTest do
     end
 
     test "et le cas qui avait motivé « la dernière barrière » tient toujours" do
-      # Un finding CITE DU CODE — c'est sa forme normale. Les deux contraintes sont désormais
-      # satisfaites par la même règle : décoder, du plus long au plus court.
       charge = %{"findings" => [%{"detail" => "le test fait\n```\nassert true\n```\net rien"}]}
 
       assert {:ok, ^charge} = FindingsWire.parse("prose\n" <> FindingsWire.render(charge))
@@ -110,21 +96,16 @@ defmodule Fleet.FindingsWireTest do
 
   describe "F-3 — « illisible » n'est pas « absent », et ne s'échange pas contre un feu vert" do
     test "une charge illisible BLOQUE dès qu'un plancher est déclaré" do
-      # L'honnêteté du modèle tient à ça : la réponse à « y a-t-il un finding au-dessus de la
-      # ligne ? » est INCONNUE, et inconnu ne se dépense pas comme non.
       assert FindingsWire.blocks?(FindingsWire.unreadable(), "critical")
       assert FindingsWire.blocks?(FindingsWire.unreadable(), "minor")
     end
 
     test "sans plancher déclaré, elle ne bloque rien — la dégénérescence est intacte" do
-      # La condition qui autorise les cartes sans courbe à ne rien changer : pas de plancher, pas
-      # de question posée, donc pas de réponse inventée.
       refute FindingsWire.blocks?(FindingsWire.unreadable(), nil)
     end
 
     test "ce n'est PAS un finding fabriqué" do
-      # Inventer un `critical` que personne n'a mesuré ferait entrer un défaut imaginaire dans le
-      # dossier — et le premier lecteur à le citer aurait raison de le croire.
+      # Represent unreadability without recording an invented defect.
       assert FindingsWire.unreadable() == %{"findings_unreadable" => true}
       refute Map.has_key?(FindingsWire.unreadable(), "findings")
     end

@@ -1,8 +1,6 @@
 defmodule Fleet.GitRefTest do
   @moduledoc """
-  Locks the single AUTHORITY for git ref validation — foundation primitive (`Fleet.Workflow.Git`,
-  `Fleet.Workflow.Deliverable` and `Fleet.ProjectBootstrap.Phase.Clone` delegate here). Covers the
-  check-ref-format edge cases.
+  Supported Git ref grammar, including structural edge cases beyond the ASCII charset check.
   """
   use ExUnit.Case, async: true
 
@@ -26,21 +24,17 @@ defmodule Fleet.GitRefTest do
       refute GitRef.valid?(bad), "ref #{inspect(bad)} should be rejected (git check-ref-format)"
     end
 
-    # and legitimate multi-component refs stay accepted
     for ok <- ["deliverables/engineer/m-42", "a/b/c", "release-1.2.3"] do
       assert GitRef.valid?(ok), "ref #{inspect(ok)} should stay valid"
     end
   end
 
-  # Regression #39 — PCRE anchors: `$` matches BEFORE a final newline, so `^…$` declared
-  # "main\n" VALID (verified at runtime) and the malformed ref reached git clone/push/commit.
-  # `\A…\z` closes the hole for any terminal control-char. Same trap already fixed in Fleet.Slug.
+  # $ can match before a final newline; \A...\z must reject it before refs reach Git.
   test "#39: terminal newline/control-char rejected (\\A..\\z, not ^..$)" do
     for bad <- ["main\n", "main\r\n", "feature/work\n", "a\n"] do
       refute GitRef.valid?(bad), "ref #{inspect(bad)} (terminal newline) should be rejected"
     end
 
-    # the equivalent clean refs stay valid (no over-tightening)
     for ok <- ["main", "feature/work"] do
       assert GitRef.valid?(ok)
     end

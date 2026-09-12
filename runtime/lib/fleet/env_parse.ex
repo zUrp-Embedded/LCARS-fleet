@@ -2,19 +2,10 @@ defmodule Fleet.EnvParse do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Domain-typed parsing of environment variables for `config/runtime.exs` — a PURE, TESTABLE primitive
-  (foundation, alongside `Fleet.Slug`/`Fleet.GitRef`).
-
-  `runtime.exs` is wrapped in `if config_env() != :test do … end`, so an inline lambda there can NEVER
-  be unit-tested — and a parser that only checks the syntactic integer lets a negative/zero/out-of-range
-  port through. Each function here parses the DOMAIN, and is testable.
-
-  Doctrine: a LOAD-BEARING knob (port, interval) with an invalid value →
-  `raise` a clear message = boot REFUSED (a typo must not boot a broken daemon, but with a readable error,
-  not an opaque `String.to_integer` stacktrace). A boolean FEATURE-flag typo → the documented default +
-  a LOUD warning (a flag typo should be visible, but must not kill the boot). A boolean SAFETY-flag
-  typo → `raise` too, which is `bool!/3` and not `bool/3`: falling back to the active default there
-  would silently arm the very thing the operator was reaching for the flag to disarm.
+  Domain-bounded environment parsing used by runtime.exs, independently testable outside its
+  non-test config branch. Numeric configuration errors raise with the setting's name.
+  Feature booleans warn and default; safety booleans use bool!/3 so a typo cannot silently
+  enable an effect the operator intended to disable.
   """
 
   require Logger
@@ -32,12 +23,8 @@ defmodule Fleet.EnvParse do
   def count(name, value), do: bounded_int(name, value, 0, nil, "a non-negative count")
 
   @doc """
-  Integer inside an explicit `min..max`. Outside, or not an integer → raise = boot refused.
-
-  For knobs whose bounds belong to a DOMAIN authority rather than to this module (a ceiling that
-  some module owns and that this one must not restate). REFUSES rather than clamps: a clamped value
-  boots green and runs at something the operator never typed, and the symptom of a wrong fan —
-  tickets waiting — reads like a busy fleet, not like a misconfiguration.
+  Parses an integer within caller-supplied domain bounds. Invalid input raises instead of clamping
+  to a value the operator did not request. Bounds remain owned by the calling domain.
   """
   @spec bounded(String.t(), String.t(), integer(), integer()) :: integer()
   def bounded(name, value, min, max) when is_integer(min) and is_integer(max),
@@ -58,7 +45,7 @@ defmodule Fleet.EnvParse do
   @falsy ~w(false 0 no off)
 
   @doc """
-  Parses `true/1/yes/on` and `false/0/no/off`, case-insensitively.
+  Parses `true/1/yes/on` and `false/0/no/off`, case-insensitively after trimming whitespace.
 
   Unset values return `default`; unknown values log a warning and return it.
   """

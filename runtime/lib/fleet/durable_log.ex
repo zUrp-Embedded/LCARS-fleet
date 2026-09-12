@@ -3,39 +3,14 @@ defmodule Fleet.DurableLog do
   require Logger
 
   @moduledoc """
-  The warning-and-above trace, ON DISK (BL-6-41).
+  Adds a rotating file trace alongside console logging, using OTP logger_std_h.
+  The default threshold is warning, keeping routine info out of incident traces; opts may override it.
+  Rotation defaults to 10 MiB and five archive files, compressed, with ANSI colours disabled.
+  This is operational log text, separate from domain audit ledgers and their schemas.
 
-  Without this handler installed, `config :logger, level:` is the whole of the logger's
-  configuration — no file, no rotation — and every load-bearing warning (a `publish_deadline`
-  firing, a drift, a `pr-open-fail`, a swallowed arrival chrono) lives in the daemon's tmux ring
-  buffer and dies with it. Nobody can then find out AFTER THE FACT whether one ever fired: not for
-  lack of access, because nothing recorded it.
-
-  **Which level becomes durable: `warning` and above.** Not `info`, and the reason is the same one
-  that keeps the poller's nominal tick silent — a rail that writes a line per routine pass buries
-  the one line that matters. Warning is the level at which this codebase already says "something
-  degraded"; below it there is nothing an incident review would look for.
-
-  **Where is the operator's, and `config/runtime.exs` resolves it** — this module writes wherever
-  it is handed. The one bound on that choice: NOT under the release, whose directory the next
-  deploy replaces, because a trace a deploy erases is not a trace.
-
-  ## What this is NOT
-
-  It is not a domain audit NDJSON — that would be a business ledger, with its own schema and its own
-  producers. This is the operational trace: whatever any module chose to log at warning or above, in the
-  order it happened, surviving the process. Merging them would give the ledger a shape nobody can
-  parse and the trace a filter nobody wants.
-
-  ## Rotation, and why the console stays
-
-  OTP's own `logger_std_h` rotates (`max_no_bytes` + `max_no_files`) — no dependency, no custom
-  writer, and the same bounds the container already applies to its json-file driver (10 MB × 5).
-  The default console handler is untouched: a fleet whose operator is watching a pane must keep
-  answering in that pane. This handler is ADDED, never substituted.
-
-  Absent config = disabled, and it stays disabled in `:test`. A suite that appends to the human's
-  real log would both pollute it and make the tests depend on a writable home.
+  runtime.exs resolves the operator's path. Choose a location outside the replaceable release;
+  this module does not enforce that placement. Missing config disables the handler, as in normal
+  test config; tests that attach it must supply their own temporary path.
   """
 
   @handler_id :lcars_durable_log
@@ -45,10 +20,8 @@ defmodule Fleet.DurableLog do
   @doc """
   Adds the file handler if `:lcars_fleet, :durable_log` names a path; otherwise a no-op.
 
-  Returns `:ok` in every case — INCLUDING a failure to install, which is logged and swallowed.
-  The trace is a safety net, and a net that refuses to let the fleet boot has become the incident
-  it was meant to record. The one thing it must never do is fail silently, hence the log line and
-  its named reason.
+  Directory-creation and handler-installation errors are logged and return :ok so logging failure
+  does not prevent boot. Malformed opts can still raise; an existing handler is left unchanged.
   """
   @spec attach() :: :ok
   def attach do
@@ -58,7 +31,7 @@ defmodule Fleet.DurableLog do
     end
   end
 
-  @doc "Path the handler writes to, or `nil` when durable logging is off. For probes and the deck."
+  @doc "Configured path, or nil without one; does not verify that a handler is installed or writing."
   @spec path() :: Path.t() | nil
   def path do
     case Application.get_env(:lcars_fleet, :durable_log) do
@@ -70,9 +43,7 @@ defmodule Fleet.DurableLog do
   defp do_attach(opts) do
     path = Keyword.fetch!(opts, :path)
 
-    # `mkdir_p` first: `logger_std_h` does not create the parent directory, and its failure mode is
-    # a handler that installs and then silently writes nowhere — the exact shape of the defect
-    # this module exists to close.
+    # Create the parent explicitly so a filesystem failure is diagnosed before handler installation.
     case File.mkdir_p(Path.dirname(path)) do
       :ok -> add_handler(path, opts)
       {:error, reason} -> warn_off(path, {:mkdir, reason})
@@ -85,16 +56,11 @@ defmodule Fleet.DurableLog do
         type: {:file, String.to_charlist(path)},
         max_no_bytes: Keyword.get(opts, :max_bytes, @default_max_bytes),
         max_no_files: Keyword.get(opts, :max_files, @default_max_files),
-        # Rotation compresses the closed files: a warning trace is mostly repeated text, and the
-        # bound above is a DISK budget, so compression buys retention rather than space.
+        # Compress closed archives; the byte threshold applies before compression.
         compress_on_rotate: true
       },
       level: Keyword.get(opts, :level, :warning),
-      # `colors: [enabled: false]` — NOT cosmetic. The formatter inherits the console's colour
-      # setting, so without this the file comes out carrying `\e[33m`/`\e[0m` around every line.
-      # A trace exists to be READ AFTER THE FACT, by a human grepping or
-      # an agent parsing; escape codes break both (`grep "^\[warning\]"` matches nothing, and every
-      # line has invisible bytes at its ends). Colour belongs to a terminal, not to a file.
+      # Do not inherit console ANSI colours into files consumed by grep or parsers.
       formatter:
         Logger.Formatter.new(
           format: "$time $metadata[$level] $message\n",
@@ -106,8 +72,7 @@ defmodule Fleet.DurableLog do
       :ok ->
         Logger.info("DurableLog: warning+ trace to #{path} (rotated)")
 
-      # Already installed: a supervisor restart of the app, or a second call. Not a failure —
-      # the handler is global to the node, and one is exactly what we want.
+      # Node-global registration can survive an application supervisor restart.
       {:error, {:already_exist, _}} ->
         :ok
 
