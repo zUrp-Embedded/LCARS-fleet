@@ -19,7 +19,7 @@ setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
   BENCH="$ROOT/deploy/docker/bench"
   DOCKER_D="$ROOT/deploy/docker"
-  mkdir -p "$BENCH" "$ROOT/deploy/lib"
+  mkdir -p "$BENCH" "$ROOT/deploy/lib" "$ROOT/.git"
   cp "$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   REAL="$BENCH/bench-up.sh"
   local f
@@ -116,7 +116,8 @@ FAKE
 echo "GIT:$* | ${GIT_CONFIG_KEY_0:-}=${GIT_CONFIG_VALUE_0:-}" >> "$CALLS"
 case "$*" in
   *"rev-parse -q --verify"*) exit "$(cat "$REV_OK")" ;;
-  *"ls-remote"*)             r="$(cat "$REMOTE_MAIN")"; [[ -z "$r" ]] || echo "$r	refs/heads/main"; exit 0 ;;
+  *"rev-parse HEAD"*)        echo "kitcommit1"; exit 0 ;;
+  *"ls-remote"*)           r="$(cat "$REMOTE_MAIN")"; [[ -z "$r" ]] || echo "$r	refs/heads/main"; exit 0 ;;
   *"merge-base --is-ancestor"*) exit "$(cat "$ANCESTOR_RC")" ;;
 esac
 exit 0
@@ -358,6 +359,27 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench --no-runner
   [ "$status" -eq 7 ]
   [[ "$output" == *"n'est pas dans ce clone"* ]]
+  refute grep -q 'GIT:.*push' "$CALLS"
+}
+
+@test "depuis un kit (sans .git) : la révision vient de .source-revision, et main est un commit unique bâti de l'arbre du kit" {
+  rm -rf "$ROOT/.git"
+  echo "deadbeef1" > "$ROOT/.source-revision"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qE "GIT:--git-dir=[^ ]+/\.git --work-tree=$ROOT add -A" "$CALLS"
+  grep -q "commit -q -m kit deadbeef1" "$CALLS"
+  grep -q "push -q http://127.0.0.1:$BF/fleet/lcars.git kitcommit1:refs/heads/main" "$CALLS"
+  refute grep -q "rev-parse -q --verify" "$CALLS"
+  [[ "$output" == *"main poussé (kit deadbeef1, un commit sans historique)"* ]]
+}
+
+@test "depuis un kit dont la révision n'est pas celle de l'image : refus qui nomme les deux, rien n'est poussé" {
+  rm -rf "$ROOT/.git"
+  echo "cafe0001" > "$ROOT/.source-revision"
+  run_bench --no-runner
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"ce kit atteste « cafe0001 » et l'image lcars-fleet:9 porte deadbeef1"* ]]
   refute grep -q 'GIT:.*push' "$CALLS"
 }
 

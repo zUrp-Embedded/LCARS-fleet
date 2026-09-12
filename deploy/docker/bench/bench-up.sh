@@ -281,18 +281,32 @@ printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/
 LCARS_REMOTE="${FORGE_LOCAL_URL%/}/$ORG/lcars.git"
 [[ -n "$IMAGE_REV" && "$IMAGE_REV" != "unknown" ]] \
   || die "$ORG/lcars : l'image $IMAGE ne porte pas de révision (label OCI) — le banc ne sème pas un code qu'il ne peut pas nommer" 7
-git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
-  || die "$ORG/lcars : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
+if [[ -d "$REPO_ROOT/.git" ]]; then
+  git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
+    || die "$ORG/lcars : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
+  SEED_DIR="$REPO_ROOT"; SEED_REF="$IMAGE_REV"; SEED_DIT="révision de l'image : $IMAGE_REV"
+else
+  # un kit n'a pas d'historique : sa révision est dans .source-revision, et le semis est un commit unique bâti de son arbre
+  KIT_REV="$(tr -d '[:space:]' < "$REPO_ROOT/.source-revision" 2>/dev/null || true)"
+  [[ -n "$KIT_REV" && ( "$IMAGE_REV" == "$KIT_REV"* || "$KIT_REV" == "$IMAGE_REV"* ) ]] \
+    || die "$ORG/lcars : ce kit atteste « ${KIT_REV:-aucune révision} » et l'image $IMAGE porte $IMAGE_REV — le banc sème le code du conteneur ; prendre le kit de cette image" 7
+  SEED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lcars-seed.XXXXXX")"
+  git -C "$SEED_DIR" init -q
+  git --git-dir="$SEED_DIR/.git" --work-tree="$REPO_ROOT" add -A
+  git --git-dir="$SEED_DIR/.git" -c user.name=lcars-bench -c user.email=bench@lcars.invalid commit -q -m "kit $KIT_REV" >/dev/null
+  SEED_REF="$(git -C "$SEED_DIR" rev-parse HEAD)"; SEED_DIT="kit $KIT_REV, un commit sans historique"
+fi
 seed_hooks=(); seed_force=()
 remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
-if [[ -n "$remote_main" ]] && ! git -C "$REPO_ROOT" merge-base --is-ancestor "$remote_main" "$IMAGE_REV" 2>/dev/null; then
-  say "$ORG/lcars : main existe déjà sur la forge de banc (${remote_main:0:9}) et n'est pas un ancêtre de $IMAGE_REV — rejeu sur une forge jetable, poussé de force"
+if [[ -n "$remote_main" ]] && ! git -C "$SEED_DIR" merge-base --is-ancestor "$remote_main" "$SEED_REF" 2>/dev/null; then
+  say "$ORG/lcars : main existe déjà sur la forge de banc (${remote_main:0:9}) et n'est pas un ancêtre de $SEED_REF — rejeu sur une forge jetable, poussé de force"
   seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
 fi
-PUSH_ERR="$(git_forge -C "$REPO_ROOT" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${IMAGE_REV}:refs/heads/main" 2>&1)" \
-  || die "$ORG/lcars : main non poussé — le conteneur clone cette source au boot ; sans elle le banc n'a pas de code
+PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${SEED_REF}:refs/heads/main" 2>&1)" \
+  || die "$ORG/lcars : main non poussé — c'est le dépôt ops de la fleet ; sans lui le banc n'a pas de code
   git a dit : $PUSH_ERR" 7
-say "$ORG/lcars : main poussé (révision de l'image : $IMAGE_REV)"
+[[ "$SEED_DIR" == "$REPO_ROOT" ]] || rm -rf "$SEED_DIR"
+say "$ORG/lcars : main poussé ($SEED_DIT)"
 WORK_TREE="${LCARS_WORK_TREE:-}"
 if [[ -z "$WORK_TREE" ]]; then
   say "$ORG/lcars : ops non poussé (LCARS_WORK_TREE non posé — le clone qui porte la branche ops, si le banc doit l'avoir)"
