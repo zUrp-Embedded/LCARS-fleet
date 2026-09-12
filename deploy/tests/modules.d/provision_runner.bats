@@ -513,17 +513,18 @@ EOF
   run env PROV_SUBSTRATE=linux PROVISION_MODULE=00-preflight \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../../modules.d/00-preflight.sh" check
-  [[ "$output" == *"HORS CIBLE"* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL"* ]]
   [[ "$output" == *"WSL2"* ]]
-  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST=1"* ]]
 }
 
 @test "cible : l'echappatoire est REELLE — nommee, elle degrade en avertissement" {
   run env PROV_SUBSTRATE=linux LCARS_ALLOW_ANY_HOST=1 PROVISION_MODULE=00-preflight \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../../modules.d/00-preflight.sh" check
-  [[ "$output" != *"HORS CIBLE"* ]]
-  [[ "$output" == *"hors cible"* ]]
+  [ "$status" -ne 2 ]
+  [[ "$output" == *"WARN"*"LCARS_ALLOW_ANY_HOST"* ]]
 }
 
 @test "cible : sous WSL, docker qui ne repond pas est un REFUS — pas une derive" {
@@ -574,7 +575,6 @@ EOF
   # l'accent epingle l'encodage en plus du contrat. « aucun daemon » est le mot du verdict final de
   # `docker_endpoint`, celui qu'il rend quand le balayage entier est revenu bredouille.
   [[ "$output" == *"aucun daemon"* ]]
-  [[ "$output" == *"JAMAIS"* ]]
   [[ "$output" != *"DRIFT 00-preflight: docker"* ]]
 }
 

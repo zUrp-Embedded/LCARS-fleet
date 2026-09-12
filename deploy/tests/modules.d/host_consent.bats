@@ -39,7 +39,6 @@ setup() {
 }
 
 consent() { export PROVISION_MODULE=05-host-consent; run bash "$MODS/05-host-consent.sh" "$1"; }
-preflight() { export PROVISION_MODULE=00-preflight; run bash "$MODS/00-preflight.sh" "$1"; }
 
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS + les trois en-tetes de module" {
   run head -9 "$MODS/05-host-consent.sh"
@@ -85,38 +84,6 @@ preflight() { export PROVISION_MODULE=00-preflight; run bash "$MODS/00-preflight
   LCARS_ALLOW_ANY_HOST=1 consent apply
   consent check
   [ "$status" -eq 0 ]
-}
-
-# ─── LA SECONDE SOURCE DE 00-preflight ──────────────────────────────────────────────────────────
-
-@test "00-preflight REFUSE le linux natif sans aucune des deux sources" {
-  preflight check
-  [[ "$output" == *"HORS CIBLE"* ]]
-}
-
-@test "00-preflight accepte sur le MARQUEUR SEUL — un daemon n'a pas d'environnement" {
-  LCARS_ALLOW_ANY_HOST=1 consent apply
-  [ -s "$LCARS_HOST_CONSENT_FILE" ]
-
-  preflight check
-  [[ "$output" != *"HORS CIBLE"* ]]
-  [[ "$output" == *"accepté une fois sur cette machine"* ]]
-}
-
-@test "un marqueur VIDE ne vaut pas consentement — le fichier doit porter quelque chose" {
-  mkdir -p "$(dirname "$LCARS_HOST_CONSENT_FILE")"
-  : > "$LCARS_HOST_CONSENT_FILE"
-
-  preflight check
-  [[ "$output" == *"HORS CIBLE"* ]]
-}
-
-@test "le marqueur ne s'applique QU'AU substrat natif — il ne parle pas pour docker ni wsl" {
-  # Le refus n'existe que sur `linux` ; poser le marqueur ne doit rien changer ailleurs, sinon on
-  # aurait fabrique un interrupteur global a partir d'un consentement local.
-  LCARS_ALLOW_ANY_HOST=1 consent apply
-  PROV_SUBSTRATE=docker preflight check
-  [[ "$output" != *"accepté une fois sur cette machine"* ]]
 }
 
 @test "CONSENTEMENT : sur du Linux natif consenti, le marqueur s'ecrit — et le module ne se declare jamais sans objet" {

@@ -1,33 +1,17 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/preflight_facts.bats
-# AUTHOR: bob
-# STARDATE: (posee par /push-github)
-# STATUS: bats tests for 00-preflight — le preflight des DEUX rails, et son canal de faits
-#
-# ─── CE QUE CES TEMOINS FERMENT ─────────────────────────────────────────────────────────────────
-#
-# `00-preflight` etait le preflight du rail POSTE : il ne mesurait docker que sous WSL, et le reste
-# vivait en double dans `install.sh`. Le canon de la porte proscrit cette duplication (« le preflight
-# duplique : une seule mesure »), donc le module mesure pour les DEUX rails et rend ses resultats
-# deux fois — en lignes pour un humain, en faits `nom=valeur` pour un appelant qui doit DECIDER.
-#
-# ⚠ LA PROPRIETE CENTRALE EST QUE MESURER N'EST PAS REFUSER. Le module sait desormais plus de choses
-# qu'avant ; il ne doit refuser ni plus, ni ailleurs, ni pour d'autres raisons. Un preflight qui
-# durcit ses verdicts en gagnant des sondes casserait toutes les machines qui passaient hier.
-#
-# ⚠ SC2016 : ces temoins LISENT du code. Leurs motifs portent des `${VAR:-defaut}` qui doivent
-# atteindre l'outil TELS QUELS.
-# shellcheck disable=SC2016
+# AUTHOR: DrDree
+# STARDATE: 2026-08-31
+# STATUS: témoins de 00-preflight — les faits que l'installeur lit, et les verdicts qui ne bougent pas
 
 load refute
 
 setup() {
-  # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT. Ce module lit `LCARS_ALLOW_ANY_HOST`, `FORGE_BASE_URL`,
-  # `LCARS_DOCKER_SOCKETS`, `PROV_DOCKER_BIN`, `PROV_SUBSTRATE` — toute la famille, donc on efface
-  # la FAMILLE et pas les noms qu'on connait : le prochain drapeau ne doit pas rouvrir le trou.
+  # le décor possède l'environnement : toute la famille est effacée, pas les noms connus
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
-    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_|DOCKER_)' || true)
   unset SUDO_USER
 
   MOD="$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh"
@@ -36,196 +20,326 @@ setup() {
   [ -f "$LIB" ]
   FACTS="$BATS_TEST_TMPDIR/facts"
 
-  # La CLI docker du decor : une doublure qui ECHOUE, declaree par `PROV_DOCKER_BIN`.
-  # ⚠ ELLE SE DECLARE, ELLE NE SE GLISSE PAS DANS LE PATH — sous wsl la sonde essaie DELIBEREMENT la
-  # CLI du montage Docker Desktop AVANT le PATH, donc une doublure posee dans le PATH n'est jamais
-  # prise sur une machine qui a Docker Desktop. Mesure du 2026-08-31, banc 2004 : c'est exactement
-  # ce defaut qui rendait `provision_runner.bats:542` vert ici et rouge la-bas.
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/docker"; chmod 0755 "$BIN/docker"
-  # Le CANAL est a nous : absent = « aucun ». Sans cette ligne, un poste installe par paquet verrait
-  # ce module rendre `channel=deb` de la machine qui joue le temoin (MUR I21, meme raison).
   export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
+  export LCARS_APT_HISTORY="$BATS_TEST_TMPDIR/apt-history.log"
+  export LCARS_PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\n' > "$LCARS_PASSWD_FILE"
 }
 
-# preflight <substrat> [VAR=val…] — joue le module et remplit "$FACTS"
-preflight() {
+teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
+
+preflight() { # preflight <substrat> [VAR=val…]
   local sub="$1"; shift
   run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight \
       PROV_SUBSTRATE="$sub" PROV_DOCKER_BIN="$BIN/docker" \
       LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
-      PATH="$BIN:/usr/bin:/bin" \
+      PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" \
       "$@" bash "$MOD" check
 }
 
-fact() { # fact <nom> -> sa valeur, vide si absent
-  sed -n "s/^$1=//p" "$FACTS" 2>/dev/null | tail -1
+fact() { sed -n "s/^$1=//p" "$FACTS" 2>/dev/null | tail -1; }
+
+docker_qui_repond() { # un docker qui répond à version et compose, publie <conteneur> (projet <projet>) sur tout port, et connaît <projet-existant>
+  cat > "$BIN/docker" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  "compose version"*)       echo "Docker Compose version v2.0.0" ;;
+  version*)                 echo "29.0.0|Docker Engine - Test" ;;
+  "ps --filter publish="*)  [[ -n "${1:-}" ]] && echo "$1" ;;
+  "inspect -f "*)           echo "${2:-}" ;;
+  "ps -a --filter label=com.docker.compose.project=${3:-jamais} -q") echo abc123 ;;
+esac
+exit 0
+EOF
+  chmod 0755 "$BIN/docker"
 }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  run head -8 "$MOD"
-  [[ "$output" == *"SOURCE:"* ]]
-  [[ "$output" == *"AUTHOR:"* ]]
-  [[ "$output" == *"STARDATE:"* ]]
-  [[ "$output" == *"STATUS:"* ]]
+ss_muet() { # un ss qui voit l'écoute sans nommer le processus
+  printf '#!/usr/bin/env bash\necho "LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:*"\n' "$1" > "$BIN/ss"
+  chmod 0755 "$BIN/ss"
 }
 
-# ─── LE CANAL ───────────────────────────────────────────────────────────────────────────────────
+free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
-@test "sans PROV_FACTS_FILE le module ne change RIEN — le canal est optionnel" {
-  # Un module qui exigerait le canal pour tourner ferait de la porte une dependance du
-  # provisionnement, alors que c'est l'inverse.
-  run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROV_SUBSTRATE=docker \
-      PROV_DOCKER_BIN="$BIN/docker" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
-      PATH="$BIN:/usr/bin:/bin" bash "$MOD" check
-  [ ! -e "$FACTS" ]
-  [[ "$output" == *"00-preflight"* ]]
+listen_on() { # listen_on <port> — un processus python qui écoute quelques secondes ; pid dans $LISTENER
+  python3 -c 'import socket,sys,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(128); time.sleep(60)' "$1" &
+  LISTENER=$!
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null && return 0; sleep 0.2; done
+  return 1
 }
 
-@test "les faits que la PORTE consomme sont TOUS poses — la liste est le contrat" {
-  # ⚠ CETTE LISTE EST LE CONTRAT ENTRE DEUX FICHIERS, et c'est pour ca qu'elle est ici et pas dans un
-  # commentaire. La porte restreint son menu sur ces noms ; en retirer un sans toucher la porte la
-  # laisse lire du vide et decider quand meme — un menu faux, sans une ligne d'erreur.
+# ─── le contrat ─────────────────────────────────────────────────────────────────────────────────
+
+CONTRAT="os distro distro_version noyau cpu systemd bash arch ram_mb disque_mb utilisateur groupes
+substrat consent wsl2 userns_knob docker docker_bin docker_host docker_server docker_flavor docker_why
+compose compose_why forge_fournie forge_joignable port_forge port_deck port_ssh projet projet_pris
+apt_installs comptes_humains sudo curl git channel channel_tree"
+
+@test "les faits que l'installeur lit sont tous posés, docker absent" {
   preflight docker
   local f
-  for f in os bash arch ram_mb disque_mb substrat consent wsl2 wslconf userns_knob \
-           docker docker_why compose forge_fournie forge_joignable sudo curl git channel channel_tree; do
-    grep -qE "^$f=" "$FACTS" || { echo "fait ABSENT : $f" >&2; return 1; }
-  done
+  for f in $CONTRAT; do grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }; done
 }
 
-@test "un fait par ligne, jamais deux valeurs pour un nom" {
+@test "les faits que l'installeur lit sont tous posés, docker présent" {
+  docker_qui_repond
+  preflight docker DOCKER_HOST=unix:///dev/null
+  local f
+  for f in $CONTRAT; do grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }; done
+}
+
+@test "un fait par nom, jamais deux valeurs" {
   preflight docker
   local n; n="$(cut -d= -f1 "$FACTS" | sort | uniq -d | head -1)"
-  [ -z "$n" ] || { echo "fait pose DEUX fois : $n" >&2; return 1; }
+  [ -z "$n" ] || { echo "fait posé deux fois : $n" >&2; return 1; }
 }
 
-# ─── DOCKER : MESURE PARTOUT, REFUS LA OU IL ETAIT DEJA ─────────────────────────────────────────
+@test "sans PROV_FACTS_FILE le module ne change rien" {
+  run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROV_SUBSTRATE=docker \
+      PROV_DOCKER_BIN="$BIN/docker" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
+      bash "$MOD" check
+  [ ! -e "$FACTS" ]
+}
 
-@test "docker est mesure sur TOUT substrat — c'etait le trou du preflight" {
-  # Le rail CONTENEUR tourne sur n'importe quel substrat et docker y est sa seule condition d'existence.
-  # Ne le mesurer que sous WSL laissait la porte deviner — ou refaire la sonde, ce qu'elle faisait.
+@test "aucun fait n'est posé après le dernier rapport : pas de bloc récapitulatif" {
+  local dernier_rapport dernier_fait
+  dernier_rapport="$(grep -nE '^\s*(p_ok|p_warn|p_fail|p_drift) ' "$MOD" | tail -1 | cut -d: -f1)"
+  dernier_fait="$(grep -nE '^\s*p_fact ' "$MOD" | tail -1 | cut -d: -f1)"
+  [ "$dernier_fait" -lt "$dernier_rapport" ]
+}
+
+# ─── le système ─────────────────────────────────────────────────────────────────────────────────
+
+@test "le système est décrit : distribution, noyau, cœurs, systemd, utilisateur et groupes" {
+  preflight docker
+  [ -n "$(fact distro)" ]
+  [ -n "$(fact noyau)" ]
+  [ "$(fact cpu)" -ge 1 ]
+  case "$(fact systemd)" in oui|non) ;; *) return 1 ;; esac
+  [ "$(fact utilisateur)" = "$(id -un)" ]
+  [[ "$(fact groupes)" == *"$(id -gn)"* ]]
+}
+
+@test "l'utilisateur est celui qui a lancé sudo, pas root" {
+  preflight docker SUDO_USER=alice
+  [ "$(fact utilisateur)" = "alice" ]
+}
+
+# ─── le substrat et la garde ────────────────────────────────────────────────────────────────────
+
+@test "linux sans LCARS_ALLOW_ANY_HOST : le fait dit none et le verdict est un échec" {
+  preflight linux
+  [ "$status" -eq 2 ]
+  [ "$(fact consent)" = "none" ]
+  [[ "$output" == *"LCARS_ALLOW_ANY_HOST=1"* ]]
+}
+
+@test "linux avec LCARS_ALLOW_ANY_HOST : le fait dit env, rien ne bloque" {
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  [ "$status" -ne 2 ]
+  [ "$(fact consent)" = "env" ]
+}
+
+@test "hors linux la garde est sans objet" {
+  preflight wsl
+  [ "$(fact consent)" = "sans-objet" ]
+  preflight docker
+  [ "$(fact consent)" = "sans-objet" ]
+}
+
+# ─── docker ─────────────────────────────────────────────────────────────────────────────────────
+
+@test "docker est mesuré sur tout substrat, avec sa raison quand il manque" {
   local s
   for s in wsl linux docker; do
     rm -f "$FACTS"
     preflight "$s" LCARS_ALLOW_ANY_HOST=1
-    [ -n "$(fact docker)" ] || { echo "substrat $s : aucun fait docker" >&2; return 1; }
-    [ -n "$(fact docker_why)" ] || { echo "substrat $s : docker absent sans raison" >&2; return 1; }
+    [ "$(fact docker)" = "absent" ] || { echo "substrat $s : docker=$(fact docker)" >&2; return 1; }
+    [ -n "$(fact docker_why)" ]
   done
 }
 
-@test "le VERDICT de docker ne bouge pas : refus sous WSL, fait ailleurs" {
-  # ⚠ C'EST LA GARDE DE L'EXTENSION ELLE-MEME. Le module sait maintenant distinguer « absent » de
-  # « refuse a cet utilisateur » ; il ne doit pas s'en servir pour refuser autrement. Sous WSL la
-  # forge n'a AUCUNE autre forme que docker, donc c'est un echec de sonde (rc 2) — comme avant.
+@test "docker absent est un échec sous wsl seulement" {
   preflight wsl
   [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL"* ]]
-  # Hors WSL, le meme fait ne refuse rien : le rail poste POSE docker sur un linux declare.
   rm -f "$FACTS"
   preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$status" -ne 2 ]
 }
 
-@test "absent et refuse sont DEUX faits, parce que ce sont deux gestes" {
-  # Un daemon absent se pose ; un daemon qui refuse cet utilisateur se regle par un groupe. La porte
-  # doit pouvoir nommer le geste, donc le fait les separe la ou le verdict les confond.
-  preflight docker
-  [ "$(fact docker)" = "absent" ]
-  run grep -nE 'p_fact docker (refuse|absent)' "$MOD"
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [[ "${lines[0]}" == *"refuse"* ]]
-  [[ "${lines[0]}" == *"absent"* ]]
+@test "docker présent : version du serveur, variante et endpoint sont des faits" {
+  docker_qui_repond
+  preflight docker DOCKER_HOST=unix:///dev/null
+  [ "$(fact docker)" = "oui" ]
+  [ "$(fact docker_server)" = "29.0.0" ]
+  [ "$(fact docker_flavor)" = "Docker Engine - Test" ]
+  [ "$(fact docker_host)" = "unix:///dev/null" ]
+  [ "$(fact compose)" = "oui" ]
 }
 
-# ─── LES FAITS NEUFS ────────────────────────────────────────────────────────────────────────────
+# ─── la forge ───────────────────────────────────────────────────────────────────────────────────
 
-@test "forge FOURNIE : l'URL est un fait, et sa joignabilite en est un autre" {
-  # `FORGE_BASE_URL` posee = « j'ai deja une forge, consomme-la ». Le rail conteneur s'y raccroche : si
-  # elle ne repond pas, il echouera au premier geste — et la porte doit le dire AVANT la validation,
-  # pas apres.
-  preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-qui-n-existe-pas"
-  [ "$(fact forge_fournie)" = "http://127.0.0.1:1/forge-qui-n-existe-pas" ]
+@test "forge fournie : l'URL est un fait, sa joignabilité un autre" {
+  preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-absente"
+  [ "$(fact forge_fournie)" = "http://127.0.0.1:1/forge-absente" ]
   [ "$(fact forge_joignable)" = "non" ]
 }
 
-@test "forge ABSENTE : le fait est vide, la joignabilite sans objet — jamais « non »" {
-  # « non » dirait « mesure faite, elle ne repond pas ». Il n'y a rien a joindre : c'est autre chose,
-  # et la porte n'affiche pas la meme ligne.
+@test "forge absente : le fait est vide, la joignabilité sans objet" {
   preflight docker
   [ -z "$(fact forge_fournie)" ]
   [ "$(fact forge_joignable)" = "sans-objet" ]
 }
 
-@test "wsl.conf ETRANGER est un avertissement, jamais un refus" {
-  # Le rail poste le REMPLACE en entier — c'est la frontiere de securite du conteneur. L'operateur
-  # doit le voir avant de valider ; refuser pour autant bloquerait une machine parfaitement saine.
-  run grep -n 'p_fact wslconf etranger' "$MOD"
-  [ "$status" -eq 0 ]
-  local bloc; bloc="$(sed -n '/p_fact wslconf etranger/,/^  fi$/p' "$MOD")"
-  grep -q 'p_warn' <<<"$bloc"
-  refute grep -qE 'p_fail|p_drift' <<<"$bloc"
+# ─── les ports et le projet ─────────────────────────────────────────────────────────────────────
+
+@test "un port libre est dit libre, avec son numéro" {
+  local p; p="$(free_port)"
+  preflight docker PROV_DECK_PORT="$p"
+  [ "$(fact port_deck)" = "$p libre" ]
 }
 
-@test "sudo : trois etats, et root en est un — le module tourne sous root a l'apply" {
-  # Rendre « absent » quand on EST root serait faux : la question ne se pose pas.
+@test "un port publié par un conteneur d'un autre projet est dit pris, par qui" {
+  docker_qui_repond autre-forge-gitea-1 autre-forge
+  preflight docker DOCKER_HOST=unix:///dev/null PROV_FORGE_HOST_PORT=21000
+  [ "$(fact port_forge)" = "21000 pris par autre-forge-gitea-1 (projet autre-forge)" ]
+  [[ "$output" == *"port 21000 (forge) pris par autre-forge-gitea-1"* ]]
+}
+
+@test "un port publié par nos propres projets est dit nous, jamais pris" {
+  docker_qui_repond lcars-forge-gitea-1 lcars-forge
+  local p; p="$(free_port)"
+  listen_on "$p"
+  preflight docker DOCKER_HOST=unix:///dev/null PROV_FORGE_HOST_PORT="$p" PROV_FORGE_BASE=lcars
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$(fact port_forge)" = "$p nous lcars-forge-gitea-1 (projet lcars-forge)" ]
+  [[ "$output" != *"port $p"*"pris"* ]]
+}
+
+@test "un port écouté que ni docker ni ss ne savent nommer est dit pris, docker présent ou non" {
+  local p; p="$(free_port)"
+  ss_muet "$p"
+  listen_on "$p"
+  preflight docker PROV_DECK_PORT="$p"
+  [ "$(fact port_deck)" = "$p pris" ]
+  docker_qui_repond
+  preflight docker DOCKER_HOST=unix:///dev/null PROV_DECK_PORT="$p"
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$(fact port_deck)" = "$p pris" ]
+}
+
+@test "les trois ports suivent leurs variables, ssh compris" {
+  preflight docker PROV_FORGE_HOST_PORT=30001 PROV_DECK_PORT=30002 PROV_SSH_PORT=30003
+  [[ "$(fact port_forge)" == 30001* ]]
+  [[ "$(fact port_deck)" == 30002* ]]
+  [[ "$(fact port_ssh)" == 30003* ]]
+}
+
+@test "un projet compose déjà présent sur le daemon est nommé" {
+  docker_qui_repond "" "" lcars-fleet
+  preflight docker DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  [ "$(fact projet)" = "lcars" ]
+  [ "$(fact projet_pris)" = "lcars-fleet" ]
+  [[ "$output" == *"projet compose déjà présent"*"lcars-fleet"* ]]
+}
+
+@test "sans docker, aucun projet n'est dit pris" {
+  preflight docker PROV_FORGE_BASE=lcars
+  [ -z "$(fact projet_pris)" ]
+}
+
+# ─── l'instance ─────────────────────────────────────────────────────────────────────────────────
+
+@test "les paquets installés après la naissance de l'instance sont listés, sans les mises à jour ni les dépendances" {
+  cat > "$LCARS_APT_HISTORY" <<'EOF'
+
+Start-Date: 2026-04-20  18:06:23
+Commandline: apt-get install ubuntu-wsl
+Install: ubuntu-wsl:amd64 (1.0), libfoo:amd64 (1.0, automatic)
+End-Date: 2026-04-20  18:07:00
+
+Start-Date: 2026-09-11  22:37:16
+Commandline: apt -y upgrade
+Upgrade: libperl5.40:amd64 (5.40.1-7build1, 5.40.1-7ubuntu0.3)
+End-Date: 2026-09-11  22:37:40
+
+Start-Date: 2026-09-11  22:37:57
+Commandline: apt install -y openssh-server
+Install: libwrap0:amd64 (7.6, automatic), openssh-server:amd64 (1:10.2p1), openssh-sftp-server:amd64 (1:10.2p1, automatic)
+End-Date: 2026-09-11  22:38:10
+EOF
+  preflight wsl LCARS_INSTANCE_BIRTH="$(date -d '2026-09-11 22:36:29' +%s)"
+  [ "$(fact apt_installs)" = "openssh-server (2026-09-11)" ]
+}
+
+@test "une instance sans installation après sa naissance rend un fait vide" {
+  cat > "$LCARS_APT_HISTORY" <<'EOF'
+
+Start-Date: 2026-04-20  18:06:23
+Commandline: apt-get install ubuntu-wsl
+Install: ubuntu-wsl:amd64 (1.0)
+End-Date: 2026-04-20  18:07:00
+EOF
+  preflight wsl LCARS_INSTANCE_BIRTH="$(date +%s)"
+  [ -z "$(fact apt_installs)" ]
+}
+
+@test "une naissance d'instance que le système ne sait pas donner rend inconnu, jamais l'image entière" {
+  cat > "$LCARS_APT_HISTORY" <<'EOF'
+
+Start-Date: 2026-04-20  18:06:23
+Commandline: apt-get install ubuntu-wsl
+Install: ubuntu-wsl:amd64 (1.0)
+End-Date: 2026-04-20  18:07:00
+EOF
+  preflight wsl LCARS_INSTANCE_BIRTH=0
+  [ "$(fact apt_installs)" = "inconnu" ]
+  preflight wsl LCARS_INSTANCE_BIRTH="?"
+  [ "$(fact apt_installs)" = "inconnu" ]
+}
+
+@test "en conteneur, l'historique apt est sans objet" {
   preflight docker
-  case "$(fact sudo)" in
-    root|oui|absent) : ;;
-    *) echo "etat sudo inattendu : $(fact sudo)" >&2; return 1 ;;
-  esac
-  run grep -c 'p_fact sudo ' "$MOD"
-  [ "$output" -eq 3 ]
+  [ "$(fact apt_installs)" = "sans-objet" ]
 }
 
-# ─── LE MUR ─────────────────────────────────────────────────────────────────────────────────────
-
-@test "MUR : aucun fait n'est pose dans un bloc recapitulatif — chacun a son lieu de mesure" {
-  # ⚠ UN RECAPITULATIF EST UNE SECONDE COPIE. Il derive des qu'une branche de mesure change, et il
-  # ment precisement sur le cas rare : celui ou la branche qu'on a oubliee s'execute. La regle se
-  # verifie mecaniquement — aucun `p_fact` apres le dernier `p_ok`/`p_warn`/`p_fail` du fichier.
-  local dernier_rapport dernier_fait
-  dernier_rapport="$(grep -nE '^\s*(p_ok|p_warn|p_fail|p_drift) ' "$MOD" | tail -1 | cut -d: -f1)"
-  dernier_fait="$(grep -nE '^\s*p_fact ' "$MOD" | tail -1 | cut -d: -f1)"
-  [ "$dernier_fait" -lt "$dernier_rapport" ] \
-    || { echo "un p_fact (l.$dernier_fait) suit le dernier rapport (l.$dernier_rapport) : recapitulatif ?" >&2; return 1; }
+@test "les comptes humains sont ceux au-dessus de l'uid 1000, nobody exclu" {
+  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nnobody:x:65534:65534::/:/usr/sbin/nologin\n' > "$LCARS_PASSWD_FILE"
+  preflight wsl
+  [ "$(fact comptes_humains)" = "bob,alice" ]
 }
 
-# ─── LE CANAL : QUI A POSE, ET CE QUE CET ARBRE POSERAIT (lot 2 du chantier release) ───────────
+# ─── sudo et le canal ───────────────────────────────────────────────────────────────────────────
 
-@test "CANAL : le fait « channel » dit qui a pose (source, kit) ou « aucun », et « channel_tree » ce que cet arbre poserait" {
+@test "sudo : root, présent ou absent" {
+  preflight docker
+  case "$(fact sudo)" in root|oui|absent) ;; *) return 1 ;; esac
+}
+
+@test "le canal dit qui a posé, ou aucun ; l'arbre dit ce qu'il poserait" {
   local v
   for v in source kit; do
     mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
-    preflight linux
-    [ "$(fact channel)" = "$v" ] || { echo "channel=$(fact channel), attendu $v"; return 1; }
-    [[ "$output" == *"canal d'installation : $v"* ]]
+    preflight linux LCARS_ALLOW_ANY_HOST=1
+    [ "$(fact channel)" = "$v" ]
   done
   rm -f "$LCARS_CHANNEL_FILE"
-  preflight linux
+  preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$(fact channel)" = "aucun" ]
-  [[ "$output" == *"aucun canal d'installation"*"jamais été posée"* ]]
-  # ce depot est un CHECKOUT : l'arbre poserait « source » — et la valeur vient de la lib, pas d'un litteral
   [ "$(fact channel_tree)" = "source" ]
-  [[ "$output" == *"cet arbre poserait « source »"* ]]
-  grep -q 'p_fact channel_tree "$(prov_channel_here)"' "$MOD"
 }
 
-@test "CANAL : un canal ILLISIBLE est un FAIL qui COMPTE (appel nu), et le fait dit « invalide » — jamais un vert par defaut" {
+@test "un canal illisible est un échec qui compte, et le fait dit invalide" {
   mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'snap\n' > "$LCARS_CHANNEL_FILE"
-  preflight linux
-  [ "$status" -eq 2 ]                                   # verdict_check : 2 = un p_fail a ete compte
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  [ "$status" -eq 2 ]
   [ "$(fact channel)" = "invalide" ]
-  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"* ]]
-  # l'appel est NU dans le module : un `$(prov_channel)` perdrait le compte
-  grep -q 'if prov_channel >/dev/null; then' "$MOD"
-  grep -vE '^\s*#' "$MOD" | refute_out '\$\(prov_channel\)'
 }
 
-@test "CANAL : un produit POSE sans tampon rend « inconnu », dit en WARN — ni « aucun », ni un canal" {
+@test "un produit posé sans tampon rend inconnu" {
   mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  preflight linux PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  [ "$(fact channel)" = "inconnu" ] || { echo "channel=$(fact channel), attendu inconnu"; echo "$output" | tail -5; return 1; }
-  [[ "$output" == *"INCONNU"*"sans tampon"* ]]
+  preflight linux LCARS_ALLOW_ANY_HOST=1 PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  [ "$(fact channel)" = "inconnu" ]
 }

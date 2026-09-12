@@ -41,8 +41,9 @@
 #
 # USAGE :
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
-#                    [--port-forge N] [--port-deck N]
+#                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain] [--verbose]
+#                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
@@ -139,6 +140,8 @@ while [[ $# -gt 0 ]]; do
                   export PROV_FORGE_HOST_PORT="$2"; shift 2 ;;
     --port-deck)  valid_port "${2:?--port-deck attend un port}" --port-deck
                   export PROV_DECK_PORT="$2"; shift 2 ;;
+    --port-ssh)   valid_port "${2:?--port-ssh attend un port}" --port-ssh
+                  export PROV_SSH_PORT="$2"; shift 2 ;;
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
                      # LA BASE, pas le projet : `bob` donne `bob-forge` et `bob-runner` (48-forge-host).
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
