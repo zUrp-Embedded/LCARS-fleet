@@ -205,6 +205,21 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   refute grep -q "20-amont:check" "$RUN_LOG"
 }
 
+@test "un préflight en échec à l'apply est une barrière : rien d'autre n'est joué, sortie 1" {
+  stub_module 00-preflight any any human STUB_RC_PRE
+  stub_module 20-suivant any any human
+  export STUB_RC_PRE=1
+  stub_impersonation
+  run "$SANDBOX/provision" apply --substrate wsl --human "$(id -un)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ARRÊT"*"le préflight refuse ce terrain"* ]]
+  grep -q "00-preflight:apply" "$RUN_LOG"
+  refute grep -q "20-suivant" "$RUN_LOG"
+  : > "$RUN_LOG"
+  run "$SANDBOX/provision" doctor --substrate wsl
+  grep -q "20-suivant:check" "$RUN_LOG"
+}
+
 @test "aucun module sélectionné est un refus qui nomme le substrat et le filtre" {
   stub_module 20-amont any any human
   run "$SANDBOX/provision" doctor --substrate docker --only 99-absent

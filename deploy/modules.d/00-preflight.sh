@@ -267,11 +267,11 @@ check() {
     fi
   done
 
-  verdict_check
 }
 
+# le préflight ne pose rien : les deux verbes sondent, chacun rend le verdict de son contrat
 case "${1:?usage: 00-preflight.sh <check|apply>}" in
-  check) check ;;
-  apply) check ;;
+  check) check; verdict_check ;;
+  apply) check; verdict_apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

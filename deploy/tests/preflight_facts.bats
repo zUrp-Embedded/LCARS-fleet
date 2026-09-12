@@ -137,6 +137,14 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [[ "$output" == *"LCARS_ALLOW_ANY_HOST=1"* ]]
 }
 
+@test "linux sans déclaration : à l'apply le refus rend 1, le code d'un échec d'apply" {
+  run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight \
+      PROV_SUBSTRATE=linux PROV_DOCKER_BIN="$BIN/docker" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
+      PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" bash "$MOD" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"*"Linux natif sans déclaration"* ]]
+}
+
 @test "linux avec LCARS_ALLOW_ANY_HOST : le fait dit env, rien ne bloque" {
   preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$status" -ne 2 ]

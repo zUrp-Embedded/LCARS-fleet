@@ -15,7 +15,7 @@
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 ENGINE_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
@@ -29,7 +29,7 @@ os_field() { # os_field <clef de /etc/os-release>
   ( . /etc/os-release 2>/dev/null; printf '%s' "${!1:-}" )
 }
 
-engine_installed() { dpkg -s docker-ce >/dev/null 2>&1; }
+engine_installed() { pkg_installed docker-ce; }
 
 # ensure_docker_repo — la source apt de Docker, dérivée de la distribution, posée une fois.
 # Un dépôt docker que la machine portait déjà est celui d'un opérateur : sur échec d'`apt-get

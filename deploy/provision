@@ -341,6 +341,11 @@ for i in "${!SELECTED[@]}"; do
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
       echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebâtir l'image qui le fournit" >&2 ;;
   esac
+  # le préflight est une barrière : un terrain refusé ne reçoit aucune mutation
+  if [[ "$CMD" == apply && "$name" == 00-* && "$failed" -gt 0 ]]; then
+    echo "${_PR}ARRÊT${_PN} : le préflight refuse ce terrain — aucun autre module n'est joué" >&2
+    break
+  fi
 done
 
 # ─── Verdict ────────────────────────────────────────────────────────────────────────────────────

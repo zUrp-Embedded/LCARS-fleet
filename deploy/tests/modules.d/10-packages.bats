@@ -1,45 +1,106 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/10-packages.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-05
-# STATUS: le socle de 10-packages — une liste (= le Depends du paquet lcars), la compilation en source
-#         seulement, et JAMAIS apt sous canal deb (mesure 2004, 2026-09-05 : rc 100 sous le verrou)
+# STARDATE: 2026-09-12
+# STATUS: témoins des paquets du runtime — présence mesurée par dpkg, pose par apt, sonde bwrap réelle
+#
+# dpkg-query, apt-get et bwrap sont doublés : l'état « installé » vit dans un fichier que la
+# doublure apt-get remplit, la sonde bwrap rend ce que le cas décide.
 
 load ../refute
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  export PROVISION_MODULE=10-packages PROV_HUMAN=temoin PROV_SUBSTRATE=wsl
+  export PROVISION_MODULE=10-packages PROV_SUBSTRATE=wsl
+  export PROV_HUMAN; PROV_HUMAN="$(id -un)"
   export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"; mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  MOD="$BATS_TEST_TMPDIR/mod.sh"; sed '/^case "${1:?usage/,$d' "$SRC" > "$MOD"
-  # une racine de depot pour prov_delivery : source (pas de tampon) ou binaire (tampon a la racine)
-  ROOT="$BATS_TEST_TMPDIR/repo"; mkdir -p "$ROOT/deploy"; cp -r "$BATS_TEST_DIRNAME/../../lib" "$ROOT/deploy/"   # la lib source ses voisines (docker-endpoint.sh)
-  export PROVISION_LIB="$ROOT/deploy/lib/provision-lib.sh"
+  export INSTALLES="$BATS_TEST_TMPDIR/installes"; : > "$INSTALLES"
+  export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
-  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\nexit 0\n' "$BATS_TEST_TMPDIR/apt.trace" > "$BIN/apt-get"
-  printf '#!/usr/bin/env bash\n[[ "$*" == *-s* ]] && exit 1\nexit 0\n' > "$BIN/dpkg"   # rien n'est installe
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/bwrap"
+  cat > "$BIN/dpkg-query" <<'EOF'
+#!/usr/bin/env bash
+pkg="${@: -1}"
+grep -qx "$pkg" "$INSTALLES" && printf 'installed' || printf 'not-installed'
+EOF
+  cat > "$BIN/apt-get" <<'EOF'
+#!/usr/bin/env bash
+echo "APT:$*" >> "$CALLS"
+[[ "${STUB_APT_RC:-0}" -eq 0 ]] || exit "$STUB_APT_RC"
+if [[ "$1" == install ]]; then shift; for a in "$@"; do [[ "$a" == -* ]] || echo "$a" >> "$INSTALLES"; done; fi
+exit 0
+EOF
+  cat > "$BIN/bwrap" <<'EOF'
+#!/usr/bin/env bash
+echo "BWRAP:$*" >> "$CALLS"
+exit "${STUB_BWRAP_RC:-0}"
+EOF
   chmod 0755 "$BIN"/*
-}
-mod() { run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; source '$MOD' >/dev/null 2>&1; $1"; }
-
-@test "la BASELINE des pods (venv, pip, compilateur) est demandee sur TOUTE livraison — source comme binaire" {
-  # Elle vivait dans BUILD_PACKAGES, « source seulement », et l'image la posait a la main pour ses
-  # pods : deux rails, deux verites — un poste installe par kit n'avait pas de venv pour ses pods.
-  # Depuis le 2026-09-11 (le jumeau Dockerfile est parti), une seule liste, sur chaque terrain.
-  mod 'effective_packages'
-  [[ "$output" == *"build-essential"* ]] && [[ "$output" == *"python3-venv"* ]] && [[ "$output" == *"tmux"* ]]
-  printf 'abcd1234\n' > "$ROOT/.source-revision"
-  mod 'effective_packages'
-  [[ "$output" == *"build-essential"* ]] && [[ "$output" == *"python3-venv"* ]] && [[ "$output" == *"tmux"* ]]
-  grep -vE '^\s*#' "$SRC" | refute_out 'BUILD_PACKAGES'
+  export PATH="$BIN:$PATH"
 }
 
-@test "canal kit/source : apply passe par apt (apt_ensure)" {
-  printf 'kit\n' > "$LCARS_CHANNEL_FILE"
-  run bash -c "set -uo pipefail; export PATH=\"$BIN:$PATH\"; bash '$SRC' apply"
-  [ -e "$BATS_TEST_TMPDIR/apt.trace" ]
-  grep -q 'APT .*install' "$BATS_TEST_TMPDIR/apt.trace"
+mod() { run bash "$SRC" "$@"; }
+liste() { sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^PACKAGES=\(|^\)|^\s*#' | tr -s ' \n' '\n' | grep -v '^$'; }
+
+@test "check : tout installé et un sandbox qui tourne, conforme — chaque paquet nommé, la baseline des pods comprise" {
+  liste > "$INSTALLES"
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"OK    10-packages: paquet tmux"*"paquet python3-venv"*"paquet build-essential"*"bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"* ]]
+  grep -q 'BWRAP:--ro-bind / / --unshare-all --die-with-parent /bin/true' "$CALLS"
+}
+
+@test "check : un paquet absent est un drift nommé, et la sonde bwrap n'est pas jouée" {
+  liste | grep -v '^gh$' > "$INSTALLES"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 10-packages: paquet gh absent"* ]]
+  refute grep -q 'BWRAP:' "$CALLS"
+}
+
+@test "check : un sandbox qui échoue est un drift ; sans sonde du noyau (PROV_KERNEL_PROBES=0) c'est un avertissement, pas un drift" {
+  liste > "$INSTALLES"
+  STUB_BWRAP_RC=1 mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 10-packages: bwrap installé mais un sandbox minimal ÉCHOUE"*"aucun pod ne spawnera"* ]]
+  : > "$CALLS"
+  PROV_KERNEL_PROBES=0 mod check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN  10-packages: sonde bwrap NON jouée"*"se joue au boot"* ]]
+  refute grep -q 'BWRAP:' "$CALLS"
+}
+
+@test "apply : rien d'installé — apt update puis install de la liste entière, sans recommends, puis la sonde ; sortie 0" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^APT:update' "$CALLS"
+  local ligne; ligne="$(grep '^APT:install' "$CALLS")"
+  [[ "$ligne" == *"-y --no-install-recommends"* ]]
+  local p; while read -r p; do [[ "$ligne" == *" $p"* ]] || { echo "$p manque dans l'install"; return 1; }; done < <(liste)
+  [[ "$output" == *"apt: install tmux"*"bwrap sandbox opérationnel"* ]]
+  [ "$(grep -n 'APT:install' "$CALLS" | cut -d: -f1)" -lt "$(grep -n 'BWRAP:' "$CALLS" | cut -d: -f1)" ]
+}
+
+@test "apply : tout déjà là — aucun apt, la sonde seule, sortie 0" {
+  liste > "$INSTALLES"
+  mod apply
+  [ "$status" -eq 0 ]
+  refute grep -q '^APT:' "$CALLS"
+  grep -q 'BWRAP:' "$CALLS"
+}
+
+@test "apply : un sandbox qui échoue est un échec qui nomme l'arbitrage, sortie 1" {
+  liste > "$INSTALLES"
+  STUB_BWRAP_RC=1 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  10-packages: bwrap installé mais un sandbox minimal ÉCHOUE"*"apparmor_restrict_unprivileged_userns=0"* ]]
+}
+
+@test "apply : apt qui refuse est un échec, sans sonde derrière" {
+  STUB_APT_RC=100 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"* ]]
+  refute grep -q 'BWRAP:' "$CALLS"
 }
