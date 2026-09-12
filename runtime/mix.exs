@@ -18,6 +18,35 @@ defmodule LcarsFleet.MixProject do
       # boundary = the compiled guardian of the architecture (inter-domain deps
       # + façade exports).
       compilers: [:boundary | Mix.compilers()],
+      # ⚠ LA COUVERTURE EST DANS LA CHAINE (decision 2 du lot E6, arbitree le 2026-09-12), et elle
+      # passe par `Fleet.Test.CoverOtp27` tant que le parc est en OTP 27 : `cover` y fait crasher
+      # douze modules (erlang/otp#11524), et l'outil de Mix s'arrete au premier. Les douze sont
+      # DECLARES ici — cliquet, pas exemption : l'outil rougit si la liste bouge dans un sens ou
+      # dans l'autre. Le jour ou le parc passe en OTP >= 28.4, `tool:` et `otp27_refused:` sortent
+      # et l'outil de Mix reprend sans trou.
+      #
+      # `Fleet.Pilot` est retire du total : une facade sans une ligne executable, son zero ne mesure
+      # rien. Les doublures de `test/support/` sont retirees par l'outil, sur leur SOURCE.
+      test_coverage: [
+        tool: Fleet.Test.CoverOtp27,
+        output: "tmp/cover",
+        summary: [threshold: 84],
+        ignore_modules: [Fleet.Pilot],
+        otp27_refused: [
+          Fleet.CapProfile.Invariants,
+          Fleet.Conflict,
+          Fleet.Forge.Client.Jury,
+          Fleet.Forge.Client.Repo,
+          Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate,
+          Fleet.Pilot.StepRunConsumer.Verdict,
+          Fleet.Spawner.Pod.LaunchSpec,
+          Fleet.Spawner.PublishConsumer,
+          Mix.Tasks.Lcars.Contracts.Check.Artifact,
+          Mix.Tasks.Lcars.Contracts.Check.SingleSource,
+          Mix.Tasks.Lcars.Contracts.Check.Tools,
+          Mix.Tasks.Lcars.Contracts.Check.Types
+        ]
+      ],
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -179,8 +208,11 @@ defmodule LcarsFleet.MixProject do
   # Streamed line by line rather than captured: the suite is the long step, and a gate that goes
   # silent for ninety seconds teaches its operator to run something else.
   defp test_gate(args) do
+    # `--cover` EST DANS LA PORTE : la mesure et son seuil font rougir la suite (exit 3), donc la
+    # chaine. Sans ce mot, la couverture est un outil configure que personne ne lance — ce que
+    # credo a ete jusqu'au 2026-09-08.
     {_, status} =
-      System.cmd("mix", ["test" | args],
+      System.cmd("mix", ["test", "--cover" | args],
         env: [{"MIX_ENV", "test"}],
         into: IO.stream(:stdio, :line),
         stderr_to_stdout: true

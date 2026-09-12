@@ -119,6 +119,19 @@ defmodule Mix.GateCompositionTest do
              "(ici : `mcp.vitrine_single_line`, pour une ligne que le build du site lit entiere)"
   end
 
+  test "E6-2 — la couverture est DANS la chaine : `--cover` sur le pas test, et un seuil pose" do
+    # Meme defaut que credo avant le 2026-09-08 : `mix test --cover` sortait en 3 sur ce depot (le
+    # seuil par defaut d'Elixir, 90, jamais arbitre) et aucun pas ne le lancait. La mesure entre
+    # par le pas test lui-meme, pas par un rapport a cote.
+    assert File.read!("mix.exs") =~ ~r/System\.cmd\("mix", \["test", "--cover" \| args\]/,
+           "`test_gate` ne passe plus `--cover` a `mix test`"
+
+    threshold =
+      Mix.Project.config() |> Keyword.fetch!(:test_coverage) |> get_in([:summary, :threshold])
+
+    assert is_number(threshold) and threshold > 0, "aucun seuil de couverture dans mix.exs"
+  end
+
   test "sobelow est atteignable dans l'environnement que le gate force" do
     # Le defaut qui rendait l'integration impossible : la dep etait `only: [:dev]` alors que la
     # chaine force `MIX_ENV=test`. Un outil installe et inatteignable depuis le seul point d'entree
