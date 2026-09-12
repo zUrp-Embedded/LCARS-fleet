@@ -1,0 +1,83 @@
+lot	family	files	lines	prose	current_prose	doctest_prompts
+L00	00 — Pilote spawner déjà préparé	3	2355	861	243	0
+L01	01 — Spawner : cycle de vie et supervision	10	2516	501	501	0
+L02	01 — Spawner : cycle de vie et supervision	12	4709	837	837	0
+L03	01 — Spawner : cycle de vie et supervision	2	62	34	34	0
+L04	02 — Spawner : provisioning et lancement	11	1029	333	333	0
+L05	02 — Spawner : provisioning et lancement	8	2897	886	886	0
+L06	02 — Spawner : provisioning et lancement	6	808	281	281	0
+L07	03 — Spawner : identité et persistance	12	2236	673	673	0
+L08	04 — Spawner : activité et résultats	12	1573	569	569	0
+L09	04 — Spawner : activité et résultats	1	68	12	12	0
+L10	05 — Chemins et toolchain	4	1431	627	627	0
+L11	05b — Primitives et formats partagés	11	1100	367	367	0
+L12	05b — Primitives et formats partagés	12	1256	510	510	0
+L13	05b — Primitives et formats partagés	7	914	271	271	11
+L14	06 — Catalogue et profils	4	2942	761	761	0
+L15	06 — Catalogue et profils	12	2385	758	758	0
+L16	06 — Catalogue et profils	7	2228	777	777	0
+L17	07 — Identités et credentials	11	1291	443	443	0
+L18	07 — Identités et credentials	4	1099	441	441	0
+L19	08 — Prompts et préparation des workspaces	7	2837	816	816	0
+L20	08 — Prompts et préparation des workspaces	11	2201	617	617	0
+L21	09 — Événements et file de travail	12	1444	318	318	0
+L22	09 — Événements et file de travail	12	1434	348	348	0
+L23	09 — Événements et file de travail	8	1931	534	534	0
+L24	10 — Analyse des conflits	12	1526	341	341	0
+L25	10 — Analyse des conflits	8	803	119	119	0
+L26	11 — Forge : client et opérations	2	479	145	145	0
+L27	11 — Forge : client et opérations	2	3875	819	819	0
+L28	11 — Forge : client et opérations	9	2388	876	876	0
+L29	11 — Forge : client et opérations	11	1805	445	445	0
+L30	11 — Forge : client et opérations	5	1024	431	431	27
+L31	12 — Workflow : contrats et artefacts	11	1625	538	538	0
+L32	12 — Workflow : contrats et artefacts	12	2182	438	438	0
+L33	12 — Workflow : contrats et artefacts	12	3076	740	740	5
+L34	12 — Workflow : contrats et artefacts	11	2158	621	621	0
+L35	12 — Workflow : contrats et artefacts	2	278	73	73	0
+L36	13 — Projets : déclaration et maintenance	10	2229	730	730	0
+L37	13 — Projets : déclaration et maintenance	6	1618	496	496	0
+L38	14 — Projets : onboarding	10	3756	898	898	0
+L39	14 — Projets : onboarding	11	3080	885	885	0
+L40	14 — Projets : onboarding	2	430	118	118	0
+L41	15 — MCP : transport et outils pods	9	2434	580	580	0
+L42	15 — MCP : transport et outils pods	3	5000	710	710	0
+L43	15 — MCP : transport et outils pods	11	1718	584	584	0
+L44	15 — MCP : transport et outils pods	6	826	221	221	0
+L45	16 — MCP : délégation métier	12	1735	499	499	0
+L46	16 — MCP : délégation métier	7	2289	779	779	0
+L47	16 — MCP : délégation métier	8	1808	479	479	0
+L48	17 — Pilot : coordination, incidents et réveils	12	3031	845	845	0
+L49	17 — Pilot : coordination, incidents et réveils	12	3545	752	752	0
+L50	17 — Pilot : coordination, incidents et réveils	3	412	99	99	0
+L51	18 — Pilot : admission et réconciliation	4	777	185	185	0
+L52	18 — Pilot : admission et réconciliation	2	2935	805	805	0
+L53	18 — Pilot : admission et réconciliation	10	2284	892	892	0
+L54	18 — Pilot : admission et réconciliation	5	1730	426	426	0
+L55	19 — Pilot : harnais de tests	7	1328	342	342	0
+L56	20 — Pilot : dispatch et briefs	3	1644	469	469	0
+L57	20 — Pilot : dispatch et briefs	6	3057	785	785	0
+L58	20 — Pilot : dispatch et briefs	7	2126	606	606	0
+L59	21 — Pilot : revue et remédiation	6	2765	872	872	0
+L60	21 — Pilot : revue et remédiation	9	1759	479	479	0
+L61	22 — Pilot : résultats et progression	11	4081	755	755	0
+L62	22 — Pilot : résultats et progression	12	3766	814	814	0
+L63	22 — Pilot : résultats et progression	9	2567	478	478	0
+L64	23 — Pilot : fusion et conflits	9	3087	895	895	0
+L65	23 — Pilot : fusion et conflits	4	374	97	97	0
+L66	24 — API et observation	12	2125	505	505	0
+L67	24 — API et observation	7	1396	353	353	0
+L68	24b — Démarrage et arrêt de la flotte	12	1612	430	430	0
+L69	24b — Démarrage et arrêt de la flotte	8	2731	834	834	0
+L70	24b — Démarrage et arrêt de la flotte	3	533	161	161	0
+L71	25a — Mix : commandes et catalogue	12	2802	765	765	0
+L72	25a — Mix : commandes et catalogue	2	234	39	39	0
+L73	25b — Mix : contrats runtime et artefacts	3	1556	485	485	0
+L74	25b — Mix : contrats runtime et artefacts	6	2918	704	704	0
+L75	25c — Mix : sources de vérité et déclarations	7	2588	665	665	0
+L76	25d — Mix : contrats des outils	5	2189	575	575	0
+L77	25e — Mix : infrastructure des contrôles	6	3309	859	859	0
+L78	25e — Mix : infrastructure des contrôles	2	455	114	114	0
+L79	26 — Infrastructure des tests	10	908	436	436	0
+L80	27 — Configuration et construction	7	1568	879	879	0
+L81	27 — Configuration et construction	4	704	279	279	0
