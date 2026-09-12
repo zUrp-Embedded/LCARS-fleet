@@ -12,10 +12,11 @@ defmodule Fleet.Forge.Client.Files do
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_path: 1]
 
   @doc """
-  Writes text at `path` on a branch, returning the commit SHA.
-
-  Omitting `:sha` creates a file; supplying it updates one. `:new_branch` creates a branch from
-  `:branch`. Optional `:author` and `:committer` identities preserve two-level attribution.
+  Sends base64 content by PUT, branch default main, and returns the response's commit.sha
+  without validating its type. :sha supplies the existing blob id for an update; omission
+  still uses PUT and leaves acceptance to the forge. :new_branch requests a branch from :branch.
+  :author/:committer are included only as atom-keyed maps with binary name/email; other identity
+  shapes are ignored. A successful write with unexpected response shape returns an error afterward.
   """
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, String.t()} | {:error, term()}
@@ -42,8 +43,9 @@ defmodule Fleet.Forge.Client.Files do
   end
 
   @doc """
-  Reads and decodes a file at `:ref` (default `main`). Returns its content and SHA for an update,
-  or `{:error, :not_found}` on a missing file or branch.
+  Reads at :ref (default main), decodes base64 ignoring whitespace and returns content plus
+  the unvalidated blob SHA. HTTP 404 maps to not_found; invalid base64 to decode_failed.
+  Unexpected 2xx shapes or nonbinary content can raise instead of returning a typed error.
   """
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
           {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
@@ -67,18 +69,15 @@ defmodule Fleet.Forge.Client.Files do
     end
   end
 
-  # UN CORPS ILLISIBLE N'EST PAS UN FICHIER ABSENT : `:decode_failed` se distingue du 404 juste
-  # au-dessus, parce que l'appelant qui ecrira ensuite a besoin du SHA, et qu'il ne l'a pas ici.
+  # An undecodable file must not be mistaken for an absent file by a subsequent writer.
   defp decoded_file({:ok, content}, sha), do: {:ok, %{content: content, sha: sha}}
   defp decoded_file(:error, _sha), do: {:error, :decode_failed}
 
   @doc """
-  Names of the entries at `path` for `:ref` — `{:error, :not_found}` when the directory is absent.
-
-  The listing half of `get_file/3`: the same `/contents` endpoint answers a LIST for a directory.
-  It exists to let a caller ask whether a repository DECLARES something, without downloading it —
-  the CI gate asks exactly that about `.gitea/workflows`, and the difference between "no run yet"
-  and "no workflow at all" is the difference between waiting and knowing.
+  Reads directory entry names at :ref (default main), without downloading file contents, e.g.
+  to distinguish declared workflows from runs not yet seen. No pagination or entry validation:
+  missing names yield nil and non-map entries raise. A map body returns not_a_directory,
+  HTTP 404 returns not_found, and other successful body shapes have no fallback clause.
   """
   @spec list_dir(String.t(), String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_dir(repo, path, opts \\ []) when is_binary(repo) and is_binary(path) do

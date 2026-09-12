@@ -1,17 +1,9 @@
 defmodule Fleet.Forge.Client.Merge do
   @moduledoc """
-  La mecanique de fusion : la tentative, le diagnostic de son refus, la reprise, et le nettoyage de
-  la branche de tete.
-
-  Une forge refuse une fusion pour deux raisons qui se ressemblent et ne se traitent pas pareil :
-  la PR est REELLEMENT en conflit, ou la forge n'a PAS FINI de calculer si elle l'est
-  (`mergeable: null`). Le second cas est transitoire et se retente ; le premier ne se retente
-  jamais. Confondre les deux, c'est soit abandonner une fusion possible, soit marteler une fusion
-  impossible.
-
-  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
-  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
-  qu'elles traversent une frontiere de module, `@doc false` le dit.
+  Fusion, reprise bornee et nettoyage de branche, internes a `Fleet.Forge.Client`.
+  Un 405 declenche une lecture de `mergeable` : false bloque la reprise ; toute autre
+  reponse laisse le message du refus et le budget decider. La cause releve en amont
+  de `Fleet.Pilot.MergeOutcome`, hors de cette boundary.
   """
 
   alias Fleet.Forge.Client.Transport
@@ -23,7 +15,7 @@ defmodule Fleet.Forge.Client.Merge do
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1, encode_seg: 1]
 
   @doc false
-  # La tentative de fusion, avec sa reprise bornee sur `mergeable: null`.
+  # Toute reponse HTTP reussie lance le nettoyage ; aucune relecture ne confirme le merge.
   @spec do_merge(
           Transport.config(),
           String.t(),
@@ -34,8 +26,7 @@ defmodule Fleet.Forge.Client.Merge do
         ) ::
           :ok | {:error, term()}
   def do_merge(config, repo, index, method, delay, attempts_left) do
-    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` ne passe que par tolerance du
-    # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
+    # Cle du contrat MergePullRequestOption : "do" ; "Do" dependait de la tolerance Go.
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
            "do" => method
          }) do
@@ -44,18 +35,8 @@ defmodule Fleet.Forge.Client.Merge do
         :ok
 
       {:error, {:http, 405, body}} = err ->
-        # ⚠ LE LIBELLE NE SEPARE PAS LES DEUX FAITS, ET LA MESURE L'A PROUVE.
-        #
-        # `fleet/probe-rails#24`, 2026-08-18 : conflit git REEL et DEFINITIF
-        # (`git merge-tree` -> `CONFLICT (content): journal.txt`), et Gitea rend
-        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours.
-        # S'en remettre au libelle seul fait donc retenter un resultat connu d'avance : mesure sur
-        # ce cas, 1447 tentatives en 21 h, ~2880 requetes/jour, et 1,6 s de `sleep` a chaque tick
-        # du pilote.
-        #
-        # L'ETAT, LUI, EST FIABLE. On relit la PR : `mergeable: false` tranche le definitif sans
-        # dependre d'une chaine. C'est un GET sur un chemin deja en echec — le cas nominal (200) ne
-        # le paie jamais.
+        # Bench fleet/probe-rails#24, 2026-08-18 : un conflit git reel rendait aussi
+        # "Please try again later". Le texte seul avait provoque des reprises repetees.
         case still_unmergeable?(config, repo, index) do
           true ->
             Logger.warning(
@@ -75,21 +56,8 @@ defmodule Fleet.Forge.Client.Merge do
     end
   end
 
-  # ⚠ CECI N'EST PAS UNE CLASSIFICATION, ET LA DISTINCTION EST TOUT LE SOIN DE CE BLOC.
-  #
-  # `Fleet.Pilot.MergeOutcome` est l'autorite qui dit ce qu'un echec de merge EST — conflit, brouillon,
-  # politique, deja fusionne, inconnu — et elle reste seule a le dire : la frontiere interdit d'ici
-  # de l'appeler, et c'est tant mieux, parce qu'un second classificateur donnerait un second avis.
-  # Le rail de routage la consulte deja apres coup (`Remediation.route_merge_failure`).
-  #
-  # Ce qu'on lit ici est UN BIT, et il ne sert qu'a une chose : decider s'il vaut la peine de
-  # REESSAYER. « La forge se dit encore non-fusionnable » ne nomme aucune cause ; elle dit seulement
-  # que retenter dans 800 ms n'y changera rien. Un brouillon y tombe aussi, et c'est correct : le
-  # retenter est tout aussi vain.
-  #
-  # LA LECTURE RATEE VAUT `false`, jamais `true`. Se tromper de ce cote-la coute une tentative de
-  # plus ; se tromper de l'autre transformerait un transitoire en blocage annonce sur une forge qui
-  # n'a simplement pas repondu.
+  # Une lecture echouee ou une autre forme vaut false pour permettre la reprise,
+  # sans prouver la fusion possible. Le bit ne classe pas la cause ni sa duree.
   defp still_unmergeable?(config, repo, index) do
     case http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}") do
       {:ok, %{"mergeable" => false}} -> true
@@ -98,7 +66,8 @@ defmodule Fleet.Forge.Client.Merge do
   end
 
   @doc false
-  # Le diagnostic du refus : transitoire (on retente) ou reel (on abandonne).
+  # Reprend si budget > 1 et sous-chaine "try again later" (casse ignoree).
+  # Un champ message present mais non binaire leve ; delay n'est pas valide ici.
   @spec do_merge_retry(
           term(),
           String.t(),
@@ -120,26 +89,12 @@ defmodule Fleet.Forge.Client.Merge do
       Process.sleep(delay)
       do_merge(config, repo, index, method, delay, attempts_left - 1)
     else
-      # DEUX SILENCES DANS UN SEUL `else`, et le premier est le plus cher.
-      #
-      # Gitea rend `405` pour deux faits opposes : « la mergeabilite est encore en cours de
-      # calcul » (transitoire, il faut reessayer) et « cette PR n'est pas fusionnable »
-      # (definitif : conflits, controles en echec). Rien de STRUCTURE ne les separe dans la
-      # reponse recue — seul le libelle anglais le fait, `"try again later"`. La detection
-      # textuelle reste donc, faute d'autre chose, mais elle ne peut plus DEGRADER EN SILENCE :
-      # le jour ou Gitea reformule ce message, tout `405` devient « definitif », les merges
-      # echouent, et rien ne disait pourquoi — seule la branche RECONNUE ecrivait au journal.
-      #
-      # Le corps entier est journalise, et c'est delibere : il est a la fois le diagnostic du
-      # jour et la matiere du jour ou un champ structure apparaitra. On ne peut pas affirmer
-      # qu'il n'en existe pas — on peut faire en sorte de le voir arriver.
+      # Distingue budget epuise et texte inconnu pour rendre une reformulation visible.
+      # Le log dit DEFINITIVE, mais l'heuristique ne prouve pas la permanence du refus.
       _ =
         if merge_checking?(body) do
           Logger.warning(
-            # ⚠ PAS DE COMPTE DANS CE MESSAGE : le budget arrive ICI en PARAMETRE, et citer
-            # l'attribut du client (`@merge_checking_retries`) ferait mentir le message le jour ou
-            # un site d'appel change le budget. Le compte exact vit dans les `info` de reprise
-            # ci-dessus.
+            # Budget fourni par l'appelant, pas necessairement le defaut du client.
             "ForgeClient: merge_pr ##{index} — mergeability still computing after the configured " <>
               "retry budget, giving up: #{inspect(body)}"
           )
@@ -161,7 +116,8 @@ defmodule Fleet.Forge.Client.Merge do
   defp merge_checking?(_), do: false
 
   @doc false
-  # Retire la branche de tete apres fusion, en respectant l'espacement d'ecriture.
+  # Supprime head.ref dans repo apres WriteSpacing.gap(), sans verifier le depot de tete.
+  # Les erreurs retournees sont journalisees puis :ok ; une exception peut encore remonter.
   @spec delete_head_branch_spaced(Transport.config(), String.t(), integer()) :: :ok
   def delete_head_branch_spaced(config, repo, index) do
     with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),

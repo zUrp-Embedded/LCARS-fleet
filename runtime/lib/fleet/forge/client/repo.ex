@@ -1,13 +1,9 @@
 defmodule Fleet.Forge.Client.Repo do
   @moduledoc """
-  **Repo provisioning** in the agent machine — sub-domain of `Fleet.Forge.Client`:
-  repo creation, discovery by org-membership (WS3), branch-protection, the repo's forge
-  identity. (Admission is org membership, managed UPSTREAM by the human admin — no
-  server-side admission marker, no mutable topic, no collaborator management here.)
-
-  The *seam-faced* ops (`repo_id`, `list_org_repos`) are forwarded by `ForgeClient` (the module injected
-  by the `:forge_client` seam stays it); the provisioning ops (`create_repo`, `protect_branch`)
-  are called directly by `Fleet.Project.Onboard`.
+  Repository provisioning, discovery, identity and branch protection.
+  Admission membership is managed upstream by the human admin; this module reads it.
+  `Fleet.Forge.Client` forwards seam operations such as `repo_id` and `list_org_repos`;
+  `Fleet.Project.Onboard` calls provisioning operations directly.
   """
 
   import Fleet.Forge.Client.Transport,
@@ -26,7 +22,7 @@ defmodule Fleet.Forge.Client.Repo do
   @doc """
   Creates an organization or token-owned repository, initialized on `main` by default.
 
-  Returns `{:ok, :already_exists}` on conflict so provisioning is replayable.
+  Any HTTP 409 returns `{:ok, :already_exists}` without checking the existing configuration.
   """
   @spec create_repo(String.t(), Keyword.t()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
@@ -55,9 +51,9 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Generates a fresh repository from a native forge template, copying content, labels, and topics
-  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with
-  but not branch protection. Returns `:template_missing` on 404 and `:already_exists` on 409.
+  Requests template generation with git content, labels and topics; owner defaults to `fleet`.
+  The 2026-07-18 forge bench copied those fields but not branch protection.
+  Maps HTTP 404 to `:template_missing`, 409 to `:already_exists`, without checking existing state.
   """
   @spec generate_repo(String.t(), String.t(), keyword()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
@@ -84,7 +80,7 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Marks or unmarks a repository as a native forge template.
+  Sets the template flag; HTTP success is accepted without readback.
   """
   @spec set_template(String.t(), boolean(), keyword()) :: :ok | {:error, term()}
   def set_template(repo, template?, opts \\ []) when is_binary(repo) and is_boolean(template?) do
@@ -95,7 +91,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Returns every repository full name in an organization, using fail-loud pagination.
+  Paginates organization repositories and extracts full_name, dropping nil values only.
+  Visibility comes from the forge response; names and individual entries are not validated.
   """
   @spec list_org_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_org_repos(org, opts \\ []) when is_binary(org) do
@@ -107,15 +104,10 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Every repository full name in a HUMAN's personal space (`<login>/<name>`).
-
-  The counterpart of `list_org_repos/2` for the other half of the model: a DEPOSITED project lives
-  in its author's personal space, an ENROLLED one lives in its catalogue's org, and the LOCATION is
-  the state. Listing the former is listing the candidates.
-
-  The system token suffices — measured 2026-08-11: it carries `read:user`, so `200`. A ROLE token
-  does not (`write:issue,write:repository`) and gets a `403` that NAMES the missing scope. Gitea
-  tokens REPLACE permissions instead of adding to them: the scope is the question, not the account.
+  Paginates a user's repositories, extracting full_name and dropping nil values only.
+  Personal-space deposits are candidates; enrolled projects live in the catalogue organization.
+  On the 2026-08-11 bench the system token's read:user scope succeeded, while a role token
+  with write:issue/write:repository received 403 for the missing scope.
   """
   @spec list_user_repos(String.t(), Keyword.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list_user_repos(login, opts \\ []) when is_binary(login) do
@@ -126,29 +118,10 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  EVERY repository this token can SEE, across the whole forge — orgs and personal spaces alike.
-
-  ## Why `/repos/search` and not `/user/repos`
-
-  Measured 2026-08-16 on Gitea 1.26, with the SYSTEM token, against a deposit sitting in the
-  master's personal space:
-
-      /user/repos     -> fleet/lcars fleet/project-template fleet/ticket-drill
-      /repos/search   -> fleet/lcars fleet/project-template admiral/sonde-depot fleet/ticket-drill
-
-  `/user/repos` answers "what this account owns or has access to", which is the wrong question: a
-  deposit in someone ELSE's personal space is neither. `/repos/search` answers "what is visible",
-  which is the one that matches the model — a deposited catalogue lives in its author's space and
-  the LOCATION is the state.
-
-  ## What a PRIVATE deposit costs us: nothing
-
-  Same measurement, after flipping that repo to private: it vanishes from `/repos/search`. Gitea
-  enforces the rule on its own, so there is no visibility code here and none is wanted — an
-  invisible deposit is invisible, and its absence from the list IS the message to its owner.
-
-  The page arrives in an envelope (`%{"ok" => true, "data" => [...]}`), unlike every other list
-  endpoint; the pagination is the shared one, told which key to take.
+  Paginates `/repos/search`, unwraps `data` and keeps map entries (without checking `ok`).
+  On Gitea 1.26, 2026-08-16, the system token found admiral/sonde-depot here but not in
+  `/user/repos`; making that deposit private removed it from these search results.
+  Discovery relies on server visibility, with no local filter excluding all private repositories.
   """
   @spec search_repos(Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def search_repos(opts \\ []) do
@@ -159,30 +132,13 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  The HEAD of a branch as `%{sha, message}` — the sha, plus what the commit SAYS about itself.
-
-  ## `branch_head/3` already answers the sha, and this does not replace it
-
-  It exists next to it because two callers ask two different questions of the same endpoint: the
-  seal wants the tip of a branch it is about to merge, this wants to know whether a catalogue's
-  source has moved. Merging them would make the seal carry a message it never reads.
-
-  ## Why the message is load-bearing here, and a sha alone is not
-
-  A catalogue's store (`<name>/_catalogue`) is a PROJECTION of its deposit: a fresh single commit
-  reflecting the deposit's tree. Two commits of identical content therefore never share a sha, so
-  comparing the two HEADs answers "different commit", which is always true, rather than "the source
-  moved", which is the question. Measured on a bench 2026-08-16: a catalogue installed thirty
-  seconds earlier reported UPDATABLE.
-
-  Nor does the forge hand out a content hash to compare instead. Gitea's `/git/trees/{sha}` echoes
-  back the sha it was given rather than resolving the tree object, and `/git/commits/{sha}` reports
-  `commit.tree.sha` equal to the commit sha — both measured on 1.26.1.
-
-  So the projection CARRIES what it projects: `push_store` writes a `Source-Commit:` trailer, and
-  this is what reads it back. Coupling to a message format is a real cost, and it is bounded — the
-  message is ours, written by our gesture, read by our code, and a missing trailer answers "unknown"
-  rather than "current".
+  Returns `%{sha, message}` for callers tracking a catalogue projection's source.
+  The store is a fresh commit, so different HEADs need not mean different content.
+  On the 2026-08-16 Gitea 1.26.1 bench, `/git/trees/{sha}` echoed the input SHA and
+  `/git/commits/{sha}` reported the commit SHA as tree.sha; neither supplied the needed tree hash.
+  `push_store` therefore writes `Source-Commit:` in the message. Parsing that trailer and
+  treating its absence as unknown belong to the caller; this function returns the raw message.
+  A missing message defaults to "", but present values are unchecked. HTTP 404 becomes :not_found.
   """
   @spec branch_commit(String.t(), String.t(), Keyword.t()) ::
           {:ok, %{sha: String.t(), message: String.t()}} | {:error, term()}
@@ -205,7 +161,7 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Returns the repository's default branch. Import callers currently require it to be `main`.
+  Returns a binary default branch, including an empty string; no main-branch policy is enforced here.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def default_branch(repo, opts \\ []) when is_binary(repo) do
@@ -220,7 +176,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Returns a branch tip SHA for the seal's provenance check.
+  Returns a binary branch tip for the seal's provenance check, without SHA format validation.
+  Unlike branch_commit/3, HTTP 404 retains the transport error shape.
   """
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def branch_head(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -235,12 +192,9 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Distingue une branche PROUVEE absente (`{:ok, false}`) d'une forge qu'on n'a pas su lire.
-
-  ⚠ JAMAIS `false` DANS LES DEUX CAS : ses trois appelants en tirent trois decisions DIFFERENTES,
-  et aucune n'est sure sous cette confusion — une protection de branche silencieusement sautee, un
-  import declare satisfait, une face republiee par-dessus une existante. Meme distinction que
-  `user_exists?/2` : le 404 est une REPONSE de la forge, tout le reste est une absence de reponse.
+  HTTP success => true, HTTP 404 => false; other errors propagate.
+  Callers use this distinction for protection, import and publication decisions.
+  It classifies the response, without validating its body or distinguishing a masked 404.
   """
   @spec branch_exists?(String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
@@ -255,11 +209,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Deletes a branch, reporting `:deleted` or `:absent` — never conflating either with a failure.
-
-  A 404 SATISFIES a caller that asked for the branch to be gone, so it is a success and not an
-  error. Everything else is reported: this primitive exists to UNDO a mutation, and a compensation
-  that cannot prove it removed what it created must never be announced as clean.
+  HTTP success => :deleted, HTTP 404 => :absent, without readback.
+  Other errors propagate so compensation callers can report an unsuccessful cleanup.
   """
   @spec delete_branch(String.t(), String.t(), Keyword.t()) ::
           {:ok, :deleted | :absent} | {:error, term()}
@@ -274,7 +225,7 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Distinguishes a proven missing account (`{:ok, false}`) from a forge failure.
+  HTTP success => true, HTTP 404 => false; other errors propagate.
   """
   @spec user_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
   def user_exists?(username, opts \\ []) when is_binary(username) do
@@ -288,18 +239,9 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Whether the ORGANISATION exists — the forge-side signature that a catalogue is INSTALLED.
-
-  Same proven-absence/error distinction as `user_exists?/2`, and the distinction is the point: an
-  org that is PROVEN missing (`{:ok, false}`) is a catalogue nobody provisioned, while a forge that
-  is merely unreachable (`{:error, _}`) says nothing about it. Collapsing the two would either
-  refuse a legitimate catalogue during an outage, or admit an unprovisioned one when the forge
-  coughs.
-
-  ⚠ `/orgs/{name}` and NOT `/users/{name}`, though Gitea would answer both. An org is a row of the
-  same `user` table (`type = Organization`), so a PERSONAL account named `web` makes
-  `/users/web` return 200 while no org `web` exists — and it is the org that carries a catalogue's
-  projects and role accounts. Asking the wrong endpoint would sign an installation that is not one.
+  Tests `/orgs/{name}` with the same HTTP mapping as user_exists?/2.
+  `/users/{name}` could also match a personal account, which cannot stand for a catalogue org.
+  Organization existence alone does not verify all catalogue provisioning.
   """
   @spec org_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
   def org_exists?(org, opts \\ []) when is_binary(org) do
@@ -313,9 +255,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Checks team membership with the same proven-absence/error distinction as `user_exists?/2`.
-
-  A missing team is a proven negative membership result. Team discovery is fully paginated.
+  Paginates teams and selects the first matching name, then maps membership HTTP status
+  as user_exists?/2 does. No matching team returns false; a matching team must carry an id.
   """
   @spec team_member?(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
@@ -329,9 +270,6 @@ defmodule Fleet.Forge.Client.Repo do
     end
   end
 
-  # UNE EQUIPE QUI N'EXISTE PAS N'EST PAS UNE ERREUR DE LECTURE : personne n'en est membre, et la
-  # reponse est aussi ferme que le 404 d'en dessous. C'est le `{:error, _}` qui remonte, lui, parce
-  # que « je n'ai pas su demander » ne vaut pas « non ».
   defp member_of_team(nil, _config, _username), do: {:ok, false}
 
   defp member_of_team(%{"id" => id}, config, username) do
@@ -371,12 +309,9 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Whether a repository is PRIVATE on the forge.
-
-  Asked before adopting a deposit, and asked EXPLICITLY rather than inferred from a clone failing:
-  the system token can read a private repo, so a clone would succeed and quietly copy private
-  content into a public org repo. A visibility change nobody asked for is worse than a refusal,
-  and it is invisible at the moment it happens.
+  Compares a map response's private field to literal true. Missing/other values give false;
+  a successful non-map response passes through unchanged despite the spec.
+  Adoption asks explicitly because a successful clone with system credentials need not mean public.
   """
   @spec private?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
   def private?(repo, opts \\ []) when is_binary(repo) do
@@ -387,11 +322,10 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Converges a forge-enforced branch-protection rule and reports `:created`, `:updated`, or
-  `:unchanged`.
-
-  Existing-rule detection requires the forge's precise message across status variants. Readback and
-  patch compare only caller-projected fields; permission and invalid-rule errors remain failures.
+  Creates a protection rule or reconciles an existing one. HTTP 403/409/422 with the
+  case-sensitive substring "already exist" triggers reconciliation; other errors propagate.
+  That path requires atom :rule_name and compares only whitelisted fields supplied by the caller.
+  An empty projection returns :unchanged without reading; successful POST/PATCH has no readback.
   """
   @type protection_outcome :: :created | :updated | :unchanged
 
@@ -407,9 +341,6 @@ defmodule Fleet.Forge.Client.Repo do
 
   defp protection_outcome({:ok, _}, _config, _repo, _rule), do: {:ok, :created}
 
-  # LA FORGE REFUSE UNE REGLE DEJA POSEE AVEC TROIS CODES DIFFERENTS selon la version, et le seul
-  # discriminant stable est le texte. Un « existe deja » est le chemin nominal d'un re-onboarding :
-  # on converge. Tout autre refus sous les memes codes reste une erreur.
   defp protection_outcome(
          {:error, {:http, code, %{"message" => msg}}} = err,
          config,
@@ -445,8 +376,7 @@ defmodule Fleet.Forge.Client.Repo do
     end
   end
 
-  # L'etat DESIRE est deja la, ou il ne l'est pas. On compare sur les seules clefs projetees : la
-  # forge en rend d'autres, et exiger l'egalite complete ferait patcher a chaque tour.
+  # Ignore extra server fields to avoid patching every time or overwriting operator additions.
   defp converge_protection(config, path, projected, existing) do
     if Map.take(existing, Map.keys(projected)) == projected do
       {:ok, :unchanged}
@@ -458,17 +388,9 @@ defmodule Fleet.Forge.Client.Repo do
     end
   end
 
-  # The reconcilable surface = the protection fields the runtime projects, restricted to those
-  # the CALLER actually projected (string keys, the wire's shape on readback). Comparing or
-  # patching MORE would clobber operator enrichments (status checks) the runtime never
-  # projected. The push-door fields (`enable_push*`, `push_whitelist_usernames`) are projected
-  # ONLY by the card-revision lift (`ProjectOnboard.revise_card` — scoped lift-push-restore);
-  # the canonical `protect_main` rule does not name them, so an operator whitelist stays
-  # untouched outside that one deliberate gesture.
-  # `enable_status_check`/`status_check_contexts` ARE projected, and are NOT an "operator
-  # enrichment" to leave alone: measured on a live bench (2026-08-03), every repo had
-  # `enable_status_check: false` and a red CI merged. An enrichment nobody applies is not an
-  # enrichment, it is a hole with a polite name.
+  # Caller-supplied keys only, stringified for wire comparison. Push whitelist fields support
+  # revise_card's lift/push/restore without changing them when protect_main omits them.
+  # Status-check fields are owned too: the 2026-08-03 bench merged red CI with checks disabled.
   @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames enable_status_check status_check_contexts)
 
   defp projected_protection_fields(rule) do
@@ -476,16 +398,11 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Transfers `repo` (`"owner/name"`) to `new_owner`, and returns its new full name.
-
-  Mesure sur une forge de banc (Gitea 1.26) : `202`, et TOUT survit — issues, PR, labels,
-  protection de branche, attribution des commentaires ; l'ancienne URL rend un `301`. Ce qui ne
-  suit PAS est ce qu'on ne veut pas voir suivre : les droits ne se transferent pas, ils se
-  REDERIVENT des teams de l'org d'arrivee.
-
-  Le `202` est un ACCEPTE, pas un fait accompli : Gitea accepte aussi un transfert qui restera
-  PENDING si la cible doit l'approuver. Entre orgs dont on possede les deux, il est immediat — et
-  le lecteur qui compte dessus est le repointage local, qui suit dans le meme geste.
+  Requests transfer and returns full_name, or constructs new_owner/name if the response omits it.
+  HTTP success (including 202) does not prove completion: target approval may leave it pending.
+  A Gitea 1.26 bench preserved issues, PRs, labels, protection and comment attribution, redirected
+  the old URL with 301 and derived permissions from destination teams. This function verifies none
+  of those effects; callers repointing locally must account for transfer state.
   """
   @spec transfer_repo(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def transfer_repo(repo, new_owner, opts \\ [])

@@ -1,35 +1,25 @@
 defmodule Fleet.Forge.Client.Jury do
   @moduledoc """
-  Reads the **jury state** of a PR (native Gitea reviews) — sub-domain of `Fleet.Forge.Client`.
-  Self-contained concern: it reads ONLY `GET .../pulls/{index}/reviews` and derives verdicts/jury/feedback
-  from it; it calls no other forge op (zero coupling to the issues/PR core). `ForgeClient` forwards these
-  functions (the module injected by the `:forge_client` seam stays `ForgeClient`; the implementation lives here).
-
-  The domain subtlety — why this is NOT trivial — is the **commit-scoping** and the fact that
-  Gitea's `requested_reviewers` is VOLATILE: the jury's source of truth is the list of review-records,
-  not the requested field. Details in each `@doc`.
+  Review verdicts, historical jury membership and timeline re-requests for Fleet.Forge.Client.
+  Commit-scoped verdicts come from review records, not requested_reviewers, whose lifecycle
+  differs across forge versions. Returned histories retain the paginator's limits and ordering.
   """
 
   import Fleet.Forge.Client.Transport, only: [resolve_config: 1, paginate: 3]
 
   require Logger
 
-  # Safe encoding of URL segments (path-traversal lock) — single authority UrlSafe.
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
   # The read half of the role <-> forge-account frontier (the write half is `Client.request_review`).
   alias Fleet.Credentials.RoleIdentity
 
   @doc """
-  THE review-routing predicate — the SINGLE truth of "where does a jury stand", shared by the
-  merge gate (`ReviewLifecycle.dispatch_by_verdicts`, fed the defensive UNION of jury sources)
-  and the arch-facing status read (`pr_review_state`'s `outcome`, fed the stable jury). One rule,
-  two inputs — factored so the status surface can NEVER drift from what the gate actually does.
-
-    * `{:pending, [login↓]}` — at least one juror without a decisive verdict (input order kept)
-    * `:no_jury`             — empty jury (zero-judge card or orphan PR — the CARD arbitrates, caller-side)
-    * `:changes_requested`   — full jury, at least one REQUEST_CHANGES in force
-    * `:approved`            — full jury, all APPROVED
+  Shared routing predicate for the gate and status read, which may supply different juries.
+  Empty jury returns no_jury; missing keys return pending in input order before considering
+  refusals. Once all keys exist, any changes_requested wins, otherwise approved.
+  Inputs are not normalized or validated here: an unknown value under a juror key also
+  counts as present and non-refusing. Consumers must supply the typed verdict vocabulary.
   """
   @spec review_outcome([String.t()], %{optional(String.t()) => :approved | :changes_requested}) ::
           {:pending, [String.t()]} | :no_jury | :changes_requested | :approved
@@ -37,30 +27,11 @@ defmodule Fleet.Forge.Client.Jury do
     do: base_outcome(jury, verdicts)
 
   @doc """
-  The same predicate, given what the judges MEASURED and the curve the card declares.
-
-  `verdict = f(rapports, criticité)` — the origin model, and the four-arity is where it finally
-  becomes true. The criticality reaches here as DATA (`policy`, resolved from the card that the
-  project's declared level selected), never as a policy compiled into this module: same doctrine as
-  `spec.ci` and `spec.jury` — the card governs, the engine stays agnostic.
-
-  ## The one rule that keeps this safe
-
-  **A card can only be STRICTER. It never repeals a judge's explicit refusal.** `:changes_requested`
-  in, `:changes_requested` out, whatever the curve says. This is the same line the CI path was
-  corrected onto (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
-  floor, a card's tolerance is a ceiling, and a machine that promotes over an explicit human-shaped
-  refusal is not a policy — it is an override.
-
-  So the ONLY thing a policy can do is turn an `:approved` jury into `:changes_requested`, when a
-  judge's own measurements exceed what this card tolerates. That case is real and is the whole
-  point of the model: an approval carrying a `critical` finding is a judge that documented a defect
-  and waved it through, and on a deliverable that can hurt someone, the card is what says no.
-
-  Leniency is NOT expressible here, deliberately — a low-criticality card grants it by declaring no
-  jury at all (`c0-poc`: `jury: []`), which is honest: nobody judged, so nobody was overruled.
-
-  `policy` nil / no `block_at` / empty findings ⟹ IDENTICAL to `review_outcome/2`, byte-for-byte.
+  Applies the caller's policy only after base_outcome is approved. A blocking finding from
+  a named juror enters arbitration: no arbiter verdict yields gray_zone; an arbiter approval
+  or refusal decides. The arbiter cannot override pending/no_jury or an explicit jury refusal.
+  Only a string-keyed block_at policy is consulted, through FindingsWire.blocks?/2.
+  No policy, no block_at or no blocking jury findings leaves the base outcome unchanged.
   """
   @spec review_outcome(
           [String.t()],
@@ -71,14 +42,7 @@ defmodule Fleet.Forge.Client.Jury do
           {:pending, [String.t()]} | :no_jury | :changes_requested | :approved | :gray_zone
   def review_outcome(jury, verdicts, findings, policy, arbiter \\ nil)
       when is_list(jury) and is_map(verdicts) and is_map(findings) do
-    # DEUX ÉTAGES, ET L'ORDRE EST LE MODÈLE : le PLANCHER d'abord (ce que le jury dit), le PLAFOND
-    # de la carte ensuite, et il ne s'applique qu'à une approbation. Écrit comme un `cond` à cinq
-    # branches, le même comportement laissait croire que la courbe est un juré de plus ; écrit
-    # ainsi, on lit qu'elle ne peut QUE durcir — il n'existe aucun chemin par lequel elle promeut.
-    #
-    # C'est aussi ce qui rend `review_outcome/2` prouvablement incapable de rendre `:gray_zone`
-    # (Dialyzer le vérifie) : sans politique il n'y a pas de zone grise, et cette impossibilité
-    # est maintenant STRUCTURELLE au lieu d'être une propriété qu'il fallait croire sur parole.
+    # Judge outcomes precede policy: arbitration cannot repeal a jury refusal.
     case base_outcome(jury, verdicts) do
       :approved ->
         if policy_blocks?(jury, findings, policy),
@@ -90,8 +54,6 @@ defmodule Fleet.Forge.Client.Jury do
     end
   end
 
-  # Le prédicat NU : jury complet, un refus l'emporte. C'est l'agrégation booléenne d'origine, et
-  # elle reste le socle sur lequel tout le reste se pose.
   defp base_outcome(jury, verdicts) do
     pending = jury -- Map.keys(verdicts)
 
@@ -110,20 +72,7 @@ defmodule Fleet.Forge.Client.Jury do
     end
   end
 
-  # C3 — LA ZONE GRISE, ET ELLE A UNE DÉFINITION ÉTROITE : le jury a TOUT approuvé, et c'est la
-  # courbe de la carte qui refuse. Rien d'autre n'est gris. Un refus de juge est net (plancher), une
-  # PR propre est nette ; ici la machine s'apprête à renverser une approbation humaine-de-forme sur
-  # la foi de mesures que ce même juge a écrites. C'est exactement le cas que le SP du gatekeeper
-  # décrit — « tu es invoqué quand le runtime ne peut pas trancher seul ».
-  #
-  # L'arbitre n'est PAS un juré de plus : sa voix n'est lue QUE dans cette zone. Hors d'elle il ne
-  # peut ni sauver un livrable qu'un juge refuse (le plancher est au-dessus de lui), ni bloquer une
-  # PR que rien ne bloque (F-C061 : seuls les rôles du jury de la carte pèsent sur le verdict). Il
-  # tranche une contradiction, il ne re-juge pas le travail.
-  #
-  # `:gray_zone` quand personne n'a encore arbitré — un état TERMINAL du prédicat, que le routage
-  # transforme en convocation ; et sa lecture par la surface arch dit à un humain « le rail attend
-  # un arbitrage », au lieu de lui montrer un « approuvé » qui ne se sellera jamais.
+  # The arbiter matters only when the approved jury's findings conflict with policy.
   defp arbitrated(_verdicts, nil), do: :gray_zone
 
   defp arbitrated(verdicts, arbiter) do
@@ -134,9 +83,7 @@ defmodule Fleet.Forge.Client.Jury do
     end
   end
 
-  # The findings of a reviewer who is NOT on the jury are not consulted: a human passing by and
-  # leaving a review does not get to raise the bar of a card they were never named in — the same
-  # `Map.take(verdicts, jury)` discipline the clause above already applies to verdicts.
+  # Outsiders' findings cannot raise the card's bar, just as their verdicts cannot veto its jury.
   defp policy_blocks?(jury, findings, %{"block_at" => block_at}) do
     findings
     |> Map.take(jury)
@@ -146,45 +93,18 @@ defmodule Fleet.Forge.Client.Jury do
   defp policy_blocks?(_jury, _findings, _policy), do: false
 
   @doc """
-  Jury state of a PR in ONE fetch (`GET .../pulls/{index}/reviews`): `verdicts` (decisive per
-  judge), `reviewers` (the jury SET) and `outcome` (cf. `review_outcome/2`).
+  Paginates native reviews and returns verdicts, reviewers, records, findings and outcome.
+  Requires a nonempty binary head_sha or explicit :unscoped; nil/absent is refused before HTTP.
+  Verdicts use the last non-dismissed APPROVED/REQUEST_CHANGES in server order per downcased login,
+  filtered by exact commit_id when scoped. This avoids carrying stale approvals/refusals onto
+  another commit; requested_reviewers and automatic dismissal do not establish that scope.
 
-  **Verdicts — why per-judge and not `requested_reviewers`**: Gitea 1.26 does NOT clear
-  `requested_reviewers` when a judge has reviewed, and the DELETE is a no-op on an already-active
-  reviewer → we CANNOT rely on it to know "who is left to judge". The SOURCE OF TRUTH = the list
-  of reviews: a judge has a **decisive verdict** iff its last non-dismissed review is APPROVED or
-  REQUEST_CHANGES (COMMENT/PENDING/REQUEST_REVIEW are NOT decisive), key = **downcased** login.
-
-  **Commit-scoping (`:head_sha`)**: a verdict is only valid for the COMMIT it judged. Passing
-  `head_sha: pr.head.sha` (prod path) → only reviews `commit_id == head_sha` count; a review
-  on an earlier commit is STALE (the code no longer exists). Crucial for REQUEST_CHANGES: Gitea
-  NEVER dismisses it on push (≠ stale approvals, dismissed by branch-protection) — without scoping, a
-  stale REQUEST_CHANGES stays "active", its judge is never re-dispatched (it already has a verdict) and the
-  PR would loop in infinite rework. Scoping makes it `pending` → re-judged on the current code.
-
-  **The jury SET is NOT read from `pr.requested_reviewers`**: that field is VOLATILE (Gitea
-  alters it unreliably — a judge can DISAPPEAR from it without having voted, which would merge on a
-  half-jury). STABLE source = the review-records, which persist: a `REQUEST_REVIEW` =
-  "this judge was requested"; an `APPROVED`/`REQUEST_CHANGES` = "it voted". The caller (`dispatch_review`)
-  unions with `requested_reviewers` (defensive) and computes `pending = jury -- verdicts` → a
-  never-voted judge stays `pending` (spawned), NEVER skipped.
-
-  ## Returns
-    * `{:ok, %{verdicts: %{login↓ => :approved | :changes_requested}, reviewers: [login↓],
-      records: [%{"login", "verdict", "submitted_at", "body"}], outcome:
-      review_outcome(reviewers, verdicts)}}` — `outcome` is computed HERE (pilot-side)
-      and carried as DATA so a seam consumer (`issue_status`) renders the gate's own
-      predicate without re-implementing it.
-    * `{:error, term()}` — HTTP/transport/config
-
-  `records` carries what `verdicts` cannot: the SUBSTANCE and the TIMING of each in-force verdict.
-  The two are derived from ONE grouping (`decisive_by_reviewer/2`), because "which review is in
-  force for this reviewer" is a single question and two implementations of it would drift — the
-  routing would then act on one answer while the human read the other.
-
-  Why it matters, and it is measured: a rubber stamp and a real review are indistinguishable in
-  `verdicts` — both are `:approved`. On the forge they never are: two `submitted_at` seconds apart
-  versus a minute, and two incomparable bodies. `records` is what lets a reader tell them apart.
+  Membership instead uses all REQUEST_REVIEW/APPROVED/REQUEST_CHANGES records, including stale
+  and dismissed ones. Pilot combines sources defensively; this set is not the declared card jury.
+  Known accounts are projected to roles, unknown logins retained; projection collisions are not
+  detected. Records/findings share decisive selection. Bodies and timestamps help review the
+  evidence, but do not prove review quality. outcome uses verdict_policy/verdict_arbiter options
+  on this membership, which can differ from the gate's input jury.
   """
   @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
           {:ok,
@@ -198,19 +118,7 @@ defmodule Fleet.Forge.Client.Jury do
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # NO IMPLICIT UNSCOPED MODE. A `Keyword.get/2` here would send an ABSENT key and a `nil` VALUE
-    # alike to "count every review ever placed on this PR" — and `nil` is exactly what the
-    # production caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR object
-    # omits `head.sha` (a lighter listing shape, a Gitea version, a partial response).
-    #
-    # WHAT THAT COSTS: a PR approved on commit A and then completed by commit B reads as still
-    # approved, `review_outcome/2` yields `:approved`, the routing promotes, and `MergeAndPromote`
-    # merges. Code no judge ever saw lands on the main branch, under a seal that attests the
-    # opposite.
-    #
-    # The unscoped mode exists — some callers legitimately want every review — but it is ASKED FOR
-    # (`head_sha: :unscoped`), never inherited from a missing key. That is the whole difference
-    # between a default and a decision.
+    # A missing pr.head.sha must not silently widen the read to reviews of earlier commits.
     case Keyword.fetch(opts, :head_sha) do
       {:ok, :unscoped} -> do_review_state(repo, index, opts, nil)
       {:ok, sha} when is_binary(sha) and sha != "" -> do_review_state(repo, index, opts, sha)
@@ -224,11 +132,7 @@ defmodule Fleet.Forge.Client.Jury do
          {:ok, reviews} <- paginated_reviews(config, repo, index) do
       decisive = decisive_by_reviewer(reviews, head_sha)
 
-      # THE FORGE ANSWERS IN LOGINS, THE FLEET REASONS IN ROLES — translated here, at the frontier,
-      # so nothing above ever holds an account name. Left untranslated, every fleet judge came back
-      # as `fleet_qualifier` and got measured against a card that says `qualifier`: F-C061 filed the
-      # jury itself as `foreign`, and the verdicts it carried were dropped. A login belonging to no
-      # role stays verbatim — that is a HUMAN, and it must remain visibly foreign.
+      # Project known accounts to the card's role vocabulary; retain unknown logins as outsiders.
       verdicts =
         Map.new(decisive, fn {login, r} ->
           {RoleIdentity.role_or_login(login), decisive_verdict(r["state"])}
@@ -244,12 +148,7 @@ defmodule Fleet.Forge.Client.Jury do
          reviewers: reviewers,
          records: to_records(decisive),
          findings: findings,
-         # C2 — la courbe de la carte s'applique ICI AUSSI, et c'est la moitié qui compte de ce
-         # geste. Cette sortie est celle que lit l'arch ; le gate calcule la sienne sur l'union
-         # défensive du jury. Deux ENTRÉES, une RÈGLE — donc la politique doit entrer des deux
-         # côtés ou d'aucun : nourrir le gate seul afficherait « approuvé » à un humain pendant que
-         # le rail renvoie en rework, ce qui est exactement la seconde vérité que le @doc de
-         # `review_outcome/2` existe pour interdire. Absente des opts ⟹ agrégation booléenne.
+         # Status consumers need the same policy rule as the gate, even with different membership.
          outcome:
            review_outcome(
              reviewers,
@@ -262,13 +161,7 @@ defmodule Fleet.Forge.Client.Jury do
     end
   end
 
-  # C2 — THE MACHINE VERDICT, READ OUT OF THE BODIES THIS FUNCTION ALREADY HOLDS. The judges'
-  # `findings` rides its own review (`Fleet.FindingsWire`), so it arrives commit-scoped for
-  # free: the same `reject_stale_reviews` that decides which VERDICT counts decides which findings
-  # count, with no second rule to keep in sync. A judge that emitted nothing simply has no key --
-  # absence is a fact the consumer reads, never an error invented here.
-  #
-  # Keyed by ROLE like `verdicts`, and for the same reason: no account name leaves this module.
+  # Findings share verdict selection/scope by travelling in the same review body.
   defp findings_by_role(decisive) do
     decisive
     |> Enum.reduce(%{}, fn {login, r}, acc ->
@@ -276,20 +169,8 @@ defmodule Fleet.Forge.Client.Jury do
         {:ok, findings} ->
           Map.put(acc, RoleIdentity.role_or_login(login), findings)
 
-        # A block that is present and broken is NOT the same fact as no block -- and DROPPING it
-        # spends the difference the moment it matters. Under a card that declares a floor, a
-        # dropped payload is read downstream as "this judge measured nothing", so an unreadable
-        # measurement REMOVES a block instead of raising one: a gray zone that owes an arbitration
-        # gets sealed as `:approved`, with a log line as its only witness. Measured 2026-08-19 on
-        # the two shipped cards that declare `block_at: critical`.
-        #
-        # So it is RECORDED, as a fact of its own kind. Not as a fabricated finding -- inventing a
-        # `critical` nobody measured would put a defect in the record -- but as the honest one:
-        # a measurement exists here and cannot be read. `FindingsWire.blocks?/2` answers `true` for
-        # it whenever a floor is declared, because *unknown* must not be spent as *no*. A card with
-        # no curve is untouched: no floor, no question, same behaviour as before.
-        #
-        # The binary verdict stays sovereign either way -- this is a ceiling, the judge is a floor.
+        # Preserve unreadability as its own sentinel: dropping it would bypass a declared
+        # findings floor. FindingsWire blocks it under that policy without inventing a severity.
         {:error, :undecodable} ->
           Logger.warning(
             "Jury: #{login}'s review carries a findings block that does not decode — " <>
@@ -304,7 +185,6 @@ defmodule Fleet.Forge.Client.Jury do
     end)
   end
 
-  # F-C069
   defp paginated_reviews(config, repo, index) do
     path = "/repos/#{encode_repo(repo)}/pulls/#{index}/reviews"
 
@@ -328,17 +208,8 @@ defmodule Fleet.Forge.Client.Jury do
     |> Enum.uniq()
   end
 
-  # Last decisive review PER reviewer (downcased login → verdict atom). Gitea lists in creation
-  # order → `List.last` of a group = that reviewer's IN-FORCE review. When `head_sha` is provided
-  # (prod path, set by `dispatch_review` from `pr.head.sha`), a verdict is **COMMIT-SCOPED**: only
-  # the one placed on the CURRENT commit (`commit_id == head_sha`) counts; a review on an earlier commit
-  # is STALE — the judged code no longer exists, the judge must re-judge. Indispensable because Gitea does
-  # NOT dismiss a REQUEST_CHANGES on push (only stale approvals via branch-protection are): without this
-  # filter, a stale REQUEST_CHANGES that is never re-dispatched blocks the PR FOREVER.
-  # The IN-FORCE review per reviewer, as the raw forge record. ONE definition of "in force", from
-  # which both the routing verdict and the human-facing record derive: two implementations of the
-  # same question drift, and the gate would then route on one answer while the architect reads the
-  # other.
+  # Last in server order, not max timestamp/id. Later COMMENT/PENDING records do not repeal
+  # a decisive review. Unknown/missing login can form an empty-string group here.
   defp decisive_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -348,21 +219,12 @@ defmodule Fleet.Forge.Client.Jury do
     |> Map.new(fn {login, revs} -> {login, List.last(revs)} end)
   end
 
-  # String keys and string values: these records cross the MCP seam and are rendered as JSON to an
-  # agent. An atom verdict would serialize as a bare string anyway — saying so here keeps the shape
-  # honest rather than leaving it to Jason.
-  #
-  # A body is kept VERBATIM, empty string included: "this judge approved and wrote nothing" is a
-  # FACT about the review, and it is precisely the one worth seeing. Dropping empty bodies would
-  # erase the rubber stamp this exists to make visible.
+  # String verdicts for MCP. Keep empty bodies visible; nil/false becomes "". Timestamps and
+  # truthy bodies are not type-validated, and sorting here does not alter decisive selection.
   defp to_records(decisive) do
     decisive
     |> Enum.map(fn {login, r} ->
       %{
-        # Fleet-side name, like `verdicts` and `reviewers` above: an account name never leaves this
-        # module. That is the invariant the whole fix rests on — one frontier, translated once — and
-        # it is also what a reader wants, since the rework brief built from these records names the
-        # judge to a pod whose world is made of roles.
         "login" => RoleIdentity.role_or_login(login),
         "verdict" => Atom.to_string(decisive_verdict(r["state"])),
         "submitted_at" => r["submitted_at"],
@@ -418,10 +280,11 @@ defmodule Fleet.Forge.Client.Jury do
   @doc """
   Returns downcased judges with an unanswered re-request after a prior review.
 
-  Read from the TIMELINE, because neither source above answers it: the review-records are not
-  dismissed on re-request (verified live) and `requested_reviewers` only shows the current state. The paginated
-  timeline is counted rather than timestamp-ordered because forge timestamps have second
-  granularity. Removals cancel requests; truncated or malformed timelines fail.
+  Counts timeline additions minus removals minus reviews, requiring at least one review.
+  Avoids second-resolution timestamp comparisons but does not establish event chronology.
+  Names are downcased logins, not projected roles. Missing fields are often ignored; malformed
+  nested shapes can raise. Pagination errors propagate, without a guarantee against silent
+  server truncation. Review records/requested_reviewers alone do not retain this request history.
   """
   @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
           {:ok, [String.t()]} | {:error, term()}

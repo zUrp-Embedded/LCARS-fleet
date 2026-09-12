@@ -1,19 +1,8 @@
 defmodule Fleet.Forge.Client.Signing do
   @moduledoc """
-  La signature des commentaires : qui a le droit d'ecrire un marqueur que le runtime relira.
-
-  Un marqueur de protocole pose en commentaire est une INSTRUCTION pour la machine a etats. S'il
-  suffisait d'ecrire le texte pour qu'il compte, n'importe quel compte de la forge pourrait piloter
-  le rail depuis un commentaire. La signature est ce qui distingue un marqueur POSE PAR LE SYSTEME
-  d'un marqueur qu'un humain a recopie.
-
-  `trusted_logins/2` appelle `Fleet.Forge.Client.role_login/3`, qui reste sur le client : c'est un
-  cycle d'appel entre deux modules d'une meme boundary, prefere a un deplacement qui toucherait la
-  surface publique.
-
-  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
-  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
-  qu'elles traversent une frontiere de module, `@doc false` le dit.
+  Deduplication par marqueur et login d'auteur, interne a `Fleet.Forge.Client`.
+  La « signature » est une sous-chaine du corps, pas une signature cryptographique.
+  Le retour vers `Fleet.Forge.Client.role_login/2` reste dans la meme boundary.
   """
 
   alias Fleet.Forge.Client.Transport
@@ -25,7 +14,7 @@ defmodule Fleet.Forge.Client.Signing do
   import Fleet.Forge.Client.UrlSafe, only: [encode_repo: 1]
 
   @doc false
-  # Le commentaire est-il signe par un compte de confiance — sinon on le dit.
+  # Lecture/identite systeme invérifiable => avertit et retourne false pour permettre le POST.
   @spec signed_or_warn(Transport.config(), String.t(), integer(), String.t(), keyword()) ::
           boolean()
   def signed_or_warn(config, repo, issue_number, sig, opts) do
@@ -45,13 +34,8 @@ defmodule Fleet.Forge.Client.Signing do
     end
   end
 
-  # ⚠ UN `false` NU DIRAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menent
-  # a poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
-  # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
-  # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
-  # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
-  # ailleurs, plus tard, et loin d'ici. Rendre le doute distinct est ce qui permet de le NOMMER au
-  # moment ou il naît ; c'est le seul endroit ou la correlation existe encore.
+  # Distinguer absence et lecture impossible permet de signaler le risque de doublon
+  # (budget de rounds, sceau, escalade) sans supprimer une publication legitime.
   defp comment_signed?(config, repo, issue_number, sig, opts) do
     case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       {:ok, comments} when is_list(comments) ->
@@ -68,16 +52,12 @@ defmodule Fleet.Forge.Client.Signing do
     end
   end
 
-  # Counted markers trust the system author; observability markers may opt into any author.
+  # dedup_any_author saute la resolution des identites : un tiers peut alors inhiber le POST.
   defp trusted_comments(comments, config, opts) do
     if Keyword.get(opts, :dedup_any_author, false) do
       {:ok, comments}
     else
-      # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant ecrit
-      # quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur » laisserait un tiers
-      # SUPPRIMER un commentaire legitime en postant sa signature en premier ; s'y limiter rendrait
-      # la dedup aveugle a tout ce qui est signe par un role, c'est-a-dire a la quasi-totalite de ce
-      # qu'elle garde.
+      # Systeme et role demande, pour retrouver aussi les publications sous compte de role.
       keep_trusted(comments, trusted_logins(config, opts))
     end
   end
@@ -85,8 +65,6 @@ defmodule Fleet.Forge.Client.Signing do
   defp keep_trusted(comments, {:ok, logins}),
     do: {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-  # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun commentaire de
-  # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a ecrit quoi.
   defp keep_trusted(_comments, {:error, why}), do: {:unverified, {:trusted_logins, why}}
 
   @doc false
@@ -102,8 +80,7 @@ defmodule Fleet.Forge.Client.Signing do
   defp with_role_login(bot, role, opts) when is_binary(role) do
     case Fleet.Forge.Client.role_login(role, opts) do
       {:ok, login} -> {:ok, [bot, login]}
-      # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
-      # publication pour une question de dedup.
+      # Toute erreur de resolution du role garde silencieusement le systeme seul.
       {:error, _} -> {:ok, [bot]}
     end
   end
