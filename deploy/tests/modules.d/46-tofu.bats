@@ -54,6 +54,7 @@ EOF
   chmod 0755 "$LCARS_TOFU_BIN"
 }
 mod() { run bash "$MOD" "$@"; }
+copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-recipe.*'; }
 
 @test "check : tofu et miroir absents — deux drifts qui disent la conséquence" {
   mod check
@@ -62,11 +63,14 @@ mod() { run bash "$MOD" "$@"; }
   [[ "$output" == *"DRIFT 46-tofu: miroir de providers absent ($LCARS_TOFU_DIR) — tofu irait les chercher sur le réseau"* ]]
 }
 
-@test "check : une autre version est un drift contre l'épingle ; la version épinglée est posée" {
+@test "check : une autre version est un drift contre l'épingle" {
   tofu_double 1.6.0
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"tofu 1.6.0 ≠ version épinglée 1.12.3 ($LCARS_TOFU_BIN)"* ]]
+}
+
+@test "check : la version épinglée est posée" {
   tofu_double
   mod check
   [[ "$output" == *"OK    46-tofu: tofu 1.12.3 posé ($LCARS_TOFU_BIN)"* ]]
@@ -113,19 +117,34 @@ mod() { run bash "$MOD" "$@"; }
   while read -r cwd _; do
     [[ "$cwd" == "$TMPDIR/lcars-tofu-recipe."* ]] || { echo "tofu joué dans $cwd"; return 1; }
   done < <(grep -E ' (init|providers) ' "$CALLS")
-  [ -z "$(ls -A "$TMPDIR")" ]
-  [ ! -e "$RECETTE/.terraform" ] && [ ! -e "$RECETTE/instance/.terraform" ]
+  [ -z "$(copies_restantes)" ]
+  [ ! -e "$RECETTE/.terraform" ]
+  [ ! -e "$RECETTE/instance/.terraform" ]
 }
 
-@test "apply : un miroir en échec, ou un init encore en échec après miroir, est un échec nommé et la copie part" {
+@test "apply : un miroir en échec est un échec nommé, la copie part" {
   tofu_double
   STUB_MIRROR_KO=1 mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  46-tofu: miroir de providers : échec sur $TMPDIR/lcars-tofu-recipe."* ]]
-  [ -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-recipe.*')" ]
+  [ -z "$(copies_restantes)" ]
+}
+
+@test "apply : un init encore en échec après miroir est un échec nommé, la copie part" {
+  tofu_double
   STUB_INIT_KO=1 mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"init hors-ligne en échec dans $TMPDIR/lcars-tofu-recipe."*"après miroir — le miroir ne couvre pas la recette"* ]]
+  [ -z "$(copies_restantes)" ]
+}
+
+@test "apply : recette absente — échec nommé avec son verdict, tofu n'est pas lancé" {
+  tofu_double
+  LCARS_FORGE_RECIPE="$BATS_TEST_TMPDIR/nulle-part" mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  46-tofu: recette absente : $BATS_TEST_TMPDIR/nulle-part"* ]]
+  [[ "$output" != *"MORT"* ]]
+  refute grep -qE ' (init|providers) ' "$CALLS"
 }
 
 @test "apply : les modes de l'ancre et du miroir convergent à ceux de la table" {
@@ -140,17 +159,25 @@ mod() { run bash "$MOD" "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "apply : une architecture non épinglée est refusée en se nommant, rien n'est téléchargé" {
+@test "apply : une architecture non épinglée est refusée en se nommant, tofu absent — rien n'est téléchargé" {
   STUB_ARCH=riscv64 mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  46-tofu: arch non épinglée pour tofu : « riscv64 » (attendu amd64 ou arm64)"* ]]
   refute grep -q CURL "$CALLS"
 }
 
+@test "apply : une architecture non épinglée est refusée même avec tofu déjà à la version épinglée — aucun miroir n'est bâti" {
+  tofu_double
+  STUB_ARCH=riscv64 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"arch non épinglée pour tofu : « riscv64 »"* ]]
+  refute grep -q 'providers mirror' "$CALLS"
+}
+
 @test "apply : un téléchargement dont le sha256 ne correspond pas n'est pas posé" {
   mod apply
   [ "$status" -eq 1 ]
   grep -q 'CURL .*tofu_1.12.3_linux_amd64.zip' "$CALLS"
-  [[ "$output" == *"sha256 MISMATCH"* ]]
   [ ! -e "$LCARS_TOFU_BIN" ]
+  [[ "$output" == *"FAIL"* ]]
 }

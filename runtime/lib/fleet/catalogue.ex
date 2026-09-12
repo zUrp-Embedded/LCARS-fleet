@@ -558,7 +558,7 @@ defmodule Fleet.Catalogue do
   fleet put there from what a human deposited. It protects nothing.
 
   The shell writers hold their own copy (`STORE_REPO` in `forge-gestures.sh`, which pushes it, and
-  in `45-catalogues.sh`, which clones from it) — three defaults in three runtimes, not three
+  in `50-catalogues.sh`, which clones from it) — three defaults in three runtimes, not three
   authorities, the same posture as `SYSTEM_ACCOUNT`.
   """
   @spec store_repo() :: String.t()
@@ -578,7 +578,7 @@ defmodule Fleet.Catalogue do
 
   Three sites ask a repo what catalogue it claims to be: the deposit listing
   (`Fleet.Application.CatalogueDeposits`), the explicit-door guard (`Fleet.Project.Onboard`), and
-  `45-catalogues.sh` in shell. The first two are in boundaries that may not reference each other,
+  `50-catalogues.sh` in shell. The first two are in boundaries that may not reference each other,
   and widening one to reach the other to be right is never the move — so the rule sits in the
   foundation both may descend onto. The shell copy is unavoidable (a different runtime) and says so.
 

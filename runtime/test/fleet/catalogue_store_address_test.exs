@@ -3,7 +3,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   L'adresse du magasin est écrite dans TROIS runtimes — et une désynchronisation EFFACE du matériel.
 
   `Fleet.Catalogue.store_repo/0` la déclare. `forge-gestures.sh` y POUSSE (`push_store`) et clone
-  depuis elle (`install_material`). `45-catalogues.sh` l'y cherche — et quand il ne trouve pas le
+  depuis elle (`install_material`). `50-catalogues.sh` l'y cherche — et quand il ne trouve pas le
   catalogue qu'il attendait, il **supprime** le matériel local.
 
   Renommer d'un seul côté donne la séquence suivante : `push_store` écrit en A, le convergeur
@@ -27,7 +27,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   """
   use ExUnit.Case, async: true
 
-  # Les deux écrivains shell. `forge-gestures.sh` pousse et clone ; `45-catalogues.sh` cherche et
+  # Les deux écrivains shell. `forge-gestures.sh` pousse et clone ; `50-catalogues.sh` cherche et
   # supprime. Ce sont les deux seuls fichiers qui portent l'adresse hors du BEAM.
   @mirrors [
     "services/forge-gestures.sh",

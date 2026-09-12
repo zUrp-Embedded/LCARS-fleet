@@ -14,22 +14,25 @@ set -euo pipefail
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 
-est_le_siege() { [[ "$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)" == "$SYSADMIN_UID" ]]; }
+HUMAN_UID="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
+est_le_siege() { [[ "$HUMAN_UID" == "$SYSADMIN_UID" ]]; }
+pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"; }
 siege_home() { echo "${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"; }
+skill_pose() { local d; d="$(siege_home)/.claude/skills/system-issues"; [[ -s "$d/SKILL.md" && -x "$d/list.sh" ]]; }
 
 check() {
   if ! est_le_siege; then
-    p_ok "$PROV_HUMAN n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"
-  elif [[ -x "$(siege_home)/.claude/skills/system-issues/list.sh" ]]; then
+    pas_le_siege
+  elif skill_pose; then
     p_ok "skill system-issues posé chez $PROV_HUMAN"
   else
-    p_drift "skill system-issues absent chez $PROV_HUMAN — la boîte de réception d'admiral ne se lit pas depuis sa session"
+    p_drift "skill system-issues absent ou incomplet chez $PROV_HUMAN — la boîte de réception d'admiral ne se lit pas depuis sa session"
   fi
   verdict_check
 }
 
 apply() {
-  est_le_siege || { p_ok "$PROV_HUMAN n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"; verdict_apply; }
+  est_le_siege || { pas_le_siege; verdict_apply; }
   [[ -d "$SKILL_SRC/system-issues" ]] || { p_fail "source du skill absente ($SKILL_SRC/system-issues)"; verdict_apply; }
   local home skdst
   home="$(siege_home)"
@@ -38,7 +41,7 @@ apply() {
   ensure_dir "$skdst" 0755 "$PROV_HUMAN:" || verdict_apply
   write_atomic "$skdst/SKILL.md" 0644 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/SKILL.md" || verdict_apply
   write_atomic "$skdst/list.sh"  0755 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/list.sh"  || verdict_apply
-  if chown -h "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null; then
+  if chown -h "$(prov_owner "$PROV_HUMAN:")" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null; then
     p_ok "skill system-issues posé chez $PROV_HUMAN"
   else
     p_drift "skill system-issues posé chez $PROV_HUMAN, mais $home/.claude et $home/.claude/skills n'ont pas pu lui être rendus"

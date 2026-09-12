@@ -17,7 +17,7 @@
 #
 # ⚠ RIEN NE SE KEY SUR LA CHAINE `admiral` (`00` §5) : ce nom est celui du PROFIL. Le siege OS est
 # l'uid 1000 (GUARD A/B), le login forge est VARIABLE (celui de l'installeur), l'assignee des
-# issues systeme est une projection (`45-sudoers-toolchain`). Le pod tourne sous l'uid du
+# issues systeme est une projection (`services/container/init.sh`, au boot). Le pod tourne sous l'uid du
 # LANCEUR (un humain de fleet — GUARD B interdit le siege lui-meme d'etre en amont d'un pod) :
 # c'est le « porteur a lui » de [BL-6-102].
 kind: CapabilityProfile

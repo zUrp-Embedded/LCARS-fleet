@@ -2,7 +2,7 @@
 
 **Date** : 2026-09-04
 **Statut** : actif — lot 6 du chantier deploy-independance
-**Référencé par** : `runtime/services/README.md`, `deploy/modules.d/{45-catalogues,65-ops-branch,66-deck-oidc}.sh`
+**Référencé par** : `runtime/services/README.md`, `deploy/modules.d/{50-catalogues,65-ops-branch,66-deck-oidc}.sh`
 
 ⚖ user 2026-09-04 : « la frontière, c'est : joué uniquement à l'install, ou utilisé en prod ? ».
 Ces trois gestes sont joués par le **conteneur** à l'init de son instance et à chaque boot pour
@@ -30,7 +30,7 @@ sur `../lib/module-protocol.sh` et les `LCARS_*`/`FORGE_*` que la table ci-dessu
 protocole valent pour le reste). Sans `LCARS_MODULE_PROTOCOL`, le geste refuse à la ligne 1 en
 nommant sa cause — un geste nu n'a pas d'hôte.
 
-Les hôtes : `deploy/modules.d/45-catalogues.sh`, `63-forge-tokens.sh`, `65-ops-branch.sh`,
+Les hôtes : `deploy/modules.d/50-catalogues.sh`, `63-forge-tokens.sh`, `65-ops-branch.sh`,
 `66-deck-oidc.sh` sur un poste (ils passent ce que l'installeur sait de mieux — l'adresse
 annoncée, le plancher de rôles) ; le boot du conteneur (`../container/boot.sh`), à chaque démarrage, dans cet ordre :
 `tokens`, `catalogues`, `ops-branch`, `deck-oidc`.

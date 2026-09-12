@@ -70,12 +70,15 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   site_git
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -f "$LCARS_MEDIA_ROOT/avatars/admiral.png" ] && [ ! -e "$LCARS_MEDIA_ROOT/avatars/avatars" ]
+  [ -f "$LCARS_MEDIA_ROOT/avatars/admiral.png" ]
+  [ ! -e "$LCARS_MEDIA_ROOT/avatars/avatars" ]
   [ -f "$LCARS_MEDIA_ROOT/favicon/favicon.ico" ]
   [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = "<html>doc /doc/</html>" ]
   grep -qx 'base=/doc/' "$NPM_TRACE"
-  grep -q '^rev abc12345$' "$LCARS_MEDIA_ROOT/.doc-revision" && grep -q '^base /doc/$' "$LCARS_MEDIA_ROOT/.doc-revision"
-  [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ] && [ ! -e "$LCARS_MEDIA_ROOT/doc.partial" ]
+  grep -q '^rev abc12345$' "$LCARS_MEDIA_ROOT/.doc-revision"
+  grep -q '^base /doc/$' "$LCARS_MEDIA_ROOT/.doc-revision"
+  [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ]
+  [ ! -e "$LCARS_MEDIA_ROOT/doc.partial" ]
   [ "$(stat -c '%a %U' "$LCARS_MEDIA_ROOT/avatars")" = "755 $(id -un)" ]
   [[ "$output" == *"POSÉ  44-media: doc du deck posée ($LCARS_MEDIA_ROOT/doc, base /doc/)"*"POSÉ  44-media: médias posés ($LCARS_MEDIA_ROOT : avatars favicon)"* ]]
   mod check
@@ -110,20 +113,23 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   grep -q 'npm run build' "$NPM_TRACE"
 }
 
-@test "apply : npm absent, ou source des médias absente — échec nommé, rien posé" {
+@test "apply : npm absent — échec nommé, la doc n'est pas posée" {
   export LCARS_NPM_BIN="$BIN/npm-absent"
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  44-media: npm absent — 16-node pose le précompilé épinglé"* ]]
   [ ! -e "$LCARS_MEDIA_ROOT/doc" ]
-  rm -rf "$LCARS_MEDIA_ROOT" "$LCARS_MEDIA_SRC_ROOT/favicon"
+}
+
+@test "apply : source des médias absente — échec nommé, l'arbre n'est pas posé" {
+  rm -rf "$LCARS_MEDIA_SRC_ROOT/favicon"
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  44-media: source absente : $LCARS_MEDIA_SRC_ROOT/favicon"* ]]
   [ ! -e "$LCARS_MEDIA_ROOT/favicon" ]
 }
 
-@test "modes : un objet de la table au mauvais mode est un drift nommé, l'apply le ramène ; une table de décor à 0750 est lue telle quelle" {
+@test "modes : un objet de la table au mauvais mode est un drift nommé, l'apply le ramène" {
   site_git
   mod apply; [ "$status" -eq 0 ]
   chmod 0700 "$LCARS_MEDIA_ROOT/avatars"; chmod 2755 "$LCARS_MEDIA_ROOT/doc"; chmod 0750 "$LCARS_MEDIA_ROOT"
@@ -133,12 +139,19 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [[ "$output" == *"$LCARS_MEDIA_ROOT/doc : 2755 root:root ≠ 755 root:root"*"$LCARS_MEDIA_ROOT : 750 root:root ≠ 755 root:root"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 755 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT/doc")" = 755 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT")" = 755 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 755 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/doc")" = 755 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT")" = 755 ]
+}
+
+@test "modes : une table de décor à 0750 est lue telle quelle, au check et à l'apply" {
+  site_git
   export LCARS_SYSTEM_MANIFEST="$BATS_TEST_TMPDIR/system.manifest"
   printf 'dir  /opt/lcars/share/avatars  0750  root:root  any\n' > "$LCARS_SYSTEM_MANIFEST"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 750 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT/favicon")" = 755 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 750 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/favicon")" = 755 ]
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
@@ -149,7 +162,8 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   for m in 744 754 764 774 654 745 700 750 604; do printf x > "$d/f$m"; chmod "$m" "$d/f$m"; done
   fn "media_modes '$BATS_TEST_TMPDIR/arbre'"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(stat -c %a "$d/g")" = 755 ] && [ "$(stat -c %a "$d/s")" = 755 ]
+  [ "$(stat -c %a "$d/g")" = 755 ]
+  [ "$(stat -c %a "$d/s")" = 755 ]
   for m in 744 754 764 774 654 745 700 750 604; do
     printf x > "$BATS_TEST_TMPDIR/ref"; chmod "$m" "$BATS_TEST_TMPDIR/ref"; chmod a+rX "$BATS_TEST_TMPDIR/ref"
     [ "$(stat -c %a "$d/f$m")" = "$(stat -c %a "$BATS_TEST_TMPDIR/ref")" ] || { echo "f$m → $(stat -c %a "$d/f$m")"; return 1; }
@@ -167,7 +181,8 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ ! -s "$CHMOD_TRACE" ] || { cat "$CHMOD_TRACE"; return 1; }
   chmod 775 "$d"
   PATH="$BIN:$PATH" fn "media_modes '$BATS_TEST_TMPDIR/arbre'"
-  [ -s "$CHMOD_TRACE" ] && [ "$(stat -c %a "$d")" = 755 ]
+  [ -s "$CHMOD_TRACE" ]
+  [ "$(stat -c %a "$d")" = 755 ]
 }
 
 @test "pose de la doc : la seconde pose du même dist ne compte rien, un dist qui a changé est reposé" {
@@ -176,8 +191,11 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   fn "PROV_CHANGED=0; poser_doc; echo \"c1=\$PROV_CHANGED\"; PROV_CHANGED=0; poser_doc; echo \"c2=\$PROV_CHANGED\"
       printf v2 > '$LCARS_SITE_SRC/dist/index.html'; PROV_CHANGED=0; poser_doc; echo \"c3=\$PROV_CHANGED\""
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" =~ c1=[1-9] ]] && [[ "$output" == *"c2=0"* ]] && [[ "$output" =~ c3=[1-9] ]]
+  [[ "$output" =~ c1=[1-9] ]]
+  [[ "$output" == *"c2=0"* ]]
+  [[ "$output" =~ c3=[1-9] ]]
   [[ "$output" == *"doc du deck déjà posée"* ]]
   [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = v2 ]
-  [ -f "$LCARS_MEDIA_ROOT/.doc-revision" ] && [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ]
+  [ -f "$LCARS_MEDIA_ROOT/.doc-revision" ]
+  [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ]
 }

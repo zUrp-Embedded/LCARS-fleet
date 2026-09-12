@@ -30,7 +30,7 @@ media_src() { echo "$MEDIA_SRC_ROOT/$1"; }
 doc_dir() { echo "$MEDIA_ROOT/doc"; }
 doc_stamp() { echo "$MEDIA_ROOT/.doc-revision"; }   # à côté de doc/, que prov_promote_dir remplace en entier
 
-media_check_perms() { # media_check_perms [sous-arbre] — mode et propriétaire relus contre la table ; un objet absent n'est pas jugé ici
+media_check_perms() { # media_check_perms [sous-arbre] — mode et propriétaire relus contre la table
   local path="$MEDIA_ROOT${1:+/$1}" cur want
   [[ -d "$path" ]] || return 0
   cur="$(stat -c '%a %U:%G' "$path")"
@@ -81,7 +81,7 @@ check() {
   if [[ -s "$(doc_dir)/index.html" ]]; then
     p_ok "$(doc_dir) posée ($(find "$(doc_dir)" -type f 2>/dev/null | wc -l) fichiers)"
   else
-    p_drift "$(doc_dir) absente — l'onglet Doc du deck rendra 404 (16-node la bâtit, ce module la pose)"
+    p_drift "$(doc_dir) absente — l'onglet Doc du deck rendra 404 (l'apply la bâtit avec le node de 16-node, ou la pose depuis le kit)"
   fi
   media_check_perms doc
   media_check_perms
@@ -142,7 +142,7 @@ poser_doc() {
   p_chg "doc du deck posée ($(doc_dir), base $SITE_BASE)"
 }
 
-media_modes() { # media_modes <racine> — l'arbre profond en 755/644, sans bits spéciaux ; seuls les objets qui dévient sont touchés
+media_modes() { # media_modes <racine> — l'arbre profond en 755/644, sans bits spéciaux
   local racine="${1:?media_modes: racine absente}" rc=0
   find "$racine" -mindepth 2 -type d \( -perm /7022 -o ! -perm -u=rwx -o ! -perm -go=rx \) \
     -exec chmod a-s,u=rwx,go=rx {} + || { p_warn "mode dossiers non posé sous $MEDIA_ROOT"; rc=1; }

@@ -78,14 +78,14 @@ mod() {
 @test "publiée sur toutes les adresses par défaut, l'adresse annoncée compose l'URL publique" {
   mod check
   [ "$status" -ne 2 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"forge du poste vivante (http://127.0.0.1:21000) — OUVERTE sur 0.0.0.0, composable en http://10.9.9.9:21000"* ]]
+  [[ "$output" == *"forge du poste vivante (http://127.0.0.1:21000) — ouverte sur 0.0.0.0, composable en http://10.9.9.9:21000"* ]]
 }
 
 @test "un bind sur la loopback ferme la forge à cette machine, et le verdict le dit" {
   PROV_FORGE_BIND=127.0.0.1 mod check
   [ "$status" -ne 2 ]
-  [[ "$output" == *"cette machine SEULE"* ]]
-  [[ "$output" != *"OUVERTE"* ]]
+  [[ "$output" == *"cette machine seule"* ]]
+  [[ "$output" != *"ouverte sur"* ]]
 }
 
 @test "sous WSL en NAT sans adresse donnée, l'annonce est localhost et le motif remonte ; hors WSL non" {
@@ -102,7 +102,7 @@ mod() {
   rm -f "$BIN/docker"
   FORGE_BASE_URL="http://forge.example:3000/" mod apply
   [ "$status" -eq 2 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"forge FOURNIE (http://forge.example:3000) — rien à monter"*"DRIFT"*"forge fournie sans autorité"* ]]
+  [[ "$output" == *"forge fournie (http://forge.example:3000) — rien à monter"*"DRIFT"*"forge fournie sans autorité"* ]]
   refute grep -q 'compose .* up\|user create' "$CALLS"
   [ "$(cat "$PROV_TOKENS_DIR/forge.url")" = "http://forge.example:3000" ]
   printf 'tok-donne\n' > "$PROV_TOKENS_DIR/forge-master.token"
@@ -114,10 +114,10 @@ mod() {
 @test "une forge fournie muette est un drift au check et un échec à l'apply" {
   STUB_FORGE_UP=0 FORGE_BASE_URL=http://forge.example:3000 mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT"*"forge FOURNIE muette"* ]]
+  [[ "$output" == *"DRIFT"*"forge fournie muette"* ]]
   STUB_FORGE_UP=0 FORGE_BASE_URL=http://forge.example:3000 mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL"*"forge FOURNIE muette"* ]]
+  [[ "$output" == *"FAIL"*"forge fournie muette"* ]]
 }
 
 # ─── les refus ──────────────────────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ mod() {
 @test "une forge qui répond sans que notre projet publie le port est étrangère : refus nommé, avant tout compose" {
   STUB_PORTS="" mod check
   [ "$status" -eq 2 ]
-  [[ "$output" == *"une forge répond sur http://127.0.0.1:21000, mais AUCUN conteneur du projet « bob_9-forge » ne publie 21000"*"--port-forge"* ]]
+  [[ "$output" == *"une forge répond sur http://127.0.0.1:21000, mais aucun conteneur du projet « bob_9-forge » ne publie 21000"*"--port-forge"* ]]
   STUB_PORTS="" mod apply
   [ "$status" -eq 1 ]
   refute grep -q 'compose .* up' "$CALLS"
@@ -248,18 +248,21 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   LCARS_BENCH=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "user create .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
+  grep -q "user create .* _ $ME\$" "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
   : > "$CALLS"; rm -f "$PROV_TOKENS_DIR"/* "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
-  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
   : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
   refute grep -q 'user create' "$CALLS"
-  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
 }
 
@@ -270,7 +273,8 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
   PROV_FORGE_ADMIN_RESET=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
-  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qE '^PW=[A-Za-z]{10}$' "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS"
+  grep -qE '^PW=[A-Za-z]{10}$' "$CALLS"
   grep -q "$ME	" "$PROV_ANNOUNCE_FILE"
 }
 
@@ -295,7 +299,7 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
 @test "sans jeton, l'adminité est inconnue et rien n'est tenté" {
   STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"AUCUNE autorité"*"adminité de « $ME » non mesurable"* ]]
+  [[ "$output" == *"aucune autorité"*"adminité de « $ME » non mesurable"* ]]
   refute grep -q 'PATCH' "$CALLS"
 }
 

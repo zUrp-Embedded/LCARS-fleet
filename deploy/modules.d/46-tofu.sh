@@ -25,7 +25,7 @@ tofu_mode() { # tofu_mode <objet canonique> → le mode que system.manifest déc
   local m; m="$(prov_manifest_mode "$1")"; printf '%s\n' "${m:-0755}"
 }
 
-tofu_check_perms() { # tofu_check_perms <chemin posé> <objet canonique> — un objet absent n'est pas jugé ici
+tofu_check_perms() { # tofu_check_perms <chemin posé> <objet canonique>
   local path="$1" cur want
   [[ -e "$path" ]] || return 0
   cur="$(stat -c '%a %U:%G' "$path")"
@@ -65,13 +65,16 @@ check() {
   verdict_check
 }
 
-poser_binaire() {
-  local arch="$1" want_sha tmpd
-  case "$arch" in
-    amd64) want_sha="$TOFU_SHA256_AMD64" ;;
-    arm64) want_sha="$TOFU_SHA256_ARM64" ;;
-    *) p_fail "arch non épinglée pour tofu : « $(arch_tag raw) » (attendu amd64 ou arm64)"; verdict_apply ;;
+sha_epingle() { # sha_epingle <arch debian> → le sha256 du binaire, ou 1 si l'arch n'est pas épinglée
+  case "$1" in
+    amd64) echo "$TOFU_SHA256_AMD64" ;;
+    arm64) echo "$TOFU_SHA256_ARM64" ;;
+    *) return 1 ;;
   esac
+}
+
+poser_binaire() { # poser_binaire <arch> <sha256>
+  local arch="$1" want_sha="$2" tmpd
   tmpd="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu.XXXXXX")" || { p_fail "tofu : tmp impossible"; verdict_apply; }
   fetch_verify "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${arch}.zip" \
     "$want_sha" "$tmpd/tofu.zip" 0644 || { rm -rf "$tmpd"; verdict_apply; }
@@ -85,19 +88,20 @@ poser_binaire() {
 }
 
 # tofu init écrit un .terraform/ à côté de la recette : elle se joue sur une copie jetable, jamais dans l'arbre
-recette_copie() {
-  local src work
-  src="$(product_tree)/services/forge-recipe"
-  [[ -d "$src" ]] || { p_fail "recette absente : $src"; verdict_apply; }
-  work="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" || { p_fail "tofu : tmp impossible"; verdict_apply; }
-  cp -a "$src/." "$work/" || { p_fail "recette non copiable ($src)"; rm -rf "$work"; verdict_apply; }
-  rm -rf "$work/.terraform" "$work/instance/.terraform"
-  echo "$work"
+recette_copie() { # recette_copie → pose WORK, la copie de la recette
+  local src
+  src="${LCARS_FORGE_RECIPE:-$(product_tree)/services/forge-recipe}"
+  [[ -d "$src" ]] || { p_fail "recette absente : $src"; return 1; }
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" || { p_fail "tofu : tmp impossible"; return 1; }
+  cp -a "$src/." "$WORK/" || { p_fail "recette non copiable ($src)"; rm -rf "$WORK"; return 1; }
+  rm -rf "$WORK/.terraform" "$WORK/instance/.terraform"
 }
 
 apply() {
-  local arch; arch="$(arch_tag debian)"
-  [[ "$(tofu_installed_version)" == "$TOFU_VERSION" ]] || poser_binaire "$arch"
+  local arch sha; arch="$(arch_tag debian)"
+  sha="$(sha_epingle "$arch")" \
+    || { p_fail "arch non épinglée pour tofu : « $(arch_tag raw) » (attendu amd64 ou arm64)"; verdict_apply; }
+  [[ "$(tofu_installed_version)" == "$TOFU_VERSION" ]] || poser_binaire "$arch" "$sha"
   ensure_mode "$TOFU_BIN" "$(tofu_mode "$TOFU_BIN_CANON")" "$TOFU_OWNER" || verdict_apply
 
   ensure_dir "$TOFU_DIR" "$(tofu_mode "$TOFU_DIR_CANON")" "$TOFU_OWNER" || verdict_apply
@@ -114,8 +118,8 @@ provider_installation {
 }
 EOF
 
-  local work; work="$(recette_copie)"
-  local mods=("$work/instance" "$work") m
+  local WORK; recette_copie || verdict_apply
+  local work="$WORK" mods=("$WORK/instance" "$WORK") m
   for m in "${mods[@]}"; do
     [[ -d "$m" ]] || { p_fail "recette incomplète : $m"; rm -rf "$work"; verdict_apply; }
   done

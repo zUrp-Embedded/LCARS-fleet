@@ -59,7 +59,7 @@ donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `LCARS_*`), sur le p
   forge inscrit, sous l'identité de l'humain ;
 - `forge.d/` — les gestes de forge (jetons de rôle, cache des catalogues, branche ops, client
   OAuth2 du deck), joués par le conteneur à l'init de son instance et à chaque boot, et par
-  l'installeur à l'install (`deploy/modules.d/45-catalogues`, `63-forge-tokens`, `65-ops-branch`,
+  l'installeur à l'install (`deploy/modules.d/50-catalogues`, `63-forge-tokens`, `65-ops-branch`,
   `66-deck-oidc` sont des appelants minces) ;
 - `container/` — l'init de l'instance et le boot du conteneur (`init.sh`, `boot.sh`, le PID 1 de l'image).
 

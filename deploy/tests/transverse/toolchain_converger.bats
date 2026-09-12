@@ -408,8 +408,8 @@ EOS
 
 # ─── LE SHA EST BORNE A LA BRANCHE PROTEGEE ─────────────────────────────────────────────────────
 #
-# ⚠ MESURE DU 2026-08-24, CHAINE COMPLETE. `45-sudoers-toolchain` accorde
-# `%fleet ALL=(root) NOPASSWD:` sur ce binaire ; le controle de `$1` ne portait que la FORME
+# ⚠ MESURE DU 2026-08-24, CHAINE COMPLETE. Ce binaire tournait en root pour le groupe fleet (une
+# regle sudoers, disparue depuis) ; le controle de `$1` ne portait que la FORME
 # hexadecimale ; le manifeste etait ensuite lu `?ref=$SHA` et ses paquets installes EN ROOT. Or le
 # rail existe pour que des pods ouvrent des PR vers `tool_request` : des commits NON SIGNES vivent
 # dans ce depot PAR CONCEPTION. Et `fleet` n'est pas l'operateur — `human-converger.sh` y verse

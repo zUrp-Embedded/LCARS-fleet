@@ -31,7 +31,8 @@ setup() {
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   SRC_DIR="$BATS_TEST_DIRNAME/../../../runtime/services"
   BIN_SRC_DIR="$BATS_TEST_DIRNAME/../../../runtime/bin"
-  [ -f "$MOD" ] && [ -f "$DOCKERFILE" ]
+  [ -f "$MOD" ]
+  [ -f "$DOCKERFILE" ]
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=62-runtime-helpers
@@ -146,9 +147,7 @@ helpers() {
   done < <(helpers)
 }
 
-@test "apply POSE le convergeur de toolchain au chemin que le sudoers etroit designe" {
-  # `45-sudoers-toolchain` accorde `%fleet ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge`.
-  # Sur le rail poste ce binaire n'etait pose par RIEN : la regle designait une absence.
+@test "apply POSE le convergeur de toolchain à son chemin" {
   stub_curl "peu importe"
   mod apply
   [ -x "$LCARS_TOOLCHAIN_CONVERGE_BIN" ]

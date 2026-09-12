@@ -614,7 +614,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # construction.
   #
   # What a divergence costs is worse than a crash, and the provisioning half is the expensive one:
-  # `45-catalogues` would converge a directory the runtime never reads. Every boot would clone the
+  # `50-catalogues` would converge a directory the runtime never reads. Every boot would clone the
   # installed catalogues, report them converged, and the fleet would run on the bundled one alone
   # while announcing three. Nothing errors and nothing is logged. The CLI half is milder but hits
   # at the worst moment — degraded `catalogue list` (no release reachable) prints the material of a
@@ -715,7 +715,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     })
   end
 
-  # The provisioning lib carries ONE of the two paths — the installed cache, which `45-catalogues`
+  # The provisioning lib carries ONE of the two paths — the installed cache, which `50-catalogues`
   # writes. It has no business with the image's seeds: it never reads them.
   defp lib_expected(nil), do: %{}
   defp lib_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
