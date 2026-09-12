@@ -1,34 +1,8 @@
 defmodule Fleet.Spawner.Pod.LaunchSpec do
   @moduledoc """
-  Pod launch placement and environment — an island of PURE reads, extracted from
-  `Fleet.Spawner.Pod`.
-
-  Every function here resolves launch PATHS and ENV VARS from three inputs: the `cap_profile`
-  (struct), the `opts` (spawn keyword) and the `pod_dir`. No state mutation, no Port, no timer,
-  no FS write: deterministic computation only. The module does NOT read the Pod's `state` and
-  calls back NO private of Pod — the Pod resolves its values (cap_profile, opts, pod_dir,
-  claude_dir, launcher path…) and passes them as arguments. The cap-profile accessors
-  (`name`/`containment`) are read from the SINGLE SOURCE `Fleet.CapProfile` (no re-decoding of
-  the field).
-
-  ## Contract (called by `Pod`)
-
-  - `effective_project/2` — EFFECTIVE project (brief `opts[:project]` > static `spec["project"]`).
-    Public because shared outside placement (`Pod.CompletedPayload`, bootstrap workspace): single source.
-  - `rc_project/2` — project slug of the pod (opt `:project_slug`), or `nil`. Public because shared
-    outside placement (`maybe_checkpoint_seed`): single source.
-  - `pod_cwd/3` — cwd seen by the agent. Public because also called by recall (`maybe_recall_restore`).
-  - `sandbox_home/2` — intra-pod home. Public because also passed to `McpProvision` (`:projecting` state).
-  - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
-    `skills_plugins_env/1`, `skills_paths_env/1`, `toolchain_env/0`, `pod_mounts_env/4` — env
-    builders, merged by the `:launching` state (through `LaunchEnv.build/4`).
-  - `output_compression?/1` — the effective compression verdict; see its `@doc`, it reaches no
-    launch today.
-  - `pin_reference_face/2`, `pin_object/4`, `other_face_reference_path/3` — the pinned reference
-    face and the single-object pin; public because the dispatch pins a brief the same way.
-  - `remote_control?/1` — EFFECTIVE Desktop visibility, the ONE authority. Public because its three
-    consumers sit in three places (slot capture, slot resume, and the vendor launcher through
-    `LCARS_POD_REMOTE_CONTROL`); a second derivation is what it exists to prevent.
+  Resolves pod launch paths, placement and environment values from profiles and spawn options.
+  Also reads toolchain declarations and materializes pinned Git references. Shared with
+  workspace setup, completion payloads, recall and seed handling to keep placement consistent.
   """
 
   require Logger
@@ -37,10 +11,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   alias Fleet.Credentials.Shell
 
   @doc """
-  Pod's EFFECTIVE project: the brief (`opts[:project]`, dynamic) takes precedence over the
-  cap-profile's static `spec["project"]`, default empty map. Drives the placement (project cwd)
-  AND the end-of-step-run payload — hence the public visibility (single source, no re-derivation
-  on the Pod side).
+  Returns opts[:project], then the profile’s static project, then an empty map.
+  Shared by launch placement and completion payload construction.
   """
   @spec effective_project(keyword() | nil, CapProfile.t()) :: map()
   def effective_project(opts, cap_profile) do
@@ -48,39 +20,17 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  CLEAN project name of the pod, read from the EXPLICIT `:project` opt. `nil` when the caller names
-  no project (permanent / admin pods → no cwd remap). Shared with the checkpoint seed-store.
+  Returns the explicit `:project_slug` when valid, otherwise nil (no project remap/seed).
+  `:project` is the separate project map; `:rc_name` is a display label and is not parsed.
 
-  Confinement boundary: this `project` is a dispatch/recall input (untrusted) that ends up
-  interpolated into paths/segments — cwd `/home/<project>`, intra-pod home, seed-store directory.
-  So we require it to be a slug HERE, as early as possible: a malformed value (`../evil`, `a/b`) →
-  `nil` (pod with no remap nor seed, neutral state) rather than a traversing `project` that would
-  reach a `Path.join`. Single source → a single point to hold.
-
-  ⚠ Its consumer `other_face_reference_path/3` builds a HOST path (`<face_root>/<project>`) whose
-  documented authority is `Fleet.Layout.project_name/1`, not the slug. The two derivations differ on `_`, `.` and
-  uppercase, so this would place a pod on a directory that does not exist. It does NOT, and the
-  reason is a charset and not a contract: every onboarding entry point validates the project name
-  against `^[a-z0-9][a-z0-9-]*[a-z0-9]$`, strictly inside what the slug preserves, so a project
-  that HAS a directory has a name on which both derivations agree. Pinned as an invariant in
-  `Fleet.LayoutTest` — widen that charset and the test parts company before a pod does.
+  Reference paths use this slug while `Fleet.Layout.project_name/1` normalizes host names.
+  Their outputs agree for the narrower onboarding charset; `Fleet.LayoutTest` guards
+  that invariant if accepted project names are widened.
   """
   @spec rc_project(keyword(), CapProfile.t()) :: String.t() | nil
   def rc_project(opts, _cap_profile) do
-    # The key is `:project_slug`, NOT `:project`: `:project` is ALREADY the project MAP of the brief
-    # (`effective_project/2` — repo_path / base_branch / repo). Two different objects, two keys. A
-    # slug parked under `:project` is silently swallowed by the map (last writer wins) and lands
-    # here as a non-binary → `nil` → a pod with no remap, which is the exact silence below.
-    #
-    # READ, never re-parsed. The slug is an EXPLICIT input: every caller that names a pod already
-    # holds it — it is what `rc_name` is BUILT from. Deriving it back out of the label would make
-    # the label a load-bearing structure, its format frozen by that parse: adding the ticket number
-    # to the Desktop name (`tetris#42_engineer`) then makes `Slug.valid?` fail → `nil` → a pod with
-    # NO cwd remap and NO seed, silently. One string doing two jobs.
-    #
-    # And no fallback to such a parse: it would not save a missed call site (the parse fails on the
-    # newer format anyway), it would only hide WHICH site was missed. The refusal lives at the spawn
-    # choke point instead, where the other structural guards are.
+    # Keep project_slug explicit: parsing rc_name would make a display format govern paths
+    # and silently lose remapping when labels gain a ticket suffix.
     case Keyword.get(opts, :project_slug) do
       p when is_binary(p) ->
         if Fleet.Slug.valid?(p), do: p, else: nil
@@ -163,7 +113,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   def launch_home("none", _pod_dir, claude_dir), do: Path.dirname(claude_dir)
   def launch_home(_containment, pod_dir, _claude_dir), do: pod_dir
 
-  # DR-021
   @permission_modes ~w(default acceptEdits bypassPermissions plan)
 
   @doc """
@@ -178,28 +127,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   def permission_mode(_), do: "default"
 
   @doc """
-  EFFECTIVE Desktop visibility of a pod — the ONE authority, obeyed by all three consumers.
-
-  Deriving visibility TWICE — here on the Elixir side (the Desktop-slot capture and the slot
-  resume) and by a `jq` read of the same field in `claude_launch.sh` (the `--remote-control` flag
-  and `remoteControlAtStartup`) — gives two derivations that agree only as long as nothing tries to
-  change it. The moment something does, the half that is not reached produces a pod VISIBLE in
-  Desktop whose slot is never captured nor resumed: visible now, a new slot every boot, which is the
-  "12 archs" bug wearing a new hat.
-
-  So this is the single site and the launcher does NOT derive: `LaunchEnv.build/4` exports the
-  answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it (its own `jq` read of the field
-  runs only when the variable is absent, i.e. a launch outside the spawner).
-
-  The declaration is the FLOOR; the fleet's debug mode (`fleet start --debug` →
-  `:debug_visibility`) is the only thing above it, and it is MONOTONE by construction — an `or`,
-  never a replacement. A mode that could also CLOSE would let an operator ask for observability and
-  lose a pod they had; and a mode that lies in either direction is worse than no mode, because the
-  operator stops looking. So: debug can add a window, it can never take one away.
-
-  The mode is fixed for the fleet's whole life, deliberately: this is read at LAUNCH, so it governs
-  the pods spawned while it is on and does not retro-fit the ones already up. A pod's visibility is
-  therefore a property of its own launch, not a fleet-wide state that shifts under it.
+  Returns declared/derived profile visibility OR the fleet debug-visibility setting.
+  Debug can add visibility, never remove it. LaunchEnv exports this decision as
+  `LCARS_POD_REMOTE_CONTROL`; the vendor only derives its own fallback outside that path.
+  Changing the setting does not retrofit launch arguments of already running pods.
   """
   @spec remote_control?(term()) :: boolean()
   def remote_control?(cap_profile) do
@@ -207,38 +138,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  Does this pod compress its Bash output before it enters the agent's context? THE authority.
+  Returns profile compression AND the fleet compression setting; either can disable it.
+  Neither may force lossy output on the other.
 
-  Composed by an **AND**, and the contrast with `remote_control?/1` one function above is the whole
-  design: that one is an `or` because debug may only ADD a window, this one is an `and` because the
-  fleet may only REMOVE compression. Both are monotone, in opposite directions, and the direction is
-  forced by what is at stake rather than chosen — visibility that fails closed costs an operator a
-  pane they had; compression that fails open costs an agent an error line it never saw, on a defect
-  the agent then reports as absent.
-
-  So a role that declared `false` keeps it whatever the fleet says, and a fleet knob set to `false`
-  cuts every pod whatever the profiles say. Neither can force the lossy direction on the other.
-
-  Read at LAUNCH, like its neighbour: a pod's compression is a property of its own launch, not a
-  fleet-wide state that shifts under a pod already running.
-
-  ⚠ **AUCUN APPELANT EN PRODUCTION, ET LE VERDICT DE CETTE FONCTION N'ATTEINT AUCUN LANCEMENT.**
-  Hors sa définition et son test, `output_compression?/1` n'est appelée nulle part dans `lib/`,
-  `bin/`, `etc/`, `deploy/` ni `config/`. La composition ci-dessus est donc exacte et inerte.
-
-  **Ce qui manque n'est ni la brique ni le knob** — la brique `vendor/token_saver/` est dans l'image
-  (`COPY` présent au Dockerfile), testée par `shell_gate.sh`, et le champ est déclaré au schéma
-  cap-profile. **Ce qui manque est le VÉHICULE, et il n'a jamais existé** : la compression passe par
-  un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
-  monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
-  `.claude` humain est exclu À CAUSE de ses hooks. Un porteur dans le tier `user`, que
-  `--setting-sources` exclut sans condition : il ne tirerait pas davantage (cf.
-  `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
-
-  Conséquence pour un auteur de cap-profile : **déclarer `output_compression` ne change rien
-  aujourd'hui**, dans les deux sens. Le « brancher » ne serait pas restaurer un porteur perdu mais
-  **en inventer un** dans un monde projeté pour n'en monter aucun — une fonctionnalité avec une
-  décision de conception derrière, pas une correction — l'inertie n'est pas un bug à réparer ici.
+  This verdict is currently unused by production launch code: declaring output_compression
+  has no effect on running pods. The shipped token_saver uses a PreToolUse hook, while pod
+  projection excludes human hooks and writes no hook configuration. Connecting the verdict
+  requires designing a supported hook delivery path, not merely enabling the existing flag.
   """
   @spec output_compression?(term()) :: boolean()
   def output_compression?(cap_profile) do
@@ -291,23 +197,16 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  `LCARS_SKILLS_PATHS` = the FILTERED plain-skill dirs to bind RO into the pod's
-  `~/.claude/skills/` (BL-6-22 — the delivery half of `filter_skills`). NEWLINE-delimited
-  `name:abs_path` entries — the `LCARS_POD_MOUNTS` pattern, NOT the plugins one above: plugins
-  carry bare NAMES, these carry PATHS, and a space-separated format would shatter on a skills
-  root containing a space. The first `:` separates (a skill name is a `Fleet.Slug`, no `:` in
-  the alphabet), so a path containing `:` stays whole. The name is `Path.basename(path)` —
-  legitimate BY CONSTRUCTION (`filter_skills` builds each path as `Path.join(skills_root, name)`;
-  do NOT "improve" filter_skills to return tuples — that is the `SPBuilder.Composer` behaviour
-  contract, with stubs and tests on it). Empty → `%{}` (no var, no bind loop).
+  Serializes filtered skill directories as newline-delimited `name:abs_path` entries.
+  The first colon separates the basename (a validated skill slug) from its path;
+  spaces and later colons remain part of the path. The composer contract returns paths,
+  so names are derived with Path.basename. Empty input produces no environment entry.
   """
   @spec skills_paths_env([Path.t()]) :: map()
   def skills_paths_env([]), do: %{}
 
   def skills_paths_env(paths) when is_list(paths) do
-    # DR-021, same refusal as `mounts_env`: a `\n`/`\r` INSIDE a path would INJECT an extra bind
-    # line into the sandbox projection → REFUSE the projection (raise, caught by LaunchEnv.build's
-    # try/rescue → clean pod-projection failure), never drop-and-launch.
+    # Newlines inject extra bind entries; refuse the projection instead of dropping one mount.
     case Enum.find(paths, &String.match?(&1, ~r/[\n\r]/)) do
       nil ->
         :ok
@@ -326,15 +225,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  Serializes the system, profile, spawn and other-face mounts for bwrap.
+  Serializes mounts in priority order: system, store, profile, spawn, other-face reference.
+  The first entry for each source path wins, including its mode. Modes must be `ro` or `rw`;
+  newlines in any field raise.
 
-  Earlier entries win on duplicate paths. Modes must be `ro` or `rw`; newline-bearing fields raise.
-
-  THE PROJECT'S OPS TREE IS NOT HERE, and its absence is the point. A read-only bind of
-  `<ops_root>/<project>` hands a project pod the runtime's own record — what was asked, what was
-  judged, what was proven — and A PRODUCER HOLDING THE LEDGER ITS OWN WORK IS SCORED IN is a hazard
-  that buys nothing: the brief and the judging criterion travel as TEXT. The architect keeps the
-  tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
+  The ops ledger is not mounted implicitly for producers: briefs and criteria arrive through
+  work items or pinned files. An architect can receive ops through explicit spawn mounts.
   """
   @spec pod_mounts_env(CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path, pod_dir \\ nil) do
@@ -347,22 +243,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     |> mounts_env()
   end
 
-  # ── LE MAGASIN D'OUTILLAGE ──────────────────────────────────────────────────────────────────
-  #
-  # DEUX MONTAGES, ET UN SEUL SERAIT UNE PANNE. L'arbre entier en `ro` — un pod n'installe rien,
-  # c'est la propriete centrale du rail : un magasin writable le rendrait contournable par le pod,
-  # ce que la garde humaine existe pour empecher. MAIS `cache/` est ecrit par pip, npm et cargo :
-  # monte en lecture seule, le premier `pip install` du pod rend `EROFS` et un `CARGO_HOME` pointant
-  # dedans fait exploser cargo a la premiere dependance.
-  #
-  # L'ORDRE PORTE LE SENS : bwrap applique les montages dans l'ordre declare, donc le `rw` du cache
-  # doit venir APRES le `ro` de l'arbre pour le recouvrir. Les inverser rend le cache lisible et non
-  # ecrivable, c'est-a-dire la panne ci-dessus avec l'air d'etre configure.
-  #
-  # LA RACINE SE LIT, ELLE NE SE DECLARE PAS : `LCARS_STORE_ROOT` vient du compose, qui en est le
-  # seul proprietaire (`deploy/lib/store.sh` possede les noms de volumes). Absente ou non montee :
-  # AUCUN montage, et le pod demarre — DR-023, deja paye sur `GIT_MIRROR` (« a spawn died on a
-  # missing relic »). Un outillage manquant ralentit un pod, il ne le tue pas.
+  # Mount the store RO, then its cache RW so pip/npm/cargo can write without changing tools.
+  # bwrap applies mounts in order; reversing them hides the writable cache. An absent
+  # LCARS_STORE_ROOT or unmounted directory contributes no mounts.
   defp store_mounts do
     case store_root() do
       nil ->
@@ -385,25 +268,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # ── L'ENVIRONNEMENT D'OUTILLAGE ─────────────────────────────────────────────────────────────
-  #
-  # INSTALLER NE SUFFIT PAS — LE POD DOIT POUVOIR S'EN SERVIR, et c'est le trou le plus couteux a
-  # diagnostiquer de tout ce rail : l'install sort verte, le pod compile toujours sans la toolchain,
-  # et RIEN NE RELIE LES DEUX SYMPTOMES. Un pod ne voit que ce que `bwrap_launch.sh` lui monte et lui
-  # `--setenv`. Le magasin monte (ci-dessus) rend l'arbre VISIBLE ; ceci le rend UTILISABLE.
-  #
-  # `KEY=VALUE` A PLAT, ET SURTOUT PAS UN `source`. Sourcer du shell fourni par un artefact
-  # telecharge, dans le processus qui CONSTRUIT le bac a sable, rouvrirait dans le launcher
-  # exactement le trou que le convergeur referme. Le pod recoit un RESULTAT, jamais un programme :
-  # c'est au convergeur de jouer l'`env_script` d'un SDK une fois, dans le contexte du pod, et d'en
-  # figer le delta ici.
-  #
-  # LA VALIDATION VIT ICI, cote Elixir, comme pour les montages — le bash ne valide rien, il deplie.
+  # The converger freezes SDK environment deltas as data. Sourcing downloaded shell while
+  # constructing the sandbox would execute it with the launcher’s authority.
   @doc """
-  The `LCARS_POD_TOOLCHAIN_ENV` payload: `KEY=VALUE` lines composed from `<store>/state/env.d/*.env`.
-
-  Empty string when there is no store, no `env.d`, or nothing declared — the launcher then adds no
-  `--setenv` at all and the pod's command line is what it is today, byte for byte.
+  Serializes `<store>/state/env.d/*.env` as KEY=VALUE lines, in sorted filename order.
+  No store/directory/declarations yields an empty string. Read failures log and omit the
+  unreadable input; malformed declarations raise. Universal build variables are logged
+  and dropped. Values are data passed to --setenv, never shell to source in the launcher.
   """
   @spec toolchain_env() :: String.t()
   def toolchain_env do
@@ -413,12 +284,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # DENYLIST CLOSE, PAS UNE HEURISTIQUE. `CARGO_HOME` n'est lu que par cargo : un pod Python qui le
-  # porte ne perd rien. `CC` est lu par TOUT systeme de build. Un `CC=aarch64-linux-gnu-gcc` global,
-  # et le premier pod Python qui installe un paquet a extension C native compile de l'ARM64 : `pip`
-  # REUSSIT, et l'import echoue plus tard en « Exec format error », sans une ligne qui nomme
-  # l'environnement de compilation. Une compilation croisee nomme sa toolchain dans SES PROPRES
-  # fichiers de build, ou c'est lisible et versionne avec le projet.
+  # Global CC/CFLAGS-style settings affect unrelated builds and can silently cross-compile
+  # native dependencies. Cross-toolchain choices belong in the project’s own build files.
   @universal_build_vars ~w(CC CXX LD AR NM RANLIB STRIP CFLAGS CXXFLAGS LDFLAGS CPPFLAGS)
   @key_re ~r/\A[A-Z_][A-Z0-9_]*\z/
 
@@ -472,10 +339,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # NEWLINE ET `\r` REFUSENT LE SPAWN — le meme geste que `mounts_env/1`, et pour la meme raison :
-  # une valeur qui porte un saut de ligne casse le format de passage et fait apparaitre une seconde
-  # variable que personne n'a declaree. `\r` est teste avec `\n` parce qu'il traverse `--setenv`
-  # silencieusement et casse ensuite un `[[ "$VAR" == "attendu" ]]` de facon invisible.
+  # Reject embedded CR/LF rather than injecting another environment entry. The reader splits
+  # physical lines first; separate valid KEY=VALUE lines remain separate declarations.
   defp validate_env_pair(key, value, path) do
     cond do
       not Regex.match?(@key_re, key) ->
@@ -489,11 +354,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
                 "(#{path}). Pod projection refused — an injecting value is NOT dropped-and-launched."
 
       key in @universal_build_vars ->
-        # DROPPED, NOT REFUSED, and the asymmetry is deliberate: a malformed file is a bug in the
-        # producer and must stop the line; a universal build var is a POLICY breach whose blast
-        # radius is other pods. Refusing the spawn would let one bad env.d file kill every pod on
-        # the container — a worse failure than the one being prevented. The converger refuses it at
-        # write time; this is the belt at read time.
+        # Drop disallowed global build variables so one bad store file does not stop every pod.
+        # Malformed syntax still refuses projection.
         Logger.error(
           "LaunchSpec: #{key} DROPPED from #{path} — universal build variables are refused. " <>
             "Set globally they make every pod cross-compile: `pip` succeeds and the import fails " <>
@@ -510,34 +372,17 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])
 
-  # THE REFERENCE FACE IS PINNED, like everything else in the pod's world: its workspace
-  # (`pin_base_sha`), its order (`brief_sha`), its matter (the lot's commit), its deliverable
-  # (`livrable_sha`). A LIVE `--ro-bind` of the host worktree would move under a running pod every
-  # time the human writes in it or `WorktreeSync` rebases it, so a producer could compose against a
-  # state that never existed as a whole, with no way to say which one it read.
-  #
-  # Pinned by COPY at the face's head, into the pod's own directory, so the reference also survives
-  # its source: a face removed under a running pod (`project_delete`) otherwise leaves a dangling
-  # bind the pod reads as an empty tree, silently. Nothing outside the pod is depended on after
-  # spawn.
-  #
-  # The MOUNT POINT does not move: the copy is bound at the canonical `<face_root>/<project>`, so a
-  # pointer written in a brief resolves exactly as before. Source and destination differ here and
-  # nowhere else, which is why the mount protocol carries both.
-  #
-  # Missing something mid-run is not patched in place — the pod is nuked and relaunched on a
-  # completed face (⚖ arbitrage user). A frozen world you replace beats a live one you
-  # cannot cite.
+  # Pin the other face into the pod so source edits/removal cannot change a successful copy.
+  # Keep its canonical mount destination for existing pointers. Updating a frozen reference
+  # requires relaunching the pod on a completed face.
   defp other_face_reference_mount(opts, cap_profile, pod_dir) do
     with path when is_binary(path) <- other_face_reference_path(opts, cap_profile),
          dir when is_binary(dir) <- pod_dir,
          {:ok, pinned} <- pin_reference_face(path, dir) do
       [%{"mode" => "ro", "path" => pinned, "dst" => path}]
     else
-      # No pod_dir (a caller that only builds env, e.g. a test) → the live bind, as before. A
-      # materialisation failure is NOT fatal either: the reference is a convenience, and refusing
-      # to launch a producer because its doc face could not be copied would trade a soft loss for
-      # a hard one. It is logged loud.
+      # Missing reference or pod_dir returns no mount; a failed pin logs and falls back to
+      # a live RO bind, so reference availability is favored over snapshot consistency.
       nil -> []
       _no_pod_dir_or_failed -> live_reference_mount(opts, cap_profile)
     end
@@ -573,8 +418,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     else
       other ->
         _ = File.rm(tarball)
-        # One level of `{:error, _}`, whichever step failed: a caller matching on the CAUSE should
-        # not have to know how many `with` clauses it travelled through.
+
         reason =
           case other do
             {:error, r} -> r
@@ -591,23 +435,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  Materializes ONE object — a single file at a PINNED commit — into `<pod_dir>/obj/<safe>/<path>`,
-  and returns the path to that file.
+  Archives the requested path at a pinned SHA into `<pod_dir>/obj/<safe>/<path>`.
+  For a file path this supplies only that version, without `.git` or other tickets’ files,
+  so a mandate can be delivered without mounting the ops ledger.
 
-  This is `pin_reference_face/2`'s narrow sibling, and the narrowness is the whole point. Where the
-  face pin archives the WHOLE tree at HEAD, this archives `git archive <sha> -- <path>`: the pod
-  receives exactly `path`, at exactly `sha`, and nothing else — no other ticket's file, no earlier
-  version (history lives in the object store, not in the archive), no `.git`. It is how a brief or a
-  criteria doc reaches the pod that must act on it WITHOUT mounting the ops face and exposing the
-  whole ledger — the third horn the `sevrage` skipped between "mount everything" and "mount nothing".
-
-  The pod reads its mandate FROM this file, so the read is coupled to the sha by git's own object
-  store: an address cannot return a different content, and the commit sha is the Merkle root that
-  covers the blob. The mandate is honest by construction — nothing to hash, nothing to trust.
-
-  `sha` must be a 40-hex commit id (fail-closed: an unpinned `HEAD` here would defeat the freeze).
-  A `path` absent at `sha` makes `git archive` fail, surfaced as `{:error, _}` — never a silent
-  empty mount that would let a pod act on nothing while looking supplied.
+  Requires a lowercase 40-hex reference and a repository toplevel. Git resolves the object
+  and reports missing references/paths; errors are surfaced rather than yielding an empty mount.
   """
   @spec pin_object(Path.t(), Path.t(), String.t(), String.t()) ::
           {:ok, Path.t()} | {:error, term()}
@@ -647,18 +480,15 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     end
   end
 
-  # An unpinned reference here defeats the freeze it exists to guarantee: `HEAD`, a branch name, a
-  # short sha would all archive SOMETHING, and the mandate would float. Only a full commit id passes.
+  # Require a full lowercase object ID; branch names and short refs would let the mandate float.
   defp require_commit_sha(sha) do
     if Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
       do: :ok,
       else: {:error, {:not_a_commit_sha, sha}}
   end
 
-  # `git -C <dir>` WALKS UP: pointed at a directory that is not itself a repository, it resolves the
-  # ENCLOSING one and archives that. Measured, and it is not theoretical — the test fixtures live
-  # under the LCARS checkout, so the first run copied the whole runtime into the pod instead of
-  # failing. A source that is not its own toplevel is refused rather than approximated.
+  # git -C walks up to enclosing repositories. Require the source itself to be the toplevel
+  # so a plain directory beneath this checkout cannot archive the runtime by accident.
   defp require_repo_toplevel(source) do
     case Shell.git(["-C", source, "rev-parse", "--show-toplevel"], env: []) do
       {:ok, {out, 0}} ->
@@ -671,17 +501,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   @doc """
-  Returns the OTHER production face's worktree as a read-only reference for this pod.
-
-  A producer on `code` gets `workshop`, a producer on `workshop` gets `code` — each one reads what it must
-  compose with and may not edit. A branch that is neither face (a judge cloning a producer's head)
-  and a missing worktree both return `nil`.
-
-  NEVER `ops`, and no clause is needed to say so: no card can declare that face, so no producer
-  clone ever sits on that branch and `face_of/1` never answers it here. `face_root/1` raises on
-  anything outside the declared faces rather than guessing a directory.
-
-  `roots` is a test seam: `%{"code" => path, "workshop" => path}`, defaulting to the layout.
+  Returns the other production face’s existing worktree, using the explicit project slug:
+  code gets workshop and workshop gets code. Other branches (including ops and feature
+  branches), absent slugs and missing worktrees return nil.
+  `roots` injects `%{"code" => path, "workshop" => path}`; defaults come from Fleet.Layout.
   """
   @spec other_face_reference_path(keyword(), CapProfile.t(), map()) :: String.t() | nil
   def other_face_reference_path(opts, cap_profile, roots \\ default_face_roots()) do
@@ -732,9 +555,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       mode = bound_mount_mode(Map.get(m, "mode") || Map.get(m, :mode))
       path = Map.get(m, "path") || Map.get(m, :path)
 
-      # `mode:src:dst` only when the two differ — the pinned reference face is the sole case, and
-      # emitting a redundant third field everywhere would make every other mount look like it has
-      # a translation to check.
+      # An explicit dst produces mode:src:dst; otherwise keep the two-field form.
       case Map.get(m, "dst") || Map.get(m, :dst) do
         nil -> "#{mode}:#{path}"
         dst -> "#{mode}:#{path}:#{dst}"
@@ -743,8 +564,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   end
 
   defp mount_has_newline?(m) do
-    # `dst` is a mount field like the other two: a field that reaches the env line without this
-    # check is a field the injection guard does not cover.
     has_newline?(Map.get(m, "mode") || Map.get(m, :mode)) or
       has_newline?(Map.get(m, "path") || Map.get(m, :path)) or
       has_newline?(Map.get(m, "dst") || Map.get(m, :dst))

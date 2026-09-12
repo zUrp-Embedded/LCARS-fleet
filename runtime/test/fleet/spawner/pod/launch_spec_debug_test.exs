@@ -1,6 +1,5 @@
 defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
-  # SYNC on purpose: these tests flip a GLOBAL application env (`:debug_visibility`), which every
-  # pod launch reads. Async peers asserting on visibility would see the flip and flake.
+  # Serial: debug visibility is application-global.
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -18,8 +17,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
     :ok
   end
 
-  # `remote_control` nil = DECLARES nothing → the answer is derived from `slot_scope`, which is why
-  # the fixture takes the scope explicitly: since 4.4 there is no single "absent" answer.
+  # An undeclared remote_control value derives from slot_scope, so the fixture specifies it.
   defp cap(remote_control, slot_scope \\ "instance") do
     invocation = %{"slot_scope" => slot_scope}
 
@@ -41,23 +39,18 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
 
       refute LaunchSpec.remote_control?(cap(false))
       assert LaunchSpec.remote_control?(cap(true))
-      # Undeclared: the derivation of 4.4 answers, per identity granularity.
       refute LaunchSpec.remote_control?(cap(nil, "instance"))
       assert LaunchSpec.remote_control?(cap(nil, "project"))
     end
 
     test "debug ON: a pod DECLARED invisible becomes attachable" do
-      # The point of the mode: look into a pod nobody planned to look into. Without this, the only
-      # way to see one is to edit its cap-profile and respawn — i.e. to observe a different pod.
+      # Debug exposes normally hidden roles at launch without editing their profiles.
       Application.put_env(:lcars_fleet, :spawner_debug_visibility, true)
 
       assert LaunchSpec.remote_control?(cap(false))
     end
 
     test "debug ON never CLOSES a pod the declaration opened" do
-      # Monotone: the mode can add a window, never take one away. A mode that could also close
-      # would let an operator asking for observability LOSE a pod they already had — and a mode
-      # that lies in either direction is worse than no mode, because they stop looking.
       Application.put_env(:lcars_fleet, :spawner_debug_visibility, true)
 
       assert LaunchSpec.remote_control?(cap(true))
@@ -65,8 +58,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecDebugTest do
     end
 
     test "an unset key is OFF, not a crash" do
-      # The key only exists when runtime.exs ran, and it never runs under :test. The launch path
-      # must not depend on that: absent = the declaration stands.
+      # Test runtime.exs does not run; absence must preserve the profile’s visibility.
       Application.delete_env(:lcars_fleet, :spawner_debug_visibility)
 
       refute LaunchSpec.remote_control?(cap(false))

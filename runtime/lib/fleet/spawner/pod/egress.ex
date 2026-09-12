@@ -1,68 +1,21 @@
 defmodule Fleet.Spawner.Pod.Egress do
   @moduledoc """
-  The pod's ONLY way out to the network — a per-pod CONNECT proxy on an AF_UNIX socket, with a
-  hostname allowlist.
+  CONNECT proxy for bwrap pods, reached through a per-pod AF_UNIX socket.
+  An in-pod relay exposes it on localhost. The isolated network namespace has no
+  external route; this permits vendor access without granting CAP_NET_ADMIN.
 
-  ## Why a proxy and not a firewall
+  Hostnames are checked before host-side DNS resolution. TLS is relayed without
+  termination or certificate injection. Plain HTTP requests are refused with 501;
+  host refusals and upstream connection errors receive 403.
 
-  A pod is sealed with `bwrap --unshare-all` (no `--share-net`), so its namespace has no route to
-  anywhere. That is total, and total is the problem: the vendor's API is on the other side of the
-  same pipe as the open web. Filtering egress by host inside a network namespace needs
-  `CAP_NET_ADMIN`, which this runtime does not have and must not want — it runs under the human's
-  own UID.
+  Matching is case-insensitive: exact names or `*.` subdomains anchored at the end,
+  excluding the bare parent. An empty list permits no hosts. Vendor endpoints belong
+  in `Egress.Vendor` declarations; `network: egress` adds profile and converged hosts.
 
-  So the traffic leaves through the FILESYSTEM instead: a unix socket bound into the sandbox, a
-  relay inside turning `localhost:<port>` into that socket, and this proxy on the other end
-  deciding host by host. A unix socket is a mount, and mounts are what an unprivileged sandbox is
-  made of. (Same shape as Anthropic's own `sandbox-runtime`, which is where the pattern was read
-  rather than invented.)
-
-  ## Why the allowlist is DATA and names no vendor
-
-  No endpoint is written in this module, and none may be — not even in prose, because a host spelled
-  in a comment is a host a reader copies. They come from the vendor that needs them
-  (`Fleet.Spawner.Pod.Egress.Vendor`), so adding a second vendor is adding its launcher and its
-  declaration — never editing a list in the middle of the runtime. A role that legitimately browses
-  declares its own hosts on top; every other role gets the vendor's alone.
-
-  ## What it enforces, and what it deliberately does not
-
-  It reads the `CONNECT host:port` line and answers `200` or `403` on the host. It does NOT
-  terminate TLS: no certificate is injected into the pod, and this proxy never sees a byte of the
-  conversation it relays — it decides WHERE, never WHAT. A plain (non-CONNECT) request is refused
-  rather than proxied, because HTTP in clear is not a thing this fleet needs and a second parser is
-  a second place to be wrong.
-
-  DNS DISAPPEARS FROM THE POD, and that is a property rather than a side effect: with no network
-  namespace there is no resolver, so a hostname is only ever resolved HERE, after the allowlist has
-  accepted it. Nothing in the pod can look a name up, which is one exfiltration channel that stops
-  existing rather than being watched.
-
-  ## Fail-closed, everywhere
-
-  An empty allowlist refuses everything (a pod with no declared egress reaches nothing, rather than
-  everything). A malformed request line is refused. A host that is not an exact match is refused —
-  the match is an exact name, or a `*.` SUBDOMAIN rule anchored on the right. Never a `contains`,
-  never a bare suffix: the anchor is what stops `sentry.io.attacker.net` from passing `*.sentry.io`.
-
-  ## `network: open` — the third policy, and what it does NOT undo
-
-  A role may declare `open`, and then `allowlist/2` yields `:open` instead of a list: every host is
-  accepted. It is a TYPE, not a magic hostname, and that is the whole point — a host file cannot
-  express it. `*` in a vendor or converged declaration stays an ordinary (never-matching) name, so
-  no data file can silently open a pod.
-
-  What `open` gives up is the host wall, and nothing else. The pod is still sealed with no network
-  namespace, still leaves through this proxy, still cannot resolve a name itself, and still gets a
-  refusal on anything that is not a CONNECT tunnel. `provision/3` logs one warning per pod life
-  naming the role that runs without a host wall, so the state is readable in the durable trace
-  instead of being inferred from an absence of refusals.
-
-  WHY IT EXISTS: a role whose job is to answer a human needs the web the human is asking about, and
-  an allowlist for that role is a list nobody can finish — the human discovers a missing host as a
-  pod that silently fails, and pays a round trip to add it. That cost is the reason, and it is a
-  USER arbitration (self-hosted box, one human): the fail-closed default does not move, `open` is
-  declared per role, and no role gets it by forgetting to say anything.
+  Explicit `network: open` returns the atom `:open`, accepting any CONNECT host while
+  retaining the proxy and network isolation. A literal `*` in a host file cannot
+  select that policy. Open access supports human-facing roles whose web destinations
+  cannot be listed in advance; it is a per-role choice, logged during provisioning.
   """
 
   require Logger
@@ -74,42 +27,24 @@ defmodule Fleet.Spawner.Pod.Egress do
   @accept "HTTP/1.1 200 Connection Established\r\n\r\n"
   @refuse "HTTP/1.1 403 Forbidden\r\n\r\nConnection blocked by the LCARS egress allowlist\r\n"
 
-  # A NON-CONNECT REQUEST IS NOT A BLOCKED HOST, AND ANSWERING BOTH WITH 403 COST A DIAGNOSIS.
-  # `HTTP(S)_PROXY` covers everything a pod emits, and a plain `http://` origin makes the client
-  # send an absolute-URI GET rather than a tunnel request. This proxy only tunnels, so answering
-  # that GET with "blocked by the allowlist" hands an agent a refusal it attributes to the FORGE: an
-  # architect whose `git fetch` gets it writes a diagnosis concluding the fleet account is not a
-  # collaborator of the repo. The permissions are right. The sandbox is talking.
-  #
-  # 501 says WHOSE refusal it is and that nothing left the container. Read it as an answer to "should a
-  # pod reach this over the network at all": its project arrives through its mounts, and the forge
-  # through its MCP tools.
+  # Distinguish unsupported plain HTTP from a blocked host so callers do not misdiagnose
+  # the sandbox’s refusal as destination authorization failure.
   @refuse_method "HTTP/1.1 501 Not Implemented\r\n\r\n" <>
                    "The LCARS pod proxy tunnels CONNECT only — plain HTTP is not proxied.\r\n" <>
                    "This is the SANDBOX refusing, not the destination: nothing was sent.\r\n"
   @connect_timeout_ms 10_000
 
   @doc """
-  Provisions this pod's egress: resolves the allowlist, starts the proxy, returns the socket path.
-
-  `{:ok, nil}` when the pod gets no proxy — a host-containment pod keeps the machine's own network
-  (there is no namespace to seal), and asking it to route through a socket would break it for
-  nothing.
-
-  The ALLOWLIST is composed here and nowhere else: the vendor's declared hosts, plus the role's own
-  only when its profile says `network: egress`. Fail-closed by construction — a profile that says
-  nothing gets the vendor's list, which is what a pod needs to work and nothing more.
+  Resolves policy, starts the proxy and returns its socket path.
+  Returns `{:ok, nil}` for host containment or an absent socket-base directory.
+  Host pods retain the host network; bwrap pods without a proxy have no egress relay.
   """
   @spec provision(String.t(), CapProfile.t(), Path.t()) ::
           {:ok, Path.t() | nil} | {:error, term()}
   def provision(pod_id, cap_profile, launcher_path) do
     path = socket_path(pod_id)
 
-    # THE BASE MUST EXIST AND BE OURS TO WRITE. `bin/fleet` creates it at start; if it is not
-    # there, this fleet was not launched through its own launcher and there is nothing to
-    # provision into. Declining QUIETLY is the difference between "no egress here" and an error
-    # logged once per pod for a condition that is not a failure — a rail that shouts on a
-    # configuration it cannot see is a rail nobody reads.
+    # bin/fleet normally creates the base. Absence disables provisioning rather than failing spawn.
     cond do
       not CapProfile.bwrap?(cap_profile) ->
         {:ok, nil}
@@ -137,9 +72,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # ONE LINE PER POD LIFE, at warning so the durable trace keeps it. Under `open` no refusal is
-  # ever logged, so without this the state "this role has no host wall" would be readable only as an
-  # ABSENCE — the one shape nobody notices. Says the role, because the decision belongs to a role.
+  # Record the role’s open policy explicitly; lack of blocked-host logs does not explain it.
   defp warn_if_open(:open, cap_profile) do
     Logger.warning(
       "Egress: role #{CapProfile.name(cap_profile)} runs with an OPEN allowlist (`network: open`) " <>
@@ -153,7 +86,8 @@ defmodule Fleet.Spawner.Pod.Egress do
   defp warn_if_open(allowed, _cap_profile), do: allowed
 
   @doc """
-  Closes this pod's proxy and removes its socket. Idempotent: a pod that never had one is a no-op.
+  Closes the listener and attempts to remove its socket file/directory.
+  Returns `:ok` even on filesystem cleanup failure; an unprovisioned pod is a no-op.
   """
   @spec release(String.t()) :: :ok
   def release(pod_id) when is_binary(pod_id) do
@@ -171,27 +105,17 @@ defmodule Fleet.Spawner.Pod.Egress do
   end
 
   @doc """
-  The hosts this pod may reach: the vendor's, plus — only when the role declares `network: egress` —
-  the ones its cap-profile carries AND the ones a human APPROVED, converged onto the state volume.
-
-  THREE SOURCES, TWO KEYS, AND NEITHER KEY IS ENOUGH. `network` says WHO may leave; the two lists
-  say WHERE. A role that says nothing gets the vendor's list and nothing else, whatever sits on the
-  volume — the fail-closed default holds at every layer rather than at one.
-
-  WHY A THIRD SOURCE AT ALL, and it is not a convenience: the first two live IN THE IMAGE (the
-  vendor declaration beside the launcher, the cap-profile inside the catalogue). A rebuild restores
-  them as they were at build time, so an opening a human signed would be ERASED at the next nuke —
-  silently, since a pod that reaches nothing looks exactly like a pod nobody opened. The converged
-  file lives on the state volume, which survives, and that is the whole reason it exists.
+  Returns vendor hosts by default. `network: egress` adds profile hosts and
+  `$LCARS_STORE_ROOT/state/egress.d/<role>.hosts`, deduplicated in that order.
+  The state-volume declaration preserves approved additions across image rebuilds.
+  `network: open` returns `:open`; the vendor file is still read before policy selection,
+  but profile/converged lists do not contribute.
   """
   @spec allowlist(CapProfile.t(), Path.t()) :: [String.t()] | :open
   def allowlist(cap_profile, launcher_path) do
     vendor = Vendor.hosts(launcher_path)
 
     case CapProfile.network(cap_profile) do
-      # NO LIST IS COMPOSED, and none is read: the two data sources are not consulted at all, so a
-      # box whose store is absent or whose converger never ran behaves identically here. `:open` is
-      # the policy itself, not a list that happens to contain everything.
       "open" ->
         :open
 
@@ -199,18 +123,16 @@ defmodule Fleet.Spawner.Pod.Egress do
         Enum.uniq(vendor ++ role_hosts(cap_profile) ++ converged_hosts(cap_profile))
 
       _vendor_only ->
-        # THE FILE IS NOT READ HERE — but its PRESENCE is worth a word, because this exact pair
-        # (an approved list, a role that cannot use it) is the one shape a human cannot diagnose
-        # from the pod side: the merge landed, the file is there, and the pod still reaches nothing.
+        # Warn if approved hosts exist but the role’s policy ignores them.
         warn_if_converged_but_sealed(cap_profile)
         vendor
     end
   end
 
   @doc """
-  This pod's socket path — the SAME shape as its MCP socket, and for the same reason: a per-pod dir
-  under a short base, so `sun_path` holds whatever the pod_id looks like. The base is never bound
-  into a sandbox; a sibling's socket is a sibling's allowlist.
+  Returns `<spawner_egress_sock_base>/<pod_id>/sock`, defaulting beneath the runtime root.
+  The short per-pod path limits Unix socket length; only the pod’s own directory is bound,
+  since sharing the base would expose siblings’ proxy policies.
   """
   @spec socket_path(String.t()) :: Path.t()
   def socket_path(pod_id) when is_binary(pod_id) do
@@ -218,8 +140,6 @@ defmodule Fleet.Spawner.Pod.Egress do
       Application.get_env(
         :lcars_fleet,
         :spawner_egress_sock_base,
-        # DERIVE, jamais recopie : `Fleet.Layout` declare la racine runtime, et Spawner l'a dans ses
-        # deps — l'arete est legale, donc un litteral ici serait une seconde source.
         Path.join(Fleet.Layout.runtime_root(), "egress")
       )
 
@@ -233,26 +153,8 @@ defmodule Fleet.Spawner.Pod.Egress do
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
   end
 
-  # ── The CONVERGED source ────────────────────────────────────────────────────────────────────
-  #
-  # `$LCARS_STORE_ROOT/state/egress.d/<role>.hosts`, one hostname per line, `#` comments — the SAME
-  # grammar as the vendor declaration, parsed by the same function, because two parsers for one file
-  # format is two places to disagree about what a comment is.
-  #
-  # THE ROOT IS READ FROM THE ENVIRONMENT AND NEVER DECLARED HERE. The compose owns the path
-  # (`LCARS_STORE_ROOT`) and `deploy/lib/store.sh` owns the volume names. Re-deriving it here would
-  # make two truths for one place, which is the defect this split exists to prevent.
-  #
-  # ABSENT IS SILENT, AND THAT IS DELIBERATE — but it is not the same silence as the vendor's.
-  # There, a missing file is a WIRING HOLE and shouts. Here, a missing file is the NOMINAL state of
-  # a container where nobody has approved anything yet. Two absences, two gravities.
-  #
-  # WHICH IS WHY THE MARKER EXISTS. Silence alone would cover five states, four of them faults:
-  # nothing approved (nominal) · the converger never ran · the volume is not mounted · the volume
-  # was purged · the path or role name is wrong. All render the same nothing, then a REFUSED on the
-  # first call. `.applied` (written by the converger, carrying the SHA it applied) separates the
-  # nominal silence from the four failures: marker present + no hosts = normal; marker absent = the
-  # converger never came through here, and THAT is worth saying once.
+  # Converged files use Vendor.parse’s host/comment grammar. Missing role files are normal;
+  # in an existing egress.d, a missing .applied marker warns that convergence is unconfirmed.
   defp converged_hosts(cap_profile) do
     case converged_dir() do
       nil ->
@@ -265,8 +167,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # The converged directory, or `nil` when this container has no store mounted (DR-023: a disabled
-  # feature is not a precondition — no store means no extra hosts, never a refused spawn).
+  # No mounted store/directory means no extra hosts, not a refused spawn.
   defp converged_dir do
     case System.get_env("LCARS_STORE_ROOT") do
       root when is_binary(root) and root != "" ->
@@ -278,9 +179,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # UNREADABLE IS NOT EMPTY. A file that exists and cannot be read is a fault, and returning the
-  # vendor list quietly would render it as "nobody approved anything" — a partial allowlist that
-  # looks like a nominal one is the failure this whole rail is built to refuse.
+  # Read failures are logged and contribute no converged hosts; vendor/profile hosts remain.
   defp read_hosts(path) do
     case File.read(path) do
       {:ok, body} ->
@@ -314,8 +213,6 @@ defmodule Fleet.Spawner.Pod.Egress do
     :ok
   end
 
-  # A converged file for a role that is not `egress`: the approval landed and does nothing.
-  # Named on BOTH facts, because either alone sends the reader to the wrong side.
   defp warn_if_converged_but_sealed(cap_profile) do
     with dir when is_binary(dir) <- converged_dir(),
          role = CapProfile.name(cap_profile),
@@ -333,10 +230,8 @@ defmodule Fleet.Spawner.Pod.Egress do
   end
 
   @doc """
-  Decides one CONNECT line against an allowlist.
-
-  Split out of the socket handling because it is the WALL, and a wall you cannot call without a
-  socket is a wall nobody tests by mutation. `{:ok, host, port}` or `{:refused, reason}`.
+  Parses a CONNECT line and applies the host policy, independently of socket handling.
+  Returns `{:ok, host, port}` or `{:refused, reason}`; no TLS or destination-content inspection.
   """
   @spec decide(binary(), [String.t()] | :open) ::
           {:ok, String.t(), :inet.port_number()} | {:refused, term()}
@@ -344,9 +239,6 @@ defmodule Fleet.Spawner.Pod.Egress do
       when is_binary(request_line) and (is_list(allowed) or allowed == :open) do
     case Regex.run(@connect_re, request_line) do
       [_, host, port] ->
-        # `:open` drops the HOST question and nothing else — the line still had to parse as a
-        # CONNECT to get here, so a non-tunnel request is refused under `open` exactly as it is
-        # under an allowlist.
         if allowed == :open or allowed?(host, allowed),
           do: {:ok, host, String.to_integer(port)},
           else: {:refused, {:host_not_allowed, host}}
@@ -356,19 +248,10 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # Which refusal the client gets, and the two are not interchangeable — cf. `@refuse_method`.
   defp refusal_for({:not_a_connect_request, _}), do: @refuse_method
   defp refusal_for(_), do: @refuse
 
-  # Exact name, or a `*.` prefix that is a SUBDOMAIN rule anchored on the right — never a
-  # `contains`. "A rule reasoning about where a domain ends will be wrong once" is true of a naive
-  # suffix test, and wrong as an argument against any pattern at all: the vendor's own error
-  # reporting needs `*.sentry.io` and `*.ingest.us.sentry.io`, so a matcher without subdomains
-  # cannot express the published list.
-  #
-  # `*.sentry.io` accepts `x.sentry.io`, and refuses `sentry.io.attacker.net` (the dot anchors the
-  # END of the candidate) as well as bare `sentry.io` (declare it too if it is wanted — a wildcard
-  # states "under this", not "this"). Pinned by mutation.
+  # A *.parent rule requires a dotted suffix and excludes the bare parent itself.
   defp allowed?(host, allowed) do
     h = String.downcase(host)
 
@@ -387,10 +270,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   The socket file is removed first: a stale one from a pod that died without releasing it would
   make `listen` fail on an address that belongs to nobody.
   """
-  # AF_UNIX caps a path at ~108 bytes, kernel-side, and the failure is a bare `:einval` that names
-  # nothing. Measured the first time this ran: an ExUnit tmp_dir blew the limit and the error said
-  # only "invalid argument". Real pod sockets live under a short root for exactly this reason (the
-  # MCP socket already does); a caller that composes a long one gets told WHICH constraint it hit.
+  # Reject overlong paths by name instead of surfacing the kernel’s unhelpful :einval.
   @sun_path_max 100
 
   @spec start(Path.t(), [String.t()] | :open, keyword()) :: {:ok, port()} | {:error, term()}
@@ -416,11 +296,8 @@ defmodule Fleet.Spawner.Pod.Egress do
       {:ok, listen} ->
         pod_id = Keyword.get(opts, :pod_id, "?")
 
-        # UNLINKED, deliberately. `spawn_link` from `provision/3` runs inside the POD's process, so
-        # an acceptor dying abnormally would take the pod down with it — a proxy failing is a pod
-        # that cannot reach its vendor, which is bad; a proxy failing that KILLS the pod is worse
-        # and looks like something else entirely. Nothing leaks either way: `release/1` closes the
-        # listener, and `accept_loop` ends on `{:error, :closed}`.
+        # Unlinked so an acceptor failure does not kill the Pod process. Closing the listener
+        # ends the accept loop; it does not explicitly close already accepted tunnels.
         spawn(fn -> accept_loop(listen, allowed, pod_id) end)
         {:ok, listen}
 
@@ -448,9 +325,6 @@ defmodule Fleet.Spawner.Pod.Egress do
   defp serve(client, allowed, pod_id) do
     with {:ok, line} <- :gen_tcp.recv(client, 0, @connect_timeout_ms),
          {:ok, host, port} <- decide(line, allowed),
-         # The 4th argument of `:gen_tcp.connect/4` is a TIMEOUT, not options: passing a keyword
-         # list there is a badarg, so the server process died and the pod saw a closed socket
-         # instead of a named refusal — a wall that crashes reads exactly like a broken network.
          {:ok, upstream} <-
            :gen_tcp.connect(
              String.to_charlist(host),
@@ -462,8 +336,6 @@ defmodule Fleet.Spawner.Pod.Egress do
       splice(client, upstream)
     else
       {:refused, reason} ->
-        # The refusal is LOGGED, always: a wall that blocks silently is indistinguishable from a
-        # network that is merely broken, and the pod will report the second.
         Logger.warning("Egress[#{pod_id}]: REFUSED #{inspect(reason)}")
         _ = :gen_tcp.send(client, refusal_for(reason))
         :gen_tcp.close(client)
@@ -475,8 +347,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # Bytes both ways until either side hangs up. Two processes rather than one select loop: the
-  # relay carries TLS records it cannot interpret, so there is nothing to be clever about.
+  # Relay opaque TLS bytes in both directions; close both sockets on either-side failure.
   defp splice(a, b) do
     pid = self()
     spawn(fn -> pump(b, a, pid) end)

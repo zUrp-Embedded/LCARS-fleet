@@ -1,47 +1,18 @@
 defmodule Fleet.Spawner.Pod.EgressTest do
   @moduledoc """
-  THE WALL, and its mutation test.
-
-  A pod is sealed with no network namespace; this proxy is the single hole in the seal, and what it
-  is worth is exactly what it refuses. So these cases spend their lines on refusals: a lock is only
-  valid once it has been shown it CAN fail.
-
-  The transport is a real AF_UNIX socket — the same object bwrap binds into the sandbox — because
-  the interesting failures (a stale socket file, a refused connect answered on the wrong stream)
-  only exist on the real thing.
+  Verify CONNECT policy and transport behavior over real AF_UNIX sockets.
+  Stale paths and wire-level refusals require the actual transport, not a mocked decision.
   """
-  # ⚠ `async: false` : ce fichier ECRIT `:spawner_egress_sock_base` en env d'APPLICATION, qui est
-  # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
-  # lit cette cle lit la valeur de celui-ci. Mesure du 2026-08-17 : la meme forme a tue
-  # `Pilot.ApplicationTest` sur une racine de catalogue temporaire qui ne lui appartenait pas, dans
-  # le build d'image et pas sur la machine de dev — la collision depend du nombre de coeurs et de
-  # l'ordre du seed, donc elle mord la ou ca coute le plus cher.
+  # Serial: these tests change application config and the node-global store environment.
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod.Egress
 
   @moduletag :tmp_dir
 
-  # NOT under `tmp_dir`: an ExUnit tmp_dir carries the test NAME, and AF_UNIX caps a path at ~108
-  # bytes. The first run failed on `:einval` for that reason alone — which is why the module now
-  # names the constraint instead of relaying the kernel's word for "no".
-  #
-  # PID-SUFFIXED, and the two candidate keys were both tried in parallel branches — this records
-  # why the pid won, so nobody "improves" it back.
-  #
-  # A CONSTANT `/tmp` path belongs to whoever created it first: on a shared container the next runner
-  # dies on `:eacces`, with a message that accuses the socket instead of naming the directory's
-  # owner (measured 2026-08-18: 3 reds with nothing to do with the code under test).
-  #
-  # NOT THE CLONE NAME. Keying on the sibling clone (`LCARS`, `LCARS-admiral`, `LCARS-rails`) reads
-  # better in an `ls /tmp` and is stable across runs, but it does not separate what actually
-  # collides: measured 2026-08-19, FOUR agents were running with the same cwd `/home/projects/LCARS`.
-  # A key that cannot tell two concurrent runners apart is not a key.
-  #
-  # AND STABILITY BUYS NOTHING HERE, which is the half worth writing down: the stale-socket case
-  # writes its own stale file (`File.write!(path, "stale")`), so it does not need the directory to
-  # survive between runs. The only real cost of a per-run directory is debris, and `File.rmdir`
-  # below settles it — it succeeds only on an empty directory, so it can never take a live one.
+  # Use a short path to fit AF_UNIX limits, and a PID suffix to isolate concurrent runners
+  # (even those sharing a clone). The stale-socket test creates its own fixture; no stable
+  # cross-run path is needed. rmdir cleanup removes only an empty directory.
   defp sock(_tmp) do
     dir = Path.join(System.tmp_dir!(), "lcars-eg-#{System.pid()}")
     File.mkdir_p!(dir)
@@ -69,7 +40,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a host that is not on the list is REFUSED — this is the mutation" do
-      # Drop the membership test and this is the case that stops failing.
       assert {:refused, {:host_not_allowed, "evil.example"}} =
                Egress.decide("CONNECT evil.example:443 HTTP/1.1\r\n\r\n", ["api.anthropic.com"])
     end
@@ -80,20 +50,15 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a plain-HTTP proxy request is refused as the SANDBOX, not as the destination" do
-      # `HTTP(S)_PROXY` covers everything, and a plain `http://` origin makes the client send an
-      # absolute-URI GET instead of a tunnel request. Answering it "blocked by the allowlist" made
-      # an architect's `git fetch` on the forge read as the FORGE refusing: it wrote a diagnosis
-      # concluding the fleet account was not a collaborator, and the permissions were right.
+      # Plain HTTP uses absolute-URI GET. The response must identify the sandbox rather than
+      # suggest a destination authorization failure.
       line = "GET http://forge:3000/web/test2.git/info/refs HTTP/1.1\r\n\r\n"
 
       assert {:refused, {:not_a_connect_request, _}} = Egress.decide(line, ["forge"])
     end
 
     test "a `*.` rule accepts subdomains and REFUSES the right-hand impostor — the mutation" do
-      # The published list needs `*.sentry.io` and `*.ingest.us.sentry.io`; a matcher without
-      # subdomains cannot express it. The dot anchors the END of the candidate — drop it and
-      # `sentry.io.attacker.net` walks in, which is the whole reason the first version refused
-      # patterns outright.
+      # Vendor declarations include subdomains; suffix matching must include the dot boundary.
       allowed = ["*.sentry.io"]
 
       assert {:ok, "o123.ingest.sentry.io", 443} =
@@ -111,8 +76,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "the shipped declaration carries the PUBLISHED list, not a reconstruction" do
-      # It was rebuilt host by host from a binary and from correlations, and shipped with ONE entry.
-      # Anthropic publishes what a sandboxed Claude Code needs; it is read, not inferred.
+      # Verify the vendor declaration shipped with the launcher.
       hosts =
         Fleet.Spawner.Pod.Egress.Vendor.hosts(Path.join(File.cwd!(), "bin/claude_launch.sh"))
 
@@ -120,15 +84,13 @@ defmodule Fleet.Spawner.Pod.EgressTest do
         assert required in hosts, "#{required} is on the published list and must ship"
       end
 
-      # Never added: it appears in no official list — only in a recipe for GRANTING GitHub access.
+      # GitHub browsing is an additional permission, not a vendor API requirement.
       refute "raw.githubusercontent.com" in hosts
     end
 
     test "a plain name matches EXACTLY — a rule without `*.` is not a suffix rule" do
       allowed = ["api.anthropic.com"]
 
-      # The three shapes a suffix rule gets wrong. A rule that has to reason about where a domain
-      # ends is a rule that will be wrong once.
       for host <- [
             "evil-api.anthropic.com.attacker.net",
             "api.anthropic.com.attacker.net",
@@ -173,14 +135,11 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       assert answer =~ "403 Forbidden"
       assert answer =~ "egress allowlist"
 
-      # And nothing is relayed after the refusal.
       assert {:error, :closed} = :gen_tcp.recv(c, 0, 2_000)
       :gen_tcp.close(listen)
     end
 
     test "an allowed host that does not resolve fails CLOSED, never open", %{tmp_dir: tmp} do
-      # Allowed is not the same as reachable. The pod must get a refusal, not a hang and not a
-      # silently proxied connection to something else.
       path = sock(tmp)
       {:ok, listen} = Egress.start(path, ["nx.invalid"], pod_id: "test")
 
@@ -193,8 +152,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a path over the AF_UNIX limit is REFUSED by name, not by :einval", %{tmp_dir: tmp} do
-      # The kernel says "invalid argument" and nothing else. A caller composing a socket under a
-      # long pod dir would read that as a bug in the proxy rather than a constraint on the path.
       long = Path.join(tmp, String.duplicate("x", 120) <> ".sock")
 
       assert {:error, {:egress_socket_path_too_long, _got, _max}} =
@@ -202,8 +159,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a STALE socket file does not stop the next pod from listening", %{tmp_dir: tmp} do
-      # A pod killed without releasing its socket leaves the file behind; `listen` on an address
-      # that belongs to nobody fails, and the next spawn would die on its predecessor's corpse.
       path = sock(tmp)
       File.write!(path, "stale")
 
@@ -238,15 +193,11 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a MISSING declaration yields no hosts — a wiring hole reaches nothing", %{tmp_dir: tmp} do
-      # Fail-closed: the alternative is a vendor whose declaration was forgotten silently getting
-      # full egress, which is the failure this rail exists to prevent.
       assert Vendor.hosts(Path.join(tmp, "ghost_launch.sh")) == []
     end
 
     test "the declaration SHIPS with its launcher — the manifest lists both or neither" do
-      # Measured on a bench: `claude_launch.sh` was installed and `claude_launch.egress` was not,
-      # so `Vendor.hosts/1` read an absent file, the allowlist was EMPTY, and the wall refused the
-      # vendor's own API. A launcher without its declaration is a pod that reaches nothing.
+      # A launcher without its endpoint declaration cannot reach its vendor by default.
       manifest = File.read!(Path.join(File.cwd!(), "etc/release.manifest"))
 
       assert manifest =~ ~r/^claude_launch\.sh\s/m
@@ -259,8 +210,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "`api.anthropic.com` is written in exactly ONE file of the repository" do
-      # The centralisation IS the requirement, so it is asserted rather than trusted: a second
-      # occurrence means someone hardcoded an endpoint where a vendor declaration belongs.
+      # Keep endpoints in the vendor declaration, not in runtime code or shell copies.
       offenders =
         ["lib/**/*.ex", "bin/*.sh", "etc/**/*.sh", "priv/**/*.yaml"]
         |> Enum.flat_map(&Path.wildcard(Path.join(File.cwd!(), &1)))
@@ -283,9 +233,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
   describe "provision/3 — the proxy is STARTED, not merely startable" do
     setup do
-      # Short base, same reason as the sockets above: `tmp_dir` carries the test NAME and AF_UNIX
-      # caps the path. The real base is `/run/lcars/egress`, which is short for this exact reason.
-      # Same pid suffix as `sock/1` above, same reason (cross-runner `/tmp` collision).
+      # Short PID-scoped base avoids AF_UNIX length and concurrent-runner collisions.
       base = Path.join(System.tmp_dir!(), "lcars-egb-#{System.pid()}")
       File.mkdir_p!(base)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_egress_sock_base, base)
@@ -294,8 +242,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
 
     test "a bwrap pod gets a live socket, and it answers", %{tmp_dir: tmp} do
-      # The gap this closes: the launcher supported egress, the proxy existed, and nothing started
-      # it — a door nobody takes. Found by a bench build, not by the gate.
       launcher = Path.join(tmp, "claude_launch.sh")
       File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
 
@@ -324,7 +270,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
   describe "network: open — the host wall goes, the seal stays" do
     setup do
-      # Same short base as the `provision/3` describe, same reason (AF_UNIX path cap).
       base = Path.join(System.tmp_dir!(), "lcars-egopen-#{System.pid()}")
       File.mkdir_p!(base)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_egress_sock_base, base)
@@ -336,8 +281,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       launcher = Path.join(tmp, "claude_launch.sh")
       File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
 
-      # A store IS mounted and carries hosts for this role: under `open` neither it nor the vendor
-      # file is read, because `:open` is the policy itself and not a list something contributes to.
+      # Converged hosts must not constrain the explicit open policy. Vendor lookup still runs.
       dir = Path.join([tmp, "state", "egress.d"])
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, "r.hosts"), "from.the.store\n")
@@ -362,8 +306,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       launcher = Path.join(tmp, "claude_launch.sh")
       File.write!(Path.join(tmp, "claude_launch.egress"), "*\n")
 
-      # The vendor file says `*`; the policy is still a list, and that list matches nothing but the
-      # literal host `*`. This is the property that makes `:open` a TYPE rather than a magic name.
+      # A literal * remains list data and cannot select the :open policy.
       assert Egress.allowlist(profile("vendor-only"), launcher) == ["*"]
 
       assert {:refused, {:host_not_allowed, "github.com"}} =
@@ -377,14 +320,12 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          # The proxy is still STARTED: `open` changes the decision, not the plumbing.
           assert {:ok, path} = Egress.provision(pod, profile("open"), launcher)
           assert path =~ pod
           Egress.release(pod)
         end)
 
-      # Under `open` no refusal is ever logged, so the ONLY readable trace of "this role has no host
-      # wall" is this line. Its absence would make the state visible as a silence.
+      # Log the policy explicitly: absence of host refusals does not explain open access.
       assert log =~ "OPEN allowlist"
       assert log =~ "role r"
     end
@@ -401,8 +342,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
         spec: %{"scope" => %{"egress_hosts" => ["docs.example.com"]}}
       }
 
-      # The role DECLARES hosts but its profile does not say `egress`: they are not granted. A
-      # declaration is not a permission.
       assert Egress.allowlist(cap, launcher) == ["api.vendor.test"]
     end
 
@@ -432,9 +371,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   end
 
   describe "allowlist/2 — the CONVERGED source, the only one that survives a rebuild" do
-    # The vendor declaration and the cap-profile both live IN THE IMAGE. A nuke restores them as
-    # they were at build time, so an opening a human signed would be erased with no trace. These
-    # cases pin the third source: read off the state volume, gated by the SAME `network` key.
+    # Converged declarations survive image rebuilds and still require the role’s egress policy.
 
     setup %{tmp_dir: tmp} do
       root = Path.join(tmp, "store")
@@ -472,8 +409,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     test "TWO KEYS: a sealed role gets NOTHING from the file, however signed", ctx do
       converged(ctx.root, "eng", "pypi.org\n")
 
-      # The whole point of the pair. The merge landed, the file is there, and the profile does not
-      # grant egress: the pod reaches its vendor and nothing else.
       assert Egress.allowlist(cap("eng"), ctx.launcher) == ["api.vendor.test"]
     end
 
@@ -481,8 +416,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       converged(ctx.root, "eng", "pypi.org\n")
       assert "pypi.org" in Egress.allowlist(cap("eng", "egress"), ctx.launcher)
 
-      # Without this case, an implementation that IGNORES the third source entirely passes every
-      # other test in this block: absent-file and ignored-source render the same list.
+      # Change the file between calls to detect cached or ignored converged declarations.
       converged(ctx.root, "eng", "pypi.org\nfiles.pythonhosted.org\n")
       assert "files.pythonhosted.org" in Egress.allowlist(cap("eng", "egress"), ctx.launcher)
     end
@@ -490,8 +424,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     test "the file name is DERIVED from the profile name, not guessed", ctx do
       converged(ctx.root, "eng", "pypi.org\n")
 
-      # Same store, another role: its own file does not exist, so it gets the vendor's only. A
-      # hardcoded path or a wrong naming convention passes all the cases above and fails here.
+      # Change only the role to verify lookup uses its own declaration file.
       assert Egress.allowlist(cap("qualifier", "egress"), ctx.launcher) == ["api.vendor.test"]
     end
 

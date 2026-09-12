@@ -1,7 +1,5 @@
 defmodule Fleet.Spawner.Pod.LaunchSpecTest do
-  # `async: false` : ce fichier ECRIT `LCARS_STORE_ROOT`, globale au NOEUD (bloc « magasin
-  # d'outillage » plus bas, ou le raisonnement complet est ecrit). Un second module l'ecrit aussi ;
-  # en parallele, leurs restaurations se marchent dessus.
+  # Serial: LCARS_STORE_ROOT is node-global, including during restoration.
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -16,9 +14,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
   describe "pod_mounts_env/2 — anti-injection LCARS_POD_MOUNTS (R1-27 / DR-021)" do
     test "a mount with a newline (injection) → REFUSAL (raise), no drop-and-launch" do
-      # DR-021: an injecting mount is an INVALID state (attack-shaped). Dropping it and continuing the
-      # launch would be downstream repair of an invalid profile. LOUD refusal → the projection fails
-      # (the raise is caught by LaunchEnv.build/4 → {:error, {:launch_env_unresolved, _}}, no launch).
+      # Malformed mount input must reject projection rather than silently alter the requested world.
       cap = cap_with_mounts([%{"mode" => "ro", "path" => "/legit\nrw:/etc/shadow"}])
 
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*injection/s, fn ->
@@ -41,11 +37,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "a mount with an OUT-OF-ENUM mode (typo) → REFUSAL (raise), no soft fallback to `ro`" do
-      # DR-021: `mode` is a SECURITY property (RO vs RW = out-of-sandbox writes). A nil/typo mode
-      # (`"RW"`) present-but-invalid = schema-bypassed profile → refusal, never normalized to `ro`
-      # (normalizing a typoed RW into RO silently changes the meaning of an invalid profile). The
-      # schema already bounds `mode ∈ {ro,rw}` at LOAD; this check is the eval boundary. Twin of
-      # `permission_mode`.
+      # This boundary also rejects profiles that bypassed schema validation.
       cap = cap_with_mounts([%{"mode" => "RW", "path" => "/x"}])
 
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*mount mode/s, fn ->
@@ -55,21 +47,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   end
 
   describe "pod_mounts_env/3 — the COMPOSITION, which nothing held" do
-    # Le monde d'un pod a QUATRE sources — system, cap-profile, opts de spawn, autre-face —
-    # concatenees puis passees a `Enum.uniq_by/2`. Chaque source avait ses tests ;
-    # l'ASSEMBLAGE n'en avait aucun, alors qu'il porte une garantie ecrite (« Earlier entries win on
-    # duplicate paths ») et que cette garantie decide un MODE. Or le mode est la propriete de
-    # securite de ce module — les trois refus ci-dessus existent pour lui, et aucun ne regarde le
-    # cas ou deux sources reclament le meme chemin.
-    #
-    # `uniq_by` garde la PREMIERE occurrence : l'ordre de concatenation n'est donc pas un detail de
-    # style, c'est la table de priorite, et elle n'est ecrite nulle part ailleurs que dans l'ordre
-    # des `++`.
+    # Deduplication selects a mode as well as a path; test priority across sources.
     test "deux sources sur le MEME chemin : la premiere gagne, et c'est son MODE qui sort" do
-      # system (`/opt/bin`, ro) est concatene AVANT le cap-profile. Le profil reclame `rw` sur le
-      # meme chemin : il perd. Un `uniq_by` qui garderait la derniere occurrence rendrait ici un
-      # `rw` hors sandbox sans qu'aucun des refus de ce module ne se declenche — ils valident la
-      # FORME d'un mount, jamais lequel des deux survit.
+      # System mounts precede the profile, so its RW request cannot widen this RO source.
       cap = cap_with_mounts([%{"mode" => "rw", "path" => "/opt/bin"}])
       env = LaunchSpec.pod_mounts_env(cap, [], "/opt/bin/claude_launch.sh")
 
@@ -78,9 +58,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "cap-profile AVANT opts de spawn : le catalogue gagne sur la demande de spawn" do
-      # L'ordre qui compte le jour ou un appelant de spawn passe un `mounts:` chevauchant le
-      # catalogue. Le catalogue est la declaration statique auditee ; la demande de spawn est
-      # dynamique. Elle ne relache pas un mode que le catalogue a serre.
+      # Profile mounts precede dynamic spawn requests on the same source path.
       cap = cap_with_mounts([%{"mode" => "ro", "path" => "/srv/shared"}])
 
       env =
@@ -95,14 +73,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "AUCUN montage n'est derive de la racine ops — le registre n'est pas le monde d'un pod" do
-      # LA PROPRIETE DU SEVRAGE, et c'est une ABSENCE, donc elle a besoin d'un garde explicite : une
-      # absence ne rougit jamais toute seule. Chaque pod projet portait un `--ro-bind` de
-      # `<ops_root>/<projet>` — briefs, gate-briefs, verdicts, provenance : le registre que le
-      # runtime tient sur le travail, y compris celui du pod qui le lisait. Il etait la pour qu'UN
-      # role lise UN fichier, et ce fichier voyage desormais en texte dans le work item.
-      #
-      # Re-ajouter une source derivee de la racine ops fait rougir cette ligne. C'est le seul
-      # endroit ou ca rougit : le reste du module ne regarde que la forme des mounts.
+      # Producers receive briefs/criteria without the ops ledger used to judge their work.
       opts = [
         rc_name: "myproj_test",
         project_slug: "myproj",
@@ -115,21 +86,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       refute env =~ Fleet.Layout.ops_root(),
              "un pod producteur ne monte pas l'arbre ou son propre travail est juge"
     end
-
-    # ❌ PAS de test pour la collision RW/RO de l'architecte sur la face ops : le mecanisme qui la
-    # produisait — un `project_ops_mount` pose APRES `opts[:mounts]` sur le meme chemin — n'existe
-    # plus. L'architecte obtient ops par son `mounts:` explicite et rien ne le lui dispute, donc il
-    # n'y a plus de precedence a epingler la. Celle qui reste est celle des deux tests plus haut.
   end
 
   describe "other_face_reference_path/3 — the OTHER production face, read-only" do
-    # WHAT REPLACED THE OPS MOUNT. Every project pod used to carry a read-only bind of the
-    # runtime's record (`<ops_root>/<project>`): briefs, gate-briefs, verdicts, provenance. It
-    # was there so ONE role could read ONE file out of it, and the brief and the judging criterion
-    # now travel as text. What a producer actually needs is the OTHER production face — the code it
-    # documents, or the documentation it implements against — and nothing else.
-    #
-    # The face comes off the project map's `base_branch`, threaded from the card, never re-derived.
+    # The project’s base_branch identifies the production face whose counterpart is needed.
     defp face_opts(base_branch) do
       [
         rc_name: "myproj_test",
@@ -156,9 +116,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     test "a CODE producer gets the doc tree — the symmetry, which did not exist before", %{
       tmp_dir: tmp
     } do
-      # The old shape granted the reference in ONE direction and gave everyone the ops tree in the
-      # other. An engineer had the ledger and not the documentation it implements against; now it
-      # has the documentation and not the ledger.
       File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
       File.mkdir_p!(Path.join([tmp, "doc", "myproj"]))
 
@@ -185,10 +142,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
     @tag :tmp_dir
     test "the OPS branch is not a production face → nil, and no clause says so", %{tmp_dir: tmp} do
-      # `face_of/1` answers "ops" here, and `other_face/1` has no clause for it — the guard is the
-      # `when face in ["code", "doc"]`, which is the same list the card enum allows. A pod on
-      # ops is unreachable by construction; this pins that the reference path agrees rather
-      # than inventing a direction for it.
+      # The explicit production-face guard excludes ops even when face_of identifies it.
       File.mkdir_p!(Path.join([tmp, "code", "myproj"]))
 
       assert LaunchSpec.other_face_reference_path(
@@ -254,9 +208,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "an UNKNOWN mode (forged security setting) → REFUSAL (raise), no \"default\" fallback" do
-      # DR-021: normalizing an invalid permission_mode into "default" silently changes the meaning of a
-      # forged security profile (a typoed "bypassPermissions" would become enforced, or the reverse).
-      # Present-but-out-of-enum → LOUD refusal; the projection fails (raise caught by LaunchEnv.build/4).
       assert_raise ArgumentError, ~r/SECURITY REFUSAL.*permission_mode/s, fn ->
         LaunchSpec.permission_mode(cap_with_permission_mode("yolo-bypass-everything"))
       end
@@ -292,15 +243,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert {:ok, pinned} = LaunchSpec.pin_reference_face(src, pod_dir)
       assert File.read!(Path.join([pinned, "refs", "ina219.txt"])) == "0x40 shunt"
 
-      # No `.git`: a pointer back into the source is exactly what must not survive the source.
       refute File.exists?(Path.join(pinned, ".git"))
-      # And the tarball is not left behind in the pod's world.
       assert Path.wildcard(Path.join(pod_dir, "*.tar")) == []
     end
 
     test "the pinned reference SURVIVES its source being removed mid-flight", %{tmp_dir: tmp} do
-      # This is the whole point. `project_delete` nukes the faces without consulting running pods;
-      # a live `--ro-bind` then became a dangling mount the pod read as an empty tree, silently.
+      # A pinned copy must survive project deletion without relying on its source worktree.
       src = face_repo(tmp)
       pod_dir = Path.join(tmp, "pod")
       File.mkdir_p!(pod_dir)
@@ -312,8 +260,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "a write in the source AFTER the pin does not reach the pod", %{tmp_dir: tmp} do
-      # The human and the architect write in that face continuously, and `WorktreeSync` rebases it
-      # after each merge. Live, a producer could compose against a state that never existed whole.
+      # Host edits and WorktreeSync rebases must not change the pod’s pinned reference.
       src = face_repo(tmp)
       pod_dir = Path.join(tmp, "pod")
       File.mkdir_p!(pod_dir)
@@ -325,8 +272,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "a source that is not its own repo REFUSES — `git -C` walks UP", %{tmp_dir: tmp} do
-      # Not a hypothetical: these fixtures live under the LCARS checkout, so without the toplevel
-      # check the first run archived the whole runtime into the pod and reported success.
+      # The fixture is inside this checkout; Git could otherwise archive the enclosing runtime.
       plain = Path.join(tmp, "not-a-repo")
       File.mkdir_p!(plain)
       pod_dir = Path.join(tmp, "pod")
@@ -342,8 +288,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   describe "pin_object/4 — one file, one pinned version, nothing else" do
     @describetag :tmp_dir
 
-    # An ops-like repo: a brief committed TWICE (two versions) plus a second file that shares the
-    # tree. Returns the source and the FIRST commit's sha — the version we freeze against.
+    # Commit two versions of the brief and a neighboring file; return the first SHA.
     defp ops_repo(tmp) do
       src = Path.join(tmp, "ops-face")
       File.mkdir_p!(Path.join(src, "briefs"))
@@ -357,7 +302,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       {_, 0} = System.cmd("git", ["-C", src, "commit", "-q", "-m", "v1"])
       {sha, 0} = System.cmd("git", ["-C", src, "rev-parse", "HEAD"])
 
-      # v2 of the SAME brief — the version the pin must NOT surface.
       File.write!(Path.join([src, "briefs", "issue-3-engineer.md"]), "ORDER v2")
       {_, 0} = System.cmd("git", ["-C", src, "add", "."], stderr_to_stdout: true)
       {_, 0} = System.cmd("git", ["-C", src, "commit", "-q", "-m", "v2"])
@@ -373,7 +317,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       assert {:ok, file} =
                LaunchSpec.pin_object(src, pod_dir, sha, "briefs/issue-3-engineer.md")
 
-      # v1, frozen — even though the source HEAD now says v2.
       assert File.read!(file) == "ORDER v1"
       refute File.read!(file) == "ORDER v2"
     end
@@ -385,12 +328,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
       {:ok, file} = LaunchSpec.pin_object(src, pod_dir, sha, "briefs/issue-3-engineer.md")
 
-      # The other ticket's brief existed at that same commit; the archive must not carry it.
+      # The neighboring ticket exists at the same commit and must not enter this archive.
       root = Path.join(pod_dir, "obj")
       others = Path.wildcard(Path.join(root, "**/issue-9-other.md"))
       assert others == [], "the mount leaked another ticket's order: #{inspect(others)}"
 
-      # No `.git`, no tarball left behind.
       refute File.exists?(Path.join(Path.dirname(Path.dirname(file)), ".git"))
       assert Path.wildcard(Path.join(pod_dir, "*.tar")) == []
     end
@@ -400,7 +342,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       pod_dir = Path.join(tmp, "pod")
       File.mkdir_p!(pod_dir)
 
-      # HEAD would archive SOMETHING and let the mandate float — exactly the freeze this defeats.
       assert {:error, {:not_a_commit_sha, "HEAD"}} =
                LaunchSpec.pin_object(src, pod_dir, "HEAD", "briefs/issue-3-engineer.md")
     end
@@ -441,22 +382,6 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
   end
 
-  # ⚠ CE COMMENTAIRE DISAIT « `async: false` sur ce bloc », ET CE MECANISME N'EXISTE PAS. Le mode
-  # `async` d'ExUnit se declare une fois par MODULE, dans `use ExUnit.Case` — il n'y a pas d'`async`
-  # par `describe`. La protection annoncee ici n'a donc jamais existe : ce bloc ecrivait
-  # `LCARS_STORE_ROOT`, variable d'environnement GLOBALE AU NOEUD, pendant que le module entier
-  # tournait en parallele des autres.
-  #
-  # MESURE DU 2026-08-20, dans un `mix gate` complet : « clef hors motif => REFUS » n'a rien leve.
-  # `Fleet.Pilot.IncidentRegistryTest` — `async: true` lui aussi — ecrit et RESTAURE la meme variable
-  # dans son `with_store/2` ; sa restauration, tombee au milieu d'un test d'ici, a fait lire une
-  # racine qui n'etait pas la sienne, ou le fichier `bad-key=1` n'existe pas. Le test attendait un
-  # refus et a vu une lecture propre. Il passait seul et echouait en suite complete, donc la seule
-  # facon de le voir etait de le faire tomber.
-  #
-  # Le fichier est desormais `async: false` (en tete), des DEUX cotes. La regle que `Fleet.TestEnv`
-  # enonce pour l'env d'APPLICATION vaut mot pour mot pour l'env OS : un fichier qui l'ecrit est
-  # `async: false`, et aucun commentaire ne remplace le mot-clef.
   describe "le magasin d'outillage — monte, et l'environnement qui le rend utilisable" do
     setup do
       root =
@@ -488,9 +413,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
       ro = :binary.match(env, "ro:#{root}\n") |> elem(0)
       rw = :binary.match(env, "rw:#{Path.join(root, "cache")}") |> elem(0)
 
-      # L'ORDRE EST LE SENS : bwrap applique dans l'ordre, donc le rw doit recouvrir le ro. Les
-      # inverser rend le cache lisible et non ecrivable — `EROFS` au premier `pip install`, avec
-      # l'air d'etre configure.
+      # The writable cache must overlay the read-only store, in bwrap mount order.
       assert ro < rw
     end
 
@@ -526,8 +449,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
 
     test "newline dans une valeur => REFUS du spawn, pas un env tronque", %{root: root} do
       envd(root, "a.env", "A=x\nB=y\n")
-      # Deux lignes valides : ce cas passe. L'injection se fait par un ECHAPPEMENT dans la valeur,
-      # que le format ne permet pas — la garde est verifiee sur la clef ci-dessous et sur `\r` ici.
+      # Two valid physical lines are accepted. The following case rejects an embedded CR.
       assert LaunchSpec.toolchain_env() == "A=x\nB=y"
 
       envd(root, "b.env", "C=avec\rretour\n")
@@ -549,9 +471,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     end
 
     test "une variable de build UNIVERSELLE est LARGUEE, pas refusee", %{root: root} do
-      # L'asymetrie est deliberee : un fichier malforme est un bug du producteur et arrete la ligne ;
-      # une variable universelle est une violation de politique dont le rayon d'action est LES AUTRES
-      # pods. Refuser le spawn laisserait un seul mauvais env.d tuer tous les pods du conteneur.
+      # Dropping global build vars protects unrelated pods without blocking every spawn.
       envd(root, "a.env", "CC=aarch64-linux-gnu-gcc\nCARGO_HOME=/store/rust\n")
       assert LaunchSpec.toolchain_env() == "CARGO_HOME=/store/rust"
     end

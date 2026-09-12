@@ -1,30 +1,15 @@
 defmodule Fleet.Spawner.Pod.Egress.Vendor do
   @moduledoc """
-  WHICH HOSTS A VENDOR NEEDS, declared once, beside the launcher that needs them.
-
-  The N1 frontier is `bin/<vendor>_launch.sh` — one launcher per vendor, same argument shape. The
-  hosts a vendor talks to are a property OF that vendor, so they live next to it:
-  `bin/<vendor>_launch.egress`, one hostname per line, `#` comments allowed.
-
-  That placement is the whole point, and it is asserted by a test rather than trusted: an endpoint
-  is written in exactly ONE file of this repository, its vendor's declaration. The day a second
-  vendor arrives it brings its own launcher AND its own declaration — nobody edits a list buried in
-  the runtime to let a new model reach its API. A hardcoded endpoint in the middle of the spawner
-  would make "add a vendor" an edit to the pod's projection itself, instead of a file laid beside
-  the others.
-
-  MISSING FILE = NO HOSTS, and the pod reaches nothing. Fail-closed on purpose: a vendor whose
-  declaration is absent is a wiring hole, and a wiring hole that silently grants full egress is the
-  failure this whole rail exists to prevent. It fails LOUD in the log and CLOSED in effect.
+  Reads vendor host declarations beside the actual launcher: `<vendor>_launch.egress`.
+  Keeping endpoints with each launcher lets vendors declare their needs without changing
+  the proxy. A missing/unreadable declaration logs an error and contributes no vendor hosts.
   """
 
   require Logger
 
   @doc """
-  The hosts declared by `vendor`, read from `<launcher_dir>/<vendor>_launch.egress`.
-
-  `launcher_path` is the vendor launcher the pod will actually exec — the declaration is resolved
-  from IT rather than from a configured directory, so the two can never name different vendors.
+  Reads hosts from the declaration derived from the launcher that will run,
+  preventing a separate vendor-name setting from selecting another vendor’s list.
   """
   @spec hosts(Path.t()) :: [String.t()]
   def hosts(launcher_path) when is_binary(launcher_path) do
@@ -45,10 +30,7 @@ defmodule Fleet.Spawner.Pod.Egress.Vendor do
   end
 
   @doc """
-  The declaration path for a launcher: `bin/claude_launch.sh` → `bin/claude_launch.egress`.
-
-  Derived from the launcher path, never composed from a vendor NAME held elsewhere: two ways to
-  name the same vendor is how a pod ends up launched by one and authorized for another.
+  Derives the adjacent `.egress` path from the launcher basename (replacing `.sh`).
   """
   @spec declaration_path(Path.t()) :: Path.t()
   def declaration_path(launcher_path) when is_binary(launcher_path) do
@@ -58,15 +40,8 @@ defmodule Fleet.Spawner.Pod.Egress.Vendor do
   end
 
   @doc """
-  Parses a host declaration: one hostname per line, `#` starts a comment, blanks dropped, deduped.
-
-  PUBLIC BECAUSE A SECOND SOURCE SHARES THIS GRAMMAR — the converged allowlist that
-  `Fleet.Spawner.Pod.Egress` reads off the state volume is the same file format, written by the
-  toolchain converger instead of shipped beside a launcher. Two parsers for one format is two
-  places to disagree about what a comment is, and the disagreement would show up as a host that
-  is allowed on one path and refused on the other.
-
-  It parses a FORMAT; it grants nothing. The decision stays in `Egress.decide/2`.
+  Parses one host per line, strips `#` comments and blanks, and deduplicates.
+  Shared with the converged state-volume list; parsing does not grant access.
   """
   @spec parse(binary()) :: [String.t()]
   def parse(body) do
