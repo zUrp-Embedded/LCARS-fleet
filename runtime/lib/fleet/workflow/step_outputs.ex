@@ -1,58 +1,28 @@
 defmodule Fleet.Workflow.StepOutputs do
   @moduledoc """
-  Derives the SYSTEM's own facts about a step's declared `outputs`, checked in the pod workspace.
+  Derives output-existence and size facts from a step's declared paths in the
+  supplied workspace. Callers merge these facts over pod-reported results.
 
-  ## Why this module exists (BL-6-59)
+  Each {...} segment becomes * before Path.wildcard: dates have no prescribed
+  format, and existing glob syntax also applies. Every declared pattern must
+  match a regular file for outputs_exist; every pattern must have at least one
+  nonempty match for outputs_non_empty. Files can predate this step; these facts
+  establish neither authorship nor content quality.
 
-  A hard gate rule like `audit_doc_exists AND audit_doc_non_empty` takes both facts from the pod's
-  own `result`: **the producer attests that its own document exists and is not empty.** Meanwhile
-  the card DECLARES the expected path three lines above the rule (`outputs: -
-  audits/scribe-{date}.json`), and with `outputs` unread the system knows what has to exist, in a
-  field nobody reads, and asks the agent whether it exists.
+  Absolute paths and .. components are refused before filesystem reads. This is
+  lexical validation, not symlink containment: regular-file/stat checks follow
+  links, and concurrent changes can affect the observations.
 
-  What this closes is that split: the declaration and the verification meet. `outputs_exist` and
-  `outputs_non_empty` are produced HERE, from the card's own declaration, against a workspace path
-  the runtime created itself (`Fleet.Layout.pod_workspace_path/1`) — it never has to believe the pod
-  to obtain it.
-
-  ## The convention that had to be decided, and why it is a GLOB
-
-  Closing this needs a resolution CONVENTION for the `{date}` family, not a repair — and the naming
-  is the trap: a derivation that resolves `{date}` to a formatted date and demands an EXACT match
-  answers `false` for a pod that spelled it otherwise, which BLOCKS every audit. Worse than the
-  self-declaration it replaces.
-
-  So a declared path is read as a **pattern**: every `{...}` segment becomes `*`, and the result is
-  globbed under the workspace. This is deliberately the LOOSE direction. It never invents a date
-  format nobody wrote, it never blocks a legitimate delivery, and it still answers the question the
-  gate actually asks — *did the step produce something where it said it would?* Resolving `{date}`
-  for real would require the cards to declare a format, which is a card-schema decision, not this
-  one.
-
-  ## What is NOT decided here
-
-  Whether the CONTENT is any good. `outputs_non_empty` is a size check, nothing more — the semantic
-  verdict belongs to a judge. The point of these two facts is that the mechanical half stops being
-  self-reported, not that the gate becomes smart.
-
-  ## Fail-closed, and the shape/verdict split
-
-  A workspace we cannot resolve, a malformed `outputs`, or a path that escapes the workspace yields
-  `false` for both facts and says WHICH of the three happened — the same rule `Fleet.Workflow.Gates`
-  applies to malformed gates: a rule the engine cannot read is not a verdict about the work, and the
-  message must let the reader tell "the card is wrong" from "the delivery failed".
-
-  A step that declares NO `outputs` yields `%{}` — the absence of a fact, not `false`. The system
-  says nothing about what the card did not declare; a rule that references these keys anyway falls
-  onto `Predicate`'s own missing-evidence rule, which is the correct refusal for a card asking about
-  a declaration it never made.
+  Missing, nil or empty outputs produce no facts (%{}). Malformed declarations,
+  missing workspace strings and rescued exceptions log a reason and set both
+  facts false. Missing files also yield false but do not log a shape error.
   """
 
   require Logger
 
   @doc """
-  The keys this module owns. A pod `result` carrying one of them is OVERRIDDEN, never trusted:
-  these are the facts whose self-declaration BL-6-59 exists to remove.
+  Names of system-derived facts. This function does not modify pod results;
+  GateEngine overrides these keys only when derive/2 returns nonempty facts.
   """
   @spec system_keys() :: [String.t()]
   def system_keys, do: ["outputs_exist", "outputs_non_empty"]
@@ -61,7 +31,8 @@ defmodule Fleet.Workflow.StepOutputs do
   Derives `%{"outputs_exist" => bool, "outputs_non_empty" => bool}` from `spec["outputs"]`,
   resolved under `workspace`.
 
-  Returns `%{}` when the step declares no outputs (nothing to say). Never raises.
+  Requires a map spec. Returns %{} for no declaration; exceptions within the
+  map clause are rescued into two false facts. Non-map calls do not match a clause.
   """
   @spec derive(map(), String.t() | nil) :: %{optional(String.t()) => boolean()}
   def derive(spec, workspace) when is_map(spec) do
@@ -71,8 +42,7 @@ defmodule Fleet.Workflow.StepOutputs do
       declared -> derive_declared(declared, workspace)
     end
   rescue
-    # A courtesy derivation can never break the gate it feeds — but it must not PASS either, so the
-    # rescue is fail-closed and named, not a silent `%{}` (which would read as "not declared").
+    # A failed derivation must not look like an absent declaration.
     e ->
       Logger.warning("StepOutputs: derivation raised (#{Exception.message(e)}) — fail-closed")
       both(false)
@@ -102,10 +72,7 @@ defmodule Fleet.Workflow.StepOutputs do
     end
   end
 
-  # A declared output is workspace-relative BY CONSTRUCTION: the card describes what the step
-  # produces in its own working copy. An absolute path or a `..` segment is a card that reaches
-  # outside — refused on SHAPE, before any filesystem look, so the refusal cannot be mistaken for a
-  # missing file.
+  # Refuse path shape separately from missing files, even if .. would stay inside the root.
   defp escapes?(path) do
     Path.type(path) != :relative or ".." in Path.split(path)
   end

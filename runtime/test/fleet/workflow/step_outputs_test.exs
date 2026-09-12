@@ -20,9 +20,7 @@ defmodule Fleet.Workflow.StepOutputsTest do
     } do
       spec = %{"outputs" => ["audits/scribe-{date}.json"]}
 
-      # The discriminant of the whole decision: the card says `{date}`, the pod wrote an
-      # UNSEPARATED date. An exact resolution would answer false here and block the audit — which
-      # is the failure mode BL-6-59 named as worse than the self-declaration it replaces.
+      # The placeholder accepts this compact date without requiring a card-level date format.
       write!(ws, "audits/scribe-20260813.json", ~s({"findings":[]}))
 
       assert StepOutputs.derive(spec, ws) == %{
@@ -127,7 +125,7 @@ defmodule Fleet.Workflow.StepOutputsTest do
         "gate" => %{"type" => "terminal", "rules" => ["outputs_exist AND outputs_non_empty"]}
       }
 
-      # The pod claims both facts. Nothing was written.
+      # This explicit merge gives system facts precedence; no production merger is called here.
       lying = %{"outputs_exist" => true, "outputs_non_empty" => true}
       system = StepOutputs.derive(spec, ws)
 
