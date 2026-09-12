@@ -5,7 +5,7 @@ Base de comparaison : `5c7f34121d2609ad4e187bb40775c0ac39343a51`.
 
 ## Proposition
 
-**82 lots de revue, destinés chacun à un commit documentaire**, dont L00 et L01 terminés et commités (`1be48ca58`, `8fa8c41b5`). Les lots L02 à L81 couvrent le reste du corpus. Un lot sans modification utile sera marqué examiné et ne produira pas de commit vide. Ce découpage n’autorise pas la suppression mécanique des commentaires inventoriés.
+**82 lots de revue, destinés chacun à un commit documentaire.** L00 est le lot pilote (`1be48ca58`) ; les lots L01 à L81 couvrent le reste du corpus. L'avancement et les validations sont consignés dans les [bilans par lot](reviews/) et les commits `docs(...): Lxx`, plutôt que dans une seconde liste de statuts à maintenir ici. Un lot sans modification utile sera marqué examiné et ne produira pas de commit vide. Ce découpage n’autorise pas la suppression mécanique des commentaires inventoriés.
 
 Les limites de préparation sont de **12 fichiers, 900 lignes documentaires existantes et 5 000 lignes source à lire par lot**. Le manifeste respecte ces trois limites. Le nombre de lignes documentaires mesure le matériau à évaluer, pas le futur diff : une réécriture peut produire à la fois des suppressions et des ajouts. Si un diff dépasse environ 1 200 lignes ajoutées/supprimées, ou mêle deux sujets distincts, le scinder avant commit. Aucun objectif de réduction en pourcentage.
 
