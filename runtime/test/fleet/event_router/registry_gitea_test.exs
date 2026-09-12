@@ -1,10 +1,8 @@
 defmodule Fleet.EventRouter.RegistryGiteaTest do
   @moduledoc """
-  Z5 #9 — producer↔registry consistency guard. `WebhooksGitea` emits `gitea.<action>`
-  (actions preregistered by `Application.gitea_event_types/0`). EVERY action MUST be a
-  key of `events.yaml`, otherwise `Bus.broadcast` fail-louds `UnregisteredError` → silent
-  drop of the webhook (HTTP 200 but event never routed — bug #9, prod-only). Locks the
-  regression.
+  Checks every declared Gitea preregistration against events.yaml keys. This is not a
+  sweep of arbitrary webhook actions; unregistered types currently produce HTTP 422,
+  rather than the historical silent 200 described in the test's failure message.
   """
   use ExUnit.Case, async: true
 

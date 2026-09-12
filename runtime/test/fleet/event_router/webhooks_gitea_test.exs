@@ -33,7 +33,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
 
   describe "POST /webhook/gitea" do
     test "valid HMAC → 200 + broadcast of gitea.<action> event", %{secret: secret} do
-      # A real Gitea webhook ALWAYS carries `repository.full_name` → the issue_ref reflects it (multi-repo).
+      # The issue reference carries the payload's repository and repo-scoped number.
       body = %{
         "action" => "opened",
         "issue" => %{"number" => 42},
@@ -57,9 +57,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
          %{
            secret: secret
          } do
-      # B-#1: a `_ = Bus.emit` that discards the `{:error}` tuple → `send_resp 200` → Gitea believes
-      # it delivered, never replays → forge event silently lost. The return is matched: `{:error}` →
-      # 422 (retry/alert).
+      # Do not acknowledge a returned emission failure. This checks HTTP status, not sender retries.
       Fleet.TestEnv.put_env_restoring(
         :lcars_fleet,
         :event_router_webhook_emit_fun,
@@ -95,10 +93,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       assert_receive %Fleet.Event{source: :event_router, type: :"gitea.unknown"}, 500
     end
 
-    # Regression acte4 #24 — Plug.Parsers guarantees the body is a MAP, not that `action` is a
-    # string. A signed `{"action": 123}` would feed `"gitea." <> 123` BEFORE the try → ArgumentError
-    # outside the try → Cowboy 500, bypassing the "never ACK a drop, 422 on drift" discipline.
-    # A non-string action ≈ absent → same path as M20 (header fallback, else gitea.unknown).
+    # Signed JSON does not guarantee field types. Non-string action takes the missing-action
+    # fallback before constructing the event type outside the route's try block.
     test "acte4 #24: non-string action → no crash; treated as absent (header else unknown)",
          %{secret: secret} do
       # without header → gitea.unknown, same as "no action"
@@ -139,8 +135,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
 
     test "F-C010: webhook WITHOUT repository.full_name (degenerate payload) → `unknown` sentinel, NOT a fabricated real repo",
          %{secret: secret} do
-      # A real Gitea webhook always carries full_name; a payload without it is malformed. We do NOT
-      # fabricate `fleet/lcars` (impersonates a real repo in the event display) → honest `unknown` sentinel.
+      # Missing repository must not fabricate a real repository identity.
       body = %{"action" => "opened", "issue" => %{"number" => 7}}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -158,11 +153,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
          %{
            secret: secret
          } do
-      # `Plug.Parsers` guarantees `body` is a map, NOT that `repository` is one. A forged body
-      # `{"repository": "x"}` would make `get_in("x", ["full_name"])` raise (FunctionClauseError
-      # in Access) INSIDE extract_issue, BEFORE the `try` → Cowboy 500, outside the module's
-      # 422-on-drift discipline (the `|| "unknown"` only catches an ABSENT repository). Exact twin
-      # of the non-string `action` case. Pattern-matching the structure yields `unknown`, not a raise.
+      # A fallback for absent repository alone would not handle a non-map nested value.
       body = %{"action" => "opened", "issue" => %{"number" => 7}, "repository" => "x"}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
 
@@ -207,8 +198,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
     test "REPRO R0-EVT-007: large HMAC-valid payload (~900KB, <1MB) → 200 (full raw_body)", %{
       secret: secret
     } do
-      # Falsifies the "401 on a large legitimate payload" finding: a body under the 1 MB cap must
-      # pass. If the raw_body were truncated ({:more}/partial branch), the HMAC would not match → 401.
+      # The in-memory Plug adapter supplies a large complete body; this does not test network chunking.
       big = String.duplicate("x", 900_000)
       body = %{"action" => "opened", "issue" => %{"number" => 1}, "blob" => big}
       conn = post_with_sig(body, secret) |> WebhooksGitea.call(WebhooksGitea.init([]))
@@ -221,9 +211,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
          %{
            secret: secret
          } do
-      # The only case where read_body returns {:more} is body > :length (1MB). Plug.Parsers REFUSES
-      # it before the dispatch (verify_hmac never runs) → 413 bound, not a 401 on a truncated
-      # raw_body. Proof that the {:more}/partial branch is NOT an HMAC hole: the cap short-circuits it.
+      # The authentication plug rejects this partial read before HMAC/JSON parsing. This
+      # exercises the test adapter's size limit, not every reason a live adapter can return :more.
       big = String.duplicate("y", 1_200_000)
       body = %{"action" => "opened", "blob" => big}
 
@@ -232,17 +221,8 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
       end
     end
 
-    # JG-015 — LA PREUVE QUE RIEN N'EST DESERIALISE AVANT L'AUTHENTIFICATION, et elle tient au corps
-    # MALFORME. Un JSON invalide est le seul temoin qui distingue « le parseur n'a pas tourne » de
-    # « le parseur a tourne et n'a rien dit » : s'il tourne, il leve `Plug.Parsers.ParseError`.
-    #
-    # Avant : `plug(:match)` → `Plug.Parsers` → `:dispatch`, et `verify_hmac/1` n'etait appelee que
-    # DANS le handler. Un appelant anonyme obtenait donc une lecture jusqu'a 1 Mio ET un
-    # `Jason.decode!` complet par requete, sans aucun controle d'identite sur ce chemin.
-    #
-    # Le correctif n'est pas de deplacer la verification : le corps brut sur lequel porte le HMAC
-    # etait capture PAR `Plug.Parsers` (son `body_reader:`), donc verifier plus tot sans deplacer la
-    # LECTURE aurait donne `raw_body = nil` → `secure_compare` faux → 401 sur TOUT, legitime compris.
+    # Malformed JSON distinguishes rejection before parsing from a parser that simply accepts
+    # valid input. Pair the invalid signature with a valid-signature parse-error control.
     test "JG-015: corps JSON malforme + signature FAUSSE → 401, et AUCUN parsing", %{
       secret: _secret
     } do
@@ -318,9 +298,7 @@ defmodule Fleet.EventRouter.WebhooksGiteaTest do
 
     test "MA-13: EMPTY/whitespace secret file → 401 fail-closed (NO forgeable empty-key HMAC)",
          %{tmp_dir: tmp_dir} do
-      # Secret file PRESENT but empty (whitespace) → without MA-13, compute_hmac("", body) lets an
-      # attacker forge a valid signature knowing NO secret (fail-open). We verify that the
-      # COMPUTED-ON-EMPTY-KEY signature (what the attacker would send) is REFUSED.
+      # An empty key is publicly reproducible: use its valid HMAC to isolate empty-secret refusal.
       empty_secret = Path.join(tmp_dir, "empty-secret")
       File.write!(empty_secret, "   \n  \t\n")
       Application.put_env(:lcars_fleet, :event_router_webhook_secret_path, empty_secret)

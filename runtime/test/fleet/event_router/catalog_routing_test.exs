@@ -1,8 +1,7 @@
 defmodule Fleet.EventRouter.CatalogRoutingTest do
   @moduledoc """
-  The declarative routing table (audit B-05): the registry canon carries
-  `event + source → classification/action/threshold/sink`, the Catalog loads it validated,
-  and the numbers/sinks live in DATA — never in a consumer clause.
+  Checks loaded source/type routes, incident metadata and schema/semantic refusals.
+  Calls the loader directly; does not exercise incident consumers or whole-node boot failure.
   """
   use ExUnit.Case, async: false
 
@@ -29,8 +28,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     assert :ok = Catalog.load!()
     routing = Bus.event_routing()
 
-    # Bascule 2026-08-19 (brouette) : plus une route de severite max — une route incident a porte IMMEDIATE
-    # declaree, avec le kind nomme (exige au boot : la table kind_describe est close).
+    # Immediate routes carry the escalation kind required by the consumer.
     assert %{
              action: :incident,
              incident: %{
@@ -41,9 +39,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
              }
            } = routing[{:workflow, :"workflow_map.failed"}]
 
-    # BL-6-114 (arbitrage user 2026-08-19) : les deux fallbacks de declaration de Project entrent
-    # par CE rail — l'arete montante `:project_incident_rail` est morte. Les ops `card`/`declaration`
-    # reprennent les namespaces de dedup de l'ancien seam ; sujet = le DEPOT.
+    # Card/declaration routes retain separate dedup operation names and repository subjects.
     assert %{
              action: :incident,
              incident: %{
@@ -64,8 +60,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
              }
            } = routing[{:project, :"project.declaration_invalid"}]
 
-    # (pod.drift, audit.verdict et les broadcasts de severite max sont partis — brouette
-    # 2026-08-19. Les sept routes restantes sont toutes `action: incident`.)
+    # Check all loaded actions; this assertion does not pin the count in the historical title.
     assert routing |> Map.values() |> Enum.all?(&(&1.action == :incident))
   end
 
@@ -89,12 +84,6 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
       Catalog.load!()
     end
   end
-
-  # (Les gardes JG-012/DPF-14 du rail de severite max sont parties avec lui — brouette
-  # 2026-08-19. Les gardes survivantes dans leur esprit, ci-dessous : un `gate` hors enum refuse
-  # au boot, et gate=immediate SANS escalate_kind refuse au boot — la table `kind_describe` est
-  # close, un kind sans clause crasherait a la PREMIERE escalade au lieu du boot, la panne exacte
-  # de :awaits_arch_stuck.)
 
   @tag :tmp_dir
   test "un gate hors enum → boot REFUSE", %{tmp_dir: tmp} do

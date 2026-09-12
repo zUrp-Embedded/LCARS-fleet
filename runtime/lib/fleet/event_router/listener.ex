@@ -13,23 +13,16 @@ defmodule Fleet.EventRouter.Listener do
   selects the bind override. `:dispatch` must be a raw Cowboy dispatch because
   Plug.Cowboy compiles it internally.
 
-  ## Why the AF_UNIX case lives HERE and not in its caller
-
-  6-072/6-098. This file is the SINGLE builder of a Cowboy child spec, held by
-  `mix lcars.contracts.check`, rail `listener.no_cowboy_bypass`, whose remediation says to route
-  through here — a unix listener writing its own `{Plug.Cowboy, ...}` tuple is refused there.
-
-  The reason survives the change of transport: with two builders, the second drifts. The TCP branch
-  is loopback-by-construction; nothing would force a second builder to stay that way, and the whole
-  point of the unix branch is that it has no address to get wrong. Keeping both in one function is
-  what makes "how this runtime binds an HTTP surface" a single readable answer.
+  Both TCP and AF_UNIX use this builder, enforced by listener.no_cowboy_bypass, so
+  bind policy has one implementation. TCP follows BindAddress overrides; AF_UNIX uses
+  filesystem access instead. Port ranges, plug validity and socket path safety are not
+  validated here; the caller and Cowboy own those preconditions.
   """
   @spec cowboy_child(keyword()) :: {module(), keyword()}
   def cowboy_child(opts) do
     plug = Keyword.fetch!(opts, :plug)
 
-    # `:socket` and `:port` are EXCLUSIVE, and the refusal is loud: a spec carrying both would bind
-    # one of them and silently ignore the other — the caller would be certain of the wrong one.
+    # Reject conflicting transports rather than silently ignoring one caller-supplied address.
     base =
       case {Keyword.get(opts, :socket), Keyword.get(opts, :port)} do
         {nil, nil} ->

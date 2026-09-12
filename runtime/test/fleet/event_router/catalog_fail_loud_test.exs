@@ -12,10 +12,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     :ok
   end
 
-  # Locks the crash-boot contract: an absent/invalid events.yaml in a real regime MUST raise —
-  # a warn-and-:ok would leave an empty registry and a Bus broadcasting EVERY type without
-  # validation (green deploy, dead registry). `do_load` is only reached with
-  # `load_event_registry: true` (prod/dev).
+  # Call the enabled loader directly: missing input must not leave a permissive empty registry.
   test "events.yaml absent + registry wanted (prod) → raise (no silent ACK)" do
     Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
 
@@ -35,10 +32,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     assert :ok = Catalog.load!()
   end
 
-  # Twin fail-open hole: a VALID but EMPTY events.yaml (`events: {}`) parses OK (`{:ok, %{}}`);
-  # an empty MapSet would leave the Bus (permissive on an empty registry) broadcasting EVERY
-  # type without validation — green boot, dead registry. In a real regime `do_load` must raise
-  # exactly like an absent file.
+  # Parsed-but-empty input must also be refused, before installing an empty authorized set.
   @tag :tmp_dir
   test "events.yaml EMPTY (events: {}) + registry wanted (prod) → raise (empty-registry fail-open closed)",
        %{tmp_dir: tmp_dir} do
@@ -53,9 +47,7 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     end
   end
 
-  # Non-regression for the OTHER reader of the parse: `event_type_strings/0` (source of
-  # `preregister_event_atoms/0`) must still return `[]` on an empty events.yaml — it has nothing to
-  # preregister and must NOT fail-loud (otherwise `Application.preregister_event_atoms/0` would break).
+  # Preregistration distinguishes an empty map from an unreadable file; only load! rejects emptiness.
   @tag :tmp_dir
   test "event_type_strings/0 returns [] on EMPTY events.yaml (preregister unchanged, no raise)",
        %{tmp_dir: tmp_dir} do
@@ -67,15 +59,9 @@ defmodule Fleet.EventRouter.CatalogFailLoudTest do
     assert [] = Catalog.event_type_strings()
   end
 
-  # JG-013 — VIDE ET ILLISIBLE SE RENDAIENT LE MEME `[]`, et le test ci-dessus n'epinglait que le
-  # premier. Les deux lecteurs d'`events.yaml` traitaient la MEME faute differemment : `load!/0`
-  # levait, `event_type_strings/0` se taisait. Le silence etait sans consequence sur le chemin
-  # nominal — `load!/0` leve une ligne plus loin — et il ne l'etait PAS la ou le registre est coupe
-  # volontairement (`event_router_load_event_registry: false`, la baseline hermetique) : la, `load!/0`
-  # est un no-op, cette fonction est la SEULE source d'atomes pre-enregistres, et un fichier
-  # illisible laissait la fleet sans aucun. La faute ressortait plus tard en `ArgumentError` sur un
-  # `String.to_existing_atom/1` chez un consommateur — le message designait le consommateur, jamais
-  # le fichier qu'on n'avait pas pu lire.
+  # Preregistration still runs when loading is disabled. Diagnose malformed input here,
+  # rather than later as an unknown atom in an event consumer. This fixture is valid YAML
+  # with the wrong events shape, despite the historical "unparseable" title.
   @tag :tmp_dir
   test "event_type_strings/0 RAISES on an unparseable events.yaml — same fault, same treatment as load!/0",
        %{tmp_dir: tmp_dir} do

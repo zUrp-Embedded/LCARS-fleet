@@ -1,15 +1,7 @@
 defmodule Fleet.EventRouter.R1SeamBroadcastTest do
   @moduledoc """
-  R1 / BL-027 — **registry + broadcast validation** seam ("direct subscribers =
-  canon" fork: there is no dispatch table, `events.yaml` IS the registry).
-
-  The anti-recurrence lock (T4): an event emitted outside the registry is rejected
-  fail-loud at broadcast — `Fleet.EventRouter.Catalog.load!/0` populates
-  `authorized_event_types` from events.yaml → `Bus.broadcast/2` raises
-  `UnregisteredError` on any unregistered type. Seam tested WITHOUT stubs: real
-  Catalog.load! + real Bus.broadcast/2.
-
-  Tag `:r1_seam` — `mix test --only r1_seam`.
+  Real Catalog.load! and Bus.broadcast/2 integration: an empty-list YAML entry authorizes
+  its type, while an unlisted type raises. Run with mix test --only r1_seam.
   """
   use ExUnit.Case, async: false
 
@@ -26,7 +18,7 @@ defmodule Fleet.EventRouter.R1SeamBroadcastTest do
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_events_yaml_path, path)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :event_router_load_event_registry, true)
 
-    # Reset the global registry to avoid polluting the other tests.
+    # Leaves the global type set empty, not restored to any previous populated state.
     on_exit(fn -> Bus.set_authorized_event_types(MapSet.new()) end)
 
     :ok = Catalog.load!()

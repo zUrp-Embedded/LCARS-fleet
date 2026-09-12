@@ -1,13 +1,8 @@
 defmodule Fleet.EventRouter.EventsSchemaTest do
   @moduledoc """
-  Proves that the in-repo canon `priv/events.yaml` (loaded by the runtime,
-  embedded in the release) validates against the derived schema
-  `priv/schema/events.json`, and that a structurally invalid config is
-  rejected (neither too strict nor too lax).
-
-  @canon_path points to the in-repo canon (single-source, the file actually
-  served) — NOT the doctrine path, absent from the code repo. The priv↔doctrine
-  drift is a data-side reconciliation.
+  Validates shipped priv/event_router/events.yaml against its events.json schema and
+  selected malformed inputs. Negative examples may violate multiple schema constraints;
+  they do not isolate every reason named in their historical titles.
   """
   use ExUnit.Case, async: true
 
@@ -46,9 +41,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end
 
-  # R5/R08 — an EMPTY handler list is VALID: an event can be registered
-  # (key = authorized_event_type) without a dispatch handler, consumed by direct
-  # subscribers (WS, AuditConsumer). `minItems: 0`.
+  # Empty lists register events without routing metadata; direct subscribers can consume them.
   test "valid config — empty handler list (registered without dispatch)", %{schema: schema} do
     ok = %{"events" => %{"pod.allocate" => []}}
     assert :ok = ExJsonSchema.Validator.validate(schema, ok)
@@ -69,7 +62,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, %{"events" => %{}})
   end
 
-  # MIN-1: the handler pattern refuses the trailing dot.
+  # A nonempty handler list is already invalid; this does not isolate trailing-dot validation.
   test "invalid config rejected — handler trailing dot", %{schema: schema} do
     bad = %{"events" => %{"pod.allocated" => ["Fleet.Spawner."]}}
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
