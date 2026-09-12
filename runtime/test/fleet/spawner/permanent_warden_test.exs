@@ -1,12 +1,8 @@
 defmodule Fleet.Spawner.PermanentWardenTest do
   @moduledoc """
-  G5 — respawn of dead permanents. Seams: `subscribe: false` (no real Bus — events are sent
-  directly to the process), `respawn_fun` stub, `backoff_base_ms: 1` (~ms delays, fast test).
+  Exercises respawn scheduling with direct events and an injected launcher.
   """
-  # async: FALSE — this suite flips the GLOBAL `Fleet.Shutdown.Quiesce` flag (`refuse!/0`, the drain
-  # gate) via `:persistent_term`. Since CI-01, `StepDispatcher.dispatch_issue` reads that flag by default
-  # → an async write here would bleed into the ~30 async dispatch tests (they'd see `{:skipped, :draining}`).
-  # Same stance as the other Quiesce-mutating suites (control_router_test, quiesce_test — both async:false).
+  # Serial because these tests mutate the global Quiesce flag.
   use ExUnit.Case, async: false
 
   alias Fleet.Shutdown.Quiesce
@@ -38,12 +34,8 @@ defmodule Fleet.Spawner.PermanentWardenTest do
       end)
 
     send(warden, pod_failed("permanent-architect"))
-    # backoff_base 1ms → the scheduled respawn arrives quickly.
     assert_receive {:respawn, "architect"}, 1_000
 
-    # Near-immediate death (under the 60s default min_uptime): NO reset on the start_child
-    # {:ok, pid} (the launch chain is async — boot-then-die would loop forever on a
-    # reset-at-start). The cycle continues, bounded: the respawn still arrives (attempt 2/5).
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn, "architect"}, 1_000
   end
@@ -60,9 +52,6 @@ defmodule Fleet.Spawner.PermanentWardenTest do
         min_uptime_ms: 0
       )
 
-    # 7 death→respawn cycles (> @max_attempts=5): with min_uptime 0, every uptime counts
-    # as a survival → reset on every death → the bound is never reached (the semantics
-    # "a LATER death restarts from a short backoff" is preserved for healthy pods).
     for _ <- 1..7 do
       send(warden, pod_failed("permanent-architect"))
       assert_receive {:respawn, "architect"}, 1_000
@@ -78,15 +67,11 @@ defmodule Fleet.Spawner.PermanentWardenTest do
         {:ok, "permanent-#{role}"}
       end)
 
-    # Every respawn SUCCEEDS (start_child {:ok}) but the pod dies under min_uptime (60s default,
-    # the test runs in ms): the counter must CONTINUE despite the {:ok} → bounded at 5 respawns.
     for _ <- 1..5 do
       send(warden, pod_failed("permanent-architect"))
       assert_receive {:respawn, "architect"}, 1_000
     end
 
-    # 6th death under min-uptime with the bound exhausted → REAL HALT: no more respawns,
-    # even on subsequent deaths (the HALT lasts as long as no survival is observed).
     send(warden, pod_failed("permanent-architect"))
     refute_receive {:respawn, _}, 300
 
@@ -118,13 +103,10 @@ defmodule Fleet.Spawner.PermanentWardenTest do
 
     send(warden, pod_failed("permanent-architect"))
 
-    # Bound @max_attempts = 5 EXECUTED attempts (1 triggered by the event + 4 failure retries);
-    # the 5th failure observes the bound → HALT.
     for _ <- 1..5 do
       assert_receive {:respawn_attempt, "architect"}, 1_000
     end
 
-    # Bound reached → HALT: no attempt at ALL (bounded spend, the incident escalation already happened).
     refute_receive {:respawn_attempt, _}, 300
   end
 
@@ -137,14 +119,11 @@ defmodule Fleet.Spawner.PermanentWardenTest do
         {:error, {role, :launch_failed}}
       end)
 
-    # Exhausts the bound (1 event + 4 retries = 5 attempts) → HALT.
     send(warden, pod_failed("permanent-architect"))
     for _ <- 1..5, do: assert_receive({:respawn_attempt, "architect"}, 1_000)
     refute_receive {:respawn_attempt, _}, 200
 
-    # A POST-HALT pod.failed can only come from a pod RESURRECTED by an external actor
-    # (the warden no longer respawns) → the warden restarts a new cycle instead of staying
-    # dead for that role until a BEAM restart.
+    # A new failure event after exhausted launch failures starts another cycle.
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn_attempt, "architect"}, 1_000
   end
@@ -155,25 +134,17 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     warden =
       start_warden(fn role ->
         send(parent, {:respawn_attempt, role})
-        # The shape `PermanentBoot.spawn_one` gives to `Fleet.Spawner.quiesce_guard`'s refusal.
         {:error, {role, :fleet_quiescing}}
       end)
 
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn_attempt, "architect"}, 1_000
 
-    # A failing respawn would retry within a few ms here (`backoff_base_ms: 1`) and go on to the
-    # bound; a drain refusal is not a failure: ONE attempt, then silence, and the warden lives.
     refute_receive {:respawn_attempt, _}, 200
     assert Process.alive?(warden)
   end
 
-  # ── Rail 2: reconciliation (the event rail is BLIND to silent deaths) ──
-
   test "reconciliation tick: a permanent ABSENT from the Registry (no pod.failed emitted) → respawn" do
-    # A restart of the spawner subtree terminates its :temporary pods CLEANLY → zero pod.failed →
-    # a purely event-driven warden sees NOTHING and the permanents stay silently dead until an
-    # escalation. The tick re-derives the truth: expected vs live Registry.
     parent = self()
 
     warden =
@@ -184,7 +155,6 @@ defmodule Fleet.Spawner.PermanentWardenTest do
         end,
         reconcile_ms: 10,
         expected_roles_fun: fn -> ["architect", "gatekeeper"] end,
-        # gatekeeper alive, architect GONE without an event.
         live_roles_fun: fn -> ["gatekeeper"] end
       )
 
@@ -194,8 +164,6 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   end
 
   test "reconciliation tick: permanent boot DISABLED (maintenance) → no respawn" do
-    # The documented maintenance mode (LCARS_BOOT_PERMANENT_AT_START=false) must not be
-    # undone by a warden re-deriving pods nobody asked for.
     parent = self()
 
     start_warden(
@@ -213,10 +181,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   end
 
   test "reconciliation tick: during a DRAIN (quiesce), DEFAULT gate off → no respawn" do
-    # A-13 (fix, not decision): the default gate reads Fleet.Shutdown.Quiesce (foundation). During a
-    # drain, respawning a dead permanent would fight the drain (cattle: a real shutdown nukes the node
-    # and this tick dies with it; the graceful drain is a DEBUG path to inspect without killing). We
-    # test the DEFAULT path (not the seam): quiesce ON → no respawn; quiesce OFF → respawn.
+    # Exercise the default reconciliation gate by toggling Quiesce.
     parent = self()
 
     Quiesce.refuse!()
@@ -230,22 +195,16 @@ defmodule Fleet.Spawner.PermanentWardenTest do
       reconcile_ms: 10,
       expected_roles_fun: fn -> ["architect"] end,
       live_roles_fun: fn -> [] end
-      # NO reconcile_enabled_fun → default path (auto_boot? and not quiescing?).
     )
 
-    # NB: auto_boot_enabled? must be true in test so that quiesce ALONE explains the absence of
-    # respawn. If the auto_boot default were false in test, this refute would pass for the wrong
-    # reason — but the next step (quiesce OFF → respawn) proves quiesce is what gates.
+    # The positive phase below proves quiescence, rather than disabled autoboot, blocked the spawn.
     refute_receive {:respawn, _}, 200
 
     Quiesce.resume!()
-    # Drain over → the next tick re-derives and respawns the missing architect.
     assert_receive {:respawn, "architect"}, 1_000
   end
 
   test "reconciliation tick: RAISING enumeration → nothing respawned (the net never becomes a danger)" do
-    # A broken enumeration (Registry down, unreadable catalog) must NEITHER kill the warden,
-    # NOR — worse — report ALL permanents as absent and re-spawn the whole fleet.
     parent = self()
 
     warden =
@@ -266,9 +225,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
   test "F-01 (codex audit): a BURST of pod.failed for one role schedules ONE respawn, not N" do
     parent = self()
 
-    # Big backoff so the FIVE burst events are all processed (GenServer is sequential) BEFORE the
-    # first respawn timer fires. Without the pending dedup, each event scheduled its own timer AND
-    # the nil stamp reset the counter → five respawns, all "attempt 1/5".
+    # Delay the timer until the entire burst has been handled, to exercise deduplication.
     warden =
       start_warden(
         fn role ->
@@ -280,7 +237,6 @@ defmodule Fleet.Spawner.PermanentWardenTest do
 
     for _ <- 1..5, do: send(warden, pod_failed("permanent-architect"))
 
-    # Exactly ONE respawn arrives from the burst (the four duplicates were deduped at the source).
     assert_receive {:respawn, "architect"}, 1_000
     refute_receive {:respawn, "architect"}, 400
   end
@@ -297,7 +253,6 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn, "architect"}, 1_000
 
-    # The timer fired (pending cleared) → a genuine later death is a new cycle iteration, honored.
     send(warden, pod_failed("permanent-architect"))
     assert_receive {:respawn, "architect"}, 1_000
   end
@@ -306,9 +261,7 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     assert PermanentWarden.backoff_delay(0, 5_000) == 5_000
     assert PermanentWarden.backoff_delay(1, 5_000) == 10_000
     assert PermanentWarden.backoff_delay(3, 5_000) == 40_000
-    # 10 min cap
     assert PermanentWarden.backoff_delay(10, 5_000) == 600_000
-    # never overflows (clamped exponent)
     assert PermanentWarden.backoff_delay(1_000_000, 5_000) == 600_000
   end
 end

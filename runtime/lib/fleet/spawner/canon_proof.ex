@@ -1,8 +1,10 @@
 defmodule Fleet.Spawner.CanonProof do
   @moduledoc """
-  Boot-time proof that every canon role and each optional modop is spawn-ready.
-  It calls the actual resolve, validate, compose, and asset-read paths rather than
-  re-deriving another definition of spawnability.
+  Checks catalogue profile compositions and prompt assets before readiness.
+
+  Uses profile loading/composition, validation, SP composition and asset reads.
+  It checks defaults and each optional modop individually, not all combinations
+  or backend launch.
   """
 
   require Logger
@@ -10,16 +12,11 @@ defmodule Fleet.Spawner.CanonProof do
   alias Fleet.CapProfile
 
   @doc """
-  Proves every canon role spawn-ready. Raises on the first role that is not —
-  fail-loud before readiness, the same dead-man's-switch contract as the workflow
-  catalogue image and Coord.Policies.
+  Checks roles in every installed catalogue against that catalogue's image.
+  Raises on an empty role list, enumeration failure or invalid composition.
   """
   @spec prove_all!() :: :ok
   def prove_all! do
-    # UNE PREUVE PAR CATALOGUE INSTALLE. `CapProfile.list/0` enumere en FUSIONNE pendant que la
-    # resolution lit l'image d'UN catalogue : avec un seul les deux coincidaient, avec deux ils
-    # divergent et la preuve accusait un role introuvable (W-34). Chaque catalogue se prouve donc
-    # contre SON image — ce qu'il declare, il doit pouvoir le spawner.
     roots = Fleet.Catalogue.installed_roots()
 
     proven =
@@ -41,9 +38,7 @@ defmodule Fleet.Spawner.CanonProof do
         prove_roles!(roles, root)
 
       {:error, :not_published} ->
-        # Pas d'image pour ce catalogue : le regime disque (tests, outillage). On retombe sur
-        # l'enumeration globale plutot que de declarer zero role — un zero silencieux serait la
-        # preuve vide que ce module refuse ailleurs.
+        # Without a published image, use the global disk enumeration fallback.
         legacy_prove_all!()
     end
   end
@@ -61,8 +56,6 @@ defmodule Fleet.Spawner.CanonProof do
   defp legacy_prove_all! do
     case CapProfile.list() do
       {:ok, []} ->
-        # An empty catalogue would make every proof below pass VACUOUSLY — the same
-        # trap as an empty workflow catalogue, refused for the same reason.
         raise "Fleet.Spawner.CanonProof: cap-profile catalogue is EMPTY — nothing to " <>
                 "prove means nothing can spawn; broken deploy, fail-loud before readiness"
 
@@ -113,10 +106,8 @@ defmodule Fleet.Spawner.CanonProof do
     end
   end
 
-  # `CapProfile.resolve/3` prend un LOADER (un module, arite 1) : il ne sait pas porter une racine.
-  # Ici le profil est deja charge AVEC la sienne, donc on rejoue les deux gestes que resolve fait —
-  # valider les modops optionnels demandes, puis composer — sans repasser par un chargement qui
-  # perdrait le scope.
+  # Compose the already-loaded profile to preserve its catalogue root;
+  # CapProfile.resolve/3 accepts a loader module but no root argument.
   defp resolve_loaded(base, extras) do
     active = CapProfile.default_modops(base) ++ extras
 

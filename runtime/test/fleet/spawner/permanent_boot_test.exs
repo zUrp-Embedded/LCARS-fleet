@@ -1,12 +1,7 @@
 defmodule Fleet.Spawner.PermanentBootTest do
   @moduledoc """
-  Lot 3 inc1 — `Fleet.Spawner.PermanentBoot.boot_at_start?/1` CRITICAL D-01
-  guard (DN ring1/permanent-pods-boot.md). Pure, string-keyed
-  (anti-M1: the DN's atom-keyed pseudo-code = illustrative).
-
-  `async: false`: the `auto_boot_enabled?/0` describe mutates global Application
-  config (`:boot_permanent_at_start`) via `put_env` — runtime-config coupling
-  inherent to the predicate; serializing avoids the inter-module race (BL-028).
+  Checks permanent selection, boot/respawn results and shipped-profile eligibility.
+  Serial because tests change application configuration and published images.
   """
   use ExUnit.Case, async: false
 
@@ -22,9 +17,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
   describe "the permanent pod_id — one authority, both directions" do
     test "build then parse round-trips: the constructor and the parser cannot drift apart" do
-      # The prefix was typed once and readable only BACKWARDS: a consumer could recognize a
-      # permanent pod_id, and anyone needing to NAME one had to retype the literal. Two halves of
-      # one authority, and only one of them was enforced.
       for role <- ~w(starfleet architect engineer) do
         assert {:ok, ^role} = PermanentBoot.parse_permanent(PermanentBoot.pod_id_for(role))
       end
@@ -131,16 +123,8 @@ defmodule Fleet.Spawner.PermanentBootTest do
   describe "boot_permanent_pods/1 (injected seams — deterministic)" do
     @describetag :tmp_dir
     setup %{tmp_dir: dir} do
-      # The enumerator (`CapProfile.list`) resolves by `metadata.name` → yaml fixtures carrying the
-      # name (the indexable identity). The FULL content comes from the injected loader (`loader_for`).
-      # `notes.txt` = non-.yaml, ignored by the scan.
-      #
-      # WHY THESE NAMES — they used to say the opposite of the canon, and the conformance describe at the
-      # bottom of this file proves which way is true: `starfleet` is the Type 1 permanent that boots,
-      # the architect is PER-PROJECT (`boot_at_start: false`, spawned on-open), and NO canon role is
-      # host-native since the reorg. So the booting fixture is `starfleet`, and the D-01 exclusion is
-      # probed with a SYNTHETIC `host-native-probe`: the guard must be exercised, and no real role can
-      # exercise it any more. Naming it after a real role is what made this file teach a dead topology.
+      # Enumeration reads metadata.name from these files; the injected loader supplies
+      # the full profiles. host-native-probe is synthetic, not a shipped role.
       for name <- ~w(engineer host-native-probe starfleet) do
         File.write!(Path.join(dir, "#{name}.yaml"), "metadata:\n  name: #{name}\n")
       end
@@ -199,7 +183,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
         {:ok, spawn(fn -> :ok end)}
       end
 
-      # G9: the boot returns the RESULT LIST (the BootOrchestrator's safe_boot classifies it).
       assert [{:ok, pid_perm}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
@@ -207,21 +190,16 @@ defmodule Fleet.Spawner.PermanentBootTest do
                  spawner: spawner
                )
 
-      # BL-055: DETERMINISTIC permanent pod_id (no `-<os_time>`) → idempotent.
       assert pid_perm == "permanent-starfleet"
       assert_received {:spawned, "starfleet", ^pid_perm, opts}
       refute_received {:spawned, "engineer", _, _}
 
-      # The pod_id ADDRESSES; `rc_name` is what a human reads in Desktop. This was the one spawn
-      # site passing none, so the fleet's most visible pod showed an internal key.
       assert opts[:rc_name] == "starfleet"
       refute_received {:spawned, "host-native-probe", _}
     end
 
     test "BL-055: permanent already alive ({:already_started}) → idempotent no-op (pod_id kept)",
          %{dir: dir} do
-      # deterministic id → a re-boot lands back on `permanent-starfleet`; if the pod already runs,
-      # spawn_pod returns {:already_started} → this is NOT an error, the pod_id is kept.
       spawner = fn _cp, _tid, _o -> {:error, {:already_started, self()}} end
 
       assert [{:ok, "permanent-starfleet"}] =
@@ -234,9 +212,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
     test "a role whose profile BREAKS after boot is excluded from reconciliation LOUDLY, never silently",
          %{dir: dir} do
-      # Deliberate exclusion (never respawn from a broken artefact), but it must leave a trace: a
-      # permanent whose profile corrupts after boot would otherwise vanish from the expected set —
-      # dead, never respawned, and nobody told.
       loader = fn
         "starfleet" -> {:error, :invalid_schema}
         role -> loader_for().(role)
@@ -254,9 +229,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
     test "F-052: load {:error} on one role → fail-loud (broken deploy, no silent skip)",
          %{dir: dir} do
-      # Crash-boot doctrine: an unloadable profile = broken artifact → propagate (a "partial
-      # success" that skips invalid roles and boots the rest would hide a broken deploy).
-      # `list_roles` returns sorted roles → engineer is the 1st to fail (starfleet OK).
+      # Roles are sorted, so engineer is the first profile load to fail.
       loader = fn
         "starfleet" -> loader_for().("starfleet")
         _ -> {:error, :invalid_schema}
@@ -273,9 +246,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
     test "G9 HONEST boot: spawner {:error} → the failure is RETURNED named, never filtered", %{
       dir: dir
     } do
-      # G9: a swallowed starfleet spawn failure ({:ok, []} via reject nil) would make the
-      # BootOrchestrator emit a LYING fleet.boot_complete. The failure lives in the result
-      # list, named (role + reason) → safe_boot classifies it → fleet.boot_partial.
       assert [{:error, {"starfleet", :launch_failed}}] =
                PermanentBoot.boot_permanent_pods(
                  cap_profiles_dir: dir,
@@ -299,8 +269,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
 
     test "G5 respawn/2: guardrail — a NON-permanent role is refused fail-loud" do
-      # engineer (boot_at_start: false): even if a forged `permanent-engineer` pod_id asked for it,
-      # respawn refuses — a one-shot worker has no business in the permanent cycle.
       assert {:error, {"engineer", :not_a_permanent}} =
                PermanentBoot.respawn("engineer",
                  loader: loader_for(),
@@ -324,9 +292,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
     test "DPF-08: published cap-profile image preferred over disk scan (empty dir ignored)", %{
       dir: dir
     } do
-      # `republish/1` et non un `:persistent_term.put` sur la cle : la cle porte desormais la RACINE
-      # du catalogue (une image par catalogue actif), et un test qui l'ecrit a la main epingle une
-      # representation privee au lieu du contrat.
       Fleet.CapProfile.Image.republish(%{
         index: %{"starfleet" => %{}},
         overlays: %{},
@@ -357,12 +322,7 @@ defmodule Fleet.Spawner.PermanentBootTest do
   end
 
   describe "REAL canon conformance — boot_at_start? on in-repo cap-profiles" do
-    # R0.8-brick5: canon lives in-repo (R0.7) at `priv/cap_profile/
-    # cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
-    # (nonexistent in a standard install). Same pattern as brick1
-    # MonkTest (resolve via Application.app_dir).
-    # Les deux racines : starfleet et architect sont de la mecanique et vivent dans le catalogue
-    # systeme ; ce bloc mesure le canon REEL, donc il doit voir le deploiement entier.
+    # Search both shipped catalogues: system and project roles live in separate roots.
     @canon_dirs [
       Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/cap-profiles"),
       Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/cap-profiles")
@@ -381,8 +341,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
 
     test "architect.yaml (real canon) → boot_at_start? FALSE (per-project, spawned on-open not at boot)" do
-      # Since the 2026-07-19 reorg the architect is per-project: starfleet is the boot front-desk, the arch
-      # is spawned on-open by create_project/relaunch — never at fleet boot.
       refute PermanentBoot.boot_at_start?(canon_spec("architect")),
              "canon architect is boot_at_start:false — per-project, spawned on-open, not a permanent"
     end
@@ -407,9 +365,6 @@ defmodule Fleet.Spawner.PermanentBootTest do
     end
   end
 
-  # BL-028: `auto_boot_enabled?/0` IS the canon gate for booting permanent pods
-  # (consulted by BootOrchestrator, single authority).
-  # Default **true** (DN lcars-fleet_service §391); `false` disables.
   describe "auto_boot_enabled?/0 — canon gate for permanent-pod boot (default true)" do
     test "default true (unconfigured) — boots by default, DN canon" do
       assert PermanentBoot.auto_boot_enabled?()
@@ -423,16 +378,13 @@ defmodule Fleet.Spawner.PermanentBootTest do
       Application.put_env(:lcars_fleet, :spawner_boot_permanent_at_start, true)
       assert PermanentBoot.auto_boot_enabled?()
 
-      # Only the boolean `true` enables (not a "yes" string).
       Application.put_env(:lcars_fleet, :spawner_boot_permanent_at_start, "yes")
       refute PermanentBoot.auto_boot_enabled?()
     end
   end
 
   test "the boot-from-base branch is GONE (reorg 2026-07-19 — one seed authority, in the pod)" do
-    # Base seeds died with the reorg: the pod's unified seed decision (`maybe_slot_resume`: live
-    # jsonl / captured seed / fresh) replaced them, and the F-C043 corrupt-seed rail died with
-    # the artifact it guarded.
+    # Recovery decisions belong to Pod; PermanentBoot does not inject a base seed.
     refute function_exported?(PermanentBoot, :escalate_corrupt_seed, 3)
 
     refute File.exists?(

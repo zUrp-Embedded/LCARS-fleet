@@ -1,19 +1,12 @@
 defmodule Fleet.Spawner.Application do
   @moduledoc """
-  Spawner domain supervisor — a plain Supervisor named `Application` like every domain's root,
-  not an OTP app callback (the only one is `Fleet.Application`).
+  Supervises the spawner's Registry, pod supervisor and optional consumers.
+  This is a domain supervisor, not an OTP application callback.
 
-  ## Permanent pod boot: SOLE authority = BootOrchestrator
-
-  The boot of permanent pods (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/1`) is
-  orchestrated **only** by `Fleet.Admiral.BootOrchestrator` (post-readiness, guarded by
-  `:lcars_fleet, :admiral_start_boot_orchestrator`). This supervisor boots no permanent pod: a
-  second boot path would double-boot. A single boot authority, period.
-
-  Two distinct knobs: `:admiral_start_boot_orchestrator` (is the orchestrator running?) and
-  `:spawner_boot_permanent_at_start` (does it boot the permanent pods? read through
-  `PermanentBoot.auto_boot_enabled?/0`, **default true**; `LCARS_BOOT_PERMANENT_AT_START=false`
-  disables it — boot_complete emitted, 0 pod spawned).
+  Permanent pods are started after readiness by `Fleet.Admiral.BootOrchestrator`.
+  `:admiral_start_boot_orchestrator` controls that orchestrator; the separate
+  `:spawner_boot_permanent_at_start` flag controls whether it boots permanent pods
+  (see `PermanentBoot.auto_boot_enabled?/0`).
   """
 
   use Supervisor
@@ -28,7 +21,6 @@ defmodule Fleet.Spawner.Application do
     # Stamp the fleet epoch before any pod starts.
     :ok = Fleet.Spawner.BootEpoch.init()
 
-    # Prove every canon role spawn-ready before readiness.
     if Application.get_env(:lcars_fleet, :spawner_prove_canon_at_boot, true) do
       :ok = Fleet.Spawner.CanonProof.prove_all!()
     end

@@ -1,59 +1,31 @@
 defmodule Fleet.Spawner.PermanentWarden do
   @moduledoc """
-  Respawn of dead PERMANENT pods (cattle, rebuildable) — Bus consumer of `pod.failed`.
+  Schedules permanent-pod respawns through `PermanentBoot.respawn/2`.
 
-  A permanent pod (`permanent-<role>`) is `restart: :temporary` on the OTP side (like every pod: the
-  respawn is EVENT-driven, not supervisor-driven — a bare OTP restart would relaunch the gen_statem
-  without the clean boot sequence). Without this module, its death would be a DEFINITIVE stop until
-  the BEAM restart: a role silently absent.
+  Handles `pod.failed` events and periodically compares expected roles with
+  reachable pods from `Fleet.Spawner.list_pods/0`, covering missed failure events.
+  Both paths share one pending timer and a retry counter per role.
 
-  ## Mechanics — two rails, one respawn path
+  Immediate spawn failures retry up to five attempts with capped exponential
+  backoff. An accepted launch records a timestamp without resetting the counter.
+  Later death/reconciliation handling resets it if that timestamp is absent or
+  at least `:min_uptime_ms` old. This is an elapsed-time heuristic, not a continuous
+  liveness check; later reconciliation can therefore reopen an exhausted cycle.
+  A drain refusal schedules no retry and leaves the already-scheduled count unchanged.
 
-  1. **Event** (`pod.failed` of a `permanent-*` pod) → respawn SCHEDULED with capped exponential
-     backoff, via `PermanentBoot.respawn/2` (the SAME path as boot: deterministic idempotent
-     pod_id + a FRESH context (recreated from scratch, no base seed) — never the dead pod's
-     accumulated session).
-  2. **Reconciliation tick** — the event rail is BLIND to a permanent that dies WITHOUT emitting:
-     a restart of the spawner sub-tree terminates its `:temporary` pods CLEANLY (no `pod.failed`),
-     the BootOrchestrator is one-shot at boot, and the Bus is lossy by doctrine. The permanents
-     would stay dead, silently, until an escalation. So the warden also RE-DERIVES the truth
-     periodically: expected permanents (`PermanentBoot.select_permanent`) vs the live Registry —
-     any missing one is respawned through the SAME counter/backoff (a reconciliation cannot spend
-     more than the event rail). The tick is a no-op when the permanent boot is disabled
-     (`LCARS_BOOT_PERMANENT_AT_START=false` — the documented maintenance mode is respected).
-     During a drain, the quiesce gate LIVES at the mechanical chokepoint (`Fleet.Spawner.spawn_pod`,
-     A-13), which covers this tick for free; the composition below stays as belt over braces — it
-     spares a pointless reconcile pass.
+  Options:
+    * `:subscribe` — subscribe to the Bus (default true).
+    * `:respawn_fun` — `(role) -> {:ok, pod_id} | {:error, reason}`;
+      defaults to `PermanentBoot.respawn/1`.
+    * `:backoff_base_ms` — default 5_000; delay is capped at 600_000 ms.
+    * `:min_uptime_ms` — default 60_000.
+    * `:reconcile_ms` — default 60_000; `nil` disables the tick.
+    * `:expected_roles_fun` / `:live_roles_fun` — zero-arity role-list providers.
+    * `:reconcile_enabled_fun` — zero-arity predicate, defaulting to permanent boot
+      enabled and fleet not quiescing. This gates reconciliation, not failure events.
 
-  A refusal from the DRAIN (`{:error, {_, :fleet_quiescing}}`, the A-13 chokepoint) is NOT an
-  attempt: logged at info and dropped — no backoff, no HALT. The node is stopping; the next boot
-  relaunches the permanents through `BootOrchestrator`.
-
-  ## BOUNDED spend (the failure mode = spend, never a churn)
-
-  Each successful respawn boots a claude session: an unbounded crash-loop would burn LLM in a loop.
-  So the retry is BOUNDED: `@max_attempts` consecutive attempts per role (exponential backoff
-  `base * 2^attempt` capped at 10 min — default base 5s, i.e. 5s → 10s → 20s → 40s → 80s).
-  The counter resets ONLY on OBSERVED survival: the pod must live past `:min_uptime_ms` after
-  a warden respawn. A `start_child` `{:ok, pid}` proves NOTHING (the allocate→launch chain is
-  async) — resetting there let a boot-then-die pod loop forever at ~5s with the HALT unreachable
-  and the spend unbounded. Exhausted → retry HALT + `Logger.error` (the role stays dead until
-  intervention). This halt is NOT silent: the human escalation goes through the incident rail, so
-  the warden carries NO escalation wiring of its own (composition, not an authority fork). A death
-  with a STALE respawn stamp (or none) means an external actor resurrected the role since — that IS
-  the external repair signal: new cycle, the spend borne by the actor (cattle, E2).
-
-  ## Seams (tests)
-
-    * `:subscribe` (default true) — real Bus subscription.
-    * `:respawn_fun` (default `&Fleet.Spawner.PermanentBoot.respawn/1`) — `(role) -> {:ok, pod_id} | {:error, _}`.
-    * `:backoff_base_ms` (default 5_000) — backoff base (reduced in test).
-    * `:min_uptime_ms` (default 60_000) — survival threshold that resets the attempt counter.
-    * `:reconcile_ms` (default 60_000) — cadence of the reconciliation tick; `nil` disables it.
-    * `:expected_roles_fun` — `() -> [role]` (default = the permanent roles of the catalogue).
-    * `:live_roles_fun` — `() -> [role]` (default = the `permanent-*` pods live in the Registry).
-    * `:reconcile_enabled_fun` — `() -> boolean` (default = permanent-boot on AND not quiescing).
-  Boot gate: `:lcars_fleet, :spawner_start_permanent_warden` (default true prod, false test — hermeticity).
+  The domain supervisor starts this process when `:spawner_start_permanent_warden`
+  is enabled (default true; disabled in test configuration).
   """
 
   use GenServer
@@ -63,7 +35,6 @@ defmodule Fleet.Spawner.PermanentWarden do
   alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.PermanentBoot
 
-  # Per-role spend bound.
   @max_attempts 5
   @max_delay_ms 600_000
 
@@ -92,7 +63,7 @@ defmodule Fleet.Spawner.PermanentWarden do
         Keyword.get(opts, :reconcile_enabled_fun, &default_reconcile_enabled?/0),
       # role => {consecutive attempts, last successful warden launch monotonic time}
       attempts: %{},
-      # F-01: one in-flight timer per role.
+      # One pending timer per role deduplicates bursts of failure events.
       pending: MapSet.new()
     }
 
@@ -117,7 +88,6 @@ defmodule Fleet.Spawner.PermanentWarden do
   end
 
   def handle_info({:respawn, role}, state) do
-    # F-01
     state = %{state | pending: MapSet.delete(state.pending, role)}
 
     result =
@@ -131,7 +101,6 @@ defmodule Fleet.Spawner.PermanentWarden do
       {:ok, pod_id} ->
         Logger.info("PermanentWarden: permanent #{role} respawned (#{pod_id})")
 
-        # Launch acceptance stamps the attempt; only later survival resets it.
         now = System.monotonic_time(:millisecond)
 
         attempts =
@@ -140,13 +109,6 @@ defmodule Fleet.Spawner.PermanentWarden do
         {:noreply, %{state | attempts: attempts}}
 
       {:error, {_role, :fleet_quiescing}} ->
-        # A DRAIN REFUSAL IS NOT A FAILURE OF THE ROLE. The spawn chokepoint refuses every new pod
-        # while the fleet quiesces (A-13), and that refusal used to land here as a failed attempt:
-        # four retries in backoff against a closed door, then HALT with an `error` line demanding
-        # an intervention — for a node that is stopping on purpose. Nothing to retry: a drain ends
-        # with the node's teardown, and the next boot relaunches the permanents through
-        # `BootOrchestrator`. The attempt counter is left as it is; a permanent that dies during a
-        # drain has not looped.
         Logger.info(
           "PermanentWarden: respawn #{role} refused by the drain (fleet quiescing) — not an " <>
             "attempt, nothing to retry: the node is stopping"
@@ -185,7 +147,6 @@ defmodule Fleet.Spawner.PermanentWarden do
     end
   end
 
-  # Reconciliation covers clean termination and lossy events through the same bound.
   def handle_info(:reconcile, state) do
     :ok = schedule_reconcile(state.reconcile_ms)
 
@@ -248,13 +209,11 @@ defmodule Fleet.Spawner.PermanentWarden do
     end)
   end
 
-  # Maintenance and quiesce suppress desired-state reconciliation.
   defp default_reconcile_enabled? do
     PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()
   end
 
   defp handle_permanent_death(role, state) do
-    # F-01
     if MapSet.member?(state.pending, role) do
       Logger.debug("PermanentWarden: #{role} death while a respawn is already pending → deduped")
       {:noreply, state}
@@ -267,7 +226,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     now = System.monotonic_time(:millisecond)
     {raw_count, last_respawn} = Map.get(state.attempts, role, {0, nil})
 
-    # No/stale warden stamp denotes external repair; short-lived launches stay one cycle.
+    # Absent or old timestamps reset the budget on both events and reconciliation.
     count = if survived?(last_respawn, now, state.min_uptime), do: 0, else: raw_count
 
     if count < @max_attempts do
@@ -294,7 +253,7 @@ defmodule Fleet.Spawner.PermanentWarden do
            pending: MapSet.put(state.pending, role)
        }}
     else
-      # Preserve the stamp so later observed external repair can open a fresh cycle.
+      # Keep the timestamp; a later scheduling request may reset the budget.
       Logger.error(
         "PermanentWarden: permanent #{role} boots then dies under #{div(state.min_uptime, 1000)}s " <>
           "with #{@max_attempts} attempts exhausted — HALT (sysadmin issue already opened by " <>

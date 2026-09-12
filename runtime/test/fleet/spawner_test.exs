@@ -1,7 +1,6 @@
 defmodule Fleet.SpawnerTest.UnresponsivePod do
   @moduledoc false
-  # Fake pod: registers in Fleet.Spawner.Registry under `pod_id` then CRASHES on `:kill` → the
-  # `GenServer.call(:kill)` in kill_pod exits → triggers the BRUTAL fallback (R1-18).
+  # Registered fake pod that crashes on :kill to exercise the forced-termination fallback.
   use GenServer
 
   def start(pod_id), do: GenServer.start(__MODULE__, pod_id)
@@ -22,15 +21,11 @@ defmodule Fleet.SpawnerTest do
   alias Fleet.Spawner.LaunchBackend.StubBackend
   alias Fleet.Spawner.Pod.TurnFlag
 
-  # G24-9 (F-CONT-RISK) — minimum disallowedTools required by validate/1 wired at spawn
-  # (Z2; cf. cap_profile.ex @disallowed_minimum_strict/_prefix).
+  # Minimum disallowed tools needed for the fixture to pass profile validation.
   @min_disallowed ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution tool_search_web)
 
-  # Test repo_id for PROJECT-BOUND roles (engineer = `valid_profile/0` and `forever_profile/0`).
-  # Their hexspeak session_id REQUIRES a resolved repo: without it the mint REFUSES (raise) rather than
-  # fabricating a random UUID — a missing repo signals an unresolved forge (forge down). In prod the
-  # dispatcher sets this repo; these tests spawn directly, so we pass it via `opts`. Deliberately omitted
-  # in the cases that MUST fail before the mint (brief refusal, non path-safe pod_id).
+  # Direct spawns need a repository ID for session minting. Admission-refusal tests
+  # can omit it when they must fail before minting.
   @test_repo_id 7
 
   @moduletag :tmp_dir
@@ -39,11 +34,8 @@ defmodule Fleet.SpawnerTest do
     Application.put_env(:lcars_fleet, :spawner_state_fs_root, Path.join(tmp_dir, "state"))
     Application.put_env(:lcars_fleet, :spawner_pod_dir_root, Path.join(tmp_dir, "pods"))
     Application.put_env(:lcars_fleet, :spawner_launch_backend, StubBackend)
-    # adr-f: no vault anymore (creds via claudeDir bwrap bind).
 
-    # auth = single bind mode (token_arg removed); the credentials gate still reads the native
-    # creds (scope/plan). Default creds fixture (these tests do not test the credentials door) —
-    # cf. pod_test.exs. Without it: {:credentials_invalid, _} → pod dies at boot.
+    # Provide valid credentials so unrelated spawn tests reach their intended phase.
     setup_claude = Path.join(tmp_dir, ".claude")
     File.mkdir_p!(setup_claude)
 
@@ -68,9 +60,7 @@ defmodule Fleet.SpawnerTest do
       StubBackend.clear()
       Application.delete_env(:lcars_fleet, :spawner_state_fs_root)
       Application.delete_env(:lcars_fleet, :spawner_pod_dir_root)
-      # B5 #576: do NOT delete :launch_backend — leave the hermetic
-      # config/test.exs baseline (StubBackend) in place, otherwise the
-      # REAL code-default LauncherPortBackend is reached under async race.
+      # Keep the configured StubBackend; deleting the key would select the real launcher.
       Application.delete_env(:lcars_fleet, :spawner_claude_dir)
     end)
 
@@ -80,8 +70,6 @@ defmodule Fleet.SpawnerTest do
   defp valid_profile do
     %Fleet.CapProfile{
       kind: "CapabilityProfile",
-      # role_index/protected/fleet_level: the role catalogue lives in the metadata (source of the WHAT),
-      # read by deterministic_session_id. engineer = slot 3, worker (1badcafe), project-bound (repo required).
       metadata: %{
         "name" => "engineer",
         "containment" => "bwrap",
@@ -102,8 +90,6 @@ defmodule Fleet.SpawnerTest do
   end
 
   defp forever_profile do
-    # g24_15/g24_16: context-long ⟹ the keying is DECLARED (the derivation is a choice here), and
-    # a project-keyed pod declares whether it deserves a durable Desktop handle.
     put_in(valid_profile().spec["invocation"], %{
       "lifetime_scope" => "forever",
       "slot_scope" => "project",
@@ -127,15 +113,11 @@ defmodule Fleet.SpawnerTest do
 
   describe "one-shot spawn without brief is refused (brief guard)" do
     test "valid_pod_id?/1 is the public authority on the pod_id charset" do
-      # "p1" (short) is ACCEPTED: admission does NOT impose a minimum length — the len≥4 is
-      # pkill's LOCAL over-armour (PodTmux.pkill_pattern), not an admission rule.
+      # Admission accepts short IDs; the stricter pkill pattern limit belongs to PodTmux.
       for ok <- ["pod-1", "permanent-architect", "repo.issue_1-role", UUID.uuid4(), "p1"] do
         assert Fleet.Spawner.valid_pod_id?(ok), "pod_id #{inspect(ok)} should be accepted"
       end
 
-      # NON-alnum head (`.`/`_`/`-`) and absurd length rejected: any admitted id must be safe for
-      # ALL consumers (alnum head = anti-degenerate-pkill-pattern; bound = anti-DoS, precise
-      # sun_path at the socket boundary).
       for bad <- [
             "../etc/passwd",
             "a/b",
@@ -155,10 +137,8 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "brief_required?/1 — shared authority: one-shot → true, other scopes / absent → false" do
-      # EXPLICIT one-shot = the only form that requires a brief.
       assert Fleet.Spawner.brief_required?(valid_profile())
 
-      # forever/run/pipe/permanent: long-lived, pull via MCP → exempt.
       for scope <- ["forever", "run", "pipe", "permanent"] do
         cap = put_in(valid_profile().spec["invocation"], %{"lifetime_scope" => scope})
 
@@ -166,36 +146,24 @@ defmodule Fleet.SpawnerTest do
                "scope #{scope} should NOT require a brief"
       end
 
-      # lifetime_scope absent: brief_required? reads the EXPLICIT "one-shot" → false. This is a
-      # dead-safe default: spawn_pod REFUSES a profile without scope upstream (DR-019, dedicated test
-      # below), so this predicate is never consulted on a real no-scope in the spawn path.
+      # This predicate returns false without scope; spawn admission separately rejects that profile.
       no_scope = put_in(valid_profile().spec["invocation"], %{})
       refute Fleet.Spawner.brief_required?(no_scope)
     end
 
     test "order_present?/1 — shared authority: the order has TWO shapes, text and address" do
-      # The predicate both halves consult. The dispatch drops the inline copy when it posts an
-      # address and asks this about WHAT REMAINS; the spawn guard asks it about what arrived. Two
-      # hand-written shapes disagreed once and looped every one-shot dispatch forever — the point
-      # of this function is that there is now only one shape to get wrong.
       assert Fleet.Spawner.order_present?(brief: "fix bug X")
       assert Fleet.Spawner.order_present?(brief_ref: "briefs/x.md", brief_sha: "abc")
 
-      # An address with no text is the NOMINAL rail, not a degradation.
       assert Fleet.Spawner.order_present?(brief_ref: "briefs/x.md")
 
       refute Fleet.Spawner.order_present?([])
       refute Fleet.Spawner.order_present?(brief: "")
       refute Fleet.Spawner.order_present?(brief: nil)
-      # A sha names nothing without a path to resolve it against.
       refute Fleet.Spawner.order_present?(brief_sha: "abc")
     end
 
     test "DR-019: cap-profile WITHOUT lifetime_scope → spawn REFUSED (invalid state, never spawned)" do
-      # `lifetime_scope` is schema-REQUIRED: a %CapProfile{} without it was never validated by the
-      # schema. Letting it spawn gives downstream reads that DIVERGE (brief-exempt at the guard, but
-      # "one-shot" at extraction → release). The spawn_pod choke point refuses it fail-loud — even with
-      # a brief, even with allow_no_brief (the profile's invalidity precedes the brief question).
       no_scope = put_in(valid_profile().spec["invocation"], %{})
 
       assert {:error, :cap_profile_no_lifetime_scope} =
@@ -206,10 +174,6 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "cap-profile WITHOUT interlocutor → spawn REFUSED (the protocol contract is never inferred)" do
-      # Same structural guard as DR-019, on the field that decides WHICH protocol the pod is
-      # provisioned with. Defaulting it would restore the exact silence it exists to end: the pod
-      # boots, looks healthy, and holds a machine contract nobody chose for it. The refusal must
-      # precede the brief question, like the scope one.
       no_who = Map.delete(valid_profile().spec, "interlocutor")
       cap = %{valid_profile() | spec: no_who}
 
@@ -219,8 +183,6 @@ defmodule Fleet.SpawnerTest do
       assert {:error, :cap_profile_no_interlocutor} =
                Fleet.Spawner.spawn_pod(cap, "issue-no-who", allow_no_brief: true)
 
-      # An EMPTY string is not a declaration either — the accessor requires a non-empty binary,
-      # or `interlocutor: ""` would pass the gate and then match no branch downstream.
       blank = %{valid_profile() | spec: Map.put(valid_profile().spec, "interlocutor", "")}
 
       assert {:error, :cap_profile_no_interlocutor} =
@@ -228,19 +190,12 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "NAMED pod without :project_slug → spawn REFUSED (the label carries no structure)" do
-      # Third structural guard at the same choke point. A pod that carries an `rc_name` is a pod
-      # placed IN a project: its cwd, its intra-pod home and its checkpoint seed all derive from the
-      # slug. The slug used to be re-parsed out of the label, which froze the label's format; now it
-      # travels explicitly, so a caller that names a pod and omits it would get a booting pod
-      # working on the wrong tree — silently. Refused instead.
       assert {:error, :project_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-named",
                  brief: "do x",
                  rc_name: "p_engineer"
                )
 
-      # A slug that is not a slug is the same refusal, not a downgrade to `nil`: the value reaches a
-      # `Path.join`, so the traversing forms die at the door.
       for bad <- ["../evil", "a/b", "", nil, 42] do
         assert {:error, :project_required} =
                  Fleet.Spawner.spawn_pod(valid_profile(), "issue-bad-slug",
@@ -253,9 +208,7 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "UNNAMED pod (no rc_name) → the slug is not demanded (permanent / admin pods)" do
-      # The guard binds the PAIR, it does not make the slug universally mandatory: a permanent or
-      # admin pod has no Desktop label and no cwd remap. It must fail LATER (on the brief), which
-      # proves the project guard let it through rather than passing for the wrong reason.
+      # The later brief refusal proves the project guard accepted an unlabeled pod.
       assert {:error, :brief_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-unnamed")
     end
@@ -271,10 +224,6 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "F076 — non path-safe pod_id (.. or / or empty) → {:error, :invalid_pod_id}, no spawn" do
-      # pod_id flows into pod_dir/sock_path/state recovery (Path.join + interpolation) → a non
-      # path-safe pod_id would traverse outside ~/pods. CLEAR refusal BEFORE any spawn. Legitimate ids
-      # UUID / `permanent-<name>-ts` / `issue-<n>-<role>-ts` (charset [A-Za-z0-9._-]) pass — covered
-      # by the tests spawning with UUID ids (hyphenated = same charset).
       for bad <- ["../etc/passwd", "a/b", "..", "pod_..", "x y", ""] do
         assert match?(
                  {:error, :invalid_pod_id},
@@ -297,12 +246,6 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "one-shot + POINTER (brief_ref, no inline text) → {:ok, _} — the nominal rail" do
-      # THE RAIL THIS GUARD REFUSED IN PRODUCTION. Once a brief is materialized into ops, the
-      # dispatch drops the inline copy BECAUSE an address replaces it, and hands the pod a
-      # `:brief_ref` — the shape the arbitration made canonical. A guard reading only `:brief` saw
-      # nothing and refused, the reconciliation re-dispatched, and it looped every 30s forever.
-      # Every one-shot role was affected (scoper, qualifier, reviewer, gatekeeper, chief); the
-      # degraded rail, having no address to name, kept working and kept every test green.
       assert {:ok, _pid} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-brief-ptr",
                  brief_ref: "briefs/x.md",
@@ -313,9 +256,6 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "a pointer with NO ref is not an order — the sha alone names nothing" do
-      # The pair keys on the ref, exactly like the dispatch site that drops the copy. A sha without
-      # a path is not resolvable, so it must NOT open the guard: an order the pod cannot read is
-      # the expensive failure this whole guard exists to prevent.
       assert {:error, :brief_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-sha-only",
                  brief_sha: "62e36295c11f459baed13ebd724583508dc36388"
@@ -323,11 +263,7 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "CONCURRENT spawns of the same (role, repo) never share a pool index" do
-      # The allocation runs inside `Pod.start_link/1` — that is, inside the window
-      # `DynamicSupervisor.start_child/2` holds open, so it is serialized by the supervisor without
-      # a lock and without an extra process. Run in the CALLER's process (where it first lived),
-      # two of these would read the same lowest free index and hand it out twice: two live pods
-      # sharing a session_id, silently, which is the exact lie the nibble exists to end.
+      # Concurrent callers must receive distinct slots through the serialized supervisor start.
       n = 6
       ids = for i <- 1..n, do: "pod-conc-#{System.unique_integer([:positive])}-#{i}"
 
@@ -347,17 +283,13 @@ defmodule Fleet.SpawnerTest do
           pid
         end)
 
-      # Six live pods left in a SHARED registry are not this test's business alone: every later
-      # test that enumerates pods (`list_pods/0` → a `GenServer.call` per pod) pays for them.
-      # Measured: without this, `PodToolsTest`'s supersede path times out at 60 s — green in
-      # isolation, red at the gate. Brutal kill on purpose — the graceful `kill_pod/1` is itself a
-      # call, so it would queue behind the very thing being cleaned up.
+      # Force cleanup without waiting on pod calls, so surviving test pods do not delay
+      # later Registry enumeration.
       on_exit(fn -> Enum.each(pids, &Process.exit(&1, :kill)) end)
 
       pools =
         for {id, pid} <- Enum.zip(ids, pids) do
-          # Matched on the PID: a pod that died would fail here by name rather than vanish from a
-          # comprehension and turn the uniqueness assertion into a tautology on a shorter list.
+          # Require every started PID to remain registered; omitted entries would weaken uniqueness.
           assert [{^pid, %{pool: pool}}] = Registry.lookup(Fleet.Spawner.Registry, id)
           pool
         end
@@ -397,22 +329,16 @@ defmodule Fleet.SpawnerTest do
 
     assert is_pid(pid)
 
-    # Mi14: synchronous registration (name: {:via, Registry, ...}) → pod registered as of {:ok, pid}.
     assert {:ok, %{pod_id: ^pod_id}} = Fleet.Spawner.pod_info(pod_id)
   end
 
-  # STATE-004 (DN-recovery B coupling): under `:temporary`, a pod dying without
-  # completion is not restarted → its active task must be released (clear_for_pod)
-  # otherwise it stays orphaned. Failing backend → transition_failed → clear.
   test "a failing pod releases its active task (STATE-004)" do
     pod_id = "pod-orphan-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
-    # active task present before the failure
     assert {:ok, status} = Fleet.TaskQueue.pod_status(pod_id)
     refute is_nil(status)
 
-    # failing backend → the pod dies via transition_failed → clear_pod_task
     StubBackend.set_reply({:error, :stub_launch_fail})
 
     {:ok, _pid} =
@@ -422,15 +348,10 @@ defmodule Fleet.SpawnerTest do
         repo_id: @test_repo_id
       )
 
-    # the active task goes `:cleared` (≠ `:pending`/`:assigned`) — ASYNC clear at pod death
-    # (clear_pod_task; a failed clear is logged warning on the Pod side) → bounded poll
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
            "the dead pod's task should be :cleared, current status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
 
-  # LIFE-003 (DN-recovery B §5): kill_pod = DELIBERATE release (handle_call(:kill) →
-  # teardown + clear_for_pod + :killed state), not a brutal terminate_child. Discriminant:
-  # the active task is released (`:cleared`) — a brutal kill would not clear.
   test "kill_pod does a clean release: task released + pod gone (LIFE-003)" do
     pod_id = "pod-killclean-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
@@ -445,7 +366,6 @@ defmodule Fleet.SpawnerTest do
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
 
-    # clean release: the task is released (vs a brutal kill which does not clear)
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
            "kill_pod should release the task (clean release), status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
 
@@ -456,12 +376,10 @@ defmodule Fleet.SpawnerTest do
     pod_id = "pod-brutal-#{System.unique_integer([:positive])}"
     {:ok, _} = Fleet.TaskQueue.enqueue(pod_id, %{brief: "x"})
 
-    # fake pod REGISTERED but CRASHING on :kill → GenServer.call(:kill) exits → brutal fallback
     {:ok, _fake} = Fleet.SpawnerTest.UnresponsivePod.start(pod_id)
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
 
-    # the mandate MUST be released (otherwise the poller re-dispatches it → loop), even without a graceful release
     assert wait_until(fn -> Fleet.TaskQueue.pod_status(pod_id) == {:ok, :cleared} end),
            "the brutal fallback should have released the task, status: #{inspect(Fleet.TaskQueue.pod_status(pod_id))}"
   end
@@ -479,8 +397,6 @@ defmodule Fleet.SpawnerTest do
 
     assert_receive :registered
 
-    # The old catch-all read this TIMEOUT as {:error, :not_found}: a live-but-slow pod
-    # classed absent — the exact false death proof the compensations killed on.
     assert {:error, :unreachable} = Fleet.Spawner.pod_info(pod_id, 50)
 
     Process.exit(pid, :kill)
@@ -501,8 +417,7 @@ defmodule Fleet.SpawnerTest do
       )
 
     assert :ok = Fleet.Spawner.kill_pod(pod_id)
-    # Mi14: terminate_child is sync on death, BUT the Registry cleanup (via monitor) is
-    # async → deterministic bounded poll (≤200ms) instead of a flaky fixed sleep.
+    # Registry monitor cleanup is asynchronous even after terminate_child returns.
     assert :ok = wait_unregistered(pod_id)
     assert {:error, :not_found} = Fleet.Spawner.pod_info(pod_id)
   end
@@ -528,15 +443,7 @@ defmodule Fleet.SpawnerTest do
   end
 
   test "count_pods returns the number of active pods" do
-    # Mi14: count_children reflects the active child as of start_child's {:ok}. NO assertion on an
-    # `initial+1` DELTA: the pod registry is GLOBAL (singleton DynamicSupervisor) shared across
-    # async tests → a concurrent spawn/terminate skews the delta (observed flaky).
-    #
-    # ⚠ MAIS `>= 1` NE DISTINGUAIT PAS UNE CONSTANTE, et `assert is_integer(...)` encore moins :
-    # `def count_pods, do: 1` laissait les deux verts (mutation jouee le 2026-09-07). DEUX pods
-    # semes, plancher a 2 : une constante `1` tombe, et le plancher reste deterministe sous
-    # concurrence (le registre ne peut que contenir PLUS, jamais moins que les deux qu'on vient de
-    # demarrer).
+    # Assert a lower bound because other live pods may share the supervisor.
     for n <- 1..2 do
       {:ok, _pid} =
         Fleet.Spawner.spawn_pod(valid_profile(), "issue-count-#{n}",
@@ -548,10 +455,7 @@ defmodule Fleet.SpawnerTest do
 
     assert Fleet.Spawner.count_pods() >= 2
 
-    # ⚠ CE QUI RESTE HORS DE PORTEE, ET IL FAUT LE DIRE : le cas « flotte VIDE rend 0 ». Un
-    # `max(active, 1)` passerait ce temoin, parce qu'aucun temoin async ne peut observer un
-    # registre global vide. La limite est ecrite plutot que masquee par une assertion qui ne la
-    # couvre pas.
+    # This does not cover an empty supervisor returning zero.
   end
 
   describe "wake_pod/1" do
@@ -569,8 +473,6 @@ defmodule Fleet.SpawnerTest do
           repo_id: @test_repo_id
         )
 
-      # StubBackend does not set tmux_session in launched → pod_info returns
-      # tmux_session: nil → wake_pod refuses cleanly (no send-keys).
       assert {:error, :not_a_tmux_pod} = Fleet.Spawner.wake_pod(pod_id)
 
       Fleet.Spawner.kill_pod(pod_id)
@@ -585,9 +487,9 @@ defmodule Fleet.SpawnerTest do
       t1 = File.read!(Path.join(tmp, "turn.flag"))
       assert :ok = TurnFlag.write(tmp)
       t2 = File.read!(Path.join(tmp, "turn.flag"))
-      # watch.sh fires on `cur != last` → every write MUST change the content.
+      # The watcher detects content changes, so consecutive writes must differ.
       assert t1 != t2
-      # bare token (mandate wake): NO space → watch.sh emits the fixed "ton tour".
+      # A token without a message selects the watcher's default wake text.
       refute String.trim(t2) =~ " "
     end
 
@@ -601,7 +503,6 @@ defmodule Fleet.SpawnerTest do
 
       [_token, msg] = String.split(content, " ", parts: 2)
       assert msg == "info : brique fleet/x#12 LIVRÉE sur main"
-      # single line contract (watch.sh cats the whole file)
       refute content =~ "\n"
     end
 
@@ -614,8 +515,7 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  # Deterministic bounded poll (Mi14): waits for the async Registry cleanup post-terminate_child
-  # (≤200ms). Replaces a fixed sleep: succeeds as soon as cleaned, fails after the bound.
+  # Wait for asynchronous Registry cleanup with a bounded poll.
   defp wait_unregistered(pod_id, tries \\ 100) do
     case Registry.lookup(Fleet.Spawner.Registry, pod_id) do
       [] ->
@@ -637,9 +537,7 @@ defmodule Fleet.SpawnerTest do
 
       worker = prefix <> "issue-7-engineer"
       judge = prefix <> "pr-3-reviewer"
-      # Neither of these carries the repository prefix, and that is the whole exclusion: an
-      # architect id is `architect-<name>`, a permanent is `permanent-<role>`. Nothing is filtered
-      # out by name here — they are simply not in the set.
+      # Architect and permanent IDs lack this repository prefix and are outside the sweep.
       arch = "architect-sweep-#{System.unique_integer([:positive])}"
       perm = "permanent-starfleet-#{System.unique_integer([:positive])}"
 
@@ -657,8 +555,6 @@ defmodule Fleet.SpawnerTest do
 
       assert {:error, :not_found} = Fleet.Spawner.wake_pod(worker)
       assert {:error, :not_found} = Fleet.Spawner.wake_pod(judge)
-      # Still addressable → still alive. Killing an architect costs the live conversation of the
-      # human who just fixed whatever the sweep was for.
       refute match?({:error, :not_found}, Fleet.Spawner.wake_pod(arch))
       refute match?({:error, :not_found}, Fleet.Spawner.wake_pod(perm))
 
@@ -695,8 +591,6 @@ defmodule Fleet.SpawnerTest do
 
   describe "project_guard — a fleet-level pod carries a label and no project" do
     test "a NAMED pod without a project is refused… unless its label is the role alone" do
-      # The guard exists because a label was once parsed BACK into a project slug. A pod bound to a
-      # project must pass what its label was built from; a fleet-level one was built from nothing.
       assert {:error, :project_required} =
                Fleet.Spawner.spawn_pod(valid_profile(), "issue-x",
                  pod_id: "pg-#{System.unique_integer([:positive])}",
@@ -707,8 +601,6 @@ defmodule Fleet.SpawnerTest do
     end
 
     test "the permanent boot's own shape passes — it is what boots the fleet" do
-      # Measured on a bench: giving the permanents an `rc_name` made this refusal fire at boot,
-      # `permanent_pods=0`, and no test in the suite spawns a permanent so nothing went red.
       pod =
         Fleet.Spawner.PermanentBoot.pod_id_for("starfleet-#{System.unique_integer([:positive])}")
 
@@ -726,10 +618,6 @@ defmodule Fleet.SpawnerTest do
 
   describe "pod_info — the project a pod belongs to is PUBLISHED, not inferred" do
     test "a dispatched pod exposes its project_slug; `repo` stays nil and that is not a bug" do
-      # The dispatch threads `:repo_id` and NOT `:repo` (the owner/name string never enters the
-      # spawn opts), so a reader keyed on `repo` got nil for every producer and judge, then fell
-      # back to scanning /proc for an ops mount that had been deliberately removed. Three layers
-      # agreeing on a wrong answer. `:project_slug` was already threaded and simply not published.
       pod_id = "pv-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
@@ -765,13 +653,6 @@ defmodule Fleet.SpawnerTest do
     end
   end
 
-  # 6-084 — `notify_pod/2` ECRASAIT L'ABSENCE DU POD SANS UN MOT, et son `@spec :: :ok` figeait
-  # l'impossibilite pour l'appelant de l'apprendre. Aucun `Logger` dans la clause `{:error, _}`.
-  #
-  # Ce serait tolerable pour une ligne de feed. Ca ne l'est pas parce que le chemin d'ESCALADE
-  # TERMINALE passe par la meme fonction : le moment ou un step_run a echoue definitivement et ou
-  # l'architecte du projet doit etre prevenu. Pod hors du Registry — jamais demarre, en cours de
-  # redemarrage, tue — et le message disparaissait : rien dans les journaux, rien dans le retour.
   describe "6-084 — l'absence du destinataire est dite, et rendue" do
     test "pod hors du Registry -> {:error, _} ET un warning qui nomme la perte" do
       absent = "pod-jamais-demarre-#{System.unique_integer([:positive])}"
@@ -784,14 +665,11 @@ defmodule Fleet.SpawnerTest do
       assert log =~ absent
       assert log =~ "NOT delivered"
 
-      # La trace doit dire ce qui est PERDU et ce qui rattrape — sinon elle signale un evenement
-      # sans dire s'il faut agir. Ici rien ne rejoue : c'est ca, l'information.
+      # The warning must identify the lost delivery and the absence of replay.
       assert log =~ "LOST"
     end
 
     test "TEMOIN — un pod VIVANT recoit toujours, et sans warning" do
-      # Sans ce temoin, un `notify_pod` qui echouerait toujours passerait le test precedent, et
-      # chaque feed de la flotte se mettrait a crier en silence.
       pod_id = "pv-notify-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
