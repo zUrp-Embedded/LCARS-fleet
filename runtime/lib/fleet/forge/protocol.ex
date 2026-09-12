@@ -1,49 +1,28 @@
 defmodule Fleet.Forge.Protocol do
   @moduledoc """
-  **Pure** vocabulary of the forge-state-machine wire-protocol: the forge IS the state machine,
-  these formats are its thread. SINGLE SOURCE of the markers recorded on issues/PRs and of the
-  feature-branches. No I/O — only build + parse of strings (the HTTP ops that
-  *post*/*read* them live in `Fleet.Forge.Client`).
+  Pure forge protocol vocabulary: branch names, comment markers, parked titles and result blocks.
+  HTTP operations live in `Fleet.Forge.Client`; labels, including route position in stage/*,
+  live in `Fleet.Labels`. MCP reaches parse_feature_branch through the forge-client seam.
 
-  Counterpart of `Fleet.Labels` (both carry the wire-protocol): `Labels` = the
-  **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches, comment markers
-  (step_run, publish-fail, ci-rework, merge, escalation), the parked title, result blocks** and the
-  **trust primitive** `system_authored?/2`.
-
-  **Co-located build+parse invariant**: each format has its BUILDER and its PARSER in
-  THIS module, glued to each other — a format change happens HERE, both together,
-  never one without the other (no drift between what is written and what is re-read).
-  The consumers (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) call these
-  functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `Fleet.Forge.Client`
-  (`defdelegate`): `Fleet.MCP` reaches it through the `:forge_client` seam.
+  Keep builders and readers together when changing a format. Most builders interpolate without
+  validating inputs, so recognition is not guaranteed for arbitrary arguments allowed by their guards.
+  Marker recognition checks text only; author trust must be handled by the caller.
   """
 
-  # ============================================================
-  # System feature-branch `lcars/issue-<n>-<role>`.
-  # ============================================================
-
-  # SINGLE-SOURCE literal of the format: builder AND parser derive from it (zero token written twice).
   @feature_branch_prefix "lcars/issue-"
-  # Regex DERIVED from the same literal — `Regex.escape` neutralises the `/` (and any meta-character) of the prefix
-  # → inert literal in the pattern, never interpreted as regex syntax.
   @feature_branch_rx Regex.compile!("^" <> Regex.escape(@feature_branch_prefix) <> "(\\d+)-(.+)$")
 
   @doc """
-  Builds the system feature-branch `lcars/issue-<n>-<role>` — the single BUILDER of the format,
-  derived from `@feature_branch_prefix` just like its parser `parse_feature_branch/1`: a format
-  change happens on THIS single literal, build and parse follow (no more token twice).
-  Guaranteed identity: `parse_feature_branch(feature_branch(n, role)) == {:ok, {n, role}}`.
+  Builds lcars/issue-n-role without validating Git ref syntax. Negative n or empty role
+  are accepted by the builder but not recognized by its parser.
   """
   @spec feature_branch(integer(), String.t()) :: String.t()
-  # => "lcars/issue-<n>-<role>"
   def feature_branch(n, role) when is_integer(n) and is_binary(role),
     do: "#{@feature_branch_prefix}#{n}-#{role}"
 
   @doc """
-  Extracts `{issue_number, role}` from a system feature-branch `lcars/issue-<n>-<role>` (format
-  built by `feature_branch/2`, its co-located inverse). Serves the PR-driven judge dispatch to go
-  back from the PR (head.ref) to the issue. `:error` if the ref is not a fleet feature-branch (external
-  PR / manual branch -> ignored by the dispatch, never misrouted).
+  Extracts decimal issue number and nonempty role from the feature-branch pattern, else :error.
+  Used to correlate a PR's head.ref with an issue; does not authenticate branch ownership or role.
   """
   @spec parse_feature_branch(String.t()) :: {:ok, {integer(), String.t()}} | :error
   def parse_feature_branch(head) when is_binary(head) do
@@ -56,13 +35,10 @@ defmodule Fleet.Forge.Protocol do
   def parse_feature_branch(_), do: :error
 
   @doc """
-  Selects the Fleet PRs from a list of raw forge pull maps: every pull whose `head.ref` parses as a
-  feature-branch (`lcars/issue-N-<role>`) yields `{issue_number, pull}` — the SINGLE loop behind the
-  in-Pilot issue↔PR correlations (C-05). Callers keep their LOCAL
-  projection: `Poller` → the set of issue numbers; `StepRunBuild` → the head.ref of issue N's PR. The
-  MCP `Delegation` correlation is NOT wired here (extending the forge seam with the selector would
-  force every forge stub to implement it) — it keeps a
-  local loop over the SAME single-authority parse (`forge.parse_feature_branch` seam → this module).
+  Returns {issue_number, pull} for each readable head.ref matching the feature pattern,
+  preserving order and duplicates. Malformed nested structures can raise.
+  Pilot projects these pairs locally; MCP Delegation uses its own loop through the parser seam
+  so forge stubs need not implement this selector.
   """
   @spec fleet_prs_by_issue([map()]) :: [{integer(), map()}]
   def fleet_prs_by_issue(pulls) when is_list(pulls) do
@@ -74,26 +50,9 @@ defmodule Fleet.Forge.Protocol do
     end)
   end
 
-  # (The workflow_map position is NOT a `[lcars-route:...]` comment-marker: it lives in the
-  # issue's SCOPED label `stage/*` — Gitea native mutex, human-visible, read without a comment scan.
-  # Builder/reader: `Fleet.Forge.Client.post_route`/`get_route`.)
-
-  # ============================================================
-  # User-lot branch `lcars/lot-<slug>` + its ticket-body pointer `Lot: <ref> @ <sha>`.
-  # ============================================================
-
-  # WHAT A LOT IS, and why it is not a brief. The brief is the TASK: what the fleet asks, one
-  # markdown the system writes and seals. A lot is the MATTER the task works on — several docs, a
-  # directory, images — produced by the human and the architect together on the workshop face. Text
-  # cannot carry it, so the lot travels as what git already is: a commit. The ticket then names that
-  # commit, and the producer's clone starts FROM it instead of from the head of its face.
-  #
-  # The two pointers coexist in one body and must never read each other: `Brief:` addresses a path
-  # in ops (`Fleet.Layout`, which owns that shape), `Lot:` addresses a BRANCH — forge protocol, so
-  # it lives here, glued to the branch builder like every other format in this module.
-
-  # SINGLE-SOURCE literal: builder AND validator derive from it, same discipline as the
-  # feature-branch above — one `lcars/` namespace, minted in one file.
+  # A lot is input material (docs/images/directories) committed on workshop by human/architect.
+  # Lot: selects a branch/commit for the producer's starting tree; Brief: selects the task text
+  # in ops (Fleet.Layout). Their parsers must remain distinct when both share a ticket body.
   @lot_branch_prefix "lcars/lot-"
   @lot_branch_rx Regex.compile!(
                    "\\A" <> Regex.escape(@lot_branch_prefix) <> "[a-z0-9][a-z0-9_-]*\\z"
@@ -101,12 +60,7 @@ defmodule Fleet.Forge.Protocol do
   @lot_pointer_re Regex.compile!("^Lot: (\\S+) @ ([0-9a-f]{40})$", "m")
 
   @doc """
-  Builds the user-lot branch `lcars/lot-<slug>` from the name the architect gives its lot.
-
-  VALIDATES, never transforms (`Fleet.Slug.cast/1` — the platform's slug authority, whose whole
-  contract is "no transformation"). A lot name that is not a slug is refused: silently renaming an
-  architect's `Morse UI v2` into `morse-ui-v2` would put a branch on the forge under a name nobody
-  chose, and the architect is the one actor that can produce a slug on demand.
+  Builds lcars/lot-slug after Fleet.Slug.cast validation, without renaming the caller's lot.
   """
   @spec lot_branch(String.t()) :: {:ok, String.t()} | {:error, {:invalid_slug, term()}}
   def lot_branch(name) do
@@ -114,33 +68,24 @@ defmodule Fleet.Forge.Protocol do
   end
 
   @doc """
-  The DEFENSIVE twin of `lot_branch/1`: a ref read back out of a ticket BODY, which anyone can edit.
-
-  Refuses everything that is not exactly a lot branch — `refs/heads/…` (a fully-qualified ref would
-  make the clone resolve something else), a feature branch, a bare face branch, the prefix with no
-  slug. A ref that reaches the dispatch decides where a producer clones FROM; it is never taken on
-  the strength of having the right shape around it.
+  Requires the exact lot-branch pattern, rejecting fully qualified refs, face/feature branches
+  and an empty slug. This validates text from an editable ticket, not branch existence or authorship.
   """
   @spec valid_lot_branch?(term()) :: boolean()
   def valid_lot_branch?(ref) when is_binary(ref), do: Regex.match?(@lot_branch_rx, ref)
   def valid_lot_branch?(_), do: false
 
   @doc """
-  The pointer LINE (`Lot: <ref> @ <sha>`) posted in the ticket body — twin of
-  `Fleet.Layout.brief_pointer_line/2`, same shape, same per-line anchoring.
+  Builds the ticket line Lot: ref @ sha without validating either argument.
   """
   @spec lot_pointer_line(String.t(), String.t()) :: String.t()
   def lot_pointer_line(ref, sha), do: "Lot: #{ref} @ #{sha}"
 
   @doc """
-  Scans a ticket body for the lot pointer. `:none` when the ticket carries no lot — the ORDINARY
-  case, never an error. `{:error, {:invalid_lot_ref, ref}}` when a line has the full pointer shape
-  (40-hex commit) but an out-of-scheme ref.
-
-  That last clause is the one that matters: answering `:none` there would silently downgrade a
-  ticket that HAS matter into one that has none, and the producer would start from the head of its
-  face and work against material it never saw. A malformed address is an intent with a typo, not an
-  absence of intent.
+  Reads the first matching Lot: line with a 40-character lowercase hex SHA, then validates its ref.
+  A matching line with an invalid ref returns an error so dispatch cannot silently discard material.
+  Other malformed pointer lines (including invalid SHA) do not match and can yield :none;
+  later matching lines are considered only if earlier lines did not match. No Git object lookup.
   """
   @spec parse_lot_pointer(String.t() | nil) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_lot_ref, String.t()}}
@@ -156,24 +101,14 @@ defmodule Fleet.Forge.Protocol do
     end
   end
 
-  # ============================================================
-  # Signed STEP_RUN marker `[step_run:<role>:<sha>]` — forge-native anti-runaway counter.
-  # ============================================================
-
-  # SINGLE-SOURCE literal: builder AND predicate derive from it.
   @step_run_prefix "[step_run:"
-  # Regex DERIVED from the same literal — `Regex.escape` neutralises the `[` of the prefix. NO anchor: the
-  # marker is placed at the end of a comment body.
+  # Unanchored: markers may occur inside comment prose. Role/SHA must be nonempty without : or ].
   @step_run_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:[^:\\]]+\\]")
-  # Meme literal, une capture de plus : le role que le marqueur DECLARE.
   @step_run_role_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "([^:\\]]+):[^:\\]]+\\]")
 
   @doc """
-  Format of the signed step_run marker `[step_run:<role>:<sha>]` (builder derived from `@step_run_prefix`, just like
-  its predicate `step_run_marker?/1` — a format change happens on THIS single literal). Posted by
-  `StepRunCompleter` at step-run end, also serves as `:dedup_signature` (idempotent replay).
-
-  Round-trip builder -> predicate (the predicate recognises what the builder records):
+  Builds [step_run:role:sha] for completion counting and caller deduplication.
+  Neither input is escaped or SHA-validated; recognition requires compatible tokens.
 
       iex> marker = Fleet.Forge.Protocol.step_run_marker("engineer", "deadbeef")
       iex> marker
@@ -185,29 +120,20 @@ defmodule Fleet.Forge.Protocol do
   """
   @spec step_run_marker(String.t(), String.t()) :: String.t()
   def step_run_marker(role, sha) when is_binary(role) and is_binary(sha) do
-    # => "[step_run:<role>:<sha>]"
     "#{@step_run_prefix}#{role}:#{sha}]"
   end
 
-  # ============================================================
-  # PUBLISH-FAIL marker `[publish-fail:issue-<n>:base-<sha12>]` — forge-native consecutive-failure
-  # counter. The gate BASE moves ONLY on a successful push, so "consecutive
-  # failures" ≡ "failures sharing a base": no success marker, no RAM state — the max same-base group
-  # among an issue's markers IS the streak, and a delivered brick starts a fresh group by construction.
-  # ============================================================
-
+  # The publish brake groups failures by abbreviated gate base. This format alone does not prove
+  # consecutive failures; the caller counts history and decides which group matters.
   @publish_fail_prefix "[publish-fail:issue-"
-  # {4,12}: the parser accepts what the builder can PRODUCE — the builder slices to ≤12, and a
-  # test base can legitimately be shorter than 12 (git's shortest abbreviation is 4). A parser
-  # stricter than its builder silently uncounts markers the poster just recorded.
+  # Accept abbreviated test SHAs from 4 through 12 hex digits, not every binary the builder accepts.
   @publish_fail_rx Regex.compile!(
                      Regex.escape(@publish_fail_prefix) <> "(\\d+):base-([0-9a-f]{4,12})\\]"
                    )
 
   @doc """
-  Marker of ONE publish failure for issue `n` on gate base `base_sha` (truncated 12 hex) —
-  builder and parser derive from the same literal. Posted by `StepRunCompleter` when the
-  deliverable publication fails; counted by `Remediation.dispatch_rework` (the brake).
+  Builds a publish-failure marker for StepRunCompleter and the Remediation brake.
+  Slices base_sha to 12 characters without validating hex or issue-number sign.
 
       iex> m = Fleet.Forge.Protocol.publish_fail_marker(7, String.duplicate("a", 40))
       iex> m
@@ -226,7 +152,7 @@ defmodule Fleet.Forge.Protocol do
     "#{@publish_fail_prefix}#{n}:base-#{String.slice(base_sha, 0, 12)}]"
   end
 
-  @doc "Extracts `{issue_n, base12}` from a body carrying a publish-fail marker; `:error` otherwise."
+  @doc "First publish-fail match with decimal issue number and 4–12 lowercase hex digits, else :error."
   @spec parse_publish_fail_marker(String.t()) :: {:ok, {integer(), String.t()}} | :error
   def parse_publish_fail_marker(body) when is_binary(body) do
     case Regex.run(@publish_fail_rx, body) do
@@ -237,23 +163,15 @@ defmodule Fleet.Forge.Protocol do
 
   def parse_publish_fail_marker(_), do: :error
 
-  # ============================================================
-  # CI-REWORK marker `[ci-rework:issue-<n>:head-<sha12>]` — le frein forge-natif du rework CAUSE PAR
-  # LA CI. `count_change_request_rounds` compte les reviews REQUEST_CHANGES ; un CI rouge n'en pose
-  # AUCUNE, donc ce compteur ne bouge pas et le budget qui s'appuie dessus ne borne rien sur ce
-  # chemin. Ce marqueur est le round dépensé : un par rework CI réellement dispatché.
-  # ============================================================
-
+  # CI failure does not itself create a REQUEST_CHANGES review, so its rework needs a separate
+  # marker budget. Posting the marker and dispatching work are caller operations, not atomic here.
   @ci_rework_prefix "[ci-rework:issue-"
-  # {4,12} : le parseur accepte ce que le constructeur PRODUIT (il tronque à 12, un sha de test peut
-  # être plus court). Un parseur plus strict que son constructeur décompte en silence ce qui vient
-  # d'être posé.
   @ci_rework_rx Regex.compile!(
                   Regex.escape(@ci_rework_prefix) <> "(\\d+):head-([0-9a-f]{4,12})\\]"
                 )
 
   @doc """
-  Marqueur d'UN rework causé par une CI rouge, pour l'issue `n` sur la tête `head_sha` (12 hex).
+  Marqueur de rework CI : tete tronquee a 12 caracteres, sans validation hex ni du signe de n.
 
       iex> m = Fleet.Forge.Protocol.ci_rework_marker(7, String.duplicate("b", 40))
       iex> m
@@ -269,10 +187,7 @@ defmodule Fleet.Forge.Protocol do
   end
 
   @doc """
-  Le PRÉFIXE des marqueurs ci-rework de l'issue `n` — ce que `count_comments_marked/4` compte.
-
-  Le compteur générique du rail conflit sert ici aussi : un seul mécanisme de comptage, et le
-  littéral reste collé à son constructeur plutôt que recopié chez l'appelant.
+  Prefixe utilise par count_comments_marked/4, partage avec le constructeur du marqueur.
 
       iex> Fleet.Forge.Protocol.ci_rework_prefix(7)
       "[ci-rework:issue-7:"
@@ -280,7 +195,7 @@ defmodule Fleet.Forge.Protocol do
   @spec ci_rework_prefix(integer()) :: String.t()
   def ci_rework_prefix(n) when is_integer(n), do: "#{@ci_rework_prefix}#{n}:"
 
-  @doc "Extrait `{issue_n, head12}` d'un corps portant un marqueur ci-rework ; `:error` sinon."
+  @doc "Premier ci-rework avec numero decimal et 4–12 caracteres hex minuscules ; :error sinon."
   @spec parse_ci_rework_marker(String.t()) :: {:ok, {integer(), String.t()}} | :error
   def parse_ci_rework_marker(body) when is_binary(body) do
     case Regex.run(@ci_rework_rx, body) do
@@ -292,32 +207,18 @@ defmodule Fleet.Forge.Protocol do
   def parse_ci_rework_marker(_), do: :error
 
   @doc """
-  Marker of ONE post-push propagation failure for issue `n` (BL-6-34): the deliverable IS pushed
-  (`sha`, truncated 12 hex — the branch survives on the forge) but the PR was never born
-  (role token unavailable, PR API refusal). Posted by `StepRunCompleter.record_pr_open_failure`
-  so the stall is named ON THE TICKET, never a host-log-only wedge.
-
-  Builder WITHOUT a parser on purpose: no counting rail consumes it today (the publish brake
-  counts `publish_fail_marker` — a distinct class: there the push itself failed and rework
-  re-runs it; here the push landed and no automatic retry exists). The day a brake covers this
-  leg, its parser is born HERE, glued to this literal.
+  BL-6-34: post-push PR-opening failure, distinct from failure to push the deliverable.
+  StepRunCompleter.record_pr_open_failure uses it to name the stall on the ticket.
+  SHA is sliced to 12 characters, unchecked. No parser or counting brake is attached to this
+  marker; adding such a consumer requires a reader here rather than reusing publish-fail counts.
   """
   @spec pr_open_fail_marker(integer(), String.t()) :: String.t()
   def pr_open_fail_marker(n, sha) when is_integer(n) and is_binary(sha) do
     "[pr-open-fail:issue-#{n}:sha-#{String.slice(sha, 0, 12)}]"
   end
 
-  # LES DEUX SIGNATURES D'ESCALADE, memes literaux uniques que ci-dessus.
-  #
-  # POURQUOI ELLES SONT ICI. Un commentaire d'escalade est la seule chose que l'inbox de l'arch doit
-  # savoir RETROUVER. Sans marqueur a chercher, `escalation_list` rend le dernier commentaire du fil,
-  # quel qu'il soit : des que l'arch a repondu, l'inbox lui renvoie SA PROPRE REPONSE sous une
-  # description qui promet « the worker's escalation comment — the reasoning ». Un format construit
-  # en dur chez chacun de ses ecrivains est introuvable par un lecteur.
-  #
-  # Le troisieme poseur d'escalade (`IncidentConsumer.default_brake/3`, le frein sur recurrence) ne
-  # poste AUCUN commentaire : il n'y a donc pas de verdict a rendre pour lui, et `nil` est la reponse
-  # juste — pas le dernier commentaire venu.
+  # Inbox lookup needs markers to avoid returning the architect's own later reply as escalation.
+  # The recurrence brake can set the label without a comment; no marked comment then means nil.
   @await_marker_rx Regex.compile!(Regex.escape(@step_run_prefix) <> "[^:\\]]+:await:[^:\\]]+\\]")
   @rework_exhausted_prefix "[rework-exhausted-escalation:"
   @rework_exhausted_rx Regex.compile!(Regex.escape(@rework_exhausted_prefix) <> "[^\\]]+\\]")
@@ -325,9 +226,8 @@ defmodule Fleet.Forge.Protocol do
   @doc """
   Format du marqueur d'attente d'arbitrage `[step_run:<role>:await:<decision>]`.
 
-  Distinct de `step_run_marker/2` par son segment `await` — et `step_run_marker?/1` ne le reconnait
-  pas, ce qui est voulu : une escalade n'est pas un step-run acheve et ne doit pas se compter comme
-  tel.
+  Avec des tokens non vides sans : ni ], await distingue une escalade d'un step-run acheve.
+  Le constructeur n'echappe pas les arguments ; l'exemple montre les tokens attendus.
 
       iex> m = Fleet.Forge.Protocol.await_marker("engineer", "escalate_user")
       iex> m
@@ -355,8 +255,8 @@ defmodule Fleet.Forge.Protocol do
     do: "#{@rework_exhausted_prefix}pr-#{pr_number}]"
 
   @doc """
-  Ce corps porte-t-il l'une des deux signatures d'escalade ? Inverse des deux constructeurs
-  ci-dessus, pour le lecteur (`Delegation.list_escalations`).
+  Reconnait un motif await ou rework-exhausted n'importe ou dans le corps, sans verifier l'auteur.
+  Le second accepte tout contenu non vide sans ], pas seulement pr-numero.
   """
   @spec escalation_marker?(term()) :: boolean()
   def escalation_marker?(body) when is_binary(body),
@@ -365,11 +265,8 @@ defmodule Fleet.Forge.Protocol do
   def escalation_marker?(_), do: false
 
   @doc """
-  Le ROLE que nomme un marqueur de step-run, ou `nil`.
-
-  Le marqueur porte deja l'identite de son ecrivain : `[step_run:<role>:<sha>]`. Un lecteur qui veut
-  savoir si un commentaire a bien ete pose par la fleet n'a donc pas besoin d'enumerer les comptes —
-  il demande au marqueur QUI il pretend etre, puis verifie que l'auteur est bien ce compte-la.
+  Role declare par le premier motif step-run, ou nil. Le lecteur doit ensuite resoudre ce role
+  et comparer l'auteur : le texte du marqueur ne prouve aucune identite.
 
       iex> Fleet.Forge.Protocol.step_run_marker_role("fait [step_run:engineer:deadbeef]")
       "engineer"
@@ -378,8 +275,6 @@ defmodule Fleet.Forge.Protocol do
   """
   @spec step_run_marker_role(term()) :: String.t() | nil
   def step_run_marker_role(body) when is_binary(body) do
-    # `capture: :all_but_first` + le garde : `Regex.run/3` peut rendre des positions selon ses
-    # options, et une spec elargie pour couvrir un cas qu'on ne veut pas est une spec qui ment.
     case Regex.run(@step_run_role_rx, body, capture: :all_but_first) do
       [role] when is_binary(role) -> role
       _ -> nil
@@ -389,8 +284,7 @@ defmodule Fleet.Forge.Protocol do
   def step_run_marker_role(_), do: nil
 
   @doc false
-  # Pure: does a body carry a signed step_run marker? Inverse of `step_run_marker/2` for the forge-native
-  # counting (`ForgeClient.count_signed_step_runs`).
+  # Text recognition only; count_signed_step_runs handles author trust separately.
   @spec step_run_marker?(term()) :: boolean()
   def step_run_marker?(body) when is_binary(body), do: Regex.match?(@step_run_marker_rx, body)
   def step_run_marker?(_), do: false
@@ -398,14 +292,10 @@ defmodule Fleet.Forge.Protocol do
   @parked_prefix "[lcars-parked]"
 
   @doc """
-  Title of the PARKED marker issue (BL-6-30) — an OPEN issue whose title carries the
-  `[lcars-parked]` prefix IS the project's closed state ("the forge IS the state machine";
-  same protocol-object class as the in-flight lock label). Built by `project_close`,
-  recognized by `parked_issue_title?/1` on the PREFIX alone (suffix and body free — the body
-  documents the reopening paths to the human), closed by `project_open` (ALL of them:
-  concurrent closes can legitimately leave two, the state holds while at least one is open).
-  Trust model: same as the `stage/*` labels — a human mutating the marker mutates the state,
-  deliberately (UI-close = legitimate unpark).
+  BL-6-30 parked-issue title. An open issue with this prefix represents project closure;
+  suffix/body are free. project_open closes all matching markers because concurrent closes
+  may leave several; any remaining open marker keeps the project parked.
+  Human UI mutation is intentional state mutation. The title predicate alone does not check open state.
   """
   @spec parked_issue_title() :: String.t()
   def parked_issue_title, do: "#{@parked_prefix} projet fermé — la fleet ne dispatche plus ici"
@@ -420,14 +310,10 @@ defmodule Fleet.Forge.Protocol do
   @merge_marker_rx ~r/\[merge:pr-(\d+)\]/
 
   @doc """
-  Format of the merge marker `[merge:pr-<n>]` — posted ON THE ISSUE by the gatekeeper seal at
-  merge (also its `:dedup_signature`). This marker IS the durable issue→PR correlation: Gitea
-  (1.26.4, verified live 2026-07-19) REWRITES a merged PR's `head.ref` to `refs/pull/N/head`
-  once the head branch is deleted, so no branch scan can resolve a delivered brick's PR — the
-  protocol carries the link instead. Trust model: same as the `stage/*` labels (a forged marker
-  = compromised role account = nuke&redeploy, not this rail's concern).
-
-  Round-trip builder -> parser:
+  Issue-to-PR correlation posted by the seal, also used for deduplication. On the Gitea 1.26.4
+  bench of 2026-07-19, deleting a merged head branch rewrote head.ref to refs/pull/N/head,
+  so a later feature-branch scan could no longer recover this link.
+  Builder accepts any integer; parser accepts decimal digits only. Neither authenticates authors.
 
       iex> marker = Fleet.Forge.Protocol.merge_marker(6)
       iex> marker
@@ -441,11 +327,8 @@ defmodule Fleet.Forge.Protocol do
   def merge_marker(pr_number) when is_integer(pr_number), do: "[merge:pr-#{pr_number}]"
 
   @doc """
-  Extracts the PR number from a merge marker, or `:error` — the co-located inverse of
-  `merge_marker/1`.
-
-  `:error` on anything else, including a non-binary: the marker is read from forge content, which is
-  untrusted input, and a body that merely resembles one must not resolve to a number.
+  Returns the number in the first [merge:pr-digits] match anywhere in a binary, else :error.
+  Recognizing a copied marker does not prove a merge occurred.
   """
   @spec parse_merge_marker(term()) :: {:ok, integer()} | :error
   def parse_merge_marker(body) when is_binary(body) do
@@ -457,34 +340,18 @@ defmodule Fleet.Forge.Protocol do
 
   def parse_merge_marker(_), do: :error
 
-  # ============================================================
-  # ` ```result ` block — serialises a step's `outputs` in the step_run comment.
-  # ============================================================
-
   @result_block_rx ~r/```result\n(.*?)\n```/s
   @result_fence_limit 8192
 
   @doc """
-  Format of the ` ```result ` block (serialises a step's `outputs` in the step_run comment).
-  Co-located with its parser `parse_result_block/1` — round-trip guaranteed. `nil`/empty →
-  `""` (no noise). JSON fenced if ≤ 8 KB; beyond that, a note pointing to the branch's
-  deliverable (never truncated JSON = invalid). `\\n\\n` prefix included (body separator).
+  Encodes a nonempty map with Jason.encode!, fencing JSON up to 8192 bytes and otherwise
+  returning a size note without truncated JSON. Empty maps/non-maps return ""; encoding may raise.
+  The body separator is included. Round-trip equality requires JSON-compatible string-key data;
+  atom keys, for example, decode as strings.
 
-  ## AUCUN APPELANT DE PRODUCTION, ET C'EST L'ETAT, PAS UN OUBLI
-
-  Ce constructeur n'est appele que par son propre test. Le maillon manquant est en amont — `StepRunBuild.build_step_run/7` garde `eng_summary` (de la prose) et laisse tomber
-  la charge structuree du pod, donc le completer n'a rien a serialiser.
-
-  Le parseur, lui, EST vivant : `ForgeClient.get_predecessor_result/3` le lit pour le brief du juge
-  suivant, et son appelant traite l'absence par un repli DELIBERE et documente — le juge est renvoye
-  vers le CODE de la branche (« the deliverable IS NOT a payload — it's the branch CODE »). Le
-  passage de sorties structurees d'une etape a la suivante a donc ete supplante par le rail
-  git-native ; ce couple builder/parser reste comme le FORMAT de ce passage, aller-retour garanti,
-  pret si la question se rouvre.
-
-  Ce qu'il ne faut PAS en conclure : ni que le champ `outputs` d'une carte alimente ce bloc (il est
-  DOCUMENTAIRE, cf. la description du schema), ni qu'un juge recoit une charge — il recoit une
-  branche.
+  The builder has test callers only: StepRunBuild retains eng_summary rather than structured
+  pod outputs. The parser is used by get_predecessor_result; the next judge's brief falls back
+  to branch code when absent. A card's documentary outputs field does not wire up this block.
   """
   @spec result_block(map() | nil) :: String.t()
   def result_block(outputs) when is_map(outputs) and map_size(outputs) > 0 do
@@ -500,9 +367,9 @@ defmodule Fleet.Forge.Protocol do
   def result_block(_), do: ""
 
   @doc false
-  # Pure: extracts the map from the FIRST ```result block of a body (`Regex.run` = first match),
-  # otherwise nil. The "last wins" semantics lives at the CALLER: `ForgeClient.get_predecessor_result`
-  # reverses the comment list before `find_value`, so the most recent comment's block wins.
+  # First matching LF-delimited result fence, without line anchors or a parser size limit.
+  # Invalid/non-map JSON returns nil without trying later fences in that body.
+  # get_predecessor_result reverses server comment order to choose the last usable comment.
   @spec parse_result_block(binary()) :: {:ok, map()} | nil
   def parse_result_block(body) when is_binary(body) do
     case Regex.run(@result_block_rx, body) do
@@ -519,17 +386,9 @@ defmodule Fleet.Forge.Protocol do
 
   def parse_result_block(_), do: nil
 
-  # ============================================================
-  # Trust primitive (bot-authored markers on comments: route/step_run/result).
-  # (WS3: admission is org-membership — no server-side admission marker in this vocabulary.)
-  # ============================================================
-
   @doc false
-  # Pure: a forge OBJECT (comment OR issue — same Gitea wire shape `{"user": {"login": …}}`) is
-  # TRUSTED iff its author = the fleet's system (bot) account. A forge user
-  # (human/attacker) has a different login → its markers are ignored. The SINGLE predicate of the
-  # trust primitive: the marker readers on comments (`ForgeClient` route/step_run/result)
-  # all go through here — no copy.
+  # Exact user.login comparison with a nonempty binary bot login, not cryptographic validation.
+  # Missing keys yield false; a malformed non-map user can raise during nested access.
   @spec system_authored?(term(), term()) :: boolean()
   def system_authored?(object, bot_login)
       when is_map(object) and is_binary(bot_login) and bot_login != "" do

@@ -3,12 +3,9 @@ defmodule Fleet.Forge.ProtocolTest do
 
   alias Fleet.Forge.PayloadFixture
 
-  # PURE wire-protocol vocabulary (no I/O): build+parse co-located. Each describe proves the
-  # invariant `parse ∘ build == identity` (a format change breaks the test here, not in prod).
+  # Pure format examples; round-trips cover selected valid inputs, not all builder arguments.
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
-  # Executable examples of the @doc (step_run_marker/2 + step_run_marker?/1): the doc stays true
-  # or the suite breaks.
   doctest Fleet.Forge.Protocol
 
   describe "feature_branch/2 + parse_feature_branch/1 (build+parse co-located)" do
@@ -36,10 +33,6 @@ defmodule Fleet.Forge.ProtocolTest do
     end
   end
 
-  # (The route_marker/parse_route_marker tests are removed: the workflow_map position lives in the
-  # SCOPED stage/* label of the issue, no longer in a marker-comment — cf.
-  # ForgeClient.get_route/post_route.)
-
   describe "step_run_marker/2 + step_run_marker?/1 (build+parse co-located)" do
     test "step_run_marker? recognizes a marker produced by step_run_marker" do
       assert ForgeProtocol.step_run_marker?(ForgeProtocol.step_run_marker("engineer", "deadbeef"))
@@ -53,7 +46,7 @@ defmodule Fleet.Forge.ProtocolTest do
 
   describe "result_block/1 + parse_result_block/1 (round-trip)" do
     test "extracts the map from the ```result block (round-trip with the StepRunCompleter N-04 format)" do
-      # "Livrable …" mirrors the real FR forge comment body posted by the completer.
+      # Synthetic body in the retained result format; no production serialization is exercised.
       body =
         "Livrable de architect.\n\n```result\n" <>
           ~s({"severity_max":"ok","findings":0}) <> "\n```\n\n[step_run:architect:abc]"
@@ -132,8 +125,7 @@ defmodule Fleet.Forge.ProtocolTest do
     end
 
     test "a name that is not a slug is REFUSED, never silently renamed" do
-      # The transformation is the danger, not the refusal: a branch would land on the forge under
-      # a name the architect never chose, and the ticket would point at it.
+      # Preserve the chosen name by rejecting invalid slugs instead of transforming them.
       assert {:error, {:invalid_slug, "Morse UI v2"}} = ForgeProtocol.lot_branch("Morse UI v2")
 
       assert {:error, {:invalid_slug, "ecran/accueil"}} =
@@ -176,8 +168,7 @@ defmodule Fleet.Forge.ProtocolTest do
     end
 
     test "the pointer SHAPE with an out-of-scheme ref is an ERROR, never :none" do
-      # THE property of this parser: `:none` here would turn a ticket that HAS matter into one
-      # that has none, and the producer would work against material it never saw.
+      # A full pointer shape with an invalid ref must not silently discard the lot.
       body = "Lot: refs/heads/evil @ #{@sha}"
 
       assert {:error, {:invalid_lot_ref, "refs/heads/evil"}} =

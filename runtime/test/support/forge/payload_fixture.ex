@@ -1,25 +1,15 @@
 defmodule Fleet.Forge.PayloadFixture do
   @moduledoc """
-  Forge payloads for witnesses, built from the REAL capture — never invented.
-
-  A witness that stubs the forge needs the two or three values a decision branches on. It does not
-  need a Gitea shape, and inventing one costs twice: the shape can be impossible, and it can be
-  INCOMPLETE, which silently disarms any guard reading a field the fixture forgot. Both failures
-  are on record in this repo — `{:no_head_sha, …}`, "a shape the forge cannot produce", and the
-  probe wall that went mute across the whole suite because a double omitted one field.
-
-  So the shape comes from `test/fixtures/forge/`, captured from a real forge whose digest was
-  checked on the container. A witness states FACTS; the complete, real shape is supplied here.
+  Forge test payloads based on test/fixtures/forge/ captures, with selected facts overridden.
+  Keeping unrelated captured fields avoids missing-field fallbacks (e.g. probe guards or no_head_sha)
+  in tests that only intend to change one decision input.
 
       pull(head_ref: "lcars/issue-42-engineer", merged: true)
       issue(label_names: ["lcars-in-flight"])
 
-  ⚠ THE WRITER GOES THROUGH `Payload.paths/0`, THE SAME TABLE THE READER USES. That is what keeps
-  the two from drifting: a path changed in one place moves the builder and the reader together, and
-  `payload_fixture_test.exs` round-trips every fact to prove it.
-
-  Projected facts (`label_names`, `assignee_logins`) need an explicit writer: reading them flattens
-  objects to names, so writing them has to rebuild the objects — the clauses of `ecrire/2`.
+  Writes use Payload.paths, so a shared wrong path can pass a round-trip test. Tests separately
+  check resolution on raw captures and round-trip the explicit list projections.
+  Overrides are not schema-validated and can produce combinations the forge would never return.
   """
 
   alias Fleet.Forge.Payload
@@ -33,15 +23,15 @@ defmodule Fleet.Forge.PayloadFixture do
   @issue @dir |> Path.join("issue.json") |> File.read!() |> Jason.decode!()
   @repo @dir |> Path.join("repo.json") |> File.read!() |> Jason.decode!()
 
-  @doc "A real pull request, with the stated facts overridden."
+  @doc "The captured pull request with stated facts overridden, without schema validation."
   @spec pull(keyword()) :: Payload.t()
   def pull(faits \\ []), do: apply_faits(@pull, faits)
 
-  @doc "A real issue, with the stated facts overridden."
+  @doc "The captured issue with stated facts overridden, without schema validation."
   @spec issue(keyword()) :: Payload.t()
   def issue(faits \\ []), do: apply_faits(@issue, faits)
 
-  @doc "A real repository, with the stated facts overridden."
+  @doc "The captured repository with stated facts overridden, without schema validation."
   @spec repo(keyword()) :: Payload.t()
   def repo(faits \\ []), do: apply_faits(@repo, faits)
 
@@ -51,16 +41,8 @@ defmodule Fleet.Forge.PayloadFixture do
   def raw(:issue), do: @issue
   def raw(:repo), do: @repo
 
-  # ⚠ UN FAIT ENONCE DOIT ETRE LE FAIT EFFECTIF, et `assignee_login` ne l'etait pas. La capture
-  # reelle porte `assignees: ["mesure"]`, et le SEUL lecteur d'assigne du runtime
-  # (`Delegation.Issues.issue_assignee/1`) lit `assignee_logins` D'ABORD, avec `assignee_login` en
-  # repli. Un temoin qui ecrivait `assignee_login: "l"` obtenait donc un objet dont l'assigne
-  # effectif restait "mesure" : la fabrique disait une chose, l'objet en portait une autre, et
-  # aucune assertion ne pouvait le voir.
-  #
-  # Une vraie forge pose les DEUX pour un assigne unique — c'est ce que montre la capture. Enoncer
-  # `assignee_login` pose donc les deux, sauf si l'appelant a nomme `assignee_logins` lui-meme :
-  # un fait explicite gagne toujours sur un fait derive.
+  # Delegation reads the plural before the singular: mirror a binary/nil assignee_login into
+  # the list unless explicitly supplied, avoiding a stale captured assignee overriding the test.
   defp apply_faits(payload, faits) do
     faits =
       case {Keyword.fetch(faits, :assignee_login), Keyword.has_key?(faits, :assignee_logins)} do
@@ -80,16 +62,12 @@ defmodule Fleet.Forge.PayloadFixture do
     end)
   end
 
-  # Les faits dont la LECTURE est une projection : le fil porte des objets, le lecteur rend des
-  # noms. L'ecriture doit donc les reconstruire.
+  # Rebuild objects for readers that project names.
   defp ecrire(:label_names, noms), do: Enum.map(noms, &%{"name" => &1})
   defp ecrire(:assignee_logins, logins), do: Enum.map(logins, &%{"login" => &1})
   defp ecrire(_fait, valeur), do: valeur
 
-  # `put_in/3` refuses a path whose intermediate key is absent; the capture always carries them for
-  # its own type, but an issue has no `head`. Building the missing level is the honest behaviour: a
-  # witness that states `head_ref:` on an issue is asking for a shape the forge does not produce,
-  # and it should get the value it asked for rather than a silent no-op.
+  # Rebuild absent/non-map intermediate levels, including synthetic fields like head on an issue.
   defp put_chemin(map, [clef], valeur), do: Map.put(map, clef, valeur)
 
   defp put_chemin(map, [clef | reste], valeur) do
