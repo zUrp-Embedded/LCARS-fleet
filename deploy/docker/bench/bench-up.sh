@@ -368,8 +368,11 @@ done
 # ─── 5bis. les creds anthropic (piege 3) — ICI, parce que le worker existe MAINTENANT ────────────
 # Cette relance est le boot ou le convergeur lit le roster de la forge et materialise `$HUMAN` en
 # utilisateur unix (uid >= 1001). Avant elle, le conteneur ne porte qu'`admiral` : cf. le bloc 3.
+if [[ "$WITH_CREDS" -eq 1 && ! -r "$CREDS_FROM" ]]; then
+  say "creds claude absentes ($CREDS_FROM) — non posees chez $HUMAN, aucun pod ne pourra penser ; le banc continue"
+  WITH_CREDS=0
+fi
 if [[ "$WITH_CREDS" -eq 1 ]]; then
-  [[ -r "$CREDS_FROM" ]] || die "creds illisibles: $CREDS_FROM (--no-creds pour un banc sans pods)" 5
   # L'existence est VERIFIEE avant l'exec, sinon l'echec parle docker et pas fleet : « unable to find
   # user » n'apprend a personne que le worker vient de la forge et pas du conteneur.
   "$DOCKER_BIN" exec "$CONTAINER" id -u "$HUMAN" >/dev/null 2>&1 \
