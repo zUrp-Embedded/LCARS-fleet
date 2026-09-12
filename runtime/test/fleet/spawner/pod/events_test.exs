@@ -1,9 +1,6 @@
 defmodule Fleet.Spawner.Pod.EventsTest do
   @moduledoc """
-  Traceability: pod lifecycle events carry `correlation_id = issue_id` (the end-to-end key
-  spawn→work→complete→review→merge). Without it the whole spawner rail emits
-  correlation_id=nil → no incident can be tied to the mandate that caused it (break at the
-  boundary).
+  Lifecycle events use issue_id as correlation_id so incidents can be traced to their mandate.
   """
   use ExUnit.Case, async: false
 

@@ -1,18 +1,8 @@
 defmodule Fleet.Spawner.PodKickTest do
   @moduledoc """
-  R3b / F-C4b-2 — AUTONOMOUS readiness-gated kick. The loop replaces a fixed-delay
-  engage (lost when the REPL is not ready, observed live at C4b).
-
-  With `Pod` as a `gen_statem`, the kick is a **generic timeout named `:kick`**:
-  the event is `{:timeout, :kick}` with content `{:attempt, n}`, and the handler is
-  `Pod.handle_event/4` (not `handle_info/2`). We call it directly and assert on the
-  RETURNED timer ACTIONS (a native timer has no `send_after`→mailbox to observe
-  with `assert_receive`):
-    - reschedule = action `{{:timeout, :kick}, retry, {:attempt, n+1}}`;
-    - stop (ACK / cap) = cancel action `{{:timeout, :kick}, :infinity, _}`;
-    - no-op (no tmux) = `:keep_state_and_data` without action.
-  The path `tmux reachable → engage → stop on pull` requires a real tmux server → proven
-  LIVE (PASSE 5/6), not here.
+  Kick handler decisions, tested through returned gen_statem timer actions rather than mailbox
+  messages: finite :kick timeouts retry, :infinity cancels, and no tmux yields no action.
+  Actual terminal delivery requires a live tmux session and is outside these tests.
   """
   use ExUnit.Case, async: false
 
@@ -20,15 +10,13 @@ defmodule Fleet.Spawner.PodKickTest do
   alias Fleet.Spawner.Pod.TaskProbe
   alias Fleet.Spawner.Pod.TurnFlag
 
-  # The kick is state-insensitive (it matches on `data.tmux_session`): we pass an arbitrary
-  # state name (:monitoring) as the 3rd argument of handle_event/4.
+  # The kick handler accepts any state name; readiness comes from data and probes.
   @state :monitoring
 
   setup do
     Application.put_env(:lcars_fleet, :spawner_kick_retry_ms, 10)
     Application.put_env(:lcars_fleet, :spawner_kick_max_attempts, 3)
-    # fake_pods have no brief → BOOTSTRAP path (dedicated cap/retry). We override those too
-    # to keep the tests fast + bounded.
+    # Fake pods without a brief use the separate bootstrap cap/cadence.
     Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_retry_ms, 10)
     Application.put_env(:lcars_fleet, :spawner_kick_bootstrap_max, 3)
 
@@ -42,14 +30,10 @@ defmodule Fleet.Spawner.PodKickTest do
     :ok
   end
 
-  # The `data` fixtures ALWAYS carry `issue_id`: that is the real shape (`Pod.@type data`), and
-  # the cap's `wake.failed` broadcast reads it (the issue_id feeds the correlation_id → the
-  # « Mandat lié » block of the escalation issue). An amputated fixture would pass where the real
-  # data passes and break elsewhere — the lying stub, only stealthier.
+  # Fixtures include issue_id because wake.failed reads it for escalation correlation.
   defp fake_pod, do: "no-such-pod-#{System.unique_integer([:positive])}"
 
   test "no tmux_session → no-op, no re-kick scheduled" do
-    # No tmux → pure no-op: no timer action (neither reschedule nor cancel).
     assert :keep_state_and_data =
              Pod.handle_event(
                {:timeout, :kick},
@@ -62,7 +46,6 @@ defmodule Fleet.Spawner.PodKickTest do
   test "tmux not up yet (no server) + brief not pulled → retries (reschedule n+1)" do
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # `alive?` false (no real server) → reschedule branch (attempt n+1 action), no lost engage.
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end
@@ -70,7 +53,6 @@ defmodule Fleet.Spawner.PodKickTest do
   test "cap reached (n >= max) → gives up (cancel), no reschedule" do
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # cap (3) reached → CANCEL action of the :kick generic timeout (:infinity), no reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
   end
@@ -98,7 +80,6 @@ defmodule Fleet.Spawner.PodKickTest do
 
     data = %{tmux_session: "sess", pod_id: fake_pod(), issue_id: "issue-1"}
 
-    # n=2 ≥ bootstrap cap (2) → stop (cancel). If the worker cap (9) applied, n=2 < 9 → reschedule.
     assert {:keep_state_and_data, [{{:timeout, :kick}, :infinity, _}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 2}, @state, data)
   end
@@ -114,14 +95,12 @@ defmodule Fleet.Spawner.PodKickTest do
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1"}
-    # n=3 > bootstrap cap (2) BUT < worker cap (9) → reschedule (worker path, tmux not up).
+
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 4}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 3}, @state, data)
   end
 
-  # WAKE-branch delivery gate: the fallback keys on the carrier DELIVERY (turn.flag == turn.flag.seen),
-  # not on the agent's get_work_item — which it may legitimately withhold. `polled` (empty poll records
-  # last_poll) but a NEW brief still `:pending` (not pulled) puts us on the wake branch, NOT acked.
+  # Poll before enqueue: the pending brief remains unpulled, isolating the Monitor delivery gate.
   @tag :tmp_dir
   test "wake: Monitor DELIVERED (flag == seen) → stop (cancel), no send-keys", %{tmp_dir: dir} do
     pod = fake_pod()
@@ -152,7 +131,6 @@ defmodule Fleet.Spawner.PodKickTest do
     {:ok, _} = Fleet.TaskQueue.enqueue(pod, %{brief: "x"})
     on_exit(fn -> Fleet.TaskQueue.clear_for_pod(pod) end)
 
-    # Flag written, but .seen absent (Monitor never emitted) → delivered? false.
     TurnFlag.write(dir, nil)
 
     data = %{tmux_session: "sess", pod_id: pod, issue_id: "issue-1", pod_dir: dir}
@@ -160,13 +138,11 @@ defmodule Fleet.Spawner.PodKickTest do
     assert TaskProbe.polled?(data)
     refute TurnFlag.delivered?(dir)
 
-    # Not delivered + fake pod (no REPL/tmux server) → falls through to the retry rail (reschedule n+1).
     assert {:keep_state_and_data, [{{:timeout, :kick}, _retry, {:attempt, 2}}]} =
              Pod.handle_event({:timeout, :kick}, {:attempt, 1}, @state, data)
   end
 
-  # BOOTSTRAP-branch armed gate: once the agent has armed its Monitor (turn.flag.seen exists), the flag
-  # rail is live and `engage` is done. NOT polled (no get_for_pod) + a pending brief (worker/bootstrap).
+  # No poll with a pending brief isolates the Monitor-armed stop condition.
   @tag :tmp_dir
   test "bootstrap: Monitor armed (turn.flag.seen exists) → stop (cancel), rail is live", %{
     tmp_dir: dir

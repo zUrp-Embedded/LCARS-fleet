@@ -2,9 +2,9 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   @moduledoc """
   Builds the `pod.completed` payload consumed by `Fleet.Pilot.StepRunConsumer`.
 
-  Every payload carries `pod_id`, `issue_id` and `result`. A project payload also carries workspace,
-  clone/gate bases, project face, effective role and deliverable mode. Brief kind, repository,
-  workflow-map and brief-provenance fields are included only when they were resolved at dispatch.
+  Every payload carries `pod_id`, `issue_id` and `result`, plus brief kind when supplied.
+  An effective project with a non-empty repo_path adds workspace, clone/gate bases, role and
+  deliverable mode. Repository, workflow-map and brief provenance are added when available.
   """
 
   alias Fleet.Spawner.Pod.LaunchSpec
@@ -17,7 +17,6 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
   def build(data, result) do
     opts = data.opts || []
 
-    # BL-6-20
     base =
       %{
         "pod_id" => data.pod_id,
@@ -47,12 +46,8 @@ defmodule Fleet.Spawner.Pod.CompletedPayload do
     end
   end
 
-  # ⚠ NE PAS SUPPRIMER en croyant que le broker (`put_runtime_brief`) fait doublon — il ne le fait
-  # PAS. Le broker injecte `brief_sha` DANS le `result` (imbriqué). CE code pose le `brief_sha` au
-  # TOP-NIVEAU du payload `pod.completed`, et c'est CELUI-LÀ que la provenance lit
-  # (`StepRunBuild.build_deliverable_opts` → `payload["brief_sha"]`). Deux champs distincts, deux
-  # sources runtime : `opts[:brief_sha]` ici (posé par le dispatch, jamais par le pod), le work_item
-  # là. Retirer celui-ci ferait perdre le sha d'ordre à la provenance en silence.
+  # StepRunBuild reads the top-level brief_sha supplied by dispatch. The broker's nested
+  # result.brief_sha comes from the work item and does not replace this provenance field.
   defp maybe_put_brief_provenance(payload, opts) do
     case Keyword.get(opts, :brief_sha) do
       sha when is_binary(sha) and sha != "" ->

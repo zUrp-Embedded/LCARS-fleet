@@ -1,8 +1,6 @@
 defmodule Fleet.Spawner.Pod.TurnFlagTest do
   @moduledoc """
-  `delivered?/1` — the carrier DELIVERY ack: `turn.flag.seen` (written by `watch.sh` right after it
-  emits the wake) matching the live `turn.flag`. It is what the wake fallback keys on instead of the
-  agent's RESPONSE (`get_work_item`), which the agent may legitimately withhold.
+  Monitor delivery acknowledgements and per-launch reset, distinct from an agent's work pull.
   """
   use ExUnit.Case, async: true
 
@@ -13,10 +11,8 @@ defmodule Fleet.Spawner.Pod.TurnFlagTest do
     flag = Path.join(dir, "turn.flag")
     seen = Path.join(dir, "turn.flag.seen")
 
-    # No flag, no seen -> not delivered (fail-open to the send-keys / wake.failed rails).
     refute TurnFlag.delivered?(dir)
 
-    # Flag written, but watch.sh has not recorded a delivery yet -> not delivered.
     TurnFlag.write(dir, nil)
     refute TurnFlag.delivered?(dir)
 
@@ -24,7 +20,7 @@ defmodule Fleet.Spawner.Pod.TurnFlagTest do
     File.write!(seen, File.read!(flag))
     assert TurnFlag.delivered?(dir)
 
-    # A NEW turn (fresh token) the Monitor has not yet emitted -> seen lags -> not delivered.
+    # A fresh token invalidates the previous acknowledgement.
     TurnFlag.write(dir, nil)
     refute TurnFlag.delivered?(dir)
 
@@ -49,7 +45,6 @@ defmodule Fleet.Spawner.Pod.TurnFlagTest do
     File.write!(seen, "\n")
     assert TurnFlag.monitor_armed?(dir)
 
-    # reset clears BOTH rail files (per-life) → armed goes back to false.
     TurnFlag.write(dir, nil)
     assert File.exists?(Path.join(dir, "turn.flag"))
     :ok = TurnFlag.reset(dir)
