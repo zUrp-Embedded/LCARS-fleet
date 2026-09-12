@@ -20,7 +20,7 @@
 #   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet) — §1bis.
 #   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`) — §1ter.
 #   - les cles d'hote SSH, PERSISTANTES dans le volume `/home` — §2.
-#   - le LAYOUT du volume : ce que `25-directories`, `26-store` et `45-sudoers-toolchain` posaient
+#   - le LAYOUT du volume : ce que `25-directories` et `26-store` posent côté poste, posé ici
 #     en substrat docker — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
 #     skill du siege, `pilot.assignee`. Les memes chemins, modes et proprietaires que la table de
 #     l'installeur declare (`deploy/system.manifest`, substrat `any`) — par CONVENTION, pas par
@@ -237,7 +237,7 @@ seat_extras() {
     if ensure_dir "$dst" 0755 "$SEAT_LOGIN:"; then
       write_atomic "$dst/SKILL.md" 0644 "$SEAT_LOGIN:" < "$SKILL_SRC/system-issues/SKILL.md" || p_fail "skill system-issues: SKILL.md"
       write_atomic "$dst/list.sh"  0755 "$SEAT_LOGIN:" < "$SKILL_SRC/system-issues/list.sh"  || p_fail "skill system-issues: list.sh"
-      chown -h "$SEAT_LOGIN:" "$home/.claude" "$home/.claude/skills" 2>/dev/null || true
+      chown -h "$(prov_owner "$SEAT_LOGIN:")" "$home/.claude" "$home/.claude/skills" 2>/dev/null || true
     fi
   else
     p_drift "skill system-issues : source absente ($SKILL_SRC) ou home du siege introuvable"

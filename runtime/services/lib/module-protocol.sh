@@ -133,9 +133,16 @@ prov_refuse_symlink_path() {
   done
   return 0
 }
+prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
+  local o="$1" g
+  [[ "$o" == *: ]] || { printf '%s' "$o"; return 0; }
+  g="$(id -gn -- "${o%:}" 2>/dev/null)" || { printf '%s' "$o"; return 0; }
+  printf '%s:%s' "${o%:}" "$g"
+}
 ensure_mode() { # ensure_mode <chemin> <mode> [proprietaire]
   local path="$1" mode="$2" owner="${3:-}"
   local cur_mode cur_owner changed=0
+  owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$path" || return 1
   [[ -e "$path" ]] || { p_fail "ensure_mode: absent: $path"; return 1; }
   cur_mode="$(stat -c '%a' "$path")"
@@ -147,7 +154,6 @@ ensure_mode() { # ensure_mode <chemin> <mode> [proprietaire]
   fi
   if [[ -n "$owner" ]]; then
     cur_owner="$(stat -c '%U:%G' "$path")"
-    [[ "$owner" == *: ]] && cur_owner="$(stat -c '%U' "$path"):"
     if [[ "$cur_owner" != "$owner" ]]; then
       chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
       changed=1
@@ -171,6 +177,7 @@ ensure_dir() { # ensure_dir <chemin> <mode> [proprietaire]
 write_atomic() { # write_atomic <dest> <mode> [proprietaire]  < contenu
   local dest="$1" mode="$2" owner="${3:-}"
   local dir tmp
+  owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$dest" || return 1
   dir="$(dirname "$dest")"
   [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }

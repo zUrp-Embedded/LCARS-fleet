@@ -94,7 +94,8 @@ module_sh() {
 @test "B1: run_quiet success stays silent and counts nothing" {
   module_sh '
     run_quiet true
-    [ "$PROV_FAILED" -eq 0 ] && [ "$PROV_CHANGED" -eq 0 ]
+    [ "$PROV_FAILED" -eq 0 ]
+    [ "$PROV_CHANGED" -eq 0 ]
   '
   [ "$status" -eq 0 ]
   [[ "$output" != *FAIL* ]]
@@ -421,9 +422,27 @@ STUB
     ensure_mode "$f" 0644 "$(id -un):" >/dev/null 2>&1
     avant="$PROV_CHANGED"
     out="$(ensure_mode "$f" 0644 "$(id -un):" 2>&1)"
-    [ "$PROV_CHANGED" -eq "$avant" ] && [ -z "$out" ]
+    [ "$PROV_CHANGED" -eq "$avant" ]
+    [ -z "$out" ]
   '
   [ "$status" -eq 0 ]
+}
+
+@test "ensure_mode, write_atomic, prov_scaffold_dir : « user: » est passé à chown avec le groupe de connexion nommé — les coreutils uutils ignorent la forme nue" {
+  local faux="$BATS_TEST_TMPDIR/bin"; mkdir -p "$faux"
+  printf '#!/usr/bin/env bash\nfor a; do [[ "$a" == -* ]] || { printf "%%s\\n" "$a" >> "%s"; break; }; done\nexec /usr/bin/chown "$@"\n' "$BATS_TEST_TMPDIR/chown.argv" > "$faux/chown"
+  chmod +x "$faux/chown"
+  PATH="$faux:$PATH" module_sh '
+    f="$BATS_TEST_TMPDIR/f"; : > "$f"
+    ensure_mode "$f" 0644 "$(id -un):" >/dev/null 2>&1
+    printf x | write_atomic "$BATS_TEST_TMPDIR/w" 0644 "$(id -un):" >/dev/null 2>&1
+    prov_scaffold_dir "$BATS_TEST_TMPDIR/d" 0755 "$(id -un):" >/dev/null 2>&1
+    [ "$(sort -u "$BATS_TEST_TMPDIR/chown.argv")" = "$(id -un):$(id -gn)" ]
+    [ "$(prov_owner "$(id -un):")" = "$(id -un):$(id -gn)" ]
+    [ "$(prov_owner root:fleet)" = root:fleet ]
+    [ -z "$(prov_owner "")" ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; cat "$BATS_TEST_TMPDIR/chown.argv"; return 1; }
 }
 
 @test "ensure_mode: TEMOIN — un groupe NOMME se compare toujours en entier" {
@@ -435,7 +454,8 @@ STUB
     ensure_mode "$f" 0644 "$(id -un):$(id -gn)" >/dev/null 2>&1
     avant="$PROV_CHANGED"
     out="$(ensure_mode "$f" 0644 "$(id -un):$(id -gn)" 2>&1)"
-    [ "$PROV_CHANGED" -eq "$avant" ] && [ -z "$out" ]
+    [ "$PROV_CHANGED" -eq "$avant" ]
+    [ -z "$out" ]
     # Et le groupe est bien celui qui a ete NOMME, pas un autre laisse au systeme.
     [ "$(stat -c "%U:%G" "$f")" = "$(id -un):$(id -gn)" ]
   '

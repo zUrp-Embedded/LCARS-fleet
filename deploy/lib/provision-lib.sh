@@ -546,6 +546,7 @@ prov_refuse_symlink_path() {
 write_atomic() {
   local dest="$1" mode="$2" owner="${3:-}"
   local dir tmp
+  owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$dest" || return 1
   dir="$(dirname "$dest")"
   [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }
@@ -577,9 +578,17 @@ write_atomic() {
 
 # ─── ensure_mode <path> <mode> [owner:group] — converge mode/owner, verdict par re-stat ──────────
 # Compare AVANT d'agir (pas de chmod aveugle qui rafraîchit les ctime à chaque run), re-sonde APRÈS.
+prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
+  local o="$1" g
+  [[ "$o" == *: ]] || { printf '%s' "$o"; return 0; }
+  g="$(id -gn -- "${o%:}" 2>/dev/null)" || { printf '%s' "$o"; return 0; }
+  printf '%s:%s' "${o%:}" "$g"
+}
+
 ensure_mode() {
   local path="$1" mode="$2" owner="${3:-}"
   local cur_mode cur_owner want_owner changed=0
+  owner="$(prov_owner "$owner")"
   # AVANT le test d'existence, pas apres : `[[ -e ]]` est faux sur un lien casse, donc un symlink
   # pose comme piege serait rapporte « absent » — le bon diagnostic est « lien », et c'est celui-la
   # qui dit a l'operateur ce qu'il regarde.
@@ -605,18 +614,6 @@ ensure_mode() {
   if [[ -n "$owner" ]]; then
     cur_owner="$(stat -c '%U:%G' "$path")"
     want_owner="$owner"
-    # ⚠ `<user>:` NE SE COMPARE PAS TEL QUEL, ET L'OUBLI COÛTE UNE CONVERGENCE PERPÉTUELLE. Le
-    # deux-points nu dit à `chown` « le groupe de CONNEXION de cet utilisateur » — il ne dit pas
-    # LEQUEL, donc `stat` rend ensuite `lordzurp:lordzurp` là où la cible s'écrit `lordzurp:`. La
-    # comparaison littérale échoue à jamais : le module re-chowne à chaque passe, compte une
-    # mutation, et imprime un POSÉ sur un fichier strictement identique. Rien ne casse — mais
-    # « rejouer ne fait rien » devient faux, et c'est la propriété sur laquelle ce rail est bâti.
-    #
-    # On compare donc ce que la SPÉCIFICATION dit : l'utilisateur seul quand le groupe est laissé au
-    # système, les deux quand il est nommé.
-    if [[ "$owner" == *: ]]; then
-      cur_owner="$(stat -c '%U' "$path"):"
-    fi
     if [[ "$cur_owner" != "$want_owner" ]]; then
       chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
       changed=1
@@ -649,6 +646,7 @@ ensure_dir() {
 # geste que le module annonce lui-meme. Ni compteur ni « POSÉ » ici.
 prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
   local path="$1" mode="$2" owner="${3:-}"
+  owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$path" || return 1
   [[ -d "$path" ]] || mkdir -p "$path" || { p_fail "prov_scaffold_dir: mkdir refusé: $path"; return 1; }
   chmod "$mode" "$path" || { p_fail "prov_scaffold_dir: chmod $mode refusé: $path"; return 1; }
