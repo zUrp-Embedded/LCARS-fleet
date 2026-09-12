@@ -1,8 +1,7 @@
 defmodule Fleet.Workflow.DeliverableGateTrailerTest do
   @moduledoc """
-  F-01 trailer facet: `check_coauthor_trailer/3` verifies at the WORLD boundary
-  (reads the `.git`, does not trust the pod) that every commit in base..HEAD carries
-  the expected `Co-authored-by: LCARS-<role>` trailer. Real git repo (tmp_dir).
+  F-01/F-03: real temporary Git histories exercise parsed coauthor trailers and first-parent
+  traversal. These tests do not authenticate authors or check ambiguous role-name prefixes.
   """
   use ExUnit.Case, async: true
 
@@ -103,8 +102,6 @@ defmodule Fleet.Workflow.DeliverableGateTrailerTest do
 
     assert :ok = DeliverableGate.check_coauthor_trailer(dir, base, "engineer")
   end
-
-  # ─── A0 — FIRST-PARENT: a conflict-resolution merge imports the base's commits ─────────────────
 
   defp merge_conflict_fixture(dir) do
     # base repo, a "main" that advances with a FOREIGN commit (system-authored, other-role trailer),

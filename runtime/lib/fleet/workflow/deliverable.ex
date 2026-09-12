@@ -1,8 +1,8 @@
 defmodule Fleet.Workflow.Deliverable do
   @moduledoc """
-  System publication boundary for pod deliverables. Payload and native-git modes
-  differ only while materializing content; both pass the same hardened gate and
-  bounded system-owned push.
+  Publication sequence for payload and native-git deliverables: materialize, verify HEAD,
+  optionally write provenance, then push through the system Git authority.
+  No workspace lock or rollback spans these operations; callers must control concurrent writers.
   """
 
   alias Fleet.Workflow.{DeliverableGate, Git, PayloadGuard}
@@ -27,21 +27,20 @@ defmodule Fleet.Workflow.Deliverable do
 
   @type result :: %{commit_sha: String.t(), pushed?: boolean(), mode: mode()}
 
-  # Git reads remain delegated to the bounded Git authority.
-
   @common_keys [:mode, :workspace, :base_sha, :allowed_emails]
   @payload_keys [:files, :identity, :message]
   @identity_keys [:author_name, :author_email, :committer_name, :committer_email]
 
   @doc """
-  Publishes content through gate then push; gate failure prevents publication.
+  Validates options, materializes content and verifies base..HEAD before attempting a push.
+  Payload writes/commits can remain after gate failure. The gate checks known secret shapes,
+  not absence of secrets (unprefixed 40-hex tokens resemble Git SHAs; see scan_secrets/2).
+  Options are partly validated: malformed identity maps or unchecked downstream values can raise.
 
-  ⚠ THE GATE IS A FLOOR, NOT A CLEARANCE, and this is the site where the difference matters: what
-  passes here gets pushed to a repository. Its ancestry, identity and trailer checks are decidable;
-  its secret scan matches known credential SHAPES on added text and cannot see a shapeless one --
-  a Gitea token is 40 hex, indistinguishable from a SHA (scope on
-  `DeliverableGate.scan_secrets/2`). Reading `{:ok, :verified}` as "no secret in
-  this chain" is the one mistake this door invites, because it is the only door there is.
+  push? defaults true; false/nil skips publication. local_ref defaults HEAD but may name another
+  source, which is not compared with the verified HEAD. commit_sha reports the HEAD read after
+  verification. Optional nonempty provenance is written locally and included in the same push;
+  Git.push does not request atomic ref updates, so errors may follow partial remote changes.
   """
   @spec publish(opts()) :: {:ok, result()} | {:error, term()}
   def publish(opts) when is_map(opts) do
@@ -61,25 +60,8 @@ defmodule Fleet.Workflow.Deliverable do
     end
   end
 
-  # LA PREUVE PART AVEC LA BRIQUE, ET C'EST TOUT LE FIX (BL-6-43).
-  #
-  # Une attestation ecrite EN SECOND, sur une AUTRE face, APRES le PR et en best-effort, porte
-  # trois proprietes qui sont toutes mauvaises : elle peut ne pas exister pour une brique PUBLIEE ;
-  # elle peut exister pour un AUTRE sha que celui qu'on scelle ; et son absence est indiscernable de
-  # son echec. Le sceau ne peut alors que gerer des consequences.
-  #
-  # Ici elle devient un objet git de l'espace de travail, sous une ref NOMMEE PAR LE SHA
-  # (`refs/lcars/provenance/<sha>`), poussee dans le MEME `git push` que la branche. Deux
-  # consequences, par construction et non par vigilance :
-  #   - la ref ne peut pas manquer pour une brique publiee : si le push echoue, la branche n'est pas
-  #     publiee non plus, donc il n'y a rien a attester ;
-  #   - elle ne peut pas parler d'un autre commit : son NOM est le commit.
-  #
-  # Une ecriture d'attestation qui echoue FAIT ECHOUER la publication, et c'est delibere. « Jamais
-  # une PR bloquee pour un fichier de trace » vaut quand la trace est un fichier de courtoisie sur
-  # une autre face ; ici l'ecriture est LOCALE
-  # (hash-object + update-ref, aucun reseau) — elle ne peut echouer que sur un depot casse, cas ou
-  # publier serait pire.
+  # BL-6-43: bind supplied provenance to the read HEAD and write it before publication.
+  # Failure here prevents this push; absent/empty/non-map provenance skips attestation entirely.
   defp with_provenance(opts, sha) do
     case Map.get(opts, :provenance) do
       attrs when is_map(attrs) and map_size(attrs) > 0 ->
@@ -104,7 +86,6 @@ defmodule Fleet.Workflow.Deliverable do
     end
   end
 
-  # Presence alone is insufficient at the publication boundary.
   defp check_types(opts) do
     cond do
       not is_binary(opts.workspace) ->
@@ -113,13 +94,8 @@ defmodule Fleet.Workflow.Deliverable do
       not is_binary(opts.base_sha) ->
         {:error, {:bad_opt, {:base_sha, opts.base_sha}}}
 
-      # ⚠ TYPE N'EST PAS FORME, et ce champ part en INTERPOLATION dans quatre commandes git de la
-      # porte (`"#{base_sha}..HEAD"` — log, name-only, trailer, secrets) plus le `merge-base` de
-      # l'ancetre. Une valeur commencant par `-` y devient une OPTION de git, pas une revision. La
-      # valeur nominale vient du pinning hors-pod (`ProjectResolver`, sortie de `git ls-remote`),
-      # mais elle transite aussi par un payload de pod (`gate_base_sha` / `base_sha` du
-      # `step_run_build`), et un champ qui traverse le pod ne se valide pas par sa provenance.
-      # C'est ici le point de passage unique : cinq sites en aval, une seule porte.
+      # base_sha is interpolated into Git ranges downstream; binary alone allows option injection.
+      # GitRef accepts revisions as well as SHAs, so native HEAD comparison below is textual.
       not Fleet.GitRef.valid?(opts.base_sha) ->
         {:error, {:bad_opt, {:base_sha, opts.base_sha}}}
 
@@ -141,7 +117,7 @@ defmodule Fleet.Workflow.Deliverable do
   defp check_mode(m) when m in [:payload, :git_native], do: :ok
   defp check_mode(m), do: {:error, {:invalid_mode, m}}
 
-  # Only payload mode supplies content fields.
+  # Checks key presence only; identity must already be a map for Map.has_key?/2.
   defp check_mode_keys(%{mode: :payload} = opts) do
     with :ok <- check_keys(opts, @payload_keys) do
       check_keys(opts.identity, @identity_keys)
@@ -175,7 +151,8 @@ defmodule Fleet.Workflow.Deliverable do
     end
   end
 
-  # Native mode requires HEAD to advance; the shared gate catches rewrite.
+  # Compares the resolved HEAD string with base_sha as supplied; a symbolic base can differ
+  # while resolving to the same commit. The gate separately checks ancestry, not a nonempty range.
   defp materialize_content(%{mode: :git_native} = opts) do
     head_advanced(opts.workspace, opts.base_sha)
   end
@@ -199,11 +176,7 @@ defmodule Fleet.Workflow.Deliverable do
     })
   end
 
-  # The completer creates the target branch before publication.
-  # Le refspec du livrable se construit ICI et pas plus haut : sans push, il n'y a pas de
-  # `target_branch` a lire (mode local, cf. `check_push_keys`) — le calculer d'avance ferait lever
-  # une `KeyError` sur un chemin qui ne pousse rien. Les refs d'attestation, elles, sont deja
-  # ecrites localement : elles accompagnent le push quand il y en a un.
+  # Build the refspec only in push mode: local-only callers need not supply target_branch.
   defp push_deliverable(opts, extra_refspecs) do
     if push?(opts) do
       refspec = "#{local_ref(opts)}:#{opts.target_branch}"
@@ -216,6 +189,5 @@ defmodule Fleet.Workflow.Deliverable do
   defp push?(opts), do: Map.get(opts, :push?, true)
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
-  # Delegated to bounded Git authority.
   defp head_sha(workspace), do: Git.read_head_sha(workspace)
 end

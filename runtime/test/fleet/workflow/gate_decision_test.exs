@@ -1,8 +1,7 @@
 defmodule Fleet.Workflow.GateDecisionTest do
   @moduledoc """
-  Locks the single AUTHORITY over the gatekeeper vocabulary and its equality with the WIRE
-  contract `priv/schema/gate-decision.json`: if one drifts from the other, this test fails
-  (anti-drift schema ⇔ code). `GateBrief` and `Fleet.Pilot.StepRunConsumer` both consume `decisions/0`.
+  Compares GateDecision vocabulary with priv/workflow/schema/gate-decision.json and validates
+  parsed template examples. GateBrief and Pilot.StepRunConsumer share decisions/0.
   """
   use ExUnit.Case, async: true
 
@@ -26,13 +25,8 @@ defmodule Fleet.Workflow.GateDecisionTest do
     assert MapSet.new(schema_enum) == MapSet.new(GateDecision.decisions())
   end
 
-  # The judge learns the envelope from the gate-brief template and NOWHERE else. The template used
-  # to write `"chain": [...]` with no item type; the schema enforces strings, so judges filled it
-  # with objects and EVERY brief-gate step run died `halt_invalid` on `#/chain/0` — fail-closed and
-  # silent about the cause, because the doc and the schema never met.
-  # This is the meeting: the examples the template hands the judge are validated against the very
-  # schema that will refuse them. Prose that instructs is anchored to the mechanism that enforces
-  # it, or it is a guess with a nice font.
+  # Regression: an unspecified chain item shape led to object items rejected at #/chain/0.
+  # Validate documented examples against the same schema as submitted decisions.
   test "every envelope example in the gate-brief templates validates against gate-decision.json" do
     schema =
       :lcars_fleet
@@ -49,14 +43,12 @@ defmodule Fleet.Workflow.GateDecisionTest do
         {name, field, json}
       end
 
-    # The templates document exactly the two optional fields whose shape is enforced. A template
-    # that stopped documenting them would pass a per-example loop vacuously.
+    # Require four total examples to avoid an empty loop; this does not enforce two per template.
     assert length(examples) == 2 * 2,
            "expected 2 documented examples per template, got: #{inspect(Enum.map(examples, fn {t, f, _} -> {t, f} end))}"
 
     for {name, field, json} <- examples do
-      # A minimal VALID envelope carrying only the example under test: the required fields are
-      # constants here, so any failure names the example, never the scaffolding.
+      # Required fields are fixed; validate each optional-field example in a minimal envelope.
       envelope = %{"decision" => "continue", "reason" => "probe", field => json}
 
       assert :ok == ExJsonSchema.Validator.validate(schema, envelope),
@@ -65,8 +57,7 @@ defmodule Fleet.Workflow.GateDecisionTest do
     end
   end
 
-  # Reads the ``Example: `<json>` `` lines of a template and returns {field, decoded}. The field is
-  # the bullet's own name (`- \`chain\` — …`), so a renamed field is not silently skipped.
+  # Reads the first Example JSON per bullet; malformed/missing examples are skipped, then counted above.
   defp envelope_examples(name) do
     Fleet.Catalogue.brief_templates_root()
     |> Path.join(name <> ".md")

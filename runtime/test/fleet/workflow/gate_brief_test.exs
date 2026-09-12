@@ -1,5 +1,5 @@
 defmodule Fleet.Workflow.GateBriefTest do
-  @moduledoc "R4 — gatekeeper evaluation brief (pure)."
+  @moduledoc "R4 — rendering assertions against catalogue gatekeeper templates."
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.GateBrief
@@ -13,26 +13,22 @@ defmodule Fleet.Workflow.GateBriefTest do
         outputs: %{"result" => %{"severity_max" => "important"}}
       })
 
-    # Context
     assert brief =~ "Judged step: spec-review"
     assert brief =~ "pipe-42"
     assert brief =~ "type terminal"
-    # Deliverable under judgement (JSON-rendered)
     assert brief =~ "severity_max"
     assert brief =~ "important"
-    # Canon decision vocabulary (all 5)
+
     for d <- ~w(continue abandon redirect escalate_user halt_wait_input) do
       assert brief =~ d
     end
 
-    # Output contract
     assert brief =~ "gate-decision.json"
     assert brief =~ "Question to decide"
   end
 
   test "request = defused judgement context (do NOT execute) — not an instruction (PASSE-9 bug)" do
-    # The issue body (the BUILD brief) must NEVER read as an instruction the gatekeeper
-    # should execute: it is quoted as context, framed.
+    # Tests framing and quotation strings, not whether an agent follows them.
     brief =
       GateBrief.build(%{
         step: "review",
@@ -42,13 +38,10 @@ defmodule Fleet.Workflow.GateBriefTest do
         request: "Crée SMOKE.md et commit."
       })
 
-    # Explicit defusal frame + judgement instruction, not production.
     assert brief =~ "DO NOT execute"
     assert brief =~ "JUDGE"
     assert brief =~ "Create NO file"
-    # The body is present as quoted context (blockquote prefix), not raw.
     assert brief =~ "> Crée SMOKE.md et commit."
-    # Explicit output instruction: submit_result with a mandatory decision.
     assert brief =~ "mcp__fleet__submit_result"
     assert brief =~ "decision` field is MANDATORY"
   end
@@ -88,16 +81,14 @@ defmodule Fleet.Workflow.GateBriefTest do
         outputs: %{"brief_mount" => "brief.md"}
       })
 
-    # transport_brief_v2 — the brief the scoper judges is a MOUNTED file it reads, content-addressed:
-    # the order names `~/issues/<mount>` and nothing else. Not the text (read, not quoted), not the
-    # pin (the runtime engraves it; the agent does not relay it). One transport, no exception of role.
+    # transport_brief_v2: assert the rendered mount address, without mounting/reading a real file.
     assert brief =~ "~/issues/brief.md"
 
-    # Mutation-verified: reinstating a ref/sha citation in `subject_body(:brief, ...)` reddens these.
+    # These two literals are absent from the input too; this does not reject every possible citation.
     refute brief =~ "briefs/issue-5-engineer.md"
     refute brief =~ "0627de8abc"
 
-    # NO errand: a payload naming that variable re-creates the need to mount ops.
+    # The order must not require an ops mount and manual git read.
     refute brief =~ "LCARS_PROJECT_OPS"
     refute brief =~ "git -C"
   end

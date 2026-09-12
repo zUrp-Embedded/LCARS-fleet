@@ -1,7 +1,5 @@
 defmodule Fleet.Workflow.DeliverableGateTest do
-  # Deliverable I-CBC gate (O5). REAL git fixture. Each consultant finding (F-01/F-02/F-03) must
-  # be MECHANICALLY blocked: an invalid deliverable is unrepresentable at push time.
-  # async: git fixtures isolated by tmp_dir (git -C) — no application env mutated.
+  # O5 gate checks on real isolated Git fixtures, without publication or global env mutation.
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.DeliverableGate, as: Gate
@@ -12,7 +10,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
   defp g(dir, args), do: System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
 
-  # Repo with a `base` commit (engineer identity) + one clean code commit. Returns {dir, base_sha}.
+  # Creates only the base commit; tests append the history they need.
   defp setup_repo(dir) do
     File.mkdir_p!(dir)
     {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", dir], stderr_to_stdout: true)
@@ -54,9 +52,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:secret_detected, "anthropic_key", _}} = Gate.scan_secrets(dir, base)
   end
 
-  # JG-049 — LA PORTEE DU BALAYAGE EST DESORMAIS ECRITE, ET CES TESTS L'EPINGLENT DES DEUX COTES.
-  # Deux familles a signal fort ont ete ajoutees (meme barre que les cinq d'origine : un prefixe
-  # fixe, assez long pour qu'un match soit un secret et non une coincidence).
+  # JG-049: pattern recognition on synthetic examples, not verification that a credential is live.
   test "JG-049 — jeton Slack dans le diff → BLOQUE", %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "leak-slack"))
     commit_file(dir, "hook.txt", "SLACK=xoxb-1234567890-abcdefghijkl", "hook")
@@ -71,12 +67,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:secret_detected, "google_api_key", _}} = Gate.scan_secrets(dir, base)
   end
 
-  # ⚠ LES JETONS DE FORGE ETAIENT UN MOTIF, D'UNE FORGE, ET PAS CELUI QU'ON PORTE SOI-MEME. La liste
-  # ne connaissait que `ghp_`, le PAT CLASSIQUE de GitHub. Or la doc GitHub nomme six prefixes, et
-  # `gho_` — le jeton OAuth — est exactement ce que `gh auth status` rend sur une machine ou
-  # l'operateur a fait `gh auth login`. Le gate qui refuse un identifiant echappe dans un livrable
-  # ne reconnaissait pas l'identifiant de son propre outillage.
-  # Et RIEN pour GitLab, sur une fleet dont l'import et l'export annoncent GitLab de plein droit.
+  # Cover GitHub families beyond classic PAT (including tooling OAuth), plus GitLab credentials.
   for {label, sample, kind} <- [
         {"classique (ghp_)", "ghp_" <> String.duplicate("a", 36), "github_token"},
         {"OAuth (gho_) — celui de notre propre gh", "gho_" <> String.duplicate("b", 36),
@@ -100,8 +91,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
   end
 
   test "un livrable SANS jeton n'est pas bloque par les motifs de forge", %{tmp_dir: tmp} do
-    # La contre-epreuve : un motif trop large refuserait des commits legitimes, et un gate qui
-    # refuse tout est un gate qu'on desactive.
+    # Prefix names in documentation must not be enough to trigger rejection.
     {dir, base} = setup_repo(Path.join(tmp, "no-leak"))
 
     commit_file(
@@ -115,26 +105,14 @@ defmodule Fleet.Workflow.DeliverableGateTest do
   end
 
   test "JG-049 — CE QUE LA PORTE NE VOIT PAS, mesure plutot que suppose", %{tmp_dir: tmp} do
-    # ⚠ Ce test EPINGLE UNE LIMITE, il ne demande pas de la corriger. Un jeton Gitea est 40 hex
-    # sans prefixe — la forme exacte de tout SHA git present dans un diff. Un motif pour lui
-    # refuserait quasiment chaque commit : la porte BLOQUE le push, un faux positif ici est un mur
-    # que les pods ne peuvent pas contourner. Ce credential est tenu hors des diffs par les rails
-    # de credentials, jamais par ce balayage, et c'est ce que la prose dit maintenant aux deux
-    # bouts. Le jour ou quelqu'un lit `:ok` comme « aucun secret », ce test lui montre le contraire.
+    # A 40-hex token shape is indistinguishable from a Git SHA; :ok does not mean no secret.
     {dir, base} = setup_repo(Path.join(tmp, "leak-gitea"))
     commit_file(dir, "t.txt", "TOKEN=a3f9c1e8b7d2054613fa8c9e0b1d2f3a4c5e6d70", "gitea-shaped")
 
     assert :ok = Gate.scan_secrets(dir, base),
            "un jeton sans forme distinctive passe : `:ok` veut dire « aucune forme connue vue »"
 
-    # ⚠ SANS CE QUI SUIT, LE `:ok` CI-DESSUS NE VEUT RIEN DIRE. Un temoin d'espace negatif est vert
-    # sur la limite qu'il decrit ET sur un balayage qui n'a rien lu du tout : supprimer les motifs,
-    # ne pas ouvrir le diff, se tromper de base — tout rend `:ok`. Les temoins parametres au-dessus
-    # couvrent le balayage, mais pas SUR CE DEPOT-CI, et c'est la difference.
-    #
-    # On ajoute donc un jeton de forme CONNUE au meme fichier, dans le meme depot, contre la meme
-    # base : seule la FORME du jeton change entre les deux moities. `:ok` cesse d'etre « la porte
-    # est muette » pour devenir « la porte regarde, et ne reconnait pas cette forme-la ».
+    # Positive control in the same file/repo/range distinguishes that limit from a disabled scan.
     commit_file(
       dir,
       "t.txt",
@@ -192,13 +170,10 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
     assert {:error, {:base_not_ancestor, msg}} = Gate.check_base_ancestor(dir, base)
 
-    # a mute `{:base_not_ancestor, ""}` (empty merge-base output) is undiagnosable: the message
-    # MUST name the offending base (12 hex) → the cause is visible in a single log line.
+    # Keep the offending base visible even when merge-base returns no text.
     assert msg =~ String.slice(base, 0, 12)
 
-    # ... AND what HEAD actually was (chantier frein-publish, phase 1). The faceproof rework loop
-    # failed five rounds with "<base> ⊄ HEAD" and the discriminating fact — amend (same parent,
-    # new sha) vs reset-to-elsewhere — died unlogged; the bench was gone before anyone could ask.
+    # Preserve HEAD/parent evidence for diagnosing amend versus reset after the workspace is gone.
     {head_out, 0} = g(dir, ["rev-parse", "--short=12", "HEAD"])
     assert msg =~ "HEAD=#{String.trim(head_out)}"
     # This rewrite amended the ROOT commit → no parent: the diag says so instead of omitting it.
@@ -208,8 +183,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
   test "frein-publish P1 — the HEAD diag names the PARENT on a non-root amend (the amend signature)",
        %{tmp_dir: tmp} do
     {dir, _c0} = setup_repo(Path.join(tmp, "diag-parent"))
-    # a second commit, then amend IT: parent survives, sha changes — the exact suspect signature
-    # of the rework loop (the pod finds its own commit at HEAD and "fixes" it).
+    # Amend preserves the parent while replacing the delivered commit SHA.
     {_, 0} = g(dir, ["commit", "-q", "--allow-empty", "-m", "delivered"])
     {delivered, 0} = g(dir, ["rev-parse", "HEAD"])
     {_, 0} = g(dir, ["commit", "--amend", "-q", "--allow-empty", "-m", "fixed"])
@@ -230,8 +204,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     {ft, 0} = g(dir, ["rev-parse", "HEAD"])
     feature_tip = String.trim(ft)
 
-    # a PARALLEL issue merged → `main` moves forward (C1). DIFFERENT file: the gate ONLY checks
-    # ancestry + identity + secrets; RESOLVING the content conflict is the pod's job.
+    # Different files avoid a content conflict; this fixture targets ancestry after rebase.
     {_, 0} = g(dir, ["checkout", "-q", "main"])
     commit_file(dir, "parallel.md", "# other issue", "feat: parallel issue")
     {m1, 0} = g(dir, ["rev-parse", "HEAD"])
@@ -241,14 +214,11 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     {_, 0} = g(dir, ["checkout", "-q", "feature"])
     {_, 0} = g(dir, ["rebase", "-q", "main"])
 
-    # THE BUG (clone-base): `base_branch=head` pinned base_sha on the OLD feature tip, which the rebase
-    # rewrote → no longer an ancestor of HEAD → `base_not_ancestor` (live PR#4, publish never reached).
+    # PR#4 regression: rebasing rewrites the old feature tip used as the clone-base pin.
     assert {:error, {:base_not_ancestor, msg}} = Gate.check_base_ancestor(dir, feature_tip)
     assert msg =~ String.slice(feature_tip, 0, 12)
 
-    # THE FIX (gate_base_sha = main, the rebase target): HEAD descends from `main` → the gate ACCEPTS,
-    # and the FULL verify passes (the replayed feat commit carries the engineer identity, zero secret
-    # → publish + push).
+    # The rebase target remains an ancestor and passes verify; no push is exercised here.
     assert :ok = Gate.check_base_ancestor(dir, main_c1)
     assert {:ok, :verified} = Gate.verify(dir, main_c1, @role_emails)
   end
@@ -261,19 +231,13 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert :ok = Gate.check_base_ancestor(dir, base)
   end
 
-  # ============================================================
-  # MA-09 — F-01 bypassed via BLANK email (anti-regression of the %x00 trap)
-  # ============================================================
-
   test "MA-09 — commit with BLANK author/committer email → check_identity REJECTS {:bad_identity}",
        %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "blank-email"))
     File.write!(Path.join(dir, "x.py"), "x = 1")
     {_, 0} = g(dir, ["add", "."])
 
-    # the pod commits with BLANK author AND committer emails (`env -i` / `user.email=""`) → a
-    # `trim: true` split drops the blank lines → the empty email is never compared → gate `:ok`
-    # (the MA-09 hole).
+    # MA-09: trim:true splitting used to discard blank identity fields before comparison.
     {_, 0} =
       g(dir, [
         "-c",
@@ -288,7 +252,6 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
     assert {:error, {:bad_identity, bad}} = Gate.check_identity(dir, base, @role_emails)
     assert "<empty-email>" in bad
-    # the FULL verify blocks too (the push never happens).
     assert {:error, {:bad_identity, _}} = Gate.verify(dir, base, @role_emails)
   end
 
@@ -304,10 +267,6 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert :ok = Gate.check_identity(dir, base, @role_emails)
     assert {:ok, :verified} = Gate.verify(dir, base, @role_emails)
   end
-
-  # ============================================================
-  # MA-10 — PER-COMMIT secret scan (introduce-then-remove)
-  # ============================================================
 
   test "MA-10 — secret INTRODUCED then REMOVED in the chain → scan_secrets BLOCKS (per-commit)",
        %{tmp_dir: tmp} do
@@ -344,10 +303,6 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:secret_detected, "blacklisted_file", ".env"}} = Gate.scan_secrets(dir, base)
   end
 
-  # ============================================================
-  # F-02 evil-merge — secret/file in the RESOLVED TREE of a merge (absent from both parents)
-  # ============================================================
-
   # Builds an evil-merge: base → (feature: feat.txt) and (main: mainwork.txt) → no-ff merge whose
   # resolved TREE contains `extra_files` (present in NEITHER parent; base stays an ancestor;
   # author = legitimate engineer identity). Returns {dir, base_sha}.
@@ -374,18 +329,13 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
   test "F-02 evil-merge — secret in the merge's resolved tree (NEITHER parent) → scan_secrets BLOCKS",
        %{tmp_dir: tmp} do
-    # Distinct from MA-10 (LINEAR chain, each commit has its diff). Here the secret appears in the
-    # diff of NO parent: it exists ONLY in the resolved tree of the MERGE commit. Without
-    # `--diff-merges=first-parent`, `git log -p` emits no diff for a merge → the scan saw
-    # nothing → the secret passed and got pushed. With it, the merge's delta vs its 1st parent is scanned.
+    # Ordinary git log -p omits merge diffs; --diff-merges=first-parent exposes merge-only additions.
     {dir, base} =
       setup_evil_merge(Path.join(tmp, "evil-merge-secret"), [
         {"f.txt", "key = sk-ant-api03-EvilMergeTree123"}
       ])
 
-    # Sanity: f.txt exists in NEITHER of the merge's two parents (the secret lives ONLY in the
-    # resolved tree) → `git show HEAD^N:f.txt` fails (rc 128, path unknown to the parent). That is
-    # precisely what makes `git log -p` blind without `--diff-merges`.
+    # Establish that f.txt was introduced by the merge, not inherited from either parent.
     {_p1, rc1} = g(dir, ["show", "HEAD^1:f.txt"])
     {_p2, rc2} = g(dir, ["show", "HEAD^2:f.txt"])
     assert rc1 != 0, "f.txt should NOT exist in the 1st parent"
@@ -406,17 +356,12 @@ defmodule Fleet.Workflow.DeliverableGateTest do
 
   test "CLEAN evil-merge (resolved tree without secret) → verify OK (no false positive on merges)",
        %{tmp_dir: tmp} do
-    # `--diff-merges=first-parent` must not fail a LEGITIMATE merge: a merge whose resolved tree
-    # contains no secret and no forbidden file, engineer identity, base an ancestor → :ok.
+    # Positive control: a harmless merge-only addition still passes.
     {dir, base} =
       setup_evil_merge(Path.join(tmp, "clean-merge"), [{"notes.txt", "clean merge summary"}])
 
     assert {:ok, :verified} = Gate.verify(dir, base, @role_emails)
   end
-
-  # ============================================================
-  # MA-24 — check_base_ancestor: TYPED rc (rc1 not-an-ancestor / rc128 git_error / rc124 timeout)
-  # ============================================================
 
   test "MA-24 — BOGUS base_sha (rc128) → {:git_error}, NOT {:base_not_ancestor}", %{tmp_dir: tmp} do
     {dir, _base} = setup_repo(Path.join(tmp, "bogus-base"))
@@ -435,8 +380,6 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert msg =~ String.slice(base, 0, 12)
   end
 
-  # ── BL-6-16 second line: instruction-tier paths forbidden in a deliverable chain ──
-
   test "a commit touching .claude/** is REFUSED (forbidden_path_in_diff)", %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "claude-dir"))
     File.mkdir_p!(Path.join(dir, ".claude"))
@@ -449,18 +392,14 @@ defmodule Fleet.Workflow.DeliverableGateTest do
   test "un producteur ne peut pas commiter la DECLARATION DU PROJET (.lcars.json)", %{
     tmp_dir: tmp
   } do
-    # Elle porte `pipeline_default` — quelle carte route le ticket, donc quel jury et quelles portes.
-    # Sans ce refus, un producteur bascule la declaration vers une carte `jury: []` / `ci: ignore`,
-    # et les juges du ticket SUIVANT tombent. La seule chose qui restait entre l'agent et ce
-    # resultat etait qu'un relecteur remarque le diff.
+    # Root pipeline_default controls later tickets' jury/CI; producers must not downgrade it.
     {dir, base} = setup_repo(Path.join(tmp, "decl"))
     commit_file(dir, ".lcars.json", ~s({"pipeline_default":"c0-poc"}), "downgrade my own jury")
 
     assert {:error, {:forbidden_path_in_diff, ".lcars.json"}} =
              Gate.verify(dir, base, @role_emails)
 
-    # Plus profond : PERSONNE ne le lit, donc rien a interdire — une regle qui borne un chemin sans
-    # lecteur est une regle que le prochain lecteur ne saura pas justifier.
+    # Nested .lcars.json is a fixture, not the root declaration.
     {dir2, base2} = setup_repo(Path.join(tmp, "decl-nested"))
     File.mkdir_p!(Path.join(dir2, "fixtures"))
     commit_file(dir2, "fixtures/.lcars.json", ~s({"pipeline_default":"c0-poc"}), "a fixture")
@@ -477,7 +416,7 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:error, {:forbidden_path_in_diff, "lib/CLAUDE.md"}} =
              Gate.verify(dir, base, @role_emails)
 
-    # Root CLAUDE.md: an eng_doc may document the project — never refused by THIS check.
+    # Root CLAUDE.md remains allowed project documentation.
     {dir2, base2} = setup_repo(Path.join(tmp, "root-md"))
     commit_file(dir2, "CLAUDE.md", "## Build\nmix compile", "document the project")
 

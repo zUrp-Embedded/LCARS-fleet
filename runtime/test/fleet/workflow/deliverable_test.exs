@@ -1,8 +1,6 @@
 defmodule Fleet.Workflow.DeliverableTest do
-  # Unified O5 publication — REAL git fixture (workspace + bare remote). Both modes (payload /
-  # git_native) go through the SAME gate + the SAME push; only the CONTENT time differs. An invalid
-  # deliverable (secret, forged identity, rewritten history) is unrepresentable at push time.
-  # async: git fixtures isolated by tmp_dir (git -C, local remotes) — no application env mutated.
+  # O5: payload/native publication against isolated local bare remotes. These fixtures cover
+  # selected gate failures, not every unsafe deliverable or remote partial-failure behavior.
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Deliverable
@@ -11,7 +9,7 @@ defmodule Fleet.Workflow.DeliverableTest do
 
   defp g(dir, args), do: System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
 
-  # Bare remote + cloned workspace, with a base commit (engineer identity). Returns {ws, bare, base}.
+  # Separately initialized workspace and bare remote, seeded with the same base by push.
   defp setup_ws(tmp, name) do
     bare = Path.join(tmp, "#{name}.git")
     File.mkdir_p!(bare)
@@ -31,10 +29,8 @@ defmodule Fleet.Workflow.DeliverableTest do
     {ws, bare, String.trim(out)}
   end
 
-  # Payload-commit identity FIXTURE — arbitrary author/committer values to exercise the gate's
-  # allowed-emails check generically (the low-level API takes whatever it is handed). NOT the
-  # production policy: there the author is the HUMAN and the role rides the `Co-authored-by:` trailer
-  # (`Fleet.Credentials.ForgeIdentity`, proven in ForgeIdentityTest).
+  # Distinct fixture author/committer emails exercise membership independently. Production identity
+  # comes from ForgeIdentity, with human author and role coauthor trailer.
   defp payload_identity do
     %{
       author_name: "LCARS-engineer",
@@ -73,8 +69,6 @@ defmodule Fleet.Workflow.DeliverableTest do
       {main, 0} = g(bare, ["rev-parse", "main"])
       assert String.trim(main) == base
 
-      # The commit records the passed author|committer verbatim — a generic fixture, not the
-      # production identity policy (author=HUMAN, role in trailer; cf. `ForgeIdentity`).
       {who, 0} = g(ws, ["log", "-1", "--format=%ae|%ce"])
       assert String.trim(who) == "engineer@lcars.local|committer@fixture.test"
     end
@@ -102,10 +96,7 @@ defmodule Fleet.Workflow.DeliverableTest do
     end
 
     test "JG-076 : un `base_sha` BIEN TYPE mais malforme est refuse — le type n'est pas la forme" do
-      # Ce champ part en INTERPOLATION dans quatre commandes git de la porte (`\#{base_sha}..HEAD` :
-      # log, name-only, trailer, secrets) plus le `merge-base` de l'ancetre. Une valeur commencant
-      # par `-` y devient une OPTION de git. `is_binary/1` la laissait passer, et c'est ici le point
-      # de passage unique : cinq sites en aval, une seule porte.
+      # JG-076: reject option-like or malformed revisions before interpolating Git ranges.
       base = %{
         mode: :payload,
         workspace: "/tmp/ws",
@@ -124,9 +115,7 @@ defmodule Fleet.Workflow.DeliverableTest do
     end
 
     test "TEMOIN JG-076 : un sha et un ref valides passent la validation de forme" do
-      # Sans ce temoin, une garde qui refuserait TOUT passerait le test ci-dessus. On ne va pas
-      # jusqu'au push (pas de vrai workspace) : ce qui est mesure est que l'echec n'est PLUS
-      # `{:bad_opt, {:base_sha, _}}`.
+      # Positive form control: only excludes the base_sha rejection; incomplete identity fails later.
       base = %{
         mode: :payload,
         workspace: "/tmp/ws-inexistant-#{System.unique_integer([:positive])}",
@@ -163,7 +152,7 @@ defmodule Fleet.Workflow.DeliverableTest do
 
       assert {:error, {:secret_detected, "anthropic_key", _}} = Deliverable.publish(opts)
 
-      # The local commit happened (time 1) but the push did NOT happen (time 3 never reached).
+      # Remote main is unchanged and the target ref absent; local commit presence is not asserted here.
       {after_push, 0} = g(bare, ["rev-parse", "main"])
       assert before == after_push
       assert {_, 1} = g(bare, ["rev-parse", "--verify", "-q", "deliverables/x"])
@@ -241,9 +230,7 @@ defmodule Fleet.Workflow.DeliverableTest do
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-clean-filter")
 
-      # RCE vector: a `clean` filter with an arbitrary command is armed in the repo's `.git/config`. The
-      # payload tries to add the `.gitattributes` that MAPS `*.txt` to that filter. If the deliverable is
-      # not refused, the system-side `git add` that follows EXECUTES the filter command world-side (outside bwrap).
+      # Payload would activate a repository clean filter during world-side git add.
       sentinel = Path.join(tmp, "clean_filter_ran")
       File.rm(sentinel)
 
@@ -265,12 +252,10 @@ defmodule Fleet.Workflow.DeliverableTest do
         message: "evil filter"
       }
 
-      # CONTENT stage (load-bearing): the `.gitattributes` arming `filter=` is refused BEFORE any write.
       assert {:error, {:dangerous_gitattributes, ".gitattributes"}} = Deliverable.publish(opts)
 
-      # The filter NEVER ran (no system-side git add took place).
       refute File.exists?(sentinel)
-      # Nothing was written (2-pass validation: validate everything before writing anything).
+      # Both proposed files remain absent, alongside the execution sentinel.
       refute File.exists?(Path.join(ws, ".gitattributes"))
       refute File.exists?(Path.join(ws, "x.txt"))
     end
@@ -324,8 +309,8 @@ defmodule Fleet.Workflow.DeliverableTest do
          %{tmp_dir: tmp} do
       {ws, _bare, base} = setup_ws(tmp, "payload-symlink")
 
-      # Vector: a cloned repo with a trap symlink `out` -> outside the workspace. The lexical check
-      # (Path.expand) passes; File.write WOULD follow the link → escape. Must be blocked.
+      # Untracked symlink planted in the workspace; unlike the title, no commit records it.
+      # Lexical path validation alone would not stop File.write following it outside.
       escape = Path.join(tmp, "escape-target")
       File.mkdir_p!(escape)
       File.ln_s!(escape, Path.join(ws, "out"))
@@ -350,7 +335,7 @@ defmodule Fleet.Workflow.DeliverableTest do
   describe "mode :git_native" do
     test "the agent committed → gate OK + push (system rewrites nothing)", %{tmp_dir: tmp} do
       {ws, bare, base} = setup_ws(tmp, "native-ok")
-      # The pod commits by itself (role identity, injected immutable in prod — simulated here).
+      # Fixture commits locally with configured identity; no pod isolation is exercised.
       File.write!(Path.join(ws, "feature.py"), "x = 1\n")
       {_, 0} = g(ws, ["add", "."])
       {_, 0} = g(ws, ["commit", "-q", "-m", "feat: agent work"])
@@ -414,6 +399,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       }
 
       assert {:error, {:bad_identity, ["architect@lcars.local"]}} = Deliverable.publish(opts)
+      # This checks main only, not absence of deliverables/x or the number of push attempts.
       {after_push, 0} = g(bare, ["rev-parse", "main"])
       assert before == after_push
     end
@@ -448,7 +434,7 @@ defmodule Fleet.Workflow.DeliverableTest do
       }
 
       assert {:error, {:invalid_ref, "../evil"}} = Deliverable.publish(opts)
-      # validation BEFORE time 1: nothing was written/committed.
+      # Worktree/index remain clean; this assertion alone does not count commits.
       {st, 0} = g(ws, ["status", "--porcelain"])
       assert String.trim(st) == ""
     end
