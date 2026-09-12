@@ -13,7 +13,7 @@ load ../refute
 
 setup() {
   MODS="$BATS_TEST_DIRNAME/../../modules.d"
-  CALLERS=(45-catalogues 63-forge-tokens 65-ops-branch 66-deck-oidc)
+  CALLERS=(50-catalogues 63-forge-tokens 65-ops-branch 66-deck-oidc)
 }
 
 @test "les quatre appelants sont MINCES : un exec env vers services/forge.d, et rien d'autre a executer" {

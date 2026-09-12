@@ -291,7 +291,7 @@ human:unset  /home/<human>/.local/bin/claude               0755  <human>:-      
 #                  valeur ecrite ici accuserait une machine correcte.
 #   settings.json  `70-human` y FUSIONNE une cle. Le fichier est a l'humain — il y met ses propres
 #                  reglages — et desinstaller ne peut pas vouloir dire le supprimer.
-#   le skill       `45-sudoers-toolchain` le pose dans le `~/.claude` du SIEGE, et de lui seul
+#   le skill       `45-seat-skill` le pose dans le `~/.claude` du SIEGE, et de lui seul
 #                  (uid 1000). Le joker `<human>` ne vaut pas ici : l'etendre a tous les humains
 #                  donnerait a chacun la boite de reception des incidents systeme.
 human:unset  /home/<human>/.claude                        775   <human>:-        any

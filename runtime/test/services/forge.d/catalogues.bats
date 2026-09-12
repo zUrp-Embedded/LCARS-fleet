@@ -30,7 +30,7 @@ setup() {
   # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
   [ -f "$MOD" ]
   export LCARS_MODULE_PROTOCOL="$LIB"
-  export LCARS_MODULE_TAG=45-catalogues
+  export LCARS_MODULE_TAG=50-catalogues
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export FORGE_BASE_URL="http://forge.invalid"
   mkdir -p "$LCARS_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"

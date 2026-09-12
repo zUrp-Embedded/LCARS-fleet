@@ -76,10 +76,10 @@ forge_installed() {
     # champ par champ. Une ligne de diagnostic y deviendrait une entree de la liste signee.
     if [[ "$declared" != "$name" ]]; then
       if [[ -z "$declared" ]]; then
-        echo "45-catalogues: $full repond, mais son $MANIFEST ne declare aucun \`name:\` en" \
+        echo "${LCARS_MODULE_TAG:-catalogues}: $full repond, mais son $MANIFEST ne declare aucun \`name:\` en" \
              "COLONNE ZERO — non signe. En YAML un \`name:\` indente appartient a la cle du dessus." >&2
       else
-        echo "45-catalogues: $full se declare \`$declared\`, pas \`$name\` — ce n'est pas le magasin" \
+        echo "${LCARS_MODULE_TAG:-catalogues}: $full se declare \`$declared\`, pas \`$name\` — ce n'est pas le magasin" \
              "de $name, il n'est pas signe." >&2
       fi
       continue
@@ -299,7 +299,7 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 45-catalogues.sh <check|apply>}" in
+case "${1:?usage: catalogues.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

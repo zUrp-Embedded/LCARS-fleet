@@ -6,7 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
-# AFTER: 45-catalogues 63-forge-tokens 70-human
+# AFTER: 50-catalogues 63-forge-tokens 70-human
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$LCARS_LOGIN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet.env` qui porte l'adresse de la forge et le jeton.

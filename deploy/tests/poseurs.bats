@@ -99,21 +99,6 @@ setup() {
   grep -q '\.lcars/log' <<<"$bloc"
 }
 
-# ─── C3 — UN ECHEC AVALE EST UN ETAT QUE PERSONNE NE CONNAIT ────────────────────────────────────
-
-@test "C3 : l'echec du chown sur ~/.claude est DIT, plus avale" {
-  # `2>/dev/null || true` sur le seul geste qui rend `~/.claude` et `~/.claude/skills` a leur
-  # proprietaire — les deux naissent `root:root` du `mkdir -p`. Quand il echouait, deux repertoires
-  # du home d'un humain restaient au groupe root ET le module annoncait « skill pose ».
-  local mod="$MODS/45-sudoers-toolchain.sh"
-  local bloc; bloc="$(sed -n '/chown -h "\$PROV_HUMAN:"/,/^          fi$/p' "$mod")"
-  [ -n "$bloc" ]
-  refute grep -q '|| true' <<<"$bloc"
-  grep -q 'p_drift' <<<"$bloc"
-  # et le p_ok ne survit plus a l'echec : il est dans la branche qui reussit
-  grep -q 'if chown -h' <<<"$bloc"
-}
-
 # ─── C4 — `cp -a` PRESERVE LE PROPRIETAIRE DE LA SOURCE ─────────────────────────────────────────
 
 @test "C4 : le contenu de /usr/share/lcars est rendu a root, pas laisse a l'operateur" {

@@ -54,7 +54,7 @@ setup() {
   PROV_HUMAN="$(id -un)"
   # ⚠ POSE PAR `deploy/provision`, COMME LES `PROV_*` AU-DESSUS — pas par ce module. Le runner derive
   # l'uid du SIEGE (l'appelant de l'installeur) avant tout module, et six lecteurs l'attendent :
-  # GUARD B, son miroir BEAM, `is_fleet_human`, `45-sudoers-toolchain`, `console-humans.sh` et le
+  # GUARD B, son miroir BEAM, `is_fleet_human`, `45-seat-skill`, `console-humans.sh` et le
   # plancher `uid_floor` du convergeur. Un decor qui l'omet ne decrit aucune machine reelle — et le
   # temoin d'a cote mesure precisement ce que le module fait quand elle manque VRAIMENT.
   export LCARS_SYSADMIN_UID

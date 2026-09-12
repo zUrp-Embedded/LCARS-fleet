@@ -157,7 +157,7 @@ declare_couvre() {
       agent/claude-automode.json) continue ;;  # human.d/70-human.sh
       container/boot.sh)          continue ;;  # ENTRYPOINT du Dockerfile
       container/init.sh)          continue ;;  # boot.sh, 25-directories
-      forge.d/catalogues.sh)      continue ;;  # 45-catalogues
+      forge.d/catalogues.sh)      continue ;;  # 50-catalogues
       forge.d/deck-oidc.sh)       continue ;;  # 66-deck-oidc
       forge.d/ops-branch.sh)      continue ;;  # 65-ops-branch
       forge.d/tokens.sh)          continue ;;  # 63-forge-tokens

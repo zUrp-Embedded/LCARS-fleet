@@ -1,223 +1,183 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/44-media.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-08
-# STATUS: bats tests for 44-media.sh — le tampon de la doc, et ce qu'il autorise a NE PAS refaire
+# STARDATE: 2026-09-12
+# STATUS: témoins de 44-media — les deux arbres de médias, la doc bâtie puis posée une fois, les modes relus contre la table
 #
-# CE QUE CES TEMOINS FERMENT. Le tampon `.doc-revision` a ete pose le 2026-09-08 pour rendre ce
-# module idempotent — il rebatissait (`npm ci` + build) et reposait l'arbre `doc/` ENTIER a chaque
-# apply. Il est arrive SANS AUCUN TEMOIN : trois fonctions neuves (`doc_stamp`, `doc_a_jour`,
-# `doc_empreinte`) et deux court-circuits, mesures une fois a la main sur un banc, jamais rejoues.
-# Un correctif d'idempotence sans temoin est une regression en attente : le prochain qui deplace le
-# tampon ou change son format ne verra rien rougir, et le module se remettra a tout reposer en
-# silence — le defaut est INVISIBLE, c'est toute sa difficulte.
-#
-# ⚠ CE CORPUS NE JOUE NI `check` NI `apply` EN ENTIER : les deux veulent `$PROV_ROOT/share`, root et
-# npm. Ce qui se mesure ici est le TAMPON et les deux court-circuits — la seule partie du module ou
-# une faute est silencieuse. Le reste (modes, proprietaires, formes de copie) est tenu par
-# `poseurs.bats` et `delivery_form.bats`, qui lisent la SOURCE.
+# Le module se joue entier sous unshare -Ur (l'arbre est root:root) avec un npm doublé qui écrit un
+# dist/ et note la base reçue ; les sources sont un décor. Les filtres de modes et la pose de la doc
+# se jouent aussi en fonctions, hors namespace.
+
+load ../refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../modules.d/44-media.sh"
-  [ -f "$SRC" ]
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/44-media.sh"; [ -f "$MOD" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  export PROVISION_MODULE=44-media
-  export PROV_HUMAN=temoin
-  export PROV_FLEET_GROUP=fleet
-  export PROV_SUBSTRATE=linux
-
-  # Le decor : une racine de medias, une source de site avec son `dist/`, et le proprietaire du
-  # temoin — jamais root, un temoin ne chown pas.
+  export PROVISION_MODULE=44-media PROV_SUBSTRATE=linux PROV_HUMAN=root PROV_FLEET_GROUP=root
+  export PROV_SOURCE_REV=abc12345
   export LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/share"
-  LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"; export LCARS_MEDIA_OWNER   # SC2155 : le rc de `id` ne se masque pas
   export LCARS_MEDIA_SRC_ROOT="$BATS_TEST_TMPDIR/assets"
-  export LCARS_SITE_SRC="$BATS_TEST_TMPDIR/assets/github.io"
-  export LCARS_SITE_BASE="/doc/"
-  mkdir -p "$LCARS_MEDIA_ROOT" "$LCARS_SITE_SRC/dist"
-  printf '<html>la doc</html>' > "$LCARS_SITE_SRC/dist/index.html"
-  printf 'body{}' > "$LCARS_SITE_SRC/dist/style.css"
-
-  # Le corps du module SANS son dispatch final : on appelle ses fonctions, on ne le lance pas.
-  MOD="$BATS_TEST_TMPDIR/mod.sh"
-  sed '/^case "${1:?usage/,$d' "$SRC" > "$MOD"
+  export LCARS_SITE_SRC="$BATS_TEST_TMPDIR/site"
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"
+  mkdir -p "$LCARS_MEDIA_SRC_ROOT/avatars" "$LCARS_MEDIA_SRC_ROOT/favicon" "$LCARS_SITE_SRC"
+  printf 'png' > "$LCARS_MEDIA_SRC_ROOT/avatars/admiral.png"; printf 'png' > "$LCARS_MEDIA_SRC_ROOT/avatars/lcars.png"
+  printf 'ico' > "$LCARS_MEDIA_SRC_ROOT/favicon/favicon.ico"
+  printf 'dist\nnode_modules\n' > "$LCARS_SITE_SRC/.gitignore"; printf '{}' > "$LCARS_SITE_SRC/package.json"
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  export LCARS_NPM_BIN="$BIN/npm" NPM_TRACE="$BATS_TEST_TMPDIR/npm.trace"; : > "$NPM_TRACE"
+  cat > "$LCARS_NPM_BIN" <<'EOF'
+#!/usr/bin/env bash
+echo "npm $*" >> "$NPM_TRACE"
+if [[ "$1 $2" == "run build" ]]; then
+  echo "base=${LCARS_SITE_BASE:-<vide>}" >> "$NPM_TRACE"
+  mkdir -p dist && printf '<html>doc %s</html>' "$LCARS_SITE_BASE" > dist/index.html && printf 'body{}' > dist/style.css
+fi
+EOF
+  chmod 0755 "$LCARS_NPM_BIN"
 }
 
-# mod <expression> — joue une expression dans le module source
-mod() { run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
+mod() {
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le module ne se joue pas ici"
+  run unshare -Ur bash "$MOD" "$@"
+}
+site_git() { # le site est un dépôt propre : la révision devient comparable
+  git -C "$LCARS_SITE_SRC" init -q && git -C "$LCARS_SITE_SRC" add -A \
+    && git -C "$LCARS_SITE_SRC" -c user.email=t@t -c user.name=t commit -qm décor
+}
+fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD') >/dev/null 2>&1; $1"; }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  head -8 "$SRC" | grep -q '^# SOURCE:'
-  head -8 "$SRC" | grep -q '^# AUTHOR:'
-  head -8 "$SRC" | grep -q '^# STARDATE:'
-  head -8 "$SRC" | grep -q '^# STATUS:'
+@test "check : arbres et doc absents — trois drifts qui disent la conséquence" {
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 44-media: $LCARS_MEDIA_ROOT/avatars absent — la charte de forge échoue dessus, et le deck sert des icônes génériques"* ]]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/favicon absent"* ]]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/doc absente — l'onglet Doc du deck rendra 404"* ]]
 }
 
-@test "EMPREINTE : la BASE en fait partie — le meme dist sous deux bases n'est pas le meme site" {
-  # ⚠ SANS CA, LE TAMPON DECLARE « A JOUR » UNE DOC BATIE POUR UNE AUTRE BASE. `LCARS_SITE_BASE`
-  # decide du prefixe de chaque URL d'asset ; servi sous « / » au lieu de « /doc/ », le site charge
-  # zero feuille de style et personne ne le voit avant d'ouvrir la page.
-  mod 'doc_empreinte'; [ "$status" -eq 0 ]
-  local a="$output"
-  LCARS_SITE_BASE=/ mod 'doc_empreinte'; [ "$status" -eq 0 ]
-  [ "$output" != "$a" ] || { echo "l'empreinte ignore la base : $a"; return 1; }
+@test "check : un arbre vide est incomplet, un doc/ sans index.html est absent" {
+  mkdir -p "$LCARS_MEDIA_ROOT/avatars" "$LCARS_MEDIA_ROOT/favicon" "$LCARS_MEDIA_ROOT/doc"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars incomplet (0 fichiers) — la source en porte plus"* ]]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/doc absente"* ]]
 }
 
-@test "EMPREINTE : un fichier du dist qui change change l'empreinte" {
-  mod 'doc_empreinte'; local a="$output"
-  printf 'body{color:red}' > "$LCARS_SITE_SRC/dist/style.css"
-  mod 'doc_empreinte'
-  [ "$output" != "$a" ] || { echo "l'empreinte ne voit pas le contenu du dist"; return 1; }
-}
-
-@test "EMPREINTE : sans dist, elle n'invente rien — elle REFUSE" {
-  rm -rf "$LCARS_SITE_SRC/dist"
-  mod 'doc_empreinte'
-  [ "$status" -ne 0 ] || { echo "une empreinte a ete rendue sans dist : « $output »"; return 1; }
-}
-
-@test "POSE : la seconde pose ne repose RIEN — c'est tout l'objet du tampon" {
-  # La mesure du 2026-09-08 sur le banc 2005 : trois apply de suite, douze objets « POSÉ » stables,
-  # dont `share/doc/index.html` dont le mtime changeait a chaque passage.
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1
-    PROV_CHANGED=0; poser_doc; echo \"---1 changed=\$PROV_CHANGED\"
-    PROV_CHANGED=0; poser_doc; echo \"---2 changed=\$PROV_CHANGED\""
+@test "apply : les deux arbres posés (leur contenu, pas avatars/avatars), la doc bâtie sous la base /doc/ et posée, le tampon à côté de doc/, le check vert" {
+  site_git
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  # ⚠ « > 0 », PAS « == 1 » : la pose compte DEUX changements (le tampon par `write_atomic`, puis la
-  # pose elle-meme). Pinner le nombre exact, c'est pinner la mecanique interne — ce qui se mesure
-  # ici est que la premiere pose COMPTE et que la seconde ne compte RIEN.
-  [[ "$output" =~ ---1\ changed=([1-9][0-9]*) ]] || { echo "la PREMIERE pose n'a rien compte : $output"; return 1; }
-  [[ "$output" == *"---2 changed=0"* ]] || { echo "la SECONDE pose a repose l'arbre : $output"; return 1; }
-  [[ "$output" == *"rien à poser"* ]] || { echo "la seconde pose ne DIT pas qu'elle n'a rien fait : $output"; return 1; }
-}
-
-@test "POSE : un dist qui a change est repose — le court-circuit n'est pas un mur" {
-  # LE TEMOIN DU TEMOIN. Sans lui, un `poser_doc` qui ne poserait JAMAIS passerait celui du dessus.
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1
-    PROV_CHANGED=0; poser_doc >/dev/null
-    printf 'nouveau' > '$LCARS_SITE_SRC/dist/index.html'
-    PROV_CHANGED=0; poser_doc; echo \"---changed=\$PROV_CHANGED\""
+  [ -f "$LCARS_MEDIA_ROOT/avatars/admiral.png" ] && [ ! -e "$LCARS_MEDIA_ROOT/avatars/avatars" ]
+  [ -f "$LCARS_MEDIA_ROOT/favicon/favicon.ico" ]
+  [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = "<html>doc /doc/</html>" ]
+  grep -qx 'base=/doc/' "$NPM_TRACE"
+  grep -q '^rev abc12345$' "$LCARS_MEDIA_ROOT/.doc-revision" && grep -q '^base /doc/$' "$LCARS_MEDIA_ROOT/.doc-revision"
+  [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ] && [ ! -e "$LCARS_MEDIA_ROOT/doc.partial" ]
+  [ "$(stat -c '%a %U' "$LCARS_MEDIA_ROOT/avatars")" = "755 $(id -un)" ]
+  [[ "$output" == *"POSÉ  44-media: doc du deck posée ($LCARS_MEDIA_ROOT/doc, base /doc/)"*"POSÉ  44-media: médias posés ($LCARS_MEDIA_ROOT : avatars favicon)"* ]]
+  mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" =~ ---changed=([1-9][0-9]*) ]] || { echo "un dist modifie n'a PAS ete repose : $output"; return 1; }
-  [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = nouveau ] \
-    || { echo "l'arbre pose ne porte pas le nouveau contenu"; return 1; }
+  [[ "$output" == *"avatars posé (2 fichiers)"*"doc posée (2 fichiers)"* ]]
 }
 
-@test "TAMPON : il vit A COTE de doc/, jamais dedans — prov_promote_dir l'emporterait" {
-  mod 'poser_doc >/dev/null; doc_stamp'
+@test "apply rejoué sur un site propre : la doc n'est pas rebâtie, rien n'est reposé" {
+  site_git
+  mod apply; [ "$status" -eq 0 ]
+  : > "$NPM_TRACE"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -s "$NPM_TRACE" ]
+  [[ "$output" == *"doc du deck à jour ($LCARS_MEDIA_ROOT/doc, révision abc12345) — rien à rebâtir"* ]]
+  [[ "$output" == *"OK    44-media: médias et doc déjà conformes"* ]]
+  [[ "$output" != *"POSÉ"* ]]
+}
+
+@test "apply : une autre base, ou un fichier nouveau dans les sources du site, rebâtit la doc" {
+  site_git
+  mod apply; [ "$status" -eq 0 ]
+  : > "$NPM_TRACE"
+  LCARS_SITE_BASE=/autre/ mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'base=/autre/' "$NPM_TRACE"
+  [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = "<html>doc /autre/</html>" ]
+  : > "$NPM_TRACE"
+  printf 'brouillon' > "$LCARS_SITE_SRC/nouveau.md"
+  LCARS_SITE_BASE=/autre/ mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == "$LCARS_MEDIA_ROOT/.doc-revision" ]] || { echo "tampon a $output"; return 1; }
-  [ -f "$LCARS_MEDIA_ROOT/.doc-revision" ] || { echo "le tampon n'a pas ete ecrit par poser_doc"; return 1; }
-  [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ] || { echo "un tampon a ete pose DANS doc/ : promote l'emportera"; return 1; }
+  grep -q 'npm run build' "$NPM_TRACE"
 }
 
-@test "TAMPON : il porte l'empreinte du dist, et la base quand la revision est comparable" {
-  mod 'poser_doc >/dev/null'
-  local t="$LCARS_MEDIA_ROOT/.doc-revision"
-  grep -q '^dist ' "$t" || { echo "pas de champ « dist » dans le tampon :"; cat "$t"; return 1; }
-  # `rev`/`base` ne s'ecrivent que si la revision est comparable — ici l'arbre du depot est celui du
-  # temoin, donc le champ peut manquer ; ce qui NE doit jamais arriver, c'est l'un sans l'autre.
-  if grep -q '^rev ' "$t"; then
-    grep -q '^base ' "$t" || { echo "« rev » sans « base » : le court-circuit du build ne pourrait pas juger"; return 1; }
-  fi
+@test "apply : npm absent, ou source des médias absente — échec nommé, rien posé" {
+  export LCARS_NPM_BIN="$BIN/npm-absent"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  44-media: npm absent — 16-node pose le précompilé épinglé"* ]]
+  [ ! -e "$LCARS_MEDIA_ROOT/doc" ]
+  rm -rf "$LCARS_MEDIA_ROOT" "$LCARS_MEDIA_SRC_ROOT/favicon"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  44-media: source absente : $LCARS_MEDIA_SRC_ROOT/favicon"* ]]
+  [ ! -e "$LCARS_MEDIA_ROOT/favicon" ]
 }
 
-@test "A JOUR : une base differente de celle du tampon REBATIT" {
-  mod 'poser_doc >/dev/null'
-  # on force un tampon comparable, la ou le depot du temoin n'en donne pas
-  printf 'rev abc12345\nbase /doc/\ndist %s\n' "$(cd "$BATS_TEST_TMPDIR" && bash -c "source '$MOD' >/dev/null 2>&1; doc_empreinte")" \
-    > "$LCARS_MEDIA_ROOT/.doc-revision"
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; PROV_SOURCE_REV=abc12345 LCARS_SITE_BASE=/autre/ doc_a_jour"
-  [ "$status" -ne 0 ] || { echo "une doc batie pour « /doc/ » est declaree a jour sous « /autre/ »"; return 1; }
-}
-
-@test "A JOUR : un fichier NON SUIVI dans les sources refuse le court-circuit" {
-  # ⚠ « +local » NE PARLE QUE DES FICHIERS SUIVIS. Un fichier neuf laisse la revision propre : sans
-  # cette garde, le module saute un build qu'il fallait faire, et sert une doc d'avant le fichier.
-  git -C "$LCARS_SITE_SRC" init -q 2>/dev/null || skip "git indisponible"
-  git -C "$LCARS_SITE_SRC" add -A >/dev/null 2>&1
-  git -C "$LCARS_SITE_SRC" -c user.email=t@t -c user.name=t commit -qm decor >/dev/null 2>&1
-  mod 'poser_doc >/dev/null'
-  printf 'rev abc12345\nbase /doc/\ndist %s\n' "$(bash -c "source '$MOD' >/dev/null 2>&1; doc_empreinte")" \
-    > "$LCARS_MEDIA_ROOT/.doc-revision"
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; PROV_SOURCE_REV=abc12345 doc_a_jour"
-  [ "$status" -eq 0 ] || { echo "arbre propre et tampon conforme : le court-circuit devrait s'appliquer — $output"; return 1; }
-  printf 'brouillon' > "$LCARS_SITE_SRC/nouveau-fichier.md"
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; PROV_SOURCE_REV=abc12345 doc_a_jour"
-  [ "$status" -ne 0 ] || { echo "un fichier non suivi n'empeche pas le court-circuit"; return 1; }
-}
-
-# ─── LES MODES : LE FILTRE DOIT SÉLECTIONNER EXACTEMENT CE QUE LE GESTE CHANGERAIT ──────────────
-#
-# ⚠ UN FILTRE TROP ÉTROIT SAUTE UN GESTE UTILE EN SILENCE, un filtre trop large repose tout à chaque
-# apply. Les deux fautes sont invisibles à la lecture, et le correctif d'idempotence du 2026-09-08 a
-# commis la première : `! -perm -a=r` ne voit que l'absence de LECTURE, alors que `a+rX` pose aussi
-# le `x` dès qu'un `x` existe quelque part. Six modes passaient au travers.
-
-@test "LES MODES : un fichier qu'il faut corriger l'EST — les six modes que l'ancien filtre ratait" {
-  local d="$BATS_TEST_TMPDIR/arbre/sous" m
-  mkdir -p "$d"
-  for m in 744 754 764 774 654 745 700 750 604; do printf x > "$d/f$m"; chmod "$m" "$d/f$m"; done
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; media_modes '$BATS_TEST_TMPDIR/arbre'"
+@test "modes : un objet de la table au mauvais mode est un drift nommé, l'apply le ramène ; une table de décor à 0750 est lue telle quelle" {
+  site_git
+  mod apply; [ "$status" -eq 0 ]
+  chmod 0700 "$LCARS_MEDIA_ROOT/avatars"; chmod 2755 "$LCARS_MEDIA_ROOT/doc"; chmod 0750 "$LCARS_MEDIA_ROOT"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars : 700 root:root ≠ 755 root:root (deploy/system.manifest) — l'apply le repose"* ]]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/doc : 2755 root:root ≠ 755 root:root"*"$LCARS_MEDIA_ROOT : 750 root:root ≠ 755 root:root"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 755 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT/doc")" = 755 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT")" = 755 ]
+  export LCARS_SYSTEM_MANIFEST="$BATS_TEST_TMPDIR/system.manifest"
+  printf 'dir  /opt/lcars/share/avatars  0750  root:root  any\n' > "$LCARS_SYSTEM_MANIFEST"
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local bad=()
-  for m in 744 754 764 774 654 745 700 750 604; do
-    # ce que `chmod a+rX` rend depuis ce mode, mesuré sur un temoin jetable
-    printf x > "$BATS_TEST_TMPDIR/ref"; chmod "$m" "$BATS_TEST_TMPDIR/ref"; chmod a+rX "$BATS_TEST_TMPDIR/ref"
-    local attendu; attendu="$(stat -c %a "$BATS_TEST_TMPDIR/ref")"
-    [ "$(stat -c %a "$d/f$m")" = "$attendu" ] || bad+=("$m → $(stat -c %a "$d/f$m"), attendu $attendu")
-  done
-  [ "${#bad[@]}" -eq 0 ] || { printf '  le filtre a saute : %s\n' "${bad[@]}"; return 1; }
+  [ "$(stat -c %a "$LCARS_MEDIA_ROOT/avatars")" = 750 ] && [ "$(stat -c %a "$LCARS_MEDIA_ROOT/favicon")" = 755 ]
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "LES MODES : un arbre DÉJÀ conforme n'appelle AUCUN chmod — c'est le coût, pas le ctime" {
-  # ⚠ LE CTIME NE PEUT PAS SERVIR D'INSTRUMENT ICI, ET C'EST UNE MESURE, PAS UNE OPINION. Remesuré
-  # le 2026-09-08 : un `chmod` dont le mode est déjà conforme laisse le ctime INCHANGÉ (alors qu'un
-  # `chown` vers le même propriétaire le change — c'est lui, et `cp -a "$src/."`, qui cassaient
-  # l'idempotence). Un témoin bâti sur le ctime resterait donc vert avec un geste inconditionnel :
-  # il ne mesurerait rien. Ce que le filtre achète est le COÛT — n'exécuter aucun chmod sur un arbre
-  # conforme — et c'est cela qu'on interpose pour compter.
+@test "modes : l'arbre profond est ramené en 755/644 sans bits spéciaux, y compris les modes qu'un filtre sur la seule lecture manquait" {
+  local d="$BATS_TEST_TMPDIR/arbre/sous" m
+  mkdir -p "$d/g" "$d/s"; chmod 775 "$d/g"; chmod 2755 "$d/s"
+  for m in 744 754 764 774 654 745 700 750 604; do printf x > "$d/f$m"; chmod "$m" "$d/f$m"; done
+  fn "media_modes '$BATS_TEST_TMPDIR/arbre'"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(stat -c %a "$d/g")" = 755 ] && [ "$(stat -c %a "$d/s")" = 755 ]
+  for m in 744 754 764 774 654 745 700 750 604; do
+    printf x > "$BATS_TEST_TMPDIR/ref"; chmod "$m" "$BATS_TEST_TMPDIR/ref"; chmod a+rX "$BATS_TEST_TMPDIR/ref"
+    [ "$(stat -c %a "$d/f$m")" = "$(stat -c %a "$BATS_TEST_TMPDIR/ref")" ] || { echo "f$m → $(stat -c %a "$d/f$m")"; return 1; }
+  done
+}
+
+@test "modes : un arbre conforme n'exécute aucun chmod, un dossier qui dévie en exécute un" {
   local d="$BATS_TEST_TMPDIR/arbre/a/b"
   mkdir -p "$d"; chmod 755 "$BATS_TEST_TMPDIR/arbre" "$BATS_TEST_TMPDIR/arbre/a" "$d"
   printf x > "$d/f"; chmod 644 "$d/f"
-  local faux="$BATS_TEST_TMPDIR/bin"; mkdir -p "$faux"
-  cat > "$faux/chmod" <<'SH'
-#!/usr/bin/env bash
-echo "chmod $*" >> "$FAUX_TRACE"
-exec /usr/bin/chmod "$@"
-SH
-  chmod +x "$faux/chmod"
-  FAUX_TRACE="$BATS_TEST_TMPDIR/chmod.trace"; : > "$FAUX_TRACE"
-  run env FAUX_TRACE="$FAUX_TRACE" PATH="$faux:$PATH" \
-    bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; media_modes '$BATS_TEST_TMPDIR/arbre'"
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ ! -s "$FAUX_TRACE" ] \
-    || { echo "un arbre conforme a fait exécuter des chmod :"; cat "$FAUX_TRACE"; return 1; }
-}
-
-@test "LES MODES : TÉMOIN DU TÉMOIN — un arbre qui DÉVIE, lui, fait bien exécuter un chmod" {
-  # Sans lui, celui du dessus passerait sur un `media_modes` qui ne ferait plus rien du tout.
-  local d="$BATS_TEST_TMPDIR/arbre/a/b"
-  mkdir -p "$d"; chmod 755 "$BATS_TEST_TMPDIR/arbre" "$BATS_TEST_TMPDIR/arbre/a"; chmod 775 "$d"
-  local faux="$BATS_TEST_TMPDIR/bin"; mkdir -p "$faux"
-  cat > "$faux/chmod" <<'SH'
-#!/usr/bin/env bash
-echo "chmod $*" >> "$FAUX_TRACE"
-exec /usr/bin/chmod "$@"
-SH
-  chmod +x "$faux/chmod"
-  FAUX_TRACE="$BATS_TEST_TMPDIR/chmod.trace"; : > "$FAUX_TRACE"
-  run env FAUX_TRACE="$FAUX_TRACE" PATH="$faux:$PATH" \
-    bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; media_modes '$BATS_TEST_TMPDIR/arbre'"
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -s "$FAUX_TRACE" ] || { echo "un repertoire en 775 n'a declenche AUCUN chmod"; return 1; }
-  [ "$(stat -c %a "$d")" = 755 ] || { echo "et il est reste en $(stat -c %a "$d")"; return 1; }
-}
-
-@test "LES MODES : un repertoire g+w ou setgid est ramene a 755" {
-  local d="$BATS_TEST_TMPDIR/arbre/sous"
-  mkdir -p "$d/g" "$d/s"; chmod 775 "$d/g"; chmod 2755 "$d/s"
-  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1; media_modes '$BATS_TEST_TMPDIR/arbre'"
+  printf '#!/usr/bin/env bash\necho "chmod $*" >> "$CHMOD_TRACE"\nexec /usr/bin/chmod "$@"\n' > "$BIN/chmod"; chmod +x "$BIN/chmod"
+  export CHMOD_TRACE="$BATS_TEST_TMPDIR/chmod.trace"; : > "$CHMOD_TRACE"
+  PATH="$BIN:$PATH" fn "media_modes '$BATS_TEST_TMPDIR/arbre'"
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a "$d/g")" = 755 ] || { echo "g+w garde : $(stat -c %a "$d/g")"; return 1; }
-  [ "$(stat -c %a "$d/s")" = 755 ] || { echo "setgid garde : $(stat -c %a "$d/s")"; return 1; }
+  [ ! -s "$CHMOD_TRACE" ] || { cat "$CHMOD_TRACE"; return 1; }
+  chmod 775 "$d"
+  PATH="$BIN:$PATH" fn "media_modes '$BATS_TEST_TMPDIR/arbre'"
+  [ -s "$CHMOD_TRACE" ] && [ "$(stat -c %a "$d")" = 755 ]
+}
+
+@test "pose de la doc : la seconde pose du même dist ne compte rien, un dist qui a changé est reposé" {
+  export LCARS_MEDIA_OWNER; LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"
+  mkdir -p "$LCARS_MEDIA_ROOT" "$LCARS_SITE_SRC/dist"; printf 'v1' > "$LCARS_SITE_SRC/dist/index.html"
+  fn "PROV_CHANGED=0; poser_doc; echo \"c1=\$PROV_CHANGED\"; PROV_CHANGED=0; poser_doc; echo \"c2=\$PROV_CHANGED\"
+      printf v2 > '$LCARS_SITE_SRC/dist/index.html'; PROV_CHANGED=0; poser_doc; echo \"c3=\$PROV_CHANGED\""
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" =~ c1=[1-9] ]] && [[ "$output" == *"c2=0"* ]] && [[ "$output" =~ c3=[1-9] ]]
+  [[ "$output" == *"doc du deck déjà posée"* ]]
+  [ "$(cat "$LCARS_MEDIA_ROOT/doc/index.html")" = v2 ]
+  [ -f "$LCARS_MEDIA_ROOT/.doc-revision" ] && [ ! -e "$LCARS_MEDIA_ROOT/doc/.doc-revision" ]
 }

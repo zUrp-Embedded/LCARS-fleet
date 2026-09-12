@@ -4,7 +4,7 @@
 # STARDATE: 2026-09-04
 # STATUS: bats tests for prov_roles (provision-lib) — le roster du mint suit les catalogues INSTALLES
 #
-# Ces trois temoins vivaient dans le fichier du module 45-catalogues, dont ils partageaient le decor.
+# Ces trois temoins vivaient dans le fichier du module 50-catalogues, dont ils partageaient le decor.
 # Le module est devenu un geste du PRODUIT (runtime/services/forge.d/catalogues.sh, lot 6) ; la
 # fonction `prov_roles`, elle, est de la lib de l'INSTALLEUR — elle lit la release posee par la
 # porte outil, pour le mint de 63. Deux sujets, deux corpus.

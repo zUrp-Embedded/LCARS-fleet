@@ -100,7 +100,7 @@ fi
 # temoin du verrou de la racine, qui compte les litteraux.
 : "${PROV_CATALOGUES_DIR:=$PROV_ROOT/var/catalogues}"
 # ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache a vecu
-# sous `/home` ; deux gestes nomment encore cette adresse — `45-catalogues` pour DIRE que le
+# sous `/home` ; deux gestes nomment encore cette adresse — `50-catalogues` pour DIRE que le
 # reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
 # (`${VAR:-/home/catalogues}`) auraient fait deux sources d'un meme fait, ce que le mur des racines
 # refuse a juste titre : celle qu'on lit n'est jamais celle qu'on a corrigee.

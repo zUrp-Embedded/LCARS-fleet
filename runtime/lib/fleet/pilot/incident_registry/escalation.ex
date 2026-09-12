@@ -122,8 +122,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   #
   # Le login du siege est VARIABLE (celui de l'installeur en prod — `admiral` n'est qu'un
   # full_name, on n'assigne pas une issue a un full_name). Le provisioning le PROJETTE a chaque
-  # boot dans `<store>/state/pilot.assignee` (module `45-sudoers-toolchain`, keye sur l'uid du
-  # siege) ; ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
+  # boot dans `<store>/state/pilot.assignee` (`services/container/init.sh`, le siege resolu) ;
+  # ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
   # tout conteneur dont l'installeur n'a pas ce login, et nommer un ROLE plutot que le siege assigne
   # l'issue a quelqu'un qui ne peut pas l'ouvrir.
   #
@@ -167,8 +167,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   defp warn_projection_missing(path, why) do
     Logger.warning(
       "Escalation: magasin present mais la projection du siege est #{why} (#{path}) — issue " <>
-        "ouverte SANS assignee. Le provisioning (45-sudoers-toolchain) la pose a chaque boot ; " <>
-        "si elle manque, LCARS_ADMIRAL n'est pas pose ou le module n'a pas tourne."
+        "ouverte SANS assignee. L'init du conteneur (services/container/init.sh) la pose a chaque boot ; " <>
+        "si elle manque, le siege n'est pas resolu ou l'init n'a pas tourne."
     )
   end
 

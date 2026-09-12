@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 45-catalogues 48-forge-host 61-forge-structure
+# AFTER: 48-forge-host 50-catalogues 61-forge-structure
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

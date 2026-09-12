@@ -267,7 +267,7 @@ check() {
   if [[ -x "$TOOLCHAIN_BIN" ]]; then
     p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)"
   else
-    p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
+    p_drift "$TOOLCHAIN_BIN absent — le convergeur de toolchain ne se joue pas"
   fi
 
   if [[ -x "$AUTHORITY_ASK_BIN" ]]; then

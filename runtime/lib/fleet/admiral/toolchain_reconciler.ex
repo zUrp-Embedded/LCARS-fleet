@@ -453,7 +453,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         Logger.warning(
           "ToolchainReconciler: convergé sur #{head} mais le marqueur est INÉCRIVABLE " <>
             "(#{inspect(reason)} sur #{path}) — la prochaine passe reconvergera. Le répertoire " <>
-            "est posé par le provisioning (45-sudoers-toolchain)."
+            "est posé par le provisioning (25-directories)."
         )
 
         :ok

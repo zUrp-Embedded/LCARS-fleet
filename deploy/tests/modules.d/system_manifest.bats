@@ -66,7 +66,7 @@ setup() {
   #
   # ⚠ `/home/catalogues` EST LA SEPTIEME, ET ELLE EST DE LA MEME NATURE QUE `/opt/elixir-` : un objet
   # que le rail NOMME sans le poser. Le cache des catalogues a demenage sous `/opt/lcars/var` le
-  # 2026-09-01 ; `45-catalogues` nomme encore l'ancien chemin pour DIRE a l'operateur qu'il subsiste,
+  # 2026-09-01 ; `50-catalogues` nomme encore l'ancien chemin pour DIRE a l'operateur qu'il subsiste,
   # parce que `/home` est hors du perimetre et qu'aucun geste ne le retirera. Le declarer dirait « on
   # a le droit de poser ca » d'un chemin dont l'etat-cible est l'absence — et sur `/home`, ou rien ne
   # se supprime, ce serait la pire des declarations : celle qu'on ne peut pas tenir.
