@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 #
 # LE SEUL GESTE PRIVILEGIE DU RAIL, et ce que ces temoins defendent tient en une phrase : ce script
 # ne doit RIEN interpreter. Son entree est un manifeste qu'un humain a signe ; sa sortie est

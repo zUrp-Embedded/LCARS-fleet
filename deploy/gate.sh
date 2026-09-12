@@ -1,109 +1,95 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/gate.sh
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
-# STATUS: la porte de L'INSTALLEUR — sa suite, jouee par lui, pas par le gate du runtime
+# STARDATE: 2026-09-12
+# STATUS: la porte de l'installeur — plancher shellcheck, en-têtes déclaratifs, puis le corpus bats, entier ou par couche
 #
-# POURQUOI UNE SECONDE PORTE, et pourquoi elle n'est pas un doublon.
+# USAGE  deploy/gate.sh [unit | integration | structure]
+#        deploy/gate.sh --list-corpora     le corpus que cette porte joue, lu par mix lcars.contracts.check
 #
-# ⚖ USER : « avoir 2 dossiers independant, avec 2 software independant : l'installeur et le
-# runtime. chacun avec sa suite de tests. ya pas de "si on sort de mix on teste plus rien" : c'est
-# quoi la logique de tester la chaine d'install en bash a partir du mix elixir du runtime ? »
+#   unit          les fonctions d'une lib, sourcées et jouées avec des doublures
+#   integration   un script ou un module joué entier sous un décor
+#   structure     ce que les sources doivent porter, lu sans les jouer (murs, manifestes, composes)
 #
-# MESURE : 1294 des 1774 cas bats que `mix gate` joue sont sous `deploy/tests/` — 73 % de la suite
-# bats du runtime est en realite la suite de l'installeur. Elle n'etait pas a ecrire : elle etait
-# branchee du mauvais cote.
-#
-# ⚠ ET LE DEBRANCHEMENT PORTE UN RISQUE NOMME, celui-la meme que `@test_corpora` du contracts.check
-# raconte : « `deploy/tests` had never been run by any gate […] A corpus nobody runs does not
-# rot loudly — it rots while reporting a coverage it does not provide ». Ce corpus a ete accroche au
-# gate du runtime en aout PARCE QUE personne ne le jouait. Le detacher sans plus referait ce
-# defaut-la, en le declarant corrige.
-#
-# CE QUI REND LE DETACHEMENT SUR — trois points de passage, et aucun n'est declaratif :
-#   1. `pack.sh` joue CETTE porte avant d'empaqueter, au meme titre que `mix gate`. Rien n'atteint
-#      la production sans les deux vertes.
-#   2. `tests.corpora_on_record` (contracts.check) declare ce corpus `{:gated_by, <ce fichier>}` et
-#      VERIFIE que le fichier existe et decouvre bien le corpus — un chemin mort echoue.
-#   3. `deploy/tests/installer_gate.bats` mesure cette porte : elle refuse un corpus vide, elle
-#      refuse bats absent, et son verdict suit celui de bats.
-#
-# ⚠ LA NEUTRALISATION D'ENVIRONNEMENT CI-DESSOUS EST UNE SECONDE COPIE, ASSUMEE ET GARDEE. Le
-# raisonnement complet vit dans `runtime/test/shell_gate.sh` (trois pannes datees : `FORGE_BASE_URL`
-# exporte par `provision --env`, un `LCARS_SEAT_UID_FILE` pose a la main, `PROV_FLEET_GROUP` qui
-# VOYAGE par `services.env`). Le recopier ici serait un mensonge par redondance ; l'omettre ferait
-# de cette porte un instrument que l'environnement du lanceur peut retuner. Un temoin garde donc que
-# les deux blocs disent la meme chose — meme motif que `tests.refute_copies_agree`, qui tient deja
-# les deux copies de `refute.bash` dans ce depot.
+#   Chaque témoin déclare sa couche en tête (« # bats file_tags=<couche> ») ; un témoin sans couche
+#   est refusé, sinon une entrée par couche jouerait moins qu'elle n'annonce.
+#   EXIT  0 tout vert · 1 refus de la porte · sinon le code de bats
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$HERE/tests"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
+COUCHES="unit integration structure"
 
-# ⚠ `--list-corpora` IMPRIME LA VARIABLE QUE LA DECOUVERTE UTILISE, il ne redeclare rien. C'est ce
-# que `tests.corpora_on_record` interroge : le registre des corpus ne CROIT plus un mot-cle
-# (`:gated`), il DEMANDE a chaque porte ce qu'elle joue. Un chemin mort, ou une porte qui a cesse de
-# decouvrir son corpus, deviennent un echec nomme au lieu d'un silence.
+# --list-corpora imprime la variable que la découverte utilise : le registre des corpus du runtime
+# demande à chaque porte ce qu'elle joue au lieu de le croire
 if [[ "${1:-}" == "--list-corpora" ]]; then
   [[ -d "$TESTS_DIR" ]] && printf '%s\n' "${TESTS_DIR#"$REPO_ROOT/"}"
   exit 0
 fi
+COUCHE="${1:-}"
+if [[ -n "$COUCHE" && " $COUCHES " != *" $COUCHE "* ]]; then
+  echo "ECHEC: couche inconnue « $COUCHE » — unit, integration ou structure." >&2
+  exit 1
+fi
 
-echo "=== gate de l'installeur : $HERE ==="
+echo "=== gate de l'installeur : $HERE${COUCHE:+ — couche $COUCHE} ==="
 
-# ⚠ CORPUS VIDE = ECHEC, JAMAIS UN SAUT. C'est la forme exacte du defaut que cette porte existe
-# pour fermer : zero test joue se lit comme zero test rouge.
+# un corpus vide est un échec, jamais un saut : zéro test joué se lirait comme zéro test rouge
 mapfile -t BATS_FILES < <(find "$TESTS_DIR" -type f -name '*.bats' 2>/dev/null | sort)
 if [[ "${#BATS_FILES[@]}" -eq 0 ]]; then
-  echo "ECHEC: aucun .bats sous $TESTS_DIR — la porte de l'installeur ne mesure RIEN." >&2
+  echo "ECHEC: aucun .bats sous $TESTS_DIR — la porte de l'installeur ne mesure rien." >&2
   exit 1
 fi
-# ⚠ `|| true` LOAD-BEARING (mur I3). `grep -c` rend 1 quand il ne trouve RIEN, et sous
-# `set -euo pipefail` ce 1 traverse le tube : l'affectation meurt, et le script avec — AVANT la
-# garde `bats absent` juste en dessous. Un corpus de fichiers `.bats` dont aucun ne porte de `@test`
-# (une suite videe par un refactor, exactement le cas qu'on veut voir) tuait donc cette porte sans
-# un mot. Trouve par `installer_gate.bats`, qui fabriquait ce corpus-la pour mesurer autre chose.
-BATS_TEST_COUNT="$( { grep -hcE '^@test' "${BATS_FILES[@]}" 2>/dev/null || true; } | awk '{s+=$1} END {print s+0}')"
+
+couche_de() { sed -n 's/^# bats file_tags=\([a-z]*\)$/\1/p' "$1" | head -1; }
+SANS_COUCHE=()
+JOUES=()
+for f in "${BATS_FILES[@]}"; do
+  t="$(couche_de "$f")"
+  case "$t" in
+    unit|integration|structure) [[ -n "$COUCHE" && "$t" != "$COUCHE" ]] || JOUES+=("$f") ;;
+    *) SANS_COUCHE+=("${f#"$HERE/"}") ;;
+  esac
+done
+if [[ "${#SANS_COUCHE[@]}" -gt 0 ]]; then
+  echo "ECHEC: ${#SANS_COUCHE[@]} témoin(s) sans couche déclarée (« # bats file_tags=unit|integration|structure » en tête) :" >&2
+  printf '   %s\n' "${SANS_COUCHE[@]}" >&2
+  exit 1
+fi
+if [[ "${#JOUES[@]}" -eq 0 ]]; then
+  echo "ECHEC: aucun témoin dans la couche « $COUCHE » — cette entrée ne mesure rien." >&2
+  exit 1
+fi
+# `grep -c` rend 1 sans occurrence, et sous pipefail ce 1 tuerait le script avant la garde « bats absent »
+BATS_TEST_COUNT="$( { grep -hcE '^@test' "${JOUES[@]}" 2>/dev/null || true; } | awk '{s+=$1} END {print s+0}')"
 
 if ! command -v bats >/dev/null 2>&1; then
-  echo "ECHEC: bats absent — ${#BATS_FILES[@]} fichier(s), $BATS_TEST_COUNT cas NON joues." >&2
-  echo "       Installer : apt install bats  (ce n'est pas une dependance optionnelle ici :" >&2
-  echo "       cette porte EST la suite de l'installeur)." >&2
+  echo "ECHEC: bats absent — ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas non joués." >&2
+  echo "       Installer : apt install bats (cette porte est la suite de l'installeur)." >&2
   exit 1
 fi
 
-# ─── LA FORME ET LE PLANCHER DU SHELL DE L'INSTALLEUR SE JOUENT ICI ───────────────────────────
-# ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « l'installeur est independant, chacun
-# joue son gate, on les split ». Jusque-la `runtime/test/shell_gate.sh` tenait le plancher shellcheck
-# et les en-tetes declaratifs (GO-7) de deploy/ ; il ne lit plus que runtime/. Un arbre qui a sa
-# porte et dont la forme est tenue par la porte d'un autre arbre n'est pas independant.
-#
-# Meme regle que le bloc BATS_ENV plus bas : les deux predicats d'en-tete sont une COPIE ASSUMEE de
-# ceux du hook `runtime/git-hooks/pre-commit`. Cette porte ne source rien hors de deploy/ — c'est
-# precisement ce qu'elle garantit — donc elle ne peut pas les lui emprunter.
-#
-# La liste vient d'un `find`, pas de git : cette porte doit jouer sur un kit detare sans `.git`.
-# Les entrees sans extension (`provision`, `container`, `workstation`, `accept`) se reconnaissent a leur
-# shebang, comme dans `shell_gate`. Un `.bats` n'entre au plancher qu'avec le shebang `bats` — sans
-# lui shellcheck le lirait comme du sh et mourrait sur `@test`, ce qui n'est pas une mesure.
+# la liste vient d'un find, pas de git : la porte se joue aussi sur un kit détaré sans .git ; les
+# entrées sans extension se reconnaissent à leur shebang, et un .bats n'entre au plancher qu'avec
+# le shebang bats (lu comme du sh, shellcheck mourrait sur @test, ce qui n'est pas une mesure)
 mapfile -t SHELL_FILES < <(
   find "$HERE" -type f 2>/dev/null | sort | while IFS= read -r f; do
     IFS= read -r first < "$f" || true
     case "$f" in
-      *.bats) [[ "$first" == *bats* ]] && printf '%s\n' "$f"; continue ;;
+      *.bats) [[ "$first" == "#!"*bats* ]] && printf '%s\n' "$f"; continue ;;
       *.sh|*.bash) printf '%s\n' "$f"; continue ;;
     esac
     [[ "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] && printf '%s\n' "$f"
   done
 )
 if [[ "${#SHELL_FILES[@]}" -eq 0 ]]; then
-  echo "ECHEC: aucun fichier shell sous $HERE — la decouverte est cassee, pas l'installeur." >&2
+  echo "ECHEC: aucun fichier shell sous $HERE — la découverte est cassée, pas l'installeur." >&2
   exit 1
 fi
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "ECHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur NON audites." >&2
-  echo "       Installer : apt install shellcheck (60-deploy le pose sur un poste)." >&2
+  echo "ECHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
+  echo "       Installer : apt install shellcheck." >&2
   exit 1
 fi
 set +e
@@ -112,12 +98,14 @@ SC_FLOOR_RC=$?
 set -e
 if [[ "$SC_FLOOR_RC" -ne 0 ]]; then
   printf '%s\n' "$SC_FLOOR" >&2
-  echo "ECHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de severite >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
+  echo "ECHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de sévérité >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
   exit 1
 fi
 echo "--- shellcheck plancher (-S warning, ${#SHELL_FILES[@]} fichier(s) shell de l'installeur) : OK ---"
 
-go7_exempt() { # un `.go7-exempt` dans le dossier ou un de ses parents, jusqu'a la racine de la porte
+# les deux prédicats GO-7 sont une copie de ceux de runtime/git-hooks/pre-commit : cette porte ne
+# source rien hors de deploy/, c'est ce qu'elle garantit ; installer_gate.bats tient l'accord des copies
+go7_exempt() { # un `.go7-exempt` dans le dossier ou un de ses parents, jusqu'à la racine de la porte
   local d; d="$(dirname "$1")"
   while :; do
     [[ -f "$d/.go7-exempt" ]] && return 0
@@ -125,14 +113,14 @@ go7_exempt() { # un `.go7-exempt` dans le dossier ou un de ses parents, jusqu'a 
     d="$(dirname "$d")"
   done
 }
-go7_md_header() { # copie de check_md_header (pre-commit)
+go7_md_header() {
   local h; h="$(head -15 "$1" 2>/dev/null)"
   grep -qF '**Date**' <<<"$h" && return 0
   grep -qE '^\s+date:' <<<"$h" && return 0
   grep -qE '<!--\s*Date\s*:' <<<"$h" && return 0
   return 1
 }
-go7_source_header() { # copie de check_source_header (pre-commit) — capture puis test (DI-13)
+go7_source_header() {
   [[ -n "$(head -20 "$1" 2>/dev/null | grep -Ei 'SOURCE:|AUTHOR:|STARDATE:')" ]]
 }
 GO7_BAD=()
@@ -146,25 +134,27 @@ while IFS= read -r f; do
   esac
 done < <(find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | sort)
 if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
-  echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous $HERE :" >&2
+  echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
   printf '   %s\n' "${GO7_BAD[@]}" >&2
-  echo "   (.md : une ligne **Date** ; .sh/.py : SOURCE:, AUTHOR: ou STARDATE: dans les 20 premieres lignes)" >&2
+  echo "   (.md : une ligne **Date** ; .sh/.py : SOURCE:, AUTHOR: ou STARDATE: dans les 20 premières lignes)" >&2
   exit 1
 fi
-echo "--- GO-7 : en-tetes declaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
+echo "--- GO-7 : en-têtes déclaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
 
-# Voir l'avertissement en tete : seconde copie assumee du bloc de `runtime/test/shell_gate.sh`.
+# copie assumée du bloc de runtime/test/shell_gate.sh : sans elle, l'environnement du lanceur
+# (FORGE_BASE_URL exporté par provision --env, un LCARS_SEAT_UID_FILE posé à la main, PROV_FLEET_GROUP
+# qui voyage par services.env) retunerait la mesure ; installer_gate.bats tient l'accord des copies
 BATS_ENV=()
 while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(
   compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort
 )
 if [[ "${#BATS_ENV[@]}" -gt 0 ]]; then
-  echo "--- ${#BATS_ENV[@]} variable(s) du lanceur NEUTRALISEE(S) : ${BATS_ENV[*]//-u/}"
+  echo "--- ${#BATS_ENV[@]} variable(s) du lanceur neutralisée(s) : ${BATS_ENV[*]//-u/}"
 fi
 
-echo "--- bats : ${#BATS_FILES[@]} fichier(s), $BATS_TEST_COUNT cas ---"
+echo "--- bats${COUCHE:+ (couche $COUCHE)} : ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas ---"
 set +e
-env "${BATS_ENV[@]}" bats "${BATS_FILES[@]}"
+env "${BATS_ENV[@]}" bats "${JOUES[@]}"
 RC=$?
 set -e
 
@@ -172,4 +162,4 @@ if [[ "$RC" -ne 0 ]]; then
   echo "=== gate de l'installeur : ECHEC (bats exit=$RC) ===" >&2
   exit "$RC"
 fi
-echo "=== gate de l'installeur : OK ($BATS_TEST_COUNT cas) ==="
+echo "=== gate de l'installeur : OK ($BATS_TEST_COUNT cas${COUCHE:+, couche $COUCHE}) ==="

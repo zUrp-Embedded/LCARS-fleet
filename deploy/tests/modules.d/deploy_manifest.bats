@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/deploy_manifest.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30

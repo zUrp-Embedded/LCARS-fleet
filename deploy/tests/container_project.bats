@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/container_project.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07

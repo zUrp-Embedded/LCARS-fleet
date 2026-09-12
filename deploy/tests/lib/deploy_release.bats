@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/lib/deploy_release.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.255

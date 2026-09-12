@@ -1,29 +1,40 @@
 # deploy/tests — les témoins de l'installeur
 
 **Date** : 2026-08-30
-**Dernière révision** : 2026-08-31
+**Dernière révision** : 2026-09-12 (trois couches, jouées par `deploy/gate.sh`)
 **Statut** : actif — pointeurs, pas un contrat
 **Référencé par** : `runtime/test/README.md`
 
 `deploy` est un programme distinct du runtime : il doit pouvoir vivre sans lui. Son corpus vit
-donc ici, et **le chemin d'un témoin est celui de sa cible sous `deploy/`** — `modules.d/61-forge-structure.sh`
-se teste dans `modules.d/`, pas ailleurs. Rien à retenir : chaque dossier se qualifie par l'existence
-de son jumeau, et `tests.dirs_mirror_source` (`mix lcars.contracts.check`) le refuse sinon.
+donc ici, et **le chemin d'un témoin est celui de sa cible sous `deploy/`** —
+`modules.d/61-forge-structure.sh` se teste dans `modules.d/`. Chaque dossier se qualifie par
+l'existence de son jumeau, et `tests.dirs_mirror_source` (`mix lcars.contracts.check`) le refuse
+sinon. `install.sh` est le seul fichier de l'installeur hors de `deploy/` (il vit à la racine du
+dépôt pour le `curl | bash`) : son témoin, `install.bats`, vit à la racine de ce corpus.
 
-`install.sh` est le seul fichier de l'installeur hors de `deploy/` (il vit à la racine du dépôt pour
-le `curl | bash`) : son témoin, `install.bats`, vit à la racine de ce corpus, à côté de ceux de ses
-délégués.
+`transverse/` est la seule zone sans jumeau : les témoins qui n'ont pas de cible unique. Quand une
+cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>`.
 
-`transverse/` est la seule zone sans jumeau : les témoins qui n'ont pas de cible unique — conformité
-sur plusieurs modules à la fois, ou sujet hors de `deploy/`. Elle est nommée dans `@test_zones`, pas
-déduite d'un tiret bas.
+## Trois couches
 
-Quand une cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>` : `docker/bench/`
-a `docker/bench_down_scope.bats`, `bench_runner_labels.bats` et `bench_swap_creds.bats`. Un témoin
-suit sa cible quand elle change de logiciel : ceux de `63-forge-tokens` et de l'entrypoint (devenu
-`runtime/services/container/boot.sh`) sont partis dans `runtime/test/services/` au lot 6, et l'appelant
-mince qui reste n'a pas de témoin propre.
+Chaque témoin déclare sa couche en deuxième ligne, `# bats file_tags=<couche>` ; la porte refuse
+un témoin qui n'en a pas.
 
-Joué par `deploy/gate.sh`, la porte de l'installeur (⚖ user 2026-09-04, Q4 : « chacun joue son
-gate, on les split »), qui découvre récursivement tous les `.bats` d'ici ; `runtime/test/shell_gate.sh`
-ne les joue plus. `refute.bash` est à la racine ; les sous-dossiers font `load ../refute`.
+| couche | ce qu'elle mesure | entrée |
+|---|---|---|
+| `unit` | les fonctions d'une lib, sourcées et jouées avec des doublures | `deploy/gate.sh unit` |
+| `integration` | un script ou un module joué entier sous un décor (`unshare -Ur` pour les chemins root) | `deploy/gate.sh integration` |
+| `structure` | ce que les sources doivent porter, lu sans les jouer : murs d'idiomes, manifestes, composes, Dockerfile | `deploy/gate.sh structure` |
+
+`deploy/gate.sh` sans argument joue tout, après le plancher shellcheck et les en-têtes
+déclaratifs ; c'est ce que `pack.sh` joue avant d'empaqueter. `runtime/test/shell_gate.sh` ne joue
+rien d'ici.
+
+## Écrire un témoin
+
+Un cas mesure une chose observable : ce qu'un script affiche, rend ou pose. Un `grep` sur la
+source n'est pas un témoin du comportement ; il n'a sa place que dans la couche `structure`, pour
+un invariant que le code ne peut pas tenir seul. Une assertion par ligne : dans un cas bats, `a &&
+b` n'échoue que si `b` échoue (mur I22 de `idiom_walls.bats`). Les doublures notent leur argv dans
+un fichier et rendent vite ; un secret ne passe jamais en argv. `refute.bash` est à la racine ; les
+sous-dossiers font `load ../refute`.

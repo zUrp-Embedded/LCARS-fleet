@@ -4,9 +4,9 @@
 # STARDATE: 2026-09-12
 # STATUS: le délégué du poste — escalade, provisionnement, acceptation, depuis ce checkout ou un kit
 #
-# USAGE
-#   deploy/workstation up     [--from <kit.tar.gz> | --from <kit détaré>] [options de provision]
-#   deploy/workstation doctor [options de provision]
+# USAGE  deploy/workstation <commande> [options]
+#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options de provision] — pose, puis accepte
+#   doctor  [options de provision] — la sonde seule, sans escalade
 #
 #   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
 #              détare sous l'utilisateur dans ~/.lcars/kits/<nom>/, et tout se joue depuis lui

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/transverse/store_volumes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19

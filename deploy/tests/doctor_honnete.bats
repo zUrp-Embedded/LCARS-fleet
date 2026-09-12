@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/doctor_honnete.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/forge_gestures.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-16

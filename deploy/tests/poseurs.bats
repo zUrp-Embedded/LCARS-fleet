@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/poseurs.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)

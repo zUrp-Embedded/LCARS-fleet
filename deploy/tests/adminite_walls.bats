@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/adminite_walls.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-23

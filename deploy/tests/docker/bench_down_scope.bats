@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/bench_down_scope.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-09

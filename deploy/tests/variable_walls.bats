@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/variable_walls.bats
 # AUTHOR: vanille
 # STARDATE: 2026-08-27

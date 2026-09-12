@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/lib/provision-lib.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30

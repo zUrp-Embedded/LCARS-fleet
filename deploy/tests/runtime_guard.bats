@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/runtime_guard.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-19

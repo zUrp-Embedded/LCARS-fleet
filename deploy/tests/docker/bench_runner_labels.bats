@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/bench_runner_labels.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-05

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/transverse/toolchain_legacy.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28

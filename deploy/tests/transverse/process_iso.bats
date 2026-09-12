@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/transverse/process_iso.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22

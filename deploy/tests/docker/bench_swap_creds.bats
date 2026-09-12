@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/bench_swap_creds.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)

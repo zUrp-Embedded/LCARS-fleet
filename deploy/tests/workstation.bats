@@ -99,7 +99,7 @@ root() {
 @test "l'aide marche sans root et sans rien d'autre" {
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"workstation up"*"--from <kit.tar.gz>"*"workstation doctor"*"EXIT"* ]]
+  [[ "$output" == *"workstation <commande>"*"up "*"--from <kit.tar.gz>"*"doctor "*"EXIT"* ]]
   [[ "$output" == *"ne se pose pas sur un autre"* ]]
   refute_out '\.deb' <<<"$output"
 }

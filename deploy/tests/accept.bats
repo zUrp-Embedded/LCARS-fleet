@@ -6,7 +6,7 @@
 # STATUS: témoins de deploy/accept — la mesure des runners (fait contre non-mesure) et le démarrage de la fleet sous l'humain
 #
 # Le décor reproduit l'arbre (accept dérive le nom de l'humain de ../runtime/services/forge-gestures.sh
-# et les labels de ../.gitea/workflows) et possède le PATH en entier : sur un poste provisionné,
+# et les labels des workflows du modèle de projet sous ../runtime) et possède le PATH en entier : sur un poste provisionné,
 # /usr/local/bin/fleet existe, et l'hériter mesurerait la machine. runuser ne change pas d'identité,
 # il exécute ce qu'on lui demande.
 
@@ -69,12 +69,17 @@ curl_stub() { # curl_stub — lit CURL_CODE, CURL_CORPS, CURL_RC de l'environnem
   chmod 0755 "$BINDIR/curl"
 }
 
+modele_de_projet() { # le modèle de projet livré, tel que la release le porte : un workflow qui demande « shell »
+  local wf="$SANDBOX/runtime/rel/lcars_fleet/lib/lcars_fleet-0.0.0/priv/catalogue/project_template/main/.gitea/workflows"
+  mkdir -p "$wf"
+  printf 'jobs:\n  test:\n    runs-on: shell\n' > "$wf/ci.yml"
+}
+
 joue_ci() { # joue_ci <code http> <corps> [rc de curl] — --forge-url par la porte du script, une variable serait écrasée
   curl_stub
   local priv="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$priv"
   printf 'jeton-de-decor\n' > "$priv/forge-master.token"
-  mkdir -p "$SANDBOX/.gitea/workflows"
-  printf 'jobs:\n  a:\n    runs-on: shell\n' > "$SANDBOX/.gitea/workflows/gate.yml"
+  [[ -n "${SANS_MODELE:-}" ]] || modele_de_projet
   run env PATH="$BINDIR:/usr/bin:/bin" \
     LCARS_PRIVATE_DIR="$priv" \
     CURL_CODE="$1" CURL_CORPS="$2" CURL_RC="${3:-0}" \
@@ -110,16 +115,22 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl] — --forge-url par la po
   [[ "$output" == *"NON   CI : aucun runner enregistré"* ]]
 }
 
-@test "check_ci : des runners qui servent les labels des workflows tiennent la capacité" {
+@test "check_ci : des runners qui servent le label demandé par le modèle de projet tiennent la capacité" {
   joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
   [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]]
-  [[ "$output" == *"OUI   CI : 1 runner(s) servant tous les labels"* ]]
+  [[ "$output" == *"OUI   CI : 1 runner(s) servant les labels que les workflows d'un projet demandent (shell)"* ]]
 }
 
 @test "check_ci : un runner qui ne sert pas le label demandé est un échec qui le nomme" {
   joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"autre"}]}]}'
   [[ "$output" == *"COMPTEURS F=1 S=0 H=0"* ]]
   [[ "$output" == *"aucun ne sert : shell"* ]]
+}
+
+@test "check_ci : sans modèle de projet sous ../runtime, le contrôle des labels est un échec nommé, jamais un vert vide" {
+  SANS_MODELE=1 joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
+  [[ "$output" == *"COMPTEURS F=1 S=0 H=0"* ]]
+  [[ "$output" == *"aucun « runs-on » lu dans les workflows du modèle de projet"* ]]
 }
 
 @test "fleet déjà vivante : le sondage la voit, rien n'est démarré, et « elle démarre » n'est pas établi" {

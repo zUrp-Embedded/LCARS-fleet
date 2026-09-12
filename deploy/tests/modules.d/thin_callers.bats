@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/thin_callers.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04

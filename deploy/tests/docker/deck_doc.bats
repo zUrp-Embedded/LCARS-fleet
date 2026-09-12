@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/docker/deck_doc.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)

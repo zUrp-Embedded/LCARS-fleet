@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/lib/prov_roles.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04

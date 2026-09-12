@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/lcars_catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)

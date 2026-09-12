@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/transverse/node_pin.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28

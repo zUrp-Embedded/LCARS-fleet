@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/service_accounts.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)

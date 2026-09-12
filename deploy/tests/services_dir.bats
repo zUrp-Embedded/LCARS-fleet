@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/services_dir.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)

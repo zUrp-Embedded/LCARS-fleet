@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/container_config.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04

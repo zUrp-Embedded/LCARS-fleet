@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/docker/image_verify.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
@@ -17,7 +18,6 @@ load ../refute
 setup() {
   DF="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   [ -f "$DF" ]
-  WF="$BATS_TEST_DIRNAME/../../../.gitea/workflows/gate.yml"
   MANIFEST="$BATS_TEST_DIRNAME/../../system.manifest"
 }
 
@@ -59,16 +59,4 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
   refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"
   grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../runtime/services/container/README.md"
-}
-@test "la CI bâtit l'image sur dood, et se declenche sur deploy/ et install.sh (DI-08)" {
-  [ -f "$WF" ]
-  grep -qE "^\s+- 'deploy/\*\*'$" "$WF"
-  grep -qE "^\s+- 'install\.sh'$" "$WF"
-  grep -qE '^\s+image:$' "$WF"
-  local job; job="$(sed -n '/^  image:$/,$p' "$WF")"
-  grep -qE 'runs-on: dood' <<<"$job"
-  grep -qE 'docker build' <<<"$job"
-  grep -qE '/opt/lcars/\.verified' <<<"$job"
-  # le job ne pousse RIEN : bâtir n'est pas publier (publish.yml le fait, sur un tag)
-  refute grep -qE 'docker push|docker login' <<<"$job"
 }

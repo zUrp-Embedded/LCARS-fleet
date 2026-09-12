@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/transverse/racines_ssot.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)

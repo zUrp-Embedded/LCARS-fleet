@@ -41,8 +41,7 @@ defmodule Fleet.Admiral.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # NO UPSTREAM-VERSION WATCH HERE (BL-6-44): it lives in CI
-    # (`.gitea/workflows/deps-upstream.yml`). Polling a package registry is not a control plane's
+    # NO UPSTREAM-VERSION WATCH HERE (BL-6-44). Polling a package registry is not a control plane's
     # job — no online consumer, one more network egress from the daemon, and nothing a cron does
     # not do better — and a watch shipped OFF by default does not exist while inviting someone to
     # switch it on. MCPMonitor stays ON:

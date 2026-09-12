@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/lib/door_gen.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-05

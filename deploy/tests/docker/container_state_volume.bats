@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=structure
 # SOURCE: deploy/tests/docker/container_state_volume.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=unit
 # SOURCE: deploy/tests/delivery_form.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)

@@ -51,8 +51,12 @@ check_forge_login() {
   [[ "$tested" -gt 0 ]] || skip "forge : le fichier d'annonce est vide"
 }
 
-# 2. une PR peut fusionner : des runners enregistrés qui servent les labels des workflows livrés
+# 2. une PR peut fusionner : des runners enregistrés qui servent les labels que les workflows d'un projet demandent
 # « aucun runner » est un fait mesuré (200 avec total_count 0) ; tout autre corps est une non-mesure, sautée
+labels_demandes() { # labels_demandes → les runs-on des workflows du modèle de projet livré (checkout ou release posée)
+  find "$(dirname "${BASH_SOURCE[0]}")/../runtime" -path '*/project_template/main/.gitea/workflows/*.yml' -print0 2>/dev/null \
+    | xargs -0 -r grep -hoP '^\s*runs-on:\s*\K[a-z0-9._-]+' 2>/dev/null | sort -u
+}
 check_ci() {
   local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
@@ -83,16 +87,16 @@ check_ci() {
     return
   fi
   served="$(printf '%s' "$body" | jq -r '[.runners[]?.labels[]?.name] | unique | join(" ")' 2>/dev/null || true)"
-  want="$(grep -rhoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "$(dirname "${BASH_SOURCE[0]}")/../.gitea/workflows" 2>/dev/null | sort -u || true)"
-  [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans .gitea/workflows — le contrôle des labels serait vide, donc faux"; return; }
+  want="$(labels_demandes || true)"
+  [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans les workflows du modèle de projet — le contrôle des labels serait vide, donc faux"; return; }
   local w
   for w in $want; do
     [[ " $served " == *" $w "* ]] || missing="$missing $w"
   done
   if [[ -n "$missing" ]]; then
-    no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs qui les demandent attendront sans fin (servis : ${served:-aucun})"
+    no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs d'un projet qui les demandent attendraient sans fin (servis : ${served:-aucun})"
   else
-    ok "CI : $n runner(s) servant tous les labels des workflows livrés (${served:-?})"
+    ok "CI : $n runner(s) servant les labels que les workflows d'un projet demandent (${want//$'\n'/ })"
   fi
 }
 
