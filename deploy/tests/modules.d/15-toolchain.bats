@@ -164,7 +164,7 @@ _run_apply() {
   [[ "$output" == *"c'est NOTRE lien $PROV_LINK_DIR/elixir qui pointe sur un autre arbre"* ]]
   refute_out 'est devant .* dans le PATH ; c'"'"'est LUI qui compile' <<<"$output"
   # et le drift sur l'arbre dit ce que converger ferait
-  [[ "$output" == *"${LCARS_ELIXIR_PREFIX}1.18.4"*"RETIRE (rm -rf)"* ]]
+  [[ "$output" == *"${LCARS_ELIXIR_PREFIX}1.18.4"*"retire (rm -rf)"* ]]
   # CAS 2 : notre lien est bon, mais un elixir d'ailleurs passe avant
   ln -sf "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir" "$PROV_LINK_DIR/elixir"
   local devant="$BATS_TEST_TMPDIR/devant"; mkdir -p "$devant"

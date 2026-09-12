@@ -1,36 +1,24 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/modules.d/22-fleet-human.sh
 # AUTHOR: DrDree
-# STARDATE: (posée par /push-github)
-# STATUS: PROTO-V2 — l'humain de fleet du POSTE : la forge le sème, le convergeur le pose, CE MODULE ATTESTE
+# STARDATE: 2026-09-12
+# STATUS: les humains de fleet du poste — la forge les sème, le convergeur les crée, ce module atteste leur groupe
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
 # AFTER: 20-groups
+#
+# Aucun compte nommé n'est attendu ni créé ici : les personnes s'inscrivent sur la forge sous leur
+# nom, le convergeur (seul créateur d'humains) les matérialise. Ce qui reste à ce module, et que
+# personne d'autre ne mesure : l'appartenance au groupe fleet, sans laquelle un humain ne lit ni
+# les jetons ni les zones de face. Zéro humain est l'état nominal d'une machine neuve.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-# ⚠ CE MODULE N'ATTEND PLUS UN COMPTE NOMME, ET C'EST LE CANON QUI A CHANGE (⚖ user 2026-08-30).
-# Il interrogeait `forge-gestures.sh builtin-human` et derivait si CE compte-la manquait. Or aucun
-# deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES (le siege, l'admin de
-# forge, le master token), et les personnes s'enrolent par la page d'inscription de la forge, sous
-# LEUR nom. Attendre « lcars » sur un poste de travail, c'etait attendre quelqu'un que plus rien ne
-# cree — une derive permanente des que le premier inscrit s'appelle autrement.
-#
-# ⚠ ET IL NE POSE PLUS RIEN : le convergeur cree le compte (`useradd -m`) ET l'ajoute au groupe
-# (`usermod -aG "$GROUP"`, deux sites dans human-converger.sh). Le `usermod` qui vivait ici doublait ce geste.
-#
-# CE QUI LUI RESTE EN PROPRE, et que personne d'autre ne verifie : L'APPARTENANCE AU GROUPE.
-# `is_fleet_human` ne juge que l'uid (dans [UID_MIN, UID_MAX], pas le siege) ; un humain hors de
-# `fleet` passe donc cette borne et ne lira pourtant ni les jetons ni les zones de face.
-# `64-services` compte les humains, celui-ci regarde s'ils peuvent travailler.
 observe() {
   local h found=0
-  # LA FRONTIERE D'ABORD. Sans bornes lisibles, `fleet_humans` ne rend personne — et « personne »
-  # aurait ici le sens d'une machine neuve, ce qui serait faux : la machine ne SAIT PAS qui est
-  # humain. C'est une derive, et son remede est le fichier que la lib vient de nommer.
   prov_uid_bounds || {
     p_drift "la frontiere systeme/humain n'est pas etablie — cette machine ne peut reconnaitre aucun humain de fleet (le remede est ci-dessus)"
     return 0
@@ -44,16 +32,6 @@ observe() {
       p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
     fi
   done < <(fleet_humans)
-
-  # ⚠ ZERO HUMAIN N'EST PAS UNE DERIVE, c'est l'etat nominal d'une machine neuve — meme raison et
-  # meme forme que dans `64-services`, qui pose la question du COMPTE. Ici il n'y a simplement
-  # personne dont verifier le groupe.
-  #
-  # ⚠ ET LE GESTE RESTE PROPOSE (P-40) : le rail est le chemin, mais celui pour qui il n'a pas
-  # abouti doit avoir quelque chose a taper. Ce n'est PAS un `useradd` (⚖ user 2026-09-04, DI-02 :
-  # UN SEUL createur d'humains, le convergeur) — un compte fait a la main n'a ni son uid derive de
-  # la forge, ni ses modules per-humain, et le convergeur le verra comme un inconnu. Ce qu'on
-  # regarde quand le rail n'aboutit pas, c'est le convergeur lui-meme.
   [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien a vérifier ici tant que personne ne s'est enrolé.
      Le chemin : la page d'inscription de la forge, puis la team « $PROV_HUMANS_TEAM » — le convergeur matérialise au tour suivant.
      S'il ne matérialise pas : « journalctl -u lcars-converger » dit pourquoi (forge, jeton, team)."
@@ -61,14 +39,10 @@ observe() {
 
 check() { observe; verdict_check; }
 
+# le rattrapage d'un compte fait à la main ou d'un groupe perdu ; la garde des bornes est ici et non
+# dans la substitution, où elle dirait le remède une seconde fois
 apply() {
-  # LE RATTRAPAGE, PAS LE GESTE NOMINAL : le convergeur pose le groupe en creant le compte. Ce qui
-  # arrive ici, c'est un compte cree A LA MAIN, ou un groupe perdu — l'apply le repose plutot que de
-  # renvoyer l'operateur a un `usermod` qu'il devra ecrire lui-meme.
   local h
-  # Meme garde que `observe`, ICI plutot que dans la substitution : `fleet_humans` y tourne dans un
-  # sous-shell, qui dirait le remede une seconde fois. Sur une frontiere illisible, aucun usermod ;
-  # `observe` dit la derive.
   if prov_uid_bounds; then
     while read -r h; do
       [[ -n "$h" ]] || continue
@@ -79,7 +53,6 @@ apply() {
       fi
     done < <(fleet_humans)
   fi
-
   observe
   verdict_apply
 }

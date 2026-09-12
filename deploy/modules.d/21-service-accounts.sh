@@ -2,18 +2,15 @@
 # SOURCE: deploy/modules.d/21-service-accounts.sh
 # AUTHOR: bob
 # STARDATE: 2026-08-25
-# STATUS: PROTO-V2 — les comptes SYSTEME des services de la machine (aucun humain ici)
+# STATUS: les comptes système des services de la machine — sans shell ni home, aucun humain ici
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 20-groups
-# ⚠ SANS SHELL ET SANS HOME. Un compte de service n'a personne a connecter : `nologin` ferme la
-# porte, et l'absence de home evite un `/home/lcars-authority` que le convergeur d'humains devrait
-# ensuite apprendre a ignorer.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 AUTHORITY_USER="$PROV_AUTHORITY_USER"
 AUTHORITY_GROUP="${PROV_AUTHORITY_GROUP:-$AUTHORITY_USER}"
@@ -29,10 +26,7 @@ GROUP_FILE="${LCARS_GROUP_FILE:-/etc/group}"
 account_exists() { awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$PASSWD_FILE"; }
 shell_of()       { awk -F: -v n="$1" '$1==n {print $7; exit}' "$PASSWD_FILE"; }
 
-# ⚠ LE GROUPE PRIMAIRE SE LIT, IL NE SE DEDUIT PAS DE `useradd -g`. Le `-g` de la creation ne vaut
-# QU'A la creation : un compte qui existait deja, ou qu'un `usermod` a deplace, garde le groupe
-# qu'il a. Sans cette sonde, `21-service-accounts` rendait vert un `lcars-system` retombe sur
-# `nogroup` — c'est-a-dire l'etat exact que son propre message de drift decrit comme dangereux.
+# le groupe primaire se lit : le -g de useradd ne vaut qu'à la création, un compte déjà là garde le sien
 primary_group_of() { # primary_group_of <compte> -> le NOM de son groupe primaire, ou vide
   local gid; gid="$(awk -F: -v n="$1" '$1==n {print $4; exit}' "$PASSWD_FILE")"
   [[ -n "$gid" ]] || return 0
@@ -104,8 +98,7 @@ apply() {
   ensure_group "$AUTHORITY_GROUP" || { p_fail "groupe $AUTHORITY_GROUP non posé — le compte de service n'aura pas de groupe à lui, et tout chown sur les secrets échouera"; verdict_apply; }
 
   if ! account_exists "$AUTHORITY_USER"; then
-    # `--system` : pas de home, uid sous UID_MIN, donc `bin/fleet` refusera de lancer une fleet
-    # sous ce compte — le garde qui protege les pods vaut aussi pour lui, et gratuitement.
+    # --system : uid sous UID_MIN, donc bin/fleet refuse une fleet sous ce compte, gratuitement
     if run_quiet "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
                  -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $AUTHORITY_USER"
@@ -124,8 +117,6 @@ apply() {
     fi
   fi
 
-  # ⚠ APRES la creation, et PAS a sa place : `useradd -g` ne pose le groupe primaire que la premiere
-  # fois. Cette convergence est le seul geste qui rattrape un compte qui existait avant nous.
   if [[ "$(primary_group_of "$AUTHORITY_USER")" != "$AUTHORITY_GROUP" ]]; then
     if run_quiet "$USERMOD" -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $AUTHORITY_USER -> $AUTHORITY_GROUP"
@@ -137,9 +128,7 @@ apply() {
 
   ensure_member "$AUTHORITY_USER" "$PROV_FLEET_GROUP" || verdict_apply
 
-  # Meme forme que ci-dessus, et une difference DELIBEREE : pas de `ensure_member` vers
-  # `$PROV_FLEET_GROUP`. Ce qu'il traverse — les repertoires de socket des consoles — lui est
-  # accorde PAR PROCESSUS a l'exec (`setpriv --groups`), jamais par une adhesion persistante.
+  # pas d'adhésion à fleet pour lcars-system : ce qu'il traverse lui est accordé par processus (setpriv --groups)
   ensure_group "$SYSTEM_GROUP" || { p_fail "groupe $SYSTEM_GROUP non posé — la landing n'aura pas de groupe à elle, et le secret OAuth2 du deck resterait sur un groupe partagé"; verdict_apply; }
 
   if ! account_exists "$SYSTEM_USER"; then

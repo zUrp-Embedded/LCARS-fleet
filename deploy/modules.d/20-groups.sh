@@ -2,14 +2,14 @@
 # SOURCE: deploy/modules.d/20-groups.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — groupes fleet et console + membership de l'humain dans fleet (AUCUN user créé : le modèle v2 est per-humain)
+# STATUS: les groupes fleet et console, et l'humain de la passe dans fleet — aucun compte créé ici
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 check() {
   if getent group "$PROV_FLEET_GROUP" >/dev/null; then

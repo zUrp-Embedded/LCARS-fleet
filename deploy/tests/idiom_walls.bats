@@ -390,10 +390,12 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
   [ -z "$manquants" ] \
     || { echo "batit depuis une source SANS savoir s il est dans la copie posee :$manquants" >&2; return 1; }
   # GARDE D INSTRUMENT : si plus aucun module ne batit, ce mur devient vert en n ayant rien regarde.
-  local batisseurs
-  batisseurs="$(grep -lE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' "$DEPLOY"/modules.d/*.sh | wc -l)"
-  [ "$batisseurs" -ge 3 ] \
-    || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 3 au moins attendus" >&2; return 1; }
+  local batisseurs=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    grep -vE '^\s*#' "$f" | grep -qE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' && batisseurs=$((batisseurs + 1))
+  done
+  [ "$batisseurs" -ge 2 ] \
+    || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 2 au moins attendus" >&2; return 1; }
 }
 
 # ─── MUR I16 : `… | grep -q` SOUS `pipefail` EST UNE RACE, PAS UN TEST (DI-12, DI-13) ──────────

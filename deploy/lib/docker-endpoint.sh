@@ -125,7 +125,7 @@ _docker_sock_listening() { # _docker_sock_listening <socket> -> 0 ecoute · 1 or
   return 1
 }
 
-_docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
+_docker_mount_cli() { echo "${LCARS_DOCKER_MOUNT_CLI:-/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker}"; }
 _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/docker/cli-plugins"; }
 
 # ─── _docker_plugin_config [<dir>] — UN `DOCKER_CONFIG` QUI VOIT LES PLUGINS DU MONTAGE ─────────
