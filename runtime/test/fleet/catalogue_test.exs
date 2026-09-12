@@ -1,9 +1,7 @@
 defmodule Fleet.CatalogueTest do
   @moduledoc """
-  The catalogue root: one knob brings one catalogue, and the boot refuses a root it cannot vouch for.
-
-  `async: false` — every test here moves `:lcars_fleet, :catalogue_root` (and the image tests write
-  `:persistent_term`), both process-global.
+  Checks catalogue paths, installation discovery, manifest verification and image provenance.
+  Serial because tests mutate node-global application configuration and published images.
   """
   use ExUnit.Case, async: false
 
@@ -18,8 +16,6 @@ defmodule Fleet.CatalogueTest do
     root = Path.join(tmp, "catalogue")
     File.mkdir_p!(root)
 
-    # The manifest carries a NAME as well as a generation: a catalogue that does not name itself is
-    # refused, so a fixture standing for "a valid catalogue" declares one.
     File.write!(Path.join(root, "catalogue.yaml"), "api_version: #{api_version}\nname: fixture\n")
     root
   end
@@ -43,8 +39,7 @@ defmodule Fleet.CatalogueTest do
         Catalogue.manifest_path()
       ]
 
-      # The adverse form: not "some tree moved" but "no tree stayed behind". A tree still resolving
-      # under the bundled priv IS the skew this module exists to make impossible.
+      # Check every accessor listed here for a root change and for accidental path aliases.
       for tree <- trees do
         assert String.starts_with?(tree, root <> "/"),
                "#{tree} did not follow the catalogue root #{root}"
@@ -60,11 +55,7 @@ defmodule Fleet.CatalogueTest do
       for tree <- [
             Catalogue.cap_profiles_root(),
             Catalogue.modop_root(),
-            # (`subagent_templates_root()` retiré de cette liste le 2026-08-19 : l'arbre a été
-            # supprimé avec la sortie de superpowers, et son absence est désormais une forme
-            # VALIDE de catalogue — aucun rôle ne déclare de template, et `SPBuilder.Image`
-            # lit cette classe sans exiger qu'elle soit peuplée. Un catalogue qui en porte un
-            # reste servi : la racine est résolue à la demande, pas exigée au démarrage.)
+            # Subagent templates are optional; absence of that tree is a valid catalogue shape.
             Catalogue.sp_drafts_root(),
             Catalogue.sp_templates_root(),
             Catalogue.workflow_maps_root(),
@@ -91,7 +82,6 @@ defmodule Fleet.CatalogueTest do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :cap_profile_root_dir, fine)
 
       assert Fleet.CapProfile.root_dir() == fine
-      # …and only that tree: panachage is allowed, silence about it is not.
       assert Fleet.SPBuilder.sp_drafts_root() == Catalogue.sp_drafts_root()
       assert String.starts_with?(Fleet.SPBuilder.sp_drafts_root(), root <> "/")
     end
@@ -116,8 +106,6 @@ defmodule Fleet.CatalogueTest do
       assert List.first(path) == Path.join(root, Catalogue.rel(:cap_profiles))
       assert List.last(path) == Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
 
-      # A tree the business root does not ship simply is not in the path — that is what lets the
-      # system catalogue carry only what its four roles need.
       refute Path.join(root, Catalogue.rel(:subagent_templates)) in Catalogue.search(
                :subagent_templates
              )
@@ -126,9 +114,7 @@ defmodule Fleet.CatalogueTest do
     test "a fine override REPLACES the active list for its tree, and only that tree", %{
       tmp_dir: tmp
     } do
-      # The property `Fleet.Test.CatalogueIsolation` rests on: a fixture must not inherit the
-      # shipped business roles from behind. Putting the override in FRONT instead of in PLACE would
-      # reopen exactly the false green that helper exists to close.
+      # Isolation depends on replacing, not prepending to, bundled business roots.
       root = fake_root(tmp)
       File.mkdir_p!(Path.join(root, Catalogue.rel(:cap_profiles)))
       File.mkdir_p!(Path.join(root, Catalogue.rel(:sp_drafts)))
@@ -145,7 +131,6 @@ defmodule Fleet.CatalogueTest do
 
       refute Path.join(root, Catalogue.rel(:cap_profiles)) in Catalogue.search(:cap_profiles)
 
-      # Untouched tree, untouched path.
       assert List.first(Catalogue.search(:sp_drafts)) ==
                Path.join(root, Catalogue.rel(:sp_drafts))
     end
@@ -163,8 +148,6 @@ defmodule Fleet.CatalogueTest do
     test "find_in/2 sur un tree_scope : le fichier du systeme, puis nil — jamais un voisin", %{
       tmp_dir: tmp
     } do
-      # La porte qui a REMPLACE `find/2` (l'aplatie, tuee avec la dette `search/1`) : un scope
-      # explicite d'UN catalogue + le systeme, et rien d'autre n'y entre par construction.
       root = fake_root(tmp)
       scope = Catalogue.tree_scope(root, :sp_drafts)
 
@@ -177,11 +160,7 @@ defmodule Fleet.CatalogueTest do
   end
 
   describe "installed — the material is here, or it is not" do
-    # The cache lives under the operator's `~/.lcars`, so these tests point the config key at a
-    # temporary directory rather than moving HOME. `HOME` is NOT the seam, and trying it is how
-    # this was found: `System.user_home!/0` is cached by the VM and keeps answering the boot-time
-    # value, so a test moving HOME would silently measure the real `~/.lcars` of whoever ran the
-    # suite.
+    # Set installation config, not HOME: System.user_home!/0 caches the VM's original home.
     setup %{tmp_dir: tmp} do
       home = Path.join(tmp, "operator")
       File.mkdir_p!(Path.join(home, "catalogues"))
@@ -193,8 +172,6 @@ defmodule Fleet.CatalogueTest do
       {:ok, home: home}
     end
 
-    # A catalogue is material PLUS a manifest. `install/3` writes both, because that pairing is
-    # exactly what `installed_roots/0` tests for.
     defp install(home, name, manifest? \\ true) do
       dir = Path.join([home, "catalogues", name])
       File.mkdir_p!(Path.join(dir, Catalogue.rel(:cap_profiles)))
@@ -205,8 +182,6 @@ defmodule Fleet.CatalogueTest do
       dir
     end
 
-    # A minimal, schema-valid card. One step, no jury, CI ignored — the shape `workshop-direct` and
-    # `quick-fix` already ship; enough for the loader to accept it and for the image to hold it.
     defp install_card(dir, name) do
       maps = Path.join(dir, Catalogue.rel(:workflow_maps))
       File.mkdir_p!(maps)
@@ -235,10 +210,7 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      # LE DEFAUT QUE CE TEST EXISTE POUR EMPECHER DE REVENIR : `publish_image!/0` publiait depuis
-      # `workflow_maps_root([])`, c'est-a-dire la PREMIERE racine. Les cartes de tout catalogue
-      # suivant existaient sur le disque et dans AUCUNE image — un projet servi par ce
-      # catalogue-la ne trouvait pas de carte du tout, et le decouvrait au premier dispatch.
+      # Exercise a second catalogue so publication limited to the default root cannot pass.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       premier = install_card(install(home, "premier"), "carte-une")
       second = install_card(install(home, "second"), "carte-deux")
@@ -246,8 +218,7 @@ defmodule Fleet.CatalogueTest do
       on_exit(&Loader.unpublish_all_images/0)
       :ok = Loader.publish_image!()
 
-      # Chaque racine porte SON image, et elle ne contient que ses cartes : les catalogues ne
-      # fusionnent pas — une carte nomme des roles, et un role appartient au catalogue qui le declare.
+      # Each root must publish its own cards without merging its neighbour's.
       for {dir, attendue, absente} <- [
             {premier, "carte-une", "carte-deux"},
             {second, "carte-deux", "carte-une"}
@@ -274,10 +245,6 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      # L'INVERSION QUE CE LOT PORTE, EN UNE ASSERTION. Ce meme test affirmait le contraire jusqu'au
-      # 2026-08-16 : « un catalogue pose sur le disque est inerte tant qu'une ligne ne le nomme
-      # pas ». Cette ligne-la etait un second etat que quelqu'un tenait a la main a cote du premier,
-      # et l'ecart entre les deux a tue une flotte au banc — declaree active, jamais installee.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       mobile = install(home, "mobile")
@@ -286,9 +253,6 @@ defmodule Fleet.CatalogueTest do
     end
 
     test "un repertoire SANS manifeste n'est pas un catalogue", %{tmp_dir: tmp, home: home} do
-      # Un `git clone` interrompu, un `lost+found`, le repertoire de sauvegarde d'un editeur : sans
-      # ce filtre ils entrent dans le roster et font tomber le boot sur une verification que
-      # personne n'a demandee.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "moitie-de-clone", false)
@@ -297,10 +261,7 @@ defmodule Fleet.CatalogueTest do
     end
 
     test "`fleet` est TOUJOURS present et TOUJOURS en tete", %{tmp_dir: tmp, home: home} do
-      # ⚖ user, 2026-08-16 : il est insupprimable PAR CHOIX, pour garantir qu'un catalogue valide
-      # existe toujours. C'est une garantie de DISPONIBILITE, pas une autorite — il reste un pair.
-      # En tete parce qu'un appelant sans projet en main doit resoudre quelque part, et que le
-      # catalogue complet qui marche toujours est le defaut honnete.
+      # User-chosen default-first policy; this checks ordering, not default-root validity.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "aaa-avant-tout-alphabetiquement")
@@ -312,10 +273,7 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      # Il n'y a plus de precedence a arbitrer : chaque catalogue porte SON image, un role et une
-      # carte se resolvent dans le leur. Ce qui reste a decider est l'ordre de la liste, et un ordre
-      # de systeme de fichiers ferait dependre le defaut d'un appelant sans projet de l'ordre
-      # d'installation.
+      # Basename ordering makes discovery independent of installation order.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, fake_root(tmp))
       zoulou = install(home, "zoulou")
       mobile = install(home, "mobile")
@@ -327,8 +285,6 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      # Deux entrees sous un meme nom publieraient deux images pour un catalogue, et un lecteur
-      # tomberait sur l'une ou l'autre selon la porte empruntee.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "fleet")
@@ -340,9 +296,6 @@ defmodule Fleet.CatalogueTest do
       tmp_dir: tmp,
       home: home
     } do
-      # `root/0` repond a « quel est le catalogue livre », pas a « lequel gagne » : il n'y a plus de
-      # gagnant. Les arbres purement metier (cartes, brief templates, project_template) le lisent en
-      # direct, et un projet resout dans le sien par sa racine, jamais par ce defaut.
       root = fake_root(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
       install(home, "mobile")
@@ -399,10 +352,7 @@ defmodule Fleet.CatalogueTest do
     test "un catalogue qui livre des cartes SANS dire laquelle est son defaut est refuse", %{
       tmp_dir: tmp
     } do
-      # Le defaut etait le litteral "brief-gate" dans Fleet.Project.Roles — la carte d'UN catalogue.
-      # Tout catalogue livrant les siennes heritait donc en silence d'un defaut nommant une carte
-      # qu'il n'a pas. Aucune propriete ne distingue la carte par defaut de ses soeurs : il faut le
-      # dire, et le boot le verifie contre les cartes REELLES du catalogue.
+      # A default must name this catalogue's own card, not a hardcoded bundled choice.
       root = fake_root(tmp)
       maps = Path.join(root, Catalogue.rel(:workflow_maps))
       File.mkdir_p!(maps)
@@ -413,8 +363,6 @@ defmodule Fleet.CatalogueTest do
       assert err.message =~ "declares no `default_card`"
       assert err.message =~ "la-mienne", "il doit NOMMER les cartes disponibles"
 
-      # Et un defaut qui nomme une carte d'un AUTRE catalogue est refuse de la meme facon : c'est
-      # exactement l'etat que le litteral produisait.
       File.write!(
         Path.join(root, "catalogue.yaml"),
         "api_version: 1\nname: fixture\ndefault_card: brief-gate\n"
@@ -434,16 +382,13 @@ defmodule Fleet.CatalogueTest do
 
       err = assert_raise RuntimeError, fn -> Catalogue.verify!() end
       assert err.message =~ "declares no `name`"
-      # It must say WHY the directory cannot stand in — that is the whole point of the field.
       assert err.message =~ "not of where it was installed"
     end
 
     test "a name carrying `_` is refused: it separates the halves of a role login", %{
       tmp_dir: tmp
     } do
-      # `Fleet.Slug` admits `_`; a catalogue name may not. `<catalogue>_<role>` is the forge account
-      # login, so `a_b_c` would split two ways. The refusal must NAME the underscore, or its author
-      # reads it as an arbitrary charset.
+      # Distinguish path-slug validity from catalogue/login-name validity.
       root = fake_root(tmp)
       File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: my_cat\n")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)
@@ -472,10 +417,8 @@ defmodule Fleet.CatalogueTest do
   end
 
   describe "the phase criterion — a catalogue COPY boots identically" do
-    # This is the test the whole lot exists for. Two claims, and the second is what makes the first
-    # mean anything: a copy of the catalogue produces the SAME proven-good images (nothing is
-    # resolved outside the root), and mutating the copy MOVES them (they were really read from it,
-    # not from the bundled priv all along).
+    # A copy gives identical images with the same system fallback; mutations then prove
+    # that the copied business material was actually read rather than the original root.
     test "same content, same image version; changed content, changed version", %{tmp_dir: tmp} do
       on_exit(fn ->
         Fleet.CapProfile.Image.unpublish()
@@ -489,8 +432,7 @@ defmodule Fleet.CatalogueTest do
 
       copy = Path.join(tmp, "catalogue-copy")
 
-      # `dereference_symlinks` — the build's `priv` is a symlink to the source tree; without it the
-      # copy would BE that symlink and the test would prove nothing.
+      # Dereference the build's priv symlink so the copy is independent of the original.
       File.cp_r!(Catalogue.root(), copy, dereference_symlinks: true)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, copy)
 
@@ -501,14 +443,10 @@ defmodule Fleet.CatalogueTest do
       assert Fleet.CapProfile.Image.published().version == bundled_caps
       assert Fleet.SPBuilder.Image.published().version == bundled_sp
 
-      # Withdraw a profile from the COPY while the bundled root keeps it: an image built from the
-      # bundle cannot notice, an image built from the copy cannot miss it. (A YAML comment would not
-      # do — the image hashes the PARSED profile, so a comment is invisible to it by construction.)
+      # Remove parsed data: a YAML comment would not change the profile image hash.
       File.rm!(Path.join(Catalogue.cap_profiles_root(), "scoper.yaml"))
 
-      # Un draft du catalogue METIER : les deux protocoles vivent desormais dans le catalogue
-      # systeme (ils servent les roles `interlocutor: both`, qui y sont tous), donc la copie n'en
-      # porte aucun — les toucher ici reviendrait a editer un fichier que la copie n'a pas.
+      # Mutate a business draft; shared protocols belong to the unchanged system fallback.
       draft = Path.join(Catalogue.sp_drafts_root(), "agent-engineer-base.md")
       File.write!(draft, File.read!(draft) <> "\n<!-- catalogue copy marker -->\n")
 

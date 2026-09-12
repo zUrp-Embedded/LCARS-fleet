@@ -3,13 +3,10 @@ defmodule Fleet.CapProfileReservedSeatTest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  BL-6-45 — the ReservedSeat kind: a kept, non-spawnable seat in the role catalogue.
-
-  The contract under test: indexed AND validated (no rot behind the exclusion), never
-  enumerated (list/list_from_published filter on the shared predicate — an unfiltered
-  enumeration feeds the seat to CanonProof/PermanentBoot, which fail-loud into
-  fleet.boot_failed), and an explicit load answers `{:error, {:role_reserved, name}}` on BOTH
-  regimes — the seat exists, the box is closed; `:not_found` would lie about the first half.
+  Checks that ReservedSeat entries are indexed and schema-validated at publication,
+  excluded from spawn enumeration, and explicitly refused by name on both disk and image reads.
+  Seat exclusion prevents boot from requesting missing spawn assets; absence and reservation
+  remain distinct states.
   """
 
   alias Fleet.CapProfile.{Catalog, Image, Schema}
@@ -108,16 +105,9 @@ defmodule Fleet.CapProfileReservedSeatTest do
       assert_raise RuntimeError, ~r/INVALID.*do not boot/s, fn -> Image.publish!() end
     end
 
-    # ⚠ LE TEMOIN AU-DESSUS NE MESURE PAS CE QU'IL DIT, ET C'EST POURQUOI CELUI-CI EXISTE.
-    # `spec: {}` est refuse par les DEUX schemas : celui du siege (qui interdit `spec`) et celui du
-    # cap-profile (dont `spec` doit avoir un contenu). Router le siege vers le mauvais schema rend
-    # donc le MEME raise, et « contre SON schema » — ce que la prose revendique — restait tenu par
-    # personne.
-    #
-    # L'entree qui separe les deux : `kind: ReservedSeat` porte par un profil COMPLET ET VALIDE.
-    # `cap-profile.json` type `kind` en simple chaine (pas de `const`) et exige `spec` ; le schema
-    # du siege pose `kind` en `const` et interdit tout le reste. Ce fichier est donc VALIDE sous le
-    # mauvais schema et INVALIDE sous le bon — la seule forme ou le raise prouve le routage.
+    # Empty spec fails both schemas and cannot distinguish routing. A complete profile with
+    # ReservedSeat kind passes the profile schema (kind is only a string) but fails the seat
+    # schema, so this fixture distinguishes which schema publication selects.
     test "le siege est valide contre SON schema, pas contre celui d'a cote", %{tmp_dir: tmp} do
       profil_complet =
         :lcars_fleet
@@ -125,8 +115,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
         |> File.read!()
         |> String.replace("kind: CapabilityProfile", "kind: ReservedSeat")
         |> String.replace("name: engineer", "name: vulcan")
-        # Slot distinct : deux noms sur un slot leveraient une AUTRE erreur, et le temoin serait
-        # vert sous la mutation pour une raison qui n'a rien a voir avec le schema.
+        # Avoid an unrelated index collision if the wrong schema accepts the fixture.
         |> String.replace("role_index: 3", "role_index: 8")
 
       File.write!(Path.join(tmp, "vulcan.yaml"), profil_complet)

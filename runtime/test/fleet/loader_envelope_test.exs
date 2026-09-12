@@ -1,36 +1,24 @@
 defmodule Fleet.Workflow.LoaderEnvelopeTest do
   @moduledoc """
-  Loader — the pipeline envelope (`kind/metadata/spec`), the only accepted form.
-
-  `Loader.load!` NORMALIZES the result to the single internal form
-  `%{"name", "steps"}`: the envelope is unwrapped at load (tests assert
-  the normalized form, not the raw YAML), then the `workflow-map.json`
-  schema validates the structure (fail-loud).
-
-  `async: true`: `:workflow_maps_root` is passed via opts to `Loader.load!/2`
-  (no coupling to the global Application env).
+  Checks schema validation of workflow envelopes and preservation of fields in normalized maps.
+  Loader validates the raw envelope before normalization and graph checks.
+  Per-call workflow_maps_root options isolate fixture loads for async tests.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Workflow.Loader
 
-  # R0.8-brick6: canon pipelines reabsorbed in-repo.
   @canon_pipelines Application.app_dir(
                      :lcars_fleet,
                      "priv/catalogue/workflow/workflow_maps"
                    )
 
   test "canon standard-qa.yaml normalized → DISPATCHABLE steps only (brief-review gate + build)" do
-    # rev3 rehabilitation: the old architect/starfleet steps were NOT servable by the
-    # dispatch (live runaway 2026-07-18) — the card now carries only what the engine runs.
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "standard-qa"
     assert is_map(pipe["steps"]["brief-review"])
     assert pipe["steps"]["brief-review"]["role"] == "scoper"
-    # The step no longer OVERRIDES `brief_kind`: `scoper` is a native judge since the 2026-07-30
-    # split, and its profile carries the property. What must hold is the RESOLVED judge-ness, which
-    # `Fleet.CapProfile` answers — asserting the map field would pin the mechanism, not the contract
-    # (and pinning it is what hid the missing fallback in GateEngine until now).
+    # Judge mission belongs to the resolved role profile, not a per-step override.
     assert {:ok, profile} = Fleet.CapProfile.load(pipe["steps"]["brief-review"]["role"])
     assert Fleet.CapProfile.brief_kind(profile) == "judge"
     assert pipe["steps"]["brief-review"]["judge_target"] == "brief"
@@ -46,9 +34,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
     refute Map.has_key?(pipe, "spec")
   end
 
-  # F-C160: brief-gate IS the DEFAULT workflow_map of the prod dispatch (StepDispatcher) → it must be
-  # covered by canon conformance like standard-qa + audit-only: it must normalize cleanly + carry its
-  # load-bearing shape (scoper brief gate BEFORE the engineer).
+  # Check the bundled brief-gate shape independently of which card a catalogue selects as default.
   test "canon brief-gate.yaml (prod DEFAULT map) normalized → brief-review(judge) gate build" do
     pipe = Loader.load!("brief-gate", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "brief-gate"
@@ -62,16 +48,14 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
     refute Map.has_key?(pipe, "spec")
   end
 
-  # The two production TYPE cards of the criticality catalogue: the card IS the judgment-layer
-  # choice — the engine reads `jury` as data (`Roles.project_jury`), never hardcodes a panel.
+  # Jury choice is card data, including an intentionally empty panel.
   test "canon c0-poc.yaml normalized → single build step + DELIBERATE zero-judge jury" do
     pipe = Loader.load!("c0-poc", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "c0-poc"
     assert pipe["jury"] == []
     assert Map.keys(pipe["steps"]) == ["build"]
     assert pipe["steps"]["build"]["role"] == "engineer"
-    # The card's short description travels through normalize: it is the SSoT of the
-    # `wfmap/<map>` forge-label tooltip (the card explains itself to the human).
+    # Description must survive normalization for the wfmap label tooltip.
     assert is_binary(pipe["description"]) and pipe["description"] != ""
   end
 
@@ -84,12 +68,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
   end
 
   test "spec.ci SURVIVES normalisation — a declared gate that does not cross is a dead guarantee" do
-    # THE SEAM WHERE THE DEFECT LIVED. `CiGate` was tested, the schema validated `spec.ci`
-    # (enum required|ignore), three canon cards declared `required` — and the WIRE between them was
-    # tested by nobody. `normalize/1` built a map without the key, so `Map.get(map, "ci")` in
-    # `ReviewLifecycle.issue_card_ci/2` always answered nil, hence `:ignore`. The gate, its bounded
-    # wait, its escalation and the fact it hands to the judge all existed and were unreachable, and
-    # no card was distinguishable from a card declaring nothing.
+    # Losing ci in normalization silently disables the gate even when declaration and gate tests pass.
     for name <- ~w(standard-qa brief-gate c1-light) do
       map = Loader.load!(name, workflow_maps_root: @canon_pipelines)
 
@@ -98,18 +77,13 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
                "disarmed on it, silently"
     end
 
-    # And the card that does NOT gate says so, in the same words: `ignore` is a declaration, not an
-    # absence. The distinction this line pins is the whole point of the mandatory field — before it,
-    # this assertion read `== nil` and could not tell "decided against" from "forgot".
+    # Explicit ignore distinguishes a choice from a missing declaration.
     audit = Loader.load!("audit-only", workflow_maps_root: @canon_pipelines)
     assert Map.get(audit, "ci") == "ignore"
   end
 
   test "NO canon card is silent on ci — the choice is written on every one of them" do
-    # The catalogue-wide half of the property. The twin below proves declared == normalized, which
-    # a catalogue of eight silent cards would satisfy perfectly (nil == nil, eight times): it
-    # measures the WIRE, not the DECLARATION, and on its own it green-lights a catalogue where
-    # nobody ever chose. This one measures the declaration.
+    # Equality alone would accept nil == nil: separately require a declaration in each file found.
     for path <- Path.wildcard(Path.join(@canon_pipelines, "*.yaml")) do
       name = Path.basename(path, ".yaml")
       declared = YamlElixir.read_from_file!(path) |> get_in(["spec", "ci"])
@@ -122,10 +96,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
   end
 
   test "a card that OMITS ci is refused by the loader — the silent card is unrepresentable" do
-    # THE MUTATION TARGET. Drop `"ci"` from `spec.required` in workflow-map.json and this test
-    # is the one that goes red. Without it, the mandatory field is enforced only by the canon cards
-    # happening to carry it — which is a convention, not a wall, and conventions do not survive the
-    # next card someone writes in a hurry.
+    # Nominal cards all contain ci; a missing-field fixture exercises the schema requirement.
     tmp = Fleet.TestEnv.tmp_path("ci-mandatory")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
@@ -148,8 +119,6 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
   end
 
   test "EVERY canon card's declared spec.ci reaches the normalized map" do
-    # Generic twin of the test above: it does not name the three cards, so a FOURTH card declaring
-    # `ci` is covered the day it lands rather than the day someone remembers to add it here.
     for path <- Path.wildcard(Path.join(@canon_pipelines, "*.yaml")) do
       name = Path.basename(path, ".yaml")
       raw = YamlElixir.read_from_file!(path)
@@ -163,14 +132,8 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
   end
 
   test "un champ d'etape dit la VERITE sur l'existence de son lecteur runtime" do
-    # Le mur, et il tient en une phrase : ce qu'un auteur de carte lit sur un champ doit correspondre
-    # a ce que le moteur en fait. Un champ sans lecteur qui ne le dit pas se lit comme un contrat ;
-    # un champ QUI A un lecteur et qui se declare documentaire est pire — il invite a le remplir a
-    # cote de la verification qui le lit vraiment.
-    #
-    # La paire est asymetrique depuis BL-6-59, et l'asymetrie est le point : `outputs` est verifiable
-    # dans le workspace du pod, `inputs` ne l'est pas (une source peut etre un ticket, une autre
-    # face, un depot distant).
+    # Outputs have a workspace verifier; inputs may refer to tickets or remote sources.
+    # This checks schema wording and exercises the outputs reader, not absence of all inputs readers.
     schema =
       Path.join([:code.priv_dir(:lcars_fleet), "workflow", "schema", "workflow-map.json"])
       |> File.read!()
@@ -185,9 +148,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
            "inputs n'a aucun lecteur runtime et le schema ne le dit pas — un auteur de carte " <>
              "le lira comme un contrat"
 
-    # `outputs` : le lecteur est PROUVE ici, pas cite. On l'exerce — un champ declare produit des
-    # faits, un champ absent n'en produit aucun. Une assertion sur le seul texte du schema serait
-    # une seconde liste a tenir a la main, exactement ce que ce test existe pour eviter.
+    # Exercise derive with and without outputs so checking prose alone cannot pass.
     assert Fleet.Workflow.StepOutputs.derive(%{"outputs" => ["x/y.json"]}, nil) != %{},
            "le schema va declarer outputs LU par le moteur — mais rien ne le lit"
 
@@ -204,13 +165,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
 
   @tag :tmp_dir
   test "a step key that means NOTHING is REFUSED, not silently accepted", %{tmp_dir: dir} do
-    # `decisions` was declared by the schema and had neither a producer nor a consumer: no canon
-    # card posed it, no line of `lib/` read it. A schema property that connects nothing to nothing
-    # invites a card author to declare something that does nothing, and the card validates — which
-    # is the most expensive kind of silence, because it looks like it worked.
-    #
-    # Removed. `additionalProperties: false` then does the rest: the key is now REFUSED with the
-    # schema's own reason instead of being carried into a void.
+    # Reject the retired decisions field rather than accepting a setting with no runtime effect.
     yaml = """
     kind: WorkflowMap
     metadata:
@@ -236,10 +191,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
   test "needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
   } do
-    # `needs: [a, a]` (copy-paste) would pass the schema, the edge got laid TWICE, and the
-    # GraphValidator rejected as :fan_out with a WRONG diagnostic ("2 successors [b, b]" on a
-    # linear chain): fail-closed but a lying trace — the map author would hunt a nonexistent
-    # fan-out. The rejection lives UPSTREAM (uniqueItems), with the true reason.
+    # Duplicate edges otherwise look like fan-out to GraphValidator; reject them at the schema.
     yaml = """
     kind: WorkflowMap
     metadata:
@@ -288,9 +240,7 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
        %{
          tmp_dir: dir
        } do
-    # Upstream lock: a hard-gate with empty rules would pass `Enum.all?([]) == true` → :pass (a gate
-    # enforcing NOTHING). The schema REJECTS it at load (`if type==hard then rules minItems 1`) → the
-    # case is unrepresentable upstream. (terminal keeps legitimate empty rules: the `finish` gate.)
+    # Empty hard rules would pass Enum.all? vacuously. Terminal gates may legitimately have none.
     bad = """
     kind: WorkflowMap
     metadata:
@@ -330,22 +280,15 @@ defmodule Fleet.Workflow.LoaderEnvelopeTest do
     """
 
     File.write!(Path.join(dir, "override-target.yaml"), yaml)
-    # No global put_env — async: true safe.
+    # This case uses workflow_maps_root only; despite its title, it does not pass schema_path.
     loaded = Loader.load!("override-target", workflow_maps_root: dir)
     assert loaded["name"] == "override-target"
   end
 
   @tag :tmp_dir
   test "a SUBSTITUTED schema cannot smuggle a nil ci through normalisation", %{tmp_dir: dir} do
-    # THE SECOND LOCK, and it exists because the first one is bypassable. `spec.ci` being mandatory
-    # is enforced by the schema — and `:schema_path` is an opt: any caller may hand the loader a
-    # laxer contract. Past that door, `normalize/1` is the last reader, and a `Map.get` there would
-    # hand back `"ci" => nil` — a policy nobody declared, rebuilt one layer below the wall that was
-    # supposed to make it unrepresentable. `Map.fetch!` turns that into a crash naming the key.
-    #
-    # Mutation-checked: with `fetch!` swapped for `get`, the whole suite stayed green without this
-    # test — every card in the tree declares `ci`, so the two are indistinguishable on the nominal
-    # path. A guard whose removal changes nothing is not a guard.
+    # A lax schema can bypass the first requirement. Normalization must still fetch ci strictly;
+    # nominal cards cannot distinguish Map.fetch! from Map.get because they all declare the field.
     lax = Path.join(dir, "lax-schema.json")
 
     real =

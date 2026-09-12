@@ -2,105 +2,34 @@ defmodule Fleet.Catalogue do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  The single authority for WHERE the catalogue lives — an ORDERED SEARCH PATH, one sub-path per
-  tree.
+  Resolves catalogue locations, tree scopes and manifest identity without domain dependencies.
 
-  There are several roots: the INSTALLED catalogues, then the system default last, and a reader
-  asks for a TREE (`search(:modops)`) rather than naming a root. `search/2` and its siblings remain
-  for the two callers that legitimately name their own — the composer under `--catalogue`, and the
-  spawn path whose skills root is its own three-state knob.
+  Project readers use `tree_scope/2` and `find_in/2`: their catalogue, then system defaults.
+  `search/1` is a global view over installed catalogues; it must not choose a neighbour's
+  role or prompt for a project. `root/0` selects the default catalogue when none is named.
+  A whole-root override keeps related trees together; fine overrides replace one business
+  tree while retaining system fallback, allowing deliberate mixed sources and test isolation.
 
-  ## Runtime vs catalogue
+  Catalogue roots contain replaceable/exportable material, including build-time SP blocks.
+  Runtime schemas, the git-denial baseline and frozen Memory-X assets stay outside them:
+  exporting editable copies of runtime contracts would suggest controls that have no effect.
 
-  The runtime is the machine that runs agents; the catalogue is the business it runs. The
-  discriminator is mechanical and it is a DIRECTORY: everything under a catalogue root
-  (`priv/catalogue/`, `priv/catalogue-system/`, or the root an operator brings) is business material
-  an operator legitimately replaces, and ONLY that resolves through this module. Everything else
-  under `priv/` is runtime, resolved by `:code.priv_dir` with no knob — `schema/` (the contract a
-  catalogue is validated against) and `baseline/` (a floor a catalogue may not lower, e.g. the
-  universal git denylist). Both by the same rule: **what an operator must not be able to replace is
-  a contract, and a contract an operator can swap does not constrain.**
-
-  Corollary for anything added later: a floor or a contract placed inside a catalogue would be
-  exported with it and edited by its author to no effect — a lie told by the layout rather than by
-  a comment. No intermediate level (`canon/`) inside a catalogue carries that discriminator: the
-  root does.
-
-  ## Why ONE root and not one variable per tree
-
-  One `LCARS_*` variable per tree would mean as many variables to set in order to bring ONE
-  catalogue. That is `Fleet.Layout`'s warning turned inside out: over-exposing the structural forces
-  the operator to re-declare a single intent N times, and the last one is the one they forget —
-  which yields a fleet running THEIR cap-profiles over the BUNDLED SP fragments, a coherent-looking
-  skew that no error message reports.
-
-  A catalogue is ONE object. Pointing at it once per tree denies it.
-
-  The per-tree config keys stay as FINE OVERRIDES, and they keep precedence over this root: they
-  predate it, tests drive them, and panachage (an operator's cap-profiles over the bundled modops)
-  is a legitimate — if rarely wise — deployment. The coarse knob moves everything; a fine knob
-  moves exactly its tree. Both narrownesses are intentional, not accidental.
-
-  ## The default
-
-  `root/0` defaults to the BUNDLED `priv/catalogue` — a directory that holds the catalogue trees
-  and nothing else. (How MANY is deliberately not written here: an inventory in prose is false the
-  day a tree is added, and `rel/1` is the place that has to be right.)
-
-  What the directory buys beyond tidiness: **exporting a catalogue is copying one directory**. The
-  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/memory-x/` (a frozen feature) —
-  sits OUTSIDE it, so no export can carry a contract an author would edit to no effect.
-
-  ⚠ `sp_builder/sp_blocks/` lives INSIDE both catalogues (`core/` is a shipped default an author
-  supersedes by name, the rest is their own material) and is build-time all the same — a running
-  fleet never reads it. Build-time is a property of WHEN a tree is read, not of where it lives, so
-  it does not decide which side of this line a tree sits on.
-
-  ## The manifest
-
-  `<root>/catalogue.yaml` declares the contract version the catalogue targets, and its NAME.
-  `verify!/0` reads it at boot, BEFORE the images freeze anything from the disk.
-
-  The name is a property OF THE CATALOGUE, not of its installation. Assigned at install time — by a
-  CLI argument, or defaulting to the source basename — the same catalogue on two containers carries two
-  names. That is harmless only while the name is a local handle for the declaration file and the
-  verbs; it stops being harmless because the name addresses something OUTSIDE the container, the forge org
-  that carries a catalogue's projects. A project created in org `web` is unopenable where the same
-  catalogue answers to `frontend`.
-
-  Kebab-case, and `_` is refused where `Fleet.Slug` allows it: the underscore is the separator of the
-  `<catalogue>_<role>` account login, so admitting it in either half would make the split ambiguous.
-
-  This does NOT reopen per-file `apiVersion`: a cap-profile still carries none, and the schema that
-  validates it is still chosen by the code. That rule answers "which schema validates THIS file"
-  under a premise that holds today — the code and the YAML ship in one commit. The manifest answers
-  a different question, which only exists once the premise breaks: "may this ARTIFACT, authored
-  elsewhere and published on its own cadence, be consumed by this runtime at all". One file, at the
-  root, about the whole; not a field on every file.
-
-  Required, not optional, for a reason with a shelf life: a manifest can be made required only while
-  every catalogue in existence is in this repository. Once a second one is in someone else's hands,
-  requiring it is a breaking change to a distributed artifact — and leaving it optional means a
-  catalogue from a foreign generation fails at its first load without ever saying why.
-
-  Foundation (`deps: []`, next to `Fleet.Layout` and `Fleet.Slug`): anything may depend down onto it.
+  The required catalogue.yaml manifest supplies a stable name (forge organisation and role-login
+  prefix) and artifact compatibility version. File schemas remain chosen by code; a manifest
+  version does not reintroduce per-profile apiVersion. `verify!/0` checks the current root's
+  manifest, name and default-card declaration before callers publish its images.
   """
 
   require Logger
 
   @manifest_basename "catalogue.yaml"
 
-  # Contract versions of the CATALOGUE this runtime can consume. A list, not a scalar: a runtime
-  # able to read two generations is what makes an operator's upgrade ordered rather than atomic.
+  # A list permits compatibility across generations during an ordered upgrade.
   @supported_api_versions [1]
 
-  # STRICTER than `Fleet.Slug` on purpose: no `_`. The underscore separates the two halves of a role
-  # account login (`<catalogue>_<role>`), so admitting it in a catalogue name would make `a_b_c`
-  # readable as two different splits. Slug stays as it is — it guards paths, a different job.
+  # Stricter than path slugs: '_' separates <catalogue>_<role> logins and cannot occur in a name.
   @name_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
 
-  # ── the trees ─────────────────────────────────────────────────────────────
-  # Root-relative, ONE literal each.
   @rel_cap_profiles "cap_profile/cap-profiles"
   @rel_modops "cap_profile/modop-bundles"
   @rel_subagent_templates "cap_profile/subagent-templates"
@@ -113,117 +42,46 @@ defmodule Fleet.Catalogue do
   @rel_project_template "project_template"
   @rel_skills "skills"
 
-  # LES AVATARS, nommes par le ROLE et non par le compte. La recette porte une table
-  # `<compte>:<image>` tenue a la main, donc elle doit connaitre les roles d'un catalogue tiers —
-  # un fichier nomme par le role, dans le catalogue qui le declare, n'a besoin d'aucun index.
-  # FACULTATIF par nature (⚖ user) : un catalogue sans avatar s'installe, ses comptes
-  # portent l'identicon de Gitea. Un role que personne n'a dessine n'a pas d'avatar, et c'est normal.
+  # Optional role-named avatars avoid a separate account-to-image roster; absence keeps identicons.
   @rel_avatars "avatars"
 
   @doc """
-  Root of the BUNDLED catalogue — and the root a caller holding no catalogue resolves to.
-
-  `LCARS_CATALOGUE_ROOT` (→ `:lcars_fleet, :catalogue_root`) or `priv/catalogue`. The default is
-  `:code.priv_dir`-derived, NOT CWD-relative: it must resolve in a release
-  (`lib/lcars_fleet-<vsn>/priv`) exactly as in dev, with no environment at all.
-
-  ## It is THE default, and that is why it has a name
-
-  It is also the head of `installed_roots/0`, by construction rather than by coincidence — the list
-  is built from this function. Spelling that default `hd(installed_roots())` READS as "whichever
-  catalogue happens to be first" while the mechanism guarantees a constant, so it invites a
-  reordering of `installed_roots/0` to silently change every such resolution — and it names a
-  POSITION where the thing has a NAME.
+  Returns the default catalogue root: :catalogue_root (configured from LCARS_CATALOGUE_ROOT),
+  or release-relative priv/catalogue. Explicit nil uses that default too.
+  This is also the first installed_roots entry; use root/0 to express default resolution.
   """
   @spec root() :: Path.t()
   def root, do: to_string(bundled_root())
 
-  # THE BUNDLED ROOT IS THE BUSINESS ROOT OF A CALLER WITHOUT A CATALOGUE.
-  #
-  # `search/1` covers the trees BOTH halves of a deployment share — cap-profiles, modops, drafts,
-  # blocks… The purely business trees (workflow maps, brief templates, project_template) have no
-  # system default, so they read this root DIRECTLY. A caller that resolves its ROLES in one
-  # catalogue and its CARDS here gets a coherent-looking half-wiring: a card whose jury names a role
-  # the other catalogue does not carry. The boot refuses that one LOUDLY — it is the same
-  # "coherent-looking skew" this module's header warns about, one level up.
   defp bundled_root do
-    # An explicit nil (a cross-test config leak) must never reach Path.join — coalesced here, at the
-    # boundary, the same guard `CapProfile.Catalog.root_dir/0` carries for its own key.
     Application.get_env(:lcars_fleet, :catalogue_root) ||
       Application.app_dir(:lcars_fleet, "priv/catalogue")
   end
 
   @doc """
-  Root of the SYSTEM catalogue — the mechanism, never the business.
-
-  The roles living there are the ones no card names — the runtime resolves each BY CAPABILITY,
-  alone, to hold its own machinery. That IS the test: a role a card names is business, a role only
-  the runtime looks for is mechanism.
-
-  ## Why this is not a second knob
-
-  The argument above against one variable per tree holds, and this does not contradict it: the system
-  root
-  is NOT an operator variable. It is embedded and resolved by `:code.priv_dir`, like `schema/` and
-  `baseline/`, for the same reason — **what an operator must not be able to replace is a contract**.
-  An operator brings their business; they do not choose their mechanism.
-
-  That is also what finally makes "this catalogue is complete" checkable. With everything in one
-  tree the sentence has no meaning: a business catalogue would have to carry the machinery, so
-  missing it and choosing differently look identical. Split, the two halves answer separately — the
-  system is present and intact, the business is conforming.
-
-  Both catalogues are read through ONE search path (`search/2`), business first: a business
-  catalogue that ships a file where the system also ships one REPLACES it, the child-theme rule.
+  Returns release-relative priv/catalogue-system, or :catalogue_system_root when configured.
+  That application-env override is a test seam, with no dedicated runtime environment-variable
+  setting; it is not access-controlled here. System supplies mechanism defaults, which business
+  entries may shadow by name/path through the search functions.
   """
   @spec system_root() :: Path.t()
   def system_root do
-    # `:system_root` is a TEST SEAM, and the distinction from a knob is the whole point: it has no
-    # env var, no line in the env template and no `config/runtime.exs` reader, so no deployment can
-    # set it. Without it no test could build an ISOLATED catalogue — every fixture root would
-    # silently inherit the mechanism roles and measure a deployment nobody assembled. A seam
-    # a test can reach and an operator cannot is not the knob this module argues against.
     Application.get_env(:lcars_fleet, :catalogue_system_root) ||
       Application.app_dir(:lcars_fleet, "priv/catalogue-system")
   end
 
   @doc """
-  The SEARCH PATH of a tree: the business directory, then the system one — existing only.
-
-  **The order IS the precedence, and it is written here once.** Every reader goes through the four
-  functions below; none of them knows there are two roots, and adding a third one day is one line
-  here and zero elsewhere. That property is the whole point, and its absence was the defect: the
-  same resolution had been hand-rolled at fourteen call sites behind three copies of the same
-  helper, and the three readers that never learned it were three bugs — a permanent pod
-  respawn-looping on a skill (W-11), a conversation contract demanded from a catalogue that has no
-  human-facing role (W-13), a dormant extension point aimed at the wrong root (W-14).
-
-  `business` is resolved BY ITS DOMAIN (that is where the fine per-tree overrides live) and passed
-  in; `rel` is the tree's path inside the system catalogue. Absent directories are dropped, which
-  is what lets the system catalogue ship only what its four roles need instead of empty trees.
-
-  **Business first.** A catalogue that ships a file at a path the system also ships REPLACES it —
-  the child-theme rule. An operator who drops their own `rubber-duck` means it; the attacker is
-  never the operator.
+  Returns existing directories in precedence order: explicit business tree, then system/rel.
+  The caller resolves business overrides. A business file shadows the same system path;
+  missing trees are omitted so catalogues need only ship the material they use.
   """
   @spec search(Path.t(), String.t()) :: [Path.t()]
   def search(business, rel) when is_binary(business) and is_binary(rel) do
     Enum.filter([business, Path.join(system_root(), rel)], &File.dir?/1)
   end
 
-  # The FINE overrides, gathered from the four domains that held them. Each moves EXACTLY its tree
-  # and nothing else, which is what "fine" means next to the big wheel (`LCARS_CATALOGUE_ROOT`,
-  # which moves a whole catalogue).
-  #
-  # ⚠ A fine override REPLACES the active list for its tree, it does not sit in front of it — and
-  # that is load-bearing rather than a detail of taste. `Fleet.Test.CatalogueIsolation` builds an
-  # isolated catalogue by pointing these keys at a fixture; if the shipped business root stayed
-  # behind, every such fixture would silently inherit roles nobody wrote and the suite would measure
-  # a deployment nobody assembled. The system root is never dropped either way: it is the contract,
-  # not a participant in precedence.
-  #
-  # Trees with no entry have no fine override, deliberately: `sp_templates` and `sp_blocks` are the
-  # shape and the substrate of the prompts, and nothing has ever needed to move one alone.
+  # Replace the business list, not prepend: fixtures must not inherit bundled business data.
+  # Keep system fallback. Trees absent from this map have no fine override.
   @fine_overrides %{
     cap_profiles: {:lcars_fleet, :cap_profile_root_dir},
     modops: {:lcars_fleet, :sp_builder_modop_root},
@@ -232,16 +90,9 @@ defmodule Fleet.Catalogue do
   }
 
   @doc """
-  The ordered search path for one TREE, named by its atom — the N-root door.
-
-  Where `search/2` asks the caller for a business root, this resolves the whole precedence itself:
-  the fine override for that tree if one is set, otherwise every INSTALLED catalogue in order, and the
-  system default last. Absent directories drop out, so a catalogue that ships only what its roles
-  need costs nothing.
-
-  This is the form a domain should use. `search/2` remains for the callers that legitimately NAME
-  their root — the composer under `--catalogue`, and the spawn path whose skills root is its own
-  three-state knob — and there are exactly two of them.
+  Returns the global tree search path: fine override or all installed business trees,
+  followed by system, deduplicated and filtered to existing directories.
+  Use tree_scope/2 for project-specific resolution instead of merging neighbouring catalogues.
   """
   @spec search(atom()) :: [Path.t()]
   def search(tree) when is_atom(tree) do
@@ -256,100 +107,38 @@ defmodule Fleet.Catalogue do
     |> Enum.filter(&File.dir?/1)
   end
 
-  # ⚠ PAS DE PORTE PAR ARBRE APLATIE SUR TOUS LES INSTALLES — pas de `find(tree, name)` qui
-  # resoudrait un nom au premier catalogue qui l'a, TOUS catalogues confondus. Un lecteur qui croit
-  # avoir besoin d'une recherche tous-catalogues a en main un appelant qui ne sait pas a quel
-  # catalogue il appartient : c'est CE probleme-la qu'il faut resoudre, pas celui du chemin. Les
-  # protocoles de pod resolvent par `tree_scope/2` + `find_in/2`, le scope d'UN catalogue plus le
-  # systeme. Ce qui prend une racine explicite, `search/2` et `find/3`, a exactement deux
-  # appelants : le composeur des blocs SP et la resolution des skills au spawn.
-
-  # The name of the business catalogue shipped inside the release. `fleet` and not `lcars`: the
-  # name is destined to become an identifier OUTSIDE this code (the forge org that carries a
-  # catalogue's projects), and `lcars` is already taken there by LCARS's own repository — an org
-  # `lcars` holding a repo `lcars` reads as a mistake. `fleet/lcars` is what the forge already
-  # shows, and it stays true when the org becomes the catalogue.
+  # Forge organisation name: fleet/lcars distinguishes the catalogue from LCARS's repository.
   @bundled_name "fleet"
 
   @doc """
-  The name the catalogue shipped inside the release declares.
-
-  PUBLIC because a second site needs it — `Fleet.Application.CatalogueLifecycle` had its own
-  `@bundled "fleet"`, and two literals for one fact drift the day one of them is changed. The name
-  is load-bearing beyond this module: it is the forge ORG that carries the reference catalogue's
-  projects, so it cannot be installed FROM the forge and no deposit can ever claim it.
+  Returns the bundled catalogue's reserved name. CatalogueLifecycle uses it to keep forge
+  installations/deposits from replacing the release-owned catalogue.
   """
   @spec bundled_name() :: String.t()
   def bundled_name, do: @bundled_name
 
   @doc """
-  The INSTALLED catalogues, as roots — `#{@bundled_name}` first, then the material present on this
-  container, by name.
+  Returns root/0 first (normally `#{@bundled_name}`), then discovered installation directories
+  ordered by basename. Discovery requires a catalogue.yaml path, skips basename `#{@bundled_name}`
+  and keeps the first directory for duplicate basenames. It does not validate manifests or
+  check the unconditional default root's existence. System is added separately by scope readers.
 
-  ## Installed is a PRESENCE, not a declaration
-
-  NO SECOND FACT beside this one — in particular no ACTIVITY declaration, one name per line in a
-  file the operator edits, deciding WHICH of the installed catalogues actually runs. Its absence is
-  the point of this function's shape.
-
-  Two facts that can disagree about the same question will disagree, and both skews are expensive:
-  a catalogue declared active while the forge carries neither its org nor its role accounts boots
-  the fleet on a roster nobody assembled, which then loops at the first dispatch on tokens that were
-  never minted — far from the line that asked for it. The reverse is quieter still: a catalogue
-  installed on the forge and absent from the declaration is polled by nobody, so its projects simply
-  never move, and no message says why.
-
-  One fact answers it. The material is HERE, or it is not.
-
-  ## What makes the material appear
-
-  `lcars catalogue install <name>`, played by an admin — the single verb. It lays the org and the
-  role accounts on the forge, pushes the catalogue's source into `<name>/_catalogue`, and drops the
-  material here. Convergent provisioning replays the second half at every container boot, so this
-  directory is a CACHE of what the forge carries rather than a state anyone maintains by hand.
-  Deleting a directory here does not uninstall anything; the next boot puts it back.
-
-  ## Why the bundled one is first and unconditional
-
-  `#{@bundled_name}` ships inside the release, so it is installed by construction and cannot be
-  removed — deliberately, so that ONE valid catalogue is always present. That is an AVAILABILITY
-  guarantee and not an authority: it is a peer, and a role or a card of another catalogue never
-  resolves in it.
-
-  It comes first because a caller with no project in hand has to resolve SOMEWHERE, and the
-  complete catalogue that always works is the honest default. The order below it is the name order
-  — deterministic, and belonging to nobody.
-
-  The system catalogue is not in this list and cannot be: it is always last, implicitly, and it is
-  a contract rather than a participant.
+  Installed material, not a second active-list declaration, controls discovery. Provisioning
+  supplies this cache from forge catalogue stores; deleting local material is not an uninstall
+  and convergence may restore it. A separate active list could omit installed projects or activate
+  roles without provisioned accounts. Project scopes still keep neighbouring catalogues separate.
   """
   @spec installed_roots() :: [Path.t()]
   def installed_roots do
     [root() | installed_dirs()]
   end
 
-  # WHERE the material sits arrives by CONFIG, and this module stays `deps: []`.
-  #
-  # It is a platform fact, so its authority is `Fleet.Layout` — but calling it from here would add a
-  # dep to the module whose layer name is the one mechanically checkable thing in the topology
-  # (`foundation ≡ deps: []`, CLAUDE.md). The edge creates no cycle and would still turn a derived
-  # fact into one the map asserts by hand. `config/runtime.exs` passes the paths instead, which is
-  # where every other deployment fact already enters.
-  #
-  # Unset — the whole of `:test`, and any deployment that never wired it — means the shipped
-  # catalogue alone.
-  #
-  # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed,
-  # `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
-  # test moving HOME would silently measure the real `~/.lcars` of whoever ran the suite.
+  # Runtime config supplies Layout's paths so this foundation module keeps deps: [].
+  # No configured directories means default catalogue only. Do not derive them via
+  # System.user_home!/0: its cached value ignores tests moving HOME and could read real user data.
   defp install_dirs, do: Application.get_env(:lcars_fleet, :catalogue_install_dirs, [])
 
-  # A directory counts as a catalogue when it carries a MANIFEST, not merely because it exists.
-  # Half a `git clone`, an editor's backup directory or a stray `lost+found` would otherwise enter
-  # the roster and take down the boot on a verify nobody asked for.
-  #
-  # `@bundled_name` is excluded rather than shadowed: it is already first, and a second entry under
-  # the same name would publish two images for one catalogue.
+  # Requiring a manifest path avoids treating arbitrary cache directories as installations.
   defp installed_dirs do
     install_dirs()
     |> Enum.flat_map(fn dir -> Path.wildcard(Path.join(dir, "*/#{@manifest_basename}")) end)
@@ -367,25 +156,16 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The CATALOGUE roots, in precedence order — business first, then the system default.
-
-  `search/2` answers "where do I look for this TREE"; this answers "which catalogues am I made of".
-  The difference matters to a check that must attribute a fault to a catalogue rather than to a
-  directory: a role and its SP live in two different trees of the SAME catalogue, and pairing them
-  through `search/2` alone would compare tree i of one with tree i of another.
-
-  ⚠ A FINE override (`:lcars_fleet, :cap_profile_root_dir` and its siblings) moves one tree OUT of its
-  catalogue, and no pairing survives that by construction — the tree is then, deliberately, not part
-  of any catalogue. Callers that attribute per catalogue must say so.
+  Returns existing installed roots followed by system, for attribution across related trees.
+  Fine tree overrides are not reflected here: callers must not assume those overridden trees
+  remain under the corresponding root or zip independently filtered tree lists together.
   """
   @spec roots() :: [Path.t()]
   def roots, do: Enum.filter(installed_roots() ++ [system_root()], &File.dir?/1)
 
   @doc """
-  First existing `name` on the search path — the BUSINESS path when it exists nowhere.
-
-  Returning the business path rather than `nil` is deliberate: the caller's own `:enoent` then names
-  the file its author would have to create, instead of a path in a tree they do not own.
+  Returns the first regular file at name on search/2, or the expected business path if missing,
+  so a caller's enoent identifies the file its author should create. Does not confine name.
   """
   @spec find(Path.t(), String.t(), String.t()) :: Path.t()
   def find(business, rel, name) when is_binary(name) do
@@ -404,29 +184,15 @@ defmodule Fleet.Catalogue do
   def rel(:sp_templates), do: @rel_sp_templates
   def rel(:skills), do: @rel_skills
 
-  # ⚠ UNE ABSENCE ICI EST UN MECANISME, PAS UN OUBLI : `rel/1` est ce qu'un appelant utilise pour
-  # adresser un arbre sous une racine ARBITRAIRE, donc un arbre qui manque a cette table ne peut
-  # etre adresse que sous `root/0` — le catalogue livre. Les cartes ne sont PAS un chemin de
-  # recherche (elles ne se superposent pas), mais elles sont adressables par racine, ce qu'exige la
-  # publication d'une image par catalogue.
+  # Cards and project templates need explicit-root addressing without cross-catalogue merging.
   def rel(:workflow_maps), do: @rel_workflow_maps
-  # Meme mecanisme, meme consequence : sans clause ici, le template de projet ne s'adresserait que
-  # sous `root/0`, donc TOUT projet du conteneur serait echafaude depuis le catalogue de reference
-  # pendant que le sien livre les fichiers que rien ne lit. Pas un chemin de recherche non plus — un
-  # template ne se superpose pas, c'est l'arbre dont un nouveau projet part.
-  #
-  # ⚠ ONE TREE IS STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
-  # (read by `Workflow.BriefTemplate`). Same latent skew — a catalogue's own would never be read —
-  # not closed here because no caller holds the catalogue in hand today.
+  # brief_templates still has no rel/1 clause: its reader uses the default root, leaving
+  # per-catalogue brief-template selection unresolved.
   def rel(:project_template), do: @rel_project_template
 
   @doc """
-  SP blocks, BUSINESS root (`<root>/#{@rel_sp_blocks}`) — the search path is `search/2`.
-
-  BUILD-TIME material, and the only tree here that a running fleet never reads: the composer turns
-  it into `sp_drafts/`, and the pods read those. It is a catalogue tree all the same, because the
-  system half of it (`core/`) is a shipped DEFAULT an operator supersedes by name, exactly like the
-  two `protocole-user-*`.
+  Returns default-catalogue SP blocks (`<root>/#{@rel_sp_blocks}`). The build-time composer
+  resolves system defaults through search/2 and emits the drafts consumed by pods.
   """
   @spec sp_blocks_root() :: Path.t()
   def sp_blocks_root, do: Path.join(root(), @rel_sp_blocks)
@@ -459,16 +225,9 @@ defmodule Fleet.Catalogue do
   def sp_templates_root, do: Path.join(root(), @rel_sp_templates)
 
   @doc """
-  One search path per installed catalogue for a TREE — the per-catalogue door, next to `search/1` which
-  merges them all.
-
-  `search/1` answers "everything this deployment can see for this tree", which is what a global view
-  wants (a dashboard, a contracts check). This answers "what does catalogue N see", which is what a
-  PROJECT wants: its own catalogue over the system, and nothing from its neighbours.
-
-  The FINE override still REPLACES the list — one scope, that directory over the system — for the
-  same reason it does in `search/1`: a fixture pointing a tree at its own root is building an
-  isolated catalogue, and leaving the shipped ones behind would make it read material nobody wrote.
+  Returns one existing-directory search path per installed catalogue: own tree then system.
+  A fine override replaces the installed list with one scope over system; empty scopes drop out.
+  These filtered lists are not a cross-tree index: use tree_scope/2 when retaining root identity.
   """
   @spec scopes(atom()) :: [[Path.t()]]
   def scopes(tree) when is_atom(tree) do
@@ -485,16 +244,9 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The search path of ONE catalogue for ONE tree: its own directory, then the system's.
-
-  The per-tree door under `scopes/1`, for a consumer whose object spans SEVERAL trees — the SP image
-  covers four, and asking `scopes/1` four times would give four lists to zip, with no defined answer
-  when a tree carries a fine override (one entry) and another does not (N).
-
-  **A fine override replaces its tree for EVERY catalogue.** Measured before choosing: those keys are
-  set only by tests (`:subagent_template_root` by nobody at all), never by `lib/` or `config/`, and a
-  fixture that sets one runs a single catalogue. The regime where "one override, N catalogues" would
-  read as N copies of the same directory is therefore a state nothing reaches.
+  Returns existing directories for one catalogue/tree: fine override or own tree, then system.
+  Root identity makes this suitable for images spanning several trees. A fine override applies
+  to every root passed, so several catalogues can share that overridden directory.
   """
   @spec tree_scope(Path.t(), atom()) :: [Path.t()]
   def tree_scope(root, tree) when is_binary(root) and is_atom(tree) do
@@ -503,7 +255,7 @@ defmodule Fleet.Catalogue do
     Enum.filter([own, Path.join(system_root(), rel)], &File.dir?/1)
   end
 
-  @doc "First existing `name` on an EXPLICIT scope (`tree_scope/2`), or nil — no config consulted."
+  @doc "Returns the first regular file at name in the explicit scope, or nil; no config or confinement."
   @spec find_in([Path.t()], String.t()) :: Path.t() | nil
   def find_in(scope, name) when is_list(scope) and is_binary(name) do
     Enum.find_value(scope, fn dir ->
@@ -513,12 +265,9 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The workflow-map directory of EVERY installed catalogue, in `installed_roots/0` order.
-
-  Cards do not supersede across catalogues and never will: a card names roles, and a role belongs to
-  the catalogue that declares it — a card from one catalogue over the roles of another describes a
-  fleet nobody assembled. So this is a LIST of roots to publish one image each from, not a search
-  path to merge. The system root is absent on purpose: it carries the mechanism, no business card.
+  Returns existing installed workflow-map directories in installed_roots order, without system.
+  Publish one card image per directory: merging cards across catalogues could resolve their roles
+  against another catalogue's definitions.
   """
   @spec workflow_maps_roots() :: [Path.t()]
   def workflow_maps_roots do
@@ -541,60 +290,33 @@ defmodule Fleet.Catalogue do
   def project_template_root, do: Path.join(root(), @rel_project_template)
 
   @doc """
-  The repo name the fleet WRITES a catalogue's store under, inside that catalogue's own org.
+  Returns the repository address used to write a catalogue store inside its organisation.
+  Do not classify existing repositories by this basename: CatalogueDeposits uses owner versus
+  manifest identity. Onboarding may check the address to avoid creating a project where store
+  publication force-pushes. The underscore only distinguishes fleet-created repositories visually.
 
-  ## This is an ADDRESS. It must never become a predicate again.
-
-  Answering "is this repo a store?" by comparing this name reserves the most natural repo name in
-  every user's namespace, and reserves it in SILENCE — a deposit called `catalogue` gets dropped
-  with no log, no line, no refusal. The question is answered by IDENTITY instead
-  (`owner == manifest.name`, `CatalogueDeposits.split/2`), which holds whatever the repo is called.
-
-  The one legitimate read is a WRITE COLLISION: *"am I about to create a repo where `push_store`
-  force-pushes?"* — `Onboard.adopt_project/2`. That does not decide what an existing repo IS; it
-  decides where a new one may be put. Any other reader is the old defect coming back.
-
-  The `_` prefix is UX (⚖ user): in a list of repos it separates at a glance what the
-  fleet put there from what a human deposited. It protects nothing.
-
-  The shell writers hold their own copy (`STORE_REPO` in `forge-gestures.sh`, which pushes it, and
-  in `50-catalogues.sh`, which clones from it) — three defaults in three runtimes, not three
-  authorities, the same posture as `SYSTEM_ACCOUNT`.
+  Shell STORE_REPO declarations mirror this value (forge-gestures.sh and forge.d/catalogues.sh).
+  Keep writers and convergence aligned: a wrong lookup can make present material appear absent
+  and trigger removal. CatalogueStoreAddressTest checks the source declarations.
   """
   @spec store_repo() :: String.t()
   def store_repo, do: "_catalogue"
 
   @doc """
-  The file a catalogue declares itself in, by BASENAME — what a forge reader asks for at a repo's
-  root, where `manifest_path/0` is what a disk reader opens under `root/0`. One literal for both.
+  Returns the manifest basename for forge readers; manifest_path/0 joins it to the disk root.
   """
   @spec manifest_file() :: String.t()
   def manifest_file, do: @manifest_basename
 
   @doc """
-  The `name:` a manifest declares — `{:ok, name}` or `{:error, :no_name_in_manifest}`.
+  Extracts the first matching column-zero name line, or {:error, :no_name_in_manifest}.
+  Shared by deposit listing and onboarding; shell readers mirror this rule.
 
-  ## One rule, and it lives HERE because two boundaries ask it
-
-  Three sites ask a repo what catalogue it claims to be: the deposit listing
-  (`Fleet.Application.CatalogueDeposits`), the explicit-door guard (`Fleet.Project.Onboard`), and
-  `50-catalogues.sh` in shell. The first two are in boundaries that may not reference each other,
-  and widening one to reach the other to be right is never the move — so the rule sits in the
-  foundation both may descend onto. The shell copy is unavoidable (a different runtime) and says so.
-
-  The manifest is read for ONE field. A full YAML parse would make a listing fail on a catalogue
-  whose unrelated section is malformed — the identity is what is needed here, and `catalogue verify`
-  is what judges the rest.
-
-  ⚠ COLUMN ZERO, and it is the whole correctness of this read. In YAML an INDENTED `name:` belongs
-  to the key above it: `roles:\n  name: dev` declares a role, not the catalogue. Accepting leading
-  whitespace would let the first nested `name:` in the file steal the catalogue's identity — and it
-  would work by accident on OUR manifests, where the root key happens to come first, then be wrong
-  on somebody else's.
-
-  ⚠ `[_, name | _]` and not `[_, name]`: the trailing comment group makes `Regex.run/2` return
-  THREE elements when a comment is present, so a two-element pattern falls through to "no name" —
-  silently, on a line as ordinary as `name: web   # le metier`.
+  This is a regex extractor, not YAML parsing or name validation: optional double quotes and
+  trailing comments are recognised, but YAML quoting/document/duplicate-key semantics are not.
+  Unrelated malformed sections need not prevent identity listing; verify!/0 checks the artifact.
+  Column-zero anchoring avoids stealing a nested name. Keep the optional comment capture in
+  mind: matching [_, name] alone would reject lines with trailing comments.
   """
   @spec manifest_name(String.t()) :: {:ok, String.t()} | {:error, :no_name_in_manifest}
   def manifest_name(yaml) when is_binary(yaml) do
@@ -630,9 +352,10 @@ defmodule Fleet.Catalogue do
   def supported_api_versions, do: @supported_api_versions
 
   @doc """
-  Verifies that the root is readable and its manifest targets a supported
-  generation, then returns the manifest. Failures raise with operator-facing
-  diagnostics.
+  Checks that the current root is a directory and its manifest is a mapping with a supported
+  version, valid name and default_card naming an own card when cards are present. Returns the
+  manifest; failures raise operator-facing diagnostics. Card filenames are checked, not contents;
+  other installed roots and catalogue assets are not validated by this call.
   """
   @spec verify!() :: map()
   def verify! do
@@ -669,10 +392,7 @@ defmodule Fleet.Catalogue do
     end
   end
 
-  # The name is REQUIRED for the same reason the manifest itself is: it can only be made required
-  # while every catalogue in existence is in this repository. Optional would mean falling back to
-  # the directory name, which is precisely the defect — a name assigned by whoever installed,
-  # differing between two containers holding the same catalogue.
+  # Never derive external identity from a local installation directory.
   defp validate_name!(manifest, path) do
     case Map.get(manifest, "name") do
       name when is_binary(name) ->
@@ -700,16 +420,8 @@ defmodule Fleet.Catalogue do
     end
   end
 
-  # WHICH card a project gets when it declares none. Not a resolution — no property distinguishes the
-  # default from its siblings, unlike the doc rail (`face: workshop`) — so it is a CHOICE, and a
-  # choice is declared. It lived as a literal in `Fleet.Project.Roles` (`"brief-gate"`, one
-  # catalogue's card): every catalogue that shipped its own cards silently inherited a default that
-  # named a card it does not have.
-  #
-  # Required exactly when it means something: a catalogue that ships NO card has no default to name
-  # (the system catalogue), and one that ships cards must say which — and must name one of its own,
-  # checked by FILENAME here rather than by loading, because this module is foundation and the loader
-  # is not below it.
+  # Defaults are catalogue choices, not a runtime card literal. Require one when cards exist;
+  # check filenames here to keep this foundation independent of the workflow loader.
   defp validate_default_card!(manifest, path, root) do
     cards =
       root
@@ -742,10 +454,8 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The catalogue's declared NAME. `verify!/0` validates it at boot; this is the reader.
-
-  It addresses the catalogue outside this container — the prefix of its role accounts
-  (`<catalogue>_<role>`), and the forge org that will carry its projects.
+  Reads the current manifest's string name, or nil on missing/non-string/unreadable data.
+  No cache or syntax validation here; verify!/0 validates the name used for forge identity.
   """
   @spec name() :: String.t() | nil
   def name do
@@ -756,24 +466,16 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The declared name of EVERY installed catalogue, in `installed_roots/0` order — the forge orgs
-  this deployment discovers on.
-
-  A catalogue that declares no name is skipped rather than defaulted: the name is required and
-  `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
+  Returns unique names from installed_catalogues/0 in installation order, for forge discovery.
+  Skipped or malformed manifests are not replaced with directory-derived identities.
   """
   @spec installed_names() :: [String.t()]
   def installed_names, do: installed_catalogues() |> Enum.map(& &1.name) |> Enum.uniq()
 
   @doc """
-  Every installed catalogue as `%{name, root}`, in `installed_roots/0` order — THE pairing.
-
-  Three readers want it in three shapes (the poller wants the orgs, the card listing wants
-  name-plus-cards-dir, the enroller wants the root), and re-reading the manifest in each is how the
-  same fact acquires three answers. One authority, one read.
-
-  A root whose manifest declares no name is skipped rather than defaulted: the name is required and
-  `verify!/0` refuses its absence, so a root without one is a root the boot has not blessed.
+  Rereads installed manifests and returns %{name, root} for each string name, preserving root order.
+  Unreadable manifests and missing/non-string names are skipped. Empty/invalid strings and duplicate
+  declared names are not rejected here; this is identity projection, not verification.
   """
   @spec installed_catalogues() :: [%{name: String.t(), root: Path.t()}]
   def installed_catalogues do
@@ -786,17 +488,9 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  Root of the installed catalogue NAMED `name`, or `nil` — the pairing read by its other end.
-
-  It exists because the dispatch rail knows a project by its forge repo, and a project lives in the
-  org of its catalogue: the `owner` of `owner/name` IS the catalogue name (lot 4 of the org-par-
-  catalogue). So a step run carries, for free, the catalogue that must resolve its roles —
-  and this is the function that spends it.
-
-  `nil` for a name no installed catalogue answers to. That is not a defect to guard against: the
-  poller only discovers on the orgs of INSTALLED catalogues, so a work item for a catalogue absent
-  from this container does not exist. Callers treat `nil` as "no catalogue named, resolve in the default
-  image", which is what every pre-catalogue caller already did.
+  Returns the first installed root with the exact declared name, or nil for nil/unknown names.
+  Dispatch derives the name from a project's forge owner. Callers that interpret nil as default
+  resolution must distinguish an unknown catalogue themselves if fallback is inappropriate.
   """
   @spec root_for(String.t() | nil) :: Path.t() | nil
   def root_for(nil), do: nil
@@ -809,10 +503,8 @@ defmodule Fleet.Catalogue do
   end
 
   @doc """
-  The same root, from a repo's `owner/name` — the form the dispatch rail actually holds.
-
-  It exists so the split is written ONCE. Three call sites derived it separately within an hour of
-  each other, which is how one fact acquires three answers and how they start to disagree.
+  Resolves the segment before the first slash through root_for/1; non-strings return nil.
+  Does not validate owner/name shape, so a bare owner or additional segments are accepted.
   """
   @spec root_for_repo(String.t() | nil) :: Path.t() | nil
   def root_for_repo(full_name) when is_binary(full_name) do
@@ -822,15 +514,15 @@ defmodule Fleet.Catalogue do
   def root_for_repo(_), do: nil
 
   @doc """
-  The card a project of THIS catalogue gets when it declares none, or `nil` for a catalogue with no
-  cards. Read from the manifest, so it is the catalogue's answer and not the runtime's.
+  Reads the default catalogue's declared default_card string, or nil on absent/invalid data.
+  Does not check whether the card exists; verify!/0 performs that check.
   """
   @spec default_card() :: String.t() | nil
   def default_card, do: default_card(root())
 
   @doc """
-  The same card, for ONE catalogue root — every INSTALLED catalogue has its own, and a guard that
-  checks them has to ask each in turn rather than the default one N times.
+  Reads default_card from the explicit root's manifest without caching or card validation.
+  Returns any string (including empty), otherwise nil.
   """
   @spec default_card(Path.t()) :: String.t() | nil
   def default_card(root) when is_binary(root) do

@@ -1,11 +1,7 @@
 defmodule Fleet.SchemaCacheTest do
   @moduledoc """
-  `Fleet.SchemaCache` — foundation authority for the "loaded once, cached in
-  `:persistent_term`" pattern (B-R2 dedup).
-
-  `async: true`: `:persistent_term` is GLOBAL BEAM state, but each test uses a
-  UNIQUE key (`unique_key/1`) erased in `on_exit` — no inter-test collision, no
-  leaked entries.
+  Checks cached reads, raising failures and an intervening write during computation.
+  Async tests use unique persistent_term keys erased on exit.
   """
   use ExUnit.Case, async: true
 
@@ -47,7 +43,6 @@ defmodule Fleet.SchemaCacheTest do
       key = unique_key(:idempotent)
 
       first = SchemaCache.resolve_json_schema!(key, path)
-      # The file disappears: if the 2nd call re-read, it would raise File.Error.
       File.rm!(path)
       assert SchemaCache.resolve_json_schema!(key, path) == first
     end
@@ -57,7 +52,6 @@ defmodule Fleet.SchemaCacheTest do
       path = "/nonexistent/schema-cache-#{System.unique_integer([:positive])}.json"
 
       assert_raise File.Error, fn -> SchemaCache.resolve_json_schema!(key, path) end
-      # The failure cached nothing: fetch! still raises "not loaded".
       assert_raise ArgumentError, fn -> SchemaCache.fetch!(key) end
     end
 
@@ -123,18 +117,11 @@ defmodule Fleet.SchemaCacheTest do
         SchemaCache.cached(key, fn -> raise "boom" end)
       end
 
-      # The raise preceded the put: the next call does execute the fun.
       assert SchemaCache.cached(key, fn -> :recovered end) == :recovered
     end
 
-    # 6-002 — LE CHECK-THEN-ACT ECRIVAIT DEUX FOIS. Deux processus qui manquent la meme cle calculent
-    # tous les deux, puis ecrivaient tous les deux : un GC GLOBAL de plus (F-001) pour ranger une
-    # valeur deja presente, et le terme rendu aux lecteurs precedents remplace pour rien.
-    #
-    # LA COURSE EST JOUEE SANS CONCURRENCE, et c'est ce qui rend le test deterministe : le `fun`
-    # ECRIT LUI-MEME la cle avant de rendre sa valeur. C'est exactement l'etat que voit le perdant
-    # au moment de la relecture — quelqu'un a rempli la cle pendant mon calcul. Aucun `spawn`,
-    # aucun `sleep`, aucun ordonnancement a esperer.
+    # Deterministically fill the key inside fun to exercise the second-read branch.
+    # This does not test or exclude a concurrent race between that read and put.
     test "6-002: la cle deja remplie pendant le calcul n'est pas ecrasee, et c'est SA valeur qui sort" do
       key = unique_key(:cached_race)
 
@@ -147,7 +134,7 @@ defmodule Fleet.SchemaCacheTest do
       assert :persistent_term.get(key) == :pose_par_le_gagnant
     end
 
-    # TEMOIN — sans lui, un `cached/2` qui ne ferait JAMAIS d'ecriture passerait le test ci-dessus.
+    # Positive control: a cache that never writes would pass the intervening-write test.
     test "6-002: TEMOIN — sur une cle vraiment absente, la valeur calculee EST ecrite" do
       key = unique_key(:cached_write)
 
