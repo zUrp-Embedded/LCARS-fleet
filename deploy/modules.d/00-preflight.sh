@@ -13,7 +13,7 @@
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 # apt_installs_depuis <epoch> — les paquets installés à la main après cette date, hors mises à
 # jour et dépendances automatiques, sous la forme « nom (date) », une par ligne.

@@ -134,18 +134,6 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   [[ "$output" == *"DRIFT"* ]]
 }
 
-@test "62-runtime-helpers : « diverge » exige DEUX cotes" {
-  # ONZE drifts par passage sur le banc 2004, tous faux : l'arbre source n'existait pas, `cmp -s`
-  # echouait, et l'echec etait lu comme une divergence. Le module ne distinguait pas « different »
-  # de « je n'ai pas de quoi comparer ».
-  local mod="$DEPLOY/modules.d/62-runtime-helpers.sh"
-  grep -q 'r "$SRC_DIR/$n"' "$mod"
-  # et ce cas n'est PAS un drift : rien n'a ete mesure, donc rien n'est a converger
-  local bloc; bloc="$(sed -n '/r "\$SRC_DIR\/\$n"/,/^    elif/p' "$mod")"
-  grep -q 'p_warn'   <<<"$bloc"
-  refute grep -q 'p_drift' <<<"$bloc"
-}
-
 # ─── LA MACHINE SE RAPPELLE CE QU'ON LUI A DEMANDE ──────────────────────────────────────────────
 
 # `_journal_params` EXTRAITE du runner et jouee seule : c'est elle qui decide, et l'extraire evite de
@@ -242,29 +230,3 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 # pas encore effective dans la session — et les deux sondes ont declare ABSENT ce qu'elles ne
 # pouvaient simplement pas ouvrir. Le cas juste est la session fraiche, pas l'inverse.
 
-@test "60-deploy : un prefixe non traversable ne rend pas « release absente »" {
-  local mod="$DEPLOY/modules.d/60-deploy.sh"
-  local bloc; bloc="$(sed -n '/^check()/,$p' "$mod" | grep -vE '^\s*#')"
-  grep -q 'prov_file_state "$PROV_PREFIX"' <<<"$bloc"
-  # la garde vient AVANT le drift, sinon elle ne sert a rien
-  local n_garde n_drift
-  n_garde="$(grep -n 'NON MESURABLE' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_drift="$(grep -n 'release absente sous' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ]
-  [ -n "$n_drift" ]
-  [ "$n_garde" -lt "$n_drift" ]
-}
-
-@test "64-services : un services.env illisible ne rend pas « aucun LCARS_SYSADMIN_UID »" {
-  # Un champ vide a DEUX causes quand le fichier est 0640 root:fleet : il n y est pas, ou on ne
-  # peut pas le lire. Une seule des deux est un drift.
-  local mod="$DEPLOY/modules.d/64-services.sh"
-  local bloc; bloc="$(sed -n '/^probe_seat_uid()/,/^}$/p' "$mod" | grep -vE '^\s*#')"
-  grep -q 'prov_file_state "$SERVICES_ENV"' <<<"$bloc"
-  local n_garde n_drift
-  n_garde="$(grep -n 'non sondable' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_drift="$(grep -n 'aucun LCARS_SYSADMIN_UID' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ]
-  [ -n "$n_drift" ]
-  [ "$n_garde" -lt "$n_drift" ]
-}

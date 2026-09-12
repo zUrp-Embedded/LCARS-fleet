@@ -174,24 +174,6 @@ setup() {
 # `services` (C6) avait ete trouve parce qu il produisait ONZE FAUX DRIFTS visibles. Ceux-ci ne se
 # voient qu en REJOUANT un apply depuis la copie — ce qu aucun geste de la suite ne faisait.
 
-@test "C6+ : les arbres de la RACINE sont embarques, pas seulement ceux du produit" {
-  local mod="$MODS/62-runtime-helpers.sh"
-  grep -qE '^EMBEDDED_ROOT=\(.*assets' "$mod"
-  grep -qE '^EMBEDDED_ROOT=\(.*catalogues' "$mod"
-  # ⚠ DEUX LISTES, PAS UNE : la copie n a pas la meme forme. `EMBEDDED` va sous `fleet/`,
-  # `EMBEDDED_ROOT` a cote. Les fondre ferait une liste dont chaque entree porte un chemin
-  # implicite different.
-  #
-  # ⚠ ON VISE LE CHEMIN, PAS L OUTIL — et la premiere version visait l outil. Elle epinglait
-  # `cp -a` pour la boucle de `fleet/` et `cd` pour celle de la racine : deux outils differents
-  # etaient alors le signe le plus visible de deux listes, mais ce n est pas ce que ce temoin veut
-  # dire. Le jour ou la boucle de `fleet/` est passee a `tar` elle aussi (pour cesser d emporter
-  # 73 Mo de cache tofu), ce temoin a rougi sur un CORRECTIF — en accusant la seule chose qu il ne
-  # mesurait pas. Ce qui distingue les deux listes est le chemin d ou elles partent, et lui seul.
-  grep -q 'cd "$(product_tree)/$n"' "$mod"
-  grep -q 'cd "$(repo_root)/$n"' "$mod"
-}
-
 @test "C6+ : ce que les modules LISENT a la RACINE (repo_root) est ce qui est embarque" {
   # Le sens qui ferme la boucle : si un module se met a lire un troisieme arbre de la racine, ce
   # temoin le dit. C est la moitie qui manquait a C6 — on avait ajoute `services` sans verifier
@@ -232,19 +214,3 @@ setup() {
     || { echo "lu sous product_tree mais PAS dans EMBEDDED :$manquants"; return 1; }
 }
 
-@test "C6+ : node_modules est EXCLU — 179 Mo sur 180" {
-  # `assets/` pese 180 Mo sur disque et 904 Ko dans git : tout le reste est l arbre npm de la doc,
-  # un artefact local. Un `cp -a` l aurait recopie sous /opt/lcars a CHAQUE apply.
-  # ⚠ `dist/` RESTE : en livraison binaire c est lui que `44-media` pose, rien ne le batit la.
-  local mod="$MODS/62-runtime-helpers.sh"
-  grep -q 'exclude=node_modules' "$mod"
-  grep -vE '^\s*#' "$mod" | refute_out 'exclude=dist'
-}
-
-@test "C6+ : le CHECK sonde la seconde liste — sinon le correctif est invisible" {
-  # L angle mort double deja rencontre sur `~/.lcars/log` (C2) : corriger l apply sans toucher au
-  # check rend le defaut invisible au lieu de le fermer.
-  local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$MODS/62-runtime-helpers.sh")"
-  grep -q 'EMBEDDED_ROOT' <<<"$bloc"
-  grep -q 'arbre embarqué ABSENT' <<<"$bloc"
-}

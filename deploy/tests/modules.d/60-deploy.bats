@@ -64,6 +64,14 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [[ "$output" != *"verrou"* ]]
 }
 
+@test "check : un prefix non traversable ne rend pas « release absente » — rien n'est conclu, et le pourquoi est dit" {
+  release_posee; chmod 0000 "$PROV_PREFIX"
+  fn check
+  chmod 0750 "$PROV_PREFIX"
+  [[ "$output" == *"WARN  60-deploy: release non mesurable — $PROV_PREFIX"* ]]
+  [[ "$output" != *"release absente"* ]]
+}
+
 @test "check : release posée, prefix non verrouillé — drift qui dit le mode attendu" {
   release_posee; chmod 0755 "$PROV_PREFIX"
   mod check

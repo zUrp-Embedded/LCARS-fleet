@@ -10,12 +10,8 @@
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-# ⚖ user 2026-09-04 (Q3, lot 6) : le conteneur pose ce client à l'init de son instance — en prod. Le
-# geste est du PRODUIT ; ce module l'appelle avec ce que l'installeur sait de mieux que lui :
-# l'adresse ANNONCÉE (le poste connaît WSL et son mode NAT, le geste ne le mesure pas), les deux
-# adresses de la forge, le port et les entrées du deck, le fichier de config et son groupe.
 advertise_addr "${PROV_DECK_BIND:-0.0.0.0}"
 exec env \
   LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \

@@ -10,12 +10,8 @@
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-# ⚖ user 2026-09-04 (Q3, lot 6) : le conteneur minte ses jetons à l'init de son instance — en prod. Le
-# geste (sondes de la forge, modes de l'autorité, roster, mint par le minteur voisin) est du
-# PRODUIT ; ce module l'appelle avec ce que l'installeur sait : la forge, le siège, le plancher de
-# rôles de la lib (`PROV_ROLES`, que le geste fusionne avec ce que le release déclare), et la CLI.
 exec env \
   LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \
   LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \

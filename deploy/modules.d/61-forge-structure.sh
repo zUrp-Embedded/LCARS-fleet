@@ -23,7 +23,7 @@ else
 fi
 RELEASE_BIN="$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
 TOFU_BIN="${LCARS_TOFU_BIN:-/usr/local/bin/tofu}"
-TOFU_RC="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc"
+TOFU_RC="${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}/tofurc"
 
 forge_up() { curl -fsS -m 5 -o /dev/null "$FORGE_URL/api/v1/version" 2>/dev/null; }
 
