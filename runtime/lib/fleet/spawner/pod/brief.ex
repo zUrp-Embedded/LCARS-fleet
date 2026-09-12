@@ -1,26 +1,8 @@
 defmodule Fleet.Spawner.Pod.Brief do
   @moduledoc """
-  Pod BRIEF: readable content + canonical channel — an island split out of
-  `Fleet.Spawner.Pod.Scaffold`.
-
-  A pod's brief (its TASK, delivered by the orchestrator, PUSH model) has TWO projections, both
-  carried by this module:
-
-  - the **readable file** `issues/<issue_id>.md` (project context, read as content — NOT a
-    prompt-injection): `issue_id_to_filename/1` (safe name) + `default_brief/1` (the body);
-  - the **CANONICAL channel**: the idempotent enqueue into `Fleet.TaskQueue`
-    (`maybe_enqueue_brief/1`) — the pod PULLs via the MCP tool `get_work_item` (triggered by the
-    keyword `engage`), never through the injected text.
-
-  Each step returns a value or a tagged `:ok`/`{:error, reason}` that the `with` of the
-  `:projecting` state propagates to `transition_failed`. No state, no Port, no timer. Depends on
-  `Pod.TaskProbe` (enqueue gate), `Fleet.TaskQueue` (enqueue) and `Fleet.CapProfile` (single
-  source of the `name`). No dependency toward `Fleet.Spawner.Pod` (no cycle).
-
-  ## Contract (called by `Pod`, `:projecting` state)
-
-  - `issue_id_to_filename/1` + `default_brief/1` — writing the `issues/<id>.md`.
-  - `maybe_enqueue_brief/1` — idempotent TaskQueue enqueue, AFTER the readable scaffold.
+  Builds readable issue files and optionally enqueues admin-spawn briefs.
+  The executable work channel is TaskQueue, pulled through MCP `get_work_item`;
+  the issue file supplies project context. Projection propagates tagged enqueue errors.
   """
 
   require Logger
@@ -38,22 +20,13 @@ defmodule Fleet.Spawner.Pod.Brief do
   end
 
   @doc """
-  Body of the `issues/<id>.md`: neutral conversational framing "pod LCARS (role X)" + the request
-  (`opts[:brief]`, or a placeholder if absent).
+  Builds `issues/<id>.md` with the resolved role and `opts[:brief]`, or instructions
+  to pull the pinned work item when the brief is delivered through the queue.
+  Step dispatch normally uses the queue; one-shot PR judges also require a spawn brief.
 
-  Which of the two it is depends on the RAIL, and neither is an accident: the step dispatcher sends
-  the order through the queue alone (no `:brief` in the spawn opts → placeholder here), while the PR
-  rail must pass it, because judges are `one-shot` and `Spawner.brief_required?/1` refuses a
-  one-shot spawn without a brief. So this function is a placeholder generator on one rail and the
-  writer of the order on the other. Interpolating `opts[:brief]` is its job — a wall forbidding that
-  cannot be written; the property that holds is upstream, at what each rail puts in the opts.
-
-  NATURAL tone (not a formalized multi-section "## Task / ## Deliverable"): claude REPL in
-  interactive mode may interpret an overly structured format as a prompt-injection attempt and
-  refuse. The fleet context (`submit_result` convention) is laid down as a conversational preamble,
-  not as an imperative directive. The ROLE is interpolated RESOLVED (single source
-  `Fleet.CapProfile.name/1`) — no hardcoded "worker engineer" that would mis-prime a judge's
-  persona.
+  Conversational framing avoids the REPL refusals observed with imperative task templates.
+  The preamble names the result channel and leaves the definition of work to the role’s
+  system prompt: producers deliver commits, judges deliver verdicts.
   """
   @spec default_brief(map()) :: String.t()
   def default_brief(state) do
@@ -77,25 +50,8 @@ defmodule Fleet.Spawner.Pod.Brief do
     """
   end
 
-  # What the file says when the spawn opts carry no `:brief` — which is the PRODUCER's normal case,
-  # not an anomaly: the step dispatcher sends the order through the queue alone.
-  #
-  # NEVER "(No brief provided)": that is FALSE, and false on the pod's own disk, in a file named
-  # after its issue. The pod HAS an order, and the very opts this function reads carry its address
-  # (`brief_ref` + `brief_sha`, put there by the same dispatch). An artifact that tells
-  # an agent it was asked nothing, while its work item holds an order, is the cheapest possible way
-  # to make it guess: an agent that finds nothing where its order should be infers its surroundings,
-  # and an inferred order is worse than a missing one because it looks like work.
-  #
-  # The pointer NOTATION comes from `Fleet.Layout`, foundation, which already owns it for exactly
-  # this reason ("two domains, one truth"): `Fleet.Workflow.BriefArtifact` is not in this domain's
-  # boundary deps, and re-writing its prose here would be a second source for one sentence.
-  # ⚠ PAS DE « No need to write any file yourself » DANS L'EN-TETE CI-DESSUS : ce serait une faute
-  # de CONTRAT, pas de style. La phrase est vraie pour un juge, dont le livrable EST le verdict, et
-  # fausse pour un producteur, dont le SP dit « ton livrable = tes commits » — un producteur qui
-  # ouvre `issues/<id>.md` avant son SP ne commite rien et rend un payload VIDE. Ce fichier ne
-  # connait pas le contrat du role : il nomme le canal de retour et renvoie au SP pour ce qui compte
-  # comme travail.
+  # No spawn brief need not mean no order: dispatch can provide it through the work item.
+  # Do not tell producers they need no files; their role contract may require commits.
   defp request_body(brief, _opts, _issue_id) when is_binary(brief) and brief != "", do: brief
 
   defp request_body(_brief, opts, issue_id) do
@@ -103,10 +59,7 @@ defmodule Fleet.Spawner.Pod.Brief do
     sha = Keyword.get(opts, :brief_sha)
 
     if is_binary(ref) and is_binary(sha) do
-      # PAS DE CHEMIN ICI. Rendre le pointeur `Brief: <ref> @ <sha>` enverrait le pod LIRE l'arbre
-      # d'operations, donc exigerait de le lui monter. Le work item porte le CONTENU a sa version
-      # pinnee ; ce fichier nomme le canal et l'adresse a citer, rien de plus. Un pod qui ne trouve
-      # pas son ordre ici doit DEMANDER, pas aller le chercher.
+      # Direct the pod to the work item’s pinned content, not a path in an unmounted ops tree.
       "Your work item carries the order, in full, at the version it was pinned to. Pull it with " <>
         "the MCP tool `get_work_item`. Cite `#{String.slice(sha, 0, 7)}` — that is the version " <>
         "you acted on, and it is what makes your work auditable by a third party."
@@ -144,7 +97,6 @@ defmodule Fleet.Spawner.Pod.Brief do
         :ok
 
       :unknown ->
-        # F-C035
         Logger.warning(
           "Brief: could not verify pod #{state.pod_id} brief slot (broker unreachable) — FAILING the " <>
             "admin.spawn brief enqueue (fail-closed): the pod would sit idle with no brief. The spawn retries."

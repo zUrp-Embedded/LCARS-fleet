@@ -14,16 +14,13 @@ defmodule Fleet.Spawner.Pod.BriefTest do
       assert Brief.issue_id_to_filename("a\nb\tc") == "a_b_c"
       assert Brief.issue_id_to_filename("a\\b") == "a_b"
 
-      # every `/` is neutralized → the result is ALWAYS a leaf (no directory traversal possible)
       refute Brief.issue_id_to_filename("../../etc/passwd") =~ "/"
     end
   end
 
   describe "enqueue_by_slot/3 — F-C035 (fail-closed on unverifiable slot)" do
     test ":unknown (broker unreachable) → {:error, {:brief_slot_unknown, pod_id}}, NOT :ok (else idle pod without brief)" do
-      # An admin.spawn has no dispatcher: maybe_enqueue_brief is the ONLY enqueue. On :unknown, returning
-      # :ok let the caller believe in success → pod launched idle (get_work_item = done:true), no reconciliation
-      # re-enqueues. Fail-closed: {:error} → the `with :projecting` fails BEFORE launch → pod.failed → retry.
+      # Admin spawn has no dispatcher to enqueue later; an unverifiable slot must fail before launch.
       state = %{
         pod_id: "admin-pod-x",
         issue_id: "tk-1",

@@ -1,10 +1,6 @@
 defmodule Fleet.Spawner.Pod.AssetsSettingsTest do
   @moduledoc """
-  `Assets.pod_settings_json/1` (BL-6-07) — the pod settings have ONE composer and one policy.
-  Before: this module shipped `skipDangerousModePermissionPrompt: true` unconditionally
-  (pre-kill-yolo) while the launcher jq-merged the opposite policy — and the unconditional side
-  won, handing every restricted pod a pre-accepted danger dialog. These tests pin the unified
-  kill-yolo policy at the single owner.
+  Verify permission-mode policy at the sole composer of pod settings.
   """
   use ExUnit.Case, async: true
 
@@ -24,12 +20,8 @@ defmodule Fleet.Spawner.Pod.AssetsSettingsTest do
     assert settings["autoMemoryEnabled"] == false
     assert settings["hasCompletedOnboarding"] == true
 
-    # The marketplace key is NOT here, and its absence is the finding. It shipped in this file for
-    # a chantier and did nothing: measured on a bench 2026-08-09, two pods carrying it installed
-    # 7.2 MB of plugins anyway. The lever that works is in claude_launch.sh's .claude.json, and
-    # this assertion holds the settings file to what it can actually enforce.
+    # Marketplace controls belong to the launcher’s .claude.json, not this settings file.
     refute Map.has_key?(settings, "extensions")
-    # The kill-yolo policy holds at the owner: a default pod ships NO pre-acceptance.
     refute Map.has_key?(settings, "skipDangerousModePermissionPrompt")
   end
 

@@ -6,32 +6,25 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   """
 
   @doc """
-  ENSURE (before the launch): creates this pod's listener + socket file and
-  returns the HOST PATH of the socket file. Idempotent (re-call → same path,
-  no duplicate). The file MUST exist on return: otherwise the bwrap bind would
-  fail (the launcher mounts the socket into the pod's sandbox).
+  Creates the pod listener and returns its host socket path before launch.
+  Repeated calls return the same path without duplicating the listener. The socket
+  file must exist on success so the launcher can bind it into the sandbox.
   """
   @callback ensure_pod_socket(pod_id :: String.t(), tools :: [String.t()]) ::
               {:ok, Path.t()} | {:error, term()}
 
   @doc """
-  RELEASE (teardown): stops the listener AND removes the socket file (closing the
-  socket frees the FD, NOT the file). Idempotent — releasing an already-freed
-  pod returns `:ok`; a release that could NOT fully clean up (terminate/rm failed)
-  returns `{:error, {:release_incomplete, _}}` so the failure is not silently lost
-  (the SocketWarden still reaps the residual at runtime).
+  Stops the listener and removes the socket file; closing the FD alone leaves it behind.
+  Already-released pods return `:ok`. Incomplete cleanup returns
+  `{:error, {:release_incomplete, _}}`; SocketWarden can reap the residual.
   """
   @callback release_pod_socket(pod_id :: String.t()) :: :ok | {:error, term()}
 
-  # Canonical default: the real impl on the fleet_mcp side. Literal atom (not a
-  # literal remote call) → no compile-time dep. Set HERE once.
+  # A module atom avoids a compile-time remote call across the spawner/MCP boundary.
   @default_provisioner Fleet.MCP.PodSocketSupervisor
 
   @doc """
-  Resolved provisioner: config `:lcars_fleet, :spawner_mcp_socket_provisioner` otherwise the
-  canonical default `Fleet.MCP.PodSocketSupervisor`. SINGLE SOURCE of the default (same
-  pattern as `Fleet.Spawner.LaunchBackend.resolved/0`) — the only runtime reader
-  is `Pod.McpProvision`, any future reader goes through here instead of re-declaring.
+  Returns `:spawner_mcp_socket_provisioner` or the canonical `default/0`.
   """
   @spec resolved() :: module()
   def resolved do
@@ -39,14 +32,9 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   end
 
   @doc """
-  The canonical default, PUBLIC because it is part of the seam's contract rather than an
-  implementation detail.
-
-  Left private, changing this attribute leaves the whole suite green — only a mutation shows it,
-  because `config/test.exs` pins a stub here and no test ever sees the fallback. Asserting it
-  through `resolved/0` would mean DELETING the key globally, which under an
-  async suite hands the real provisioner to whatever pod test happens to be running — a hazard
-  bought to test a constant. Exposing the value costs one function and no risk.
+  Returns the canonical provider independently of configuration.
+  Exposed so tests can verify the production fallback without deleting a global
+  stub override and selecting the real provider for concurrent pod tests.
   """
   @spec default() :: module()
   def default, do: @default_provisioner

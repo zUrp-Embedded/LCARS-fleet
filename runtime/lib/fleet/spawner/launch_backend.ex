@@ -36,7 +36,6 @@ defmodule Fleet.Spawner.LaunchBackend do
 
     _ = Code.ensure_loaded(mod)
 
-    # F-C041
     if function_exported?(mod, :launch, 2) do
       {:ok, mod}
     else

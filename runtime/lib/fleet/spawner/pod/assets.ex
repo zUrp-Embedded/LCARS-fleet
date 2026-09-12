@@ -1,24 +1,9 @@
 defmodule Fleet.Spawner.Pod.Assets do
   @moduledoc """
-  READ + PROVISION of a pod's vendor/priv ASSETS — island extracted from `Fleet.Spawner.Pod.Scaffold`.
-
-  Everything the `:projecting` state READS from the fleet apps' `priv/` (role-aware SP draft,
-  the protocole-user selected by the profile's `interlocutor`, `watch.sh`) or MANUFACTURES as
-  static content (the REPL's `settings.json`),
-  plus the cap-profile skills filter. Each step returns `{:ok, content}`/`:ok` or an
-  `{:error, reason}` TAGGED per asset (the tag identifies the failing step in the
-  `transition_failed` of the `:projecting` state) — the `with` of `:projecting` propagates.
-
-  This module knows NEITHER the brief (TaskQueue channel — `Pod.Brief`), NOR the project workspace
-  (git clone — `Pod.Scaffold`): assets only. No state, no Port, no timer. Depends on
-  `Pod.Fs` (non-bang write of `watch.sh`), `Fleet.SPBuilder` (skills filter), `Fleet.CapProfile`
-  (single source of the `name`), `Fleet.Slug` (validation of the role interpolated into a path) and
-  `Application` (config + `priv/` assets). No dependency on `Fleet.Spawner.Pod` (no cycle).
-
-  ## Contract (called by `Pod`, `:projecting` state)
-
-  - `pod_settings_json/1`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
-    `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
+  Reads and provisions pod assets during `:projecting`: role prompts, user protocols,
+  REPL settings, skills and the monitor script. Asset failures return tagged errors
+  for the pod’s projection failure path. Briefs belong to `Pod.Brief`; workspace
+  cloning belongs to `Pod.Scaffold`.
   """
 
   alias Fleet.CapProfile
@@ -26,30 +11,14 @@ defmodule Fleet.Spawner.Pod.Assets do
   alias Fleet.SPBuilder
 
   @doc """
-  The pod REPL's `settings.json` — COMPLETE, single-owner: written to `.lcars/` by the
-  `:projecting` state, and `claude_launch.sh` only passes the file through `--settings`, it
-  composes and merges nothing (BL-6-07). Two writers of one file with two policies is how a
-  restricted pod ships with a pre-accepted danger dialog: the unconditional side wins the merge.
-  One owner, and the kill-yolo policy is the one that holds:
+  Builds the complete `.lcars/settings.json`; the vendor launcher passes it to `--settings`.
+  Only `bypassPermissions` pre-accepts the dangerous-mode dialog, avoiding a headless
+  prompt while keeping restricted modes unacknowledged. Onboarding is skipped and
+  auto-memory is disabled because it is private to the pod rather than shared fleet state.
 
-  `skipDangerousModePermissionPrompt: true` ONLY under `permission_mode == "bypassPermissions"`
-  (`LaunchSpec.permission_mode/1`, the same authority that exports `LCARS_PERMISSION_MODE`) —
-  it pre-accepts the interactive "By proceeding, you accept..." dialog that hangs a headless
-  pod; a default/restricted pod gets NO pre-acceptance.
-  `hasCompletedOnboarding: true` skips onboarding (the legacy `.claude.json` — the host user's
-  global config — is not meant to be touched here).
-  `autoMemoryEnabled: false` (F-POD-AUTOMEM): the pod's claude
-  auto-memory is siloed, useless to the fleet, and doctrine pollution (BUG-3) — off for every
-  permission mode.
-  ⚠ PAS DE `extensions.marketplace.autoInstall: false` ICI : IL N'Y FAIT RIEN. The problem is real
-  — left on, every spawn clones the vendor's plugin marketplace to install zero plugin, and a pod
-  running inside a projected world must not fetch code from the internet at boot — but this is not
-  the lever. Measured on CLI 2.1.221, both directions: two pods carrying this key installed 7.2 MB
-  of plugins anyway; a pod whose `.claude.json` carried `officialMarketplaceAutoInstalled` had no
-  `plugins/` at all. The vendor gates this on ITS OWN config keys, and `--settings` is documented
-  as ADDITIONAL settings, not an overriding tier. The effective lever lives where it works, in
-  `claude_launch.sh`'s `.claude.json`, with the measurement written next to it. A setting that declares an intention it cannot enforce is worse
-  than no setting: it tells every reader the matter is handled.
+  Marketplace installation is controlled in the launcher’s `.claude.json` projection.
+  The `extensions.marketplace.autoInstall` settings key was ineffective on CLI 2.1.221;
+  keep that control at the vendor config layer.
   """
   @spec pod_settings_json(CapProfile.t()) :: String.t()
   def pod_settings_json(%CapProfile{} = cap_profile) do
@@ -57,10 +26,7 @@ defmodule Fleet.Spawner.Pod.Assets do
       "hasCompletedOnboarding" => true,
       "hasAcknowledgedCostThreshold" => true,
       "autoMemoryEnabled" => false,
-      # TUI plein ecran (release vendor recente). C'est une CLE DE SETTINGS, pas un flag : les 62
-      # options de la CLI 2.1.221 n'en portent aucune equivalente, donc `--settings` est la seule
-      # voie vers un pod. Verifie a la main par l'user dans un vrai terminal ET sous tmux, ce qui
-      # est le cas d'un pod (PTY de tmux, ADR-G).
+      # Fullscreen TUI is selected through settings; the tested CLI 2.1.221 has no equivalent flag.
       "tui" => "fullscreen"
     }
 
@@ -73,24 +39,10 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   @doc """
-  Reads the profile's SP: `agent-<role>-base.md`, or the draft of the role its `spec.systemPrompt`
-  names.
-
-  Missing image or disk content and invalid role slugs return tagged errors; there
-  is no generic fallback.
-
-  ## `spec.systemPrompt` — DECLARED reuse, and the only alternative
-
-  A cap-profile grants PERMISSIONS; its SP decides BEHAVIOUR. So a role with no prompt of its own
-  behaves like whoever's prompt it ends up with, and its name lies — so there is no generic
-  `agent-worker-base.md` fallback: no SP, no pod. The single legitimate case is
-  RENAMING: a catalogue that renames a role into its own language would otherwise copy two hundred
-  lines that then drift, the substrate defect one floor up.
-
-  It names a ROLE, not a path. The reuse is then stated in the catalogue's own vocabulary, there is
-  nothing to sanitise or escape, and the key already exists in the frozen image. The distinction
-  that makes it safe is DECLARED versus SILENT: a role inheriting a prompt by accident stays
-  refused; one that says so in its yaml has assumed it.
+  Reads `agent-<role>-base.md` from the published image, or disk while unpublished.
+  A missing prompt returns a tagged error; there is no generic worker fallback.
+  `spec.systemPrompt` explicitly borrows another role’s prompt, allowing role renames
+  without copying it. The value names a role, not a path, and must pass slug validation.
   """
   @spec read_agent_draft(CapProfile.t()) ::
           {:ok, String.t()}
@@ -129,15 +81,13 @@ defmodule Fleet.Spawner.Pod.Assets do
   Selects `protocole-user.md` from the profile's `interlocutor`.
 
   `fleet` receives the machine protocol, `human` the conversation protocol, and
-  `both` receives machine then human. The configured protocol path overrides only
-  the machine half.
+  `both` receives machine then human. When reading from disk, the configured
+  protocol path overrides only the machine half; a published image takes precedence.
   """
   @spec read_protocole_user(CapProfile.t()) ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
   def read_protocole_user(%CapProfile{} = cap) do
-    # La racine vient du PROFIL : le protocole qu'un pod recoit appartient au catalogue qui declare
-    # son role. Sans ca, un role du second catalogue recoit le protocole du premier — un contrat de
-    # conversation ecrit pour d'autres gens.
+    # Use the declaring catalogue’s protocol, not another installed catalogue’s.
     root = cap.catalogue_root
 
     case CapProfile.interlocutor(cap) do
@@ -168,14 +118,8 @@ defmodule Fleet.Spawner.Pod.Assets do
         {:ok, content}
 
       :unpublished ->
-        # The SCOPE, not the search path — the pod's own catalogue plus the system one, the same
-        # pair its image is frozen from. The scope is a pair and never the business root alone: the
-        # human protocol follows the roles that need it, and the only `interlocutor: both` roles
-        # live in the system catalogue — reading one root demands this file from catalogues whose
-        # every role is `interlocutor: fleet` (W-13). And never the FLATTENED path either
-        # (`find(:sp_drafts, …)` walks every installed catalogue): a `mobile` pod would read
-        # `web-demo`'s protocol on disk while its image raises — a conversation contract written
-        # for other people, served on exactly the regime hermetic tests measure.
+        # Limit fallback lookup to this catalogue plus the system catalogue, matching the image.
+        # System roles may need the human protocol even when all business roles use fleet.
         protocol_from_disk(root, "protocole-user-human.md", :protocole_user_human_missing)
     end
   end
@@ -190,12 +134,8 @@ defmodule Fleet.Spawner.Pod.Assets do
     end
   end
 
-  # `root` is nil for a profile loaded without a named catalogue: the BUNDLED one, because that is
-  # what the image regime answers for the same caller. The not-found error names a path in the
-  # scope's OWN tree, never a foreign one — send the author to the tree they own.
-  #
-  # The rule is stated here rather than delegated to another function's name: a rule that outlives
-  # the function it is attached to should not go looking for it.
+  # A nil root uses the bundled catalogue, matching image lookup. Missing-file errors
+  # name a path in that catalogue so the author can repair the correct tree.
   defp protocol_from_disk(root, name, error_tag) do
     scope_root = root || Fleet.Catalogue.root()
     scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)

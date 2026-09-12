@@ -1,15 +1,7 @@
 defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
   @moduledoc """
-  The protocol a pod is provisioned with is SELECTED by its cap-profile's `interlocutor`, not
-  assumed. Before that field existed the rail had no branch at all: every pod — the interactive
-  architect included — was handed the machine contract, which tells its reader that `SeeU` closes
-  nothing and that no handoff exists. True of an engineer, false of a role a human talks to.
-
-  These tests drive the IMAGE regime, which is the one a deployed fleet runs on, with marker
-  contents so the assertions read what was actually served rather than a substring of the shipped
-  documents. The disk regime is covered where it belongs — `Fleet.SPBuilderImageParityTest` proves
-  the two regimes serve identical bytes for all three values, so neither suite asserts the other's
-  job.
+  Exercise interlocutor selection against a published image using distinct fixture markers.
+  `Fleet.SPBuilderImageParityTest` covers parity with the disk regime.
   """
   use ExUnit.Case, async: false
 
@@ -64,9 +56,7 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
   end
 
   test "interlocutor: both → the machine contract AND the human one, machine first" do
-    # ADDITIVE, not a replacement: the architect is kicked by the machine and talked to by a human
-    # at the same terminal, so dropping either half breaks one of its two rails. Machine first
-    # because that is the contract that starts the pod; the human half is what it does once alive.
+    # Machine protocol comes first to start the pod; the human protocol supports conversation.
     assert {:ok, served} = Assets.read_protocole_user(cap("both"))
     assert served =~ "MACHINE-CONTRACT"
     assert served =~ "HUMAN-CONTRACT"
@@ -77,8 +67,6 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
   end
 
   test "the three values do not collapse — each serves a distinct document" do
-    # The cheap failure this closes: a branch written so that two values happen to produce the same
-    # bytes reads as implemented and is not. Measured, not assumed.
     served =
       for who <- ["fleet", "both", "human"], into: %{} do
         assert {:ok, content} = Assets.read_protocole_user(cap(who))
@@ -89,9 +77,7 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
   end
 
   test "the canon's own interlocutors are declared, and the architect is dual" do
-    # The catalogue is the source: this asserts the DECLARATION, not a hardcoded role list in the
-    # code. `architect`/`starfleet` face a human AND are dispatched by the fleet; the producer and
-    # the judges have nobody at their terminal.
+    # Read catalogue declarations: architect/starfleet support both interaction modes.
     for {role, expected} <- [
           {"architect", "both"},
           {"starfleet", "both"},

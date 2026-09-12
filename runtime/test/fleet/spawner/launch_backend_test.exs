@@ -1,6 +1,5 @@
 defmodule Fleet.Spawner.LaunchBackendTest do
-  # async: false — `:launch_backend` is global Application config. setup RESTORES the original
-  # (test.exs sets StubBackend; others count on it — CLAUDE.md hermeticity).
+  # Serial: launch_backend is application-global; restore the configured stub for other tests.
   use ExUnit.Case, async: false
 
   alias Fleet.Spawner.LaunchBackend
@@ -22,8 +21,6 @@ defmodule Fleet.Spawner.LaunchBackendTest do
     end
 
     test "NON-conforming backend (real module without launch/2, config typo) → {:error, {:launch_backend_misconfigured, mod}}" do
-      # On direct dispatch, `mod.launch(...)` would raise UndefinedFunctionError and crash the gen_statem
-      # BEFORE transition_failed (orphan). The guard types it as a clear error that do_launch_backend folds.
       Application.put_env(:lcars_fleet, :spawner_launch_backend, Enum)
       assert {:error, {:launch_backend_misconfigured, Enum}} = LaunchBackend.resolved_conforming()
     end
@@ -34,7 +31,6 @@ defmodule Fleet.Spawner.LaunchBackendTest do
     end
 
     test "test backend StubBackend is conforming (non-regression: pod tests still launch)" do
-      # resolved() in test env = StubBackend (test.exs) → must stay {:ok, _} (otherwise all pod tests break).
       assert {:ok, _mod} = LaunchBackend.resolved_conforming()
     end
   end

@@ -1,8 +1,6 @@
 defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
   @moduledoc """
-  B5 #576 — real LauncherPortBackend. Pure `build_spawn/1` (args vector =
-  anti-M1 risk) + Port smoke via fake-exe (captured init / timeout /
-  exit-before-init / missing exe). `@tag :tmp_dir`, async.
+  Verify the argv vector and Port launch/error contracts with temporary executables.
   """
   use ExUnit.Case, async: true
 
@@ -28,8 +26,8 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
 
   describe "build_spawn/1 (pure, anti-M1 vector)" do
     test "exact vector launcher <role pod dir> claude <role pod dir> (SP OUT of argv → --system-prompt-file)" do
-      # SP not in argv (/proc/cmdline leak + ARG_MAX): claude_launch reads it from
-      # .lcars/system-prompt.md via --system-prompt-file. Identity/session travel through the ENV (launch/2).
+      # Keep the system prompt out of argv to avoid /proc exposure and ARG_MAX limits.
+      # The vendor reads .lcars/system-prompt.md; identity travels through the environment.
       assert {:ok, "/b/bwrap.sh",
               [
                 "engineer",
@@ -50,8 +48,7 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
     end
 
     test "LAUNCH-Q: the Port exe = launcher_path (host_launch when containment: none), argv unchanged" do
-      # The backend is containment-agnostic: it executes the launcher the spawner chose.
-      # Same args vector ⇒ same argv; only the exe (the Port's argv0) changes (host vs bwrap).
+      # The backend executes the selected launcher; containment selection happens upstream.
       assert {:ok, "/h/host_launch.sh", ["architect", "pod-7", "/p", "/opt/claude_launch.sh" | _]} =
                LauncherPortBackend.build_spawn(%{
                  role: "architect",
@@ -92,7 +89,6 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackendTest do
          %{tmp_dir: dir} do
       bwrap = fake_exe(dir, "fake_bwrap.sh", "true")
 
-      # `to_charlist(42)` would raise an out-of-contract ArgumentError → bounded into a typed error.
       assert {:error, {:bad_env, _}} = LauncherPortBackend.launch(args(dir, bwrap), %{"K" => 42})
       assert {:error, {:bad_env, _}} = LauncherPortBackend.launch(args(dir, bwrap), %{"K" => nil})
     end
