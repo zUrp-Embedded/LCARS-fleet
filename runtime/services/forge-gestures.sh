@@ -44,14 +44,14 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # TRAVAIL ne fabrique d'humain — le rail pose les autorites (le siege, l'admin de forge, le master
 # token) et les personnes s'enrolent par la page d'inscription, sous leur nom.
 #
-# Qui en veut un le NOMME : les deux bancs posent `LCARS_BUILTIN_HUMAN` — `bench-forge-bootstrap.sh`
+# Qui en veut un le NOMME : les deux bancs posent `LCARS_BUILTIN_HUMAN` — `bench-up.sh`
 # pour le conteneur, `install.sh --bench` pour le poste (il traverse le sudo par l'ESCALADE_ENV de
 # `deploy/workstation`) ; ⚖ user 2026-09-11, « les install doivent etre ISO a la fin ». C'est la
 # SEULE voie. Un `LCARS_DISPOSABLE` a vecu ici, qui demandait un humain de demonstration
 # sans le nommer (« lcars » par defaut) depuis un `--disposable` de la porte, quatre etages plus
 # haut : ⚖ user 2026-09-04, « un vieux reliquat a virer » — un axe entier pour un defaut que plus
 # personne ne demandait. Ce fichier reste le seul declarant du nom ; deux temoins de
-# `forge_host_reach.bats` le gardent.
+# le temoin de 48 le garde.
 BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,

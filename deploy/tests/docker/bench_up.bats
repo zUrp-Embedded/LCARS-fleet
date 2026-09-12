@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/lib/bench_up_verdict.bats
+# SOURCE: deploy/tests/docker/bench_up.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins du banc — forge, conteneur, amorçage, humain, semis, runner, fleet, verdict
@@ -72,6 +72,7 @@ FAKE
 argv="$*"
 stdin=""; [[ -p /dev/stdin || -f /dev/stdin ]] && stdin="$(cat)"
 echo "DOCKER:$argv${stdin:+ <<< $stdin}" >> "$CALLS"
+[[ -z "${PW-}" ]] || echo "PW=$PW" >> "$CALLS"
 case "$argv" in
   *" create lcars"*|*" up -d")   env | grep '^LCARS_\|^FORGE_' | sort >> "$CALLS"; exit 0 ;;
   *"ps --filter publish="*)      [[ -f "$PORT_HOLDER" ]] && cat "$PORT_HOLDER"; exit 0 ;;
@@ -260,7 +261,9 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -q "DOCKER:compose -f .*forge-compose.yml -p bt-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$BF" "$CALLS"
   grep -q "DOCKER:exec -i -u root bt-fleet-lcars-1 chpasswd <<< admiral:toto123456" "$CALLS"
-  grep -q "gitea admin user create --username admiral --password toto123456" "$CALLS"
+  grep -q 'DOCKER:exec -e PW -u git bt-forge-gitea-1 sh -c gitea admin user create .* _ admiral$' "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
+  refute grep -q 'DOCKER:[^<]*toto123456' "$CALLS"
   [[ "$output" == *"compte admiral créé"* ]]
 }
 
@@ -268,7 +271,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   echo 1 > "$CREATE_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "user change-password --username admiral --password toto123456" "$CALLS"
+  grep -q 'user change-password .* _ admiral$' "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
   [[ "$output" == *"compte admiral déjà présent — mot de passe de banc reposé"* ]]
 }
 
@@ -320,6 +323,14 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"creds claude posées chez lcars"* ]]
 }
 
+@test "--no-creds est un choix, dit comme tel, et rien n'est lu ni posé" {
+  printf 'CREDS-DE-DECOR\n' > "$BATS_TEST_TMPDIR/creds.json"
+  run_bench --no-runner --no-creds --creds-from "$BATS_TEST_TMPDIR/creds.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"creds claude non posées (--no-creds)"*"par choix"*"creds     : non"* ]]
+  refute grep -q 'CREDS-DE-DECOR' "$CALLS"
+}
+
 # ─── le semis des dépôts ────────────────────────────────────────────────────────────────────────
 
 @test "le semis pousse la révision de l'image sur main, avec le jeton système dans l'environnement de git, jamais dans l'argv, et sans --force" {
@@ -355,7 +366,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   printf 'CREDS\n' > "$BATS_TEST_TMPDIR/creds.json"; : > "$CALLS"
   run_bench --no-runner --creds-from "$BATS_TEST_TMPDIR/creds.json"
   grep -q "DOCKER:exec -u lcars bt-fleet-lcars-1 env fleet start" "$CALLS"
-  echo 1 > "$FLEET_RC"
+  echo 1 > "$FLEET_RC"; rm -f "$CREDS_POSED"
   run_bench --no-runner
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet     : « fleet start » a échoué sous lcars"* ]]

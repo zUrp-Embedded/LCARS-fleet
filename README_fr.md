@@ -136,13 +136,14 @@ services ou le conteneur, enregistre le runner CI, puis affiche les points d'ent
 idempotente : relancée, elle converge vers le même état.
 
 ```
-banc PRET
-  forge     : http://192.168.1.42:21000   (humain lcars / toto32toto32)
+banc PRÊT
+  forge     : http://192.168.1.42:21000   (admiral / toto123456 · lcars / toto32toto32)
   deck      : http://192.168.1.42:20999
-  conteneur : lcars-nuit-lcars-1   ssh 192.168.1.42:2222
-  runner    : ENREGISTRE (1 vu(s) par la forge)
-  ecoute    : 0.0.0.0 — OUVERT SUR LE RESEAU. …
-  destruire : bench-down.sh --project lcars-nuit
+  conteneur : lcars-nuit-lcars-1   ssh lcars@192.168.1.42 -p 2222
+  runner    : enregistré (1 vu(s) par la forge)
+  écoute    : 0.0.0.0 — ouvert sur le réseau ; …
+  fleet     : démarrée sous lcars (sans credentials claude : aucun pod ne pense)
+  détruire  : bench-down.sh --project lcars-nuit --yes
 ```
 
 L'adresse affichée est celle de la machine, détectée au démarrage. Tout autre verdict que
@@ -157,7 +158,7 @@ Deux comptes existent, et ils ne sont **pas** interchangeables.
 | compte | mot de passe | ce que c'est |
 |---|---|---|
 | **`lcars`** | `toto32toto32` | **l'humain de la flotte.** C'est celui que tu utilises. Il possède les projets, parle aux agents, et a une console sur le tableau de bord. |
-| **`admiral`** | `toto1234` | **l'administrateur système.** Il possède le conteneur (sudo) et a fondé la forge. Il fait tourner la machine ; il ne fait pas tourner la flotte — démarrer une flotte sous lui est refusé par construction. |
+| **`admiral`** | `toto123456` | **l'administrateur système.** Il possède le conteneur (sudo) et a fondé la forge. Il fait tourner la machine ; il ne fait pas tourner la flotte — démarrer une flotte sous lui est refusé par construction. |
 
 ⚠ **Ces mots de passe sont des défauts de test, écrits en clair dans ce README — et le banc écoute
 sur `0.0.0.0`, donc tout ce qui atteint ta machine l'atteint.** C'est délibéré : l'intérêt de cette

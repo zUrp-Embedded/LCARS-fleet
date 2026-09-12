@@ -10,7 +10,7 @@
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+. "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 # shellcheck source=../lib/forge-bootstrap.sh
 . "$(dirname "$PROVISION_LIB")/forge-bootstrap.sh"
 
@@ -94,7 +94,7 @@ docker_answers() { d ps --format '{{.ID}}' >/dev/null 2>&1; }
 
 foreign_forge_refusal() {
   p_fail "une forge répond sur $FORGE_URL, mais AUCUN conteneur du projet « $PROV_FORGE_PROJECT » ne publie $PROV_FORGE_HOST_PORT — ce n'est pas la forge de cette machine"
-  p_fail "  monte la tienne : « --port-forge <autre port> » (ajoute « --forge-project <nom> » si le nom est pris lui aussi)"
+  p_fail "  en monter une autre : « --port-forge <autre port> » (et « --forge-project <nom> » si le nom est pris lui aussi)"
 }
 
 forge_reach_note() {
@@ -216,7 +216,7 @@ check() {
     # « apply va le corriger » — le contrat des codes dit « etat-cible non tenu », et une forge qui
     # ne repond pas est un FAIT etabli, pas une ignorance. Ce qui distingue un warn est de ne PAS
     # SAVOIR ; ici on sait, et la machine est inutilisable tant que ca dure.
-    p_drift "forge FOURNIE muette ($FORGE_URL) — c'est l'adresse de FORGE_BASE_URL ; ce rail ne la monte pas, il la consomme"
+    p_drift "forge FOURNIE muette ($FORGE_URL) — c'est l'adresse de FORGE_BASE_URL ; cette installation ne la monte pas, elle la consomme"
     verdict_check
   fi
   if forge_up; then
@@ -255,7 +255,7 @@ apply() {
     # ⚠ ICI C'EST UN ECHEC, ET AU `check` C'ETAIT UN DRIFT — les deux verbes ne disent pas la même
     # chose. Constater qu'une adresse est muette n'est pas une panne ; s'engager à structurer une
     # forge qu'on ne joint pas en est une, et tout ce qui suit échouerait un geste plus loin.
-    p_fail "forge FOURNIE muette ($FORGE_URL) — ce rail la consomme, il ne la monte pas ; c'est à qui la tient de la relever"
+    p_fail "forge FOURNIE muette ($FORGE_URL) — cette installation la consomme, elle ne la monte pas ; c'est à qui la tient de la relever"
     verdict_apply
   fi
   local was_up=0; forge_up && was_up=1
@@ -276,7 +276,7 @@ apply() {
     if [[ -n "$_running" && "$_running" != "$PROV_FORGE_HOST_PORT" ]]; then
       p_fail "la forge du projet « $PROV_FORGE_PROJECT » tourne déjà sur le port $_running, et cette passe en demande $PROV_FORGE_HOST_PORT — je ne la déplace pas sans qu'on me le dise"
       p_fail "  une SECONDE forge      : « --forge-project <nom> » (conteneur, réseau, volumes et runner à elle)"
-      p_fail "  DÉPLACER celle-ci      : « $PROV_DOCKER_BIN compose -p $PROV_FORGE_PROJECT down » d'abord, puis relance"
+      p_fail "  DÉPLACER celle-ci      : « $PROV_DOCKER_BIN compose -p $PROV_FORGE_PROJECT down » d'abord, puis relancer"
       verdict_apply
     fi
 
@@ -284,7 +284,7 @@ apply() {
     if [[ "$was_up" -eq 0 && "$etat" == pris* ]]; then
       local holder; holder="${etat#pris}"; holder="${holder# par }"
       p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est PAS la forge de LCARS (elle ne répond pas sur $FORGE_URL)"
-      p_fail "choisis-en un autre : PROV_FORGE_HOST_PORT=<port> — ou libère celui-ci"
+      p_fail "en choisir un autre : PROV_FORGE_HOST_PORT=<port> — ou libérer celui-ci"
       verdict_apply
     fi
 
@@ -296,7 +296,7 @@ apply() {
   fi
 
   if [[ "$FORGE_MONTEE" -eq 0 ]]; then
-    p_ok "forge FOURNIE ($FORGE_URL) — rien à monter ; ce rail l'amorce, 61-forge-structure y pose la structure"
+    p_ok "forge FOURNIE ($FORGE_URL) — rien à monter ; cette installation l'amorce, 61-forge-structure y pose la structure"
   elif [[ "$was_up" -eq 1 ]]; then
     p_ok "forge du poste vivante et convergée ($FORGE_URL)$(forge_reach_note)"
   else
@@ -315,7 +315,7 @@ apply() {
     if forge_admin_password "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"; then
       announce_password "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"
     else
-      p_warn "banc : mot de passe de « $PROV_FORGE_ADMIN » non reposé (la forge a refusé)"
+      p_drift "banc : mot de passe de « $PROV_FORGE_ADMIN » non reposé (la forge a refusé) — le contrat du banc n'est pas tenu"
     fi
   fi
 
@@ -327,28 +327,28 @@ apply() {
   if [[ ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
     # en banc, le mot de passe de l'amiral est celui du contrat ; sinon aléatoire, annoncé une fois
-    local pw etat rc=0
+    local pw etat err preexistant=1
     if [[ "${LCARS_BENCH:-}" == "1" ]]; then pw="$(bench_admiral_password)"; else pw="$(new_password)"; fi
-    etat="$(forge_admin_ensure "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$pw" 2>"${TMPDIR:-/tmp}/forge-admin.$$")" || rc=$?
-    case "$rc:$etat" in
-      0:cree)
-        announce_password "$PROV_FORGE_ADMIN" "$pw" ;;
-      0:present)
+    err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
+    etat="$(forge_admin_ensure "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$pw" 2>"$err")" || etat=refus
+    case "$etat" in
+      cree)
+        preexistant=0; announce_password "$PROV_FORGE_ADMIN" "$pw" ;;
+      present)
         if [[ "${LCARS_BENCH:-}" == "1" ]] && forge_admin_password "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$pw"; then
-          rc=0; announce_password "$PROV_FORGE_ADMIN" "$pw"
+          preexistant=0; announce_password "$PROV_FORGE_ADMIN" "$pw"
         else
-          rc=1
           p_ok "compte « $PROV_FORGE_ADMIN » déjà présent (son mot de passe est un hash, il n'est pas relisible)"
           p_warn "pour obtenir un mot de passe : « PROV_FORGE_ADMIN_RESET=1 » sur un apply en pose un neuf et l'affiche"
         fi ;;
       *)
-        p_fail "création du compte « $PROV_FORGE_ADMIN » refusée par la forge : $(tr -d '\r' < "${TMPDIR:-/tmp}/forge-admin.$$" | grep -v '^$' | tail -3 | tr '\n' ' ')"
-        rm -f "${TMPDIR:-/tmp}/forge-admin.$$"
+        p_fail "création du compte « $PROV_FORGE_ADMIN » refusée par la forge : $(tr -d '\r' < "$err" | grep -v '^$' | tail -3 | tr '\n' ' ')"
+        rm -f "$err"
         verdict_apply ;;
     esac
-    rm -f "${TMPDIR:-/tmp}/forge-admin.$$"
+    rm -f "$err"
 
-    reset_admin_password_if_asked "$rc"
+    reset_admin_password_if_asked "$preexistant"
     docker_stream_ok "$FORGE_CONTAINER" || {
       p_fail "le daemon docker répond aux lectures mais rend du vide sur « exec » (relais amputé) — rien ne peut être capturé depuis $FORGE_CONTAINER, et la forge n'y est pour rien. Viser la socket Docker Desktop directement : DOCKER_HOST=unix://$(_docker_mount_sock)"
       verdict_apply

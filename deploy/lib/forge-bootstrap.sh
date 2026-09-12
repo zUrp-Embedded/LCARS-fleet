@@ -5,7 +5,9 @@
 # STATUS: l'amorçage d'une forge Gitea — montage, compte d'administration, jeton master, seed, humain de banc
 #
 # Sourcée par 48-forge-host (poste) et par le banc (conteneur) : une seule forme pour les deux.
-# Les secrets passent par stdin (curl -K -) ou par l'environnement de docker exec, jamais par argv.
+# Aucun secret dans un argv de l'hôte : curl les lit par sa config sur stdin (-K -), la CLI gitea
+# par une variable transmise à docker exec (-e PW), le mot de passe n'apparaissant que dans le
+# namespace du conteneur de la forge — gitea n'a pas d'entrée stdin pour un mot de passe.
 #
 #   forge_mount <docker> <compose> <projet> <port> <bind> <url publique>   compose up -d
 #   forge_wait <url> [essais]                                              0 quand /api/v1/version répond
@@ -36,15 +38,15 @@ forge_wait() {
     curl -fsS -m 3 -o /dev/null "$url/api/v1/version" 2>/dev/null && return 0
     sleep 2
   done
-  curl -fsS -m 3 -o /dev/null "$url/api/v1/version" 2>/dev/null
+  return 1
 }
 
 forge_admin_ensure() {
   local docker="$1" conteneur="$2" login="$3" pw="$4" err rc=0
   err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
-  "$docker" exec -u git "$conteneur" gitea admin user create \
-      --username "$login" --password "$pw" --email "$login@lcars.local" \
-      --admin --must-change-password=false >/dev/null 2>"$err" || rc=$?
+  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
+      'gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false' \
+      _ "$login" >/dev/null 2>"$err" || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     rm -f "$err"; echo cree; return 0
   fi
@@ -58,8 +60,9 @@ forge_admin_ensure() {
 
 forge_admin_password() {
   local docker="$1" conteneur="$2" login="$3" pw="$4"
-  "$docker" exec -u git "$conteneur" gitea admin user change-password \
-      --username "$login" --password "$pw" --must-change-password=false >/dev/null 2>&1
+  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
+      'gitea admin user change-password --username "$1" --password "$PW" --must-change-password=false' \
+      _ "$login" >/dev/null 2>&1
 }
 
 forge_master_token() {
@@ -70,7 +73,7 @@ forge_master_token() {
   printf '%s\n' "$tok"
 }
 
-forge_seed_new() { head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20; }
+forge_seed_new() { head -c 400 /dev/urandom | tr -dc 'A-Za-z0-9' | cut -c1-20; }
 
 forge_token_ok() {
   local url="${1%/}"
@@ -79,6 +82,8 @@ forge_token_ok() {
 
 bench_human_seed() {
   local url="${1%/}" tok="$2" humain="$3" pw="$4" code is_admin resp sha
+  # le mot de passe s'écrit dans une requête JSON portée par une config curl : pas de guillemet ni de barre oblique inverse
+  [[ "$pw$humain" != *[\"\\]* ]] || { echo "mot de passe ou login de banc avec « \" » ou « \\ » : refusé" >&2; return 1; }
   code="$(printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false,\\"admin\\":true}"\n' \
              "$tok" "$humain" "$pw" \
            | curl -K - -s -m 10 -o /dev/null -w '%{http_code}' "$url/api/v1/admin/users/$humain" 2>/dev/null || echo 000)"

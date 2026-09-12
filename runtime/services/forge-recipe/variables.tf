@@ -29,7 +29,7 @@ variable "seed_password" {
 # vraies personnes s'inscrivent seules et un admin les ajoute à `humans`.
 # ⚠ VIDE = AUCUN COMPTE, ET C'EST LE DÉFAUT (⚖ user 2026-08-30). Un défaut nommé sèmerait ce compte
 # sur tout déploiement, alors qu'un déploiement réel ne passe pas le sien. Un banc le NOMME
-# (`bench-forge-bootstrap.sh`), et c'est du confort assumé sur une machine jetable.
+# (`bench-up.sh`), et c'est du confort assumé sur une machine jetable.
 variable "builtin_human" {
   type        = string
   default     = ""

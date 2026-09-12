@@ -35,7 +35,7 @@ setup() {
   cat > "$BIN/docker" <<EOF
 #!/usr/bin/env bash
 echo "DOCKER:\$*" >> "$CALLS"
-env | grep '^LCARS_DEVFORGE_' | sort >> "$CALLS"
+env | grep '^LCARS_DEVFORGE_\|^PW=' | sort >> "$CALLS"
 case "\$*" in
   version*)                       echo "29.0.0"; exit 0 ;;
   "compose version"*)             echo "v2"; exit 0 ;;
@@ -59,7 +59,7 @@ case "\$url" in
   */api/v1/users/*)  code="\${STUB_USER_CODE:-200}"
                      [[ " \$* " == *" -w "* ]] && { printf '{"is_admin":%s}\n%s' "\${STUB_IS_ADMIN:-true}" "\$code"; exit 0; }
                      printf '{"is_admin":%s}' "\${STUB_IS_ADMIN:-true}"; exit 0 ;;
-  */api/v1/admin/users?*) printf '[{"id":1,"login":"%s"}]' "\${STUB_SEAT:-$ME}"; exit 0 ;;
+  *"/api/v1/admin/users?limit="*) printf '[{"id":1,"login":"%s"}]' "\${STUB_SEAT:-$ME}"; exit 0 ;;
   */api/v1/admin/users/*) exit "\${STUB_PATCH_RC:-0}" ;;
 esac
 exit 0
@@ -83,6 +83,7 @@ mod() {
 
 @test "un bind sur la loopback ferme la forge à cette machine, et le verdict le dit" {
   PROV_FORGE_BIND=127.0.0.1 mod check
+  [ "$status" -ne 2 ]
   [[ "$output" == *"cette machine SEULE"* ]]
   [[ "$output" != *"OUVERTE"* ]]
 }
@@ -90,8 +91,10 @@ mod() {
 @test "sous WSL en NAT sans adresse donnée, l'annonce est localhost et le motif remonte ; hors WSL non" {
   unset PROV_FORGE_ADVERTISE
   PROV_SUBSTRATE=wsl LCARS_WSL_NETWORKING_MODE=nat mod check
+  [ "$status" -ne 2 ]
   [[ "$output" == *"composable en http://localhost:21000 (WSL2 en mode NAT"* ]]
   PROV_SUBSTRATE=linux LCARS_WSL_NETWORKING_MODE=nat mod check
+  [ "$status" -ne 2 ]
   [[ "$output" != *"http://localhost:21000"* ]]
 }
 
@@ -182,18 +185,19 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
 
 @test "l'administrateur est l'humain de la passe, sauf si la table des uid nomme déjà le siège" {
   STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
-  grep -q "user create --username $ME --password" "$CALLS"
+  grep -q "user create .* _ $ME\$" "$CALLS"
   : > "$CALLS"; rm -f "$PROV_TOKENS_DIR"/*
   printf '1\t0\troot\n' > "$PROV_UID_MAP_FILE"
   STUB_PORTS="0.0.0.0:21000->3000/tcp" STUB_SEAT=root mod apply
-  grep -q 'user create --username root --password' "$CALLS"
+  grep -q 'user create .* _ root$' "$CALLS"
 }
 
 @test "premier apply : compte créé avec un mot de passe de dix lettres annoncé, jeton master et seed posés en 0600" {
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local pw; pw="$(grep -oE "user create --username $ME --password [A-Za-z]+" "$CALLS" | awk '{print $NF}')"
+  local pw; pw="$(sed -n 's/^PW=//p' "$CALLS" | head -1)"
+  refute grep -q "DOCKER:.*$pw" "$CALLS"
   [[ "$pw" =~ ^[A-Za-z]{10}$ ]]
   grep -q "forge du poste — compte d'administration	$ME	$pw" "$PROV_ANNOUNCE_FILE"
   [[ "$output" != *"$pw"* ]]
@@ -202,6 +206,14 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   [[ "$(cat "$PROV_TOKENS_DIR/forge-seed.pass")" =~ ^[A-Za-z0-9]{20}$ ]]
   [ "$(stat -c %a "$PROV_TOKENS_DIR/forge-seed.pass")" = "600" ]
   [[ "$output" == *"autorité de création posée"*"seed des comptes posé"* ]]
+}
+
+@test "sans canal d'annonce, le mot de passe créé s'imprime sur place : se taire serait pire" {
+  unset PROV_ANNOUNCE_FILE
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local pw; pw="$(sed -n 's/^PW=//p' "$CALLS" | head -1)"
+  [[ "$output" == *"IDENTIFIANTS"*"$ME"*"$pw"* ]]
 }
 
 @test "second apply : jeton et seed déjà posés restent, aucun compte recréé, rien annoncé" {
@@ -236,18 +248,18 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   LCARS_BENCH=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "user create --username $ME --password toto123456" "$CALLS"
+  grep -q "user create .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
   : > "$CALLS"; rm -f "$PROV_TOKENS_DIR"/* "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
-  grep -q "change-password --username $ME --password toto123456" "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
   : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
   refute grep -q 'user create' "$CALLS"
-  grep -q "change-password --username $ME --password toto123456" "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
 }
 
@@ -258,7 +270,7 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
   PROV_FORGE_ADMIN_RESET=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 0 ]
-  grep -qE "change-password --username $ME --password [A-Za-z]{10} --must-change-password=false" "$CALLS"
+  grep -q "user change-password .* _ $ME\$" "$CALLS" && grep -qE '^PW=[A-Za-z]{10}$' "$CALLS"
   grep -q "$ME	" "$PROV_ANNOUNCE_FILE"
 }
 
@@ -273,7 +285,11 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   grep -q 'CURL:-K - .*admin/users/'"$ME"' | header = "Authorization: token tok-master".*request = "PATCH"' "$CALLS"
   refute grep -qE 'CURL:[^|]*tok-master' "$CALLS"
   STUB_USER_CODE=404 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
+  [ "$status" -ne 2 ]
   [[ "$output" == *"« $ME » n'a pas de compte sur cette forge"* ]]
+  STUB_IS_ADMIN=false STUB_PATCH_RC=22 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL"*"« $ME » n'a pas pu être promu administrateur"* ]]
 }
 
 @test "sans jeton, l'adminité est inconnue et rien n'est tenté" {
@@ -286,11 +302,13 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
 @test "le siège s'enregistre à l'apply dans la table des uid, le check le voit ensuite et n'écrit rien" {
   rm -f "$PROV_UID_MAP_FILE"
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
+  [ "$status" -ne 2 ]
   [ ! -e "$PROV_UID_MAP_FILE" ]
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$(awk -F'\t' '$1 == 1 { print $3 }' "$PROV_UID_MAP_FILE")" = "$(id -un)" ]
   [[ "$output" == *"siège : « $(id -un) » enregistré"* ]]
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
+  [ "$status" -ne 2 ]
   [[ "$output" == *"siège : « $(id -un) » enregistré"* ]]
 }
 

@@ -18,7 +18,7 @@ setup() {
   cat > "$BIN/docker" <<EOF
 #!/usr/bin/env bash
 echo "DOCKER:\$*" >> "$CALLS"
-env | grep '^LCARS_DEVFORGE_' | sort >> "$CALLS"
+env | grep '^LCARS_DEVFORGE_\|^PW=' | sort >> "$CALLS"
 case "\$*" in
   *"user create"*)  [[ -z "\${STUB_CREATE_ERR:-}" ]] || echo "\$STUB_CREATE_ERR" >&2; exit "\${STUB_CREATE_RC:-0}" ;;
   *"generate-access-token"*) printf '%s\n' "\${STUB_TOKEN-tok-123}"; exit 0 ;;
@@ -63,10 +63,12 @@ lib() { run bash -c "set -euo pipefail; source '$LIB'; $1"; }
   [ "$status" -ne 0 ]
 }
 
-@test "forge_admin_ensure : crée le compte admin, ou dit qu'il est présent, ou rend l'erreur de la forge" {
+@test "forge_admin_ensure : crée le compte admin, ou dit qu'il est présent, ou rend l'erreur de la forge ; le mot de passe voyage par l'environnement" {
   lib 'forge_admin_ensure docker gitea-1 bob s3cret'
   [ "$status" -eq 0 ] && [ "$output" = "cree" ]
-  grep -q 'DOCKER:exec -u git gitea-1 gitea admin user create --username bob --password s3cret --email bob@lcars.local --admin --must-change-password=false' "$CALLS"
+  grep -q 'DOCKER:exec -e PW -u git gitea-1 sh -c gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false _ bob' "$CALLS"
+  grep -qx 'PW=s3cret' "$CALLS"
+  refute grep -q 'DOCKER:.*s3cret' "$CALLS"
   STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists [name: bob]" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
   [ "$status" -eq 0 ] && [ "$output" = "present" ]
   STUB_CREATE_RC=1 STUB_CREATE_ERR="database is locked" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
@@ -77,7 +79,9 @@ lib() { run bash -c "set -euo pipefail; source '$LIB'; $1"; }
 @test "forge_admin_password : rotation par la CLI de la forge, sans changement forcé" {
   lib 'forge_admin_password docker gitea-1 admiral toto123456'
   [ "$status" -eq 0 ]
-  grep -q 'DOCKER:exec -u git gitea-1 gitea admin user change-password --username admiral --password toto123456 --must-change-password=false' "$CALLS"
+  grep -q 'DOCKER:exec -e PW -u git gitea-1 sh -c gitea admin user change-password --username "$1" --password "$PW" --must-change-password=false _ admiral' "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
+  refute grep -q 'DOCKER:.*toto123456' "$CALLS"
 }
 
 @test "forge_master_token : rend le jeton minté, et 1 quand la forge n'en rend aucun" {

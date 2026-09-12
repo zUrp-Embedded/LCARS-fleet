@@ -86,6 +86,8 @@ export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
 # dans la lib : la copie qui vivait ici portait la meme erreur et il aurait fallu la corriger deux fois.
 # shellcheck source=../../lib/provision-lib.sh
 source "$DOCKER_DIR/../lib/provision-lib.sh"
+# shellcheck source=../../lib/forge-bootstrap.sh
+source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
 if [[ -z "${ADVERTISE:-}" ]]; then advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"; fi
 FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
 
@@ -169,7 +171,7 @@ say "conteneur healthy"
 
 # ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
 # ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
-if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$CONTAINER" chpasswd 2>/dev/null; then
+if printf 'admiral:%s\n' "$(bench_admiral_password)" | "$DOCKER_BIN" exec -i "$CONTAINER" chpasswd 2>/dev/null; then
   say "mot de passe de banc pose sur admiral (ssh/sudo)"
 else
   say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $CONTAINER bash'"

@@ -230,10 +230,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   qui ne peuvent pas s'appeler — la meme forme que les listes de roles verrouillees par `mix
   lcars.contracts.check`"*. Naming a cost is not paying it; this check pays it.
 
-  ⚠ TWO WITNESSES PIN THE LITERAL WITHOUT KNOWING THE AUTHORITY.
-  `forge_host_reach.bats` asserts the exact strings `/opt/lcars/catalogues/web-demo` and
-  `COPY catalogues /opt/lcars/catalogues`. Move `@platform_root` and both stay GREEN on the old
-  value — a witness that pins a literal defends the literal, not the agreement.
+  ⚠ A WITNESS THAT PINS THE LITERAL WOULD NOT KNOW THE AUTHORITY: move `@platform_root` and it
+  would stay GREEN on the old value — a witness that pins a literal defends the literal, not the
+  agreement. This contract reads the authority.
 
   What breaks without this: the fleet reads seeds where the image never wrote them. `bin/lcars`
   says when it hurts most — the CLI shows the cache in DEGRADED mode, release unreachable, which

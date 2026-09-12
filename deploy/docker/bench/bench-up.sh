@@ -12,12 +12,14 @@
 #   Le banc monte une forge Gitea jetable (projet <base>-forge), crée le conteneur (<base>-fleet)
 #   attaché à son réseau, y pose la structure de la forge, l'humain de démonstration et ses
 #   jetons, enrôle un runner CI (<base>-runner) et démarre la fleet. Les mots de passe sont ceux
-#   du contrat de banc : admiral / toto123456, lcars / toto32toto32 — publics, jetables.
+#   du contrat de banc : admiral / toto123456, lcars / toto32toto32 — publics, jetables. L'humain
+#   de démonstration est site-admin de la forge : ce banc ne mesure pas ce que la team humans
+#   autorise à un compte ordinaire.
 #
 # EXIT  : 0 banc prêt (« banc PRÊT », ou « banc PRÊT sans CI » sous --no-runner) · 1 arguments ou
 #         dépendance · 2 la forge ne monte pas · 3 le conteneur ne monte pas · 4 amorçage de la forge ·
 #         5 humain ou credentials · 6 le verdict final ne passe pas (runner demandé qui ne sert pas,
-#         conteneur en échec de convergence)
+#         conteneur en échec de convergence) · 7 la source ne se sème pas (révision de l'image)
 
 set -euo pipefail
 
@@ -110,6 +112,9 @@ attendre_healthy() {
 }
 
 # ─── Le terrain ─────────────────────────────────────────────────────────────────────────────────
+for _outil in curl python3 git; do
+  command -v "$_outil" >/dev/null 2>&1 || die "$_outil requis sur ce poste (le banc lit la forge par son API et sème sa source)" 1
+done
 [[ "$DOCKER_BIN" == */* ]] && { [[ -f "$DOCKER_BIN" && -x "$DOCKER_BIN" ]] || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"; } \
   || command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
 if [[ -z "${DOCKER_HOST:-}" ]]; then
@@ -243,14 +248,16 @@ d restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
 attendre_healthy || die "le conteneur ne redevient pas healthy après relance" 3
 as_human id -u "$HUMAN" >/dev/null 2>&1 \
   || die "l'humain '$HUMAN' n'existe pas dans le conteneur après la relance — il vient de la forge (team $ORG:humans), matérialisé par le convergeur : docker logs $CONTAINER" 5
-printf '%s\n' "$HUMAN_TOKEN" | as_human bash -c 'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
+printf '%s\n' "$HUMAN_TOKEN" | as_human bash -c 'umask 077 && cat > ~/.gitea_token' \
   || die "jeton opérateur non posé chez $HUMAN dans $CONTAINER" 5
 say "jeton opérateur posé (~$HUMAN/.gitea_token)"
 printf '%s:%s\n' "$HUMAN" "$HUMAN_PW" | in_container chpasswd 2>/dev/null \
   && say "mot de passe de banc posé sur $HUMAN (ssh)" \
   || say "$HUMAN : mot de passe unix non posé — ssh par clé"
 
-if [[ "$WITH_CREDS" -eq 1 && ! -r "$CREDS_FROM" ]]; then
+if [[ "$WITH_CREDS" -eq 0 ]]; then
+  say "creds claude non posées (--no-creds) — aucun pod ne pourra penser, par choix"
+elif [[ ! -r "$CREDS_FROM" ]]; then
   say "creds claude absentes ($CREDS_FROM) — non posées chez $HUMAN, aucun pod ne pourra penser ; le banc continue"
   WITH_CREDS=0
 fi

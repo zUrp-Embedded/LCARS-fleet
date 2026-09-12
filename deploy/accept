@@ -66,7 +66,7 @@ check_ci() {
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
   if [[ ! -r "$tokfile" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
-      no "CI : cette mesure demande root (l'API des runners est site-admin, et son jeton appartient au detenteur des secrets) — rejoue sous « sudo »"
+      no "CI : cette mesure demande root (l'API des runners est site-admin, et son jeton appartient au detenteur des secrets) — a rejouer sous « sudo »"
     else
       no "CI : jeton master illisible ($tokfile) — l'etat des runners n'est pas mesurable"
     fi

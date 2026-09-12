@@ -41,6 +41,7 @@ setup() {
   # fait rien est pire qu'un drapeau refuse : le refus laisse chercher, le silence laisse croire.
   grep -q 'export LCARS_BENCH=1 PROV_FORGE_MONTEE=1' "$PORTE"
   grep -qE '^ESCALADE_ENV=\(.*LCARS_BENCH ' "$DEPLOY/workstation"
+  grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_ADMIN_RESET' "$DEPLOY/workstation"
   # et le banc du POSTE nomme son humain de demo comme celui du conteneur (ISO, ⚖ user 2026-09-11)
   grep -q 'export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"' "$PORTE"
   grep -qE '^ESCALADE_ENV=\(.*LCARS_BUILTIN_HUMAN' "$DEPLOY/workstation"
