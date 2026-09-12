@@ -243,6 +243,12 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   [ "$status" -eq 0 ]
   grep -q "change-password --username $ME --password toto123456" "$CALLS"
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
+  : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
+  LCARS_BENCH=1 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
+  [ "$status" -eq 0 ]
+  refute grep -q 'user create' "$CALLS"
+  grep -q "change-password --username $ME --password toto123456" "$CALLS"
+  grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
 }
 
 @test "PROV_FORGE_ADMIN_RESET pose un mot de passe neuf et l'annonce, jamais sur un compte tout juste créé" {

@@ -310,6 +310,14 @@ apply() {
     || { p_fail "adresse publique de la forge non posée ($PROV_TOKENS_DIR/forge.public.url)"; verdict_apply; }
 
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
+  # en banc, chaque passe repose le mot de passe du contrat : un banc se rejoue, son mot de passe ne bouge pas
+  if [[ "${LCARS_BENCH:-}" == "1" && "$FORGE_MONTEE" -eq 1 && -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+    if forge_admin_password "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"; then
+      announce_password "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"
+    else
+      p_warn "banc : mot de passe de « $PROV_FORGE_ADMIN » non reposé (la forge a refusé)"
+    fi
+  fi
 
   # une forge fournie n'a pas de conteneur ici : son autorité se donne, elle ne se fabrique pas
   if [[ "$FORGE_MONTEE" -eq 0 && ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
