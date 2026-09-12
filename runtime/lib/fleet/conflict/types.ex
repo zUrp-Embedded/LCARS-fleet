@@ -1,10 +1,7 @@
 defmodule Fleet.Conflict.ConfidenceScore do
   @moduledoc """
-  Composite confidence for one automatic resolution: a multi-dimensional score, not a flat label.
-
-  The score and its label are derived in ONE place (`Fleet.Conflict.Score`). Divergent copies of the
-  formula make a hunk SILENTLY LOSE a penalty the first time a secondary path re-scores it, so
-  callers pass dimensions, never a pre-rolled score.
+  Classification score and explanatory metadata, normally built by Fleet.Conflict.Score.
+  Direct structs can supply inconsistent scores/labels; key enforcement does not validate them.
   """
   @type label :: :certain | :high | :medium | :low
   @type t :: %__MODULE__{
@@ -20,9 +17,8 @@ end
 
 defmodule Fleet.Conflict.DecisionTrace do
   @moduledoc """
-  Structured trace of a hunk classification. Every evaluated pattern is recorded -- the REFUSAL is
-  documented as much as the acceptance. This trace is the durable audit artifact (doctrine D1: the
-  trace precedes the routing action), never a debug afterthought.
+  Classification trace through the winning pattern, including skipped and failed predecessors.
+  Pure data for routing/audit consumers; persistence is their responsibility.
   """
   @type step :: %{type: atom(), passed: boolean(), reason: String.t()}
   @type t :: %__MODULE__{
@@ -37,9 +33,8 @@ end
 
 defmodule Fleet.Conflict.Hunk do
   @moduledoc """
-  One classified conflict block: the three sides, the detected type, the composite confidence, and
-  the decision trace. Pure data -- produced by the classifier, consumed by the assembler and by the
-  router upstream (`Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation`).
+  Classified block for Assemble and Pilot conflict routing: sides, type, score and trace.
+  Manually constructed fields are not validated; zdiff3 is a heuristic annotation.
   """
   alias Fleet.Conflict.{ConfidenceScore, DecisionTrace}
 
@@ -74,11 +69,8 @@ defmodule Fleet.Conflict.Hunk do
     :confidence,
     :explanation,
     :trace,
-    # Result of the three-way merge, CARRIED rather than recomputed. `NonOverlapping.detect?/1`
-    # answers BY PERFORMING the merge; without this field the assembler asks for the same merge
-    # again, so the subsystem's most expensive computation (two quadratic LCS tables) runs TWICE per
-    # hunk and the first result is thrown away. `nil` for every other type, and for a hunk built by
-    # hand.
+    # Classifier carries NonOverlapping's result to avoid two more LCS tables. Nil by default;
+    # Assemble trusts a supplied list, including one from a manual struct.
     :merged_lines,
     zdiff3: false
   ]
@@ -86,17 +78,15 @@ end
 
 defmodule Fleet.Conflict.Report do
   @moduledoc """
-  Result of classifying (and, where trivially resolvable, resolving) one conflict-marked file.
-
-  `merged` is non-nil ONLY when every hunk was auto-resolved above the confidence threshold -- the
-  contract for "the runtime may write this back". Any residual (a `:complex` hunk, or a resolvable
-  hunk below threshold) leaves `merged: nil` and the caller routes to the producer / gatekeeper.
+  Conflict.resolve/2 result: merged is a candidate only when at least one hunk exists and
+  every hunk passes the writable-type gate, confidence floor and assembly. Any residual
+  discards the whole candidate; a clean file also has merged: nil, with no hunks.
+  This describes resolver output; manual structs do not enforce these relationships.
   """
   alias Fleet.Conflict.Hunk
 
-  # `writable` counts the hunks whose TYPE the engine may write back (`Fleet.Conflict`'s
-  # `@writable_types`); `trivial` counts every non-complex classification. The two differ on
-  # purpose: a hunk can be trivially diagnosed and still never be written by the machine.
+  # writable counts allowed types regardless of confidence/assembly; trivial counts non-complex
+  # diagnoses. Neither count alone authorizes writing: consumers must check merged.
   @type stats :: %{
           trivial: non_neg_integer(),
           complex: non_neg_integer(),

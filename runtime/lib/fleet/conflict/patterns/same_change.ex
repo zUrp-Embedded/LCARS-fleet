@@ -1,6 +1,6 @@
 defmodule Fleet.Conflict.Patterns.SameChange do
   @moduledoc """
-  Both branches made the exact same edit -> trivial (ours == theirs).
+  Both sides have identical joined text, whether or not it differs from base. Assemble uses ours.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

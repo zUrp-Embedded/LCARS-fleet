@@ -1,18 +1,7 @@
 defmodule Fleet.Conflict.Score do
   @moduledoc """
-  Single authority for composite confidence scoring and label derivation.
-
-      score = type_classification
-              - data_risk           * 0.40
-              - scope_impact        * 0.15
-              - file_frequency      * 0.10
-              + base_availability   * 0.05
-              - algorithm_stability * 0.10
-              - post_merge_risk     * 0.20
-
-  The formula is here for its WEIGHTS — what the engine is most afraid of being wrong about. The
-  label thresholds are NOT: they live on `label_from_score/1` alone, for the reason that function
-  states.
+  Composite classification score and label derivation. Weights live in make/4, label
+  thresholds in label_from_score/1. These heuristics are not probabilities or write authorization.
   """
   alias Fleet.Conflict.ConfidenceScore
 
@@ -24,10 +13,7 @@ defmodule Fleet.Conflict.Score do
   def scope_impact(_), do: 55
 
   @doc """
-  Folds a numeric confidence into the label the rest of the engine routes on.
-
-  The thresholds live HERE and nowhere else: a second table would let a report say `:high` while the
-  gate read the number as medium, and the two would disagree without either being wrong.
+  Maps a score to its routing label. Call this authority rather than copying thresholds.
   """
   @spec label_from_score(number()) :: ConfidenceScore.label()
   def label_from_score(s) when s >= 92, do: :certain
@@ -36,9 +22,10 @@ defmodule Fleet.Conflict.Score do
   def label_from_score(_), do: :low
 
   @doc """
-  Builds a `ConfidenceScore` from dimensions. `type_classification`, `data_risk` and `scope_impact`
-  are positional (always meaningful); the rest default to 0 (absent = no effect), which the
-  additive/subtractive formula makes exact.
+  Weighs dimensions, clamps to 0..100, rounds, then derives the label. Numeric options default
+  to zero; values are not validated. Text boosters/penalties are annotations, not score inputs.
+  algorithm_stability and post_merge_risk affect the score but are omitted from returned dimensions,
+  so that map alone cannot always reproduce the score.
   """
   @spec make(non_neg_integer(), non_neg_integer(), non_neg_integer(), keyword()) ::
           ConfidenceScore.t()

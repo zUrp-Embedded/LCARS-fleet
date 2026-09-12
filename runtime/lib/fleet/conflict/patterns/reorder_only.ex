@@ -1,7 +1,8 @@
 defmodule Fleet.Conflict.Patterns.ReorderOnly do
   @moduledoc """
-  Same lines, different order (a pure permutation) -> take theirs order (or ours if base already
-  matches theirs). Duplicated lines make the order ambiguous and cost confidence.
+  Same multiset of normalized nonblank lines, different order; duplicates lower confidence.
+  Normalization can also hide whitespace changes within quotes. Conflict excludes this type
+  from writing; a direct Assemble call prefers theirs, or ours when theirs equals non-empty base.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

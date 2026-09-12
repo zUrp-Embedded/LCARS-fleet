@@ -1,8 +1,8 @@
 defmodule Fleet.Conflict.Patterns.WhitespaceOnly do
   @moduledoc """
-  Same code, whitespace-only difference -> resolve. Guarded by a string-literal check: whitespace
-  INSIDE a string is data, not layout, so a hunk whose quoted contents differ is NOT purely cosmetic
-  and must not be silently collapsed to one side.
+  Equal normalized sides plus equal quote-scanner contents. The scanner approximates strings;
+  it is not a language lexer. Base presence changes the score without comparing base content.
+  Conflict never auto-writes this type because whitespace can carry language semantics.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

@@ -1,6 +1,7 @@
 defmodule Fleet.Conflict.Patterns.OneSideChange do
   @moduledoc """
-  Exactly one side changed relative to base (XOR) -> take the changed side. diff3 only.
+  Exactly one side's joined text equals base (XOR); Assemble takes the changed side.
+  The classifier requires a non-empty base before evaluating this pattern.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

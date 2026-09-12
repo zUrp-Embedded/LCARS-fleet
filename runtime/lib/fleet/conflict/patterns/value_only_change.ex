@@ -1,9 +1,9 @@
 defmodule Fleet.Conflict.Patterns.ValueOnlyChange do
   @moduledoc """
-  Same structure, only volatile value(s) differ (hash / version / timestamp). `requires: :both`,
-  because with a base a UNILATERAL value change is already `one_side_change` (priority 30): this
-  pattern only ever sees the both-sides-changed case. Delegates to
-  `Utils.detect_value_only_change/3`.
+  Volatile-token heuristic from Utils.detect_value_only_change/3, with or without a base.
+  With a non-empty base, OneSideChange handles unilateral edits earlier in the registry.
+  Confidence, explanation and pass_reason recalculate the detection result. Conflict keeps
+  this diagnosis for routing but never auto-writes it, even when values appear orderable.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

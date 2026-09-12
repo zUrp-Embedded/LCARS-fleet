@@ -1,14 +1,13 @@
 defmodule Fleet.Conflict.Patterns.Utils do
   @moduledoc """
-  Shared whitespace, quote-aware tokenization, volatile detection, and ordering
-  helpers. Quoted whitespace remains data; quote-aware value tokens coexist with
-  the coarse token granularity that calibrates the diff thresholds.
+  Text heuristics for whitespace, quoted tokens, volatile values and ordering.
+  Quote-aware value tokens coexist with a coarser denominator for diff thresholds.
+  These scanners and regexes do not validate language semantics or value chronology.
   """
   alias Fleet.Conflict.Score
 
-  # Volatile tokens: hex, uuid, mixed-case id, semver (with range prefix), ISO datetime, url,
-  # prefixed base64. A pair of tokens that both match (or that differ only by a hash-like middle)
-  # is treated as a value change, not a semantic one.
+  # Hex, UUID, mixed-case id, semver-like, datetime-like, URL and prefixed base64 shapes.
+  # Either side matching is enough for token_volatile?; the two need not share a category.
   @volatile_patterns [
     ~r/^[a-f0-9]{7,64}$/,
     ~r/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
@@ -21,8 +20,6 @@ defmodule Fleet.Conflict.Patterns.Utils do
 
   @re_semver ~r/^[~^>=<]*(\d+)\.(\d+)\.(\d+)(-[\w.]+)?(\+[\w.]+)?$/
   @re_datetime ~r/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(:\d{2})?([Z+\-]\S*)?$/
-
-  # ── whitespace normalization ──────────────────────────────
 
   @doc "Tabs->2 spaces, trim each line, drop blank edges, collapse internal runs, join."
   @spec normalize_for_whitespace_check([String.t()]) :: String.t()
@@ -50,12 +47,10 @@ defmodule Fleet.Conflict.Patterns.Utils do
     |> Enum.reverse()
   end
 
-  # ── quoted-string extraction (whitespace_only guard) ──────
-
   @doc """
-  Ordered contents of string literals (`"..."`, `'...'`, `` `...` ``) across the block. Naive
-  char scan with `\\`-escape handling -- not a lexer, but both conflict sides get the same
-  approximation, so comparing the sequences stays fair and errors push toward refusing to resolve.
+  Ordered contents between double, single or backtick quotes across joined lines.
+  Preserves backslash-escaped pairs and accepts unterminated contents through EOF.
+  Delimiter kinds are omitted; language-specific comments/strings are not recognized.
   """
   @spec extract_quoted_segments([String.t()]) :: [String.t()]
   def extract_quoted_segments(lines) do
@@ -78,15 +73,13 @@ defmodule Fleet.Conflict.Patterns.Utils do
 
   defp join_rev(list), do: list |> Enum.reverse() |> Enum.join()
 
-  # ── tokenization ──────────────────────────────────────────
-
   @doc "Splits a line into structural tokens and values (delimiters kept, empties included)."
   @spec tokenize_line(String.t()) :: [String.t()]
   def tokenize_line(line) do
     Regex.split(~r/(\s+|[{}\[\](),:;"'`=<>])/, line, include_captures: true)
   end
 
-  @doc "Quote-aware tokenization: a string literal's content stays ONE atomic token."
+  @doc "Quote-scanned nonempty contents stay atomic, with delimiter tokens; unclosed quotes are accepted and empty tokens dropped."
   @spec tokenize_line_quote_aware(String.t()) :: [String.t()]
   def tokenize_line_quote_aware(line) do
     tqa(String.graphemes(line), "", [])
@@ -118,8 +111,6 @@ defmodule Fleet.Conflict.Patterns.Utils do
   defp read_qa([q | rest], q, content), do: {join_rev(content), rest, true}
   defp read_qa(["\\", c | rest], q, content), do: read_qa(rest, q, [c, "\\" | content])
   defp read_qa([c | rest], q, content), do: read_qa(rest, q, [c | content])
-
-  # ── volatile-value detection ──────────────────────────────
 
   @doc "True if two differing tokens differ only by a hash-like middle (shared prefix/suffix)."
   @spec pairwise_volatile?(String.t(), String.t()) :: boolean()
@@ -178,8 +169,11 @@ defmodule Fleet.Conflict.Patterns.Utils do
   end
 
   @doc """
-  Detects a block that differs from its counterpart ONLY by volatile values (hash/version/
-  timestamp). Returns a classification result (`%{confidence, explanation, trace_reason}`) or `nil`.
+  Returns a heuristic classification or nil for equal-length, nonempty line lists.
+  Each differing quote-aware token pair needs either token to match a volatile shape,
+  or a shared prefix/suffix with hash-like middles. Counts differences using quote-aware
+  tokens but divides by coarse tokens from ours, including empties: the ratio is asymmetric.
+  Base presence affects scoring only; no base content is supplied or compared.
   """
   @spec detect_value_only_change([String.t()], [String.t()], boolean()) ::
           %{
@@ -273,12 +267,12 @@ defmodule Fleet.Conflict.Patterns.Utils do
     end
   end
 
-  # ── semver / datetime ordering (value_only_change resolution) ──
-
   @doc """
-  If EVERY differing token pair is an orderable version (semver, or ISO datetime whose
-  lexicographic order is chronological) AND the same side wins every pair, returns that side.
-  Otherwise `nil` (fall back to policy). Determinism before preference.
+  Returns a side when all differing token pairs compare and all non-tied comparisons agree.
+  Nil means no winner, incompatible tokenization, an unorderable pair or competing winners.
+  Version comparison uses numeric major/minor/patch and prerelease presence only; it ignores
+  range prefixes, build metadata and ordering among prerelease identifiers. Datetime-shaped
+  strings compare lexically without calendar/timezone validation, so the winner need not be newer.
   """
   @spec pick_newer_side([String.t()], [String.t()]) :: :ours | :theirs | nil
   def pick_newer_side(ours, theirs) do
@@ -294,8 +288,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
     end
   end
 
-  # UNE SEULE LIGNE INORDONNABLE ARRETE TOUT LE FICHIER. `:error` remonte en `:halt` parce qu'un
-  # verdict rendu sur les lignes restantes serait un verdict rendu sur une comparaison incomplete.
+  # One unorderable line invalidates a winner from earlier lines.
   defp line_step({o, t}, winner) do
     case line_winner(o, t, winner) do
       :error -> {:halt, :error}
@@ -315,7 +308,6 @@ defmodule Fleet.Conflict.Patterns.Utils do
     end
   end
 
-  # Deux jetons identiques n'elisent personne : ils laissent le gagnant courant intact.
   defp token_step({a, b}, w), do: if(a == b, do: {:cont, w}, else: pair_winner(a, b, w))
 
   defp pair_winner(a, b, w) do
@@ -326,9 +318,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
     end
   end
 
-  # DEUX VOCABULAIRES ORDONNES, ET RIEN D'AUTRE : semver, puis horodatage. `:error` n'est pas « les
-  # deux sont egaux », c'est « je ne sais pas les ordonner » — et l'appelant en fait un `:halt`,
-  # parce qu'un conflit qu'on ne sait pas trancher ne se tranche pas au hasard.
+  # :error means unorderable, distinct from a tie (0) that preserves an earlier winner.
   defp compare_tokens(a, b) do
     case {parse_semver(a), parse_semver(b)} do
       {{:ok, sa}, {:ok, sb}} -> compare_semver(sa, sb)
