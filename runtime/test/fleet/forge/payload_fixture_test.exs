@@ -1,19 +1,10 @@
 defmodule Fleet.Forge.PayloadFixtureTest do
   @moduledoc """
-  Le collage entre la fabrique et le lecteur.
-
-  ⚠ L'ALLER-RETOUR SEUL EST UNE TAUTOLOGIE, ET LA PREMIERE VERSION DE CE TEMOIN NE L'ETAIT QUE CA.
-  `PayloadFixture` ecrit par `Payload.paths/0` et `Payload` lit par la meme table : changer un
-  chemin deplace les DEUX ensemble, et l'aller-retour reste vert. Mutation jouee — `base_ref`
-  pointe sur une autre clef, zero echec. Un temoin qui ne peut pas rougir n'achete rien.
-
-  Ce qui mord, et qui est le vrai garde : **chaque chemin declare doit RESOUDRE sur la capture
-  reelle**. Un chemin qui derive de l'API n'a plus de valeur nulle part, et ca, aucune table
-  partagee ne peut le masquer.
-
-  L'aller-retour est conserve pour les faits dont la lecture est une PROJECTION — `label_names`,
-  `assignee_logins` : l'ecriture y reconstruit des objets par des clauses propres, donc les deux
-  cotes peuvent vraiment diverger.
+  Fabrique et lecteur partagent Payload.paths : un aller-retour seul laissait passer
+  une mutation du chemin base_ref. La resolution sur captures apporte un controle independant,
+  sans detecter tout mauvais chemin qui pointerait vers un autre champ non nil.
+  Les projections label_names/assignee_logins gardent un aller-retour car leurs clauses
+  d'ecriture reconstruisent les objets lus.
   """
   use ExUnit.Case, async: true
 
@@ -41,10 +32,8 @@ defmodule Fleet.Forge.PayloadFixtureTest do
   }
 
   describe "un fait ENONCE est le fait EFFECTIF" do
-    # Le runtime lit `assignee_logins` D'ABORD (`Delegation.Issues.issue_assignee/1`), avec
-    # `assignee_login` en repli. La capture reelle porte `assignees: ["mesure"]` : sans ce
-    # miroir, un temoin qui ecrit `assignee_login: "l"` obtient un objet dont l'assigne effectif
-    # reste "mesure". La fabrique disait une chose et l'objet en portait une autre.
+    # Delegation lit la liste avant le singulier : la surcharge doit remplacer aussi la liste
+    # capturee, sauf si le test en fournit une explicitement.
     test "`assignee_login` pose AUSSI la liste — sinon la capture la recouvre en silence" do
       charge = PayloadFixture.issue(assignee_login: "l")
 
@@ -61,16 +50,11 @@ defmodule Fleet.Forge.PayloadFixtureTest do
   end
 
   describe "chaque chemin declare RESOUT sur la capture reelle" do
-    # Le garde qui mord. Une capture par forme : la PR porte `head`/`base`/`merged`, l'issue porte
-    # `repository` et son assigne, le depot porte `full_name`/`default_branch`. Un fait qui ne
-    # resout nulle part est un chemin qui a derive de l'API — ou un fait qu'aucune capture ne
-    # couvre, ce qui se corrige en capturant, pas en relachant l'assertion.
+    # PR, issue et depot couvrent des champs differents ; un nouveau fait demande une capture.
     for fait <- Map.keys(Payload.paths()) do
       @fait fait
       test "#{fait}" do
-        # ⚠ PAS `v = Payload.get(...)` EN FILTRE : dans un `for`, une affectation vaut filtre, et
-        # `merged` vaut `false` sur une PR ouverte — un fait resolu et pourtant ecarte. « absent »
-        # et « faux » sont deux reponses.
+        # Tester != nil garde false (merged sur la PR) ; une affectation-filtre l'ecarterait.
         vus =
           for forme <- [:pull, :issue, :repo],
               Payload.get(PayloadFixture.raw(forme), @fait) != nil,
@@ -104,8 +88,7 @@ defmodule Fleet.Forge.PayloadFixtureTest do
     test "les champs NON surcharges gardent leur valeur reelle" do
       charge = PayloadFixture.pull(merged: true)
 
-      # ⚠ CE QUI FAIT TOUT L'INTERET : un temoin qui n'enonce qu'un fait recoit quand meme la forme
-      # COMPLETE. C'est ce qui empeche un garde lisant un autre champ de retomber sur son repli.
+      # Verifie ici la conservation de head_sha/base_ref, pas de chaque champ de la capture.
       assert Payload.head_sha(charge) == Payload.head_sha(PayloadFixture.raw(:pull))
       assert Payload.base_ref(charge) == Payload.base_ref(PayloadFixture.raw(:pull))
       assert Payload.merged?(charge) == true

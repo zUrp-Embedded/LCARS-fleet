@@ -3,16 +3,16 @@ defmodule Fleet.Forge.Client.UrlSafe do
   Encodes forge path segments without changing their structural separators.
 
   Atomic segments encode embedded separators and query/fragment characters. Repository and file
-  paths preserve `/` between components while neutralizing literal `.` and `..`, which ordinary URI
-  form encoding leaves untouched.
+  paths preserve `/` and encode literal `.`/`..` components, which form encoding leaves untouched.
+  This constructs strings; it neither validates repository shape nor controls downstream decoding.
   """
 
-  @doc "Encodes an atomic URL component (renders `/`, `..`, space, `?`, `#` inert)."
+  @doc "Encodes one component, including separators; exact dot components become %2E sequences."
   @spec encode_seg(String.t()) :: String.t()
   def encode_seg(seg) when is_binary(seg), do: encode_component(seg)
 
   @doc """
-  Encodes an `owner/name`, preserving structural separators and neutralizing traversal components.
+  Encodes slash-separated repository components without requiring exactly owner/name.
   """
   @spec encode_repo(String.t()) :: String.t()
   def encode_repo(repo) when is_binary(repo) do

@@ -1,33 +1,17 @@
 defmodule Fleet.Forge.Client.Transport do
   @moduledoc """
-  HTTP/config engine of the forge client — the plumbing UNDER `Fleet.Forge.Client`.
-  Vendor-agnostic in the "domain" sense: here live config/token resolution, the Req
-  call (dedicated pool + instrumentation of slow calls), the pagination of source-of-truth
-  collections and the derivation of the system login. (The safe encoding of URL
-  segments — path-traversal lock — lives in `Fleet.Forge.Client.UrlSafe`.)
-  No knowledge of the forge *protocol* (branches, labels, markers): that's
-  `Fleet.Forge.Client` (domain) + `Fleet.Forge.Protocol` (vocab).
+  Configuration, HTTP, pagination and login resolution for `Fleet.Forge.Client`.
+  Path components are encoded by `Fleet.Forge.Client.UrlSafe`; protocol vocabulary lives
+  in `Fleet.Forge.Protocol`.
 
-  INTERNAL surface (`@doc false`): everything is public so that `Fleet.Forge.Client` and its
-  sub-modules can call it, but it is not an app contract — no caller outside this domain.
+  Call-time opts override matching keys in :lcars_fleet/:pilot_forge. The merged configuration
+  requires :base_url and selects a nonempty binary :token, then :token_file, then :account.
+  Failure of the selected source does not try the next. Whitespace-only direct values count
+  as nonempty; file contents are trimmed. There is no implicit ~/.gitea_token fallback,
+  which could otherwise substitute the BEAM user's personal identity for a missing system one.
 
-  ## Configuration
-
-  Resolved at call time via `opts` (Keyword) or fallback `Application.get_env(:lcars_fleet, :pilot_forge)`:
-
-    * `:base_url` — e.g. `"http://localhost:3000"` (laptop mirror) or `"http://192.0.2.10"` (forge NAS).
-    * `:token` — Gitea token, supplied directly by the caller.
-    * `:token_file` — an EXPLICIT path. A caller that already holds one (a second forge, a witness).
-    * `:account` — a forge ACCOUNT name. The token is ASKED of the authority service, at call time.
-    * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
-
-  ## Aucun repli vers `~/.gitea_token`, et c'est une regle d'IDENTITE
-
-  Le BEAM tourne sous l'uid de l'humain de fleet : un repli vers son `~/.gitea_token` resoudrait
-  vers le jeton PERSONNEL de cette personne. Un conteneur dont le cablage systeme manque ne tomberait
-  pas en panne — elle agirait sur la forge sous l'identite d'un humain, avec ses droits, sans
-  qu'une ligne le dise. Sans source de jeton, la resolution rend `{:config, :no_token_source}` :
-  un refus nomme, jamais un succes sous une autre identite.
+  :req_options overrides request defaults, including headers, URL, retry and timeouts.
+  Its Plug option supports HTTP interception in tests.
   """
 
   require Logger
@@ -42,21 +26,15 @@ defmodule Fleet.Forge.Client.Transport do
         }
 
   @typedoc """
-  Le retour de TOUT verbe HTTP de ce module.
-
-  Trois formes, et la deuxieme est la seule que vingt sites filtrent : `{:http, status, body}` porte
-  un refus de la forge (y compris les 412/423 DEFINITIFS, dont la forme est deliberement identique —
-  cf. `name_permanent/4`), `{:transport, exception}` porte une panne de fil.
+  HTTP 2xx body, HTTP status/body error, or transport error. Diagnostic logging does not
+  change these return shapes. Invalid configuration or request options can still raise.
   """
   @type response ::
           {:ok, term()} | {:error, {:http, pos_integer(), term()} | {:transport, term()}}
 
   @typedoc """
-  Le retour de la pagination : la liste COLLECTEE, ou un refus.
-
-  Deux refus lui sont propres, en plus de ceux de `response()` : une page 2xx dont la forme n'est ni
-  une liste ni l'enveloppe attendue (`:unexpected_page_shape`), et le filet `@max_pages` — une forge
-  qui ignore `page` rendrait sinon la meme page indefiniment.
+  Collected pages or an error, with no partial list on failure. Pagination adds
+  :unexpected_page_shape and :pagination_budget_exceeded to transport/HTTP errors.
   """
   @type paginated :: {:ok, [term()]} | {:error, term()}
 
@@ -84,12 +62,7 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # TROIS SOURCES, ORDONNEES, ET AUCUN REPLI IMPLICITE. Un jeton fourni, un chemin fourni, un compte
-  # a demander — et si aucune n'est la, un refus qui le dit. L'ordre est celui du SPECIFIQUE vers le
-  # GENERAL : ce que l'appelant tient de la main gagne sur ce que le conteneur a configure.
-  # TROIS SOURCES DE JETON, DANS L'ORDRE DE PRECEDENCE : la valeur en clair, le fichier, l'autorite.
-  # `non_vide/2` porte la garde commune — une option presente mais vide n'est PAS une source, et la
-  # laisser passer ferait echouer l'appel HTTP au lieu de nommer la configuration.
+  # Selection occurs after merging: an env :token can outrank an explicit :account or :token_file.
   defp resolve_token(opts) do
     cond do
       token = non_vide(opts, :token) -> {:ok, token}
@@ -106,11 +79,7 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un jeton
-  # mis en cache ici reprendrait exactement la peremption infinie que cette regle retire. Le cout
-  # est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du bruit. Le jour
-  # ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra le dire ailleurs
-  # que dans un `defp`.
+  # Ask the authority on each resolution so this module does not cache a rotated token.
   defp token_from_authority(account) do
     case Fleet.Credentials.ForgeAuth.token_for(account) do
       {:ok, token} -> {:ok, token}
@@ -133,6 +102,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   @doc false
   @spec forge_bot_login(config(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  # A truthy option masks the env override; an invalid value derives, an error tuple propagates.
   def forge_bot_login(config, opts) do
     case Keyword.get(opts, :forge_bot_login) ||
            Application.get_env(:lcars_fleet, :pilot_forge_bot_login) do
@@ -142,40 +112,17 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # LA CLE DE CACHE PORTE CE QUI DETERMINE LA REPONSE.
-  #
-  # Le login est une propriete du JETON sur SA forge, jamais du module. Keye sur
-  # `{__MODULE__, :bot_login}` seul, un second jeton — rotation, ou deux forges dans la meme VM —
-  # heritait du login du premier pour toute la vie du noeud. Et ce login est l'argument du primitif
-  # de confiance `ForgeProtocol.system_authored?/2` : s'en tromper, ce n'est pas afficher un mauvais
-  # nom, c'est comparer l'auteur d'un commentaire au mauvais compte.
-  #
-  # Le jeton n'est JAMAIS stocke : `:persistent_term` est lisible par tout processus du noeud. Son
-  # empreinte suffit a distinguer deux jetons sans en reveler aucun.
   @doc false
-  # Le login DE CE JETON, sans passer par les surcharges de `forge_bot_login/2`.
-  #
-  # `derive_bot_login/1` n'a jamais rien eu de specifique au bot : c'est « qui suis-je avec ce
-  # jeton », et depuis que sa cle porte l'empreinte du jeton, il repond juste pour n'importe lequel.
-  # `forge_bot_login/2`, lui, consulte d'abord `opts[:forge_bot_login]` puis l'env applicative —
-  # deux surcharges qui rendraient le login du SYSTEME pour un jeton de ROLE, ce qui est exactement
-  # le genre de reponse plausible et fausse qu'on cherche a supprimer.
+  # Resolves this token's login, bypassing system-login overrides when resolving a role.
   @spec login_of(config()) ::
           {:ok, String.t()}
           | {:error,
              :bot_login_unresolved | {:transport, term()} | {:http, pos_integer(), term()}}
   def login_of(config), do: derive_bot_login(config)
 
-  # L'EMPREINTE DU JETON EST UNE VALEUR, PAS UNE CLE. Dans la cle, chaque rotation creerait une
-  # entree de plus, jamais rendue : sur un noeud de longue duree, le nombre d'entrees
-  # `:persistent_term` croitrait avec le nombre de jetons successifs, et chaque `put` declenche un
-  # GC global.
-  #
-  # UNE entree par `base_url`, dont la valeur porte l'empreinte : une rotation ECRASE la precedente
-  # au lieu de s'y ajouter. La propriete de correction est la meme — un login memorise pour un jeton
-  # ne doit jamais etre servi pour un autre (le jeton du SYSTEME et celui d'un ROLE ne repondent pas
-  # le meme `/user`) — et la comparaison sur la valeur lue est le meme test, au meme moment, sans
-  # accumuler.
+  # One slot per URL, digest/login in the value: rotation replaces instead of accumulating.
+  # Wrong cached authors affect protocol trust. No raw token is stored in persistent_term.
+  # No expiry or same-token revalidation; alternating role/system tokens replace each other.
   defp derive_bot_login(config) do
     key = {__MODULE__, :bot_login, config.base_url}
     fingerprint = :crypto.hash(:sha256, config.token)
@@ -199,28 +146,8 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # LA BORNE DE CETTE BOUCLE, ECRITE POUR POUVOIR ETRE REFAITE.
-  #
-  # `paginate/3` tourne DANS le tour de poller, qui est synchrone : tant qu'elle marche, la fleet ne
-  # dispatche pas. Le pire cas a donc une valeur, et il vaut mieux qu'elle soit ecrite que devinee.
-  #
-  #   par requete   `receive_timeout: 10_000` (cf. `request_raw/4`) — une reponse qui ne vient pas
-  #                 coupe a 10 s, jamais plus.
-  #   par boucle    le TOTAL annonce (`X-Total-Count`) : on s'arrete des qu'on le tient. Le nombre de
-  #                 tours est donc `ceil(total / @page_limit)`, pas `@max_pages` : un depot de 600
-  #                 issues fait 12 tours, soit ~120 s au pire (borne ARITHMETIQUE, pas une mesure —
-  #                 la taille reelle d'un depot varie et ce commentaire ne pretend pas la connaitre).
-  #   deux gardes   une page VIDE termine quoi qu'annonce le total (une forge qui compte plus qu'elle
-  #                 ne sert ne nous fait pas marcher) ; sans en-tete, l'heuristique `< @page_limit`
-  #                 reprend la main.
-  #
-  # `@max_pages` n'est donc pas la borne effective : c'est le filet du cas ou tout le reste ment
-  # simultanement — une forge qui ignore `page` rend tout, a chaque tour, et sans total lu tourne
-  # 200 fois (mesure). Les quatre tests de
-  # `forge_client_pagination_test.exs` tiennent les deux gardes.
-  #
-  # PAS de deadline murale sur la boucle, et c'est un choix : elle transformerait une lecture LENTE
-  # mais correcte en echec, alors que le mal a eviter est une lecture qui ne finit pas.
+  # At most 200 page requests, not a wall-clock deadline or item/byte limit. The default
+  # receive_timeout is not a total request duration bound and req_options can override it.
   @page_limit 50
   @max_pages 200
 
@@ -229,15 +156,10 @@ defmodule Fleet.Forge.Client.Transport do
   def paginate(config, path_base, query), do: paginate(config, path_base, query, nil)
 
   @doc """
-  Same pagination, for an endpoint whose page arrives in an ENVELOPE instead of as a bare list.
-
-  Gitea is not uniform here: the list endpoints answer with a JSON array, `/repos/search` answers
-  `%{"ok" => true, "data" => [...]}`. `unwrap` names the key to take, `nil` means "the body IS the
-  list" — the shape every existing caller has.
-
-  It is a PARAMETER and not a second paginator, because the stop condition is the part that has a
-  scar (`X-Total-Count` first, empty page always wins, `< @page_limit` only as a fallback). A copy
-  of that loop for one endpoint is a copy that drifts away from the reasoning above it.
+  Collects lists, optionally taking `unwrap` from a successful map response (e.g. search's data).
+  A bare list is also accepted with unwrap set. Headers survive unwrapping; envelope ok is ignored.
+  Stops on an empty page, collected count reaching the latest X-Total-Count, or a short page
+  when no usable total exists. Does not deduplicate, check a snapshot or reject premature emptiness.
   """
   @spec paginate(config(), String.t(), String.t(), String.t() | nil) :: paginated()
   def paginate(config, path_base, query, unwrap) do
@@ -248,19 +170,9 @@ defmodule Fleet.Forge.Client.Transport do
     {:error, {:pagination_budget_exceeded, path_base, @max_pages}}
   end
 
-  # LA CONDITION D'ARRET EST UN FAIT QUAND LA FORGE LE DONNE, UNE HEURISTIQUE SINON.
-  #
-  # `X-Total-Count` est annonce sur les endpoints de liste, y compris sur celui dont `page` et
-  # `limit` sont IGNORES (mesure 1.26.1 : 7 commentaires -> `X-Total-Count: 7`). Sans lui, le seul
-  # signal disponible serait `length(items) < @page_limit`, et cette heuristique ment de deux facons :
-  #
-  #   * un endpoint qui ignore `page` rend TOUT a chaque tour — sous le plafond elle conclut juste
-  #     par accident, au-dessus elle boucle jusqu'au budget sur des pages identiques ;
-  #   * `@page_limit` egale le `max_response_items` du serveur par VALEUR, pas par derivation : un
-  #     plafond serveur abaisse ferait ecreter la premiere page et la troncature serait muette.
-  #
-  # Le total supprime les deux : on s'arrete quand on tient ce qui a ete annonce. `nil` veut dire
-  # « non annonce », jamais zero — dans ce cas seulement on retombe sur l'heuristique.
+  # Gitea 1.26.1 bench: comments ignored page/limit but supplied X-Total-Count.
+  # Using that count avoids repeated all-items pages and handles a server page cap below 50.
+  # Repeated partial pages can still satisfy the total with duplicates.
   defp do_paginate(config, path_base, query, unwrap, page, acc) do
     sep = if query == "", do: "?", else: "?#{query}&"
     path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
@@ -287,11 +199,7 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # LES TROIS FACONS DE SAVOIR QU'ON A TOUT LU, et l'ordre compte.
-  #
-  # Une page VIDE est la fin quoi qu'annonce le total : elle borne le cas ou le serveur rend moins
-  # que ce qu'il compte (filtrage de droits) sans nous laisser tourner. Les deux autres sont le
-  # total annonce quand il existe, et la page courte quand il n'existe pas.
+  # Empty wins even if the server announces more, avoiding a walk through the full budget.
   defp last_page?([], _acc, _total), do: true
 
   defp last_page?(items, acc, total) do
@@ -301,9 +209,6 @@ defmodule Fleet.Forge.Client.Transport do
       (is_nil(total) and length(items) < @page_limit)
   end
 
-  # The envelope is taken BEFORE the shape guard, so a body that is neither a list nor the expected
-  # envelope falls through to `:unexpected_page_shape` — one refusal for both, and the headers stay
-  # on the response the stop condition reads.
   defp unwrap_page(result, nil), do: result
 
   defp unwrap_page({:ok, %Response{status: status, body: body} = resp}, key)
@@ -331,10 +236,7 @@ defmodule Fleet.Forge.Client.Transport do
   @spec http_delete(config(), String.t()) :: response()
   def http_delete(config, path), do: request(config, :delete, path, nil)
 
-  # DELETE WITH A BODY. Unusual, and it is the forge that asks for it: Gitea identifies a
-  # dependency edge by the OBJECT to detach (`{index, owner, repo}`), not by an id in the path —
-  # the same body its POST twin takes. Kept separate from `http_delete/2` so that no caller sends a
-  # body by accident on the many endpoints that carry their target in the URL.
+  # Dependency deletion takes {index, owner, repo} in a body, unlike ordinary URL-only DELETE.
   @doc false
   @spec http_delete_body(config(), String.t(), term()) :: response()
   def http_delete_body(config, path, body), do: request(config, :delete, path, body)
@@ -342,7 +244,7 @@ defmodule Fleet.Forge.Client.Transport do
   defp request_raw(config, method, path, body) do
     url = config.base_url <> "/api/v1" <> path
 
-    # Callers own retry policy; Req retries would stack another backoff.
+    # Disable retries by default to avoid stacking caller backoff; req_options wins below.
     req_opts =
       [
         method: method,
@@ -371,10 +273,7 @@ defmodule Fleet.Forge.Client.Transport do
     result
   end
 
-  # `request/4` rend ce qu'il a toujours rendu ; `request_raw/4` garde la REPONSE, en-tetes compris.
-  # Le decoupage existe pour une seule raison : la forge annonce le total d'une liste dans
-  # `X-Total-Count`, et ce total est la difference entre une condition d'arret exacte et une
-  # heuristique (cf. `do_paginate/5`).
+  # Ordinary verbs discard headers; pagination keeps them and bypasses name_permanent diagnostics.
   defp request(config, method, path, body) do
     case request_raw(config, method, path, body) do
       {:ok, %Response{status: status, body: body}} when status in 200..299 ->
@@ -389,17 +288,8 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  # DEUX ECHECS QUI NE REVIENDRONT PAS, ET QUI PORTAIENT LE VISAGE D'UN ECHEC PASSAGER.
-  #
-  # `423` est declare par 31 operations du contrat, `412` par 3, et seule cette ligne de journal les
-  # distingue d'un `500` : tous ressortent en `{:http, status, body}`. Or un depot ARCHIVE ou une
-  # conversation VERROUILLEE rend 423 a chaque tentative, pour toujours — un poller qui re-dispatche
-  # a chaque tour produit la meme panne indefiniment, et rien d'autre ne dit qu'aucun tour ne la
-  # resoudra.
-  #
-  # La FORME du retour est la meme, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
-  # un tuple different ferait tomber ces deux codes dans leurs catch-all — en silence, c'est-a-dire
-  # exactement le contraire du but. Ce qui compte n'est pas un type, c'est de le DIRE.
+  # Logs 412/423 without changing the tuple consumed by callers. PERMANENTE is diagnostic
+  # wording: this code neither proves permanence nor prevents later attempts after a state change.
   defp name_permanent(status, method, path, body) when status in [412, 423] do
     Logger.warning(
       "Transport: #{method} #{path} -> HTTP #{status} " <>
@@ -408,16 +298,7 @@ defmodule Fleet.Forge.Client.Transport do
     )
   end
 
-  # LE SYMETRIQUE. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai ne les levera.
-  # Le `429` est l'inverse exact — il dit « reessaie plus tard » — et sans cette ligne il ressort en
-  # `{:http, 429, body}` indistinct d'un `500` : un appelant qui abandonne sur erreur abandonne une
-  # condition qui se serait levee seule.
-  #
-  # La FORME du retour est la meme, pour la meme raison que ci-dessus : vingt sites filtrent sur
-  # `{:http, ...}`. Ce qui compte est de le DIRE — et de dire COMBIEN de temps, quand la forge le
-  # dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
-  # boucle de reessai metier est un geste d'appelant (le motif existe, `do_merge/6`), pas de ce
-  # transport, qui a `retry: false` par construction.
+  # Announces 429 without scheduling a retry or reading the HTTP Retry-After header.
   defp name_permanent(429, method, path, body) do
     Logger.warning(
       "Transport: #{method} #{path} -> HTTP 429 (limitation de debit) — condition TRANSITOIRE" <>
@@ -427,12 +308,11 @@ defmodule Fleet.Forge.Client.Transport do
 
   defp name_permanent(_status, _method, _path, _body), do: :ok
 
-  # `Retry-After` n'arrive pas toujours, et son absence n'est pas zero : elle veut dire « non dit ».
+  # Only the JSON field retry_after is read; any integer, including negative, is logged as seconds.
   defp retry_after_note(%{"retry_after" => v}) when is_integer(v), do: ", reessai dans #{v} s"
   defp retry_after_note(_), do: ", delai non annonce"
 
-  # Le total annonce, ou `nil` s'il ne l'est pas. `nil` n'est PAS zero : il veut dire « non dit »,
-  # et la pagination retombe alors sur son heuristique en le sachant.
+  # First header's nonnegative integer prefix; trailing text is accepted. Unparseable => nil.
   defp total_count(%Response{} = resp) do
     case Response.get_header(resp, "x-total-count") do
       [v | _] ->

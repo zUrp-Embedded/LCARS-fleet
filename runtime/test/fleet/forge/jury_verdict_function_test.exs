@@ -10,16 +10,10 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
   defp f(severities) when is_list(severities),
     do: %{"findings" => Enum.map(severities, &%{"severity" => &1, "category" => "tests"})}
 
-  # ⚠ CES CAS ONT CHANGÉ DE SORTIE AVEC C3, ET LA SÉMANTIQUE EST INCHANGÉE. En C2 un blocage par
-  # courbe rendait `:changes_requested` — la PR repartait chez le producteur. C3 lui donne son nom :
-  # `:gray_zone`, l'état où le jury approuve et où seule la carte refuse. Le ROUTAGE, lui, fait
-  # aujourd'hui la même chose (rework) tant que le gatekeeper n'est pas convoqué ; ce qui change est
-  # qu'un arbitre PEUT désormais trancher cette zone, et qu'une surface peut la nommer.
+  # C3 distingue la zone grise (jury approuve, politique bloque) d'un refus de juge.
+  # Ces tests portent sur le verdict pur, pas le routage ni la convocation du gatekeeper.
   describe "C2/C3 — la carte peut refuser ce qu'un juge a approuvé (zone grise)" do
     test "un finding AU-DESSUS du plancher refuse une PR pourtant approuvée" do
-      # LE CAS QUI FAIT EXISTER LE MODÈLE : un juge documente un défaut critique et approuve quand
-      # même. Sur un livrable qui peut blesser, c'est la carte qui dit non — et le finding qui le
-      # justifie est celui que le juge a lui-même mesuré.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"qualifier" => f(["critical"])}
 
@@ -47,8 +41,6 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "les findings d'un relecteur HORS jury ne relèvent pas la barre" do
-      # Un humain qui passe et laisse une review ne peut pas durcir une carte où il n'est pas
-      # nommé — même discipline que le `Map.take(verdicts, jury)` déjà appliqué aux verdicts.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"un-humain" => f(["critical"])}
 
@@ -77,9 +69,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
 
   describe "LE PLANCHER — une carte n'annule jamais le refus d'un juge" do
     test "un REQUEST_CHANGES reste bloquant, quelle que soit la courbe" do
-      # La règle qui rend tout le reste sûr, et le pendant exact de la correction CI de ce
-      # chantier (`e005ad229` : une carte `ci: ignore` n'abroge pas le plancher de la forge). Un
-      # juge qui refuse est un PLANCHER ; la tolérance d'une carte est un PLAFOND.
+      # Une politique ne peut lever un refus deja rendu par le jury complet.
       verdicts = %{"qualifier" => :changes_requested, "reviewer" => :approved}
 
       for policy <- [nil, %{"block_at" => "critical"}, %{"block_at" => "minor"}, %{}] do
@@ -134,9 +124,6 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "l'arbitre approuve → la PR passe MALGRÉ la courbe", ctx do
-      # C'est le pouvoir propre du gatekeeper : renverser une règle de carte sur un cas d'espèce.
-      # Il ne renverse pas un JUGE (cf. le plancher), il tranche une contradiction entre ce qu'un
-      # juge a approuvé et ce que la carte tolère.
       verdicts = Map.put(ctx.verdicts, @arbiter, :approved)
 
       assert :approved =
@@ -151,8 +138,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "HORS zone grise, la voix de l'arbitre n'est pas lue — F-C061 tient", ctx do
-      # Deux directions, et les deux comptent. (a) L'arbitre ne peut pas bloquer une PR que rien ne
-      # bloque : il n'est pas un juré de plus, seuls les rôles du jury de la carte pèsent.
+      # L'arbitre hors jury ne rajoute pas un veto quand la politique ne bloque pas.
       assert :approved =
                Jury.review_outcome(
                  @jury,
@@ -162,7 +148,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
                  @arbiter
                )
 
-      # (b) Il ne peut pas sauver un livrable qu'un JUGE refuse : le plancher est au-dessus de lui.
+      # Son approbation ne leve pas le refus d'un jure.
       assert :changes_requested =
                Jury.review_outcome(
                  @jury,
@@ -180,11 +166,8 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
 
   describe "DÉGÉNÉRESCENCE — une carte sans courbe se comporte comme aujourd'hui" do
     property "policy nil ⟹ /4 rend EXACTEMENT ce que rend /2, pour tout état de jury" do
-      # La condition qui autorise les huit cartes du canon à migrer une par une : tant qu'aucune ne
-      # déclare de courbe, le rail ne bouge pas d'un octet.
-      # Les générateurs construisent par LISTE puis `Map.new` : l'espace de clés tient en trois
-      # rôles, et `map_of`/`uniq_list_of` y échouent à produire des clés distinctes (mesuré —
-      # `TooManyDuplicatesError`). Une liste de paires déduplique sans contrainte d'unicité.
+      # Liste puis Map.new evite TooManyDuplicatesError dans ce petit espace de roles.
+      # L'equivalence porte sur les etats generes, pas sur tout terme Elixir possible.
       check all(
               jury <- StreamData.list_of(StreamData.member_of(@jury), max_length: 3),
               pairs <-
@@ -206,9 +189,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "les états non terminaux ne sont pas court-circuités par la courbe" do
-      # `:no_jury` et `{:pending, _}` se décident AVANT toute mesure : une carte stricte ne doit pas
-      # transformer « il manque un juge » en « refusé », ce qui ferait retravailler un producteur
-      # sur un verdict que personne n'a encore rendu.
+      # Un juge manquant ne doit pas devenir un refus de politique.
       policy = %{"block_at" => "minor"}
       findings = %{"qualifier" => f(["critical"])}
 
@@ -221,10 +202,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
 
   describe "F-3 — une charge ILLISIBLE ne s'échange pas contre un sceau" do
     test "sous une carte à courbe : zone grise, pas :approved" do
-      # LE DÉFAUT MESURÉ (2026-08-19). La charge était droppée à la lecture, donc lue plus bas
-      # comme « ce juge n'a rien mesuré » — et une mesure illisible RETIRAIT un blocage au lieu
-      # d'en poser un. La PR partait au sceau sans arbitre et sans escalade, témoin unique une
-      # ligne de log. Le sens correct est l'inverse : inconnu ne se dépense pas comme non.
+      # Regression du 2026-08-19 : perdre la sentinelle illisible effacait le blocage.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"qualifier" => FindingsWire.unreadable()}
 
@@ -233,8 +211,6 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "sans courbe déclarée : rien ne change, l'illisible ne bloque pas" do
-      # La dégénérescence tient sur ce cas aussi — sinon le correctif aurait taxé tous les projets
-      # qui ne demandent rien.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
       findings = %{"qualifier" => FindingsWire.unreadable()}
 
@@ -243,7 +219,6 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     end
 
     test "l'arbitre peut trancher ce trou comme il tranche un désaccord" do
-      # Le barreau existe pour ça : quelqu'un regarde, au lieu d'un sceau muet.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved, "gatekeeper" => :approved}
       findings = %{"qualifier" => FindingsWire.unreadable()}
 

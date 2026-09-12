@@ -3,24 +3,9 @@ defmodule Fleet.Forge.ClientPaginationTest do
 
   alias Fleet.Forge.Client, as: ForgeClient
 
-  # THE STOP CONDITION OF `paginate/3`, and why it has two of them.
-  #
-  # The forge announces the size of a list in `X-Total-Count`, on every list endpoint — INCLUDING
-  # the one whose `page` and `limit` it ignores (measured on Gitea 1.26.1: an issue with 7 comments
-  # answers `X-Total-Count: 7` to `?page=1&limit=50`). Until this contract existed, the transport
-  # destructured the response into `{:ok, body}` and the header never crossed, so the only signal
-  # left was `length(items) < @page_limit` — a heuristic that lies in two directions:
-  #
-  #   * an endpoint that ignores `page` returns EVERYTHING every turn. Under the cap the heuristic
-  #     concludes correctly BY ACCIDENT; above it, it walks 200 identical pages into the budget
-  #     error. Measured against a live forge on a 60-comment issue: 5327 ms and
-  #     `{:error, {:pagination_budget_exceeded, …}}` before, 119 ms and `{:ok, 60}` after.
-  #   * `@page_limit` equals the server's `max_response_items` by VALUE, not by derivation. A
-  #     lowered server cap would clip page one, `length(items) < @page_limit` would be true, and the
-  #     truncation would be silent.
-  #
-  # What is pinned here: the total WINS when announced, the heuristic survives when it is not, and
-  # `nil` means "not announced" — never zero.
+  # X-Total-Count avoids repeating all-items responses and premature stops with a lower server cap.
+  # Gitea 1.26.1 bench, 60 comments: budget failure in 5327 ms before, 60 results in 119 ms after.
+  # Here the Plug drives page selection and counts calls; assertions count items, not identities.
 
   defmodule PagedForge do
     @moduledoc false
@@ -114,8 +99,7 @@ defmodule Fleet.Forge.ClientPaginationTest do
   end
 
   test "a malformed X-Total-Count is treated as NOT ANNOUNCED, never as zero" do
-    # Zero would end the walk on page one and report an empty list as complete — the exact shape of
-    # a silent truncation. Unparseable means we know nothing, so the heuristic takes over.
+    # Despite the title, this fixture omits the header; it does not serve malformed text.
     {:ok, agent} = Agent.start_link(fn -> 0 end)
 
     plug =

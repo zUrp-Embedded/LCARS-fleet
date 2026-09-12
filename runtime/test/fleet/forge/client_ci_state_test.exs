@@ -3,18 +3,8 @@ defmodule Fleet.Forge.ClientCiStateTest do
 
   alias Fleet.Forge.Client, as: ForgeClient
 
-  # THE CURRENT STATUS PER CONTEXT, AND WHY THE RESPONSE ORDER IS NOT ALLOWED TO DECIDE IT.
-  #
-  # `commit_ci_state/3` feeds a merge decision. It used to keep the FIRST occurrence of each context
-  # under a comment promising "statuses are returned newest-first". Measured on Gitea 1.26.1: the
-  # default order is OLDEST-first, and of the five contractual `sort` values only `leastindex`
-  # returns newest-first — its name saying the opposite of what it does. Keeping the first therefore
-  # kept the OLDEST, and a context posted `success` then `failure` answered `{:ok, :success}`: the
-  # merge gate reading green on a red commit, which is the one thing the comment swore could not
-  # happen.
-  #
-  # So the rank is read from the DATA (`id`), and these tests pin that the ORDER OF THE PAYLOAD
-  # changes nothing. A forge that reverses its default tomorrow must not move this verdict.
+  # Gitea 1.26.1's captured default order was oldest-first (leastindex reversed it).
+  # Distinct integer ids must choose the newest per context regardless of payload order.
 
   defmodule Statuses do
     @moduledoc false
@@ -31,12 +21,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
     end
   end
 
-  # ⚠ LA FORME VIENT DE LA CAPTURE REELLE, PAS D'UN LITTERAL A TROIS CLEFS. Un element
-  # `CommitStatus` de Gitea en porte neuf plus un `creator` imbrique ; une forme inventee peut etre
-  # INCOMPLETE, et une forme incomplete desarme en silence tout garde qui lirait un champ que le
-  # double a oublie — le defaut est au dossier de ce depot. Les trois clefs nommees ici sont
-  # exactement celles sur lesquelles chaque temoin ci-dessous branche ; le reste est ce que la
-  # forge envoie vraiment.
+  # Override decisive fields on a captured CommitStatus, preserving its other fields.
   @statuses_file Path.join([__DIR__, "..", "..", "fixtures", "forge", "statuses.json"])
   @external_resource @statuses_file
   @capture @statuses_file |> File.read!() |> Jason.decode!()
@@ -87,8 +72,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
     end
 
     test "le rail placeholder du template est VERT, et desormais NOMME" do
-      # C'est le defaut exact de la fiche : sur un projet fraichement onboarde, ce vert-la est le
-      # seul qui existe, et rien ne le distinguait d'une suite reelle.
+      # Le nom permet de distinguer un placeholder vert d'une suite de tests.
       assert {:ok, {:success, ["CI / no-harness-yet (pull_request)"]}} =
                ci_report([st(1, "CI / no-harness-yet (pull_request)", "success")])
     end
@@ -114,16 +98,8 @@ defmodule Fleet.Forge.ClientCiStateTest do
              ci_state([st(1, "ci/build", "failure"), st(2, "ci/build", "success")])
   end
 
-  # LA CAPTURE ELLE-MEME. Le commentaire de `Client.CI` affirme un fait sur un SYSTEME EXTERNE —
-  # « l'ordre par defaut de `/commits/{ref}/statuses` est OLDEST-first sur Gitea 1.26.1 » — et
-  # c'est de ce fait que vient tout le reste : c'est parce que l'ordre ment que le rang se lit dans
-  # `id`.
-  #
-  # ⚠ CE QUE CE PREMIER TEMOIN PROUVE, EXACTEMENT : que le FICHIER de capture est oldest-first et
-  # porte les trois clefs lues. C'est une SENTINELLE DE DERIVE — elle mord si quelqu'un recapture
-  # contre une forge dont l'ordre a change, ou fabrique le fichier a la main. Elle ne prouve pas le
-  # comportement de Gitea : aucune assertion sur un fichier qu'on controle ne le peut. Celui qui le
-  # prouve est le SECOND, qui fait passer la capture ET son inverse par le meme verdict.
+  # Verifie le fichier capture, pas une forge en direct. Le test suivant exerce notre verdict
+  # sur ce fichier et son inverse ; ni l'un ni l'autre ne mesure l'ordre actuel du serveur.
   test "la capture reelle est OLDEST-first, et porte `status` — jamais `state`" do
     ids = Enum.map(@capture, & &1["id"])
 
@@ -134,17 +110,14 @@ defmodule Fleet.Forge.ClientCiStateTest do
       assert is_integer(statut["id"])
       assert is_binary(statut["context"])
 
-      # `status` sur un CommitStatus, `state` sur l'agregat CombinedStatus. Confondre les deux rend
-      # `nil` partout, et un `nil` groupe par contexte se lit comme un contexte sans verdict.
+      # CommitStatus porte status ; CombinedStatus porte state.
       assert is_binary(statut["status"])
       refute Map.has_key?(statut, "state")
     end)
   end
 
   test "sur la capture reelle, le verdict est celui du statut le PLUS RECENT du contexte" do
-    # La capture porte `ci/build` en `failure` (id 1) puis `success` (id 2). Garder la PREMIERE
-    # occurrence rendrait `:failure` sur un commit vert ; lire le rang dans `id` rend `:success`,
-    # dans les deux sens de lecture.
+    # La capture passe de failure (id 1) a success (id 2).
     assert {:ok, :success} = ci_state(@capture)
     assert {:ok, :success} = ci_state(Enum.reverse(@capture))
   end
@@ -183,8 +156,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
   end
 
   test "a group we cannot ORDER falls back to its WORST, never its best" do
-    # No usable `id` → we do not know which one is current. Returning the best of the set would be
-    # the same lie by another route; the merge gate gets the worst.
+    # Unranked groups contribute their worst state to the merge gate.
     unranked = [
       %{"context" => "ci/build", "status" => "success"},
       %{"context" => "ci/build", "status" => "failure"}
@@ -192,8 +164,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
 
     assert {:ok, :failure} = ci_state(unranked)
 
-    # And the symmetric case: unrankable but uniformly green stays green — fail-closed is not
-    # fail-always, or the gate would never open.
+    # These two singleton contexts are both green despite missing ids.
     assert {:ok, :success} =
              ci_state([
                %{"context" => "ci/build", "status" => "success"},
@@ -202,9 +173,8 @@ defmodule Fleet.Forge.ClientCiStateTest do
   end
 
   test "a SKIPPED context does not vote — a deliberate skip is not a wait" do
-    # `skipped` means the step did not run and was not meant to (its `if:` was false). Counting it
-    # as "not yet" made the gate wait 45 minutes and then ESCALATE to a human: a false alarm on a
-    # deliberate skip, and false alarms are what teach a human to ignore the channel.
+    # Skipped does not vote, avoiding the former timeout/escalation on skipped checks.
+    # The status alone does not tell this test why execution was skipped.
     items = [st(1, "ci/build", "success"), st(2, "ci/lint", "skipped")]
     assert {:ok, :success} = ci_state(items)
 
@@ -213,21 +183,18 @@ defmodule Fleet.Forge.ClientCiStateTest do
   end
 
   test "ALL contexts skipped → :none, the honest answer (nothing ran)" do
-    # `:none` is what the gate already treats as a bounded wait then a loud escalation — correct
-    # here, because a repo whose every check was skipped has told us nothing.
+    # No voting status remains; this test does not exercise downstream waiting/escalation.
     assert {:ok, :none} = ci_state([st(1, "ci/build", "skipped"), st(2, "ci/lint", "skipped")])
   end
 
   test "a WARNING opens the door — the check ran and did not fail" do
-    # Blocking forever on a warning is a state no human can leave except by re-running. It is a
-    # success that comments.
+    # Policy maps warning to success; these synthetic statuses do not prove a check executed.
     assert {:ok, :success} = ci_state([st(1, "ci/build", "warning")])
     assert {:ok, :success} = ci_state([st(1, "ci/build", "success"), st(2, "ci/lint", "warning")])
   end
 
   test "an UNKNOWN state still closes the door — the catch-all keeps its job" do
-    # The reason the catch-all existed stays true for states this code does not know: a forge that
-    # grows a new one must not widen the merge door by default.
+    # A new status must not open the merge gate by default.
     assert {:ok, :pending} = ci_state([st(1, "ci/build", "quantum-superposed")])
   end
 
@@ -235,9 +202,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
     assert {:ok, :none} = ci_state([])
   end
 
-  # LES ROUGES NOMMES, ET EUX SEULS. Le pod est forge-blind : la cause d'un rework CI ne peut pas
-  # etre « va voir », elle doit voyager. Ce qui voyage est le nom du contexte en echec — nommer la
-  # liste complete accuserait les verts, qui n'ont rien fait.
+  # Le pod sans acces forge recoit les contextes rouges pour cibler le rework.
   describe "commit_ci_failures — la cause voyage, l'accusation reste juste" do
     test "un contexte VERT n'est jamais nomme" do
       items = [
@@ -267,8 +232,7 @@ defmodule Fleet.Forge.ClientCiStateTest do
     end
 
     test "ORDRE INDETERMINABLE : on n'accuse PERSONNE — l'inverse de la porte de merge" do
-      # `commit_ci_state` garde tout le groupe pour y lire le PIRE : une porte de merge doit se
-      # fermer sur le doute. Ici la lecture DESIGNE un coupable, donc le doute innocente.
+      # Le verdict garde le pire ; le rapport n'attribue pas un echec sans statut courant connu.
       items = [
         %{"id" => nil, "context" => "CI / t", "status" => "failure"},
         %{"id" => nil, "context" => "CI / t", "status" => "success"}

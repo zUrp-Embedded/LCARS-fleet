@@ -3,10 +3,8 @@ defmodule Fleet.Forge.Client.UrlSafeTest do
 
   alias Fleet.Forge.Client.UrlSafe
 
-  # Confinement E (WI-E4) — a hostile repo/path/ref segment produces a SAFE URL.
-  # The right treatment = ENCODING (not slugging: repo=`owner/name`, path=`dir/file` carry legitimate `/`):
-  # each COMPONENT is encoded, STRUCTURAL `/` preserved; an injected `..`/`/`/space/`?`/`#` is inert.
-  # (The encoding authority lives in `ForgeClient.UrlSafe`.)
+  # WI-E4 : string encoding of components, preserving structural slashes.
+  # These tests do not exercise HTTP normalization or server decoding.
   describe "encode_seg/encode_repo/encode_path — per-segment encoding" do
     test "encode_seg neutralizes /, space, ?, # in an atomic component" do
       assert UrlSafe.encode_seg("a/b") == "a%2Fb"
@@ -18,13 +16,11 @@ defmodule Fleet.Forge.Client.UrlSafeTest do
     test "encode_repo preserves the structural owner/name / BUT neutralizes a traversal component" do
       assert UrlSafe.encode_repo("fleet/lcars") == "fleet/lcars"
 
-      # REAL VECTOR: `fleet/../admin` — the `..` is a COMPONENT after split. www-form leaves `.`
-      # untouched → without the dedicated case it would survive and the server would normalize it
-      # (traversal). We render it inert:
+      # www-form leaves literal dot components unchanged without the dedicated clause.
       assert UrlSafe.encode_repo("fleet/../admin") == "fleet/%2E%2E/admin"
       refute UrlSafe.encode_repo("fleet/../admin") =~ ~r{/\.\.(/|$)}
       assert UrlSafe.encode_repo("fleet/a b") == "fleet/a%20b"
-      # a `/` injected INSIDE a component (fake separator) is encoded:
+      # Already-percent-encoded input has its percent escaped again.
       assert UrlSafe.encode_repo("fleet/x%2F..") == "fleet/x%252F.."
     end
 
