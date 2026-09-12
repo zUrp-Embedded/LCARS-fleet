@@ -1,17 +1,16 @@
 defmodule Fleet.Conflict.Assemble do
   @moduledoc """
-  Textual merge per conflict type -- turns a resolvable `Hunk` into merged lines. `:complex` (and any
-  type this engine does not settle) returns `:skip`; the caller then drops its whole merged output
-  and routes upstream, WITHOUT rebuilding any marker block. Never guesses.
+  Builds lines from a classified Hunk, trusting its type and cached merged_lines.
+  This module does not enforce Conflict's writable-type or confidence gates: direct calls
+  can apply heuristic unions, whitespace/order preferences and default-to-theirs values.
+  Unknown types and failed non-overlapping recomputation return :skip.
   """
   alias Fleet.Conflict.{Diff, Hunk}
   alias Fleet.Conflict.Patterns.Utils
 
   @doc """
-  Resolved lines for a hunk the engine can settle mechanically, with the sentence explaining WHY.
-
-  `:skip` for every hunk whose type carries a real disagreement — the explanation is not decoration
-  there either: a resolution nobody can read is a merge nobody can review.
+  Returns {:ok, lines, reason} or :skip. A result alone is not write authorization;
+  use Conflict.resolve/2 for the type and confidence gates.
   """
   @spec resolve_lines(Hunk.t()) :: {:ok, [String.t()], String.t()} | :skip
   def resolve_lines(%Hunk{type: :same_change} = h),
@@ -43,9 +42,8 @@ defmodule Fleet.Conflict.Assemble do
     end
   end
 
-  # The merge was already performed to CLASSIFY this hunk, and its result travels on the hunk. The
-  # clause below is what happens when it does not: a hunk built by hand (a test, a future caller
-  # that skips the classifier) still gets a correct answer, at the price of the computation.
+  # Reuse the classifier's expensive merge. Manually built hunks without a cached list
+  # recompute and can decline; supplied lists are trusted without verification.
   def resolve_lines(%Hunk{type: :non_overlapping, merged_lines: lines}) when is_list(lines),
     do: {:ok, lines, "3-way LCS merge -- non-overlapping changes combined."}
 
@@ -82,9 +80,7 @@ defmodule Fleet.Conflict.Assemble do
 
   def resolve_lines(%Hunk{}), do: :skip
 
-  # MULTISET insertions: a line equal to a base line is a REAL insertion (a duplicated `}`, a
-  # repeated line) -- a plain Set would filter it and silently drop it from the result. Consume base
-  # occurrences before counting a line as new.
+  # Consume base occurrences as a multiset: an extra identical line (e.g. `}`) is an insertion.
   defp insertions_of(lines, base_counts) do
     {out, _remaining} =
       Enum.reduce(lines, {[], base_counts}, fn l, {out, rem} ->

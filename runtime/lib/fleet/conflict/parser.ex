@@ -1,7 +1,9 @@
 defmodule Fleet.Conflict.Parser do
   @moduledoc ~S"""
-  Parses diff2, diff3, and truncated zdiff3 conflict markers into ordered segments.
-  The separator deliberately accepts trailing CR from CRLF input.
+  Parses column-zero, seven-character diff2/diff3 markers into ordered segments.
+  The separator accepts trailing CR from CRLF input; content CRs remain in the lines.
+  Marker-looking content follows the state machine rather than language/quoting rules.
+  Empty diff3 bases and absent bases both become base_lines: []; labels are discarded.
   """
 
   @marker_ours ~r/^<{7}(\s|$)/
@@ -22,19 +24,9 @@ defmodule Fleet.Conflict.Parser do
   @doc """
   Splits conflict-marked `content` into ordered `:text` / `:conflict` segments.
 
-  Fails with `{:error, {:unterminated_conflict, state, start_line}}` when the content ends while a
-  conflict is still open. THE SILENCE IS THE DEFECT: the accumulated `ours`/`base`/`theirs` lines
-  only ever become a segment on the closing `>>>>>>>`, so an unterminated conflict gets dropped
-  WHOLE and the caller receives the segment list of a CLEAN file. Two ways that bites, and the
-  second is the expensive one:
-
-    * alone, it made `resolve/2` return a report byte-identical to a file with no conflict at all,
-      so a probe reported "clean" on a file it had failed to read;
-    * after a resolvable conflict, `all_resolved?` stayed true and `merged` was written back
-      MISSING the unterminated hunk's content — silent data loss on disk, not just a bad verdict.
-
-  A parser that cannot represent what it read must say so; guessing "nothing there" is the one
-  answer that is indistinguishable from success.
+  An open conflict at EOF returns {:error, {:unterminated_conflict, state, start_line}};
+  start_line is the opening marker's one-based line number. Do not return accumulated
+  segments on error: a previous resolvable hunk could otherwise yield a truncated merge.
   """
   @spec segments(String.t()) :: {:ok, [segment()]} | {:error, error()}
   def segments(content) do
@@ -51,8 +43,8 @@ defmodule Fleet.Conflict.Parser do
   end
 
   @doc """
-  zdiff3 heuristic: a non-empty base that is a subset of ours OR of theirs. A full diff3 base would
-  carry every common line; a truncated (zdiff3) base only carries the diverging ones.
+  Heuristic annotation: every line of a non-empty base occurs in ours OR every line occurs
+  in theirs. Ignores order and multiplicity; this does not reliably identify Git's zdiff3 style.
   """
   @spec zdiff3?(raw_conflict()) :: boolean()
   def zdiff3?(%{base_lines: []}), do: false
@@ -64,9 +56,6 @@ defmodule Fleet.Conflict.Parser do
     Enum.all?(raw.base_lines, &MapSet.member?(ours, &1)) or
       Enum.all?(raw.base_lines, &MapSet.member?(theirs, &1))
   end
-
-  # ── state machine ─────────────────────────────────────────
-  # start_line points at the `<<<<<<<` marker line (1-indexed), mirroring the ported contract.
 
   defp new_state,
     do: %{mode: :outside, text: [], ours: [], base: [], theirs: [], start: 0, segs: []}

@@ -23,10 +23,7 @@ defmodule Fleet.Conflict.PatternsTest do
 
   describe "whitespace_only" do
     test "same code, different indentation -> CLASSIFIED, never auto-written" do
-      # Classification is real and useful (it routes the tier: this is shallow). Writing it is not
-      # ours to do: the engine is format-blind, and in Python an indent/dedent changes scope, in
-      # YAML it changes which key owns the value. Measured on the deployed build before this gate:
-      # `    return a` vs `\treturn a` resolved at :high and rewrote the block.
+      # Python/YAML indentation can change semantics even when classification scores :high.
       content = diff3("a", "  a", "    a")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :whitespace_only, confidence: %{label: :high}}] = r.hunks
@@ -35,7 +32,8 @@ defmodule Fleet.Conflict.PatternsTest do
     end
 
     test "whitespace inside a string is data -> not whitespace_only" do
-      # ours and theirs normalize equal on layout but the quoted content differs
+      # This fixture also matches one_side_change first (theirs == base); it does not
+      # isolate the whitespace detector's handling of quoted strings.
       content = diff3(~s|x = "a  b"|, ~s|x = "a b"|, ~s|x = "a b"|)
       {:ok, r} = Conflict.resolve(content)
       refute match?([%{type: :whitespace_only}], r.hunks)
@@ -44,9 +42,7 @@ defmodule Fleet.Conflict.PatternsTest do
 
   describe "reorder_only" do
     test "same lines, different order (diff2) -> CLASSIFIED, never auto-written" do
-      # Order carries meaning far too often to guess: `RUN apt update` after `apt install`, CSS
-      # last-declaration-wins, and `log()` before `auth()` -- the engine reordered an auth check
-      # ahead of its log at :high before this gate.
+      # Order affects Docker commands, CSS precedence and auth/log sequencing.
       content = diff2("a\nb", "b\na")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :reorder_only}] = r.hunks
@@ -56,11 +52,7 @@ defmodule Fleet.Conflict.PatternsTest do
 
   describe "insertion_at_boundary" do
     test "both sides insert at the same boundary -> CLASSIFIED, never auto-written" do
-      # The union is right when the two insertions are ADDITIVE and wrong when they are
-      # ALTERNATIVES -- and nothing in the text says which. Measured before this gate: two sides
-      # setting the same key produced `timeout: 30` AND `timeout: 60` (invalid in strict YAML), two
-      # sides defining `def run` kept both (dead clause), two sides setting `color:` kept both (ours
-      # silently lost to CSS last-wins).
+      # A union can duplicate alternative YAML keys, definitions or CSS properties.
       content = diff3("a\nX", "a", "a\nY")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :insertion_at_boundary}] = r.hunks
@@ -73,16 +65,12 @@ defmodule Fleet.Conflict.PatternsTest do
       content = diff3("version = 1.2.0", "version = 1.0.0", "version = 1.1.0")
       {:ok, r} = Conflict.resolve(content)
       assert [%{type: :value_only_change, confidence: %{label: :medium}}] = r.hunks
-      # medium -> not auto-resolved at the default :high floor
+      # Both the default floor and the writable-type gate refuse this candidate.
       assert r.merged == nil
     end
 
     test "lowering the floor to :medium does NOT unlock it — the type gate is independent" do
-      # The confidence floor and the write gate answer different questions. Lowering the floor used
-      # to hand the disk to a value pick; it no longer can, because `value_only_change` is not an
-      # auto-writable type at ANY floor. The reason is measured, not theoretical: for an unorderable
-      # volatile `Assemble` itself records "not orderable -- accept theirs (default)", i.e. a coin
-      # flip. A sha `aaaa1111` vs `bbbb2222` resolved to theirs at :high before this gate.
+      # Lowering the floor cannot authorize a type whose assembler may default to theirs.
       content = diff3("version = 1.2.0", "version = 1.0.0", "version = 1.1.0")
       {:ok, r} = Conflict.resolve(content, min_confidence: :medium)
       assert [%{type: :value_only_change}] = r.hunks
@@ -108,26 +96,19 @@ defmodule Fleet.Conflict.PatternsTest do
     end
   end
 
-  # JG-050 — LA TABLE EST LE COUT, ET RIEN NE LA BORNAIT. `lcs/2` remplit une entree de map
-  # persistante par couple `{i, j}`. Mesure sur ce build : 250 000 cellules coutent 21 Mio et
-  # 179 ms, soit ~91 octets et ~0.71 us la cellule, en quadratique. Un hunk de 5 000 lignes de
-  # chaque cote — un lockfile, un fichier genere, un instantane, c'est-a-dire EXACTEMENT ce qui
-  # produit les gros conflits — fait 25 millions de cellules : ~2.2 Gio et ~18 s pour UNE table, et
-  # une fusion trois voies en construit DEUX. Le calcul a lieu pendant la CLASSIFICATION, avant
-  # toute decision de resoudre.
+  # Le budget borne les cellules DP pendant la classification, pas la mémoire totale ni le temps.
   describe "JG-050 — le budget LCS borne la table" do
     defp lines(n), do: for(i <- 1..n, do: "ligne #{i}")
 
     test "la frontiere est exacte, et elle se lit en O(1) sur les longueurs" do
+      # Le prédicat traverse les listes pour calculer leurs longueurs ; ce test ne mesure pas le coût.
       cap = Diff.max_lcs_cells()
       refute Diff.over_lcs_budget?(lines(1), lines(cap))
       assert Diff.over_lcs_budget?(lines(1), lines(cap + 1))
     end
 
     test "au-dela, `lcs/2` REFUSE au lieu de rendre une liste vide" do
-      # Une liste vide serait le pire retour possible : « ces sequences n'ont rien en commun » est
-      # une reponse plausible, indistinguable d'un refus, et elle ferait produire un diff FAUX avec
-      # confiance. Le refus est explicite pour que personne ne puisse le lire comme un resultat.
+      # [] signifierait « aucune ligne commune », alors que la comparaison a été refusée.
       over = Diff.max_lcs_cells() + 1
       assert Diff.lcs(lines(1), lines(over)) == {:error, :too_large}
 
@@ -136,8 +117,7 @@ defmodule Fleet.Conflict.PatternsTest do
     end
 
     test "TEMOIN — sous le budget, la fusion se fait normalement" do
-      # La borne doit se prouver sur ce qu'elle LAISSE PASSER : sans ce temoin, un `lcs/2` qui
-      # refuserait tout passerait les deux tests ci-dessus.
+      # Témoin contre un LCS qui refuserait toutes les entrées.
       assert {:ok, ["X", "a", "b", "Y"]} =
                Diff.merge_non_overlapping(["a", "b"], ["X", "a", "b"], ["a", "b", "Y"])
     end
@@ -163,15 +143,9 @@ defmodule Fleet.Conflict.PatternsTest do
     end
   end
 
-  # JG-051 — `NonOverlapping.detect?/1` REPOND EN FUSIONNANT, et l'assembleur redemandait la meme
-  # fusion : le calcul le plus cher du sous-systeme tournait deux fois par hunk, le premier resultat
-  # jete. Compte par `:erlang.trace/3` — la fonction n'a pas de couture, et un compteur pose dans le
-  # code mesurerait le compteur.
+  # La trace mesure les appels réels, sans ajouter de compteur au code de fusion.
   describe "JG-051 — la fusion trois voies n'est calculee qu'une fois par hunk" do
-    # ⚠ LE TRAVAIL TOURNE DANS UN AUTRE PROCESSUS, ET CE N'EST PAS DU CONFORT : le processus
-    # TRACEUR est exclu du tracage. Tracer `self()` depuis `self()` rend `trace/3 -> 1` et
-    # `trace_pattern -> 1` — deux retours qui disent « arme » — puis ZERO message. Un instrument qui
-    # repond « rien » a l'identique d'un sujet qui ne fait rien.
+    # Tracer un autre processus : le traceur lui-même est exclu et ne produirait aucun appel.
     defp count_merges(fun) do
       {pid, ref} =
         spawn_monitor(fn ->
@@ -180,10 +154,7 @@ defmodule Fleet.Conflict.PatternsTest do
           end
         end)
 
-      # ⚠ `trace_pattern` REND 0 ET N'ARME RIEN SUR UN MODULE PAS ENCORE CHARGE, en silence. Un
-      # `alias` ne charge pas : les modules Elixir se chargent a la demande, et si rien n'a encore
-      # touche `Diff` a cet instant le motif ne matche AUCUNE fonction. Le compte serait alors 0 —
-      # exactement ce que rend un sujet qui n'appelle jamais la fusion.
+      # alias ne charge pas le module ; sinon trace_pattern peut armer zéro fonction.
       Code.ensure_loaded!(Diff)
 
       :erlang.trace(pid, true, [:call])
@@ -197,11 +168,9 @@ defmodule Fleet.Conflict.PatternsTest do
       drain_traces(0)
     end
 
-    # ⚠ LE DRAIN ATTEND, IL NE CUEILLE PAS. Il vidait la boite avec `after 0`, donc il courait apres
-    # les messages : le `:DOWN` du moniteur et les messages de trace n'ont pas le meme expediteur et
-    # rien n'ordonne les deux. Un message de trace encore en vol au moment du `:DOWN` etait compte
-    # ZERO — un rouge intermittent, et le test qui l'a subi le 2026-08-14 accusait le sujet.
-    # 200 ms sur le PREMIER message, puis 0 : la salve est deja la une fois le premier arrive.
+    # :DOWN et traces peuvent arriver dans un ordre différent. Attendre jusqu'à 200 ms tant
+    # qu'aucun appel n'a été compté, puis drainer sans délai ; cela ne prouve pas qu'aucune
+    # trace supplémentaire ne reste en vol.
     defp drain_traces(n) do
       receive do
         {:trace, _pid, :call, {Diff, :merge_non_overlapping, _}} -> drain_traces(n + 1)
@@ -223,8 +192,7 @@ defmodule Fleet.Conflict.PatternsTest do
     end
 
     test "TEMOIN — l'instrument compte bien, il ne rend pas 1 par construction" do
-      # Sans ce temoin, un `:erlang.trace` mal arme rendrait 1 (ou 0) quoi qu'il arrive, et le test
-      # ci-dessus serait vert sur une mesure morte.
+      # Témoin à deux appels contre un compteur constant ou une trace non armée.
       calls =
         count_merges(fn ->
           Diff.merge_non_overlapping(["a"], ["b"], ["c"])
@@ -235,7 +203,7 @@ defmodule Fleet.Conflict.PatternsTest do
     end
 
     test "un hunk regle par un motif PRIORITAIRE ne paie jamais la fusion" do
-      # La capture reste PARESSEUSE : `same_change` gagne avant que `non_overlapping` soit atteint.
+      # same_change gagne avant que la fusion soit tentée.
       calls =
         count_merges(fn -> {:ok, _} = Conflict.resolve(diff3("b", "a", "b")) end)
 

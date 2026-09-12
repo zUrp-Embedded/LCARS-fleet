@@ -1,8 +1,9 @@
 defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   @moduledoc """
-  Both branches ONLY added lines relative to base (no removals), at the same boundary where a plain
-  LCS 3-way merge fails. Complements `non_overlapping` (priority 40, checked first): this is the case
-  where the insertions land at the same point. diff3 = high confidence; diff2 = a subset heuristic.
+  With a base, detects additions on both sides, no removals, and disjoint added line values.
+  It does not compare insertion positions; NonOverlapping gets first chance in the classifier.
+  Without a base, uses a strict subset of normalized nonblank line sets. Conflict never
+  auto-writes this type: additive and alternative insertions can have the same text shape.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.{Diff, Score}
@@ -20,9 +21,7 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   def detect?(%{base_lines: []} = h), do: detect_without_base(h)
 
   def detect?(h) do
-    # This pattern reaches `Diff.lcs/2` DIRECTLY, so it carries the budget refusal itself -- a
-    # ceiling placed in the three-way merge alone would leave THIS path unbounded beside a bounded
-    # neighbour.
+    # Direct LCS calls must also decline over budget; a bound only in the merge is insufficient.
     with {:ok, ours_removals} <- lcs_removals(h.base_lines, h.ours_lines),
          {:ok, theirs_removals} <- lcs_removals(h.base_lines, h.theirs_lines),
          {:ok, ours_added} <- lcs_additions(h.base_lines, h.ours_lines),
@@ -58,7 +57,7 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   @impl true
   def fail_reason(_h), do: "At least one side has removals or overlapping insertions."
 
-  # diff2: one side is a strict subset of the other (different sizes) -- a pure addition.
+  # Set heuristic ignores order and repeated occurrences; it does not prove a pure addition.
   defp detect_without_base(h) do
     ours = normalized_set(h.ours_lines)
     theirs = normalized_set(h.theirs_lines)

@@ -1,7 +1,7 @@
 defmodule Fleet.Conflict.Diff do
   @moduledoc """
-  LCS and three-way non-overlapping merge primitives. Conflicting edit ranges
-  return `nil`; deterministic tie-breaking keeps index pairs stable.
+  Bounded LCS and three-way text merge. Overlap and budget refusals are distinct errors.
+  Ties during LCS backtracking decrement the second index, making pair selection deterministic.
   """
 
   @type op :: %{type: :keep | :add | :remove, line: String.t(), index: non_neg_integer()}
@@ -12,32 +12,16 @@ defmodule Fleet.Conflict.Diff do
           source: :ours | :theirs
         }
 
-  # THE TABLE IS THE COST, AND NOTHING BOUNDS IT ON ITS OWN. `lcs/2` fills one persistent-map entry
-  # per `{i, j}` couple -- `n * m` entries in time AND in memory, for a hunk whose size no caller
-  # limits. MEASURED on this build (two sequences of n lines each, strings of ~50 chars):
-  #
-  #     n=100    10 000 cells     3.4 ms      ~1 MiB
-  #     n=200    40 000 cells    17.4 ms      ~7 MiB
-  #     n=500   250 000 cells   178.6 ms     ~21 MiB
-  #
-  # ~91 bytes and ~0.71 us per cell, quadratic in n. A 5 000-line hunk -- a lockfile, a generated
-  # file, a snapshot, i.e. EXACTLY what produces big conflicts -- is 25 million cells: ~2.2 GiB and
-  # ~18 s for ONE table, and a three-way merge builds TWO. The BEAM does not refuse it; it swaps and
-  # freezes the calling process, during CLASSIFICATION, before any decision to resolve was taken.
-  #
-  # The ceiling is set where an automatic merge stops being reasonable rather than where the machine
-  # stops coping: 500x500 costs 21 MiB and 179 ms per table, twice per hunk. A conflict block bigger
-  # than that is a human's, not the engine's.
+  # Bound the n*m persistent-map cells before classification can build two LCS tables per
+  # three-way merge. Historical sizing at 500x500 was ~21 MiB / 179 ms per table; this is a
+  # cell budget, not a time/byte guarantee or a bound on total input and output allocation.
   @max_lcs_cells 250_000
 
   @doc """
   LCS as ordered `{i, j}` index pairs where `a[i] == b[j]` (both strictly increasing).
 
-  `{:error, :too_large}` when the DP table would exceed #{@max_lcs_cells} cells. It is a RETURN and
-  not a silent empty result because the two are indistinguishable downstream: an empty LCS means
-  "these sequences share nothing", which would make a bounded merge produce a confident WRONG diff.
-  Callers cannot forget to read it, which is the point -- a budget the caller must remember to check
-  is a budget the next caller will not check.
+  Returns {:error, :too_large} above #{@max_lcs_cells} DP cells. An empty successful LCS
+  means no shared lines and must remain distinguishable from refusing to compare them.
   """
   @spec lcs([String.t()], [String.t()]) ::
           {:ok, [{non_neg_integer(), non_neg_integer()}]} | {:error, :too_large}
@@ -55,11 +39,8 @@ defmodule Fleet.Conflict.Diff do
   def max_lcs_cells, do: @max_lcs_cells
 
   @doc """
-  Whether `lcs/2` would decline this pair -- O(1) on the two lengths.
-
-  It exists so a caller can NAME the refusal without paying for it. The decision trace records a
-  reason for every pattern it rejected; deriving that reason by re-running the merge would make the
-  trace, which is pure narration, the most expensive step of the classification.
+  Whether lcs/2 would exceed its cell budget. Traverses both lists for their lengths,
+  without constructing a DP table; traces can name the refusal without rerunning a merge.
   """
   @spec over_lcs_budget?([String.t()], [String.t()]) :: boolean()
   def over_lcs_budget?(a, b), do: length(a) * length(b) > @max_lcs_cells
@@ -75,8 +56,6 @@ defmodule Fleet.Conflict.Diff do
     backtrack(av, bv, dp, n, m, [])
   end
 
-  # UNE CELLULE DE LA MATRICE LCS : egalite -> la diagonale plus un, sinon le meilleur des deux
-  # voisins. Sortie de la double reduction pour que celle-ci ne porte plus que le parcours.
   defp lcs_cell(dp, av, bv, i, j) do
     if elem(av, i - 1) == elem(bv, j - 1) do
       Map.get(dp, {i - 1, j - 1}, 0) + 1
@@ -85,7 +64,7 @@ defmodule Fleet.Conflict.Diff do
     end
   end
 
-  # L'index de base d'une operation ANCREE (`:keep` ou `:remove`) — une insertion n'en a pas.
+  # One past an anchored base index; :add indices belong to the branch instead.
   defp anchored_index(%{type: t, index: i}) when t in [:keep, :remove], do: i + 1
   defp anchored_index(_op), do: nil
 
@@ -105,7 +84,7 @@ defmodule Fleet.Conflict.Diff do
     end
   end
 
-  @doc "Diff of `base` against `branch` as an ordered list of keep/add/remove ops."
+  @doc "Ordered keep/add/remove ops: keep/remove index base, add indexes branch. Propagates the LCS budget error."
   @spec compute_diff([String.t()], [String.t()]) :: {:ok, [op()]} | {:error, :too_large}
   def compute_diff(base, branch) do
     with {:ok, common} <- lcs(base, branch), do: {:ok, do_compute_diff(base, branch, common)}
@@ -140,7 +119,7 @@ defmodule Fleet.Conflict.Diff do
     end)
   end
 
-  @doc "Groups contiguous non-keep ops into edits (base interval + added lines)."
+  @doc "Groups non-keep runs into edits over half-open base intervals; an insertion has equal endpoints."
   @spec extract_edits([op()], :ours | :theirs) :: [edit()]
   def extract_edits(diff, source) do
     diff_v = List.to_tuple(diff)
@@ -203,7 +182,7 @@ defmodule Fleet.Conflict.Diff do
     end
   end
 
-  @doc "True when two edits touch overlapping base intervals (pure insertions handled specially)."
+  @doc "Overlap of half-open base intervals; insertions overlap at the same point or inside a range, including its start only."
   @spec edits_overlap?(edit(), edit()) :: boolean()
   def edits_overlap?(a, b) do
     cond do
@@ -224,10 +203,8 @@ defmodule Fleet.Conflict.Diff do
   @doc """
   Merges non-overlapping ours/theirs edits over `base`.
 
-  `{:error, :overlap}` when a pair of edits touches the same base interval, `{:error, :too_large}`
-  when a side exceeds the LCS budget. The two are kept APART: both mean "the engine will not merge
-  this", but only the first is a statement about the CONTENT. Collapsing them onto one `nil` made
-  the decision trace say "both branches touched the same lines" about a block nobody had compared.
+  {:error, :overlap} means cross-side edits overlap. {:error, :too_large} means a base/side
+  pair exceeded the LCS budget, which says nothing about whether the edits overlap.
   """
   @spec merge_non_overlapping([String.t()], [String.t()], [String.t()]) ::
           {:ok, [String.t()]} | {:error, :overlap | :too_large}
@@ -248,7 +225,6 @@ defmodule Fleet.Conflict.Diff do
     end
   end
 
-  # Un seul intervalle commun suffit : la fusion est refusee des la premiere paire qui se touche.
   defp overlapped?(ours_edit, theirs_edits),
     do: Enum.any?(theirs_edits, &edits_overlap?(ours_edit, &1))
 

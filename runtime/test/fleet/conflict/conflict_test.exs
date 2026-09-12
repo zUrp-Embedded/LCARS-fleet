@@ -43,22 +43,9 @@ defmodule Fleet.ConflictTest do
     end
   end
 
-  # UN CONFLIT NON REFERME RENDAIT LE RAPPORT D'UN FICHIER PROPRE. Le parseur n'emettait un segment
-  # qu'au marqueur de fermeture ; a EOF, les lignes accumulees dans `ours`/`base`/`theirs` etaient
-  # jetees sans trace. Deux consequences, et la seconde est celle que la fiche d'audit ecarte a tort
-  # (« le risque n'est pas la perte de contenu, `merged` etant nil ») :
-  #
-  #   1. seul, il rendait `%Report{merged: nil, hunks: [], stats: %{total: 0}}` — a l'octet pres le
-  #      rapport d'un fichier SANS conflit. « je n'ai pas su lire » et « il n'y a rien » etaient la
-  #      meme reponse ;
-  #   2. APRES un hunk resolvable, `all_resolved?` restait vrai, `merged` etait donc calcule et
-  #      ECRIT — ampute du conflit non refermé et de tout ce qui le suivait. Perte de contenu sur
-  #      disque, mesuree : `merged == "same\ntail"`, la ligne suivante disparue.
-  #
-  # Le declencheur n'est pas exotique : une ligne commencant par `<<<<<<< ` suffit, et la doc de git
-  # comme les fixtures de merge en contiennent.
+  # EOF dans un conflit doit être une erreur : seul, il ressemblait à un fichier propre ;
+  # après un hunk résolu, il permettait un candidat amputé. Ces tests n'écrivent pas sur disque.
   describe "conflit non referme -> erreur structuree, jamais un rapport de fichier propre" do
-    # Les trois etats de la machine, chacun atteint par un contenu qui s'arrete DEDANS.
     @states [
       {:ours, "<<<<<<< ours\nperdu\n"},
       {:base, "<<<<<<< ours\na\n||||||| base\nperdu\n"},
@@ -75,26 +62,21 @@ defmodule Fleet.ConflictTest do
         prefix = diff3("b", "a", "b") <> "\ntail\n"
         content = prefix <> unquote(content)
 
-        # Le hunk qui precede est `same_change`, donc resolvable et writable : c'est exactement la
-        # configuration ou `merged` devenait un binaire et partait a `File.write/2`.
+        # Témoin : sans le conflit orphelin, ce préfixe produit bien un candidat.
         assert {:ok, %{merged: "b\ntail\n", stats: %{writable: 1}}} = Conflict.resolve(prefix)
 
-        # La ligne 9 est le `<<<<<<<` ORPHELIN, pas celui du hunk valide qui ouvre en 1 : l'erreur
-        # designe le conflit qu'on n'a pas su lire, pas le premier marqueur du fichier.
+        # L'erreur doit viser l'ouverture orpheline en 9, pas le premier conflit en 1.
         assert {:error, {:unterminated_conflict, unquote(state), 9}} = Conflict.resolve(content)
       end
     end
 
     test "TEMOIN — le meme contenu, marqueur referme, se resout normalement" do
-      # La garde doit se prouver sur ce qu'elle LAISSE PASSER. Sans ce temoin, un parseur qui
-      # refuserait tout contenu porteur d'un `<<<<<<<` passerait les trois tests ci-dessus.
+      # Distingue la garde d'un parseur qui refuserait tous les conflits.
       assert {:ok, %{merged: "b"}} = Conflict.resolve(diff3("b", "a", "b"))
       assert {:ok, %{merged: nil, stats: %{total: 1}}} = Conflict.resolve(diff3("b", "a", "c"))
     end
 
     test "un fichier PROPRE et un conflit non referme ne rendent plus la meme chose" do
-      # L'egalite que le defaut produisait, epinglee a l'envers : c'est elle qui rendait le defaut
-      # invisible a tout appelant.
       assert {:ok, %{merged: nil, hunks: [], stats: %{total: 0}}} =
                Conflict.resolve("aucun conflit ici\n")
 
@@ -102,23 +84,13 @@ defmodule Fleet.ConflictTest do
     end
   end
 
-  # DEUX GARANTIES « NEVER GUESSES » QUE RIEN NE TENAIT. Mesure du 2026-08-08, chaque mutation
-  # contre la suite entiere (2441 tests) : faire GARDER les lignes a `:delete_no_change` au lieu de
-  # supprimer, et faire DEVINER `:non_overlapping` quand le merge 3-way rend `nil`, laissaient tout
-  # vert. Ce module decide quel code survit a un merge : un regresseur qui devine au lieu de passer
-  # la main merge du code faux, en silence, et le `@moduledoc` promet exactement l'inverse.
-  #
-  # (Un troisieme repli — la clause fourre-tout `resolve_lines(%Hunk{})` — a survecu lui aussi a sa
-  # mutation, mais il est INATTEIGNABLE par conception : `:complex` n'est pas dans
-  # `@writable_types`, donc `try_resolve/2` ne l'appelle jamais. C'est un filet pour un type
-  # writable qui serait ajoute sans clause. Pas un defaut, et pas de test invente pour lui.)
+  # Régressions ciblées de l'assemblage. Le titre historique ne couvre pas les autres heuristiques
+  # appelables directement. La clause fourre-tout protège un futur type sans assembleur ;
+  # :complex n'y arrive pas depuis Conflict.resolve/2, qui l'exclut avant l'appel.
   describe "never guesses" do
     test "delete_no_change SUPPRIME le bloc — garder les lignes serait ressusciter du code efface" do
-      # C'est THEIRS qui supprime, pas ours — et ce detail EST le test. Avec le cote vide du cote
-      # `ours`, la mutation « rendre `h.ours_lines` au lieu de `[]` » rend `[]` elle aussi : le
-      # fixture ne distingue pas les deux mondes et passe dans les deux sens. Mesure faite : premiere
-      # version du test, mutation appliquee, 2443 verts. Ici `ours_lines == ["a"]`, donc garder
-      # ressusciterait la ligne effacee et le merge le montre.
+      # Theirs supprime : retourner ours_lines au lieu de [] doit échouer. Un ours vide
+      # masquerait cette mutation et laisserait le test vert.
       content = "top\n<<<<<<< ours\na\n||||||| base\na\n=======\n>>>>>>> theirs\nbottom"
 
       {:ok, r} = Conflict.resolve(content)
@@ -128,9 +100,7 @@ defmodule Fleet.ConflictTest do
     end
 
     test "non_overlapping dont le merge 3-way ECHOUE passe la main, il n'invente pas" do
-      # Teste `Assemble.resolve_lines/1` en direct : produire ce hunk par le classifieur
-      # demanderait un texte qui se classe `non_overlapping` ET dont le LCS echoue — l'assembleur
-      # est la surface publique ou la decision se prend, et c'est elle qui doit tenir.
+      # Hunk manuel : le classifieur ne choisit non_overlapping qu'après une fusion réussie.
       h = %Fleet.Conflict.Hunk{
         base_lines: ["a"],
         ours_lines: ["b"],
@@ -146,10 +116,8 @@ defmodule Fleet.ConflictTest do
         }
       }
 
-      # Le merge 3-way ne sait pas combiner ces trois cotes — verifie, pas suppose. Le motif
-      # `:overlap` dit LEQUEL des deux refus c'est : le contenu se chevauche, la taille n'est pas
-      # en cause. Le hunk ci-dessus ne porte pas de `merged_lines`, donc l'assembleur recalcule —
-      # c'est exactement le chemin de repli qu'on veut ici.
+      # Sans merged_lines, l'assembleur recalcule. Témoin d'un chevauchement réel, pas d'un
+      # dépassement du budget. :skip ne restaure pas de marqueurs malgré le message historique.
       assert Fleet.Conflict.Diff.merge_non_overlapping(["a"], ["b"], ["c"]) == {:error, :overlap}
 
       assert Fleet.Conflict.Assemble.resolve_lines(h) == :skip,

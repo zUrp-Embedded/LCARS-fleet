@@ -1,8 +1,7 @@
 defmodule Fleet.Conflict.Patterns.Complex do
   @moduledoc """
-  Fallback pattern: always matches, never resolves. The total-function guard at the tail of the
-  registry -- its `detect?/1` is `true`, so classification is total, but its confidence floors the
-  score so it is never auto-resolved.
+  Always-eligible fallback at the end of the registry. Conflict excludes this type from
+  writing at every confidence floor; Assemble returns :skip. Its score alone is not that gate.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

@@ -1,8 +1,7 @@
 defmodule Fleet.Conflict.Patterns.NonOverlapping do
   @moduledoc """
-  Both branches changed DIFFERENT regions of the same block -> automatic 3-way LCS merge. diff3 only.
-  `detect?/1` runs the actual merge (detection IS the resolution attempted): it matches iff the merge
-  succeeds without overlap.
+  Eligible with a non-empty base. Detection performs the merge and matches when cross-side
+  edit intervals do not overlap within the LCS budget; this is a textual, not semantic check.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.{Diff, Score}
@@ -15,11 +14,8 @@ defmodule Fleet.Conflict.Patterns.NonOverlapping do
   def requires, do: :diff3
 
   @doc """
-  The merge itself -- this pattern's detection and its resolution are the SAME computation.
-
-  Public so the classifier can keep the result instead of asking for it a second time: the
-  behaviour's `detect?/1` can only answer a boolean, and the answer here costs two quadratic LCS
-  tables. `{:error, :too_large}` is the LCS budget declining, not a statement about the content.
+  Returns the merge payload for classifier caching, avoiding a second pair of LCS tables
+  in Assemble. {:error, :too_large} is a budget refusal, not evidence of overlapping edits.
   """
   @spec merge(Fleet.Conflict.Parser.raw_conflict() | Fleet.Conflict.Hunk.t()) ::
           {:ok, [String.t()]} | {:error, :overlap | :too_large}
@@ -43,14 +39,9 @@ defmodule Fleet.Conflict.Patterns.NonOverlapping do
 
   @impl true
   def pass_reason(_h), do: "3-way LCS merge succeeded -- the changes do not overlap."
-  # The trace must not say "both branches touched the same lines" about a block the engine never
-  # compared: over the LCS budget, nothing was measured, and a refusal that invents its own motive
-  # is worse than a refusal.
   @impl true
   def fail_reason(h) do
-    # O(1) on the lengths, NEVER `merge/1`: the trace calls this for every pattern it rejected, so
-    # deriving the sentence from the merge would run the subsystem's costliest computation a third
-    # time -- to write prose about a hunk this pattern did not win.
+    # Name budget refusal without rerunning the merge; the check only traverses the lists.
     if Diff.over_lcs_budget?(h.base_lines, h.ours_lines) or
          Diff.over_lcs_budget?(h.base_lines, h.theirs_lines) do
       "Block too large for the 3-way LCS budget (#{Diff.max_lcs_cells()} cells) -- not compared."

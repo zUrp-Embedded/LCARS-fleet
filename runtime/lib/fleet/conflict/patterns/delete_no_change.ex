@@ -1,10 +1,8 @@
 defmodule Fleet.Conflict.Patterns.DeleteNoChange do
   @moduledoc """
-  One side deleted the block, the other left it untouched -> delete.
-
-  diff3 is CERTAIN (the untouched side equals base). diff2 (no base) can only GUESS from emptiness,
-  so it scores medium with an explicit penalty -- the fail-safe direction is to under-resolve, never
-  to delete on a hunch.
+  With a non-empty base, matches unilateral deletion while the other side equals base (:certain).
+  Without a base, one empty side is only a deletion heuristic (:medium). The default :high
+  floor refuses that candidate, but lowering min_confidence to :medium permits deletion.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Score

@@ -2,75 +2,28 @@ defmodule Fleet.Conflict do
   use Boundary, deps: [], exports: [Report]
 
   @moduledoc """
-  Deterministic classifier and trivial-merge engine for git conflicts -- pure text -> classification
-  (+ resolution). No git, no I/O, no process: a `foundation` primitive (`deps: []`), consumed by
-  `Fleet.Pilot` to triage a merge conflict BEFORE spending a producer round or escalating to a human.
+  Pure text classification and merge candidates for Pilot conflict triage; no Git or I/O.
+  The deterministic patterns and confidence trace derive from GitWand, excluding its
+  format-aware, structural and LLM resolvers. Attribution: root THIRD_PARTY_NOTICES.md.
 
-  Ported from the sane deterministic core of an external engine (GitWand) -- the trivial patterns
-  and their composite-confidence trace, none of the format-aware / structural / LLM machinery an
-  audit flagged as unreliable. The durable value is the DecisionTrace: every classification records
-  WHY, and the refusal is traced as clearly as the resolution.
+  resolve/2 returns {:ok, Report} or an unterminated-conflict error. A non-nil merged
+  candidate requires at least one hunk and every hunk to pass both the writable-type gate
+  and confidence floor. Any residual discards the entire candidate; no partial merge or
+  reconstructed marker labels are returned. A clean file has no hunks and merged: nil.
 
-  The origin is indexed at the ROOT (`THIRD_PARTY_NOTICES.md`), not only here. A credit that lives solely in the
-  prose of the file it applies to is one refactor away from disappearing with it, and the question
-  it answers -- does anything in this repository come from somewhere else -- is asked from outside,
-  by someone who has no reason to open this module.
-
-  ## Contract
-
-  `resolve/2` returns a `Fleet.Conflict.Report`. `merged` is non-nil ONLY when every hunk is of an
-  auto-WRITABLE type (cf. `@writable_types` -- a blast-radius judgement the confidence score does
-  not carry) AND resolved at or above `:min_confidence` (default `:high`). That pair is the single
-  "safe to write back" signal; confidence alone was not enough, and the gap wrote Python indentation
-  and duplicate YAML keys at `:high`. Any residual (`:complex`, or a resolvable hunk below threshold) leaves `merged: nil`; the
-  caller then routes to the producer conflict-rework / chief exception pass, never writing on a partial guess.
-
-  `resolve/2` returns `{:error, {:unterminated_conflict, state, line}}` when the markers do not
-  close. Returning an empty report there would be the EXACT report of a file with no conflict, so
-  "I could not read this" and "there is nothing here" would be the same answer. It is an error and
-  not an empty report because the two demand opposite moves from every caller: one aborts, the other
-  proceeds.
-
-  Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
-  resolution is caught downstream -- the guard the standalone engine lacked.
+  Confidence and disjoint text edits do not validate language semantics. Callers remain
+  responsible for applying and reviewing a candidate; downstream re-judging is another
+  check, not a guarantee that a wrong resolution will be caught.
   """
   alias Fleet.Conflict.{Assemble, Classifier, Parser, Report}
 
   @confidence_rank %{certain: 4, high: 3, medium: 2, low: 1}
 
-  # WRITE-SAFETY, a dimension the confidence score does NOT carry. The score answers "how sure am I
-  # of this classification"; it says nothing about what being wrong COSTS. Two patterns can both
-  # score `:high` and sit above the write floor -- `whitespace_only` and `non_overlapping` do -- yet
-  # being wrong about the first rewrites Python indentation while being wrong about the second is
-  # near-impossible (the base proves the two sides touch disjoint lines).
-  #
-  # A pattern is auto-WRITABLE only when its correctness follows from the base and the two sides
-  # ALONE, with no assumption about the language:
-  #
-  #   * same_change      -- the sides are identical; there is nothing to choose.
-  #   * one_side_change  -- the base proves only one side moved.
-  #   * delete_no_change -- the base proves the deletion is unilateral.
-  #   * non_overlapping  -- the base proves the two changes touch disjoint regions.
-  #
-  # The rest each need a semantic assumption this engine cannot check, because it is deliberately
-  # FORMAT-BLIND (the audited engine's format-aware resolvers were dropped for being unreliable --
-  # dropping them and then keeping patterns that silently assume a format is the same bug wearing
-  # the opposite mask). What they assume, and where it is false, measured:
-  #
-  #   * whitespace_only       assumes whitespace is insignificant -> Python indent/dedent changes
-  #                           scope, YAML indent changes which key owns a value.
-  #   * reorder_only          assumes order is insignificant -> `RUN apt update` after `install`,
-  #                           CSS last-wins, `log()` before `auth()`.
-  #   * insertion_at_boundary assumes two insertions at one place are ADDITIVE -> when they are
-  #                           alternatives it keeps both: duplicate YAML key (invalid file),
-  #                           duplicate `def` (dead clause), duplicate CSS property (ours lost).
-  #   * value_only_change     picks the "newer" value -- and for an UNORDERABLE volatile (a sha, a
-  #                           uuid) `Assemble` itself records "not orderable -- accept theirs
-  #                           (default)". A coin flip must not ride a `:high` label to disk.
-  #
-  # These stay CLASSIFIED (the diagnosis "this is shallow, a producer fixes it in one round" is real
-  # and drives tier-0 routing) but are never WRITTEN by the machine. Keeping the classifier without
-  # this line is the shape of the bug: a diagnosis that quietly becomes a write authorisation.
+  # Type authorization is independent of confidence. Keep the other patterns for routing,
+  # but exclude their semantic guesses: whitespace can change Python/YAML scope; order can
+  # change Docker/CSS behavior; insertion union can duplicate keys/definitions; hashes and
+  # UUIDs have no "newer" side. Lowering the floor must not authorize those types.
+  # delete_no_change without a base is only a heuristic: :medium explicitly permits it.
   @writable_types [:same_change, :one_side_change, :delete_no_change, :non_overlapping]
 
   @type opt :: {:min_confidence, Fleet.Conflict.ConfidenceScore.label()}
@@ -96,11 +49,8 @@ defmodule Fleet.Conflict do
 
   defp segment_step({:text, lines}, {out, hs, ok}, _min), do: {out ++ lines, hs, ok}
 
-  # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here on: nothing may
-  # be appended for this hunk. ⚠ ET SURTOUT PAS UNE RECONSTRUCTION DU BLOC DE MARQUEURS : elle
-  # ecrirait des labels FIXES (`<<<<<<< ours`) la ou git ecrit la BRANCHE ou la revision, donc le
-  # jour ou quelqu'un consommerait ce `out`, un merge partiel expedierait des fichiers dont les
-  # marqueurs ont perdu LES NOMS PAR LESQUELS UN HUMAIN RESOUT.
+  # Residuals discard the whole candidate. Rebuilding markers with fixed labels would lose
+  # the branch/revision names a human needs; callers must retain the original content.
   defp segment_step({:conflict, raw}, {out, hs, ok}, min) do
     hunk = Classifier.to_hunk(raw)
 
@@ -123,7 +73,7 @@ defmodule Fleet.Conflict do
 
   defp rank(label), do: Map.fetch!(@confidence_rank, label)
 
-  # Trivial routes work; writable separately authorizes disk mutation.
+  # writable counts types, not hunks that passed the confidence floor or produced output.
   defp stats(hunks) do
     complex = Enum.count(hunks, &(&1.type == :complex))
     total = length(hunks)

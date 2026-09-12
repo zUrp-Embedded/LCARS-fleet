@@ -1,11 +1,10 @@
 defmodule Fleet.Conflict.Classifier do
   @moduledoc """
-  Pattern registry + classification. Evaluates patterns in priority order (lowest first), filtered
-  by `requires` against base availability, first `detect?/1` wins. The DecisionTrace is built by
-  replaying the FULL registry so a skipped or failed pattern is recorded as clearly as the match.
-
-  Adding a pattern = implement `Fleet.Conflict.Pattern` + one entry in `@registry` (a visible,
-  reviewable gesture -- the priority ordering is the contract).
+  Evaluates eligible patterns by ascending priority; first match wins. Base availability
+  means non-empty base_lines, so an empty diff3 base is treated as absent. DecisionTrace
+  records skipped/failed patterns only up to the winner. Reason/score callbacks may
+  recompute detection; NonOverlapping specifically reuses its cached merge.
+  Add patterns through Fleet.Conflict.Pattern and @registry.
   """
   alias Fleet.Conflict.{DecisionTrace, Hunk, Parser}
 
@@ -48,7 +47,7 @@ defmodule Fleet.Conflict.Classifier do
 
     confidence =
       if zdiff3? do
-        # zdiff3's base is TRUNCATED but PRESENT -> it is a real diff3 base for our purposes.
+        # Heuristic annotation only: the score and label remain unchanged.
         %{
           confidence
           | boosters: confidence.boosters ++ ["zdiff3 -- base truncated to diverging lines"]
@@ -96,11 +95,8 @@ defmodule Fleet.Conflict.Classifier do
     }
   end
 
-  # ONE pattern answers with a PAYLOAD and the behaviour has no room for it: `NonOverlapping`
-  # detects BY PERFORMING THE MERGE, so a boolean `detect?/1` throws away exactly what the assembler
-  # asks for next. It is special-cased HERE, visibly, rather than by widening the behaviour for every
-  # other pattern that has nothing to carry -- and the walk stays lazy, so a hunk settled by a
-  # higher-priority pattern still never pays for the merge.
+  # Cache NonOverlapping's merge payload despite the boolean behavior callback. Lazy selection
+  # avoids this computation entirely when an earlier pattern wins.
   defp detect(NonOverlapping, raw) do
     case NonOverlapping.merge(raw) do
       {:ok, lines} -> {NonOverlapping, lines}
