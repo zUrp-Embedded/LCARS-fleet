@@ -79,7 +79,7 @@ COPY --chown=builder:builder . /src/lcars_install
 RUN cd /src/lcars_install \
     && PROV_KERNEL_PROBES=0 PROV_COLOR=0 DEBIAN_FRONTEND=noninteractive \
        deploy/provision apply --substrate docker --human builder \
-    && cd / && rm -rf /src && userdel -r builder \
+    && cd / && rm -rf /src \
     && rm -rf /var/lib/apt/lists/*
 
 # ─── 3. CE QUE SEULE L'IMAGE PORTE ────────────────────────────────────────────────────────────────
@@ -101,8 +101,10 @@ ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.s
 FROM runtime AS verify
 ARG GIT_SHA=unknown
 RUN PROV_SOURCE_REV="${GIT_SHA}" PROV_KERNEL_PROBES=0 PROV_COLOR=0 \
-      /opt/lcars/deploy/provision doctor --substrate docker \
+      /opt/lcars/deploy/provision doctor --substrate docker --human builder \
     && printf '%s\n' "${GIT_SHA}" > /verified
 
+# builder a servi de siège au rail et à son doctor ; le siège réel (uid 1000) se dérive au boot
 FROM runtime AS final
+RUN userdel -r builder
 COPY --from=verify /verified /opt/lcars/.verified

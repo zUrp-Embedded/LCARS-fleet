@@ -43,8 +43,17 @@ setup() {
   n_probe="$(grep -n 'PROV_KERNEL_PROBES=0' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
   n_apply="$(grep -n 'provision apply --substrate docker' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
   [ -n "$n_probe" ] && [ -n "$n_apply" ] && [ "$n_probe" -le "$n_apply" ] && [ $((n_apply - n_probe)) -le 2 ]
-  # et le kit n'est pas livre : /src part, l'humain de build aussi
-  grep -qE 'rm -rf /src && userdel -r builder' <<<"$RUNTIME"
+  # et le kit n'est pas livre : /src part
+  grep -qE 'cd / && rm -rf /src' <<<"$RUNTIME"
+}
+
+@test "LE DOCTOR VERIFIE SOUS LE MEME SIEGE QUE LE RAIL, et builder ne part qu'au stage final" {
+  local v f
+  v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
+  f="$(sed -n '/^FROM runtime AS final$/,$p' "$DF" | grep -vE '^\s*#')"
+  grep -qE 'provision doctor --substrate docker --human builder' <<<"$v"
+  refute grep -q 'userdel -r builder' <<<"$RUNTIME"
+  grep -qE '^RUN userdel -r builder$' <<<"$f"
 }
 
 @test "LE SOCLE SEUL : une liste apt, sans pin, sans sha256, sans version — tout pin vit dans un module" {
@@ -70,7 +79,7 @@ setup() {
   n_rail="$(grep -n 'provision apply --substrate docker' <<<"$CODE" | head -1 | cut -d: -f1)"
   [ -n "$n_del" ] && [ -n "$n_use" ] && [ -n "$n_rail" ]
   [ "$n_del" -lt "$n_use" ] && [ "$n_use" -lt "$n_rail" ]
-  grep -q 'userdel -r builder' <<<"$RUNTIME"
+  grep -q 'userdel -r builder' <<<"$CODE"
 }
 
 @test "LA REVISION a UNE origine, l'ARG GIT_SHA, et elle arrive au rail (PROV_SOURCE_REV), a l'ENV et au LABEL" {
