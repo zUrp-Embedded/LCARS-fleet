@@ -1,13 +1,7 @@
 defmodule Fleet.EventRouter.BindAddressTest do
   @moduledoc """
-  Single source of the bind ip (`Fleet.EventRouter.BindAddress`) + bind contract of
-  the Gitea webhook listener `:8081`.
-
-  Invariant: loopback `{127,0,0,1}` by default, exposure = named opt-in. The
-  webhook is the only surface with a PER-SURFACE override (`LCARS_WEBHOOK_BIND_HOST`)
-  because a remote forge must be able to POST. The precedence (surface > global) is
-  tested here: it is what allows exposing the webhook WITHOUT exposing the command
-  surfaces.
+  Checks loopback default, surface-over-global precedence and the webhook's child-spec IP.
+  No listener is started; this does not prove live network exposure or DNS/IPv6 behaviour.
   """
   use ExUnit.Case, async: false
 

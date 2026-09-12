@@ -2,14 +2,16 @@ defmodule Fleet.EventRouter.Catalog do
   @moduledoc """
   Loads `events.yaml` at boot as the authorized event registry and routing table.
 
-  With `:load_event_registry` enabled, absent, invalid, empty, or inconsistent
-  registries raise. `:events_yaml_path` overrides the default file under `priv/`.
+  With :event_router_load_event_registry enabled, missing, invalid, empty or inconsistent
+  registries raise. :event_router_events_yaml_path overrides the default under priv/.
+  The trusted file supplies atom names; it must not be populated from unbounded external input.
   """
 
   require Logger
 
   @doc """
-  Loads the authorized types and routing table when registry loading is enabled.
+  Validates and loads types then routing when enabled; disabling leaves previous state intact.
+  Updates are not atomic: routing validation can raise after replacing authorized types.
   """
   @spec load!() :: :ok
   def load! do
@@ -51,23 +53,10 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   @doc """
-  Returns the registry's event type strings. An empty registry yields `[]`; an UNPARSEABLE one
-  raises, exactly like `load!/0` on the same fault.
-
-  THE TWO READERS OF `events.yaml` TREAT THE SAME FAULT THE SAME WAY, and they must: returning `[]`
-  on an unparseable file would give it the answer a legitimately empty registry gives, leaving the
-  two indistinguishable at the output.
-
-  Silence would cost nothing on the nominal path — `load!/0` raises one line later and the boot
-  dies anyway — and everything where the registry is deliberately off
-  (`event_router_load_event_registry: false`, the hermetic test baseline and any maintenance run):
-  there `load!/0` is a no-op, this function is the ONLY source of pre-registered event atoms, and an
-  unparseable file leaves the fleet with none. Every later `String.to_existing_atom/1` on a binary
-  event type — `Bus.coerce_type/1`, the gitea webhook — then raises an ArgumentError naming the
-  type, pointing at the consumer instead of at the file that could not be read.
-
-  An EMPTY registry is a different fact and keeps its `[]`: there is genuinely nothing to
-  pre-register, and `load!/0` is the one that decides whether emptiness is fatal.
+  Returns keys from the parsed events map, without schema validation or a loading-switch check.
+  Empty maps yield []; missing/unparseable files or a non-map events value raise. This remains
+  active for atom preregistration when load!/0 is disabled, so a bad file is diagnosed here
+  rather than later at a to_existing_atom consumer. Malformed key types are not rejected here.
   """
   @spec event_type_strings() :: [String.t()]
   def event_type_strings do
@@ -93,15 +82,8 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   defp validate_against_schema!(events) do
-    # THROUGH THE SHARED CACHE, like every other schema of the repo — NOT an inlined
-    # `File.read! |> Jason.decode! |> resolve()`, which is the exact body of
-    # `SchemaCache.resolve_json_schema!/2`. `lib/` calls `ExJsonSchema.Schema.resolve/1` in the
-    # shared mechanism and in ONE documented exception (`CapProfile.Schema`, whose
-    # `{:error, :schema_unavailable}` must stay retryable and therefore uncacheable). Nowhere else.
-    #
-    # Safe to cache here and NOT there: the variable artifact of this module is `events.yaml`, which
-    # the tests rewrite under it; the SCHEMA is immutable `priv/` resolved through `:code.priv_dir`,
-    # with no knob and nothing to swap.
+    # Re-read mutable events YAML, but cache the bundled schema by path. Disk schema edits
+    # do not invalidate that cache automatically; publication assumes deployed schema stability.
     path =
       Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events.json")
 
@@ -137,8 +119,6 @@ defmodule Fleet.EventRouter.Catalog do
     atom
   end
 
-  # (Pas de rail de severite separe ni de gardes de prefixe : la seule garde de cet esprit est
-  # celle du kind nomme, plus bas — une route `incident` a porte immediate exige un `escalate_kind`.)
   defp incident_route!(type, action, route) do
     if route["incident"] && action != "incident" do
       raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
@@ -148,9 +128,8 @@ defmodule Fleet.EventRouter.Catalog do
       %{"op" => op, "subject" => subject} = inc ->
         gate = incident_gate!(type, inc["gate"])
 
-        # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
-        # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue. Refus au BOOT, pas au
-        # premier incident.
+        # Immediate escalation needs a named kind before reaching the consumer's closed table.
+        # This guard checks presence, not that the named kind has a handler there.
         if gate == :immediate and is_nil(inc["escalate_kind"]) do
           raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
                   "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>
@@ -170,11 +149,8 @@ defmodule Fleet.EventRouter.Catalog do
     end
   end
 
-  # LA PORTE EST DECLARATIVE : `immediate` = issue des la PREMIERE occurrence (escalate_gated,
-  # cooldown seul) ; `recurrence` (defaut) = 1re notee, recidive escaladee (record_or_escalate).
-  # Le perimetre est borne : la porte declarative vaut pour les evenements ROUTES PAR CETTE TABLE ;
-  # les kinds tires depuis le code appellent leur porte au site — on ne re-decrit pas des chemins de
-  # code ici.
+  # For table-routed incidents: immediate requests first-occurrence escalation subject to
+  # cooldown; recurrence records before escalating repeats. Direct code callers choose separately.
   defp incident_gate!(_type, nil), do: :recurrence
   defp incident_gate!(_type, "recurrence"), do: :recurrence
   defp incident_gate!(_type, "immediate"), do: :immediate

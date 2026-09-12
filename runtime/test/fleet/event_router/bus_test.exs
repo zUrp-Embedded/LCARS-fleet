@@ -9,10 +9,6 @@ defmodule Fleet.EventRouter.BusTest do
     :ok
   end
 
-  # Z5 (ER-D2) — the `broadcast/3` blocks (legacy `{atom, map}` shim) are gone with the legacy.
-  # The canonical path `broadcast/2 (topic, %Fleet.Event{})` is tested here + in
-  # r1_seam_broadcast_test (registry / UnregisteredError).
-
   defp ev(type), do: Fleet.Event.new(:spawner, type)
 
   describe "subscribe/unsubscribe" do
@@ -28,15 +24,8 @@ defmodule Fleet.EventRouter.BusTest do
     end
   end
 
-  # 6-041 — L'ADRESSAGE PAR POD. Chaque pod s'abonnait au sujet GLOBAL : tout evenement reveillait
-  # les N pods actifs (plafond 128) et N-1 le jetaient. Le pod ne consomme que ce qui porte SON
-  # `pod_id` — le bus peut donc adresser au lieu de diffuser, et la repartition vit ICI, en un seul
-  # endroit, plutot qu'en devoir de memoire chez chaque emetteur.
   describe "6-041 — sujet par pod" do
-    # ⚠ LE TEST LUI-MEME EST ABONNE AU SUJET PRINCIPAL (`setup`), donc il ne peut pas distinguer
-    # « livre sur le sujet du pod » de « livre sur le principal ». Un `refute_receive` pose ici
-    # rougirait sur le trafic normal du sujet global — mesure faite, premier jet. L'ecoute d'un
-    # sujet de pod se delegue donc a un processus qui n'ecoute QUE lui, et qui rapporte.
+    # The test process already subscribes to main; use a pod-only listener to distinguish deliveries.
     defp ecouteur(topic) do
       parent = self()
 
@@ -56,8 +45,7 @@ defmodule Fleet.EventRouter.BusTest do
       pid
     end
 
-    # Emis depuis un TIERS : `broadcast_from` exclut l'emetteur, donc emettre depuis l'ecouteur ou
-    # depuis le test ne mesurerait pas la meme chose.
+    # Emit from another process so broadcast_from's exclusion cannot hide listener delivery.
     defp emet(event) do
       parent = self()
       spawn_link(fn -> send(parent, {:emis, Bus.broadcast_main(event)}) end)
@@ -82,8 +70,7 @@ defmodule Fleet.EventRouter.BusTest do
 
       assert_receive :silence, 2_500
 
-      # TEMOIN — le sujet PRINCIPAL, lui, l'a bien vu : un observateur n'est pas adresse, il
-      # observe. Sans lui, le silence ci-dessus passerait aussi si le bus n'emettait plus rien.
+      # Main-topic receipt is the control against a completely silent bus.
       assert_received %Fleet.Event{type: :"work_item.completed", pod_id: ^autre}
     end
 
@@ -96,9 +83,7 @@ defmodule Fleet.EventRouter.BusTest do
       assert_received %Fleet.Event{type: :"pod.completed", pod_id: nil}
     end
 
-    # L'ECHO : un pod emet ses propres evenements de cycle de vie avec son propre `pod_id`. Sans
-    # l'exclusion par pid, le bus lui rendrait tout ce qu'il vient de dire — et la clause du pod qui
-    # NOMME un evenement adresse sans clause crierait sur chacun d'eux.
+    # Lifecycle events must reach observers without echoing to their emitter's pod subscription.
     test "l'emetteur ne recoit pas sur SON sujet ce qu'il vient d'emettre lui-meme" do
       moi = "pod-6041-echo-#{System.unique_integer([:positive])}"
       parent = self()

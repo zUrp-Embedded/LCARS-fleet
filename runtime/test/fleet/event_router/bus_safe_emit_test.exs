@@ -1,23 +1,8 @@
 defmodule Fleet.EventRouter.BusSafeEmitTest do
   @moduledoc """
-  Locks the `Bus.safe_emit/3-4` contract — the SINGLE core of the
-  "protected-Bus-emission" family (dedup of the local rescues of coord/starfleet/spawner).
-  Four paths:
-
-    * OK — registered type → emitted, the subscriber receives the canonical struct
-      (atom OR binary).
-    * UnregisteredError — boot-order tolerated: `:log` (default) = VISIBLE warning,
-      `:silent` = mute. In both cases `:ok`, NO event goes out.
-    * malformed event (CONSTRUCTION bug: source outside the enum, type name never
-      preregistered) — ALWAYS Logger.error + `:ok`: never swallowed mute, never a
-      crash of the emitter.
-    * DELIVERY error (CI-09: Phoenix.PubSub.broadcast → `{:error, reason}`) — Logger.error
-      + the tuple PASSED THROUGH (a caller that acts on delivery still can). This branch was
-      in the code but UNPROVEN — the "complete contract" claim omitted it.
-
-  Covered regression: re-swallowing a malformed event in silence (the per-site
-  inconsistency this core deduplicates) fails the "malformed event" cases; propagating
-  the raise fails the `assert :ok`s.
+  Exercises successful atom/binary emission, tolerated registry/constructor failures,
+  diagnostic context and a returned delivery error injected through the seam. These cases
+  do not cover all exception classes or partial delivery between main and pod topics.
   """
   use ExUnit.Case, async: false
 
@@ -25,10 +10,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
 
   alias Fleet.EventRouter.Bus
 
-  # The registry is a GLOBAL `:persistent_term` → no async, set saved/restored
-  # (same discipline as BusRegistryEmptyTest). The registry is POPULATED here: with an
-  # empty set + default permit, no UnregisteredError can occur — the "unregistered"
-  # paths of this test would be dead.
+  # Populate and restore the global registry. Empty+permissive would never exercise rejection.
   setup do
     previous = Bus.authorized_event_types()
     Bus.set_authorized_event_types(MapSet.new([:"pod.completed"]))
@@ -153,10 +135,8 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
 
   describe "the `:broadcast_fun` seam is ANNOUNCED at boot when it is declared" do
     test "declared in config → the supervisor init says so, LOUD" do
-      # CI-03 rests on "an {:error} from the bus means ZERO subscriber was delivered". This seam
-      # replaces the bus with an arbitrary function, read hot on every broadcast, with no
-      # environment guard — a function that delivers THEN errors makes that assumption false and
-      # duplicates downstream work on the honest re-submit.
+      # The warning names the risk of deliver-then-error seams. This only calls init to inspect
+      # its log; it does not start children or demonstrate completion retry behaviour.
       Application.put_env(:lcars_fleet, :event_router_broadcast_fun, fn _n, _t, _e -> :ok end)
       on_exit(fn -> Application.delete_env(:lcars_fleet, :event_router_broadcast_fun) end)
 
@@ -170,9 +150,7 @@ defmodule Fleet.EventRouter.BusSafeEmitTest do
     end
 
     test "absent → boot says NOTHING about it (the per-test put_env must stay silent)" do
-      # The check exists for the form DECLARED in a config file. The single test that legitimately
-      # uses the seam sets it after boot, so a boot that never sees it must not cry — a warning
-      # nobody can act on trains an operator to filter the rail out.
+      # With no seam at init there is nothing to announce; no post-init change is exercised here.
       Application.delete_env(:lcars_fleet, :event_router_broadcast_fun)
 
       log =

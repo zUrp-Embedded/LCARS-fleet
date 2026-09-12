@@ -4,7 +4,7 @@ defmodule Fleet.EventRouter.BindAddress do
 
   Listeners bind to loopback by default. A named per-surface environment
   override wins over `LCARS_BIND_HOST`; blank values are ignored. Overrides
-  accept literal IPs or DNS names and invalid values raise.
+  accept IPv4/IPv6 literals or DNS names resolved as IPv4; resolution failures raise.
   """
 
   @loopback {127, 0, 0, 1}

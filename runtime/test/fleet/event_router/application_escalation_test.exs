@@ -3,16 +3,13 @@ defmodule Fleet.EventRouter.ApplicationEscalationTest do
 
   alias Fleet.EventRouter.Application, as: DomApp
 
-  # The "PubSub crash → node" escalation contract is MECHANICAL, not documentary:
-  # a local restart of Phoenix.PubSub loses ALL the node's subscriptions — consumers
-  # alive but deaf forever, node green (the exact success-shaped failure this device
-  # exists to forbid). Three properties make it impossible; this test locks them.
+  # Child-spec checks for escalating PubSub loss rather than silently restarting without
+  # subscriptions. This suite does not crash a live bus or demonstrate node shutdown.
 
   test "Bus child spec: restart :temporary + significant:true (never resurrected deaf)" do
     assert [%{id: Fleet.EventRouter.Bus.EscalatingSupervisor} = spec] = DomApp.base_children()
 
-    # :temporary — a fresh PubSub with an EMPTY subscription registry would be a
-    # success-shaped lie; significant — its death must shut the domain down, not go unnoticed.
+    # Couple temporary restart policy with significance; neither alone requests domain shutdown.
     assert spec.restart == :temporary
     assert spec.significant == true
   end
@@ -20,9 +17,7 @@ defmodule Fleet.EventRouter.ApplicationEscalationTest do
   test "domain supervisor: auto_shutdown :any_significant (Bus death = domain death)" do
     assert {:ok, {flags, _children}} = DomApp.init([])
 
-    # The significant child's death shuts THIS supervisor down → the root (Fleet.Application,
-    # max_restarts: 0, F8/D-17 scar) turns the shutdown into node-down. The boot.order_f8
-    # check locks the boot order; this test locks the escalation.
+    # Root escalation is configured in Fleet.Application; this assertion covers the domain flag.
     assert flags.auto_shutdown == :any_significant
   end
 end

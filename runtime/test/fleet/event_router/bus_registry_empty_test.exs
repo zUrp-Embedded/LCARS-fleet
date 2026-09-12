@@ -1,24 +1,13 @@
 defmodule Fleet.EventRouter.BusRegistryEmptyTest do
   @moduledoc """
-  "Empty registry → EXPLICITLY permissive" hardening: the Bus behavior when
-  `authorized_event_types` is EMPTY is not a silent hole but a regime chosen by
-  `:lcars_fleet, :event_router_permit_when_registry_empty`. This test locks BOTH regimes AND the
-  empty→populated transition (otherwise a regression of the flag/guard would go unnoticed).
-
-  Invariant proven (over N arbitrary types, registered or not):
-    * EMPTY registry + permit=true  → EVERY type passes (init safety-net).
-    * EMPTY registry + permit=false → EVERY type raises (fail-closed).
-    * POPULATED registry            → a type INSIDE passes, a type OUTSIDE raises (flag-independent).
-
-  Regression: removing the `permit_when_registry_empty?` guard (back to the unconditional `:ok` on
-  an empty set) fails the fail-closed case; wiring the flag backwards fails both empty cases.
+  Checks both empty-registry policies on sampled types, their default, and the transition
+  to membership enforcement. A populated registry ignores the empty-registry flag.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.EventRouter.Bus
 
-  # The registry is a GLOBAL `:persistent_term` and the flag a GLOBAL app config → this test cannot
-  # be async. ALWAYS start from an empty set + restored default, to avoid polluting neighbors.
+  # Serialize global registry/config changes and restore the previous values on exit.
   setup do
     previous = Bus.authorized_event_types()
     Bus.set_authorized_event_types(MapSet.new())
@@ -96,9 +85,7 @@ defmodule Fleet.EventRouter.BusRegistryEmptyTest do
   end
 
   test "empty→populated transition: an unregistered type passes while empty, raises once the set is populated" do
-    # The real boot scenario: the Bus starts (empty set → broadcast permitted), then Catalog.load!
-    # populates the set → the SAME type, if absent from events.yaml, becomes refused. Proves the
-    # validation ACTIVATES at the transition, not that it is disabled for life.
+    # Drive the registry setter directly; this checks policy transition, not actual boot ordering.
     Application.put_env(:lcars_fleet, :event_router_permit_when_registry_empty, true)
 
     assert :ok = Bus.broadcast("fleet.events", ev(:"phantom.never.registered"))

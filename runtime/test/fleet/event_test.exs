@@ -1,8 +1,7 @@
 defmodule Fleet.EventTest do
   @moduledoc """
-  Contract of the canonical constructor `Fleet.Event.new/3` ("parse, don't validate"):
-  it makes the invalid unrepresentable. Source outside the closed enum list → raises;
-  timestamp always `%DateTime{}`; type a free atom; pod_id/correlation_id/payload optional.
+  Checks constructor field shapes and source enum consistency. Direct struct construction
+  bypasses new/3, so invalid events remain representable outside this entry point.
   """
   use ExUnit.Case, async: true
 
@@ -24,10 +23,7 @@ defmodule Fleet.EventTest do
       assert_raise ArgumentError, fn -> Event.new("spawner", :x) end
     end
 
-    # Regression #40 — TWO free copies of the closed source set coexist:
-    # `@type source` (the machine-visible doc) and `@canonical_sources` (new/3's enforcement).
-    # Without this guard, adding a source to ONE list only passes silently: missing from the
-    # enforcement → legitimate producer rejected; missing from the type → ghost doc.
+    # Compare the declared source type with constructor enforcement to catch either list drifting.
     test "anti-drift guard: @type source ≡ @canonical_sources (same atoms)" do
       {:ok, types} = Code.Typespec.fetch_types(Event)
 

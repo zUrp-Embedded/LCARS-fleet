@@ -21,7 +21,7 @@ defmodule Fleet.EventRouter do
 
   @moduledoc """
   Event registry and PubSub-based event bus. Domains consume events through
-  direct subscribers; there is no dispatch table.
+  direct subscribers; Catalog supplies declarative routing metadata for consumers.
 
   The domain also owns shared HTTP listener construction and the authenticated
   Gitea webhook.

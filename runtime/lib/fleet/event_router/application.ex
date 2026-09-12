@@ -10,25 +10,10 @@ defmodule Fleet.EventRouter.Application do
   @spec gitea_event_types() :: [String.t()]
   def gitea_event_types, do: @gitea_event_types
 
-  # THE ONE INVARIANT THE COMPLETION RAIL RESTS ON, AND THE ONE SEAM THAT CAN TURN IT OFF.
-  #
-  # `Broadcast.required/3` treats an `{:error, _}` from the bus as "ZERO subscriber was delivered",
-  # and the whole non-commit-on-failed-broadcast discipline (CI-03) depends on that being true. It
-  # holds on the mono-node Phoenix.PubSub because both of its failure modes are pre-dispatch.
-  #
-  # `:broadcast_fun` replaces that bus with an arbitrary 3-arity function, read HOT on every
-  # broadcast, with no environment guard. A function that DELIVERS and then returns `{:error, _}`
-  # reproduces partial delivery exactly: the item is not committed, the downstream already left,
-  # and the honest re-submit sends it a second time. It is a test seam, and nothing stopped it from
-  # being declared in a config file.
-  #
-  # Checked at BOOT and not per-call, deliberately: the dangerous form is the one DECLARED in
-  # config, and it is the only one visible here. A test that sets it with `put_env` after boot
-  # stays silent, and that is the intent — a line on every broadcast would be noise nobody reads,
-  # which is the same as no line at all.
-  #
-  # It LOGS and boots rather than refusing: the seam is legitimate machinery, and a node that will
-  # because someone left a debug hook is a worse failure than one that says so loudly.
+  # An injected function can deliver then return an error, causing completion retries to
+  # duplicate downstream work. Warn once at init rather than per emission; the bus reads the
+  # seam hot, so later changes are not announced. Any non-nil value warns, even if not callable.
+  # This warning permits boot and does not establish atomic delivery across main/pod broadcasts.
   defp warn_if_broadcast_seam_declared do
     case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
       nil ->
@@ -74,11 +59,8 @@ defmodule Fleet.EventRouter.Application do
   defp preregister_event_atoms do
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
-    # NO hard-coded signal atoms here (BL-6-43). Pre-registering `os.signal.*` for a producer that
-    # does not exist creates atoms at EVERY boot for a broadcast nothing can emit — and a
-    # transitively-dormant key outlives the reason anyone could name for it. Whoever lands the real
-    # producer adds its types IN THE SAME GESTURE, which is the only moment their presence means
-    # anything.
+    # Pre-register trusted catalogue/webhook names for to_existing_atom consumers. Add OS
+    # signal types with their producer, not speculatively; these atoms are not garbage-collected.
     Enum.each(
       yaml_events ++ gitea_event_types(),
       fn event_type ->
@@ -113,7 +95,8 @@ defmodule Fleet.EventRouter.Application do
   @doc """
   Returns the webhook listener child specs, or `[]` when webhooks are disabled.
 
-  The listener binds to loopback unless `LCARS_WEBHOOK_BIND_HOST` overrides it.
+  BindAddress chooses loopback by default; LCARS_WEBHOOK_BIND_HOST takes precedence over
+  the global LCARS_BIND_HOST override.
   """
   @spec webhook_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def webhook_children do

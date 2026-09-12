@@ -6,7 +6,8 @@ defmodule Fleet.Event do
 
   `source` is a closed enum enforced by `new/3`; event `type` remains a free
   atom and is registered separately by the Bus from `events.yaml`. The
-  constructor also enforces the timestamp, identifier and payload field types.
+  constructor checks timestamp struct, identifier and payload container types; direct
+  struct construction bypasses those checks. Payload contents and DateTime fields are unchecked.
   """
 
   @type source ::
@@ -32,9 +33,7 @@ defmodule Fleet.Event do
   @enforce_keys [:source, :type, :timestamp]
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
-  # Every source here has at least one emitter under `lib/` (a `Fleet.Event.new(:<source>, …)` or a
-  # routed source in `events.yaml`). A source no producer emits is a ghost in the closed enum —
-  # removed when its last emitter goes, never kept "in case".
+  # Keep sources tied to actual emitters/routes; retire a source with its last producer.
   @canonical_sources ~w(spawner task_queue mcp workflow pilot project admiral event_router api)a
 
   @doc "True if the source belongs to the canonical closed enum."
@@ -97,11 +96,12 @@ defmodule Fleet.Event do
   end
 
   @doc """
-  Splits a failure term into JSON-safe `{category, detail}` strings.
+  Splits a failure term into `{category, detail}` binaries for incident reporting.
 
   Tuple categories derive recursively from their first element so variable
   details do not change the incident recurrence bucket. `detail` retains the
-  inspected full term.
+  inspected term with Inspect's default limits. Binary input passes through unchanged,
+  so this does not guarantee valid UTF-8, redact secrets or preserve every detail.
   """
   @spec reason_fields(term()) :: {String.t(), String.t()}
   def reason_fields(reason) when is_binary(reason), do: {reason, reason}
