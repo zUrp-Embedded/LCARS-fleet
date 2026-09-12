@@ -1,10 +1,7 @@
 defmodule Fleet.PeriodicCheckTest do
   @moduledoc """
-  `Fleet.PeriodicCheck` — the tick plumbing, proven on a minimal client rather than through its
-  real ones. What is pinned: the tick runs the check and re-arms; a check that raises, throws or
-  exits keeps the prior state in the SAME process (no crash, no restart); a check that changes its
-  own interval is obeyed at the next tick; `check_now` replays synchronously, replies from the new
-  state, and lets a raise reach its caller.
+  Minimal client exercising cadence changes, retained state after check failures and synchronous
+  checks that propagate errors. The timer tests observe the same process, not supervisor recovery.
   """
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
@@ -47,9 +44,7 @@ defmodule Fleet.PeriodicCheckTest do
     start_supervised!({Client, [name: nil, interval_ms: interval_ms, check: check]})
   end
 
-  # A check that reports what it sees, and fails ONCE — on the given tick, the first time it is
-  # reached. The failure is injected AFTER the report so the sequence of reports tells the story:
-  # a kept state makes the tick number repeat, a reset state makes it restart from 1.
+  # Report before failing once: retained state repeats a tick number; restarted state begins at 1.
   defp report_and_fail_once(parent, on_tick, fail) do
     once = :counters.new(1, [])
 
@@ -78,10 +73,7 @@ defmodule Fleet.PeriodicCheckTest do
     assert_receive {:seen, 3}, 1_000
   end
 
-  # The client starts INSIDE `capture_log`, in the three failure tests below: at a 10 ms tick, a
-  # test process descheduled under a loaded suite can find the failure, its log line and all three
-  # reports already behind it when the capture begins — the log reads "" and the witness fails
-  # without the plumbing being wrong. Measured in a full gate, not in isolation.
+  # Start inside capture_log: a 10ms tick can fail before capture starts when the suite is busy.
   test "a check that RAISES keeps the prior state in the SAME process — no crash, no restart" do
     parent = self()
 
@@ -97,8 +89,7 @@ defmodule Fleet.PeriodicCheckTest do
         assert_receive {:seen, 2}, 1_000
         assert_receive {:seen, 3}, 1_000
 
-        # A crash would have handed the test supervisor a NEW pid, and the sequence would read
-        # 1,2,1,2.
+        # A supervisor restart would replace the PID and restart the report sequence.
         assert Process.alive?(pid)
       end)
 

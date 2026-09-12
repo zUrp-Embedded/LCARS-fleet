@@ -2,19 +2,12 @@ defmodule Fleet.PodId do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Owns deterministic, repository-scoped and path-safe pod identifiers.
+  Deterministic pod-ID construction shared by Pilot, Spawner's Registry and Project cleanup.
+  Foundation avoids a Project/Pilot cycle. Layout separately owns human-facing labels.
 
-  FOUNDATION, next to `Fleet.Layout` which owns the human-facing twin (`pod_label/3`): a naming
-  authority has to sit where every namer can reach it. Housed inside `Fleet.Pilot`, the pod-id
-  FORMAT would sit ABOVE two of its consumers — `Fleet.Spawner`, which owns the Registry these ids
-  key, and `Fleet.Project`, which removes a project and must first find the pods on it. Neither
-  could reach it (`Fleet.Pilot` depends on `Fleet.Project`, so the reverse edge is a cycle boundary
-  refuses), leaving only a re-derivation of `slug(repo) <> "-"` at the call site — A SECOND SOURCE
-  FOR A FORMAT WHOSE WHOLE POINT IS HAVING ONE. It has zero runtime dependency, so nothing about it
-  belongs up there.
-
-  Instance ids encode issue or PR number; project ids key a stable `(repo, role)` slot. Consumers may
-  recover only the repo-anchored instance reference, keeping the rest of the identifier opaque.
+  Instance IDs include an issue/PR reference; project IDs use repo and role. Slugging replaces
+  path separators and unsafe characters but is lossy, so arbitrary repo names may collide.
+  Consumers recover only the repo-prefixed reference and keep the remaining identifier opaque.
   """
 
   @phase_issue "issue"
@@ -43,7 +36,9 @@ defmodule Fleet.PodId do
   def scope_prefix(repo) when is_binary(repo), do: "#{slug(repo)}-"
 
   @doc """
-  Extracts a positive issue or PR reference only when the id belongs to the supplied repository.
+  Extracts a decimal issue/PR reference after the supplied repo's slug prefix, otherwise :error.
+  Zero is accepted despite the current pos_integer return spec. The remaining suffix is not
+  validated, and slug matching does not prove repo identity.
   """
   @spec parse_ref(String.t(), String.t()) :: {:ok, {:issue | :pr, pos_integer()}} | :error
   def parse_ref(pod_id, repo) when is_binary(pod_id) and is_binary(repo) do

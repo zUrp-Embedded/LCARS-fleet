@@ -2,11 +2,7 @@ defmodule Fleet.Opts do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Pure option-list helpers, shared across domains.
-
-  Foundation because it is: two total functions over keyword lists, no dependency, no subject of
-  its own. Held inside a domain, it would owe that domain an upward reference from every other
-  caller.
+  Shared helpers for optional keyword values, tagged results and loaded-module export probes.
   """
 
   @doc """
@@ -24,11 +20,8 @@ defmodule Fleet.Opts do
   def tag_err({:error, reason}, tag), do: {:error, {tag, reason}}
 
   @doc """
-  Does `mod` export `fun/arity` — LOADING it first. `function_exported?/3` answers `false` for a
-  module that is merely not loaded yet, which outside a release (interactive mode: `mix run`,
-  the bench) is every seam module before its first call — a live pipe read as a pod without
-  `pod_info/1`, a pool without `has_free_slot?/3`, a queue without `list_active/0`. A release
-  preloads its modules; a probe on an injected seam must not depend on it.
+  Loads mod before checking fun/arity. function_exported?/3 alone returns false for unloaded
+  modules, making available injected seams look unimplemented during lazy loading (e.g. mix run).
   """
   @spec exported?(module(), atom(), non_neg_integer()) :: boolean()
   def exported?(mod, fun, arity) when is_atom(mod) and is_atom(fun) and is_integer(arity),

@@ -2,67 +2,18 @@ defmodule Fleet.PeriodicCheck do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Plumbing for the runtime's periodic-check GenServers (its clients call `start_link/2` — grep for
-  them, a list here would rot). Kept generic rather than inlined: the next periodic check should
-  not have to re-derive the tick / re-arm / safety-net / test-hook shape.
+  Callback helpers for GenServers that check, then schedule their next tick.
+  start_link/2 passes all opts to init; opts[:name] defaults to the module, or nil for an unnamed server.
+  Clients own init, check logic and synchronous reply shape; state must contain positive interval_ms.
+  Call schedule from the server process and maintain one timer chain; these helpers do not deduplicate
+  timers. Re-arming after completion avoids overlap and uses cadence changes returned by the check.
 
-  Every client carries the SAME skeleton: a named GenServer + a recursive `Process.send_after/3`
-  (a single deadline armed at any instant: the tick runs the check then re-arms the next) + the
-  test hook `:check_now` (a sync call that replays the timer's full code path). This skeleton lives
-  HERE, as FUNCTIONS called from their callbacks — no `use` macro: functions suffice, and a
-  callback that delegates explicitly stays auditable line by line (no generated code to
-  reconstruct from memory).
+  Periodic check exceptions, throws and exits are logged while retaining prior state, preserving
+  observations that a supervisor restart would reset. Scheduling errors and invalid returned state
+  are outside that protection. check_now propagates failures and does not alter timer cadence;
+  clients needing error values must convert failures inside their own check.
 
-  Each client keeps what is its OWN: its `init/1` (the state fields differ), its `do_check/1` (the
-  business logic) and the SHAPE of its `:check_now` reply. Minimal state contract: a map carrying
-  `interval_ms` (re-read on EVERY re-arm).
-
-  ## The safety net, and why it is here and not in each client
-
-  `tick/3` runs the check under a net: a check that raises, throws or exits is logged at `error`
-  with the GenServer's registered name and the tick message, the state from BEFORE the check is
-  kept, and the next tick is armed from it. Lossy by construction — and every client had written
-  that net for itself before it lived here, which is how a contract gets recognised.
-
-  The alternative reads better than it is. Without the net, a raise in `handle_info` kills the
-  GenServer; its domain supervisor restarts it (3 per 60 s, everywhere in this runtime); `init/1`
-  re-arms. A check that raises on every tick therefore restarts once per interval, UNDER the
-  intensity, forever: the failure loops anyway — through a crash report per tick instead of one
-  error line, and with the client's state reset each time (a monitor whose status is reset to
-  `:unknown` never sees the `:ok → :crashed` transition it exists to broadcast). The net is what
-  makes the failure visible AND the state durable.
-
-  `check_now/3` has NO net, on purpose: an on-demand check is a test or an operator asking, and a
-  raise there must reach its caller rather than be swallowed into a log line. A client that wants
-  its on-demand failure as a VALUE (rather than an exit) rescues inside its own `do_check`; the
-  toolchain reconciler does, to hand `check_now` an `{:error, {:raised, _}}`.
-
-  ## Re-arm LAST, from the resulting state
-
-  The interval is read from the state AFTER the check, so a check that changes its own cadence
-  takes effect on the next tick rather than the one after. Re-arming FIRST would make the period
-  fixed regardless of the check's duration — and let a check longer than its interval pile ticks
-  up in the mailbox. Under the net, re-arming last costs nothing and keeps both properties.
-
-  ## Real clients only
-
-  Still no speculative parameter: a module joins because its tick IS this shape — arm, check,
-  re-arm, replay on demand — not because it could be made to fit. A reconciler that also owns a
-  family of per-subject timers (respawn deadlines per role) is not this shape; a reactor with
-  jitter, error backoff and a drain lease around its tick is not this shape either. Both keep
-  their own plumbing.
-
-  ## Contract
-
-  - `start_link(module, opts)` — starts the named GenServer `module` (`opts[:name]`, default the
-    module itself — tests inject a unique name, or `nil`, to co-exist). The whole `opts` reaches
-    `init/1`.
-  - `schedule(tick_message, interval_ms)` — arms the NEXT deadline (`send_after` to `self()`,
-    so called FROM the GenServer process: `init/1` and the tick handler).
-  - `tick(state, tick_message, do_check)` — body of the tick `handle_info`: runs `do_check.(state)`
-    under the net, then re-arms → `{:noreply, new_state}`.
-  - `check_now(state, do_check, reply)` — body of `handle_call(:check_now, ...)`: same check as
-    the timer, no net, no re-arm, reply built by `reply.(new_state)` → `{:reply, _, new_state}`.
+  These functions cover a regular tick loop, not per-subject deadlines, jitter, backoff or leases.
   """
 
   require Logger
@@ -73,9 +24,8 @@ defmodule Fleet.PeriodicCheck do
   end
 
   @doc """
-  Arms the next tick — `Process.send_after/3`, returning its reference.
-
-  Separate from `tick/3` so a GenServer can arm the first one from `init/1` without running a check.
+  Sends the next tick to self after interval_ms and returns its timer reference.
+  Called from init to start the chain without immediately checking.
   """
   @spec schedule(atom(), pos_integer()) :: reference()
   def schedule(tick_message, interval_ms)
@@ -84,10 +34,9 @@ defmodule Fleet.PeriodicCheck do
   end
 
   @doc """
-  Runs one periodic check under the net and RE-ARMS from the resulting state, in that order.
-
-  A check that raises, throws or exits leaves the prior state in place (logged at `error` with the
-  GenServer's name and the tick message); the timer never stops.
+  Runs the check, then schedules using the resulting state's interval_ms.
+  A raised/thrown/exited check logs at error with server identity and tick message and retains
+  prior state. Scheduling still requires a valid positive interval in that state.
   """
   @spec tick(map(), atom(), (map() -> map())) :: {:noreply, map()}
   def tick(state, tick_message, do_check) when is_function(do_check, 1) do
@@ -97,10 +46,8 @@ defmodule Fleet.PeriodicCheck do
   end
 
   @doc """
-  Runs the check ON DEMAND and replies from the RESULTING state — the `handle_call` twin of `tick/3`.
-
-  Does NOT re-arm: an out-of-band check must not shift the periodic cadence, or a caller polling it
-  would silently suppress the scheduled one. Does NOT catch: the caller asked, the caller sees.
+  Runs an on-demand check and builds the reply from its resulting state. Failures propagate.
+  Does not re-arm: polling this call must not postpone the scheduled check indefinitely.
   """
   @spec check_now(map(), (map() -> map()), (map() -> term())) :: {:reply, term(), map()}
   def check_now(state, do_check, reply)
