@@ -1,42 +1,21 @@
 defmodule Fleet.Forge.Client do
   @moduledoc """
-  The Gitea REST API client — the DOMAIN layer of the forge-state-machine (the forge IS the state
-  machine). Carries the ops on issues/PRs (idempotent read/write), PR jury state, repo onboarding,
-  and the credential→wire adapter `as_role/2`. It is the module injected by the `:forge_client`
-  seam (StepDispatcher/Poller/MCP).
+  Gitea operations for issues, PRs, jury state and onboarding, exposed through forge-client seams.
+  Transport handles HTTP/config/pagination; Protocol owns marker and branch formats.
+  Delegates remain here when callers reach them through this facade.
 
-  Two layers live BELOW it, and a few of their functions are re-exported here because a seam
-  names THIS module:
+  Implements MCP.PodTools.Delegation.ForgeClient by convention: a @behaviour reference would
+  reverse the Boundary dependency. Keep signatures aligned with its callbacks; Delegation.Gate
+  checks exported functions, not full return semantics. The same applies to the ForgeWriter seam.
 
-    * `Fleet.Forge.Client.Transport` — HTTP/config/encoding/pagination engine + system login.
-      No knowledge of the forge protocol. This module `import`s it (`http_get`, `paginate`, …).
-    * `Fleet.Forge.Protocol` — PURE vocabulary of the wire-protocol (feature-branches, comment
-      markers, the parked title, result blocks, `system_authored?`), build+parse co-located. Callers
-      call it DIRECTLY. Only `parse_feature_branch/1` is re-exported here (`defdelegate`) because
-      `Fleet.MCP` reaches it through the `:forge_client` seam.
+  Transport merges call options over :pilot_forge, then selects a nonempty token source in order:
+  :token, :token_file, :account. Sources are not mutually exclusive; no source returns a named
+  error without reading a personal fallback file. :req_options are forwarded to Req.
 
-  ⚠ CROSS CONTRACT (`Fleet.MCP` seam): this module is the REAL (default) impl of the behaviour
-  `Fleet.MCP.PodTools.Delegation.ForgeClient` (13 callbacks: `create_issue`, `add_label`,
-  `repo_label_id`, `get_issue`, `list_pulls`, `list_open_issues`, `parse_feature_branch`,
-  `pr_review_state`, `get_route`, `post_comment`, `close_issue`, `close_pr`,
-  `merged_pr_of_issue`). It CANNOT be adopted as a `@behaviour`: `Fleet.Forge` does not depend on
-  `Fleet.MCP` (MCP sits above it) and the compile reference would be a Boundary violation.
-  Duck-typed impl — any evolution of these signatures MUST be mirrored onto the behaviour's
-  `@callback`s (and vice versa); `Delegation.conforming/2` is the witness that holds it.
-
-  ## Configuration
-
-  Resolved at call time by `Transport.resolve_config/1` (see its moduledoc): `:base_url`, then
-  ONE token source — `:token`, `:token_file`, or `:account` (asked of the authority service);
-  none is a named refusal, never a fallback to a personal file — and `:req_options` passed to
-  `Req`.
-
-  ## Idempotence
-
-  Write-ops are idempotent (skip if the target state is already reached). E.g. `add_label/4`:
-  `GET issue labels` to short-circuit, else `POST issue/labels` by NAME (Gitea resolves repo+org
-  server-side and dedups by name — no duplicate) with response VERIFICATION and repo-label self-heal;
-  re-call on a label already present = `{:ok, :already_present}`, zero write round-trip.
+  Writes have per-operation replay rules, not general idempotence: issue/review creation can
+  duplicate, and comment dedup is a read-then-write race. Multi-request operations are not
+  transactional; a returned error can follow an applied write. Paginated reads propagate errors
+  and budget refusals, but depend on server counts/page behavior and are not atomic snapshots.
   """
 
   require Logger
@@ -70,27 +49,13 @@ defmodule Fleet.Forge.Client do
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Repo
 
-  # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI COMME SON DEFAUT, pas parce que la facade
-  # voudrait grossir : une fonction sortie dans un sous-module sans etre reexposee ici fait mourir
-  # tout appel qui passe par ce seam.
-  #
-  # Le trou est EN AMONT : rien ne verifie qu'une implementation PAR DEFAUT tient le contrat qui la
-  # designe. C'est le temoin de conformite (`Delegation.conforming/2`) qui le ferme, pour tous les
-  # seams a la fois.
+  # ForgeWriter's default names this facade; extracting Files must preserve its seam exports.
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, term()} | {:error, term()}
   defdelegate put_file(repo, path, content, opts), to: Fleet.Forge.Client.Files
 
-  # SON JUMEAU, ET IL TOMBE PLUS DUREMENT. `Client.Files` porte `get_file` ET `put_file`, et deux
-  # appelants distincts passent par cette facade. Celui-ci est `probe.ex` —
-  # `forge().get_file(repo, "CLAUDE.md", …)`, sur le chemin de `run_probe`, l'outil des juges.
-  #
-  # ⚠ LA DIFFERENCE DE MANIFESTATION EST TOUTE LA LECON. `put_file` passe par un behaviour, donc
-  # `conforming/2` rend `{:seam_misconfigured, …, [put_file: 4]}` : un refus qui NOMME quoi
-  # reparer. Le seam de `probe.ex` (`get_env(:lcars_fleet, :mcp_probe_forge_client, …)`) ne declare
-  # aucun `@callback` — aucun garde n'a rien a verifier, et le juge recoit un
-  # `UndefinedFunctionError` brut. Meme defaut, meme module, meme decoupage : seule la presence d'un
-  # contrat change ce qu'en voit celui qui le subit.
+  # mcp_probe_forge_client also calls get_file here, without a behavior conformance check;
+  # a missing delegate would raise UndefinedFunctionError at the tool call.
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
           {:ok, %{content: String.t(), sha: String.t()}} | {:error, term()}
   defdelegate get_file(repo, path, opts), to: Fleet.Forge.Client.Files
@@ -98,8 +63,9 @@ defmodule Fleet.Forge.Client do
   @doc """
   Adds and verifies a label, returning `:already_present` without writing when applicable.
 
-  Missing protocol labels are created at repository scope and retried; unverifiable success returns
-  `{:error, {:label_not_added, label_name}}`.
+  If a successful POST omits the requested name, attempts repo-level creation/reconciliation
+  and one re-add. An unverifiable retry returns {:error, {:label_not_added, label_name}};
+  initial HTTP errors propagate. Verification checks the POST response, not a later read.
   """
   @spec add_label(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :added | :already_present}
@@ -119,15 +85,15 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Lists all open issues visible to the optional forge-side `:assigned_by` scope.
+  Paginates issue records with state defaulting to open (overridable by :state) and optional
+  forge-side :assigned_by scope. No local assignee filtering or record-shape validation.
   """
   @spec list_open_issues(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_issues(repo, opts \\ []) when is_binary(repo) do
     list_scoped_issues(repo, "issues", opts)
   end
 
-  # `assigned_by` is honoured on `/issues` for BOTH types (Gitea 1.26.1), so the poller sees only
-  # what the forge itself scoped — no client-side filtering of a wider list.
+  # /issues supports assigned_by for both types on the measured Gitea 1.26.1 deployment.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
     state = Keyword.get(opts, :state, "open")
 
@@ -160,7 +126,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Lists every issue comment oldest-first; the final element is therefore the true newest comment.
+  Paginates issue comments in server order. Latest-marker readers assume oldest-first;
+  this function does not sort, verify ordering or freeze the thread during pagination.
   """
   @spec list_comments(String.t(), integer(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_comments(repo, number, opts \\ []) when is_binary(repo) and is_integer(number) do
@@ -170,7 +137,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Replaces issue assignees with exactly `login`, returning `:already` when converged.
+  Requests exactly [login] as assignees, skipping PATCH when the preceding read already matches.
+  Success acknowledges the PATCH response without readback or protection against concurrent edits.
   """
   @spec set_assignee(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :set | :already} | {:error, term()}
@@ -191,10 +159,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Posts a comment, deduplicating `:dedup_signature` only against authenticated system comments.
-
-  If the bot identity or comment history cannot be resolved, no existing marker is trusted and the
-  comment is posted.
+  Posts unless :dedup_signature occurs in a trusted comment. Default trust is the resolved bot;
+  :dedup_role adds that role's resolved login, while :dedup_any_author trusts every author.
+  Failed bot/history reads log unverified dedup and post anyway; failed role resolution keeps
+  bot-only trust. This is not atomic: concurrent calls or unreadable history can duplicate.
   """
   @spec post_comment(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -236,7 +204,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Starts native time tracking on an issue or PR. An already-active stopwatch succeeds.
+  Starts native time tracking. Treats every HTTP 409 as an already-active success without readback.
   """
   @spec start_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def start_stopwatch(repo, number, opts \\ []) do
@@ -250,7 +218,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Stops native time tracking. An already-stopped stopwatch succeeds.
+  Stops native time tracking. Treats every HTTP 409 as an already-stopped success without readback.
   """
   @spec stop_stopwatch(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def stop_stopwatch(repo, number, opts \\ []) do
@@ -264,28 +232,14 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Closes the issue, and SAYS WHICH KIND OF CLOSURE IT IS. PATCH `state: closed`, idempotent on the
-  Gitea side.
+  PATCHes state closed; :closure must be :delivered (stage/merged), :retired (stage/retired)
+  or :marker (no stamp). The caller declares intent; this module does not prove delivery.
+  Closed blockers release dependencies even when retired, so callers must handle their edges
+  explicitly rather than infer delivery from closure or an absent label.
 
-  `:closure` is MANDATORY — an unnamed closure is refused, loudly, rather than defaulted:
-
-    * `:delivered` — the work landed (seal after merge, terminal step). Stamps `stage/merged`.
-    * `:retired` — the ticket dies WITHOUT delivering: its work moved (supersede) or was dropped.
-      Stamps `stage/retired`.
-    * `:marker` — not a ticket at all (parking markers of `ProjectOnboard`). Stamps nothing.
-
-  WHY THE ARGUMENT IS REQUIRED, AND NOT DERIVED. Left unstated, "a closed ticket is a delivered
-  ticket" is EMERGENT: it holds only because no actor owns a close gesture — the human's team is
-  `read`, the architect has no close tool, and every closing path is runtime. An invariant resting
-  on the absence of a tool is one new caller away from lying, and everything downstream reads the
-  CLOSURE, never the intent: a dependency releases on a closed blocker whatever killed it.
-
-  Deriving the kind from "does it carry `stage/merged`?" would rebuild the same weakness one level
-  up — an ABSENCE is not a fact, and the reader would have to guess what silence means. Here the
-  caller states it at the only moment where it is known for certain.
-
-  The stamp is best-effort and the close is not rolled back for it: the closure is authoritative,
-  the label is its trace. A failed stamp is logged, never swallowed.
+  Stamping and retired-lock removal follow the close. Returned failures are logged and do not
+  undo closure; exceptions can still propagate after the PATCH. Delivered/marker closures do not
+  remove in-flight locks here. Repeats PATCH again and retry the follow-up operations.
   """
   @spec close_issue(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
   def close_issue(repo, issue_number, opts \\ []) do
@@ -301,8 +255,7 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # `{:ok, _}` d'une ecriture forge -> `{:ok, <ce qui a ete fait>}`. Le corps de la reponse n'est
-  # jamais lu sur ces trois chemins : ce que l'appelant veut savoir est l'ACTE, pas la charge.
+  # Report the requested act from HTTP success without inspecting its response body.
   defp acted({:ok, _}, verbe), do: {:ok, verbe}
   defp acted({:error, _} = err, _verbe), do: err
 
@@ -331,16 +284,9 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # A `:retired` closure LIFTS the flat `lcars-in-flight` lock. It CANNOT ride on the stamp: the stamp
-  # is a SCOPED label (`stage/retired`) and the lock is FLAT — disjoint families, so Gitea's per-scope
-  # mutex evicts nothing. Every lifecycle path reaches `close_issue` with the lock already lifted
-  # (`StepRunCompleter.unlock/6` removes it before a `:delivered` seal), so this is scoped to the ONE
-  # closure with no other place to lift it: the supersede/retire gesture (`Delegation.do_retire*`)
-  # closes a ticket that may still be IN FLIGHT — a live pod is reaped in the same act — and would
-  # leave the lock behind on the now-closed ticket. Best-effort like the stamp: the close is
-  # authoritative, and a stale lock on a CLOSED ticket is a warning, never a rollback. Idempotent
-  # (`remove_label` no-ops when the label is absent), so it is safe on a retire target that never
-  # carried it.
+  # A scoped stage stamp cannot evict the flat in-flight lock. Retirement may close active work;
+  # the delivered seal instead relies on StepRunCompleter.unlock upstream. Failure here leaves
+  # a stale lock on a closed ticket; retrying removal is a no-op once absent.
   defp lift_in_flight_on_retire(repo, n, :retired, opts) do
     case remove_label(repo, n, Fleet.Labels.in_flight(), opts) do
       {:ok, _} ->
@@ -384,15 +330,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  The issues BLOCKING `number` (what it waits on), as returned by the forge.
-
-  Gitea carries issue dependencies natively and enforces them where it matters: it refuses to CLOSE
-  an issue while a blocker is still open. So this is a read, never a rule we re-implement — same
-  stance as branch-protection.
-
-  ⚠ A CLOSED blocker counts as satisfied. That is what makes the supersede path load-bearing: a
-  retired ticket keeps the edges pointing at it, and closing it RELEASES everything it blocked —
-  while the work moved to its replacement and is not delivered (measured 2026-08-04 on the bench).
+  Paginates issues blocking number; dependency enforcement stays on the forge.
+  On the measured deployment, a closed blocker satisfies the dependency even if retired
+  without delivery. Closing does not remove or redirect its edges to replacement work.
   """
   @spec issue_dependencies(String.t(), integer(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}
@@ -413,9 +353,8 @@ defmodule Fleet.Forge.Client do
   @doc """
   Adds "`number` depends on `blocker`" (same repo).
 
-  THE BODY FIELD IS `repo`, NOT `name`. The swagger's `IssueMeta` says `name`; sending it yields
-  `404 IsErrRepoNotExist [id: 0, uid: 0]` — an error that accuses the repository while the body is
-  what is wrong. Measured against a live Gitea 1.26.1 on 2026-08-04; both spellings were tried.
+  Body uses repo rather than IssueMeta's advertised name: tested on Gitea 1.26.1 (2026-08-04),
+  where name yielded IsErrRepoNotExist. repo must split into owner/name or the call raises.
   """
   @spec add_issue_dependency(String.t(), integer(), integer(), Keyword.t()) ::
           {:ok, map()} | {:error, term()}
@@ -435,13 +374,9 @@ defmodule Fleet.Forge.Client do
   @doc """
   Removes "`number` depends on `blocker`" (same repo). Inverse of `add_issue_dependency/4`.
 
-  Same body shape and the same `repo`-not-`name` trap: the edge is identified by the OBJECT, so the
-  DELETE carries a body (see `Transport.http_delete_body/3`).
-
-  Needed because a retirement must not leave its edges behind. Closing a blocker RELEASES what it
-  blocked, so a dependent whose blocker is retired would silently become closable as if the work had
-  landed — the retired ticket delivered nothing. Lifting the edge and NAMING the retirement on the
-  dependent is what keeps "unblocked" from meaning "done".
+  DELETE carries the identifying body (index, owner, repo), as in add_issue_dependency/4.
+  Retirement callers must also explain the removed dependency; deleting an edge does not deliver
+  or replace its work. This function neither annotates the dependent nor redirects the edge.
   """
   @spec remove_issue_dependency(String.t(), integer(), integer(), Keyword.t()) ::
           {:ok, map()} | {:error, term()}
@@ -577,14 +512,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Le `owner/name` d'un dépôt, depuis son ID numérique de forge.
-
-  Existe parce que l'identité de canal d'un pod DISPATCHÉ ne porte pas la chaîne `owner/name` : le
-  dispatch file `:repo_id` et jamais `:repo`, et ce n'est pas un oubli — le `slot_key` du spawner
-  se clef dessus, donc un `nil` y mettrait tous les producteurs et tous les juges de tous les
-  projets dans un même seau. L'ID, lui, est toujours là. C'est la traduction qui manquait.
-
-  `{:error, :repo_not_found}` sur 404 — un id inconnu est un fait.
+  Traduit le repo_id du canal d'un pod en full_name pour les appels owner/name.
+  Accepte une chaîne non vide sans valider sa forme ; réponse inattendue → unexpected_repo_shape,
+  404 → repo_not_found. L'identité numérique reste celle utilisée pour séparer les slots par dépôt.
   """
   @spec repo_full_name(integer(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def repo_full_name(repo_id, opts \\ []) when is_integer(repo_id) do
@@ -599,15 +529,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Les deux extrémités d'une PR : `%{head_sha, base_sha, head_ref, base_ref}`.
-
-  Existe pour la SONDE de pertinence, qui a besoin des deux SHAs et pas des deux refs : une branche
-  bouge, un SHA non. Mesurer « la suite de cette tête contre le code de cette base » sur des REFS
-  reviendrait à mesurer un état qui a pu changer entre la lecture et le run — et le fait porterait
-  un nom d'état au lieu d'un état.
-
-  `{:error, :pr_not_found}` sur 404, comme son voisin `get_pr_for_branch/4` : un numéro de PR
-  inconnu est un fait, pas une panne de transport.
+  Renvoie %{head_sha, base_sha, head_ref, base_ref}. Les SHAs permettent à la sonde de viser
+  des commits fixes plutôt que des branches mobiles. Leur présence est contrôlée, pas leurs types
+  ni leur existence Git. Map incomplète → unexpected_pr_shape ; 404 → pr_not_found.
+  Une réponse 2xx non-map n'a pas de clause de repli.
   """
   @spec pr_refs(String.t(), integer(), Keyword.t()) :: {:ok, map()} | {:error, term()}
   def pr_refs(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -616,8 +541,7 @@ defmodule Fleet.Forge.Client do
         {:ok, %{"head" => %{"sha" => hs, "ref" => hr}, "base" => %{"sha" => bs, "ref" => br}}} ->
           {:ok, %{head_sha: hs, head_ref: hr, base_sha: bs, base_ref: br}}
 
-        # Une PR sans ces champs n'est pas une PR qu'on peut sonder : on refuse en le NOMMANT
-        # plutôt que de rendre des `nil` qui iraient s'écrire dans les entrées d'un workflow.
+        # Missing keys are diagnosed; present nil values still match the preceding clause.
         {:ok, other} when is_map(other) ->
           {:error, {:unexpected_pr_shape, Map.keys(other)}}
 
@@ -631,20 +555,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Requests native PR reviews from the supplied ROLES.
-
-  ROLES, not logins, and the distinction is the whole point. The fleet reasons in roles everywhere;
-  the account a role writes under is `<tier>_<role>` and only the forge side needs to know it.
-  Forwarding what it is handed straight into the Gitea payload sends a jury of
-  `["qualifier", "reviewer"]` to a forge whose accounts are `fleet_qualifier` / `fleet_reviewer`,
-  which answers `404 User 'qualifier' not exist` — and the deliverable PR then sits open with no
-  judge, forever, since a merge waits on approvals that nobody was ever asked for.
-
-  Same shape as `as_role/2`: the caller names a ROLE, the client resolves what the forge needs.
-
-  An unprojectable role FAILS the whole call rather than being dropped: a jury is a quorum, and
-  silently requesting two judges out of three turns a merge gate into a deadlock that looks like
-  patience.
+  Requests reviews for role names, projected to forge logins by RoleIdentity.login/1.
+  Raw roles such as qualifier are not necessarily account names. One unresolved role refuses
+  the entire POST, avoiding a partially requested jury; this does not verify reviewer acceptance.
   """
   @spec request_review(String.t(), integer(), [String.t()], Keyword.t()) ::
           :ok | {:error, term()}
@@ -704,17 +617,9 @@ defmodule Fleet.Forge.Client do
   defp review_event(other), do: {:error, {:invalid_review_event, other}}
 
   @doc """
-  Closes a pull request WITHOUT merging it — PATCH `state: closed`.
-
-  It exists because retiring a ticket does not, on its own, retire its work. The two rails are
-  independent by design: `dispatch_review` polls PULLS, not issues, and it is not lease-guarded. So
-  a supersede that closes the ticket while its PR stays open leaves that PR being judged, then
-  merged, into a retired ticket.
-
-  A retirement that cannot retire the work is not a retirement, and the operator's intent — stop the
-  machine, bound the cost — does not care whether a PR exists.
-
-  Idempotent on the Gitea side, like every close.
+  PATCHes PR state closed without merging. Retirement must handle PRs separately: review
+  dispatch polls them independently of issue closure. This call does not close the issue,
+  reap a pod or check whether the PR merged concurrently.
   """
   @spec close_pr(String.t(), integer(), Keyword.t()) :: {:ok, :closed} | {:error, term()}
   def close_pr(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -726,18 +631,11 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Arme l'AUTO-MERGE d'une PR (`merge_when_checks_succeed`) — le clic unique du rail toolchain.
-
-  Fonction DISTINCTE de `merge_pr/3`, et les deux différences sont le sujet :
-    * `merge_pr` supprime la head sur succès (`delete_head_branch_spaced`) — sur un merge
-      PROGRAMMÉ, ça détruirait la branche AVANT que le merge ait lieu ;
-    * `merge_pr` traite « no approvals » en fail-loud — ici c'est l'ÉTAT NOMINAL : la PR attend
-      sa signature, l'armement dit « merge tout seul QUAND elle arrive ».
-
-  ⚠ N'ARME JAMAIS une branche sans protection : sans `required_approvals`, « quand les conditions
-  sont remplies » = TOUT DE SUITE — la PR se merge sans signature et le convergeur applique. La
-  garde vit chez l'appelant (`request_toolchain`, config `:toolchain_auto_merge`, défaut OFF —
-  posée par le geste d'installation AVEC la protection, jamais l'un sans l'autre).
+  Demande merge_when_checks_succeed, méthode par défaut rebase. :ok accuse la réponse HTTP,
+  sans prouver une fusion future ou différée ; toutes les erreurs sont propagées.
+  Ne lance pas le nettoyage de head de merge_pr/3, qui supprimerait une branche encore utile.
+  L'appelant doit vérifier la protection avant l'armement : les conditions peuvent déjà être
+  satisfaites sans approbation. request_toolchain porte la garde :toolchain_auto_merge.
   """
   @spec schedule_auto_merge(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
   def schedule_auto_merge(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
@@ -753,21 +651,16 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Merges (PROMOTES) the PR `index` via **`rebase`** by default — the SEAL passes `method: "merge"`
-  on a conflict-resolved PR (A0: its resolution IS a merge commit, a rebase drops it) — (Gitea `POST /repos/{repo}/pulls/{index}/merge`,
-  `Do: rebase` by default): replays the PR's commits onto the current `main` then fast-forwards →
-  stays **LINEAR** (no merge commit, append-only doctrine preserved) AND handles a `main` that has
-  advanced under the PR (PARALLEL MULTI-ISSUE: 2 disjoint issues → 2 PRs off the same `main` → the 1st
-  merge advances `main`, the 2nd is no longer FF-able but stays mergeable → `rebase` gets it through; `fast-forward-only`
-  would wedge it forever).
+  Merges with :method defaulting to rebase, allowing replay onto an advanced base rather than
+  an FF-then-rebase cascade that can retrigger asynchronous mergeability checks. The seal uses
+  merge for conflict-resolution commits whose resolution must survive; this wrapper does not
+  choose that override or guarantee a successful/linear result.
 
-  **NO FF→rebase cascade**: a 1st attempt that fails throws the PR back into "checking" state
-  (Gitea recomputes mergeability ASYNCHRONOUSLY), and the 2nd back-to-back attempt hits that
-  window → `405 "Please try again later"` (double-call = double-405; `rebase` alone
-  on a stable PR = 200). So A SINGLE call, and the `405 try-again-later` is treated as a
-  **TRANSIENT** (bounded retry `@merge_checking_retries` × `merge_retry_delay_ms`, default 800ms — the
-  mergeability stabilises in ~1 computation). Any other failure (real conflict, no approvals under
-  branch-protection) propagates as-is (fail-loud). `opts[:method]` forces a style (e.g. tests).
+  On HTTP 405, Merge first reads the PR: mergeable: false returns merge_blocked. Otherwise a
+  message containing "try again later" permits up to three total attempts, with default 800 ms
+  between them. Other errors propagate. These are attempt limits, not a total call deadline.
+  After HTTP success, attempts a separately spaced head-branch deletion; returned cleanup
+  failures only warn, while exceptions may propagate after the merge has already occurred.
   """
   @merge_checking_retries 3
   @spec merge_pr(String.t(), integer(), Keyword.t()) :: :ok | {:error, term()}
@@ -780,7 +673,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Lists full open PR records under the optional forge-side assignee scope.
+  Lists PR records under the optional forge-side assignee scope, state defaulting to open.
 
   Hybrid (Gitea 1.26.1): `/pulls` has NO `assigned_by` filter; only the issue-shaped list
   `/issues?type=pulls&assigned_by=…` carries it, so each filtered number is expanded with
@@ -793,30 +686,16 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # Fetches the COMPLETE shape of each PR (head/head.sha/requested_reviewers) for the filtered
-  # numbers. Fail-fast preserved: an error on a single PR fails the whole set — we never dispatch on
-  # a partial view, the same rule as pagination.
-  #
-  # ⚠ LE N+1 EST STRUCTUREL COTE FORGE : l'endpoint qui porte le scoping rend des objets ISSUE,
-  # sans `head.sha` ni reviewers demandes — d'ou une requete par numero, qu'aucun contournement ne
-  # retire tant que la forge ne rend pas le champ.
-  #
-  # Ce qui EST retirable est la SEQUENTIALITE : ces requetes sont independantes et sans effet de
-  # bord, et les enchainer ferait payer au tick la SOMME des latences la ou le maximum suffit. La
-  # concurrence est BORNEE parce qu'elles partagent le meme pool de connexions — en ouvrir N
-  # echangerait de la lenteur contre de la saturation.
-  #
-  # ⚠ ET LE CACHE SUR `updated_at` EST DELIBEREMENT NON FAIT : la clef d'invalidation serait ce
-  # champ, donc une seule mutation qui ne le bouge pas servirait une PR PERIMEE a une decision de
-  # MERGE. Le faire demanderait de VERIFIER quelles mutations le bougent, pas de le supposer.
+  # Expand issue-shaped rows for head/reviewer fields. Bound concurrency for the shared pool,
+  # preserve listing order and discard all accumulated records on a returned failure.
+  # No updated_at cache: its invalidation coverage would need evidence before routing uses it.
   defp fetch_pulls(numbers, repo, opts) do
     numbers
     |> Task.async_stream(&get_pull(repo, &1, opts),
       max_concurrency: 8,
       ordered: true,
-      # A PR's timeout is already bounded by the transport (`receive_timeout`); this one is the net
-      # for the case where the Task itself hangs. `:kill_task` rather than a propagated exit: a PR
-      # that does not answer becomes an error of THAT PR, not a crash of the poller.
+      # Per-task timeout returns an exit tuple; this is not a deadline for the whole listing.
+      # async_stream tasks are linked, so other task crashes can still exit the caller.
       timeout: 30_000,
       on_timeout: :kill_task
     )
@@ -832,12 +711,8 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Lists the PRs of ONE base branch, all states, FULL records — one paginated call, no N+1.
-
-  Le endpoint `/pulls` (pas `/issues?type=pulls`) rend directement les objets complets
-  (`head`/`base`/`merged`) ET filtre `base=` cote serveur. Ecrit pour la passe de drain du
-  reconciliateur, qui tourne toutes les 60 s : `list_pulls/2` sur le depot ops y paginerait TOUTES
-  les PR du conteneur, puis ferait un GET par PR.
+  Paginates /pulls with state=all and server-side base filtering for reconciliation drains.
+  Unlike list_pulls/2, this endpoint supplies PR records without per-number expansion.
   """
   @spec list_pulls_for_base(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}
@@ -885,15 +760,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Resolves the merged PR from the latest `[merge:pr-N]` issue marker, not from rewritten branch refs.
-
-  NEVER by branch name: a merged PR's `head.ref` no longer resolves once its head branch is gone,
-  so a branch scan cannot find a delivered brick's PR. The measurement that establishes it lives
-  with the marker it justifies, in `Fleet.Forge.Protocol.merge_marker/1`.
-
-  Returns `:none` only after a successful complete comment read. The marker is author-agnostic
-  because it is observability-only and the gatekeeper role, not necessarily the system bot, writes
-  it.
+  Fetches the PR named by the last recognized [merge:pr-N] marker in server comment order.
+  Markers survive deleted/rewritten head refs (see Protocol.merge_marker/1). No marker after
+  successful pagination returns :none; fetch errors propagate. Author and PR merged state are
+  not checked, so this observability read is not delivery proof or write authorization.
   """
   @spec merged_pr_of_issue(String.t(), integer(), Keyword.t()) ::
           {:ok, map()} | :none | {:error, term()}
@@ -925,7 +795,8 @@ defmodule Fleet.Forge.Client do
   @doc """
   Counts the largest same-base group of durable publish-failure markers for issue `n`.
 
-  A successful push advances the base, so each group is one consecutive failure streak.
+  Groups all matching comments, regardless of author or adjacency, and takes the maximum.
+  Interpreting this as a consecutive streak assumes each successful push advances the marker base.
   """
   @spec count_publish_failures(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -950,23 +821,11 @@ defmodule Fleet.Forge.Client do
     do: Jury.count_change_request_rounds(repo, index, opts)
 
   @doc """
-  Worst CI state on `sha` — `:success | :pending | :failure | :none` (Gitea
-  `GET /repos/{repo}/commits/{sha}/statuses`).
-
-  WHY A WORST-OF AND NOT THE RAW LIST. A commit carries ONE context per workflow-job-trigger pair,
-  so a Gitea Actions run posts BOTH `CI / ci (push)` and `CI / ci (pull_request)` on the same sha
-  (measured 2026-08-03). The caller's question is never "which contexts exist" but "may this merge
-  proceed", and a single failure answers it — reducing here keeps that judgement in one place
-  instead of leaving each caller to re-derive it, differently.
-
-  `:none` (no status at all) is DISTINCT from `:success` on purpose: a repo with no CI and a repo
-  whose CI passed are not the same fact, and collapsing them would let "the rail never ran" wear
-  the face of "the rail is green". The caller decides what an absent rail means for it.
-
-  Per context, the CURRENT status wins — an older green must never outvote the current red. The rank
-  is read from the DATA (`id`), never from the order of the response: measured on Gitea 1.26.1, the
-  default order is OLDEST-first and only `sort=leastindex` returns newest-first, its name saying the
-  opposite of what it does. An order is not a contract you can verify locally.
+  Reduces commit status history via CI: max integer id per context, then worst current status.
+  If any id in a context is noninteger, all its statuses vote. Response order is not trusted;
+  the Gitea 1.26.1 ordering observation is documented alongside CI.current_per_context/1.
+  failure/error → failure; pending or unknown → pending; success/warning → success;
+  skipped does not vote. No voting statuses returns none, distinct from a successful run.
   """
   @spec commit_ci_state(String.t(), String.t(), Keyword.t()) ::
           {:ok, :success | :pending | :failure | :none} | {:error, term()}
@@ -975,15 +834,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  The same verdict, plus the CONTEXTS that produced it (sorted, deduplicated).
-
-  The worst-of alone answers the merge question, and it is the WHOLE answer only for a caller that
-  decides. A caller that must TELL A HUMAN (or a judge)
-  what the machine did needs to say WHICH rail ran, because `:success` is silent about that and a
-  green from a placeholder rail is indistinguishable from a green from a real harness (6-140).
-
-  Additive on purpose: `commit_ci_state/3` keeps its contract and every seam that implements it
-  keeps working. A caller pays for the contexts only where it renders them.
+  Returns the aggregate verdict plus sorted unique binary context names from the full response,
+  including skipped contexts. Names explain which rails were reported; they do not prove a
+  meaningful test harness ran. commit_ci_state/3 delegates here and discards the names.
   """
   @spec commit_ci_report(String.t(), String.t(), Keyword.t()) ::
           {:ok, {:success | :pending | :failure | :none, [String.t()]}} | {:error, term()}
@@ -1003,17 +856,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Les contextes ACTUELLEMENT rouges sur `sha` — `context`, `description`, `target_url`.
-
-  Un pod est forge-blind : il n'ouvre aucune page. La cause d'un rework CI doit donc voyager DANS
-  le brief, et une cause tient au NOM du contexte en échec — jamais à la liste complète, qui
-  accuserait les verts.
-
-  ⚠ ORDRE INDÉTERMINABLE = PAS D'ACCUSATION, et c'est l'inverse de `commit_ci_state/3`. Quand les
-  ids d'un contexte ne s'ordonnent pas, `current_per_context/1` garde tout le groupe pour que la
-  porte de merge y lise le PIRE. Ici la lecture sert à désigner un coupable : un contexte dont on
-  ne sait pas si le rouge est le dernier mot est écarté, et la section dégrade vers son texte
-  générique, qui ne nomme personne.
+  Contextes failure/error au plus grand id entier, avec description et target_url pour le brief.
+  Un contexte sans nom binaire ou avec un id non entier est écarté : nommer le responsable
+  demande un ordre établi, tandis que commit_ci_state/3 conserve le pire pour bloquer le merge.
   """
   @spec commit_ci_failures(String.t(), String.t(), Keyword.t()) ::
           {:ok,
@@ -1037,7 +882,8 @@ defmodule Fleet.Forge.Client do
   @wfmap_prefix Fleet.Labels.wfmap_prefix()
 
   @doc """
-  Sets an issue's fixed `wfmap/<pipeline>` and exclusive current `stage/<step>` labels.
+  Adds wfmap/<pipeline>, then stage/<step>. The calls are non-atomic; stage failure can leave
+  the map applied. Scoped-label exclusivity is delegated to the forge, not checked locally.
   """
   @spec post_route(String.t(), integer(), String.t(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -1049,7 +895,7 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Sets only the exclusive current stage, retaining the issue's workflow-map label.
+  Adds stage/<stage> without writing workflow-map labels. Relies on forge scoped-label exclusivity.
   """
   @spec set_stage(String.t(), integer(), String.t(), Keyword.t()) ::
           {:ok, :posted | :already} | {:error, term()}
@@ -1075,20 +921,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  La route DERIVEE de labels deja en main — pure, zero I/O (BL-6-40 Phase 2).
-
-  `get_route/3` fait un `GET /issues/{n}/labels` par issue et par tick. Or l'appelant chaud
-  (`Poller.Lease.classify_issue`) tient DEJA les labels complets : `list_open_issues` les rend avec
-  l'issue. Une requete par issue, par repo, par tick, pour une donnee qui est en RAM.
-
-  Deux formes acceptees parce que les deux existent chez les appelants : la forme FIL (maps Gitea
-  `%{"name" => …}`, ce que rend `get_issue_labels`) et la liste de NOMS (ce que `classify_issue`
-  a deja projete). Accepter les deux evite d'imposer une re-projection a un appelant qui a
-  justement fait l'economie.
-
-  `get_route/3` reste, et n'est pas un doublon : un appelant qui n'a pas l'objet issue — une sonde,
-  un outil, un chemin qui part d'un numero — ne peut pas deriver ce qu'il n'a pas lu. Il delegue
-  ici apres avoir lu, donc la REGLE de derivation n'existe qu'une fois.
+  Dérive sans I/O la route depuis des maps name ou des noms binaires, pour réutiliser les labels
+  déjà lus par Poller.Lease. get_route/3 partage cette règle après sa propre lecture HTTP.
+  Premier préfixe wfmap et premier préfixe stage gagnent ; valeurs vides acceptées, autres entrées
+  ignorées. Ne valide ni unicité, ni carte/étape existante, ni auteur des labels.
   """
   @spec route_from_labels([map() | String.t()]) :: {:ok, {String.t(), String.t()}} | :none
   def route_from_labels(labels) when is_list(labels) do
@@ -1121,16 +957,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Le login de forge sous lequel `role` ecrit, ou `{:error, _}`.
-
-  RIEN D'AUTRE NE DIT SOUS QUEL COMPTE UN ROLE ECRIT. `as_role/2` echange un JETON (`RoleIdentity`
-  porte `{role, token}`) ; le compte qui apparait comme auteur est celui qui detient ce jeton SUR LA
-  FORGE. Sans cette traduction, tout ce qui filtre sur le login SYSTEME compte ZERO marqueur — ils
-  sont tous poses sous un role, cf. F-E6 qui l'exige — et la dedup ne voit jamais le sien, donc le
-  repose a chaque rejeu.
-
-  La resolution est le meme geste que pour le bot — `GET /user` avec CE jeton — et son cache est
-  deja keye par empreinte de jeton, donc un role resolu une fois ne coute plus rien.
+  Résout le compte qui détient le jeton frais du rôle, via Transport.login_of/1 (/user), sans
+  les surcharges du login système. Nécessaire pour vérifier l'auteur réel des marqueurs de rôle.
+  Le cache garde un couple empreinte/login par base_url : changer de jeton remplace l'entrée,
+  donc alterner les rôles peut relancer /user. La demande de jeton a lieu même sur cache hit.
   """
   @spec role_login(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def role_login(role, opts \\ []) when is_binary(role) do
@@ -1140,8 +970,7 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # UN commentaire signe compte-t-il ? Le marqueur nomme un ROLE ; on ne croit ce role que si
-  # l'auteur du commentaire est le compte de ce role, ou le compte systeme.
+  # Author equality authenticates one marker-bearing comment, not each marker occurrence.
   defp count_signed(c, {:ok, n}, bot, opts) do
     role = ForgeProtocol.step_run_marker_role(c["body"])
     author = get_in(c, ["user", "login"])
@@ -1156,15 +985,12 @@ defmodule Fleet.Forge.Client do
         {:ok, _other} ->
           {:cont, {:ok, n}}
 
-        # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
-        # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
-        # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
-        # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
+        # Unavailable credentials skip this comment, including authority failures normalized
+        # by RoleIdentity. This does not prove the role or its historical token never existed.
         {:error, :role_token_unavailable} ->
           {:cont, {:ok, n}}
 
-        # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
-        # que de rendre un total qui pourrait etre bas.
+        # Other returned errors (e.g. /user unreadable) abort the count.
         {:error, reason} ->
           {:halt, {:error, {:role_login_unresolved, role, reason}}}
       end
@@ -1172,18 +998,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Counts the FLEET's step-run markers across all comment pages for the anti-runaway budget.
-
-  UN MARQUEUR DIT QUI IL PRETEND ETRE, ET ON LE VERIFIE. Il compte si son auteur est le login du
-  role QU'IL NOMME (ou le bot, pour les marqueurs que le systeme pose lui-meme, cf. `pr-open-fail`).
-  Filtrer sur `auteur == login systeme` compterait ZERO : F-E6 exige que ce commentaire soit signe
-  par le ROLE qui finit, jamais par le systeme.
-
-  La frontiere de F059 tient, et c'est tout l'enjeu : un `[step_run:fake:ccc]` pose par un tiers ne
-  compte pas, puisque son auteur n'est pas le compte du role `fake` — et un compte de role n'est
-  detenu que par le daemon, dans `/opt/lcars/var/tokens`.
-
-  Un role dont le login est irresolvable est une ERREUR, jamais un sous-compte permissif.
+  Counts comments carrying a recognized step-run marker for the anti-runaway budget, once per
+  comment without deduplicating repeated posts. Trusts the resolved bot or the account of the
+  first recognized marker's role. Missing role credentials skip that comment; other returned
+  identity/history errors abort. Author equality is the check, not cryptographic body signing.
   """
   @spec count_signed_step_runs(String.t(), integer(), Keyword.t()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -1199,18 +1017,10 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  The last comment carrying an ESCALATION marker, or `nil` — the arch's inbox reads its arbitration
-  question through this.
-
-  It exists as a seam function rather than a filter on the MCP side because the marker FORMAT is
-  this domain's (`ForgeProtocol` builds it at both writing sites), and the boundary refuses
-  `Fleet.MCP -> Fleet.Pilot`. The inbox asks the forge client; the client knows the protocol —
-  exactly the shape `get_predecessor_result/3` already has.
-
-  `nil` is a RESULT, not a failure: the recurrence brake (`IncidentConsumer.default_brake/3`) poses
-  `lcars-awaits-arch` with NO comment at all, so there is no verdict to hand back. Saying so beats
-  handing over the thread's last comment, which would give the arch its own previous answer as the
-  question to arbitrate.
+  Last escalation-marked body in server comment order, for the arch inbox. Protocol owns the
+  format; the MCP seam asks this client rather than reaching into Pilot. No author filtering.
+  Successful read without a marker returns {:ok, nil}: the recurrence brake may set awaits-arch
+  without a comment. Returning arbitrary recent prose could hand the arch its own previous answer.
   """
   @spec escalation_verdict(String.t(), integer(), Keyword.t()) ::
           {:ok, String.t() | nil} | {:error, term()}
@@ -1246,18 +1056,13 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Ensures static lock, destination, and stage labels exist with their protocol metadata.
-
-  Success is based on complete readback, not create responses. Missing or unreadable labels return
-  `:labels_missing` or `:labels_unverifiable`; dynamic workflow-map labels are not seeded.
+  Attempts static lock, destination, stage and visual-type label creation/color reconciliation,
+  then verifies names via readback. Success does not certify color or description convergence.
+  Missing/unreadable labels return labels_missing/labels_unverifiable; dynamic wfmap labels
+  are not seeded. Earlier changes are not rolled back on failure.
   """
 
-  # LES CONSTANTES DE PROTOCOLE VIENNENT DE `Fleet.Labels`, ET C'EST SON CONTRAT, PAS UN STYLE.
-  # Son `@moduledoc` l'écrit : « Re-declaring one as a local `@attr` or literal = silent drift on a
-  # rename. Centralized here, consumed everywhere. » Les épeler en littéral — dans la liste de
-  # seeding comme dans les clauses de `label_color/1` / `label_description/1` — laisse ici autant de
-  # chaînes orphelines au premier renommage côté Labels, sans un mot. Attributs évalués à la
-  # compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
+  # Read protocol names from Fleet.Labels so renames also reach seeding.
 
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
@@ -1266,21 +1071,14 @@ defmodule Fleet.Forge.Client do
         [
           Fleet.Labels.in_flight(),
           Fleet.Labels.awaits_arch(),
-          # Genre marker (face-projet): the arch poses it at create_issue, the burn reads
-          # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
+          # Seed the project-face destination used at issue creation.
           Fleet.Labels.destination_workshop(),
-          # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step
-          # names carried by the workflow MAPS (data), not protocol constants — `Fleet.Labels` says
-          # so itself ("brief-review/build values come from the MAP"). Seeding them here pre-creates
-          # the two canonical steps' labels; a card naming other steps gets them on demand.
+          # Workflow step names are data, not protocol constants; other steps are created on demand.
           "stage/brief-review",
           "stage/build",
           Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
           Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged(),
-          # RETIRED is seeded for the PALETTE, not for routing — `add_issue_label/4` creates a
-          # label on demand when the POST does not take. A lazily-created label is born with the
-          # default grey and no description, so the ONE stage that says "closed without delivering"
-          # would read as noise next to five coloured ones.
+          # Preseed retired for its operator-facing palette as well as on-demand routing use.
           Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
         ] ++ Fleet.Labels.visual_types()
 
@@ -1290,10 +1088,9 @@ defmodule Fleet.Forge.Client do
   end
 
   @doc """
-  Replaces forge credentials with a role token so the system acts under that role's identity.
-
-  Invalid, missing, unreadable, or empty role credentials return `:role_token_unavailable`; there is
-  no fallback to the privileged system token. Pods remain forge-blind.
+  Replaces :token with the role's freshly resolved token, retaining other options. Transport's
+  token precedence makes it win over retained token_file/account fields. Unavailable/invalid role
+  credentials return role_token_unavailable without using the caller's privileged token.
   """
   @spec as_role(keyword(), String.t() | nil) ::
           {:ok, keyword()} | {:error, :role_token_unavailable}

@@ -6,10 +6,8 @@ defmodule Fleet.Forge.ClientTest do
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
-  # Req stub Plug — intercepts requests in memory, no network.
-  # Standard Req pattern (`:plug` option). All expected routes are
-  # matched explicitly; a 500 fallback forces a test to make its
-  # path explicit (no silent "any").
+  # Req Plug en mémoire : routage par méthode/chemin, query ignorée. Un chemin inconnu rend
+  # 500 ; cela ne prouve l'absence d'appel que si le client ne tolère pas cette erreur.
   defmodule FakeForge do
     @behaviour Plug
 
@@ -20,10 +18,8 @@ defmodule Fleet.Forge.ClientTest do
     def call(conn, handlers) do
       key = {conn.method, conn.request_path}
 
-      # The SENT PAYLOAD, mailed to the test. Req runs a `:plug` adapter in the CALLING process, so
-      # `self()` here is the test. Without this the harness could only assert what a handler answers,
-      # never what the client asked — and the defect this exists for lives entirely in the request:
-      # a jury sent under role names to a forge whose accounts are `<tier>_<role>`.
+      # Corps envoyé au processus appelant de Req. C'est le test pour les appels synchrones,
+      # mais une Task pour l'expansion parallèle des PR ; ce n'est pas un collecteur global.
       case Plug.Conn.read_body(conn) do
         {:ok, "", _} -> :ok
         {:ok, raw, _} -> send(self(), {:fake_forge_body, conn.method, conn.request_path, raw})
@@ -31,8 +27,7 @@ defmodule Fleet.Forge.ClientTest do
       end
 
       case Map.fetch(handlers, key) do
-        # Function handler (0-arity): response computed at call time → allows ORDERED responses on
-        # a same path called multiple times (e.g. merge cascade FF→rebase, via a counter Agent).
+        # Handler dynamique pour les réponses successives sur un même chemin (retry/pagination).
         {:ok, fun} when is_function(fun, 0) ->
           {status, body} = fun.()
 
@@ -64,16 +59,9 @@ defmodule Fleet.Forge.ClientTest do
     ]
   end
 
-  # Verdicts projection of `pr_review_state` — the standalone `pr_review_verdicts` projection was
-  # nuked with its last production caller (get_issue_status now consumes the full state); these
-  # tests keep exercising the same derivation (last-decisive, dismissed, commit-scoping) through
-  # the surviving read.
-  # `head_sha: :unscoped` EXPLICITE — JG-065. Ces cas exercent l'arithmetique du jury (derniere
-  # revue decisive par relecteur, traduction login→role, revues rejetees) et non le scoping par
-  # commit : ils veulent bien « toutes les revues ». Depuis JG-065 ce mode se DEMANDE au lieu de
-  # s'heriter d'une cle absente — c'est exactement la clause de la fiche (« reserver explicitement le
-  # mode non scope aux seuls appelants historiques qui le demandent »), et l'effet secondaire utile
-  # est qu'un test dit desormais quel mode il exerce.
+  # Projection via l'API restante. Ce helper FORCE :unscoped et écrase un head_sha reçu : les
+  # deux anciens tests « head_sha » qui l'appellent ne vérifient donc pas le filtrage par commit.
+  # Le groupe JG-065 en fin de fichier appelle directement pr_review_state pour ce filtrage.
   defp verdicts_of(repo, index, opts) do
     with {:ok, %{verdicts: verdicts}} <-
            ForgeClient.pr_review_state(repo, index, Keyword.put(opts, :head_sha, :unscoped)),
@@ -81,10 +69,7 @@ defmodule Fleet.Forge.ClientTest do
   end
 
   describe "ensure_protocol_labels/2 — convergent verification, not per-POST optimism" do
-    # DERIVED from `Fleet.Labels` wherever a source exists, never re-typed. A mirror list in a test
-    # goes stale the day the code seeds one label more — and its stale form is a GREEN test, which
-    # is the only kind of staleness nobody notices. Measured 2026-08-03: seeding the two `type:*`
-    # broke this list AND the word "seven" in both test names, three copies of one count.
+    # Liste attendue indépendante, noms dérivés de Labels pour supporter leurs renommages.
     @protocol_labels [
                        Fleet.Labels.in_flight(),
                        Fleet.Labels.awaits_arch(),
@@ -93,22 +78,11 @@ defmodule Fleet.Forge.ClientTest do
                        Fleet.Labels.stage_prefix() <> "build",
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged(),
-                       # `retired` was NOT seeded, and it is the twin of `merged`: the stage a
-                       # supersede stamps when a ticket closes WITHOUT delivering. Not a routing
-                       # hole — `add_issue_label/4` creates a label on demand — but a lazily-created
-                       # label is born with the default grey and no description, so the one stage
-                       # that says "nothing was delivered" looked like noise beside five coloured
-                       # ones. This list is the INDEPENDENT statement of what must be seeded, so it
-                       # is the thing that had to move for the seeding to be allowed to.
+                       # Retired distingue une fermeture sans livraison dans la palette.
                        Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
                      ] ++ Fleet.Labels.visual_types()
 
-    # The one this suite removes to prove the convergent read surfaces an absence. DERIVED for the
-    # same reason as the list above — and it was re-typed twice, fifteen lines under the comment
-    # that says "never re-typed". Measured: renaming `stage_merged` at its source made the reject
-    # match nothing, every label was present, and the test failed on its own literal instead of on
-    # the code. A mirror that breaks for the wrong reason is worse than no mirror: it reports red
-    # while the property it guards is fine.
+    # Dériver aussi le label retiré : un renommage ne doit pas rendre le témoin d'absence inopérant.
     @missing_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
 
     test "every protocol label present after the sync → :ok" do
@@ -135,13 +109,10 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "a STALE label color is repainted; one already right is left alone (idempotent)" do
-      # Why this path exists at all: the operator palette landed on 2026-08-03, and `genre/doc` —
-      # the marker whose near-white made it invisible on the very tickets it declares — ALREADY
-      # existed on every repo ever seeded. A fix that only reaches repos nobody has created yet is
-      # not a fix. Repaint only: the label keeps its id, and with it every issue wearing it.
+      # Corriger aussi les labels existants, en gardant leur id et les tickets qui les portent.
       test_pid = self()
 
-      # Only `genre/doc` carries an id+color, so exactly one label is a repaint candidate.
+      # Seul destination/workshop porte id+color dans la fixture.
       labels_with = fn color ->
         Enum.map(@protocol_labels, fn name ->
           if name == Fleet.Labels.destination_workshop(),
@@ -183,8 +154,8 @@ defmodule Fleet.Forge.ClientTest do
 
   describe "list_open_pulls/2 — N+1 parallelise, semantique inchangee (BL-6-40)" do
     test "l'ORDRE est celui du listing, pas celui des reponses" do
-      # `ordered: true` n'est pas un detail : le dispatch lit ces PR dans l'ordre, et une forge qui
-      # repond plus vite sur #9 que sur #7 ne doit pas reordonner ce que le poller traite.
+      # L'ordre du listing doit survivre à l'expansion. Cette fixture ne force toutefois
+      # pas les Tasks à finir dans un ordre différent.
       h = %{
         {"GET", "/api/v1/repos/fleet/tmpl/issues"} =>
           {200, [%{"number" => 7}, %{"number" => 8}, %{"number" => 9}]},
@@ -198,9 +169,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "FAIL-FAST conserve : une seule PR en erreur fait echouer l'ensemble" do
-      # On ne dispatche JAMAIS sur une vue partielle — meme regle que la pagination. Un `{:ok, [2
-      # PR sur 3]}` ferait prendre au poller une decision de merge sur un monde incomplet, et il
-      # n'aurait aucun moyen de savoir qu'il en manque une.
+      # Une expansion échouée refuse la liste entière ; ce test ne mesure pas le délai d'abandon.
       h = %{
         {"GET", "/api/v1/repos/fleet/tmpl/issues"} => {200, [%{"number" => 7}, %{"number" => 8}]},
         {"GET", "/api/v1/repos/fleet/tmpl/pulls/7"} => {200, %{"number" => 7}},
@@ -222,15 +191,11 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "accepte aussi une liste de NOMS — l'appelant chaud a deja projete" do
-      # `Poller.Lease.classify_issue` tient `Enum.map(labels, & &1["name"])`. Lui imposer une
-      # re-projection pour appeler cette fonction lui ferait payer l'economie qu'il vient de faire.
       assert {:ok, {"workshop-direct", "redaction"}} =
                ForgeClient.route_from_labels(["wfmap/workshop-direct", "stage/redaction"])
     end
 
     test "un seul des deux → :none, jamais une route a moitie" do
-      # Une route est un COUPLE. Rendre `{map, nil}` laisserait un appelant croire qu'il a de quoi
-      # charger une carte, et il echouerait une couche plus loin, sur une valeur qu'on lui a donnee.
       assert :none = ForgeClient.route_from_labels([%{"name" => "wfmap/brief-gate"}])
       assert :none = ForgeClient.route_from_labels([%{"name" => "stage/build"}])
       assert :none = ForgeClient.route_from_labels([])
@@ -302,8 +267,7 @@ defmodule Fleet.Forge.ClientTest do
           {200, [%{"id" => 7, "name" => "lcars-dispatched"}]}
       }
 
-      # No PUT handler nor labels-index → if called, the 500 fallback
-      # would crash. The test implicitly validates that we don't hit them.
+      # Un POST inattendu échouerait ici au lieu de rendre :already_present.
       assert {:ok, :already_present} =
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts(handlers))
     end
@@ -408,10 +372,7 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.list_open_issues("fleet/lcars", opts(handlers))
     end
 
-    # MA-20 — a 2xx page of UNEXPECTED shape (non-list, e.g. a 200 error object, or a response
-    # truncated by a proxy) must NOT return `{:ok, []}` (a silent empty the poller reads as
-    # "nothing to dispatch"): the collection cannot be derived →
-    # `{:error, {:unexpected_page_shape, …}}`.
+    # Une forme inattendue doit rester distincte d'une liste vide : le poller ne sait pas quoi dispatcher.
     test "MA-20 — non-list 2xx page → {:error, :unexpected_page_shape}, NOT {:ok, []}" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues"} => {200, %{"message" => "this is not a list"}}
@@ -438,10 +399,7 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.list_org_repos("fleet", opts(handlers))
     end
 
-    # Regression acte4 #9 — THE discovery collection reader coerced a non-list 2xx via `List.wrap`
-    # → silent `{:ok, []}` = the poller believes "no repo" with no trace, exactly the false-green
-    # MA-20 hunted on paginate. Since DR-016, the discovery PAGINATES via `paginate/3`: the
-    # fail-loud guard is now the primitive's (`:unexpected_page_shape`), same doctrine.
+    # La découverte partage le refus de forme de paginate, sans coercition en liste vide.
     test "acte4 #9: non-list 2xx → {:error, :unexpected_page_shape}, NOT {:ok, []}" do
       handlers = %{
         {"GET", "/api/v1/orgs/fleet/repos"} => {200, %{"message" => "this is not a list"}}
@@ -488,10 +446,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "C2 — findings : le verdict MACHINE se relit dans le corps de la review, par rôle" do
-      # LE FIL, DE BOUT EN BOUT. `StepRunCompleter` appende le bloc au corps qu'il poste ; ici on
-      # vérifie l'autre bout : le gate le retrouve dans les corps qu'il fetch DÉJÀ, sans requête
-      # supplémentaire et sans chemin de lecture neuf (l'objet gravé par C1 reste l'archive, il
-      # n'est pas le transport — `OpsObjectSync` est en écriture seule).
+      # Round-trip du format FindingsWire via le corps de review ; ne lance pas StepRunCompleter.
       f_qual = %{"findings" => [%{"severity" => "important", "category" => "tests"}]}
 
       handlers = %{
@@ -529,10 +484,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "C2 — findings : une review périmée emporte ses findings AVEC elle" do
-      # La propriété que le transport par le corps donne GRATUITEMENT : le scoping par commit est
-      # décidé UNE fois (`reject_stale_reviews`), et il vaut pour le verdict comme pour la mesure.
-      # Un canal séparé (objet ops, commentaire dédié) aurait exigé une seconde règle de péremption
-      # à tenir synchrone — et deux règles qui doivent s'accorder finissent par diverger.
+      # Findings et verdict partagent le même filtrage par commit, via le corps de review.
       stale = %{"findings" => [%{"severity" => "critical", "category" => "obsolete"}]}
 
       handlers = %{
@@ -585,11 +537,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "pr_review_state translates forge ACCOUNTS to roles, and leaves a human verbatim" do
-      # The read half of the same frontier as `request_review`. A real forge answers with the
-      # accounts provisioning created — `fleet_qualifier` — while the card names `qualifier`, so
-      # untranslated verdicts were measured against the wrong vocabulary: F-C061 filed the fleet's
-      # own jury as `foreign` and threw its verdicts away. A login belonging to no role is a HUMAN
-      # and stays exactly as it came, which is what keeps that filter able to see strangers.
+      # Les comptes connus se projettent en rôles pour ne pas classer notre jury comme étranger.
+      # Le login inconnu conservé ici ne prouve pas à lui seul qu'il appartient à un humain.
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6/reviews"} =>
           {200,
@@ -618,7 +567,7 @@ defmodule Fleet.Forge.ClientTest do
       assert "qualifier" in reviewers
       assert "lordzurp" in reviewers
 
-      # The audit records travel through the same door — an account name never leaves the client.
+      # Le compte de rôle est projeté aussi dans records ; les logins inconnus restent présents.
       assert Enum.any?(records, &(&1["login"] == "qualifier"))
       refute Enum.any?(records, &(&1["login"] == "fleet_qualifier"))
     end
@@ -776,13 +725,7 @@ defmodule Fleet.Forge.ClientTest do
   end
 
   describe "F-C069 — non-list 2xx on /reviews → fail-loud (paginate twin), never an {:ok, empty}" do
-    # A 2xx with a NON-LIST body (proxy/gateway returning an HTML page or an object envelope with
-    # 200) fell on `{:ok, _non_list} -> {:ok, <empty>}` → silently EMPTY jury/feedback/budget. The
-    # twin `pr_rerequested_reviewers` (via `paginate`) fails loud `:unexpected_page_shape` on a
-    # non-list page. We align → `{:error, {:unexpected_review_shape, path, body}}`. Consequences
-    # avoided: merge on an empty jury (pr_review_state → dispatch_by_verdicts([], %{}) → MERGE
-    # branch); undercounted rework budget (count → 0 → blind re-dispatch instead of arch
-    # escalation).
+    # Une réponse illisible ne doit ni vider le jury ni remettre le budget de rework à zéro.
     setup do
       %{
         handlers: %{
@@ -895,11 +838,7 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
     end
 
-    # ─── LA TROISIEME SOURCE : LE COMPTE, DEMANDE AU SERVICE D'AUTORITE ────────────────────────
-    #
-    # C'est par la que passe DESORMAIS tout le runtime : `config/runtime.exs` pose `account:` dans
-    # `:pilot_forge`, et une trentaine de verbes de `client/repo.ex` resolvent par ici. Le lecteur
-    # que l'inventaire de la phase 0b avait manque.
+    # La couture AuthorityDouble lit les fichiers de test ; le client demande un jeton par compte.
     @tag :tmp_dir
     test "un compte → le jeton est DEMANDE, jamais lu depuis un chemin", %{tmp_dir: tmp_dir} do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp_dir)
@@ -937,25 +876,10 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
     end
 
-    # ⚠ CE TEMOIN GARDE UNE SUPPRESSION, ET C'EST LE SEUL A LE FAIRE.
-    #
-    # Sans `:token`, `:token_file` ni `:account`, ce module lisait `~/.gitea_token`. Le BEAM tourne
-    # sous l'uid de l'humain de fleet : ce chemin resout vers son jeton PERSONNEL. Un conteneur dont le
-    # cablage systeme manquait ne tombait donc pas en panne — elle agissait sur la forge sous
-    # l'identite d'une personne, avec ses droits, et la forge voyait cette personne faire ce que le
-    # systeme faisait.
-    #
-    # Le repli est retire. Rien d'autre que ce temoin n'empeche qu'on le remette « parce que ca
-    # marchait avant » : un repli silencieux ne fait rougir aucune suite, par construction.
-    #
-    # ⚠ POURQUOI CE TEMOIN N'ESSAIE PAS DE DEPLACER `HOME`, ET POURQUOI IL PROUVE QUAND MEME.
-    # `System.user_home/0` lit un argument fige au demarrage de la VM : le poser dans
-    # `System.put_env` ne changerait rien, et le temoin serait un theatre.
-    #
-    # L'assertion sur la FORME EXACTE de l'erreur suffit, et elle mord sur les deux machines
-    # possibles. Si quelqu'un remet le repli : la ou `~/.gitea_token` existe, la resolution reussit
-    # et rend `{:ok, _}` ou une erreur HTTP ; la ou il n'existe pas, elle rend
-    # `{:config, {:token_file, <chemin>, :enoent}}`. Aucune des deux n'est `:no_token_source`.
+    # Empêcher le retour au jeton personnel ~/.gitea_token quand le câblage manque. L'erreur
+    # exacte distingue ce refus des résultats de l'ancien repli, fichier présent ou absent.
+    # Pas de mutation de HOME : System.user_home est fixé au démarrage de la VM. Ce témoin
+    # n'instrumente pas les lectures et ne prouve pas l'absence d'un accès dont l'erreur serait masquée.
     test "aucune source → {:config, :no_token_source}, JAMAIS un repli sur ~/.gitea_token" do
       opts = [base_url: "http://fake.test", req_options: [plug: {FakeForge, %{}}]]
 
@@ -980,10 +904,6 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # ============================================================
-  # Write-ops (end-of-step-run primitives, DN forge-state-machine §5)
-  # ============================================================
-
   describe "set_assignee/4" do
     test "PATCHes the assignee when different" do
       handlers = %{
@@ -1007,9 +927,6 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # #5.2 D4 — `describe "set_state_label/4"` removed: the function is gone (state = route-comment,
-  # no more `state:*` label).
-
   describe "post_comment/4 — signature dedup" do
     # `forge_bot_login` seam injected → deterministic (no GET /user nor persistent_term cache).
     defp dedup_opts(handlers, sig) do
@@ -1032,11 +949,8 @@ defmodule Fleet.Forge.ClientTest do
                )
     end
 
-    # JG-112 — `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux
-    # postaient, et c'est le bon arbitrage (le `@doc` l'ecrit : refuser supprimerait un commentaire
-    # legitime). Mais ces signatures sont METIER — budget de rounds, sceau, escalade — donc un
-    # doublon coute ailleurs et plus tard. Le moment ou le doute naît est le seul ou la correlation
-    # existe encore.
+    # Historique illisible et historique vide postent tous deux ; seul le premier doit avertir
+    # du risque de doublon avec sa signature, car ces marqueurs alimentent les budgets.
     test "JG-112: historique ILLISIBLE → on poste, et on DIT que la dedup n'a pas ete verifiee" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} => {503, %{"message" => "down"}},
@@ -1122,11 +1036,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "F058-bis: signature forged by an attacker + UNRESOLVED bot → the system posts anyway (fail-closed)" do
-      # Soft fallback #7: unresolved bot → `{:error} -> comments` (trust ALL authors) → the forged
-      # sig is taken as "already posted" → the system marker DROPPED (count_signed_step_runs
-      # undercounts the anti-runaway budget). Fail-closed: unresolved bot → trust NOBODY → forged
-      # sig not believed → the marker IS posted ("at worst a double-post", never a silent drop —
-      # like the paginate-error case).
+      # Une identité inconnue ne doit pas élargir la confiance à tous les auteurs et supprimer
+      # une publication légitime ; on accepte ici le risque de doublon.
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
@@ -1152,10 +1063,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "dedup_any_author: a signed ROLE comment (non-bot, e.g. Gatekeeper) → no-op (merge seal)" do
-      # F-arch-MCP: the `[merge:pr-N]` seal is posted by the GATEKEEPER role account (not the bot)
-      # → the bot-only dedup would miss it → double-post on retry. `dedup_any_author` makes it
-      # author-agnostic (safe: `[merge:pr-N]` is NOT a counted marker, unlike `[step_run:role:sha]`
-      # which F058 protects).
+      # any_author évite un doublon sur le sceau d'observation d'un rôle non-bot, mais permet
+      # aussi à un tiers de préposer le marqueur. Ne pas appliquer cette option aux compteurs.
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
@@ -1198,6 +1107,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "close_issue: PATCH state closed + le STAMP de la nature de la fermeture" do
+      # Le POST de label rend {} et ne vérifie pas le stamp : ce test prouve le close malgré
+      # un stamp non vérifiable, pas la présence effective de stage/merged.
       handlers = %{
         {"PATCH", "/api/v1/repos/fleet/lcars/issues/42"} => {201, %{"state" => "closed"}},
         # Le stamp lit les labels courants puis pose le sien : une fermeture DIT ce qu'elle est.
@@ -1216,8 +1127,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "close_issue SANS nature : refus, et rien n'est ferme" do
-      # L'invariant « ferme = livre » etait EMERGENT (personne n'a d'outil de fermeture). Une
-      # fermeture muette le laisserait redevenir faux au premier appelant nouveau.
+      # L'intention de fermeture doit être explicite ; fermé ne signifie pas toujours livré.
       assert {:error, {:closure_kind_required, _}} =
                ForgeClient.close_issue("fleet/lcars", 42, opts(%{}))
     end
@@ -1252,9 +1162,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "close_issue(:delivered): does NOT lift in-flight — the seal path already did (hot path untouched)" do
-      # Scope guard for the fix above: the lift is retire-only. A `:delivered` seal reaches here with
-      # the lock ALREADY removed by `StepRunCompleter.unlock/6`; re-removing it would add a round-trip
-      # to the hottest path for a no-op. If a delivered close tried to DELETE, this handler would fire.
+      # Le seal compte sur unlock en amont. Ici le label reste volontairement présent : on
+      # vérifie seulement que :delivered ne tente pas de le supprimer lui-même.
       test_pid = self()
 
       handlers = %{
@@ -1281,10 +1190,7 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # Gitea-native time-tracking (stopwatch) — global mechanics wired at the same points as the
-  # lcars-in-flight lock (spawn_step/unlock/reconciliation). 409 in both directions (already
-  # active / nothing to stop) is idempotent — never a blocking error (cf. ForgeClient moduledoc
-  # § Time-tracking).
+  # Le client accepte les 409 de stopwatch sans lire leur message ni vérifier l'état réel.
   describe "start_stopwatch/3 + stop_stopwatch/3" do
     test "start: 201 -> :ok" do
       handlers = %{
@@ -1351,12 +1257,8 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # ============================================================
-  # get_route reads the POSITION from the SCOPED labels `wfmap/<map>` + `stage/<step>` (no longer a
-  # `[lcars-route:...]` comment). The map comes from the DATA (wfmap label), NOT a coded default:
-  # two issues may follow two maps. One of the two missing → `:none` (no invented map). Trust comes
-  # from the WS1 write lock (only system_starfleet sets the labels), not a read-time filter.
-  # ============================================================
+  # La route vient des deux scopes de labels, sans carte par défaut. Le lecteur ne vérifie
+  # pas leur auteur ; leur contrôle d'écriture relève des permissions de la forge.
   describe "get_route/3 — via wfmap/* + stage/* labels" do
     test ~s|wfmap/brief-gate + stage/build → {:ok, {"brief-gate", "build"}}| do
       handlers = %{
@@ -1428,9 +1330,8 @@ defmodule Fleet.Forge.ClientTest do
 
   describe "permanent HTTP failures are NAMED, and the tuple shape is untouched" do
     test "423 says it is permanent, 500 says nothing extra" do
-      # 423 is declared by 31 contract operations and 412 by 3; nothing distinguished them from a
-      # 500. An ARCHIVED repo answers 423 forever, so a poller re-dispatching every tick reproduces
-      # the same failure indefinitely with nothing saying no tick will fix it.
+      # Un dépôt archivé demande un changement d'état externe, pas un simple retry de tick.
+      # Ce test vérifie le diagnostic 423/500, pas la politique de reprise du poller.
       locked = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42"} => {423, %{"message" => "archived"}}
       }
@@ -1498,9 +1399,7 @@ defmodule Fleet.Forge.ClientTest do
 
   describe "count_signed_step_runs/3 — a marker names its role, and the role is VERIFIED" do
     test "a marker signed by the ROLE it names is counted (F-E6 requires role signing)" do
-      # The filter used to be `author == system login` and therefore counted ZERO: F-E6 requires
-      # this comment to be signed by the finishing ROLE, never by the system, while the @doc
-      # promised no permissive undercount two lines above.
+      # Les marqueurs de rôle doivent compter aussi, pas seulement ceux du système.
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/issues/42/comments"} =>
           {200,
@@ -1511,9 +1410,8 @@ defmodule Fleet.Forge.ClientTest do
         {"GET", "/api/v1/user"} => {200, %{"login" => "lcars-engineer"}}
       }
 
-      # Pas d'opt `role_tokens` : les jetons de role viennent de `:role_tokens_dir`, et le plug rend
-      # `lcars-engineer` sur `/user` quel que soit le jeton. Inventer une option ici suggererait un
-      # mecanisme qui n'existe pas — le genre de fixture qui fait croire a un lecteur qu'il en a un.
+      # RoleIdentity demande le jeton via la couture d'autorité. /user rend ici le même login
+      # pour tous les jetons : la distinction de credentials est testée par LoginPerToken.
       o = opts(handlers) |> Keyword.put(:forge_bot_login, "lcars-bot")
 
       assert {:ok, 2} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, o)
@@ -1548,9 +1446,7 @@ defmodule Fleet.Forge.ClientTest do
         {"GET", "/api/v1/user"} => {200, %{"login" => "lcars-engineer"}}
       }
 
-      # Pas d'opt `role_tokens` : les jetons de role viennent de `:role_tokens_dir`, et le plug rend
-      # `lcars-engineer` sur `/user` quel que soit le jeton. Inventer une option ici suggererait un
-      # mecanisme qui n'existe pas — le genre de fixture qui fait croire a un lecteur qu'il en a un.
+      # /user est constant ; ce cas vérifie l'inégalité auteur/login, pas le choix du jeton.
       o = opts(handlers) |> Keyword.put(:forge_bot_login, "lcars-bot")
 
       assert {:ok, 0} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, o)
@@ -1636,13 +1532,9 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # ⚠ persistent_term + async (F058 review follow-up #1): `derive_bot_login` caches the login in
-  # `:persistent_term.{Fleet.Forge.Client.Transport, :bot_login, base_url}` — a GLOBAL key shared by the
-  # whole ExUnit VM (the /user derivation lives in the Transport module). ANY test that does NOT
-  # inject `:forge_bot_login` in its opts reaches this cache and may pollute/be polluted by a
-  # concurrent test. Module invariant: all OTHER tests inject the `forge_bot_login:` seam on
-  # purpose (deterministic, no cache); ONLY the test below touches the cache, and it erases it
-  # both upfront AND in `after`. A future seam-less test MUST do the same (or async:false).
+  # Cache persistent_term partagé par base_url, valeur {empreinte du jeton, login}. Ce test
+  # efface avant/après, sans exclure un accès concurrent. D'autres tests de rôle touchent aussi
+  # ce cache ; une URL unique ou une couture explicite évite les collisions de fixtures.
   describe "forge_bot_login — /user derivation (seam absent)" do
     test "derives the login via GET /user when neither opts nor config" do
       handlers = %{
@@ -1654,8 +1546,7 @@ defmodule Fleet.Forge.ClientTest do
       # persistent_term cache: erased upfront for a deterministic test.
       :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login, "http://fake.test"})
 
-      # get_route no longer derives (reads a label): we exercise the /user derivation via
-      # count_signed_step_runs (which still filters bot-authored step_runs → needs the bot-login).
+      # count_signed_step_runs exerce la dérivation /user ; get_route lit seulement les labels.
       assert {:ok, 1} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, opts(handlers))
     after
       :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login, "http://fake.test"})
@@ -1782,11 +1673,8 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # JG-121/124 — `branch_exists?/3` rendait `false` sur une branche PROUVEE absente ET sur une forge
-  # qu'on n'a pas su lire. Ses trois appelants en tiraient trois decisions differentes, dont deux
-  # destructrices : une protection de `main` silencieusement sautee, et une face republiee PAR-DESSUS
-  # une existante sur un simple timeout. La reponse etait huit lignes plus bas dans le meme module —
-  # `user_exists?/2` distingue depuis toujours un 404 prouve d'une panne.
+  # Distinguer le 404 d'une lecture en échec évite de sauter une protection ou de republier
+  # par-dessus une branche que l'appelant croit absente après un timeout.
   describe "branch_exists?/3 — un 404 est une REPONSE, le reste est une absence de reponse" do
     test "branche presente → {:ok, true}" do
       handlers = %{{"GET", "/api/v1/repos/fleet/proj/branches/ops"} => {200, %{"name" => "ops"}}}
@@ -1820,11 +1708,8 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # L'org EST la signature forge d'un catalogue INSTALLE (chantier catalogues-lifecycle) : la fleet
-  # ne demande pas a un fichier local si un catalogue est provisionne, elle demande a la forge. D'ou
-  # la meme discipline que `branch_exists?/3` ci-dessus — un 404 est une REPONSE (personne n'a
-  # provisionne), une panne n'en est pas une (on ne sait pas), et confondre les deux ferait soit
-  # refuser un catalogue sain pendant une coupure, soit en admettre un mort quand la forge tousse.
+  # Les consommateurs catalogue utilisent l'existence de l'org ; ce lecteur ne prouve ni
+  # provisioning complet ni santé du catalogue. Une panne reste distincte d'un 404.
   describe "org_exists?/2 — la signature d'un catalogue installe" do
     test "org presente → {:ok, true}" do
       handlers = %{{"GET", "/api/v1/orgs/fleet"} => {200, %{"username" => "fleet"}}}
@@ -1841,11 +1726,7 @@ defmodule Fleet.Forge.ClientTest do
       assert {:error, {:http, 503, _}} = ForgeClient.Repo.org_exists?("web", opts(handlers))
     end
 
-    # TEMOIN DU MECANISME, pas du resultat : dans Gitea une org est une ligne de la MEME table
-    # `user` (`type = Organization`), donc `/users/web` repond 200 pour un compte PERSONNEL nomme
-    # `web` alors qu'aucune org `web` n'existe. Un predicat ecrit sur `/users` signerait donc une
-    # installation qui n'en est pas une. Ce temoin devient rouge le jour ou quelqu'un reecrit
-    # `org_exists?/2` sur l'endpoint des comptes : seule la route `/orgs/...` est servie ici.
+    # Deux réponses opposées : l'existence d'un compte personnel ne doit pas valider une org.
     test "un COMPTE du meme nom ne signe pas une org — c'est /orgs qui est interroge" do
       handlers = %{
         {"GET", "/api/v1/users/web"} => {200, %{"login" => "web"}},
@@ -1995,10 +1876,7 @@ defmodule Fleet.Forge.ClientTest do
 
   describe "request_review/4 + post_review/5 (trigger + verdict home)" do
     test "request_review takes ROLES and sends the forge ACCOUNTS — <tier>_<role>" do
-      # The defect this pins, measured on a bench 2026-08-11: the jury travelled as role names, the
-      # forge answered `404 User 'qualifier' not exist`, and the deliverable PR stayed open with no
-      # judge — a merge gate waiting on approvals nobody had been asked for. The old test asserted
-      # `:ok` on a handler that answers 201 to anything, so it could not see which name went out.
+      # Vérifier le corps : un handler 201 constant accepte aussi le mauvais nom de compte.
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/requested_reviewers"} => {201, [%{"id" => 1}]}
       }
@@ -2014,9 +1892,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "request_review REFUSES a role the roster does not carry — a jury is a quorum" do
-      # Dropping the unresolvable one would request 1 judge out of 2 and leave the merge gate
-      # waiting forever on a verdict that was never solicited: a deadlock wearing the face of
-      # patience. No HTTP round-trip either — the refusal is decided before the wire.
+      # Ne pas solliciter un jury partiel en écartant silencieusement le rôle inconnu.
       assert {:error, {:role_login_unresolved, "ghost-role", _}} =
                ForgeClient.request_review("fleet/proj", 9, ["qualifier", "ghost-role"], opts(%{}))
     end
@@ -2079,7 +1955,7 @@ defmodule Fleet.Forge.ClientTest do
       end
     end
 
-    # 0 delay in tests → no real Process.sleep.
+    # Retry delay nul ; le nettoyage de branche peut encore appliquer WriteSpacing.gap.
     defp merge_opts(handlers), do: [{:merge_retry_delay_ms, 0} | opts(handlers)]
 
     # Post-merge handlers (GET head.ref → DELETE branch): every merge-OK path runs the spaced
@@ -2101,11 +1977,7 @@ defmodule Fleet.Forge.ClientTest do
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
 
-      # LA METHODE EST LA MOITIE QUI COMPTE, ET ELLE N'ETAIT PINCEE PAR PERSONNE. Le handler ne lit
-      # pas le corps, donc `merge_pr/3` scellant en `merge` au lieu de `rebase` laissait ce temoin
-      # ET LA SUITE ENTIERE verts — mutation jouee contre les 3576 temoins le 2026-09-07. Le
-      # harnais poste deja la charge envoyee (`:fake_forge_body`) : il n'y avait qu'a la lire.
-      # `"do"` et non `"Do"` : la cle du contrat `MergePullRequestOption`, cf. `Merge.do_merge/6`.
+      # Le 200 ne prouve pas la méthode envoyée. Vérifier le champ contractuel lowercase do.
       assert_received {:fake_forge_body, "POST", "/api/v1/repos/fleet/proj/pulls/9/merge", raw}
       assert %{"do" => "rebase"} = JSON.decode!(raw)
     end
@@ -2157,12 +2029,8 @@ defmodule Fleet.Forge.ClientTest do
                ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
 
-    # JG-087 — GITEA REND `405` POUR DEUX FAITS OPPOSES, et rien de STRUCTURE ne les separe dans la
-    # reponse recue : seul le libelle anglais le fait, `"try again later"`. La detection textuelle
-    # reste faute d'autre chose, mais elle ne peut plus degrader EN SILENCE — le jour ou Gitea
-    # reformule ce message, tout `405` devient « definitif », les merges echouent, et seule la
-    # branche RECONNUE ecrivait au journal. Le corps entier est journalise : diagnostic du jour, et
-    # matiere du jour ou un champ structure apparaitra.
+    # Après le contrôle mergeable, le retry dépend encore du libellé anglais. Un message
+    # reformulé doit apparaître dans le diagnostic plutôt que devenir un refus inexpliqué.
     test "JG-087 : un 405 NON reconnu comme transitoire est journalise avec son corps" do
       handlers = %{
         {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} =>
@@ -2203,6 +2071,7 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "opts[:method] forces the style (e.g. fast-forward-only)" do
+      # Ce cas accepte une option mais ne lit pas le corps ; il ne prouve pas son envoi.
       handlers =
         Map.merge(post_merge_handlers(), %{
           {"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}
@@ -2217,10 +2086,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "merge OK → head branch deleted as a SEPARATE spaced call (feed-ordered), slash encoded" do
-      # Proves the two-call shape (GET head.ref then DELETE) replacing `delete_branch_after_merge`:
-      # a DELETE handler keyed on the %2F-encoded branch answers 204 — reaching it IS the assertion
-      # (FakeForge 500s any unhandled route, which delete_head_branch_spaced only warns about;
-      # the probe Agent below turns "the DELETE actually happened" into an explicit assert).
+      # La sonde Agent prouve le DELETE au chemin encodé, car un échec de nettoyage ne change
+      # pas :ok. Le temps d'espacement et l'ordre du feed ne sont pas mesurés ici.
       {:ok, probe} = Agent.start_link(fn -> false end)
 
       handlers = %{
@@ -2239,20 +2106,15 @@ defmodule Fleet.Forge.ClientTest do
 
     @tag capture_log: true
     test "delete failure is warning-only: merge stays :ok (the merge is the authority)" do
-      # No GET/DELETE handlers → FakeForge 500s the post-merge lookup; the merge result must
-      # still be :ok (a surviving dead branch is cosmetic, never a merge error).
+      # Le GET de head échoue avant tout DELETE ; ce cas ne simule pas un DELETE rejeté.
       handlers = %{{"POST", "/api/v1/repos/fleet/proj/pulls/9/merge"} => {200, %{}}}
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
     end
   end
 
-  # ============================================================
-  # F-030 — pagination of source-of-truth reads. FakeForge routes by path ALONE (the `?page=N`
-  # query is ignored in the key) → a stateful FUNCTION handler (Agent) returns the pages in
-  # order: page 1 FULL (50 items) → the client loops; page 2 partial (< 50) → last page, stop.
-  # The result must include all 51 (page 2 was actually read).
-  # ============================================================
+  # Pages servies par ordre d'appel, indépendamment de la query. Ces tests prouvent les appels
+  # suivants et l'accumulation, pas l'incrément de page envoyé à la forge.
   describe "pagination (F-030) — beyond 50 items, the following pages are read" do
     # Returns `pages` (list of item lists) in call order; once exhausted, empty page (200, []) →
     # the client stops cleanly (empty < 50). Same Agent mechanics as `seq_handler`.
@@ -2285,9 +2147,7 @@ defmodule Fleet.Forge.ClientTest do
       assert Enum.any?(issues, &(&1["number"] == 51))
     end
 
-    # DR-016/BND-057 — THE poller's discovery (org-membership = admission). With `?limit=50` ALONE
-    # → beyond 50 repos, projects 51+ were INVISIBLE (no dispatch, no reconciliation, no event nor
-    # error — the forge+poll backstop broken in a never-re-read zone). Paginated → seen.
+    # La découverte doit aussi voir les dépôts au-delà de la première page pour les réconcilier.
     test "list_org_repos: 50 repos page 1 + 1 repo page 2 → all 51 full_names (repo 51 seen)" do
       page1 = for n <- 1..50, do: %{"full_name" => "fleet/repo-#{n}"}
       page2 = [%{"full_name" => "fleet/repo-51"}]
@@ -2302,10 +2162,7 @@ defmodule Fleet.Forge.ClientTest do
       assert "fleet/repo-51" in names
     end
 
-    # #5.2 D1 — list_open_pulls pagination: the LISTING paginates via /issues
-    # (`list_scoped_issues`, SAME code as list_open_issues → already covered by the issues test
-    # above). The get_pull fan-out is tested in the `list_open_pulls` describe. No duplicated test
-    # here (one listing code = one pagination test).
+    # list_open_pulls partage list_scoped_issues ; son expansion est testée dans son propre groupe.
 
     test "count_signed_step_runs: a signed step_run on page 2 is counted (source of truth of the anti-runaway budget)" do
       # page 1 full (50 UNSIGNED comments) + page 2 (1 comment carrying a signed step_run marker).
@@ -2326,9 +2183,8 @@ defmodule Fleet.Forge.ClientTest do
     end
 
     test "≤ 50 items: a single page (partial page 1) → identical behavior, no page 2" do
-      # 3 items < 50 → the client stops after page 1 (no 2nd call). If a 2nd call went out,
-      # paged_handler would return [] → length would stay 3, but above all we prove the ≤50
-      # short-circuit.
+      # Trois éléments : ce cas ne teste ni la frontière exacte 50 ni l'absence de second appel,
+      # car une page vide supplémentaire laisserait la longueur inchangée.
       page1 = for n <- 1..3, do: %{"number" => n, "labels" => []}
 
       handlers = %{
@@ -2357,10 +2213,8 @@ defmodule Fleet.Forge.ClientTest do
     defp timeline(repo, n, events),
       do: %{{"GET", "/api/v1/repos/#{repo}/issues/#{n}/timeline"} => {200, events}}
 
-    # COUNTING (immune to second-level granularity), no temporal ordering: the `at` values below
-    # are IDENTICAL (same second) on purpose — the counting must decide the same (that was the
-    # hole of the strict `>` found on the forge). PROD sequence: initial request (`req add`) →
-    # review → possible re-request.
+    # Dates identiques pour distinguer le comptage des événements d'une comparaison temporelle
+    # stricte : demande initiale, revue puis éventuelle redemande dans la même seconde.
 
     test "prod sequence: initial request + review + RE-request (net 2−1>0) → returned, SAME second" do
       h =
@@ -2426,16 +2280,11 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # ============================================================
-  # Confinement E (WI-E4) — a hostile repo/path/ref segment produces a SAFE URL.
-  # The right treatment = ENCODING (not slugging: repo=`owner/name`, path=`dir/file` carry
-  # legitimate `/`): each COMPONENT is encoded, STRUCTURAL `/` preserved; an injected
-  # `..`/`/`/space/`?`/`#` is inert.
-  # ============================================================
+  # Vérifier l'encodage en sortie Req ; ces tests ne prouvent pas la manière dont un proxy
+  # ou serveur distant décode/normalise l'URL, ni une autorisation d'accès au dépôt.
 
   describe "real constructed URL — a hostile segment neither traverses nor injects" do
-    # Recording Plug: captures the EXACT URL seen server-side (request_path + query_string)
-    # AFTER client encoding. This is the proof on real URL construction, not just the helpers.
+    # Capture path/query au Plug en mémoire après construction par Req.
     defmodule RecordingForge do
       @behaviour Plug
       @impl Plug
@@ -2459,8 +2308,8 @@ defmodule Fleet.Forge.ClientTest do
 
     test "hostile repo (fleet/../admin) → no raw `..` component in the request_path" do
       {:ok, agent} = Agent.start_link(fn -> nil end)
-      # Without encoding: `/api/v1/repos/fleet/../admin/issues/1` → the server NORMALIZES it to
-      # `/api/v1/repos/admin/issues/1` (traversal to another repo). Encoding renders it inert.
+
+      # Un composant .. brut pourrait être normalisé ; on vérifie ici sa forme encodée seulement.
       ForgeClient.get_issue("fleet/../admin", 1, rec_opts(agent))
       %{path: path} = Agent.get(agent, & &1)
 
@@ -2494,18 +2343,8 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
-  # JG-065 (`S2`) — SANS `head_sha`, LES APPROBATIONS PERIMEES ETAIENT RETENUES.
-  #
-  # `head_sha` etait lu par `Keyword.get/2`, donc une cle ABSENTE et une valeur `nil` tombaient
-  # toutes deux sur « compte toutes les revues jamais posees sur cette PR ». Or `nil` est exactement
-  # ce que produit l'appelant de production : `get_in(pr, ["head", "sha"])` sur une reponse de forge
-  # dont l'objet PR n'expose pas `head.sha` (forme allegee d'un listage, version de Gitea, reponse
-  # partielle).
-  #
-  # Ce que ca coutait : une PR approuvee sur le commit A puis completee par un commit B se lisait
-  # toujours approuvee, `review_outcome/2` rendait `:approved`, le routage promouvait, et le sceau
-  # fusionnait. Du code qu'aucun juge n'a vu atterrissait sur la branche principale, sous un
-  # scellement qui atteste le contraire.
+  # L'absence/nil de head_sha ne doit pas réactiver une approbation sur un ancien commit.
+  # Appels directs : contrairement à verdicts_of, ils préservent l'option réellement testée.
   describe "JG-065 — le mode non scope se DEMANDE, il ne s'herite plus d'une cle absente" do
     defp one_approval_handlers do
       %{
