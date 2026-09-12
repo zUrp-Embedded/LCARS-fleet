@@ -1,11 +1,8 @@
 defmodule Fleet.Spawner.Pod.KickReplUpTest do
   @moduledoc """
-  The cold-start window of the kick loop: while the pod's REPL is not up, the loop must NOT type.
-
-  What makes this defect invisible without a test: every ACK the loop knows (`brief_pulled?`,
-  `polled?`) requires the agent to take a turn, so during a cold start the loop is guaranteed to
-  see "no ack" and fire again — and the keys it types are not lost, tmux buffers them and the TUI
-  replays each one as a submission. The symptom lands in the agent's REPL, where no test looks.
+  Connection marks used by the kick readiness probe. Before a REPL starts, tmux can buffer
+  repeated kicks and later replay them as separate submissions. These tests cover the broker
+  signal and probe, not terminal delivery or the complete cold-start loop.
   """
   use ExUnit.Case, async: false
 
@@ -55,9 +52,7 @@ defmodule Fleet.Spawner.Pod.KickReplUpTest do
 
   describe "repl_up? — the probe the kick tick reads" do
     test "answers false rather than raising when the broker is unreachable" do
-      # The probe defends like its siblings: no broker → "not proven up" → the loop waits one more
-      # tick. The failure mode of a wrong answer here is a spurious keystroke, so `false` is the
-      # only safe default.
+      # An unknown pod has no connection mark; this does not take the default broker offline.
       refute TaskProbe.repl_up?("pod-no-broker-#{System.unique_integer([:positive])}")
     end
 
