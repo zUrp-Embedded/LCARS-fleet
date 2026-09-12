@@ -116,8 +116,6 @@ check() {
       else
         p_drift "$PROV_LINK_DIR/$name ≠ symlink vers $PROV_PREFIX/bin/$name"
       fi
-    else
-      [[ -f "$PROV_LINK_DIR/$name" ]] && p_warn "copie morte $PROV_LINK_DIR/$name (plus aucun lecteur) — nettoyage manuel : sudo rm $PROV_LINK_DIR/$name"
     fi
   done < <(mf_entries)
   local e

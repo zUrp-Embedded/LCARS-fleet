@@ -299,17 +299,6 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"arbre embarqué $LCARS_HELPERS_DIR/etc"*"arbre embarqué $LCARS_HELPERS_DIR/services"* ]]
 }
 
-@test "migration : un ancien arbre embarqué sous fleet/ est un drift au check et se retire à l'apply" {
-  need_git_checkout
-  mkdir -p "$LCARS_HELPERS_DIR/fleet/services/lib"; echo x > "$LCARS_HELPERS_DIR/fleet/services/lib/human-protocol.sh"
-  mod check
-  [[ "$output" == *"ancien arbre embarqué présent"* ]]
-  mod apply
-  [[ "$output" == *"ancien arbre embarqué retiré"* ]]
-  [ ! -e "$LCARS_HELPERS_DIR/fleet" ]
-  [ -d "$LCARS_HELPERS_DIR/services" ]
-}
-
 @test "embarqué : aucun fichier ni répertoire posé n'est setgid ni inscriptible par le groupe ou les autres" {
   need_git_checkout
   mod apply

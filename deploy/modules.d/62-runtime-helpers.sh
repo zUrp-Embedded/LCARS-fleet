@@ -204,9 +204,6 @@ check() {
   else
     p_drift "provisionnement embarqué absent ($HELPERS_DIR/deploy/provision) — le convergeur ne pourra pas converger un humain"
   fi
-  if [[ -d "$HELPERS_DIR/fleet" ]]; then
-    p_drift "ancien arbre embarqué présent ($HELPERS_DIR/fleet) — les arbres vivent à plat sous $HELPERS_DIR ; l'apply le retire"
-  fi
   local _r
   for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do
     if [[ -d "$HELPERS_DIR/$_r" ]]; then
@@ -301,10 +298,6 @@ apply() {
     embarquer "$(product_tree)/$n" "$EMBEDDED_FLEET/$n" || verdict_apply
   done
   p_chg "arbres du runtime embarqués ($HELPERS_DIR/{${EMBEDDED[*]}})"
-  if [[ -d "$HELPERS_DIR/fleet" ]]; then
-    rm -rf "${HELPERS_DIR:?}/fleet" && p_chg "ancien arbre embarqué retiré ($HELPERS_DIR/fleet) — les arbres vivent à plat" \
-      || p_fail "ancien arbre embarqué non retiré ($HELPERS_DIR/fleet)"
-  fi
   local -a _only
   for n in "${EMBEDDED_ROOT[@]}"; do
     [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
