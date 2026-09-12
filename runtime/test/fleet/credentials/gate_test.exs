@@ -1,8 +1,7 @@
 defmodule Fleet.Credentials.GateTest do
   @moduledoc """
-  Login-validity gate at the spawn boundary. The scope/plan sub-gates were nuked 2026-07-20
-  (vendor-redundant — the claude binary enforces scope+plan via 401); only "is the human logged
-  in?" survives. `@tag :tmp_dir` gives each test a real claudeDir.
+  Checks local credential-file shape and token-free status using temporary claudeDir fixtures.
+  No live vendor token, scope, plan or refresh validation is exercised.
   """
   use ExUnit.Case, async: true
 
@@ -23,7 +22,6 @@ defmodule Fleet.Credentials.GateTest do
        %{
          tmp_dir: dir
        } do
-    # Regression of the nuke: the old gate refused this (no scopes / unpaid). Now login-only.
     write_creds!(dir, ~s({"claudeAiOauth":{"accessToken":"tok-abc","subscriptionType":"free"}}))
     assert :ok = Gate.validate(dir)
   end
@@ -71,10 +69,7 @@ defmodule Fleet.Credentials.GateTest do
 
       assert path =~ ".credentials.json"
 
-      # Dashboard-safe: the status must never carry token material. THE KEY SET, not the absence of
-      # two strings — `refute inspect(status) =~ "tok-abc"` accepts anything the status invents that
-      # is not that literal, a `token_prefix: String.slice(token, 0, 4)` included (mutation played
-      # 2026-09-07: it stayed green). A closed list of keys refuses what nobody thought of.
+      # A closed key set also rejects added token fragments, which full-token substring checks miss.
       assert status |> Map.keys() |> Enum.sort() == [:expires_at_ms, :path, :status]
       refute inspect(status) =~ "tok-abc"
       refute inspect(status) =~ "ref-x"

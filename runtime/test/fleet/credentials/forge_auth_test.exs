@@ -7,18 +7,12 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   alias Fleet.Credentials.ForgeAuth
   alias Fleet.TestEnv
 
-  # ⚠ LA CONFIG NE PORTE PLUS LE JETON, SEULEMENT LE COMPTE — et c'est la totalite de ce que ces
-  # temoins ont eu a changer. `%{url_prefix:, token:}` est devenu `%{url_prefix:, account:}`, le
-  # jeton se demandant au service d'autorite AU MOMENT DE POUSSER.
-  #
-  # Ce qu'ils continuent d'epingler est inchange, et c'est le point : le jeton sort dans
-  # `GIT_CONFIG_*`, jamais sur l'argv ; `GIT_TERMINAL_PROMPT=0` est inconditionnel ; un prefixe qui
-  # porte un saut de ligne est refuse au lieu d'injecter une cle de git-config.
+  # Config names the account; the authority test double reads its token from the fixture directory.
   @account "system_pusher"
   @token "SECRET123"
 
   setup do
-    # Tests set/delete :forge_auth themselves; here we only capture the restoration.
+    # Individual tests set/delete auth config; register restoration before they run.
     TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
 
     tmp = TestEnv.tmp_path("forgeauth-test")
@@ -38,18 +32,12 @@ defmodule Fleet.Credentials.ForgeAuthTest do
   end
 
   describe "git_env/0" do
-    # MOVE-1/MA-22 — `GIT_TERMINAL_PROMPT=0` is set UNCONDITIONALLY: the contract of `git_env/0`
-    # is not "[] when unconfigured" but "ALWAYS the anti-prompt bound, plus the forge auth when
-    # configured". The invariant does not depend on forge_auth (a local repo without a token is
-    # precisely the case that would prompt).
     test "unconfigured → anti-prompt bound only (GIT_TERMINAL_PROMPT=0)" do
       Application.delete_env(:lcars_fleet, :credentials_forge_auth)
       assert [{"GIT_TERMINAL_PROMPT", "0"}] = ForgeAuth.git_env()
     end
 
     test "MINE-CRED-01: config PRESENT but incomplete (empty account / missing prefix) → anti-prompt only + LOUD" do
-      # A broken credential config must be LOUD, never silently swallowed (otherwise git goes out
-      # unauthenticated and only fails at the remote with 403/404, masking the real cause).
       log1 =
         capture_log(fn ->
           configure("https://f/", "")
@@ -88,11 +76,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
              ] = ForgeAuth.git_env()
     end
 
-    # ⚠ LE TEMOIN DE LA NOUVELLE CAUSE, ET IL EST STRUCTUREL. Un compte CONFIGURE dont le service ne
-    # rend pas le jeton n'est PAS la meme chose qu'un conteneur sans config : la premiere croit pouvoir
-    # pousser et ne le peut pas. `git_env/0` degrade pareil dans les deux cas — c'est le bon repli,
-    # git echoue bruyamment — mais le journal doit dire laquelle des deux, sinon l'operateur cherche
-    # une config cassee alors qu'il lui manque une unite qui tourne.
+    # Same env fallback, different diagnosis: valid account configuration but no issued token.
     test "compte configure, jeton indisponible → anti-prompt seul + LOUD (jamais un push muet)" do
       configure("https://forge.example/", "compte_sans_jeton")
 
@@ -109,10 +93,6 @@ defmodule Fleet.Credentials.ForgeAuthTest do
       assert ForgeAuth.account() == @account
     end
 
-    # `nil` EST UN ETAT LEGITIME, PAS UNE PANNE : un conteneur en mode outil, un banc sans forge. Ce
-    # module ne devine aucun nom par defaut — devine-le ici, et deux endroits sauraient « le compte
-    # du systeme », dont un se tromperait en silence sur tout conteneur qui ne s'appelle pas comme le
-    # conteneur de reference.
     test "absent → nil, jamais un nom devine" do
       Application.delete_env(:lcars_fleet, :credentials_forge_auth)
       assert ForgeAuth.account() == nil
@@ -144,10 +124,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
       end)
     end
 
-    # ⚠ LES DEUX REFUS NE SE CONFONDENT PAS, ET LEURS REMEDES SONT OPPOSES : `malformed` se corrige
-    # dans la config du conteneur, `unavailable` demande si le service d'autorite repond. Les fondre
-    # enverrait la moitie des pannes au mauvais geste — c'est exactement la separation que DR-024 a
-    # posee entre « absent » et « malforme », etendue au troisieme etat que ce chantier introduit.
+    # Separate configuration repair from authority/token availability diagnosis.
     test "compte configure, jeton indisponible → {:error, :forge_auth_unavailable}, PAS malformed" do
       capture_log(fn ->
         configure("https://forge.example/", "compte_sans_jeton")
@@ -167,8 +144,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     test "git config --get reads the extraheader from the env, not the argv" do
       configure("https://forge.example/")
 
-      # `git config --get` receives NO -c on the argv; if it returns the header, it read it from
-      # GIT_CONFIG_* (env). This is exactly the channel clone/fetch/ls-remote/push use.
+      # Exercise the actual Git config reader with env only; this is not a remote-auth test.
       {out, 0} =
         System.cmd("git", ["config", "--get", "http.https://forge.example/.extraheader"],
           env: ForgeAuth.git_env(),

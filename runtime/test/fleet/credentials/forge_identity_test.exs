@@ -1,9 +1,7 @@
 defmodule Fleet.Credentials.ForgeIdentityTest do
   @moduledoc """
-  Z4 (forge-identity B') — the author = the brief's human (identity derived from the OS),
-  the role = a verified `Co-authored-by: LCARS-<role>` trailer. Pure tests (human +
-  identity injected via `:identity` — zero IO; the real OS derivation git config/GECOS
-  is validated in deploy-env, not hermetic in unit).
+  Checks human identity assembly, role trailers and accepted-email policy using explicit
+  human/name/email fixtures. Does not verify live OS derivation, forge accounts or commit gates.
   """
   use ExUnit.Case, async: true
 
@@ -40,7 +38,6 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
   test "for_role: the role is carried by the Co-authored-by trailer (not the identity)" do
     assert {:ok, id} = ForgeIdentity.for_role("reviewer", opts())
     assert id.coauthor_trailer == "Co-authored-by: LCARS-reviewer <reviewer@lcars.local>"
-    # the identity NEVER contains the role (non-negotiable #1: no flattening)
     refute id.author_email =~ "reviewer"
   end
 
@@ -50,10 +47,7 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
   end
 
   test "F-C018 R1-14: role with newline/control → hygiened (trailer + email), no commit-header injection" do
-    # Symmetric to the name/email test: the role (= cap-profile `metadata.name`, a schema-OPEN field
-    # without a pattern) is interpolated into the Co-authored-by trailer + the role email. A
-    # newline/control (mis-authored cap profile) would inject a commit-header line (R1-14). The SAME
-    # defense as for the HUMAN fields applies to the role (sink-side, source-agnostic).
+    # Exercise control stripping at both role-to-header sinks, independently of catalogue validation.
     trailer = ForgeIdentity.coauthor_trailer("engineer\nBcc: evil")
     refute trailer =~ ~r/[\x00-\x1F]/, "trailer: no control char (R1-14 injection)"
 
@@ -63,9 +57,7 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
 
   test "allowed_emails: git_native = human only; payload = human + system" do
     assert ForgeIdentity.allowed_emails(:git_native, "h@x.tld") == ["h@x.tld"]
-    # H2: the system identity = the REAL forge account system_starfleet (an identity without an
-    # actual forge account would be a ghost). The payload allow-list DERIVES from system_email
-    # (structural coherence tested, not the literal retyped twice).
+    # Pin the system literal once, then check policy and identity accessors agree with it.
     assert ForgeIdentity.system_email() == "system_starfleet@lcars.local"
 
     assert ForgeIdentity.allowed_emails(:payload, "h@x.tld") == [
@@ -82,8 +74,7 @@ defmodule Fleet.Credentials.ForgeIdentityTest do
   end
 
   test "no catalog: any human ALWAYS resolves (we do not over-filter)" do
-    # `:identity` injected → the assembly succeeds without any catalog or file, for any
-    # login. Never a `{:human_not_in_catalog}` fail-loud.
+    # An injected human/identity is assembled without a catalogue membership check.
     assert {:ok, %{human: "qui-que-ce-soit", author_email: "x@y.tld"}} =
              ForgeIdentity.for_role("engineer",
                human: "qui-que-ce-soit",

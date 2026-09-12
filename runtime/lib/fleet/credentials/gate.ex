@@ -1,22 +1,18 @@
 defmodule Fleet.Credentials.Gate do
   @moduledoc """
-  Single reader of the human Claude login file. `status/1` returns categorized,
-  dashboard-safe facts without token material; `validate/1` derives the spawn gate.
-  Scope and plan validity remain vendor-enforced.
+  Reads local Claude login-file shape for dashboard status and the spawn gate.
+  Returns categories and path/expiry without token material. Token validity, expiry handling,
+  scopes and plan eligibility are not checked here; the vendor/launcher handles authentication.
   """
 
-  # BL-6-09
   @doc """
-  Structured login status of `<claude_dir>/.credentials.json` — dashboard-safe (categorized
-  facts + path, NEVER the decoded JSON: it carries accessToken/refreshToken).
+  Reads <claude_dir>/.credentials.json. An OAuth map with a non-empty string accessToken
+  gives logged_in (including whitespace-only strings); absent/invalid tokens give not_logged_in.
+  File/JSON/OAuth-shape errors give unreadable with a categorized reason.
 
-    * `%{status: :logged_in, path: p, expires_at_ms: ms | nil}` — usable login token present.
-      `expires_at_ms` (epoch ms, as the file states it) is DATA for a dashboard countdown, not a
-      verdict: an expired access token with a refresh token still refreshes at launch
-      (cf. `bin/bwrap_launch.sh`) — expiry alone is never reported as logged-out.
-    * `%{status: :not_logged_in, path: p}` — oauth block present, no usable accessToken.
-    * `%{status: :unreadable, path: p, reason: :malformed_json | :no_oauth_block | posix}` —
-      the file cannot answer the question (absent, undecodable, or foreign shape).
+  expires_at_ms is the file's integer expiresAt value or nil, for display only. Expiry alone
+  must not reject a token the launcher may refresh; refresh-token presence and success are not
+  checked here. Never return the decoded JSON, access token or refresh token.
   """
   @spec status(Path.t()) ::
           %{status: :logged_in, path: Path.t(), expires_at_ms: integer() | nil}
@@ -40,14 +36,12 @@ defmodule Fleet.Credentials.Gate do
       {:error, posix} when is_atom(posix) ->
         %{status: :unreadable, path: creds_path, reason: posix}
 
-      # oauth block present but no usable accessToken → not logged in.
       _ ->
         %{status: :not_logged_in, path: creds_path}
     end
   end
 
-  # `expiresAt` is epoch MILLISECONDS in the native file; `null` is a legitimate durable login
-  # (cf. the launch-side refresh rationale) — reported as nil, never fabricated into a date.
+  # Preserve integer epoch milliseconds; absent/null/other values remain unknown, not a fabricated date.
   defp expires_at_ms(oauth) do
     case Map.get(oauth, "expiresAt") do
       ms when is_integer(ms) -> ms
@@ -56,13 +50,8 @@ defmodule Fleet.Credentials.Gate do
   end
 
   @doc """
-  Confirms the human is logged in — the SPAWN gate, derived from `status/1` (one reader).
-
-    * `claude_dir` — the human's claudeDir path (resolved by the caller)
-
-  Return: `:ok` | `{:error, {:credentials_invalid, reason}}`. The reason is CATEGORIZED, never the
-  decoded JSON: `{:credentials_unreadable, path, why}` / `{:not_logged_in, path}` — all safe to
-  propagate, log, and surface.
+  Admits the local logged_in status, otherwise returns credentials_invalid with a categorized
+  credentials_unreadable or not_logged_in reason and path. This is not a live token check.
   """
   @spec validate(Path.t()) :: :ok | {:error, {:credentials_invalid, term()}}
   def validate(claude_dir) do

@@ -1,8 +1,8 @@
 defmodule Fleet.Credentials.RoleIdentity do
   @moduledoc """
-  Fail-closed smart constructor for forge role identity. A struct requires a
-  verified non-empty token, making silent fallback to the privileged system account
-  unrepresentable. `RoleToken` only reports availability; policy lives here.
+  Constructs forge-role identities without fallback to the privileged system account.
+  for_role/1 requires a non-empty token from RoleToken; it does not validate it with the forge.
+  Direct struct construction bypasses that check: enforce_keys requires keys, not valid values.
   """
   alias Fleet.Credentials.RoleToken
 
@@ -12,10 +12,9 @@ defmodule Fleet.Credentials.RoleIdentity do
   @type t :: %__MODULE__{role: String.t(), token: String.t()}
 
   @doc """
-  Builds the verified identity for `role`, or `{:error, :role_token_unavailable}` if its token cannot be
-  resolved (absent / unreadable / empty file, or a non-path-safe role). Never yields a struct with a nil
-  token (`@enforce_keys`), so downstream code cannot construct a "role identity" that is really the system
-  account.
+  Resolves the role's forge account through RoleToken and accepts a non-empty token.
+  Unavailable tokens or invalid role input return role_token_unavailable without a system fallback.
+  Authority transport exceptions and catalogue-map construction failures can still propagate.
   """
   @spec for_role(String.t()) :: {:ok, t()} | {:error, :role_token_unavailable}
   def for_role(role) when is_binary(role) and role != "" do
@@ -28,50 +27,25 @@ defmodule Fleet.Credentials.RoleIdentity do
   def for_role(_), do: {:error, :role_token_unavailable}
 
   @doc """
-  POURQUOI `for_role/1` a refusé — la cause, sans le jeton.
-
-  ## Ce que ce module refuse de faire, et pourquoi il l'expose quand même
-
-  `for_role/1` rend UNE forme d'échec, `:role_token_unavailable`, et c'est sa politique : les
-  appelants du domaine agissent pareil dans tous les cas, ils ferment. Leur donner les causes les
-  ferait décider au cas par cas, chacun à sa façon.
-
-  Un appelant a pourtant besoin de les séparer, et il est hors du domaine : le garde de BOOT du
-  rail. Depuis que le jeton se demande à un service, « pas de jeton » recouvre un défaut de
-  provisionnement (LOCAL, définitif — le conteneur ne doit pas démarrer) et une porte qui ne répond pas
-  (TRANSITOIRE — refuser le boot dessus échangerait une panne rattrapable contre un conteneur mort).
-
-  ⚠ CE N'EST PAS UNE PORTE DE REPLI. Elle ne rend jamais de jeton que `for_role/1` aurait refusé —
-  elle rend `{:ok, _}` seulement là où `for_role/1` aurait réussi. Ce qui se lit ici est un
-  DIAGNOSTIC, jamais une seconde chance.
+  Performs a fresh token request, returning {:ok, token} or the detailed cause.
+  Unlike for_role/1's collapsed refusal, boot callers can distinguish provisioning defects from
+  transient authority/forge failures. Success contains secret material: this is not a token-free
+  diagnostic or the saved cause of a previous request, and no fallback identity is supplied.
   """
   @spec token_cause(String.t() | nil) ::
           {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause() | :no_forge_login}
   defdelegate token_cause(role), to: RoleToken, as: :token_result
 
   @doc """
-  Where `role`'s forge token lives — `<dir>/<login>.gitea_token`, or `:error`.
-
-  The third face of the same identity, beside the token and the account: a credential FILE is named
-  after the account that owns it. Exposed here because this module is the domain's door on "who a
-  role is on the forge", and `RoleToken` is internal to it.
+  Names <dir>/<forge-login>.gitea_token, or returns :error when login/path resolution fails.
+  Does not read or check the file; runtime token requests go through the authority service.
   """
   @spec token_path(String.t()) :: {:ok, Path.t()} | :error
   defdelegate token_path(role), to: RoleToken, as: :path_for
 
   @doc """
-  The forge LOGIN `role` writes under, or `{:error, _}`.
-
-  THE SECOND HALF OF THE IDENTITY. This module's subject is "who a role is on the forge", and
-  answering only the token leaves callers holding a credential with nothing to tell them the
-  ACCOUNT: the runtime then addresses accounts by the BARE ROLE NAME while the provisioning created
-  them as `<tier>_<role>`, so `request_review` asks a forge that has a `<tier>_qualifier` for a
-  `qualifier` — 404, a deliverable PR with no judge, and a merge waiting on approvals NOBODY WAS
-  ASKED FOR.
-
-  The RULE lives in `Fleet.CapProfile.forge_login/1` (the roster and the tier split are its
-  subject); this is the door the forge side comes through, so the two halves of an identity are
-  reached from one module.
+  Resolves a role's forge login through CapProfile.forge_login/1, preserving its errors/raises.
+  Forge requests need the tier-prefixed account, not the bare role, to reach provisioned reviewers.
   """
   @spec login(String.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate login(role), to: Fleet.CapProfile, as: :forge_login
@@ -83,12 +57,9 @@ defmodule Fleet.Credentials.RoleIdentity do
   defdelegate role_of_login(login), to: Fleet.CapProfile, as: :role_of_forge_login
 
   @doc """
-  The FLEET-side name of a forge account: its role, or the login unchanged when it belongs to none.
-
-  The read frontier. A forge answers in logins; the fleet reasons in roles; and a name that is
-  neither is a HUMAN, which must stay visibly foreign rather than be coerced into the jury (F-C061
-  — a stranger who reads as a role can skew or block a verdict). So: translate what is ours, leave
-  the rest exactly as it came.
+  Returns the resolved role, or the original login on any resolution error (including map-read
+  failures). Unknown humans/bots must remain foreign to jury membership; this display conversion
+  is not an authorization check.
   """
   @spec role_or_login(String.t()) :: String.t()
   def role_or_login(login) when is_binary(login) do

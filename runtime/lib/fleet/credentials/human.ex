@@ -28,9 +28,9 @@ defmodule Fleet.Credentials.Human do
   end
 
   @doc """
-  The current human's OS UID (`id -u`) as an integer. Folded into the deterministic session_id
-  (`SessionId.encode`) so two humans sharing ONE OAuth account get distinct UUIDs (same axis as
-  `id -un` — the OS user IS the human). `{:ok, uid}` | `{:error, reason}`.
+  Parses the current OS UID from bounded id -u output. SessionId uses it to distinguish
+  humans sharing an OAuth account. The parser accepts an integer prefix without checking
+  sign or trailing text; real id output supplies the non-negative UID promised by the spec.
   """
   @spec current_uid() :: {:ok, non_neg_integer()} | {:error, term()}
   def current_uid do

@@ -23,11 +23,8 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role("gatekeeper")
   end
 
-  # ⚠ « empty » A DISPARU DE L'ASSERTION PARCE QUE CE PROCESS NE LIT PLUS LE FICHIER. Le jeton se
-  # demande au service d'autorite, qui rend `no_role_token` pour un fichier vide comme pour un
-  # fichier absent — meme remede, meme effet. Ce que ce temoin garde est le point qui n'a jamais
-  # bouge et qui est le seul a compter ici : un jeton vide ne devient JAMAIS une identite. Pas de
-  # `%RoleIdentity{token: ""}`, pas de repli sur le compte systeme.
+  # The authority double reads the file and classifies blank contents as no_role_token.
+  # The constructor must propagate refusal without an empty identity or system fallback.
   test "EMPTY token → {:error} (fail-closed)", %{dir: _dir} do
     Fleet.TestEnv.put_role_token!("reviewer", "   \n")
 
@@ -42,14 +39,9 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     assert {:error, :role_token_unavailable} = RoleIdentity.for_role(nil)
   end
 
-  # THE SECOND HALF OF THE IDENTITY. This module answered the token and nothing answered the
-  # ACCOUNT, so the runtime addressed forge accounts by the bare role name while provisioning had
-  # created them as `<tier>_<role>`: `request_review` 404'd and deliverable PRs got no judge.
   describe "login/1 + role_of_login/1 — the account a role writes under" do
     test "the prefix follows the TIER, not the file that wins the overlay" do
-      # `architect` is a SYSTEM authority — the same one in every org — so its account stays
-      # `system_architect` even though a business catalogue may ship its own `architect.yaml` to
-      # widen its tools. A business role takes the catalogue's own name.
+      # System membership fixes the prefix even if business data overlays the role.
       assert {:ok, "system_architect"} = RoleIdentity.login("architect")
       assert {:ok, "fleet_qualifier"} = RoleIdentity.login("qualifier")
     end
@@ -66,8 +58,6 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     end
 
     test "role_or_login/1 leaves a HUMAN verbatim — F-C061 must keep seeing them as foreign" do
-      # Coercing an unknown login into a role would slip a stranger into the jury, where they can
-      # skew or block a verdict. Translate what is ours, leave the rest exactly as it came.
       assert "qualifier" = RoleIdentity.role_or_login("fleet_qualifier")
       assert "lordzurp" = RoleIdentity.role_or_login("lordzurp")
       assert "dependabot[bot]" = RoleIdentity.role_or_login("dependabot[bot]")
