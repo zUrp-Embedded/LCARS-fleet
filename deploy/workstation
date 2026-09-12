@@ -152,7 +152,7 @@ bandeau_final() {
 # le contrat du banc sur le poste : l'humain de démonstration avec ses mots de passe unix et
 # forge, site-admin, son jeton opérateur, et les creds claude du compte qui installe si elles existent
 bench_seed() {
-  local human="$1" seat="${SUDO_USER:-}" src home grp url tok
+  local human="$1" seat="${SUDO_USER:-}" src home grp url tok tmp
   home="$(getent passwd "$human" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { echo "  banc : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
   grp="$(id -gn "$human")"
@@ -164,9 +164,15 @@ bench_seed() {
   url="$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)"
   if [[ -n "$url" && -s "$PROV_MASTER_TOKEN_FILE" ]] \
      && tok="$(bench_human_seed "$url" "$(read_token "$PROV_MASTER_TOKEN_FILE")" "$human" "$(bench_human_password)")"; then
-    printf '%s\n' "$tok" | install -m 0600 -o "$human" -g "$grp" /dev/stdin "$home/.gitea_token" \
-      && echo "  banc : « $human » sur la forge — mot de passe de banc, site-admin, jeton opérateur (~/.gitea_token)" \
-      || echo "  banc : jeton opérateur de « $human » minté mais non posé ($home/.gitea_token)"
+    # un fichier temporaire puis install : install ne relit pas un stdin sur une destination déjà là
+    tmp="$(mktemp "${TMPDIR:-/tmp}/lcars-op-token.XXXXXX")"
+    printf '%s\n' "$tok" > "$tmp"
+    if install -m 0600 -o "$human" -g "$grp" "$tmp" "$home/.gitea_token"; then
+      echo "  banc : « $human » sur la forge — mot de passe de banc, site-admin, jeton opérateur (~/.gitea_token)"
+    else
+      echo "  banc : jeton opérateur de « $human » minté mais non posé ($home/.gitea_token)"
+    fi
+    rm -f "$tmp"
   else
     echo "  banc : « $human » non semé sur la forge (adresse ou jeton master illisible, ou refus de la forge — ligne ci-dessus)"
   fi

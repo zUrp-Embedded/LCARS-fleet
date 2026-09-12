@@ -301,6 +301,11 @@ EOF
   [ "$(stat -c %a "$HROOT/.gitea_token")" = "600" ]
   [[ "$output" == *"banc : mot de passe unix posé sur « root »"*"« root » sur la forge — mot de passe de banc, site-admin, jeton opérateur"*"creds claude non posées chez « root »"*"n'en a pas"*"/login"* ]]
   refute_out '\b(rejoue|tu|ton)\b' <<<"$output"
+  # une passe rejouée repose le jeton sur le fichier déjà là
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root LCARS_CREDS_SRC="$BATS_TEST_TMPDIR/absent.json" SUDO_USER=root root
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"jeton opérateur (~/.gitea_token)"* ]]
+  [ -z "$(compgen -G "$TMPDIR/lcars-op-token.*" || true)" ]
 }
 
 @test "root, banc : un humain pas encore matérialisé est dit, rien n'est posé ; un refus de la forge est dit" {
