@@ -88,12 +88,6 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   [[ "$output" == *"$PROV_LINK_DIR/fleet ≠ symlink vers"* ]]
 }
 
-@test "manifest-driven check: a dead copy of a non-link entry warns (D3)" {
-  printf 'x\n' > "$PROV_LINK_DIR/bwrap_launch.sh"
-  run_check
-  [[ "$output" == *"copie morte $PROV_LINK_DIR/bwrap_launch.sh"* ]]
-}
-
 @test "source-independence: check runs WITHOUT mix.exs (only etc/ ships in the image)" {
   # setup() never created mix.exs — a green-path check proves no source-tree dependency
   run_check

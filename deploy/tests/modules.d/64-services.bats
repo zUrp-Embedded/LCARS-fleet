@@ -54,6 +54,7 @@ setup() {
   RESTART_TUE="$BATS_TEST_TMPDIR/restart-tue"
   SPIN="$BATS_TEST_TMPDIR/spinning"
   cat > "$BINDIR/systemctl" <<EOF
+#!/usr/bin/env bash
 echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "is-active" ]] && exit "\$(cat "$ACTIVE")"
 [[ "\$1" == "show" && -f "$SPIN" ]] && { u="\${@: -1}"; f="$RESTARTS/\${u%.service}"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
