@@ -6,24 +6,11 @@ defmodule Fleet.CapProfileTest do
 
   setup %{tmp_dir: tmp_dir} do
     Fleet.Test.CatalogueIsolation.isolate!(tmp_dir)
-    # Restore the exact prior state: if :root_dir was not set, DELETE it
-    # (not put_env(nil) — that leaks a nil into the shared umbrella env and
-    # crashes other apps' tests that read root_dir).
 
     :ok
   end
 
-  # ============================================================
-  # Fixtures
-  # ============================================================
-
-  # Minimal in-memory profile for kill_class/1. `slot` is optional: absent = the historical
-  # derivation from `lifetime`, which is what every profile that does not declare one still gets.
-  #
-  # ⚠ `brief_kind` A ETE AJOUTE LE 2026-08-20 (B1), ET C'EST UN AXE, PAS UN PARAMETRE DE PLUS. La
-  # classe de fauche ne trie plus sur le CYCLE DE VIE mais sur la MISSION : `"judge"` designe la
-  # classe 3. Une fixture qui ne le declare pas decrit donc un PRODUCTEUR — ce qui est le bon
-  # defaut, et ce que la plupart de ces cas veulent dire.
+  # Deliberately bypass the schema to isolate accessor rules, including missing fields.
   defp kc_prof(role_index, lifetime, slot \\ nil, brief_kind \\ "worker") do
     invocation =
       %{"lifetime_scope" => lifetime}
@@ -37,8 +24,6 @@ defmodule Fleet.CapProfileTest do
   end
 
   defp valid_profile_yaml do
-    # NB: no `apiVersion` — the field was REMOVED from the model (versioning lives in the code, R0.8-brick3);
-    # the strict schema (additionalProperties:false) rejects it as an unknown field.
     """
     kind: CapabilityProfile
     metadata:
@@ -77,7 +62,6 @@ defmodule Fleet.CapProfileTest do
     File.write!(Path.join(tmp_dir, "#{role}.yaml"), aligned)
   end
 
-  # G24-10..14 helpers: mutate a nested sub-field of the struct (string keys).
   defp put_invocation(struct, key, value) do
     put_in(struct, [Access.key!(:spec), "invocation", key], value)
   end
@@ -86,9 +70,7 @@ defmodule Fleet.CapProfileTest do
     put_in(struct, [Access.key!(:spec), "knowledge", key], value)
   end
 
-  # A fixture that stops being one-shot owes g24_15/g24_16 its declarations — that IS the invariant.
-  # Applied to the fixtures whose subject is another rule, so that a `:ok` there keeps asserting the
-  # rule under test and not the absence of these two.
+  # Satisfy g24_15/g24_16 in context-long fixtures whose subject is another invariant.
   defp declares_its_keying(struct) do
     struct
     |> put_invocation("slot_scope", "project")
@@ -125,10 +107,6 @@ defmodule Fleet.CapProfileTest do
     }
   end
 
-  # ============================================================
-  # load/1
-  # ============================================================
-
   describe "load/1" do
     test "loads a valid profile", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
@@ -154,10 +132,7 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("incomplete")
     end
 
-    # JG-022 — LE VERDICT REMONTAIT, LE DIAGNOSTIC RESTAIT SUR PLACE. `ExJsonSchema` rend la liste
-    # des violations avec leur pointeur JSON ; elle etait remplacee par un atome unique, et
-    # l'operateur apprenait que son profil est non conforme sans apprendre OU. L'atome de retour est
-    # le contrat gele des appelants et ne bouge pas : ce qui manquait etait une TRACE.
+    # Keep the callers' error atom while retaining violation locations in the log.
     test "JG-022: le REFUS nomme les violations — pointeur JSON compris", %{tmp_dir: tmp_dir} do
       write_role(
         tmp_dir,
@@ -181,11 +156,7 @@ defmodule Fleet.CapProfileTest do
 
     test "#27: metadata.name collision → {:error, :name_collision}, NOT a CaseClauseError",
          %{tmp_dir: tmp_dir} do
-      # Two catalogue files carrying the SAME metadata.name = broken deploy artifact.
-      # `name_index` returns {:error, :name_collision} (fail-loud, logged) — the `case` in
-      # `read_role` must propagate this variant too, otherwise load/spawn crashes with an
-      # opaque CaseClauseError instead of the intended tag. `list/1` already propagates it;
-      # `read_role` (the load/compose path) must do the same.
+      # Exercise collision propagation through both Catalog and the public loader.
       yaml =
         String.replace(valid_profile_yaml(), ~r/^(\s*name:).*$/m, "\\1 collide", global: false)
 
@@ -193,16 +164,12 @@ defmodule Fleet.CapProfileTest do
       File.write!(Path.join(tmp_dir, "dup-b.yaml"), yaml)
 
       assert {:error, :name_collision} = Fleet.CapProfile.Catalog.read_role("collide")
-      # the full public path propagates the same tag (never a crash)
       assert {:error, :name_collision} = Fleet.CapProfile.load("collide")
     end
 
     test "F-040: non-decodable YAML in the catalogue → :invalid_schema (not :not_found)",
          %{tmp_dir: tmp_dir} do
-      # Silently skipping a corrupt .yaml in `name_index` would make the role look ABSENT
-      # (:not_found) instead of corrupt (:invalid_schema). A non-decodable file = broken
-      # deploy artifact → fail-loud: the whole catalogue is poisoned (loading any role and
-      # `list/1` both return the error) — consistent with "we don't rescue a wounded thing".
+      # Corruption invalidates the catalogue scan, even when requesting another name.
       File.write!(Path.join(tmp_dir, "broken.yaml"), "a: [b, c\n")
 
       assert {:error, :invalid_schema} = Fleet.CapProfile.load("whatever-role")
@@ -233,10 +200,7 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
     end
 
-    # JG-023 — LE REESSAI EST L'ARBITRAGE, L'INONDATION ETAIT L'ACCIDENT. Ne pas memoriser l'echec
-    # est delibere (un schema redevenu lisible est repris sans redemarrage, cf. la relecture du
-    # secret HMAC). Mais chaque validation reecrivait la MEME ligne : une indisponibilite durable
-    # devenait proportionnelle au trafic, et la trace ou on l'aurait vue etait la premiere noyee.
+    # Retry failed schema reads for recovery without repeating the outage log on every request.
     test "JG-023: un schema durablement illisible parle UNE fois, pas une fois par validation", %{
       tmp_dir: tmp_dir
     } do
@@ -281,7 +245,6 @@ defmodule Fleet.CapProfileTest do
 
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
 
-      # Le schema redevient lisible : c'est CE cas que le non-memorisation de l'echec protege.
       for name <- ~w(cap-profile.json modop-profile.json reserved-seat.json) do
         src = Path.join([to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/schema", name])
         if File.exists?(src), do: File.cp!(src, Path.join(empty, name))
@@ -325,10 +288,6 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # compose/2
-  # ============================================================
-
   describe "compose/2" do
     test "with empty modop_set returns the base profile", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
@@ -343,8 +302,7 @@ defmodule Fleet.CapProfileTest do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
       assert {:ok, base} = Fleet.CapProfile.load("engineer")
 
-      # The catalogue disappears between load and compose: the epoch pinned at load must
-      # still compose (the two-read shape came back :not_found here — or, live, another epoch).
+      # Only the base file disappears; with no modops this tests reuse of the loaded base.
       File.rm!(Path.join(tmp_dir, "engineer.yaml"))
 
       assert {:ok, %Fleet.CapProfile{kind: "CapabilityProfile"}} =
@@ -365,9 +323,6 @@ defmodule Fleet.CapProfileTest do
       # last-wins: list replaced, not concatenated
       assert ["tool_search_extra"] = profile.spec["scope"]["disallowedTools"]
     end
-
-    # R0.8-brick3: test "rejects modop with reserved key apiVersion" removed
-    # — apiVersion is no longer a reserved key (the field no longer exists).
 
     test "rejects modop overriding metadata.containment", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
@@ -426,9 +381,6 @@ defmodule Fleet.CapProfileTest do
     test "modop_set order matters (precedence)", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
 
-      # A VALID free field (`spec.invocation.model`) demonstrates deep-merge precedence: the old
-      # `spec.lifetime_scope` sat at the WRONG level (the real field is `spec.invocation.lifetime_scope`),
-      # tolerated by the permissive schema — the strict schema rejects it.
       write_modop(tmp_dir, "m1", "spec:\n  invocation:\n    model: model-a\n")
       write_modop(tmp_dir, "m2", "spec:\n  invocation:\n    model: model-b\n")
 
@@ -440,7 +392,6 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.sha256(p_a) != Fleet.CapProfile.sha256(p_b)
     end
 
-    # Confinement E (WI-E2): a non-slug modop name NEVER traverses outside modop_root.
     test "rejects modop name with traversal (../) before Path.join", %{tmp_dir: tmp_dir} do
       write_role(tmp_dir, "engineer", valid_profile_yaml())
 
@@ -449,8 +400,7 @@ defmodule Fleet.CapProfileTest do
       File.mkdir_p!(escape)
       File.write!(Path.join(escape, "profile.yaml"), "spec:\n  lifetime_scope: pipe\n")
 
-      # Without the slug+confinement guard, `Path.join([root, "modop", "../../escape"])` would load
-      # this out-of-catalogue YAML. The guard rejects it BEFORE any FS access.
+      # Assert the name rejection; this test does not instrument filesystem access.
       assert {:error, :invalid_modop} =
                Fleet.CapProfile.compose("engineer", ["../../escape"])
 
@@ -464,10 +414,6 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # validate/1 — 9 G24 invariants
-  # ============================================================
-
   describe "validate/1" do
     test "passes on a valid profile" do
       assert :ok = Fleet.CapProfile.validate(valid_struct())
@@ -479,8 +425,6 @@ defmodule Fleet.CapProfileTest do
       assert :g24_1 in codes
     end
 
-    # R0.8-brick3: G24-2 (check_api_version) removed — apiVersion no longer
-    # exists in the struct or the schema (versioning lives in the code).
     test "G24-3 fails when kind is wrong" do
       profile = %{valid_struct() | kind: "Pod"}
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
@@ -493,15 +437,8 @@ defmodule Fleet.CapProfileTest do
       assert :g24_4 in codes
     end
 
-    # G24-5 removed: Face 2 doctrine — workers MAY push when the cap-profile
-    # allows it via the claude CLI allowedTools. The old invariant requiring
-    # `"push"` in git_ops_denied is obsolete. The baseline mechanism
-    # `baseline/git-denied.yaml` + `with_resolved_disallowed_tools/1`
-    # replaces it: forbids destructive patterns without blocking push.
-
-    # R13: canonical structure — `modop_set` is a MAP
-    # (default/optional/incompatible); the invariant reads the ACTIVE set
-    # (`active_modops/1`: the resolve decision, declared defaults as fallback).
+    # Git restrictions come from DisallowedTools' baseline plus profile policy;
+    # semantic validation does not require denying every push.
     test "G24-6 fails when both modops in incompatible pair are active" do
       profile =
         put_in(valid_struct(), [Access.key!(:spec), "modop_set"], %{
@@ -558,10 +495,6 @@ defmodule Fleet.CapProfileTest do
       assert :g24_6 in codes
     end
 
-    # R0.8-brick4: G24-7 (check_budget) removed — no API = no budget in
-    # cap-profiles. Response timeout is handled by Pod.monitor_timeout_ms/1
-    # (default per lifetime_scope).
-
     test "G24-8 fails when metadata.name is empty" do
       profile = put_in(valid_struct().metadata["name"], "")
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
@@ -588,19 +521,13 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # validate/1 — extensions G24-10..14 (BL-022)
-  # Reconciled DN↔actual: string keys, G24-12 without system_user,
-  # G24-13 (liveness) outside pure validate/1, G24-14 structural only.
-  # ============================================================
+  # G24-13 is retired; G24-14 checks field pairing without filesystem validation.
 
   describe "validate/1 — G24-10..14" do
     test "valid_struct (without the G24 fields) passes — back-compat defaults" do
-      # No boot_at_start/subagent_template/host_native/monk_* → all :ok.
       assert :ok = Fleet.CapProfile.validate(valid_struct())
     end
 
-    # --- G24-10: boot_at_start ⟹ forever ---
     test "G24-10 fails when boot_at_start: true but lifetime_scope != forever" do
       profile =
         valid_struct()
@@ -626,7 +553,6 @@ defmodule Fleet.CapProfileTest do
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
-    # --- G24-11: subagent_template ⟹ one-shot ---
     test "G24-11 fails when subagent_template set but lifetime_scope != one-shot" do
       profile =
         valid_struct()
@@ -639,7 +565,6 @@ defmodule Fleet.CapProfileTest do
 
     test "G24-11 passes when subagent_template set and lifetime_scope: one-shot" do
       profile = put_invocation(valid_struct(), "subagent_template", "implementer")
-      # valid_struct is already one-shot.
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
@@ -653,9 +578,7 @@ defmodule Fleet.CapProfileTest do
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
-    # --- G24-12: host_native ⟹ containment none (without system_user) ---
     test "G24-12 fails when host_native: true but containment != none" do
-      # valid_struct.metadata.containment == "bwrap".
       profile = put_invocation(valid_struct(), "host_native", true)
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
       assert :g24_12 in codes
@@ -670,7 +593,6 @@ defmodule Fleet.CapProfileTest do
       assert :ok = Fleet.CapProfile.validate(profile)
     end
 
-    # --- G24-14: monk_registry ⟺ monk_instance pairing ---
     test "G24-14 fails when monk_registry set without monk_instance" do
       profile = put_knowledge(valid_struct(), "monk_registry", "/some/registry.yaml")
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
@@ -721,9 +643,7 @@ defmodule Fleet.CapProfileTest do
     defp facing(struct, who), do: put_in(struct, [Access.key!(:spec), "interlocutor"], who)
 
     test "interlocutor `both` + remote_control false → REFUSED" do
-      # Not a restriction, a contradiction: the profile provisions the human protocol addendum
-      # into a terminal nobody can open. The pod holds a conversation contract with no counterpart
-      # and the fleet reports it healthy.
+      # A human conversation protocol requires a reachable terminal.
       profile =
         valid_struct()
         |> declares_its_keying()
@@ -746,10 +666,8 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "reached by SILENCE too: `both` + instance-keyed + undeclared derives invisible" do
-      # The check reads the EFFECTIVE answer, not the declared field. An instance-keyed role that
-      # declares nothing derives to invisible since 4.4 — the same contradiction, arrived at by
-      # omission instead of statement. g24_16 does not cover this one (it only forces a
-      # declaration from PROJECT-keyed roles).
+      # Validate the profile's derived preference too; g24_16 requires declarations only
+      # for project slots. This check does not apply the fleet debug override.
       profile =
         valid_struct()
         |> put_invocation("slot_scope", "instance")
@@ -781,7 +699,6 @@ defmodule Fleet.CapProfileTest do
 
   describe "from_map/1 (validated in-memory constructor — BND-001)" do
     test "schema-conformant map → {:ok, %CapProfile{}} (same validation as load)" do
-      # A nominal fixture (builder) IS schema-conformant; re-pass it as a map and from_map rebuilds it.
       p = Fleet.Support.CapProfileFixture.build()
       map = %{"kind" => p.kind, "metadata" => p.metadata, "spec" => p.spec}
 
@@ -789,8 +706,6 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "NON-conformant map (empty spec) → {:error, :invalid_schema} — never a silently forged profile" do
-      # THIS is the BND-001 hole: without from_map this shape gets hand-built as `%CapProfile{spec: %{}}`,
-      # schema short-circuited. The constructor REJECTS it (same verdict as load), it does not normalize it.
       raw = %{
         "kind" => "CapabilityProfile",
         "metadata" => %{"name" => "x", "containment" => "bwrap"},
@@ -815,14 +730,7 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # git_ops_denied_patterns/1 + with_resolved_disallowed_tools/1
-  # Catalogue→claude CLI mechanism (face 1 of the git architecture decision)
-  # ============================================================
-
   describe "wake_send_keys?/1" do
-    # 2026-07-19: false = flag-only pod (the kick loop never types into its terminal — set on
-    # the architect, interactive human session). Absent/nil-tolerant: default is TRUE.
     test "false in spec.invocation → fallback denied" do
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
@@ -850,7 +758,7 @@ defmodule Fleet.CapProfileTest do
   end
 
   describe "remote_control?/1" do
-    # Gates the Desktop-slot capture (a no-RC pod never registers → nothing to capture).
+    # Accessor preferences only; launch policy may add the fleet debug override.
     test "false in spec.invocation → invisible (no capture)" do
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
@@ -872,9 +780,6 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "absent + INSTANCE-keyed → invisible (a handle on a pod that dies with its ticket)" do
-      # This is the flat `true` default 4.4 removed. It was tenable while producers were one pod
-      # per repo; the day they fan out per ticket it is Desktop pollution proportional to the
-      # fan-out — which is precisely the direction the fleet is going.
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
         metadata: %{"name" => "engineer"},
@@ -908,9 +813,7 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "a non-boolean value falls to the DERIVATION, it is not read as truthy" do
-      # The schema types this field `boolean`, so a string is an invalid profile. The derivation is
-      # the narrower answer for an instance-keyed role, so an invalid field never opens a door by
-      # accident — the old `!= false` read `"false"` as visible.
+      # Invalid boolean falls back to slot policy: false here, but true for a project slot.
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
         metadata: %{"name" => "engineer"},
@@ -943,9 +846,6 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "les PRODUCTEURS → 2, y compris ceux qui sont one-shot" do
-      # ⚠ LE CŒUR DU CHANGEMENT DU 2026-08-20. `chief` est `lifetime_scope: one-shot` ET
-      # `brief_kind: worker` : l'ancien critère le classait 3, « jetable », dans le même seau que
-      # quatre juges. Fusionner est une EXÉCUTION — ce pod produit, il ne juge pas.
       assert Fleet.CapProfile.kill_class(kc_prof(15, "one-shot")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(3, "pipe", "instance")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(7, "pipe", "instance")) == 2
@@ -957,8 +857,6 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "L'ORDRE est l'invariant : lié au projet AVANT juge" do
-      # Inversé, un rôle qui parle à un humain ET qui juge tomberait en classe 3, donc dans un
-      # balayage de routine — au milieu d'une phrase. Le coût décide, pas l'étiquette.
       assert Fleet.CapProfile.kill_class(kc_prof(13, "forever", "project", "judge")) == 1
     end
 
@@ -976,32 +874,16 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "B3 — `lifetime_scope` décide encore DEUX choses, et plus la classe de fauche" do
-      # Son nom promet une durée de vie ; quatre valeurs le suggèrent ; c'est faux. La durée est
-      # décidée par un ÉVÉNEMENT DU RAIL (le sceau pour un producteur, l'ingestion du verdict pour
-      # un juge), jamais par cette énumération. Ce qui lui reste :
-      #
-      #   1. le RANGEMENT — `slot_scope` en dérive quand le profil n'en déclare pas ;
-      #   2. l'ADMISSION au spawn — résident re-briefé vs pod froid.
-      #
-      # On épingle (1) ici parce qu'il est pur ; (2) vit dans `Spawn.project_scope_decision/4`.
+      # This tests slot derivation only, not spawn admission or monitoring policy.
       assert Fleet.CapProfile.slot_scope(kc_prof(4, "one-shot")) == "instance"
       assert Fleet.CapProfile.slot_scope(kc_prof(4, "forever")) == "project"
 
-      # Et la dérivation continue de fonctionner alors que la classe, elle, ne la lit plus : les
-      # deux profils ci-dessus tombent dans la MÊME classe 2, malgré deux `lifetime_scope` opposés
-      # et deux `slot_scope` dérivés opposés.
+      # Lifetime still affects class indirectly through derived project scope: 2 versus 1.
       assert Fleet.CapProfile.kill_class(kc_prof(4, "one-shot")) == 2
       assert Fleet.CapProfile.kill_class(kc_prof(4, "forever")) == 1
     end
 
     test "un profil SANS `brief_kind` ne se range pas en producteur par défaut" do
-      # ⚠ TROUVÉ PAR RELECTURE ADVERSARIALE. `brief_kind/1` rend `nil` sans défaut, et
-      # `nil == "judge"` est faux : un profil forgé à la main tombait donc dans le `true ->` et se
-      # rangeait PRODUCTEUR, sans un mot. Un juge de fixture parmi les jetables — exactement
-      # l'erreur que B1 venait de corriger, réintroduite par le bas.
-      #
-      # On ne met pas de défaut à `"worker"` : ce serait faire l'inférence que le schéma interdit.
-      # On classe au plus cher et on le DIT.
       sans =
         %Fleet.CapProfile{
           kind: "CapabilityProfile",
@@ -1014,25 +896,13 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "CONTRE-PREUVE : le cycle de vie ne décide plus rien à lui seul" do
-      # ⚠ SANS CE TEST, LE CHANGEMENT SERAIT INDÉMONTRABLE. Deux profils au MÊME
-      # `lifetime_scope: one-shot` et au même `slot_scope` dérivé, qui tombent dans deux classes
-      # différentes : c'est exactement ce que l'ancien critère ne pouvait pas exprimer, et c'est
-      # pour ça qu'il mettait `chief` avec les juges.
+      # Hold lifetime and slot constant to isolate the effect of brief_kind.
       assert Fleet.CapProfile.kill_class(kc_prof(9, "one-shot", nil, "judge")) == 3
       assert Fleet.CapProfile.kill_class(kc_prof(9, "one-shot", nil, "worker")) == 2
     end
 
     test "le VRAI catalogue se range comme annoncé — mesuré, jamais recopié" do
-      # Le docstring de `kill_class/1` REFUSE d'inventorier les rôles, parce qu'un inventaire ment
-      # le jour où l'artefact bouge — il l'a déjà fait une fois (2026-08-11, `gatekeeper` classé 1
-      # alors que son profil portait `one-shot` depuis des semaines). Alors on ne recopie pas la
-      # liste : on la MESURE sur les profils installés.
-      #
-      # On lit les FICHIERS LIVRÉS (patron de `cap_profile_image_test`), pas le catalogue résolu :
-      # `load/1` dépend d'une racine que d'autres tests de ce module déplacent, et un test qui
-      # mesure des artefacts ne doit pas dépendre de l'ambiant de ses voisins. Ça permet en prime de
-      # couvrir les DEUX catalogues, système compris — donc `chief`, le seul rôle qui change de
-      # classe dans ce commit.
+      # Read both bundled catalogues directly: load/1 uses this module's temporary root.
       klass = fn catalogue, name ->
         path =
           Application.app_dir(
@@ -1045,17 +915,15 @@ defmodule Fleet.CapProfileTest do
         Fleet.CapProfile.kill_class(profile)
       end
 
-      # L'accueil, et l'architecte qui parle à un humain.
       assert klass.("catalogue-system", "starfleet") == 0
       assert klass.("catalogue-system", "architect") == 1
 
-      # Les producteurs — dont `chief`, qui portait 3 avant ce commit. Fusionner est une EXÉCUTION.
+      # Merging is execution, so chief belongs with producers.
       assert klass.("catalogue-system", "chief") == 2
       assert klass.("catalogue", "engineer") == 2
       assert klass.("catalogue", "scribe") == 2
 
-      # Les juges — et `scoper` en fait partie, ce qui n'allait pas de soi : il juge un BRIEF et non
-      # un livrable, mais il juge.
+      # Scoper judges a brief rather than a deliverable, but still belongs with judges.
       assert klass.("catalogue-system", "gatekeeper") == 3
       assert klass.("catalogue", "qualifier") == 3
       assert klass.("catalogue", "reviewer") == 3
@@ -1107,21 +975,15 @@ defmodule Fleet.CapProfileTest do
       patterns = Fleet.CapProfile.baseline_git_ops_denied_patterns()
 
       assert is_list(patterns)
-      # Intangible patterns expected in the baseline (may evolve;
-      # tests assert a canonical subset to catch regression without
-      # breaking on future additions).
+      # Assert a required subset while allowing additions to the baseline.
       assert "Bash(git push --force:*)" in patterns
       assert "Bash(git reset --hard:*)" in patterns
       assert "Bash(git rebase main:*)" in patterns
     end
 
     test "the floor lives OUTSIDE every catalogue tree — a catalogue cannot carry it" do
-      # THE point of `priv/cap_profile/baseline/` sitting outside the catalogue, asserted on the LAYOUT
-      # and not on a read: the resolver caches its parse in `:persistent_term` for the life of the
-      # VM, so a test that repoints the root and re-reads would pass on a warm cache without
-      # exercising a single path. What can be checked, and is what actually protects the floor:
-      # the file is under no tree `Fleet.Catalogue` exports, so no catalogue export can carry a
-      # copy for its author to edit to no effect.
+      # Check layout directly: a cached baseline read would not exercise a repointed root.
+      # Exported catalogue trees must not carry an editable but ineffective baseline copy.
       priv = to_string(:code.priv_dir(:lcars_fleet))
       floor = Path.join(priv, "cap_profile/baseline/git-denied.yaml")
 
@@ -1157,8 +1019,7 @@ defmodule Fleet.CapProfileTest do
         spec: %{
           "scope" => %{
             "disallowedTools" => ["web_search", "code_execution"],
-            # Worker pattern NOT present in the universal baseline — assert
-            # it gets added without breaking the baseline.
+            # Outside the baseline so the assertion exercises profile-specific additions.
             "git_ops_denied" => ["push some-feature-branch"]
           }
         }
@@ -1167,12 +1028,9 @@ defmodule Fleet.CapProfileTest do
       resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
       disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
 
-      # Existing entries preserved at the head, in order.
       assert ["web_search", "code_execution" | _] = disallowed
-      # Universal baseline applied.
       assert "Bash(git push --force:*)" in disallowed
       assert "Bash(git reset --hard:*)" in disallowed
-      # Profile-specific entry applied.
       assert "Bash(git push some-feature-branch:*)" in disallowed
     end
 
@@ -1186,7 +1044,6 @@ defmodule Fleet.CapProfileTest do
       resolved = Fleet.CapProfile.with_resolved_disallowed_tools(profile)
       disallowed = get_in(resolved.spec, ["scope", "disallowedTools"])
 
-      # The universal baseline is always applied — intangible protection.
       assert "Bash(git push --force:*)" in disallowed
       assert "Bash(git reset --hard:*)" in disallowed
     end
@@ -1240,10 +1097,6 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # sha256/1 — canonical encoder properties
-  # ============================================================
-
   describe "sha256/1" do
     test "stable across 100 invocations on the same map" do
       map = %{"a" => 1, "b" => %{"c" => [1, 2], "d" => "x"}, "e" => true}
@@ -1262,18 +1115,11 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "R0-CAP-014: key collision after stringification → raise (unambiguous hash)" do
-      # `:k` and `"k"` both stringify to "k" → ambiguous canonical form → fail-loud refusal
-      # rather than an unstable hash depending on Map iteration order.
       assert_raise ArgumentError, ~r/key collision/, fn ->
         Fleet.CapProfile.CanonicalJson.encode(%{:k => 1, "k" => 2})
       end
     end
   end
-
-  # ============================================================
-  # Role catalogue → session_id: role_index / protected? / fleet_level? / catalogued?
-  # (the source of the WHAT lives here, not in Fleet.Spawner.SessionId — the encoder does not catalogue)
-  # ============================================================
 
   describe "catalogue accessors (role_index/protected?/fleet_level?/catalogued?)" do
     defp role_struct(metadata),
@@ -1284,7 +1130,6 @@ defmodule Fleet.CapProfileTest do
       assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 0})) == 0
       assert Fleet.CapProfile.role_index(role_struct(%{"role_index" => 15})) == 15
 
-      # absent, non-integer, AND outside the nibble's 4 bits (16, -1) → raise (invalid nibble)
       for bad <- [
             %{"name" => "ad-hoc"},
             %{"role_index" => "3"},
@@ -1298,15 +1143,13 @@ defmodule Fleet.CapProfileTest do
     test "R0-CAP-005: with_project stringifies keys (preserves the deep-string-keys invariant)" do
       cap = valid_struct()
 
-      # ATOM-keyed project (what a brief/dispatch may pass) → must come out with STRING keys
       eff = Fleet.CapProfile.with_project(cap, %{repo_path: "/r", nested: %{a: 1}})
 
       assert eff.spec["project"] == %{"repo_path" => "/r", "nested" => %{"a" => 1}}
     end
 
     test "protected?/1 + fleet_level?/1 are GONE (reorg 2026-07-19 — collapsed into role_index 0)" do
-      # Both bits died when every non-starfleet role went per-project: the kill tier is kill_class/1,
-      # the fleet-scope (repo 0000) is `role_index == 0` at the mint. The schema rejects the fields.
+      # Harvest uses kill_class/1; the mint reserves fleet scope (repo 0000) for role index zero.
       refute function_exported?(Fleet.CapProfile, :protected?, 1)
       refute function_exported?(Fleet.CapProfile, :fleet_level?, 1)
     end
@@ -1316,8 +1159,7 @@ defmodule Fleet.CapProfileTest do
       refute Fleet.CapProfile.catalogued?(role_struct(%{"name" => "ad-hoc"}))
       refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => "0"}))
 
-      # consistency with role_index/1: an index OUTSIDE 0..15 is not catalogued (otherwise
-      # catalogued?=true but role_index/1 raises → broken contract).
+      # Presence must agree with role_index/1's accepted range.
       refute Fleet.CapProfile.catalogued?(role_struct(%{"role_index" => 16}))
     end
 
@@ -1330,23 +1172,16 @@ defmodule Fleet.CapProfileTest do
         }
       end
 
-      # one-shot = cold, independent → fan-out → instance
       assert Fleet.CapProfile.slot_scope(life.("one-shot")) == "instance"
 
-      # context-long (pipe/run/forever) = one instance keeping its context → unique/serialized → project
       assert Fleet.CapProfile.slot_scope(life.("pipe")) == "project"
       assert Fleet.CapProfile.slot_scope(life.("run")) == "project"
       assert Fleet.CapProfile.slot_scope(life.("forever")) == "project"
 
-      # lifetime absent (empty spec) → default one-shot → instance: the SAFE failure mode
-      # (ephemeral/fan-out, never a shared Desktop slot claimed by mistake).
+      # Missing lifetime must not claim a shared project identity.
       assert Fleet.CapProfile.slot_scope(role_struct(%{"name" => "ad-hoc"})) == "instance"
     end
   end
-
-  # ============================================================
-  # Property-based generators
-  # ============================================================
 
   defp leaf_gen do
     one_of([
@@ -1404,9 +1239,7 @@ defmodule Fleet.CapProfileTest do
               "git_ops_denied" => ["push"]
             },
             "knowledge" => %{},
-            # g24_15/g24_16: a VALID profile declares its keying whenever the derivation would be a
-            # choice. Generating them always is not a weakening — the generator's job is to produce
-            # profiles that pass, and a one-shot simply carries a redundant (still legal) value.
+            # Satisfy g24_15/g24_16 for semantic validation. This generator bypasses the schema.
             "invocation" => %{
               "lifetime_scope" => lifetime,
               "slot_scope" => slot_scope,
@@ -1419,10 +1252,6 @@ defmodule Fleet.CapProfileTest do
       end
     )
   end
-
-  # ============================================================
-  # Property-based — sha256 stability + canonical encoder
-  # ============================================================
 
   property "sha256 is stable across two consecutive calls on flat maps" do
     check all(
@@ -1462,19 +1291,11 @@ defmodule Fleet.CapProfileTest do
     end
   end
 
-  # ============================================================
-  # Property-based — G24 conformance on random valid profiles
-  # ============================================================
-
   property "validate/1 returns :ok on randomly generated valid profiles" do
     check all(profile <- valid_profile_struct_gen(), max_runs: 50) do
       assert :ok = Fleet.CapProfile.validate(profile)
     end
   end
-
-  # R0.8-brick3: G24-2 property removed — apiVersion is no longer in the
-  # struct, the `check_api_version` check is gone (the v2 release code
-  # serves as versioning, not an embedded field).
 
   property "G24-1 violation detected when containment is unknown" do
     check all(profile <- valid_profile_struct_gen(), max_runs: 30) do
@@ -1560,8 +1381,6 @@ defmodule Fleet.CapProfileTest do
   end
 
   describe "resolve/3 (catalogue chantier L1a — the single launch-site authority)" do
-    # A loader that records what `compose` was called with, so we prove resolve composes
-    # `default_modops(base) ++ extra` — the whole point (no divergence across launch sites).
     defmodule RecordingLoader do
       def load("engineer"),
         do:
@@ -1575,8 +1394,7 @@ defmodule Fleet.CapProfileTest do
              }
            }}
 
-      # The seam receives the loaded BASE (same epoch as the guard's checks), never the
-      # role name — a name would mean a second catalogue read.
+      # Reuse the checked base; a role name would trigger another base read.
       def compose(%Fleet.CapProfile{} = base, modops) do
         send(self(), {:composed, base, modops})
 
@@ -1606,16 +1424,12 @@ defmodule Fleet.CapProfileTest do
                        ["rubber-duck", "tdd"]}
     end
 
-    # THE regression this closes. `compose/2` returns a profile that no longer says WHICH modops were
-    # asked for — here it returns `spec: %{}`, so `default_modops/1` of the RESULT is `[]`. The spawn
-    # path used to re-derive the SP's modop list from that result, so a step's optional modop was
-    # validated by the B-01 guard above and then silently never reached `SPBuilder.compose`.
+    # The stub erases spec: active modops must survive separately for SPBuilder to use them.
     test "the ACTIVE modops survive the composition (this is what reaches the pod's system prompt)" do
       assert {:ok, profile} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
 
       assert Fleet.CapProfile.active_modops(profile) == ["rubber-duck", "tdd"]
 
-      # Same profile, re-derived the old way: the step's `tdd` is gone — and so was its `sp.md`.
       assert Fleet.CapProfile.default_modops(profile) == []
     end
 
@@ -1634,7 +1448,6 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :not_found} = Fleet.CapProfile.resolve(LoadOnlyLoader, "ghost")
     end
 
-    # B-01 guard: a step can only activate a modop the ROLE declares in its `optional`.
     test "extra modop IN the role's optional → allowed (engineer + tdd)" do
       assert {:ok, _} = Fleet.CapProfile.resolve(RecordingLoader, "engineer", ["tdd"])
 
