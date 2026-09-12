@@ -20,7 +20,8 @@ setup() {
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   GEN="$BATS_TEST_DIRNAME/../../lib/door-gen.sh"
   TEMPLATE="$BATS_TEST_DIRNAME/../../../install.sh"
-  [ -f "$GEN" ] && [ -f "$TEMPLATE" ]
+  [ -f "$GEN" ]
+  [ -f "$TEMPLATE" ]
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
   printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
   printf 'a1\n' > "$DIST/annexe-a.bin"
@@ -128,7 +129,9 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
   grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
   local l_tar l_door; l_tar="$(grep -nE '^tar -czf "\$OUT"' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
-  [ -n "$l_tar" ] && [ -n "$l_door" ] && [ "$l_tar" -lt "$l_door" ]
+  [ -n "$l_tar" ]
+  [ -n "$l_door" ]
+  [ "$l_tar" -lt "$l_door" ]
   # LCARS_DOOR_BASE surcharge la base (les bancs servent en local)
   grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
   # le compose et le profil seccomp de la version entrent au tiroir, donc dans la table de la porte

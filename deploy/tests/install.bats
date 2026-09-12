@@ -90,7 +90,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   l_main="$(grep -n '^main() {$' "$SRC" | head -1 | cut -d: -f1)"
   l_appel="$(grep -n '^{ main "\$@"; }$' "$SRC" | head -1 | cut -d: -f1)"
   total="$(wc -l < "$SRC")"
-  [ -n "$l_main" ] && [ "$l_appel" -eq "$total" ]
+  [ -n "$l_main" ]
+  [ "$l_appel" -eq "$total" ]
   # hors de main : le shebang, l'en-tête, set, la version, la fermeture et l'appel
   local hors; hors="$(awk -v m="$l_main" -v a="$l_appel" 'NR<m || NR>=a' "$SRC" | grep -vE '^\s*#|^\s*$|^set -euo pipefail$|^LCARS_DOOR_VERSION=|^}$|^\{ main' || true)"
   [ -z "$hors" ] || { echo "hors de main : $hors" >&2; return 1; }
@@ -119,9 +120,11 @@ porte() { # porte <arbre> [args…] — sans TTY
 
 @test "--version répond, pipée aussi, sans lire de fichier" {
   run bash "$SRC" --version
-  [ "$status" -eq 0 ] && [ "$output" = "$(sed -n 's/^LCARS_DOOR_VERSION="\([^"]*\)".*/\1/p' "$SRC")" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(sed -n 's/^LCARS_DOOR_VERSION="\([^"]*\)".*/\1/p' "$SRC")" ]
   run bash -c "cat '$SRC' | bash -s -- --version"
-  [ "$status" -eq 0 ] && [ -n "$output" ]
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
 }
 
 @test "--help marche sans docker et pipée, et nomme tous les drapeaux acceptés" {
@@ -132,7 +135,8 @@ porte() { # porte <arbre> [args…] — sans TTY
     [[ "$output" == *"$f"* ]] || { echo "aide sans $f" >&2; return 1; }
   done
   run bash -c "cat '$SRC' | bash -s -- --help"
-  [ "$status" -eq 0 ] && [[ "$output" == *"--workstation"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--workstation"* ]]
 }
 
 @test "les drapeaux retirés font rater le script en se nommant" {
@@ -143,7 +147,8 @@ porte() { # porte <arbre> [args…] — sans TTY
     [[ "$output" == *"$f est retiré"* ]]
   done
   run bash "$SRC" --inconnu < /dev/null
-  [ "$status" -eq 1 ] && [[ "$output" == *"Option inconnue"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Option inconnue"* ]]
 }
 
 @test "--substrate invalide est refusé au parsing, avant toute mesure" {
@@ -244,7 +249,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   porte "$a"
   [ "$status" -eq 1 ]
   [[ "$output" == *"Aucune n'est indiquée"* ]]
-  [[ "$output" == *"--bench"* ]] && [[ "$output" == *"FORGE_BASE_URL=https://"* ]]
+  [[ "$output" == *"--bench"* ]]
+  [[ "$output" == *"FORGE_BASE_URL=https://"* ]]
   refute grep -q 'CONTAINER:\|Installation en conteneur' <<<"$output"
 }
 
@@ -258,18 +264,22 @@ porte() { # porte <arbre> [args…] — sans TTY
 @test "docker absent sous WSL arrête les deux modes ; refusé arrête aussi" {
   local a; a="$(_arbre docker=absent "docker_why=aucun daemon")"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"Docker est absent"*"intégration WSL de Docker Desktop"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker est absent"*"intégration WSL de Docker Desktop"* ]]
   porte "$a" --bench --workstation
-  [ "$status" -eq 1 ] && [[ "$output" == *"Docker est absent"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker est absent"* ]]
   a="$(_arbre docker=refuse "docker_why=la socket est root:docker")"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"refuse cet utilisateur"*"root:docker"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refuse cet utilisateur"*"root:docker"* ]]
 }
 
 @test "sur Linux dédié, docker absent arrête le conteneur et passe pour le système, qui le posera" {
   local a; a="$(_arbre substrat=linux consent=env docker=absent "docker_why=aucun daemon")"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"Docker est absent"*"LCARS_ALLOW_ANY_HOST=1"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker est absent"*"LCARS_ALLOW_ANY_HOST=1"* ]]
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"Docker     absent · sera posé par l'installation"* ]]
@@ -283,7 +293,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"sans déclaration"*"LCARS_ALLOW_ANY_HOST=1"*"--workstation"* ]]
   a="$(_arbre substrat=linux consent=env)"
   porte "$a" --bench --workstation --check
-  [ "$status" -eq 0 ] && [[ "$output" == *"Installation dans ce système"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Installation dans ce système"* ]]
 }
 
 @test "--workstation hors WSL et hors Linux est refusé, et le conteneur est nommé" {
@@ -297,7 +308,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
   local a; a="$(_arbre)"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"namespaces utilisateur"*"wsl --set-version"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"namespaces utilisateur"*"wsl --set-version"* ]]
 }
 
 @test "un port demandé déjà tenu arrête et nomme les drapeaux qui déplacent" {
@@ -310,7 +322,8 @@ porte() { # porte <arbre> [args…] — sans TTY
 @test "un projet compose déjà présent arrête le mode conteneur, pas le mode système" {
   local a; a="$(_arbre projet_pris=lcars-fleet)"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"lcars-fleet » existe déjà"*"--forge-project"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars-fleet » existe déjà"*"--forge-project"* ]]
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
 }
@@ -318,16 +331,19 @@ porte() { # porte <arbre> [args…] — sans TTY
 @test "outils manquants : arrêt qui les nomme" {
   local a; a="$(_arbre git=absent)"
   porte "$a" --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"Outils manquants : git"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Outils manquants : git"* ]]
 }
 
 @test "le canal : un autre canal en place arrête --workstation, illisible aussi ; aucun ou inconnu continuent" {
   local a; a="$(_arbre channel=kit channel_tree=source)"
   porte "$a" --bench --workstation
-  [ "$status" -eq 1 ] && [[ "$output" == *"installée par « kit »"*"« source »"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"installée par « kit »"*"« source »"* ]]
   a="$(_arbre channel=invalide)"
   porte "$a" --bench --workstation
-  [ "$status" -eq 1 ] && [[ "$output" == *"illisible"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"illisible"* ]]
   a="$(_arbre channel=inconnu)"
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
@@ -407,7 +423,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"Installation dans ce système — deploy/workstation up"* ]]
   [[ "$output" == *"WORKSTATION:up --substrate wsl --human alice --port-deck 20091"* ]]
   # --bench sur ce mode : la forge montée et le compte de démonstration, transmis par l'environnement
-  [[ "$output" == *"LCARS_BUILTIN_HUMAN=lcars"* ]] && [[ "$output" == *"PROV_FORGE_MONTEE=1"* ]]
+  [[ "$output" == *"LCARS_BUILTIN_HUMAN=lcars"* ]]
+  [[ "$output" == *"PROV_FORGE_MONTEE=1"* ]]
   refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"   # sudo est l'affaire du délégué
   porte "$a" --workstation
   [ "$status" -eq 1 ]   # sans forge : arrêt, pas de montée silencieuse
@@ -417,7 +434,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   local a; a="$(_arbre)"
   rm "$a/deploy/workstation"
   porte "$a" --workstation --bench
-  [ "$status" -eq 1 ] && [[ "$output" == *"deploy/workstation introuvable"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"deploy/workstation introuvable"* ]]
 }
 
 # ─── l'instance, quand on va la posséder ──────────────────────────────────────────────────────
@@ -466,7 +484,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   done
   # Ctrl-D : un terminal sans réponse est un abandon, pas une absence de terminal
   run bash -c "script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null < /dev/null"
-  [[ "$output" == *"Rien n'a été fait"* ]] && [[ "$output" != *"WORKSTATION:up"* ]]
+  [[ "$output" == *"Rien n'a été fait"* ]]
+  [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
 # ─── la provenance release : le kit de la version, vérifié ───────────────────────────────────
@@ -541,7 +560,8 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   pipee --bench --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"--check : rien n'est téléchargé"*"La commande serait : deploy/container --bench up"* ]]
-  [ ! -s "$SERVEUR_LOG" ] && [ ! -d "$HOME/.lcars" ]
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -d "$HOME/.lcars" ]
 }
 
 @test "--repo l'emporte sur la base gravée dans la porte" {
@@ -563,7 +583,9 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   # relancée : déjà là, vérifié, rien de retéléchargé
   : > "$SERVEUR_LOG"
   pipee --workstation --bench
-  [ "$status" -eq 0 ] && [[ "$output" == *"déjà là, sha256 vérifié"* ]] && [ ! -s "$SERVEUR_LOG" ]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"déjà là, sha256 vérifié"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
 }
 
 @test "pipée en mode conteneur : même kit, exec deploy/container depuis le kit" {
@@ -580,7 +602,8 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   pipee --workstation --bench
   [ "$status" -ne 0 ]
   [[ "$output" == *"attendu "*"00000000"*", obtenu "*"rien n'est posé"* ]]
-  [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ] && [ ! -d "$KITS/lcars_install" ]
+  [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ]
+  [ ! -d "$KITS/lcars_install" ]
   refute grep -q 'WORKSTATION:' <<<"$output"
 }
 
@@ -597,7 +620,9 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   _release
   unset LCARS_DOOR_INSECURE_HTTP
   pipee --workstation --bench
-  [ "$status" -ne 0 ] && [[ "$output" == *"n'est pas https"* ]] && [ ! -s "$SERVEUR_LOG" ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"n'est pas https"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
   grep -q -- "curl --proto \"\$proto\" --tlsv1.2 -fsSL" "$SRC"
 }
 
@@ -605,17 +630,21 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   _release
   local pub="RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
   PORTE="$(_porte "$DIST" "$pub")"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
   pipee --workstation --bench
-  [ "$status" -ne 0 ] && [[ "$output" == *".minisig introuvable"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *".minisig introuvable"* ]]
   printf 'untrusted comment: x\nRUQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3AAAA\ntrusted comment: x\nAAAA\n' > "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
   pipee --workstation --bench
-  [ "$status" -ne 0 ] && [[ "$output" == *"signature de lcars-fleet-$TAG-otp27-x86_64.tar.gz invalide"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"signature de lcars-fleet-$TAG-otp27-x86_64.tar.gz invalide"* ]]
   [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ]
   rm "$BINDIR/minisign"
   command -v minisign >/dev/null && skip "minisign est réellement installé ici : l'absence ne se joue pas"
   pipee --workstation --bench
-  [ "$status" -eq 0 ] && [[ "$output" == *"minisign absent : provenance non vérifiée"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minisign absent : provenance non vérifiée"* ]]
 }
 
 @test "--dry-run pipée : les artefacts et leurs sha256, rien de téléchargé, la sortie dite" {
@@ -625,7 +654,8 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   local a="lcars-fleet-$TAG-otp27-x86_64.tar.gz"
   [[ "$output" == *"$a "*"sha256 $(sha256sum "$DIST/$a" | cut -d' ' -f1)"* ]]
   [[ "$output" == *"rien n'est téléchargé"*"deploy/workstation up --from <kit>"* ]]
-  [ ! -s "$SERVEUR_LOG" ] && [ ! -d "$HOME/.lcars" ]
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -d "$HOME/.lcars" ]
   # une fois le kit posé, --dry-run dit la commande exacte, --from compris
   pipee --workstation --bench
   [ "$status" -eq 0 ]

@@ -33,7 +33,8 @@ setup() {
 
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   RUNNER="$BATS_TEST_DIRNAME/../provision"
-  [ -f "$LIB" ] && [ -f "$RUNNER" ]
+  [ -f "$LIB" ]
+  [ -f "$RUNNER" ]
 
   export PROVISION_LIB="$LIB"
   export PROVISION_MODULE=test-journal
@@ -214,7 +215,8 @@ SH
   local n_note n_apt
   n_note="$(grep -n 'prov_journal_note apt_already' <<<"$body" | head -1 | cut -d: -f1)"
   n_apt="$(grep -n 'apt-get install' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_note" ] && [ -n "$n_apt" ]
+  [ -n "$n_note" ]
+  [ -n "$n_apt" ]
   [ "$n_note" -lt "$n_apt" ]
 }
 
@@ -232,7 +234,8 @@ SH
   local n_seal n_recap
   n_seal="$(grep -n 'JOURNAL_FILE"' <<<"$body" | head -1 | cut -d: -f1)"
   n_recap="$(grep -n 'provision \$CMD — substrat' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_seal" ] && [ -n "$n_recap" ]
+  [ -n "$n_seal" ]
+  [ -n "$n_recap" ]
   [ "$n_seal" -lt "$n_recap" ]
   # une ecriture ratee se DIT, elle ne `die` pas
   grep -q 'journal NON écrit' <<<"$body"
@@ -290,7 +293,9 @@ SH
   local n_lire n_ecrire
   n_lire="$(grep -n '_journal_ancien=' <<<"$body" | head -1 | cut -d: -f1)"
   n_ecrire="$(grep -n '} > "\$JOURNAL_FILE"' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_lire" ] && [ -n "$n_ecrire" ] && [ "$n_lire" -lt "$n_ecrire" ]
+  [ -n "$n_lire" ]
+  [ -n "$n_ecrire" ]
+  [ "$n_lire" -lt "$n_ecrire" ]
 }
 
 @test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
@@ -337,14 +342,16 @@ SH
 @test "M8 : prov_scaffold_dir puis prov_promote_dir — l'echafaudage disparait, le final est la" {
   lib "PROV_JOURNAL_ACC='$ACC'; prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
-  [ -f "$BATS_TEST_TMPDIR/final/x" ] && [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
+  [ -f "$BATS_TEST_TMPDIR/final/x" ]
+  [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
 }
 
 @test "M8 : prov_promote_dir REMPLACE un final existant (la bascule est un rm -rf + mv, comme avant)" {
   mkdir -p "$BATS_TEST_TMPDIR/final/vieux"
   lib "prov_scaffold_dir '$BATS_TEST_TMPDIR/final.new' 0755 >/dev/null; prov_promote_dir '$BATS_TEST_TMPDIR/final.new' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ]
-  [ -d "$BATS_TEST_TMPDIR/final" ] && [ ! -e "$BATS_TEST_TMPDIR/final/vieux" ]
+  [ -d "$BATS_TEST_TMPDIR/final" ]
+  [ ! -e "$BATS_TEST_TMPDIR/final/vieux" ]
 }
 
 @test "M8 : aucun module ne cree son echafaudage par ensure_dir — et trois au moins passent par la primitive" {
@@ -353,7 +360,8 @@ SH
   [ -z "$hits" ] || { echo "echafaudage journalise :" >&2; printf '%s\n' "$hits" >&2; return 1; }
   n_scaffold="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_scaffold_dir ')"
   n_promote="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_promote_dir ')"
-  [ "$n_scaffold" -ge 3 ] && [ "$n_promote" -ge 3 ]
+  [ "$n_scaffold" -ge 3 ]
+  [ "$n_promote" -ge 3 ]
   # le motif voit bien la forme interdite
   grep -qE 'ensure_dir "[^"]*\.(partial|new)"' <<<'  ensure_dir "${NODE_HOME}.partial" 0755 root:root || verdict_apply'
 }

@@ -65,12 +65,14 @@ lib() { run bash -c "set -euo pipefail; source '$LIB'; $1"; }
 
 @test "forge_admin_ensure : crée le compte admin, ou dit qu'il est présent, ou rend l'erreur de la forge ; le mot de passe voyage par l'environnement" {
   lib 'forge_admin_ensure docker gitea-1 bob s3cret'
-  [ "$status" -eq 0 ] && [ "$output" = "cree" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "cree" ]
   grep -q 'DOCKER:exec -e PW -u git gitea-1 sh -c gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false _ bob' "$CALLS"
   grep -qx 'PW=s3cret' "$CALLS"
   refute grep -q 'DOCKER:.*s3cret' "$CALLS"
   STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists [name: bob]" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
-  [ "$status" -eq 0 ] && [ "$output" = "present" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "present" ]
   STUB_CREATE_RC=1 STUB_CREATE_ERR="database is locked" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
   [ "$status" -eq 1 ]
   [[ "$output" == *"database is locked"* ]]
@@ -86,10 +88,12 @@ lib() { run bash -c "set -euo pipefail; source '$LIB'; $1"; }
 
 @test "forge_master_token : rend le jeton minté, et 1 quand la forge n'en rend aucun" {
   lib 'forge_master_token docker gitea-1 bob poste-1'
-  [ "$status" -eq 0 ] && [ "$output" = "tok-123" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "tok-123" ]
   grep -q 'generate-access-token --username bob --token-name poste-1 --scopes all --raw' "$CALLS"
   STUB_TOKEN="" lib 'forge_master_token docker gitea-1 bob'
-  [ "$status" -eq 1 ] && [ -z "$output" ]
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "forge_seed_new : vingt caractères alphanumériques, deux tirages différents" {
@@ -122,16 +126,20 @@ lib() { run bash -c "set -euo pipefail; source '$LIB'; $1"; }
 
 @test "bench_human_seed : un refus de la forge, une promotion qui ne prend pas, un jeton absent — chacun nommé, rien rendu" {
   STUB_PATCH_CODE=403 lib 'bench_human_seed http://f:1 tok lcars pw'
-  [ "$status" -eq 1 ] && [[ "$output" == *"refuse le compte « lcars » (HTTP 403)"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refuse le compte « lcars » (HTTP 403)"* ]]
   STUB_IS_ADMIN=false lib 'bench_human_seed http://f:1 tok lcars pw'
-  [ "$status" -eq 1 ] && [[ "$output" == *"n'est pas site-admin"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas site-admin"* ]]
   STUB_TOKEN_RESP='{"message":"nope"}' lib 'bench_human_seed http://f:1 tok lcars pw'
-  [ "$status" -eq 1 ] && [[ "$output" == *"jeton opérateur"*"nope"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"jeton opérateur"*"nope"* ]]
 }
 
 @test "les mots de passe du banc sont ceux du contrat, et une variable les remplace" {
   lib 'bench_admiral_password; bench_human_password'
-  [ "${lines[0]}" = "toto123456" ] && [ "${lines[1]}" = "toto32toto32" ]
+  [ "${lines[0]}" = "toto123456" ]
+  [ "${lines[1]}" = "toto32toto32" ]
   LCARS_BENCH_ADMIRAL_PW=autre lib 'bench_admiral_password'
   [ "$output" = "autre" ]
 }

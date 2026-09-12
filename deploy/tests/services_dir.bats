@@ -24,7 +24,9 @@ setup() {
   MOD="$REPO/deploy/modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$REPO/deploy/docker/Dockerfile"
   SERVICES="$REPO/runtime/services"
-  [ -f "$MOD" ] && [ -f "$DOCKERFILE" ] && [ -d "$SERVICES" ]
+  [ -f "$MOD" ]
+  [ -f "$DOCKERFILE" ]
+  [ -d "$SERVICES" ]
 }
 
 # La liste des auxiliaires, EXTRAITE du module — jamais recopiee : un instrument qui mesure une copie

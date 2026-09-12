@@ -33,7 +33,8 @@ setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   LIB="$DEPLOY/lib/provision-lib.sh"
   RUNNER="$DEPLOY/provision"
-  [ -f "$LIB" ] && [ -f "$RUNNER" ]
+  [ -f "$LIB" ]
+  [ -f "$RUNNER" ]
   export PROVISION_LIB="$LIB"
   # ⚠ EXPORTEE : `lib()` joue dans un `bash -c`, ou une variable non exportee est VIDE. Sans cela
   # `prov_file_state ""` sondait la chaine vide, dont le `dirname` est « . » — toujours traversable,
@@ -249,7 +250,8 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   local n_garde n_drift
   n_garde="$(grep -n 'NON MESURABLE' <<<"$bloc" | head -1 | cut -d: -f1)"
   n_drift="$(grep -n 'release absente sous' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ] && [ -n "$n_drift" ]
+  [ -n "$n_garde" ]
+  [ -n "$n_drift" ]
   [ "$n_garde" -lt "$n_drift" ]
 }
 
@@ -262,6 +264,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   local n_garde n_drift
   n_garde="$(grep -n 'non sondable' <<<"$bloc" | head -1 | cut -d: -f1)"
   n_drift="$(grep -n 'aucun LCARS_SYSADMIN_UID' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ] && [ -n "$n_drift" ]
+  [ -n "$n_garde" ]
+  [ -n "$n_drift" ]
   [ "$n_garde" -lt "$n_drift" ]
 }

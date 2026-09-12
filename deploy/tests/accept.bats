@@ -278,10 +278,12 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
   LCARS_BENCH=1 joue
   [ "$status" -eq 0 ]
   [[ "$output" == *"OUI"*"laissee debout"* ]]
-  [ -e "$MARQUEUR" ] && [ -e "$MARQUEUR.sans-claude" ]
+  [ -e "$MARQUEUR" ]
+  [ -e "$MARQUEUR.sans-claude" ]
   rm -f "$MARQUEUR" "$MARQUEUR.sans-claude"
   joue
-  [ ! -e "$MARQUEUR" ] && [ ! -e "$MARQUEUR.sans-claude" ]
+  [ ! -e "$MARQUEUR" ]
+  [ ! -e "$MARQUEUR.sans-claude" ]
 }
 
 @test "start en ECHEC : refus qui renvoie vers la plainte du lanceur" {

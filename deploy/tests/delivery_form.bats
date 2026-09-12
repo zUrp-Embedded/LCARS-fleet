@@ -202,7 +202,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # doit mesurer est le GESTE de copie, et lui seul.
   n_rel="$(grep -n 'cp -a runtime/_build/prod/rel/lcars_fleet' "$pack" | head -1 | cut -d: -f1)"
   n_doc="$(grep -n 'cp -a "\$SITE_SRC/dist"' "$pack" | head -1 | cut -d: -f1)"
-  [ -n "$n_rel" ] && [ -n "$n_doc" ]
+  [ -n "$n_rel" ]
+  [ -n "$n_doc" ]
   [ "$n_rel" -lt "$n_doc" ]
   # et le tar se ferme APRES les deux
   local n_tar; n_tar="$(grep -n 'tar -czf' "$pack" | head -1 | cut -d: -f1)"
@@ -233,7 +234,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   local n_bin n_npm
   n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
   n_npm="$(grep -n 'command -v "\$NPM_BIN"' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_bin" ] && [ -n "$n_npm" ]
+  [ -n "$n_bin" ]
+  [ -n "$n_npm" ]
   [ "$n_bin" -lt "$n_npm" ]
   # et un paquet SANS doc est un echec NOMME, pas un build silencieux
   grep -q 'demi-livraison' <<<"$bloc"
@@ -300,7 +302,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   local n_garde n_plancher
   n_garde="$(grep -n 'plancher OTP/Elixir non vérifié' <<<"$bloc" | head -1 | cut -d: -f1)"
   n_plancher="$(grep -n 'toujours sous le plancher' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ] && [ -n "$n_plancher" ]
+  [ -n "$n_garde" ]
+  [ -n "$n_plancher" ]
   [ "$n_garde" -lt "$n_plancher" ]
 }
 

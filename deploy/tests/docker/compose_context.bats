@@ -15,7 +15,8 @@ setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
   CF="$DOCKER/docker-compose.yml"
   DF="$DOCKER/Dockerfile"
-  [ -f "$CF" ] && [ -f "$DF" ]
+  [ -f "$CF" ]
+  [ -f "$DF" ]
 }
 
 @test "le compose n'a AUCUN bloc build: — l'image se nomme (image:), elle vient de pack.sh" {

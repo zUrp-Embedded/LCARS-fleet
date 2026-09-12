@@ -119,7 +119,8 @@ EOS
   run bash "$SRC" down
   [ "$status" -eq 0 ]
   grep -q -- '-f .*docker-compose.secrets.yml -p lcars-fleet down' "$CALLS"
-  [ -e "$SECRETS/forge-master.token" ] && [ ! -s "$SECRETS/forge-master.token" ]
+  [ -e "$SECRETS/forge-master.token" ]
+  [ ! -s "$SECRETS/forge-master.token" ]
   [ -e "$SECRETS/forge-seed.pass" ]
   grep -q 'LCARS_CONTAINER_SECRETS' "$REPO/deploy/docker/docker-compose.secrets.yml"
   grep -q '/run/secrets\|forge_master_token' "$REPO/deploy/docker/docker-compose.secrets.yml"

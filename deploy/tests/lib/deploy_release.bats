@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: deploy/tests/lib/deploy_release.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.239
+# STARDATE: 2026.255
 # STATUS: bats tests for deploy/lib/deploy-release.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
@@ -274,7 +274,9 @@ MIX
   [[ "$output" == *"retire $PREFIX/bin/fleet_v2 (absent du manifest)"* ]]
   [[ "$output" == *"retire symlink $LINK_DIR/fleet_v2"* ]]
   # ce que le manifest nomme reste, lien compris
-  [ -e "$PREFIX/bin/fleet" ] && [ -e "$PREFIX/bin/lcars" ] && [ -L "$LINK_DIR/fleet" ]
+  [ -e "$PREFIX/bin/fleet" ]
+  [ -e "$PREFIX/bin/lcars" ]
+  [ -L "$LINK_DIR/fleet" ]
 }
 
 @test "S4 : un lien du PATH qui vise AILLEURS n'est pas a nous — il reste, meme homonyme" {

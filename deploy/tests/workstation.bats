@@ -342,7 +342,8 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"sha256 vérifié"* ]]
   local racine="$HOME/.lcars/kits/lcars-fleet-1.0-abc/lcars_install"
-  [ -x "$racine/deploy/provision" ] && [ -f "$racine/.source-revision" ]
+  [ -x "$racine/deploy/provision" ]
+  [ -f "$racine/.source-revision" ]
   [[ "$output" == *"kit : $racine"*"depuis ce kit"* ]]
   grep -q '^KIT-PROVISION:doctor --only 00-preflight --port-deck 20991' "$TRACE"
   grep -q "^SUDO:.* bash $racine/deploy/workstation up --from $racine --port-deck 20991$" "$TRACE"

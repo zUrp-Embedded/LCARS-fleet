@@ -16,7 +16,10 @@ setup() {
   ROOT="$BATS_TEST_DIRNAME/../../.."
   MOD="$ROOT/deploy/modules.d/15-toolchain.sh"; LIB="$ROOT/deploy/lib/provision-lib.sh"
   DF="$ROOT/deploy/docker/Dockerfile"; MIX="$ROOT/runtime/mix.exs"
-  [ -f "$MOD" ] && [ -f "$LIB" ] && [ -f "$DF" ] && [ -f "$MIX" ]
+  [ -f "$MOD" ]
+  [ -f "$LIB" ]
+  [ -f "$DF" ]
+  [ -f "$MIX" ]
   export PROVISION_LIB="$LIB" PROVISION_MODULE=15-toolchain
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin" LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
   export PROV_ROOT="$BATS_TEST_TMPDIR/lcars" PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
@@ -72,7 +75,10 @@ _run_apply() {
   # pose satisfait ce que le projet exige » — un pin 1.20.4 satisfait `~> 1.18` comme `~> 1.20`.
   # Exiger l'egalite forcait l'installeur a editer `mix.exs` pour rester vert : un perimetre qui
   # deborde sur l'autre par la faute d'une assertion.
-  [ -n "$PIN" ] && [ -n "$MIN" ] && [ -n "$OTP" ] && [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]
+  [ -n "$PIN" ]
+  [ -n "$MIN" ]
+  [ -n "$OTP" ]
+  [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]
   [ "${PIN%.*}" = "$MIN" ] || { echo "pin $PIN et plancher $MIN : pas la meme minor"; return 1; }
   local mixreq; mixreq="$(sed -n 's/.*elixir: "~> \([0-9.]*\)".*/\1/p' "$MIX")"
   [ -n "$mixreq" ] || { echo "mix.exs ne declare plus de requirement elixir — l'accord n'a plus de sujet"; return 1; }
@@ -108,7 +114,8 @@ _run_apply() {
   _run_apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"sha256 MISMATCH"* ]]
-  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ] && [ ! -e "$PROV_LINK_DIR/elixir" ]
+  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ]
+  [ ! -e "$PROV_LINK_DIR/elixir" ]
   [ -z "$(ls -A "$BATS_TEST_TMPDIR/opt")" ] || { echo "reste dans opt : $(ls -A "$BATS_TEST_TMPDIR/opt")"; return 1; }
 }
 
@@ -145,7 +152,8 @@ _run_apply() {
   run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 0; }; apply 2>&1"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"livraison binaire, rien à bâtir ici"* ]]
-  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ] && [ ! -e "$PROV_LINK_DIR/elixir" ]
+  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ]
+  [ ! -e "$PROV_LINK_DIR/elixir" ]
 }
 
 @test "CHECK : les deux causes d'un « elixir » qui n'est pas le pin se distinguent — notre lien, ou quelqu'un devant nous" {

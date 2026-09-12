@@ -48,7 +48,9 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   _mods="$(cd "$d" && printf '%s\n' *.sh)"
   _ia="$(grep -nx '60-deploy.sh' <<<"$_mods" | cut -d: -f1)"
   _ib="$(grep -nx '61-forge-structure.sh' <<<"$_mods" | cut -d: -f1)"
-  [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
+  [ -n "$_ia" ]
+  [ -n "$_ib" ]
+  [ "$_ia" -lt "$_ib" ]
 }
 
 @test "48 ne pose PLUS la structure, ni le roster — il monte et amorce, c'est tout" {

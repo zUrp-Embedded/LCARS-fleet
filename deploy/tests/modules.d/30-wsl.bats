@@ -91,7 +91,9 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$(head -1 "$LCARS_WSL_CONF")" == "# /etc/wsl.conf — les clés ci-dessous sont tenues par LCARS"* ]]
-  [ "$(cle boot systemd)" = "true" ] && [ "$(cle interop appendWindowsPath)" = "false" ] && [ "$(cle network hostname)" = "bob-9" ]
+  [ "$(cle boot systemd)" = "true" ]
+  [ "$(cle interop appendWindowsPath)" = "false" ]
+  [ "$(cle network hostname)" = "bob-9" ]
   [ "$(stat -c '%a %U' "$LCARS_WSL_CONF")" = "644 $(id -un)" ]
   [[ "$output" == *"C: fermé (sonde réelle)"* ]]
 }
@@ -121,7 +123,8 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q '^APT:purge -y snapd' "$CALLS"
   [[ "$output" == *"POSÉ  30-wsl: snapd purgé"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/snap" ] && [ ! -e "$BATS_TEST_TMPDIR/var-snap" ]
+  [ ! -e "$BATS_TEST_TMPDIR/snap" ]
+  [ ! -e "$BATS_TEST_TMPDIR/var-snap" ]
   [ "$(readlink "$HOME_DIR/.config/systemd/user/gpg-agent-ssh.socket")" = "/dev/null" ]
   mod check
   [[ "$output" == *"snapd absent"* ]]

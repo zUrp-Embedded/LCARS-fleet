@@ -30,7 +30,8 @@
 setup() {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/16-node.sh"
   SITE_WF="$BATS_TEST_DIRNAME/../../../.github/workflows/site.yml"
-  [ -f "$MOD" ] && [ -f "$SITE_WF" ]
+  [ -f "$MOD" ]
+  [ -f "$SITE_WF" ]
 }
 
 # La majeure de chacun des trois. Chaque extraction est nommee : une seule qui rate rendrait une

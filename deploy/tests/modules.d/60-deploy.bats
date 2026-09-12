@@ -94,8 +94,11 @@ mod() { run bash -c "set -euo pipefail; source '$DECOR_MOD' >/dev/null 2>&1; $1"
   [[ "$output" == *"retiré $PROV_PREFIX/bin/fleet_v2"* ]]
   [[ "$output" == *"retiré symlink $PROV_LINK_DIR/fleet_v2"* ]]
   [[ "$output" == *"rc=0"* ]]
-  [ ! -e "$PROV_PREFIX/bin/fleet_v2" ] && [ ! -L "$PROV_LINK_DIR/fleet_v2" ]
-  [ -e "$PROV_PREFIX/bin/fleet" ] && [ -L "$PROV_LINK_DIR/fleet" ] && [ -L "$PROV_LINK_DIR/quelconque" ]
+  [ ! -e "$PROV_PREFIX/bin/fleet_v2" ]
+  [ ! -L "$PROV_LINK_DIR/fleet_v2" ]
+  [ -e "$PROV_PREFIX/bin/fleet" ]
+  [ -L "$PROV_LINK_DIR/fleet" ]
+  [ -L "$PROV_LINK_DIR/quelconque" ]
 }
 
 @test "RELEASE A DEUX LIBS : le build annonce est celui qui DEMARRE, et la lib morte est un DRIFT nomme" {
@@ -162,8 +165,11 @@ module() { run bash "$MOD" "$1"; }   # le dispatch ENTIER : c'est lui qui lit le
   n_pose="$(grep -n 'deploy-release.sh' <<<"$corps" | tail -1 | cut -d: -f1)"
   n_verrou="$(grep -n 'chmod -R u=rwX' <<<"$corps" | tail -1 | cut -d: -f1)"
   n_canal="$(grep -n 'poser_canal' <<<"$corps" | tail -1 | cut -d: -f1)"
-  [ -n "$n_pose" ] && [ -n "$n_verrou" ] && [ -n "$n_canal" ]
-  [ "$n_pose" -lt "$n_verrou" ] && [ "$n_verrou" -lt "$n_canal" ]
+  [ -n "$n_pose" ]
+  [ -n "$n_verrou" ]
+  [ -n "$n_canal" ]
+  [ "$n_pose" -lt "$n_verrou" ]
+  [ "$n_verrou" -lt "$n_canal" ]
   # et sur les DEUX autres sorties ou la release est deja en place (rejeu depuis la copie, raccourci)
   [ "$(grep -c 'poser_canal || verdict_apply' <<<"$corps")" -eq 3 ]
   # le seul ecrivain est poser_canal : aucun prov_channel_write nu dans apply

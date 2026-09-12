@@ -42,7 +42,10 @@ setup() {
   local n_probe n_apply
   n_probe="$(grep -n 'PROV_KERNEL_PROBES=0' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
   n_apply="$(grep -n 'provision apply --substrate docker' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
-  [ -n "$n_probe" ] && [ -n "$n_apply" ] && [ "$n_probe" -le "$n_apply" ] && [ $((n_apply - n_probe)) -le 2 ]
+  [ -n "$n_probe" ]
+  [ -n "$n_apply" ]
+  [ "$n_probe" -le "$n_apply" ]
+  [ $((n_apply - n_probe)) -le 2 ]
   # et le kit n'est pas livre : /src part
   grep -qE 'cd / && rm -rf /src' <<<"$RUNTIME"
 }
@@ -77,8 +80,11 @@ setup() {
   n_del="$(grep -nF 'userdel -r "$(getent passwd 1000' <<<"$CODE" | head -1 | cut -d: -f1)"
   n_use="$(grep -n 'useradd -m -u 1000' <<<"$CODE" | head -1 | cut -d: -f1)"
   n_rail="$(grep -n 'provision apply --substrate docker' <<<"$CODE" | head -1 | cut -d: -f1)"
-  [ -n "$n_del" ] && [ -n "$n_use" ] && [ -n "$n_rail" ]
-  [ "$n_del" -lt "$n_use" ] && [ "$n_use" -lt "$n_rail" ]
+  [ -n "$n_del" ]
+  [ -n "$n_use" ]
+  [ -n "$n_rail" ]
+  [ "$n_del" -lt "$n_use" ]
+  [ "$n_use" -lt "$n_rail" ]
   grep -q 'userdel -r builder' <<<"$CODE"
 }
 

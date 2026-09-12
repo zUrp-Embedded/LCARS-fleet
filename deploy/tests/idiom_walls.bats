@@ -226,7 +226,8 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
   printf '%s\n' 'MOD="$X/modules.d/62-runtime-helpers.sh"' 'run bash "$MOD" check' > "$ech"
   seen="$(grep -vE '^[[:space:]]*#' "$ech")"
   v="$(grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<"$seen" | sed -E "s/.*(^|[[:space:]{;])(export )?([A-Za-z_]+)=[^;]*$I21_MODS.*/\3/")"
-  [ "$v" = MOD ] && grep -qE "bash \"?\\\$$v\"?( |\$)" <<<"$seen"
+  [ "$v" = MOD ]
+  grep -qE "bash \"?\\\$$v\"?( |\$)" <<<"$seen"
   grep -qE "bash \"?\\\$?[^\" ]*$I21_MODS\"?( |\$)" <<<'run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check'
   # et ne mord pas sur un LECTEUR : `local mod=` puis un grep
   grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<'  local mod="$DEPLOY/modules.d/62-runtime-helpers.sh"' \
@@ -455,6 +456,35 @@ I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
 # `pgrep -f "$x"` voit tout argv qui contient `x` — dont le `bash -c`, le `ssh … '…'` ou le temoin
 # qui a lance la mesure. La forme sure passe par `prov_pgrep_pattern` (lib) : `[x]yz` matche `xyz`
 # et jamais la chaine `[x]yz` qui le porte. Perimetre : tout script de `deploy/` hors tests.
+i22_hits() { # i22_hits <fichier> — les lignes « assertion && assertion » : errexit ignore l'échec de la première (mesuré)
+  awk '
+    function ok_seg(s) { return s ~ /^(\[ |\[\[ |grep |refute |refute_out |test )/ }
+    /^[[:space:]]*#/ || !/ && / || / \|\| / || /\\$/ { next }
+    { body = $0; sub(/^[[:space:]]*/, "", body); n = split(body, seg, / && /); if (n < 2) next
+      good = 1; for (i = 1; i <= n; i++) { s = seg[i]; sub(/^[[:space:]]+/, "", s); if (!ok_seg(s)) good = 0 }
+      if (good) print FILENAME ":" FNR ": " $0 }
+  ' "$1"
+}
+
+@test "MUR I22: une assertion par ligne dans un temoin — « a && b » ne fait echouer le cas que si b echoue" {
+  local f hits=0 vus=0
+  while IFS= read -r f; do
+    vus=$((vus + 1))
+    if [[ -n "$(i22_hits "$f")" ]]; then
+      echo "MUR I22 rompu — ${f#"$DEPLOY"/} :" >&2; i22_hits "$f" >&2; hits=$((hits + 1))
+    fi
+  done < <(find "$DEPLOY/tests" -name '*.bats' | sort)
+  [ "$hits" -eq 0 ]
+  [ "$vus" -ge 50 ] || { echo "instrument casse : $vus temoin(s) vu(s), 50 au moins attendus" >&2; return 1; }
+  local decor="$BATS_TEST_TMPDIR/i22.bats"
+  printf '  [ "$status" -eq 0 ] && [[ "$output" == *x* ]]\n' > "$decor"
+  [ -n "$(i22_hits "$decor")" ]
+  printf '  grep -q a "$f" && grep -q b "$f"\n' > "$decor"
+  [ -n "$(i22_hits "$decor")" ]
+  printf '  [[ "$a" == x && "$b" == y ]]\n  [ -n "$x" ] && echo oui\n  [ -n "$x" ] && [ -n "$y" ] || { echo non; return 1; }\n  # [ a ] && [ b ]\n' > "$decor"
+  [ -z "$(i22_hits "$decor")" ]
+}
+
 I17_RE='p(grep|kill)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*f[[:space:]]+"?[^"[:space:]]*"?'
 
 @test "MUR I17: tout pgrep -f / pkill -f de deploy/ passe son motif par prov_pgrep_pattern" {

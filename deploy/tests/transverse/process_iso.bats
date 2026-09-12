@@ -40,7 +40,9 @@ setup() {
   ENTRY="$BATS_TEST_DIRNAME/../../../runtime/services/container/boot.sh"
   SERVICES="$BATS_TEST_DIRNAME/../../modules.d/64-services.sh"
   CONVERGER="$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
-  [ -f "$ENTRY" ] && [ -f "$SERVICES" ] && [ -f "$CONVERGER" ]
+  [ -f "$ENTRY" ]
+  [ -f "$SERVICES" ]
+  [ -f "$CONVERGER" ]
 }
 
 # Le corps du fichier, commentaires retires. ⚠ Tous ces temoins lisent le CODE : l'entrypoint et ce

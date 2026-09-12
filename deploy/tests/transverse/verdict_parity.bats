@@ -15,7 +15,8 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   INSTALLER="$REPO/deploy/lib/provision-lib.sh"
   PRODUCT="$REPO/runtime/services/lib/module-protocol.sh"
-  [ -f "$INSTALLER" ] && [ -f "$PRODUCT" ]
+  [ -f "$INSTALLER" ]
+  [ -f "$PRODUCT" ]
 }
 
 # verdict <lib> <verbe> <failed> <drift> -> le code rendu

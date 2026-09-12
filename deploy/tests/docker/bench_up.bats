@@ -271,7 +271,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   echo 1 > "$CREATE_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q 'user change-password .* _ admiral$' "$CALLS" && grep -qx 'PW=toto123456' "$CALLS"
+  grep -q 'user change-password .* _ admiral$' "$CALLS"
+  grep -qx 'PW=toto123456' "$CALLS"
   [[ "$output" == *"compte admiral déjà présent — mot de passe de banc reposé"* ]]
 }
 
@@ -301,7 +302,9 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -q 'admin/users/lcars | header = "Authorization: token MASTER".*"password\\":\\"toto32toto32\\".*"admin\\":true' "$CALLS"
   refute grep -qE 'CURL:[^|]*(MASTER|toto32toto32)' "$CALLS"
   local relance jeton; relance="$(grep -n '^DOCKER:restart' "$CALLS" | cut -d: -f1)"; jeton="$(grep -n 'gitea_token <<< OP-TOKEN' "$CALLS" | cut -d: -f1)"
-  [ -n "$relance" ] && [ -n "$jeton" ] && [ "$relance" -lt "$jeton" ]
+  [ -n "$relance" ]
+  [ -n "$jeton" ]
+  [ "$relance" -lt "$jeton" ]
   grep -q "chpasswd <<< lcars:toto32toto32" "$CALLS"
 }
 

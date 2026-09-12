@@ -29,7 +29,8 @@ setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   MODS="$DEPLOY/modules.d"
   PORTE="$BATS_TEST_DIRNAME/../../install.sh"
-  [ -d "$MODS" ] && [ -f "$PORTE" ]
+  [ -d "$MODS" ]
+  [ -f "$PORTE" ]
 }
 
 # ─── C1 — UN DRAPEAU FAIT CE QU'IL DIT, OU IL EST REFUSE ────────────────────────────────────────
@@ -60,7 +61,8 @@ setup() {
   local n_montee n_url
   n_montee="$(grep -n 'PROV_FORGE_MONTEE' "$mod" | head -1 | cut -d: -f1)"
   n_url="$(grep -n 'elif \[\[ -n "\${FORGE_BASE_URL' "$mod" | head -1 | cut -d: -f1)"
-  [ -n "$n_montee" ] && [ -n "$n_url" ]
+  [ -n "$n_montee" ]
+  [ -n "$n_url" ]
   [ "$n_montee" -lt "$n_url" ]
 }
 
