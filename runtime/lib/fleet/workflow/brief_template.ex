@@ -1,11 +1,13 @@
 defmodule Fleet.Workflow.BriefTemplate do
   @moduledoc """
   F-23 template loader: inert token substitution for human-editable calibration prose.
-  Missing, unfilled, or leftover tokens fail loud; templates are read on every render.
+  Reads templates on every render, strips leading HTML-comment headers and substitutes {{word}}
+  tokens once. Missing assigns and remaining matching tokens raise; other brace syntax is untouched.
   """
 
   @doc """
-  Renders a string-keyed template and rejects unresolved tokens.
+  Renders catalogue brief_templates_root/name.md with string-keyed assigns, without evaluating them.
+  Name is joined as supplied, without confinement validation; extra assigns are ignored.
   """
   @spec render(String.t(), %{String.t() => String.t()}) :: String.t()
   def render(name, assigns) when is_binary(name) and is_map(assigns) do

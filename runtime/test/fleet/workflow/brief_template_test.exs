@@ -1,7 +1,6 @@
 defmodule Fleet.Workflow.BriefTemplateTest do
   @moduledoc """
-  The calibration-template renderer (F-23): prose is priv DATA, code fills slots, and every
-  miswiring fails LOUD — an agent must never receive a half-rendered order.
+  F-23: render a catalogue template and reject missing files/assigns or leftover {{word}} tokens.
   """
   use ExUnit.Case, async: true
 

@@ -1,13 +1,8 @@
 defmodule Fleet.RosterTest do
   @moduledoc """
-  The grouping rule of `Fleet.Roster.tfvars/1`, confronted with the bundled canon catalogue.
-
-  `tfvars/1` says its rule "lives HERE rather than in a shell so it can be tested": externals are
-  the ReservedSeats, judges are the `brief_kind: judge` roles without a structural capability,
-  writers are everything else, and `roles` / `system_roles` split the same roster by lifetime.
-  This file is that test. It reads the roster the same way the function does
-  (`Fleet.CapProfile.forge_roster/0` under the swapped root), so the expectation and the subject
-  share their source and cannot drift apart silently.
+  Roster partition and recipe projection against the bundled catalogue.
+  Expected groups share CapProfile's roster/login sources with the implementation; these tests
+  do not independently verify those sources or provision accounts on a forge.
   """
   # `tfvars/1` swaps the global `:catalogue_root` for its duration — not async.
   use ExUnit.Case, async: false

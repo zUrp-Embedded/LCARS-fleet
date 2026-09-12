@@ -1,18 +1,6 @@
 defmodule Fleet.Workflow.CardRolesTest do
-  # ⚠ `async: false`, ET CE N'EST PAS DE LA PRUDENCE — MESURE, build d'image du 2026-08-17.
-  #
-  # Le dernier bloc pose `:workflow_workflow_maps_root` en env d'APPLICATION, restauree en
-  # `on_exit`. `Application.put_env` est GLOBAL au node : pendant cette fenetre, tout test
-  # concurrent qui resout une carte lit la racine temporaire de CELUI-CI. C'est ce qui est arrive —
-  # `Fleet.Pilot.ApplicationTest` est mort sur
-  # `/tmp/cr-19589/workflow/workflow_maps/c0-poc.yaml: no such file`, une racine qui ne lui
-  # appartient pas et qui n'existait deja plus.
-  #
-  # LE VERT DE LA MACHINE DE DEV NE PROUVE RIEN ICI : la collision demande que les deux modules
-  # tombent dans la meme fenetre, donc elle depend du nombre de coeurs et de l'ordre du seed. Elle
-  # se declenche sur la machine la plus chargee — le build d'image — c'est-a-dire la ou elle coute
-  # le plus cher. La regle, elle, n'a pas de zone grise : un test qui ECRIT une cle d'env
-  # d'application n'est pas asynchrone, quelle que soit la cle.
+  # Global workflow_workflow_maps_root mutation in the last test forbids async execution.
+  # Build regression 2026-08-17: Pilot.ApplicationTest read this fixture's already-removed root.
   use ExUnit.Case, async: false
 
   alias Fleet.Workflow.CardRoles
@@ -49,10 +37,7 @@ defmodule Fleet.Workflow.CardRolesTest do
   end
 
   test "un role d'ETAPE est lu — `spec.steps` est une MAP, pas une liste", %{root: root} do
-    # ⚠ LA REGRESSION QUE CE TEMOIN GARDE, ET ELLE A EU LIEU. Ma premiere lecture faisait
-    # `List.wrap` sur `spec.steps`, ce qui rend `[la map entiere]` : `s["role"]` valait `nil` et le
-    # controle passait sur les ONZE cartes livrees en n'en lisant AUCUN role d'etape. Un controle
-    # qui passe partout parce qu'il ne lit rien est pire qu'un controle absent.
+    # Regression: List.wrap(steps_map) hid every step role instead of walking Map.values.
     card(root, "carte", """
     spec:
       steps:
@@ -111,14 +96,11 @@ defmodule Fleet.Workflow.CardRolesTest do
   end
 
   test "un catalogue SANS cartes est coherent, pas casse", %{root: root} do
-    # Un catalogue qui ne porte que des profils est legitime. Confondre « aucune carte » avec
-    # « cartes illisibles » refuserait un objet valide.
+    # No card directory is accepted; this fixture has no profiles either.
     assert {:ok, []} = CardRoles.unresolved(root)
   end
 
   test "une carte ILLISIBLE est un refus NOMME, jamais un ensemble vide", %{root: root} do
-    # Rendre `{:ok, []}` sur du YAML casse dirait « ce catalogue est coherent » d'un fichier que
-    # personne n'a pu lire.
     card(root, "casse", "spec:\n  steps:\n    - [ceci: n'est pas\n")
 
     assert {:error, {:cards_unreadable, _path, _}} = CardRoles.unresolved(root)
@@ -136,8 +118,6 @@ defmodule Fleet.Workflow.CardRolesTest do
   end
 
   test "verify!/1 passe sur le catalogue REEL — un faux positif tuerait le boot du conteneur" do
-    # Le controle est joue au boot sur `installed_roots/0`. Ce temoin le joue sur le meme objet : si
-    # la lecture se durcissait au point de refuser le catalogue livre, le conteneur ne demarrerait plus.
     for root <- Fleet.Catalogue.installed_roots() do
       assert :ok = CardRoles.verify!(root)
     end
@@ -169,12 +149,8 @@ defmodule Fleet.Workflow.CardRolesTest do
     end
 
     test "carte d'atelier SANS `scope` -> ticket, donc INDECLARABLE par un projet", %{root: root} do
-      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE LIVRE : `web-demo/content` portait
-      # `face: workshop` et avait oublie `scope: ticket`. Mesure du 2026-08-17,
-      # `declarable_card("content") == :ok` — un projet pouvait donc declarer la carte d'atelier, et
-      # TOUT son travail de production serait parti sur la branche d'atelier, sans jury, sans CI,
-      # sans jamais atteindre `main`. Les DEUX gardes qui l'auraient arrete (le guichet et
-      # `declarable_card/3`) lisent le meme champ absent : elles tombent ensemble.
+      # Regression web-demo/content, 2026-08-17: missing scope let a workshop card become a project's
+      # default, routing production away from main. Derive ticket scope from face: workshop.
       opts = workshop_card(root, "atelier")
 
       assert %{"scope" => "ticket"} = Loader.load!("atelier", opts)
@@ -211,8 +187,7 @@ defmodule Fleet.Workflow.CardRolesTest do
     end
 
     test "un `scope` EXPLICITE gagne — la derivation ne comble qu'une absence", %{root: root} do
-      # Le schema borne le champ a `project|ticket`, donc « explicite » ne veut pas dire « libre » :
-      # ce qui est teste est que la derivation n'ECRASE pas ce que l'auteur a ecrit.
+      # This explicit value equals the derived value, so it alone does not prove precedence.
       opts = workshop_card(root, "atelier", "\n  scope: ticket")
       assert %{"scope" => "ticket"} = Loader.load!("atelier", opts)
     end
@@ -221,10 +196,7 @@ defmodule Fleet.Workflow.CardRolesTest do
          %{
            root: root
          } do
-      # Elle affirme quelque chose qui ne peut pas etre vrai : une carte d'atelier EST le rail doc de
-      # son catalogue (le publish en refuse deja deux), donc elle s'atteint par le genre d'un ticket.
-      # Ecrasee en silence par la derivation, l'auteur ne l'apprendrait jamais ; refusee, il
-      # l'apprend au demarrage — la ou l'objet fusionne est enfin visible.
+      # Publishing must reject the contradiction rather than silently rewrite explicit project scope.
       opts = workshop_card(root, "atelier", "\n  scope: project")
 
       Fleet.TestEnv.put_env_restoring(

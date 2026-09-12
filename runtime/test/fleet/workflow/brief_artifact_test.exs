@@ -1,9 +1,8 @@
 defmodule Fleet.Workflow.BriefArtifactTest do
   @moduledoc """
-  The brief as a committed object whose IDENTITY is the introducing COMMIT sha. A real temp
-  git repo (`git init`) — `BriefArtifact` commits for real (via `OpsObject`, exercised
-  through here); we verify the object, the commit identity and the git-native idempotence.
-  The commit identity comes from the env (`GIT_AUTHOR_*`), not from the repo config → `git init` is enough.
+  Local temporary Git repositories exercise commit identity, version reuse and worktree support
+  through BriefArtifact. OpsObject supplies author env, so git init needs no identity config.
+  These tests do not establish remote availability or serializer concurrency behavior.
   """
   use ExUnit.Case, async: true
 
@@ -30,7 +29,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(tmp, content)
     assert ref == "briefs/#{name}.md"
     assert File.read!(Path.join(tmp, ref)) == content
-    # sha = the COMMIT that introduced the object (the version's identity), i.e. HEAD here.
+    # First commit in this fixture: the returned version must be HEAD.
     {head, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: tmp)
     assert sha == String.trim(head)
     assert sha =~ ~r/\A[0-9a-f]{40}\z/
@@ -38,19 +37,14 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
   test "PROVENANCE lives in git: the introducing commit's MESSAGE names the object (transport_brief_v2)",
        %{tmp_dir: tmp} do
-    # #1/geste-2: the pin used to be COPIED into the agent's order body — a dangling reference it
-    # could neither reach nor verify. P1 stripped that copy; this locks the other half: the
-    # provenance is recorded where audit and humans read it — the ops commit. `git log <ref>` is the
-    # version ledger (the message names the object, the sha IS the version). `git prouve`, not the
-    # text the agent swallows.
+    # The commit message must identify the object for audit through Git history.
     git_init(tmp)
 
     assert {:ok, %{ref: ref, sha: sha}} =
              BriefArtifact.commit(tmp, "Brief: do X.\n", name_hint: "issue-7-engineer")
 
     {msg, 0} = System.cmd("git", ["log", "-1", "--format=%s", sha], cd: tmp)
-    # Mutation-verified: a content-free commit message (dropping `ref` from `OpsObject`'s
-    # `"#{label}: #{ref}"`) reddens this — provenance would stop being answerable from git alone.
+    # Removing ref from OpsObject's commit message was caught by this assertion under mutation.
     assert String.trim(msg) =~ ref
   end
 
@@ -83,7 +77,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
     refute c1 == c2
     assert File.read!(Path.join(tmp, ref)) == "v2\n"
-    # the validated version is readable FOREVER at its own commit (git history = the ledger).
+    # The old version remains readable in this repository's retained history.
     {old, 0} = System.cmd("git", ["show", "#{c1}:#{ref}"], cd: tmp)
     assert old == "v1\n"
   end
@@ -113,10 +107,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
        %{tmp_dir: tmp} do
     git_init(tmp)
 
-    # `:ops` resolves to origin/ops — no such remote in this repo → Git.push fails;
-    # the materialization must NOT (F-15: local commit = base truth, publication degrades LOUD).
-    # And it SAYS SO. `:ok` alone was the whole answer until 2026-08-05: the caller got a citable
-    # pointer and no way to learn the object it names is reachable from nowhere but this disk.
+    # F-15: missing origin makes publication local_only without discarding the committed object.
     assert {:ok, %{ref: ref, push: :local_only}} =
              BriefArtifact.commit(tmp, "pushed brief\n", push: :ops)
 
@@ -127,8 +118,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
   test "no `:push` opt is NOT a failed push — the two are different answers", %{tmp_dir: tmp} do
     git_init(tmp)
 
-    # `:local_only` means a publication was attempted and did not land; `:not_requested` means none
-    # was asked for. Collapsing them into `false` is what made the outcome unreportable.
+    # Distinguish no publication requested from an unsuccessful publication attempt.
     assert {:ok, %{push: :not_requested}} = BriefArtifact.commit(tmp, "unpushed\n")
   end
 
@@ -139,8 +129,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
 
     {out, 0} = System.cmd("git", ["show", "-s", "--format=%an <%ae>", sha], cd: tmp)
     expected = Fleet.Credentials.ForgeIdentity.system_identity()
-    # Gitea links a commit to a profile by EMAIL match — a divergent literal here renders
-    # every work-order/provenance commit as plain text (no link, no avatar) on the forge.
+    # Keep local attribution aligned with the account identity used for forge email linking.
     assert String.trim(out) == "#{expected.name} <#{expected.email}>"
   end
 
@@ -207,9 +196,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
   end
 
   describe "materialize/3 — the cause, not just the failure" do
-    # `physicalize/3` flattens every reason into `{nil, nil}`, so a caller could only pick ONE
-    # policy for all of them. It picked "degrade", and three of the four causes are permanent — a
-    # project misconfigured once then produced unauditable work indefinitely, nothing failing.
+    # Keep materialize's causes available for caller policy; physicalize deliberately flattens them.
     test "names the four causes apart" do
       assert {:error, :no_brief} = BriefArtifact.materialize(nil, "fleet/demo")
       assert {:error, :no_brief} = BriefArtifact.materialize("", "fleet/demo")
@@ -218,9 +205,7 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     end
 
     test "an un-onboarded project is named as such, not as a git failure", %{tmp_dir: tmp} do
-      # The discriminant that matters: this one is PERMANENT (until a human onboards the project),
-      # where `{:git, _}` is transient. A caller that cannot tell them apart cannot break on one
-      # and retry on the other.
+      # Missing directory has its own cause; this fixture does not establish prior onboarding state.
       assert {:error, {:work_dir_missing, _}} =
                BriefArtifact.materialize("x\n", "fleet/demo", ops_root: tmp)
     end
@@ -238,21 +223,9 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     end
   end
 
-  # ❌ PLUS DE TEST `pointer_brief` : la fonction est SUPPRIMEE. Elle rendait l'ordre de mission
-  # court — « ton brief est le doc <ref> @ <sha>, lis-le par `git -C $LCARS_PROJECT_OPS show` » —
-  # et son dernier appelant de production etait parti avec le sevrage du dispatch (d576754f1). Ce
-  # qui restait etait un ecrivain sans lecteur, plus deux tests qui prouvaient soigneusement la
-  # forme d'un texte que plus aucun pod ne recevait.
-  #
-  # Ce qui les remplace n'est pas ici : le contenu voyage dans le work item (`Spawn.materialize`),
-  # et l'adresse l'accompagne pour etre CITEE. Les proprietes de cette forme-la se mesurent la ou
-  # elle est construite.
   test "commit inside an orphan git WORKTREE (the REAL ops: `.git` is a FILE, not a dir)",
        %{tmp_dir: tmp} do
-    # Live regression: `git init` (`.git` = dir) passed, but the real ops is an orphan git
-    # WORKTREE (ProjectOnboard `git worktree add --orphan`) whose `.git` is a FILE →
-    # `ensure_git_workspace` rejected it (`:not_a_git_workspace`) → brief never committed. This test
-    # walks the REAL case, not the plausible one.
+    # Regression: .git is a file in an ops worktree, previously rejected as not_a_git_workspace.
     main = Path.join(tmp, "main")
     File.mkdir_p!(main)
 
@@ -266,10 +239,8 @@ defmodule Fleet.Workflow.BriefArtifactTest do
     {_, 0} = g.(["commit", "-qm", "init"])
 
     wt = Path.join(tmp, "workops")
-    # `worktree add --orphan` needs git >= 2.42; Debian bookworm (the container's base, and the
-    # image that runs this gate) ships 2.39 and answers exit 129. The two-step below builds the
-    # SAME shape on every version — a worktree whose `.git` is a FILE, on an orphan branch — so
-    # the case under test is unchanged and the gate stops depending on the runner's git.
+    # Older Git (bench: bookworm 2.39, exit 129) lacked worktree add --orphan.
+    # The fallback still exercises a .git file on an orphan branch, though initial index differs.
     case g.(["worktree", "add", "--orphan", "-b", "ops", wt]) do
       {_, 0} ->
         :ok
@@ -285,13 +256,11 @@ defmodule Fleet.Workflow.BriefArtifactTest do
           )
     end
 
-    # THE point: in a worktree, `.git` is a FILE (`gitdir: …`), not a directory.
     assert File.regular?(Path.join(wt, ".git"))
 
     assert {:ok, %{ref: ref, sha: sha}} = BriefArtifact.commit(wt, "brief in a worktree\n")
     assert File.read!(Path.join(wt, ref)) == "brief in a worktree\n"
     assert sha =~ ~r/\A[0-9a-f]{40}\z/
-    # committed FOR REAL inside the worktree (the bug returned `{nil, nil}` with no commit).
     {log, 0} = System.cmd("git", ["log", "--oneline"], cd: wt)
     assert log =~ "brief: #{ref}"
   end

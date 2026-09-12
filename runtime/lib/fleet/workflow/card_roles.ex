@@ -1,46 +1,19 @@
 defmodule Fleet.Workflow.CardRoles do
   @moduledoc """
-  Does every role a catalogue's cards NAME actually exist in that catalogue?
-
-  ## The edge the two boot freezes do not cover
-
-  Two boot-time freezes already refuse a broken catalogue, each on its own tree:
-  `CapProfile.Image` on the profiles, `SPBuilder.Image` on "a catalogue that DECLARES a role owes
-  its prompt". Both are sound and both are blind to the same thing — the edge BETWEEN them.
-
-  Nothing ELSE resolves `steps[].role` or `jury[]` against the cap-profiles. A catalogue whose card
-  says `dev` while its profiles declare `developer` passes both freezes (each tree is internally
-  fine), boots, and dies at the FIRST dispatch — a role token nobody minted, a spawn that
-  refuses a name nobody declared. Far from the cause, and on a message that ACCUSES THE RUNTIME.
-
-  ## Why it is checked HERE and not at load
-
-  `Loader.load!/2` reads ONE card, on demand, for a project that already exists. By then the
-  catalogue is installed, the org is provisioned, and a refusal is a work item that cannot move —
-  the operator learns of the hole through a stuck ticket. The question "is this catalogue coherent"
-  belongs to the two moments where the answer can still change something: the boot that freezes the
-  images, and the install that has not touched the forge yet.
-
-  ## The two places a role may live, and the one it may not
-
-  A role resolves in the catalogue's own profiles, or in `catalogue-system` — the mechanism layer
-  (`starfleet`, `chief`, `gatekeeper`, `architect`), inalienable and irreplaceable by design.
-
-  It does NOT resolve in another business catalogue, `fleet` included. ⚖ user: `fleet` is
-  undeletable to guarantee ONE valid catalogue always exists — availability, not authority. It
-  is a peer. `Loader` already says the same thing for the cards themselves: *"a card names roles,
-  and a role belongs to the catalogue that declares it — a card from one catalogue over the roles of
-  another describes a fleet nobody assembled."* This module is that sentence, enforced.
+  Checks card-to-role references against this catalogue's and catalogue-system's profile names.
+  A peer business catalogue, including fleet, is never a role fallback. This complements the
+  profile/prompt image checks: individually valid trees can still have a dev/developer mismatch.
+  Boot and installation use the check before an unresolved role reaches dispatch.
+  This is reference inventory, not full workflow-schema validation or credential provisioning.
   """
 
   alias Fleet.Catalogue
 
   @doc """
-  Every unresolved `card -> role` reference of a catalogue root, as `{card, role}` pairs.
-
-  `{:ok, []}` is a coherent catalogue. `{:error, {:cards_unreadable, …}}` when the tree exists but
-  cannot be parsed — distinct from "no cards", which is `{:ok, []}` and a legitimate state for a
-  catalogue that carries only profiles.
+  Returns missing {card, role} pairs from sorted top-level *.yaml files, deduplicated per card.
+  Missing/non-directory card root returns {:ok, []} without checking profiles. YAML read errors
+  stop the inventory; malformed nested spec structures may raise. Non-binary roles are ignored.
+  An empty result only proves no missing references were found in this scan.
   """
   @spec unresolved(Path.t()) :: {:ok, [{String.t(), String.t()}]} | {:error, term()}
   def unresolved(root) when is_binary(root) do
@@ -59,9 +32,7 @@ defmodule Fleet.Workflow.CardRoles do
     end
   end
 
-  # Le pas de l'accumulation, nomme : une carte illisible ARRETE l'inventaire au lieu de le
-  # raccourcir en silence — « aucun role manquant » et « je n'ai pas pu lire » ne se distinguent
-  # pas dans une liste vide.
+  # Do not return a partial successful inventory after a card read error.
   defp collect_unresolved(path, {:ok, acc}, known) do
     case roles_of(path) do
       {:ok, roles} ->
@@ -75,8 +46,8 @@ defmodule Fleet.Workflow.CardRoles do
   end
 
   @doc """
-  Raises unless every card of `root` names roles that resolve. Used at boot and at install — ONE
-  check, two moments, so an installed catalogue cannot be coherent at one and broken at the other.
+  Raises on missing references or returned read errors from unresolved/1; otherwise :ok.
+  Boot and installation share this check, each against the files present at that time.
   """
   @spec verify!(Path.t()) :: :ok
   def verify!(root) when is_binary(root) do
@@ -98,18 +69,14 @@ defmodule Fleet.Workflow.CardRoles do
     end
   end
 
-  # The union of what the catalogue declares and what the mechanism layer carries. `index_of/1`
-  # answers `{:error, :enoent}` on a missing directory, which is NOT an error here: a catalogue with
-  # no profiles of its own is legal as long as its cards only name system roles.
+  # Missing profile directories contribute no names, allowing cards that only use system roles.
   defp known_roles(root) do
     [
       Path.join(root, Catalogue.rel(:cap_profiles)),
       Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
     ]
     |> Enum.reduce_while({:ok, MapSet.new()}, fn dir, {:ok, acc} ->
-      # La FACADE, pas le sous-module : `Fleet.CapProfile.Catalog` n'est pas exporte par sa
-      # frontiere, et l'atteindre elargirait l'API d'un domaine pour un appelant. `index_of/1` est
-      # deja la porte, celle que `SPBuilder.Image` emprunte.
+      # Use the exported CapProfile facade; Catalog remains internal to its boundary.
       case Fleet.CapProfile.index_of(dir) do
         {:ok, index} -> {:cont, {:ok, MapSet.union(acc, MapSet.new(Map.keys(index)))}}
         {:error, :enoent} -> {:cont, {:ok, acc}}
@@ -118,12 +85,8 @@ defmodule Fleet.Workflow.CardRoles do
     end)
   end
 
-  # ⚠ `spec.steps` EST UNE MAP, cle = le nom de l'etape — PAS une liste. Un `List.wrap` dessus rend
-  # `[la map entiere]`, donc `s["role"]` vaut `nil` et LE CONTROLE PASSE SUR TOUTES LES CARTES EN
-  # N'EN LISANT AUCUN ROLE : un mur qui dit toujours oui.
-  #
-  # Le `jury` existe a la RACINE du spec ET par ETAPE, et les deux formes sont lues par le runtime :
-  # ne lire que la premiere ferait passer en silence une carte dont le jury d'etape est casse.
+  # Steps normally form a name-keyed map (legacy lists accepted). List.wrap(map) would hide
+  # every step role. Read jury both at spec root and per step.
   defp roles_of(path) do
     case YamlElixir.read_from_file(path) do
       {:ok, %{} = yaml} ->

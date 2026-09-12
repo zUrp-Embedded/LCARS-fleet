@@ -1,8 +1,7 @@
 defmodule Fleet.Workflow.CatalogueGuardsTest do
   @moduledoc """
-  The catalogue guards addressed where they live. Their behaviour on broken cards is proved by
-  `Fleet.Pilot.ApplicationTest` through the boot seam; this file pins the guards' own address and
-  that the bundled catalogue passes each of them.
+  Direct checks of the bundled catalogue and a non-judge jury rejection.
+  Fleet.Pilot.ApplicationTest covers additional broken cards through the boot seam.
   """
   use ExUnit.Case, async: false
 
