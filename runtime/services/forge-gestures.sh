@@ -333,6 +333,8 @@ cmd_apply() {
   local m
   for m in instance .; do
     echo "forge-gestures: apply $m"
+    ( cd "$RECIPE_DIR/$m" && tofu init -input=false -no-color >/dev/null ) \
+      || die "init $m en echec — le miroir de providers (TF_CLI_CONFIG_FILE) couvre-t-il cette recette ?"
     ( cd "$RECIPE_DIR/$m" && tofu apply -auto-approve -input=false -no-color ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
