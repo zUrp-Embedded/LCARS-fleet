@@ -96,10 +96,9 @@ l'autre. Les douze verbes (`build up doctor shell logs down reset source-push co
 forge-apply runner-token`) s'appellent par `deploy/container <verbe>` à la racine, qui détecte, refuse en
 nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
 
-**La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
-PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et délègue — `--workstation`
-vers `provision apply`, `--container` vers `container`, `--bench` vers le fournisseur de banc. Ce qui suit
-`--` part verbatim au délégué de la branche.
+**La porte publique des deux rails est `install.sh`** (racine) : elle mesure, montre le bilan, et
+délègue — `--workstation` vers `deploy/workstation up`, sinon vers `deploy/container up` ; avec
+`--bench`, `deploy/container --bench up` monte d'abord une forge jetable et son runner.
 
 **Son mouvement SOURCE a trois provenances** (lot 4 du chantier release) : lancée dans un checkout
 → `source`, on continue dedans (HEAD est dit) ; à la racine d'un kit → `kit` ; pipée (`curl … | bash`)

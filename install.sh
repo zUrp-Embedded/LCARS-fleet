@@ -172,7 +172,7 @@ obtenir() { # obtenir <artefact> — dans KITS_DIR, sha256 vérifié contre la t
 }
 delegue_dit() { # la commande du délégué, en mots, pour un --dry-run ou un --check qui n'a pas d'arbre
   if [[ "$MODE" == "workstation" ]]; then echo "deploy/workstation up --from <kit>"
-  elif [[ "$WITH_BENCH" -eq 1 ]]; then echo "deploy/docker/bench/bench-up.sh"
+  elif [[ "$WITH_BENCH" -eq 1 ]]; then echo "deploy/container --bench up"
   else echo "deploy/container up"
   fi
 }
@@ -486,11 +486,10 @@ if [[ "$MODE" == "workstation" ]]; then
 fi
 
 # ─── 8. la sortie : un seul exec, vers le délégué du mode ─────────────────────────────────────
-delegue() { # delegue <workstation|container|bench> -> DELEGUE, le chemin du script, vérifié
+delegue() { # delegue <workstation|container> -> DELEGUE, le chemin du script, vérifié
   case "$1" in
     workstation) DELEGUE="$SCRIPT_DIR/deploy/workstation" ;;
     container)   DELEGUE="$SCRIPT_DIR/deploy/container" ;;
-    bench)       DELEGUE="$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ;;
   esac
   [[ -x "$DELEGUE" ]] || { echo "  ${R}${DELEGUE#"$SCRIPT_DIR"/} introuvable — l'arbre est incomplet.${N}"; exit 1; }
 }
@@ -504,10 +503,9 @@ if [[ "$MODE" == "workstation" ]]; then
   [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/${ASSETS[0]}")
   RAPPEL="Installation dans ce système — deploy/workstation up"
 elif [[ "$WITH_BENCH" -eq 1 ]]; then
-  DOCKER_BIN="$(fait docker_bin)"; export DOCKER_BIN
-  delegue bench
-  CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
-  RAPPEL="Installation en conteneur, avec le banc — deploy/docker/bench/bench-up.sh"
+  delegue container
+  CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} --bench up)
+  RAPPEL="Installation en conteneur, avec le banc — deploy/container --bench up"
 else
   delegue container
   CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)

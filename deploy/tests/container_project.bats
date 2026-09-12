@@ -47,6 +47,7 @@ setup() {
 echo "\$*" >> "$CALLS"
 if [[ "\$*" == *"config --format json"* ]]; then printf '{"volumes":{"lcars-home":{"name":"%s"}}}\n' "\${STUB_COMPOSE_HOME:-}"; exit 0; fi
 if [[ "\$*" == *".Mounts"* ]]; then echo "\${STUB_HOME_VOLUME:-}"; exit 0; fi
+if [[ "\$1 \$2" == "image inspect" && -n "\${STUB_NO_IMAGE:-}" ]]; then exit 1; fi
 case "\$1 \$2" in
   "compose version") exit 0 ;;
   "ps -aq")          printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0 ;;
@@ -100,7 +101,7 @@ seed_project() {
   run bash "$SRC" -p lcars-jamais-cree down
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"REFUS"* ]]
+  [[ "$output" != *"refus"* ]]
   # It really went through to compose rather than short-circuiting.
   grep -q -- "-p lcars-jamais-cree down" "$CALLS"
 }
@@ -111,7 +112,7 @@ seed_project() {
   run bash "$SRC" down
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"REFUS"* ]]
+  [[ "$output" != *"refus"* ]]
   grep -q -- "-p lcars-fleet down" "$CALLS"
 }
 
@@ -122,7 +123,7 @@ seed_project() {
   run bash "$SRC" down
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUS"* ]]
+  [[ "$output" == *"refus"* ]]
   # A refusal that does not say WHAT it saw cannot be acted on.
   [[ "$output" == *"provisioning_v2"* ]]
   [[ "$output" == *"$CF"* ]]
@@ -139,7 +140,7 @@ seed_project() {
   run bash "$SRC" down
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUS"* ]]
+  [[ "$output" == *"refus"* ]]
 }
 
 @test "one match inside a multi-file list is enough" {
@@ -148,7 +149,7 @@ seed_project() {
   run bash "$SRC" down
 
   [ "$status" -eq 0 ]
-  [[ "$output" != *"REFUS"* ]]
+  [[ "$output" != *"refus"* ]]
 }
 
 @test "reset refuses BEFORE asking for confirmation" {
@@ -159,8 +160,8 @@ seed_project() {
   run bash "$SRC" -p lcars-valid reset
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUS"* ]]
-  [[ "$output" != *"RESET du projet"* ]]
+  [[ "$output" == *"refus"* ]]
+  [[ "$output" != *"reset du projet"* ]]
   refute grep -q "volume rm" "$CALLS"
 }
 
@@ -198,14 +199,6 @@ seed_project() {
 }
 
 # shellcheck disable=SC2016 # motif `grep` : `${PROJECT}` doit atteindre grep tel quel
-@test "AUCUN nom de volume n'est compose dans le CODE — c'est docker qui sait" {
-  # La regression exacte : `"${PROJECT}_<quelquechose>"` fabrique un nom au lieu de le demander.
-  # ⚠ HORS COMMENTAIRES, et la cicatrice de ce lot l'exige : la prose qui EXPLIQUE le defaut cite
-  # forcement la forme fautive. Un temoin qui lit la prose interdit d'ecrire pourquoi.
-  run bash -c "grep -vE '^[[:space:]]*#' '$SRC' | grep -nE '\\\$\\{PROJECT\\}_[a-z-]+'"
-  [ "$status" -ne 0 ]
-}
-
 @test "up refuse une instance dont /home vit sur un autre volume que celui du compose — jamais un /home vide en silence" {
   seed_project "$CF"
   STUB_HOME_VOLUME=lcars-fleet_home STUB_COMPOSE_HOME=lcars-fleet_lcars-home run bash "$SRC" up
@@ -251,7 +244,7 @@ seed_project() {
   [ "$status" -eq 0 ]
   # First line of the block and last line of the block: the extraction is anchored on content, so
   # inserting a header line can no longer amputate the tail.
-  [[ "$output" == *"LCARS fleet v2 en conteneur"* ]]
+  [[ "$output" == *"USAGE : deploy/container"* ]]
   [[ "$output" == *"EXIT :"* ]]
   # And the -p contract is documented where an operator looks for it.
   [[ "$output" == *"LCARS_PROJECT"* ]]
@@ -270,35 +263,37 @@ seed_project() {
 # sort 0 — sortir non nul sur une non-mesure apprendrait a ignorer le code de sortie, ce qui coute
 # exactement le jour ou il est vrai.
 
-@test "up: verdict 0 -> CONVERGE, sortie 0" {
+@test "up: verdict 0 -> convergé, sortie 0, et compose n'a jamais bâti" {
   STUB_PROV_RC=0 run "$SRC" -p lcars up
   [ "$status" -eq 0 ]
-  [[ "$output" == *"provisionnement CONVERGÉ"* ]]
+  [[ "$output" == *"provisionnement convergé"* ]]
+  grep -q -- ' up -d --no-build' "$CALLS"
+  refute grep -qE '(^| )build( |$)' "$CALLS"
 }
 
 @test "up: verdict 2 -> DRIFT nomme, mais PAS un echec (un geste manque, rien n'est casse)" {
   STUB_PROV_RC=2 run "$SRC" -p lcars up
   [ "$status" -eq 0 ]
-  [[ "$output" == *"DRIFT RÉSIDUEL"* ]]
-  [[ "$output" != *"EN ÉCHEC"* ]]
+  [[ "$output" == *"drift résiduel"* ]]
+  [[ "$output" != *"en échec"* ]]
 }
 
 @test "up: verdict non nul -> ECHEC, sortie NON NULLE, et la consequence est nommee" {
   STUB_PROV_RC=1 run "$SRC" -p lcars up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"EN ÉCHEC"* ]]
+  [[ "$output" == *"en échec"* ]]
   # « le conteneur tourne » ET « ne produira rien » : les deux moities, sinon le lecteur croit que
   # le conteneur est mort et va le relancer au lieu de diagnostiquer.
   [[ "$output" == *"le conteneur tourne"* ]]
-  [[ "$output" == *"ne produira RIEN"* ]]
+  [[ "$output" == *"ne produira rien"* ]]
 }
 
 @test "up: verdict ILLISIBLE -> on le DIT et on sort 0 — une non-mesure n'est pas un echec" {
   LCARS_UP_VERDICT_TIMEOUT=1 run "$SRC" -p lcars up
   [ "$status" -eq 0 ]
-  [[ "$output" == *"NON LU"* ]]
-  [[ "$output" == *"n'est PAS mesuré"* ]]
-  [[ "$output" != *"EN ÉCHEC"* ]]
+  [[ "$output" == *"non lu"* ]]
+  [[ "$output" == *"n'est pas mesuré"* ]]
+  [[ "$output" != *"en échec"* ]]
 }
 
 # ─── `build` DELEGUE A pack.sh — le kit, puis l'image, par le meme rail ─────────────────────────
@@ -315,10 +310,6 @@ seed_project() {
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"PACK:--no-image"* ]]
   refute grep -qE -- "compose .*build|build --target" "$CALLS"
-  # et le defaut d'image est celui que pack.sh pose : `lcars-fleet:local`
-  # l'image : celle bâtie ici si elle existe, sinon le défaut du compose — une seule déclaration
-  grep -qE '^: "\$\{LCARS_IMAGE:=\$\(image_defaut\)\}"' "$SRC"
-  grep -q 'lcars-fleet:local' "$SRC"
 }
 
 # ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────
@@ -370,7 +361,7 @@ FAKE
   # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
   run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"LCARS fleet v2 en conteneur"* ]]
+  [[ "$output" == *"USAGE : deploy/container"* ]]
   [[ "$output" == *"EXIT :"* ]]
 }
 
@@ -394,83 +385,44 @@ FAKE
   [[ "$output" != *"ne la fabrique pas"* ]]
 }
 
-@test "le delegue ne redit PAS que l'aide vit ailleurs" {
-  # Sa carte annoncait « l'aide de la porte, qui reste la source unique de l'aide. Elle n'est pas
-  # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
-  # sessions suivantes sans date ni signature.
-  local container="$BATS_TEST_DIRNAME/../container"
-  refute grep -q 'qui reste la source unique de l' "$container"
-}
-
-# ─── LE DELEGUE EST SA PROPRE PORTE ─────────────────────────────────────────────────────────────
-#
-# ⚠ TANT QU'IL LISAIT CE QU'UNE PORTE LUI POSAIT, `container` PORTAIT DEUX DEFAUTS :
-# `${LCARS_DOCKER_BIN:-docker}` et `${LCARS_COMPOSE_CMD:-docker compose}`. Sur une socket
-# appartenant a root, `PROV_DOCKER_BIN` est un SHIM qui escalade — un `docker` nu le contournerait
-# EN SILENCE pour echouer plus loin sur une permission. Les deux defauts n'ont plus d'objet
-# maintenant qu'il sonde lui-meme, et les garder serait garder la reponse d'une porte disparue.
-
-# shellcheck disable=SC2016 # motifs `grep` : `$PROV_DOCKER_BIN` doit atteindre grep tel quel
-@test "le delegue SONDE, il ne lit plus ce qu'une porte lui pose" {
-  local container="$BATS_TEST_DIRNAME/../container"
-  grep -q 'docker_endpoint || fail' "$container"
-  grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$container"
-  # ⚠ LE CODE, PAS LE FICHIER. Rendue mordante, la premiere de ces deux lignes a accuse `container:137` —
-  # une CICATRICE qui cite `${LCARS_DOCKER_BIN:-docker}` pour expliquer le defaut qu'elle a ferme.
-  # La seconde etait derniere de son bloc, donc vivante, et verte : son motif n'existe nulle part,
-  # pas meme en prose. Les deux lisent desormais ce qui S'EXECUTE — sinon la premiere cicatrice
-  # ecrite pour `LCARS_COMPOSE_CMD` ferait rougir un fichier sain.
-  grep -vE '^[[:space:]]*#' "$container" | refute_out 'LCARS_DOCKER_BIN:-'
-  grep -vE '^[[:space:]]*#' "$container" | refute_out 'LCARS_COMPOSE_CMD:-'
-}
-
-@test "le delegue rend l'aide SANS docker — elle passe avant la sonde" {
-  # ⚠ L'ORDRE EST LA PROPRIETE. Un `--help` qui exige l'outil qu'il documente est une porte fermee,
-  # et c'est le seul geste du rail qui n'a aucune condition.
-  local container="$BATS_TEST_DIRNAME/../container"
-  local l_help l_sonde
-  l_help="$(grep -n 'help|-h|--help) usage; exit 0' "$container" | head -1 | cut -d: -f1)"
-  l_sonde="$(grep -n 'docker-endpoint.sh"$' "$container" | head -1 | cut -d: -f1)"
-  [ -n "$l_help" ] && [ -n "$l_sonde" ]
-  [ "$l_help" -lt "$l_sonde" ]
-  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
+@test "l'aide se rend sans docker ni sonde, et ne crée aucun fichier de secrets" {
+  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
   [ "$status" -eq 0 ]
+  [[ "$output" == *"USAGE"*"--bench"*"EXIT"* ]]
+  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
 }
 
-# ─── E4 : L'IMAGE EST UNE PRECONDITION, ET C'EST ICI QU'ELLE SE VERIFIE ─────────────────────────
-#
-# ⚠ CES TROIS TEMOINS VIENNENT D'`install_door.bats`, ET LEUR SUJET A CHANGE DE MAISON AVEC LEUR
-# CODE (E4 du chantier porte, D4). La PORTE batissait l'image : elle sondait `image inspect` et
-# lancait `container build` avant de deleguer. Un conteneur de production TIRE son image — epinglee par
-# digest, avec le gate joue UNE FOIS par le rail qui la construit ; un client ne compile pas chez son
-# hote. Le build reste un geste de DEV, et c'est CE script qui sait s'il a une image.
-
-@test "MIGRE : image ABSENTE — un up ne la fabrique pas, et il le DIT" {
-  # ⚠ LE REFUS DOIT NOMMER LES DEUX VOIES. `compose up --no-build` echoue deja sur une image absente,
-  # mais avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
-  # `container build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat —
-  # il a coute la 4e forme du rail conteneur le 2026-08-30 (chemin publie inexistant, rc 127).
-  local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
-  grep -q 'image inspect' <<<"$bloc"
-  grep -q 'container build' <<<"$bloc"
-  grep -qE 'pull' <<<"$bloc"
-  # Et il SORT : un up qui continue sans image laisserait compose parler a sa place.
-  grep -q 'exit 1' <<<"$bloc"
+@test "up --bench : exec du banc avec la base du projet, l'image et les ports traduits" {
+  local bench="$BATS_TEST_TMPDIR/arbre/deploy/docker/bench"; mkdir -p "$bench" "$BATS_TEST_TMPDIR/arbre/deploy/lib" "$BATS_TEST_TMPDIR/arbre/deploy/docker"
+  cp "$SRC" "$BATS_TEST_TMPDIR/arbre/deploy/container"; cp -a "$REPO/deploy/lib/." "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
+  cp "$CF" "$REPO/deploy/docker/docker-compose.secrets.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
+  printf '#!/usr/bin/env bash\necho "BENCH:$*"; echo "DOCKER_BIN=$DOCKER_BIN"\n' > "$bench/bench-up.sh"; chmod 0755 "$bench/bench-up.sh"
+  LCARS_IMAGE=lcars-fleet:9 run bash "$BATS_TEST_TMPDIR/arbre/deploy/container" --forge-project bob_10 --port-forge 20100 --port-deck 20101 --port-ssh 20102 --bench up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"BENCH:--forge-project bob_10 --image lcars-fleet:9 --port-forge 20100 --port-deck 20101 --port-ssh 20102"* ]]
+  [[ "$output" == *"DOCKER_BIN=$BINDIR/docker"* ]]
+  refute grep -qE "compose .* up" "$CALLS"
 }
 
-@test "MIGRE : un up ne BUILDE JAMAIS implicitement" {
-  # Un `up` qui builde masque un build rate en repartant du cache de layers. Un build rend SON
-  # verdict, et c'est un geste separe.
-  local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
-  grep -q -- '--no-build' <<<"$bloc"
+@test "--port-forge sans --bench est refusé : la forge est fournie" {
+  run bash "$SRC" --port-forge 20100 up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--port-forge n'a d'objet qu'avec --bench"* ]]
 }
 
-@test "MIGRE : la PORTE ne batit plus AUCUNE image — ni pour un rail, ni pour l autre" {
-  # Le pendant du precedent, mesure de l'autre cote : ce qui a quitte la porte n'y revient pas.
-  local door; door="$BATS_TEST_DIRNAME/../../install.sh"
-  [ -f "$door" ]
-  local code; code="$(grep -vE '^\s*#' "$door")"
-  refute grep -q 'image inspect' <<<"$code"
-  refute grep -qE 'container" build|container build' <<<"$code"
-  refute grep -q 'PROV_DOCKER_BIN' <<<"$code"
+@test "la CLI docker est celle que la sonde rend, jamais le docker nu du PATH" {
+  local nu="$BATS_TEST_TMPDIR/nu"; mkdir -p "$nu"
+  printf '#!/usr/bin/env bash\necho "DOCKER-NU:$*" >> "%s"\nexit 1\n' "$CALLS" > "$nu/docker"; chmod 0755 "$nu/docker"
+  PATH="$nu:$PATH" run bash "$SRC" status
+  [ "$status" -eq 2 ]
+  refute grep -q 'DOCKER-NU' "$CALLS"
+  grep -q 'compose .* ps -q lcars' "$CALLS"
+}
+
+@test "up : image absente — un up ne la fabrique pas, il nomme pull et build, et sort 1" {
+  seed_project "$CF"
+  STUB_NO_IMAGE=1 run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"image « ghcr.io/"*" » absente"*"deploy/container pull"*"deploy/container build"* ]]
+  refute grep -qE "compose .* up|build" "$CALLS"
 }

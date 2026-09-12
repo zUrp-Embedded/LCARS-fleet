@@ -22,7 +22,7 @@ case "\$1 \$2" in
   "compose version") exit 0 ;;
 esac
 if [[ "\$*" == *" ps -q lcars"* ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
-if [[ "\$*" == *" up -d"* ]]; then printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"; exit 0; fi
+if [[ "\$*" == *" up -d"* ]]; then printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"; printf '%s %s %s\n' "\${FORGE_BASE_URL-}" "\${LCARS_ADMIRAL-}" "\${LCARS_CONTAINER_SECRETS-}" > "$BATS_TEST_TMPDIR/env.seen"; exit 0; fi
 if [[ "\$1" == inspect ]]; then
   case "\$3" in
     *State.Status*)   echo "\${STUB_STATE:-running}" ;;
@@ -107,15 +107,12 @@ EOS
 
 @test "up : le fichier d'env est LU, et l'env explicite de l'appelant PRIME (le modele compose)" {
   mkdir -p "$LCARS_CONTAINER_CONF_DIR"
-  printf 'FORGE_BASE_URL=http://fichier:3000\nLCARS_ADMIRAL=zoe\n' > "$ENV_FILE"
-  # `docker image inspect` rend 0 sur la doublure : up passe jusqu'au compose
+  printf 'FORGE_BASE_URL=http://fichier:3000\nLCARS_ADMIRAL=zoe\nLCARS_IMAGE=depuis-fichier:1\n' > "$ENV_FILE"
+  # `docker image inspect` rend 0 sur la doublure : up passe jusqu'au compose, qui note son env
   FORGE_BASE_URL=http://appelant:3000 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
-  # ce que compose a vu : l'env du PROCESSUS container — on le lit par une commande qui l'imprime
-  run env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="$DOCKER_HOST" PROV_DOCKER_BIN="$PROV_DOCKER_BIN" \
-      LCARS_CONTAINER_CONF_DIR="$LCARS_CONTAINER_CONF_DIR" FORGE_BASE_URL=http://appelant:3000 \
-      bash -c 'PROJECT=lcars-fleet; source <(sed -n "/^CONTAINER_CONF_DIR=/,/^ensure_secrets$/p" "$0"); echo "$FORGE_BASE_URL $LCARS_ADMIRAL $LCARS_CONTAINER_SECRETS"' "$SRC"
   [ "$status" -eq 0 ]
-  [[ "$output" == "http://appelant:3000 zoe $SECRETS" ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/env.seen")" = "http://appelant:3000 zoe $SECRETS" ]
+  [[ "$output" == *"image depuis-fichier:1"* ]]
 }
 
 @test "compose : l'override des secrets est passe a CHAQUE compose, et les fichiers existent (vides = rien)" {
@@ -131,7 +128,7 @@ EOS
 @test "status : sans conteneur, rc 2 et le geste nomme" {
   run bash "$SRC" status
   [ "$status" -eq 2 ]
-  [[ "$output" == *"AUCUN conteneur"*"container up"* ]]
+  [[ "$output" == *"aucun conteneur"*"container up"* ]]
 }
 
 @test "status : sain — tout converge, le tampon est la revision qui tourne, rc 0" {
@@ -150,16 +147,16 @@ EOS
   export STUB_IDS=c0ffee STUB_BOOT=awaiting-config STUB_HEALTH=starting
   run bash "$SRC" status
   [ "$status" -eq 1 ]
-  [[ "$output" == *"EN ATTENTE DE CONFIGURATION"*"container config"* ]]
+  [[ "$output" == *"en attente de configuration"*"container config"* ]]
 }
 
 @test "status : drift de forge ou aucun humain = degrade (1) ; init en echec ou conteneur mort = panne (2)" {
   export STUB_IDS=c0ffee STUB_PROV=2 STUB_HUM=0
-  run bash "$SRC" status; [ "$status" -eq 1 ]; [[ "$output" == *"DRIFT"* ]]
+  run bash "$SRC" status; [ "$status" -eq 1 ]; [[ "$output" == *"drift résiduel"* ]]
   export STUB_PROV=0 STUB_HUM=1
-  run bash "$SRC" status; [ "$status" -eq 1 ]; [[ "$output" == *"AUCUN humain"* ]]
+  run bash "$SRC" status; [ "$status" -eq 1 ]; [[ "$output" == *"aucun humain"* ]]
   export STUB_HUM=0 STUB_BOOT=init-failed
-  run bash "$SRC" status; [ "$status" -eq 2 ]; [[ "$output" == *"INIT EN"* ]]
+  run bash "$SRC" status; [ "$status" -eq 2 ]; [[ "$output" == *"init en échec"* ]]
   unset STUB_BOOT; export STUB_STATE=exited
   run bash "$SRC" status; [ "$status" -eq 2 ]
 }
@@ -176,6 +173,7 @@ EOS
   [ "$status" -eq 0 ]
   grep -qx 'pull reg.example/fleet/lcars:2.2' "$CALLS"
   refute grep -q 'build' "$CALLS"
+  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
   # `up` sur une image absente : la doublure repond 1 a `image inspect`
   cat >> "$BINDIR/docker" <<'EOS'
 EOS
@@ -202,7 +200,7 @@ EOS
   export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_TAMPON=436f94cd STUB_REV=436f94cd STUB_DECK_HTTP=409
   run bash "$SRC" status
   [ "$status" -eq 1 ]
-  [[ "$output" == *"409"*"NON DÉCLARÉE"* ]]
+  [[ "$output" == *"409"*"non déclarée"* ]]
 }
 
 @test "aide : chaque variable d'env ANNONCEE est LUE — par container, par un compose qu'il pilote, ou par une lib qu'il source" {
@@ -210,7 +208,7 @@ EOS
   # nulle part — une piste morte pour l'operateur qui cherche pourquoi son port ne bouge pas, dans
   # le fichier qu'il lit en premier. L'aide est un contrat : un nom qu'elle annonce a un lecteur.
   local names
-  names="$(sed -n '/^# ENV (tous optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"
+  names="$(sed -n '/^# ENV (optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"
   [ "$(grep -c . <<<"$names")" -ge 8 ] || { echo "moins de 8 variables lues dans l'aide — l'instrument ne lit plus le bloc ENV" >&2; return 1; }
   local code
   code="$(cat "$SRC" "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" \

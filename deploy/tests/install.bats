@@ -370,8 +370,8 @@ porte() { # porte <arbre> [args…] — sans TTY
   local a; a="$(_arbre)"
   porte "$a" --bench --dry-run --forge-project bob_10 --port-deck 20101
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/docker/bench/bench-up.sh --forge-project bob_10 --port-deck 20101"* ]]
-  refute grep -q 'BENCHUP:' <<<"$output"
+  [[ "$output" == *"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/container --forge-project bob_10 --port-deck 20101 --bench up"* ]]
+  refute grep -q 'CONTAINER:' <<<"$output"
   porte "$a" --workstation --bench --dry-run --substrate wsl --only 10-packages
   [ "$status" -eq 0 ]
   [[ "$output" == *"$a/deploy/workstation up --substrate wsl --only 10-packages"* ]]
@@ -391,12 +391,12 @@ porte() { # porte <arbre> [args…] — sans TTY
   [ -z "$(ls "$TMPDIR")" ]
 }
 
-@test "mode conteneur avec --bench : exec bench-up.sh avec les mêmes drapeaux et le docker du préflight" {
+@test "mode conteneur avec --bench : exec deploy/container avec les mêmes drapeaux, puis --bench up" {
   local a; a="$(_arbre)"
   porte "$a" --bench --forge-project bob_10 --port-forge 20100
   [ "$status" -eq 0 ]
-  [[ "$output" == *"BENCHUP:--forge-project bob_10 --port-forge 20100"* ]]
-  [[ "$output" == *"DOCKER_BIN=/usr/bin/docker"* ]]
+  [[ "$output" == *"Installation en conteneur, avec le banc — deploy/container --bench up"* ]]
+  [[ "${lines[-1]}" == "CONTAINER:--forge-project bob_10 --port-forge 20100 --bench up" ]]
   refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"
 }
 
@@ -540,7 +540,7 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   _release
   pipee --bench --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"--check : rien n'est téléchargé"*"La commande serait : deploy/docker/bench/bench-up.sh"* ]]
+  [[ "$output" == *"--check : rien n'est téléchargé"*"La commande serait : deploy/container --bench up"* ]]
   [ ! -s "$SERVEUR_LOG" ] && [ ! -d "$HOME/.lcars" ]
 }
 
