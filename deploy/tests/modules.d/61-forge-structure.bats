@@ -148,8 +148,9 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'rm -rf "\$recipe" "\$enroll"'
 }
 
-@test "la copie est INITIALISEE hors-ligne — le geste appelle \`tofu apply\` NU" {
-  sed -n '/^  for m in instance \.; do/,/^  done/p' "$G" | refute_out 'tofu init'
+@test "la copie est initialisée hors-ligne par 61, et le geste réinitialise la sienne avant chaque apply" {
+  local boucle; boucle="$(sed -n '/^  for m in instance \.; do/,/^  done/p' "$G")"
+  [ "$(grep -n 'tofu init' <<<"$boucle" | head -1 | cut -d: -f1)" -lt "$(grep -n 'tofu apply' <<<"$boucle" | head -1 | cut -d: -f1)" ]
   code | grep -q '"$TOFU_BIN" init -input=false -no-color'
   code | grep -q 'TF_CLI_CONFIG_FILE='
 }

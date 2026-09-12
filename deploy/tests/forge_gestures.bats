@@ -66,7 +66,7 @@ FAKE
   # deux modules, qui est un invariant (une adhesion ne cree pas le compte qu'elle nomme).
   cat > "$BIN/tofu" <<'FAKE'
 #!/usr/bin/env bash
-printf '%s\n' "$PWD" >> "$TOFU_LOG"
+printf '%s %s\n' "$1" "$PWD" >> "$TOFU_LOG"
 exit "${FAKE_TOFU_RC:-0}"
 FAKE
   chmod +x "$BIN/tofu"
@@ -217,8 +217,10 @@ FAKE
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '1p' "$TOFU_LOG")" = "$RECIPE/instance" ]
-  [ "$(sed -n '2p' "$TOFU_LOG")" = "$RECIPE" ]
+  [ "$(sed -n '1p' "$TOFU_LOG")" = "init $RECIPE/instance" ]
+  [ "$(sed -n '2p' "$TOFU_LOG")" = "apply $RECIPE/instance" ]
+  [ "$(sed -n '3p' "$TOFU_LOG")" = "init $RECIPE" ]
+  [ "$(sed -n '4p' "$TOFU_LOG")" = "apply $RECIPE" ]
 }
 
 
