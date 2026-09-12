@@ -33,7 +33,8 @@ STARTERS=(
 )
 
 # /run/systemd/system n'existe que si systemd est l'init (sd_booted) : systemctl et /etc/systemd/system existent aussi dans une image sans lui
-have_systemd() { [[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
+SYSTEMD_RUN="${LCARS_SYSTEMD_RUN:-/run/systemd/system}"
+have_systemd() { [[ -d "$SYSTEMD_RUN" ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
 
 consequence_of() { # consequence_of <unité> — ce que coûte son absence
   case "$1" in
@@ -102,7 +103,7 @@ forge_url() { # forge_url → vide tant que 48-forge-host n'a pas annoncé d'adr
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]'; fi
 }
 
-# tout ce qu'un daemon lit et que l'installateur décide voyage par ici (mur 7) ; aucun défaut : la lib les pose avant tout module
+# tout ce qu'un daemon lit et que l'installateur décide voyage par ici ; aucun défaut : la lib pose ces variables avant tout module
 services_env_body() {
   echo "# Généré par 64-services.sh — l'environnement des services LCARS de cette machine."
   echo "# Un daemon n'hérite d'aucun shell : ce qu'il lui faut est ici, dérivé du provisionnement."
@@ -125,7 +126,7 @@ unit_body() { # unit_body <nom sans .service>
     lcars-landing)
       cat <<EOF
 [Unit]
-Description=LCARS — la porte d'entrée web (deck) sur :$PROV_DECK_PORT
+Description=LCARS — l'accueil web (deck) sur :$PROV_DECK_PORT
 Documentation=file://$HELPERS_DIR/console-landing.sh
 After=network-online.target
 Wants=network-online.target
@@ -320,7 +321,6 @@ apply() {
     unit_current "$u" && continue
     body="$(unit_body "$u")" \
       || { p_fail "unité inconnue: $u — aucun fichier écrit"; verdict_apply; }
-    # un service debout sur l'ancienne unité se relance après la pose ; un service neuf est démarré par enable --now
     if [[ -f "$(unit_path "$u")" ]] && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then reecrites+=("$u"); fi
     write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" <<<"$body" \
       || { p_fail "unité non posée: $(unit_path "$u")"; verdict_apply; }
@@ -335,10 +335,10 @@ apply() {
       || p_fail "$u.service n'a pas démarré — « $SYSTEMCTL status $u.service » et « journalctl -u $u.service » disent pourquoi"
   done
   for u in "${reecrites[@]}"; do
-    if "$SYSTEMCTL" try-restart "$u.service" >/dev/null 2>&1; then
+    if "$SYSTEMCTL" try-restart "$u.service" >/dev/null 2>&1 && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
       p_chg "$u.service relancé sur l'unité réécrite"
     else
-      p_warn "$u.service non relancé sur l'unité réécrite — il tourne encore sur l'ancienne"
+      p_warn "$u.service : relance sur l'unité réécrite sans service debout derrière — le verdict ci-dessous le mesure"
     fi
   done
   if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep "$SETTLE_SECS"; fi

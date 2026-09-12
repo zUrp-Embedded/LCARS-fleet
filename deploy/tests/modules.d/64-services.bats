@@ -51,6 +51,7 @@ setup() {
   ACTIVE="$BATS_TEST_TMPDIR/active"; echo 0 > "$ACTIVE"
   RESTARTS="$BATS_TEST_TMPDIR/restarts.d"; mkdir -p "$RESTARTS"
   LOOP="$BATS_TEST_TMPDIR/looping"
+  RESTART_TUE="$BATS_TEST_TMPDIR/restart-tue"
   SPIN="$BATS_TEST_TMPDIR/spinning"
   cat > "$BINDIR/systemctl" <<EOF
 echo "systemctl \$*" >> "$CALLS"
@@ -58,8 +59,10 @@ echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "show" && -f "$SPIN" ]] && { u="\${@: -1}"; f="$RESTARTS/\${u%.service}"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
 [[ "\$1" == "show" ]] && { u="\${@: -1}"; cat "$RESTARTS/\${u%.service}" 2>/dev/null || echo 0; exit 0; }
 [[ "\$1" == "enable" && -f "$LOOP" ]] && { u="\${@: -1}"; echo 9 > "$RESTARTS/\${u%.service}"; }
+[[ "\$1" == "try-restart" && -f "$RESTART_TUE" ]] && echo 1 > "$ACTIVE"
 exit 0
 EOF
+  export LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR/run-systemd"; mkdir -p "$LCARS_SYSTEMD_RUN"
   chmod 0755 "$BINDIR/systemctl"
   export LCARS_SYSTEMCTL="$BINDIR/systemctl"
   export PATH="$BINDIR:$PATH"
@@ -209,6 +212,17 @@ mod() { run bash "$MOD" "$1"; }
   : > "$CALLS"
   mod apply
   refute grep -q "try-restart" "$CALLS"
+}
+
+@test "une relance qui ne laisse pas le service debout est dite, pas annoncée comme faite" {
+  mod apply
+  printf '[Unit]\nDescription=ancienne\n' > "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  : > "$RESTART_TUE"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"WARN  64-services: lcars-landing.service : relance sur l'unité réécrite sans service debout derrière"* ]]
+  [[ "$output" != *"relancé sur l'unité réécrite"* ]]
+  [[ "$output" == *"FAIL  64-services: lcars-landing.service posé mais pas debout"* ]]
 }
 
 @test "rejoue : une unite deja identique n'est pas re-ecrite, donc pas de daemon-reload" {
@@ -516,6 +530,7 @@ container_services_present() {
 }
 
 @test "check : un services.env illisible ne rend pas « aucun LCARS_SYSADMIN_UID » — non sondable, dit sans drift" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : l'illisible ne se joue pas ici"
   mod apply
   chmod 0000 "$LCARS_SERVICES_ENV"
   mod check

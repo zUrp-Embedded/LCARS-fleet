@@ -65,6 +65,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
 }
 
 @test "check : un prefix non traversable ne rend pas « release absente » — rien n'est conclu, et le pourquoi est dit" {
+  [ "$(id -u)" -ne 0 ] || skip "root traverse tout : le non-traversable ne se joue pas ici"
   release_posee; chmod 0000 "$PROV_PREFIX"
   fn check
   chmod 0750 "$PROV_PREFIX"
@@ -145,7 +146,24 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [[ "$output" == *"POSÉ  60-deploy: runtime déployé : $PROV_PREFIX (build $HEAD_SHA) + /usr/local/bin câblé"* ]]
 }
 
-@test "apply : deploy-release.sh en échec — échec nommé, le canal n'est pas écrit, le prefix reste à l'humain pour inspection" {
+@test "check : la génération précédente gardée par deploy-release.sh est nommée avec sa taille et le geste qui la libère" {
+  release_posee; verrouille
+  mkdir -p "$PROV_PREFIX/rel/lcars_fleet.prev/bin"
+  head -c 4096 /dev/zero > "$PROV_PREFIX/rel/lcars_fleet.prev/bin/lcars_fleet"
+  mod check
+  [[ "$output" == *"génération précédente gardée : $PROV_PREFIX/rel/lcars_fleet.prev ("*"sudo rm -rf $PROV_PREFIX/rel/lcars_fleet.prev"* ]]
+}
+
+@test "apply : le code 3 de deploy-release.sh est toléré, la pose continue" {
+  release_posee; verrouille
+  printf '# modif\n' >> "$RACINE/runtime/mix.exs"
+  STUB_POSE_RC=3 mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -s "$MARQUEUR" ]
+  [[ "$output" == *"POSÉ  60-deploy: runtime déployé"* ]]
+}
+
+@test "apply : deploy-release.sh en échec — échec nommé, le canal n'est pas écrit" {
   release_posee; verrouille
   printf '# modif\n' >> "$RACINE/runtime/mix.exs"
   STUB_POSE_RC=1 mod apply

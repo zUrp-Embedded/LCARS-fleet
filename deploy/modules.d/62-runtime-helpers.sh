@@ -122,10 +122,22 @@ check_perms() {
   return 0
 }
 
-bloc_present() { # bloc_present <fichier> <marqueur> → 0 si le bloc géré est dans le fichier
-  local trouve
-  trouve="$(grep -F "# >>> lcars:$2 >>>" "$1" 2>/dev/null || true)"
-  [[ -n "$trouve" ]]
+# les deux fichiers appartiennent à la distribution : un bloc géré, jamais un remplacement, et un raccord qui teste avant de sourcer
+BLOC_SKEL="if [ -r $LCARS_BASHRC ]; then . $LCARS_BASHRC; fi"
+# /etc/skel ne sert qu'à la création d'un compte : le PATH de tout shell interactif se règle dans bash.bashrc
+BLOC_PATH='case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) if [ -d "$HOME/.local/bin" ]; then PATH="$HOME/.local/bin:$PATH"; fi ;;
+esac'
+
+bloc_conforme() { # bloc_conforme <fichier> <marqueur> <corps> → 0 si le bloc géré du fichier porte ce corps
+  local corps
+  corps="$(awk -v b="# >>> lcars:$2 >>>" -v e="# <<< lcars:$2 <<<" '
+    index($0, b) == 1 {dedans=1; next}
+    $0 == e            {dedans=0; next}
+    dedans             {print}
+  ' "$1" 2>/dev/null || true)"
+  [[ "$corps" == "$3" ]]
 }
 
 check() {
@@ -196,7 +208,7 @@ check() {
     p_drift "ancien arbre embarqué présent ($HELPERS_DIR/fleet) — les arbres vivent à plat sous $HELPERS_DIR ; l'apply le retire"
   fi
   local _r
-  for _r in "${EMBEDDED_ROOT[@]}"; do
+  for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do
     if [[ -d "$HELPERS_DIR/$_r" ]]; then
       p_ok "arbre embarqué $HELPERS_DIR/$_r"
     else
@@ -210,15 +222,15 @@ check() {
   else
     p_drift "la copie de $HELPERS_DIR se déclare « $_a » alors que cette source est « $_veut » — un apply rejoué depuis $HELPERS_DIR/deploy/provision poserait (ou refuserait) un toolchain à tort"
   fi
-  if bloc_present "$BASH_BASHRC" path; then
+  if bloc_conforme "$BASH_BASHRC" path "$BLOC_PATH"; then
     p_ok "PATH des shells interactifs : ~/.local/bin ($BASH_BASHRC)"
   else
-    p_drift "$BASH_BASHRC sans le bloc PATH — « claude » (~/.local/bin) est invisible d'un shell interactif"
+    p_drift "$BASH_BASHRC sans le bloc PATH attendu — « claude » (~/.local/bin) est invisible d'un shell interactif"
   fi
-  if bloc_present "$SKEL_FILE" skel; then
+  if bloc_conforme "$SKEL_FILE" skel "$BLOC_SKEL"; then
     p_ok "squelette des humains raccordé ($SKEL_FILE → $LCARS_BASHRC)"
   else
-    p_drift "$SKEL_FILE sans le raccord vers $LCARS_BASHRC — les nouveaux comptes n'auraient pas le réglage de shell"
+    p_drift "$SKEL_FILE sans le raccord attendu vers $LCARS_BASHRC — les nouveaux comptes n'auraient pas le réglage de shell"
   fi
   check_perms
   verdict_check
@@ -271,19 +283,10 @@ apply() {
       || { p_fail "pose ratée: $d_dst"; verdict_apply; }
   done
 
-  # les deux fichiers appartiennent à la distribution : un bloc géré, jamais un remplacement, et un raccord qui teste avant de sourcer
   ensure_dir "$(dirname "$SKEL_FILE")" 0755 || verdict_apply
-  ensure_managed_block "$SKEL_FILE" skel 0644 <<BLOC || { p_fail "raccord du squelette non posé ($SKEL_FILE)"; verdict_apply; }
-if [ -r $LCARS_BASHRC ]; then . $LCARS_BASHRC; fi
-BLOC
-  # /etc/skel ne sert qu'à la création d'un compte : le PATH de tout shell interactif se règle ici
+  ensure_managed_block "$SKEL_FILE" skel 0644 <<<"$BLOC_SKEL" || { p_fail "raccord du squelette non posé ($SKEL_FILE)"; verdict_apply; }
   ensure_dir "$(dirname "$BASH_BASHRC")" 0755 || verdict_apply
-  ensure_managed_block "$BASH_BASHRC" path 0644 <<'BLOC' || { p_fail "bloc PATH non posé ($BASH_BASHRC)"; verdict_apply; }
-case ":$PATH:" in
-  *":$HOME/.local/bin:"*) ;;
-  *) if [ -d "$HOME/.local/bin" ]; then PATH="$HOME/.local/bin:$PATH"; fi ;;
-esac
-BLOC
+  ensure_managed_block "$BASH_BASHRC" path 0644 <<<"$BLOC_PATH" || { p_fail "bloc PATH non posé ($BASH_BASHRC)"; verdict_apply; }
 
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
   install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN" \

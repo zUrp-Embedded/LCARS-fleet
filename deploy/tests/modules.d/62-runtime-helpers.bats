@@ -275,6 +275,28 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [ "$output" = "/usr/bin:/bin" ]
   mod check
   [[ "$output" == *"PATH des shells interactifs : ~/.local/bin ($LCARS_BASH_BASHRC)"* ]]
+  mod apply
+  [ "$(grep -c 'lcars:path >>>' "$LCARS_BASH_BASHRC")" -eq 1 ]
+}
+
+@test "check : un bloc géré vidé de son corps est un drift, le marqueur seul ne suffit pas" {
+  mod apply
+  printf '# >>> lcars:path >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# rien\n# <<< lcars:path <<<\n' > "$LCARS_BASH_BASHRC"
+  printf '# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# <<< lcars:skel <<<\n' > "$LCARS_SKEL_FILE"
+  mod check
+  [[ "$output" == *"DRIFT 62-runtime-helpers: $LCARS_BASH_BASHRC sans le bloc PATH attendu"* ]]
+  [[ "$output" == *"DRIFT 62-runtime-helpers: $LCARS_SKEL_FILE sans le raccord attendu"* ]]
+  mod apply
+  mod check
+  [[ "$output" == *"PATH des shells interactifs"*"squelette des humains raccordé"* ]]
+}
+
+@test "check : un arbre embarqué du runtime absent (vendor, bin, etc, services) est un drift" {
+  mod apply
+  rm -rf "${LCARS_HELPERS_DIR:?}/vendor" "${LCARS_HELPERS_DIR:?}/bin"
+  mod check
+  [[ "$output" == *"arbre embarqué absent ($LCARS_HELPERS_DIR/bin)"*"arbre embarqué absent ($LCARS_HELPERS_DIR/vendor)"* ]]
+  [[ "$output" == *"arbre embarqué $LCARS_HELPERS_DIR/etc"*"arbre embarqué $LCARS_HELPERS_DIR/services"* ]]
 }
 
 @test "migration : un ancien arbre embarqué sous fleet/ est un drift au check et se retire à l'apply" {

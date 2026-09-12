@@ -35,13 +35,16 @@ setup() {
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export GESTE_ENV="$BATS_TEST_TMPDIR/geste.env"; : > "$GESTE_ENV"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
-  export LCARS_TOFU_BIN="$BIN/tofu"
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN" "$BATS_TEST_TMPDIR/hors-path"; export PATH="$BIN:$PATH"
+  # tofu vit hors du PATH (sous apt, DPkg::Path n'a pas /usr/local/bin) ; un tofu et un mix du PATH sont des pièges
+  export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/hors-path/tofu"
   cat > "$LCARS_TOFU_BIN" <<'EOF'
 #!/usr/bin/env bash
 echo "TOFU $PWD $*" >> "$CALLS"
 [[ -z "${STUB_INIT_KO:-}" ]] || { echo "init: provider introuvable dans le miroir" >&2; exit 1; }
 EOF
+  printf '#!/usr/bin/env bash\necho "PIEGE tofu du PATH $*" >> "$CALLS"; exit 127\n' > "$BIN/tofu"
+  printf '#!/usr/bin/env bash\necho "PIEGE mix $*" >> "$CALLS"; exit 127\n' > "$BIN/mix"
   cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 [[ "${STUB_FORGE_UP:-1}" == 1 ]] && exit 0 || exit 7
@@ -55,7 +58,7 @@ EOF
   cat > "$RACINE/runtime/services/forge-gestures.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "GESTE $*" >> "$CALLS"
-{ env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE)=' | sort
+{ env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE|LCARS_BUILTIN_HUMAN)=' | sort
   echo "recette: $(ls -A "$LCARS_RECIPE_DIR" | sort | tr '\n' ' ')"
   echo "instance: $(ls -A "$LCARS_RECIPE_DIR/instance" | sort | tr '\n' ' ')"
 } > "$GESTE_ENV"
@@ -65,7 +68,7 @@ case "${STUB_GESTE:-pose}" in
   echec)  echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
 esac
 EOF
-  chmod 0755 "$BIN"/* "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
+  chmod 0755 "$BIN"/* "$LCARS_TOFU_BIN" "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
 }
 
 mod() { run bash "$MOD" "$@"; }
@@ -137,6 +140,8 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   grep -q "^LCARS_DEMO_CATALOGUE=$RACINE/catalogues/web-demo$" "$GESTE_ENV"
   grep -q "^TF_CLI_CONFIG_FILE=$LCARS_TOFU_DIR/tofurc$" "$GESTE_ENV"
   grep -q '^recette: instance roles.auto.tfvars.json versions.tf $' "$GESTE_ENV"
+  refute grep -q '^LCARS_BUILTIN_HUMAN=' "$GESTE_ENV"
+  refute grep -q '^PIEGE' "$CALLS"
   [ -z "$(copies_restantes)" ]
   [ ! -e "$RACINE/runtime/services/forge-recipe/roles.auto.tfvars.json" ]
   [[ "$output" == *"POSÉ  61-forge-structure: structure de la forge posée — 63-forge-tokens peut minter les jetons de rôle"* ]]
