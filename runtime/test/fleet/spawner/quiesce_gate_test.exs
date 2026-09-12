@@ -1,15 +1,8 @@
 defmodule Fleet.Spawner.QuiesceGateTest do
   @moduledoc """
-  A drain refuses new pods AT THE CHOKEPOINT — arbitration A-13, decided 2026-08-05.
-
-  `Quiesce.refuse!/0` is named for this and had two readers: the permanent warden's reconcile gate,
-  and the HTTP control surface. The poller's dispatch was not one of them. Its ticks are wrapped in
-  `Quiesce.busy/1`, which makes the drain WAIT for a tick without stopping that tick from starting a
-  brand-new pod — so the mechanism that makes a drain safe also makes it longer, once per tick, with
-  no bound. The drain ends up waiting on a pod born after it began.
-
-  The warden composed the check at its own call site. That is correct there, and it is a PARALLEL
-  PATH to the chokepoint: the shape that leaves every other caller uncovered while looking handled.
+  The spawn boundary refuses new pods during drain, covering every caller.
+  Quiesce.busy/1 only makes shutdown wait for work; it does not prevent that work
+  from attempting another spawn.
   """
   use ExUnit.Case, async: false
 
@@ -17,8 +10,7 @@ defmodule Fleet.Spawner.QuiesceGateTest do
   alias Fleet.Spawner
 
   setup do
-    # The flag is a `:persistent_term` — node-global by design, so it must be put back whatever the
-    # test does. Restored, never assumed to have been false.
+    # Restore the previous node-global persistent_term flag, even if the test fails.
     was = Quiesce.quiescing?()
 
     on_exit(fn ->
@@ -43,9 +35,7 @@ defmodule Fleet.Spawner.QuiesceGateTest do
     test "spawn_pod REFUSES, typed, and refuses BEFORE any other validation" do
       Quiesce.refuse!()
 
-      # A profile with no lifetime_scope would normally be refused for THAT reason. The quiesce
-      # answer must come first: during a drain the shape of the request is irrelevant, and a caller
-      # reading `:lifetime_scope_missing` would go fix a card instead of noticing the drain.
+      # Use an invalid profile to verify that drain refusal takes precedence over validation.
       broken = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => "x"}, spec: %{}}
 
       assert {:error, :fleet_quiescing} = Spawner.spawn_pod(broken, "issue-1", [])
@@ -72,7 +62,6 @@ defmodule Fleet.Spawner.QuiesceGateTest do
 
       broken = %Fleet.CapProfile{kind: "CapabilityProfile", metadata: %{"name" => "x"}, spec: %{}}
 
-      # Whatever this answers, it must NOT be the drain refusal: the gate is closed, not stuck.
       assert {:error, reason} = Spawner.spawn_pod(broken, "issue-1", [])
       refute reason == :fleet_quiescing
     end

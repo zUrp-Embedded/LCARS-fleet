@@ -1,14 +1,12 @@
 defmodule Fleet.Spawner.PublishConsumer do
   @moduledoc """
-  Consumes canonical `admin.spawn.request` events and dispatches
-  `Fleet.Spawner.spawn_pod/3`. Every post-202 dispatch failure emits
-  `spawn.failed`; malformed or failed requests never crash the consumer.
+  Dispatches canonical API `admin.spawn.request` events to `Fleet.Spawner.spawn_pod/3`.
+  Dispatch errors, exceptions and exits trigger `spawn.failed` after the API's 202;
+  failed alarm emission is logged.
 
-  It ALSO relays `project_publish.{done,failed}` back to the requesting pod (`requester_pod_id`
-  in the payload) via `notify_pod`: the wake channel is the only server->pod path (MCP is
-  pull-only), and the pod that asked to publish gets its own answer. This lives here because
-  `notify_pod` is a Spawner act; the MCP worker only emits the outcome on the bus. Best-effort by
-  design (the wake is a courtesy — the durable truth is the PR/MR on the forge), never a crash.
+  Relays `project_publish.{done,failed}` to `requester_pod_id` through `notify_pod`.
+  This notification is best-effort; the durable publish outcome lives on the forge.
+  Spawner owns the notification, while the MCP worker emits the outcome on the Bus.
   """
 
   use GenServer
@@ -49,7 +47,6 @@ defmodule Fleet.Spawner.PublishConsumer do
 
         emit_spawn_failed(payload, reason)
     catch
-      # F-06: exits and throws must alarm just like exceptions.
       kind, reason ->
         Logger.error(
           "PublishConsumer: handle_spawn_request #{kind} — spawn DROPPED while the API already " <>
@@ -62,8 +59,6 @@ defmodule Fleet.Spawner.PublishConsumer do
     {:noreply, %{state | count: state.count + 1}}
   end
 
-  # Relay a finished publish back to the pod that asked for it. Only when `requester_pod_id` is a
-  # real pod (a caller without one falls through to the ignore clause).
   def handle_info(
         %Event{type: :"project_publish.done", payload: %{"requester_pod_id" => pod} = p},
         state
@@ -98,8 +93,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   def handle_info(%Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Best-effort wake — a dead/absent pod yields {:error, _} (logged in notify_pod), and any raise is
-  # swallowed: a failed courtesy notification must never take down the spawn-dispatch consumer.
+  # Notification exceptions must not interrupt spawn dispatch.
   defp notify_requester(state, pod, msg) do
     state.spawner.notify_pod(pod, msg)
   rescue
@@ -122,7 +116,6 @@ defmodule Fleet.Spawner.PublishConsumer do
           "(payload=#{inspect(payload)})"
       )
 
-      # F-C044
       emit_spawn_failed(payload, :name_missing_or_empty)
     else
       Fleet.CapProfile.resolve(Fleet.CapProfile, name)
@@ -130,10 +123,7 @@ defmodule Fleet.Spawner.PublishConsumer do
     end
   end
 
-  # Alarm loss is non-fatal but loud: the original request was already acknowledged.
-  # LES DEUX ECHECS SONT DISTINGUES DANS L'EVENEMENT : `:cap_profile_load` dit que le role n'existe
-  # pas, `:spawn_pod` qu'il existe et n'a pas demarre. Les fondre laisserait l'operateur chercher un
-  # role manquant la ou c'est le demarrage qui a rate (F-C044).
+  # Distinguish profile-resolution errors from failures to start a resolved profile.
   defp spawn_resolved({:ok, cap_profile}, payload, state, {name, issue_id, opts}) do
     case state.spawner.spawn_pod(cap_profile, to_string(issue_id), opts) do
       {:ok, _pod_ref} ->

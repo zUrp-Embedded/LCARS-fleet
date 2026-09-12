@@ -45,7 +45,6 @@ defmodule Fleet.Spawner.Pod.Backend do
         :ok
     end
 
-    # CI-05
     _ =
       cond do
         not is_binary(state.tmux_session) ->
@@ -101,7 +100,6 @@ defmodule Fleet.Spawner.Pod.Backend do
   """
   @spec launch_backend_conforming() ::
           {:ok, module()} | {:error, {:launch_backend_misconfigured, term()}}
-  # F-C041
   def launch_backend_conforming, do: Fleet.Spawner.LaunchBackend.resolved_conforming()
 
   @doc "Returns the configured bwrap launcher path."
@@ -116,9 +114,7 @@ defmodule Fleet.Spawner.Pod.Backend do
   @spec claude_launch_path() :: String.t()
   def claude_launch_path, do: launcher_path(:spawner_claude_launch_path, "claude_launch.sh")
 
-  # La cle arrive DEJA prefixee par domaine (`:spawner_*`) depuis les trois appelants ci-dessus, et
-  # c'est deliberе : une cle assemblee ici (`:"spawner_#{config_key}"`) serait invisible a tout grep
-  # et au mur `config.no_legacy_namespace`. Un knob doit se lire en toutes lettres a son point d'usage.
+  # Keep config keys literal at call sites so source-based config checks can find them.
   defp launcher_path(config_key, default_basename) do
     Application.get_env(:lcars_fleet, config_key, "/usr/local/bin/" <> default_basename)
   end

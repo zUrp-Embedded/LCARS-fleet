@@ -1,25 +1,16 @@
 defmodule Fleet.Spawner.PodWarden do
   @moduledoc """
-  Periodic substrate reaper for orphan tmux holders and terminal pod tombstones.
-  Both duties reconcile against the live registry and require two consecutive
-  observations before acting (`Fleet.Grace.two_tick/2`). Unknown liveness skips the entire tick.
+  Reaps orphan tmux holders and terminal pod directories after two observations
+  (`Fleet.Grace.two_tick/2`). An unavailable Registry or socket listing freezes both
+  suspect sets. `Fleet.PeriodicCheck` handles scheduling and check failures.
 
-  The tick plumbing — arm, re-arm LAST, the net under the check, the `:check_now` hook — is
-  `Fleet.PeriodicCheck`; this module keeps its state, its two sources and its decision.
-
-  ## Options (`start_link/1`)
-
-    * `:name` — GenServer name (default the module; tests pass `nil` or a unique name to co-exist).
-    * `:interval_ms` — tick period (default `60_000`).
-    * `:live_fun` — `() -> {:ok, MapSet.t()} | :unavailable`, the live pod ids (default: the
-      Registry).
-    * `:socks_fun` — same shape, the socket dirs on disk (default: `PodTmux.sock_base/0`).
-    * `:reap_fun` — `(pod_id -> term)`, the reap effect (default `reap/1`).
-    * `:gc_fun` — `(live, prev_suspects -> new_suspects)`, the pod_dir GC sweep (default
-      `sweep_pod_dir_gc/2`).
-
-  The four seams exist so the TICK is testable without a disk or a Registry: the decisions are
-  pure and tested on their own, and the tick's three branches are tested through the seams.
+  Options for `start_link/1`:
+    * `:name` — GenServer name (default this module; `nil` permits unnamed instances).
+    * `:interval_ms` — tick period (default 60_000).
+    * `:live_fun` — `() -> {:ok, MapSet.t()} | :unavailable`, default Registry pod IDs.
+    * `:socks_fun` — same shape, default directories under `PodTmux.sock_base/0`.
+    * `:reap_fun` — `(pod_id -> term)`, default `reap/1`.
+    * `:gc_fun` — `(live, prev_suspects -> new_suspects)`, default `sweep_pod_dir_gc/2`.
   """
 
   use GenServer
@@ -146,7 +137,7 @@ defmodule Fleet.Spawner.PodWarden do
 
     PodTmux.kill_holder(pod_id)
 
-    # CI-05: erase the socket proof only after confirmed holder death.
+    # Erase the socket proof only after an explicit absent-session result.
     if PodTmux.confirm_dead?(pod_id) do
       PodTmux.remove_sock_dir(pod_id)
     else
@@ -176,7 +167,7 @@ defmodule Fleet.Spawner.PodWarden do
 
     for scope <- subdirs(root),
         pod_id <- subdirs(Path.join(root, scope)),
-        # R1-33: derive deletion targets only from valid owned pod ids.
+        # Derive deletion targets only from valid owned pod ids.
         Fleet.Spawner.valid_pod_id?(pod_id),
         tomb = tombstone_for(root, scope, pod_id),
         not is_nil(tomb),
@@ -215,14 +206,7 @@ defmodule Fleet.Spawner.PodWarden do
     _ -> :unavailable
   end
 
-  # THE SHAPE OF ITS TWIN, just above, and for the same reason. An unreadable socket base coming
-  # back as an EMPTY MapSet makes `difference(socks, live)` empty, so the warden concludes "no
-  # orphan" — fail-safe (nothing is killed by mistake) and INDISTINGUISHABLE from the nominal tick.
-  # `live_pod_ids/0` exists precisely to make that distinction visible on the other source.
-  #
-  # `:unavailable` on any read failure, and the tick is skipped as a whole: a reconciliation needs
-  # BOTH sides, and one side missing is not one side empty. The reclaim outcome is unchanged — no
-  # orphan is declared either way — but the operator sees why nothing happened.
+  # A failed listing is unavailable evidence, not an empty directory.
   defp sock_pod_ids do
     base = PodTmux.sock_base()
 

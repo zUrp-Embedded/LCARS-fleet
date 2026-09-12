@@ -1,25 +1,14 @@
 defmodule Fleet.Spawner.PodTmux do
   @moduledoc """
-  Host→pod control ops over the **PER-POD tmux socket** (`tmux -S <sock>`), conventions SHARED with
-  `bin/bwrap_launch.sh`: the pod runs in a tmux server INSIDE bwrap, reachable via its bound socket
-  (host↔pod sock-dir). Keyed by `pod_id` (not by state) — `sock_path`/`session_name` derived from
-  the pod_id + sock-base config.
+  Controls each pod through its tmux socket, following the launcher conventions.
 
-  ## This channel carries the CONTROL-PLANE, not the brief
+  Carries kicks, slash commands and health probes; briefs are pulled through MCP.
+  MCP channels skip slash commands, so `/clear` must use tmux send-keys.
 
-  The brief does NOT travel here (it is pulled by the pod via MCP `get_work_item`). This channel = the
-  **KICK** ("engage" → triggers get_work_item → processes → submit_result) + the slash-commands (`/clear`)
-  + health (`has-session`). The MCP channels are `skipSlashCommands:true` → only the tmux send-keys
-  reaches the slash-commands.
-
-  ## The PRIMARY KILL is NOT here (but the orphan fallback is)
-
-  Killing = SIGTERM of the bwrap holder (`Pod.Backend.terminate_pod_port/1`), NOT `kill-session`:
-  the holder (`sleep infinity`) holds the namespace and IGNORES `Port.close` alone (stdin EOF) → we
-  SIGTERM its os_pid; killing just the tmux session would leave the holder alive → orphan namespace.
-  The socket dies with the namespace when the holder falls. **RECOVERY exception**: when there is no
-  Port left (orphan after a crash of the pod gen_statem process, reap), `kill_holder/1` below performs
-  the rescue gesture (tmux kill-server + anchored `pkill -f`).
+  Normal teardown SIGTERMs the Port's holder (`Pod.Backend.terminate_pod_port/1`):
+  closing the Port or killing only the tmux session can leave the namespace alive.
+  Without an owned Port, `kill_holder/1` kills the tmux server and matches the
+  orphan launcher holder with an escaped, anchored `pkill` pattern.
   """
 
   require Logger
@@ -27,38 +16,26 @@ defmodule Fleet.Spawner.PodTmux do
   alias Fleet.Credentials.Shell
 
   @tmux_bin "tmux"
-  # WALL bound for tmux/pkill: these are load-bearing on teardown/wake/health paths. A wedged tmux server
-  # (or a `pkill` that hangs on a stuck process) under a bare System.cmd would block the CALLING GenServer
-  # (Pod/PodWarden/health) indefinitely. Fleet.Credentials.Shell.run runs the command in its own
-  # process-GROUP and SIGKILLs the whole group at the deadline. tmux ops are sub-second nominally.
+  # Bound subprocesses so a wedged tmux/pkill cannot block the calling GenServer indefinitely.
+  # Shell.run kills the command process group at the deadline.
   @tmux_timeout_ms 5_000
 
   @doc """
-  Base of the pod sockets. Config `:lcars_fleet, :spawner_tmux_sock_base` (default `~/.lcars/run/tmux-sock`).
-  The alignment invariant with the launchers is the ENV, not the defaults: the `:launching` state
-  ALWAYS exports `LCARS_TMUX_SOCK_BASE` from this value (`Pod.LaunchEnv`), so both sides (Elixir
-  host / launcher pod) compute the SAME path. The launchers' literal fallback
-  (`/run/lcars/tmux-sock`) only covers a direct legacy invocation and need not equal this default.
+  Socket root, configured by `:spawner_tmux_sock_base` (default `~/.lcars/run/tmux-sock`).
+  `Pod.LaunchEnv` exports it as `LCARS_TMUX_SOCK_BASE` so launchers use the same path;
+  their direct-invocation fallback need not match this default.
   """
   @spec sock_base() :: String.t()
   def sock_base,
     do: Application.get_env(:lcars_fleet, :spawner_tmux_sock_base, default_sock_base())
 
-  # Fleet runs as the human → home-relative default `~/.lcars/run/tmux-sock` (a `/run/lcars/tmux-sock`
-  # would be a systemd RuntimeDirectory owned by `lcars`, non-writable outside an lcars-daemon).
-  # Unresolvable HOME = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
-  # path: the .lcars state must not scatter silently.
+  # Use the runtime user’s state directory; a system-owned /run directory may be unwritable.
   defp default_sock_base,
     do: Path.join(Fleet.Layout.state_dir(), "run/tmux-sock")
 
   @doc """
-  Pod socket path — bwrap_launch.sh convention: `<base>/<pod_id>/pod.sock`.
-
-  CONSTANT filename (`pod.sock`), not `lcars-pod-<pod_id>.sock`: the `<pod_id>/` dir
-  already gives uniqueness + isolation (bind-mount). A doubled pod_id (dir + filename)
-  would blow past the hard `sun_path` limit (108 bytes) of Unix sockets as soon as
-  `pod_id` is a UUID (workflow path) → `error: File name too long` (a short id in a
-  direct spawn would pass; a workflow UUID pod_id would not).
+  Returns `<base>/<pod_id>/pod.sock`, matching the launchers.
+  The short filename avoids repeating a UUID and exceeding the Unix socket path limit.
   """
   @spec sock_path(String.t()) :: String.t()
   def sock_path(pod_id) when is_binary(pod_id),
@@ -148,11 +125,9 @@ defmodule Fleet.Spawner.PodTmux do
   @dead_confirm_attempts 5
   @dead_confirm_sleep_ms 40
   @doc """
-  Whether a pod session is REALLY gone — `:absent` observed within a bounded poll, never a single
-  read.
-
-  `false` on `:unknown` as well as on `:alive`: a state we could not read is not a death, and the
-  caller of this reaps. One transient miss would kill a living pod and its context.
+  Returns true on the first explicit `:absent` result, including the first probe.
+  Retries `:alive` or `:unknown` up to five probes, 40 ms apart, then returns false.
+  An unreachable tmux alone never authorizes socket-directory removal.
   """
   @spec confirm_dead?(String.t(), (String.t() -> :alive | :absent | :unknown)) :: boolean()
   def confirm_dead?(pod_id, state_fun \\ &session_state/1) when is_binary(pod_id) do
@@ -218,11 +193,8 @@ defmodule Fleet.Spawner.PodTmux do
   end
 
   @doc """
-  Same capture, TYPED and SILENT — for the POLLING consumer (the liveness probe samples this
-  every tick). The loud version above is the one-shot escalation contract, where an empty pane
-  must be told apart from a blank screen; a failure repeated at tick cadence is a log flood,
-  not new information (measured: a test-suite pod with no tmux logged it every 30 s). The
-  caller decides what a failure means — for liveness it means "no signal", never "silence".
+  Captures the pane without logging, returning a typed error for polling consumers.
+  Liveness treats capture failure as unavailable evidence, not a silent pane.
   """
   @spec capture_pane_quiet(String.t()) :: {:ok, String.t()} | {:error, integer(), String.t()}
   def capture_pane_quiet(pod_id) when is_binary(pod_id) do
