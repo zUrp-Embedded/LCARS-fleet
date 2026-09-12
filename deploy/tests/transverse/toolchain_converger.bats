@@ -1,37 +1,13 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-#
-# LE SEUL GESTE PRIVILEGIE DU RAIL, et ce que ces temoins defendent tient en une phrase : ce script
-# ne doit RIEN interpreter. Son entree est un manifeste qu'un humain a signe ; sa sortie est
-# l'application EXACTE de ce document, ou un refus bruyant.
-#
-# Trois familles de cas :
-#   - les REFUS (un manifeste qui ne peut pas venir du rail ne s'applique pas) ;
-#   - le VERROU (deux convergences concurrentes se battraient sur /var/lib/dpkg/lock) ;
-#   - l'IDEMPOTENCE par le SHA (rejouer ne refait rien, et un echec ne pose pas de marqueur).
-#
-# La forge est simulee par un `curl` en tete de PATH. Ce qui est mesure est la DECISION, jamais le
-# reseau.
 
-# ⚠ LE DEFAUT DE `LCARS_TOOLCHAIN_WORK` N'EST EXERCE PAR AUCUN AUTRE TEMOIN DE CE FICHIER : le
-# `setup` le surcharge vers le tmpdir, comme il faut — un temoin qui poserait un aptroot au chemin
-# de production serait un temoin qui provisionne la machine. Le prix de cette surcharge est qu'un
-# defaut faux passe INVISIBLE ici, et il l'a ete : il pointait dans l'etat tofu. Le temoin qui suit
-# est le seul a regarder la valeur elle-meme.
 
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
-# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
 @test "le repertoire de travail par defaut ne s'ouvre ni dans l'etat tofu ni dans le magasin" {
   local default
   default="$(sed -n 's/^WORK="\${LCARS_TOOLCHAIN_WORK:-\(.*\)}"$/\1/p' "$SUT")"
   [[ -n "$default" ]]
-  # `/var/lib/lcars/tofu` porte l'etat terraform des catalogues, mot de passe de seed compris. Son
-  # mode et son proprietaire vivent dans `deploy/system.manifest`, pas ici : ce qui se verifie
-  # ci-dessous est qu'un arbre `rm -rf` a chaque passe ne s'imbrique pas dans l'etat sensible d'un
-  # autre proprietaire.
   [[ "$default" != /var/lib/lcars/tofu* ]]
   # Ni sous la racine du magasin : les volumes externes y sont montes, et un voisin non monte
   # promet une persistance qu'il n'a pas.
@@ -44,13 +20,6 @@ load ../refute
 
 setup() {
   SUT="${BATS_TEST_DIRNAME}/../../../runtime/bin/lcars-toolchain-converge"
-  # ⚠ RESOLU, PAS GRAVE — et ce mur-ci est de ceux qui ne PEUVENT pas se permettre un litteral. Il
-  # cherche une ABSENCE : le jour ou la racine des jetons a demenage, un motif grave aurait cesse de
-  # pouvoir matcher quoi que ce soit et serait reste vert en ne gardant plus rien. Un mur de presence
-  # qui perd sa cible rougit ; un mur d'absence, lui, felicite.
-  # ⚠ `env -i` : on resout le DEFAUT, pas la surcharge de l'appelant. Un `setup()` qui exporte
-  # cette variable — plusieurs le font — la rendrait telle quelle, et le mur mesurerait le
-  # temoin au lieu de la SSoT. Le motif complet est dans `deploy_manifest.bats`.
   TOKENS_DIR="$(env -i PATH="$PATH" bash -c ". '${BATS_TEST_DIRNAME}/../../lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
   [[ "$TOKENS_DIR" == /* ]] || { echo "la lib ne rend pas de racine de jetons absolue : « $TOKENS_DIR »" >&2; return 1; }
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
@@ -72,12 +41,6 @@ stub_deps() {
   done
 }
 
-# `curl` rend la liste des manifestes puis leur contenu, selon l'URL demandee.
-#
-# ⚠ ET LA TETE DE LA BRANCHE PROTEGEE, parce que le convergeur la DEMANDE AVANT TOUT. Un decor qui
-# ne la sert pas fait refuser toutes les passes nominales — c'est le comportement voulu du garde,
-# et c'est pourquoi le defaut du decor decrit une forge SAINE dont la tete vaut le sha des temoins.
-# Les temoins qui veulent une tete AUTRE la posent eux-memes via `stub_head`.
 : "${STUB_HEAD:=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef}"
 stub_head() { STUB_HEAD="$1"; }
 
@@ -125,17 +88,6 @@ EOF
   [[ "$output" == *"FORGE_BASE_URL"* ]]
 }
 
-# ─── AUCUN SECRET DANS LE PROCESS LE PLUS PRIVILEGIE ────────────────────────────────────────────
-#
-# ⚠ CE TEMOIN GARDAIT UNE EXIGENCE QUI EST DEVENUE SON CONTRAIRE. Il epinglait « pas de jeton
-# lisible -> refus ». Or ce script porte le SEUL geste root de la machine, et la regle qui donne sa
-# forme au rail est que celui qui a le PRIVILEGE ne DETIENT aucun secret. Exiger un jeton, c'etait
-# exiger que le process le plus privilegie en tienne un — donc qu'un defaut chez lui puisse
-# escalader ce qu'il vole.
-#
-# Le depot d'ops est PUBLIC par construction — mesure du 2026-08-25 sur forge vivante :
-# `/repos/fleet/lcars/branches/tool_request` et `/contents/ops` repondent 200 SANS aucun en-tete
-# d'autorisation. La lecture part donc en anonyme, et ce temoin garde la propriete INVERSE.
 
 @test "AUCUN SECRET: ce script n'OUVRE aucun fichier de la racine des jetons" {
   # ⚠ ON MESURE LE CODE, PAS LA PROSE : la cicatrice de ce fichier NOMME le chemin qu'elle a retire,
@@ -148,9 +100,6 @@ EOF
 }
 
 @test "AUCUN SECRET: quand un jeton EST fourni, il ne passe pas en argv de curl" {
-  # La contrepartie du precedent. `FORGE_TOKEN` reste accepte pour un conteneur dont la forge exige une
-  # session en lecture — mais un en-tete construit en `-H` se lit dans `/proc/<pid>/cmdline`, par
-  # tout le monde, pendant toute la duree de l'appel, dans le process le plus privilegie qui soit.
   local n
   n="$(sed 's/#.*//' "$SUT" | grep -cE '\-H "Authorization' || true)"
   [ "$n" -eq 0 ]
@@ -158,9 +107,6 @@ EOF
 }
 
 @test "VERROU: une seconde convergence pendant la premiere sort 0 sans rien faire" {
-  # `apt-get` n'est PAS reentrant : deux processus root en parallele se battent sur
-  # /var/lib/dpkg/lock et l'un des deux meurt en laissant dpkg a moitie configure. Sortir 0 est
-  # correct — il n'y a rien a faire, ce n'est pas un echec — et le dire l'est aussi.
   exec 8>"$LCARS_TOOLCHAIN_LOCK"
   flock -n 8
   run "$SUT" deadbeef
@@ -170,12 +116,6 @@ EOF
 }
 
 @test "IDEMPOTENCE: marqueur au MEME SHA — les verbes MAGASIN sont sautes, APT REJOUE" {
-  # LE CAS DU REBUILD : le marqueur (magasin, volume externe) survit au conteneur, /usr non. Une
-  # v1 sautait le manifeste ENTIER sur marqueur courant — apres rebuild, le conteneur se disait
-  # convergee avec un /usr nu. Deux temoins en un : apt est INVOQUE malgre le marqueur courant,
-  # et l'installeur (verbe magasin) ne l'est PAS.
-  # ⚠ l'eco vient du CHEMIN servi par stub_forge (python.yaml), et list_under attend des entrees
-  # indentees a DEUX espaces (`  - `).
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n  - python3-venv\n' | base64 -w0)"
   mkdir -p "$LCARS_STORE_ROOT/state/eco.d"
   printf 'deadbeef\n' > "$LCARS_STORE_ROOT/state/eco.d/python.applied"
@@ -233,9 +173,6 @@ EOS
 }
 
 @test "GRAMMAIRE: la forme REELLE du render (entrees a 4 espaces) — apt recoit les paquets" {
-  # Le temoin qui a paye : une v1 de list_under exigeait `^  - ` pendant que le render emet a 4
-  # espaces — apply_apt lisait ZERO paquet sur un manifeste reellement rendu, en silence, et
-  # chaque cote etait vert avec ses propres fixtures. Cette fixture est la forme du RENDER.
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n    - python3-yaml\n' | base64 -w0)"
   cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<EOS
 #!/usr/bin/env bash
@@ -250,14 +187,8 @@ EOS
 }
 
 @test "GRAMMAIRE: manifeste COMBINE apt+sysroot — la cible ne s'installe JAMAIS sur l'hote" {
-  # Le cas cross legitime : apt.packages = paquets HOTE, sysroot.packages = paquets CIBLE. Sans le
-  # scope par bloc (block_under), `  packages` aspirait les deux et apt installait la cible sur
-  # l'hote. Piege latent depuis la v1, mesure en reparant la grammaire.
   local sr; sr="$BATS_TEST_TMPDIR/keyring.gpg"; : > "$sr"
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\napt:\n  packages:\n    - crossbuild-essential-arm64\nsysroot:\n  arch: arm64\n  keyring: %s\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' "$sr" | base64 -w0)"
-  # UNE LIGNE VIDE entre les invocations : c'est elle qui fait de chaque appel un paragraphe
-  # (RS="") — sans elle le fichier est UN bloc et le temoin serait creux (le Dir:: du sysroot
-  # couvrirait un libssl-dev arrive dans l'appel hote).
   cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<EOS
 #!/usr/bin/env bash
 { printf '%s\n' "\$@"; echo; } >> "$BATS_TEST_TMPDIR/apt-args"
@@ -269,9 +200,6 @@ EOS
   run "$SUT" deadbeef
   [[ "$status" -eq 0 ]]
   grep -qx 'crossbuild-essential-arm64' "$BATS_TEST_TMPDIR/apt-args"
-  # La preuve du tri — nuance : le sysroot appelle AUSSI apt-get (racine privee, `-o Dir::Etc`).
-  # Ce qui est interdit est libssl-dev dans un appel SANS `Dir::` (l'appel HOTE) : on refuse tout
-  # PARAGRAPHE (= une invocation, separee par la ligne vide du stub) hote portant le paquet cible.
   refute awk 'BEGIN{RS=""} !/Dir::/ && /libssl-dev/ {found=1} END{exit !found}' "$BATS_TEST_TMPDIR/apt-args"
 }
 
@@ -287,9 +215,6 @@ EOS
 }
 
 @test "EGRESS: le marqueur .applied est pose MEME SANS egress_hosts — le silence nominal est estampille" {
-  # Une v1 posait le marqueur dans apply_egress : un conteneur qui n'a jamais rien ouvert (le cas
-  # NOMINAL) ne l'avait donc jamais, et « aucun hote » recouvrait de nouveau les pannes que le
-  # marqueur separe. Ce temoin epingle : convergence verte SANS hotes => marqueur pose quand meme.
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
   run "$SUT" deadbeef
   [[ "$status" -eq 0 ]]
@@ -327,13 +252,6 @@ EOS
 }
 
 @test "INSTALLER: sha256 qui ne correspond pas — RIEN n'est execute, et c'est un echec d'APPLICATION" {
-  # Un telechargement coupe produit un script TRONQUE que `sh` executerait quand meme, et l'etat
-  # partiel passerait ensuite pour « deja fait ».
-  #
-  # EXIT 3 ET PAS 2, ET LA NUANCE EST LE SUJET : le manifeste est BIEN FORME — c'est l'artefact qui
-  # ne correspond pas. Un pin perime et un telechargement corrompu se ressemblent ici, et l'un des
-  # deux se repare tout seul au tick suivant. Un `2` dirait « ce document ne marchera jamais », ce
-  # qui est faux et ferait attendre une correction humaine qui n'a pas lieu d'etre.
   cat > "$BATS_TEST_TMPDIR/bin/sha256sum" <<'EOS'
 #!/usr/bin/env bash
 exit 1
@@ -365,10 +283,6 @@ EOS
 }
 
 @test "RC 2 vs RC 3: un delta HORS MAGASIN (freeze_env) sort en 2 — document faux, pas retryable" {
-  # Le refus nait pendant l'EXECUTION (invisible a validate_manifest) : l'env_script pose un chemin
-  # hors magasin. Une v1 le laissait mourir dans le sous-shell du pipe : freeze_env CONTINUAIT
-  # (env.d tronque possible) et le rc sortait en 3 « retryable » — le rail rebouclait toutes les
-  # 60 s en RE-TELECHARGEANT l'installeur. Deux proprietes : rc=2, et AUCUN env.d pose.
   local sha; sha="$(printf 'a%.0s' {1..64})"
   local B64; B64="$(printf 'kind: ecosystem_enable\necosystem: rust\ninstaller:\n  name: rustup\n  sha256: %s\n  url: https://sh.rustup.rs\n  version: "1.27"\n  env_script: env.sh\n' "$sha" | base64 -w0)"
   stub_forge "$B64"
@@ -407,17 +321,6 @@ EOS
   [[ ! -e "$LCARS_STORE_ROOT/state/env.d/python.env" ]]
 }
 
-# ─── LE SHA EST BORNE A LA BRANCHE PROTEGEE ─────────────────────────────────────────────────────
-#
-# ⚠ MESURE DU 2026-08-24, CHAINE COMPLETE. Ce binaire tournait en root pour le groupe fleet (une
-# regle sudoers, disparue depuis) ; le controle de `$1` ne portait que la FORME
-# hexadecimale ; le manifeste etait ensuite lu `?ref=$SHA` et ses paquets installes EN ROOT. Or le
-# rail existe pour que des pods ouvrent des PR vers `tool_request` : des commits NON SIGNES vivent
-# dans ce depot PAR CONCEPTION. Et `fleet` n'est pas l'operateur — `human-converger.sh` y verse
-# toute la team `humans` de la forge, toutes les 30 s.
-#
-# Ces temoins tiennent le garde. Sans eux, il se retire au premier refactor qui trouve l'appel
-# reseau couteux.
 
 @test "GARDE: un sha qui n'est PAS la tete de la branche protegee est REFUSE" {
   stub_head "cafe1234cafe1234cafe1234cafe1234cafe1234"
@@ -452,16 +355,6 @@ EOF
 }
 
 @test "GARDE: la branche est un LITTERAL GELE — une borne ne se regle pas" {
-  # ⚠ CE TEMOIN A CONSACRE UN DEFAUT. Sa premiere forme exigeait
-  # `LCARS_TOOLCHAIN_BRANCH:-tool_request` : elle rendait la borne REGLABLE et le verifiait, donc
-  # elle aurait empeche de la geler. Un temoin qui epingle l'implementation qu'on vient d'ecrire ne
-  # mesure rien — il fige.
-  #
-  # Ce qui se tient : `Fleet.Toolchain.branch/0` gele le nom, chaque lecteur shell en porte la COPIE,
-  # et AUCUN ne la derive d'une expansion. Le contrat `toolchain.branch_single_source` le dit dans
-  # sa remediation : « a name half of the rail can retune is a rail that splits in silence ».
-  # Ici ce n'est meme pas un nom de confort : c'est ce qui empeche d'installer en root un manifeste
-  # que personne n'a signe.
   grep -qx 'BRANCH="tool_request"' "$SUT"
   refute grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"
   # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le

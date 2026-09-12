@@ -4,7 +4,7 @@
 # STARDATE: 2026-09-12
 # STATUS: l'acceptation d'une installation : ce qu'un opérateur peut en faire — se connecter à la forge, faire fusionner une PR, démarrer la fleet
 # USAGE : accept --announce-file <chemin> [--forge-url URL]
-# EXIT  : 0 les trois tiennent · 1 au moins une manque · 2 argument inconnu
+# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une manque · 2 argument inconnu
 
 set -euo pipefail
 
@@ -156,7 +156,7 @@ check_fleet_start() {
   fi
 }
 
-printf '\n  %sACCEPTATION — ce qu%s'"'"'%son peut faire de cette installation%s\n' "$_N" "$_N" "$_N" "$_N"
+printf '\n  %sACCEPTATION — ce que cette installation permet%s\n' "$_N" "$_N"
 check_forge_login
 check_ci
 check_fleet_start

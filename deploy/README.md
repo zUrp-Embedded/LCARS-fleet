@@ -3,7 +3,7 @@
 **Date** : 2026-07-05
 **Dernière révision** : 2026-09-12 (chantier installeur : un pipeline, trois couches de témoins, les workflows de CI et de publication partis)
 **Statut** : en service
-**Référencé par** : `install.sh` (racine), `README_fr.md`
+**Référencé par** : `deploy/tests/README.md`, `deploy/tests/provision.bats` (la table des modules)
 
 `deploy/` porte l'installation, et rien d'autre : ce qui amène une machine nue — une distribution
 WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le produit vit sous
@@ -17,7 +17,7 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 | `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, demande confirmation et délègue. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration. `--check`, `--dry-run`, `--from-release`, les ports : voir `install.sh --help` |
 | `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit détaré sous `~/.lcars/kits/<nom>/`, puis `accept` ; `doctor` sonde sans escalader |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/` |
-| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : gate, release, doc, kit `.tar.gz`, installeur de la version, image docker. Tout reste dans le tiroir `<parent du checkout>/lcars-packs/dist/<tag>/` (`LCARS_PACK_DIR` le déplace) et dans le daemon ; `--publish` pousse l'image sur le registre, puis le kit et l'installeur sur la release de la forge |
+| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : gate, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace), le tiroir `dist/<tag>/` les reprend par liens durs avec l'installeur de la version, l'image reste dans le daemon ; `--publish` pousse l'image sur le registre, puis le kit et l'installeur sur la release de la forge |
 | `deploy/provision apply \| doctor \| update \| list \| audit` | le runner des modules, joué par `workstation` et par la construction de l'image |
 | `deploy/accept` | l'acceptation d'une installation : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows d'un projet demandent, la fleet démarre sous l'humain de fleet |
 
@@ -110,8 +110,9 @@ runner), `forge-runner.sh` (l'enrôlement d'un runner, joué par 49 et par le ba
 ## Publier une version
 
 `deploy/pack.sh --publish` se joue depuis le poste, après le gate local, sur un arbre commité :
-le tag est celui de git quand HEAD en porte un, sinon `<VERSION>-<sha>` (`LCARS_PACK_TAG` le
-pose) ; la forge, le propriétaire et le dépôt se dérivent d'`origin` (`LCARS_PACK_FORGE`,
+le tag est celui de git quand HEAD en porte un, sinon `<MM-JJ_HH-MM>-<sha>` (`LCARS_PACK_TAG` le
+pose) ; l'installeur généré nomme l'image de la version (`<registre>/<owner>/<repo>:<tag>`) et la
+tire avant `container up` quand elle manque au daemon ; la forge, le propriétaire et le dépôt se dérivent d'`origin` (`LCARS_PACK_FORGE`,
 `LCARS_PACK_OWNER`, `LCARS_PACK_REPO` sinon) ; le jeton vient de `LCARS_PACK_TOKEN` ou de
 `LCARS_PACK_TOKEN_FILE`, portées `write:repository` et `write:package`, jamais en argv. L'image
 part d'abord, sur le registre de la forge (`ghcr.io` pour GitHub, `LCARS_PACK_REGISTRY` sinon) :

@@ -4,14 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for le stage `verify` du Dockerfile — l'ISO des rails se mesure au build, pas chez l'operateur
-#
-# ⚖ user 2026-09-04 (point 2 du chantier deploy-independance, DI-08). Le stage `runtime` refait a la
-# main sept modules du rail poste, et le doctor commun ne se jouait qu'au boot : trois derives de
-# l'image (groupe de `lcars-authority`, tampon `.helpers-revision`, arbre `assets/`) ont ete vues au
-# premier `container up` du 04/09, jamais au build. Ces temoins tiennent la FORME du dispositif ; sa
-# mesure, c'est le build lui-meme (job `image` de la CI, `container build` sur un banc).
-#
-# ⚠ CES TEMOINS NE BATISSENT AUCUNE IMAGE.
 
 load ../refute
 
@@ -33,11 +25,6 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
 }
 
 @test "verify joue le doctor SANS --only, depuis la copie que 62 embarque — la selection est celle des CHECK-ON" {
-  # L'ancien verify copiait deploy/ lui-meme et nommait neuf modules par --only : une selection
-  # ecrite dans le Dockerfile, contre la regle « une difference de terrain s'exprime par une
-  # selection d'en-tete ». Depuis que le rail pose l'image (2026-09-11), 62 embarque deploy/ sous
-  # /opt/lcars comme sur un poste, et le doctor s'y joue entier : ce qui n'est pas mesurable sur
-  # ce substrat le dit par CHECK-ON, pas par une liste ici.
   local v; v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
   grep -qE '/opt/lcars/deploy/provision doctor --substrate docker' <<<"$v"
   refute grep -qE -- '--only' <<<"$v"
@@ -53,9 +40,6 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
 }
 
 @test "le marqueur est un objet du PRODUIT — hors de la table de l'installeur, nomme par container/README" {
-  # ⚖ user 2026-09-04 (Q1, lot 7) : la table n'a plus de colonne docker. Le tampon est pose par le
-  # Dockerfile (stage final), lu par « container status » : l'installeur ne le pose, ne le sonde, ni ne le
-  # desinstalle.
   refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
   refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"
   grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../runtime/services/container/README.md"

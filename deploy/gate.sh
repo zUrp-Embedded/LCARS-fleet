@@ -29,11 +29,11 @@ if [[ "${1:-}" == "--list-corpora" ]]; then
 fi
 COUCHE="${1:-}"
 if [[ -n "$COUCHE" && " $COUCHES " != *" $COUCHE "* ]]; then
-  echo "ECHEC: couche inconnue « $COUCHE » — unit, integration ou structure." >&2
+  echo "ÉCHEC: couche inconnue « $COUCHE » — unit, integration ou structure." >&2
   exit 1
 fi
 if [[ $# -gt 1 ]]; then
-  echo "ECHEC: un seul argument, la couche — reçu : $*" >&2
+  echo "ÉCHEC: un seul argument, la couche — reçu : $*" >&2
   exit 1
 fi
 
@@ -42,7 +42,7 @@ echo "=== gate de l'installeur : $HERE${COUCHE:+ — couche $COUCHE} ==="
 # un corpus vide est un échec, jamais un saut : zéro test joué se lirait comme zéro test rouge
 mapfile -t BATS_FILES < <(find "$TESTS_DIR" -type f -name '*.bats' 2>/dev/null | sort)
 if [[ "${#BATS_FILES[@]}" -eq 0 ]]; then
-  echo "ECHEC: aucun .bats sous $TESTS_DIR — la porte de l'installeur ne mesure rien." >&2
+  echo "ÉCHEC: aucun .bats sous $TESTS_DIR — la porte de l'installeur ne mesure rien." >&2
   exit 1
 fi
 
@@ -62,24 +62,24 @@ for f in "${BATS_FILES[@]}"; do
 done
 # un .bats sans shebang bats sortirait du plancher shellcheck en silence : il est refusé
 if [[ "${#SANS_SHEBANG[@]}" -gt 0 ]]; then
-  echo "ECHEC: ${#SANS_SHEBANG[@]} témoin(s) sans shebang bats en première ligne :" >&2
+  echo "ÉCHEC: ${#SANS_SHEBANG[@]} fichier(s) de tests sans shebang bats en première ligne :" >&2
   printf '   %s\n' "${SANS_SHEBANG[@]}" >&2
   exit 1
 fi
 if [[ "${#SANS_COUCHE[@]}" -gt 0 ]]; then
-  echo "ECHEC: ${#SANS_COUCHE[@]} témoin(s) sans couche déclarée (« # bats file_tags=unit|integration|structure » en deuxième ligne) :" >&2
+  echo "ÉCHEC: ${#SANS_COUCHE[@]} fichier(s) de tests sans couche déclarée (« # bats file_tags=unit|integration|structure » en deuxième ligne) :" >&2
   printf '   %s\n' "${SANS_COUCHE[@]}" >&2
   exit 1
 fi
 if [[ "${#JOUES[@]}" -eq 0 ]]; then
-  echo "ECHEC: aucun témoin dans la couche « $COUCHE » — cette entrée ne mesure rien." >&2
+  echo "ÉCHEC: aucun fichier de tests dans la couche « $COUCHE » — cette entrée ne mesure rien." >&2
   exit 1
 fi
 # `grep -c` rend 1 sans occurrence, et sous pipefail ce 1 tuerait le script avant la garde « bats absent »
 BATS_TEST_COUNT="$( { grep -hcE '^@test' "${JOUES[@]}" 2>/dev/null || true; } | awk '{s+=$1} END {print s+0}')"
 
 if ! command -v bats >/dev/null 2>&1; then
-  echo "ECHEC: bats absent — ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas non joués." >&2
+  echo "ÉCHEC: bats absent — ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas non joués." >&2
   echo "       Installer : apt install bats (cette porte est la suite de l'installeur)." >&2
   exit 1
 fi
@@ -96,7 +96,7 @@ mapfile -t SHELL_FILES < <(
   done
 )
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "ECHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
+  echo "ÉCHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
   echo "       Installer : apt install shellcheck." >&2
   exit 1
 fi
@@ -106,7 +106,7 @@ SC_FLOOR_RC=$?
 set -e
 if [[ "$SC_FLOOR_RC" -ne 0 ]]; then
   printf '%s\n' "$SC_FLOOR" >&2
-  echo "ECHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de sévérité >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
+  echo "ÉCHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de sévérité >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
   exit 1
 fi
 echo "--- shellcheck plancher (-S warning, ${#SHELL_FILES[@]} fichier(s) shell de l'installeur) : OK ---"
@@ -142,7 +142,7 @@ while IFS= read -r f; do
   esac
 done < <(find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | sort)
 if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
-  echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
+  echo "ÉCHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
   printf '   %s\n' "${GO7_BAD[@]}" >&2
   echo "   (.md : une ligne **Date** ; .sh/.py : SOURCE:, AUTHOR: ou STARDATE: dans les 20 premières lignes)" >&2
   exit 1
@@ -161,13 +161,17 @@ if [[ "${#BATS_ENV[@]}" -gt 0 ]]; then
 fi
 
 echo "--- bats${COUCHE:+ (couche $COUCHE)} : ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas ---"
+# un cas sauté n'est pas un cas joué : le verdict les compte, sinon un poste qui en saute soixante rend le même vert
+SORTIE="$(mktemp "${TMPDIR:-/tmp}/gate-bats.XXXXXX")"
 set +e
-env "${BATS_ENV[@]}" bats "${JOUES[@]}"
-RC=$?
+env "${BATS_ENV[@]}" bats "${JOUES[@]}" | tee "$SORTIE"
+RC="${PIPESTATUS[0]}"
 set -e
+SAUTES="$(grep -c '# skip' "$SORTIE" || true)"
+rm -f "$SORTIE"
 
 if [[ "$RC" -ne 0 ]]; then
-  echo "=== gate de l'installeur : ECHEC (bats exit=$RC) ===" >&2
+  echo "=== gate de l'installeur : ÉCHEC (bats exit=$RC) ===" >&2
   exit "$RC"
 fi
-echo "=== gate de l'installeur : OK ($BATS_TEST_COUNT cas${COUCHE:+, couche $COUCHE}) ==="
+echo "=== gate de l'installeur : OK ($BATS_TEST_COUNT cas${COUCHE:+, couche $COUCHE}, $SAUTES sauté(s)) ==="

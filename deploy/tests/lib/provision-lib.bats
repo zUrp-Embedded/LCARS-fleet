@@ -607,7 +607,7 @@ STUB
   [ "$status" -eq 0 ]
   local -a lines; mapfile -t lines <<< "$output"
   [ "${lines[0]}" = "compilation" ]
-  [ "${lines[1]}" = "suite ExUnit (3000+ témoins)" ]
+  [ "${lines[1]}" = "suite ExUnit (3000+ cas)" ]
   [ "${lines[2]}" = "suite ExUnit terminée" ]
   [ "${lines[3]}" = "gate shell (python + bats)" ]
   [ "${lines[4]}" = "release posée" ]

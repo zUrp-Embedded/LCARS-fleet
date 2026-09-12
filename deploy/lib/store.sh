@@ -2,7 +2,7 @@
 # SOURCE: deploy/lib/store.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
-# STATUS: PROTO-V2 — les volumes du MAGASIN : ce qui coute du temps a refabriquer
+# STATUS: les volumes du MAGASIN : ce qui coute du temps a refabriquer
 
 LCARS_STORE_TREES=(
   cache        # npm, pip, cargo, hex — perdre coute de la BANDE PASSANTE. Purgeable de routine.
@@ -13,7 +13,7 @@ LCARS_STORE_TREES=(
 
 store_volume_name() {
   if [[ -z "${LCARS_STORE_PREFIX:-}" ]]; then
-    echo "store: LCARS_STORE_PREFIX absent — le nom du projet compose EST l'identite d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
+    echo "store : LCARS_STORE_PREFIX absent — le nom du projet compose est l'identité d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
     return 1
   fi
   [[ -n "${1:-}" ]] || { echo "store_volume_name: nature attendue (cache|toolchains|sysroots|state)" >&2; return 1; }
@@ -33,7 +33,7 @@ store_ensure_volumes() {
   names="$(store_volume_names)" || return 1
   for vol in $names; do
     "$docker_bin" volume create "$vol" >/dev/null 2>&1 || {
-      echo "store: impossible de creer le volume « $vol » — le up refusera de demarrer (external: true)" >&2
+      echo "store : impossible de créer le volume « $vol » — le up refusera de démarrer (external: true)" >&2
       rc=1
     }
   done
@@ -53,7 +53,7 @@ store_spared_line() {
   local names
   names="$(store_volume_names)" || return 1
   names="$(printf '%s' "$names" | tr '\n' ' ')"; names="${names% }"
-  printf 'EPARGNES (magasin de « %s », hors projet compose) : %s — ils survivent a ce geste.\n' \
+  printf 'ÉPARGNÉS (magasin de « %s », hors projet compose) : %s — ils survivent à ce geste.\n' \
     "$LCARS_STORE_PREFIX" "$names"
-  printf '  Pour les detruire VRAIMENT : docker volume rm %s\n' "$names"
+  printf '  Pour les détruire : docker volume rm %s\n' "$names"
 }

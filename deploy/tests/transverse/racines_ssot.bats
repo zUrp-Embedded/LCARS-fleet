@@ -4,24 +4,6 @@
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests — une racine se DEMANDE, elle ne se recopie pas
-#
-# POURQUOI CE FICHIER, ET POURQUOI MAINTENANT. Le lot va deplacer l'arbre sous un prefixe unique.
-# Sans ce mur, ce deplacement est un `sed` qu'on rejouera : les coutures existent deja
-# (`PROV_PREFIX`, `PROV_TOKENS_DIR`, `MEDIA_ROOT`, `HELPERS_DIR`…), et ce qui les contourne est ce
-# qui casse au deplacement suivant. Mesure du 2026-08-28 sur le rail : SEPT litteraux, dont cinq
-# dans des MESSAGES et deux dans du code.
-#
-# ⚠ LA PROPRIETE N'EST PAS « AUCUN LITTERAL », ET C'EST TOUT L'INTERET DE CE FICHIER.
-#
-# Un message qui NOMME un chemin a l'operateur fait son metier : « il ne lira ni /home/private ni
-# … » est precisement ce qu'on veut lire quand ca casse. Une prose qui cite la racine pour
-# l'expliquer aussi. Ce qui est interdit est qu'un chemin soit DECIDE ailleurs que dans sa source :
-# une AFFECTATION ou un TEST qui porte la racine en dur cree un second decideur, et celui qui derive
-# est toujours celui qu'on ne relit pas.
-#
-# Un temoin qui interdirait le litteral partout interdirait d'expliquer — c'est le piege que ce lot
-# a rencontre deux fois (l'anti-litteral de `container`, le refute anti-`docker volume rm`), et il est
-# ecrit ici pour qu'on ne le refasse pas une troisieme.
 
 # ⚠ SC2016 : ce temoin LIT DU CODE, ses motifs doivent atteindre `grep` tels quels.
 # shellcheck disable=SC2016
@@ -30,32 +12,12 @@ load ../refute
 
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/../.."
-  # ⚠ `/home/private` EST UNE RACINE MORTE, ET ELLE RESTE DANS LA LISTE. Les jetons sont descendus
-  # sous `/opt/lcars/var/tokens` ; plus une ligne du rail ne la nomme. La garder ici ne garde donc
-  # plus un accord — ca interdit son RETOUR, ce qui est le seul service qu'une racine fermee peut
-  # encore rendre. L'accord des huit defauts qui nomment la nouvelle, lui, est tenu par
-  # `racine_jetons.bats` : un mur par propriete, jamais un mur qui fait les deux a moitie.
-  # ⚠ `/home/catalogues` EST LA DEUXIEME RACINE MORTE, meme statut que `/home/private` : le cache des
-  # catalogues est passe sous `/opt/lcars/var/catalogues` le 2026-09-01, quand `/home` est sorti du
-  # perimetre d'uninstall. Elle reste ici pour interdire son RETOUR. Un seul site la nomme encore, et
-  # par un repli nomme (`50-catalogues.sh`, le reliquat qu'on signale sans pouvoir le retirer) : la
-  # forme `${VAR:-defaut}` est une couture, que `code_seul` exempte deja.
   RACINES='/opt/lcars/runtime|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues|/opt/lcars/var/catalogues'
-  # ⚠ `/opt/lcars` N'EST PAS DANS LA LISTE, ET C'EST DELIBERE : c'est la racine de l'IMAGE, que le
-  # Dockerfile pose litteralement (`COPY runtime/services/X /opt/lcars/X`). Un `COPY` derive serait un
-  # Dockerfile qui ne se lit plus. Elle entrera ici le jour ou la phase B en fait un prefixe unique.
 }
 
 # Le perimetre : ce qui DECIDE. Le Dockerfile et l'entrypoint portent le layout de l'image.
 sources() { printf '%s\n' "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision "$DEPLOY"/container; }
 
-# Une ligne de CODE QUI DECIDE : ni commentaire, ni message, ni la DECLARATION elle-meme.
-#
-# ⚠ LA FORME `: "${VAR:=defaut}"` EST LA SOURCE, PAS UNE COPIE — c'est l'endroit qui a le DROIT de
-# nommer la racine, et il faut bien qu'un endroit le fasse. La premiere version de ce mur l'attrapait
-# et accusait `provision-lib.sh` d'avoir recopie ce qu'il DEFINIT. Un mur qui refuse a la source
-# d'etre la source n'a plus de source du tout.
-# Meme raison pour `${VAR:-defaut}` : un repli nomme est une couture, pas un contournement.
 code_seul() {
   grep -vE '^[[:space:]]*#' "$1" 2>/dev/null \
     | grep -vE ':=|:-' \
@@ -89,12 +51,6 @@ code_seul() {
   [ "$bad" -eq 0 ]
 }
 
-# ─── LA RACINE UNIQUE ───────────────────────────────────────────────────────────────────────────
-#
-# `PROV_ROOT` est l'endroit — le seul — qui nomme la racine du produit. Ce que la phase B fait
-# ensuite est de faire descendre les huit autres dessous ; ce que ce temoin empeche est qu'un
-# SECOND endroit se remette a la nommer entre-temps, ce qui rendrait le deplacement suivant aussi
-# cher que celui-ci.
 
 @test "RACINE : \`PROV_ROOT\` est declaree UNE fois, dans la lib" {
   local lib="$DEPLOY/lib/provision-lib.sh"
@@ -120,22 +76,6 @@ code_seul() {
   [ "$n" -ge 1 ]
 }
 
-# ─── AUCUN CONSOMMATEUR NE MASQUE UN DEFAUT DE LA LIB AVANT DE LA SOURCER ────────────────────────
-#
-# ⚠ LE DEFAUT QUE CE MUR FERME A TOURNE EN SILENCE. `deploy/provision` posait `PROV_ROOT` en tete
-# — l'arbre `deploy/` de ce script — puis sourçait la lib, dont `PROV_ROOT` designe la RACINE
-# D'INSTALL. Le `:=` de la lib ne tire pas sur une variable deja posee : le runner resolvait donc
-# `PROV_PREFIX`, `PROV_TOKENS_DIR` et `PROV_CATALOGUES_WORK` sous son propre repertoire.
-#
-# CE QUE CA COUTAIT : le plan d'`uninstall` ne nommait pas les vrais chemins, l'`audit` mesurait a
-# cote, et le JOURNAL enregistrait « prefix <depot>/deploy/runtime » — il mentait sur ce qui
-# venait d'etre installe. Les MODULES, eux, posaient au bon endroit : ce sont des processus separes
-# et la variable n'etait pas exportee. Seul le runner divergeait, ce qui est le pire des deux
-# mondes — la machine juste, sa trace fausse.
-#
-# ⚠ AVANT LE `source`, ET PAS APRES : le runner exporte deliberement `PROV_SUBSTRATE` APRES, pour
-# le propager aux modules. Une surcharge voulue et une collision de nom ont la meme forme ; seule
-# leur POSITION les distingue. Un mur qui interdirait les deux serait faux.
 
 consommateurs() { printf '%s\n' "$DEPLOY/provision" "$DEPLOY"/modules.d/*.sh; }
 

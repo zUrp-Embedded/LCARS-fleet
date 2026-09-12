@@ -4,25 +4,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: bats tests — le JOURNAL : ce qui a ete pose sur CETTE machine
-#
-# ─── LE FAIT QU'AUCUN FICHIER STATIQUE NE PEUT PORTER ───────────────────────────────────────────
-#
-# `system.manifest` dit ce que le provisionnement a le DROIT de poser : statique, versionne, le meme
-# partout. Le journal dit ce qu'il A pose ICI — et la seule chose qui compte vraiment dedans est la
-# separation `apt_installed` / `apt_already`.
-#
-# ⚠ ELLE N'EST CONNAISSABLE QU'AVANT L'INSTALL. Une seconde plus tard, `dpkg -s` repond « present »
-# pour les deux listes et plus rien ne distingue ce que LCARS a pose de ce que l'operateur avait
-# deja. Un audit qui l'ignore compterait comme notres des paquets de quelqu'un d'autre.
-#
-# ⚠ ET LE CANAL EST UN FICHIER, PARCE QUE LES MODULES SONT DES PROCESSUS. Le runner ouvre
-# l'accumulateur avant la boucle, les modules y notent, il le scelle apres. Meme lecon que
-# `forge.url` : mesure du 2026-08-18, deux modules en derive parce qu'on croyait qu'un `export`
-# traversait d'un module a l'autre.
 
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
-# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
 load refute
@@ -80,30 +62,8 @@ code() { grep -vE '^\s*#' "$1"; }
   [ "$output" = "survecu" ]
 }
 
-# ─── LE DECOR APT, ET IL EST PARTAGE PAR TROIS TEMOINS ──────────────────────────────────────────
-# ⚠ CHAQUE `@test` A SON PROPRE `BATS_TEST_TMPDIR`. Ce bloc vivait dans le corps d'un seul test ;
-# les deux temoins ecrits ensuite ont herite d'un `$bin` qui n'existait pas chez eux et sont morts
-# sur `No such file or directory` — un decor absent, pas un code faux. Une fonction, appelee par
-# chacun, et le decor suit son test.
-# ⚠ ELLE POSE `APT_BIN`, ELLE NE L'ECRIT PAS SUR STDOUT. Premiere version : `bin="$(apt_decor)"`.
-# Une substitution de commande est un SOUS-SHELL — les trois `export` y naissaient et y mouraient,
-# et les trois temoins recevaient un `APT_TRACE` vide (`grep: : No such file or directory`). C'est
-# le meme piege que SC2030/SC2031 signale ailleurs dans ce depot, et il se voit mal parce que la
-# fonction, elle, a bien tout fait.
 apt_decor() { # -> pose bin/dpkg + bin/apt-get, exporte APT_TRACE, APT_POSED_DIR et APT_BIN
   local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
-  # ⚠ LA DOUBLURE REPOND AUSSI A CE QUE LA LIB DEMANDE AU SOURCE. Reduite au seul `-s`, elle rendait
-  # une chaine VIDE sur `--print-architecture` et la lib mourait avant le premier test — un decor
-  # qui casse ce qu'il devait seulement observer.
-  # ⚠ LA DOUBLURE DOIT CHANGER D'AVIS QUAND LA MACHINE CHANGE, ET LA PREMIERE VERSION NE LE FAISAIT
-  # PAS. Elle repondait « socat absent » AVANT comme APRES l'install : le seul journal qu'elle
-  # pouvait valider etait celui qui note une INTENTION. Depuis que `apt_ensure` ne journalise que ce
-  # que `dpkg` confirme, un decor fige mesure l'ancien contrat et rougit sur le nouveau — c'est ce
-  # qu'il a fait, et c'est le decor qui avait tort. Un marqueur par paquet pose porte l'etat.
-  # ⚠ LA DOUBLURE REPRODUIT LE PIEGE : `dpkg -s` REUSSIT sur un paquet en etat `rc` (retire, config
-  # conservee) — c'est le comportement du vrai dpkg, et c'est ce qui a fait croire au rail que
-  # `docker-ce` et `ttyd` etaient poses apres son propre uninstall (banc .63, 2026-08-30). Un
-  # marqueur `<pkg>.rc` dans APT_POSED_DIR pose cet etat-la.
   cat > "$bin/dpkg" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -153,10 +113,6 @@ SH
   # Le coeur du fichier. On double `dpkg` : `git` est deja la, `socat` non.
   local bin; apt_decor; bin="$APT_BIN"
 
-  # ⚠ GUILLEMETS DOUBLES SUR LE PATH, ET CE N'EST PAS DU STYLE. En simples, `$PATH` ne s'expanse pas :
-  # on écrase le PATH entier par une chaîne littérale, `dirname` disparaît, et la lib meurt à son
-  # `source` — sur une ligne qui n'a rien à voir avec ce qu'on mesure. Mesuré le 2026-08-22 : la
-  # doublure ne cassait pas la lib, elle cassait le shell.
   run bash -c "set -euo pipefail
     export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE' APT_POSED_DIR='$APT_POSED_DIR'
     . '$LIB' >/dev/null 2>&1
@@ -169,11 +125,6 @@ SH
 }
 
 @test "un apt EN ECHEC ne fait revendiquer AUCUN paquet au journal" {
-  # ⚠ LE JOURNAL NOTAIT UNE INTENTION. `apt_installed` s'ecrivait AVANT l'`apt-get` : un depot
-  # injoignable, et la machine declarait porter des paquets qu'elle n'a jamais eus. La passe
-  # suivante les reclasse en `missing` et les note a nouveau ; un `uninstall` lance alors un
-  # `apt-get remove` sur des absents. La propriete que ce journal existe pour tenir — « savoir ce
-  # que LCARS a pose » — etait fausse exactement dans le cas ou elle sert.
   local bin; apt_decor; bin="$APT_BIN"
   run bash -c "set -euo pipefail
     export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE' APT_POSED_DIR='$APT_POSED_DIR' APT_FAIL=1
@@ -264,28 +215,11 @@ SH
 }
 
 @test "le chemin du journal a une couture, et son defaut vit AVEC l'etat machine" {
-  # `/etc/lcars` porte `services.env`, `seat.uid` et le canal — l'etat machine qui n'est pas le runtime.
-  # ⚠ DERIVE, PAS GRAVE. Ce temoin epinglait `/etc/lcars/install.journal` en litteral ; le journal
-  # a demenage sous la racine unique et il aurait rougi sur un geste correct. Ce qu'il garde est que
-  # le runner NOMME son defaut a un seul endroit, pas la valeur de ce defaut.
   code "$RUNNER" | grep -qE 'LCARS_JOURNAL_FILE:-\$PROV_ROOT/var/install\.journal' 
   grep -qE '^dir +/etc/lcars ' "$BATS_TEST_DIRNAME/../system.manifest"
 }
 
-# ─── LES PRIMITIVES NOTENT, ET LE JOURNAL FUSIONNE ──────────────────────────────────────────────
-#
-# MESURE DU 2026-08-27, banc vierge : le journal portait DIX-SEPT lignes, dont dix d'en-tete, cinq
-# metadonnees et deux colonnes apt. Zero repertoire, zero fichier, zero lien, zero groupe —
-# `prov_journal_note` avait DEUX appelants, tous deux dans `apt_ensure`.
 
-# ─── LA FUSION ──────────────────────────────────────────────────────────────────────────────────
-#
-# MESURE DU 2026-08-28, banc vierge, DEUX passes d'apply :
-#   passe 1 installe 16 paquets  -> apt_installed = les 16
-#   passe 2 les trouve presents  -> apt_already = 16, apt_installed = VIDE
-#   (le desinstalleur d'alors   -> « rien a retirer », et les 16 restaient)
-# `jq`, `socat`, `erlang`, `ttyd` etaient la en `ii`, poses par LCARS, invisibles au verbe qui devait
-# les retirer. Le rail est CONCU pour etre rejoue : ce n'est pas un cas de bord, c'est le nominal.
 
 @test "FUSION : le scelleur LIT l'ancien journal AVANT d'ouvrir le nouveau" {
   # ⚠ L'ORDRE EST LA PROPRIETE. `> "$JOURNAL_FILE"` tronque a l'ouverture : un `grep` place DANS le
@@ -303,10 +237,6 @@ SH
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
   local body; body="$(code "$RUNNER")"
-  # ⚠ LES CLEFS SE NOMMENT. Un motif large attraperait `posed_at`, qui est la METADONNEE de la
-  # passe : elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur
-  # banc. (Les inventaires `posed_*` du desinstalleur sont partis le 2026-09-11 ; restent les deux
-  # clefs apt, que l'audit relit.)
   grep -qE 'apt_installed\|apt_already' <<<"$body"
   refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
 }
@@ -319,10 +249,6 @@ SH
 }
 
 @test "un paquet RETIRE (etat rc) est REINSTALLE — dpkg -s le croit la, et le rail se coupait la scie" {
-  # Banc .63, 2026-08-30 : apres `provision uninstall --yes`, l'`apply` suivant n'a reinstalle ni
-  # docker-ce ni ttyd. `apt-get remove` laisse le paquet en `rc` (removed, config-files) ; `dpkg -s`
-  # y sort 0, donc apt_ensure les comptait « deja la » et ne les nommait jamais a apt-get. Trois
-  # modules sont tombes derriere : forge non montee, console sans serveur, quatre unites mortes.
   apt_decor
   : > "$APT_POSED_DIR/docker-ce.rc"          # retire, config conservee
   : > "$APT_POSED_DIR/tmux"                  # celui-la est VRAIMENT pose
@@ -332,13 +258,6 @@ SH
   refute grep -qE 'apt-get install.*\btmux\b' "$APT_TRACE"
 }
 
-# ─── M8 : L'ECHAFAUDAGE NE SE JOURNALISE PAS — LE NOM FINAL, APRES LA BASCULE ──────────────────
-#
-# ⚠ RELECTURE HOSTILE DU 2026-09-04, journal d'un banc : `posed_dir` portait
-# `/opt/node-24.20.0.partial`, `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin}.new`
-# — les repertoires de travail des poseurs atomiques, crees par `ensure_dir` (qui note) et disparus
-# a la bascule. Ceux qu'aucun ancetre declare n'absorbe remontaient dans la ligne « hors table »
-# du plan d'uninstall, la seule dont l'operateur ne peut pas deviner le contenu.
 
 @test "M8 : prov_scaffold_dir puis prov_promote_dir — l'echafaudage disparait, le final est la" {
   lib "PROV_JOURNAL_ACC='$ACC'; prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"

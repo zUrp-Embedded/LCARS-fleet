@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de deploy/pack.sh — le refus d'un arbre modifié, le kit et son nom, la porte de la version, le tiroir, ce que la publication dit du jeton
-#
-# pack.sh se joue entier dans un dépôt de décor commité : les libs, l'installeur, le manifeste et
-# les fichiers que kit-verify exige y sont copiés ; mix, npm, erl, le gate et curl sont des doublures.
 
 load refute
 

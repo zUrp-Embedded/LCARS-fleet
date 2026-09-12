@@ -4,9 +4,6 @@
 # AUTHOR: alice
 # STARDATE: 2026-09-12
 # STATUS: témoins de 49-forge-runner — l'enrôlement du runner CI, reporté, sauté, refusé ou posé
-#
-# La forge est un curl doublé ; le délégué forge-runner.sh est un espion qui note son argv et rend
-# le code demandé, dans un dépôt de décor où la lib est copiée pour que repo_root y mène.
 
 load ../refute
 

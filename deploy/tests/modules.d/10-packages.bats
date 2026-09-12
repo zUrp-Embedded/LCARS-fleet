@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins des paquets du runtime — présence mesurée par dpkg, pose par apt, sonde bwrap réelle
-#
-# dpkg-query, apt-get et bwrap sont doublés : l'état « installé » vit dans un fichier que la
-# doublure apt-get remplit, la sonde bwrap rend ce que le cas décide.
 
 load ../refute
 

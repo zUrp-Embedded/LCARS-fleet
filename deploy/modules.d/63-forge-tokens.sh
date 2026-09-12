@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/63-forge-tokens.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — les jetons de rôle : un APPELANT du geste de forge du produit (runtime/services/forge.d/tokens.sh)
+# STATUS: les jetons de rôle : un APPELANT du geste de forge du produit (runtime/services/forge.d/tokens.sh)
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root

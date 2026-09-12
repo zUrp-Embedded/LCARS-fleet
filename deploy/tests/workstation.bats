@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins du délégué du poste — escalade, canal, kit, provisionnement, acceptation, sortie
-#
-# Le délégué est copié dans un deploy/ factice avec la lib réelle ; provision, accept et sudo sont
-# des doublures qui notent leurs appels dans TRACE. Le chemin root se joue sous « unshare -Ur »,
-# où EUID vaut 0 sans privilège : rien n'est posé sur la machine.
 
 load refute
 

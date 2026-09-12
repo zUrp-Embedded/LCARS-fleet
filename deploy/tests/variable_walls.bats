@@ -4,38 +4,10 @@
 # AUTHOR: vanille
 # STARDATE: 2026-08-27
 # STATUS: actif — les invariants d'ECRITURE des variables, tenus par une mesure et non par la relecture
-#
-# ─── POURQUOI CE FICHIER ────────────────────────────────────────────────────────────────────────
-# Les defauts que l'inventaire des variables a trouves ne sont pas des fautes de frappe : ce sont
-# des FORMES. Un repli ecrit contre un cas qui ne peut pas arriver, un nom recopie sans arbitre,
-# une valeur inventee la ou l'absence est un fait. Une forme ne se corrige pas une fois — elle se
-# refuse, sinon elle revient par le prochain fichier, ecrit par quelqu'un qui n'a lu aucun des
-# precedents.
-#
-# ⚠ ON MESURE LE CODE, PAS LA PROSE — meme regle que `adminite_walls.bats`, et pour la meme raison :
-# les cicatrices de ce depot NOMMENT ce qu'elles interdisent, c'est leur metier. Un mur qui lirait
-# les commentaires interdirait de les ecrire.
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
 
-  # ⚠ LE PERIMETRE SE DIT PAR SHEBANG, ET C'EST L'INVARIANT LUI-MEME QUI L'EXIGE. `EUID` n'est pose
-  # que par bash : dans un fichier `#!/bin/sh`, `${EUID:-...}` est un repli LEGITIME, et un mur qui
-  # balaierait `*.sh` l'accuserait a tort. Dans l'autre sens, balayer par extension raterait
-  # `bin/fleet`, `bin/lcars`, `deploy/container`, `deploy/provision`, `deploy/accept` — des programmes
-  # bash sans suffixe. La question n'est pas « quel nom porte le fichier » mais « quel interprete
-  # le lit », et la seule reponse est sur sa premiere ligne.
-  #
-  # ⚠ CE QUI EST EXCLU, ET CE QUI NE L'EST PAS — la premiere redaction de ce commentaire disait
-  # « tests hors perimetre », et c'etait FAUX de son propre instrument : `*/tests/*` ne retire que
-  # les suites de `deploy/tests/` et `git-hooks/tests/`, pas les 32 fichiers bash de `test/`, qui
-  # SONT balayes. La mesure du 2026-08-27 : deploy 41 · test 32 · bin 11 · services 8 ·
-  # git-hooks 4 · etc 3 · vendor 2 · priv 1 = 102.
-  #
-  # Et c'est le bon perimetre : un repli mort dans un temoin est une affirmation fausse comme
-  # ailleurs. La seule exclusion NECESSAIRE est celle des fichiers de mur eux-memes — la liste de
-  # variables ci-dessous est du CODE, donc un mur inclus dans son propre balayage s'accuse au
-  # premier motif qu'il epingle. `*/tests/*` la couvre, et c'est sa vraie raison d'etre.
   mapfile -t BASH_CODE < <(
     find "$REPO" -type f \
       -not -path '*/tests/*' -not -path '*/_build/*' -not -path '*/deps/*' -not -path '*/.git/*' \
@@ -46,21 +18,9 @@ setup() {
   )
 }
 
-# Le code d'un fichier, prose retiree. La troncature sur un `#` qui n'ouvre pas un commentaire
-# (`${VAR#motif}`, `"$#"`) fait PERDRE de la fin de ligne : le mur peut donc sous-compter, jamais
-# accuser a tort. C'est le sens qui protege.
 code_of() { sed 's/#.*//' "$1"; }
 
 @test "MUR: le perimetre n'est pas VIDE — un balayage casse compte zero, comme un sans-faute" {
-  # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, `head -1` qui change de forme)
-  # rendrait le mur vert en n'ayant rien lu. C'est la forme d'echec la plus chere : elle certifie.
-  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE, ET J'AI POSE LE DEFAUT ICI AVANT DE LE CHASSER
-  # AILLEURS : 60 pour 102 fichiers laisse perdre `test` (32) EN ENTIER sans un mot. Les deux murs
-  # voisins portaient la meme forme, a 30 pour 123 et 30 pour 65.
-  #
-  # Le balayage etant par SHEBANG, il n'y a pas de liste d'arbres a consommer — le garde nomme donc
-  # les cinq arbres stables, un par voie d'entree du bash dans ce depot : recette, temoins,
-  # programmes de PATH, demons, outils d'install. Perdre l'un d'eux se voit ici.
   local t
   # `runtime/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
   for t in deploy runtime/test runtime/bin runtime/services; do
@@ -78,29 +38,8 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 1: aucun repli sur une variable que bash pose TOUJOURS" {
-  # Bash pose ces variables au demarrage de chaque shell, avant la premiere ligne du script. Leur
-  # ecrire un repli garde contre un cas qui n'existe pas — la branche de repli est du code MORT,
-  # et personne ne le saura jamais parce qu'elle ne s'execute pas.
-  #
-  # ⚠ LE COUT N'EST PAS LE FORK QU'ON N'ECONOMISE PAS. C'est que la ligne AFFIRME que la valeur peut
-  # manquer. `${1:-${EUID:-$(id -u)}}` se lit « trois sources possibles » alors qu'il y en a deux,
-  # et le lecteur suivant ecrit son propre garde en croyant cette affirmation. Un repli est une
-  # documentation executable de ce qui peut arriver ; contre l'impossible, il documente faux.
-  #
-  # ⚠ QUATRE VARIABLES INTERNES SONT DELIBEREMENT ABSENTES DE CETTE LISTE, et leur absence est la
-  # mesure qui rend la liste utilisable :
-  #   · `FUNCNAME`  — n'existe QUE dans un appel de fonction, vide au niveau du fichier ;
-  #   · `OLDPWD`    — non pose tant qu'aucun `cd` n'a eu lieu ;
-  #   · `BASH_SOURCE`— tableau, dont l'element lu peut legitimement ne pas exister ;
-  #   · `HOSTNAME`  — pose par bash, mais sa valeur depend de l'hote et un repli y est un choix.
-  # Un repli sur ces quatre-la est du code VIVANT. Les mettre dans la liste aurait fait de ce mur
-  # un mur qui a raison en moyenne, ce qui n'est pas une propriete d'un mur.
   local internes='EUID|UID|PPID|BASHPID|RANDOM|SECONDS|LINENO|SHLVL|GROUPS|PWD|IFS|BASH_VERSION|MACHTYPE|OSTYPE|HOSTTYPE'
 
-  # Les formes REFUSEES sont celles qui INVENTENT une valeur : `${V-x}`, `${V:-x}`, `${V=x}`,
-  # `${V:=x}`. Pas `${V:?msg}` ni `${V?msg}` — celles-la REFUSENT, et un refus contre l'impossible
-  # est du bruit, pas un mensonge. Pas `${V:+x}` non plus : elle ne se declenche que si la variable
-  # EST posee, donc elle ne parle pas de son absence.
   local motif="\\\$\\{($internes):?[-=]"
 
   local f n total=0 rompu=0
@@ -120,26 +59,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 2: aucun fichier dans la portee de provision-lib ne RECOPIE un defaut qu'elle pose" {
-  # ⚠ LA REGLE EST DEJA ECRITE DANS LE CORPUS, dans `64-services.sh` : « PAS DE `:-` ICI, ET C'EST
-  # UNE CORRECTION. » Elle etait tenue pour DEUX noms, dans UN fichier, par un temoin qui ne
-  # regardait qu'une seule forme d'ecriture. Une regle tenue par de la discipline est une regle que
-  # le prochain site rate — et quatre sites l'avaient deja ratee.
-  #
-  # ⚠ CE QUI EST INTERDIT EST LA COPIE DU DEFAUT, PAS LE `:-`. `${PROV_X:-}` avec un defaut VIDE
-  # est l'idiome sain de lecture sous `set -u`, et pour un nom que la lib peut poser vide il est
-  # meme le seul juste. Ce qui ne peut pas mordre, c'est `${PROV_X:-<litteral>}` quand la lib pose
-  # deja ce nom a une valeur NON VIDE : la branche est morte, et elle AFFIRME qu'un module peut
-  # tourner sans la lib — alors qu'il meurt sur `PROVISION_LIB non pose` deux lignes plus haut.
-  #
-  # ⚠ ET L'INTERDICTION S'APPUIE SUR UN AUTRE VERROU, ce qui est la raison pour laquelle elle est
-  # sure : `shell.sourcers_set_strict` (contrat Elixir) exige `set -u` de TOUT sourcer de la lib.
-  # Retirer le repli ne rend donc pas la lecture silencieuse — elle devient un `unbound variable`
-  # bruyant. Un echec explicite vaut mieux qu'un succes ambigu, mais seulement si quelque chose
-  # garantit l'echec ; ici, quelque chose le garantit.
-  #
-  # LES DEUX LISTES SE DERIVENT, aucune n'est tenue a la main : les poseurs se lisent dans la lib,
-  # la portee se lit dans les fichiers qui la sourcent. Un nom ajoute a la lib est garde le jour
-  # meme.
   local lib="$REPO/deploy/lib/provision-lib.sh"
   [ -r "$lib" ] || { echo "provision-lib.sh introuvable : $lib" >&2; return 1; }
 
@@ -181,50 +100,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 3: aucun motif de temoin n'utilise la classe qui ne veut pas dire ce qu'elle a l'air de dire" {
-  # ⚠ `[^` + `\` + `n` + `]` N'EST PAS « TOUT SAUF UN SAUT DE LIGNE ». Dans une expression entre
-  # crochets POSIX, la contre-oblique n'echappe rien : la classe dit « ni contre-oblique, ni la
-  # lettre n ». Un motif `verbe.CLASSE.*cible` cesse donc de traverser des mots aussi ordinaires que
-  # `--no-create-home`, `nologin`, `$human`, `os.path.join` ou `--owner`.
-  #
-  # ⚠ ET C'EST INVISIBLE PARCE QUE LE MUR RESTE VERT. Un motif qui ne traverse plus rien ne rougit
-  # pas : il cesse de trouver. Mesure du 2026-08-27 sur les onze occurrences du depot, cinq formes
-  # REALISTES echappaient a leur mur :
-  #     ensure_member "$human" lcars-console          (le `n` de « human »)
-  #     install -d -m 0700 --owner root "$TOKENS_DIR" (le `n` de « owner »)
-  #     FORGE_TOKEN_FILE=$(dirname …)/home/private/t  (le `n` de « dirname »)
-  #     os.chmod(os.path.join(P,"x"), 0o750)          (le `n` de « join »)
-  #     install -d --owner=root -m 0750 "$PRIVATE_DIR"
-  # Les onze sont passees en `.` — dans grep, qui travaille ligne a ligne, le point ne franchit
-  # JAMAIS un saut de ligne : la classe n'apportait rien, et elle retirait beaucoup.
-  #
-  # ⚠ ET LA MESURE ELLE-MEME A MENTI TROIS FOIS AVANT D'ETRE JUSTE. Teste en ligne de commande, le
-  # motif se comportait comme « tout sauf newline » — une couche shell convertissait la sequence
-  # avant grep. Il a fallu ecrire le test DANS UN FICHIER, comme les murs le sont, pour voir le
-  # comportement reel. Un instrument doit etre eprouve dans la forme ou il vit.
-  #
-  # LE MOTIF INTERDIT EST ASSEMBLE, PAS ECRIT. Ecrit en clair, ce mur figurerait dans son propre
-  # perimetre et s'accuserait lui-meme ; l'assembler evite de devoir s'exclure, donc ce mur se garde
-  # AUSSI lui-meme.
-  #
-  # ⚠ ET CE MUR A ETE MORT PENDANT SIX JOURS, DANS LE PIEGE VOISIN DE CELUI QU'IL GARDE. Il cherchait
-  # en ERE (`grep -E`) un motif assemble en `\[\^\n\]` : dans une expression reguliere, `\n` vaut le
-  # SAUT DE LIGNE, pas les deux caracteres. Le mur cherchait donc `[^<newline>]` — introuvable dans un
-  # fichier texte — au lieu de `[^` `\` `n` `]`. Mesure du 2026-08-29, sur un fichier temoin portant
-  # la vraie cible : la forme ERE rend 0, la forme LITTERALE rend 1, et le fichier sain rend 0 aux
-  # deux.
-  #
-  # ⚠ ET CETTE CICATRICE NE PEUT PAS EPELER SA PROPRE CIBLE. Ecrite en clair, elle serait la premiere
-  # prise du mur repare — mesure faite, il l'a accusee. C'est la contrainte que l'assemblage du motif
-  # existe pour tenir, appliquee a la prose qui l'explique.
-  #
-  # C'est la MEME famille que ce que le mur interdit : une sequence `\n` qui ne veut pas dire ce
-  # qu'elle a l'air de dire, une couche plus haut. Le motif interdit est une SUITE D'OCTETS, pas une
-  # expression : il se cherche en LITTERAL (`-F`), ou rien ne le trouve.
-  #
-  # ⚠ ET LE COMMIT QUI A « REPARE » CE MUR ANNONCAIT DEJA CE CORRECTIF. `0fbc7ae97` ecrit : « Elle
-  # cherche desormais en LITTERAL (grep -F) […] verifie, les deux mutations rougissent. » Le `-F`
-  # n'a jamais ete pose ; les `-E` sont restes. Une verification declaree et non tenue est plus
-  # couteuse qu'une absence de verification : elle clot le sujet.
   local bs; bs="$(printf '\\')"
   local interdit="[^${bs}n]"
 
@@ -249,15 +124,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 4: le port du deck a UNE declaration, et les copies s'accordent" {
-  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `66-deck-oidc` batit les
-  # `redirect_uris` OAuth2 du deck avec `PROV_DECK_PORT` ; le daemon lit `LCARS_LANDING_PORT`. Au
-  # poste, `64-services` relie les deux et `services_units.bats` le garde depuis le 2026-08-23. Sur
-  # le rail CONTENEUR, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
-  # valent tous les deux 20999. La cicatrice du rail poste decrit la panne mot pour mot —
-  # « la panne tombait au RETOUR du login, la ou elle se lit comme un probleme d'identite ».
-  #
-  # L'AUTORITE EST `PROV_DECK_PORT`, et elle se LIT : c'est la seule declaration nommee du fait
-  # (`provision-lib.sh`), celle que `--port-deck` deplace et celle dont les callbacks OIDC derivent.
   local attendu
   attendu="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
              | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_DECK_PORT:=([0-9]+)\}".*$/\1/p' | head -n1)"
@@ -294,21 +160,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 5: le chemin du fichier de siege est le MEME partout, et le manifeste pose celui-la" {
-  # Le fichier que GUARD B lit — les DEUX moities, le launcher shell et le BEAM — et que le
-  # provisionnement pose. Sept sites le nomment, un huitieme le CREE (la ligne `anchor` du
-  # manifeste). C'est un chemin que j'ai introduit le 2026-08-26 et propage sans verrou ; le
-  # verrou arrive apres, ce qui est l'ordre inverse de celui qu'on recommande.
-  #
-  # ⚠ AUCUNE AUTORITE DESIGNEE, ET ON NE S'EN INVENTE PAS UNE. Comme pour `/home/private`, le
-  # manifeste ne peut pas faire foi : sa ligne est `anchor <chemin> <mode> <proprietaire> <rail>`,
-  # il n'y a AUCUN NOM a interroger — on ne peut que confirmer un chemin qu'on connait deja. Et
-  # aucune des sept declarations n'a ete designee. Ce mur enonce donc la revendication plus faible
-  # mais VRAIE : elles s'accordent, et le manifeste cree celui qu'elles nomment.
-  #
-  # ⚠ CE QUE CE MUR N'EST PAS. Une derive ici ne produit pas un silence : les deux moities de
-  # GUARD B REFUSENT quand le fichier manque (`R-no-seat`, « siege non etabli »). Ce qu'il achete
-  # n'est donc pas la fermeture d'un trou muet, c'est qu'un renommage devienne un geste VISIBLE de
-  # huit fichiers au lieu d'une panne totale decouverte au boot suivant.
   local sites=(
     "runtime/bin/fleet"
     "runtime/config/runtime.exs"
@@ -348,18 +199,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 6: le groupe de traversee des consoles a UNE declaration, nom ET gid" {
-  # Le groupe qui accorde le `--x` sur `/run/lcars/console/<humain>/` — rien d'autre. Il porte
-  # ZERO membre declare (`MUR 5 ter` d'`adminite_walls` le garde) : root le rend a l'exec, a un
-  # processus nomme. Ce mur-ci ne garde pas ce pouvoir, il garde que tout le monde parle du MEME
-  # groupe — et du meme gid, parce que les deux rails le CREENT chacun de leur cote.
-  #
-  # ⚠ LE PIEGE EST DANS LES FAUX PORTEURS, ET IL EST EXACTEMENT CELUI QUI A SATISFAIT `MUR 4 bis`
-  # CE MATIN (`lcars-authority-ask`, un nom de binaire). Trois sites portent la chaine sans porter
-  # le fait : `console.sh:58` en fait un PREFIXE DE LOG (`[lcars-console]`),
-  # `/etc/tmpfiles.d/lcars-console.conf` est un NOM DE FICHIER (manifeste + `25-directories`), et
-  # `observation/application.ex` la cite dans sa prose. Un mur qui compterait les occurrences serait
-  # vert en ayant compte des choses qui n'ont rien a voir. Chaque miroir est donc ancre sur SON
-  # GESTE : declarer, lire, creer, posseder.
   local nom gid
   nom="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
          | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_CONSOLE_GROUP:=([a-z0-9_-]+)\}".*$/\1/p' | head -n1)"
@@ -379,18 +218,6 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   need runtime/services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
   need runtime/services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
-  # Les DEUX createurs, un par rail, et ils doivent s'accorder sur le gid : un groupe de meme nom
-  # et de gid different sur les deux rails, c'est un `chown` qui reussit et une traversee qui non.
-  #
-  # ⚠ ET LE MUR N'EN GARDAIT QU'UN. Ce commentaire annonce « les DEUX createurs » depuis le premier
-  # jour, et la seule ligne posee etait celle de l'image : le createur du rail NATIF,
-  # `modules.d/20-groups.sh`, n'a jamais ete garde. Rien n'aurait dit qu'il cesse de creer
-  # `lcars-console` — et sur ce rail le groupe n'a AUCUN autre poseur (`groupadd` ne parait que
-  # dans le Dockerfile et dans `ensure_group`). La landing meurt alors au boot sur
-  # « setpriv: unknown group », sur une machine dont le provisionnement s'est declare vert.
-  #
-  # Le rail natif ne cite pas le gid : il le lit dans la table par `prov_manifest_gid`, ce qui EST
-  # la bonne forme — l'accord sur le gid y est structurel, pas recopie. On garde donc son GESTE.
   need deploy/modules.d/20-groups.sh "ensure_group \"\\\$PROV_CONSOLE_GROUP\""    "la creation sur le rail natif"
   need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
@@ -398,12 +225,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 7: ce que l'installeur DECIDE et qu'un daemon lit voyage par la table de transport" {
-  # ⚠ LE FAIT : un daemon (ExecStart de 64-services) n'herite d'aucun shell ; ce qu'il lit n'existe
-  # que si `services.env` le porte. Depuis le lot 8 le produit ne parle que LCARS_*/FORGE_* — un nom
-  # ne dit plus s'il vient de l'installeur. La regle qui survit : une variable que le daemon LIT et
-  # que provision-lib DECLARE (son jumeau PROV_*) doit etre dans la table ; un reglage du produit
-  # sans jumeau n'a rien a transporter. Relecture hostile 2026-09-04 : la version « lue sans defaut »
-  # mesurait l'ensemble vide et restait verte sur une table amputee.
   local svc="$REPO/deploy/modules.d/64-services.sh" lib="$REPO/deploy/lib/provision-lib.sh"
   [ -r "$svc" ] && [ -r "$lib" ] || { echo "MUR 7 — 64-services ou provision-lib illisible" >&2; return 1; }
   local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
@@ -447,12 +268,6 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 8: l'override genere nomme le service que la base DEFINIT, et sa prose ne s'execute pas" {
-  # ⚠ TROUVE AU BANC DU 2026-08-28, PAS PAR RELECTURE. `runner-compose.yml` a renomme son service
-  # `runner` -> `act` (b01fe3164). Six consommateurs ont suivi ; le septieme vivait DANS UN HEREDOC
-  # de `forge-runner.sh`, donc dans une CHAINE — invisible a tout grep sur le nom du service.
-  # Compose fusionnait alors un service `runner` absent de la base, sans image, et refusait :
-  # « service "runner" has neither an image nor a build context specified ». L'enrolement du runner
-  # echouait a CHAQUE install fraiche, et avec lui toute la CI.
   local src="$REPO/deploy/docker/forge-runner.sh" base="$REPO/deploy/docker/runner-compose.yml"
   [ -r "$src" ] && [ -r "$base" ] || { echo "MUR 8 — source ou base illisible" >&2; return 1; }
 

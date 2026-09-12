@@ -4,10 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
 # STATUS: la doc du deck — posée là où le deck la lit, hors du préfixe de release que son compte de service ne peut pas traverser
-#
-# Mesuré le 2026-08-20 sur un banc neuf : la doc posée sous /opt/lcars/runtime (750 root:fleet)
-# rendait 404 sur neuf pages présentes, parce que le deck largue ses privilèges vers un compte
-# hors du groupe fleet. Le 404 ne distingue pas l'absent de l'interdit.
 
 setup() {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/44-media.sh"

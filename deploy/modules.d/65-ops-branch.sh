@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/65-ops-branch.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — la branche ops : un APPELANT du geste de forge du produit (runtime/services/forge.d/ops-branch.sh)
+# STATUS: la branche ops : un APPELANT du geste de forge du produit (runtime/services/forge.d/ops-branch.sh)
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root

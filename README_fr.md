@@ -28,8 +28,8 @@ leur rôle, et un tableau de bord — montés par une commande, en conteneur ou 
 | Compte Anthropic | les agents sont des processus Claude Code ; les identifiants de `~/.claude/.credentials.json` sont réutilisés |
 
 Les versions publiées sont pré-compilées : un kit et une image. Aucune chaîne Elixir/Erlang n'est
-requise, sauf pour une installation depuis un clone en mode `--workstation`, où l'installeur la
-pose lui-même.
+requise pour les installer. Depuis un clone, elle l'est : en mode `--workstation` l'installeur la
+pose lui-même ; en mode conteneur, bâtir l'image (`deploy/container build`) l'exige, avec node.
 
 ---
 
@@ -69,7 +69,8 @@ Le kit est téléchargé dans `~/.lcars/kits/<version>/` et vérifié contre les
 inscrites dans l'installeur ; un écart supprime le fichier et interrompt l'installation. La
 signature minisign est vérifiée si `minisign` est installé ; sinon l'absence de vérification est
 signalée. `install.sh.sha256`, publié à côté, permet de vérifier l'installeur lui-même avant de le
-jouer.
+jouer. En mode conteneur, l'image de la version est tirée depuis le registre de la forge
+(`ghcr.io/<owner>/lcars-fleet:<version>` sur GitHub) quand elle n'est pas déjà sur le daemon.
 
 ### Depuis les sources
 
@@ -81,8 +82,11 @@ bash install.sh --workstation --bench     # ou : bash install.sh --bench
 
 Lancé depuis un clone, l'installeur installe depuis ce clone (canal `source`) : en mode
 `--workstation`, il compile le runtime et pose la chaîne Elixir/OTP aux versions épinglées par le
-provisionnement ; en mode conteneur, `deploy/container build` bâtit l'image sur le poste.
-`--from-release` prend le kit de cette version à la place.
+provisionnement. En mode conteneur, l'image doit être sur le daemon avant `install.sh` :
+`deploy/container build` la bâtit sur le poste (c'est `deploy/pack.sh` : la chaîne Elixir/OTP et
+node sont requises, et le gate complet est joué), ou `LCARS_IMAGE=<registre/image:tag>
+deploy/container pull` la tire. `--from-release` prend le kit de cette version à la place, et
+tire son image.
 
 ### Depuis un kit
 

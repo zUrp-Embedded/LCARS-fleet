@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins du banc — forge, conteneur, amorçage, humain, semis, runner, fleet, verdict
-#
-# bench-up.sh est copié dans un arbre factice avec les libs réelles ; docker, curl, git,
-# enroll-catalogue.sh et forge-runner.sh sont des doublures qui notent leurs appels. Trois ports
-# libres sont pris à chaque cas pour que la sonde de ports réelle ne voie rien de tenu.
 
 load ../refute
 
@@ -131,7 +127,6 @@ FAKE
 
 run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 
-# ─── le verdict ─────────────────────────────────────────────────────────────────────────────────
 
 @test "runner demandé et servi, conteneur convergé, fleet démarrée : banc PRÊT, sortie 0" {
   run_bench
@@ -173,7 +168,6 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q '^RUNNER:' "$CALLS"
 }
 
-# ─── le runner ──────────────────────────────────────────────────────────────────────────────────
 
 @test "le runner reçoit la forge, le jeton d'enregistrement, le réseau, le projet et les trois labels, sans le label elixir" {
   run_bench
@@ -208,7 +202,6 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"banc PAS PRÊT — le runner était demandé"*"démarré mais aucun runner vu par la forge"* ]]
 }
 
-# ─── l'image ────────────────────────────────────────────────────────────────────────────────────
 
 @test "une image sans révision, ou « unknown », est annoncée inconnue ; une image estampillée montre sa révision" {
   : > "$IMAGE_REV_OUT"
@@ -224,7 +217,6 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"révision  : deadbeef1"* ]]
 }
 
-# ─── les adresses et les ports ──────────────────────────────────────────────────────────────────
 
 @test "l'adresse annoncée n'est jamais le joker d'écoute, et seule l'entrée annoncée est déclarée au deck" {
   run_bench --no-runner --bind 0.0.0.0 --advertise 10.0.0.9
@@ -254,7 +246,6 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -qE 'compose .* (up|create)' "$CALLS"
 }
 
-# ─── l'amorçage ─────────────────────────────────────────────────────────────────────────────────
 
 @test "la forge monte avec port, bind et URL racine, puis admiral est créé avec le mot de passe du contrat, unix et forge" {
   run_bench --no-runner --advertise 10.0.0.9

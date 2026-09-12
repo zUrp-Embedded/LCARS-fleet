@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de deploy/gate.sh — la porte se mesure elle-même : refus nommés, couches, copies qui s'accordent
-#
-# Le décor copie la porte dans un arbre à part avec un tests/ fabriqué : ce qui se mesure est le
-# comportement de la porte, pas le contenu de la suite. bats est une doublure qui note son argv.
 
 load refute
 
@@ -81,7 +78,16 @@ path_sans() { # path_sans <outil> → un dossier
   stub_bats 1
   run bash "$DECOR/gate.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ECHEC"* ]]
+  [[ "$output" == *"ÉCHEC"* ]]
+}
+
+@test "les cas sautés sont comptés dans le verdict — un saut n'est pas un cas joué" {
+  temoin x.bats unit $'@test "a" { true; }\n@test "b" { true; }'
+  printf '#!/usr/bin/env bash\necho "BATS APPELE: $*"\necho "1..2"\necho "ok 1 a"\necho "ok 2 b # skip pas ici"\nexit 0\n' > "$BIN/bats"
+  chmod 0755 "$BIN/bats"
+  run bash "$DECOR/gate.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK (2 cas, 1 sauté(s))"* ]]
 }
 
 @test "le chemin nominal passe — sans lui, les refus seraient satisfaits par une porte qui refuse tout" {
@@ -161,7 +167,7 @@ path_sans() { # path_sans <outil> → un dossier
   [[ "$output" == *"couche inconnue « fumee »"* ]]
   run bash "$DECOR/gate.sh" structure
   [ "$status" -eq 1 ]
-  [[ "$output" == *"aucun témoin dans la couche « structure »"* ]]
+  [[ "$output" == *"aucun fichier de tests dans la couche « structure »"* ]]
 }
 
 @test "--list-corpora rend le corpus que la découverte joue" {

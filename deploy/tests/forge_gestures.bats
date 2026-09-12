@@ -4,23 +4,7 @@
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
 # STATUS: bats tests for services/forge-gestures.sh — LA porte des gestes forge du conteneur
-#
-# CE SCRIPT PORTE LE JETON SITE-ADMIN, celui qui peut tout creer et tout detruire sur la forge, et
-# il est joue par DEUX appelants (`container` et le banc). Une regression ici ne se voit ni dans
-# l'un ni dans l'autre : elle se voit sur la forge de quelqu'un.
-#
-# Dispositif identique a `forge_charte.bats` et `forge_existing.bats` : un faux `curl` en tete de
-# PATH qui journalise `"$@"` ET son stdin. Chaque assertion d'attaque va par paire avec un temoin.
 
-# ─── LE GESTE VIT DES DEUX COTES, ET LA PORTE DOIT LE SAVOIR ────────────────────────────────────
-#
-# `deploy/container` entrait dans le conteneur `lcars` pour jouer `forge-gestures.sh`. Sur un poste ce
-# conteneur n'existe pas — la fleet y tourne nativement et seule la forge est conteneurisee — donc
-# tout verbe qui passe par la mourait sur l'absence d'un objet sans rapport avec la demande. Le meme
-# script est pose sur l'hote par `62-runtime-helpers` : la porte doit chercher les DEUX.
-# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
-# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
-# l'isolation, pas une fuite.
 # shellcheck disable=SC2030,SC2031
 
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand le conteneur n'est pas la" {
@@ -146,11 +130,6 @@ FAKE
 }
 
 @test "config-token: un jeton qui porte des guillemets traverse INTACT" {
-  # La config de curl est un format CITE : une valeur non echappee couperait le jeton en deux et
-  # l'auth partirait tronquee — un echec qui ressemble a un jeton revoque.
-  # Le jeton passe par un FICHIER, pas par une chaine imbriquee : trois niveaux de quoting
-  # (bats -> bash -c -> printf) transformaient `a"b\c` en `a"b\\c`, et le test mesurait alors
-  # une autre valeur que celle qu'il nomme.
   printf '%s' 'a"b\c' > "$BATS_TEST_TMPDIR/tok"
   run bash -c "'$SCRIPT' config-token < '$BATS_TEST_TMPDIR/tok'"
   [ "$status" -eq 0 ]
@@ -192,9 +171,6 @@ FAKE
 }
 
 @test "apply: sans rien, il NOMME les trois manques au lieu d'en deviner un" {
-  # LE TITRE DISAIT TROIS ET LE TEMOIN EN VERIFIAIT DEUX (audit 2026-08-16) : le `setup` injecte
-  # `FORGE_BASE_URL`, donc le troisieme manque n'etait jamais atteint. Un temoin qui promet plus
-  # qu'il ne mesure est pire qu'un temoin absent — on le croit.
   run env -u FORGE_BASE_URL bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
   [[ "$output" == *"l'URL de la forge"* ]]
@@ -244,9 +220,6 @@ FAKE
 }
 
 @test "apply: DEUX applys concurrents — le second REFUSE, il n'attend pas" {
-  # Deux applys sur le meme `terraform.tfstate` : le second rendrait un verdict sur un travail
-  # qu'il n'a pas fait. Attendre serait pire que refuser — il repartirait sur une forge qui a
-  # bouge sous lui pendant qu'il patientait.
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
 
@@ -272,7 +245,6 @@ FAKE
   [ -s "$TOFU_LOG" ]
 }
 
-# ─── install ────────────────────────────────────────────────────────────────────────────────────
 
 setup_install() {
   printf 'TOK\n' > "$PRIV/forge-master.token"
@@ -281,22 +253,6 @@ setup_install() {
 }
 
 @test "install: la LECTURE de la source va sous le jeton SYSTEME, jamais le master" {
-  # ⚠ MESURE SUR BANC, 2026-08-16 : l'install mourait sur
-  # `UNREACHABLE {:config, {:token_file, …, :eacces}}`. La porte `catalogue-source` tourne en
-  # `nobody:fleet` parce que c'est une lecture ; le jeton master est `0600 root`, donc illisible
-  # pour elle. Le refus de permission ressortait en « pas de source installable » — le mauvais
-  # diagnostic pour le mauvais probleme, sur le geste central du chantier.
-  #
-  # ⚠ CE TEMOIN MESURAIT LE MECANISME, ET LE MECANISME A CHANGE SOUS LUI. Il epinglait un CHEMIN
-  # (`TOKFILE=<…>/system_starfleet.gitea_token`). Depuis que `/opt/lcars/var/tokens` est
-  # `0700 lcars-authority`, la porte `nobody` ne peut plus ouvrir AUCUN fichier d'ici — pas plus le
-  # jeton systeme que le master. Ce qui traverse est donc la VALEUR, lue par le service qui la
-  # possede et transmise par l'environnement (`/proc/<pid>/environ` n'est lisible que du
-  # proprietaire du process ; un argv l'est de tout le monde).
-  #
-  # L'EXIGENCE, ELLE, N'A PAS BOUGE D'UN MOT : la lecture se fait sous l'identite SYSTEME, jamais
-  # sous l'autorite totale du conteneur. C'est elle qui est epinglee ici, la ou elle se lit
-  # maintenant.
   setup_install
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
@@ -318,10 +274,6 @@ FAKE
   refute grep -q "catalogue-source .*TOKFILE=$PRIV" "$ENTRY_LOG"
 }
 
-# ⚠ LE TEMOIN DU VIDE, ET IL GARDE UN DIAGNOSTIC. Un jeton systeme present mais VIDE donnerait
-# `FORGE_TOKEN=`, que la resolution traite comme « pas de source » : la forge repond 401 et le refus
-# accuse le catalogue. Le geste doit mourir ICI, en nommant le fichier. C'est la contrepartie de la
-# lecture par valeur : un chemin illisible se diagnostique tout seul, une chaine vide non.
 @test "install: un jeton systeme VIDE est refuse AVANT la porte, et il est nomme" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
@@ -387,9 +339,6 @@ FAKE
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
-  # Sans ca, la commande rend la main sur un conteneur qui n'a pas encore le catalogue qu'il vient
-  # d'installer, et rien ne dit a l'admin qu'il doit redemarrer. Le clone vient du STORE et non de
-  # l'arbre en main : le convergeur compare des shas, et une copie sans `.git` n'en a pas.
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
@@ -414,13 +363,6 @@ FAKE
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {
-  # ⚠ MESURE SUR BANC, 2026-08-16. `apply` joue la recette DANS `$RECIPE_DIR` et y laisse le
-  # `terraform.tfstate` du catalogue de reference ; le `cp -r` de l'install l'emportait — 26 Ko
-  # d'etat de `fleet` recopies a l'identique dans la recette de `web-demo`.
-  #
-  # LE DANGER N'EST PAS L'ERREUR QU'ON A VUE (`user not found with id 12`), C'EST CELLE QU'ON N'A
-  # PAS VUE : un etat portant les comptes de `fleet`, applique avec les variables de `web-demo`,
-  # decrit ces comptes comme « plus dans la configuration ». Le plan suivant les DETRUIT.
   setup_install
   printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
   printf 'backup\n' > "$RECIPE/terraform.tfstate.backup"
@@ -438,10 +380,6 @@ FAKE
 }
 
 @test "install: l'etat DE CE CATALOGUE-CI survit au rejeu — sinon tout se re-importe a chaque fois" {
-  # La symetrique du temoin ci-dessus, et sans elle le remede tuait ce qu'il protegeait : `cp -r`
-  # ecrase l'etat de `web-demo` avec celui de `fleet`, et le nettoyage effacait alors les deux. Le
-  # rejeu repartait de zero — ca converge, l'etat est jetable par construction, mais ca ne tient pas
-  # la promesse affichee par la CLI : « rien n'a bouge -> il ne touche rien ».
   setup_install
   printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
   mkdir -p "$LCARS_CATALOGUE_WORK/cat"
@@ -454,9 +392,6 @@ FAKE
 }
 
 @test "install: UN DOSSIER DE RECETTE PAR CATALOGUE — le roster n'ecrase pas celui d'un autre" {
-  # La recette lit `roles.auto.tfvars.json` dans SON dossier, et ce fichier porte l'org ET le
-  # roster : deux catalogues dans un meme dossier, c'est le dernier installe qui decide de ce que
-  # le suivant applique.
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
@@ -531,10 +466,6 @@ FAKE
 }
 
 @test "apply: le catalogue de REFERENCE est depose aussi, au meme endroit" {
-  # ⚖ user, 2026-08-21 : « il faut republier le catalogue de base fleet ». Il vit dans le release et
-  # tourne sans la forge ; ce qu'il gagne a y etre est la LISIBILITE — on ne forke pas ce qu'on ne
-  # peut pas ouvrir. Il reste NON installable pour autant : `CatalogueDeposits` ecarte toute
-  # candidature portant le nom du catalogue livre.
   setup_install
   ref="$BATS_TEST_TMPDIR/reference"
   mkdir -p "$ref"
@@ -548,9 +479,6 @@ FAKE
 }
 
 @test "apply: le nom du depot vient du MANIFESTE, jamais du repertoire" {
-  # Un arbre range sous un nom et qui en declare un autre serait pousse sous le nom du repertoire, et
-  # n'apparaitrait JAMAIS dans « catalogue list » — qui indexe par identite declaree. Le depot serait
-  # la, visible sur la forge, et introuvable par la commande faite pour le trouver.
   setup_install
   ref="$BATS_TEST_TMPDIR/un-repertoire-mal-nomme"
   mkdir -p "$ref"
@@ -565,9 +493,6 @@ FAKE
 }
 
 @test "apply: un arbre SANS \`name:\` en colonne zero n'est pas depose, et le refus le DIT" {
-  # ⚠ COLONNE ZERO, la meme regle qu'en Elixir et pour la meme raison : en YAML un `name:` INDENTE
-  # appartient a la cle du dessus. Un `name:` sous `roles:` declare un ROLE, et le prendre pour
-  # l'identite du catalogue deposerait le catalogue sous le nom d'un de ses roles.
   setup_install
   ref="$BATS_TEST_TMPDIR/reference"
   mkdir -p "$ref"
@@ -603,20 +528,8 @@ FAKE
   [[ "$output" == *"apply"* ]]
 }
 
-# ─── le verrou d'apply se partage entre root et l'humain admin ───────────────────────────────────
 
 @test "le verrou vit dans le repertoire de travail, pas dans /run/lock" {
-  # LE DEFAUT MESURE (2026-08-18, reproduit sur deux bancs). Le verrou vivait dans `/run/lock`, en
-  # `1777` : n'importe qui y cree un fichier, mais le boot joue l'apply en ROOT, donc root le creait
-  # en `0644 root:root` — et l'humain qui jouait `lcars catalogue install` ensuite ouvrait en
-  # ecriture un fichier qui n'etait pas le sien. « Permission denied », puis « verrou d'apply
-  # inouvrable » : un refus qui accuse le verrou pour un probleme de proprietaire, et un geste
-  # injouable par un humain sur tout conteneur ayant demarre une fois.
-  #
-  # ⚠ LE PARTAGE ENTRE DEUX IDENTITES N'A PLUS D'OBJET, ET LE MODE N'EST PLUS EPINGLE. Les deux
-  # appelants sont ROOT desormais — le boot, et `catalogue-executor.py`. Ce qui reste vrai, et ce
-  # que ce temoin garde, est l'EMPLACEMENT : un verrou dans un repertoire dont le proprietaire est
-  # connu, jamais dans un `/run/lock` que tout le monde peuple.
   unset LCARS_APPLY_LOCK
   export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work"
   mkdir -p "$LCARS_CATALOGUE_WORK"
@@ -628,9 +541,6 @@ FAKE
 
   LOCK="$LCARS_CATALOGUE_WORK/.apply.lock"
   [ -e "$LOCK" ]
-  # Et il n'est PAS dans /run/lock, qui est le defaut qu'on a paye. ⚠ ON MESURE LE CODE, PAS LA
-  # PROSE : la cicatrice qui explique ce defaut NOMME `/run/lock`, et une premiere ecriture de cette
-  # assertion rougissait dessus. Un instrument qui attrape l'explication interdit d'expliquer.
   run bash -c "sed 's/#.*//' '$SCRIPT' | grep -c '/run/lock' || true"
   [ "$output" -eq 0 ]
 }
@@ -649,17 +559,6 @@ FAKE
   [ "$(stat -c '%a' "$LCARS_CATALOGUE_WORK/.apply.lock")" = "600" ]
 }
 
-# ─── LA RESOLUTION DE L'ENTRYPOINT — UN CHEMIN D'IMAGE DANS UN SCRIPT SANS HYPOTHESE DE CONTENEUR ──
-#
-# ⚠ MESURE DU 2026-08-22, SUR UN POSTE. `lcars catalogue install web-demo` rendait
-# « /opt/lcars/entrypoint.sh: No such file or directory », traduit en « pas de source installable » :
-# un fichier absent presente comme un catalogue introuvable. Le defaut de `$ENTRYPOINT` etait le
-# chemin de l'IMAGE, dans le seul script que le miroir des auxiliaires pose a plat sur l'hote — et
-# `62-runtime-helpers` exclut `entrypoint.sh` de ce miroir au motif qu'« il n'a pas de sens hors
-# conteneur » : vrai de son metier de BOOT, faux de son metier de PORTES OUTIL.
-#
-# IL N'Y A RIEN A COPIER : l'arbre `deploy/` est deja pose (`EMBEDDED=(deploy etc)`). Ces temoins
-# tiennent les DEUX dispositions ou ce script vit, et le refus quand il n'en trouve aucune.
 
 _flat_copy() { # <racine> -> pose une copie du script a plat, et rend son chemin
   mkdir -p "$1"
@@ -683,12 +582,6 @@ EOF
   chmod "${3:-0755}" "$1"
 }
 
-# ─── LA RESOLUTION DE LA CLI DU PRODUIT (lot 6) ─────────────────────────────────────────────────
-#
-# Les portes outil vivaient dans l'entrypoint de l'image, et ce script le devinait a deux adresses
-# (« le voisin », « l'arbre embarque »). Elles sont dans `lcars tool …` : la surcharge `LCARS_CLI`
-# d'abord, la CLI posee sur le PATH ensuite (les deux rails la posent), le voisin `../bin/lcars` de
-# l'arbre a defaut. Le PATH des temoins est TENU : le poste de dev porte un `lcars` reel.
 
 @test "cli: la SURCHARGE LCARS_CLI gagne sur tout" {
   setup_install
@@ -741,14 +634,6 @@ EOF
 }
 
 @test "install: une porte MUETTE qui rend 0 est refusee — jamais un clone sur du vide" {
-  # ⚠ MESURE DU 2026-08-23, SUR UN POSTE. La porte a rendu 0 sans rien imprimer ; les trois champs
-  # sont sortis VIDES, le geste a construit une URL a partir de rien, git a repondu
-  # « repository 'http://.../.git/' not found », et le refus final a dit « clone de  impossible ».
-  # Trois messages, aucun ne nommant le vrai manque — et le seul cite accusait git, a qui on venait
-  # de passer du vide.
-  #
-  # Aucune branche de `eval_source/1` ne rend 0 sans imprimer : un zero muet ne vient pas de la
-  # porte, il vient de ce qui a repondu a sa place. Le refus doit donc nommer CA.
   setup_install
   cat > "$BIN/entrypoint" <<'FAKE'
 #!/usr/bin/env bash
@@ -783,22 +668,6 @@ FAKE
   [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
 }
 
-# ─── LA RACINE DES CATALOGUES N'EST PAS UNE CIBLE DE `rm -rf` ────────────────────────────────────
-#
-# ⚠ CE QUI EST GARDE ICI N'EST PAS UN COMPORTEMENT, C'EST UNE INDEPENDANCE. `install_material`
-# calcule son repertoire cible ; ces trois temoins exigent qu'il le calcule depuis SON ARGUMENT et
-# depuis rien d'autre. La version d'avant le faisait depuis la PORTEE DYNAMIQUE de son appelant —
-# `local name="$1" dir=".../$name"`, ou bash expanse tout avant d'executer le builtin, donc ce
-# `$name` est celui d'ailleurs. C'etait juste tant que l'appelant gardait un `local` de ce nom.
-#
-# TROIS CAS, ET ILS NE SE VALENT PAS — mesures un par un sur la version defectueuse :
-#   `name` ABSENT       : `set -u` tue le script avant le `rm -rf`. Bruyant, rien de perdu.
-#   `name` POSE MAIS VIDE : `set -u` ne dit rien d'une variable vide. `dir` devient LA RACINE des
-#                         catalogues, le `rm -rf "$dir"` l'emporte entiere — y compris le clone
-#                         qui venait d'arriver — et l'erreur qui sort accuse un `.tmp` introuvable.
-#   `name` HOMONYME     : le catalogue s'installe sous l'AUTRE nom, `install` sort vert, et le
-#                         catalogue demande n'existe nulle part.
-# Le deuxieme est le cher, et c'est le seul que `set -u` ne couvre pas.
 
 setup_material() {
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"

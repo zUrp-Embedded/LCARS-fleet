@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     --repo)      REPO="${2:?}";      shift 2 ;;
     --release)   RELEASE="${2:?}";   shift 2 ;;
     --served)    SERVED="${2:?}";    shift 2 ;;
-    -h|--help)   sed -n '2,/^[^#]/{/^[^#]/!p;}' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)   sed -n '2,/^[^#]/{/^[^#]/!s/^# \{0,1\}//p;}' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)           die "argument inconnu: $1" ;;
   esac
 done
@@ -55,31 +55,31 @@ if [[ -n "$IMAGE" ]]; then
   MOUNT=()
   [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && MOUNT=(-v "$CATALOGUE:$CATALOGUE:ro")
   TFVARS="$("$DOCKER_BIN" run --rm ${MOUNT[@]+"${MOUNT[@]}"} "$IMAGE" roles-tfvars ${CATALOGUE:+"$CATALOGUE"} 2>/dev/null)" \
-    || die "l'image ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
+    || die "l'image ne rend pas le roster de ${CATALOGUE:-son catalogue livré}" 2
 elif [[ -n "$RELEASE" ]]; then
   SRC="release $RELEASE"
-  [[ -x "$RELEASE" ]] || die "release non executable : $RELEASE" 1
+  [[ -x "$RELEASE" ]] || die "release non exécutable : $RELEASE" 1
   _arg="Fleet.Catalogue.root()"
   [[ -n "$CATALOGUE" ]] && _arg="\"$CATALOGUE\""
   TFVARS="$(env HOME="${TMPDIR:-/tmp}" RELEASE_TMP="${TMPDIR:-/tmp}" LCARS_TOOL_EVAL=1 \
               "$RELEASE" eval "Fleet.Roster.eval_tfvars(${_arg})" 2>/dev/null)" \
-    || die "la release ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
+    || die "la release ne rend pas le roster de ${CATALOGUE:-son catalogue livré}" 2
 else
   SRC="depot $REPO"
-  [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
-  ( cd "$REPO" && mix compile ) >/dev/null 2>&1 || die "le depot $REPO ne compile pas" 2
+  [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (--image pour une installation livrée)" 1
+  ( cd "$REPO" && mix compile ) >/dev/null 2>&1 || die "le dépôt $REPO ne compile pas" 2
   TFVARS="$(cd "$REPO" && mix lcars.catalogue.roles "$CATALOGUE" --tfvars 2>/dev/null)" \
     || die "mix ne rend pas le roster de $CATALOGUE" 2
 fi
 
 [[ -n "$TFVARS" ]] || die "roster vide pour $CATALOGUE" 2
 printf '%s' "$TFVARS" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("roles")' 2>/dev/null \
-  || die "roster illisible ou sans role pour $CATALOGUE" 2
+  || die "roster illisible ou sans rôle pour $CATALOGUE" 2
 
 DEST="$TOFU_DIR/roles.auto.tfvars.json"
 TMP="$DEST.tmp.$$"
-printf '%s\n' "$TFVARS" > "$TMP" || die "ecriture impossible dans $TOFU_DIR" 3
-mv -f "$TMP" "$DEST" || die "ecriture impossible dans $TOFU_DIR" 3
+printf '%s\n' "$TFVARS" > "$TMP" || die "écriture impossible dans $TOFU_DIR" 3
+mv -f "$TMP" "$DEST" || die "écriture impossible dans $TOFU_DIR" 3
 
 ROLES_LINE="$(printf '%s' "$TFVARS" | python3 -c '
 import json, sys
@@ -112,8 +112,8 @@ say "tofu crée les comptes avec un seul seed_password ; le conteneur tient une 
 say ""
 
 say "catalogue : ${CATALOGUE:-<celui de la livraison>} (lu via $SRC)"
-say "ecrit     : $DEST"
-say "roles     : $ROLES_LINE"
-say "org       : ${ORG_LINE:-<non declaree>}"
+say "écrit     : $DEST"
+say "rôles     : $ROLES_LINE"
+say "org       : ${ORG_LINE:-<non déclarée>}"
 echo "PROV_ROLES=\"$ROLES_LINE\""
 [[ -n "$ORG_LINE" ]] && echo "PROV_FORGE_ORG=\"$ORG_LINE\""

@@ -4,31 +4,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for the STORE — what survives a destruction, and what says so
-#
-# WHY THIS EXISTS, AND IT IS NOT HYPOTHETICAL. The store was declared with TWO volumes for FIVE
-# declared paths, and the defect was found by a human reader, not by a test:
-#
-#   - the volume was named `lcars-toolchain` and the path is `toolchains/` — ONE character, and the
-#     artefact that costs three hours of CPU lands NEXT TO its own volume, on the container layer,
-#     where the next rebuild takes it;
-#   - `sysroots/` had no volume at all;
-#   - `env.d/` and `egress.d/` had none either — and losing those costs NOTHING VISIBLE: the
-#     toolchain stays, the pod simply stops seeing it, the install reports green and the build
-#     fails with nothing linking the two symptoms.
-#
-# So the contract under test is not "a volume exists". It is: EVERY path the store mounts is backed
-# by an external volume, and no mount silently falls through to the container layer. That is a
-# structural property of the compose files, and it is checked by reading them.
-#
-# WHAT IS PROVEN HERE: the declared names, that every store mount is external, that the two compose
-# files agree, and that both destruction gestures NAME what they spare. WHAT IS NOT: that docker
-# actually spares them — that is docker's behaviour, measured live on 2026-08-19 (marker written in
-# `lcars-toolchains`, `-p storetest down -v`, project volume destroyed, the four externals and the
-# marker intact) and recorded in `docker-compose.yml`. A stub cannot answer for it.
 
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
-# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
 # ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
@@ -48,10 +24,6 @@ setup() {
   export LCARS_STORE_PREFIX="testproj"
 }
 
-# Les montages du magasin declares dans un compose : « <clef>:<chemin> » sous `/var/lib/lcars`.
-# ⚠ LA CLEF LOCALE, PAS LE NOM REEL. Un volume `external` porte deux identites : la clef que le
-# service monte (`lcars-cache`, interne au fichier) et le `name:` que docker voit
-# (`<projet>-cache`). Ce qui se lit sur une ligne de montage est toujours la premiere.
 store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed 's/^\s*- //'; }
 
 @test "chaque nature declaree par store.sh est montee par le compose — aucun orphelin" {
@@ -63,10 +35,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "REGRESSION — le nom REEL porte le projet : deux installations ne partagent AUCUN volume" {
-  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE LIVRE. `external: true` sort le volume du projet
-  # DANS LES DEUX SENS : compose ne le detruit pas, et ne le prefixe pas. Les quatre volumes
-  # s'appelaient donc `lcars-cache` etc. pour TOUTE LA MACHINE — une prod et un test cote a cote
-  # (le cas meme que docker sert) partageaient leur magasin, et jouer avec le test vidait la prod.
   local a b
   a="$(LCARS_STORE_PREFIX=prod store_volume_names | sort)"
   b="$(LCARS_STORE_PREFIX=test store_volume_names | sort)"
@@ -88,10 +56,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "prefixe absent : les deux gestes ECHOUENT — jamais un succes muet sur un magasin fantome" {
-  # ⚠ LE PIEGE ETAIT DANS LA FORME DE LA BOUCLE, PAS DANS LE GARDE. `while read … < <(f)` JETTE le
-  # code de retour de `f` : zero ligne lue, corps jamais execute, `rc` reste 0. Les deux gestes
-  # rendaient donc un SUCCES sans avoir touche un seul volume — « magasin pose » sur rien, et
-  # « magasin detruit » sur rien, ce qui est le pire des deux.
   local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
   local calls="$BATS_TEST_TMPDIR/calls"; : > "$calls"
   printf '#!/usr/bin/env bash\necho "$*" >> %s\nexit 0\n' "$calls" > "$bin/dockerstub"
@@ -112,9 +76,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "REGRESSION — chaque montage du magasin a son volume EXTERNE, aucun ne tombe sur la couche conteneur" {
-  # LE TEMOIN QUI MANQUAIT. Un montage dont le volume n'est pas declare `external: true` est cree
-  # par compose, prefixe par le projet, et EMPORTE par `down -v` — silencieusement. C'est le
-  # defaut qui a mis `toolchains/` a cote de `lcars-toolchain`.
   local mount vol
   while read -r mount; do
     [[ -n "$mount" ]] || continue
@@ -148,9 +109,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "store_destroy_volumes n'efface QUE le magasin de son projet" {
-  # ⚠ CE GESTE N'EXISTAIT PAS, ET C'EST LE PARTAGE QUI L'INTERDISAIT : detruire aurait vide les
-  # voisins. La destruction se dictait donc a l'operateur en toutes lettres — une ligne qui, tapee,
-  # emportait le magasin du banc d'a cote, en marche. Une ligne dictee est un geste quand meme.
   local calls="$BATS_TEST_TMPDIR/calls"; : > "$calls"
   local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
   printf '#!/usr/bin/env bash\necho "$*" >> %s\nexit 0\n' "$calls" > "$bin/dockerstub"
@@ -168,13 +126,10 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   printf '#!/usr/bin/env bash\nexit 1\n' > "$bin/dockerko"; chmod 0755 "$bin/dockerko"
   run store_ensure_volumes "$bin/dockerko"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"refusera de demarrer"* ]]
+  [[ "$output" == *"refusera de démarrer"* ]]
 }
 
 @test "LA CONTREPARTIE — ce que \`container reset\` epargne, il le NOMME" {
-  # Sans ca, « reset » se lit comme « la machine est propre » alors que des heures de toolchain
-  # restent. Un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission, et il ne se
-  # decouvre qu'au moment ou quelqu'un purge un cache.
   run store_spared_line
   [ "$status" -eq 0 ]
   local vol
@@ -186,13 +141,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
-  # ⚠ LA DISTINCTION EST LE FOND DU LOT, pas un detail d'implementation. Reinitialiser un CONTENEUR
-  # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `container reset`
-  # epargne et le dit. Un BANC est jetable : le sien part avec lui, sinon le mot est faux.
-  #
-  # ⚠ ET LE TEMOIN GREPPE LE PORTEUR DU GESTE, PAS LA PORTE : un temoin reste sur un relais
-  # passerait au vert sur un `reset` devenu muet — il mesurerait un fichier qui ne porte plus le
-  # geste.
   grep -q "store_spared_line" "$DEPLOY/container"
   refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"

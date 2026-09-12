@@ -4,19 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la derivation du roster ne demande pas de
-#         toolchain a la machine qui l'appelle
-#
-# CE QUE CES TEMOINS TIENNENT, ET CE QU'ILS ONT COUTE. `enroll-catalogue.sh` a deux chemins de
-# lecture pour la MEME autorite (`CatalogueRoles`) : `--repo`, qui compile l'arbre source avec
-# `mix`, et `--image`, qui joue la porte du release livre. Le banc prenait le premier.
-#
-# Mesure du 2026-08-18, machine Debian neuve, chemin de livraison exact du README : `mix: ABSENT`,
-# rc 2, « le depot ne compile pas », amorcage forge mort en passe 1. Le README de la beta promet
-# en toutes lettres « No Elixir, no Erlang, no toolchain on your machine » — la promesse etait
-# fausse, et c'est la premiere machine autre que celle de dev qui l'a dit.
-#
-# Ce fichier n'ouvre aucune socket : `docker` est une doublure posee en tete de PATH, et ce qui est
-# mesure est l'ARGV qu'on lui passe — c'est-a-dire la decision du script.
 
 load ../refute
 
@@ -43,10 +30,6 @@ SH
 }
 
 @test "--image SANS --catalogue : l'image lit le SIEN, aucun chemin d'hote ne transite" {
-  # LE POINT. Un chemin d'hote passe a un conteneur designe un chemin que le conteneur n'a pas, et
-  # le monter ne suffit pas toujours : la porte de l'image tourne en `nobody`, et un `/home/<user>`
-  # en 0700 lui reste ferme. Une image PORTE son catalogue — c'est la seule lecture qui ne depende
-  # ni d'un chemin, ni d'un montage, ni de droits.
   run "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2
   [ "$status" -eq 0 ]
   [[ "$output" == *'PROV_ROLES="system_architect fleet_dev"'* ]]

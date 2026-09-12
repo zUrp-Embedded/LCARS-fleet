@@ -14,7 +14,7 @@ set -euo pipefail
 
 SYSTEMD_DIR="${LCARS_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
-# ce que lit GUARD B dans le shell d'un humain : hors de services.env, que seuls les daemons chargent
+# ce que lit la garde du siège dans le shell d'un humain : hors de services.env, que seuls les daemons chargent
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
 HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
@@ -227,21 +227,21 @@ probe_seat_uid() {
       p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
       return 0
     fi
-    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — sans siège déclaré, is_fleet_human répond non à tout le monde et le convergeur refuse de démarrer (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — sans siège déclaré, is_fleet_human répond non à tout le monde et le convergeur refuse de démarrer (la garde du siège, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
     return 0
   fi
   name="$(getent passwd "$declared" 2>/dev/null | cut -d: -f1 || true)"
   if [[ -z "$name" ]]; then
-    p_drift "LCARS_SYSADMIN_UID=$declared ne correspond a AUCUN compte de cette machine — GUARD B réserve un uid que personne ne porte, donc il ne réserve rien"
+    p_drift "LCARS_SYSADMIN_UID=$declared ne correspond a AUCUN compte de cette machine — la garde du siège réserve un uid que personne ne porte, donc il ne réserve rien"
   else
-    p_ok "siege : « $name » (uid $declared) — GUARD B lui interdit de lancer une fleet"
+    p_ok "siege : « $name » (uid $declared) — la garde du siège lui interdit de lancer une fleet"
   fi
 }
 
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
-    p_drift "$SEAT_UID_FILE absent — GUARD B (« $PROV_LINK_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
+    p_drift "$SEAT_UID_FILE absent — la garde du siège (« $PROV_LINK_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
     return 0
   fi
   v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -252,12 +252,12 @@ probe_seat_file() {
   local declared
   declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -n "$declared" && "$declared" != "$v" ]]; then
-    p_fail "$SEAT_UID_FILE dit $v et $SERVICES_ENV dit $declared — GUARD B et uid_floor ne réservent pas le même uid ; le convergeur créerait des humains sur celui que la garde refuse"
+    p_fail "$SEAT_UID_FILE dit $v et $SERVICES_ENV dit $declared — la garde du siège et uid_floor ne réservent pas le même uid ; le convergeur créerait des humains sur celui que la garde refuse"
     return 0
   fi
   name="$(getent passwd "$v" 2>/dev/null | cut -d: -f1 || true)"
   if [[ -n "$name" ]]; then
-    p_ok "GUARD B lit $SEAT_UID_FILE → uid $v (« $name »)"
+    p_ok "la garde du siège lit $SEAT_UID_FILE → uid $v (« $name »)"
   else
     p_drift "$SEAT_UID_FILE dit $v, uid qu'aucun compte ne porte — la garde réserve un siège absent"
   fi
@@ -309,7 +309,7 @@ apply() {
   write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" <<<"$env_body" \
     || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
-    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B refusera tout lancement sur cette machine"; verdict_apply; }
+    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — la garde du siège refusera tout lancement sur cette machine"; verdict_apply; }
   if ! have_systemd; then
     p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — le siège et l'environnement sont posés, aucune unité ne l'est. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (30-wsl)"
     verdict_apply

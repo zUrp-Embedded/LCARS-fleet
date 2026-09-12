@@ -17,7 +17,7 @@
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
 #                       démonstration. Sans ce drapeau, une forge existante est requise
 #                       (FORGE_BASE_URL).
-#       --check         mesure et affiche, ne modifie rien. Pipé, il s'arrête avant de télécharger.
+#       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Pipé, il s'arrête avant de télécharger.
 #       --dry-run       tout jusqu'au bilan, puis la commande qui serait exécutée.
 #       --from-release  depuis un clone : prendre le kit de cette version, vérifié, au lieu de
 #                       l'arbre courant. C'est ce que fait le script quand il est pipé (curl | bash).
@@ -67,7 +67,8 @@ REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 # Les constantes d'une version : vides dans le gabarit, écrites par deploy/lib/door-gen.sh sur les
 # lignes marquées @@DOOR_…@@, et sur elles seules.
 DOOR_BASE=""                       # @@DOOR_BASE@@ <forge>/<owner>/<repo>/releases/download/<tag>
-MINISIGN_PUBKEY=""                 # @@DOOR_PUBKEY@@ la cle publique minisign des artefacts
+MINISIGN_PUBKEY=""                 # @@DOOR_PUBKEY@@ la clé publique minisign des artefacts
+DOOR_IMAGE=""                      # @@DOOR_IMAGE@@ l'image publiée de cette version (registre/image:tag), vide sans publication
 sums() { cat <<'SUMS'              # @@DOOR_SUMS_BEGIN@@ « <sha256>  <artefact> », un par ligne
 SUMS
 }                                  # @@DOOR_SUMS_END@@
@@ -479,7 +480,7 @@ if [[ "$MODE" == "workstation" ]]; then
           *) stop "Réponse « $ans » non comprise — rien n'a été fait." ;;
         esac
       else
-        echo "  (pas de terminal : on continue, le terrain est jetable)"
+        echo "  (sans terminal, l'installation continue : le terrain est jetable)"
       fi
     fi
     echo ""
@@ -512,10 +513,23 @@ else
   CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)
   RAPPEL="Installation en conteneur — deploy/container up"
 fi
-[[ "$DRY_RUN" -eq 0 ]] || sortie_dite "${CMD[@]}"
+# une release en conteneur nomme son image ; absente du daemon, elle est tirée avant le up, qui ne tire jamais
+PRE=()
+if [[ "$MODE" != "workstation" && "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]]; then
+  export LCARS_IMAGE="$DOOR_IMAGE"
+  if ! "$(fait docker_bin)" image inspect "$DOOR_IMAGE" >/dev/null 2>&1; then
+    PRE=("$DELEGUE" pull)
+    echo "  l'image de cette version n'est pas sur ce daemon : elle sera tirée d'abord ($DOOR_IMAGE)"
+  fi
+fi
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  [[ "${#PRE[@]}" -eq 0 ]] || { printf '  --dry-run : d'"'"'abord'; printf ' %q' "${PRE[@]}"; echo ""; }
+  sortie_dite "${CMD[@]}"
+fi
 echo "  ${G}$RAPPEL${N}"
 echo ""
 rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
+[[ "${#PRE[@]}" -eq 0 ]] || "${PRE[@]}" || exit 1
 exec "${CMD[@]}"
 
 }

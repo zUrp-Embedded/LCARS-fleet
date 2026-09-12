@@ -4,19 +4,12 @@
 # AUTHOR: bob
 # STARDATE: 2026-08-30
 # STATUS: murs d'idiomes — la forme fragile ne revient pas une fois le code corrige
-#
-# Chaque mur remplace un commentaire qui defendait le code contre une simplification : le
-# commentaire disait « ne fais pas ca », le mur le mesure. Il grep le CODE seul, jamais la prose.
 
 load refute
 
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   mapfile -t SOURCES < <(ls "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision)
-  # Temoin de non-cecite : un mur qui grep une liste VIDE est vert, et le dit comme un succes. Le
-  # plancher tient sous la population reelle, assez pres pour crier si le `ls` se met a ne plus
-  # rien trouver. Il se regle donc a la baisse quand un fichier quitte legitimement le corpus —
-  # ce qui est un geste VISIBLE, et c'est tout ce qu'on lui demande.
   [ "${#SOURCES[@]}" -ge 25 ]
 }
 
@@ -52,9 +45,6 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
 }
 
 @test "MUR I2: aucun jeton de forge ne passe par argv — forge_curl le porte sur stdin" {
-  # `-H "Authorization: token $tok"` met le jeton dans la ligne de commande, lisible dans /proc de
-  # tout l'hote pendant l'appel (cicatrice 6-141). La lib porte `forge_curl`, qui le passe par
-  # `-K -`. Un module qui a besoin d'un en-tete d'autorisation l'appelle, il ne refait pas curl.
   local f hits=0
   for f in "${SOURCES[@]}"; do
     if code "$f" | grep -qE -- '-H ["'"'"']?Authorization: token'; then
@@ -67,9 +57,6 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
 }
 
-# Derniere instruction d une fonction : `[[ … ]] && cmd` sans `||`. Sous set -e, le rc du test
-# devient celui de la fonction, et un appelant qui capture par affectation — `x="$(f)"` — meurt sans
-# verdict. Un PREDICAT (nom en `_ok`) est exempte : son rc EST son contrat, ses appelants sont des if.
 I3_AWK='
   FNR==1 { fn="" }
   /^[a-z_][a-z0-9_]*\(\)[ \t]*\{/ { fn=$1; sub(/\(\).*/, "", fn); last=""; next }
@@ -90,11 +77,6 @@ I3_AWK='
 }
 
 @test "MUR I4: toute lecture de /dev/urandom est BORNEE par un head -c en tete de pipeline" {
-  # `tr -dc … < /dev/urandom | head -c N` : tr lit un flux infini, head ferme le tuyau, tr meurt de
-  # SIGPIPE — et sous pipefail c est le rc du pipeline. `head -c N /dev/urandom | …` en tete est la
-  # seule forme qui termine par elle-meme. Et un `| head -c` EN AVAL d un flux fini peut encore
-  # fermer le tuyau avant le dernier write de l amont — latent, il depend du buffer. La longueur se
-  # borne par `cut -c1-N`, qui lit tout et ne ferme rien.
   local f l hits=0
   for f in "${SOURCES[@]}"; do
     while IFS= read -r l; do
@@ -108,9 +90,6 @@ I3_AWK='
 }
 
 @test "MUR I5: l architecture se demande a arch_tag — dpkg et uname -m ne se lisent dans aucun module" {
-  # Trois modules mappaient dpkg vers le vocabulaire d une release, chacun a sa facon. Une seule
-  # table, dans la lib. `00-preflight` garde son `uname -m` : il verifie le NOYAU (x86_64, aarch64),
-  # pas le nom d un tarball — l exemption est nommee, pas devinee.
   local f hits=0
   for f in "$DEPLOY"/modules.d/*.sh; do
     if code "$f" | grep -q 'dpkg --print-architecture'; then echo "MUR I5 rompu — $f : dpkg" >&2; hits=$((hits+1)); fi
@@ -122,9 +101,6 @@ I3_AWK='
 }
 
 @test "MUR I6: comm ne se lit dans aucun module — set_diff trie lui-meme" {
-  # `comm` exige des entrees triees et, sur GNU, ne le verifie pas : deux listes dans le mauvais
-  # ordre rendent un resultat faux sans un mot. Sur uutils il le verifie — l instrument de la machine
-  # de dev ne dit pas ce que fait la cible. Une seule table de difference, dans la lib.
   local f hits=0
   for f in "$DEPLOY"/modules.d/*.sh; do
     if code "$f" | grep -qE '\bcomm -'; then echo "MUR I6 rompu — $f" >&2; hits=$((hits+1)); fi
@@ -134,9 +110,6 @@ I3_AWK='
 }
 
 @test "MUR I7: une valeur d un fichier d environnement se lit par env_field, jamais par un sed nu" {
-  # `x="$(sed -n 's/^CLE=//p' "$f" | tail -n1)"` : sur un fichier absent sed rend 2, pipefail le
-  # propage, l affectation echoue et set -e tue la fonction AVANT le if qui savait dire l absence.
-  # Trois sites portaient la forme ; un seul avait son `|| true`.
   local f hits=0
   for f in "$DEPLOY"/modules.d/*.sh; do
     if code "$f" | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"; then echo "MUR I7 rompu — $f" >&2; hits=$((hits+1)); fi
@@ -146,9 +119,6 @@ I3_AWK='
 }
 
 @test "MUR I8: un fichier de jeton se lit par read_token ou forge_curl — jamais par une redirection nue" {
-  # `tr < "$X_TOKEN_FILE" 2>/dev/null` : la redirection d'entree est appliquee AVANT le detournement
-  # de stderr, et quand le fichier manque c'est le shell qui crie « No such file » sur le vrai
-  # stderr. `{ …; } 2>/dev/null` le tait, mais cette forme ne tient que par un commentaire.
   local hits=0 f
   for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
     if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE' || code "$f" | grep -qF "tr -d '[:space:]' <"; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
@@ -157,11 +127,6 @@ I3_AWK='
 }
 
 @test "MUR I9: un temoin dont le code nomme une fonction du siege pose LCARS_SEAT_UID_FILE — il ne lit jamais celui de la machine" {
-  # `prov_seat_uid` lit `/etc/lcars/seat.uid` AVANT `LCARS_SYSADMIN_UID`, et ce fichier existe sur
-  # toute machine provisionnee. Un temoin sans decor y lit le siege reel — celui qui joue le gate —
-  # et tout ce qu'il attend d'un humain « qui passe GUARD B » rougit au second run (banc .63,
-  # 2026-08-30 : vert a l'install, rouge au re-run). Le scrub du shell_gate ne peut rien : c'est un
-  # DEFAUT de chemin, pas une variable. Perimetre : le CODE des temoins (une ligne `#` ne lit rien).
   local f bad=0
   for f in "$BATS_TEST_DIRNAME"/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
@@ -172,12 +137,6 @@ I3_AWK='
 }
 
 @test "MUR I19: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
-  # `prov_uid_bounds` lit `/etc/login.defs` ; `is_fleet_human` et `fleet_humans` en dependent, et
-  # `64-services` les joue a chaque check (`probe_fleet_humans`). Un decor qui pose un /etc/passwd
-  # sans poser ses bornes decrit une machine a moitie : sur un poste dont UID_MIN vaut 5000, ou dont
-  # login.defs est illisible, ses humains de decor changent de nature — vert ici, rouge ailleurs,
-  # pour un code identique. Vu : 64-services.bats (lot 15). Perimetre : le CODE des temoins, a tous
-  # les etages (I9 ne lit que le premier) ; 22-fleet-human.bats est le modele.
   local f bad=0 vus=0
   for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
@@ -192,15 +151,6 @@ I3_AWK='
   [ "$bad" -eq 0 ]
 }
 
-# ─── MUR I21 : UN TEMOIN QUI EXECUTE UN LECTEUR DU CANAL POSE LCARS_CHANNEL_FILE ─────────────
-#
-# `prov_channel` lit `/etc/lcars/channel` en tete du dispatch de 44, 46, 60 et 62 (lot 2 du chantier
-# release), et ce fichier existe sur toute machine posee. Un temoin sans decor y lit le canal REEL :
-# sur un poste installe par paquet, `apply` ne poserait plus rien, et rien ne dirait pourquoi — le
-# meme defaut que le siege (MUR I9), sur un autre fichier. Perimetre : le CODE des temoins qui
-# EXECUTENT un de ces quatre modules — `bash …/<module>.sh` en clair, ou `bash "$VAR"` quand `VAR=`
-# lui a ete assigne au niveau du fichier (un `local` ne compte pas : `doctor_honnete` assigne `mod`
-# a 62 pour le LIRE et joue `bash "$mod"` sur un autre module deux tests plus loin).
 I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
 @test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose LCARS_CHANNEL_FILE — il ne lit jamais le canal de la machine" {
   local f bad=0 vus=0 c execute v
@@ -461,7 +411,7 @@ i22_hits() { # i22_hits <fichier> — les lignes « assertion && assertion » : 
   awk '
     function ok_seg(s) { return s ~ /^(\[ |\[\[ |grep |refute |refute_out |test )/ }
     /^[[:space:]]*#/ || !/ && / || / \|\| / || /\\$/ { next }
-    { body = $0; sub(/^[[:space:]]*/, "", body); n = split(body, seg, / && /); if (n < 2) next
+    { body = $0; sub(/^[[:space:]]*/, "", body); sub(/^[^ )]*\)[[:space:]]+/, "", body); n = split(body, seg, / && /); if (n < 2) next
       good = 1; for (i = 1; i <= n; i++) { s = seg[i]; sub(/^[[:space:]]+/, "", s); if (!ok_seg(s)) good = 0 }
       if (good) print FILENAME ":" FNR ": " $0 }
   ' "$1"
@@ -481,6 +431,10 @@ i22_hits() { # i22_hits <fichier> — les lignes « assertion && assertion » : 
   printf '  [ "$status" -eq 0 ] && [[ "$output" == *x* ]]\n' > "$decor"
   [ -n "$(i22_hits "$decor")" ]
   printf '  grep -q a "$f" && grep -q b "$f"\n' > "$decor"
+  [ -n "$(i22_hits "$decor")" ]
+  printf '      n)    [[ "$output" == *x* ]] && [[ "$output" != *y* ]] ;;\n' > "$decor"
+  [ -n "$(i22_hits "$decor")" ]
+  printf '      ""|o) [ -n "$x" ] && [ -n "$y" ] ;;\n' > "$decor"
   [ -n "$(i22_hits "$decor")" ]
   printf '  [[ "$a" == x && "$b" == y ]]\n  [ -n "$x" ] && echo oui\n  [ -n "$x" ] && [ -n "$y" ] || { echo non; return 1; }\n  # [ a ] && [ b ]\n' > "$decor"
   [ -z "$(i22_hits "$decor")" ]

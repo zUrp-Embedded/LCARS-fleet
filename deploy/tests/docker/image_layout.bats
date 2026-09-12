@@ -4,15 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-11
 # STATUS: bats tests for le Dockerfile — l'image est POSEE PAR LE RAIL, et ce fichier ne pose rien que le rail pose
-#
-# Jusqu'au 2026-09-11 ce corpus tenait le stage runtime d'accord avec la table de l'installeur :
-# chaque `install -d`, chaque `COPY --chmod`, chaque `chmod -R` du Dockerfile compare au mode que
-# system.manifest declare — neuf temoins pour un jumeau. Le jumeau est parti (02-CIBLE § 3, spike du
-# 2026-09-10) : l'image se batit par `provision apply --substrate docker` depuis le kit, donc ce que
-# la table declare est pose par les MEMES modules que sur un poste, et se mesure par les temoins de
-# ces modules. Ce qui reste a tenir ici, c'est que le Dockerfile ne redevienne pas un jumeau.
-#
-# ⚠ CES TEMOINS NE BATISSENT AUCUNE IMAGE. Ils lisent le Dockerfile.
 
 load ../refute
 

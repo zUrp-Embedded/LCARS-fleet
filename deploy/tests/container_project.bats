@@ -4,27 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
 # STATUS: bats tests for deploy/container — a project NAME is not proof you are talking about the same container
-#
-# WHY THIS EXISTS. The container rail targeted the compose project `lcars` as a hardcoded constant. Compose
-# will happily apply a file to a project it never created: it computes the desired state from THAT
-# file and recreates, republishes ports, drops what is absent — with no error, because from its own
-# point of view nothing is wrong. The name is enough to address the project; it is not enough to
-# prove both parties mean the same object.
-#
-# Measured on this workstation on 2026-08-07: `lcars` was a 47-hour-old working container created from
-# `fleet/provisioning_v2/docker/docker-compose.install.yml` — a path DELETED by the 2026-08-04 move.
-# `container down` stopped it, `container reset` took its /home volume, and neither said a word.
-# That is the dominant defect family here: a defect that breaks gets killed by whoever meets it; a
-# defect that returns GREEN survives indefinitely.
-#
-# WHAT IS PINNED. The guard reads the container's own `com.docker.compose.project.config_files`
-# label — the list of files that actually created it — instead of trusting the name. What matters is
-# both directions: it must REFUSE a foreign project, and it must NOT refuse an empty one (there is
-# nothing to confuse, and `up` is entitled to create it).
-#
-# The last test has nothing to do with projects and everything to do with the same family: the help
-# text used to be extracted by line numbers (`sed -n '6,35p'`), so inserting one header line
-# truncated it silently. An amputated help never reports itself either.
 
 load refute
 
@@ -38,11 +17,6 @@ setup() {
   CALLS="$BATS_TEST_TMPDIR/docker.calls"
   : > "$CALLS"
 
-  # A docker daemon seen through a keyhole. Two env knobs drive it:
-  #   STUB_IDS           what `ps -aq --filter label=…project=<p>` returns ("" = project has no
-  #                      container at all, which is the case the guard must let through)
-  #   STUB_CONFIG_FILES  what `inspect --format` prints, i.e. the comma-separated list of compose
-  #                      files that created those containers
   cat > "$BINDIR/docker" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
@@ -74,18 +48,7 @@ EOF
   export PATH="$BINDIR:$PATH"
   unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC STUB_VOLUMES STUB_HOME_VOLUME STUB_COMPOSE_HOME
 
-  # ⚠ SANS CETTE LIGNE, CES SEIZE TEMOINS DEPENDENT D'UNE SOCKET SUR LA MACHINE QUI LES JOUE.
-  # Le delegue sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
-  # sonde parcourt /var/run/docker.sock, /run/docker-fleet.sock et la socket du montage WSL. Ici
-  # elle en trouvait une VRAIE et passait — donc verts sur ce poste, et rouges d'un bloc sur une
-  # machine sans daemon, pour une raison qui n'a rien a voir avec ce qu'ils mesurent. En la posant,
-  # la sonde prend la branche « DOCKER_HOST est pose » et interroge LA DOUBLURE, qui repond 0.
   export DOCKER_HOST="unix:///dev/null"
-  # ⚠ ET LA DOUBLURE SE DÉCLARE, elle ne se glisse plus dans le PATH en espérant être prise. Sur
-  # WSL la sonde préfère DÉLIBÉRÉMENT la CLI du montage Docker Desktop : il n'y a pas de « binaire
-  # docker » dans une distro, seulement un montage, et un `docker` trouvé dans un PATH y est une
-  # copie que quelqu'un a posée. Un test qui compte sur l'ordre du PATH mesurait donc la machine.
-  # `PROV_DOCKER_BIN` est le choix de l'appelant, et il l'emporte sur tout — c'est la couture.
   export PROV_DOCKER_BIN="$BINDIR/docker"
   # la conf par projet vit sous $HOME : un temoin ne touche pas le vrai
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
@@ -167,9 +130,6 @@ seed_project() {
 }
 
 @test "reset NAMES the project it is about to destroy" {
-  # `setsid` detaches from the controlling terminal, so opening /dev/tty FAILS and the confirmation
-  # read yields nothing. Without it this test HANGS whenever the suite runs from a terminal — the
-  # prompt would wait for a human who is not there. Skipping loudly beats a test that blocks a gate.
   command -v setsid >/dev/null || skip "setsid absent: cannot detach the tty without risking a hang"
   seed_project "$CF"
 
@@ -251,18 +211,6 @@ seed_project() {
   [[ "$output" == *"LCARS_PROJECT"* ]]
 }
 
-# ─── `up` REND LE VERDICT DE PROVISIONNEMENT ────────────────────────────────────────────────────
-#
-# ⚠ CES TEMOINS EXISTENT PARCE QUE `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort des
-# que le conteneur demarre ; le provisionnement tourne DANS l'entrypoint et dure. Un conteneur qui n'a
-# rien pu provisionner annoncait « fleet up », se declarait *healthy* (son healthcheck ne sonde que
-# des ports : ssh + le deck) et ne pouvait demarrer AUCUN pod — le seul endroit ou ca se lisait etant les logs, qu'on ne va
-# pas lire apres une commande qui a dit oui.
-#
-# Les quatre etats sont distincts PARCE QU'ILS APPELLENT QUATRE GESTES DIFFERENTS, et le quatrieme
-# est celui qui compte : ne pas avoir LU le verdict n'est pas l'avoir lu mauvais. On le dit, et on
-# sort 0 — sortir non nul sur une non-mesure apprendrait a ignorer le code de sortie, ce qui coute
-# exactement le jour ou il est vrai.
 
 @test "up: verdict 0 -> convergé, sortie 0, et compose n'a jamais bâti" {
   STUB_PROV_RC=0 run "$SRC" -p lcars up
@@ -297,12 +245,6 @@ seed_project() {
   [[ "$output" != *"en échec"* ]]
 }
 
-# ─── `build` DELEGUE A pack.sh — le kit, puis l'image, par le meme rail ─────────────────────────
-#
-# Jusqu'au 2026-09-11 `build` rendait DEUX images : `compose build` depuis le checkout, puis un
-# second `docker build --target build` qui etiquetait le jumeau `lcars-build:<tag>` du label
-# `elixir`. Le Dockerfile n'est plus un jumeau — il pose le kit par les modules — et le kit ne se
-# fabrique que par pack.sh (gate, release, doc, tar, image). `build` n'a donc rien a faire lui-meme.
 
 @test "build DELEGUE a pack.sh — aucun docker build, aucun compose build ici" {
   local stub="$BATS_TEST_TMPDIR/pack-stub"
@@ -313,19 +255,8 @@ seed_project() {
   refute grep -qE -- "compose .*build|build --target" "$CALLS"
 }
 
-# ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────
-# Les seize temoins ci-dessus passent par le delegue, donc ils traversent la porte sans le
-# savoir. C'est voulu : le plan prevoyait de les DESCENDRE vers le delegue, et les garder ici prouve
-# strictement plus — l'entree ET le relais. Ce qu'ils ne prouvent pas, ce sont les deux proprietes
-# du relais lui-meme, et c'est ce que les deux temoins suivants ajoutent.
 
 @test "la racine DELEGUE, et transmet l'argv VERBATIM" {
-  # Un wrapper qui reconstruit la ligne de commande perd toujours quelque chose — le plus souvent
-  # un argument a espaces, et on ne s'en apercoit que le jour ou quelqu'un en passe un.
-  #
-  # ARBRE FACTICE plutot qu'une couture dans le script : un `LCARS_CONTAINER_OVERRIDE` dont le seul
-  # client serait ce temoin ferait porter au code une variable qui ne sert a personne. Ici on
-  # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/deploy/container`).
   local root="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$root/deploy/lib"
   mkdir -p "$root/deploy"; cp "$SRC" "$root/deploy/container"
@@ -343,18 +274,9 @@ FAKE
 }
 
 
-# ─── L'AIDE APPARTIENT A QUI PORTE LES VERBES ───────────────────────────────────────────────────
-#
-# ⚠ L'AIDE A VECU HORS DU FICHIER QUI PORTE LES VERBES, et ce fichier la LUI DEMANDAIT — un
-# `usage()` qui `exec` ailleurs. Le porteur du contrat empruntait son contrat a un relais qui ne
-# faisait que le passer. Ces temoins tiennent le sens de la fleche.
 
 @test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
   local container="$BATS_TEST_DIRNAME/../container"
-  # ⚠ LES CONTROLES STATIQUES D'ABORD, ET CE N'EST PAS UN DETAIL DE STYLE. Si le delegue redemande
-  # son aide a la porte pendant que la porte la lui demande, les deux `exec` s'appellent sans fond
-  # de pile : rien ne compte les tours, rien ne sort. Un temoin qui LANCE avant de LIRE PEND au lieu
-  # de rougir — et un temoin qui pend est un temoin que le prochain desactive.
   grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$container"
   refute grep -q '^usage() { exec ' "$container"
 
@@ -377,9 +299,6 @@ FAKE
 }
 
 @test "l'aide ne promet plus une forge que l'operateur devrait apporter" {
-  # ⚠ « La forge est a TOI : LCARS ne la fabrique pas » etait vrai le 2026-07-05 et faux depuis
-  # `--bench`, qui monte forge jetable + conteneur + runner CI en un geste (`install.sh:588`). C'etait
-  # le SEUL texte d'aide du rail conteneur, et il disait d'apporter ce que le produit sait fabriquer.
   run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
   [[ "$output" == *"--bench"* ]]
   [[ "$output" != *"LCARS ne la"$'\n'*"fabrique pas"* ]]

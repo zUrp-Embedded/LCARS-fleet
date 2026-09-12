@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de 61-forge-structure — les préconditions, le roster dérivé de la release, la recette jouée sur une copie, le verdict lu dans la sortie de tofu
-#
-# Le module se joue entier dans un dépôt de décor : la lib y est copiée (repo_root y mène),
-# enroll-catalogue.sh et forge-gestures.sh sont des doublures qui notent ce qu'elles reçoivent,
-# tofu et curl aussi.
 
 load ../refute
 

@@ -20,7 +20,7 @@ set -euo pipefail
 observe() {
   local h found=0
   prov_uid_bounds || {
-    p_drift "la frontiere systeme/humain n'est pas etablie — cette machine ne peut reconnaitre aucun humain de fleet (le remede est ci-dessus)"
+    p_drift "la frontiere systeme/humain n'est pas etablie — cette machine ne peut reconnaître aucun humain de fleet (le remède est ci-dessus)"
     return 0
   }
   while read -r h; do

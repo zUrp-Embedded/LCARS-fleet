@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de l'amorçage de forge — montage, admin, jeton, seed, humain de banc, avec docker et curl doublés
-#
-# Les doublures notent chaque appel et sa configuration stdin dans CALLS : ce qui doit passer par
-# stdin s'y lit, ce qui ne doit jamais être dans un argv s'y cherche.
 
 load ../refute
 

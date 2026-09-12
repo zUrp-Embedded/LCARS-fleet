@@ -12,8 +12,10 @@ l'existence de son jumeau, et `tests.dirs_mirror_source` (`mix lcars.contracts.c
 sinon. `install.sh` est le seul fichier de l'installeur hors de `deploy/` (il vit à la racine du
 dépôt pour le `curl | bash`) : son témoin, `install.bats`, vit à la racine de ce corpus.
 
-`transverse/` est la seule zone sans jumeau : les témoins qui n'ont pas de cible unique. Quand une
-cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>`.
+Les témoins sans cible unique vivent à la racine du corpus (invariants d'idiomes, de variables,
+d'adminité, poseurs…) ou sous `transverse/` quand ils traversent plusieurs zones. Quand une
+cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>` ; `gate.sh` fait
+exception avec `installer_gate.bats`.
 
 ## Trois couches
 

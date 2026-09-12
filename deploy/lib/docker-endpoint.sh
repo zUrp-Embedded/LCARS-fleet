@@ -99,7 +99,7 @@ docker_endpoint() { # docker_endpoint → 0 et DOCKER_HOST exporté, ou 1 et PRO
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
     fi
-    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
+    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }   # la première refusée est celle qu'on nomme : la dernière a déjà fait accuser le mauvais objet
   done < <(_docker_sockets)
   # « refusé » n'est pas « répond » : une socket orpheline ne met pas le groupe en cause
   local _orpheline="" _ecoute=""

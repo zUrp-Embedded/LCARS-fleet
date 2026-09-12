@@ -2,12 +2,12 @@
 # SOURCE: deploy/lib/provision-audit.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — l'audit de la machine (`provision audit`) de `provision`, sourcé par lui (lot 10 : le runner ne porte plus que le runner)
+# STATUS: l'audit de la machine (`provision audit`) de `provision`, sourcé par lui
 
 audit_run() {
   local avant="${1:-}" apres="${2:-}"
   [[ -r "$avant" && -r "$apres" ]] \
-    || die "audit attend deux instantanes lisibles : provision audit --before <f> --after <f>"
+    || die "audit attend deux instantanés lisibles : provision audit --before <f> --after <f>"
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE)"
 
   local rows; rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
@@ -47,12 +47,12 @@ audit_run() {
   done < <(comm -13 <(cut -d' ' -f4- "$avant" | sort) <(cut -d' ' -f4- "$apres" | sort))
 
   echo ""
-  printf '  %d objet(s) apparu(s), %d appartenant a un paquet apt journalise, %d NON couvert(s) par la table.\n' \
+  printf '  %d objet(s) apparu(s), %d appartenant à un paquet apt journalisé, %d non couvert(s) par la table.\n' \
     "$n_apparu" "$n_apt" "$n_nu"
   [[ -r "$JOURNAL_FILE" ]] \
-    || echo "  ${_PA}⚠ journal illisible ($JOURNAL_FILE) — les fichiers des paquets apt sont comptes comme non declares${_PN}"
+    || echo "  ${_PA}journal illisible ($JOURNAL_FILE) — les fichiers des paquets apt sont comptés comme non déclarés${_PN}"
   [[ "$n_nu" -eq 0 ]] || {
-    echo "  ${_PA}Chacun est un DEFAUT : soit on le declare, soit on cesse de le poser.${_PN}"
+    echo "  ${_PA}Chacun est un défaut : soit il se déclare, soit il cesse d'être posé.${_PN}"
     return 1
   }
   echo "  ${_PG}Rien n'est apparu entre les deux instantanés que la table ne déclare.${_PN}"

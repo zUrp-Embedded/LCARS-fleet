@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-11
 # STATUS: bats tests for docker-compose.yml + Dockerfile — l'image vient de pack.sh, le compose ne BATIT pas
-#
-# Jusqu'au 2026-09-11 le compose portait un bloc `build:` (contexte `../..`, la racine du depot) et
-# ces temoins tenaient ce contexte d'accord avec chaque COPY du Dockerfile. Le contexte est
-# maintenant le KIT de pack.sh (`docker build … "$STAGE/$ROOT"`), jamais un checkout : un
-# `compose build` n'aurait plus de sens, et c'est ce que ces deux temoins tiennent.
 
 load ../refute
 

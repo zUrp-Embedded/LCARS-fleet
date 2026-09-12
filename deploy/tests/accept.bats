@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de deploy/accept — la mesure des runners (fait contre non-mesure) et le démarrage de la fleet sous l'humain
-#
-# Le décor reproduit l'arbre (accept dérive le nom de l'humain de ../runtime/services/forge-gestures.sh
-# et les labels des workflows du modèle de projet sous ../runtime) et possède le PATH en entier : sur un poste provisionné,
-# /usr/local/bin/fleet existe, et l'hériter mesurerait la machine. runuser ne change pas d'identité,
-# il exécute ce qu'on lui demande.
 
 load refute
 

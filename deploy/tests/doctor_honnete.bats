@@ -4,27 +4,6 @@
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests — UN VERDICT QUI NE PEUT PAS ETRE VRAI EST PIRE QU'UN VERDICT ABSENT
-#
-# ─── CE QUE CES TEMOINS TIENNENT ────────────────────────────────────────────────────────────────
-#
-# Un doctor a DEUX facons de mentir, et les deux ont ete mesurees sur le banc 2004 le 2026-09-01 :
-#
-#   1. confondre « je ne peux pas le lire » avec « ce n'est pas la ». `66-deck-oidc` annoncait
-#      « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets present, en `0640
-#      root:lcars-system` : un doctor sans sudo ne peut pas l'OUVRIR, il peut parfaitement
-#      CONSTATER qu'il est la.
-#
-#   2. conclure d'une comparaison qui n'a pas eu lieu. `62-runtime-helpers` rendait ONZE drifts
-#      « diverge de la source » alors que l'arbre source n'existait pas du tout — `cmp` echoue,
-#      et l'echec etait lu comme une divergence.
-#
-# Et une troisieme, qui n'est pas un mensonge sur un objet mais sur soi : OUBLIER CE QU'ON A FAIT.
-# `apply --port-deck 20997` posait le deck sur 20997 ; le `doctor` sans drapeau exigeait 20999.
-# Le rail declarait en drift une machine qu'il venait lui-meme de convergir.
-#
-# ⚠ LE COUT DE CES TROIS N'EST PAS LE FAUX VERDICT, C'EST CE QU'IL APPREND. Un operateur qui voit
-# un drift qui ne part jamais cesse de lire le rapport — et le jour ou un vrai drift s'y trouve,
-# il est dans la meme liste que les faux.
 
 # shellcheck disable=SC2030,SC2031
 
@@ -37,9 +16,6 @@ setup() {
   [ -f "$LIB" ]
   [ -f "$RUNNER" ]
   export PROVISION_LIB="$LIB"
-  # ⚠ EXPORTEE : `lib()` joue dans un `bash -c`, ou une variable non exportee est VIDE. Sans cela
-  # `prov_file_state ""` sondait la chaine vide, dont le `dirname` est « . » — toujours traversable,
-  # donc toujours « absent ». Le temoin mesurait le repertoire courant de bats.
   export FERME="$BATS_TEST_TMPDIR/ferme"
 }
 
@@ -48,7 +24,6 @@ lib() { bash -c '. "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$LIB" "$@"; }
 
 teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 
-# ─── LES QUATRE ETATS ───────────────────────────────────────────────────────────────────────────
 
 @test "ETAT : un fichier lisible est « present »" {
   echo x > "$BATS_TEST_TMPDIR/f"
@@ -62,9 +37,6 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 }
 
 @test "ETAT : un fichier PRESENT mais non lisible n'est pas « absent »" {
-  # LE DEFAUT, dans sa forme exacte. `0000` reproduit ce que `0640 root:lcars-system` fait a un
-  # doctor lance sans sudo : le fichier EST la, ce compte ne peut pas l'ouvrir. La confusion entre
-  # les deux etats est ce qui envoyait converger un objet deja pose.
   echo x > "$BATS_TEST_TMPDIR/secret"
   chmod 0000 "$BATS_TEST_TMPDIR/secret"
   run lib 'prov_file_state "$BATS_TEST_TMPDIR/secret"'
@@ -97,9 +69,6 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 }
 
 @test "ETAT : un chemin dont un ANCETRE lointain est ferme n'est pas dit absent" {
-  # La boucle remonte jusqu'au premier ancetre qui EXISTE avant de demander s'il est traversable.
-  # Sans elle, un parent absent (sous un grand-parent ferme) rendait `unmeasurable` par accident ou
-  # `absent` par optimisme, selon la profondeur — un verdict qui depend de la longueur du chemin.
   mkdir -p "$FERME"
   chmod 0000 "$FERME"
   run lib 'prov_file_state "$FERME/a/b/c/d"'
@@ -107,7 +76,6 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   [ "$output" = unmeasurable ]
 }
 
-# ─── LES MODULES QUI MENTAIENT ──────────────────────────────────────────────────────────────────
 
 @test "66-deck-oidc : un fichier PRESENT et illisible n'est plus annonce « absent »" {
   local mod="$DEPLOY/../runtime/services/forge.d/deck-oidc.sh"
@@ -135,11 +103,7 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   [[ "$output" == *"DRIFT"* ]]
 }
 
-# ─── LA MACHINE SE RAPPELLE CE QU'ON LUI A DEMANDE ──────────────────────────────────────────────
 
-# `_journal_params` EXTRAITE du runner et jouee seule : c'est elle qui decide, et l'extraire evite de
-# faire tourner tout un `provision` pour observer une variable. Elle est ecrite dans un fichier plutot
-# que passee par `declare -f` : la fonction lit `$RUNNER`, qu'un sous-shell `env` n'aurait pas.
 params() {
   local f="$BATS_TEST_TMPDIR/params.sh"
   { sed -n '/^_journal_params()/,/^}$/p' "$RUNNER"
@@ -158,9 +122,6 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 }
 
 @test "MEMOIRE : un drapeau EXPLICITE gagne toujours sur la memoire" {
-  # L'ordre est la propriete : la memoire s'intercale entre le drapeau (deja exporte) et le defaut
-  # d'usine (pose plus bas par la lib, en `:=`, qui ne mord que sur du vide). Une memoire qui
-  # gagnerait sur un drapeau rendrait la machine impossible a reconfigurer.
   journal 'params        PROV_DECK_PORT=20997'
   LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" PROV_DECK_PORT=21001 run params
   [[ "$output" == "21001|"* ]]
@@ -173,10 +134,6 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 }
 
 @test "MEMOIRE : la liste est FERMEE — un drapeau du geste n'est pas un fait de la machine" {
-  # ⚠ CE QUI SEPARE LES DEUX. `--port-deck` decrit un ETAT-CIBLE ; `--only` et `--verbose` decrivent
-  # une INTENTION du geste en cours. Memoriser `--only` ferait qu'un doctor futur n'examinerait plus
-  # qu'un module, parce que quelqu'un a un jour lance un apply cible — et le rapport partiel
-  # ressemblerait trait pour trait a un rapport complet.
   local liste; liste="$(sed -n 's/^PROV_REMEMBERED=(\(.*\))$/\1/p' "$LIB")"
   [ -n "$liste" ]
   [ "$(wc -w <<<"$liste")" -eq 4 ]
@@ -197,15 +154,8 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   printf '%s\n' "$output" | refute_out 'PROV_VERBOSE|PROV_HUMAN'
 }
 
-# ─── UN ETAT NORMAL N'EST PAS UN DRIFT ──────────────────────────────────────────────────────────
 
 @test "63-forge-tokens : un humain pas encore membre de l'org n'est pas un DRIFT" {
-  # ⚠ LE CANON DU 2026-08-30 : le rail pose les AUTORITES — siege, admin de forge, master token,
-  # comptes de service ; les PERSONNES s'inscrivent sur la forge et un proprietaire d'org les
-  # ajoute. Un humain pas encore membre est donc l'etat NORMAL d'une machine fraiche.
-  #
-  # Le mot engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN faire — il n'a pas
-  # les credentials de la personne, et les avoir serait le contraire du canon.
   local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
   local bloc; bloc="$(sed -n '/case "\$(member_state "\$LCARS_LOGIN")"/,/esac/p' "$mod")"
   [ -n "$bloc" ]
@@ -223,11 +173,4 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
 }
 
-# ─── LES DEUX SITES QUE LA CAMPAGNE 2007 A TROUVES ──────────────────────────────────────────────
-#
-# ⚠ CE QUI LES A REVELES : une session FRAICHE. Sur le banc 2001, `bob` etait deja effectivement
-# dans le groupe `fleet`, donc il lisait `/opt/lcars/runtime` (0750 root:fleet) et
-# `/etc/lcars/services.env` (0640 root:fleet). Sur 2007, l'adhesion venait d'etre posee et n'etait
-# pas encore effective dans la session — et les deux sondes ont declare ABSENT ce qu'elles ne
-# pouvaient simplement pas ouvrir. Le cas juste est la session fraiche, pas l'inverse.
 

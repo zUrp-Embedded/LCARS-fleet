@@ -4,10 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
 # STATUS: témoins du runner — sélection par en-têtes, dispatch d'identité, codes de verdict, journal
-#
-# Le runner est copié dans un bac à sable avec sa lib, et joue des modules-stubs écrits par chaque
-# cas ; RUN_LOG dit quel module a tourné, avec quel verbe. Les cas de structure lisent les modules
-# réels de deploy/modules.d.
 
 load refute
 
@@ -77,7 +73,6 @@ mort_module() { # mort_module <NN-nom> <source la lib : 0|1> — meurt sous pipe
 
 stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-lib.sh"; }
 
-# ─── sélection et dispatch ──────────────────────────────────────────────────────────────────────
 
 @test "doctor sous docker joue le check d'un module que l'image a appliqué, sans une ligne ERREUR" {
   stub_module 10-pkgstub "wsl linux" any human
@@ -234,7 +229,6 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   [[ "$output" == *"option inconnue: --fleet-human"* ]]
 }
 
-# ─── verdict et codes ───────────────────────────────────────────────────────────────────────────
 
 @test "un drift dans l'apply rend 2 : appliqué, l'état-cible n'est pas tenu, rien n'est un échec" {
   lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
@@ -292,7 +286,6 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   [[ "$output" == *"source inconnue"* ]]
 }
 
-# ─── identité ───────────────────────────────────────────────────────────────────────────────────
 
 @test "un module NEEDS: human dont l'identité ne peut pas être prise ne tourne pas" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
@@ -311,13 +304,12 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   grep -qx "human=root" "$RUN_LOG"
 }
 
-# ─── un module mort avant son verdict ───────────────────────────────────────────────────────────
 
 @test "doctor : un module mort sans verdict est nommé, rc 2" {
   mort_module 90-mort 1
   run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 2 ]
-  [[ "$output" == *"ERREUR 90-mort"*"MORT avant de rendre son verdict"* ]]
+  [[ "$output" == *"ERREUR 90-mort"*"mort avant de rendre son verdict"* ]]
 }
 
 @test "apply : un module mort est un échec, pas un drift résiduel" {
@@ -352,10 +344,9 @@ EOF
   run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 0 ]
   [[ "$output" == *"PETIT-FILS-OK"*"PETIT-FILS-RC=0"* ]]
-  [[ "$output" != *"MORT avant de rendre son verdict"* ]]
+  [[ "$output" != *"mort avant de rendre son verdict"* ]]
 }
 
-# ─── drapeaux et mémoire ────────────────────────────────────────────────────────────────────────
 
 # bats test_tags=unit
 @test "les trois ports sont validés au parseur : un nombre, dans la plage" {
@@ -426,14 +417,13 @@ MODEOF
   refute grep -qE 'lcars/provision[^/]*\.lock' "$fdlog"
 }
 
-# ─── AFTER ──────────────────────────────────────────────────────────────────────────────────────
 
 @test "AFTER vers un rang qui ne précède pas est refusé au démarrage" {
   stub_module 40-amont any any human
   printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: human\n# AFTER: 40-amont\nexit 0\n' > "$SANDBOX/modules.d/30-aval.sh"
   run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 1 ]
-  [[ "$output" == *"30-aval"*"40-amont"*"precede"* ]]
+  [[ "$output" == *"30-aval"*"40-amont"*"précède"* ]]
 }
 
 @test "AFTER vers un module inconnu est refusé et le nomme" {
@@ -451,7 +441,6 @@ MODEOF
   [ "$(grep -n '20-amont:check' "$RUN_LOG" | cut -d: -f1)" -lt "$(grep -n '30-aval:check' "$RUN_LOG" | cut -d: -f1)" ]
 }
 
-# ─── les modules réels ──────────────────────────────────────────────────────────────────────────
 
 # bats test_tags=structure
 @test "les modules réels : APPLY-ON couvert par CHECK-ON, et aucun check-seul hors docker" {

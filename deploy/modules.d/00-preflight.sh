@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/00-preflight.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — le préflight des deux terrains : système, substrat, docker, forge, ports, instance
+# STATUS: le préflight des deux terrains : système, substrat, docker, forge, ports, instance
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -58,7 +58,7 @@ check() {
   p_fact distro_version "$distro_version"
   p_fact noyau "$(uname -r)"
   p_fact cpu "$(nproc 2>/dev/null || echo 1)"
-  if [[ -d /run/systemd/system ]]; then p_fact systemd oui; else p_fact systemd non; fi
+  if [[ -d "${LCARS_SYSTEMD_RUN:-/run/systemd/system}" ]]; then p_fact systemd oui; else p_fact systemd non; fi
 
   p_fact bash "$BASH_VERSION"
   if [[ "${BASH_VERSINFO[0]}" -gt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 ) ]]; then

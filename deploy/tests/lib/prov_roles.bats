@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for prov_roles (provision-lib) — le roster du mint suit les catalogues INSTALLES
-#
-# Ces trois temoins vivaient dans le fichier du module 50-catalogues, dont ils partageaient le decor.
-# Le module est devenu un geste du PRODUIT (runtime/services/forge.d/catalogues.sh, lot 6) ; la
-# fonction `prov_roles`, elle, est de la lib de l'INSTALLEUR — elle lit la release posee par la
-# porte outil, pour le mint de 63. Deux sujets, deux corpus.
 
 load ../refute
 
@@ -71,13 +66,3 @@ SH
   [[ "$output" == *"fleet_engineer"* ]]
 }
 
-# ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE — ET IL DISAIT TOUJOURS WARN ───
-#
-# ⚠ AUCUN TEMOIN NE COUVRAIT CETTE BRANCHE : le setup exporte `PROV_FORGE_URL` dans TOUS les tests.
-# La cause du trou est une inversion de rang non declarable — l adresse se derive de
-# `$PROV_TOKENS_DIR/forge.url`, dont le seul poseur est `48-forge-host`, TROIS RANGS PLUS LOIN, et
-# `provision:327` refuse un `AFTER` qui ne precede pas.
-#
-# Le module rendait `p_warn` dans les deux cas. Or `p_warn` n incremente ni PROV_DRIFT ni
-# PROV_FAILED : sur une re-provision dont les jetons ont disparu alors que le volume de la forge a
-# survecu, la passe etait INERTE et le bilan restait vert.

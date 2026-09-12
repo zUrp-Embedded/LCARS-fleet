@@ -4,22 +4,9 @@
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for 60-deploy check — manifest-driven, source-independent
-#
-# Contract under test: the doctor side of 60-deploy is as BLIND to content as the installer —
-# what it probes under $PREFIX/bin comes from etc/release.manifest, and it needs NO source
-# checkout beyond etc/ (first real container boot proved the old mix.exs guard broke the probe
-# exactly where it matters most). The RO-lock probe (root:fleet) inevitably drifts in an
-# unprivileged sandbox — assertions therefore target the bin/link lines, not the exit code,
-# except where the exit code is the contract (missing manifest = probe ERROR = rc 2).
 
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
-# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC1003 — antislash litteral VOULU dans le motif
-#   SC2020 — `tr` sur des CARACTERES, et c'est ce que le temoin mesure
 # shellcheck disable=SC1003,SC2020
 
 load ../refute
@@ -102,22 +89,8 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   [[ "$output" == *"manifest introuvable"* ]]
 }
 
-# ─── L'OUTILLAGE DU GATE : UNE EGALITE DE LISTES, TENUE PAR UN TEMOIN ───────────────────────────
-#
-# Le Dockerfile porte en commentaire « Liste = celle de 10-packages + les 2 du gate ». C'etait une
-# affirmation que rien ne verifiait, et elle avait deja derive : le stage build installe TROIS
-# paquets de plus (python3-pytest, bats, procps), et le rail natif n'en installait aucun.
-#
-# Mesure du 2026-08-18, Ubuntu 26.04 LTS neuve : « ECHEC: pytest absent — les lcars_tests de
-# token-saver ne peuvent pas tourner (pas de skip silencieux) ». Gate rouge, release non posee,
-# install natif mort. La liste vivait a un seul endroit, et c'etait le Dockerfile.
 
 @test "le rail natif n'installe PLUS d'outillage de gate — l'install ne re-atteste pas la source (DI-07)" {
-  # ⚖ user 2026-09-04 (defaut pris, chantier deploy-independance) : `60-deploy` COMPILE et POSE, il ne
-  # joue plus `mix gate` sur la cible. Le gate exigeait sur un poste neuf pytest, bats, procps,
-  # les planchers shellcheck et ruff, et le binaire vendor `claude` du siege — deux jours de banc perdus le 04/09
-  # pour attester une source que la CI et `pack.sh` attestent deja. Ce temoin garde l'ABSENCE :
-  # aucune liste de paquets de gate dans 60, et la pose passe `LCARS_INSTALL_SKIP_GATE=1`.
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
   [ -f "$MOD" ]
   local code; code="$(grep -vE '^\s*#' "$MOD")"
@@ -129,26 +102,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   [[ " $(native_list 'PACKAGES' "$PKG") " == *" procps "* ]]
 }
 
-# ─── ET DANS L'AUTRE SENS, QUI EST CELUI QUI A COUTE ────────────────────────────────────────────
-#
-# Le temoin ci-dessus ne verifie qu'une direction : tout paquet natif est dans l'image. L'inverse —
-# tout paquet du RUNTIME de l'image est sur le rail natif — n'etait verifie par personne, et c'est
-# par la que sont passes `socat` et TOUT le socle d'outillage des pods.
-#
-# MESURE DU 2026-08-21, poste natif installe a froid : `socat` absent, donc
-# `bwrap_launch.sh:478` refuse (exit 2), donc le warden respawne le pod permanent cinq fois puis
-# abandonne — AUCUN pod ne peut naitre. Sur une installation dont les 23 modules etaient verts.
-# Et derriere : ni gcc, ni make, ni pip, ni venv. Le produit livrait des pods infirmes.
-#
-# ⚠ LES EXEMPTIONS SE NOMMENT UNE PAR UNE, AVEC LEUR RAISON. Une liste d'exclusion sans motif
-# devient l'endroit ou l'on range ce qu'on n'a pas envie de traiter.
 
-# ⚠ LES COMMENTAIRES SE RETIRENT AVANT DE CHERCHER LA BORNE, ET C'EST TOUT LE PIEGE. Le depot porte
-# les DEUX formes — un tableau sur une ligne (`GATE_PACKAGES=(a b c)`) et un tableau aere avec des
-# commentaires entre les noms. Avec `/^)/` comme borne, la forme d'une ligne ne fermait jamais la
-# plage et sed rapportait du CODE comme des paquets (« paquet 'apt_ensure' absent du Dockerfile ») ;
-# avec `/)/`, un commentaire contenant « (lot 1 du rail toolchain) » la fermait trop tot. Une
-# machine a etats sur les lignes DECOMMENTEES repond juste sur les deux.
 native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, commentaires retires
   awk -v n="$1" '
     !inside && $0 ~ "^[[:space:]]*" n "=\\(" { inside = 1; sub("^[[:space:]]*" n "=\\(", "") }
@@ -162,11 +116,6 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
 }
 
 @test "l'image ne pose par apt qu'un SOCLE — chaque paquet est sur le rail (10-packages), ou image-only et NOMME" {
-  # Jusqu'au 2026-09-11 l'image reposait a la main la liste de 10-packages, et ce temoin tenait les
-  # deux copies egales. L'image se pose maintenant par le rail : la seule liste apt du Dockerfile est
-  # le socle qu'il faut AVANT de jouer le rail (curl, git, sudo, ca-certificates) et ce que seule une
-  # image demande (tini pour le PID 1, openssh-server pour la porte d'entree). Tout le reste vient
-  # de 10-packages. Un paquet qui reviendrait ici serait le jumeau qui revient.
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
 
@@ -180,9 +129,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   [ "$(printf '%s\n' "$image" | grep -c .)" -le 8 ] || { echo "l'image pose $(printf '%s\n' "$image" | grep -c .) paquets : ce n'est plus un socle" >&2; printf '%s\n' "$image" >&2; return 1; }
 
   local native; native=" $(native_list 'PACKAGES' "$PKG") "
-  #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
-  #   openssh-server  — la porte d'admin du CONTENEUR. Sur un poste, l'acces reseau appartient a son
-  #                     proprietaire : lui ouvrir un sshd serait decider de son exposition a sa place.
+  # tini — PID 1 d'un conteneur, c'est systemd sur une machine ; openssh-server — la porte d'admin du conteneur, hors du poste
   local exempt=" tini openssh-server "
   local miss=""
   for p in $image; do
@@ -204,14 +151,6 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
 
 
 @test "le rail POSTE fait TRAVERSER ses reglages a l'escalade sudo" {
-  # `sudo` remet l'environnement a zero. Un reglage pose avant l'escalade (PROV_COLOR, PROV_VERBOSE)
-  # meurt en la traversant : mesure du 2026-08-18, `PROV_COLOR=1 bash install.sh` colorisait le
-  # preflight puis rendait un provisionnement blanc, sans un mot pour dire pourquoi. Troisieme
-  # incarnation de ce piege dans la meme journee (le shim docker, le temp root de bench-swap).
-  #
-  # ⚠ CE TEMOIN A SUIVI SON SUJET (E2, 2026-08-31). L'escalade vivait dans `install.sh` ; elle est
-  # dans `deploy/workstation` depuis que le rail poste a son propre script. La porte, elle,
-  # n'escalade PLUS DU TOUT — un temoin qui aurait continue de la lire serait devenu vert a vide.
   SH="$BATS_TEST_DIRNAME/../../workstation"
   [ -f "$SH" ]
   grep -q 'ESCALADE_ENV=(' "$SH"
@@ -224,30 +163,11 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   refute grep -q 'exec sudo' <<<"$(grep -vE '^\s*#' "$door")"
 }
 
-# ─── DOCKER : DEPENDANCE DURE DU RAIL POSTE, ET DE LUI SEUL ─────────────────────────────────────
-#
-# ⚖ USER 2026-08-21 : « docker, ça me choque pas que ça soit un pré-requis […] tu peux toujours
-# l'installer si tu trouves pas. »
-#
-# Sur une machine dediee, LCARS MONTE sa forge lui-meme (`48-forge-host` : `compose up -d` sur un
-# Gitea) et refuse sans docker. Aucun module ne le posait : sur une Ubuntu vierge l'install mourait
-# au module 48, et tout ce qui suit sortait en derive pour une cause qui n'etait pas la sienne.
 
 pkg_mod()    { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
 
 @test "docker n'est PAS dans la liste des deux rails — il n'a rien a faire dans l'image" {
-  # `PACKAGES` est la liste que les DEUX rails obtiennent par apt, et le temoin d'egalite ci-dessus
-  # exige que chacun de ses membres soit dans le Dockerfile. Y mettre docker ferait mentir ce
-  # temoin ou installerait un daemon dans une image qui tourne DANS un daemon.
-  # ⚠ CE TEMOIN NE MESURAIT RIEN, ET IL EST VERT DEPUIS QU'IL EXISTE. Sa `sed` exigeait
-  # `^PACKAGES=(…)$` sur UNE ligne ; le tableau reel en fait vingt-huit, donc elle rendait la chaine
-  # VIDE et `[[ "" != *"docker"* ]]` passait a vide. Mesure du 2026-08-23 : 0 octet en sortie.
-  # Ajouter `docker` a `PACKAGES` n'aurait rien fait rougir.
-  #
-  # `native_list` existe dans ce fichier POUR CA — son propre commentaire decrit le piege — et il
-  # etait deja utilise deux tests plus bas. Une extraction correcte a cote d'une extraction fausse,
-  # c'est celle qui ne mord pas qui survit le plus longtemps : personne ne relit un test vert.
   run native_list 'PACKAGES' "$(pkg_mod)"
   [ -n "$output" ]
   [[ "$output" != *"docker"* ]]
@@ -269,32 +189,10 @@ engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
 }
 
 @test "UN FAIT, DEUX RENDUS : le prefixe de la lib EGALE celui de l'installeur de release" {
-  # ⚠ CE COUPLAGE ETAIT ECRIT ET NON TENU. `provision-lib.sh` le dit en toutes lettres — « DOIT
-  # egaler le defaut d'deploy/lib/deploy-release.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
-  # et RIEN ne le verifiait. Une prose qui demande une synchronisation manuelle est une derive
-  # programmee : celui qui deplace l'un des deux ne lit pas forcement le commentaire de l'autre.
-  #
-  # Ce temoin existe pour le chantier EMPREINTE, qui va precisement deplacer ce prefixe. Sans lui,
-  # la phase B pouvait bouger la lib, laisser `deploy/lib/deploy-release.sh` derriere, et produire une machine ou
-  # le provisionnement cherche la release a un endroit ou l'installeur ne l'a pas posee.
-  # ⚠ ON SOURCE LA LIB, ON N'EXTRAIT PLUS SON TEXTE — ET C'EST CE TEMOIN QUI A EXIGE LE CHANGEMENT.
-  # Il a rougi au deplacement du prefixe, comme prevu, mais pour la MAUVAISE raison : la lib s'etait
-  # mise a DERIVER (`$PROV_ROOT/runtime`) et l'extraction rendait le texte non developpe. Un
-  # instrument qui lit une valeur doit la faire calculer par celui qui la definit, sinon il mesure
-  # une syntaxe. Troisieme occurrence de cette lecon dans ce chantier ; celle-ci est la derniere.
   local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   local inst="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
   local from_lib from_inst
-  # ⚠ `env -i`, ET C'EST ICI QUE CA S'EST DECOUVERT. Le `setup()` de ce fichier EXPORTE
-  # `PROV_PREFIX` et `PROV_LINK_DIR` vers des tmpdirs, pour les tests de `60-deploy`. Sourcer la lib
-  # dans cet environnement rend la SURCHARGE, jamais le defaut : `:=` ne remplace pas une variable
-  # deja posee. Le mur comparait donc le tmpdir du temoin a l'installeur, et rougissait sur un depot
-  # sain. Resoudre un defaut exige un environnement VIDE — sinon on mesure son propre montage.
   from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
-  # ⚠ LE `}` FERMANT, ET IL A TENU CE TEMOIN VERT SUR DEUX EXTRACTIONS CASSEES. `sed 's/.*:-//'`
-  # laisse l'accolade : la valeur lue etait « /local/LCARS_v2} ». L'autre cote la portait AUSSI —
-  # meme motif, meme defaut — donc les deux chaines etaient egales et le mur passait. Il n'a jamais
-  # compare des chemins ; il comparait deux fois la meme erreur. Resoudre un seul cote l'a decouvert.
   from_inst="$(grep -oE '\$\{LCARS_INSTALL_PREFIX:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"
   [ -n "$from_lib" ]
   [ -n "$from_inst" ]
@@ -313,16 +211,6 @@ engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
   [ "$from_lib" = "$from_inst" ]
 }
 
-# ─── LE DEPOT UPSTREAM — ce qu'il pose, et surtout ce qu'il NE pose PAS ──────────────────────────
-#
-# ⚖ USER 2026-08-23 : le rail prend `docker-ce` chez Docker plutot que `docker.io` chez Canonical.
-# C'est le SEUL depot tiers que ce rail ajoute a une machine, donc les trois proprietes qui comptent
-# sont : il se derive (jamais de codename cable), il refuse en NOMMANT la cause, et un refus ne
-# laisse RIEN derriere lui.
-#
-# ⚠ LA TROISIEME EST LA MOINS EVIDENTE ET LA PLUS CHERE. Une source apt posee vers une suite qui
-# n'existe pas ne casse pas ici : elle casse au prochain `apt-get update` de l'operateur, des mois
-# plus tard, sur un message de depot introuvable que personne ne rattachera a LCARS.
 repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine jamais mesuree
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
   sed '/^check() {/,$d' "$(engine_mod)" > "$head"
@@ -365,14 +253,6 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
 }
 
 @test "depot docker : la source est DERIVEE — id, codename et architecture, aucun litteral" {
-  # ⚠ LES DEUX POSEURS SONT DOUBLES SUR LEUR CHOWN, et ce n'est pas du confort. Le keyring et la
-  # source appartiennent a root en production — c'est juste — mais un temoin joue par un humain ne
-  # peut pas chowner : il tomberait donc sur l'IDENTITE de qui le lance au lieu de la regle qu'il
-  # garde. Meme piege que les deux d'aujourd'hui, troisieme forme.
-  #
-  # La propriete n'est pas perdue, elle est DEPLACEE la ou elle se verifie : `system.manifest`
-  # declare les deux fichiers en `0644 root:root`, et le temoin d'ISO de ce fichier l'exige.
-  # Ce test-ci ne garde qu'une chose, celle qui n'est verifiable qu'ici : la source est DERIVEE.
   repo_sh 'os_field() { case "$1" in ID) echo debian ;; VERSION_CODENAME) echo trixie ;; esac; }
            curl() { return 0; }
            ensure_dir() { mkdir -p "$1"; }
@@ -389,13 +269,6 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
 }
 
 @test "depot docker : REJOUER ne repose rien — la cle n'est pas re-telechargee" {
-  # ⚠ LE TEMOIN QUE LES QUATRE PREMIERS N'AVAIENT PAS, et c'est celui qui a attrape un vrai defaut.
-  # `fetch_verify` telecharge, pose et COMPTE un changement a chaque appel — c'est son contrat, et
-  # l'idempotence appartient a l'appelant. Sans garde, une machine ou docker est installe mais dont
-  # le daemon ne repond pas (service coupe) re-telecharge la cle a chaque passe et sort `POSE`.
-  #
-  # On compte les appels a `fetch_verify` : deux passes, UN seul appel. La sonde reseau, elle, a le
-  # droit de rejouer — c'est une lecture, elle ne pose rien.
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
   sed '/^check() {/,$d' "$(engine_mod)" > "$head"
   run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
@@ -418,18 +291,6 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
   [ "$(grep -c '^FETCH$' <<< "$output")" -eq 1 ]
 }
 
-# ─── LE DEPOT D'UN OPERATEUR N'EST PAS LE NOTRE ─────────────────────────────────────────────────
-#
-# MESURE : `10-packages` journalisait `posed_apt_repo` INCONDITIONNELLEMENT et, sur echec
-# d'`apt-get update`, faisait `rm -f` sur les deux fichiers en annoncant « la machine repart comme
-# avant ». Sur une machine qui portait deja le depot docker — le cas le plus banal — les deux
-# gestes disaient le contraire de ce qu'ils faisaient : le premier faisait revendiquer a LCARS un
-# objet qu'il n'avait pas pose (donc `uninstall` le retirerait), le second le detruisait.
-#
-# Le journal EXISTAIT et son commentaire enoncait deja la bonne regle — « uninstall ne retire que ce
-# que le journal revendique, jamais le depot d'un operateur qui l'avait avant nous ». La regle
-# etait juste ; l'ecriture qui l'alimente ne la respectait pas. Un mecanisme correct nourri d'un
-# fait faux se trompe avec methode.
 
 repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
@@ -456,9 +317,6 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
 
   repo_echec
   [ "$status" -ne 0 ]
-  # ⚠ LE CONTENU, PAS L'EXISTENCE. Un temoin qui ne verifierait que `-f` passerait sur un rollback
-  # qui laisse en place le fichier que LCARS vient d'ecrire — c'est-a-dire sur le cas ou la machine
-  # ne repart PAS comme avant, avec un fichier present pour le prouver.
   [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
   [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
   [[ "$output" == *"restauré"* ]]

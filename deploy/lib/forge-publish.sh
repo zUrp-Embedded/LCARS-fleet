@@ -2,18 +2,18 @@
 # SOURCE: deploy/lib/forge-publish.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-05
-# STATUS: PROTO-V2 — publier UNE version sur la forge : la Release (tout le tiroir)
+# STATUS: publier UNE version sur la forge : la Release (tout le tiroir)
 
 fp_token_sain() {
-  local t="${FP_TOKEN:?FP_TOKEN absent (le jeton, dans l environnement)}" i c
+  local t="${FP_TOKEN:?FP_TOKEN absent (le jeton, attendu en variable)}" i c
   if [[ "$t" =~ ^[A-Za-z0-9._-]+$ ]]; then return 0; fi
   for (( i = 0; i < ${#t}; i++ )); do
     c="${t:i:1}"
     [[ "$c" =~ [A-Za-z0-9._-] ]] || break
   done
-  echo "ECHEC: FP_TOKEN porte un caractere que la config curl interprete (rang $((i + 1)) sur ${#t})." >&2
-  echo "       Un jeton de forge est alphanumerique (. _ - admis) ; un guillemet tronque l en-tete," >&2
-  echo "       un saut de ligne fait executer la suite comme des options curl. Le jeton n est pas reimprime." >&2
+  echo "ÉCHEC : FP_TOKEN porte un caractère que la config curl interprète (rang $((i + 1)) sur ${#t})." >&2
+  echo "       Un jeton de forge est alphanumérique (. _ - admis) ; un guillemet tronque l'en-tête," >&2
+  echo "       un saut de ligne fait exécuter la suite comme des options curl. Le jeton n'est pas réimprimé." >&2
   return 1
 }
 

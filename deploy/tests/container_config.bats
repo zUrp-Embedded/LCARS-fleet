@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for deploy/container config|status — la conf de l'instance vit COTE HOTE, le verdict se lit de l'hote
-#
-# ⚖ user 2026-09-04 (Q1, chantier deploy-independance) : le modele Docker. « container config » ecrit l'env
-# et les secrets de l'instance sur l'hote (par projet) ; « container up » les donne au conteneur ; « container
-# status » lit l'instance de l'hote et remplace le doctor. `docker` est une doublure : rien ne tourne.
 
 load refute
 
@@ -206,9 +202,6 @@ EOS
 }
 
 @test "aide : chaque variable d'env ANNONCEE est LUE — par container, par un compose qu'il pilote, ou par une lib qu'il source" {
-  # Relecture hostile 2026-09-04 (M6) : `LCARS_CONSOLE_PORT` etait documentee dans l'aide et lue
-  # nulle part — une piste morte pour l'operateur qui cherche pourquoi son port ne bouge pas, dans
-  # le fichier qu'il lit en premier. L'aide est un contrat : un nom qu'elle annonce a un lecteur.
   local names
   names="$(sed -n '/^# ENV (optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"
   [ "$(grep -c . <<<"$names")" -ge 8 ] || { echo "moins de 8 variables lues dans l'aide — l'instrument ne lit plus le bloc ENV" >&2; return 1; }

@@ -4,34 +4,12 @@
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for console.sh + console-landing.sh — JG-072/JG-098, le terminal n'a plus de port
-#
-# WHY THIS EXISTS. The invariant of this lot is not "the terminal is authenticated" -- it is "the
-# terminal HAS NO PORT". A rule gets worked around and forgotten at the next route; a topology
-# cannot be worked around, because there is no second path to discipline. So what is pinned here is
-# the SHAPE of the thing: no `-p` on either ttyd, an AF_UNIX socket under a directory whose mode is
-# the guard, and a deck that gains exactly one supplementary group.
-#
-# ⚠ THE ASSERTIONS READ THE COMMAND LINE ttyd ACTUALLY RECEIVES, not the source of the script. A
-# grep over the source would pass on a script that builds the right array and then launches
-# something else -- and the whole point of this lot is that the reachable surface is what counts,
-# not what the code says about itself.
-#
-# WHAT IS NOT PROVEN HERE, and cannot be by a stub: that the kernel refuses a `connect(2)` to a
-# directory the caller cannot traverse. That is the kernel's behaviour, measured on a live container on
-# 2026-08-14 (`nobody` without the group -> connection refused; with `--groups` -> 200) and recorded
-# in the chantier design. A stub can only prove we ASK for the right mode.
 
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
-# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
 load ../refute
 
 setup() {
-  # ⚠ LE SIEGE SE LIT DANS UN FICHIER AVANT LA VARIABLE (`prov_seat_uid`), et ce fichier existe sur toute
-  # machine provisionnee : sans decor, un temoin qui attend que celui qui joue passe GUARD B rougit des
-  # le second run du gate — le siege, c'est lui (banc .63, 2026-08-30). Le decor nomme un fichier absent.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   SRC="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
   LANDING="$BATS_TEST_DIRNAME/../../../runtime/services/console-landing.sh"
@@ -39,11 +17,6 @@ setup() {
   BINDIR="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
 
-  # ⚠ LA RACINE DES SOCKETS NE PEUT PAS VIVRE DANS $BATS_TEST_TMPDIR, et le motif vaut d'etre su :
-  # `sun_path` fait 108 octets NUL compris, et le repertoire temporaire de bats est deja profond --
-  # le `bind()` echouait avec « AF_UNIX path too long » et ttyd mourait, ce qui se lisait comme une
-  # console qui ne se leve pas. Le script porte desormais sa propre garde sur cette limite ; ce
-  # harnais doit rester SOUS elle, sinon il mesure la garde au lieu de mesurer la topologie.
   ROOT="$(mktemp -d /tmp/lct.XXXXXX)"
 
   mkdir -p "$BINDIR"
@@ -79,9 +52,6 @@ fi
 sleep 5
 EOF
 
-  # setpriv is the identity boundary, and the stub must not swallow it: it LOGS what it was asked to
-  # become, then runs the tail after `--`. A stub that just exec'd the command would let a
-  # regression on `--reuid` through unseen.
   cat > "$BINDIR/setpriv" <<EOF
 #!/usr/bin/env bash
 echo "setpriv \$*" >> "$CALLS"
@@ -118,11 +88,6 @@ EOF
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/id"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/podsh"
 
-  # ⚠ TOUS LES STUBS SONT CREES ET RENDUS EXECUTABLES **AVANT** D'EXPORTER LE PATH, et ce n'est pas
-  # cosmetique : `chmod` fait partie des stubs. Fait dans l'autre ordre, le `chmod` du harnais est le
-  # STUB (exit 0, aucun effet), `podsh` reste non executable, `console.sh` declare les consoles de
-  # pod indisponibles et sort proprement en 0 -- trois assertions echouaient en accusant le script
-  # alors que l'outil s'etait mordu la queue. Mesure : hors bats, les deux ttyd se lancent.
   chmod 0755 "$BINDIR"/*
 
   mkdir -p /tmp/bt-home
@@ -167,9 +132,6 @@ ttyd_line() {
 }
 
 @test "JG-072: the per-human directory is asked for as 2710 <human>:lcars-console" {
-  # The MODE is the guard -- `connect(2)` requires traversing every directory of the path. 0710
-  # gives the owner everything and the group `--x` only (traverse, no listing); the setgid `2` is
-  # what makes ttyd's socket inherit the group WITHOUT ttyd ever changing identity.
   run_console
   [ "$status" -eq 0 ]
 
@@ -181,9 +143,6 @@ ttyd_line() {
 }
 
 @test "JG-072: ttyd is asked to refuse a request without the identity header" {
-  # Defence in depth behind the directory guard, and free: measured 2026-08-14 on the pinned binary,
-  # `-H` makes ttyd answer 407 without the header and 200 with it. ⚠ It proves PRESENCE, never the
-  # value nor the sender -- the relay must overwrite it. This test pins the flag, not a guarantee.
   run_console
   [ "$status" -eq 0 ]
 
@@ -201,16 +160,6 @@ ttyd_line() {
   refute grep -qE "^setpriv .*--reuid (root|0)( |$)" "$CALLS"
 }
 
-# ─── LE GID EST UN NOMBRE QU'ON LIT, PAS UN NOM QU'ON SUPPOSE ───────────────────────────────────
-#
-# Cette ligne a porte `--regid bt` pendant sa vie entiere, et le test l'epinglait — les deux
-# supposaient qu'un groupe porte le nom de l'humain. C'est vrai sous `USERGROUPS_ENAB yes` (le
-# defaut Debian, donc l'image) et FAUX des qu'un compte nait avec un groupe primaire nomme :
-# `useradd -g fleet lcars` ne cree AUCUN groupe `lcars`.
-#
-# Mesure du 2026-08-21, poste natif : « setpriv: failed to parse regid: 'lcars' » — la console de
-# l'humain de fleet mourait au demarrage, et le message affiche ensuite accusait la socket. Le gid
-# est le champ 4 de la ligne passwd d'ou le script tire deja le home (6) et le shell (7).
 @test "le gid primaire vient de passwd, pas du login — un groupe eponyme n'est pas supposé" {
   # bt a le gid 1000 et AUCUN groupe `bt` : la doublure `getent` refuse `group bt` (exit 2), comme
   # une vraie base ou le groupe n'existe pas.
@@ -224,10 +173,6 @@ ttyd_line() {
 }
 
 @test "un humain dont le groupe primaire est NOMMÉ démarre quand même — la faute d'origine" {
-  # `lcars`, gid 1003 (fleet) : la forme que le rail poste a posee jusqu'au 2026-08-25 (`useradd -g
-  # fleet`, dans `22-fleet-human`), et celle sur laquelle setpriv refusait de parser. Le createur a
-  # change — c'est le convergeur, et il ne passe plus `-g` — mais tout poste installe avant cette
-  # date porte encore cette ligne, et un compte pose a la main l'aura aussi.
   cat > "$BINDIR/getent" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -247,9 +192,6 @@ EOF
 }
 
 @test "a live process with NO socket is a FAILURE, not a running console" {
-  # The process is only the producer; what the deck will open is the file. Before this guard, a ttyd
-  # that started and failed to bind was reported as "vivante" and the human went looking in a
-  # browser for something that never existed.
   echo 0 > "$TTYD_MAKES_SOCK"
   run_console
 
@@ -281,22 +223,6 @@ EOF
   refute grep -q "^ttyd" "$CALLS"
 }
 
-# ─── L'ESPACE DES BLOCS N'EST PLUS PUBLIE DU TOUT ──────────────────────────────────────────────
-# ⚠ CES TEMOINS ONT ETE REMPLACES, PAS RAPIECES. Ils epinglaient un contrat qui a tenu une demi-
-# journee : « ce qui a un ecoutant est publie », avec une liste de six ports vivants. Ce contrat est
-# mort quand la mesure a montre qu'AUCUN d'eux n'etait appele — la surface API a ete supprimee, le
-# webhook aussi. Garder l'ancienne forme aurait epingle une liste que plus rien n'honore.
-#
-# LE NOUVEAU CONTRAT EST PLUS SIMPLE ET PLUS FORT : rien de l'espace des blocs (21000..25999) n'est
-# publie. Il ne s'enumere pas, donc il ne perime pas a chaque service qui naît ou meurt — et il
-# survit a l'UID tire de la forge, qui rend les blocs NON CONTIGUS (`lcars` = id 3 -> uid 1003 ->
-# bloc 21030) et donc indevinables depuis un fichier qui ne connait pas les humains.
-#
-# Ce qui reste publie se dit en une ligne : ssh, et la porte du conteneur.
-# ⚠ ON LIT LE PORT DE FIN DE LIGNE, PAS UN MOTIF `hote:port:port`. La forme reelle du compose est
-# `- "${VAR:-127.0.0.1:2222}:22"` : une accolade separe les deux nombres, donc tout motif
-# `:[0-9]+:[0-9]+` rate TOUTES les publications a variable — c'est-a-dire toutes. Premiere version de
-# cet extracteur, et il rendait une liste vide sur un compose qui publie deux ports.
 ports_of() {
   grep -oE '^\s*- "[^"]+"' "$1" | grep -oE ':[0-9]+"$' | tr -d ':"' | sort -u
 }
@@ -307,10 +233,6 @@ ports_of() {
 }
 
 @test "6-072: NOTHING of the per-human block space is published" {
-  # La propriete, pas la liste : un port publie sans ecoutant est une adresse libre dans un
-  # conteneur qui porte SYS_ADMIN, et les listeners bindent 0.0.0.0 a l'interieur — donc CE BLOC EST
-  # LA FRONTIERE. Enumerer les vivants obligerait a re-editer ce test a chaque service ; interdire
-  # l'espace entier tient tout seul.
   local dir="$BATS_TEST_DIRNAME/../../docker" p
   for p in $(ports_of "$dir/docker-compose.yml"); do
     [ "$p" -lt 21000 ] || [ "$p" -gt 25999 ] \
@@ -319,9 +241,6 @@ ports_of() {
 }
 
 @test "6-072: TEMOIN — l'instrument voit encore les publications qui restent" {
-  # Sans lui, un `ports_of` casse rendrait une liste vide et le test ci-dessus passerait EN NE
-  # MESURANT RIEN. C'est exactement le vert creux qu'une contre-epreuve avait deja trouve ici le
-  # 2026-08-14, sur la forme en plage. Une liste vide n'est jamais une reponse.
   local dir="$BATS_TEST_DIRNAME/../../docker" pub
   pub="$(ports_of "$dir/docker-compose.yml")"
   [ -n "$pub" ]
@@ -330,35 +249,17 @@ ports_of() {
 }
 
 @test "the deck gains the console group and NOT fleet" {
-  # `fleet` (gid 2000) already carries read access to /opt/lcars/runtime and elsewhere; reusing it would
-  # have been shorter and would have granted all of that too. The power granted here has to be
-  # sayable in one sentence: traverse the consoles' socket directories.
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
-  # And it REPLACES --init-groups: setpriv refuses both together -- measured IN THE IMAGE
-  # (util-linux 2.38.1), not on a dev container, because a tool's argument handling is a property of the
-  # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
-  # and names the flag, and a grep over the whole file would fail on the prose that documents it.
-  # `refute_out` porte son propre `--` devant le motif : ne pas le repasser ici, il serait pris
-  # POUR le motif.
   grep -E '^[^#]*setpriv' "$LANDING" | refute_out '--init-groups'
 }
 
-# ─── `console-humans.sh` EST LA REGLE, ET SA SORTIE EST UN CONTRAT ────────────────────────────────
-#
-# Ce script n'avait AUCUN test, et sa sortie vient de changer : la 3e colonne portait un bloc de
-# ports (supprime avec la formule), elle porte maintenant le HOME. Le deck l'appelle desormais au
-# lieu de refaire son propre filtre sur /etc/passwd — c'est ce qui met fin a la seconde autorite. Un
-# contrat que deux programmes lisent et que rien n'epingle est un contrat en sursis.
 
 humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   # Le 2e argument est mort — l'eligibilite ne lit aucun groupe — et sa POSITION est gardee pour ne
   # pas reecrire vingt appels. Le nommer `ignore` dit ce qu'il est.
   local pw="$1"; shift
   [[ $# -gt 0 ]] && shift
-  # LES BORNES SONT EPINGLEES, sinon ces temoins mesurent le `login.defs` de la machine qui les
-  # joue : des fixtures a uid 1000 tombent en bloc sur un poste dont UID_MIN vaut 2000, et le rouge
-  # ne dit alors rien du code.
   local defs="$BATS_TEST_TMPDIR/login.defs"
   printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$defs"
   LCARS_CONSOLE_PASSWD="$pw" PASSWD_DEFS="$defs" \
@@ -390,19 +291,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [ "${lines[0]}" = "zoe 1015 $home/zoe" ]
 }
 
-# ─── L'ELIGIBILITE NE DERIVE PLUS D'UN GROUPE, ELLE DERIVE DU SIEGE ─────────────────────────────
-#
-# ⚠ CE TEMOIN EPINGLAIT « hors du groupe `fleet` -> rejete », et il appelait ce groupe une AUTORITE.
-# C'en etait une PROJECTION : le convergeur y ajoutait chaque membre de l'equipe `humans` de la
-# forge, toutes les trente secondes. Filtrer dessus, c'etait lire un cache pour repondre a une
-# question qui n'en a pas besoin — « cette personne a-t-elle un siege de travail sur cette machine ».
-#
-# Le groupe n'ouvre plus rien depuis ce chantier. Ce qui reste a garder est la seule exclusion qui
-# ait jamais eu une raison — et elle etait un EFFET DE BORD, jamais une regle : le siege.
 @test "le SIEGE a une console, comme tout humain de la machine" {
-  # Le siege tient la machine : il a un uid dans la plage, un home et un shell, donc une console.
-  # Elle tourne sous SON uid — sudo-capable, comme son terminal ssh — derriere une porte qui exige
-  # une session de la forge. Ce qui lui reste ferme est la FLEET, et c'est GUARD B qui le tient.
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe" "$home/admiral"
   printf 'admiral:x:1000:1000::%s/admiral:/bin/bash\n' "$home" > "$pw"
@@ -431,28 +320,9 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
 }
 
 
-# ─── LE MEMBRE QUE `/etc/group` NE NOMMAIT PAS — LA CICATRICE, ET POURQUOI ELLE RESTE ───────────
-#
-# Un compte cree `useradd -g fleet` a le groupe pour gid PRIMAIRE, et /etc/group ne le liste PAS
-# dans son champ 4 — ce champ ne porte que les ajouts secondaires. `id -nG` le disait membre, le
-# fichier non : deux reponses vraies a deux questions differentes, et la regle lisait la mauvaise.
-#
-# Mesure du 2026-08-21, poste natif : `lcars`, l'humain de fleet du poste, tenait le
-# BEAM et sa `deck.sock` — et etait absent de cette liste. Le deck ne lisait donc jamais sa socket
-# et affichait « 0 pod » sur une fleet vivante. Le mode de defaillance est le pire qui soit : un
-# compteur a zero, identique a celui d'une fleet reellement vide.
-#
-# ⚠ CE PIEGE N'EXISTE PLUS, ET LE TEMOIN RESTE PARCE QUE SON CAS EST REEL. Cette forme de ligne de
-# passwd est celle que le rail poste produisait jusqu'au 2026-08-25 ; elle survit sur toute machine
-# installee avant, et un compte pose a la main la porte aussi — il DOIT etre servi. Il l'est maintenant pour une raison plus simple : plus rien ne regarde son gid.
-# Garder le cas coute une ligne et attrape le jour ou quelqu'un rebranche une lecture de groupe ;
-# le retirer parce que « sa cause a disparu » retirerait la preuve que la cause a disparu.
 @test "l'humain de fleet du rail poste (useradd -g fleet) est servi — le cas qui affichait « 0 pod »" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/lcars"
-  # La forme en question : gid primaire = celui de `fleet`, champ 4 vide. Le convergeur, lui, ne
-  # passe pas `-g` — il produit un groupe prive — donc ce cas n'est plus le NOMINAL, il est le LEGACY,
-  # et c'est exactement ce qu'un temoin doit continuer de servir.
   printf 'lcars:x:1001:2000::%s/lcars:/bin/bash\n' "$home" > "$pw"
 
   humans_sh "$pw" ""
@@ -460,13 +330,6 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [ "${lines[0]}" = "lcars 1001 $home/lcars" ]
 }
 
-# ⚠ CE TEMOIN EPINGLAIT « un autre gid reste dehors », ET SON SUJET A DISPARU AVEC LE FILTRE. Il
-# gardait une comparaison d'egalite sur un gid — utile tant que le gid decidait. Il ne decide plus
-# rien : ce qui le remplace est sa CONTREPARTIE, et elle est la moitie qu'aucun temoin ne tenait.
-#
-# Sans elle, un `console-humans.sh` qui rejetterait TOUT passerait les trois temoins du siege
-# ci-dessus — ils cherchent tous une ABSENCE — et le conteneur n'ouvrirait plus une seule console, en
-# affichant « 0 pod », c'est-a-dire exactement ce qu'affiche une fleet vide.
 @test "un humain ORDINAIRE est servi quels que soient ses groupes — le gid ne decide plus rien" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe" "$home/max"
@@ -487,9 +350,6 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
   printf 'max:x:1016:1016::%s/absent:/bin/bash\n' "$home" >> "$pw"
 
-  # ⚠ C'EST L'ECART QUI MORDAIT. Le deck acceptait `max` (il ne regardait pas le home) et affichait
-  # son siege ; `console.sh --all` ne lui demarrait jamais de console. La page rendait donc « cette
-  # console ne fonctionne pas » a quelqu'un dont le compte allait parfaitement bien.
   humans_sh "$pw" "zoe,max"
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
@@ -510,15 +370,8 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [[ "$output" != *"svc"* ]]
 }
 
-# ─── l'idempotence, qui etait DECLAREE ailleurs et n'existait pas ─────────────────────────────────
 
 @test "rejoue sur une console VIVANTE : aucun ttyd de plus, la socket n'est pas touchee" {
-  # LE DEFAUT MESURE (2026-08-18). `human-converger.sh` appelle `console.sh --human` PAR HUMAIN ET
-  # PAR TOUR (30 s), sous un commentaire qui affirmait que ce script « sonde la socket avant de
-  # lancer quoi que ce soit ». Il ne sondait rien : `rm -f` puis relance. Resultat sur un banc de
-  # trente minutes : **64 ttyd par humain**, empiles sur la meme socket, celle-ci effacee et
-  # re-posee sous le navigateur a chaque tour. L'operateur voyait « la console du nouvel humain ne
-  # demarre pas » — elle demarrait, et la suivante la remplacait.
   run_console
   [ "$status" -eq 0 ]
   local avant; avant="$(grep -c '^ttyd ' "$CALLS")"
@@ -535,9 +388,6 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
 }
 
 @test "une socket RESIDUELLE (fichier sans serveur) est bien remplacee" {
-  # L'autre moitie, et sans elle la garde ci-dessus serait un blocage permanent : un fichier de
-  # socket survit a son processus. `[[ -S ]]` ne distingue pas les deux etats — seule une connexion
-  # le fait, et c'est ce que le deck fera.
   mkdir -p "$LCARS_CONSOLE_SOCK_ROOT/bt"
   python3 -c 'import socket,sys
 s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/bt/console.sock"
@@ -548,15 +398,6 @@ s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/
   [ -n "$(ttyd_line console.sock)" ]
 }
 
-# ─── LA CONSEQUENCE QUE PERSONNE N'AVAIT TIREE : LA SONDE DOIT SUIVRE LA PROMESSE ───────────────
-#
-# Tout ce fichier etablit un fait : le terminal n'a plus de port, la landing est le SEUL chemin vers
-# lui. Le healthcheck de l'image, lui, etait reste sur `:22` — vrai du temps ou chaque console
-# publiait son port, faux depuis. Un conteneur dont le deck etait mort se declarait donc SAIN parce
-# que sshd repondait, alors que plus personne ne pouvait entrer.
-#
-# ⚠ CES TEMOINS LISENT LE `Dockerfile`, PAS UN CONTENEUR. Ce qui se mesure est la SONDE DEMANDEE — un
-# conteneur vivant serait une autre suite, et une autre machine.
 
 hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 
@@ -568,9 +409,6 @@ hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 }
 
 @test "la sonde lit le PORT depuis l'environnement, jamais un littéral" {
-  # `20999` est un defaut, pas une valeur : `LCARS_LANDING_PORT` le deplace. Une sonde qui grave le
-  # nombre testerait un port ou personne n'ecoute des qu'un operateur le change — et elle rendrait
-  # rouge un conteneur parfaitement sain.
   hc_cmd | grep -q '${LCARS_LANDING_PORT:-20999}'
 }
 

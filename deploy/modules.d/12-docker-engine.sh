@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/12-docker-engine.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: PROTO-V2 — docker-ce sur une machine Linux dédiée : posé une fois si aucun daemon ne répond
+# STATUS: docker-ce sur une machine Linux dédiée : posé une fois si aucun daemon ne répond
 # APPLY-ON: linux
 # CHECK-ON: linux
 # NEEDS: root
@@ -48,7 +48,7 @@ ensure_docker_repo() {
   curl -fsIL --max-redirs 3 -m 20 -o /dev/null "$url/dists/$codename/Release" 2>"$cerr" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     if [[ "$rc" -eq 22 ]]; then
-      p_fail "dépôt docker : la suite « $codename » n'existe pas chez Docker ($url/dists/) — rien n'est posé ; installer docker autrement, le rail sonde un daemon, pas un paquet"
+      p_fail "dépôt docker : la suite « $codename » n'existe pas chez Docker ($url/dists/) — rien n'est posé ; installer docker autrement, l'installeur sonde un daemon, pas un paquet"
     else
       p_fail "dépôt docker : $url injoignable (curl rc=$rc — $(tr -d '\n' < "$cerr")) — réseau, proxy ou DNS ; rien n'est posé"
     fi

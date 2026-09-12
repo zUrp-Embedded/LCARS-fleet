@@ -26,7 +26,7 @@ prov_console_human() { # prov_console_human → l'humain intégré si le geste d
 
 # /run est un tmpfs : rien au build de l'image (l'init de l'instance le pose au boot), et sans systemd aucune déclaration tmpfiles n'a de sens
 prov_runtime_dirs() {
-  [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" != docker ]] || return 0
+  [[ "${PROV_SUBSTRATE:?PROV_SUBSTRATE non posé — ce module se joue par ./provision, pas nu}" != docker ]] || return 0
   local h; h="$(prov_console_human)"
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
@@ -59,7 +59,7 @@ prov_container_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
 
 prov_dir_scope() { # prov_dir_scope <chemin> → here | substrate | volume
   local path="$1" sub col v
-  sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
+  sub="${PROV_SUBSTRATE:?PROV_SUBSTRATE non posé — ce module se joue par ./provision, pas nu}"
   col="$(prov_manifest_substrate "$path")"
   if [[ -n "$col" ]] && ! prov_substrate_satisfait "$col" "$sub"; then
     echo substrate; return 0
@@ -73,7 +73,7 @@ prov_dir_scope() { # prov_dir_scope <chemin> → here | substrate | volume
 }
 
 say_unmeasured() { # say_unmeasured <hors substrat> <sur volume> — ce qui n'est pas mesuré se dit, sans compter
-  local sub; sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
+  local sub; sub="${PROV_SUBSTRATE:?PROV_SUBSTRATE non posé — ce module se joue par ./provision, pas nu}"
   if [[ -n "$1" ]]; then p_warn "hors substrat $sub selon le manifeste — non mesuré :$1"; fi
   if [[ -n "$2" ]]; then p_warn "sur un volume du conteneur — pas de vérité au build, l'init de l'instance les pose :$2"; fi
   return 0

@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for the thin callers 45/63/65/66 — ce que l'installeur transmet au produit est GARDE
-#
-# DI-09 (lot 11). Un appelant mince ne fait qu'une chose : `exec env LCARS_X="…" bash <geste>`. Sous
-# `set -u`, une valeur `"$PROV_X"` transmise depuis un PROV_ que la lib n'a pas pose tue l'appelant
-# avant le geste, avec « unbound variable » pour tout verdict — vu au lot 6 (a2). La forme est donc
-# `"${PROV_X:-}"` (vide → le protocole du produit pose SON defaut par `:=`), ou un defaut explicite.
 
 load ../refute
 
@@ -32,9 +27,6 @@ setup() {
   local m line bad=0
   for m in "${CALLERS[@]}"; do
     while IFS= read -r line; do
-      # une valeur brute sans `:-` est la forme qui tue — et elle a DEUX ecritures, `"$PROV_X"` et
-      # `"${PROV_X}"` ; la premiere version de ce cas ne voyait que la premiere (relecture hostile
-      # 2026-09-04, M4 : mutation `"${PROV_CATALOGUES_DIR}"` verte ici, rouge au cas 3 seulement)
       if [[ "$line" =~ ^[[:space:]]+(LCARS|FORGE)_[A-Z_]+=\"\$\{?PROV_[A-Z_]+\}?\" ]]; then
         echo "$m : transmis sans garde → $line" >&2; bad=1
       fi

@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de 44-media — les deux arbres de médias, la doc bâtie puis posée une fois, les modes relus contre la table
-#
-# Le module se joue entier sous unshare -Ur (l'arbre est root:root) avec un npm doublé qui écrit un
-# dist/ et note la base reçue ; les sources sont un décor. Les filtres de modes et la pose de la doc
-# se jouent aussi en fonctions, hors namespace.
 
 load ../refute
 

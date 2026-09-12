@@ -470,7 +470,7 @@ cmd_source_push() {
     rm -rf /home/projects/.LCARS.old
     if [ -e /home/projects/LCARS ]; then
       if ! mv -T /home/projects/LCARS /home/projects/.LCARS.old; then
-        echo 'source-push: /home/projects/LCARS ne peut pas etre deplace (point de montage ?) — rien ecrase' >&2
+        echo 'source-push : /home/projects/LCARS ne peut pas être déplacé (point de montage ?) — rien écrasé' >&2
         exit 1
       fi
     fi

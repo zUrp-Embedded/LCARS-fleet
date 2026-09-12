@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests — le protocole du produit et la lib de l'installeur rendent les MEMES codes de verdict
-#
-# DI-09 (lot 11). Deux libs, deux dialectes (`PROV_*` chez l'installeur, `LCARS_*` chez le produit),
-# et UN contrat de codes : apply 0 converge · 2 drift residuel · 1 echec ; check 0 conforme · 1 drift
-# · 2 echec. `provision` lit ces codes sans savoir qui les a rendus (un module natif ou un appelant
-# mince qui relaie un geste du produit) : un ecart d'une unite ferait lire un echec comme un drift.
 
 load ../refute
 

@@ -25,7 +25,7 @@ setup() {
   printf 'sig\n'  > "$DIST/annexe-a.bin.minisig"
 }
 
-gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
+gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" LCARS_DOOR_IMAGE="${IMG-ghcr.io/o/r:0.9.0}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
 sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   bash -c "$(sed -n '/^sums() {/,/^}/p' "$1")"$'\nsums'
 }
@@ -61,7 +61,10 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   grep -qE '^DOOR_BASE="https://forge\.test/o/r/releases/download/0\.9\.0" +# @@DOOR_BASE@@' "$porte"
   grep -qE '^MINISIGN_PUBKEY="RWQcle" +# @@DOOR_PUBKEY@@' "$porte"
   grep -qE '^LCARS_DOOR_VERSION="0\.9\.0" +# @@DOOR_VERSION@@' "$porte"
-  local m; for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_SUMS_BEGIN DOOR_SUMS_END; do
+  grep -qE '^DOOR_IMAGE="ghcr\.io/o/r:0\.9\.0" +# @@DOOR_IMAGE@@' "$porte"
+  IMG="" gen; [ "$status" -eq 0 ]
+  grep -qE '^DOOR_IMAGE="" +# @@DOOR_IMAGE@@' "$porte"
+  local m; for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_IMAGE DOOR_SUMS_BEGIN DOOR_SUMS_END; do
     [ "$(grep -c "@@$m@@" "$porte")" -eq 1 ]
   done
   [ -x "$porte" ]

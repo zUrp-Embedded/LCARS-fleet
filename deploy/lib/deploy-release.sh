@@ -18,9 +18,9 @@ atomic_swap_dir() {
   local stage="${dst}.staging.$$" prev="${dst}.prev"
 
   rm -rf "$stage"
-  cp -a "$src" "$stage" || { rm -rf "$stage"; die "copie du build vers le staging echouee ($stage)"; }
+  cp -a "$src" "$stage" || { rm -rf "$stage"; die "copie du build vers le staging échouée ($stage)"; }
 
-  [[ -x "$stage/$probe" ]] || { rm -rf "$stage"; die "build stage invalide : $probe absent ou non-executable"; }
+  [[ -x "$stage/$probe" ]] || { rm -rf "$stage"; die "build stage invalide : $probe absent ou non exécutable"; }
 
   rm -rf "$prev"
   [[ -e "$dst" ]] && mv "$dst" "$prev"
@@ -31,7 +31,7 @@ atomic_swap_file() {
   local src="$1" dst="$2"
   local tmp="${dst}.new.$$"
 
-  cp -a "$src" "$tmp" || { rm -f "$tmp"; die "copie de $(basename "$dst") vers le staging echouee"; }
+  cp -a "$src" "$tmp" || { rm -f "$tmp"; die "copie de $(basename "$dst") vers le staging échouée"; }
   mv "$tmp" "$dst"
 }
 
@@ -155,7 +155,7 @@ RAW_PREFIX="$PREFIX"
 PREFIX="${PREFIX%/}"
 case "$PREFIX" in
   /?*/?*) : ;;
-  *) die "LCARS_INSTALL_PREFIX doit etre absolu, profondeur >= 2 (recu : '$RAW_PREFIX')" ;;
+  *) die "LCARS_INSTALL_PREFIX doit être absolu, profondeur >= 2 (reçu : '$RAW_PREFIX')" ;;
 esac
 
 MANIFEST="$ETC_DIR/release.manifest"
@@ -163,7 +163,7 @@ MANIFEST="$ETC_DIR/release.manifest"
 declare -a MF_FILES=() MF_MODES=() MF_LINKS=()
 while read -r mf_name mf_mode mf_flag mf_extra; do
   [[ -z "$mf_name" || "$mf_name" == \#* ]] && continue
-  [[ -z "$mf_extra" ]] || die "manifest : token en trop « $mf_extra » sur l'entree « $mf_name »"
+  [[ -z "$mf_extra" ]] || die "manifest : token en trop « $mf_extra » sur l'entrée « $mf_name »"
   case "$mf_mode" in
     exec|noexec) : ;;
     *) die "manifest : mode inconnu « ${mf_mode:-<vide>} » pour « $mf_name » (exec|noexec)" ;;

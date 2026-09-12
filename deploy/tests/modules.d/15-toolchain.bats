@@ -4,11 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-06
 # STATUS: PROTO-V2 — 15-toolchain sous le plancher 1.20 : le pin d'Elixir, UNE source, et la pose a blanc
-#
-# Le plancher (PROV_ELIXIR_MIN), le pin (PROV_ELIXIR_PIN + sha256) et la majeure OTP vivent dans
-# provision-lib.sh ; mix.exs porte le meme plancher, le Dockerfile les memes pins en ARG. Ces temoins
-# tiennent l'egalite, puis jouent la pose : curl double (il sert un zip fabrique), unzip reel,
-# fetch_verify reel, erl/elixir doubles, arbre et liens sous un prefixe temporaire.
 load ../refute
 
 setup() {
@@ -70,12 +65,6 @@ _run_apply() {
 }
 
 @test "UNE SOURCE : le pin et le plancher s'accordent — et le pin SATISFAIT ce que mix.exs exige" {
-  # ⚠ CE TEMOIN A EXIGE L'EGALITE AVEC `mix.exs`, ET C'ETAIT TROP FORT (2026-09-07). `runtime/` n'est
-  # pas le perimetre de l'installeur : le requirement du projet est pose la-bas, le pin et le
-  # plancher ici. Le contrat REEL entre les deux n'est pas « la meme valeur », c'est « ce que le rail
-  # pose satisfait ce que le projet exige » — un pin 1.20.4 satisfait `~> 1.18` comme `~> 1.20`.
-  # Exiger l'egalite forcait l'installeur a editer `mix.exs` pour rester vert : un perimetre qui
-  # deborde sur l'autre par la faute d'une assertion.
   [ -n "$PIN" ]
   [ -n "$MIN" ]
   [ -n "$OTP" ]

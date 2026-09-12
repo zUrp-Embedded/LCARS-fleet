@@ -4,21 +4,6 @@
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for prov_delivery + 15-toolchain + 16-node — LA FORME DE LA LIVRAISON
-#
-# ─── LA DOCTRINE QUE CES TEMOINS TIENNENT ───────────────────────────────────────────────────────
-#
-#   binary  la release Elixir ET la doc sont deja baties. Rien n'est a batir sur la cible, donc
-#           aucun outil de build n'y est pose.
-#   source  on bâtit les deux. Les compilateurs vivent le temps du build.
-#
-# ⚠ ON N'EN FAIT JAMAIS LA MOITIE, et c'est la moitie qui est le vrai risque. Une machine qui porte
-# node mais pas la toolchain Elixir — ou l'inverse — n'est ni un conteneur de prod ni un poste de dev :
-# c'est un etat que personne n'a decrit, et sur lequel aucun diagnostic ne se prononce. Les deux
-# modules lisent donc LE MEME discriminant, et ces temoins mesurent qu'ils le lisent pareil.
-#
-# ⚠ CE QUI EST MESURE EST LA DECISION. Aucun de ces temoins ne telecharge, ne compile, ni ne pose
-# quoi que ce soit : le cas « source » de `16-node apply` n'est deliberement pas joue jusqu'au bout
-# (il irait chercher 60 Mo chez nodejs.org). Ce qui distingue les deux formes se decide AVANT.
 
 # shellcheck disable=SC2030,SC2031
 
@@ -30,10 +15,6 @@ setup() {
   # racine-la que le discriminant interroge, et c'est donc la seule qu'un temoin ait a fabriquer.
   RACINE="$BATS_TEST_TMPDIR/racine"
   mkdir -p "$RACINE/deploy"
-  # ⚠ TOUT `lib/`, PAS LE SEUL `provision-lib.sh` : la lib en source d'autres (`docker-endpoint.sh`)
-  # par un chemin relatif a elle-meme. N'en copier qu'un fichier fait rendre a chaque appel un « No
-  # such file » sur stderr — que `run` agrege dans `$output`, ou il fait echouer toute egalite
-  # stricte. Le harnais mesurait alors le message d'erreur de son propre decor.
   cp -r "$DEPLOY/lib" "$RACINE/deploy/lib"
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
 
@@ -44,16 +25,8 @@ setup() {
   export PROV_ROOT="$BATS_TEST_TMPDIR/opt-lcars"
   mkdir -p "$PROV_ROOT"
 
-  # ⚠ LES DEUX SEAMS DE `15-toolchain`, ET LEUR ABSENCE A MORDU. Sans eux, `legacy_elixir_links`
-  # sonde le VRAI `/usr/local/bin` : sur un poste de dev qui porte un elixir, l'`apply` du temoin
-  # tentait de le supprimer, echouait faute de root, et sortait par `verdict_apply` AVANT le bloc
-  # qu'on croyait mesurer. Un temoin qui touche la machine qui le joue ne mesure ni l'une ni l'autre.
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/link"
   export LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
-  # ⚠ GARDE DE COUTURE, ET ELLE A UNE CICATRICE. `apply` fait `rm -rf "$LCARS_ELIXIR_PREFIX"*` : le
-  # jour ou la variable du module a ete renommee sans ce fichier (2026-09-07), la couture n'a plus
-  # rien couvert et le geste a vise `/opt/elixir-1.18.4`, l'Elixir du poste — sauve par le seul fait
-  # que bats tourne sans root. Un temoin qui joue une branche destructive PROUVE d'abord ou elle tire.
   [[ "$LCARS_ELIXIR_PREFIX" == "$BATS_TEST_TMPDIR"/* ]] \
     || { echo "couture Elixir hors du tmp du test : $LCARS_ELIXIR_PREFIX — le module viserait la vraie machine"; return 1; }
   mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt"
@@ -74,9 +47,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 @test "DISCRIMINANT : il est EXPLICITE — un depot sans .git ne suffit pas a dire « paquet »" {
-  # La deduction « pas de .git donc paquet » se trompe deux fois : sur un paquet detare DANS un
-  # depot, et sur un clone dont le `.git` a ete retire pour l'expedier. Le tampon, lui, est ecrit
-  # par celui qui sait — `pack.sh`.
   checkout
   refute test -e "$RACINE/.git"
   run lib 'prov_delivery'
@@ -111,9 +81,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   checkout
   node check
   [[ "$output" == *"node absent"* || "$output" == *"node "*" posé"* || "$output" == *"≠ pin"* ]]
-  # ⚠ ON REFUTE LE MOTIF DU CAS BINAIRE, PAS LE MOT « doc ». Le message du cas source NOMME la doc
-  # lui aussi — « la doc du deck ne peut pas être bâtie » est sa consequence. Une refutation sur
-  # « doc du deck » rougissait donc sur le bon comportement.
   printf '%s\n' "$output" | refute_out 'livraison binaire|stage . site|doc du deck (absente|bâtie)'
 }
 
@@ -126,9 +93,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 @test "TOOLCHAIN : livraison binaire — le nettoyage des reliquats PASSE QUAND MEME" {
-  # Un `/usr/local/bin/elixir` qui masque apt est un dechet dans les deux formes : c'est une
-  # convergence d'ABSENCE, elle ne depend pas de ce qu'on a a batir. Sauter tout le module sur le
-  # discriminant aurait emporte ce nettoyage avec le reste — sans que rien ne le dise.
   paquet
   ln -sf "${LCARS_ELIXIR_PREFIX}1.14.0/bin/elixir" "$PROV_LINK_DIR/elixir"
   toolchain check
@@ -150,16 +114,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 @test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme erlang, et elixir n'y entre PLUS par apt" {
-  # ⚠ LA BRANCHE QUI NE FAIT RIEN LAISSE UNE TRACE, et c'est le trou que le geste sur `10-packages`
-  # ne couvrait PAS : celui-la porte sur les depots apt, celui-ci sur `apt_ensure`, qui n'est appelee
-  # QUE si le seuil n'est pas atteint. Machine deja au niveau : rien n'entrait au journal, et plus
-  # rien ne distinguait « LCARS l'a pose » de « il etait la avant nous » — la question meme a
-  # laquelle le journal existe pour repondre.
-  #
-  # ⚠ ET LA PAIRE A ETE DEFAITE (2026-09-06) : la cible LTS sert Elixir 1.18, le plancher est 1.20 —
-  # erlang reste a apt, Elixir vient du zip officiel epingle. Le journal ne peut donc plus porter
-  # « apt_already … elixir », et l'exiger serait exiger le retour de la distro. La trace d'Elixir,
-  # quand le rail le pose, est `posed_dir` / `posed_link` (mesure : modules.d/15-toolchain.bats).
   checkout                                   # livraison source : le module travaille
   export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal"
   # Le pin est DEJA pose sous la couture : le module prend la branche « deja pose » et ne telecharge
@@ -182,7 +136,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   refute grep -qE '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
 }
 
-# ─── LE PAQUET PORTE LES DEUX MOITIES ───────────────────────────────────────────────────────────
 
 @test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
   # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
@@ -197,9 +150,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 @test "44-media : livraison binaire — il POSE la doc du paquet, il ne la batit pas" {
-  # Le symetrique de R4 : « rien a batir sur la cible ». Sans cette branche le module mourait sur
-  # « npm absent — 16-node pose le precompile ; joue-le d abord » — une instruction impossible,
-  # puisque l etat-cible de `16-node` en livraison binaire est justement de ne rien poser.
   local media="$DEPLOY/modules.d/44-media.sh"
   local bloc; bloc="$(sed -n '/^build_doc()/,/^}$/p' "$media")"
   [ -n "$bloc" ]
@@ -216,15 +166,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 @test "44-media : la POSE est commune aux deux livraisons — une seule copie" {
-  # Ce qui change est QUI a bati le dist, pas ce qu on en fait. Deux copies de la pose deriveraient
-  # sur le mode, le proprietaire ou l atomicite, et une des deux formes servirait une doc que
-  # personne n a relue.
-  # ⚠ CE TEMOIN PINNAIT LA CHAINE `cp -a "$SITE_SRC/dist/."`, ET LA FORME A DU CHANGER pour une
-  # raison mesuree : le `.` designe le REPERTOIRE source, donc `cp -a` recopiait ses attributs sur la
-  # destination — le mode et le proprietaire du checkout par-dessus ceux que `prov_scaffold_dir`
-  # venait de poser. Et `-exec … \;` rendait 0 meme quand `cp` echouait (mesure du 2026-09-08 : rc 0
-  # sous `\;`, rc 1 sous `+`). La PROPRIETE, elle, n'a pas bouge : le dist ne se copie qu'a UN seul
-  # endroit. On la mesure sans imposer la forme — sinon le prochain correctif juste rougit ici.
   local media="$DEPLOY/modules.d/44-media.sh"
   [ "$(grep -c 'poser_doc' "$media")" -ge 3 ]           # la fonction + ses deux appelants
   # les lignes de CODE (commentaires exclus) qui copient le dist, quelle que soit la primitive
@@ -235,12 +176,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
          grep -vE '^\s*#' "$media" | grep -nE '\$SITE_SRC/dist' >&2; return 1; }
 }
 
-# ─── CE QUE LA PREMIERE INSTALL BINAIRE REELLE A TROUVE (banc 2006, 2026-09-01) ─────────────────
 
 @test "15-toolchain : livraison binaire — le plancher OTP n est PAS verifie" {
-  # Le module s est contredit en trois lignes sur le banc 2006 : « erlang et elixir non poses,
-  # livraison binaire » puis « Erlang/OTP « 0 » toujours sous le plancher 27 » puis rc=1. La release
-  # embarque son ERTS : le plancher OTP de la MACHINE ne decide de rien quand rien ne compile.
   local mod="$DEPLOY/modules.d/15-toolchain.sh"
   # ⚠ HORS COMMENTAIRES, pour la meme raison : la prose du correctif CITE le message qu il corrige.
   local bloc; bloc="$(sed -n "/^apply()/,\$p" "$mod" | grep -vE "^\\s*#")"
@@ -266,12 +203,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   [ "$n_bin" -lt "$n_mix" ]
 }
 
-# ─── LE CANAL — QUI A POSE (lot 2 du chantier release, 2026-09-05) ──────────────────────────────
-#
-# `prov_delivery` dit la FORME de ce qu'on pose (binary/source) ; `prov_channel` dit QUI a pose
-# (source/kit/deb). Les deux se rejoignent en un point, et un seul : `60-deploy` ecrit `kit` quand
-# la livraison etait binaire et `source` sinon — et il ne l'ecrit JAMAIS sous `deb`, ou c'est le
-# postinst du paquet qui parle et ou ce module ne pose rien.
 
 canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la racine du decor
   local m="$BATS_TEST_TMPDIR/60.sh"

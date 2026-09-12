@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/66-deck-oidc.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — le client OAuth2 du deck : un APPELANT du geste de forge du produit (runtime/services/forge.d/deck-oidc.sh)
+# STATUS: le client OAuth2 du deck : un APPELANT du geste de forge du produit (runtime/services/forge.d/deck-oidc.sh)
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root

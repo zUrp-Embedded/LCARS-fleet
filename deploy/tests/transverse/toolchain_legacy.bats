@@ -4,25 +4,6 @@
 # AUTHOR: alice
 # STARDATE: 2026-08-28
 # STATUS: bats tests for 15-toolchain — le geste destructif du module (la SELECTION), et ce qu'il refuse de toucher
-#
-# `15-toolchain` pose le precompile Elixir OFFICIEL du pin (`/opt/elixir-<pin>` + quatre symlinks
-# dans `PROV_LINK_DIR`) — le cliquet du 2026-08-28 (« la distro sert la paire ») est inverse le
-# 2026-09-06 : la cible LTS sert 1.18 jusqu'en 2028 et le plancher est 1.20. Ce qui se detruit :
-# les arbres d'une AUTRE version que le pin, et les liens qui pointent ailleurs que sur le pin.
-#
-# ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE, et c'est ce trou que ces
-# temoins gardent. La ou l'ancien mecanisme a tourne les cinq objets sont toujours la ; le symlink
-# est le pire des deux, parce qu'il GAGNE : `PROV_LINK_DIR` passe avant `/usr/bin` dans le PATH,
-# donc la machine continuerait de compiler avec l'ancien binaire pendant que le paquet apt est pose,
-# sonde vert et jamais appele.
-#
-# ⚠ LE SUJET DE CE GESTE EST UN POSTE DE DEV, PAS UN PARC. Aucun systeme LCARS n'est deploye a ce
-# jour (⚖ user 2026-08-28) : les machines concernees sont celles ou le rail a ete joue en partie,
-# a commencer par celle qui a ecrit ce fichier.
-#
-# ⚠ ET UN GESTE QUI SUPPRIME SE MESURE D'ABORD SUR CE QU'IL NE SUPPRIME PAS. Le rang 4 du chantier
-# empreinte nomme la faute : detruire le bien d'autrui. Un operateur a le droit d'avoir SON elixir
-# dans `PROV_LINK_DIR` — c'est la CIBLE du lien qui decide, jamais son nom.
 
 # ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep` portent des `${VAR:-defaut}` qui doivent
 # atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell.
@@ -45,9 +26,6 @@ setup() {
   mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt"
 }
 
-# Les deux fonctions se sondent SOURCEES : `apply` exige root et joue apt, ce qu'un temoin n'a ni le
-# droit ni les moyens de faire. Ce qui est mesure ici est la SELECTION — la seule moitie du geste
-# qui decide quoi detruire.
 sourced() { # sourced <code bash>
   bash -c "
     set -euo pipefail

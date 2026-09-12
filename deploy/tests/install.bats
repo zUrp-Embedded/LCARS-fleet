@@ -4,10 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
 # STATUS: témoins d'install.sh — ce qu'il mesure, ce qu'il montre, ce qu'il refuse, où il délègue
-#
-# install.sh vit à la racine du dépôt (curl | bash) ; son témoin vit à la racine du corpus.
-# Aucun cas ne provoque une mutation : tous s'arrêtent sur un refus, un --check, un --dry-run, ou
-# sur un délégué doublé qui ne fait qu'écrire ce qu'il a reçu.
 
 # shellcheck disable=SC2016
 bats_require_minimum_version 1.5.0
@@ -30,7 +26,6 @@ setup() {
   TAG="9.9.9-test"
 }
 
-# ─── le décor : un arbre avec un préflight qui dicte ses faits et des délégués qui écoutent ────
 
 # shellcheck disable=SC2054  # les virgules sont dans les valeurs (groupes, comptes), pas entre les éléments
 _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker docker_host=unix:///var/run/docker.sock
@@ -71,7 +66,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   run bash "$a/install.sh" "$@" < /dev/null
 }
 
-# ─── structure : ce qui ne se vérifie qu'en lisant le fichier ─────────────────────────────────
 
 # bats test_tags=structure
 @test "root est refusé avant tout parsing" {
@@ -116,7 +110,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   done
 }
 
-# ─── --version, --help, les drapeaux ──────────────────────────────────────────────────────────
 
 @test "--version répond, pipée aussi, sans lire de fichier" {
   run bash "$SRC" --version
@@ -167,7 +160,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
 }
 
-# ─── le préflight : une seule mesure, celle du module ─────────────────────────────────────────
 
 @test "le bilan lit les faits du préflight et rien d'autre — ni docker ni sudo ne sont appelés" {
   # docker=oui dans les faits alors que le docker du décor rougit s'il est appelé : le bilan le dit oui
@@ -202,7 +194,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"aucun fait"*"le doctor est mort"* ]]
 }
 
-# ─── le bilan ─────────────────────────────────────────────────────────────────────────────────
 
 @test "le bandeau porte la version, puis le bilan décrit la source, le système, docker, les outils, la forge" {
   local a; a="$(_arbre)"
@@ -242,7 +233,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" != *"(forge)"* ]]
 }
 
-# ─── ce qui arrête, avant toute grille ────────────────────────────────────────────────────────
 
 @test "sans forge indiquée, l'installeur s'arrête et nomme les deux commandes" {
   local a; a="$(_arbre)"
@@ -353,7 +343,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [ "$status" -eq 0 ]
 }
 
-# ─── le mode, la grille, --check, --dry-run ───────────────────────────────────────────────────
 
 @test "sans --workstation le mode est le conteneur : sa grille, et l'autre mode nommé" {
   local a; a="$(_arbre projet=bob_10)"
@@ -393,7 +382,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"$a/deploy/workstation up --substrate wsl --only 10-packages"* ]]
 }
 
-# ─── la sortie : un exec vers le délégué, les drapeaux tels quels ─────────────────────────────
 
 @test "mode conteneur : exec deploy/container avec le projet et les ports, puis up" {
   local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
@@ -438,13 +426,12 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"deploy/workstation introuvable"* ]]
 }
 
-# ─── l'instance, quand on va la posséder ──────────────────────────────────────────────────────
 
 @test "sous WSL, des traces d'usage sont montrées ; sans terminal on continue, le terrain est jetable" {
   local a; a="$(_arbre "apt_installs=openssh-server (2026-09-11)" comptes_humains=temoin,alice)"
   porte "$a" --workstation --bench
   [ "$status" -eq 0 ]
-  [[ "$output" == *"traces d'usage"*"openssh-server (2026-09-11)"*"comptes humains : temoin,alice"*"pas de terminal : on continue"* ]]
+  [[ "$output" == *"traces d'usage"*"openssh-server (2026-09-11)"*"comptes humains : temoin,alice"*"sans terminal, l'installation continue"* ]]
   [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
@@ -478,8 +465,10 @@ porte() { # porte <arbre> [args…] — sans TTY
     run bash -c "printf '%s\n' '$rep' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
     case "$rep" in
       ""|o) [[ "$output" == *"Continuer ? [O/n]"*"WORKSTATION:up"* ]] || { echo "réponse « $rep » : $output" >&2; return 1; } ;;
-      n)    [[ "$output" == *"Rien n'a été fait"* ]] && [[ "$output" != *"WORKSTATION:up"* ]] ;;
-      q)    [[ "$output" == *"non comprise"* ]] && [[ "$output" != *"WORKSTATION:up"* ]] ;;
+      n)    [[ "$output" == *"Rien n'a été fait"* ]] || { echo "réponse « n » : $output" >&2; return 1; }
+            [[ "$output" != *"WORKSTATION:up"* ]] || { echo "réponse « n » a lancé l'installation" >&2; return 1; } ;;
+      q)    [[ "$output" == *"non comprise"* ]] || { echo "réponse « q » : $output" >&2; return 1; }
+            [[ "$output" != *"WORKSTATION:up"* ]] || { echo "réponse « q » a lancé l'installation" >&2; return 1; } ;;
     esac
   done
   # Ctrl-D : un terminal sans réponse est un abandon, pas une absence de terminal
@@ -488,7 +477,6 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
-# ─── la provenance release : le kit de la version, vérifié ───────────────────────────────────
 
 _dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un kit avec un préflight qui dicte ses faits
   local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
@@ -496,7 +484,7 @@ _dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un ki
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
   _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
   printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$st/lcars_install/deploy/workstation"
-  printf '#!/usr/bin/env bash\necho "CONTAINER:$*"\n' > "$st/lcars_install/deploy/container"
+  printf '#!/usr/bin/env bash\necho "IMAGE:${LCARS_IMAGE:-}"\necho "CONTAINER:$*"\n' > "$st/lcars_install/deploy/container"
   printf '#!/usr/bin/env bash\necho "BENCHUP:$*"\n' > "$st/lcars_install/deploy/docker/bench/bench-up.sh"
   chmod 0755 "$st/lcars_install/deploy/workstation" "$st/lcars_install/deploy/container" "$st/lcars_install/deploy/docker/bench/bench-up.sh"
   tar -czf "$d/lcars-fleet-$TAG-otp27-x86_64.tar.gz" -C "$st" lcars_install
@@ -519,13 +507,66 @@ _serveur() { # sert <dir> en http local ; SERVEUR_URL, SERVEUR_PID, SERVEUR_LOG
   : > "$SERVEUR_LOG"
 }
 teardown() { [[ -z "${SERVEUR_PID:-}" ]] || kill "$SERVEUR_PID" 2>/dev/null || true; }
-_porte() { # la porte de la version $TAG générée depuis le gabarit, base = le serveur
-  LCARS_DOOR_TEMPLATE="$SRC" LCARS_MINISIGN_PUBKEY="${2:-}" \
+_porte() { # la porte de la version $TAG générée depuis le gabarit, base = le serveur ; IMAGE_PORTE : l'image publiée qu'elle nomme
+  LCARS_DOOR_TEMPLATE="$SRC" LCARS_MINISIGN_PUBKEY="${2:-}" LCARS_DOOR_IMAGE="${IMAGE_PORTE:-}" \
     bash "$REPO/deploy/lib/door-gen.sh" "$TAG" "$SERVEUR_URL" "$1" >/dev/null 2>&1 || { echo "door-gen a échoué" >&2; return 1; }
   printf '%s' "$1/install.sh"
 }
 _release() { _machine; DIST="$(_dist "$@")"; _serveur "$DIST"; PORTE="$(_porte "$DIST")"; KITS="$HOME/.lcars/kits/$TAG"; }
 pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
+_daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker dont « image inspect » répond selon l'argument
+  local rc=1; [[ "$1" == oui ]] && rc=0
+  printf '#!/usr/bin/env bash\n[[ "$1 $2" == "image inspect" ]] && exit %s\nexit 0\n' "$rc" > "$BINDIR/docker"
+  chmod 0755 "$BINDIR/docker"
+}
+
+@test "release en conteneur : l'image de la version absente du daemon est tirée avant up, et up la reçoit par LCARS_IMAGE" {
+  _daemon_avec_image non
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
+  pipee --bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n'est pas sur ce daemon : elle sera tirée d'abord (ghcr.io/o/r:$TAG)"* ]]
+  [[ "$output" == *"CONTAINER:pull"*"CONTAINER:--bench up"* ]]
+  [[ "$output" == *"IMAGE:ghcr.io/o/r:$TAG"* ]]
+}
+
+@test "release en conteneur : l'image déjà sur le daemon n'est pas tirée" {
+  _daemon_avec_image oui
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
+  pipee --bench
+  [ "$status" -eq 0 ]
+  refute_out "CONTAINER:pull" <<<"$output"
+  [[ "$output" == *"IMAGE:ghcr.io/o/r:$TAG"*"CONTAINER:--bench up"* ]]
+}
+
+@test "release sans image publiée : rien n'est tiré, LCARS_IMAGE n'est pas posé, up décide" {
+  _daemon_avec_image non
+  IMAGE_PORTE="" _release "docker_bin=$BINDIR/docker"
+  pipee --bench
+  [ "$status" -eq 0 ]
+  refute_out "CONTAINER:pull" <<<"$output"
+  refute_out "^IMAGE:." <<<"$output"
+  [[ "$output" == *"CONTAINER:--bench up"* ]]
+}
+
+@test "release en conteneur, --dry-run sur un kit déjà posé : le pull est dit avant la commande, rien n'est joué" {
+  _daemon_avec_image non
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
+  pipee --bench
+  [ "$status" -eq 0 ]
+  pipee --bench --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--dry-run : d'abord"*"container pull"*"La commande serait"* ]]
+  refute_out "CONTAINER:" <<<"$output"
+}
+
+@test "release en mode poste : l'image publiée ne concerne pas ce mode, rien n'est tiré" {
+  _daemon_avec_image non
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
+  pipee --workstation --bench
+  [ "$status" -eq 0 ]
+  refute_out "pull" <<<"$output"
+}
 
 @test "la porte générée est le gabarit, hors les lignes marquées" {
   _release
@@ -641,8 +682,20 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   [[ "$output" == *"signature de lcars-fleet-$TAG-otp27-x86_64.tar.gz invalide"* ]]
   [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ]
   rm "$BINDIR/minisign"
-  command -v minisign >/dev/null && skip "minisign est réellement installé ici : l'absence ne se joue pas"
-  pipee --workstation --bench
+  # un PATH qui porte tout sauf minisign : l'absence se joue, quel que soit le poste
+  local sans="$BATS_TEST_TMPDIR/sans-minisign" d f n; mkdir -p "$sans"
+  local -a dirs; IFS=: read -ra dirs <<< "$PATH"
+  for d in "${dirs[@]}"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -x "$f" ] || continue
+      n="$(basename "$f")"
+      [ "$n" = minisign ] && continue
+      [ -e "$sans/$n" ] || ln -sf "$f" "$sans/$n"
+    done
+  done
+  [ ! -e "$sans/minisign" ]
+  run env PATH="$sans" bash -c "cat '$PORTE' | bash -s -- --workstation --bench"
   [ "$status" -eq 0 ]
   [[ "$output" == *"minisign absent : provenance non vérifiée"* ]]
 }

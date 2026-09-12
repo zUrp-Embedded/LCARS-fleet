@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de runtime/services/admiral/skills/system-issues/list.sh, la lecture de la boîte de réception d'admiral
-#
-# La cible est hors de deploy/ ; le module 45-seat-skill la pose chez le siège. Le client d'autorité
-# rend le jeton système ; curl est une doublure qui n'accepte que la configuration sur stdin (-K -)
-# portant ce jeton, et note son argv.
 
 load refute
 

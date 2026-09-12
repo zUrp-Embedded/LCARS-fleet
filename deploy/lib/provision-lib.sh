@@ -14,7 +14,7 @@ PROVISION_LIB_LOADED=1
 
 PROV_ROOT_CANON=/opt/lcars
 if [[ -n "${PROV_ROOT:-}" && "${PROV_ROOT}" != "$PROV_ROOT_CANON" && -z "${BATS_TEST_TMPDIR:-}" ]]; then
-  printf 'ECHEC: PROV_ROOT est posé à « %s » dans l'"'"'environnement, et la racine du produit est fixe (%s).\n' \
+  printf 'ÉCHEC : PROV_ROOT est posé à « %s » dans l'"'"'environnement, et la racine du produit est fixe (%s).\n' \
     "$PROV_ROOT" "$PROV_ROOT_CANON" >&2
   printf '       LCARS ne s'"'"'installe que sur un terrain contrôlé — docker, WSL — où il impose son\n' >&2
   printf '       arborescence. Le manifeste déclare mode et propriétaire sous cette racine ; la déplacer\n' >&2
@@ -100,7 +100,7 @@ PROV_VERDICT_RENDERED=0
 _prov_exit_guard() {
   local rc=$?
   [[ "$PROV_VERDICT_RENDERED" -eq 1 ]] && return 0
-  printf '%sERREUR %s:%s MORT avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
+  printf '%sERREUR %s:%s mort avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
     "$_PR" "$PROV_MODULE_TAG" "$_PN" "$rc" >&2
   exit 3
 }
@@ -127,7 +127,7 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
   m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
   case "$m" in
     "Compiling"*)        echo "compilation" ;;
-    "Running ExUnit")    echo "suite ExUnit (3000+ témoins)" ;;
+    "Running ExUnit")    echo "suite ExUnit (3000+ cas)" ;;
     "Finished in "*)     echo "suite ExUnit terminée" ;;
     "=== shell_gate"*)   echo "gate shell (python + bats)" ;;
     "--- bats"*)         echo "gate shell (bats)" ;;
@@ -288,7 +288,7 @@ prov_lock_path() {
   [[ "$mode" == "700" ]] || { p_fail "verrou : $dir est en $mode, attendu 700"; return 1; }
 
   local lock="$dir/provision${scope:+.$scope}.lock"
-  [[ -L "$lock" ]] && { p_fail "verrou: $lock est un symlink — REFUSE"; return 1; }
+  [[ -L "$lock" ]] && { p_fail "verrou : $lock est un symlink — refusé"; return 1; }
 
   printf '%s\n' "$lock"
 }
@@ -298,7 +298,7 @@ prov_refuse_symlink_path() {
   local -a parts
 
   [[ "$path" == /* ]] || {
-    p_fail "mutation privilegiee REFUSEE — chemin relatif: $path"
+    p_fail "mutation privilégiée refusée — chemin relatif : $path"
     return 1
   }
 
@@ -308,7 +308,7 @@ prov_refuse_symlink_path() {
     [[ -z "$part" ]] && continue
     cur="$cur/$part"
     if [[ -L "$cur" ]]; then
-      p_fail "mutation privilegiee REFUSEE — composant symlink: $cur -> $(readlink "$cur")"
+      p_fail "mutation privilégiée refusée — composant symlink : $cur -> $(readlink "$cur")"
       return 1
     fi
   done
@@ -582,7 +582,7 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
     if [[ "$n" -eq 0 ]]; then
       printf '\n'
       printf '    ┌──────────────────────────────────────────────────────────────┐\n'
-      printf '    │  IDENTIFIANTS — note-les maintenant, ils ne seront PAS redits │\n'
+      printf '    │  IDENTIFIANTS — à noter maintenant, ils ne seront pas redits  │\n'
       printf '    ├──────────────────────────────────────────────────────────────┤\n'
     else
       printf '    │%s│\n' "$(_prov_pad '' 62)"
@@ -746,6 +746,7 @@ prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 
   [[ -n "$manque" || "$PROV_UID_MAX" =~ ^[0-9]+$ ]] || manque=UID_MAX
   if [[ -z "$manque" ]]; then PROV_UID_BOUNDS_WHY=""; return 0; fi
   PROV_UID_MIN="" PROV_UID_MAX=""
+  # phrase identique à celle du protocole du produit (module-protocol.sh), que ses témoins épinglent sans accents
   PROV_UID_BOUNDS_WHY="la frontiere systeme/humain n'est pas etablie ($manque illisible dans $defs) — la borne est declaree par le systeme, pas par ce processus : repare $defs"
   if [[ -z "$_PROV_UID_BOUNDS_SAID" ]]; then
     _PROV_UID_BOUNDS_SAID=1

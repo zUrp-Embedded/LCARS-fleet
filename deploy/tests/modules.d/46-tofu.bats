@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de 46-tofu — le binaire épinglé, le miroir hors-ligne refait sur le verdict d'un init, la copie jetable
-#
-# tofu est une doublure : `version` répond la version demandée, `init` réussit dès qu'un miroir a été
-# posé, `providers mirror` pose le miroir. Rien ne part sur le réseau ; curl et dpkg sont doublés.
 
 load ../refute
 

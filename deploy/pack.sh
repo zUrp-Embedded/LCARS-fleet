@@ -122,8 +122,19 @@ _FORGE="${LCARS_PACK_FORGE:-$(sed -n 's|^\(https\?://[^/]*\)/.*|\1|p' <<<"$_ORIG
 _OWNER="${LCARS_PACK_OWNER:-$(sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p' <<<"$_ORIGIN")}"
 _REPO="${LCARS_PACK_REPO:-$(sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p' <<<"$_ORIGIN")}"
 DOOR_BASE="${LCARS_DOOR_BASE:-${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/${_REPO:-lcars-fleet}/releases/download/$TAG}"
-say "installeur de la version → $DIST/install.sh (base $DOOR_BASE)…"
-bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "installeur de la version non généré"
+# shellcheck source=lib/forge-publish.sh
+. deploy/lib/forge-publish.sh
+# l'image de la version, telle que --publish la pousse : l'installeur la nomme pour la tirer ; sans image ni forge, il ne nomme rien
+IMAGE_REMOTE=""
+if [[ "$IMAGE" -eq 1 && -n "$_FORGE" && -n "$_OWNER" ]]; then
+  _registry="${LCARS_PACK_REGISTRY:-}"
+  if [[ -z "$_registry" ]]; then
+    if [[ "$(fp_dialect "$_FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${_FORGE#*://}"; _registry="${_registry%%/*}"; fi
+  fi
+  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$_OWNER/${_REPO:-lcars-fleet}"):$TAG"
+fi
+say "installeur de la version → $DIST/install.sh (base $DOOR_BASE${IMAGE_REMOTE:+, image $IMAGE_REMOTE})…"
+LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "installeur de la version non généré"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, installeur compris)"
 
 # l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
@@ -157,14 +168,9 @@ _tok_state="absent"
 [[ -n "$TOKEN" ]] && _tok_state="trouvé"
 say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 [[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:repository + write:package)"
-# shellcheck source=lib/forge-publish.sh
-. deploy/lib/forge-publish.sh
 if [[ "$IMAGE" -eq 1 ]]; then
-  _registry="${LCARS_PACK_REGISTRY:-}"
-  if [[ -z "$_registry" ]]; then
-    if [[ "$(fp_dialect "$FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${FORGE#*://}"; _registry="${_registry%%/*}"; fi
-  fi
-  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
+  [[ -n "$IMAGE_REMOTE" ]] || die "--publish : l'image n'a pas de nom de registre (forge ou owner indéterminés à la génération de l'installeur)"
+  _registry="${IMAGE_REMOTE%%/*}"
   printf '%s' "$TOKEN" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
   if "$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" >/dev/null 2>&1; then

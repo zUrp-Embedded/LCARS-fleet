@@ -71,24 +71,30 @@ listen_on() { # listen_on <port> — un processus python qui écoute quelques se
   return 0
 }
 
-# ─── le contrat ─────────────────────────────────────────────────────────────────────────────────
 
 CONTRAT="os distro distro_version noyau cpu systemd bash arch ram_mb disque_mb utilisateur groupes
 substrat consent wsl2 userns_knob docker docker_bin docker_host docker_server docker_flavor docker_why
 compose compose_why forge_fournie forge_joignable port_forge port_deck port_ssh projet projet_pris
 apt_installs comptes_humains sudo curl git channel channel_tree"
 
-@test "les faits que l'installeur lit sont tous posés, docker absent" {
-  preflight docker
+faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est posé ; vide seulement s'il est admis vide
   local f
-  for f in $CONTRAT; do grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }; done
+  for f in $CONTRAT; do
+    if [[ " $1 " == *" $f "* ]]; then grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }
+    else grep -qE "^$f=.+" "$FACTS" || { echo "fait absent ou vide : $f" >&2; return 1; }
+    fi
+  done
 }
 
-@test "les faits que l'installeur lit sont tous posés, docker présent" {
+@test "les faits que l'installeur lit sont tous posés, avec une valeur, docker absent" {
+  preflight docker
+  faits_poses "docker_bin docker_host docker_server docker_flavor compose_why forge_fournie projet_pris apt_installs"
+}
+
+@test "les faits que l'installeur lit sont tous posés, avec une valeur, docker présent" {
   docker_qui_repond
   preflight docker DOCKER_HOST=unix:///dev/null
-  local f
-  for f in $CONTRAT; do grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }; done
+  faits_poses "docker_why compose_why forge_fournie projet_pris apt_installs"
 }
 
 @test "un fait par nom, jamais deux valeurs" {
@@ -111,16 +117,20 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$dernier_fait" -lt "$dernier_rapport" ]
 }
 
-# ─── le système ─────────────────────────────────────────────────────────────────────────────────
 
 @test "le système est décrit : distribution, noyau, cœurs, systemd, utilisateur et groupes" {
-  preflight docker
+  preflight docker LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR"
   [ -n "$(fact distro)" ]
   [ -n "$(fact noyau)" ]
   [ "$(fact cpu)" -ge 1 ]
-  case "$(fact systemd)" in oui|non) ;; *) return 1 ;; esac
+  [ "$(fact systemd)" = oui ]
   [ "$(fact utilisateur)" = "$(id -un)" ]
   [[ "$(fact groupes)" == *"$(id -gn)"* ]]
+}
+
+@test "systemd : le fait suit le répertoire de systemd — absent, « non »" {
+  preflight docker LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR/pas-de-systemd"
+  [ "$(fact systemd)" = non ]
 }
 
 @test "l'utilisateur est celui qui a lancé sudo, pas root" {
@@ -128,7 +138,6 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$(fact utilisateur)" = "alice" ]
 }
 
-# ─── le substrat et la garde ────────────────────────────────────────────────────────────────────
 
 @test "linux sans LCARS_ALLOW_ANY_HOST : le fait dit none et le verdict est un échec" {
   preflight linux
@@ -158,7 +167,6 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$(fact consent)" = "sans-objet" ]
 }
 
-# ─── docker ─────────────────────────────────────────────────────────────────────────────────────
 
 @test "docker est mesuré sur tout substrat, avec sa raison quand il manque" {
   local s
@@ -188,7 +196,6 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$(fact compose)" = "oui" ]
 }
 
-# ─── la forge ───────────────────────────────────────────────────────────────────────────────────
 
 @test "forge fournie : l'URL est un fait, sa joignabilité un autre" {
   preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-absente"
@@ -202,7 +209,6 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$(fact forge_joignable)" = "sans-objet" ]
 }
 
-# ─── les ports et le projet ─────────────────────────────────────────────────────────────────────
 
 @test "un port libre est dit libre, avec son numéro" {
   local p; p="$(free_port)"
@@ -270,7 +276,6 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ -z "$(fact projet_pris)" ]
 }
 
-# ─── l'instance ─────────────────────────────────────────────────────────────────────────────────
 
 @test "les paquets installés après la naissance de l'instance sont listés, sans les mises à jour ni les dépendances" {
   cat > "$LCARS_APT_HISTORY" <<'EOF'
@@ -331,11 +336,30 @@ EOF
   [ "$(fact comptes_humains)" = "bob,alice" ]
 }
 
-# ─── sudo et le canal ───────────────────────────────────────────────────────────────────────────
 
-@test "sudo : root, présent ou absent" {
+@test "sudo : présent sur le PATH, le fait dit « oui » (« root » sous root)" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/sudo"; chmod 0755 "$BIN/sudo"
+  local attendu=oui; [[ "$EUID" -ne 0 ]] || attendu=root
   preflight docker
-  case "$(fact sudo)" in root|oui|absent) ;; *) return 1 ;; esac
+  [ "$(fact sudo)" = "$attendu" ]
+}
+
+@test "sudo : absent du PATH, le fait dit « absent » (« root » sous root)" {
+  # un PATH qui porte tout sauf sudo, et la doublure docker devant
+  local sans="$BATS_TEST_TMPDIR/sans-sudo" d f n; mkdir -p "$sans"
+  for d in /usr/sbin /usr/bin /sbin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -x "$f" ] || continue
+      n="$(basename "$f")"
+      [ "$n" = sudo ] && continue
+      [ -e "$sans/$n" ] || ln -sf "$f" "$sans/$n"
+    done
+  done
+  [ ! -e "$sans/sudo" ]
+  local attendu=absent; [[ "$EUID" -ne 0 ]] || attendu=root
+  preflight docker PATH="$BIN:$sans"
+  [ "$(fact sudo)" = "$attendu" ]
 }
 
 @test "le canal dit qui a posé, ou aucun ; l'arbre dit ce qu'il poserait" {

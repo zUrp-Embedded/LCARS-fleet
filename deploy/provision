@@ -219,7 +219,7 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   after="$(module_field "$mod" AFTER)"
   for dep in $after; do
     [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"
-    [[ "$dep" < "$name" ]] || die "$name: AFTER « $dep », mais $dep ne le precede pas — le rang est l'ordre, renomme l'un des deux"
+    [[ "$dep" < "$name" ]] || die "$name : AFTER « $dep », mais $dep ne le précède pas — le rang est l'ordre, l'un des deux est à renommer"
   done
   if [[ "$check_on" != "any" ]]; then
     for s in $apply_on; do
@@ -330,16 +330,16 @@ for i in "${!SELECTED[@]}"; do
     doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     doctor:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
-      echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
+      echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:apply:2)  drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     apply:apply:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
-      echo "${_PR}ERREUR $name:${_PN} apply en echec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
+      echo "${_PR}ERREUR $name:${_PN} apply en échec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
-      echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebâtir l'image qui le fournit" >&2 ;;
+      echo "FAIL  $name: état-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebâtir l'image qui le fournit" >&2 ;;
   esac
   # le préflight est une barrière : un terrain refusé ne reçoit aucune mutation
   if [[ "$CMD" == apply && "$name" == 00-* && "$failed" -gt 0 ]]; then

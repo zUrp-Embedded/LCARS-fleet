@@ -2,8 +2,8 @@
 # SOURCE: deploy/lib/kit-verify.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-08
-# STATUS: PROTO — le kit porte-t-il ce que les LISTES déclarent ? Le mur, avant que le tar ne ferme
-# USAGE : . kit-verify.sh ; kit_verifie <stage>   → 0 si le kit est complet, 1 sinon (manques NOMMÉS)
+# STATUS: ce qu'un kit doit porter, contre les listes (system.manifest, release.manifest, 62), vérifié avant que le tar ne ferme
+# USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
 
 [[ -n "${LCARS_KIT_VERIFY_LOADED:-}" ]] && return 0
 LCARS_KIT_VERIFY_LOADED=1
@@ -79,8 +79,8 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
 }
 
 kv_dire() {
-  printf 'ECHEC: le kit ne porte pas ce que les listes declarent — %d manque(s) :\n' "$#" >&2
+  printf 'ÉCHEC : le kit ne porte pas ce que les listes déclarent — %d manque(s) :\n' "$#" >&2
   printf '  · %s\n' "$@" >&2
-  printf '       Le tar n a PAS ete scelle. Les listes sont la source : soit le fichier manque a\n' >&2
-  printf '       l arbre, soit la liste nomme quelque chose qui n existe plus.\n' >&2
+  printf '       Le tar n'"'"'a pas été scellé. Les listes sont la source : soit le fichier manque à\n' >&2
+  printf '       l'"'"'arbre, soit la liste nomme quelque chose qui n'"'"'existe plus.\n' >&2
 }

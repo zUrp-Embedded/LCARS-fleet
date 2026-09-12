@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins du substrat WSL — wsl.conf clé par clé, C: sondé, hostname, snapd, gpg-agent, credsStore, docker.io
-#
-# Le module est joué entier sous unshare -Ur (wsl.conf est root:root) avec dpkg-query, apt-get,
-# getent et hostname doublés ; le lecteur C: et la CLI de Docker Desktop sont des chemins du décor.
 
 load ../refute
 

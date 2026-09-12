@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de 62-runtime-helpers — les auxiliaires, les binaires du PATH, les arbres embarqués et leurs exclusions, le tampon de révision, les réglages de shell, les modes relus
-#
-# Le module se joue entier ; tout ce qu'il pose va sous des chemins de décor (LCARS_*), curl et ttyd
-# sont des doublures. Les cas qui lisent la révision du dépôt sautent sur un arbre sans git.
 
 load ../refute
 

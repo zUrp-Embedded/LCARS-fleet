@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de 60-deploy — le raccourci « rien à bâtir », la pose par deploy-release.sh, le verrou, les intrus, le canal
-#
-# Le module se joue entier sous unshare -Ur (le prefix est root:fleet) dans un dépôt de décor : la
-# lib y est copiée, le runtime y est un mix.exs et le vrai release.manifest, deploy-release.sh est
-# une doublure qui note son appel, mix aussi. Les sondes d'intrus et de release se jouent en fonctions.
 
 load ../refute
 

@@ -4,9 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de lib/docker-endpoint.sh — le substrat, le choix de la CLI, le verdict sur la socket, le geste du refus, compose
-#
-# Les sockets sont posées par python3 dans le décor, avec ou sans processus derrière ; la CLI est
-# une doublure. Sous root, « refusé » n'existe pas : ces cas sautent.
 
 load ../refute
 
@@ -131,7 +128,11 @@ s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); os.chmod(sy
 PY
   [[ -S "$1" ]]
 }
-teardown() { [[ -n "${ECOUTEUR_PID:-}" ]] && kill "$ECOUTEUR_PID" 2>/dev/null; return 0; }
+teardown() {
+  [[ -n "${ECOUTEUR_PID:-}" ]] && kill "$ECOUTEUR_PID" 2>/dev/null
+  [[ -n "${ECOUTEUR_PID2:-}" ]] && kill "$ECOUTEUR_PID2" 2>/dev/null
+  return 0
+}
 sonde() { # sonde <socket> — docker_endpoint avec une CLI muette
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/cli-muette"; chmod +x "$BIN/cli-muette"
   run env -u DOCKER_HOST LCARS_DOCKER_SOCKETS="$1" PROV_DOCKER_BIN="$BIN/cli-muette" \
@@ -146,6 +147,17 @@ sonde() { # sonde <socket> — docker_endpoint avec une CLI muette
   sonde "$sock"
   [[ "$output" == *"rc=1 denied=1"*"le daemon docker répond, mais pas à « $(id -un) » : la socket $sock est"*"bit d'écriture"* ]]
   [[ "$output" != *"non établi"* ]]
+}
+
+@test "deux sockets refusées : le verdict nomme la première essayée, jamais la dernière" {
+  [ "$EUID" -ne 0 ] || skip "root écrit sur toute socket : le cas « refusé » n'existe pas ici"
+  [ -r /proc/net/unix ] || skip "pas de /proc/net/unix : l'écoute n'est pas mesurable ici"
+  local a="$BATS_TEST_TMPDIR/a.sock" b="$BATS_TEST_TMPDIR/b.sock"
+  ecouteur "$a"; ECOUTEUR_PID2="$ECOUTEUR_PID"
+  ecouteur "$b"
+  sonde "$a"$'\n'"$b"
+  [[ "$output" == *"rc=1 denied=1"*"la socket $a est"* ]]
+  [[ "$output" != *"la socket $b est"* ]]
 }
 
 @test "socket orpheline (personne n'écoute) : daemon vivant non établi, le groupe n'est pas accusé" {

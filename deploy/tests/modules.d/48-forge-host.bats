@@ -4,10 +4,6 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de la forge du poste — montée ou fournie, adresses, refus, admin, jeton, seed, siège
-#
-# Le module est joué entier (check ou apply) sous des doublures docker et curl qui notent leurs
-# appels dans CALLS ; la forge « répond » ou non selon STUB_FORGE_UP, docker publie ou non le
-# port du projet selon STUB_PORTS.
 
 load ../refute
 
@@ -73,17 +69,16 @@ mod() {
   run unshare -Ur bash "$SRC" "$@"
 }
 
-# ─── les adresses ───────────────────────────────────────────────────────────────────────────────
 
 @test "publiée sur toutes les adresses par défaut, l'adresse annoncée compose l'URL publique" {
   mod check
-  [ "$status" -ne 2 ] || { echo "$output"; return 1; }
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
   [[ "$output" == *"forge du poste vivante (http://127.0.0.1:21000) — ouverte sur 0.0.0.0, composable en http://10.9.9.9:21000"* ]]
 }
 
 @test "un bind sur la loopback ferme la forge à cette machine, et le verdict le dit" {
   PROV_FORGE_BIND=127.0.0.1 mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"cette machine seule"* ]]
   [[ "$output" != *"ouverte sur"* ]]
 }
@@ -91,10 +86,10 @@ mod() {
 @test "sous WSL en NAT sans adresse donnée, l'annonce est localhost et le motif remonte ; hors WSL non" {
   unset PROV_FORGE_ADVERTISE
   PROV_SUBSTRATE=wsl LCARS_WSL_NETWORKING_MODE=nat mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"composable en http://localhost:21000 (WSL2 en mode NAT"* ]]
   PROV_SUBSTRATE=linux LCARS_WSL_NETWORKING_MODE=nat mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 1 ]
   [[ "$output" != *"http://localhost:21000"* ]]
 }
 
@@ -120,7 +115,6 @@ mod() {
   [[ "$output" == *"FAIL"*"forge fournie muette"* ]]
 }
 
-# ─── les refus ──────────────────────────────────────────────────────────────────────────────────
 
 @test "sans daemon docker, le check refuse : la forge du poste est un conteneur, aucune autre forme" {
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/docker"
@@ -152,7 +146,6 @@ mod() {
   refute grep -q 'compose .* up' "$CALLS"
 }
 
-# ─── le montage et les adresses posées ──────────────────────────────────────────────────────────
 
 forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis répond
   cat > "$BIN/curl.state" <<<"0"
@@ -181,7 +174,6 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   [[ "$output" == *"forge du poste vivante et convergée"* ]]
 }
 
-# ─── le compte d'administration, le jeton, le seed ──────────────────────────────────────────────
 
 @test "l'administrateur est l'humain de la passe, sauf si la table des uid nomme déjà le siège" {
   STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
@@ -278,7 +270,6 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   grep -q "$ME	" "$PROV_ANNOUNCE_FILE"
 }
 
-# ─── l'adminité et le siège ─────────────────────────────────────────────────────────────────────
 
 @test "l'adminité se lit avec le jeton : admin OK, simple compte promu par l'API sans secret en argv, absent averti" {
   STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
@@ -289,7 +280,7 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
   grep -q 'CURL:-K - .*admin/users/'"$ME"' | header = "Authorization: token tok-master".*request = "PATCH"' "$CALLS"
   refute grep -qE 'CURL:[^|]*tok-master' "$CALLS"
   STUB_USER_CODE=404 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"« $ME » n'a pas de compte sur cette forge"* ]]
   STUB_IS_ADMIN=false STUB_PATCH_RC=22 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$status" -eq 1 ]
@@ -306,13 +297,13 @@ forge_absente_puis_vivante() { # la forge ne répond pas au premier appel, puis 
 @test "le siège s'enregistre à l'apply dans la table des uid, le check le voit ensuite et n'écrit rien" {
   rm -f "$PROV_UID_MAP_FILE"
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 1 ]
   [ ! -e "$PROV_UID_MAP_FILE" ]
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod apply
   [ "$(awk -F'\t' '$1 == 1 { print $3 }' "$PROV_UID_MAP_FILE")" = "$(id -un)" ]
   [[ "$output" == *"siège : « $(id -un) » enregistré"* ]]
   PROV_HUMAN="$(id -un)" STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
-  [ "$status" -ne 2 ]
+  [ "$status" -eq 0 ]
   [[ "$output" == *"siège : « $(id -un) » enregistré"* ]]
 }
 

@@ -47,7 +47,7 @@ mod() {
 @test "check : un daemon qui répond est conforme" {
   mod repond check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"OK"* ]]
+  [[ "$output" == *"OK    12-docker-engine: un daemon docker répond ("* ]]
 }
 
 @test "check : aucun daemon est une dérive qui annonce la pose" {

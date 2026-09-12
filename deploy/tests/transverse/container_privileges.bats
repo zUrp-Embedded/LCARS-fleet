@@ -4,25 +4,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for 6-071 — the container's privileges are the narrowest that let bwrap run
-#
-# WHY THIS EXISTS. The service ran `seccomp=unconfined`, `apparmor=unconfined` and `SYS_ADMIN`, and
-# the header called the fine-grained hardening "un chantier de ship, pas un defaut silencieux" —
-# a promise nothing held. Measured on the bench image, `bwrap --unshare-all --ro-bind / / --proc
-# /proc --dev /dev true`:
-#
-#   1. seccomp=unconfined      + SYS_ADMIN ...... OK   (the previous state)
-#   2. seccomp=lcars-hardened  + SYS_ADMIN ...... OK   ← what the composes now declare
-#   3. seccomp=lcars-hardened  WITHOUT SYS_ADMIN . KO  "No permissions to create new namespace"
-#   4. seccomp DEFAULT docker  + SYS_ADMIN ...... KO   "pivot_root: Operation not permitted"
-#
-# WHAT THIS FILE CAN AND CANNOT DO. It does NOT re-run those four — they need a docker daemon, which
-# a unit gate has no business requiring. It holds the DECLARATION: the composes must keep pointing at
-# a profile that exists and that carries the syscalls bwrap needs. A silent slide back to
-# `unconfined` (the easy fix when something breaks) goes red here, and so does a profile that loses
-# `pivot_root`.
-#
-# The gap is named on purpose: only the bench proves the profile WORKS. This proves nobody quietly
-# undid it.
 
 load ../refute
 
@@ -69,9 +50,6 @@ for b in d['syscalls']:
 need = ['unshare', 'mount', 'umount2', 'setns', 'pivot_root', 'clone']
 missing = [n for n in need if n not in allowed]
 assert not missing, 'syscalls manquants: %r' % missing
-# TEMOIN — le profil n'autorise pas TOUT : sinon la liste ci-dessus serait vraie par construction
-# et ne mesurerait rien. \`keyctl\` est refuse par le defaut docker (evasion de conteneur) et bwrap
-# n'en a pas besoin.
 assert 'keyctl' not in allowed, 'le profil autorise keyctl — ce n est plus un durcissement'
 "
 }
