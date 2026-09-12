@@ -19,19 +19,30 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, args, _} = OptionParser.parse(argv, aliases: [q: :quiet], switches: [quiet: :boolean])
+    {opts, args, invalid} =
+      OptionParser.parse(argv, aliases: [q: :quiet], strict: [quiet: :boolean])
+
     quiet? = Keyword.get(opts, :quiet, false)
 
-    case args do
-      [root] ->
+    # `strict:` et non `switches:` : une option inconnue (`--quite`) n'est pas un mot de plus, c'est
+    # un appel que l'operateur n'a pas voulu. Refusee avec l'usage, jamais jetee en silence.
+    case {args, invalid} do
+      {[root], []} ->
         # Avoid runtime deployment configuration while loading compiled modules and priv paths.
         _ = Mix.Task.run("loadpaths")
         report(Fleet.Application.CatalogueVerify.verify(root), quiet?)
 
-      _ ->
-        Mix.raise("usage: mix lcars.catalogue.verify <catalogue-root> [-q]")
+      {_, invalid} ->
+        Mix.raise(
+          "usage: mix lcars.catalogue.verify <catalogue-root> [-q]" <> unknown_options(invalid)
+        )
     end
   end
+
+  defp unknown_options([]), do: ""
+
+  defp unknown_options(invalid),
+    do: " — option(s) inconnue(s) : #{Enum.map_join(invalid, " ", &elem(&1, 0))}"
 
   defp report({:ok, %{assumptions: assumptions}}, quiet?) do
     unless quiet? do

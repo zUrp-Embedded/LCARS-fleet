@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
   Deterministic manual/CI face of `Fleet.Workflow.Provenance.Verifier`.
 
       mix lcars.provenance.verify <project-name>
-      mix lcars.provenance.verify <project-name> --work-root /path --projects-root /path
+      mix lcars.provenance.verify <project-name> --ops-root /path --code-root /path
 
   It checks every ops provenance statement against code commits and exits
   nonzero on incoherence. No statement is reported but remains valid.
@@ -15,11 +15,15 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
 
   @impl Mix.Task
   def run(argv) do
-    {opts, args, _} =
+    {opts, args, invalid} =
       OptionParser.parse(argv, strict: [ops_root: :string, code_root: :string])
 
-    case args do
-      [name] ->
+    # ⚠ UNE OPTION INCONNUE EST REFUSEE, PAS IGNOREE. Mesure du 2026-09-12 : l'usage disait
+    # `--work-root` et `--projects-root` pendant que le parseur n'acceptait que `--ops-root` et
+    # `--code-root` — un operateur qui tapait ce que la doc lui disait voyait son option JETEE en
+    # silence, et la tache verifiait les racines PAR DEFAUT en pretendant avoir lu les siennes.
+    case {args, invalid} do
+      {[name], []} ->
         work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
 
         project_dir =
@@ -27,9 +31,10 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
 
         verify_all(name, work_dir, project_dir)
 
-      _ ->
+      {_, invalid} ->
         Mix.raise(
-          "usage: mix lcars.provenance.verify <project-name> [--work-root …] [--projects-root …]"
+          "usage: mix lcars.provenance.verify <project-name> [--ops-root …] [--code-root …]" <>
+            unknown_options(invalid)
         )
     end
   end
@@ -65,6 +70,11 @@ defmodule Mix.Tasks.Lcars.Provenance.Verify do
       if fails > 0, do: Mix.raise("provenance verification FAILED (#{fails} statement(s))")
     end
   end
+
+  defp unknown_options([]), do: ""
+
+  defp unknown_options(invalid),
+    do: " — option(s) inconnue(s) : #{Enum.map_join(invalid, " ", &elem(&1, 0))}"
 
   defp format(:ok), do: "ok  "
   defp format({:error, reason}), do: "FAIL #{inspect(reason)}"

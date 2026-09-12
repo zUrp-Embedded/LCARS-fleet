@@ -32,7 +32,18 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   @impl Mix.Task
   def run(argv) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
-    {opts, _rest, _bad} = OptionParser.parse(argv, strict: [catalogue: :string])
+    {opts, _rest, invalid} = OptionParser.parse(argv, strict: [catalogue: :string])
+
+    # ⚠ UNE OPTION INCONNUE EST REFUSEE, PAS IGNOREE — et ici l'oubli COUTAIT. `--catalog x` (une
+    # lettre de moins) tombait dans `invalid`, `invalid` etait jete, et la tache composait la
+    # reference EMBARQUEE, `confined?: false`, en ecrivant dans le catalogue systeme : la faute de
+    # frappe changeait l'ENDROIT ou la tache ecrit. Mesure du 2026-09-12.
+    if invalid != [] do
+      Mix.raise(
+        "usage: mix lcars.sp.gen [--catalogue <root>] — option(s) inconnue(s) : " <>
+          Enum.map_join(invalid, " ", &elem(&1, 0))
+      )
+    end
 
     case opts[:catalogue] do
       nil -> compose(false)
