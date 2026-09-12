@@ -395,11 +395,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
 
   defp corpus_entry(path, _nom, acc) do
     cond do
-      File.dir?(path) -> corpus_walk(path, acc)
+      File.dir?(path) -> if nested_repo?(path), do: acc, else: corpus_walk(path, acc)
       File.regular?(path) -> [path | acc]
       true -> acc
     end
   end
+
+  # ⚠ UN DEPOT IMBRIQUE N'EST PAS LE CORPUS DE CELUI-CI. Un worktree parque sous la racine (mesure
+  # du 2026-09-12 : dix `git worktree add .claude/mut/wN`) porte un `.git` FICHIER — l'entree `.git`
+  # est bien sautee par nom, mais ses freres `runtime/`, `deploy/`, `.claude/` sont parcourus comme
+  # s'ils etaient le depot : `tests.corpora_on_record` accusait 190 repertoires « sur aucun registre »
+  # et la suite rendait 3 rouges sur un arbre dont pas un fichier suivi n'avait change. Meme regle
+  # que `.terraform` ci-dessus : ce qu'un operateur a parque dans l'arbre est la machine, pas le
+  # depot. Un `.git` — fichier ou dossier — sous un enfant de la racine ferme cet enfant entier.
+  # La racine elle-meme n'est jamais testee : son `.git` est saute par nom, jamais par ce garde.
+  defp nested_repo?(dir), do: File.exists?(Path.join(dir, ".git"))
 
   # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
   @doc false

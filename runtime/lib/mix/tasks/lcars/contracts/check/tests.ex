@@ -597,12 +597,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   #
   # `-type f` est porteur : un REPERTOIRE peut s'appeler `*.bats` (un framework de test sorti
   # dans l'arbre en serait un), et sans lui le scan rapporte un corpus qui est un dossier.
-  @corpus_find_prune ~w[( -name .git -o -name _build -o -name .venv -o -name site-packages -o
-                        -path */runtime/tmp ) -prune -o -type f
-                        ( -name *.bats -o -name test_*.py -o -name *_test.py ) -print]
+  @corpus_find_skip ~w[-name .git -o -name _build -o -name .venv -o -name site-packages -o
+                       -path */runtime/tmp]
+  @corpus_find_select ~w[-prune -o -type f
+                         ( -name *.bats -o -name test_*.py -o -name *_test.py ) -print]
 
   defp corpus_files_on_disk(repo) do
-    case System.cmd("find", [repo | @corpus_find_prune], stderr_to_stdout: true) do
+    nested = Enum.flat_map(nested_repos(repo), &["-o", "-path", &1])
+    args = [repo, "("] ++ @corpus_find_skip ++ nested ++ [")"] ++ @corpus_find_select
+
+    case System.cmd("find", args, stderr_to_stdout: true) do
       {out, 0} ->
         out
         |> String.split("\n", trim: true)
@@ -611,6 +615,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
       _ ->
         []
+    end
+  end
+
+  # ⚠ UN DEPOT IMBRIQUE N'EST PAS LE CORPUS DE CELUI-CI. Un worktree parque sous la racine (mesure
+  # du 2026-09-12 : dix `git worktree add .claude/mut/wN`) porte un `.git` FICHIER : `-name .git`
+  # saute l'entree, pas ses freres, et ce mur accusait 190 repertoires « sur aucun registre » sur un
+  # arbre dont pas un fichier suivi n'avait change. Les racines imbriquees sont trouvees par un
+  # PREMIER `find` — un `.git`, fichier ou dossier, a une profondeur >= 2 (celui de la racine est a
+  # 1) — puis elaguees PAR CHEMIN dans le second. Deux passes a ~20 ms chacune ; la forme en une
+  # passe (`-type d -exec test -e {}/.git`) coute 2,5 s sur ce depot, un facteur 150, le meme que
+  # `Support.corpus_files/1` documente pour `tmp/`. Meme regle que `.terraform` la-bas : ce qu'un
+  # operateur a parque dans l'arbre est la machine, pas le depot.
+  #
+  # ⚠ LA PASSE DES RACINES SAUTE CE QUE LA PASSE PRINCIPALE SAUTE, `runtime/tmp` compris : mesure du
+  # 2026-09-12, 517 depots-residus de `@tmp_dir` y dorment (un par temoin qui clone), et les elaguer
+  # par chemin dans le second `find` aurait fait 1 500 arguments pour rien.
+  @nested_find ~w[-mindepth 2 ( -name _build -o -name deps -o -name node_modules -o -name .venv -o
+                  -name site-packages -o -path */runtime/tmp ) -prune -o -name .git -prune -print]
+
+  defp nested_repos(repo) do
+    case System.cmd("find", [repo | @nested_find], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split("\n", trim: true) |> Enum.map(&Path.dirname/1)
+      _ -> []
     end
   end
 

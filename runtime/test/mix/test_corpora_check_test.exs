@@ -102,6 +102,29 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       assert hd(result.evidence) =~ "runtime/ailleurs"
     end
 
+    test "un worktree IMBRIQUE (un `.git` fichier sous un enfant) n'est pas le corpus de ce depot" do
+      # Mesure du 2026-09-12 : dix worktrees du banc de mutation parques sous `.claude/mut/`, et ce
+      # mur accusait leurs 190 repertoires de tests « sur aucun registre » — la suite rouge sur un
+      # arbre dont pas un fichier suivi n'avait change. Le `.git` d'un worktree est un FICHIER ;
+      # le sauter par nom ne ferme pas ses freres.
+      runtime =
+        tree([
+          "runtime/test/x/a.bats",
+          "parked/wt/.git",
+          "parked/wt/deploy/tests/b.bats",
+          "parked/wt/runtime/test/c.bats"
+        ])
+
+      assert Tests.check_test_corpora_on_record(runtime).status == :pass
+    end
+
+    test "⚠ sans le marqueur `.git`, le meme arbre EST un corpus non declare — le garde ne ferme que des depots" do
+      runtime = tree(["runtime/test/x/a.bats", "parked/wt/deploy/tests/b.bats"])
+
+      assert %{status: :fail, evidence: [ev]} = Tests.check_test_corpora_on_record(runtime)
+      assert ev =~ "parked/wt/deploy/tests"
+    end
+
     test "a vendored virtualenv is NOT a corpus to declare" do
       # site-packages carries hundreds of upstream suites. Excluding them IS the declaration; making
       # someone list them would be an inventory that grows with every dependency.
