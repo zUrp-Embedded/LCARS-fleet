@@ -7,6 +7,11 @@ defmodule LotCheck do
       when kind in [:doc, :moduledoc, :typedoc] and is_binary(value) ->
         {:documentation, [], [kind]}
 
+      # Ignore prose fragments in interpolated docs, but compare every interpolation expression.
+      {:@, _, [{kind, _, [{:<<>>, _, parts}]}]}
+      when kind in [:doc, :moduledoc, :typedoc] ->
+        {:documentation, [], [kind, Enum.reject(parts, &is_binary/1)]}
+
       {name, meta, args} when is_list(meta) ->
         {name, [], args}
 
