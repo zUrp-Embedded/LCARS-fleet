@@ -1,7 +1,8 @@
 defmodule Fleet.SPBuilderImageTest do
   @moduledoc """
-  The SP half of the proven-good image: fragments/templates/drafts frozen at boot — the prompts
-  pods receive stop tracking the live disk once published.
+  Checks frozen artifact reads, closed-world misses and source drift using temporary
+  overrides plus shipped system fallbacks. Fingerprints are exercised with edits made
+  after publication, not concurrent mutation during its separate read passes.
   """
   use ExUnit.Case, async: false
 
@@ -68,7 +69,7 @@ defmodule Fleet.SPBuilderImageTest do
     assert sp =~ "tdd v1"
     refute sp =~ "MUTATED"
 
-    # Restart-republish → the new epoch.
+    # Unpublish switches this read to live disk; no restart or republish occurs here.
     Image.unpublish()
     assert {:ok, %{sp_md: sp2}} = Fleet.SPBuilder.compose(profile, ["tdd"])
     assert sp2 =~ "MUTATED"
@@ -86,14 +87,8 @@ defmodule Fleet.SPBuilderImageTest do
   test "EPOCH CLOSURE: the worker protocole-user edited after publish! is invisible to Assets", %{
     tmp_dir: tmp
   } do
-    # This file redefines the pod's trigger keywords: unimaged, a mid-life edit changed what `engage`
-    # MEANS for the next pod while the image version still claimed a closed epoch.
-    #
-    # Driven through the `:protocole_user_path` override, which is the ONE resolution the image and
-    # the disk fallback share — so the same test proves both halves: the image freezes what the
-    # consumer would have read (an image freezing the bundled default while the consumer read the
-    # override would let the override escape the epoch in silence), and unpublished, the mutation
-    # DOES show, which is what makes the frozen assertion above evidence rather than coincidence.
+    # Use the shared protocol override. Reading changed bytes after unpublish confirms that
+    # the frozen assertion is not accidentally reading a different file.
     custom = Path.join(tmp, "custom-protocole.md")
     File.write!(custom, "# custom proto\n")
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_protocole_user_path, custom)
@@ -104,7 +99,7 @@ defmodule Fleet.SPBuilderImageTest do
     assert {:ok, "# custom proto\n"} =
              Assets.read_protocole_user(fleet_facing())
 
-    # Restart-republish → the new epoch (and proof the mutation was reachable all along).
+    # The unpublished disk fallback can see the mutation.
     Image.unpublish()
     assert {:ok, served} = Assets.read_protocole_user(fleet_facing())
     assert served =~ "MUTATED"
@@ -113,15 +108,14 @@ defmodule Fleet.SPBuilderImageTest do
   test "EPOCH CLOSURE: an EEx template edited after publish! is invisible to the composer", %{
     tmp_dir: tmp
   } do
-    # A template is the SHAPE of every prompt the fleet emits. It was the last live read left, and
-    # the one whose drift would be hardest to attribute to a file nobody touched on purpose.
+    # Historical title overstates the fixture: this replaces the image directly and checks
+    # its consumption/miss handling. The temporary EEx file is not wired into publication.
     tpl_root = Path.join(tmp, "eex")
     File.mkdir_p!(tpl_root)
     src = Path.join(tpl_root, "sp_template.eex")
     File.write!(src, "MARKER-V1\n")
 
-    # The template root is derived from priv (no knob): drive the image directly to prove the
-    # consumption path, which is what the finding is about.
+    # Supply a known source through the image test seam.
     :ok = Image.publish!()
     published = Image.published()
 
@@ -141,21 +135,9 @@ defmodule Fleet.SPBuilderImageTest do
   test "a BORROWED SP absent from a published image is a closed-world error, not a disk read", %{
     tmp_dir: tmp
   } do
-    # `spec.systemPrompt` names ANOTHER ROLE whose SP this one reuses. Once an image is published,
-    # a profile borrowing an SP the image lacks must fail loud — silently reading the live file is
-    # what reopened the epoch precisely where a deployment had extended it.
-    #
-    # The fixture is the DISCRIMINATING one, and it has to be: the draft is written to disk AFTER
-    # the publish, so it EXISTS and is readable. An image-first lookup refuses it (closed world); a
-    # disk read would serve it. Asserting against a file missing on disk too would pass under either
-    # implementation and prove nothing.
-    #
-    # (This test used to prove the same property of `sp_role_bases`, a SECOND corpus keyed by PATH
-    # that served the same field — measured 2026-08-10 to be forbidden by the schema, so no valid
-    # catalogue could ever reach it. The property is real; the mechanism it guarded was not.)
-    # The FINE override, not the catalogue root: moving the whole root would take the modops and
-    # the EEx templates with it and the publish would refuse on those instead — measuring the
-    # fixture rather than the property.
+    # Write the borrowed role's draft after publication: a readable disk file distinguishes
+    # an image miss from a disk fallback. Override only drafts so other artifact prerequisites
+    # remain available and cannot mask the property under test.
     drafts = Path.join(tmp, "drafts")
     File.mkdir_p!(drafts)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :sp_builder_sp_drafts_root, drafts)
@@ -181,7 +163,7 @@ defmodule Fleet.SPBuilderImageTest do
     assert {:error, {:agent_draft_missing, _, _}} =
              Assets.read_agent_draft(profile)
 
-    # Restart-republish → the new epoch admits it, which is the only way in.
+    # Republishing admits the new draft into the image, without a daemon restart.
     Image.unpublish()
     :ok = Image.publish!()
 
@@ -190,9 +172,7 @@ defmodule Fleet.SPBuilderImageTest do
   end
 
   test "systemPrompt: a role REUSES another role's SP instead of copying it" do
-    # The renaming case, verbatim from the user: a catalogue renaming `architect` into its own
-    # language declares the new name and points at the validated prompt. Copying two hundred lines
-    # is what this replaces, and copies drift.
+    # A renamed role can reuse the same prompt bytes without maintaining a duplicate draft.
     :ok = Image.publish!()
 
     renamed = %Fleet.CapProfile{
@@ -214,9 +194,7 @@ defmodule Fleet.SPBuilderImageTest do
   end
 
   test "systemPrompt is a ROLE NAME: a path is refused as an invalid role, never resolved" do
-    # R1-01 moved here rather than deleted. The field used to be a PATH, with a null-byte check and
-    # a traversal check guarding it — both real anchors, both guarding a field the schema forbade.
-    # A role name has no path to escape, and the slug guard is what says so.
+    # The Assets consumer validates the borrowed role name before constructing a path.
     :ok = Image.publish!()
 
     for hostile <- ["../../../etc/passwd", "role\0", "sub/dir", ""] do
@@ -237,9 +215,6 @@ defmodule Fleet.SPBuilderImageTest do
          %{
            tmp_dir: tmp
          } do
-      # Serving the frozen copy is the DEFENCE: bytes that appear on disk after boot never reach an
-      # agent. Saying nothing about the divergence was the defect — an edit to the deployed program's
-      # prompt material was absorbed as a non-event by the very mechanism guarding it.
       :ok = Image.publish!()
       assert {:ok, []} = Image.drift()
 
@@ -247,7 +222,7 @@ defmodule Fleet.SPBuilderImageTest do
       File.write!(edited, "# tdd v2 MUTATED\n")
 
       assert {:ok, [{^edited, :modified}]} = Image.drift()
-      # And the pod still gets the proven-good content — detection never becomes degradation.
+      # Reporting drift must not switch the reader to changed disk bytes.
       profile = %Fleet.CapProfile{
         kind: "CapabilityProfile",
         spec: %{},
@@ -259,8 +234,6 @@ defmodule Fleet.SPBuilderImageTest do
     end
 
     test "a source DELETED after publish! is reported as :vanished, distinctly", %{tmp_dir: tmp} do
-      # A different operator story from an edit (a botched deploy, not a botched edit), so it must
-      # not collapse into the same word.
       :ok = Image.publish!()
       gone = Path.join(tmp, "drafts/agent-probe-base.md")
       File.rm!(gone)
@@ -283,8 +256,7 @@ defmodule Fleet.SPBuilderImageTest do
     test "the fingerprint covers EVERY imaged section, both protocols included", %{
       tmp_dir: tmp
     } do
-      # A section imaged but absent from the fingerprint is material whose drift nobody can see —
-      # the exact hole this closes, one level down. Each source is edited in turn and must surface.
+      # Edit each listed fixture class in turn; despite the title, this list omits EEx templates.
       :ok = Image.publish!()
 
       for rel <- [
@@ -310,24 +282,8 @@ defmodule Fleet.SPBuilderImageTest do
     end
   end
 
-  # ⚠ ICI VIVAIT « an empty artifact root makes publish! raise », RETIRÉ LE 2026-08-19, ET SON
-  # ABSENCE SE DOCUMENTE PLUTÔT QUE DE SE CACHER.
-  #
-  # Il vidait la racine des subagent-templates. Ça marchait pour une raison qu'il ne disait pas :
-  # `tree_scope/2` filtre les racines existantes, et le catalogue SYSTÈME n'a jamais porté cet
-  # arbre-là — c'était donc la seule classe dont la liste de racines pouvait tomber à `[]`. Pour
-  # toutes les autres (modops, drafts, templates EEx), le catalogue système sert de fond de panier
-  # et la classe n'est jamais vide, quoi que la fixture fasse de son override.
-  #
-  # Depuis la sortie de superpowers, cette classe-là est justement celle qui a le DROIT d'être vide
-  # (aucun rôle ne déclare de template ; `Image` la lit sans `!`). La propriété « une classe
-  # d'artefacts vide refuse de booter » n'a donc plus aucune porte par laquelle être exercée : elle
-  # ne peut se produire que sur un déploiement dont le `priv` système a disparu, ce qu'un test ne
-  # simule pas sans déplacer le priv de l'application sous les pieds des autres tests.
-  #
-  # Ce qui RESTE tenu, et par le test juste en dessous : un artefact TRONQUÉ lève. C'est la moitié
-  # de « proven-good or do not boot » qui reste atteignable, et c'est celle qui attrape un vrai
-  # déploiement abîmé.
+  # Empty subagent corpus is allowed. The following case checks an empty selected file;
+  # required artifact classes can still fall back to system and are not emptied by this fixture.
   test "une racine de subagent-templates VIDE ne bloque PLUS le boot (aucun rôle n'en déclare)",
        %{tmp_dir: tmp} do
     File.rm_rf!(Path.join(tmp, "templates"))
@@ -340,15 +296,8 @@ defmodule Fleet.SPBuilderImageTest do
     assert_raise RuntimeError, ~r/empty/, fn -> Image.publish!() end
   end
 
-  # 6-029 — LE REFUS EXISTAIT, LE NOM MANQUAIT. Les chemins publies viennent d'un INSTANTANE
-  # (`Path.wildcard`, `File.regular?`) puis sont relus : entre les deux, un artefact peut disparaitre
-  # et le lecteur rendait un `File.Error` brut la ou la ligne d'a cote nomme deja le fichier VIDE.
-  # Meme fonction, meme artefact, deux traitements.
-  #
-  # ⚠ LA COURSE EST REPRODUITE, PAS SIMULEE : un SYMLINK CASSE est liste par `Path.wildcard` et
-  # rendu `{:error, :enoent}` par `File.read` — exactement l'etat « liste, puis illisible », sans
-  # aucune fenetre temporelle a gagner. `assert_raise RuntimeError` est aussi la CONTRE-EPREUVE :
-  # l'ancien code levait un `%File.Error{}`, qui est une autre exception et ferait rougir ces trois.
+  # Broken symlinks reproduce listed-but-unreadable inputs without a timing race. Assert the
+  # named RuntimeError, distinguishing it from a generic File.Error; no concurrent writer is used.
   describe "6-029 — « liste puis illisible » se nomme, aux TROIS lecteurs" do
     test "lecteur de repertoire (drafts)", %{tmp_dir: tmp} do
       File.ln_s!("/nonexistent/gone", Path.join(tmp, "drafts/agent-ghost-base.md"))
@@ -370,12 +319,8 @@ defmodule Fleet.SPBuilderImageTest do
                    fn -> Image.publish!() end
     end
 
-    # LE SITE QUE LA FICHE NOMME, et il faut un chemin que les lecteurs ci-dessus n'ont PAS lu pour
-    # l'atteindre. Il existe : `read_dir_map/3` s'arrete a la premiere racine qui porte une CLE
-    # (regle du child-theme), tandis que l'empreinte parcourt tous les CHEMINS. Un draft de la
-    # racine systeme masque par son homonyme business n'est donc jamais lu par l'image — et l'est
-    # par l'empreinte. Propriete voulue (l'empreinte doit voir ce qui peut bouger sous le daemon),
-    # et elle rend ce troisieme lecteur atteignable sans course a gagner.
+    # A shadowed system draft skips the content read but reaches the fingerprint pass,
+    # isolating that reader's failure handling.
     test "empreinte de sources — un chemin MASQUE que l'image n'a pas lu", %{tmp_dir: tmp} do
       sys = Path.join(tmp, "sysroot")
       File.mkdir_p!(Path.join(sys, "sp_builder/sp_drafts"))

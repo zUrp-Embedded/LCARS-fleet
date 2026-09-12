@@ -1,7 +1,7 @@
 defmodule Fleet.SPBuilder.RepoSectionsTest do
   @moduledoc """
-  The THREE states of a repo `CLAUDE.md` read, and why the third needs a log to exist:
-  two of them return the SAME `{:ok, ""}`, so only the emission tells them apart.
+  Checks missing, unreadable, unmatched and filtered repository context. Nil and an
+  unmatched readable file both return empty content, but only the latter warns.
   """
   use ExUnit.Case, async: true
 
@@ -32,10 +32,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
   end
 
   test "`## Doc` travels — the shipped-documentation half of the Test obligation", %{tmp_dir: dir} do
-    # `Test` tells a producer how to PROVE what it delivers; `Doc` tells it where the delivered
-    # documentation goes. Absent from the carried list, a repo could write the instruction and no
-    # pod would ever receive it — the failure is silent on both ends, since the file looks right.
-    # The word boundary is the same bet as the rest of the list: `## Docker` must NOT match.
+    # Carry documentation destinations, but do not match Docker through the Doc prefix.
     path = Path.join(dir, "CLAUDE.md")
 
     File.write!(
@@ -71,9 +68,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
              RepoSections.read(Path.join(dir, "absent.md"))
   end
 
-  # BL-6-16 / A2-001 — the exact measured vector: hostile content INSIDE a NAMED section
-  # (`## Commands`) passes the structural extract but must die at the reception filter,
-  # while the clean sections still reach the pod. Red on the pre-wall wiring.
+  # Named headings alone do not make content admissible; filter each section independently.
   test "a hostile named section is DROPPED loud; clean sections survive (BL-6-16)",
        %{tmp_dir: dir} do
     path = Path.join(dir, "CLAUDE.md")
@@ -101,18 +96,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     assert log =~ "push --force"
   end
 
-  # JG-028 — LE RETRAIT ETAIT SILENCIEUX DU COTE QUI COMPTE. La flotte loggue `error` ; le POD
-  # n'apprenait rien et lisait un doc de depot ampute de sa section la plus prescriptive.
-  #
-  # Les motifs du filtre sont LEXICAUX et ne distinguent pas une consigne d'une mention :
-  # `\brebase\b.*\bmain\b` matche « rebase sur main » comme « ne jamais rebaser sur main ». La
-  # section la plus susceptible de tomber est donc celle qui DOCUMENTE les interdits du depot —
-  # c'est-a-dire exactement ce a quoi servent `Conventions` et `Gotchas`. Le filtre produit alors
-  # l'inverse de son intention : « ne fais jamais X » disparait parce qu'il mentionne X.
-  #
-  # La liste de motifs n'est PAS touchee — son propre contrat dit EXTENSIBLE, NEVER REDUCIBLE, et
-  # lui apprendre a distinguer mention et ordre est la menace V4 que la doctrine met hors perimetre.
-  # Ce qui est repare est le SILENCE.
+  # The lexical filter also drops prohibitions; notify the pod of omitted constraints.
   describe "JG-028 — une section ecartee est SIGNALEE au pod" do
     test "le pod apprend QUE des sections manquent, et lesquelles", %{tmp_dir: dir} do
       path = Path.join(dir, "CLAUDE.md")
@@ -138,8 +122,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     end
 
     test "⚠ la notice NOMME la section et ne la CITE JAMAIS", %{tmp_dir: dir} do
-      # Porter l'extrait matche dans le message reinjecterait par la notice exactement ce que le
-      # filtre vient de refuser : la porte tient, et le panneau qui parle de la porte le fait entrer.
+      # A notice quoting rejected content would bypass the filter through its explanation.
       path = Path.join(dir, "CLAUDE.md")
 
       File.write!(path, """
@@ -159,10 +142,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     end
 
     test "⚠ la notice elle-meme PASSE le filtre qu'elle decrit" do
-      # Elle entre dans l'etage directive du pod, donc elle est soumise a la meme regle que le
-      # contenu qu'elle remplace. Sa formulation contient un exemple d'interdit (« ne jamais
-      # rebaser sur main ») : c'est precisement le genre de phrase qui pourrait matcher, et rien
-      # d'autre que ce test ne le verifiera le jour ou quelqu'un la reformule.
+      # Notice wording itself enters prompt context; verify it against the same lexical filter.
       path = Fleet.TestEnv.tmp_path("jg028") <> ".md"
 
       File.write!(path, "## Conventions\nNe JAMAIS faire git push --force sur main.\n")
@@ -181,8 +161,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     end
 
     test "TEMOIN — un depot propre ne recoit AUCUNE notice", %{tmp_dir: dir} do
-      # Sans lui, une notice posee inconditionnellement passerait les tests ci-dessus, et chaque pod
-      # lirait un avertissement sur des sections qu'on ne lui a pas retirees.
+      # Control against an unconditional notice on clean repositories.
       path = Path.join(dir, "CLAUDE.md")
       File.write!(path, "## Build\nmix compile\n")
 
@@ -191,8 +170,7 @@ defmodule Fleet.SPBuilder.RepoSectionsTest do
     end
 
     test "TOUTES les sections ecartees : la notice reste, la zone n'est pas vide", %{tmp_dir: dir} do
-      # Le cas ou le silence etait total. Le gabarit ne rend la zone que si la chaine est non vide :
-      # sans la notice, un depot dont TOUT est filtre etait indistinguable d'un depot sans CLAUDE.md.
+      # Even with no accepted section, the nonempty notice keeps the omission visible.
       path = Path.join(dir, "CLAUDE.md")
 
       File.write!(path, """

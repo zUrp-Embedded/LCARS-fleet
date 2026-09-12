@@ -1,24 +1,18 @@
 defmodule Fleet.SPBuilder.MonkTest do
   @moduledoc """
-  `Fleet.SPBuilder.resolve_monk_injection/2` (DN ring2/fleet_memory.md L478:
-  inject registry persona_hint+corpus_paths into the monk SP). Pure, real canon.
-  The compose/3 regression (byte-identical additive for non-monk) is covered by
-  the full suite (mix test). `async: true`.
+  Skipped legacy registry-resolution cases. No tests in this module currently execute;
+  the non-monk case checks the resolver result, not byte-identical prompt composition.
   """
   use ExUnit.Case, async: true
 
-  # FROZEN (BL — Memory-X frozen): this test's fixtures = the real monk cap-profiles
-  # (`cap-profiles/monks/alpha.yaml`…), ARCHIVED in `priv/memory-x/monks/` (Memory-X out
-  # of the boot loop: must be per-project + system-wide under lcars, not per-fleet). The
-  # `resolve_monk_injection/2` code stays in place; re-enable these tests (and re-point the
-  # fixtures) when Memory-X is re-homed.
+  # Memory-X fixtures moved to priv/memory-x/monks. Repoint these legacy paths and revisit
+  # per-project ownership before enabling the cases; the resolver implementation remains.
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at the per-project re-home"
 
   alias Fleet.SPBuilder
 
-  # R0.8-brick1: canon root in-repo (R0.7 reabsorption), not the doctrine path
-  # 05_data-canon/... (nonexistent in a standard install).
+  # Historical location, retained with the skipped fixtures.
   @monks_dir Application.app_dir(
                :lcars_fleet,
                "priv/catalogue/cap_profile/cap-profiles/monks"

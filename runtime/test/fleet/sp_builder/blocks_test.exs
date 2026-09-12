@@ -3,22 +3,16 @@ defmodule Fleet.SPBuilder.BlocksTest do
 
   alias Fleet.SPBuilder.Blocks
 
-  # The BUSINESS blocks root. `core/` is not under it — it lives in the system catalogue and is
-  # reached by the resolver, so a hardcoded path here would compose half the corpus and the
-  # no-drift below would compare a truncated SP to the committed one.
+  # Business root plus resolver fallback to system core blocks.
   defp blocks_dir, do: Fleet.Catalogue.sp_blocks_root()
 
-  # Le draft d'un role vit avec le role : mecanique dans le catalogue systeme, metier dans l'autre.
-  # Le resolveur repond ou qu'il soit — le tester par un chemin en dur reviendrait a epingler la
-  # moitie metier et a declarer manquant tout ce qui a demenage.
+  # Drafts may live in either catalogue; use the consumer's resolver.
   defp draft_path(role), do: Fleet.SPBuilder.sp_draft_path(role)
 
   test "each role in the map composes a non-empty, titled SP" do
     roles = Blocks.role_map(blocks_dir())
 
-    # Anti-vacuity: a `for` over an EMPTY map raises nothing → the test would pass GREEN without
-    # running a single assertion (e.g. sp-map.yaml not found in _build). Require at least one role
-    # BEFORE the loop.
+    # Prevent an empty map from passing without composing a role.
     assert map_size(roles) > 0,
            "empty role_map (sp-map.yaml not found?) → the loop tests NOTHING"
 
@@ -98,11 +92,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
     test "an operator's own `gatekeeper` lands in THEIR tree, and the system's is untouched", %{
       tmp_dir: tmp
     } do
-      # Measured by running the documented gesture, not imagined: composing a third-party catalogue
-      # whose map named `gatekeeper` OVERWROTE the shipped system draft — the one file the target
-      # state calls never modifiable. `draft_target/2` routes a mechanism role's draft to the system
-      # catalogue, which is right for the bundled reference (it is how the system carries its own
-      # gatekeeper, proven on a bench) and wrong the moment someone else's map is the one composing.
+      # An existing system draft is the discriminator: unconfined generation would overwrite it.
       system_draft =
         Path.join([
           Fleet.Catalogue.system_root(),
@@ -139,10 +129,7 @@ defmodule Fleet.SPBuilder.BlocksTest do
   end
 
   describe "audit!: every role owes EXACTLY ONE source for its SP" do
-    # Measured against the REAL tree on purpose. Each case below needs one real property — a role
-    # that exists, a draft that is hand-written, a name that exists nowhere — and a fixture would
-    # only prove the fixture. `architect` is the hand-written twin, and that is not incidental: it
-    # is the role the "both" refusal must protect.
+    # Shipped-content checks depend on architect remaining a hand-written draft.
 
     test "the bundled catalogue passes its own audit" do
       assert :ok = Blocks.audit!(roster!(), Blocks.role_map(blocks_dir()))
@@ -155,8 +142,6 @@ defmodule Fleet.SPBuilder.BlocksTest do
     end
 
     test "an entry for a role the catalogue does not carry → refused (blocks for a ghost)" do
-      # Never fatal at spawn — nothing spawns a role that does not exist — which is exactly why
-      # nothing would ever report it.
       assert_raise RuntimeError, ~r/nobody are named by sp-map.yaml/, fn ->
         Blocks.audit!(["engineer"], %{"nobody" => ["core/runtime-contract"]})
       end
@@ -173,8 +158,6 @@ defmodule Fleet.SPBuilder.BlocksTest do
     end
 
     test "every disagreement is named at once, not the first one" do
-      # An operator fixes a catalogue in one pass. Reporting one fault per run turns a three-line
-      # fix into three edit-run cycles, which is how the third one gets skipped.
       message =
         assert_raise RuntimeError, fn ->
           Blocks.audit!(["architect", "ghost-role-xyz"], %{
@@ -195,18 +178,8 @@ defmodule Fleet.SPBuilder.BlocksTest do
   end
 
   test "catalog completeness: each pod role has its own SP (the no-fallback flip would brick its spawn otherwise)" do
-    # Roles spawned via `Fleet.Spawner.Pod.Assets.read_agent_draft` (bwrap pods). `architect` and
-    # `starfleet` keep a HISTORICAL/manual draft (user-facing socle — one per-project, one fleet-level —
-    # outside the composed blocks, so NOT in sp-map.yaml). Every other role is block-composed.
-    #
-    # DERIVED from the catalogue, not listed. This used to be a hand-written `~w(...)` of the eight
-    # names, with a comment telling the reader to add the next role to it — a FIFTH list to keep in
-    # sync, checked by nothing, next to the four the contracts check locks precisely because
-    # hand-kept lists drift. A role added everywhere else would leave this test green while never
-    # testing it: the one test whose job is to catch a missing draft would be the one that missed it.
-    #
-    # `list/0` filters ReservedSeats out (`vulcan` is not spawnable, so it owes no draft, BL-6-45),
-    # which is the exact set that owes one.
+    # Derive the population from CapProfile.list/0, excluding ReservedSeats. This checks
+    # draft existence, not readability/content or whether every other spawn prerequisite holds.
     {:ok, pod_roles} = Fleet.CapProfile.list()
 
     # Anti-vacuity, same reason as above: an empty list would loop over nothing and pass.

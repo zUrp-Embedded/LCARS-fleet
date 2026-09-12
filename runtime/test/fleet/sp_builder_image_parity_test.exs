@@ -1,16 +1,9 @@
 defmodule Fleet.SPBuilderImageParityTest do
   @moduledoc """
-  The two consumption regimes must produce the SAME prompts, on the REAL canon.
-
-  Why this exists — the hole it closes: prompt material is resolved TWICE. With an image published
-  the composer reads the frozen snapshot; without one it reads the live disk. Production always
-  publishes (do-not-boot otherwise), so the disk path never runs there — while the whole SP suite
-  runs on it, because `:test` disables publication for hermeticity. The suite was therefore
-  exercising a path production never takes, and nothing anywhere proved the two agree.
-
-  A second resolution of the same asset is one edit away from diverging with no gate to catch it.
-  This IS that gate: it composes every canon role both ways and compares. Whichever regime a test
-  happens to run under, this pins that the answer is the same one a pod would receive.
+  Compares shipped-role fragment hashes and composed CLAUDE.md between image and disk
+  regimes, plus protocol bytes for all interlocutors. The hash comparison does not cover
+  role drafts or full rendered system prompts. Production normally publishes while test
+  configuration defaults to disk, so both consumption paths need explicit checks.
   """
   use ExUnit.Case, async: false
 
@@ -18,8 +11,7 @@ defmodule Fleet.SPBuilderImageParityTest do
   alias Fleet.Spawner.Pod.Assets
   alias Fleet.SPBuilder
 
-  # Every role of the shipped canon — the parity claim is about what pods really get, so the list
-  # is READ from the catalogue rather than retyped (a role added without a line here would escape).
+  # Derive role names from the catalogue; underscore-prefixed entries are excluded.
   defp canon_roles do
     {:ok, names} = CapProfile.Catalog.list()
     Enum.reject(names, &String.starts_with?(&1, "_"))
@@ -35,8 +27,7 @@ defmodule Fleet.SPBuilderImageParityTest do
   end
 
   setup do
-    # Whatever the suite's ambient regime, this test drives both ends explicitly and leaves the
-    # process as it found it: unpublished, the `:test` default the other suites rely on.
+    # Leave both images unpublished, the test default; this does not restore a prior image.
     on_exit(fn ->
       SPBuilder.Image.unpublish()
       CapProfile.Image.unpublish()
@@ -70,11 +61,7 @@ defmodule Fleet.SPBuilderImageParityTest do
   end
 
   test "the protocole-user is byte-identical in both regimes, for every interlocutor" do
-    # Not composed by SPBuilder but read by the spawner's Assets rail, through its own image
-    # accessors — same duplication, same exposure, and it decides what `engage` means to the pod.
-    # Swept over the THREE values because each one takes a different path through the rail
-    # (machine only, machine + human, human only): a parity proven on `fleet` alone would leave
-    # the two branches that actually gained an image accessor unchecked.
+    # Exercise all Assets protocol branches: worker, worker+human, human.
     for who <- ["fleet", "both", "human"] do
       cap = %CapProfile{
         kind: "CapabilityProfile",
@@ -93,12 +80,8 @@ defmodule Fleet.SPBuilderImageParityTest do
   end
 
   test "un root de drafts REPOINTE deplace aussi le chemin disque du spawn" do
-    # Le cas que la parite sur la racine PAR DEFAUT ne pouvait pas voir : les deux resolveurs
-    # coincidaient tant que personne ne deplacait la racine. L'image lisait
-    # `:lcars_fleet, :sp_builder_sp_drafts_root`, `Pod.Assets` gardait un literal `app_dir` — repointer la
-    # cle deplacait ce que l'image GELAIT et pas ce que le spawn LISAIT. Un catalogue pointe sur un
-    # arbre de drafts etranger aurait ete gele depuis lui, et lu depuis le bundle sur le chemin
-    # non-publie : deux drafts differents pour un seul role.
+    # Default-root parity cannot catch a disk reader ignoring the draft override. This case
+    # checks that disk path directly; it does not publish/compare the override's image.
     role = "engineer"
     tmp = Fleet.TestEnv.tmp_path("drafts")
     File.mkdir_p!(tmp)

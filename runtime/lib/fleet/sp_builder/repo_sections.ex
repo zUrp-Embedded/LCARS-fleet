@@ -1,59 +1,30 @@
 defmodule Fleet.SPBuilder.RepoSections do
   @moduledoc """
-  Selective extraction of sections from the repo `CLAUDE.md` — the mini markdown
-  parser split out of `Fleet.SPBuilder`, used by `compose_claude_md/3` to carry
-  over into the pod's `CLAUDE.md` (N3) the useful sections of the target repo.
+  Selects Stack, Build, Test, Doc, Conventions, Commands and Gotchas sections for
+  SPBuilder's repository context. A section runs from a column-zero level-two header
+  to the next such header. Matching is case-sensitive and accepts a word-boundary
+  suffix (Test suite, not Testing). This line parser does not understand code fences.
 
-  Sections kept: `Stack`, `Build`, `Test`, `Doc`, `Conventions`, `Commands`, `Gotchas`
-  — each level-2 markdown header (`## Name`) and its body up to the next level-2
-  header. Everything else in the file is ignored (the repo CLAUDE.md also carries
-  human sections with no value for a pod).
-
-  **Pure** functions (FS read only for `read/1`, no process) — except the "nothing matched" warning,
-  which `read/1` emits (never `extract/1`, which stays a pure parser).
-
-  ## Bet on an adopted repo, CONTRACT on an onboarded one
-
-  The distinction matters because the two produce the same silence and deserve opposite reactions.
-
-  A repo LCARS did not create is free to name its sections otherwise and then contributes nothing.
-  That outcome is legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching
-  with zero repo context is otherwise indistinguishable from a pod given no repo file at all.
-
-  A repo LCARS onboarded is a different case: `priv/catalogue/project_template` ships a `CLAUDE.md`
-  on each writer face, and the one on the code face NAMES these headings and explains what each is
-  for. It deliberately leaves them CLOSED — a hollow heading makes the fleet believe it has context
-  and the agent believe it has a command — so the warning on a fresh project is EXPECTED and says
-  the sections have not been written yet, not that the convention was missed.
-
+  extract/1 is pure and unfiltered. read/1 reads disk, filters whole sections and logs
+  omissions. No accepted section is a warning, not a failure: adopted repositories may
+  use other headings, and new onboarded projects may not have written them yet.
   """
 
   require Logger
 
-  # Closed list of the sections carried over into the pod. The `\b` bounds the name on a
-  # word boundary: `## Test suite` matches (space after `Test`), `## Testing` or
-  # `## Stackoverflow` do not match (the word continues).
-  # `Doc` is the twin of `Test`, on the other half of the same obligation. `Test` tells a producer
-  # how to PROVE what it delivers; `Doc` tells it where the delivered documentation goes and what
-  # is expected there. Without it, `docs/` is a directory every project has and no producer is ever
-  # told to feed — and the documentation that ships gets written, if at all, by whoever notices.
-  # It carries no `## Doc` for the DRAFTING face: that tree ships nothing, and its own CLAUDE.md
-  # says so under `Conventions`.
+  # Doc carries documentation destination/expectations alongside Test's proof commands.
   @repo_section_re ~r/^##\s+(Stack|Build|Test|Doc|Conventions|Commands|Gotchas)\b/m
-  # Same list, readable — quoted in the "nothing matched" warning so the operator sees WHAT was expected.
+  # Keep the warning's expected names aligned with the matcher.
   @repo_section_names ~w(Stack Build Test Doc Conventions Commands Gotchas)
 
   @doc """
-  Reads the repo `CLAUDE.md`, extracts the named sections, and passes EACH through
-  `Fleet.ReceptionFilter` (BL-6-16): the repo file is authored OUTSIDE the trust boundary and
-  this is the door where its content becomes pod DIRECTIVES. A matching section is DROPPED
-  whole and logged ERROR (red-alert class — the pod launches with LESS context, never with
-  poison; a spawn is never wedged over prose).
+  Reads and filters named sections through ReceptionFilter. A matching section is
+  omitted whole, logged as an error and named in a notice to the pod. The lexical filter
+  can reject prohibitions as well as instructions; passing it does not prove text harmless.
 
-    * `path = nil` → `{:ok, ""}` (no repo CLAUDE.md supplied: no section, not
-      an error — the template renders the zone empty).
-    * path supplied but unreadable → `{:error, {:repo_claude_md_unreadable, path, reason}}`
-      (fail-loud: a supplied path MUST be readable, no silently-empty extraction).
+  nil returns {:ok, ""} without warning. An unreadable supplied path returns
+  {:error, {:repo_claude_md_unreadable, path, reason}}. Zero accepted sections warns;
+  withheld sections may still contribute the notice to the successful result.
   """
   @spec read(String.t() | nil) :: {:ok, String.t()} | {:error, term()}
   def read(nil), do: {:ok, ""}
@@ -74,7 +45,6 @@ defmodule Fleet.SPBuilder.RepoSections do
     end
   end
 
-  # The reception filter at the admission door (never a cleanup: the WHOLE section goes).
   defp admit_or_withhold(section, {kept, withheld}, path) do
     case Fleet.ReceptionFilter.scan(section) do
       :clean ->
@@ -98,23 +68,8 @@ defmodule Fleet.SPBuilder.RepoSections do
     end
   end
 
-  # A SILENT DROP IS SILENT ON THE SIDE THAT MATTERS. The fleet logs `error`; without this notice
-  # the POD is told nothing, and reads a repo doc whose most prescriptive section has vanished. The
-  # filter's patterns
-  # are LEXICAL and do not tell an instruction from a mention — `\brebase\b.*\bmain\b` matches
-  # "rebase onto main" and "never rebase onto main" alike. So the section most likely to be dropped
-  # is the one that DOCUMENTS the repo's prohibitions, i.e. exactly what `Conventions` and `Gotchas`
-  # are for. The filter then produces the reverse of its intent: "never do X" is removed because it
-  # mentions X, and the agent proceeds not knowing X is forbidden.
-  #
-  # The pattern list stays untouched — its own contract says EXTENSIBLE, NEVER REDUCIBLE, and
-  # teaching it to tell a mention from an order is the V4 threat the doctrine puts out of scope.
-  # What the notice closes is the SILENCE: the pod learns that constraints exist which it was not
-  # given.
-  #
-  # ⚠ THE NOTICE NAMES THE SECTIONS AND NEVER QUOTES THEM. Carrying the matched excerpt would
-  # re-inject through the message exactly what the filter just refused — the door held, and the
-  # notice about the door would walk it in.
+  # Tell the pod constraints were withheld: lexical patterns also match "never rebase onto main".
+  # Include only section names, never rejected excerpts, or the notice would reintroduce them.
   defp withheld_notice([]), do: ""
 
   defp withheld_notice(names) do
@@ -139,16 +94,8 @@ defmodule Fleet.SPBuilder.RepoSections do
     |> String.trim_trailing()
   end
 
-  # THIRD state, easily folded into the first. This module separates "no path supplied"
-  # ({:ok, ""} — legitimate, the template renders an empty zone) from "path supplied but unreadable"
-  # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections is otherwise
-  # indistinguishable from the first: the pod launches with no repo context at all and nothing says so.
-  # The closed list is a BET on an ADOPTED repo's headings — LCARS does not impose them there, so a
-  # repo naming its sections `## Setup` / `## Architecture` contributes nothing, legitimately and
-  # invisibly. On an ONBOARDED repo the template ships the headings, closed: the same warning then
-  # says they have not been written yet (cf. the moduledoc). Not an error either way (a repo owes
-  # us no heading), so `{:ok, ""}` stands — but VISIBLY. `extract/1` stays pure: the log lives
-  # here, on the side that already does I/O.
+  # Also runs when all matched sections were withheld; the existing log text is broader
+  # than that case. No supplied path takes read(nil)'s separate, silent branch.
   defp warn_if_no_section("", path) do
     Logger.warning(
       "RepoSections: #{path} read but NO section matched #{inspect(@repo_section_names)} — the pod's " <>
@@ -171,7 +118,6 @@ defmodule Fleet.SPBuilder.RepoSections do
     content |> named_sections() |> Enum.join("\n\n")
   end
 
-  # The named sections as a LIST (one string each) — the shape `read/1` filters per-section.
   defp named_sections(content) do
     lines = String.split(content, "\n")
     {sections_acc, current} = Enum.reduce(lines, {[], []}, &fold_section/2)
@@ -183,9 +129,7 @@ defmodule Fleet.SPBuilder.RepoSections do
     |> Enum.map(&Enum.join(&1, "\n"))
   end
 
-  # Line-by-line fold: a `## ` header opens a new section (the accumulator
-  # of the previous one is pushed), any other line is added to the current section.
-  # The lists are built by prepending (O(1)) then reversed by `extract/1`.
+  # Prepend while scanning, then reverse sections and their lines in named_sections/1.
   defp fold_section(line, {acc, current}) do
     if String.match?(line, ~r/^##\s+/) do
       {[current | acc], [line]}

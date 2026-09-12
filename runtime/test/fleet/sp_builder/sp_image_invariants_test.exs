@@ -1,22 +1,16 @@
 defmodule Fleet.SPBuilder.SpImageInvariantsTest do
   @moduledoc """
-  Invariants over the COMPOSED SP images — the finished prompt each role actually receives
-  (role base + default modops + subagent template), not the fragments.
-
-  The blocks have a no-drift gate, but nothing analyzed the FINAL image: two fragments can each be
-  fine and their concatenation still carry two contradictory doctrines (a judge told to diff a git
-  ref that does not exist in its clone, an architect promising a validation chain the engine does
-  not run, a bundle ordering an operation of a retired architecture). These tests compose the REAL
-  canon images and refuse the known contradiction classes — purely NEGATIVE invariants (no prose is
-  pinned; the SP package stays the operator's to write).
+  Negative lexical checks over shipped role drafts plus default overlays, selected bundle
+  files and worker protocols. They catch known contradictions across fragments without
+  pinning replacement prose. This helper is not the complete launch composition: it does
+  not append protocols, follow borrowed role drafts or exercise every catalogue scope.
   """
   use ExUnit.Case, async: true
 
   @judges ~w(reviewer qualifier)
 
-  # Retired-dialect registry: identifiers of ARCHITECTURES THAT NO LONGER EXIST, refused in any
-  # composed image / active bundle. Grows one entry per retirement; never shrinks silently.
-  # Each entry: {label, regex} — label names the retirement for the failure message.
+  # Named regression patterns; review removals deliberately. Labels are historical test data
+  # (including the stale claim that the implementer subagent template is current).
   @retired_dialect [
     {"cycle_regime (retired cap-profile field)", ~r/cycle_regime/},
     {"L-scale intensity levels (current scheme is C0..C4)", ~r/\bL[0-9]\+?\b/},
@@ -27,18 +21,13 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
      ~r/audits\/[a-zA-Z0-9_{}-]+\.json/}
   ]
 
-  # The FULL image a pod actually receives = the role draft (`agent-<role>-base.md`, projected by
-  # the spawner's Assets rail) + the composed overlay (modops + subagent template, SPBuilder). The
-  # canon profiles carry no `systemPrompt` — analyzing the compose output alone would MISS the role
-  # base entirely (and pass vacuously, as this test's first draft did).
+  # Include the draft: checking compose/3 alone would miss the role's base instructions.
   defp composed_image(role) do
     {:ok, profile} = Fleet.CapProfile.load(role)
     defaults = Fleet.CapProfile.default_modops(profile)
     {:ok, %{sp_md: overlay}} = Fleet.SPBuilder.compose(profile, defaults)
 
-    # Through the RESOLVER, not a literal path: the draft of a mechanism role lives in the system
-    # catalogue and a business role's in the business one, and this test is about what a pod
-    # RECEIVES — which is exactly what the resolver answers.
+    # Resolve across business/system rather than assuming every draft lives in business.
     draft = role |> Fleet.SPBuilder.sp_draft_path() |> File.read!()
 
     draft <> "\n" <> overlay
@@ -46,9 +35,8 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
 
   describe "judge images (reviewer/qualifier) — one doctrine, executable on THIS architecture" do
     test "every git range is origin-anchored: the local ref `main` DOES NOT EXIST in a judge's clone" do
-      # The judge's clone is mono-branch: the base is `origin/main` (the drafts state it
-      # themselves). A composed image instructing `diff main..HEAD` sends the judge against an
-      # absent ref — it errors, or silently reviews the wrong base.
+      # Reject bare main ranges. The historical title/message overstate this check:
+      # it neither requires origin/main nor verifies ref existence; bootstrap supplies lcars/base.
       for role <- @judges do
         image = composed_image(role)
 
@@ -90,8 +78,8 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
   end
 
   describe "active modop bundles — only doctrine executable on the CURRENT architecture is activable" do
-    # Same computation as the consumption test: activable = union of every canon cap-profile's
-    # modop_set default ∪ optional. Orphans (nothing can activate them) are out of scope here.
+    # Business YAML references only; malformed profiles and absent local bundle files are skipped.
+    # Unlike the consumption suite, this does not enumerate the system root.
     test "no retired dialect in any ACTIVE bundle's sp.md" do
       canon = Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile")
 
@@ -124,19 +112,8 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
     end
   end
 
-  # 6-138 — LE PROTOCOLE WORKER NIAIT LE MODE DANS LEQUEL IL EST COMPOSE. `read_protocole_user/1`
-  # concatene worker PUIS humain pour `interlocutor: both` — le mode d'`architect` et de
-  # `starfleet` — et la moitie worker affirmait « les deux protocoles ne cohabitent JAMAIS dans un
-  # pod : ce fichier-ci est le seul qui fasse autorite pour toi ». Le pod recevait donc la
-  # composition ET une phrase lui disant que la seconde moitie n'existait pas.
-  #
-  # ⚠ La moitie HUMAINE, elle, etait deja juste : elle nomme le cas et l'explique (« l'une decrit
-  # ton rail machine, l'autre ta conversation, elles tiennent ensemble parce qu'elles ne parlent pas
-  # de la meme chose »). Une seule des deux mentait — et c'etait celle qui parlait la premiere.
-  #
-  # INVARIANT NEGATIF, comme tout ce fichier : on n'epingle AUCUNE prose (le package SP reste a
-  # l'operateur), on refuse une classe de contradiction. Ici : la moitie worker ne peut pas nier la
-  # composition tant qu'un role la declare.
+  # Worker instructions must not deny the human protocol that Assets appends for interlocutor both.
+  # These checks reject known exclusivity phrases without prescribing replacement prose.
   describe "6-138 — protocole `both` : la moitie worker ne nie plus la composition" do
     test "un role declare `both`, donc la negation d'exclusivite est une contradiction" do
       roots = ["priv/catalogue", "priv/catalogue-system"]
@@ -152,8 +129,7 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
         end)
         |> Enum.map(&Path.basename(&1, ".yaml"))
 
-      # Sans ce garde, la suppression du dernier role `both` rendrait le test vert en ne mesurant
-      # plus rien — et la contradiction pourrait revenir sans bruit le jour ou un role revient.
+      # Require a real both-role population so this regression cannot become vacuous.
       assert both_roles != [],
              "aucun role `interlocutor: both` — cet invariant ne mesure plus rien ; " <>
                "si le mode a ete retire, retirer aussi la composition dans `read_protocole_user/1`"

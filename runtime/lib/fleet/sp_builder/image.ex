@@ -1,8 +1,9 @@
 defmodule Fleet.SPBuilder.Image do
   @moduledoc """
-  Versioned closed-world snapshot of all SP-builder prompt material. Boot reads and
-  fingerprints required artifacts into persistent storage; published images never
-  fall back to live disk. Drift is reported while pods keep receiving proven bytes.
+  Root-keyed snapshots of prompt artifacts in persistent_term. Readers keep published
+  bytes until republishing and distinguish an absent image from a missing image entry.
+  Publication checks presence/nonempty selected artifacts, not their semantic safety.
+  Content reads and source fingerprints are separate passes, not an atomic disk snapshot.
   """
 
   require Logger
@@ -10,15 +11,16 @@ defmodule Fleet.SPBuilder.Image do
   alias Fleet.Catalogue
 
   @doc """
-  Builds and publishes the SP image from the live roots. Raises on any unreadable root —
-  the artifacts are load-bearing prompt material, a hole is a broken deploy. Gated by the
-  caller (`:lcars_fleet, :sp_builder_publish_image`).
+  Publishes installed catalogue scopes sequentially, each combining its own and system
+  artifacts. Required artifact sets must be nonempty; subagent templates may be absent.
+  Selected empty files and unreadable listed sources raise. This does not validate every
+  directory or required filename. Earlier scopes remain published if a later one fails;
+  images for roots no longer installed are not erased. The caller applies the
+  :sp_builder_publish_image switch; this function does not check it.
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE INSTALLE, cle sur sa racine : un pod du catalogue k doit recevoir le
-    # materiel de k, pas celui de son voisin. Une cle scalaire les fusionnerait, et le SP d'un role
-    # viendrait de n'importe lequel d'entre eux.
+    # Separate keys prevent same-named roles in different business catalogues sharing an image.
     for root <- Catalogue.installed_roots(), do: publish_scope!(root)
     :ok
   end
@@ -29,13 +31,8 @@ defmodule Fleet.SPBuilder.Image do
     image = %{
       modop_sp:
         read_dir_map!(modop_roots(root), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
-      # ⚠ SANS le `!` : un ensemble VIDE est la forme CORRECTE de cette classe, pas une panne.
-      # Aucun rôle n'exige de template de subagent, donc exiger au moins un artefact ferait refuser
-      # le boot sur un catalogue parfaitement sain.
-      # Ce qui reste gardé, et c'est la distinction : un fichier TRONQUÉ lève, et un rôle qui
-      # DÉCLARE un template introuvable échoue au spawn (`read_subagent_template` →
-      # `subagent_template_missing`). Pas d'exigence de population, mais détection d'un artefact
-      # manquant.
+      # Empty corpus is valid. A role naming an absent template fails during composition;
+      # publication only rejects empty selected files, not every possible truncation.
       subagent:
         read_dir_map(
           subagent_roots(root),
@@ -53,33 +50,17 @@ defmodule Fleet.SPBuilder.Image do
         ),
       worker_protocol: read_worker_protocol!(root),
       human_protocol: read_protocol!(human_protocol_path(root), "human protocol"),
-      # (`spec.systemPrompt` names a ROLE, so it resolves through `drafts` above: no second corpus
-      # of prompt files keyed by path.)
-      # The two EEx templates, frozen as SOURCE (rendered with eval_string against the image). A
-      # template is the SHAPE of every prompt the fleet emits — the last thing that may drift
-      # mid-life while the version claims otherwise.
+      # systemPrompt selects a role draft. EEx is frozen as source, evaluated later by SPBuilder.
       templates: read_dir_map!(template_roots(root), "*.eex", &Path.basename(&1))
     }
 
-    # The SOURCES this epoch was opened with: absolute path -> content sha. Not a second copy — a
-    # FINGERPRINT, so the epoch can answer "is the disk still what I validated?". Without it, an
-    # edit to the deployed program's prompt material under a live daemon is a NON-EVENT: the image
-    # keeps serving the good copy (which is the point — tampered bytes never reach an agent) and
-    # nobody ever learns the two diverged. Serving proven-good is the defence; staying SILENT about
-    # the divergence is the defect, and the doctrine is explicit — active suspicion of silent failure.
+    # Re-read sources for drift tracking, including shadowed files. Concurrent edits can make
+    # these hashes disagree with the bytes already placed in image; publish from a quiescent tree.
     sources = source_fingerprints(root)
 
-    # MEME TAMPON, MEME DIMENSIONNEMENT QUE `CapProfile.Image.version_of/2` — 48 bits pour
-    # distinguer deux epoques dans une trace, jamais pour identifier durablement quoi que ce soit.
-    # Il ne quitte pas la VM (calcule ici, range en `persistent_term`, relu par le meme noeud) et
-    # `lib/` ne le compare nulle part.
-    #
-    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, ce qui invite a craindre un
-    # ordre de parcours instable entre executions. MESURE sur cet OTP, et c'est FAUX :
-    # `term_to_binary` rend le meme binaire pour
-    # deux maps construites dans des ordres opposes — 3 cles ou 60, cles binaires, et imbriquees
-    # comprises. Pas de tri ajoute : il n'achete rien d'observable ici, et un geste qui n'achete
-    # rien sur un tampon n'est pas neutre (il change toutes les versions deja tracees).
+    # A 48-bit trace stamp like CapProfile.Image's, not a durable/collision-free identity.
+    # Uses OTP term encoding of content, excluding source paths/hashes; changing encoding
+    # would change existing stamps even if prompt bytes stayed the same.
     version =
       :crypto.hash(:sha256, :erlang.term_to_binary(image))
       |> Base.encode16(case: :lower)
@@ -90,8 +71,6 @@ defmodule Fleet.SPBuilder.Image do
       image |> Map.put(:version, version) |> Map.put(:sources, sources)
     )
 
-    # Every section counted: the line an operator reads to know WHAT the version covers. A section
-    # published but unnamed here is a piece of the epoch nobody can see was frozen.
     Logger.info(
       "SPBuilder.Image: published (#{map_size(image.modop_sp)} modop fragments, " <>
         "#{map_size(image.subagent)} subagent templates, #{map_size(image.drafts)} drafts, " <>
@@ -102,32 +81,11 @@ defmodule Fleet.SPBuilder.Image do
     :ok
   end
 
-  # DECLARING a role and SUPERSEDING its prompt are two different gestures, and the guard between
-  # them is ASYMMETRIC — which is the whole content of this function.
-  #
-  #   * a catalogue that DECLARES `<role>.yaml` must also carry its SP: `agent-<role>-base.md` in
-  #     its own drafts tree, or a `spec.systemPrompt` naming the role it reuses. A cap-profile grants
-  #     PERMISSIONS; the SP decides BEHAVIOUR. A role with neither behaves like whoever's prompt it
-  #     inherited, and its name lies.
-  #   * a catalogue that carries `agent-<role>-base.md` and NOT the yaml is superseding a role it
-  #     did not write. That is the child-theme gesture, it is the point, and it is silent here.
-  #
-  # PER CATALOGUE, and that is what a deployment-wide check cannot do. `canon spawn-proof` already
-  # refuses a role whose draft exists in NO root — but it reads the union, so a role declared by
-  # catalogue A and prompted by an unrelated catalogue B passes: A's role silently runs B's
-  # behaviour. With the bundled roots alone that configuration is unreachable — the only shared
-  # names are the ones the system also DECLARES, which is the legal override. It becomes reachable
-  # the moment an operator stacks catalogues, which is what the search path was built for, so the
-  # guard lands WITH the mechanism rather than after the first accident.
-  #
-  # LIMIT, and it is structural: a FINE override moves one tree out of its catalogue, and nothing
-  # can then attribute a role to a catalogue. Such a tree is not visited rather than guessed at.
+  # Check declaration ownership within this business/system pair, not unrelated catalogues.
+  # A draft-only override needs no YAML. A declared role needs a local draft or declared reuse
+  # in at least one tree declaring that name; fine path overrides are outside this direct-root scan.
   defp ensure_declared_roles_carry_an_sp!(scope_root) do
-    # Grouped by ROLE across the catalogues that declare it, never per catalogue in isolation. A
-    # business catalogue that copies `architect.yaml` to widen its tools and keeps the system's
-    # prompt declares a role whose SP it does not carry — and that is LEGAL, because the name means
-    # the same thing on both sides. The lie needs a name introduced by one catalogue and prompted by
-    # another that never heard of it.
+    # OR across declarations lets a business copy of a system role reuse the system's prompt.
     carried = Enum.reduce([scope_root, Catalogue.system_root()], %{}, &carried_in_root/2)
 
     orphans = carried |> Enum.reject(&elem(&1, 1)) |> Enum.map(&elem(&1, 0)) |> Enum.sort()
@@ -143,11 +101,8 @@ defmodule Fleet.SPBuilder.Image do
     :ok
   end
 
-  # `systemPrompt` is honoured WITHOUT following it: whether the borrowed role resolves is
-  # `read_agent_draft/1`'s answer and the spawn proof's to enforce. This one asks only whether the
-  # catalogue SAID where the behaviour comes from — declaring the reuse IS carrying the SP.
-  # UN `or` ACCUMULE SUR LE ROLE, pas sur le catalogue : un role porte par l'un des deux arbres
-  # n'est pas orphelin, meme si l'autre le declare sans le prompter.
+  # Any binary systemPrompt counts, even empty/unresolvable; actual resolution belongs to
+  # the asset reader/spawn proof. Index errors skip this tree rather than failing this guard.
   defp carried_in_root(root, acc) do
     cap_dir = Path.join(root, Catalogue.rel(:cap_profiles))
     drafts_dir = Path.join(root, Catalogue.rel(:sp_drafts))
@@ -171,13 +126,11 @@ defmodule Fleet.SPBuilder.Image do
   end
 
   @doc """
-  Paths whose content no longer matches what `publish!/0` validated, as
-  `[{path, :modified | :vanished}]`. `[]` = the disk still agrees with the epoch; `:unpublished`
-  when no image is live (nothing was ever validated, so nothing can have drifted).
-
-  A non-empty list means the deployed program's prompt material changed under a running daemon: the
-  pods keep receiving the proven-good content (that is the defence), and the operator is told (which
-  the freeze alone does not do).
+  Compares the default catalogue image's recorded source hashes with current disk bytes.
+  Returns sorted modified/vanished paths, or :unpublished. Any read error is :vanished.
+  Does not detect newly added files or inspect other business images. Empty results mean
+  recorded sources match their fingerprint pass, not proof they match the earlier content
+  reads. The function returns findings without logging them or changing the published image.
   """
   @spec drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
   def drift do
@@ -198,12 +151,9 @@ defmodule Fleet.SPBuilder.Image do
     end
   end
 
-  # Same roots, same globs as the sections above — one traversal, hashed. Kept beside them on
-  # purpose: a section added without a line here would be material the drift check cannot see.
+  # Keep globs aligned with image sections or added sections escape drift tracking.
   defp source_fingerprints(root) do
-    # The ROOTS here are the plural ones, and that is the whole point of this function's warning:
-    # reading only the business root would leave the system catalogue's prompt material outside the
-    # fingerprint — editable under a live daemon with nobody told.
+    # Include both business and system files, even shadowed ones omitted from the content map.
     [
       {modop_roots(root), "*/sp.md"},
       {subagent_roots(root), "subagent-*.md"},
@@ -218,13 +168,8 @@ defmodule Fleet.SPBuilder.Image do
     |> Map.new(&{&1, &1 |> read_artifact!("fingerprinted source") |> sha_of()})
   end
 
-  # THE ONE READER OF A LISTED PATH (6-029). Every path read here comes from a SNAPSHOT — a
-  # `Path.wildcard` for the directory readers, a `find_in` for the protocols — and between the
-  # snapshot and the read an artifact can vanish or turn unreadable. The posture stays (proven-good
-  # or no boot), and the refusal NAMES the condition instead of surfacing a raw `File.Error`: an
-  # empty file and an unreadable one are two named refusals of the same reader, never one named and
-  # one from the library. `drift/0` reads the same paths and classes the case as `:vanished`; here
-  # nothing degrades, because an epoch that does not cover what it freezes is not an epoch.
+  # Listed paths can vanish before reading; returned errors name that condition. Empty-content
+  # checks live in callers. A missing protocol lookup can pass nil and raise before this case.
   defp read_artifact!(path, what) do
     case File.read(path) do
       {:ok, content} ->
@@ -240,7 +185,7 @@ defmodule Fleet.SPBuilder.Image do
 
   defp sha_of(content), do: :crypto.hash(:sha256, content)
 
-  @doc "The published image of a catalogue, or nil. No argument = the BUNDLED catalogue."
+  @doc "Returns a catalogue image or nil; no argument selects the current Catalogue.root/0."
   @spec published() :: map() | nil
   def published do
     published(Catalogue.root())
@@ -260,11 +205,9 @@ defmodule Fleet.SPBuilder.Image do
   end
 
   @doc """
-  Restores an image for the BUNDLED catalogue — TESTS ONLY, symmetric of `unpublish/0`.
-
-  Exists so a test never writes the persistent_term key itself: the key carries the catalogue root
-  now, and a test that composes it by hand pins a private representation instead of the contract —
-  which is exactly how two of them broke when the key changed.
+  Test helper restoring an unchecked image at the current Catalogue.root/0. Restore the
+  root configuration first; this does not restore every image erased by unpublish/0.
+  Using this helper keeps tests independent of the persistent_term key representation.
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
@@ -283,10 +226,8 @@ defmodule Fleet.SPBuilder.Image do
   def draft(role) when is_binary(role), do: draft(role, nil)
 
   @doc """
-  Le meme draft, dans l'image du catalogue NOMME. `nil` = le premier installe (comportement du jour).
-
-  La racine vient du PROFIL (`%CapProfile{}.catalogue_root`) chez les appelants qui en ont un : le
-  draft d'un role appartient au catalogue qui le declare, pas au premier de la liste.
+  Reads the named root's draft image; nil selects Catalogue.root/0. Profile-aware callers
+  pass catalogue_root so a same-named role in another catalogue cannot supply its draft.
   """
   @spec draft(String.t(), Path.t() | nil) :: {:ok, binary()} | :not_found | :unpublished
   def draft(role, root) when is_binary(role) do
@@ -303,10 +244,9 @@ defmodule Fleet.SPBuilder.Image do
   end
 
   @doc """
-  The pod's `protocole-user.md` from the image (`{:ok, content}`) or `:unpublished` (the caller
-  falls back to disk). Resolved at PUBLISH time through the same `:protocole_user_path` override
-  the disk path honours, so a deployment override still applies while a mid-life edit of that file
-  no longer changes the pods spawn by spawn — which is the whole promise.
+  Returns the frozen worker protocol or :unpublished. Publication honours the
+  :spawner_protocole_user_path override used by the disk consumer; later disk edits do
+  not change these bytes until republished. nil root selects the default catalogue.
   """
   @spec worker_protocol() :: {:ok, binary()} | :unpublished
   def worker_protocol, do: worker_protocol(nil)
@@ -356,8 +296,6 @@ defmodule Fleet.SPBuilder.Image do
     end
   end
 
-  # `roots` is ALWAYS a search path. A single-root clause beside this one is unreachable — dialyzer
-  # says so — and that unreachability is the proof the door is single.
   defp read_dir_map!(roots, glob, key_fun) when is_list(roots) do
     if Enum.all?(roots, &(Path.wildcard(Path.join(&1, glob)) == [])) do
       raise "SPBuilder.Image: no artifact matches #{glob} under #{inspect(roots)} — " <>
@@ -367,15 +305,9 @@ defmodule Fleet.SPBuilder.Image do
     read_dir_map(roots, glob, key_fun)
   end
 
-  # Same read, WITHOUT the non-empty-directory requirement — for a root whose emptiness is a valid
-  # deployment shape. A truncated FILE still raises either way: an empty artifact is a broken deploy
-  # whatever the root, and that check is the one this image exists for.
+  # Allows zero matching files; nonempty selected content is still required.
   defp read_dir_map(roots, glob, key_fun) when is_list(roots) do
-    # `Map.put_new` and the roots in PRECEDENCE order: the first root that carries a key wins, and
-    # the later one is not read. That is the child-theme rule — a business catalogue shipping its
-    # own `rubber-duck` REPLACES the system's, without declaring anything, which is the whole point
-    # of a search path. Refusing the collision instead makes overriding impossible, which is the
-    # opposite of what a default is for.
+    # First key wins; the later fingerprint pass still reads shadowed sources.
     Enum.reduce(roots, %{}, fn root, acc ->
       root
       |> Path.join(glob)
@@ -384,9 +316,7 @@ defmodule Fleet.SPBuilder.Image do
     end)
   end
 
-  # PREMIERE racine gagnante : le scope est ordonne (propre, puis systeme), et une clef deja vue
-  # vient donc de la racine la plus specifique. Un artefact VIDE fait lever — une image « prouvee
-  # bonne » qui gele un fichier tronque prouve le contraire de ce qu'elle annonce.
+  # Reject exactly empty selected files; whitespace-only content is accepted.
   defp put_first_seen(inner, key, path) do
     if Map.has_key?(inner, key) do
       inner
@@ -415,11 +345,7 @@ defmodule Fleet.SPBuilder.Image do
     content
   end
 
-  # SAME resolution as `Pod.Assets`' machine half (override first, bundled worker default
-  # otherwise) — the image must freeze what the consumer would have read, or it freezes the wrong
-  # file and the override silently escapes the epoch. Reading the spawner's config KEY creates no
-  # module edge (a key is not a call); the alternative is a second resolution of the same asset,
-  # one edit away from diverging with no gate to catch it.
+  # Match Pod.Assets' override without introducing a reverse module dependency.
   defp worker_protocol_path(root) do
     Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
       Catalogue.find_in(
@@ -428,10 +354,7 @@ defmodule Fleet.SPBuilder.Image do
       )
   end
 
-  # No override knob, DELIBERATELY: the machine protocol has one because a deployment may need to
-  # re-cut the work-item contract, whereas the operator-facing half is meant to be replaced by the
-  # operator's own file through the deploy's override scheme, not by a runtime config path. Adding
-  # a second knob now would be inventing the mechanism twice before either exists.
+  # Human protocol overrides use the catalogue search path, not a second per-file config knob.
   defp human_protocol_path(root),
     do:
       Catalogue.find_in(
@@ -439,20 +362,13 @@ defmodule Fleet.SPBuilder.Image do
         "protocole-user-human.md"
       )
 
-  # The SAME roots the disk fallback reads (`SPBuilder.sp_draft_path/2`, `Spawner.Pod.Assets` on
-  # the unpublished path): the image and the spawn's disk fallback MUST read one search path, and it
-  # is `Fleet.Catalogue.tree_scope/2` for both. A fine override moves
-  # the business root only; the system root is never dropped, and an absent directory is — which is
-  # what lets the system catalogue ship only what its roles need (it has no subagent template and
-  # must not fake one).
+  # Scope order is business (or fine override), then system, omitting absent directories.
+  # Draft/subagent disk readers match this scope; SPBuilder's modop disk fallback remains global.
   defp modop_roots(root), do: Catalogue.tree_scope(root, :modops)
 
   defp subagent_roots(root), do: Catalogue.tree_scope(root, :subagent_templates)
 
   defp drafts_roots(root), do: Catalogue.tree_scope(root, :sp_drafts)
 
-  # Two readers that must go through the search path like the rest: the EEx templates shape the
-  # MECHANISM's prompts, and demanding the human protocol from catalogues that have no human-facing
-  # role at all is a defect of its own (W-13).
   defp template_roots(root), do: Catalogue.tree_scope(root, :sp_templates)
 end
