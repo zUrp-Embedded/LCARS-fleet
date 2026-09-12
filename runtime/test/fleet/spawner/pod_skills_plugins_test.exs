@@ -1,13 +1,7 @@
 defmodule Fleet.Spawner.PodSkillsPluginsTest do
   @moduledoc """
-  DN ring1/pod-bootstrap-superpowers — `Fleet.Spawner.Pod.LaunchSpec.skills_plugins_env/1`
-
-  ⚠ Le nom du DN reste tel quel : c'est une RÉFÉRENCE vers un document existant, pas un
-  exemple. Les exemples de ce fichier, eux, ne nomment plus superpowers (⚖ user 2026-08-19,
-  sortie du corpus) : le mécanisme testé est générique — un préfixe `plugin:skill` — et
-  l'illustrer avec un plugin que le dépôt ne charge plus laissait croire à une dépendance.
-  is pure: qualified `plugin:skill` skills → LCARS_SKILLS_PLUGINS env
-  (unique plugin names). Consumed by bin/bwrap_launch.sh. async.
+  Verify qualified plugin:skill entries become unique LCARS_SKILLS_PLUGINS names.
+  Fixtures describe the generic mechanism rather than implying an installed plugin dependency.
   """
   use ExUnit.Case, async: true
 

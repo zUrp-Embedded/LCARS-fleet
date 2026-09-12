@@ -10,21 +10,12 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   require Logger
 
   @doc """
-  Lists session JSONLs across all cwd slugs, optionally restricted to one session ID.
+  Lists session JSONLs across cwd slugs, optionally filtered by session ID.
+  Rejects symlinks on every component from pod_dir down: the writable pod tree must
+  not redirect the host-side reader into arbitrary human files later copied as seeds.
 
-  SYMLINKED ENTRIES ARE DROPPED, and this is the read side of a sandbox escape. `<pod_dir>` is
-  bind-mounted READ-WRITE into the pod (`bwrap_launch.sh`), so the agent owns every inode under it:
-  a link at `.claude/projects/<slug>/<uuid>.jsonl`, or on any directory above it, made the daemon —
-  which runs as the human, outside the sandbox — read a file of ITS choosing. The content then
-  travelled into the seed store and was restored into the next pod. Reading is the exfiltration.
-
-  The filter walks every component from `pod_dir` down (`Fleet.Slug.link_free_under?/2`): a link on
-  the leaf is not the only shape, one on `projects/` redirects the whole subtree while every path
-  under it stays textually confined.
-
-  ⚠ Check-then-act: the tree can change between this filter and the caller's read. Narrowed, not
-  closed — the BEAM exposes no `O_NOFOLLOW`. `SeedStore` re-verifies after reading and discards a
-  capture whose source changed shape.
+  This remains check-then-read, not an atomic no-follow open. SeedStore checks again
+  after capture and discards a source whose path has become unsafe.
   """
   @spec jsonl_paths(Path.t(), String.t()) :: [Path.t()]
   def jsonl_paths(pod_dir, session_id \\ "*")
@@ -36,11 +27,7 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
 
     kept = Enum.filter(found, &Fleet.Slug.link_free_under?(&1, pod_dir))
 
-    # A DROP IS A REFUSAL AND IT IS SAID OUT LOUD. Filtering silently would trade one silence for
-    # another: the daemon would stop following the link (good) and nothing would record that a pod
-    # pointed its own transcript at the host (bad). Logged at `error` because it is not a degraded
-    # read — it is an agent reaching through the daemon, which runs outside its sandbox. Noisy by
-    # design: there is exactly one pod that can produce this line, and it did it on purpose.
+    # Log rejected paths so a missing checkpoint is distinguishable from a refused symlink read.
     case found -- kept do
       [] ->
         :ok
@@ -57,16 +44,10 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   end
 
   @doc """
-  Returns the most recently modified session JSONL, ignoring entries that vanish during stat.
-
-  `:none` means NO USABLE SESSION — the sessions directory does not exist yet (the nominal case
-  before the pod's first turn), or it holds nothing this function may read.
-
-  `{:error, {:sessions_unreadable, reason}}` means the directory IS there and could not be listed.
-  Folded into `:none`, the two opposite facts collapse: the first says "not yet", the second says
-  "the instrument cannot see". A caller that checkpoints on `:none` skips quietly and loses the
-  pod's transcript; on `{:error, _}` it knows why nothing was captured. `Path.wildcard/1` cannot
-  make the distinction on its own — it returns `[]` for both.
+  Returns the newest usable JSONL, ignoring entries that disappear during stat.
+  `:none` means no usable session. An existing projects directory that cannot be listed
+  returns `{:error, {:sessions_unreadable, reason}}`, distinguishing unavailable evidence
+  from a pod that has not written its first transcript.
   """
   @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none | {:error, term()}
   def latest_jsonl(pod_dir) when is_binary(pod_dir) do

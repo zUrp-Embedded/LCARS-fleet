@@ -1,7 +1,6 @@
 defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
-  # REAL git fixture + the REAL engineer cap-profile: the repo-section rail end-to-end
-  # (BL-6-16 revival) — clone → sanitize → repo-source from GIT → re-compose THROUGH the
-  # reception filter → workspace copy. async: tmp_dir-isolated, no global env touched.
+  # Real Git and catalogue fixtures exercise repository-section filtering and document ownership.
+  # Temporary paths isolate the test without changing global configuration.
   use ExUnit.Case, async: true
 
   alias Fleet.Spawner.Pod.Scaffold
@@ -34,8 +33,7 @@ defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
     src = make_repo_with_claude(Path.join(tmp, "doc-src"))
     pod_dir = Path.join(tmp, "pod-enrich")
     File.mkdir_p!(pod_dir)
-    # The :projecting state normally wrote the identity-only composed doc — the enrichment
-    # replaces it wholesale, so a stub marks the pre-state.
+    # Mark the initial pod-side composition to prove enrichment replaces it.
     File.write!(Path.join(pod_dir, "CLAUDE.md"), "IDENTITY-ONLY STUB")
 
     {:ok, cap} = Fleet.CapProfile.load("engineer")
@@ -53,27 +51,20 @@ defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
         assert :ok = Scaffold.maybe_bootstrap_project_workspace(state)
       end)
 
-    # The original was engraved for the composer (from GIT).
     assert File.read!(Path.join(pod_dir, "CLAUDE.md.repo-source")) =~ "## Build"
 
-    # The composed doc carries the CLEAN section, never the hostile one (reception filter).
     md = File.read!(Path.join(pod_dir, "CLAUDE.md"))
     assert md =~ "mix compile"
     refute md =~ "--force"
     refute md =~ "IDENTITY-ONLY STUB"
     assert log =~ "section DROPPED"
 
-    # LE FICHIER DU DEPOT RESTE CELUI DU DEPOT. Il etait ECRASE par la copie composee, et masque
-    # par `skip-worktree` pour que notre copie ne parte pas dans le livrable — au prix de rendre ce
-    # fichier INLIVRABLE : l'edition d'un producteur n'etait jamais stagee, `git status` restait
-    # propre et `git diff` vide en ayant tort. C'est l'entree de tout producteur (ses sections
-    # voyagent dans le prompt compose) ET la sortie par laquelle ses conventions se mettent a jour :
-    # les deux exigent qu'il reste intact et versionne.
+    # The tracked repository original must remain editable and deliverable, even though the
+    # pod-side prompt copy filters hostile sections.
     ws_md = File.read!(Path.join([pod_dir, "workspace", "CLAUDE.md"]))
     assert ws_md =~ "--force"
     refute ws_md =~ "pod engineer"
 
-    # Et il n'est PAS masque : un producteur peut le modifier et le livrer.
     {out, 0} =
       System.cmd("git", ["-C", Path.join(pod_dir, "workspace"), "ls-files", "-v", "CLAUDE.md"],
         stderr_to_stdout: true
@@ -84,8 +75,7 @@ defmodule Fleet.Spawner.Pod.ScaffoldEnrichTest do
 
   test "the UNTRACKED composed CLAUDE.md never reaches a pod commit-all (info/exclude)",
        %{tmp_dir: tmp} do
-    # Repo WITHOUT a tracked root CLAUDE.md — the measured bench case (`?? CLAUDE.md`): our
-    # composed copy is untracked and would ride a `git add -A` into the deliverable.
+    # Without a tracked original, the generated identity document must not enter git add -A.
     src = Path.join(tmp, "bare-src")
     File.mkdir_p!(src)
     {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", src], stderr_to_stdout: true)

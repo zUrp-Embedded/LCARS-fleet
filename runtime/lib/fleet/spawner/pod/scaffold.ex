@@ -1,30 +1,8 @@
 defmodule Fleet.Spawner.Pod.Scaffold do
   @moduledoc """
-  WORKSPACE & SESSION of the pod_dir — island extracted from `Fleet.Spawner.Pod`.
-
-  The disk steps of the boot that touch the pod's work SUBSTRATE: GC of the session UUID before a
-  re-spawn (`:cleaning`), project workspace bootstrap (git clone + doc branch, `:projecting`) and
-  restore of the recall seed (`:projecting`). The two other families of steps have their own
-  dedicated islands: the vendor/priv ASSETS (`Pod.Assets` — settings/draft/protocole/watch.sh) and
-  the BRIEF (`Pod.Brief` — `issues/<id>.md` + TaskQueue enqueue).
-
-  This module does NOT ORCHESTRATE: the `:cleaning`/`:projecting` STATES stay at the heart of `Pod`
-  (their big `with` is the orchestrator). Each step returns `:ok` or a tagged `{:error, reason}`
-  that the `:projecting` state's `with` propagates to `transition_failed` (clean cleanup:
-  phase=failed + state.json written). `Pod` passes it the `state` as an argument; the module calls
-  back NO private of `Pod` (no cycle).
-
-  ## Contract (called by `Pod`)
-
-  - `gc_stale_session_jsonl(state)` — called by the `:cleaning` state (GC of the session UUID before
-    a `--session-id` re-spawn).
-  - `maybe_bootstrap_project_workspace(state)` / `maybe_recall_restore(state)` — steps called in the
-    `:projecting` state's `with`.
-
-  Depends on `Pod.LaunchSpec` (effective cwd/project), `Pod.SessionFiles` (shared glob of the
-  session jsonl), `Fleet.CapProfile` (single source of the `name` + `with_project/2`),
-  `Fleet.ProjectBootstrap.Phase.Clone` (workspace + doc clone) and `Fleet.Spawner.SeedStore`
-  (recall restore). No dependency toward `Fleet.Spawner.Pod`.
+  Prepares pod workspaces and session files: stale UUID cleanup, project clone and recall
+  seed restoration. Pod orchestrates these steps in cleaning/projecting and handles
+  returned errors; `Pod.Assets` owns static assets and `Pod.Brief` owns brief delivery.
   """
 
   require Logger
@@ -33,20 +11,16 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   alias Fleet.Spawner.Pod.SessionFiles
 
   @doc """
-  Removes stale JSONLs for the deterministic session ID across all cwd slugs.
-
-  Removal is best-effort and logged per file; a residue is surfaced by the later
-  vendor launch.
+  Renames matching stale session JSONLs to `.dead`, freeing the UUID while retaining
+  one generation of transcript evidence. Best-effort; a rename failure is logged and
+  may leave the vendor reporting the session ID already in use.
   """
   @spec gc_stale_session_jsonl(map()) :: :ok
   def gc_stale_session_jsonl(state) do
     state.pod_dir
     |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
-      # RENAME, not rm: the stale jsonl is the DEAD predecessor's
-      # transcript — the only forensic trail of what it was doing when killed. `.dead` frees the
-      # UUID exactly like removal (the glob matches *.jsonl only) and keeps ONE generation of
-      # evidence; the next death replaces it.
+      # Renaming leaves one predecessor transcript for diagnosis while removing it from *.jsonl scans.
       case File.rename(f, f <> ".dead") do
         :ok ->
           Logger.info(
@@ -66,24 +40,16 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   @doc """
-  Wiring of `Fleet.ProjectBootstrap.Phase.Clone` for pods carrying a project (`repo_path`): the
-  EFFECTIVE project comes from the BRIEF (`LaunchSpec.effective_project/2`: `opts[:project]`
-  injected by the issue→repo dispatch) or from the static cap_profile (permanent pods). Present:
-  clones the repo into `<pod_dir>/workspace/` + checkout of the feature branch; the REPL's cwd
-  points at this workspace (`maybe_put_pod_cwd` → `LCARS_POD_CWD`) → the agent codes INSIDE its
-  branch (idempotent clone on respawn). The composed `CLAUDE.md` is copied to the root of the
-  workspace ONLY when the repo does not track one of its own — a tracked `CLAUDE.md` is both the
-  producer's INPUT and a legitimate deliverable, so it stays untouched and stageable. Absent
-  (`repo_path` nil) → no-op.
+  Bootstraps a project workspace from opts[:project] or the profile’s static project.
+  A missing repo_path is a no-op. Clone errors are tagged `:project_workspace_clone_failed`.
 
-  The OTHER production face is NOT cloned here: it reaches the pod as an RO mount of a copy PINNED
-  at the face's head (`LaunchSpec.pin_reference_face/2`, bound at the canonical
-  `<face_root>/<project>`), so the reference does not move under a running pod and survives its
-  source. Only a launch env built without a `pod_dir` falls back to a live RO bind of the worktree.
+  After cloning, enriches the pod’s composed CLAUDE.md with filtered repository sections.
+  The repository’s tracked CLAUDE.md stays intact and stageable. If none is tracked,
+  copy the composed document into the workspace and exclude it locally from Git.
+  Document enrichment/copy failures log without refusing launch.
 
-  The pod's commit identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
-  the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*` = the HUMAN, role in the
-  trailer) and the guarantee lives on the world side (DeliverableGate gate at push).
+  LaunchSpec supplies the other production face separately; LaunchEnv supplies Git identity,
+  with deliverable checks enforcing it at publication.
   """
   @spec maybe_bootstrap_project_workspace(map()) ::
           :ok | {:error, {:project_workspace_clone_failed, term()}}
@@ -104,13 +70,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     end
   end
 
-  # Repo-section rail, HERE and not earlier in the `:projecting` chain (BL-6-16): the composer runs
-  # before the clone, so `CLAUDE.md.repo-source` cannot exist at composition time. Post-clone is the
-  # first moment the original is READABLE (from GIT, never the working tree — from the 2nd spawn on
-  # the tree carries OUR composed file): write repo-source, re-compose the CLAUDE.md with it
-  # (RepoSections filters each section through Fleet.ReceptionFilter — hostile sections are dropped
-  # loud there), overwrite the pod_dir copy. Best-effort LOUD: a failure degrades to the
-  # identity-only CLAUDE.md of :projecting, never a HALT.
+  # Composition precedes cloning, so repository sections can only be read here. Read them
+  # from Git rather than a possibly composed working-tree copy, then apply ReceptionFilter.
   defp settle_workspace_doc(state, workspace, branch) do
     claim_workspace_doc(maybe_enrich_claude_md(state, workspace), state, workspace)
 
@@ -119,17 +80,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     :ok
   end
 
-  # ⚠ ON N'ECRASE PAS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de tout
-  # producteur (ses sept sections voyagent dans le prompt compose) et il doit rester LIVRABLE :
-  # c'est par la que ses conventions se mettent a jour quand la pile change. L'ecraser obligerait a
-  # le masquer (`skip-worktree`), donc a rendre `git status` propre et `git diff` vide EN AYANT TORT
-  # — un producteur qui applique la discipline de preuve obtient alors un FAUX NEGATIF et declare le
-  # critere tenu de bonne foi.
-  #
-  # Ce que la copie apporterait vit ailleurs : l'identite arrive par `--system-prompt-file`
-  # (remplacante et fiable, claude_launch.sh), et la doctrine de sortie/preuve/path est dans les
-  # blocs SP (le bloc du monde projete, `evidence`, `producer-output`). Un fichier compose ne
-  # porterait que l'identite dupliquee et les sections du depot — que l'agent lit a leur source.
+  # A tracked CLAUDE.md is both input and deliverable. Overwriting or hiding it would make
+  # producer edits disappear from Git evidence; pod identity already comes through the system prompt.
   defp claim_workspace_doc(:tracked, state, _workspace) do
     Logger.info(
       "pod #{state.pod_id} workspace CLAUDE.md: celui du DEPOT, intact et livrable " <>
@@ -137,11 +89,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     )
   end
 
-  # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace): the
-  # agent pops into an already-documented project. The :projecting state writes it at the pod_dir
-  # (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes without its
-  # codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD, not fatal (the pod still launches;
-  # the doc-in-cwd is a degradation, not a HALT).
+  # For untracked repos, place the composed document at the actual cwd; copy failure is nonfatal.
   defp claim_workspace_doc(_repo_doc, state, workspace),
     do: copy_composed_claude_md(state, workspace)
 
@@ -179,12 +127,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     end
   end
 
-  # cf. the call-site comment (anti-leak, untracked case). Idempotent; best-effort LOUD.
-  # Anti-leak, cas UNTRACKED (mesure sur le banc scribe : `?? CLAUDE.md` dans git status) : sur un
-  # depot qui ne suit pas de CLAUDE.md racine, NOTRE copie composee est stageable — un `git add -A`
-  # du pod embarquerait de la matiere d'identite dans son livrable, et le mur de chemins du gate
-  # autorise deliberement le CLAUDE.md racine. `.git/info/exclude` la cache d'add/status, reste
-  # local au clone, et ne part jamais.
+  # Exclude only the generated, untracked document so git add -A cannot ship pod identity.
+  # .git/info/exclude stays local and does not affect tracked repository documents.
   defp copy_composed_claude_md(state, workspace) do
     case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
       :ok ->
@@ -226,15 +170,8 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     :ok
   end
 
-  # The repo-section rail (BL-6-16 — cf. the call-site comment for WHY here and not earlier).
-  # Original absent (an adopted repo that tracks none; a template-born repo tracks the
-  # template's) → silent no-op,
-  # the :projecting composition stands. Any failure past that point degrades LOUD to the
-  # identity-only CLAUDE.md — a pod without repo conventions beats no pod, and beats a pod
-  # whose repo doc bypassed the reception filter.
-  # Rend `:tracked` quand le depot porte une racine `CLAUDE.md` A HEAD (`git show HEAD:CLAUDE.md` —
-  # c'est exactement le predicat « ce fichier est versionne », pas « il existe sur le disque »), et
-  # `:absent` sinon. L'appelant s'en sert pour NE PAS ecraser un fichier livrable.
+  # Original presence is determined at HEAD. Enrichment failures retain :tracked so the
+  # caller preserves that deliverable even when the pod-side composition failed.
   defp maybe_enrich_claude_md(state, workspace) do
     case Fleet.ProjectBootstrap.Phase.Clone.read_original_claude_md(workspace) do
       :absent ->
@@ -254,10 +191,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                 "the pod launches on the identity-only CLAUDE.md (no repo conventions)"
             )
 
-            # `:tracked` MEME EN ECHEC : le depot porte bien ce fichier (on vient de le lire a HEAD),
-            # seule la composition de la copie pod_dir a rate. Rendre `:absent` ici ferait ecraser un
-            # fichier livrable par une copie degradee — l'echec d'un confort deviendrait la perte
-            # d'une entree.
+            # Return :tracked on enrichment failure too: a degraded copy must not overwrite the original.
             :tracked
         end
     end
