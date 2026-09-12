@@ -355,7 +355,8 @@ for p in forge deck ssh; do
   esac
 done
 echo "             projet $(ou "$(fait projet)") · ports $ports_ligne"
-[[ -z "$(fait projet_pris)" ]] || echo "             ${R}projet déjà présent sur ce daemon : $(fait projet_pris)${N}"
+PROJET_ROUGE=""; [[ "$MODE" != "container" ]] || PROJET_ROUGE="$R"
+[[ -z "$(fait projet_pris)" ]] || echo "             ${PROJET_ROUGE}projet déjà présent sur ce daemon : $(fait projet_pris)${N}"
 echo ""
 
 # ─── 5. ce qui arrête, avant toute grille ─────────────────────────────────────────────────────

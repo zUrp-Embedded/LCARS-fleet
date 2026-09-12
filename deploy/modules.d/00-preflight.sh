@@ -197,11 +197,14 @@ check() {
   fi
 
   # ─── Les ports et le projet compose ───────────────────────────────────────────────────────────
-  local base="$PROV_FORGE_BASE" nom port etat
+  local base="$PROV_FORGE_BASE" nom port etat landing services_env
   local -a miens=("$PROV_FORGE_PROJECT" "$base-fleet" "$PROV_RUNNER_PROJECT")
+  landing=""; services_env="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+  [[ ! -r "$services_env" ]] || landing="$(sed -n 's/^LCARS_LANDING_PORT=//p' "$services_env" | tail -1)"
   for nom in forge:"$PROV_FORGE_HOST_PORT" deck:"$PROV_DECK_PORT" ssh:"$PROV_SSH_PORT"; do
     port="${nom#*:}"
     etat="$(port_state "$port" "${miens[@]}")"
+    [[ "$etat" != pris* || "$nom" != deck:* || "$port" != "$landing" ]] || etat="nous lcars-landing (service)"
     p_fact "port_${nom%%:*}" "$port $etat"
     [[ "$etat" != pris* ]] || p_warn "port $port (${nom%%:*}) $etat"
   done

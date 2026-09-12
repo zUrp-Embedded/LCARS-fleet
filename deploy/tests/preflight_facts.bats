@@ -231,6 +231,17 @@ apt_installs comptes_humains sudo curl git channel channel_tree"
   [ "$(fact port_deck)" = "$p pris" ]
 }
 
+@test "le port du deck tenu par notre service landing est dit nous" {
+  local p; p="$(free_port)"
+  ss_muet "$p"
+  listen_on "$p"
+  printf 'LCARS_LANDING_PORT=%s\n' "$p" > "$BATS_TEST_TMPDIR/services.env"
+  preflight wsl PROV_DECK_PORT="$p" LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/services.env"
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$(fact port_deck)" = "$p nous lcars-landing (service)" ]
+  [[ "$output" != *"port $p"*"pris"* ]]
+}
+
 @test "les trois ports suivent leurs variables, ssh compris" {
   preflight docker PROV_FORGE_HOST_PORT=30001 PROV_DECK_PORT=30002 PROV_SSH_PORT=30003
   [[ "$(fact port_forge)" == 30001* ]]
