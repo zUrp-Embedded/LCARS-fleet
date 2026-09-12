@@ -31,19 +31,18 @@ setup() {
   PROFILE="$DOCKER_DIR/lcars-hardened-seccomp.json"
 }
 
-@test "6-071: the two composes that grant SYS_ADMIN point at the hardened profile" {
-  local found=0
-  for f in "$DOCKER_DIR/docker-compose.yml" "$DOCKER_DIR/docker-compose.install.yml"; do
-    [[ -f "$f" ]] || continue
-    grep -q "SYS_ADMIN" "$f" || continue
-    found=$((found + 1))
-    grep -q "seccomp=./lcars-hardened-seccomp.json" "$f"
-    # LA REGRESSION FACILE, celle qu'on ecrit a 2 h du matin quand un pod ne demarre plus.
-    refute grep -qE "^\s*-\s*seccomp=unconfined" "$f"
+@test "6-071: the compose that grants SYS_ADMIN points at the hardened profile, and it is the only one" {
+  local f="$DOCKER_DIR/docker-compose.yml"
+  [[ -f "$f" ]]
+  grep -q "SYS_ADMIN" "$f"
+  grep -q "seccomp=./lcars-hardened-seccomp.json" "$f"
+  refute grep -qE "^\s*-\s*seccomp=unconfined" "$f"
+  # un seul compose porte le conteneur ; bench et secrets sont des surcouches
+  local c n=0
+  for c in "$DOCKER_DIR"/docker-compose*.yml; do
+    case "$c" in *bench*|*secrets*) ;; *) n=$((n + 1)) ;; esac
   done
-
-  # Sans ce garde, supprimer les deux fichiers rendrait ce test vert.
-  [[ "$found" -eq 2 ]]
+  [ "$n" -eq 1 ]
 }
 
 @test "6-071: the profile exists, is valid JSON, and refuses by default" {

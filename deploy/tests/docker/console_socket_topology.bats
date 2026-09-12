@@ -300,23 +300,20 @@ ports_of() {
   grep -oE '^\s*- "[^"]+"' "$1" | grep -oE ':[0-9]+"$' | tr -d ':"' | sort -u
 }
 
-@test "6-072: neither compose publishes a RANGE of ports" {
+@test "6-072: the compose publishes no RANGE of ports" {
   local dir="$BATS_TEST_DIRNAME/../../docker"
   refute grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.yml"
-  refute grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.install.yml"
 }
 
-@test "6-072: NOTHING of the per-human block space is published, by either compose" {
+@test "6-072: NOTHING of the per-human block space is published" {
   # La propriete, pas la liste : un port publie sans ecoutant est une adresse libre dans un
   # conteneur qui porte SYS_ADMIN, et les listeners bindent 0.0.0.0 a l'interieur — donc CE BLOC EST
   # LA FRONTIERE. Enumerer les vivants obligerait a re-editer ce test a chaque service ; interdire
   # l'espace entier tient tout seul.
   local dir="$BATS_TEST_DIRNAME/../../docker" p
-  for f in docker-compose.yml docker-compose.install.yml; do
-    for p in $(ports_of "$dir/$f"); do
-      [ "$p" -lt 21000 ] || [ "$p" -gt 25999 ] \
-        || { echo "$f publie $p, dans l'espace des blocs" >&2; return 1; }
-    done
+  for p in $(ports_of "$dir/docker-compose.yml"); do
+    [ "$p" -lt 21000 ] || [ "$p" -gt 25999 ] \
+      || { echo "docker-compose.yml publie $p, dans l'espace des blocs" >&2; return 1; }
   done
 }
 
@@ -329,17 +326,6 @@ ports_of() {
   [ -n "$pub" ]
   grep -qx "20999" <<< "$pub"   # la porte du conteneur
   grep -qx "22"    <<< "$pub"   # ssh, la porte d'admin
-}
-
-@test "6-072: the two composes publish the SAME list — a drift would be silent" {
-  # One is the dev compose, the other the installed one. They already diverged once on a port
-  # variable (measured 2026-08-03, and the divergence WAS the trap). Nothing but this test makes
-  # the duplication safe.
-  local dir="$BATS_TEST_DIRNAME/../../docker" a b
-  a="$(ports_of "$dir/docker-compose.yml")"
-  b="$(ports_of "$dir/docker-compose.install.yml")"
-  [ -n "$a" ] && [ -n "$b" ]
-  [ "$a" = "$b" ]
 }
 
 @test "the deck gains the console group and NOT fleet" {

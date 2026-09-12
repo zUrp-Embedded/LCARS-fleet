@@ -40,7 +40,6 @@ setup() {
   DEPLOY="$BATS_TEST_DIRNAME/../.."
   STORE_LIB="$DEPLOY/lib/store.sh"
   COMPOSE="$DEPLOY/docker/docker-compose.yml"
-  COMPOSE_INSTALL="$DEPLOY/docker/docker-compose.install.yml"
   # shellcheck source=../../lib/store.sh
   source "$STORE_LIB"
   # Le prefixe est EXIGE par la lib (aucun defaut, pour que deux installations ne puissent pas
@@ -106,14 +105,9 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   [ ! -s "$calls" ]
 }
 
-@test "les deux compose EXIGENT le prefixe — un up sans lui est refuse, jamais silencieux" {
-  # `:?` et non `:-` : c'est la moitie compose du temoin precedent. Sans elle, la lib refuserait de
-  # creer pendant que le compose monterait joyeusement un nom nu.
-  local f
-  for f in "$COMPOSE" "$COMPOSE_INSTALL"; do
-    [ "$(grep -c 'LCARS_STORE_PREFIX:?' "$f")" -eq 4 ] \
-      || { echo "les 4 volumes de $f n'exigent pas tous le prefixe"; return 1; }
-  done
+@test "le compose EXIGE le prefixe sur ses quatre volumes — un up sans lui est refuse, jamais silencieux" {
+  # `:?` et non `:-` : sans elle, la lib refuserait de creer pendant que le compose monterait un nom nu.
+  [ "$(grep -c 'LCARS_STORE_PREFIX:?' "$COMPOSE")" -eq 4 ]
 }
 
 @test "REGRESSION — chaque montage du magasin a son volume EXTERNE, aucun ne tombe sur la couche conteneur" {
@@ -129,18 +123,9 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   done < <(store_mounts "$COMPOSE")
 }
 
-@test "les deux compose qui portent le conteneur montent EXACTEMENT le meme magasin" {
-  # `docker-compose.install.yml` porte le meme conteneur que `docker-compose.yml` (le banc l'utilise).
-  # Un magasin present d'un cote et pas de l'autre donnerait une install ou un banc qui perd ses
-  # artefacts sans que rien ne le dise — et c'est le banc qui les fabrique.
-  [ "$(store_mounts "$COMPOSE" | sort)" = "$(store_mounts "$COMPOSE_INSTALL" | sort)" ]
-}
-
-@test "le chemin du magasin est ecrit par les compose SEULS, jamais par un script" {
-  # store.sh possede les NOMS, le compose possede le CHEMIN. Un `/var/lib/lcars` en dur dans un
-  # script serait une seconde verite, et c'est celle qu'on ne relit pas qui derive.
+@test "le chemin du magasin est ecrit par le compose SEUL, jamais par un script" {
+  # store.sh possede les NOMS, le compose possede le CHEMIN.
   grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE"
-  grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE_INSTALL"
   refute grep -q "/var/lib/lcars" "$STORE_LIB"
 }
 

@@ -89,7 +89,7 @@ printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "
 rm -f "$RUNNER_ENV_DOWN"
 
 echo "[bench-down] destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
+"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true

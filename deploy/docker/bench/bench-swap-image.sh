@@ -148,7 +148,7 @@ LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
 ENVEOF
 trap 'rm -f "$SWAP_ENV"' EXIT
 
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$CONTAINER_PROJECT" create \
+"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" create \
   || die "le conteneur ne se cree pas" 3
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$CONTAINER" \

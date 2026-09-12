@@ -85,6 +85,18 @@ while [[ $# -gt 0 ]]; do
     -p|--project)
       [[ -n "${2:-}" ]] || { echo "container: -p attend un nom de projet" >&2; exit 1; }
       PROJECT="$2"; shift 2 ;;
+    # le vocabulaire de l'installeur : la base des projets, et les ports publiés sur la loopback
+    --forge-project)
+      [[ -n "${2:-}" ]] || { echo "container: --forge-project attend un nom" >&2; exit 1; }
+      PROJECT="$2-fleet"; shift 2 ;;
+    --port-deck)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "container: --port-deck attend un port" >&2; exit 1; }
+      export LCARS_LANDING_PORT_BIND="127.0.0.1:$2"; shift 2 ;;
+    --port-ssh)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "container: --port-ssh attend un port" >&2; exit 1; }
+      export LCARS_SSH_PORT="127.0.0.1:$2"; shift 2 ;;
+    --port-forge)
+      echo "container: --port-forge n'a pas d'objet ici — la forge est fournie (FORGE_BASE_URL) ; pour en monter une : --bench" >&2; exit 1 ;;
     *) break ;;
   esac
 done
@@ -174,6 +186,24 @@ project_config_files() {
     --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
 }
 
+# Une instance née d'un compose qui nommait autrement ses volumes : un up la recréerait sur un
+# /home vide, l'ancien volume restant en place hors de vue. Les deux noms viennent de docker et de
+# compose, jamais d'une composition ici.
+assert_home_volume_kept() {
+  local id cible cle actuel attendu
+  id="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | head -n1)" || return 0
+  [[ -n "$id" ]] || return 0
+  for cible in /home:lcars-home /opt/lcars/var:lcars-var; do
+    cle="${cible#*:}"; cible="${cible%%:*}"
+    actuel="$("$DOCKER" inspect "$id" --format "{{range .Mounts}}{{if eq .Destination \"$cible\"}}{{.Name}}{{end}}{{end}}" 2>/dev/null)" || continue
+    [[ -n "$actuel" ]] || continue
+    attendu="$(compose config --format json 2>/dev/null \
+      | python3 -c "import json,sys; print(json.load(sys.stdin)['volumes']['$cle']['name'])" 2>/dev/null)" || continue
+    [[ -n "$attendu" && "$actuel" != "$attendu" ]] || continue
+    fail "le projet « $PROJECT » monte $cible depuis le volume « $actuel », et ce compose le monterait depuis « $attendu » — un up le recréerait sur un volume vide" \
+         "garder les données : docker run --rm -v $actuel:/from -v $attendu:/to alpine cp -a /from/. /to/ — ou les jeter : deploy/container -p $PROJECT reset — puis up"
+  done
+}
 assert_project_ours() {
   local files line
   files="$(project_config_files)"
@@ -229,6 +259,7 @@ cmd_build() {
 
 cmd_up() {
   assert_project_ours up
+  assert_home_volume_kept
   build_env
   # ⚠ AVANT LE `up`, ET C'EST UN ORDRE. Les volumes du magasin sont `external: true` : compose ne
   # les cree pas, il REFUSE de demarrer s'ils manquent, et ce script est le seul a s'executer avant.
@@ -264,7 +295,7 @@ cmd_up() {
   fi
   compose up -d --no-build "$@"
   echo ""
-  echo "LCARS fleet up (projet $PROJECT). Accès :"
+  echo "LCARS fleet up (projet $PROJECT, image $img). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet start"
   echo "  deploy/container status                                   # l'état de l'instance, vu de l'hôte"
   await_provision_verdict
@@ -621,7 +652,13 @@ EOF
 # SANS repli (`${…:?}`) : deux defauts independants qui s'accordent par coincidence sont ce qui a
 # produit B1 (relecture hostile 2026-09-04, M12). Exportes : compose est un processus fils.
 : "${LCARS_SSH_PORT:=127.0.0.1:2222}"
-: "${LCARS_IMAGE:=lcars-fleet:local}"
+# l'image de dev bâtie ici si elle existe, sinon le défaut du compose : la release publiée
+image_defaut() {
+  if "$DOCKER" image inspect lcars-fleet:local >/dev/null 2>&1; then echo lcars-fleet:local
+  else sed -nE 's/^[[:space:]]*image: "\$\{LCARS_IMAGE:-([^}]+)\}".*$/\1/p' "$COMPOSE_FILE" | head -n1
+  fi
+}
+: "${LCARS_IMAGE:=$(image_defaut)}"
 export LCARS_SSH_PORT LCARS_IMAGE
 : "${LCARS_FORGE_PORT:=127.0.0.1:3300}"
 

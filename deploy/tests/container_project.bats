@@ -45,6 +45,8 @@ setup() {
   cat > "$BINDIR/docker" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
+if [[ "\$*" == *"config --format json"* ]]; then printf '{"volumes":{"lcars-home":{"name":"%s"}}}\n' "\${STUB_COMPOSE_HOME:-}"; exit 0; fi
+if [[ "\$*" == *".Mounts"* ]]; then echo "\${STUB_HOME_VOLUME:-}"; exit 0; fi
 case "\$1 \$2" in
   "compose version") exit 0 ;;
   "ps -aq")          printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0 ;;
@@ -68,7 +70,7 @@ EOF
   chmod 0755 "$BINDIR/docker"
 
   export PATH="$BINDIR:$PATH"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC STUB_VOLUMES
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC STUB_VOLUMES STUB_HOME_VOLUME STUB_COMPOSE_HOME
 
   # ⚠ SANS CETTE LIGNE, CES SEIZE TEMOINS DEPENDENT D'UNE SOCKET SUR LA MACHINE QUI LES JOUE.
   # Le delegue sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
@@ -178,22 +180,14 @@ seed_project() {
   [[ "$output" == *"annulé"* ]]
 }
 
-# ⚠ CE TEMOIN ASSERAIT `lcars-a-moi_lcars-home`, ET CE VOLUME N'EXISTE PAS.
-#
-# `container` n'ouvre QUE `docker-compose.yml`, qui declare `home:` — donc docker cree `<projet>_home`.
-# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `container` ne lit
-# jamais. Le temoin epinglait donc le nom recopie depuis le mauvais fichier, et il verrouillait le
-# defaut : `reset` annoncait la destruction du /home du conteneur, retirait un fantome, et laissait
-# le vrai volume intact — a chaque fois. `compose down` sans `-v` n'y touche pas non plus.
-#
-# Ce qui est epingle maintenant : le nom se DERIVE de docker (meme filtre par label que les
-# conteneurs), il ne se compose plus. Un test qui recopierait le nom attendu referait le defaut.
+# Le nom des volumes se dérive de docker (filtre par label de projet), il ne se recompose jamais
+# depuis le compose : un nom recopié à la main a déjà fait retirer un fantôme en laissant le vrai.
 
 @test "reset NOMME les volumes que docker declare, il ne les compose pas" {
-  STUB_VOLUMES="$(printf 'lcars-a-moi_home\nlcars-a-moi_cache')" \
+  STUB_VOLUMES="$(printf 'lcars-a-moi_lcars-home\nlcars-a-moi_cache')" \
     run setsid --wait bash "$SRC" -p lcars-a-moi reset </dev/null
   [ "$status" -eq 1 ]
-  [[ "$output" == *"lcars-a-moi_home"* ]]
+  [[ "$output" == *"lcars-a-moi_lcars-home"* ]]
   [[ "$output" == *"lcars-a-moi_cache"* ]]
 }
 
@@ -210,6 +204,18 @@ seed_project() {
   # forcement la forme fautive. Un temoin qui lit la prose interdit d'ecrire pourquoi.
   run bash -c "grep -vE '^[[:space:]]*#' '$SRC' | grep -nE '\\\$\\{PROJECT\\}_[a-z-]+'"
   [ "$status" -ne 0 ]
+}
+
+@test "up refuse une instance dont /home vit sur un autre volume que celui du compose — jamais un /home vide en silence" {
+  seed_project "$CF"
+  STUB_HOME_VOLUME=lcars-fleet_home STUB_COMPOSE_HOME=lcars-fleet_lcars-home run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars-fleet_home"*"lcars-fleet_lcars-home"*"volume vide"* ]]
+  [[ "$output" == *"reset"* ]]
+  refute grep -qE "compose .* up" "$CALLS"
+  # même volume des deux côtés : la garde se tait
+  STUB_HOME_VOLUME=lcars-fleet_lcars-home STUB_COMPOSE_HOME=lcars-fleet_lcars-home run bash "$SRC" up
+  [[ "$output" != *"volume vide"* ]]
 }
 
 @test "LCARS_PROJECT is read, and -p overrides it" {
@@ -307,7 +313,9 @@ seed_project() {
   [[ "$output" == *"PACK:--no-image"* ]]
   refute grep -qE -- "compose .*build|build --target" "$CALLS"
   # et le defaut d'image est celui que pack.sh pose : `lcars-fleet:local`
-  grep -qE '^: "\$\{LCARS_IMAGE:=lcars-fleet:local\}"' "$SRC"
+  # l'image : celle bâtie ici si elle existe, sinon le défaut du compose — une seule déclaration
+  grep -qE '^: "\$\{LCARS_IMAGE:=\$\(image_defaut\)\}"' "$SRC"
+  grep -q 'lcars-fleet:local' "$SRC"
 }
 
 # ─── LA DECOUPE ELLE-MEME ────────────────────────────────────────────────────────────────────────

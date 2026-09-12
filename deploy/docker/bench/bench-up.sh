@@ -88,14 +88,12 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project)    PROJECT="${2:?}"; shift 2 ;;
-    --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
-    --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
-    # ⚠ LE PORT SSH ETAIT LE SEUL DES TROIS A NE PAS AVOIR SON OPTION, et c'est le pre-vol des
-    # ports qui l'a rendu visible : deux bancs sur une meme machine se refusaient sur 2222 alors
-    # que la forge et le deck, eux, se deplacaient. Un banc de plus par machine est le cas
-    # ordinaire ici (un jetable qu'on casse, un complet ou on travaille), pas une exception.
-    --ssh-port)   SSH_PORT="${2:?}"; shift 2 ;;
+    # le vocabulaire de l'installeur (--forge-project, --port-*) est accepté tel quel, à côté de l'ancien
+    --project|--forge-project)  PROJECT="${2:?}"; shift 2 ;;
+    --forge-port|--port-forge)  FORGE_PORT="${2:?}"; shift 2 ;;
+    --deck-port|--port-deck)    DECK_PORT="${2:?}"; shift 2 ;;
+    --bench)                    shift ;;   # ce script est le banc : le drapeau qui l'a choisi n'ajoute rien
+    --ssh-port|--port-ssh)      SSH_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
@@ -128,7 +126,7 @@ FORGE_PROJECT="${PROJECT}-forge"
 FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
 FORGE_NET="${FORGE_PROJECT}_default"
 CONTAINER="${CONTAINER_PROJECT}-lcars-1"
-COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
+COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
 # ─── LES DEUX ADRESSES, ET ELLES NE SE CONFONDENT PAS ────────────────────────────────────────────
 #
 #   FORGE_LOCAL_URL  celle que CE script compose pour parler a la forge (sondes, amorcage, API).
@@ -141,9 +139,7 @@ COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker
 # Un bind precis (`--bind 127.0.0.5`) rend les deux egales et l'ancien comportement revient.
 # shellcheck source=../../lib/provision-lib.sh
 source "$DOCKER_DIR/../lib/provision-lib.sh"
-# Les noms des volumes du magasin. Le banc monte LE MEME conteneur que l'install nominale
-# (`docker-compose.install.yml`), donc il porte les memes volumes externes — et il doit les poser
-# avant son `create`, pour la meme raison : compose REFUSE de demarrer sur un `external` absent.
+# Les volumes externes du magasin existent avant le `create` : compose refuse un `external` absent.
 # shellcheck source=../../lib/store.sh
 source "$DOCKER_DIR/../lib/store.sh"
 

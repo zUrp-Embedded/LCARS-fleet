@@ -18,19 +18,18 @@ load ../refute
 
 setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
-  DEV="$DOCKER/docker-compose.yml"; PULL="$DOCKER/docker-compose.install.yml"
+  DEV="$DOCKER/docker-compose.yml"
   PROTO="$DOCKER/../../runtime/services/lib/module-protocol.sh"
 }
 env_of() { sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1; }
 mounts_of() { sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+).*$/\1/p'; }
 under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]] && return 0; done < <(mounts_of "$2"); return 1; }
 
-@test "le client OAuth2 du deck est sous un volume, dans les deux composes, au MEME chemin" {
-  local dev pull
-  dev="$(env_of "$DEV" LCARS_DECK_OIDC_FILE)"; pull="$(env_of "$PULL" LCARS_DECK_OIDC_FILE)"
-  [ -n "$dev" ] && [ "$dev" = "$pull" ]
+@test "le client OAuth2 du deck est sous un volume du compose" {
+  local dev
+  dev="$(env_of "$DEV" LCARS_DECK_OIDC_FILE)"
+  [ -n "$dev" ]
   under_mount "$dev" "$DEV"  || { echo "$dev hors de tout volume de $DEV" >&2; return 1; }
-  under_mount "$pull" "$PULL" || { echo "$pull hors de tout volume de $PULL" >&2; return 1; }
   refute grep -qE '^\s*LCARS_DECK_OIDC_FILE:\s*/etc/' "$DEV"
 }
 
@@ -47,7 +46,7 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]
 @test "le repertoire prive (jetons) est aussi sous le volume var — l'etat ne se separe pas" {
   local priv; priv="$(sed -nE 's/^: "\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/\1/p' "$PROTO" | head -1)"
   [ -n "$priv" ]
-  under_mount "$priv" "$DEV" && under_mount "$priv" "$PULL"
+  under_mount "$priv" "$DEV"
 }
 
 @test "TOUT chemin d'etat que l'init ou le protocole nomme tombe sous un volume — ou dans la liste d'exceptions ECRITE ici" {
@@ -83,8 +82,8 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]
     [ -n "$p" ] || continue
     [[ "$p" == /run/* ]] && continue
     [[ "$exceptions" == *" $p "* ]] && continue
-    under_mount "$p" "$DEV" && under_mount "$p" "$PULL" && continue
-    echo "$p : ecrit par l'init ou le protocole, hors de tout volume des deux composes, et pas nomme dans les exceptions" >&2
+    under_mount "$p" "$DEV" && continue
+    echo "$p : ecrit par l'init ou le protocole, hors de tout volume du compose, et pas nomme dans les exceptions" >&2
     rompu=1
   done <<<"$chemins"
   [ "$rompu" -eq 0 ]

@@ -131,4 +131,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ -n "$l_tar" ] && [ -n "$l_door" ] && [ "$l_tar" -lt "$l_door" ]
   # LCARS_DOOR_BASE surcharge la base (les bancs servent en local)
   grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
+  # le compose et le profil seccomp de la version entrent au tiroir, donc dans la table de la porte
+  grep -qE '^for _f in deploy/docker/docker-compose\.yml deploy/docker/lcars-hardened-seccomp\.json' <<<"$body"
+  grep -qE 'artefact de la version introuvable' <<<"$body"
 }

@@ -96,12 +96,10 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # s'executait JAMAIS. Un temoin vert sur un chemin que le produit n'atteint pas.
   #
   # La semence n'a pas de defaut : elle vient d'un appelant qui la POSE, jamais d'un `:-`.
-  local d="$BATS_TEST_DIRNAME/../../../../deploy/docker"
-  for f in "$d/docker-compose.yml" "$d/docker-compose.install.yml"; do
-    [ -f "$f" ]
-    run grep -c 'LCARS_ADMIRAL:-[^}]' "$f"
-    [ "$output" = "0" ]
-  done
+  local f="$BATS_TEST_DIRNAME/../../../../deploy/docker/docker-compose.yml"
+  [ -f "$f" ]
+  run grep -c 'LCARS_ADMIRAL:-[^}]' "$f"
+  [ "$output" = "0" ]
 }
 
 # ─── LE REFUS N'EMPORTE PLUS LE CONTENEUR ───────────────────────────────────────────────────────

@@ -287,6 +287,12 @@ for _f in "$OUT" "${OUT}.sha256"; do
   [[ -f "$_f" ]] || continue
   ln -f "$_f" "$DIST/$(basename "$_f")"
 done
+# le compose et le profil seccomp de cette version entrent dans la table de la porte (copiés :
+# le tiroir peut vivre sur un autre système de fichiers que le checkout)
+for _f in deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json; do
+  [[ -f "$_f" ]] || die "artefact de la version introuvable : $_f"
+  cp -f "$_f" "$DIST/$(basename "$_f")"
+done
 _FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
 _OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
 _REPO="${LCARS_PACK_REPO:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p')}"
