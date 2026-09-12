@@ -35,7 +35,7 @@ fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s
 
 # sudo remet l'environnement à zéro : seule cette liste traverse, nommée variable par variable.
 # Aucun secret ici — « sudo VAR=valeur » met la valeur dans l'argv d'un processus root.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
+ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BENCH LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
 
 escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0

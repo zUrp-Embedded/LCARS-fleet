@@ -495,7 +495,7 @@ delegue() { # delegue <workstation|container> -> DELEGUE, le chemin du script, v
 }
 if [[ "$MODE" == "workstation" ]]; then
   if [[ "$WITH_BENCH" -eq 1 ]]; then
-    export PROV_FORGE_MONTEE=1
+    export LCARS_BENCH=1 PROV_FORGE_MONTEE=1
     export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
   fi
   delegue workstation

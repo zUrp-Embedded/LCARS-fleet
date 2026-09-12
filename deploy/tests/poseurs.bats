@@ -39,7 +39,8 @@ setup() {
   # drapeau n'entre pas dans `PASSTHRU`. Sur le poste il posait une variable que personne ne lisait,
   # apres avoir annonce « forge jetable + runner CI + humain de demo ». Un drapeau accepte qui ne
   # fait rien est pire qu'un drapeau refuse : le refus laisse chercher, le silence laisse croire.
-  grep -q 'export PROV_FORGE_MONTEE=1' "$PORTE"
+  grep -q 'export LCARS_BENCH=1 PROV_FORGE_MONTEE=1' "$PORTE"
+  grep -qE '^ESCALADE_ENV=\(.*LCARS_BENCH ' "$DEPLOY/workstation"
   # et le banc du POSTE nomme son humain de demo comme celui du conteneur (ISO, ⚖ user 2026-09-11)
   grep -q 'export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"' "$PORTE"
   grep -qE '^ESCALADE_ENV=\(.*LCARS_BUILTIN_HUMAN' "$DEPLOY/workstation"

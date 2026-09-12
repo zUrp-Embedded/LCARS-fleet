@@ -11,6 +11,8 @@
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+# shellcheck source=../lib/forge-bootstrap.sh
+. "$(dirname "$PROVISION_LIB")/forge-bootstrap.sh"
 
 : "${PROV_FORGE_HOST_PORT:=21000}"              # le port qu'elle publie (aligné sur bench-up.sh)
 # Un `PROV_FORGE_ADMIN` posé explicitement par l'opérateur l'emporte toujours : `:=` ne remplit que
@@ -288,12 +290,9 @@ apply() {
 
     [[ "$was_up" -eq 1 ]] \
       || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
-    LCARS_DEVFORGE_PORT="$PROV_FORGE_HOST_PORT" LCARS_DEVFORGE_BIND="$PROV_FORGE_BIND" \
-    LCARS_DEVFORGE_ROOT_URL="$PUBLIC_URL/" \
-      run_quiet d compose -f "$COMPOSE_FILE" -p "$PROV_FORGE_PROJECT" up -d \
+    run_quiet forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_BIND" "$PUBLIC_URL" \
       || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
-    for _ in $(seq 1 60); do forge_up && break; sleep 2; done
-    forge_up || { p_fail "forge montée mais muette sur $FORGE_URL après 120 s"; verdict_apply; }
+    forge_wait "$FORGE_URL" || { p_fail "forge montée mais muette sur $FORGE_URL après 120 s"; verdict_apply; }
   fi
 
   if [[ "$FORGE_MONTEE" -eq 0 ]]; then
@@ -312,38 +311,43 @@ apply() {
 
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
 
+  # une forge fournie n'a pas de conteneur ici : son autorité se donne, elle ne se fabrique pas
+  if [[ "$FORGE_MONTEE" -eq 0 && ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+    p_drift "forge fournie sans autorité : y écrire un jeton master site-admin de cette forge dans $PROV_MASTER_TOKEN_FILE (0600, $PROV_AUTHORITY_USER), puis relancer"
+    verdict_apply
+  fi
   if [[ ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
-    local pw err rc; pw="$(new_password)"
-    err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
-    rc=0
-    d exec -u git "$FORGE_CONTAINER" gitea admin user create \
-      --username "$PROV_FORGE_ADMIN" --password "$pw" \
-      --email "$PROV_FORGE_ADMIN@lcars.local" --admin --must-change-password=false \
-      >/dev/null 2>"$err" || rc=$?
-
-    if [[ "$rc" -eq 0 ]]; then
-      announce_password "$PROV_FORGE_ADMIN" "$pw"
-    elif grep -qiE 'already exist|user already|login name.*taken' "$err" 2>/dev/null; then
-      p_ok "compte « $PROV_FORGE_ADMIN » déjà présent (son mot de passe est un hash, il n'est pas relisible)"
-      p_warn "besoin d'un mot de passe pour t'y connecter ? « PROV_FORGE_ADMIN_RESET=1 » sur un apply en pose un neuf et l'affiche"
-    else
-      p_fail "création du compte « $PROV_FORGE_ADMIN » REFUSÉE par la forge : $(tr -d '\r' < "$err" | grep -v '^$' | tail -3 | tr '\n' ' ')"
-      rm -f "$err"
-      verdict_apply
-    fi
-    rm -f "$err"
+    # en banc, le mot de passe de l'amiral est celui du contrat ; sinon aléatoire, annoncé une fois
+    local pw etat rc=0
+    if [[ "${LCARS_BENCH:-}" == "1" ]]; then pw="$(bench_admiral_password)"; else pw="$(new_password)"; fi
+    etat="$(forge_admin_ensure "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$pw" 2>"${TMPDIR:-/tmp}/forge-admin.$$")" || rc=$?
+    case "$rc:$etat" in
+      0:cree)
+        announce_password "$PROV_FORGE_ADMIN" "$pw" ;;
+      0:present)
+        if [[ "${LCARS_BENCH:-}" == "1" ]] && forge_admin_password "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$pw"; then
+          rc=0; announce_password "$PROV_FORGE_ADMIN" "$pw"
+        else
+          rc=1
+          p_ok "compte « $PROV_FORGE_ADMIN » déjà présent (son mot de passe est un hash, il n'est pas relisible)"
+          p_warn "pour obtenir un mot de passe : « PROV_FORGE_ADMIN_RESET=1 » sur un apply en pose un neuf et l'affiche"
+        fi ;;
+      *)
+        p_fail "création du compte « $PROV_FORGE_ADMIN » refusée par la forge : $(tr -d '\r' < "${TMPDIR:-/tmp}/forge-admin.$$" | grep -v '^$' | tail -3 | tr '\n' ' ')"
+        rm -f "${TMPDIR:-/tmp}/forge-admin.$$"
+        verdict_apply ;;
+    esac
+    rm -f "${TMPDIR:-/tmp}/forge-admin.$$"
 
     reset_admin_password_if_asked "$rc"
     docker_stream_ok "$FORGE_CONTAINER" || {
-      p_fail "le daemon docker répond aux lectures mais rend du VIDE sur « exec » (relais amputé) — rien ne peut être capturé depuis $FORGE_CONTAINER, et la forge n'y est pour rien. Vise la socket Docker Desktop directement : DOCKER_HOST=unix://$(_docker_mount_sock)"
+      p_fail "le daemon docker répond aux lectures mais rend du vide sur « exec » (relais amputé) — rien ne peut être capturé depuis $FORGE_CONTAINER, et la forge n'y est pour rien. Viser la socket Docker Desktop directement : DOCKER_HOST=unix://$(_docker_mount_sock)"
       verdict_apply
     }
     local tok
-    tok="$(d exec -u git "$FORGE_CONTAINER" gitea admin user generate-access-token \
-             --username "$PROV_FORGE_ADMIN" --token-name "poste-$(date +%s)" --scopes all --raw \
-             2>/dev/null | tail -n1 | tr -d '[:space:]')"
-    [[ -n "$tok" ]] || { p_fail "la forge n'a rendu aucun jeton master pour $PROV_FORGE_ADMIN"; verdict_apply; }
+    tok="$(forge_master_token "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "poste-$(date +%s)")" \
+      || { p_fail "la forge n'a rendu aucun jeton master pour $PROV_FORGE_ADMIN"; verdict_apply; }
     write_atomic "$PROV_MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
       || { p_fail "jeton master non posé ($PROV_MASTER_TOKEN_FILE)"; verdict_apply; }
     p_chg "autorité de création posée ($PROV_MASTER_TOKEN_FILE, $PROV_AUTHORITY_USER seul)"
@@ -374,7 +378,7 @@ apply() {
   #    (vu), donc un seed neuf donnerait un fichier qui ne correspond plus aux
   #    comptes et le mint des jetons de rôle partirait en 401.
   if [[ ! -s "$SEED_FILE" ]]; then
-    local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
+    local seed; seed="$(forge_seed_new)"
     [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
     write_atomic "$SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
