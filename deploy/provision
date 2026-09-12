@@ -2,100 +2,59 @@
 # SOURCE: deploy/provision
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — LE point d'entrée provisioning : apply (converge), doctor (sonde nuke-drill), list
+# STATUS: le runner du provisionnement — apply, doctor, update, list, audit sur modules.d/
 #
-# Machine nue → `fleet start` fonctionnel, en UN geste rejouable à l'infini :
-#     sudo deploy/provision apply
-#     deploy/provision doctor        # sonde read-only — LA sonde du nuke-drill
-#
-# Modèle (inversion délibérée de la v1) :
-#   - les modules `modules.d/NN-*.sh` sont des PROCESSUS exécutés, pas des scripts sourcés dans un
-#     namespace commun : un module qui meurt rend SON verdict, il n'avorte pas le durcissement des
-#     autres à moitié fait. L'ordre est le préfixe numérique, lisible dans un `ls`.
-#   - chaque module expose `check` (sonde read-only) et `apply` (check → fix → re-check) ;
-#     le doctor N'EST PAS un autre code : c'est le même check que l'apply utilise. Une seule vérité.
-#   - chaque module DÉCLARE son terrain en tête (greppable, pas de registre à maintenir), sur
-#     DEUX axes (D6 de l'ADR install/compile/release — les confondre rendait le doctor Docker
-#     muet sur le verrou RO, le câblage bin et la sonde bwrap) :
-#         # APPLY-ON: wsl linux   où les MUTATIONS tournent (en Docker le stage image a déjà
-#                                 appliqué → l'apply de ce module est remplacé par son check)
-#         # CHECK-ON: any         où l'ÉTAT-CIBLE doit être VRAI (le doctor sonde tout ça)
-#         # NEEDS: root|human     SOUS QUELLE IDENTITÉ le module est joué (le runner la pose)
-#   - AUCUNE sentinelle d'état : l'état, c'est le système, re-sondé à chaque run. (La machine à
-#     états v1 — .install_ok/.fleet_ready/.deploy_ok/.offline-bootstrap éparpillées sur 2 dossiers —
-#     pouvait rester coincée « ni-vierge-ni-provisionnée » sans un message pour l'humain.)
-#   - pas de reprise-par-bashrc-trigger : après le reboot WSL (lockdown C:), l'humain RELANCE le
-#     même apply — l'idempotence rend la reprise triviale, le doctor dit où on en est.
-#
-# Codes retour module (contrat) : check 0=conforme 1=drift 2=erreur-de-sonde ·
-#                                 apply 0=convergé 1=échec 2=appliqué, drift résiduel ·
-#                                 3 (les DEUX verbes) = MORT AVANT SON VERDICT, rendu par la garde
-#                                 de sortie de provision-lib. Il lui fallait son propre code : `2`
-#                                 est pris des deux cotes, et un module tue par `set -e` rendait
-#                                 justement 2 — donc « rien n'est cassé » sur un module inacheve.
-# Codes retour runner : apply 0=tout convergé 1=au moins un échec 2=appliqué, drift résiduel ·
-#                       doctor 0=conforme 1=drift 2=erreur.
-# Le 2 d'apply manquait, et son absence n'etait pas un trou de vocabulaire : un module qui constate
-# une non-convergence dans son apply rendait 0, donc « tout convergé », drift compris a zero dans le
-# bilan alors qu'une ligne DRIFT venait d'etre imprimee.
-#
-# USAGE :
+# USAGE
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
-#   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain] [--verbose]
-#                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
+#   provision doctor (mêmes options) [--porcelain]
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
-#   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
+#   provision audit  --before F --after F
 #
-# `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
-# Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
-# passees sous le mur ISO parce que leur nom se compose a l'execution sous un repertoire exempte,
-# et `lcars-system` — un second compte de service — est ne sans que rien ne le signale. Le
-# balayage d'une machine n'a aucun de ces angles : il voit ce QUI EST, pas ce qui est ecrit.
+#   apply    converge la machine : chaque module joue check, fix, re-check
+#   doctor   sonde seule — le même check que l'apply
+#   update   pull --ff-only du checkout, remote vérifié contre PROV_EXPECTED_REPO, puis apply
+#   list     les modules sélectionnés et leurs en-têtes
+#   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
+#            « find / … > avant ; install ; find / … > après » (une ligne par objet :
+#            <type> <mode> <uid>:<gid> <chemin>)
 #
-#   find / … > avant ; <install> ; find / … > apres ; provision audit --before avant --after apres
+#   Un module modules.d/NN-nom.sh déclare en tête APPLY-ON (où il mute), CHECK-ON (où son état
+#   doit être vrai), NEEDS (root ou human) et AFTER (modules qui le précèdent). Il est joué en
+#   processus séparé, dans l'ordre du préfixe.
 #
-# Les deux instantanes se prennent avec le meme filtre ; le format attendu est
-# « <type> <mode> <uid>:<gid> <chemin> », une ligne par objet. Ce que le diff montre et que la
-# table ne couvre pas est un DEFAUT — pas une curiosite.
+#   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
+#          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
+#          runner apply  0 convergé · 1 échec · 2 drift résiduel
+#          runner doctor 0 conforme · 1 drift · 2 erreur
 #
-# `update` = la jambe runtime du triangle (source→forge→runtime) : pull --ff-only du checkout,
-# APRÈS vérification d'autorité (le remote DOIT matcher PROV_EXPECTED_REPO — déclaré, jamais
-# deviné), puis re-exec du runner FRAÎCHEMENT PULLÉ en `apply` (le provisioning qui vient
-# d'arriver s'applique lui-même — pas de vieux code qui déroule du neuf). Toujours un converge
-# COMPLET : pas de --only sur update (un update partiel est un état qu'on ne veut pas pouvoir
-# représenter). Héritier direct de fleet-update.sh v1 (F-E1 : autorité-avant-pull ; « already
-# up to date — reconverging anyway »).
-# Options :
-#   --substrate S   force le substrat (auto par défaut : docker si /.dockerenv, wsl si kernel
-#                   Microsoft, linux sinon)
-#   --only M        n'exécute que ce module (répétable ; nom complet ou préfixe numérique)
-#   --human USER    humain cible des modules per-humain (défaut : SUDO_USER, sinon l'appelant)
-#   --env FILE      fichier KEY=VALUE sourcé avant tout (surcharge les défauts de la lib)
-#   --porcelain     (doctor) sortie machine `MODULE=OK|DRIFT|ERROR`, une ligne par module
+#   --substrate S    wsl, linux ou docker (défaut : docker si /.dockerenv, wsl si noyau Microsoft, linux sinon)
+#   --only M         ce module seulement, répétable — nom complet ou préfixe numérique
+#   --human USER     humain des modules NEEDS: human (défaut : SUDO_USER, sinon l'appelant)
+#   --env FILE       fichier KEY=VALUE sourcé avant tout
+#   --port-forge N   ce que la machine publie ; retenu dans son journal pour les passes suivantes
+#   --port-deck N
+#   --port-ssh N
+#   --forge-project NOM   la base des projets compose : NOM-forge, NOM-runner
+#   --verbose
+#   --porcelain      (doctor) une ligne MODULE=OK|DRIFT|ERROR par module
 
 set -euo pipefail
 
 SELF="$(readlink -f "$0")"
-# ⚠ NE PAS RENOMMER EN `PROV_ROOT` : la lib en a fait son contrat, et il y designe la RACINE
-# D'INSTALL (`/opt/lcars`), dont derivent `PROV_PREFIX`, `PROV_TOKENS_DIR`, `PROV_CATALOGUES_WORK`.
-# La collision est SILENCIEUSE — les modules sont des processus separes, ils n'heritent pas de la
-# variable et continuent de poser au bon endroit. Seul le runner divergerait, et son journal
-# mentirait sur ce qui vient d'etre installe.
-DEPLOY_DIR="$(dirname "$SELF")"                     # l'arbre deploy/ de ce script, résolu UNE fois
-MODULES_DIR="$DEPLOY_DIR/modules.d"                 # puis propagé par env — jamais d'heuristique ../..
+DEPLOY_DIR="$(dirname "$SELF")"
+MODULES_DIR="$DEPLOY_DIR/modules.d"
 export PROVISION_LIB="$DEPLOY_DIR/lib/provision-lib.sh"
 
-# ⚠ L'AIDE SE DÉLIMITE PAR SON CONTENU, JAMAIS PAR DES NUMÉROS DE LIGNE : la forme `sed -n '6,52p'`
-# tronque en silence dès qu'on insère une ligne en tête, et une aide amputée ne se signale pas.
-usage() { sed -n '/^# Machine nue →/,/^#   --porcelain/p' "$SELF" | sed 's/^# \{0,1\}//'; }
+# l'aide se borne par son contenu, jamais par des numéros de ligne : une aide tronquée ne se signale pas
+usage() { sed -n '/^# USAGE/,/^#   --porcelain/p' "$SELF" | sed 's/^# \{0,1\}//'; }
 die()   { echo "provision: $*" >&2; exit 1; }
 
 [[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
 [[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
 
-# ─── Args ─────────────────────────────────────────────────────────────────────────────────────────
+# ─── Args ───────────────────────────────────────────────────────────────────────────────────────
 CMD="${1:-}"; shift || true
 SUBSTRATE="auto"
 PORCELAIN=0
@@ -104,16 +63,14 @@ AUDIT_BEFORE=""
 AUDIT_AFTER=""
 declare -a ONLY=()
 
-# ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
-# tuait le SOUS-SHELL de la substitution : le script continuait, avec une valeur vide. Le refus
-# s'imprimait et ne refusait pas.
-valid_port() { # valid_port <valeur> <nom du drapeau> — valide ou meurt, n'imprime rien
+# les validations ne rendent rien : dans une substitution `X="$(valid_port …)"`, le die ne tuerait
+# que le sous-shell et le refus s'imprimerait sans refuser
+valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] || die "$2 : « $1 » n'est pas un nombre"
   (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous « lcars-system », ne peut pas binder)"
 }
 
-# ⚠ LA FORME EST CELLE DE DOCKER, PAS LA NÔTRE : elle ne s'assouplit pas.
-valid_project() { # valid_project <valeur> <nom du drapeau>
+valid_project() {
   [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
     || die "$2 : « $1 » n'est pas un nom de projet compose — minuscules, chiffres, « _ » et « - », et le premier caractère n'est ni l'un ni l'autre"
 }
@@ -121,21 +78,8 @@ valid_project() { # valid_project <valeur> <nom du drapeau>
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
-    # ─── L'AXE DESTINATION (40-RAILS.md § 13) ────────────────────────────────
-    #
-    # ⚠ TROIS AXES, PAS DEUX : substrat (`--substrate`), forge (montée / fournie par
-    # `FORGE_BASE_URL`). Il n'y a PAS d'axe destination (⚖ user 2026-09-04) : `--disposable`
-    # portait jusqu'à `forge-gestures.sh` un nom d'humain de démonstration par défaut que plus
-    # personne ne demandait — seul le banc sème un humain, et il le NOMME. Un déploiement de
-    # travail n'en fabrique aucun : les personnes s'inscrivent sur la forge.
     --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
-    # ⚠ IL N'Y A PAS DE `--fleet-human`, ET IL NE SE RÉINTRODUIT PAS : le nom de l'humain de fleet a
-    # UNE source, « runtime/services/forge-gestures.sh builtin-human ». Un drapeau en poserait une
-    # seconde, en concurrence avec elle.
-    #
-    # Les deux ports que la machine PUBLIE. Des DRAPEAUX et non des variables d'environnement :
-    # une variable ne survit pas au `sudo` de la porte.
     --port-forge) valid_port "${2:?--port-forge attend un port}" --port-forge
                   export PROV_FORGE_HOST_PORT="$2"; shift 2 ;;
     --port-deck)  valid_port "${2:?--port-deck attend un port}" --port-deck
@@ -143,13 +87,10 @@ while [[ $# -gt 0 ]]; do
     --port-ssh)   valid_port "${2:?--port-ssh attend un port}" --port-ssh
                   export PROV_SSH_PORT="$2"; shift 2 ;;
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
-                     # LA BASE, pas le projet : `bob` donne `bob-forge` et `bob-runner` (48-forge-host).
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
-    # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS : ce parseur consomme tout `$@` avant que le verbe ne
-    # tourne, donc un argument positionnel meurt sur « option inconnue » sans jamais l'atteindre.
     --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
     --after)     AUDIT_AFTER="${2:?--after attend un fichier}"; shift 2 ;;
     -h|--help)   usage; exit 0 ;;
@@ -157,7 +98,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$CMD" in apply|doctor|update|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
-[[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
+[[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est toujours un converge complet — pas de --only (apply --only pour un module isolé)"
 
 if [[ -n "$ENV_FILE" ]]; then
   [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
@@ -167,21 +108,8 @@ if [[ -n "$ENV_FILE" ]]; then
   set +a
 fi
 
-# ─── CE QUE LA MACHINE SE RAPPELLE, LU AVANT QUE LA LIB NE FIGE SES DEFAUTS ─────────────────────
-#
-# ⚠ L'ORDRE EST TOUT, ET IL EST DEJA CELUI DU FICHIER. Les options de la ligne de commande ont
-# EXPORTE leurs variables plus haut ; la lib, plus bas, pose ses defauts en `: "${VAR:=…}"`, qui ne
-# mord que sur du vide. En lisant ICI, entre les deux, la memoire de la machine s'intercale
-# exactement ou il faut : elle perd contre un drapeau explicite, elle gagne contre le defaut d'usine.
-#
-# LE DEFAUT QU'ELLE FERME : `apply --port-deck 20997` posait le deck sur 20997, et le `doctor` sans
-# drapeau exigeait 20999 — le rail declarait en drift une machine qu'il venait de convergir. Un
-# operateur voyait un drift qui ne partait jamais, sur un objet parfaitement conforme a ce qu'il
-# avait demande.
-#
-# ⚠ LE JOURNAL ET PAS UN FICHIER DE PLUS. Il dit deja « ce qui a ete pose sur CETTE machine » et il
-# porte deja `substrate` et `prefix` — des faits de la meme nature. Un second fichier d'etat aurait
-# ouvert la question de savoir lequel des deux ment quand ils divergent.
+# Les paramètres retenus par la machine (ligne `params` de son journal) : lus après les drapeaux,
+# avant les défauts de la lib — un drapeau explicite gagne, le défaut d'usine perd.
 _journal_params() {
   local f="${LCARS_JOURNAL_FILE:-${PROV_ROOT:-/opt/lcars}/var/install.journal}" ligne kv k v
   [[ -r "$f" ]] || return 0
@@ -189,9 +117,6 @@ _journal_params() {
   for kv in $ligne; do
     k="${kv%%=*}"; v="${kv#*=}"
     [[ -n "$k" && "$k" != "$kv" ]] || continue
-    # La liste FERMEE vit dans la lib, mais elle n'est pas encore sourcee ici : la recopier serait
-    # une seconde source. On accepte donc tout `PROV_*` que le journal porte — c'est NOUS qui
-    # l'avons ecrit, et `prov_params_line` est le seul endroit qui decide de ce qui y entre.
     [[ "$k" == PROV_* ]] || continue
     [[ -n "${!k:-}" ]] || export "$k=$v"
   done
@@ -203,71 +128,54 @@ _journal_params
 
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
-# ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
-# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/container/), et rien ne
-# se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
-# l'image (doctor au build) et de `list` — jamais un substrat qu'on converge.
 case "$CMD" in
-  update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
-  L'image se bâtit (deploy/docker/Dockerfile, « deploy/container build »), se vérifie au build (stage verify,
-  « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
-  (runtime/services/container/init.sh). Pour l'instance : « deploy/container status » · « deploy/container down »." ;;
+  update) [[ "$SUBSTRATE" != "docker" ]] || die "« $CMD » ne se joue pas sous docker : une image ne se converge pas.
+  Elle se bâtit par deploy/pack.sh et se vérifie au build (provision doctor --substrate docker) ;
+  une instance se remplace : « deploy/container status » · « deploy/container down »." ;;
 esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
-# ─── L'UID DU SIÈGE — DÉRIVÉ ICI, UNE FOIS, ET SURTOUT PAS DEPUIS `PROV_HUMAN` ──────────────────
-# ⚠ ET SURTOUT PAS DEPUIS `PROV_HUMAN`, MÊME S'IL PORTE LA MÊME VALEUR ICI. Le convergeur le
-# REMPLACE par l'humain de fleet quand il rejoue les modules `NEEDS: human` pour un compte qu'il
-# vient de matérialiser. Une dérivation posée dans la lib rendrait donc, dans CETTE passe-là, l'uid
-# de l'humain de FLEET : la garde réserverait exactement le compte qu'elle doit laisser passer, et
-# le siège deviendrait libre. Ici le runner n'a pas encore d'humain cible — c'est le seul point du
-# rail où la question a une seule réponse.
-#
-# `:=` et pas `=` : une valeur posée par l'appelant reste la sienne (le banc en a besoin).
+# L'uid du siège se dérive ici, du compte qui a lancé le runner — jamais de PROV_HUMAN, que le
+# convergeur remplace par l'humain de fleet quand il rejoue les modules NEEDS: human.
 _seat_login="${SUDO_USER:-$(id -un)}"
 _seat_uid="$(id -u -- "$_seat_login" 2>/dev/null || true)"
 if [[ "$_seat_uid" =~ ^[0-9]+$ ]]; then
   : "${LCARS_SYSADMIN_UID:=$_seat_uid}"
 else
-  echo "[provision] uid du siège ILLISIBLE pour « $_seat_login » — LCARS_SYSADMIN_UID reste ${LCARS_SYSADMIN_UID:-1000}, donc GUARD B garde cet uid-là et pas celui du siège" >&2
+  echo "[provision] uid du siège illisible pour « $_seat_login » — LCARS_SYSADMIN_UID reste ${LCARS_SYSADMIN_UID:-1000}, la garde du siège retient cet uid-là" >&2
   : "${LCARS_SYSADMIN_UID:=1000}"
 fi
 export LCARS_SYSADMIN_UID
 unset _seat_login _seat_uid
 
-# ─── D'OÙ VIENT CE QU'ON S'APPRÊTE À POSER ──────────────────────────────────────────────────────
-# shellcheck disable=SC2119 # `prov_source_rev` prend un argument OPTIONNEL ; les args de fonction
-# masquent ceux du script, donc l'appel nu est sur — c'est le cas nominal, pas un oubli.
+# shellcheck disable=SC2119 # l'argument de prov_source_rev est optionnel : l'appel nu est le cas nominal
 PROV_SOURCE_REV="$(prov_source_rev)"
 export PROV_SOURCE_REV
 
-# ─── update : pull VÉRIFIÉ du checkout, puis re-exec du runner pullé en apply ─────────────────────
+# ─── update : pull vérifié du checkout, puis re-exec du runner pullé en apply ───────────────────
 if [[ "$CMD" == "update" ]]; then
   [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relance : sudo $SELF update"
   ROOT="$(repo_root)"
   git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
 
-  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare l'autorité COMPLÈTE, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars) via --env ou l'environnement ; SANS elle, aucun pull"
+  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — l'autorité complète doit être déclarée, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars), via --env ou l'environnement ; sans elle, aucun pull"
   case "$PROV_EXPECTED_REPO" in
     */*/*) ;;
-    *) die "update: PROV_EXPECTED_REPO=« $PROV_EXPECTED_REPO » n'a pas d'hôte — une autorité sans hôte autorise n'importe quelle forge. Écris « <hôte>/<owner>/<repo> » (ex: forge.example.org/fleet/lcars)" ;;
+    *) die "update: PROV_EXPECTED_REPO=« $PROV_EXPECTED_REPO » n'a pas d'hôte — une autorité sans hôte autorise n'importe quelle forge. Forme attendue : « <hôte>/<owner>/<repo> » (ex: forge.example.org/fleet/lcars)" ;;
   esac
   REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
   [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
   REMOTE_ID="$(prov_parse_remote "$REMOTE_URL")" \
-    || die "update: remote « $REMOTE_URL » non analysable (forme inconnue, userinfo, ou chemin qui n'est pas <owner>/<repo>) — pull REFUSÉ"
+    || die "update: remote « $REMOTE_URL » non analysable (forme inconnue, userinfo, ou chemin qui n'est pas <owner>/<repo>) — pull refusé"
   [[ "$REMOTE_ID" == "$PROV_EXPECTED_REPO" ]] \
-    || die "update: remote « $REMOTE_URL » → « $REMOTE_ID » ≠ autorité déclarée « $PROV_EXPECTED_REPO » — pull REFUSÉ"
+    || die "update: remote « $REMOTE_URL » → « $REMOTE_ID » ≠ autorité déclarée « $PROV_EXPECTED_REPO » — pull refusé"
 
-  # 2. Le pull s'exécute comme l'OWNER du checkout (jamais root : des objets .git root dans le
-  #    checkout d'un humain = le clobber qu'on a fui). Identité validée avant usage (IEC, v1:84).
+  # le pull s'exécute comme l'owner du checkout, jamais root
   OWNER="$(stat -c '%U' "$ROOT")"
   [[ "$OWNER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "update: owner du checkout invalide: « $OWNER »"
   BEFORE="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
 
-  # Lock apply pris AVANT le pull (un converge concurrent pendant qu'on change le code sous lui
-  # est exactement ce que le lock interdit) ; relâché avant le re-exec — le nouveau runner le reprend.
-  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply/update REFUSÉ"
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply/update refusé"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
   runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
@@ -281,27 +189,23 @@ if [[ "$CMD" == "update" ]]; then
   fi
   flock -u 9
 
-  # 3. Re-exec du runner FRAÎCHEMENT PULLÉ : c'est le code qui vient d'arriver qui s'applique,
-  #    pas celui chargé avant le pull (sinon un update du provisioning lui-même ne prend
-  #    effet qu'à l'update SUIVANT — la faille self-update classique).
+  # c'est le code fraîchement pullé qui s'applique, pas celui chargé avant le pull
   REEXEC=(--substrate "$SUBSTRATE" --human "$PROV_HUMAN")
   [[ -n "$ENV_FILE" ]] && REEXEC+=(--env "$ENV_FILE")
   exec "$SELF" apply "${REEXEC[@]}"
 fi
 
-# ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
-module_field() { # $1=file $2=FIELD → valeur (vide si absent)
+# ─── Découverte et sélection ────────────────────────────────────────────────────────────────────
+module_field() {
   sed -n "s/^# ${2}: *//p" "$1" | head -1
 }
 
-# ⚠ LA REPONSE VIENT DE LA LIB, ELLE N'EST PLUS RECOPIEE ICI. Ce `case` et celui de
-# `prov_dir_scope` (`25-directories`) repondaient a la meme question avec deux separateurs ; une
-# seule fonction les lit (`prov_substrate_satisfait`), sinon le rail s'applique la ou la table ne
-# se mesure pas.
-substrate_in() { # $1=liste (`any` ou mots séparés par des espaces) → 0 si $SUBSTRATE dedans
+substrate_in() {
   prov_substrate_satisfait "$1" "$SUBSTRATE"
 }
 
+# AFTER vérifie que le module nommé existe et précède ; il ne ferme pas `--only` transitivement,
+# et le préfixe numérique reste l'ordre.
 declare -a SELECTED=() EFFECTIVE=()
 for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
@@ -312,29 +216,6 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
   [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
   [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
-  # ─── CE QUE `AFTER` GARANTIT, ET CE QU'IL NE GARANTIT PAS ─────────────────────────────────────
-  #
-  # ⚠ IL VERIFIE DEUX CHOSES, ET IL EN LAISSE CROIRE TROIS. Les deux qu'il tient :
-  #   · le module nomme EXISTE (une dependance vers un module renomme meurt ici, pas au run) ;
-  #   · il PRECEDE dans l'ordre du rang (une arete qui remonte est refusee a l'ouverture).
-  #
-  # Ce qu'il ne tient pas, et qu'un lecteur suppose :
-  #   · que TOUTES les dependances reelles soient declarees. Rien ne le mesure. Quatre aretes ont manque
-  #     d'un coup — `60-deploy`->`15-toolchain`, `22-fleet-human`->`20-groups`,
-  #     `25-directories`->`20-groups`+`21-service-accounts`, `64-services`->trois de plus — toutes
-  #     reelles, toutes declarables, aucune declaree. Elles le sont maintenant ; rien n'empeche la
-  #     cinquieme d'etre oubliee.
-  #   · que `--only` ferme transitivement. Il ne joue QUE ce qu'on lui nomme : demander un module
-  #     sans ses `AFTER` est permis, et c'est parfois le geste voulu.
-  #
-  # ⚠ ET CERTAINES ARETES REELLES NE SONT PAS DECLARABLES DU TOUT — c'est la limite dure, pas un
-  # oubli. La garde du rang refuse une dependance qui ne precede pas, or il en existe deux :
-  # `45-catalogues` a besoin de l'adresse de forge qu'ecrit `48-forge-host` (trois rangs plus loin),
-  # et `48-forge-host` lisait la release que `60-deploy` pose (douze rangs plus loin). Les deux sont
-  # traitees dans les modules concernes, en le NOMMANT ; aucune ne peut vivre ici.
-  #
-  # Ce champ est donc une liste de CICATRICES D'ORDRE verifiees, pas un graphe de dependances
-  # complet. Le prefixe numerique reste l'autorite.
   after="$(module_field "$mod" AFTER)"
   for dep in $after; do
     [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"
@@ -370,23 +251,17 @@ if [[ "$CMD" == "list" ]]; then
   exit 0
 fi
 
-# ─── Garde de privilège (apply) ───────────────────────────────────────────────────────────────────
-# Le runner N'ESCALADE JAMAIS lui-même : pas d'`exec sudo` caché, c'est la porte qui porte le
-# consentement et l'escalade. Il DÉS-escalade en revanche — un module `NEEDS: human` est joué sous
-# son humain par `run_module`, donc root peut tout appliquer.
+# ─── Garde de privilège : le runner n'escalade jamais, il dés-escalade (NEEDS: human) ──────────
 if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
   for i in "${!SELECTED[@]}"; do
-    if [[ "${EFFECTIVE[$i]}" == "apply"&& "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
+    if [[ "${EFFECTIVE[$i]}" == "apply" && "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
       die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
     fi
   done
 fi
 
-# ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
+# ─── Verrou (apply seulement) — dérivé de ce qui va tourner, jamais d'un argument ───────────────
 if [[ "$CMD" == "apply" ]]; then
-  # ⚠ DÉRIVÉE, JAMAIS PASSÉE EN ARGUMENT : rien de ce que l'APPELANT écrit ne décide de ce qui est
-  # verrouillé. Un `--per-human` pourrait mentir ; `SELECTED` est ce qui va réellement tourner —
-  # d'où le verrou APRÈS la sélection.
   _lock_scope=""
   if [[ -n "${PROV_HUMAN:-}" ]]; then
     _lock_scope="$PROV_HUMAN"
@@ -395,19 +270,16 @@ if [[ "$CMD" == "apply" ]]; then
     done
   fi
 
-  LOCK="$(prov_lock_path "$_lock_scope")" || die "verrou: emplacement sûr indisponible — apply REFUSÉ"
+  LOCK="$(prov_lock_path "$_lock_scope")" || die "verrou: emplacement sûr indisponible — apply refusé"
   exec 9>"$LOCK"
   flock -n 9 \
     || die "un autre apply est en cours${_lock_scope:+ pour « $_lock_scope »} (lock: $LOCK)"
 fi
 
-# ─── LE JOURNAL DE CETTE MACHINE ─────────────────────────────────────────────────────────────────
+# ─── Le journal de cette machine ────────────────────────────────────────────────────────────────
 JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
 MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 
-# ⚖ lot 10 (point 10) : `audit` ne vit pas dans le fichier du runner — il est source d'a cote, avec
-# les memes globales. Le runner ne porte que le runner. (`uninstall` etait source ici aussi ; il est
-# parti le 2026-09-11 : un terrain se refait, il ne se desinstalle pas.)
 # shellcheck source=lib/provision-audit.sh
 . "$(dirname "$PROVISION_LIB")/provision-audit.sh"
 
@@ -420,25 +292,12 @@ if [[ "$CMD" == "apply" ]]; then
   export PROV_JOURNAL_ACC
 fi
 
-# ─── run_module <mod> <eff> — L'UID SE DÉCIDE ICI, ET UNE SEULE FOIS ─────────────────────────────
-#
-#
-# ⚠ `runuser` GARDE l'environnement exporté (mesuré) mais REPOSE le PATH depuis `login.defs`. Les
-# modules travaillent en chemins absolus et le runner ne pose aucun PATH, donc le décor est le même
-# des deux côtés de la frontière — mais un module qui prendrait une dépendance sur le PATH du runner
-# la perdrait ICI, silencieusement.
-#
-#
+# run_module <module> <apply|check> — un sous-shell par module (PROV_HUMAN ne survit pas au tour),
+# le fd du verrou fermé (un enfant détaché par un module ne doit pas le garder).
 run_module() {
   local mod="$1" eff="$2" human="${PROV_HUMAN:-}" name
   name="$(basename "$mod" .sh)"
-  # ⚠ LE SOUS-SHELL EST LE MECANISME, PAS UN EFFET DE BORD : sans lui l'`export PROV_HUMAN` survit
-  # au retour, et le tour suivant de la boucle joue sous l'humain du precedent.
-  # ⚠ ET SANS LE FD DU VERROU (`9>&-`) : un enfant detache par un module — la premiere passe du
-  # convergeur lance les consoles ttyd, reparentees a 1 — herite de TOUS les fds, dont le flock. Sans
-  # cette fermeture, chaque apply APRES une install reussie repondait « un autre apply est en cours »
-  # tant qu une console tournait. Le runner tient son verrou seul.
-  # shellcheck disable=SC2030,SC2031 # portee voulue : un tour de boucle = un shell
+  # shellcheck disable=SC2030,SC2031 # la portée d'un tour est le sous-shell, c'est voulu
   (
     export PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$human"
     if [[ "$(module_field "$mod" NEEDS)" != "human" || "$(id -un)" == "$human" ]]; then
@@ -449,7 +308,7 @@ run_module() {
   ) 9>&-
 }
 
-# ─── Exécution ────────────────────────────────────────────────────────────────────────────────────
+# ─── Exécution ──────────────────────────────────────────────────────────────────────────────────
 total=0 ok=0 drift=0 failed=0
 declare -a REPORT=()
 
@@ -473,8 +332,6 @@ for i in "${!SELECTED[@]}"; do
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
-    # ⚠ AVANT LE FOURRE-TOUT `apply:apply:*` : `case` prend la PREMIERE clause qui matche, donc
-    # l'ordre EST ce qui distingue un drift résiduel d'un échec.
     apply:apply:2)  drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     apply:apply:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
@@ -482,61 +339,31 @@ for i in "${!SELECTED[@]}"; do
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     apply:check:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
-      echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebuild l'image/le build qui le fournit" >&2 ;;
+      echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebâtir l'image qui le fournit" >&2 ;;
   esac
 done
 
-# ─── Verdict ──────────────────────────────────────────────────────────────────────────────────────
+# ─── Verdict ────────────────────────────────────────────────────────────────────────────────────
 if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
 else
   echo ""
-  # ⚠ ON ECRIT MEME SI L'ACCUMULATEUR EST VIDE — surtout pas de `-s` ici. Une passe qui ne pose RIEN
-  # (un `--only`, une machine deja convergee) laisserait sinon l'ANCIEN journal en place avec son
-  # `posed_at` d'une autre passe : un fichier qui se declare « mesure » et date d'avant est pire
-  # qu'absent, il repond avec assurance.
+  # Le journal s'écrit même quand la passe ne pose rien ; les inventaires apt_* s'additionnent
+  # avec ceux des passes précédentes, le reste décrit cette passe.
   if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" ]]; then
-    # ⚠ L'ANCIEN JOURNAL SE LIT AVANT, DANS UNE VARIABLE — jamais dans le bloc redirige. Le
-    # `> "$JOURNAL_FILE"` de la fin TRONQUE le fichier a l'ouverture, donc un `grep` place a
-    # l'interieur lirait du vide et la fusion serait silencieusement sans effet. shellcheck le dit
-    # (SC2094, « read and write the same file in the same pipeline ») et il a raison.
     _journal_ancien=""
-    # ⚠ LES CLEFS D'INVENTAIRE S'ENUMERENT, ELLES NE SE DEVINENT PAS A UN PREFIXE : un motif large
-    # attraperait `posed_at`, et la METADONNEE de la passe se fusionnerait avec les inventaires —
-    # le fichier porterait deux `posed_at`, dont un accumulant tous les horodatages.
     [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already) ' "$JOURNAL_FILE" || true)"
     if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
       {
         echo "# SOURCE: $JOURNAL_FILE"
-        echo "# STATUS: mesure, pas declaration — CE QUI A ETE POSE SUR CETTE MACHINE."
-        echo "#"
-        echo "# Son jumeau statique est deploy/system.manifest, qui dit ce que le"
-        echo "# provisionnement a le DROIT de poser. Celui-ci dit ce qu'il A pose, ici."
-        echo "#"
-        echo "# ⚠ apt_installed / apt_already EST LA RAISON D'ETRE DE CE FICHIER. La distinction"
-        echo "# n'est connaissable QU'AVANT l'install : une seconde plus tard, dpkg repond"
-        echo "# « present » pour les deux. Un audit qui l'ignore compterait comme notres les"
-        echo "# fichiers de paquets que l'operateur avait avant."
+        echo "# STATUS: mesure, pas declaration — ce qui a été posé sur cette machine ; deploy/system.manifest dit ce qui peut l'être."
+        echo "# apt_installed / apt_already : la distinction n'est connaissable qu'avant l'install."
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
         echo "substrate     $SUBSTRATE"
-        # ⚠ CE QUE L'OPERATEUR A DEMANDE, POUR QUE LA PASSE SUIVANTE NE LE REDEMANDE PAS. Sans cette
-        # ligne, `apply --port-deck 20997` posait le deck sur 20997 et le `doctor` sans drapeau, une
-        # minute plus tard, exigeait 20999 : le rail declarait en drift une machine qu'il venait
-        # lui-meme de convergir. Un parametre passe a `apply` EST l'etat-cible de la machine jusqu'a
-        # ce qu'un autre `apply` le remplace — pas une opinion valable le temps d'une commande.
         echo "params        $(prov_params_line)"
-        # Sans repli : la lib pose `PROV_PREFIX`, et un « inconnu » afficherait un etat qui n'existe pas.
         echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
-        # ⚠ LE JOURNAL FUSIONNE AVEC LE PRECEDENT, IL NE LE REECRIT PAS. Le rail est CONCU pour etre
-        # rejoue : a la seconde passe les paquets sont deja presents, donc `apt_installed` serait
-        # VIDE et l'audit perdrait ce que LCARS a pose. Le fichier dirait « ce qui a ete pose sur
-        # cette machine » en decrivant la DERNIERE PASSE.
-        #
-        # ⚠ ET LA FUSION NE VAUT QUE POUR CE QUI EST CUMULATIF : `posed_at`, `source_rev`,
-        # `substrate`, `prefix`, `modules` decrivent LA passe et s'ecrasent. Seuls les inventaires
-        # `apt_*` s'additionnent.
         { printf '%s\n' "$_journal_ancien"; cat "$PROV_JOURNAL_ACC"; } \
         | awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
              END { for (k in acc) {
@@ -553,7 +380,7 @@ else
   fi
 
   echo "${_PC}=== provision $CMD — substrat $SUBSTRATE · source $PROV_SOURCE_REV ===${_PN}"
-  _tint() { # _tint <couleur> <libellé> <valeur>
+  _tint() {
     if [[ "$3" -gt 0 ]]; then printf '%s%s: %s%s' "$1" "$2" "$3" "$_PN"; else printf '%s: %s' "$2" "$3"; fi
   }
   printf '  modules: %d · %s · %s · %s\n' "$total" \
@@ -562,17 +389,11 @@ else
     "$(_tint "$_PR" "échecs" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     if [[ "$SUBSTRATE" == "docker" ]]; then
-      # docker n'est pas un rail : un drift ici est une IMAGE non conforme a son build, pas un
-      # etat a converger — le geste est le rebuild (le stage verify le refuse au build).
-      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/container build) — un drift ici est une image non conforme"
+      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebâtir l'image (deploy/pack.sh) — un drift ici est une image non conforme à son build"
     else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi
   fi
-  # ⚠ L'ÉCHEC PASSE DEVANT, ET L'`elif` EST LOAD-BEARING : en deux `if` separes, « Rien n'est cassé »
-  # sortirait APRÈS « EN ÉCHEC sur 3 module(s) », et ce serait la derniere ligne que l'opérateur lit.
-  # Rien ne casserait pour autant — le code de retour reste juste, aucun test ne rougit ; seul un
-  # humain se ferait une idee fausse de l'etat de sa machine.
   if [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
     echo "  ${_PR}→ EN ÉCHEC${_PN} sur $failed module(s) — voir les lignes FAIL ci-dessus."
     [[ "$drift" -gt 0 ]] && \

@@ -235,6 +235,15 @@ STUB
 # « forge du poste deja vivante » — et le conteneur toujours publie sur la loopback. Il a fallu
 # taper `compose up -d` a la main.
 
+@test "sans daemon docker, le check refuse : la forge du poste est un conteneur, aucune autre forme" {
+  local cli="$BATS_TEST_TMPDIR/bin"; mkdir -p "$cli"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$cli/docker"; chmod 0755 "$cli/docker"
+  run env PATH="$cli:/usr/bin:/bin" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_DOCKER_BIN="$cli/docker" PROV_SUBSTRATE=wsl bash "$SRC" check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL"*"aucun daemon"*"aucune autre forme"* ]]
+}
+
 @test "l'apply appelle compose SANS condition — une forge vivante doit pouvoir RECONVERGER" {
   # L'appel ne doit plus etre garde par la liveness : c'est `forge_up` AVANT qui dit si l'on a
   # monte ou simplement reconverge, pas s'il faut agir.

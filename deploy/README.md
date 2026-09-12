@@ -151,7 +151,7 @@ mutations tournent), `# CHECK-ON:` (où l'état-cible doit tenir) — greppables
 runner ; plus `# NEEDS: root|human`, l'identité SOUS LAQUELLE le module est joué, que le runner
 pose UNE FOIS au dispatch (le corps du module ne dés-escalade pas ligne à ligne).
 Ordre = préfixe numérique. En apply, un module CHECK-ON-retenu hors APPLY-ON
-tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — rebuild l'image).
+tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — rebâtir l'image, `deploy/pack.sh`).
 
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|

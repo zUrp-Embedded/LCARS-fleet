@@ -213,9 +213,12 @@ seed_project() {
   [[ "$output" == *"lcars-fleet_home"*"lcars-fleet_lcars-home"*"volume vide"* ]]
   [[ "$output" == *"reset"* ]]
   refute grep -qE "compose .* up" "$CALLS"
-  # même volume des deux côtés : la garde se tait
-  STUB_HOME_VOLUME=lcars-fleet_lcars-home STUB_COMPOSE_HOME=lcars-fleet_lcars-home run bash "$SRC" up
+  # même volume des deux côtés : la garde se tait et up va jusqu'au verdict
+  STUB_HOME_VOLUME=lcars-fleet_lcars-home STUB_COMPOSE_HOME=lcars-fleet_lcars-home STUB_PROV_RC=0 \
+    LCARS_UP_VERDICT_TIMEOUT=5 run bash "$SRC" up
+  [ "$status" -eq 0 ]
   [[ "$output" != *"volume vide"* ]]
+  grep -qE "compose .* up" "$CALLS"
 }
 
 @test "LCARS_PROJECT is read, and -p overrides it" {

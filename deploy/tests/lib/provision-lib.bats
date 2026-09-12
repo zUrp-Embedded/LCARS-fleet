@@ -1894,3 +1894,30 @@ ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL 
   kill "$LISTENER" 2>/dev/null || true
   [ "$output" = "pris" ]
 }
+
+# ─── l'adresse de la forge : l'environnement, sinon le fichier posé par 48-forge-host ────────────
+
+@test "PROV_FORGE_URL : l'environnement prime sur forge.url, et une chaîne vide explicite lit le fichier" {
+  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
+  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=http://depuis-l-env:9999 module_sh 'echo "$PROV_FORGE_URL"'
+  [ "$output" = "http://depuis-l-env:9999" ]
+  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_URL"'
+  [ "$output" = "http://depuis-le-fichier:3000" ]
+  PROV_TOKENS_DIR="$d" PROV_FORGE_URL="" module_sh 'echo "$PROV_FORGE_URL"'
+  [ "$output" = "http://depuis-le-fichier:3000" ]
+  mkdir -p "$BATS_TEST_TMPDIR/vide"
+  PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/vide" PROV_FORGE_URL="" module_sh 'echo "[$PROV_FORGE_URL]"'
+  [ "$output" = "[]" ]
+}
+
+@test "PROV_FORGE_PUBLIC_URL : forge.public.url, sinon l'adresse interne, et l'environnement prime" {
+  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"
+  echo "http://127.0.0.1:3000" > "$d/forge.url"
+  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "http://127.0.0.1:3000" ]
+  echo "http://198.51.100.63:3000" > "$d/forge.public.url"
+  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_URL|$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "http://127.0.0.1:3000|http://198.51.100.63:3000" ]
+  PROV_TOKENS_DIR="$d" FORGE_PUBLIC_URL=http://forge.exemple:3000 module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "http://forge.exemple:3000" ]
+}

@@ -64,7 +64,7 @@ setup() {
 
   # ⚠ `runuser` NE CHANGE PAS D'IDENTITE ICI, ET C'EST DELIBERE : un temoin ne peut pas devenir un
   # autre compte. Ce qui doit etre epingle est ce que le script DEMANDE, pas le pouvoir de le faire —
-  # meme idiome que `stub_impersonation` de `provision_runner.bats`. La doublure retire `-u <login>`
+  # meme idiome que `stub_impersonation` de `provision.bats`. La doublure retire `-u <login>`
   # et le `--`, puis exec le reste.
   printf '%s\n' '#!/usr/bin/env bash' 'shift 2; [[ "$1" == "--" ]] && shift; exec "$@"' \
     > "$BINDIR/runuser"
