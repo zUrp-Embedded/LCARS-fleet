@@ -2,8 +2,12 @@
 # SOURCE: deploy/lib/deploy-release.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
-# STATUS: deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
-# EXIT CODES — 0 install complete · 1 hard failure (nothing usable posted) · 3 RELEASE POSTED, PATH
+# STATUS: la release du runtime — bâtie depuis les sources (gate puis mix release) ou reprise du kit, posée sous le préfixe et câblée sur le PATH
+#
+# ENV   LCARS_INSTALL_PREFIX      où la release est posée (défaut /opt/lcars/runtime)
+#       LCARS_INSTALL_LINK_DIR    où ses commandes sont câblées (défaut /usr/local/bin)
+#       LCARS_INSTALL_SKIP_GATE=1 saute le gate avant le build ; la release n'est alors pas attestée
+# EXIT  0 posée et câblée · 1 échec, rien d'utilisable posé · 3 posée, mais au moins un lien du PATH manque
 set -euo pipefail
 
 say() { echo "install: $*" >&2; }
@@ -46,7 +50,7 @@ build_release() {
   local rel="$runtime_dir/_build/prod/rel/lcars_fleet"
   if [[ -x "$rel/bin/lcars_fleet" ]]; then
     if [[ -f "$runtime_dir/../.source-revision" ]]; then
-      echo "install: paquet — release batie par pack.sh (gate joue la-bas), ni gate ni compilation" >&2
+      echo "install: kit — release bâtie par pack.sh, déjà passée au gate : ni gate ni compilation" >&2
       return 0
     fi
     local src_sha built_sha m
@@ -55,10 +59,10 @@ build_release() {
     [[ -n "$m" && -f "$m/priv/api/build_info.txt" ]] && built_sha="$(sed -n 's/^sha=//p' "$m/priv/api/build_info.txt" 2>/dev/null | head -1)"
     if [[ -n "$src_sha" && "$src_sha" == "${built_sha:-}" ]] \
        && git -C "$runtime_dir" diff --quiet HEAD -- . 2>/dev/null; then
-      echo "install: release deja batie et ATTESTEE ($src_sha, arbre propre) — ni gate ni compilation" >&2
+      echo "install: release déjà bâtie et attestée ($src_sha, arbre propre) — ni gate ni compilation" >&2
       return 0
     fi
-    echo "install: un _build/prod/rel existe mais n'atteste pas cette source (build ${built_sha:-inconnu} vs HEAD ${src_sha:-inconnu}) — on rebatit" >&2
+    echo "install: un _build/prod/rel existe mais n'atteste pas cette source (build ${built_sha:-inconnu} vs HEAD ${src_sha:-inconnu}) — rebâti" >&2
   fi
 
   (
@@ -67,10 +71,10 @@ build_release() {
     MIX_ENV=prod mix deps.get >/dev/null || exit 1
 
     if [[ "${LCARS_INSTALL_SKIP_GATE:-0}" == "1" ]]; then
-      echo "install: ATTENTION — gate saute (LCARS_INSTALL_SKIP_GATE=1) : la release n'est PAS attestee par le gate de ce commit" >&2
+      echo "install: gate sauté (LCARS_INSTALL_SKIP_GATE=1) : la release ne sera pas attestée par le gate de ce commit" >&2
     else
       echo "install: gate complet sur l'arbre source (compile-strict + tests + bats + topologie + dialyzer)…" >&2
-      MIX_ENV="test" mix gate || exit 1
+      MIX_ENV="test" mix gate || exit 1   # les guillemets : sans eux, SC2209 lit « test » comme une commande
     fi
 
     rm -rf "_build/prod/rel/lcars_fleet"
@@ -103,12 +107,12 @@ wire_path_links() {
       linked="$linked $f"
     else
       link_fail=1
-      say "symlink $LINK_DIR/$f KO (droits ?). Manuel : sudo ln -sf $PREFIX/bin/$f $LINK_DIR/"
+      say "lien $LINK_DIR/$f non posé (droits ?) — à la main : sudo ln -sf $PREFIX/bin/$f $LINK_DIR/"
     fi
   done
 
   [[ "$link_fail" -eq 0 ]] &&
-    say "symlinks $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrees « link » du manifest)"
+    say "liens $LINK_DIR/{${linked# }} → $PREFIX/bin/ (entrées « link » du manifest)"
 
   return "$link_fail"
 }
@@ -124,13 +128,13 @@ prune_bin_dir() {
     if rm -rf -- "$e"; then
       say "retire $e (absent du manifest)"
     else
-      say "retrait KO : $e (absent du manifest, droits ?) — manuel : sudo rm -rf $e"
+      say "retrait impossible : $e (absent du manifest, droits ?) — à la main : sudo rm -rf $e"
     fi
     if [[ -L "$LINK_DIR/$f" && "$(readlink "$LINK_DIR/$f")" == "$PREFIX/bin/$f" ]]; then
       if rm -f -- "$LINK_DIR/$f" 2>/dev/null; then
-        say "retire symlink $LINK_DIR/$f (pointait sur l'intrus $e)"
+        say "retire le lien $LINK_DIR/$f (il pointait sur $e, absent du manifest)"
       else
-        say "symlink $LINK_DIR/$f KO (droits ?) — il pointe sur un fichier RETIRE ; 60-deploy le retire en root, ou : sudo rm $LINK_DIR/$f"
+        say "lien $LINK_DIR/$f non retiré (droits ?) — il pointe sur un fichier retiré ; 60-deploy le retire en root, ou : sudo rm $LINK_DIR/$f"
       fi
     fi
   done
@@ -183,7 +187,7 @@ refuse_root
 require_prefix_writable "$PREFIX"
 
 say "build release prod (gate complet puis MIX_ENV=prod mix release)…"
-build_release "$RUNTIME_DIR" || die "gate rouge ou build KO — la release n'est PAS posee (arbre source non atteste)"
+build_release "$RUNTIME_DIR" || die "gate rouge ou build en échec — la release n'est pas posée (arbre source non attesté)"
 REL_SRC="$RUNTIME_DIR/_build/prod/rel/lcars_fleet"
 [[ -x "$REL_SRC/bin/lcars_fleet" ]] || die "release introuvable une fois le build fini ($REL_SRC)"
 
@@ -194,10 +198,10 @@ atomic_swap_dir "$REL_SRC" "$PREFIX/rel/lcars_fleet" "bin/lcars_fleet"
 
 for i in "${!MF_FILES[@]}"; do
   f="${MF_FILES[$i]}"
-  [[ -e "$SRC_BIN/$f" ]] || die "entree du manifest absente du source bin/ : $f"
+  [[ -e "$SRC_BIN/$f" ]] || die "entrée du manifest absente du source bin/ : $f"
   atomic_swap_file "$SRC_BIN/$f" "$PREFIX/bin/$f"
   if [[ "${MF_MODES[$i]}" == "exec" ]]; then
-    chmod +x "$PREFIX/bin/$f" || die "chmod +x refuse : $PREFIX/bin/$f"
+    chmod +x "$PREFIX/bin/$f" || die "chmod +x refusé : $PREFIX/bin/$f"
   fi
 done
 prune_bin_dir
@@ -206,23 +210,23 @@ atomic_swap_file "$RUNTIME_DIR/etc/fleet.env.template" "$PREFIX/etc/fleet.env.te
 
 if chgrp -R fleet "$PREFIX" 2>/dev/null; then
   if chmod -R g+rX,g-w,o-rwx "$PREFIX" 2>/dev/null; then
-    say "perms : group fleet r-x, others none (RO humains)"
+    say "modes : groupe fleet en lecture seule, rien pour les autres"
   else
-    say "chmod perms KO — la politique RO (group r-x, others none) n'est PAS en place ; le deploy doit la poser"
+    say "chmod refusé — la lecture seule (groupe r-x, autres rien) n'est pas en place ; 60-deploy la pose en root"
   fi
 else
-  say "chgrp fleet KO (droits ?) — le deploy doit le poser"
+  say "chgrp fleet refusé (droits ?) — 60-deploy le pose en root"
 fi
 
 wire_path_links || true
 
 if [[ "$link_fail" -ne 0 ]]; then
-  say "INSTALL INCOMPLETE — la release est en place sous $PREFIX, mais au moins un symlink de"
-  say "  $LINK_DIR n'a pas pu etre pose (voir les lignes « symlink … KO » ci-dessus)."
-  say "  Les commandes PATH sont donc absentes, ou pointent encore sur une version PRECEDENTE."
-  say "  Reparer les liens ci-dessus, ou relancer avec les droits sur $LINK_DIR."
+  say "installation incomplète — la release est en place sous $PREFIX, mais au moins un lien de"
+  say "  $LINK_DIR n'a pas pu être posé (voir les lignes « lien … non posé » ci-dessus)."
+  say "  Les commandes du PATH sont donc absentes, ou pointent encore sur une version précédente."
+  say "  Réparer les liens ci-dessus, ou relancer avec les droits sur $LINK_DIR."
   exit 3
 fi
 
-say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
-say "Lancer : fleet start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."
+say "release en place sous $PREFIX (version : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
+say "Lancer : fleet start   (l'état par humain vit sous ~/.lcars/ ; le dépôt n'est pas requis à l'exécution)."

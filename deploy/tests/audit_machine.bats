@@ -42,11 +42,11 @@ EOF
 snap() { printf 'f -rw-r--r-- 0:0 %s\n' "$@" > "$APRES"; }
 audit() { run bash "$RUNNER" audit --before "$AVANT" --after "$APRES"; }
 
-@test "rien d'apparu : la machine ne porte rien que la table ne declare" {
+@test "rien d'apparu : rien n'est apparu entre les deux instantanés que la table ne déclare" {
   : > "$APRES"
   audit
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ne porte rien"* ]]
+  [[ "$output" == *"Rien n'est apparu"* ]]
 }
 
 @test "un objet DECLARE ne sort pas" {
@@ -163,7 +163,7 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"/etc/pwned-by-lcars"* ]]
   [[ "$output" == *"/srv/nimportequoi"* ]]
-  [[ "$output" != *"ne porte rien"* ]]
+  [[ "$output" != *"Rien n'est apparu"* ]]
 }
 
 # ─── M5 : UN CHEMIN DEJA LA DONT SEUL LE MODE CHANGE N'EST PAS « APPARU » ───────────────────────

@@ -68,6 +68,7 @@ docker_endpoint() { # docker_endpoint → 0 et DOCKER_HOST exporté, ou 1 et PRO
   local cli sock
   for cli in "$want" docker; do
     [[ -n "$cli" ]] || continue
+    # un nom nu ne se teste pas comme un chemin : « [[ -x docker ]] » est vrai dès que le dossier courant porte un fichier de ce nom
     if [[ "$cli" == */* ]]; then
       [[ -f "$cli" && -x "$cli" ]] && { PROV_DOCKER_BIN="$cli"; break; }
     else
@@ -76,6 +77,8 @@ docker_endpoint() { # docker_endpoint → 0 et DOCKER_HOST exporté, ou 1 et PRO
   done
   if [[ -z "$PROV_DOCKER_BIN" ]]; then
     PROV_DOCKER_WHY="aucune CLI docker dans le PATH${want:+ (ni en $want)}"
+    [[ "$(detect_substrate)" != "wsl" ]] \
+      || PROV_DOCKER_WHY+=". Sur WSL, c'est l'intégration Docker Desktop qui la pose : Docker Desktop démarré côté Windows, l'intégration WSL activée pour cette distribution (Settings > Resources > WSL integration), puis rouvrir la session"
     return 1
   fi
   local _envhost="" _dh=""
@@ -87,9 +90,8 @@ docker_endpoint() { # docker_endpoint → 0 et DOCKER_HOST exporté, ou 1 et PRO
     else
       _envhost=" ${DOCKER_HOST}[env,rien à cette adresse]"
     fi
-    unset DOCKER_HOST
+    unset DOCKER_HOST   # dans l'environnement de l'appelant, à dessein : un DOCKER_HOST qui ne répond pas ne doit pas descendre aux modules
   fi
-  # le premier refus est celui qu'on garde : la socket qui compte est la première du balayage
   while read -r sock; do
     [[ -S "$sock" ]] || continue
     if DOCKER_HOST="unix://$sock" "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
@@ -97,7 +99,7 @@ docker_endpoint() { # docker_endpoint → 0 et DOCKER_HOST exporté, ou 1 et PRO
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
     fi
-    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }
+    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
   done < <(_docker_sockets)
   # « refusé » n'est pas « répond » : une socket orpheline ne met pas le groupe en cause
   local _orpheline="" _ecoute=""

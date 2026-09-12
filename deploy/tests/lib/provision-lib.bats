@@ -239,7 +239,7 @@ STUB
     [ "$PROV_FAILED" -ge 1 ]      # et lechec est COMPTE, pas avale
   ' 2>/dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"ecriture du tampon RATEE"* ]]
+  [[ "$output" == *"écriture du tampon ratée"* ]]
   refute_out "POSE" <<<"$output"
 }
 
@@ -423,7 +423,7 @@ STUB
   module_sh 'prov_lock_path'
   [ "$status" -ne 0 ]
   [[ "$output" == *"$BATS_TEST_TMPDIR/absent"* ]]
-  [[ "$output" == *"pas d'emplacement sur"* ]]
+  [[ "$output" == *"pas d'emplacement sûr"* ]]
 }
 
 @test "6-109: l URL de l attaque de la fiche ne rend PAS l autorite attendue" {

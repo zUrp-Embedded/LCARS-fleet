@@ -80,7 +80,7 @@ MIX
   export MIX_CALL_LOG="$TMP/mix-calls.log"
   LCARS_INSTALL_SKIP_GATE=1 PATH="$TMP/binstub:$PATH" run build_release "$TMP"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gate saute"* ]]
+  [[ "$output" == *"gate sauté"* ]]
   refute grep -q ' gate$' "$MIX_CALL_LOG"
   grep -q release "$MIX_CALL_LOG"
 }
@@ -160,7 +160,7 @@ MIX
   chmod 700 "$LINK_DIR"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"symlink $LINK_DIR/fleet KO"* ]]
+  [[ "$output" == *"lien $LINK_DIR/fleet non posé"* ]]
 }
 
 @test "6-110: TEMOIN — un lien qui passe rend ZERO et annonce les liens poses" {
@@ -172,7 +172,7 @@ MIX
 
   run wire_path_links
   [ "$status" -eq 0 ]
-  [[ "$output" == *"symlinks $LINK_DIR/{fleet}"* ]]
+  [[ "$output" == *"liens $LINK_DIR/{fleet}"* ]]
   [ -L "$LINK_DIR/fleet" ]
 }
 
@@ -222,7 +222,7 @@ MIX
   [ ! -e "$PREFIX/bin/fleet_v2" ]
   [ ! -L "$LINK_DIR/fleet_v2" ]
   [[ "$output" == *"retire $PREFIX/bin/fleet_v2 (absent du manifest)"* ]]
-  [[ "$output" == *"retire symlink $LINK_DIR/fleet_v2"* ]]
+  [[ "$output" == *"retire le lien $LINK_DIR/fleet_v2"* ]]
   [ -e "$PREFIX/bin/fleet" ]
   [ -e "$PREFIX/bin/lcars" ]
   [ -L "$LINK_DIR/fleet" ]
@@ -241,7 +241,7 @@ MIX
   [ ! -e "$PREFIX/bin/vieux" ]
   [ -L "$LINK_DIR/vieux" ]
   [ "$(readlink "$LINK_DIR/vieux")" = "$TMP/autre/vieux" ]
-  refute grep -q 'retire symlink' <<<"$output"
+  refute grep -q 'retire le lien' <<<"$output"
 }
 
 @test "S4 : un symlink que l'humain ne peut pas retirer se DIT et ne fait pas echouer la pose" {
@@ -257,6 +257,6 @@ MIX
   chmod 700 "$LINK_DIR"
   [ "$status" -eq 0 ]
   [ ! -e "$PREFIX/bin/fleet_v2" ]
-  [[ "$output" == *"symlink $LINK_DIR/fleet_v2 KO"* ]]
+  [[ "$output" == *"lien $LINK_DIR/fleet_v2 non retiré"* ]]
   [[ "$output" == *"60-deploy"* ]]
 }

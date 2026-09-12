@@ -55,5 +55,5 @@ audit_run() {
     echo "  ${_PA}Chacun est un DEFAUT : soit on le declare, soit on cesse de le poser.${_PN}"
     return 1
   }
-  echo "  ${_PG}La machine ne porte rien que la table ne declare.${_PN}"
+  echo "  ${_PG}Rien n'est apparu entre les deux instantanés que la table ne déclare.${_PN}"
 }

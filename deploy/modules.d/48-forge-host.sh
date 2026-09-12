@@ -274,7 +274,7 @@ apply() {
     rm -f "$err"
     reset_admin_password_if_asked "$preexistant"
     docker_stream_ok "$FORGE_CONTAINER" || {
-      p_fail "le daemon docker répond aux lectures mais rend du vide sur « exec » — rien ne peut être capturé depuis $FORGE_CONTAINER ; un relais docker amputé (contexte, proxy) est en cause, DOCKER_HOST=unix:///var/run/docker.sock le contourne"
+      p_fail "le daemon docker répond aux lectures mais rend du vide sur « exec » — rien ne peut être capturé depuis $FORGE_CONTAINER ; un relais docker amputé (contexte, proxy) est en cause"
       verdict_apply
     }
     local tok

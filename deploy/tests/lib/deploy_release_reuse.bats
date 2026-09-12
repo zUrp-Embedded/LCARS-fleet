@@ -35,14 +35,14 @@ appel() { run bash -c ". '$SUT' >/dev/null 2>&1; build_release '$RT' 2>&1"; }
   printf 'abcd1234\n' > "$RT/../.source-revision"
   appel
   [ "$status" -eq 0 ]
-  [[ "$output" == *"paquet"* ]]
+  [[ "$output" == *"kit — release bâtie par pack.sh"* ]]
 }
 
 @test "CLONE PROPRE, sha qui CORRESPOND : reutilisation, et elle est dite ATTESTEE" {
   local sha; sha="$(depot)"; atteste "$sha"
   appel
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ATTESTEE"* ]]
+  [[ "$output" == *"attestée"* ]]
 }
 
 @test "LE DEFAUT : un vieux _build dans un clone ne se reutilise PAS" {

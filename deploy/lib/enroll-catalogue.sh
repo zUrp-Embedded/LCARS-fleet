@@ -2,8 +2,19 @@
 # SOURCE: deploy/lib/enroll-catalogue.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-10
-# STATUS: actif — derive les entrees de la recette forge depuis un catalogue
-# USAGE
+# STATUS: actif — dérive le roster (roles.auto.tfvars.json) de la recette forge depuis un catalogue
+#
+# USAGE  enroll-catalogue.sh --tofu-dir <dir> [--catalogue <racine>] [--image <img> | --release <bin> | --repo <runtime>] [--served "r1 r2"]
+#   --tofu-dir    la recette qui reçoit roles.auto.tfvars.json
+#   --catalogue   la racine du catalogue lu ; sans elle, l'image ou la release lit le sien
+#   --image       le roster est demandé à l'image (docker run … roles-tfvars) : rien à compiler sur l'hôte
+#   --release     le roster est demandé à la release posée (eval Fleet.Roster)
+#   --repo        le roster est compilé depuis les sources (mix) ; défaut quand ni image ni release
+#   --served      rôles déjà servis par la forge, unis au roster dans la ligne PROV_ROLES rendue
+#   EXIT  0 · 1 arguments ou source illisible · 2 roster non rendu ou vide · 3 tofu-dir absent ou non inscriptible
+#
+# Il n'écrit aucune recette : un catalogue est la pièce qu'un opérateur remplace, et générer la
+# recette depuis lui donnerait à un fichier remplaçable l'autorité d'élargir ses propres droits.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

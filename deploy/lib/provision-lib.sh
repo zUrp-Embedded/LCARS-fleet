@@ -264,7 +264,7 @@ prov_lock_path() {
   uid="$(id -u)"
 
   if [[ -n "$scope" && ! "$scope" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    p_fail "verrou: portee « $scope » hors charset — REFUSE"
+    p_fail "verrou : portée « $scope » hors charset — refusée"
     return 1
   fi
 
@@ -277,15 +277,15 @@ prov_lock_path() {
   prov_refuse_symlink_path "$dir" || return 1
 
   local parent="${dir%/*}"
-  [[ -d "$parent" ]] || { p_fail "verrou: $parent absent — pas d'emplacement sur pour un verrou"; return 1; }
-  mkdir -p "$dir" || { p_fail "verrou: dossier impossible: $dir"; return 1; }
-  chmod 0700 "$dir" || { p_fail "verrou: chmod 0700 refuse: $dir"; return 1; }
+  [[ -d "$parent" ]] || { p_fail "verrou : $parent absent — pas d'emplacement sûr pour un verrou"; return 1; }
+  mkdir -p "$dir" || { p_fail "verrou : dossier impossible : $dir"; return 1; }
+  chmod 0700 "$dir" || { p_fail "verrou : chmod 0700 refusé : $dir"; return 1; }
 
   local owner mode
-  owner="$(stat -c '%u' "$dir")" || { p_fail "verrou: stat impossible: $dir"; return 1; }
-  mode="$(stat -c '%a' "$dir")" || { p_fail "verrou: stat impossible: $dir"; return 1; }
-  [[ "$owner" == "$uid" ]] || { p_fail "verrou: $dir appartient a l'uid $owner, pas a $uid"; return 1; }
-  [[ "$mode" == "700" ]] || { p_fail "verrou: $dir est en $mode, attendu 700"; return 1; }
+  owner="$(stat -c '%u' "$dir")" || { p_fail "verrou : stat impossible : $dir"; return 1; }
+  mode="$(stat -c '%a' "$dir")" || { p_fail "verrou : stat impossible : $dir"; return 1; }
+  [[ "$owner" == "$uid" ]] || { p_fail "verrou : $dir appartient à l'uid $owner, pas à $uid"; return 1; }
+  [[ "$mode" == "700" ]] || { p_fail "verrou : $dir est en $mode, attendu 700"; return 1; }
 
   local lock="$dir/provision${scope:+.$scope}.lock"
   [[ -L "$lock" ]] && { p_fail "verrou: $lock est un symlink — REFUSE"; return 1; }
@@ -322,9 +322,9 @@ write_atomic() {
   owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$dest" || return 1
   dir="$(dirname "$dest")"
-  [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }
-  tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic: tmp impossible dans $dir"; return 1; }
-  cat > "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: ecriture du tampon RATEE (disque plein ? quota ?): $dest"; return 1; }
+  [[ -d "$dir" ]] || { p_fail "write_atomic : dossier absent : $dir"; return 1; }
+  tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic : tmp impossible dans $dir"; return 1; }
+  cat > "$tmp" || { rm -f "$tmp"; p_fail "write_atomic : écriture du tampon ratée (disque plein ? quota ?) : $dest"; return 1; }
   if [[ -f "$dest" ]] && cmp -s "$tmp" "$dest"; then
     rm -f "$tmp"
     ensure_mode "$dest" "$mode" "$owner"   # le contenu est bon ; mode/owner convergés à part
@@ -497,7 +497,7 @@ ensure_managed_block() {
       !skip              {print}
     ' "$file")"
   local tmp rc=0
-  tmp="$(mktemp "${TMPDIR:-/tmp}/prov-block.XXXXXX")" || { p_fail "ensure_managed_block: tmp impossible"; return 1; }
+  tmp="$(mktemp "${TMPDIR:-/tmp}/prov-block.XXXXXX")" || { p_fail "ensure_managed_block : tmp impossible"; return 1; }
   {
     if [[ -n "$existing" ]]; then printf '%s\n' "$existing"; fi
     printf '%s\n%s\n%s\n' "$begin" "$block" "$end"
@@ -511,14 +511,14 @@ fetch_verify() {
   local url="$1" sha="$2" dest="$3" mode="$4"
   local dir tmp actual
   dir="$(dirname "$dest")"
-  tmp="$(mktemp "$dir/.fetch.XXXXXX")" || { p_fail "fetch_verify: tmp impossible dans $dir"; return 1; }
+  tmp="$(mktemp "$dir/.fetch.XXXXXX")" || { p_fail "fetch_verify : tmp impossible dans $dir"; return 1; }
   if ! run_quiet curl -fsSL --proto '=https' -m 300 -o "$tmp" "$url"; then
-    rm -f "$tmp"; p_fail "fetch_verify: download raté: $url"; return 1
+    rm -f "$tmp"; p_fail "fetch_verify : téléchargement raté : $url"; return 1
   fi
   actual="$(sha256sum "$tmp" | awk '{print $1}')"
   if [[ "$actual" != "$sha" ]]; then
     rm -f "$tmp"
-    p_fail "fetch_verify: sha256 MISMATCH pour $url"
+    p_fail "fetch_verify : sha256 différent pour $url"
     p_fail "  attendu : $sha"
     p_fail "  trouvé  : $actual"
     return 1

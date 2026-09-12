@@ -70,7 +70,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   gen; [ "$status" -eq 0 ]
   [ -f "$DIST/install.sh.sha256" ]
   ( cd "$DIST" && sha256sum -c --quiet --strict install.sh.sha256 )
-  [[ "$output" == *"sha256 de la porte : $(cut -d' ' -f1 < "$DIST/install.sh.sha256")"* ]]
+  [[ "$output" == *"sha256 de l'installeur : $(cut -d' ' -f1 < "$DIST/install.sh.sha256")"* ]]
   local avant; avant="$(cat "$DIST/install.sh.sha256")"
   gen; [ "$status" -eq 0 ]
   [ "$(cat "$DIST/install.sh.sha256")" = "$avant" ]
@@ -78,12 +78,12 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
 
 @test "SANS cle publique : la porte est generee AVEC une cle vide, et le generateur le DIT — jamais en silence" {
   PUB="" gen; [ "$status" -eq 0 ]
-  [[ "$output" == *"AUCUNE cle publique"*"NON verifiee"* ]]
+  [[ "$output" == *"aucune clé publique"*"NON vérifiée"* ]]
   grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
   printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
   PUB="" gen; [ "$status" -eq 0 ]
   grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
-  refute_out 'AUCUNE cle' <<<"$output"
+  refute_out 'aucune clé' <<<"$output"
   refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
 }
 

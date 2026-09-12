@@ -24,6 +24,7 @@ setup() {
   local n
   while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/bin/$n"; done \
     < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$K/runtime/etc/release.manifest")
+  # la lib se joue en sous-shell : un « . "$LIB" » à chemin calculé serait un SC1090 que le plancher du gate refuse
   while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \
     < <(bash -c ". '$LIB'; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" || true)
   while read -r n _; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \

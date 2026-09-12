@@ -42,13 +42,23 @@ lib() { run bash -c ". '$LIB' >/dev/null 2>&1; $1"; }
   run env -u DOCKER_HOST LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" LCARS_DOCKER_MOUNT_CLI="$BATS_TEST_TMPDIR/montage/docker" PATH="$BIN:/usr/bin:/bin" \
     bash -c '. "$1"; docker_endpoint; echo "rc=$? bin=$PROV_DOCKER_BIN"' _ "$LIB"
   [[ "$output" == *"rc=1 bin=docker"* ]]
-  mkdir -p "$BATS_TEST_TMPDIR/vide"
-  run env -u DOCKER_HOST LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" LCARS_DOCKER_MOUNT_CLI="$BATS_TEST_TMPDIR/montage/docker" PATH="$BATS_TEST_TMPDIR/vide" \
+  mkdir -p "$BATS_TEST_TMPDIR/vide" "$BATS_TEST_TMPDIR/linux"
+  run env -u DOCKER_HOST LCARS_SUBSTRATE_ROOT="$BATS_TEST_TMPDIR/linux" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" LCARS_DOCKER_MOUNT_CLI="$BATS_TEST_TMPDIR/montage/docker" PATH="$BATS_TEST_TMPDIR/vide" \
     /bin/bash -c '. "$1"; docker_endpoint; echo "rc=$? bin=[$PROV_DOCKER_BIN]"; echo "$PROV_DOCKER_WHY"' _ "$LIB"
   [[ "$output" == *"rc=1 bin=[]"*"aucune CLI docker dans le PATH"* ]]
+  refute_out "intégration" <<<"$output"
   run env -u DOCKER_HOST LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" PROV_DOCKER_BIN="$BIN/docker" PATH="$BATS_TEST_TMPDIR/vide:/usr/bin:/bin" \
     bash -c '. "$1"; docker_endpoint; echo "rc=$? bin=$PROV_DOCKER_BIN"' _ "$LIB"
   [[ "$output" == *"rc=1 bin=$BIN/docker"* ]]
+}
+
+@test "CLI : sous WSL, aucune CLI dans le PATH nomme le geste — l'intégration Docker Desktop de cette distribution" {
+  mkdir -p "$BATS_TEST_TMPDIR/outils" "$BATS_TEST_TMPDIR/wsl/proc"
+  ln -s "$(command -v grep)" "$BATS_TEST_TMPDIR/outils/grep"   # grep seul : la sonde du substrat en a besoin, aucune CLI docker
+  echo "Linux version 6.6.0-microsoft-standard-WSL2" > "$BATS_TEST_TMPDIR/wsl/proc/version"
+  run env -u DOCKER_HOST LCARS_SUBSTRATE_ROOT="$BATS_TEST_TMPDIR/wsl" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" PATH="$BATS_TEST_TMPDIR/outils" \
+    /bin/bash -c '. "$1"; docker_endpoint; echo "rc=$?"; echo "$PROV_DOCKER_WHY"' _ "$LIB"
+  [[ "$output" == *"rc=1"*"aucune CLI docker dans le PATH. Sur WSL"*"WSL integration"*"rouvrir la session"* ]]
 }
 
 @test "sockets : une seule, /var/run/docker.sock, quel que soit le substrat — le décor la remplace" {
@@ -90,9 +100,12 @@ lib() { run bash -c ". '$LIB' >/dev/null 2>&1; $1"; }
 }
 
 @test "docker_denied_geste : hors du groupe — usermod, puis rouvrir la session" {
-  [ -e /etc/shadow ] || skip "pas de /etc/shadow pour servir de groupe témoin"
-  lib "docker_denied_geste /etc/shadow"
-  [[ "$output" == *"sudo usermod -aG shadow $(id -un)"*"rouvrir la session"* ]]
+  local sock="$BATS_TEST_TMPDIR/d.sock"; : > "$sock"
+  run bash -c '. "$1"
+    id() { case "$1" in -nG) echo "sans-le-groupe" ;; *) command id "$@" ;; esac; }
+    getent() { printf "%s:x:1:\n" "$2"; }
+    docker_denied_geste "$2"' _ "$LIB" "$sock"
+  [[ "$output" == *"sudo usermod -aG $(id -gn) $(id -un)"*"rouvrir la session"* ]]
 }
 
 @test "docker_denied_geste : socket illisible — rien n'est raconté qui ne soit su" {

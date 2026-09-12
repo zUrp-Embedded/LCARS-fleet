@@ -113,7 +113,7 @@ _run_apply() {
   FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"; _fake_zip "$PIN" "$FAKE_ZIP"; FAKE_SHA="0000000000000000000000000000000000000000000000000000000000000000"
   _run_apply
   [ "$status" -ne 0 ]
-  [[ "$output" == *"sha256 MISMATCH"* ]]
+  [[ "$output" == *"sha256 différent"* ]]
   [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ]
   [ ! -e "$PROV_LINK_DIR/elixir" ]
   [ -z "$(ls -A "$BATS_TEST_TMPDIR/opt")" ] || { echo "reste dans opt : $(ls -A "$BATS_TEST_TMPDIR/opt")"; return 1; }

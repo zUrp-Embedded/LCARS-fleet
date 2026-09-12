@@ -46,7 +46,7 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
     done < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$relman")
   fi
   [[ -r "$stage/runtime/etc/fleet.env.template" ]] \
-    || manques+=("runtime/etc/fleet.env.template absent — le rail en dérive l'environnement")
+    || manques+=("runtime/etc/fleet.env.template absent — le provisionnement en dérive l'environnement")
 
   if [[ -r "$mod62" ]]; then
     while read -r h; do
