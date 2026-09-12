@@ -86,8 +86,12 @@ code() { grep -vE '^\s*#' "$1"; }
   done
 }
 
-@test "DI-05 : sur le rail conteneur, --forge-project N est la BASE (LCARS_BASE) — le conteneur s'appelle N-fleet comme chez deploy/container" {
-  code "$INSTALL" | grep -qE 'export LCARS_BASE="\$\{PASSTHRU\[\$\(\(_i \+ 1\)\)\]\}"'
-  refute grep -qE 'export LCARS_PROJECT="\$\{PASSTHRU' <(code "$INSTALL")
-  grep -qE 'PROJECT="\$\{LCARS_PROJECT:-\$\{LCARS_BASE:-lcars\}-fleet\}"' "$BATS_TEST_DIRNAME/../../container"
+@test "DI-05 : --forge-project N passe tel quel de l'installeur au conteneur, qui s'appelle N-fleet" {
+  # l'installeur ne traduit rien : le drapeau va au délégué, et c'est lui qui dérive le projet
+  code "$INSTALL" | grep -qE '^\s*--forge-project\)\s+PROJET_PORTS\+='
+  refute grep -qE 'export LCARS_(BASE|PROJECT)=' <(code "$INSTALL")
+  local container="$BATS_TEST_DIRNAME/../../container"
+  grep -qE '^\s*--forge-project\)' "$container"
+  grep -qE 'PROJECT="\$2-fleet"' "$container"
+  grep -qE 'PROJECT="\$\{LCARS_PROJECT:-\$\{LCARS_BASE:-lcars\}-fleet\}"' "$container"
 }

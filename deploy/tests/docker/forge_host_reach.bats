@@ -823,7 +823,8 @@ STUB
   local runner; runner="$BATS_TEST_DIRNAME/../../provision"
   refute grep -qi 'DISPOSABLE' <<<"$(grep -vE '^\s*#' "$runner")"
   local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
-  grep -qE '^\s*--disposable\) echo .*retire' "$door"
+  run bash "$door" --disposable </dev/null
+  [ "$status" -eq 1 ] && [[ "$output" == *"--disposable est retiré"* ]]
   # Et l'AUTORITE du nom n'a plus que DEUX etats : rien, ou l'explicite.
   local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   [ -z "$(bash "$g" builtin-human)" ]

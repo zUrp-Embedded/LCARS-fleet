@@ -70,12 +70,11 @@ setup() {
   # ligne du bloc : partir de la faisait courir la plage jusqu'au `_box_emit` suivant — celui du
   # CONTENEUR — et le temoin rougissait sur la banniere qu'il n'examinait pas. Un intervalle `sed` mal
   # borne ne se voit pas, il change juste ce qu'on mesure.
-  local bloc; bloc="$(sed -n '/Ce rail ne crée aucun humain/,/RAIL POSTE/p' "$PORTE")"
+  # la grille du mode système, de son titre à la ligne qui nomme l'autre mode
+  local bloc; bloc="$(sed -n "/Installation dans ce système.*LCARS s'installe/,/Pour installer en conteneur/p" "$PORTE")"
   [ -n "$bloc" ]
-  grep -q 'bench' <<<"$bloc"                    # le bloc contient bien la ligne --bench du POSTE
-  # Hors commentaires : le commentaire qui explique POURQUOI on ne reprend pas la phrase du conteneur
-  # la cite forcement. Un temoin qui lit la prose interdit d'expliquer ce qu'il garde.
-  grep -vE '^[[:space:]]*#' <<<"$bloc" | refute_out 'runner CI|humain de d'
+  grep -q 'la forge' <<<"$bloc"
+  grep -vE '^[[:space:]]*#' <<<"$bloc" | refute_out 'runner CI|humain de d|deploy/container'
 }
 
 # ─── C2 — UN MODE AFFIRME SE POSE, ET SE VERIFIE ────────────────────────────────────────────────

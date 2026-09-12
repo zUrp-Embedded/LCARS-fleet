@@ -24,7 +24,7 @@
 # script de la version — jamais recuperes a cote du binaire, « un checksum servi par le meme serveur
 # ne vaut rien ». La porte du depot est donc un GABARIT : ce qui tourne dans un checkout (provenance
 # source), avec ses constantes vides. Celle d'une release en derive, et ne differe que par ces
-# lignes — un temoin le tient (`install_door.bats`, « la porte generee = le gabarit hors constantes »).
+# lignes — un temoin le tient (`install.bats`, « la porte generee est le gabarit, hors les lignes marquees »).
 #
 # ⚠ LES MARQUEURS SONT LE CONTRAT, ET ILS SE COMPTENT. `@@DOOR_VERSION@@`, `@@DOOR_BASE@@`,
 # `@@DOOR_PUBKEY@@` marquent UNE ligne chacun ; `@@DOOR_SUMS_BEGIN@@` / `@@DOOR_SUMS_END@@` bornent

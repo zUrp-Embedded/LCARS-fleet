@@ -10,6 +10,10 @@ donc ici, et **le chemin d'un témoin est celui de sa cible sous `deploy/`** —
 se teste dans `modules.d/`, pas ailleurs. Rien à retenir : chaque dossier se qualifie par l'existence
 de son jumeau, et `tests.dirs_mirror_source` (`mix lcars.contracts.check`) le refuse sinon.
 
+`install.sh` est le seul fichier de l'installeur hors de `deploy/` (il vit à la racine du dépôt pour
+le `curl | bash`) : son témoin, `install.bats`, vit à la racine de ce corpus, à côté de ceux de ses
+délégués.
+
 `transverse/` est la seule zone sans jumeau : les témoins qui n'ont pas de cible unique — conformité
 sur plusieurs modules à la fois, ou sujet hors de `deploy/`. Elle est nommée dans `@test_zones`, pas
 déduite d'un tiret bas.
