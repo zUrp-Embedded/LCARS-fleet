@@ -1,8 +1,7 @@
 defmodule Fleet.Publish.InFlightTest do
   @moduledoc """
-  The per-pod publish-in-flight fact: the completion marks a pod while it publishes, the pod's
-  deadline reads it. Crash-safe (while_publishing clears in an `after`) so a dead completion never
-  keeps a pod frozen.
+  Checks mark/clear and cleanup on a locally raised exception. Does not exercise external
+  process termination or simultaneous publishers for the same pod.
   """
   use ExUnit.Case, async: true
 

@@ -1,58 +1,29 @@
 defmodule Fleet.TaskQueue.Server do
   @moduledoc """
-  GenServer holding the queue IN RAM (a single writer); `%Fleet.Event{}` events on the bus.
+  Serializes an in-memory broker. Restart begins empty; forge-driven callers redispatch
+  from durable issue/route/PR state. This server does not itself recover or persist work;
+  adding a state file would require reconciling mandates already superseded by the forge.
 
-  SINGLE-SOURCE AXIOM: the **forge** is the truth of the work (issues/routes/PR); the
-  broker is only its RAM FRONT. No `WorkItem` field is broker-only-durable — everything is
-  re-derivable on forge re-dispatch — so **the broker is EPHEMERAL, period**: no persisted state,
-  hence no stale tasks surviving a reboot. On restart, the queue re-derives itself from the forge
-  polls (canonical reconciliation rail).
+  Options: name (nil for anonymous), topic (default fleet.events), bus (broadcast/2 module,
+  default EventRouter.Bus), retention_terminal_max (default 500) and poll_retention_ms
+  (default one day). Retention values also have task_queue_* application-config defaults.
+  Options are not validated here. Terminal retention excludes active items; it is not a
+  total memory bound. Poll pruning runs only on subsequent polls, and connection marks
+  persist until explicit clear/restart. All transitions and broadcasts run on this process.
 
-  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** L'axiome ci-dessus est une POUTRE du cycle de vie du
-  worker, pas une option : reintroduire une persistance cote broker ne serait pas inutile, ce serait
-  FAUX — on ressusciterait au demarrage des mandats que la forge a deja depasses.
-  **Un mecanisme dormant qui s'allume detruit du travail ; un mecanisme retire de trop se reecrit.**
+  Enqueue supersedes the pod's active items. Pull assigns once; completion requires a pulled
+  item and checks a supplied work_item_id before state. Completion broadcasts before terminal
+  commit; returned failures leave state unchanged for retry. Other transitions use lossy events.
+  Broadcast documents why neither :ok nor an error establishes consumer delivery, and why
+  partial delivery can duplicate work on retries. Completion history and deduplication are
+  bounded by retention and lost on restart.
 
-  Broadcasts `%Fleet.Event{source: :task_queue, ...}` on `Phoenix.PubSub`
-  topic `fleet.events`, `correlation_id = work_item.id`. Reconciliation across a restart goes
-  through the forge-driven rail (re-dispatch from the forge state), and through nothing else.
+  The pull prerequisite matches Poller.Reconciliation's @pulled_states [:assigned]
+  ownership rule: a pending admission alone does not establish an executor.
 
-  ## Assumed bottleneck
-  GenServer = intended serialization of state transitions (idempotence). The ETS-reads / pool
-  optimization is **deferred** (trigger criterion: get_work_item/submit_result latency > 100ms).
-  MVP: everything goes through `call`.
-
-  ## Options
-  `:name` (`nil` → anonymous, test isolation),
-  `:topic` (default `"fleet.events"`), `:retention_terminal_max` (max number
-  of TERMINAL tasks kept, default 500; bounds `work_items` in memory. ACTIVE tasks do not count),
-  `:bus` (seam, default `Fleet.EventRouter.Bus`; module with `broadcast/2` — injected in test to
-  exercise the non-swallowed `work_item.completed` lifecycle path).
-
-  ## Broadcast — load-bearing vs lossy observability
-  `work_item.completed` is LIFECYCLE load-bearing (the StepRunConsumer depends on it to finish the step_run) →
-  `required_broadcast`: a failure is NOT swallowed, it propagates `{:error, {:broadcast_failed, _}}` to the caller
-  of `submit_result` (no more mute `:ok` that leaves the forge lock for life). The other events
-  (enqueued/assigned/cleared/failed-deadline) = `lossy_broadcast` (observability, rescue).
-
-  ⚠ **`required` is about THIS server's obligation, not about delivery.** Its `:ok` proves the bus
-  accepted the message; zero subscriber is also `:ok`, so a completion CAN be committed terminal
-  with nobody left to advance the step_run. The broker cannot close that gap from here — the probe
-  would have to ask the SPAWNER whether this item's pod still listens, and the spawner is this
-  domain's source, not its dependency. `Fleet.TaskQueue.Broadcast` states the full reasoning; the
-  durable half of completion is the forge reconciliation (F-C050), never this ephemeral broker.
-
-  ## Deux extractions REFUSEES, et leurs raisons
-
-    * **Deadline-watchdog** (`maybe_schedule_deadline/1` + `handle_info {:check_deadline}`):
-      the arm/check pair is coupled to the PROCESS (`Process.send_after(self(), ...)` →
-      message received by THIS GenServer). Extracting the "arming" half would place a
-      process-coupled side-effect in a leaf module while the receiving half
-      (callback) stayed here: no coupling lifted, one indirection added.
-    * **Retention/prune** (`prune_terminal/2` + `recency/1`): ~20 pure LOC, a SINGLE
-      call-site (`put_work_item/2`), and the `@active_states` vocabulary is SHARED with
-      selection (`find_active`), supersession and the deadline guard — extracting it
-      would force either a duplication of that authority, or a dedicated module for 20 LOC.
+  Deadlines are queued checks against wall-clock time, not hard cutoffs on pull/submit.
+  Checks and timer arming stay together because send_after targets this server; retention
+  shares WorkItem.active_states/0 with selection, supersession and deadline handling.
   """
 
   use GenServer
@@ -62,7 +33,6 @@ defmodule Fleet.TaskQueue.Server do
   alias Fleet.TaskQueue.Broadcast
   alias Fleet.TaskQueue.WorkItem
 
-  # F-C050
   @active_states WorkItem.active_states()
 
   @max_timer 4_294_967_295
@@ -82,21 +52,12 @@ defmodule Fleet.TaskQueue.Server do
   def init(opts) do
     base = %{
       work_items: %{},
-      # Last-poll per pod (the agent called get_for_pod = in-band ACK, EVEN with no work item → bootstrap
-      # signal "the agent is up + reached out"). In-mem/ephemeral: recency lives at runtime, not
-      # persisted (a restart re-establishes it via subsequent polls).
+      # Empty pulls also record activity; restart forgets it.
       polls: %{},
-      # REPL-up per pod: the pod's MCP socket has received AT LEAST ONE line from it. Distinct from
-      # `polls`, and the distinction is the whole point — `polls` proves the agent asked for WORK
-      # (it took a turn), this proves only that its client is CONNECTED, which happens at TUI init,
-      # before any turn. It is what the kick loop needs: typing into a REPL that is not up yet is
-      # not a no-op (tmux buffers the keys and the TUI replays each line as its own submission).
-      # Same in-mem/ephemeral nature as `polls`, same purge point (`clear_for_pod`).
+      # MCP traffic is a startup hint earlier than a work poll, not continuous liveness.
       connects: %{},
       topic: Keyword.get(opts, :topic, Bus.main_topic()),
-      # Bus seam (default = the real `Bus`). Module with `broadcast/2`. Lets us
-      # test the non-swallowed lifecycle path (a stub bus that returns `{:error,_}` / raises on work_item.completed)
-      # without touching the global `:persistent_term` registry.
+      # Per-server failure seam avoids mutating the global bus registry in tests.
       bus: Keyword.get(opts, :bus, Bus),
       retention_terminal_max:
         Keyword.get(opts, :retention_terminal_max) ||
@@ -114,19 +75,10 @@ defmodule Fleet.TaskQueue.Server do
           )
     }
 
-    # UN BROKER NEUF EST VIDE, SANS ALTERNATIVE : pas de relecture d'etat, donc pas de
-    # `handle_continue` de restauration. Un chemin de demarrage que rien ne declenche decrirait un
-    # demarrage que la machine n'a pas (BL-6-113).
     {:ok, base}
   end
 
-  # ============================================================
-  # Command Port
-  # ============================================================
-
-  # CAST, not call: this is written from the pod-socket read loop, on every inbound line. A call
-  # would put the broker's mailbox on the critical path of an MCP response — the queue's health
-  # would become the pod's latency. Losing one mark costs nothing: the next line re-posts it.
+  # Cast avoids blocking MCP responses on this mailbox. Later inbound lines may repeat a lost mark.
   @impl GenServer
   def handle_cast({:mark_connected, pod_id}, state) do
     {:noreply, %{state | connects: Map.put_new(state.connects, pod_id, true)}}
@@ -134,29 +86,19 @@ defmodule Fleet.TaskQueue.Server do
 
   @impl GenServer
   def handle_call({:enqueue, pod_id, attrs}, _from, state) do
-    # Smart constructor: casts the attrs (deadline ISO→DateTime, metadata=map, …) — a malformed attr
-    # is refused with `{:error, {:bad_attr, _}}` instead of storing a semi-typed work item.
     case WorkItem.new(pod_id, attrs) do
       {:error, _} = err ->
         {:reply, err, state}
 
       {:ok, work_item} ->
-        # AXIOM "1 ACTIVE work item/pod" held AT WRITE. A FRESH work item SUPERSEDES EVERY active one of the pod: the
-        # `:pending` never pulled (drop) AND the in-flight `:assigned` (→ `:cleared`). A re-brief replaces the old one:
-        # the pod will take the new one (the only active left) at the next `get_for_pod`. Uniqueness MUST be held here,
-        # not only at read: keeping a stale `:assigned` alongside the new pending would leave it ACTIVE and invisible to
-        # the guards (`find_active` = `max_by(enqueued_at)` serves the most recent but MASKS the leak → unbounded "2
-        # actives/pod" state, invariant violated). Uniqueness held AT WRITE → `find_active`/`max_by` becomes moot (at
-        # most 1 active/pod by construction).
+        # Clear both pending and assigned predecessors at write time. Selecting only the newest
+        # on reads would hide stale active items from callers while leaking ownership state.
         {state, superseded} = supersede_active(state, pod_id)
 
         new_state = state |> put_work_item(work_item)
 
-        # Supersede must not be the one terminal transition with no event: mandates going
-        # `:cleared` behind a debug log make the audit trail lie by omission about their fate, and
-        # any consumer holding per-mandate context (StepRunConsumer's `gate_evals`) keeps it
-        # forever. One `work_item.cleared` per superseded item, SAME shape as the clear_for_pod
-        # rail (payload `work_item_id` + `reason` — the reason distinguishes the two paths).
+        # Emit each supersession so audit/context consumers can retire the old mandate.
+        # These events remain lossy; :superseded distinguishes them from explicit clear.
         for t <- superseded do
           Logger.debug("Server: enqueue pod=#{pod_id} supersedes stale active item #{t.id}")
 
@@ -212,16 +154,9 @@ defmodule Fleet.TaskQueue.Server do
     end
   end
 
-  # Purges ALL of the pod's active items (not only the most recent via `find_active`). With the
-  # "1 active/pod" invariant held at enqueue (`supersede_active`), there is normally only one; but a clear must
-  # stay TOTAL (no residual stale `:assigned` that would escape the clear and leak — symmetric to
-  # the enqueue). One `:"work_item.cleared"` broadcast per cleared task; no active → idempotent no-op.
+  # Clear every active item, including duplicates injected into corrupt test state.
   def handle_call({:clear_for_pod, pod_id}, _from, state) do
-    # The clear decommissions the pod → we ALSO drop its last-poll from `state.polls` (symmetric to
-    # the `work_items` purge below). Without this, `polls` (one timestamp per pod, NEVER persisted) accumulates
-    # dead pod_ids indefinitely: `record_poll` only adds entries, and `prune_terminal` only prunes
-    # `work_items`. `clear_for_pod` is the pod's canonical purge point → this is where a poll becomes
-    # obsolete. `Map.delete` idempotent: no-op if the pod never polled or has no active item.
+    # Remove startup marks even when no active item remains; work-item retention does not prune them.
     state = %{
       state
       | polls: Map.delete(state.polls, pod_id),
@@ -282,10 +217,8 @@ defmodule Fleet.TaskQueue.Server do
     {:reply, {:ok, issue}, state}
   end
 
-  # Pod last-poll (`DateTime | nil`) = the bootstrap in-band ACK ("the agent reached out",
-  # even with no work item). The real consumer (`Pod.TaskProbe.polled?`) tests PRESENCE (!= nil),
-  # it does NOT compare instants (if a recency comparison is ever introduced, do it in
-  # monotonic/token, never DateTime-vs-DateTime — NTP jumps).
+  # TaskProbe uses presence as a startup hint. Timestamps/TTL use wall clock and can be
+  # affected by clock adjustments; reading last_poll does not itself prune stale entries.
   def handle_call({:last_poll, pod_id}, _from, state) do
     {:reply, Map.get(state.polls, pod_id), state}
   end
@@ -293,10 +226,6 @@ defmodule Fleet.TaskQueue.Server do
   def handle_call({:connected?, pod_id}, _from, state) do
     {:reply, Map.has_key?(state.connects, pod_id), state}
   end
-
-  # ============================================================
-  # Deadline (transition :failed)
-  # ============================================================
 
   @impl GenServer
   def handle_info({:check_deadline, work_item_id}, state) do
@@ -332,24 +261,8 @@ defmodule Fleet.TaskQueue.Server do
       tid when tid != nil and tid != work_item.id ->
         {:reply, {:error, :work_item_id_mismatch}, state}
 
-      # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and matching `@active_states` here would leave
-      # that to accident.
-      #
-      # `@active_states` is `[:pending, :assigned]`, so such a branch accepts a `:pending` item —
-      # one the pod never pulled. Nothing exploits it, for a reason that is not a rule: the id is
-      # only obtainable through `get_work_item`, which transitions the item to `:assigned` on its
-      # way out. The guarantee "the pod saw the brief before closing it" is then a property of who
-      # knows an id, not of the state machine. A confused pod, a misplaced retry or a future caller
-      # holding an id another way would each turn it off silently.
-      #
-      # The distinction already exists in the codebase — `Poller.Reconciliation` keys its own
-      # ownership rule on `@pulled_states [:assigned]` for exactly this reason. Applying it here is
-      # consistency, not a new invention.
-      #
-      # AFTER the id check and not before, deliberately: a stale id submitted while a pending item
-      # is active must still answer `:work_item_id_mismatch`, which names the real problem.
-      # Refusing on the state first would report "not pulled" about a mandate the pod never meant
-      # to close — an instrument answering the neighbouring question.
+      # Enforce pull-before-close in state, not by assuming only a reader could know the id.
+      # Check the correlator first so a stale submission names the id error, not the new item's state.
       _ok when work_item.state == :pending ->
         {:reply, {:error, :work_item_not_pulled}, state}
 
@@ -381,26 +294,10 @@ defmodule Fleet.TaskQueue.Server do
         metadata: completed.metadata
       })
 
-    # BROADCAST BEFORE COMMIT (CI-03). `work_item.completed` is LIFECYCLE load-bearing (the double-hop
-    # STARTS here: the pod consumes it in `:monitoring` → `pod.completed` → StepRunConsumer). The terminal
-    # `:completed` state is committed ONLY after the delivery is confirmed — same ordering doctrine as
-    # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
-    # failure NOTHING is committed: the item STAYS active (`:assigned`) → `find_active`
-    # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
-    # `:double_submit_ignored`/"already received" on an UNdelivered item. Commit first and a
-    # lost broadcast leaves a terminal `:completed` plus a false success at retry.
-    #
-    # ⚠ AN IMPLICATION, NEVER `⟺`: a biconditional is false in the direction that matters,
-    # since zero subscriber yields `:ok` and not an error. The discipline needs only the
-    # implication below — a refusal proves nobody got it — and reading it as an equivalence
-    # turns "the bus accepted" into "a consumer received", which nothing here establishes
-    # (cf. `Broadcast.required`, which states what `:ok` does not buy).
-    # INVARIANT this rests on: `required_broadcast {:error} ⟹ ZERO subscriber delivered`. True on the
-    # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
-    # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
-    # dispatch — cf. `Broadcast.required`). So an item stays active only if NOBODY received → re-emission
-    # never double-delivers. A future clustered/async Bus (partial delivery before error) would break it.
-    # Across-restart durability stays the forge reconciliation (F-C050), NOT this ephemeral broker.
+    # Publish before terminal commit so failures remain retryable. The pod's monitoring path
+    # forwards completion toward StepRunConsumer; neither hop is acknowledged here. A failure
+    # may follow partial delivery, or this process may die after broadcast and before commit:
+    # retries can duplicate events. The broker is not durable; forge reconciliation remains needed.
     case required_broadcast(state, ev) do
       :ok -> {:reply, {:ok, completed}, put_work_item(state, completed)}
       {:error, _} = err -> {:reply, err, state}
@@ -414,11 +311,8 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  # D4 — THE RUNTIME ENGRAVES THE ORDER'S VERSION; THE POD DOES NOT CITE IT. The broker dispatched
-  # this work item at a pinned `brief_sha`/`brief_ref`, so it OVERWRITES whatever the pod put (or
-  # omitted) in its result. The provenance triplet downstream then cites the version the runtime
-  # RESOLVED — PROVEN — instead of a pod relaying a sha it cannot verify, a citation honest only if
-  # the pod is. `nil` (a degraded/inline order, nothing materialized) → untouched.
+  # Prefer the dispatched brief's provenance over pod-supplied string keys when a SHA exists.
+  # Without it, leave the result unchanged. Atom-keyed citations are not removed by this helper.
   defp put_runtime_brief(result, %WorkItem{brief_sha: sha, brief_ref: ref}) when is_binary(sha) do
     result |> Map.put("brief_sha", sha) |> Map.put("brief_ref", ref)
   end
@@ -432,15 +326,9 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  # Supersedes EVERY active item of the pod (a fresh work item at enqueue replaces the old one): each active
-  # (`:pending` | `:assigned`) is transitioned to `:cleared` — including the `:pending`
-  # never pulled (SAME transition as the others, it stays traceable in the map; nothing is dropped).
-  # The pod abandons the old one: `submit_result` of the old work item will hit `find_active`
-  # = nil → `:no_active_work_item`/`:double_submit_ignored`, never a mutation of the new one. Keeps all the rest
-  # (other pods, the pod's terminal items). Bounds the queue to 1 active/pod AT WRITE. Returns
-  # `{state, superseded_items}` — the ITEMS, not a count: the caller broadcasts one
-  # `work_item.cleared` per item (a terminal transition with no event is a hole in the audit
-  # trail, and it strands the per-mandate context consumers hold — cf. StepRunConsumer gate_evals).
+  # Return every cleared item for per-mandate events; later terminal pruning may discard history.
+  # A supplied old id is refused against the replacement. Id-less direct submissions can still
+  # close a replacement once pulled; the pod-facing MCP boundary must require the correlator.
   defp supersede_active(state, pod_id) do
     superseded =
       state.work_items
@@ -454,22 +342,9 @@ defmodule Fleet.TaskQueue.Server do
     {%{state | work_items: work_items}, superseded}
   end
 
-  # "HAS THIS MANDATE ALREADY BEEN RECEIVED?" — not "has this pod ever completed anything".
-  #
-  # The difference is the whole point, because the answer is told to the pod as a SUCCESS: the MCP
-  # layer turns `:double_submit_ignored` into `{:ok, "Result already received (ignored)."}`. Answer
-  # the neighbouring question and a pod is told its work landed when it went in the bin.
-  #
-  # The sequence that produced it, and none of its steps is exotic: the pod completes mandate A, a
-  # mandate B is enqueued, a teardown clears B, and B's `submit_result` — already in flight on the
-  # socket — arrives. `find_active` is nil, a predicate keyed on the pod sees A, and B's result is
-  # dropped under an acknowledgement. The `work_item_id_mismatch` guard does not catch it either:
-  # it only runs on the branch where an ACTIVE item exists, so on this path the submitted id is
-  # never compared to anything.
-  #
-  # Correlating by id also states the honest answer when there is nothing to correlate: no id, or
-  # an id we never completed, is `:no_active_work_item` — "we have nothing of yours", which is
-  # true — and never "already received", which would be a claim we cannot support.
+  # Correlate to this pod's retained completed id, not any earlier completion by the pod.
+  # Otherwise completed A followed by cleared B could falsely acknowledge B's late result.
+  # No id or pruned history cannot establish a duplicate; a new active item takes the other branch.
   defp completed_submit?(work_items, pod_id, result) do
     case result["work_item_id"] || result[:work_item_id] do
       nil ->

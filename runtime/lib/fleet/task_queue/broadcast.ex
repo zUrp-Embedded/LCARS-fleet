@@ -2,40 +2,20 @@ defmodule Fleet.TaskQueue.Broadcast do
   @moduledoc """
   Broadcast policy for broker events using an injected bus and topic.
 
-  Observability events are lossy: failures are logged and flattened to `:ok`.
+  Observability events are lossy: returned errors and rescued exceptions become :ok.
   `work_item.completed` is required: failures return
   `{:error, {:broadcast_failed, reason}}`, and the server keeps the item active
   for replay.
 
-  Required-broadcast retries assume the current bus fails before delivering to
-  any subscriber. A bus capable of partial delivery must provide a different
-  replay contract.
+  Required means the caller must not commit on a returned failure. It is not a delivery
+  acknowledgement: zero subscribers can yield :ok, while main-topic delivery can precede
+  failed pod fan-out. An injected bus may also deliver then fail. Retries therefore need
+  downstream deduplication/reconciliation; this module provides no exactly-once guarantee.
 
-  ## What `required` buys, and what it does NOT
-
-  It is a ONE-WAY guarantee, and only the refusal side is proven: `{:error, _}` means NOBODY
-  received, so the caller may keep the item active and replay honestly. `:ok` means the BUS
-  ACCEPTED the message — not that a consumer existed, was alive, or handled it. Zero subscribers
-  is `:ok`. The name says "required" about the CALLER's obligation not to commit on failure, never
-  about delivery.
-
-  **And the probe that would close the gap cannot live here** — two measured reasons, both
-  structural:
-
-    * Every consumer of this fleet subscribes to ONE topic (`fleet.events`) and filters by event
-      type itself. "Does this topic have a subscriber?" is answered `true` by an open dashboard
-      websocket, so it would certify delivery of `work_item.completed` while its actual consumer is
-      dead. An exact answer to a neighbouring question is worse than none: it closes the matter.
-    * The precise question — "is THIS work item's pod alive and subscribed?" — belongs to the
-      SPAWNER, which is this domain's SOURCE and not its dependency (`Fleet.TaskQueue` declares no
-      `Fleet.Spawner`, and the edge would close a cycle boundary refuses). The broker distributes
-      and collects; it does not reach back to ask whether the source is still listening.
-
-  So an acknowledged delivery is an ARCHITECTURE decision — a per-event-type subscriber notion in
-  `Fleet.EventRouter` (which deliberately has "direct subscribers, no dispatch table"), or the
-  durable outbox this fleet does not have, its single queue being EPHEMERAL BY CONSTRUCTION
-  (BL-6-113 — cf. `Server`'s moduledoc).
-  Until one is taken, the durable half of completion stays the forge reconciliation (F-C050).
+  Topic subscription counts do not prove the intended event consumer is listening: a dashboard
+  can satisfy that probe. Pod liveness belongs to Spawner, which this domain cannot depend back
+  on. Acknowledgements or durable handoff require a separate protocol; this broker has no outbox.
+  Forge reconciliation supplies restart recovery. Neither wrapper catches exits or throws.
   """
 
   require Logger
@@ -56,12 +36,10 @@ defmodule Fleet.TaskQueue.Broadcast do
   end
 
   @doc """
-  Broadcasts a lossy observability event and always returns `:ok`.
-
-  Exceptions and delivery errors are logged.
+  Broadcasts observability, logging returned errors and rescued exceptions, then returning :ok.
+  Other return values are accepted; exits/throws and errors in diagnostic logging can escape.
   """
   @spec lossy(module(), String.t(), Event.t()) :: :ok
-  # CI-09
   def lossy(bus, topic, %Event{} = ev) do
     case bus.broadcast(topic, ev) do
       {:error, reason} ->
@@ -84,12 +62,12 @@ defmodule Fleet.TaskQueue.Broadcast do
   @doc """
   Broadcasts a required lifecycle event, returning `:broadcast_failed` on failure.
 
-  `:ok` proves the bus accepted the message, NOT that a consumer received it — zero subscribers is
-  `:ok`. The moduledoc states why the probe that would prove delivery cannot live in this domain.
+  :ok is the bus result, not subscriber acknowledgement. Returned errors and rescued
+  exceptions become broadcast_failed; unexpected return values raise a rescued CaseClauseError.
+  A failure can follow partial delivery, so replay may duplicate an event.
   """
   @spec required(module(), String.t(), Event.t()) ::
           :ok | {:error, {:broadcast_failed, term()}}
-  # CI-03
   def required(bus, topic, %Event{} = ev) do
     case bus.broadcast(topic, ev) do
       :ok ->

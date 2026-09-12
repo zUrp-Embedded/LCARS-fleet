@@ -3,8 +3,8 @@ defmodule Fleet.Publish.InFlight do
 
   @moduledoc """
   Zero-dependency per-pod fact protecting a live publish from deadline recovery's
-  destructive workspace reset. `while_publishing/2` always clears its rare-write
-  persistent mark in an `after` block.
+  destructive workspace reset. This VM-local boolean is not a lock or reference count:
+  concurrent/nested publishers for the same pod can clear each other's mark. Callers must serialize.
   """
 
   @doc "Marks `pod_id` as having a publish in flight. Idempotent."
@@ -28,9 +28,9 @@ defmodule Fleet.Publish.InFlight do
   end
 
   @doc """
-  Runs `fun` with `pod_id` marked in-flight for its whole duration; the clear runs in an `after`,
-  so a raised/exited publish still clears its mark (a dead completion never freezes the pod
-  forever). Returns `fun`'s result.
+  Marks pod_id, runs fun and clears in after, returning its result. Local raises, throws
+  and exit/1 unwind through cleanup; external process termination can leave the mark set.
+  It survives an individual publisher's death until cleared or the VM restarts.
   """
   @spec while_publishing(String.t(), (-> result)) :: result when result: var
   def while_publishing(pod_id, fun) when is_binary(pod_id) and is_function(fun, 0) do

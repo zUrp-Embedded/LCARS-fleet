@@ -18,8 +18,9 @@ defmodule Fleet.TaskQueue do
   `Fleet.MCP` serves via the `get_work_item`/`submit_result` tools,
   `Fleet.Pilot` (StepRunConsumer) steers post-result.
 
-  Every function has a test-seam variant (explicit `server`, e.g. `enqueue/3`,
-  `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
+  Explicit-server variants support isolated anonymous servers (name: nil). Calls use
+  GenServer's default timeout and may exit if the server is unavailable or slow; timeout
+  does not cancel a queued operation. State is ephemeral; see Server for retention.
   """
 
   alias Fleet.TaskQueue.Server
@@ -51,7 +52,8 @@ defmodule Fleet.TaskQueue do
 
   Completion is broadcast before commit. A broadcast failure returns
   `{:error, {:broadcast_failed, reason}}` and leaves the item active so a retry
-  can replay delivery.
+  can retry emission. Partial delivery before failure can duplicate events on retry;
+  successful emission does not acknowledge subscriber processing.
   """
   @spec submit_result(String.t(), map()) ::
           {:ok, WorkItem.t()}
@@ -82,12 +84,8 @@ defmodule Fleet.TaskQueue do
   def list_pending(server), do: GenServer.call(server, :list_pending)
 
   @doc """
-  Lists the ACTIVE work items (`:pending` | `:assigned` — the Server's
-  `@active_states` authority, not a re-declaration here). Query Port, no broadcast.
-
-  Consumer: the poller's lock reconciliation (G1) — a work unit under an ACTIVE gatekeeper
-  eval is owned (the task's `gate_eval` metadata carries the work unit); an eval that is
-  `:cleared` (superseded) or `:completed` no longer is → the reclaim takes over.
+  Lists items in WorkItem.active_states/0 without broadcasting. Poller lock reconciliation
+  uses active gate-evaluation metadata; terminal items do not count as broker-owned work.
   """
   @spec list_active() :: [WorkItem.t()]
   def list_active, do: list_active(@server)
@@ -95,7 +93,7 @@ defmodule Fleet.TaskQueue do
   @spec list_active(GenServer.server()) :: [WorkItem.t()]
   def list_active(server), do: GenServer.call(server, :list_active)
 
-  @doc "Clears all active work items for a pod. Idempotent."
+  @doc "Clears active items and forgets poll/connection marks for a pod. Idempotent; terminal history may remain."
   @spec clear_for_pod(String.t()) :: :ok
   def clear_for_pod(pod_id), do: clear_for_pod(@server, pod_id)
 
@@ -106,7 +104,7 @@ defmodule Fleet.TaskQueue do
   @doc """
   Returns the state of the pod's latest work item, including terminal states.
 
-  `{:ok, nil}` means the pod has no recorded work item.
+  {:ok, nil} means no retained item; terminal pruning and server restart can erase history.
   """
   @spec pod_status(String.t()) :: {:ok, atom() | nil}
   def pod_status(pod_id), do: pod_status(@server, pod_id)
@@ -136,12 +134,9 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:last_poll, pod_id})
 
   @doc """
-  The pod's MCP client has spoken on its socket at least once — i.e. its REPL is UP.
-
-  Weaker than `last_poll/1` and that is what makes it useful: a client connects and lists tools at
-  TUI init, BEFORE the agent takes any turn. It is the only in-band evidence available during a
-  cold start, and the kick loop needs exactly that — keys typed into a REPL that is not up yet are
-  buffered by tmux and replayed by the TUI as that many spurious submissions.
+  Asynchronously records that the MCP client has spoken. Used as a startup hint before a
+  get_for_pod poll, to avoid tmux buffering premature kick input as extra submissions.
+  The mark is not proof of current client/REPL liveness; clear_for_pod or restart removes it.
   """
   @spec mark_connected(String.t()) :: :ok
   def mark_connected(pod_id), do: mark_connected(@server, pod_id)

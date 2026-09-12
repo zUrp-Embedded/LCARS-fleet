@@ -9,10 +9,7 @@ defmodule Fleet.TaskQueue.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # Le broker est EPHEMERE PAR CONSTRUCTION (BL-6-113) : pas de rail de persistance, donc pas de
-    # drapeau a poser ni de choix a plaider ici. L'AUTORITE est le `@moduledoc` de
-    # `Fleet.TaskQueue.Server` (la forge est la verite du travail, le broker n'en est que le FRONT
-    # RAM). On POINTE, on ne recopie pas.
+    # Server restarts empty; forge-driven callers reconstruct work, not a broker state file.
     children = [Fleet.TaskQueue.Server]
 
     Supervisor.init(children,
