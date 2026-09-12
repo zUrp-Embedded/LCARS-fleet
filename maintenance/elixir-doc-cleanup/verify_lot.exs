@@ -7,6 +7,11 @@ defmodule LotCheck do
       when kind in [:doc, :moduledoc, :typedoc] and is_binary(value) ->
         {:documentation, [], [kind]}
 
+      # ~S docs are literal text. Preserve the sigil and modifiers; do not normalize other sigils.
+      {:@, _, [{kind, _, [{:sigil_S, _, [{:<<>>, _, [value]}, modifiers]}]}]}
+      when kind in [:doc, :moduledoc, :typedoc] and is_binary(value) ->
+        {:documentation, [], [kind, :sigil_S, modifiers]}
+
       # Ignore prose fragments in interpolated docs, but compare every interpolation expression.
       {:@, _, [{kind, _, [{:<<>>, _, parts}]}]}
       when kind in [:doc, :moduledoc, :typedoc] ->
