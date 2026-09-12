@@ -103,7 +103,7 @@ fleet_stub() { # fleet_stub <vivant|mort|start-casse>
     printf '%s\n' '    printf "fleet: visibilite debug : off\n"'
     printf '%s\n' '    printf "(aucun pod vivant)\n"'
     printf '%s\n' '    ;;'
-    printf '%s\n' '  start) [[ "$ETAT" == start-casse ]] && exit 1; : > "$MARQUEUR" ;;'
+    printf '%s\n' '  start) [[ "$ETAT" == start-casse ]] && exit 1; : > "$MARQUEUR"; [[ -z "${LCARS_START_WITHOUT_CLAUDE:-}" ]] || : > "$MARQUEUR.sans-claude" ;;'
     printf '%s\n' '  stop)  rm -f "$MARQUEUR" ;;'
     printf '%s\n' 'esac'
     printf '%s\n' 'exit 0'
@@ -271,6 +271,17 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
   [ "$status" -eq 0 ]
   [[ "$output" == *"demarre et vivante"* ]]
   [[ "$output" == *"OUI"* ]]
+}
+
+@test "sur un banc, la fleet démarre sans credentials claude et reste debout" {
+  fleet_stub mort
+  LCARS_BENCH=1 joue
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OUI"*"laissee debout"* ]]
+  [ -e "$MARQUEUR" ] && [ -e "$MARQUEUR.sans-claude" ]
+  rm -f "$MARQUEUR" "$MARQUEUR.sans-claude"
+  joue
+  [ ! -e "$MARQUEUR" ] && [ ! -e "$MARQUEUR.sans-claude" ]
 }
 
 @test "start en ECHEC : refus qui renvoie vers la plainte du lanceur" {

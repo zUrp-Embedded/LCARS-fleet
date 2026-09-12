@@ -266,15 +266,65 @@ root() {
   [[ "$output" != *"wsl --shutdown"* ]]
 }
 
-@test "root : les creds du banc — l'humain absent est dit, le compte sans credentials est dit, en termes impersonnels" {
+banc() { # banc — le décor du contrat de banc : getent, chpasswd et curl doublés, adresse et jeton de la forge posés
+  local hroot="$BATS_TEST_TMPDIR/hroot"; mkdir -p "$hroot"
+  printf '#!/usr/bin/env bash\n[[ "$1" == passwd ]] && printf "%%s:x:0:0::%s:/bin/bash\\n" "$2"\nexit 0\n' "$hroot" > "$BINDIR/getent"
+  printf '#!/usr/bin/env bash\ncat >> "%s"\n' "$TRACE" > "$BINDIR/chpasswd"
+  cat > "$BINDIR/curl" <<EOF
+#!/usr/bin/env bash
+cfg=""; for a in "\$@"; do [[ "\$a" == "-K" ]] && cfg="\$(cat)"; done
+url="\${@: -1}"
+echo "CURL:\$* | \$(tr '\n' ' ' <<<"\$cfg")" >> "$TRACE"
+case "\$url" in
+  */api/v1/admin/users/*)   [[ " \$* " == *" -w "* ]] && printf '%s' "\${STUB_PATCH_CODE:-200}"; exit 0 ;;
+  */api/v1/users/*/tokens)  printf '{"sha1":"OP-TOKEN"}'; exit 0 ;;
+  */api/v1/users/*)         printf '{"is_admin":true}'; exit 0 ;;
+esac
+exit 0
+EOF
+  chmod 0755 "$BINDIR/getent" "$BINDIR/chpasswd" "$BINDIR/curl"
+  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens" PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  mkdir -p "$PROV_TOKENS_DIR"
+  echo "http://127.0.0.1:20090" > "$PROV_TOKENS_DIR/forge.url"; echo "tok-master" > "$PROV_MASTER_TOKEN_FILE"
+  HROOT="$hroot"
+}
+
+@test "root, banc : l'humain reçoit ses mots de passe unix et forge, l'adminité, son jeton opérateur, et l'absence de creds est dite" {
   arbre channel=aucun substrat=wsl
-  LCARS_BUILTIN_HUMAN="inexistant-$$" root
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"creds claude : « inexistant-$$ » n'existe pas encore"* ]]
-  LCARS_BUILTIN_HUMAN="$(id -un)" LCARS_CREDS_SRC="$BATS_TEST_TMPDIR/absent.json" SUDO_USER="$(id -un)" root
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"creds claude non posées chez « $(id -un) »"*"n'en a pas"*"/login"* ]]
+  banc
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root LCARS_CREDS_SRC="$BATS_TEST_TMPDIR/absent.json" SUDO_USER=root root
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'root:toto32toto32' "$TRACE"
+  grep -q 'admin/users/root | header = "Authorization: token tok-master".*"password\\":\\"toto32toto32\\".*"admin\\":true' "$TRACE"
+  refute grep -qE 'CURL:[^|]*(tok-master|toto32toto32)' "$TRACE"
+  [ "$(cat "$HROOT/.gitea_token")" = "OP-TOKEN" ]
+  [ "$(stat -c %a "$HROOT/.gitea_token")" = "600" ]
+  [[ "$output" == *"banc : mot de passe unix posé sur « root »"*"« root » sur la forge — mot de passe de banc, site-admin, jeton opérateur"*"creds claude non posées chez « root »"*"n'en a pas"*"/login"* ]]
   refute_out '\b(rejoue|tu|ton)\b' <<<"$output"
+}
+
+@test "root, banc : un humain pas encore matérialisé est dit, rien n'est posé ; un refus de la forge est dit" {
+  arbre channel=aucun substrat=wsl
+  banc
+  printf '#!/usr/bin/env bash\nexit 2\n' > "$BINDIR/getent"
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"banc : « root » n'existe pas encore sur cette machine"* ]]
+  refute grep -q 'CURL:' "$TRACE"
+  banc
+  STUB_PATCH_CODE=403 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refuse le compte « root » (HTTP 403)"*"« root » non semé sur la forge"* ]]
+  [ ! -e "$HROOT/.gitea_token" ]
+}
+
+@test "root, hors banc : l'humain de démonstration n'est pas semé même s'il est nommé" {
+  arbre channel=aucun substrat=wsl
+  banc
+  LCARS_BUILTIN_HUMAN=root root
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"banc :"* ]]
+  refute grep -q 'CURL:\|toto32toto32' "$TRACE"
 }
 
 # ─── le kit ─────────────────────────────────────────────────────────────────────────────────────

@@ -94,18 +94,3 @@ SH
   [[ "$output" == *"--catalogue"* ]]
 }
 
-# ─── le banc ne redemande PAS de toolchain a la machine ──────────────────────────────────────────
-
-@test "bench-forge-bootstrap derive le roster par l'IMAGE, jamais par --repo" {
-  # TEMOIN STRUCTUREL, et il garde la regression exacte qui a tue le premier deploiement ailleurs :
-  # « simplifier » ce site en revenant a `--repo` remet un `mix` sur le chemin de livraison, et ca
-  # ne se voit sur aucune machine de dev.
-  SRC="$BATS_TEST_DIRNAME/../../docker/bench/bench-forge-bootstrap.sh"
-  [ -f "$SRC" ]
-  grep -q -- "--image \"\$CONTAINER_IMAGE\"" "$SRC"
-  refute grep -q -- "--repo \"\$REPO_ROOT/fleet\"" "$SRC"
-  # ET SANS `--catalogue` : nommer l'arbre de l'hote le fait monter dans le conteneur, ou la porte
-  # tourne en `nobody`. Ca passe la ou le clone est world-readable et ca echoue ailleurs — une
-  # dependance a la permission d'un parent, invisible sur la machine qui l'a ecrite.
-  refute grep -q -- "--catalogue \"\$REPO_ROOT" "$SRC"
-}

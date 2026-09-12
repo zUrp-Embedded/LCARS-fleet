@@ -5,7 +5,7 @@
 # STATUS: geste de BANC — enregistre un runner CI de circonstance sur la forge jetable
 #
 # ─── CE QUE C'EST ───────────────────────────────────────────────────────────────────────────────
-# Le pendant runner de `bench-degrade.sh` : sur un banc qu'on nuke plusieurs fois par jour,
+# L'enrôlement du runner : sur un banc qu'on nuke plusieurs fois par jour,
 # l'appairage runner<->forge meurt avec la forge, et le rail CI du template laisse des runs en
 # Waiting pour toujours. Ce script rejoue l'appairage en un geste : il minte le token
 # d'enregistrement (API admin), pose la config reseau des JOBS, et lance le compose de

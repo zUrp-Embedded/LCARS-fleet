@@ -116,7 +116,7 @@ announce_password() { # announce_password <login> <mot de passe>
 # plus d'humain de travail — il pose les AUTORITES (le siege, l'admin de forge, le master token) et
 # les personnes s'enrolent par la page d'inscription, sous leur nom. Un compte de travail aux
 # identifiants imprimes dans une sortie de console etait un geste de BANC, hereditaire de l'epoque
-# ou le poste en etait un ; `bench-forge-bootstrap.sh` le tient toujours, la ou il a un sens.
+# ou le poste en etait un ; `bench-up.sh` le tient toujours, la ou il a un sens.
 # Le marqueur `forge-builtin-human.posed` part avec : il n'avait d'objet que pour ne pas reposer ce
 # mot de passe a chaque convergence.
 

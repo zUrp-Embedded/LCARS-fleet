@@ -4,7 +4,7 @@
 # STARDATE: 2026-09-04
 # STATUS: bats tests for 61-forge-structure — la structure de la forge se derive de la release POSEE, sans mix
 #
-# CE QUE CE FICHIER GARDE, ET D'OU IL VIENT. Ces temoins vivaient dans `forge_host_reach.bats`, sur
+# CE QUE CE FICHIER GARDE, ET D'OU IL VIENT. Ces temoins vivaient dans le temoin de 48, sur
 # `48-forge-host`, quand ce module posait la structure de la forge dans le meme geste que son
 # amorcage. La structure exige le roster du catalogue, donc la release — que `60-deploy` pose douze
 # rangs plus loin. `48` la contournait en COMPILANT l'arbre (hex, rebar, deps.get, `mix run`) et en

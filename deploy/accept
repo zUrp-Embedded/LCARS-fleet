@@ -158,8 +158,11 @@ check_fleet_start() {
     return
   fi
 
-  if ! "${as[@]}" fleet start >/dev/null 2>&1; then
-    no "fleet : « fleet start » a echoue sous « $login » — rejoue-le a la main pour voir sa plainte"
+  # sur un banc, la fleet démarre sans credentials claude et reste debout : c'est le contrat du banc
+  local -a sans_claude=()
+  [[ "${LCARS_BENCH:-}" != 1 ]] || sans_claude=(env LCARS_START_WITHOUT_CLAUDE=1)
+  if ! "${as[@]}" ${sans_claude[@]+"${sans_claude[@]}"} fleet start >/dev/null 2>&1; then
+    no "fleet : « fleet start » a echoue sous « $login » — a relancer a la main pour lire sa plainte"
     return
   fi
   local alive=0
@@ -167,6 +170,11 @@ check_fleet_start() {
     if fleet_up; then alive=1; break; fi
     sleep 2
   done
+  if [[ "${LCARS_BENCH:-}" == 1 ]]; then
+    [[ "$alive" -eq 1 ]] && ok "fleet : demarree et vivante sous « $login », laissee debout (banc : demarrage sans credentials claude permis)" \
+                         || no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet status » sous « $login »"
+    return
+  fi
   "${as[@]}" fleet stop >/dev/null 2>&1 || true
   if [[ "$alive" -eq 1 ]]; then
     ok "fleet : demarre et vivante sous « $login » (arretee apres mesure) — verdict de DEMARRAGE etabli sur cette installation (P4 : il vaut pour elle telle qu'elle est, jetable ou non)"

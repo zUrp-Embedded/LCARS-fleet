@@ -280,12 +280,11 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
 }
 
 @test "MUR I12: un script de bench/ est EXECUTABLE DANS L INDEX — son appelant ne le prefixe pas de bash" {
-  # `bench-up.sh` lance ses sous-scripts PAR LEUR CHEMIN (`"$HERE/bench-forge-bootstrap.sh" …`), pas
+  # `bench-up.sh` lance ses sous-scripts PAR LEUR CHEMIN (`"$DOCKER_DIR/forge-runner.sh" …`), pas
   # par `bash <chemin>` : un mode 100644 dans l'index rend 126 sur TOUT clone frais, et le message
   # (« Permission non accordee ») nomme le sous-script sans dire que le fautif est son mode.
   # Le bit se perd en REECRIVANT un fichier — un geste qu'aucune relecture de diff ne montre, et que
-  # le disque de celui qui l'a fait ne trahit pas : `git ls-files -s` est le seul temoin. Mesure du
-  # 2026-08-30 : perdu sur `bench-forge-bootstrap.sh` par un commit qui ne touchait qu'a sa prose.
+  # le disque de celui qui l'a fait ne trahit pas : `git ls-files -s` est le seul temoin.
   local root bad=0 mode path
   root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || skip "hors arbre git"

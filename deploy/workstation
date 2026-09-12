@@ -30,6 +30,8 @@ esac
 
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"
+# shellcheck source=lib/forge-bootstrap.sh
+. "$HERE/lib/forge-bootstrap.sh"
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
@@ -147,13 +149,29 @@ bandeau_final() {
   prov_box_emit --rule "       LCARS-FLEET — provisionnement terminé" "${corps[@]}"
 }
 
-seed_bench_creds() {
-  local human="$1" seat="${SUDO_USER:-}" src home grp
+# le contrat du banc sur le poste : l'humain de démonstration avec ses mots de passe unix et
+# forge, site-admin, son jeton opérateur, et les creds claude du compte qui installe si elles existent
+bench_seed() {
+  local human="$1" seat="${SUDO_USER:-}" src home grp url tok
   home="$(getent passwd "$human" | cut -d: -f6 || true)"
-  [[ -n "$home" ]] || { echo "  creds claude : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
+  [[ -n "$home" ]] || { echo "  banc : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
+  grp="$(id -gn "$human")"
+  if printf '%s:%s\n' "$human" "$(bench_human_password)" | chpasswd 2>/dev/null; then
+    echo "  banc : mot de passe unix posé sur « $human »"
+  else
+    echo "  banc : mot de passe unix non posé sur « $human » (chpasswd a refusé)"
+  fi
+  url="$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)"
+  if [[ -n "$url" && -s "$PROV_MASTER_TOKEN_FILE" ]] \
+     && tok="$(bench_human_seed "$url" "$(read_token "$PROV_MASTER_TOKEN_FILE")" "$human" "$(bench_human_password)")"; then
+    printf '%s\n' "$tok" | install -m 0600 -o "$human" -g "$grp" /dev/stdin "$home/.gitea_token" \
+      && echo "  banc : « $human » sur la forge — mot de passe de banc, site-admin, jeton opérateur (~/.gitea_token)" \
+      || echo "  banc : jeton opérateur de « $human » minté mais non posé ($home/.gitea_token)"
+  else
+    echo "  banc : « $human » non semé sur la forge (adresse ou jeton master illisible, ou refus de la forge — ligne ci-dessus)"
+  fi
   src="${LCARS_CREDS_SRC:-$(getent passwd "$seat" 2>/dev/null | cut -d: -f6)/.claude/.credentials.json}"
   [[ -r "$src" ]] || { echo "  creds claude non posées chez « $human » : le compte qui a lancé l'installation (« ${seat:-?} ») n'en a pas ($src) — aucun pod ne pourra penser. « claude », /login, /exit sous ce compte, puis relancer l'installation"; return 0; }
-  grp="$(id -gn "$human")"
   if install -d -m 0700 -o "$human" -g "$grp" "$home/.claude" \
      && install -m 0600 -o "$human" -g "$grp" "$src" "$home/.claude/.credentials.json"; then
     echo "  creds claude posées chez « $human » (copie de celles de « $seat », 0600)"
@@ -228,7 +246,7 @@ cmd_up() {
       exit 1
       ;;
   esac
-  [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || seed_bench_creds "$LCARS_BUILTIN_HUMAN"
+  [[ "${LCARS_BENCH:-}" != 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] || bench_seed "$LCARS_BUILTIN_HUMAN"
 
   local accept_rc=0
   if [[ -x "$HERE/accept" ]]; then

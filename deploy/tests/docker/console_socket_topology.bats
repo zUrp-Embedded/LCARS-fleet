@@ -339,7 +339,7 @@ ports_of() {
   # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
   # and names the flag, and a grep over the whole file would fail on the prose that documents it.
   # `refute_out` porte son propre `--` devant le motif : ne pas le repasser ici, il serait pris
-  # POUR le motif. La regle est deja ecrite dans `forge_host_reach.bats:362`.
+  # POUR le motif.
   grep -E '^[^#]*setpriv' "$LANDING" | refute_out '--init-groups'
 }
 
