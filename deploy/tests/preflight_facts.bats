@@ -66,8 +66,9 @@ free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",
 listen_on() { # listen_on <port> — un processus python qui écoute quelques secondes ; pid dans $LISTENER
   python3 -c 'import socket,sys,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(128); time.sleep(60)' "$1" &
   LISTENER=$!
-  local i; for i in 1 2 3 4 5 6 7 8 9 10; do timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null && return 0; sleep 0.2; done
-  return 1
+  local n=0
+  until timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null; do n=$((n + 1)); [[ "$n" -lt 10 ]] || return 1; sleep 0.2; done
+  return 0
 }
 
 # ─── le contrat ─────────────────────────────────────────────────────────────────────────────────

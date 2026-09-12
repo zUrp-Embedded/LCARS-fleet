@@ -189,9 +189,10 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   # ressemblerait trait pour trait a un rapport complet.
   local liste; liste="$(sed -n 's/^PROV_REMEMBERED=(\(.*\))$/\1/p' "$LIB")"
   [ -n "$liste" ]
-  [ "$(wc -w <<<"$liste")" -eq 3 ]
+  [ "$(wc -w <<<"$liste")" -eq 4 ]
   grep -q 'PROV_DECK_PORT'       <<<"$liste"
   grep -q 'PROV_FORGE_HOST_PORT' <<<"$liste"
+  grep -q 'PROV_SSH_PORT'        <<<"$liste"
   grep -q 'PROV_FORGE_BASE'      <<<"$liste"
   printf '%s\n' "$liste" | refute_out 'ONLY|VERBOSE|PORCELAIN|HUMAN'
 }
