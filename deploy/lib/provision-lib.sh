@@ -125,6 +125,8 @@ fi
 : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
 : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
 : "${PROV_DECK_PORT:=20999}"
+: "${PROV_SSH_PORT:=2222}"
+: "${PROV_FORGE_HOST_PORT:=21000}"
 : "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 # Combien de lignes d'une commande en échec atterrissent à l'écran (le reste vit dans le fichier).
@@ -1090,18 +1092,49 @@ advertise_addr() {
   return 0
 }
 
-# ─── LES PORTS — FIXES PAR DÉFAUT, SURCHARGEABLES, ET SONDÉS AVANT D'ÊTRE PRIS ──────────────────
-# Le risque n'est pas symétrique : `3000` est le défaut de la moitié de l'écosystème de dev — React,
-# Rails, Vite, Grafana — quand `20999` est choisi pour être improbable.
-port_taken() { # port_taken <port> -> 0 si quelque chose ÉCOUTE sur la loopback
+# ─── Les ports ───────────────────────────────────────────────────────────────────────────────────
+port_taken() { # port_taken <port> -> 0 si quelque chose écoute sur la loopback
   timeout 2 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null
 }
 
-port_holder() { # port_holder <port> -> description, ou VIDE
+# port_holder <port> -> « <conteneur> (projet <p>) » si un conteneur publie le port, sinon le processus
+# que `ss` nomme, sinon rien. rc 0 toujours. Sous WSL, `ss` voit l'écoute sans le processus : seul
+# docker nomme un conteneur.
+port_holder() {
+  local port="$1" bin name proj
+  bin="${PROV_DOCKER_BIN:-${DOCKER_BIN:-docker}}"
+  if command -v "$bin" >/dev/null 2>&1 && timeout 2 "$bin" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    name="$(timeout 5 "$bin" ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null | head -1)"
+    if [[ -n "$name" ]]; then
+      proj="$(timeout 5 "$bin" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name" 2>/dev/null || true)"
+      printf '%s (projet %s)\n' "$name" "${proj:-<hors compose>}"
+      return 0
+    fi
+  fi
   command -v ss >/dev/null 2>&1 || return 0
   ss -ltnp 2>/dev/null \
-    | awk -v p=":$1\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
+    | awk -v p=":$port\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
     | sed -e 's/users:((//' -e 's/))$//' -e 's/,fd=[0-9]*//' | head -1
+  return 0
+}
+
+# port_state <port> [projet…] -> une ligne, dont le premier mot décide :
+#   « libre »                        rien n'écoute
+#   « nous <conteneur> (projet <p>) » un conteneur d'un projet listé publie le port
+#   « pris par <détenteur> »         un autre conteneur ou un processus nommé
+#   « pris »                         quelque chose écoute que rien ne sait nommer
+port_state() {
+  local port="$1" tenu own proj; shift
+  tenu="$(port_holder "$port")"
+  if [[ "$tenu" == *"(projet "* ]]; then
+    proj="${tenu##*(projet }"; proj="${proj%)}"
+    for own in "$@"; do [[ "$proj" == "$own" ]] && { printf 'nous %s\n' "$tenu"; return 0; }; done
+  fi
+  if [[ -n "$tenu" ]]; then printf 'pris par %s\n' "$tenu"
+  elif port_taken "$port"; then echo pris
+  else echo libre
+  fi
+  return 0
 }
 
 # ─── as_human <cmd…> — exécute comme PROV_HUMAN avec le HOME de PROV_HUMAN ───────────────────────
@@ -1295,7 +1328,7 @@ prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou �
 #
 # Elargir cette liste, c'est decider qu'un drapeau devient un fait persistant de la machine. Ca se
 # fait ligne par ligne, jamais par une regex sur les noms.
-PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_FORGE_BASE)
+PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_SSH_PORT PROV_FORGE_BASE)
 
 prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulement ce qui differe
   local n out=""

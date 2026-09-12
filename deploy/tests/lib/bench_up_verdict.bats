@@ -18,6 +18,10 @@
 
 load ../refute
 
+free_ports() { # free_ports <n> — n ports libres distincts, sur une ligne
+  python3 -c 'import socket,sys; ss=[socket.socket() for _ in range(int(sys.argv[1]))]; [s.bind(("127.0.0.1",0)) for s in ss]; print(" ".join(str(s.getsockname()[1]) for s in ss))' "$1"
+}
+
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
   BENCH="$ROOT/deploy/docker/bench"
@@ -29,7 +33,15 @@ setup() {
   DOCKER_D="$ROOT/deploy/docker"
   mkdir -p "$BENCH" "$ROOT/runtime/services/forge-recipe" "$ROOT/deploy/lib"
   cp "$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
-  SRC="$BENCH/bench-up.sh"
+  REAL="$BENCH/bench-up.sh"
+  # Le banc sonde ses ports sur la loopback réelle : les témoins lui donnent des ports libres de
+  # cette machine, par un lanceur qui les place devant les arguments du cas (un cas qui passe les
+  # siens l'emporte, dernier gagne).
+  read -r BF BD BS < <(free_ports 3)
+  export BF BD BS
+  SRC="$BATS_TEST_TMPDIR/bench-up"
+  printf '#!/usr/bin/env bash\nexec bash "%s" --forge-port %s --deck-port %s --ssh-port %s "$@"\n' "$REAL" "$BF" "$BD" "$BS" > "$SRC"
+  chmod +x "$SRC"
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
   : > "$ROOT/runtime/services/forge-recipe/.keep"
@@ -133,6 +145,7 @@ argv="\$*"
 case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/container.env" ;; esac
 case "\$argv" in
   *"ps --filter publish="*) [[ -f "$BATS_TEST_TMPDIR/port_holder" ]] && cat "$BATS_TEST_TMPDIR/port_holder"; exit 0 ;;
+  *"com.docker.compose.project"*) echo "un-autre-projet"; exit 0 ;;
 esac
 case "\$1 \$2" in
   "run --rm")      echo flux-ok; exit 0 ;;
@@ -428,8 +441,8 @@ run_bench() {
 @test "l'adresse ANNONCEE n'est jamais le joker d'ecoute" {
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
   [[ "$output" != *"http://0.0.0.0:"* ]]
-  [[ "$output" == *"http://10.0.0.9:21000"* ]]
-  [[ "$output" == *"http://10.0.0.9:20999"* ]]
+  [[ "$output" == *"http://10.0.0.9:$BF"* ]]
+  [[ "$output" == *"http://10.0.0.9:$BD"* ]]
 }
 
 @test "le banc ne declare que l'entree qu'il ANNONCE — les loopbacks sont semees par le module" {
@@ -439,12 +452,12 @@ run_bench() {
   # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour tous les conteneurs.
   # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
-  grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/container.env"
+  grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:$BD$" "$BATS_TEST_TMPDIR/container.env"
 }
 
 @test "un bind PRECIS rend les deux adresses egales — l'ancien comportement revient" {
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 127.0.0.5
-  [[ "$output" == *"http://127.0.0.5:21000"* ]]
+  [[ "$output" == *"http://127.0.0.5:$BF"* ]]
   [[ "$output" == *"cette machine seulement"* ]]
 }
 
@@ -466,7 +479,7 @@ run_bench() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUS"* ]]
-  [[ "$output" == *"un-autre-banc"* ]]
+  [[ "$output" == *"un-autre-banc (projet un-autre-projet)"* ]]
   # Les deux sorties sont nommees, sinon le refus ne se distingue pas d'une panne.
   [[ "$output" == *"bench-down.sh"* ]]
   [[ "$output" == *"--forge-port"* ]]
@@ -480,9 +493,9 @@ run_bench() {
   #
   # TEMOIN STRUCTUREL, et il l'est par necessite : la ligne ne s'imprime que sur un substrat WSL en
   # NAT. Un temoin qui l'executerait mesurerait la machine qui joue les tests, pas le script.
-  refute grep -qE '^[[:space:]]*say .*netsh' "$SRC"
-  refute grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
-  grep -q "n'est joignable que depuis CETTE machine" "$SRC"
+  refute grep -qE '^[[:space:]]*say .*netsh' "$REAL"
+  refute grep -qE '^[[:space:]]*say .*portproxy' "$REAL"
+  grep -q "n'est joignable que depuis CETTE machine" "$REAL"
 }
 
 @test "les TROIS ports du banc ont leur option — sinon deux bancs ne cohabitent pas" {
@@ -490,11 +503,12 @@ run_bench() {
   # existaient, `--ssh-port` non : un second banc sur la meme machine se refusait donc sur 2222,
   # sans qu'aucune option ne permette de le deplacer. Deux bancs par machine — un jetable qu'on
   # casse, un complet ou on travaille — est le cas ordinaire ici.
+  local f d s; read -r f d s < <(free_ports 3)
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 127.0.0.5 \
-      --forge-port 21001 --deck-port 20998 --ssh-port 2223
-  [[ "$output" == *"ssh 127.0.0.5:2223"* ]]
-  [[ "$output" == *"http://127.0.0.5:21001"* ]]
-  [[ "$output" == *"http://127.0.0.5:20998"* ]]
+      --forge-port "$f" --deck-port "$d" --ssh-port "$s"
+  [[ "$output" == *"ssh 127.0.0.5:$s"* ]]
+  [[ "$output" == *"http://127.0.0.5:$f"* ]]
+  [[ "$output" == *"http://127.0.0.5:$d"* ]]
 }
 
 
@@ -508,7 +522,7 @@ run_bench() {
   # On epingle le CONTRAT (zero argument transmis), pas la forme du code : une autre facon de vider
   # le tableau resterait juste.
   local decl
-  decl="$(grep -n -- '--no-human-admin)' "$SRC" | head -1)"
+  decl="$(grep -n -- '--no-human-admin)' "$REAL" | head -1)"
   [[ "$decl" != *'[@]/'* ]]
   # Et le comportement, joue pour de vrai : la doublure refuse desormais un argv malforme.
   RUNNER_RC_VAL=0 run_bench

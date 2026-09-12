@@ -1778,3 +1778,118 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
   ! grep -qE 'case "\+\$col\+" in \*"\+\$sub\+"\*' "$dirs" \
     || { echo "prov_dir_scope a retrouve sa comparaison locale"; return 1; }
 }
+
+# ─── Les ports ───────────────────────────────────────────────────────────────────────────────────
+
+free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
+
+teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
+
+listen_on() { # listen_on <port> — un processus python qui écoute quelques secondes ; pid dans $LISTENER
+  python3 -c 'import socket,sys,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(128); time.sleep(60)' "$1" &
+  LISTENER=$!
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null && return 0; sleep 0.2; done
+  return 1
+}
+
+docker_stub() { # docker_stub <conteneur> <projet> — un daemon qui répond et publie <conteneur> sur tout port
+  cat > "$BATS_TEST_TMPDIR/docker" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  version*)                echo "29.0.0" ;;
+  "ps --filter publish="*) [[ -n "$1" ]] && echo "$1" ;;
+  "inspect -f "*)          echo "$2" ;;
+esac
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/docker"
+  export PROV_DOCKER_BIN="$BATS_TEST_TMPDIR/docker"
+}
+
+ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL ou pour un autre utilisateur
+  mkdir -p "$BATS_TEST_TMPDIR/sbin"
+  printf '#!/usr/bin/env bash\necho "LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:*"\n' "$1" > "$BATS_TEST_TMPDIR/sbin/ss"
+  chmod +x "$BATS_TEST_TMPDIR/sbin/ss"
+  export PATH="$BATS_TEST_TMPDIR/sbin:$PATH"
+}
+
+@test "port_taken : un port libre rend 1, un port écouté rend 0" {
+  export P; P="$(free_port)"
+  module_sh '! port_taken "$P"'
+  [ "$status" -eq 0 ]
+  listen_on "$P"
+  module_sh 'port_taken "$P"'
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+}
+
+@test "port_holder nomme le conteneur qui publie le port, avec son projet" {
+  docker_stub autre-forge-gitea-1 autre-forge
+  export P; P="$(free_port)"
+  module_sh 'port_holder "$P"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "autre-forge-gitea-1 (projet autre-forge)" ]
+}
+
+@test "port_holder nomme un conteneur hors compose tel quel" {
+  docker_stub solitaire ""
+  export P; P="$(free_port)"
+  module_sh 'port_holder "$P"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "solitaire (projet <hors compose>)" ]
+}
+
+@test "port_holder retombe sur le processus vu par ss quand docker ne publie rien" {
+  command -v ss >/dev/null || skip "ss absent"
+  docker_stub "" ""
+  export P; P="$(free_port)"
+  listen_on "$P"
+  module_sh 'port_holder "$P"'
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *python3* ]]
+}
+
+@test "port_holder ne rend rien, et rc 0, quand ni docker ni ss ne nomment" {
+  docker_stub "" ""
+  export P; P="$(free_port)"
+  module_sh 'port_holder "$P"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "port_state : libre quand rien n'écoute" {
+  docker_stub "" ""
+  export P; P="$(free_port)"
+  module_sh 'port_state "$P" mien-forge'
+  [ "$output" = "libre" ]
+}
+
+@test "port_state : nous quand un de nos projets publie le port, même si ss voit l'écoute" {
+  docker_stub mien-forge-gitea-1 mien-forge
+  export P; P="$(free_port)"
+  listen_on "$P"
+  module_sh 'port_state "$P" mien-forge mien-fleet'
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$output" = "nous mien-forge-gitea-1 (projet mien-forge)" ]
+}
+
+@test "port_state : pris par, quand un autre conteneur ou un processus nommé publie le port" {
+  docker_stub autre-forge-gitea-1 autre-forge
+  export P; P="$(free_port)"
+  module_sh 'port_state "$P" mien-forge'
+  [ "$output" = "pris par autre-forge-gitea-1 (projet autre-forge)" ]
+  docker_stub solitaire ""
+  module_sh 'port_state "$P" mien-forge'
+  [ "$output" = "pris par solitaire (projet <hors compose>)" ]
+}
+
+@test "port_state : pris, quand ça écoute et que ni docker ni ss ne savent nommer" {
+  docker_stub "" ""
+  export P; P="$(free_port)"
+  ss_muet "$P"
+  listen_on "$P"
+  module_sh 'port_state "$P" mien-forge'
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$output" = "pris" ]
+}

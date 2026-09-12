@@ -250,34 +250,16 @@ if grep -qx -- "$CONTAINER" <<<"$_noms"; then
   die "le projet $PROJECT existe deja ($CONTAINER) — detruis-le d'abord (bench-down.sh) ou change --project" 1
 fi
 
-# ─── 0. LES PORTS SONT-ILS LIBRES ? ──────────────────────────────────────────────────────────────
-#
-# ⚠ UN BIND JOKER NE PARTAGE PAS UN PORT, ET L'ERREUR NE LE DIT PAS. Avec des binds de loopback
-# distincts (`127.0.0.5`, `.6`, `.7`) plusieurs bancs cohabitaient sur les memes numeros. Sur
-# `0.0.0.0`, il n'y en a plus qu'UN par port — et docker le refuse en nommant l'adresse de l'AUTRE :
-# « Bind for 127.0.0.6:2222 failed: port is already allocated », sur un banc ou personne n'a jamais
-# tape `127.0.0.6`. Le script mourait la-dessus en « le conteneur ne demarre pas ».
-#
-# On demande donc AVANT, et on nomme le detenteur. Deux sorties, pas une : detruire l'autre banc, ou
-# deplacer les ports de celui-ci.
-port_holder() { # <port> -> "<nom> (projet <p>)" du conteneur qui le publie, hors de NOS projets
-  local port="$1" name proj
-  while read -r name; do
-    [[ -n "$name" ]] || continue
-    proj="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name" 2>/dev/null || true)"
-    [[ "$proj" == "$CONTAINER_PROJECT" || "$proj" == "$FORGE_PROJECT" || "$proj" == "${PROJECT}-runner" ]] && continue
-    printf '%s (projet %s)\n' "$name" "${proj:-<hors compose>}"
-    return 0
-  done < <("$DOCKER_BIN" ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null)
-  return 1
-}
-
+# ─── 0. Les ports sont-ils libres ? ──────────────────────────────────────────────────────────────
+# Un bind joker ne partage pas un port : un seul banc par numéro, et docker nomme l'adresse de
+# l'autre banc quand il refuse. La sonde vit dans la lib ; nos propres projets ne comptent pas.
 BUSY=()
 for _p in "$SSH_PORT" "$DECK_PORT" "$FORGE_PORT"; do
-  _h="$(port_holder "$_p")" && BUSY+=("$_p -> $_h")
+  _h="$(port_state "$_p" "$CONTAINER_PROJECT" "$FORGE_PROJECT" "${PROJECT}-runner")"
+  [[ "$_h" != pris* ]] || BUSY+=("$_p -> ${_h#pris}")
 done
 if [[ ${#BUSY[@]} -gt 0 ]]; then
-  say "REFUS : un autre conteneur tient deja un des ports de ce banc."
+  say "REFUS : un autre conteneur ou un processus tient deja un des ports de ce banc."
   for _b in "${BUSY[@]}"; do say "  $_b"; done
   say "  Un bind « $BIND » prend le port sur TOUTES les adresses : il n'y a qu'un banc par port."
   say "  Sorties : detruire l'autre banc (bench-down.sh --project <son-projet>),"

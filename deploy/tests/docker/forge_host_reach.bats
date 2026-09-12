@@ -307,8 +307,7 @@ STUB
   # already allocated » dans une sortie dumpee, et le module concluait « la forge ne converge pas ».
   # L'operateur cherche un defaut de LCARS quand le fait est « autre chose tient 3000 ».
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'port_taken "\$PROV_FORGE_HOST_PORT"'
-  code | grep -q 'port_holder "\$PROV_FORGE_HOST_PORT"'
+  code | grep -q 'port_state "\$PROV_FORGE_HOST_PORT" "\$PROV_FORGE_PROJECT"'
   # le refus nomme le levier, pas seulement le probleme
   code | grep -q 'PROV_FORGE_HOST_PORT=<port>'
 }
@@ -319,17 +318,16 @@ STUB
   # qui disait le contraire.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   # la garde exige les DEUX : port pris ET forge muette
-  code | grep -qE 'was_up" -eq 0 \]\] && port_taken'
+  code | grep -qE 'was_up" -eq 0 && "\$etat" == pris\*'
 }
 
-@test "les deux sondes de port vivent dans la LIB, pas dans un module" {
-  # Le deck en aura besoin aussi (`64-services`, port 20999) : deux implementations d'une meme
-  # question repondraient differemment le jour ou l'une bouge.
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+@test "les deux sondes de port vivent dans la lib, et nulle part ailleurs" {
+  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" deploy; deploy="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   grep -q '^port_taken()' "$lib"
   grep -q '^port_holder()' "$lib"
-  # `port_holder` rend VIDE quand il ne sait pas — jamais une phrase creuse
-  grep -A6 '^port_holder()' "$lib" | grep -q 'command -v ss'
+  # aucune seconde implémentation ailleurs dans deploy/
+  [ -d "$deploy/modules.d" ] && [ -d "$deploy/docker" ]
+  [ "$(grep -rlE '^port_(taken|holder)\(\)' "$deploy" --include='*.sh' --include=provision --include=workstation --include=container | grep -v /tests/ | wc -l)" -eq 1 ]
 }
 
 @test "UN SEUL port de forge dans le produit : le poste s'aligne sur le banc" {

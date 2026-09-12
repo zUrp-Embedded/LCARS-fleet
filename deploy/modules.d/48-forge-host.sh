@@ -278,8 +278,9 @@ apply() {
       verdict_apply
     fi
 
-    if [[ "$was_up" -eq 0 ]] && port_taken "$PROV_FORGE_HOST_PORT"; then
-      local holder; holder="$(port_holder "$PROV_FORGE_HOST_PORT")"
+    local etat; etat="$(port_state "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_PROJECT")"
+    if [[ "$was_up" -eq 0 && "$etat" == pris* ]]; then
+      local holder; holder="${etat#pris}"; holder="${holder# par }"
       p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est PAS la forge de LCARS (elle ne répond pas sur $FORGE_URL)"
       p_fail "choisis-en un autre : PROV_FORGE_HOST_PORT=<port> — ou libère celui-ci"
       verdict_apply
