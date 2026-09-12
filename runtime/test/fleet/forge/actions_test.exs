@@ -3,15 +3,8 @@ defmodule Fleet.Forge.Client.ActionsTest do
 
   alias Fleet.Forge.Client.Actions
 
-  # LE STUB EST AU NIVEAU HTTP, ET C'EST LA CONDITION POUR QUE CES TESTS SERVENT A QUELQUE CHOSE.
-  #
-  # Ce que ce module ajoute n'est pas de la logique : c'est une CONNAISSANCE D'API — un paramètre de
-  # requête sans lequel le run est introuvable, et un chemin de logs qui n'est pas celui qu'on
-  # écrirait spontanément. Un stub au niveau fonction (« `dispatch_workflow` rend `{:ok, …}` »)
-  # n'épinglerait rien de tout ça : il testerait que j'ai écrit ce que j'ai écrit.
-  #
-  # Donc on branche un `Plug` (même patron que `forge_client_ci_state_test`), et les assertions
-  # portent sur L'URL ET LE CORPS qui partent réellement.
+  # Le Plug capture méthode, chemin, query et corps produits par Req. Un stub de fonction
+  # masquerait les erreurs d'endpoint/paramètre ; ce test ne joint pas une vraie forge.
   defmodule Recorder do
     @moduledoc false
     @behaviour Plug
@@ -60,11 +53,8 @@ defmodule Fleet.Forge.Client.ActionsTest do
          })}
       ]
 
-      # ⚠ LE RESULTAT NE PORTE QUE `run_id`, ET LE STUB REND POURTANT LES DEUX URL. C'est un refus,
-      # pas un oubli : le contrat `forge.payload_fields_read` du dépôt inscrit que `html_url` n'a
-      # AUCUN lecteur, parce qu'une URL rendue par la forge porte l'hôte qui a RÉPONDU — le
-      # conteneur atteint `http://gitea:3000` là où un navigateur atteint un port publié. Ce module
-      # a été écrit en les lisant, le contrat l'a repris, et il avait raison.
+      # Garder les URL dans la fixture prouve leur exclusion du résultat : l'hôte de réponse
+      # peut être interne au conteneur et inutilisable par un navigateur.
       assert {:ok, run_ref} =
                Actions.dispatch_workflow(
                  "fleet/p",
@@ -78,12 +68,10 @@ defmodule Fleet.Forge.Client.ActionsTest do
 
       assert_received {:req, "POST", path, query, body}
 
-      # Le nom du fichier de workflow EST la clé de l'endpoint — pas un nom d'affichage.
+      # L'endpoint attend le nom de fichier du workflow, pas son nom d'affichage.
       assert path == "/api/v1/repos/fleet/p/actions/workflows/probe-test-relevance.yml/dispatches"
 
-      # ⚠ L'ASSERTION QUI PORTE TOUT LE MODULE. Sans ce paramètre la forge rend 204, le run tourne
-      # et personne ne peut le retrouver autrement qu'en listant et en devinant — avec une course
-      # dès que deux juges sondent la même tête.
+      # Demander l'id au dispatch évite une recherche ambiguë entre runs concurrents sur la même tête.
       assert query == "return_run_details=true"
 
       assert JSON.decode!(body) == %{
@@ -93,9 +81,8 @@ defmodule Fleet.Forge.Client.ActionsTest do
     end
 
     test "2xx SANS détails de run → erreur, PAS un succès (le runner tourne, personne ne peut le lire)" do
-      # Une forge plus ancienne, ou un proxy qui mange la query : la requête PASSE, le run DÉMARRE,
-      # et le corps est vide. C'est le cas où un `:ok` serait un mensonge opérationnel — il
-      # annoncerait une mesure que rien ne pourra jamais collecter.
+      # Succès HTTP sans id exploitable : le dispatch a pu avoir lieu, mais reste non traçable.
+      # La réponse simulée ne prouve pas qu'un runner ait commencé à travailler.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:dispatch_untrackable, "probe-test-relevance.yml"}} =
@@ -108,17 +95,13 @@ defmodule Fleet.Forge.Client.ActionsTest do
                    )
         end)
 
-      # Bruyant, parce que l'effet de bord a EU LIEU : un `{:error, _}` silencieux laisserait croire
-      # que rien n'a été déclenché.
+      # L'erreur doit signaler le dispatch potentiellement effectué avant toute décision de retry.
       assert log =~ "[error]"
       assert log =~ "NO run details"
     end
 
     test "un VRAI 204 (corps vide, pas de JSON) prend le même chemin" do
-      # ⚠ LE STUB CI-DESSUS ENVOIE `{}`, ET UN VRAI 204 N'A PAS DE CORPS. La branche exercée est la
-      # même aujourd'hui — `""` comme `%{}` tombent dans le catch-all — mais rien ne le prouvait :
-      # quelqu'un resserrant la clause sur les maps aurait laissé ce test vert pendant que la vraie
-      # réponse de la forge cassait. Signalé en relecture, épinglé ici.
+      # Le cas précédent utilise {} ; un corps vide doit aussi être traité sans exiger une map.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:dispatch_untrackable, "probe-test-relevance.yml"}} =
@@ -135,9 +118,7 @@ defmodule Fleet.Forge.Client.ActionsTest do
     end
 
     test "input non-chaîne : refusé AVANT le fil — la forge n'est jamais appelée" do
-      # La forge répondrait 422 en nommant son schéma, pas la clé fautive. Refuser ici nomme
-      # l'erreur réelle. Et le contre-test est l'absence de requête : sans lui, un refus posé APRÈS
-      # l'appel passerait pour un refus posé avant.
+      # L'absence de requête distingue un refus local d'un refus après effet de bord.
       drain()
 
       assert {:error, {:input_not_a_string, "rounds", 3}} =
@@ -177,9 +158,8 @@ defmodule Fleet.Forge.Client.ActionsTest do
     end
 
     test "un tableau NU est refusé — accepter deux formes masquerait le jour où l'enveloppe bouge" do
-      # Le contrat déclare `ActionWorkflowRunsResponse` (`{total_count, workflow_runs}`). Un repli
-      # complaisant sur un tableau nu rendrait `[]` le jour où la clé change, et « aucun run » est
-      # exactement la réponse que cette fonction ne doit jamais inventer.
+      # Une forme inconnue doit rester distincte de « aucun run ». Le code exige workflow_runs
+      # en liste ; total_count est seulement utilisé pour avertir d'une page partielle.
       assert {:error, {:unexpected_runs_shape, _}} =
                Actions.runs_for_sha(
                  "fleet/p",
@@ -190,11 +170,9 @@ defmodule Fleet.Forge.Client.ActionsTest do
     end
 
     test "probed?/3 — un dispatch MANUEL d'un autre workflow ne compte pas comme une sonde" do
-      # ⚠ `event: workflow_dispatch` COUVRE AUSSI LE GESTE D'UN OPÉRATEUR. Un humain qui relance un
-      # workflow quelconque depuis l'UI Gitea sur la même tête faisait disparaître l'annotation
-      # « aucune sonde n'a tourné » — alors que personne n'avait mesuré. Et cette annotation est
-      # précisément le signal qui dira, au banc, si les juges appellent l'outil : un faux négatif
-      # dessus fausse la première mesure qu'on va en faire.
+      # workflow_dispatch inclut les actions manuelles : il faut aussi reconnaître le chemin.
+      # Le prédicat actuel cherche seulement la sous-chaîne probe-, sans vérifier qui a lancé
+      # le run ni son résultat ; ces fixtures distinguent ci.yml du chemin de sonde attendu.
       autre = [
         {"/actions/runs",
          json(200, %{
@@ -219,8 +197,6 @@ defmodule Fleet.Forge.Client.ActionsTest do
     end
 
     test "probed?/3 — un run dont le chemin est ILLISIBLE ne compte pas" do
-      # Ne pas savoir ce qu'un run était ne prouve pas qu'il sondait. Même direction que partout
-      # ailleurs dans ce module : l'ignorance ne crédite jamais.
       sans = [
         {"/actions/runs", json(200, %{"total_count" => 1, "workflow_runs" => [%{"id" => 9}]})}
       ]
@@ -238,8 +214,7 @@ defmodule Fleet.Forge.Client.ActionsTest do
           assert {:ok, [%{"id" => 1}]} = Actions.runs_for_sha("fleet/p", "abc", [], opts(routes))
         end)
 
-      # Un run au-delà de la page se lit comme un run ABSENT. Le fait est le même, la conclusion
-      # est opposée — donc on le dit.
+      # La troncature est seulement loguée ; la valeur de retour ne distingue pas la page partielle.
       assert log =~ "PARTIAL page"
     end
   end
@@ -275,9 +250,7 @@ defmodule Fleet.Forge.Client.ActionsTest do
       assert "/api/v1/repos/fleet/p/actions/runs/9/jobs" in paths
       assert "/api/v1/repos/fleet/p/actions/jobs/11/logs" in paths
 
-      # ⚠ LE PIÈGE, ÉPINGLÉ PAR LA NÉGATIVE. `/runs/{id}/logs` n'est pas dans le contrat de la
-      # forge — il rend 404, et un appelant lit ce 404 comme « pas de logs », ce qui est un AUTRE
-      # fait que « les logs sont un étage plus bas ».
+      # Refuser le raccourci /runs/{id}/logs : le client doit lire les logs par job.
       refute "/api/v1/repos/fleet/p/actions/runs/9/logs" in paths
     end
 
@@ -291,12 +264,13 @@ defmodule Fleet.Forge.Client.ActionsTest do
 
       assert {:ok, out} = Actions.run_logs("fleet/p", 9, opts(routes))
 
-      # Un log partiel qui nomme son trou vaut mieux qu'une erreur qui jette les jobs ayant répondu.
+      # Une erreur de lecture devient une section explicite, sans perdre les autres logs.
       assert out =~ "je suis lisible"
       assert out =~ "logs unreadable"
     end
 
     test "aucun job → {:ok, \"\"} : « le runner n'a pas encore pris » n'est pas un échec" do
+      # Aucun job retourné ne suffit pas à diagnostiquer l'état du runner malgré le titre.
       routes = [{"/actions/runs/9/jobs", json(200, %{"total_count" => 0, "jobs" => []})}]
       assert {:ok, ""} = Actions.run_logs("fleet/p", 9, opts(routes))
     end
@@ -312,9 +286,8 @@ defmodule Fleet.Forge.Client.ActionsTest do
       assert {:ok, %{"status" => "running", "conclusion" => ""}} =
                Actions.run("fleet/p", 9, opts(routes))
 
-      # Les deux champs ne se replient pas l'un sur l'autre : un run inachevé n'a PAS de conclusion,
-      # et un lecteur qui ne regarde que `conclusion` confond « pas encore » avec « pas bon ». C'est
-      # la confusion exacte que le rail de merge a payée sur le 405 de Gitea (doc 16).
+      # Le retour conserve status et conclusion séparément ; ce test ne vérifie pas leur
+      # interprétation par le rail de merge (« pas encore terminé » versus « échec »).
       assert_received {:req, "GET", "/api/v1/repos/fleet/p/actions/runs/9", _, _}
     end
   end
