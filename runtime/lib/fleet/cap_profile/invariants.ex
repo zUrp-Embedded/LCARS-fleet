@@ -1,65 +1,24 @@
 defmodule Fleet.CapProfile.Invariants do
   @moduledoc """
-  The **pure** G24 business invariants of a composed `%CapProfile{}`
-  (cap-profile canon + containment gate).
+  Pure semantic checks on a composed profile, exposed through `CapProfile.validate/1`.
+  The registry in `violations/1` defines code order; each check defines its rule.
+  Run structural validation separately: arbitrary malformed field shapes can raise here.
 
-  Pure validation cluster extracted from `Fleet.CapProfile`: one function per
-  check, aggregated by `violations/1`. Pure — no process read, no FS read
-  (same struct ⇒ same verdict), zero I/O. `CapProfile.validate/1`
-  DELEGATES here: it wraps `violations/1` in its return contract
-  (`:ok | {:error, [atom()]}`) and is the single public entry point.
-
-  This module is the SINGLE SOURCE for the per-code catalogue: what each
-  `:g24_*` enforces lives on its check function below; `validate/1` points here
-  rather than restating it.
-
-  The error-atom vocabulary is **FROZEN**: the tests AND `mix lcars.contracts.check`
-  match these exact codes — do NOT rename them (they are a wire contract, not a
-  comment). The registry in `violations/1` is the list; naming an upper bound here
-  would be a second copy that goes stale the next time one is added — and a sentence
-  ending on the highest code it knew is exactly how that staleness reads.
-
-  ## Excluded from `validate/1` (documented at their sites below)
-
-    * The numbering GAPS in the registry (`g24_2`, `g24_5`, `g24_7`) are deliberate:
-      those invariants no longer exist, and their codes stay retired — never reused
-      (frozen wire vocab). A one-line note sits at each gap's position below.
-    * `g24_13` RETIRED with its `mcp_channels` field: the field was a phantom control —
-      no production code ever read it (the real tool surface is `scope.allowedTools`,
-      filtered by `mcp_fleet_tools/1`, plus the MCP handler gates). A schema field that
-      LOOKS like a mechanical barrier while nothing enforces it hands the catalogue
-      author a false assurance — removed rather than wired (no consumer ever needed it).
-    * The **I/O parts** of otherwise-pure checks: `g24_14`'s FS existence of
-      the monk registry + `monk_instance` lookup is load-time (`compose/2`);
-      only its pure both-or-neither structural part is checked here.
-
-  Single dependency direction (no cycle): this module depends on the
-  `%CapProfile{}` struct (compile-dep); `CapProfile.validate/1`
-  calls `violations/1` (runtime-dep).
+  Error atoms are a frozen caller/test/contract-check vocabulary: do not rename or reuse
+  retired g24_2, g24_5, g24_7 and g24_13. The removed mcp_channels field never enforced tool
+  access; the surface comes from scope.allowedTools/mcp_fleet_tools and MCP handler gates.
+  G24-14 checks only monk-field pairing, not filesystem existence or instance lookup.
+  The retired apiVersion check is not a missing guard: schema versioning belongs to the code.
   """
 
   alias Fleet.CapProfile
 
   @kind_pinned "CapabilityProfile"
 
-  # g24_9 — deny Anthropic's native server-tools: they run SERVER-SIDE, outside the pod → outside the
-  # pod's SANCTUARY. The sanctuary grants the agent ONLY what runs INSIDE it (constructive framing:
-  # "what is not projected does not exist"), so these server-side tools — which escape the projection —
-  # are denied by construction. Not "the sandbox does not contain them" (containment framing): "they live
-  # outside the world we project FOR the agent".
-  # Strict entries = equality, prefix entries = `String.starts_with?/2`.
-  #
-  # DECLARED then VALIDATED, not copied — the distinction matters when reading the catalogue. Every
-  # canon cap-profile repeats these entries in its own `spec.scope.disallowedTools`, and this list is
-  # what MAKES that repetition safe rather than duplicated: `check_disallowed_strict/1` requires each
-  # profile to contain every strict entry, so a profile that drops one FAILS validation. The seven
-  # lists cannot drift apart, and reading any single cap-profile shows what its pod is denied.
-  #
-  # Do not confuse this with the OTHER mechanism on the same field: the git denials are INJECTED at
-  # resolve time (`CapProfile.DisallowedTools.with_resolved/1`, from `baseline/git-denied.yaml`) and
-  # appear in no cap-profile. Same key, two mechanisms — one declared and checked here, one injected
-  # and absent from the source. Adding the server-tools minimum to the injection instead would make the
-  # catalogue stop stating its own denials.
+  # Profiles must declare denials for server-side tools that escape pod containment.
+  # These checks require exact strict entries and at least one match per prefix; they do
+  # not inject denials or prove the launcher enforces them. Git denials are separately
+  # injected by DisallowedTools; keep the server-tool minimum visible in catalogue data.
   @disallowed_minimum_strict ~w(web_search web_fetch code_execution bash_code_execution text_editor_code_execution)
   @disallowed_minimum_prefix ~w(tool_search_)
 
@@ -76,7 +35,6 @@ defmodule Fleet.CapProfile.Invariants do
   """
   @spec violations(CapProfile.t()) :: [atom()]
   def violations(%CapProfile{} = profile) do
-    # g24_2 retired: no apiVersion field exists (schema versioning is carried by the code).
     [
       {:g24_1, &check_containment/1},
       {:g24_3, &check_kind/1},
@@ -104,14 +62,8 @@ defmodule Fleet.CapProfile.Invariants do
   def lifetime_scope_enum, do: @lifetime_scope_enum
 
   @doc """
-  Returns the code-side `containment` enum used by the schema drift test.
-
-  EXPOSEE POUR LA MEME RAISON QUE SA JUMELLE, ET L'ECART A COUTE PLUS CHER ICI. Cette constante
-  decide du BAC A SABLE : `bwrap?/1` en derive, et un profil qui n'est pas `bwrap` prend le chemin
-  hote — `Egress.provision/3` rend `{:ok, nil}` (aucun proxy CONNECT) et `SpawnAdmission` le range
-  avec les host-native. Tant que le schema typait `containment` en `"string"` nu, cette liste etait
-  le SEUL portail sur la valeur, et elle n'etait epinglee par aucun temoin : y ajouter un mot
-  passait `validate/1`, passait le schema, et ne faisait rougir aucun des 3 774 tests.
+  Returns the code-side containment enum for schema drift checks. Widening it requires
+  checking downstream containment policy: values other than bwrap bypass its proxy path.
   """
   @spec containment_enum() :: [String.t()]
   def containment_enum, do: @containment_enum
@@ -208,18 +160,8 @@ defmodule Fleet.CapProfile.Invariants do
 
   defp monk_present?(v), do: is_binary(v) and String.trim(v) != ""
 
-  # g24_15 — a role that is NOT one-shot must DECLARE its `slot_scope`.
-  #
-  # `slot_scope` derives from `lifetime_scope` when absent, and that derivation is a tautology on
-  # one side and a CHOICE on the other. `one-shot ⟹ instance` has nothing to choose: a one-shot
-  # keyed by project would be one pod per repo dying after a single use, and the next dispatch
-  # would land on a dead id. But `context-long ⟹ project` is a decision — the one that was taken
-  # in silence for a year, and that made "long-lived AND one per ticket" inexpressible while being
-  # exactly what a producer needs.
-  #
-  # So the declaration is required exactly where the derivation LIES, and nowhere else. Not a
-  # schema `required`: that would refuse the one-shot judges, which are right to say nothing. A
-  # named refusal at load, on the half that carries a choice.
+  # Context-long profiles must choose per-ticket or shared project identity explicitly.
+  # One-shot profiles may omit slot_scope; a blanket schema requirement would reject them.
   defp check_slot_scope_declared(%CapProfile{spec: spec}) do
     if get_in(spec, ["invocation", "lifetime_scope"]) == "one-shot" or
          get_in(spec, ["invocation", "slot_scope"]) in ~w(instance project),
@@ -227,13 +169,8 @@ defmodule Fleet.CapProfile.Invariants do
        else: :error
   end
 
-  # g24_16 — a PROJECT-keyed role must DECLARE its `remote_control`.
-  #
-  # Same shape, same reason, one axis over. An instance-keyed pod is ephemeral by construction, so
-  # "no durable Desktop handle" has nothing to choose. A project-keyed pod has a stable identity,
-  # so whether it deserves a handle IS a decision — and leaving it to a default meant "visible
-  # unless someone remembered to say otherwise", which was harmless while producers were one per
-  # repo and became Desktop pollution the day they fanned out per ticket.
+  # A stable project identity must explicitly choose Desktop visibility; instance slots
+  # may use the invisible default to avoid a Desktop handle for every ticket.
   defp check_remote_control_declared(%CapProfile{spec: spec} = profile) do
     if CapProfile.slot_scope(profile) != "project" or
          is_boolean(get_in(spec, ["invocation", "remote_control"])),
@@ -241,21 +178,8 @@ defmodule Fleet.CapProfile.Invariants do
        else: :error
   end
 
-  # g24_17 — a role with a HUMAN in front of it must be REACHABLE by that human.
-  #
-  # `interlocutor` says who the REPL converses with; `remote_control` says whether there is a door
-  # to that REPL. `both`/`human` with no door is not a restriction, it is a CONTRADICTION: the
-  # profile provisions the human protocol addendum (`SeeU`, handoff, the whole interactive
-  # contract) into a terminal nobody can open. The pod would sit there holding a conversation
-  # contract with no counterpart, and the fleet would report it healthy.
-  #
-  # Checked on the EFFECTIVE answer, not on the declared field: since the visibility derivation, an
-  # instance-keyed `both` role that declares nothing derives to invisible, which is the same
-  # contradiction reached by silence rather than by statement. `g24_16` covers the project-keyed
-  # side by forcing a declaration; this one covers what the declaration then says.
-  #
-  # The debug widening is deliberately NOT consulted: it is a fleet-lifetime mode, and an invariant
-  # that a runtime flag can satisfy is not an invariant. A profile must be coherent as written.
+  # Human-facing protocols require visibility, including when derived rather than declared.
+  # Ignore the fleet debug override: a temporary switch must not repair an incoherent profile.
   defp check_human_facing_visible(%CapProfile{} = profile) do
     if CapProfile.interlocutor(profile) in ~w(both human) and
          not CapProfile.remote_control?(profile),

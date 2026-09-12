@@ -1,68 +1,29 @@
 defmodule Fleet.CapProfile.Catalog do
   @moduledoc """
-  Resolution + reading of the cap-profile catalogue YAML files.
+  Resolves raw profiles by `metadata.name` and modops by directory name.
 
-  SINGLE concern: the FS FRONT of the domain (directory scan, YAML decode, resolving a role/modop
-  into a raw map pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and `read_modops/1`
-  and never touches the FS itself.
+  Role/modop reads use the named catalogue's published image, falling back to its disk
+  scope (own tree then system) only when no image exists. `list/0` instead scans the global
+  disk search path. Listing checks names and excludes seats; it does not guarantee schema
+  validity or loadability in a different scope/image.
 
-  ## Security invariant — resolution by `metadata.name`, never by filename
+  Disk modop names pass `Fleet.Slug.confined_join/2` before path lookup. This is lexical
+  confinement, not a symlink check. Role filenames are cosmetic within the scanned paths.
+  Public cross-domain access goes through `Fleet.CapProfile`.
 
-  A cap-profile is resolved by its INTERNAL `metadata.name` prop (via `name_index/1`),
-  NOT by filename (cosmetic). The source of truth is the data, never the
-  filesystem: `list/1`, `read_role/1` and the boot enumerator thus share the
-  SAME key (the name) → enum and load never drift apart (a listed profile is
-  always loadable). A modop name (an untrusted input used as a path segment) is
-  confined under `<root>/modop/` via `Fleet.Slug.confined_join/2` (fail-closed:
-  a `..`/`/` never reaches the FS).
-
-  ## Public surface + out-of-app re-export
-
-  `list/1` and `root_dir/0` are consumed OUT of the app (`Fleet.Spawner.PermanentBoot`
-  enumerates + aligns its dir; `Fleet.Observation.Deck` lists the dashboard roles).
-  `Fleet.CapProfile` re-exports them via `defdelegate` — the public API consumed
-  out-of-app does NOT move. `read_role/1` and `read_modops/1` are public for the
-  core (same app).
-
-  ## Single dependency direction (no cycle)
-
-  This module depends on `Fleet.CapProfile.Schema` (validating modop fragments in
-  `read_modops/1`) and on `Fleet.Slug` (confinement) — both UPSTREAM, neither
-  calls Catalog. The `Fleet.CapProfile.load`/`compose` core calls this module
-  (runtime-dep). No cycle.
-
-  ## Configuration
-
-  `root_dir/0` reads the env key `:lcars_fleet, :cap_profile_root_dir` (tests drive it via
-  `Application.put_env/3`) — the FINE override, which keeps precedence. Default =
-  `Fleet.Catalogue.cap_profiles_root/0`: the bundled canon unless `LCARS_CATALOGUE_ROOT` brings
-  another catalogue, and `:code.priv_dir`-derived either way (resolves in a release as in dev,
-  without env).
+  `:lcars_fleet, :cap_profile_root_dir` overrides the business tree; otherwise roots come
+  from `Fleet.Catalogue`, whose default is release-relative unless configured explicitly.
   """
 
   require Logger
 
-  # JSON-schema validation of modop fragments (reserved keys + conformance). UPSTREAM:
-  # Schema calls nothing here (no cycle). Two FQ calls under credo AliasUsage, aliased
-  # for the cluster's readability.
   alias Fleet.CapProfile.Schema
 
-  # ============================================================
-  # Role resolution (by metadata.name)
-  # ============================================================
-
   @doc """
-  Resolves a cap-profile by its `metadata.name` prop (not by filename — that is cosmetic) and
-  returns the raw map (pre-`to_struct`). Source of truth = the data, never the filesystem (see `list/1`).
-
-  ## Exit codes
-    * `{:ok, raw}` — the role exists in the catalogue.
-    * `{:error, :not_found}` — no profile carries this `name`.
-    * `{:error, {:role_reserved, name}}` — the entry exists as a `kind: ReservedSeat`
-      (BL-6-45): the seat is kept, the box is closed — named, never conflated with absence.
-    * `{:error, :invalid_schema}` — corrupt catalogue (an undecodable YAML) →
-      we CANNOT resolve by name. The `load`/`compose` contract classes "malformed
-      YAML" as `:invalid_schema` (not `:not_found`, which would suggest the role is absent).
+  Reads a raw profile by `metadata.name` from the default catalogue.
+  Returns `:not_found` for absence and `{:role_reserved, name}` for an existing seat.
+  Disk scan failures propagate; unreadable/invalid YAML maps to `:invalid_schema`,
+  not absence. Structural profile validation belongs to the caller.
   """
   @spec read_role(String.t()) ::
           {:ok, map()}
@@ -75,19 +36,12 @@ defmodule Fleet.CapProfile.Catalog do
   def read_role(role), do: read_role(role, nil)
 
   @doc """
-  Le meme role, lu dans l'image d'un catalogue NOMME — la porte per-catalogue.
-
-  `nil` resout dans l'image du catalogue LIVRE — ce que veut un appelant sans projet en main. Un
-  appelant qui en a un passe la racine de SON catalogue, parce qu'un role n'existe que dans le
-  catalogue qui le declare.
+  Reads from the named catalogue's image or disk scope; nil uses `Fleet.Catalogue.root/0`.
+  An image miss does not fall back to disk. Pass the project's root to avoid resolving a
+  same-named role from the default catalogue.
   """
   @spec read_role(String.t(), Path.t() | nil) :: {:ok, map()} | {:error, term()}
   def read_role(role, root) do
-    # IMAGE-FIRST (proven-good image at boot): once `Fleet.CapProfile.Image.publish!/0` ran, the
-    # image IS the catalogue — a closed world, one epoch for the whole deployment (a disk mutation
-    # mid-life changes nothing until a restart republishes). A role absent from the image is
-    # `:not_found`, whatever the disk now says. No image (tests' hermetic default, tooling) → the
-    # live-disk path below, unchanged.
     case published_for(root) do
       %{index: index} ->
         case Map.fetch(index, role) do
@@ -103,25 +57,12 @@ defmodule Fleet.CapProfile.Catalog do
   defp published_for(nil), do: Fleet.CapProfile.Image.published()
   defp published_for(root) when is_binary(root), do: Fleet.CapProfile.Image.published(root)
 
-  # A ReservedSeat found by NAME answers its own refusal, never `:not_found` (the seat exists,
-  # the box is closed — BL-6-45) and never `:invalid_schema` (validating a seat against the
-  # PROFILE schema downstream would misname a declared state as corruption). Lives on BOTH
-  # regimes (image branch above, disk branch below): the raw carries its kind in both.
+  # A seat is present but not spawnable; validating it as a profile would misreport corruption.
   defp refuse_reserved(role, raw) do
     if spawnable?(raw), do: {:ok, raw}, else: {:error, {:role_reserved, role}}
   end
 
-  # THE DISK REGIME READS THE SAME SCOPE THE IMAGE IS BUILT FROM, and that agreement IS the
-  # contract: two regimes answering "does this role exist" differently is the defect. Honouring
-  # `root` in the image branch and dropping it here gives a caller naming its catalogue THAT
-  # catalogue's answer with an image and EVERY catalogue's answer without one — latent while the
-  # installed catalogues declare disjoint role names, wrong the day two businesses both declare
-  # `dev`.
-  #
-  # `disk_scope/1` mirrors `published_for/1` exactly: a named root reads ITS tree_scope (own
-  # cap-profiles + system, the same pair its image is published from), nil reads the BUNDLED
-  # catalogue's — because `published_for(nil)` answers the bundled catalogue's image, and the disk
-  # must not answer more than the image would.
+  # Mirror image scope on disk; flattening installed catalogues leaks neighbours' roles.
   defp disk_scope(nil), do: disk_scope(Fleet.Catalogue.root())
   defp disk_scope(root), do: Fleet.Catalogue.tree_scope(root, :cap_profiles)
 
@@ -145,14 +86,9 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Lists the NAMES (`metadata.name`) of the deployment's cap-profiles — the SYSTEM root and the
-  business root unioned. `list/1` keeps a single explicit root, for tooling and tests.
-
-  **SINGLE SOURCE**: every enumerator (`Fleet.Spawner.PermanentBoot`) AND `Fleet.CapProfile.load/1`
-  resolve by THIS key — the `name` prop, **never** the filename (cosmetic). Sorted.
-  A `name` collision between two files → `{:error, :name_collision}`; the same name held by BOTH
-  catalogues → `{:error, {:root_collision, names}}` (fail-loud both ways: no silent resolution at
-  the whim of the filesystem, and no catalogue quietly redefining a system role).
+  Lists sorted spawnable names from the global disk search path. The first root wins
+  across roots; duplicate names within one root return `:name_collision`.
+  `list/1` scans just the supplied directory and returns `:enoent` when it is not a directory.
   """
   @spec list() :: {:ok, [String.t()]} | {:error, term()}
   def list do
@@ -161,10 +97,7 @@ defmodule Fleet.CapProfile.Catalog do
 
   @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def list(dir) do
-    # Absent/unreadable dir = error (broken config) — distinct from an empty catalogue ({:ok, []}).
-    # `Path.wildcard` conflates the two; `File.dir?` decides. (`load/1`/`compose/2` go through
-    # `read_role`, which ALSO checks `File.dir?` first → an absent dir there gives `:catalogue_missing`
-    # (same broken-config signal as here), NOT `:not_found`.)
+    # Distinguish a missing directory from an empty glob; this is not a readability probe.
     if File.dir?(dir) do
       with {:ok, index} <- name_index(dir), do: {:ok, spawnable_names(index)}
     else
@@ -172,11 +105,7 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # Filter on the ENTRIES ({name, raw}) BEFORE projecting the keys — the predicate reads the raw's
-  # kind, `Map.keys/1` would hand it strings. An unfiltered list feeds a ReservedSeat to every
-  # enumerator (`Spawner.CanonProof`, `PermanentBoot`) → the seat has no SP draft →
-  # fleet.boot_failed. Filter
-  # BEFORE enumerate (BL-6-45).
+  # Seats lack spawn assets: exclude raw entries before projecting their names for boot.
   defp spawnable_names(index) do
     index
     |> Enum.filter(fn {_name, raw} -> spawnable?(raw) end)
@@ -185,29 +114,16 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Is this raw catalogue entry a SPAWNABLE profile? (`kind` ≠ `ReservedSeat` — BL-6-45.)
-  The ONE predicate both enumeration projections apply (`list/1` here,
-  `Fleet.CapProfile.list_from_published/0` on the image index): two projections, one rule.
+  Excludes `kind: ReservedSeat` for both disk and image enumeration. Other kinds, including
+  missing or unknown values, return true; this predicate is not schema validation.
   """
   @spec spawnable?(map()) :: boolean()
   def spawnable?(raw) when is_map(raw), do: Map.get(raw, "kind") != "ReservedSeat"
 
   @doc """
-  Role names this catalogue declares a FORGE IDENTITY for — the account-and-token roster, sorted.
-
-  ## Why this is NOT `list/1` filtered
-
-  `list/1` drops ReservedSeats because a seat has no SP draft and would break every enumerator that
-  spawns. **A seat still owns a forge account**: it is a name held so nobody else takes it, which is
-  only true if the account exists. So this enumeration keeps them, and `spawnable?/1` has no
-  business here. The two projections answer different questions — "who can be spawned" and "who owns
-  an account" — and conflating them is what makes a roster silently short by exactly the seats.
-
-  The inclusion is what `provisioning_locked` already measures ("seats included"); this function is
-  where that rule becomes readable at runtime instead of living only in a repo-time check.
-
-  `metadata.forge_identity: false` is the explicit opt-out — an orchestrator whose forge writes all
-  go through the system account. Absent = `true`.
+  Returns sorted forge-identity names from `forge_roster/0`, seats included: reserving a
+  name requires provisioning its account even though it cannot spawn. Only explicit
+  `metadata.forge_identity: false` opts out (writes then use the system account).
   """
   @spec forge_identity_roles() :: {:ok, [String.t()]} | {:error, term()}
   def forge_identity_roles do
@@ -221,25 +137,16 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  The forge roster with the three facts a provisioning needs to place each role, sorted by name.
-
-  `%{name, seat?, judge?}` — `seat?` is `kind == "ReservedSeat"`, `judge?` is a role that only
-  judges: `brief_kind: judge` AND no structural capability. Everything else writes.
-
-  Why these three and not the whole profile: they are exactly what distinguishes an account that
-  holds a name (a seat), one that renders verdicts, and one that puts something in the repository.
-  A provisioning that knew more would start deciding with it.
+  Returns sorted `%{name, seat?, judge?}` records from the default catalogue plus system.
+  Explicit forge-identity opt-outs are excluded. `seat?` identifies ReservedSeat;
+  `judge?` requires a judge brief and an empty/absent capabilities list, separating
+  verdict-only roles from those needing structural write capabilities.
   """
   @spec forge_roster() ::
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   def forge_roster do
-    # THE catalogue in hand plus the system half — never the union of every installed catalogue.
-    # The zero-arity's one production caller names its target through the big wheel
-    # (`:catalogue_root`) before calling, so `disk_scope(nil)` resolves to that root + system, which
-    # is exactly the split its accounts are derived from. On the UNION, a container with a second
-    # catalogue installed folds B's roles into A's roster at install time — and the login projection
-    # prefixes with the TARGET org, so the recipe mints `A_<role-of-B>` accounts that belong to
-    # nobody. Latent only because the install's first pass runs before the cache holds a neighbour.
+    # Roster provisioning selects its target via catalogue_root. A global union would mint
+    # neighbour roles under the target organisation's prefix.
     with {:ok, index} <- snapshot_roles(disk_scope(nil)), do: {:ok, roster_of(index)}
   end
 
@@ -269,24 +176,9 @@ defmodule Fleet.CapProfile.Catalog do
     |> Enum.sort_by(& &1.name)
   end
 
-  # Index `metadata.name => raw` by scanning `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`.
-  # No `monks/` scan: the monks are FROZEN under `priv/memory-x/monks/`,
-  # deliberately out of the boot loop (cf. `Fleet.SPBuilder.Monk`); the thaw that re-homes
-  # them adds their scan then. The `modop/` dir stays excluded: overlays have no role
-  # identity. A fragment without `metadata.name` → ignored (baseline/overlay).
-  # Collision `name` → fail-loud (`:name_collision`).
-  #
-  # A NON-DECODABLE YAML in the catalogue is NOT silently skipped (otherwise the role would be
-  # INVISIBLE to the index → `load` would see it as `:not_found` (role absent) instead of
-  # `:invalid_schema` (role corrupt), and `list/1` (enumerated by PermanentBoot) would amputate it
-  # from boot silently → a "green" but incomplete deploy). A corrupt file = a broken deploy artifact →
-  # we propagate `{:error, {:invalid_yaml, path}}` (fail-loud). Assumed consequence: a single
-  # unreadable file poisons the whole index (corrupt catalogue = we load NONE of it) — consistent
-  # with "we do not save a wounded thing".
-  #
-  # Un role sans `metadata.name` est SAUTE, pas refuse — un fragment prefixe `_` est deliberement
-  # sans nom. Une COLLISION, elle, arrete tout : deux fichiers qui revendiquent le meme role
-  # rendraient l'index dependant de l'ordre du glob.
+  # Scan only *.yaml and archivistes/*.yaml: frozen monks stay outside boot, modops are overlays.
+  # A bad YAML or same-root name collision aborts the index, avoiding silent partial boot.
+  # Nameless maps are skipped; '_' suppresses the warning for deliberate fragments.
   defp index_named(acc, path, name, raw) when is_binary(name) and name != "" do
     if Map.has_key?(acc, name) do
       Logger.error("Catalog: metadata.name collision #{inspect(name)} (#{path})")
@@ -330,16 +222,16 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Reads named modop fragments in order and validates their paths and schemas.
+  Reads ordered modop fragments from the default catalogue's image or disk scope.
+  Disk reads check lexical confinement, reserved keys and fragment schema; image reads
+  use the already-validated snapshot.
   """
   @spec read_modops([String.t()]) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set) when is_list(modop_set), do: read_modops(modop_set, nil)
 
   @doc """
-  Les memes overlays, dans l'image du catalogue NOMME — `nil` = celui qui est livre.
-
-  Un modop appartient au catalogue qui le livre : celui d'un role du second catalogue n'existe pas
-  dans l'image du premier, et l'y chercher rend `:modop_not_found` SUR UN FICHIER BIEN PRESENT.
+  Reads ordered overlays in the named catalogue's scope; nil uses `Fleet.Catalogue.root/0`.
+  Missing image entries return `:modop_not_found` without disk fallback or partial composition.
   """
   @spec read_modops([String.t()], Path.t() | nil) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set, root) when is_list(modop_set) do
@@ -356,12 +248,7 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # Le chemin du `profile.yaml` d'un modop sous UNE racine, ou nil. Le nom reste CONFINE sous
-  # chaque racine : essayer la suivante ne doit pas affaiblir ce qui rend un nom non fiable sur
-  # comme segment de chemin.
-  # TROIS REPONSES, TROIS CAUSES DISTINCTES : trouve et lu, trouve nulle part (le `confined_join`
-  # rend alors le repertoire ATTENDU, que le journal nomme), ou un nom qui ne se confine pas. Les
-  # fondre ferait chercher un fichier absent la ou c'est le NOM qui etait refuse.
+  # Keep missing files distinct from refused names; the fallback supplies the expected log path.
   defp disk_modop_step(name, {:ok, acc}, scope) do
     found = Enum.find_value(scope, &modop_profile_path(&1, name))
     fallback = Fleet.Slug.confined_join(Path.join(List.first(scope, root_dir()), "modop"), name)
@@ -403,12 +290,7 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   defp read_modops_from_disk(modop_set, catalogue_root) do
-    # Same scope as `read_role_from_disk/2`, same reason: a modop belongs to the catalogue that
-    # ships it, and the mechanism ones live in the system half of the scope — which is why the
-    # scope is a PAIR (own + system) and never one root alone: reading only the business root makes
-    # every hermetic test see a role whose default overlay has VANISHED. The name stays confined
-    # under EACH root — trying a second one must not weaken what makes an untrusted name safe as a
-    # path segment.
+    # Include system overlays without admitting neighbouring catalogues; confine at each root.
     scope = disk_scope(catalogue_root)
 
     result = Enum.reduce_while(modop_set, {:ok, []}, &disk_modop_step(&1, &2, scope))
@@ -419,9 +301,6 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # UN MODOP DE L'IMAGE PUBLIEE. Absent = l'image ne le porte pas, ce qui est un refus et pas une
-  # composition partielle : un pod dont un mode manque n'est pas un pod diminue, c'est un pod dont
-  # personne ne sait ce qu'il fait.
   defp overlay_step(name, {:ok, acc}, overlays) do
     case Map.fetch(overlays, name) do
       {:ok, raw} ->
@@ -433,8 +312,7 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
-  # LA LECTURE D'UN MODOP SUR DISQUE, avec ses deux validations. Les trois etapes voyagent ensemble
-  # partout ou un overlay se lit : les separer laisserait un site en valider deux sur trois.
+  # Keep decoding and both validations together for all disk overlay readers.
   defp read_modop_yaml(path) do
     with {:ok, raw} <- decode_yaml(path),
          :ok <- Schema.validate_modop_keys(raw),
@@ -452,10 +330,8 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  The raw role index of ONE root — used to judge a catalogue's own roles apart from what it
-  inherits. Every other reader wants the union; the conformance check is the one caller that must
-  see the business half alone, because "this catalogue declares a system capability" is only a
-  question about what IT declares.
+  Returns one directory's raw role index without inherited entries, or `:enoent` if absent.
+  Conformance checks use this to distinguish a business declaration from a system fallback.
   """
   @spec index_of(String.t()) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def index_of(dir) when is_binary(dir) do
@@ -463,17 +339,15 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  Returns the live disk role index used to build an image.
+  Returns the merged live-disk role index over `root_dirs/0` (all installed catalogues).
   """
   @spec snapshot_roles() :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_roles, do: snapshot_roles(root_dirs())
 
   @doc """
-  The same index over an EXPLICIT search path — one catalogue's, rather than every installed one merged.
-
-  `snapshot_roles/0` answers "everything this deployment can see", which a global view wants. A
-  PROJECT wants its own catalogue over the system and nothing from its neighbours, and that path is
-  `Fleet.Catalogue.scopes(:cap_profiles)`.
+  Returns the raw index over an explicit precedence-ordered search path, first root wins.
+  Image publication passes one catalogue plus system. An empty path returns
+  `{:catalogue_missing, root_dir()}`; missing individual directories merely scan empty.
   """
   @spec snapshot_roles([String.t()]) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_roles([]), do: {:error, {:catalogue_missing, root_dir()}}
@@ -489,16 +363,13 @@ defmodule Fleet.CapProfile.Catalog do
   @spec snapshot_overlays([String.t()]) ::
           {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   def snapshot_overlays(dirs) when is_list(dirs) do
-    # Search path, precedence order, FIRST WINS — same rule as the roles and the SP fragments. A
-    # business `rubber-duck` overlay replaces the system's; declaring nothing is the point.
+    # First root wins; a business overlay can replace its system default.
     dirs
     |> Enum.flat_map(&Path.wildcard(Path.join([&1, "modop", "*/profile.yaml"])))
     |> Enum.reduce_while({:ok, %{}}, &snapshot_step/2)
   end
 
-  # PREMIER TROUVE GAGNE, et il gagne AVANT la lecture : un nom deja retenu ne fait meme pas ouvrir
-  # le fichier d'apres. Un overlay metier casse ne peut donc pas faire echouer un snapshot ou celui
-  # du systeme etait deja le vainqueur.
+  # Skip shadowed overlays before reading them, so a broken loser cannot invalidate the winner.
   defp snapshot_step(path, {:ok, acc}) do
     name = path |> Path.dirname() |> Path.basename()
 
@@ -522,27 +393,14 @@ defmodule Fleet.CapProfile.Catalog do
   end
 
   @doc """
-  The cap-profile roots actually read: the SYSTEM one, then the business one.
-
-  The fine override (`:lcars_fleet, :cap_profile_root_dir`) moves the BUSINESS root only. The system root
-  has no knob on purpose — an operator brings their business, they do not choose the mechanism, and
-  an override that could drop the machinery would make "this deployment is complete" unanswerable.
-
-  Absent directories are dropped so a test root or a narrow catalogue does not have to exist twice.
+  Returns existing global search roots: installed business trees, then system.
+  The cap_profile_root_dir override replaces the business portion, retaining system fallback.
   """
   @spec root_dirs() :: [String.t()]
   def root_dirs, do: Fleet.Catalogue.search(:cap_profiles)
 
-  # Union of the search path's role indexes, in PRECEDENCE order — the first root that carries a
-  # name wins, and the later one is not read.
-  #
-  # Refusing a name held on both sides would make overriding impossible, which is the opposite of
-  # what a default catalogue is for: a business catalogue that ships its
-  # own `architect.yaml` means to replace the system's, and it should not have to declare it — the
-  # child-theme rule, and the reason a search path costs nothing to extend.
-  #
-  # A collision INSIDE one root stays a refusal (`name_index/1`): two files claiming one name in the
-  # same catalogue is an ambiguity its author can only have made by accident.
+  # First root wins across roots, but every root is read: a shadowed role's corrupt YAML
+  # or a same-root duplicate still fails the scan (unlike shadowed overlay handling).
   defp union_indexes(dirs) do
     Enum.reduce_while(dirs, {:ok, %{}}, fn dir, {:ok, acc} ->
       case name_index(dir) do

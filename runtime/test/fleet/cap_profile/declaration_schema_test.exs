@@ -1,7 +1,7 @@
 defmodule Fleet.CapProfile.DeclarationSchemaTest do
   @moduledoc """
-  Proves that the canon template `priv/catalogue/cap_profile/config/declaration-template.json`
-  validates against `priv/schema/declaration.json`, and that an invalid config is rejected.
+  Checks the bundled declaration template against `priv/cap_profile/schema/declaration.json`,
+  including required fields and the distinction between unknown keys and underscore annotations.
   """
   use ExUnit.Case, async: true
 
@@ -50,9 +50,8 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
 
   test "rejects — the RETIRED `level` and `nature` keys (crit_quarantine removed them from the schema)",
        %{schema: schema, canon: canon} do
-    # They were valid fields once; `additionalProperties: false` now refuses them like any unknown
-    # key. A legacy file still carrying `level` is schema-invalid — which is exactly why the READ
-    # path (`Declaration.pipeline_default/2`) stopped full-validating and reads only the card name.
+    # Legacy keys are schema-invalid; Declaration.pipeline_default/2 reads the card name
+    # without full validation so it can still consume those declarations.
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, Map.put(canon, "level", "C2"))
 
     assert {:error, _} =
@@ -61,9 +60,7 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
 
   test "rejects — any structured block beyond the declared fields (a declaration IS exactly the schema)",
        %{schema: schema, canon: canon} do
-    # The declaration carries justification + card + provenance, nothing else: any extra
-    # non-underscore structure is refused (additionalProperties: false) — the WHY of the stakes
-    # lives in the justification PROSE, never in side data.
+    # Stakes belong in justification prose, not an undeclared structured criteria block.
     bad = Map.put(canon, "criteria", %{"anything" => true})
     assert {:error, _} = ExJsonSchema.Validator.validate(schema, bad)
   end

@@ -44,7 +44,8 @@ defmodule Fleet.CapProfile.DisallowedTools do
   @doc """
   Returns the bundled universal git-denial patterns.
 
-  The parsed baseline is cached and unreadable or malformed input raises.
+  The parsed baseline is cached. Unreadable YAML or a missing/non-list git_ops_denied
+  raises; empty and non-string list entries are discarded, not rejected.
   """
   @spec baseline_patterns() :: [String.t()]
   def baseline_patterns do

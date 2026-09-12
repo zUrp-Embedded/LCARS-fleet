@@ -1,8 +1,8 @@
 defmodule Fleet.CapProfileImageTest do
   @moduledoc """
-  The proven-good image, tier B — the EPOCH is closed at the deployment scale: once published,
-  a disk mutation changes NOTHING until a restart republishes; consumption is the closed world
-  of the image, not the live disk.
+  Checks that profile and overlay reads use the published snapshot despite disk edits,
+  and that publication rejects invalid profiles and merged role-index collisions.
+  Explicit republishing replaces the snapshot without requiring a restart in these tests.
   """
   use ExUnit.Case, async: false
 
@@ -10,8 +10,7 @@ defmodule Fleet.CapProfileImageTest do
 
   @moduletag :tmp_dir
 
-  # A VALID canon under tmp roots: the REAL engineer profile (schema-proof by construction)
-  # + one modop overlay. Epoch mutations below edit metadata.description (schema-neutral).
+  # Use the bundled engineer profile and an empty overlay to reach publication validation.
   defp write_canon(tmp) do
     File.mkdir_p!(Path.join(tmp, "modop/tdd"))
 
@@ -27,14 +26,8 @@ defmodule Fleet.CapProfileImageTest do
     tmp
   end
 
-  # Epoch mutation on a SCHEMA-ADMITTED field: metadata.role_index (integer) — bumped to a
-  # sentinel value the assertions can read on both regimes.
-  #
-  # ⚠ THE SENTINEL IS NOT FREE TO CHOOSE, and it stopped being so on 2026-08-10. It was 14, picked
-  # as an arbitrary high number; `publish!/0` now refuses two names on one slot on the MERGED
-  # catalogue, and the slot convention put `gatekeeper` on 14 — so the mutation collided with a
-  # system role and the test died on the guard instead of measuring the epoch. It must be a slot no
-  # role of the SYSTEM catalogue holds (0, d, e, f) and none of the business fixture holds.
+  # Must remain schema-valid and unused by the system/fixture roles; a collision would
+  # test uniqueness failure instead of snapshot replacement.
   @mutated_role_index 9
 
   defp mutate_role_index(tmp) do
@@ -58,19 +51,16 @@ defmodule Fleet.CapProfileImageTest do
 
   test "EPOCH CLOSURE: after publish!, a disk mutation changes NOTHING — before it, the disk leads",
        %{tmp_dir: tmp} do
-    # Disk regime (no image): the live file is the truth.
     original = role_index_of(Fleet.CapProfile.load("engineer"))
     assert is_integer(original) and original != @mutated_role_index
 
     :ok = Image.publish!()
 
-    # MUTATE the catalogue on disk (a mid-life redeploy/edit).
     mutate_role_index(tmp)
 
-    # The image leads: the mutation is INVISIBLE to consumption (one epoch per deployment).
     assert role_index_of(Fleet.CapProfile.load("engineer")) == original
 
-    # Back to the disk regime (as a restart-republish would): the new epoch is seen.
+    # Removing the image restores live disk reads.
     Image.unpublish()
     assert role_index_of(Fleet.CapProfile.load("engineer")) == @mutated_role_index
   end
@@ -95,7 +85,6 @@ defmodule Fleet.CapProfileImageTest do
     :ok = Image.publish!()
     assert {:ok, [%{}]} = Fleet.CapProfile.Catalog.read_modops(["tdd"])
 
-    # An overlay added on disk after publish is not activable (closed world).
     File.mkdir_p!(Path.join(tmp, "modop/ghost"))
     File.write!(Path.join(tmp, "modop/ghost/profile.yaml"), "{}\n")
     assert {:error, :modop_not_found} = Fleet.CapProfile.Catalog.read_modops(["ghost"])
@@ -115,8 +104,7 @@ defmodule Fleet.CapProfileImageTest do
     assert Image.published() == nil
   end
 
-  # Derives a second entry from the real engineer profile — schema-proof by construction, so the
-  # publish reaches the uniqueness pass instead of dying on the schema before it.
+  # Preserve schema conformance so tests reach the merged-index uniqueness check.
   defp write_twin(tmp, name, role_index) do
     body =
       tmp
@@ -131,10 +119,7 @@ defmodule Fleet.CapProfileImageTest do
   test "two DIFFERENT names on one role_index: the boot refuses, and it names the slot", %{
     tmp_dir: tmp
   } do
-    # The slot is a kill class. `dev` and `gatekeeper` shipped on slot 2 together and the bench
-    # stayed green only because their kill_class happened to differ — the guard the schema (per
-    # file) and the contract check (per root) both structurally cannot hold, since neither sees
-    # the merged catalogue.
+    # Role index is distinct from kill class; uniqueness is required in the merged catalogue.
     write_twin(tmp, "twin", 3)
 
     assert_raise RuntimeError, ~r/role_index 3 claimed by engineer, twin/, fn ->
@@ -147,14 +132,8 @@ defmodule Fleet.CapProfileImageTest do
   test "superposing a SYSTEM entry by name is one entry, one slot — not a collision", %{
     tmp_dir: tmp
   } do
-    # The legitimate case the search path made free: a business catalogue overriding `architect`
-    # carries its slot too. It must NOT read as two claims on that slot, or the override would be
-    # unusable — which is precisely why the check reads the merged index and not the files.
-    #
-    # The slot is READ from the system profile rather than typed: it was `1` here, and the slot
-    # convention moved the architect to `d` on 2026-08-10. A literal would have kept passing (same
-    # NAME, one entry, whatever the number) while describing a catalogue that no longer exists —
-    # green prose next to a green test is the hardest kind to notice.
+    # Same-name override is one merged entry. Read its real index: an arbitrary literal
+    # could pass while no longer representing the system role being overridden.
     {:ok, system_arch} = Fleet.CapProfile.load("architect")
     write_twin(tmp, "architect", Fleet.CapProfile.role_index(system_arch))
 

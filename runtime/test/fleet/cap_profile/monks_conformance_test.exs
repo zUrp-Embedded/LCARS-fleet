@@ -1,21 +1,13 @@
 defmodule Fleet.CapProfile.MonksConformanceTest do
   @moduledoc """
-  Conformance of the 15 monks + archivist (Memory-X V1) to the schema
-  `cap-profile.json` + sanity of the `alpha.yaml`/`beta.yaml` registries.
-  Same pattern as the canon cap-profile conformance suite (PROVEN).
-
-  ## G24-11 / ADR #565
-  Monks/archivist carry `lifetime_scope: forever` (Type-1 permanent), so the
-  G24-11 rule (`subagent_template != null ⟹ one-shot`) is N/A for them: per
-  ADR #565 verdict B they use `spec.knowledge.sp_template` (permanent pod),
-  NOT `spec.invocation.subagent_template` (one-shot dispatch) — and therefore
-  validate ENTIRELY.
+  Skipped Memory-X conformance checks; paths still target the old catalogue location.
+  Before re-enabling, re-home the archived profiles and update paths/schema expectations.
+  Permanent monks use knowledge.sp_template instead of invocation.subagent_template,
+  whose presence would require one-shot lifetime under G24-11 (ADR #565 verdict B).
   """
   use ExUnit.Case, async: true
 
-  # FROZEN (BL — Memory-X frozen): schema conformance of the monk cap-profiles, now ARCHIVED
-  # (`priv/memory-x/monks/`, out of the boot loop). Re-enable when Memory-X is re-homed
-  # (per-project + system-wide under lcars).
+  # Archived at priv/memory-x/monks, outside boot; retain the per-project/system re-home gate.
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at per-project re-home"
 
@@ -58,9 +50,6 @@ defmodule Fleet.CapProfile.MonksConformanceTest do
 
   test "monks/archivist: FULLY conformant (post ADR #565 verdict B)",
        %{schema: schema} do
-    # ADR #565 verdict B: monks use `spec.knowledge.sp_template` (permanent pod),
-    # NOT `spec.invocation.subagent_template` (one-shot dispatch, G24-11).
-    # G24-11 unchanged but N/A for monks → they now validate ENTIRELY.
     profiles =
       Path.wildcard(Path.join(@monks_dir, "monk-*.yaml")) ++
         [Path.join(@monks_dir, "archivist.yaml")]
@@ -82,7 +71,6 @@ defmodule Fleet.CapProfile.MonksConformanceTest do
   test "alpha.yaml/beta.yaml registries: well-formed monks (kind removed, R0.8-brick2)" do
     for {file, svc, n} <- [{"alpha.yaml", "alpha", 5}, {"beta.yaml", "beta", 10}] do
       reg = YamlElixir.read_from_file!(Path.join(@monks_dir, file))
-      # R0.8-brick2: `kind: MemoryRegistry` removed (a single kind per directory).
       assert reg["metadata"]["service"] == svc
       monks = reg["spec"]["monks"]
       assert length(monks) == n, "#{file}: #{n} monks expected, saw #{length(monks)}"

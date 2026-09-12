@@ -1,52 +1,24 @@
 defmodule Fleet.CapProfile.Schema do
   @moduledoc """
-  JSON-schema validation of a cap-profile / modop (STRUCTURAL conformance).
+  Validates raw maps structurally; composed G24 semantics belong to `Invariants`.
+  Bundled schemas in `priv/cap_profile/schema/` cover profiles, modop fragments and
+  reserved seats. Modops cannot override kind/containment/name; seats cannot carry spec.
 
-  Validation cluster of `Fleet.CapProfile`. Distinct from the G24 business
-  invariants (`Fleet.CapProfile.Invariants`, pure over the composed struct):
-  HERE the RAW map is validated against the JSON-schemas pinned in
-  `priv/cap_profile/schema/` —
-
-    * `cap-profile.json` — strict schema of the composed profile.
-    * `modop-profile.json` — strict schema of the modop fragment (reserved keys
-      forbidden: `kind`, `metadata.containment`, `metadata.name` — so a modop
-      cannot override the base profile's containment/name/kind).
-    * `reserved-seat.json` — strict schema of a `kind: ReservedSeat` catalogue entry
-      (BL-6-45): a kept, non-spawnable seat — a seat carrying a `spec` is rejected.
-
-  Single dependency direction (no cycle): this module is UPSTREAM of the core — it
-  calls neither the single-authority accessors (`name/1`, `containment/1`…) nor
-  `Catalog`. Its only deps are `Jason` / `ExJsonSchema` / `File` (already in the
-  app). `Fleet.CapProfile.load/1` and `compose/2` call `validate/2`;
-  `read_modops/2` (core side) calls `validate_modop_keys/1` then `validate/2`.
-
-  I/O: reads the schema files from the FS (`:lcars_fleet, :cap_profile_schema_dir` override;
-  default = the bundled `priv/cap_profile/schema`). The read+decode+resolve is cached in
-  `:persistent_term` (keyed by the RESOLVED path → test overrides get their own entry),
-  lazy, errors not cached.
+  `:lcars_fleet, :cap_profile_schema_dir` overrides the schema directory. Successful
+  read/decode/schema resolution is cached lazily in persistent_term by joined path
+  (not canonical filesystem identity). Errors are retried; cached successes ignore disk edits.
   """
 
   require Logger
 
-  # Fast-path guard for top-level reserved keys. `metadata.containment`/`metadata.name`
-  # are enforced by the JSON schema `priv/cap_profile/schema/modop-profile.json`
-  # (`not/anyOf` clause); `kind` stays reserved HERE (it distinguishes cap-profile vs
-  # modop at merge time).
+  # Fast-path kind guard; the modop schema separately protects metadata.containment/name.
   @reserved_modop_keys ~w(kind)
 
   @doc """
-  Validates a raw map against the JSON-schema of the requested `kind`.
-
-  ## Exit codes
-    * `:ok` — conformant to the schema.
-    * `{:error, :invalid_schema}` — `kind: :cap_profile` or `:reserved_seat` nonconformant
-      (one atom for both: the callers' contract branches on `:ok`/`{:error, reason}` only).
-    * `{:error, :invalid_modop}` — `kind: :modop` nonconformant.
-    * `{:error, :schema_unavailable}` — the priv schema file is absent or corrupt.
-
-  The error atoms (`:invalid_schema`/`:invalid_modop`/`:schema_unavailable`)
-  are the return contract of `load/1` and `compose/2` (see their moduledocs) —
-  frozen, do not rename.
+  Validates against the requested schema, returning :ok or a frozen caller-facing error:
+  `:invalid_schema` for profiles/seats, `:invalid_modop` for fragments, or
+  `:schema_unavailable` for schema read/decode/resolution failures. Do not rename these atoms.
+  Validation failures log up to ten violations with locations, the total and a truncation notice.
   """
   @spec validate(map(), :cap_profile | :modop | :reserved_seat) ::
           :ok | {:error, :invalid_schema | :invalid_modop | :schema_unavailable}
@@ -58,15 +30,7 @@ defmodule Fleet.CapProfile.Schema do
             :ok
 
           {:error, errors} ->
-            # LE VERDICT REMONTE, LE DIAGNOSTIC DOIT SORTIR ICI. `ExJsonSchema` rend la liste des
-            # violations avec leur pointeur JSON ; la remplacer sur place par un atome unique
-            # apprend a l'operateur que son profil est non conforme SANS lui apprendre OU — sur un
-            # fichier de catalogue de plusieurs dizaines de cles, c'est la difference entre une
-            # correction et une chasse.
-            #
-            # L'atome de retour NE BOUGE PAS : les trois sont le contrat gele de `load/1` et
-            # `compose/2`, et les appelants branchent dessus. Ce qu'il faut n'est pas un type plus
-            # riche, c'est une TRACE — le detail va au rail operateur, la ou on le cherche.
+            # Preserve locations in the log while keeping the callers' error-atom contract.
             Logger.error("CapProfile.Schema: #{kind} REFUSED — #{describe_violations(errors)}")
 
             refusal(kind)
@@ -77,23 +41,14 @@ defmodule Fleet.CapProfile.Schema do
     end
   end
 
-  # L'ATOME DE RETOUR NE BOUGE PAS : les trois sont le contrat gele de `load/1` et `compose/2`, et
-  # les appelants branchent dessus. Le detail, lui, est parti au journal juste au-dessus.
   defp refusal(:cap_profile), do: {:error, :invalid_schema}
   defp refusal(:reserved_seat), do: {:error, :invalid_schema}
   defp refusal(:modop), do: {:error, :invalid_modop}
 
-  # BORNE, ET LA TRONCATURE SE DIT. Un fichier franchement faux produit des dizaines de violations,
-  # et noyer la trace sous elles la rend aussi illisible que le silence qu'on repare. On en montre
-  # dix et on annonce le reste — un « … » muet laisserait croire que la liste est complete.
+  # Bound log volume without presenting a truncated list as complete.
   @violations_shown 10
 
-  # ⚠ PAS DE CLAUSE DE REPLI, ET C'EST DIALYZER QUI L'A TRANCHE. J'en avais ecrit une « au cas ou
-  # `ExJsonSchema` rendrait autre chose qu'une liste » : `pattern_match_cov`, elle ne peut jamais
-  # matcher — le spec du validateur garantit `[error]` sur la branche d'erreur. Une garde defensive
-  # contre une forme que le type interdit n'est pas une precaution, c'est du code que personne
-  # n'atteindra jamais et qu'un lecteur croira necessaire. La garde `is_list/1` reste : elle DIT
-  # l'attente, sans pretendre couvrir autre chose.
+  # ExJsonSchema's error contract is a list; no fallback for a type-impossible container.
   defp describe_violations(errors) when is_list(errors) do
     total = length(errors)
 
@@ -112,7 +67,8 @@ defmodule Fleet.CapProfile.Schema do
   end
 
   @doc """
-  Returns `{:error, :invalid_modop}` when a fragment carries a reserved key.
+  Rejects the reserved top-level string key `kind`. Other reserved fields require
+  `validate/2` with the modop schema.
   """
   @spec validate_modop_keys(map()) :: :ok | {:error, :invalid_modop}
   def validate_modop_keys(map) when is_map(map) do
@@ -122,23 +78,12 @@ defmodule Fleet.CapProfile.Schema do
     end
   end
 
-  # ============================================================
-  # Schema loading (private — I/O + cache)
-  # ============================================================
-
   defp load_schema(:cap_profile), do: load_schema_file("cap-profile.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
   defp load_schema(:reserved_seat), do: load_schema_file("reserved-seat.json")
 
-  # IMMUTABLE priv schema: read+decode+resolve once, cached in `:persistent_term`
-  # keyed by the RESOLVED path (the `schema_dir/0` test overrides get their entry). Lazy-init,
-  # errors not cached.
-  # DELIBERATE manual cache, NOT `Fleet.SchemaCache.cached/2` (even though that dep is
-  # declared on the facade boundary): `cached/2` caches whatever the fun returns, so it
-  # would freeze a soft `{:error, :schema_unavailable}` for the BEAM's lifetime — here
-  # the error tuple must stay RETRYABLE. That is the RULE `cached/2` states in its own
-  # `@doc` ("returned error tuples are ordinary values and are cached"), and this module
-  # is the site that falls on the other side of it.
+  # SchemaCache.cached/2 would also cache error tuples, preventing recovery without restart.
+  # Cache only success here. Concurrent cold reads are not serialized.
   defp load_schema_file(name) do
     path = Path.join(schema_dir(), name)
     key = {__MODULE__, :schema, path}
@@ -172,24 +117,8 @@ defmodule Fleet.CapProfile.Schema do
     end
   end
 
-  # LE REESSAI EST L'ARBITRAGE, L'INONDATION EST L'ACCIDENT. Ne pas memoriser l'echec est
-  # DELIBERE (cf. `load_schema_file/1` : un `{:error, _}` gele pour la vie du BEAM rendrait un
-  # schema redevenu lisible inaccessible sans redemarrage, et c'est le meme choix que la relecture
-  # du secret HMAC a chaque requete). Mais chaque validation refait alors `File.read` + `decode` +
-  # `resolve` ET reecrit la MEME ligne de warning : une indisponibilite durable devient
-  # PROPORTIONNELLE AU TRAFIC, et la trace ou on la verrait est la premiere noyee.
-  #
-  # On journalise donc la TRANSITION, pas l'etat — exactement la discipline de la jauge de boite aux
-  # lettres du poller : « un etat qui dure est UN fait ; le repeter noie la trace ». Un changement
-  # de raison (absent -> illisible, illisible -> JSON casse) est une transition et parle a nouveau.
-  #
-  # ⚠ ET LE RETOUR SE DIT AUSSI. Sans l'annonce de reprise, un operateur ne peut pas distinguer
-  # « repare » de « mort et silencieux » — la seule chose que le silence prouve, c'est qu'on ne
-  # journalise plus.
-  #
-  # `persistent_term` porte le drapeau parce que le cache voisin y est deja, et les ecritures sont
-  # bornees a une par TRANSITION (3 chemins de schema possibles) : jamais une par validation, ce
-  # qui declencherait un balayage global a chaque appel.
+  # Log cause changes and recovery, not every failed retry. The non-atomic get/put can
+  # duplicate announcements under concurrency; steady identical failures avoid repeated writes.
   defp warn_once(path, reason) do
     key = {__MODULE__, :schema_error_logged, path}
 

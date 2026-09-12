@@ -1,10 +1,9 @@
 defmodule Fleet.CapProfile.MonksFrozenTest do
-  # async: false — mutates the global :root_dir config.
+  # Serial: mutates global cap_profile_root_dir.
   use ExUnit.Case, async: false
 
-  # FROZEN (BL — Memory-X frozen): tests that `list/load` scan `cap-profiles/monks/`,
-  # now ARCHIVED (`priv/memory-x/monks/`, out of the boot loop). Re-enable when Memory-X
-  # is re-homed (per-project + system-wide under lcars).
+  # Archived at priv/memory-x/monks, outside boot. Re-home per-project/system profiles,
+  # update these old paths and restore the scan before re-enabling.
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at per-project re-home"
 
@@ -35,10 +34,7 @@ defmodule Fleet.CapProfile.MonksFrozenTest do
     :ok
   end
 
-  # F-041: `name_index/1` must scan `monks/*.yaml` in addition to `*.yaml` + `archivistes/*.yaml`.
-  # Otherwise the canon Memory-X profiles (archivist, monk-alpha-*, monk-beta-*) are invisible to
-  # `list/1`/`load/1` → `PermanentBoot` (which enumerates via `list/1`) never boots them. Memory-X
-  # WILL live → the scan must include them.
+  # Dormant expectations only: Catalog currently excludes monks from enumeration and loading.
   test "load(\"archivist\") resolves the monk profile (monks/ scan)" do
     assert {:ok, _cap} = CapProfile.load("archivist")
   end

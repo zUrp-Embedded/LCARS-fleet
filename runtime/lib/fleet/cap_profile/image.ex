@@ -1,24 +1,13 @@
 defmodule Fleet.CapProfile.Image do
   @moduledoc """
-  The PROVEN-GOOD cap-profile image — profiles + modop overlays frozen at boot into one
-  versioned snapshot the whole runtime consumes.
+  Publishes structurally validated profile/overlay snapshots in persistent_term, one per
+  installed catalogue over its system fallback. Catalog reads use the published snapshot
+  exclusively; disk edits take effect only after republishing or removing that image.
+  Publication normally occurs at boot, but the API itself permits replacement without restart.
 
-  ## Doctrine (images audit, tier B)
-
-  > proven-good image at boot, or do not boot.
-
-  Tier A (`Fleet.Spawner.CanonProof`) proves every canon role composes before readiness but leaves consumption on
-  the LIVE disk: a catalogue mutated mid-life still changes the pods spawn by spawn, its epoch being
-  closed per-RESOLVE rather than per-deployment. This module closes the epoch at the DEPLOYMENT
-  scale: `publish!/0` loads and validates EVERY profile and EVERY modop overlay at
-  boot — any invalid artifact raises (crash-boot, same posture as the event registry) — then
-  publishes the snapshot to `:persistent_term`. `Catalog.read_role/1` and `Catalog.read_modops/1`
-  consume the image when published (the CLOSED world: a role absent from the image is
-  `:not_found`, whatever the disk now says); the disk path remains the fallback when no image is
-  published (tests' hermetic default, standalone tooling). A new image requires a restart —
-  exactly the doctrine.
-
-  The truly-dynamic calibration assets stay OUT of the image by design (cf. the SP split).
+  This checks schemas and merged role-index uniqueness, not composed semantic invariants.
+  CanonProof and the pod spawn gate check composed profiles. Dynamic calibration assets
+  are outside this image.
   """
 
   require Logger
@@ -26,18 +15,14 @@ defmodule Fleet.CapProfile.Image do
   alias Fleet.CapProfile.{Catalog, Schema}
 
   @doc """
-  Validates and publishes the live catalogue, replacing any previous image.
+  Validates and publishes each non-empty installed catalogue scope, replacing its image.
+  Invalid artifacts raise before that scope is stored. Scopes publish sequentially, not
+  transactionally: earlier publications and old images can remain after a later failure.
+  Images for roots no longer installed are not erased here.
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE INSTALLE, chacune batie sur SON scope — le catalogue par-dessus le
-    # systeme, jamais par-dessus ses voisins. Une cle scalaire fusionnerait les catalogues en une
-    # seule image : un projet n'aurait pas « ses » roles, il aurait ceux de tout le monde. Les
-    # cartes ne se superposent pas et les cap-profiles si — c'est la difference que `scopes/1`
-    # porte et que `search/1` aplatit.
-    # Clee par la RACINE du catalogue, pas par le repertoire d'arbre : `SPBuilder.Image` clee ainsi,
-    # et un profil ne peut porter qu'UNE identite de catalogue. Deux espaces de cles pour un meme
-    # fait, c'est une duplication.
+    # Keep neighbours separate and key by catalogue root, matching profile/SP image provenance.
     for root <- Fleet.Catalogue.installed_roots(),
         scope = Fleet.Catalogue.tree_scope(root, :cap_profiles),
         scope != [],
@@ -46,21 +31,8 @@ defmodule Fleet.CapProfile.Image do
     :ok
   end
 
-  # Branch on kind (BL-6-45): a ReservedSeat is validated against ITS schema — every entry is proven
-  # at boot, none rots unvalidated behind its exclusion from the spawnable world. Three exits, the
-  # third a raise: an unknown kind is a broken deploy artifact, refused loud here rather than
-  # mis-validated against whichever schema a default would pick.
-  #
-  # SCHEMA ONLY, and that is a smaller promise than it looks: the schema types
-  # `scope.disallowedTools` as an array of strings and constrains NOTHING about its contents, so a
-  # profile that passes here can still violate the `g24_*` containment invariants — the ones that
-  # keep `web_search`, `code_execution` and friends away from every role.
-  #
-  # Those are checked on the COMPOSED profile (overlays merged, baseline denylist resolved), which
-  # does not exist yet at this point: `Fleet.Spawner.CanonProof.prove_all!/0` at boot, and
-  # `Pod.gate_cap_profile/1` in `:allocating` — the latter unconditional and on every launching
-  # pod's path. Publication is therefore deliberately the weakest of the three checks, and an
-  # over-provisioned profile fails at spawn rather than here.
+  # Seats need their own schema; unknown kinds must not silently select the profile schema.
+  # Schema-valid disallowedTools can still fail G24: semantic checks need the composed profile.
   defp validate_entry!({role, raw}) do
     case Schema.validate(raw, schema_kind!(role, Map.get(raw, "kind"))) do
       :ok ->
@@ -113,8 +85,7 @@ defmodule Fleet.CapProfile.Image do
       version: version
     })
 
-    # Reserved seats named ONCE, loud, at the publish (BL-6-45): the state "declared but not
-    # spawnable" is voiced here instead of surfacing as a confusing :not_found downstream.
+    # Expose declared but unspawnable seats at publication.
     seats = for {name, raw} <- index, not Catalog.spawnable?(raw), do: name
 
     seats_note =
@@ -131,18 +102,10 @@ defmodule Fleet.CapProfile.Image do
     :ok
   end
 
-  # `role_index` is the role's slot in the hexspeak session UUID, so two entries sharing one slot
-  # make `pkill -f '<X>badcafe'` reach two kill classes at once. Nothing held that uniqueness where
-  # it now lives: the schema bounds the value per FILE (0..15), and the repo contract check proves
-  # it per catalogue ROOT — neither can see the union. Since the search path let a business
-  # catalogue superpose the system one, the perimeter of uniqueness became the MERGED index, and
-  # this function is the only place that holds it. Measured cost of its absence: `dev` and
-  # `gatekeeper` shipped on slot 2 together and the bench stayed green, because their `kill_class`
-  # happened to differ. Luck is not a guard.
-  #
-  # Seats included — a ReservedSeat CLAIMS its slot exactly like a spawnable role. Entries whose
-  # `role_index` is not an integer are skipped rather than refused: the schema above is the
-  # authority on presence, and duplicating its refusal here would report the wrong fault.
+  # Enforce role-index uniqueness after overlays by name, including seats: per-file bounds
+  # and per-root checks cannot detect cross-root claims. Schema handles missing/noninteger values.
+  # Role index and kill class occupy different session-ID nibbles; sharing an index risks
+  # identity/role-pattern ambiguity, not a change to the independently derived kill class.
   defp ensure_role_indexes_unique!(index, business) do
     duplicates =
       index
@@ -174,10 +137,8 @@ defmodule Fleet.CapProfile.Image do
   end
 
   @doc """
-  The published image of a catalogue (`%{index, overlays, version}`), or nil (fallback-to-disk).
-
-  No argument = the BUNDLED catalogue, which is what a caller with no project in hand gets.
-  The per-project door is `published/1`, named by that project's catalogue root.
+  Returns `%{index, overlays, version}` or nil (disk fallback).
+  No argument uses `Fleet.Catalogue.root/0`; `published/1` reads an explicit catalogue root.
   """
   @spec published() :: map() | nil
   def published do
@@ -200,12 +161,9 @@ defmodule Fleet.CapProfile.Image do
   defp image_key(root), do: {__MODULE__, :image, root}
 
   @doc """
-  Restores a previously-`published/0` image — TESTS ONLY, the symmetric of `unpublish/0`.
-
-  Exists because unpublishing has no natural undo and a test that omits one leaks the DISK regime
-  into every test after it: same read, different path, and a whole run's timing changes under it.
-  `publish!/0` is not that undo — it rebuilds from the catalogue currently configured, which a test
-  that repointed `root_dir` no longer has.
+  Test helper: stores a saved image at the currently configured default catalogue root,
+  without validation. Restore the root first if it changed. This restores one image only;
+  `unpublish/0` erases all roots. Calling `publish!/0` instead would reread mutated disk data.
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
@@ -213,24 +171,8 @@ defmodule Fleet.CapProfile.Image do
     :ok
   end
 
-  # Deterministic content stamp: the image is versioned so two epochs are distinguishable in logs.
-  #
-  # ⚠ 12 HEX = 48 BITS, ET C'EST DIMENSIONNE POUR CE QUE CE TAMPON FAIT, pas pour ce qu'un
-  # identifiant fait en general. Il ne quitte JAMAIS la VM : calcule au publish, range en
-  # `persistent_term`, relu par le meme noeud. Il ne voyage sur aucun fil, ne se stocke nulle part,
-  # et `lib/` ne le COMPARE nulle part — son seul consommateur de production est le `Logger.info`
-  # de publication. Distinguer deux epoques dans une trace demande de ne pas collisionner sur les
-  # quelques images qu'une flotte publie ; 48 bits donnent une chance sur deux vers 2^24 epoques.
-  #
-  # C'est la difference avec un marqueur DURABLE (cf. `PodTools.Delegation`, JG-044) : celui-la est
-  # ecrit dans un ticket de forge et relu par un noeud ulterieur, potentiellement sous un autre OTP,
-  # donc sa stabilite dependait d'un format qu'on ne controle pas. Ici la question ne se pose pas —
-  # le producteur et le lecteur sont le meme processus, dans le meme boot.
-  #
-  # ⚠ L'ENTREE EST DEJA CANONIQUE, deux fois plutot qu'une : `Enum.sort/1` sur les deux termes, et
-  # MESURE — `:erlang.term_to_binary/1` ordonne les maps sur cet OTP (cles atomes ou binaires,
-  # petites comme grandes, imbriquees comprises). Le tri reste : il dit l'intention, et il ne
-  # depend pas d'une propriete du runtime.
+  # 48-bit log stamp, not a durable identity or collision-free key. Top-level entries are
+  # sorted explicitly; nested encoding depends on OTP's term format, not canonical JSON.
   defp version_of(index, overlays) do
     :crypto.hash(:sha256, :erlang.term_to_binary({Enum.sort(index), Enum.sort(overlays)}))
     |> Base.encode16(case: :lower)
