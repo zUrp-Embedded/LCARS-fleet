@@ -85,24 +85,14 @@ defmodule Fleet.Slug do
   end
 
   @doc """
-  Returns whether `dest` lies under `root` with NO SYMLINK on the way — the non-lexical twin of
-  `under_root?/2`, and the one to reach for whenever the tree between the two is writable by
-  something other than the caller.
+  Checks lexical confinement, then rejects symlinks observed in components below root.
+  Root itself and its ancestors are not checked; callers must trust them. Missing components
+  are allowed for later creation, and other lstat errors also continue the walk.
 
-  `under_root?/2` compares STRINGS. That is the right check against a `..` in a name, and it is no
-  check at all against a link: `<root>/.claude/projects` pointing at `/home/<human>/.ssh` leaves
-  every path under it textually confined while every read and write lands elsewhere. The two
-  functions answer different questions and the lexical one reads like the strong one, which is why
-  they live side by side here.
-
-  Walks each component from `root` down and refuses on the first `:symlink`. A component that does
-  not exist yet is not a refusal — the caller is usually about to create it.
-
-  ⚠ CHECK-THEN-ACT, and the window is real: nothing stops the tree from changing between this call
-  and the operation it guards. The BEAM exposes no `O_NOFOLLOW`, so the race cannot be closed from
-  Elixir; it can only be narrowed and then DETECTED, by re-verifying after the operation and
-  discarding the result. A caller that guards a read of untrusted-writable ground owes itself that
-  second call.
+  Lexical checks alone miss links into host files from a pod-writable tree. This check is still
+  separate from the guarded read/write: paths can change in between. Recheck after an untrusted
+  read and discard a result if a link is found; even that cannot detect a swap restored before
+  the second check. This helper does not provide atomic no-follow access.
 
   ## Examples
 
@@ -129,9 +119,7 @@ defmodule Fleet.Slug do
     end
   end
 
-  # UN LIEN SUR N'IMPORTE QUEL COMPOSANT ARRETE LA DESCENTE. Le `false` qui remonte n'est pas un
-  # chemin, et c'est ce que l'appelant lit : `is_binary/1` distingue « descendu jusqu'au bout » de
-  # « stoppe sur un lien ».
+  # A path accumulator means descent continued; false records a detected symlink.
   defp descend_link_free(segment, acc) do
     path = Path.join(acc, segment)
 

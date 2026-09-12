@@ -1,9 +1,6 @@
 defmodule Fleet.SlugTest do
   @moduledoc """
-  Smart-constructor `Fleet.Slug` — the confinement-by-construction brick for names
-  that reach a `Path.join` (FS leaf) or a URL segment. The exact contract
-  (`^[a-z0-9][a-z0-9_-]*$`, no `..`/`/`/control, non-empty, no leading `-`/`_`) is
-  proven here once; the call sites (seed-store, modop, workflow_map, forge) compose it.
+  Slug validation for atomic path/URL names, exact preservation and lexical path confinement.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
@@ -82,10 +79,6 @@ defmodule Fleet.SlugTest do
       assert Slug.under_root?("/srv/store/sub/deep", "/srv/store")
     end
   end
-
-  # ============================================================
-  # Property: the accepted slug is EXACTLY the path-safe charset, and it is safe by construction.
-  # ============================================================
 
   property "every accepted slug is single-component and does not climb (safe Path.join round-trip)" do
     check all(slug <- valid_slug_gen()) do

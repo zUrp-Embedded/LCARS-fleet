@@ -1,20 +1,13 @@
 defmodule Fleet.SlugPropertyTest do
   @moduledoc """
-  Property-based proof of CONFINEMENT (`confined_join/2`). `slug_test.exs` already proves the
-  `cast/1` smart-constructor (charset, traversal refusal) and its two properties target the
-  NAME. Here we attack the other half of the move — the ROOT.
-
-  `cast/1` is not enough when the root itself is computed: exactly what the moduledoc says
-  ("the belt on top of the braces"). So the property bombards TWISTED roots (relative, `..`,
-  `.`, `//`, trailing slash, empty) and demands, for every possible outcome, that the result
-  is NEVER an absolute path OUTSIDE the root — nor an exception.
+  Generated lexical-confinement checks over varied roots and names. Root normalization matters
+  independently of slug validation; the oracle compares path components rather than copying
+  under_root?'s string-prefix logic. These properties do not check filesystem symlinks.
   """
   use ExUnit.Case, async: true
   use ExUnitProperties
 
   alias Fleet.Slug
-
-  # ── generators ──
 
   defp seg, do: string([?a..?z], min_length: 1, max_length: 5)
 
@@ -28,8 +21,7 @@ defmodule Fleet.SlugPropertyTest do
     end
   end
 
-  # Twisted roots: every shape a COMPUTED path can take when it comes from a config,
-  # an env var or a concatenation — including the ones that climb up.
+  # Include relative paths, traversal, redundant separators and degenerate roots.
   defp root_gen do
     gen all(
           segs <- list_of(seg(), max_length: 3),
@@ -50,9 +42,6 @@ defmodule Fleet.SlugPropertyTest do
     end
   end
 
-  # LES NEUF FORMES DE RACINE QU'UN APPELANT PEUT ENVOYER, chacune une clause. Elles ne sont pas des
-  # variantes de style : `:climb` et `:dotdot` sont les deux traversees, `:empty` et `:root` les
-  # deux degenerescences, et c'est leur presence dans la table qui fait que la propriete les tire.
   defp shaped(:abs, base), do: "/srv/" <> base
   defp shaped(:rel, base), do: base
   defp shaped(:dot, base), do: "./" <> base
@@ -63,7 +52,7 @@ defmodule Fleet.SlugPropertyTest do
   defp shaped(:empty, _base), do: ""
   defp shaped(:root, _base), do: "/"
 
-  # Names: valid slugs AND everything a payload/catalogue may send in their place.
+  # Draw valid slugs, printable strings and explicit invalid names.
   defp name_gen do
     one_of([
       valid_slug(),
@@ -87,16 +76,7 @@ defmodule Fleet.SlugPropertyTest do
     ])
   end
 
-  # ── P1 — CONFINEMENT ──
-
-  # INVARIANT: for ANY root (even twisted) and ANY name, `confined_join/2` returns
-  #   • either `{:ok, abs}` with `abs` ABSOLUTE and UNDER `Path.expand(root)` (== root, or
-  #     prefixed by `root <> "/"`), with no residual `..`;
-  #   • or a TYPED error (`{:invalid_slug, name}` | `{:path_escape, abs}`).
-  # Never an exception. Never a path outside the root.
-  # WHY: this is the last rampart before a `File.write`/`File.rm_rf` on a path where one
-  # segment comes from an input. A single out-of-root `{:ok, abs}` and we write (or erase)
-  # out of zone. An untyped exception breaks the caller expecting a fail-closed `{:error, _}`.
+  # Generated inputs must produce a confined absolute path or typed refusal before filesystem use.
   property "P1 CONFINEMENT — {:ok, abs} always under the root, otherwise typed error, never a raise" do
     check all(root <- root_gen(), name <- name_gen(), max_runs: 400) do
       expanded_root = Path.expand(root)
@@ -105,11 +85,7 @@ defmodule Fleet.SlugPropertyTest do
         {:ok, abs} ->
           assert Path.type(abs) == :absolute, "non-absolute path: #{inspect(abs)}"
 
-          # Confinement oracle, implementation-independent: `abs` is the root itself, or one
-          # of its descendants — compared by COMPONENTS (Path.split), not by string prefix.
-          # The naive `expanded_root <> "/"` prefix is exactly the bug fixed on the code side
-          # (root `/` → prefix `//` that nothing carries): an oracle copying the code's bug
-          # cannot find it.
+          # Component comparison catches the naive root <> "/" bug: root / would become //.
           root_parts = Path.split(expanded_root)
           abs_parts = Path.split(abs)
 
@@ -128,17 +104,11 @@ defmodule Fleet.SlugPropertyTest do
           refute Slug.valid?(name), "rejected as invalid_slug while the slug is valid"
 
         {:error, {:path_escape, abs}} ->
-          # Fail-closed outcome: refuse rather than write out of zone. The path is returned
-          # for diagnostics, it is NOT usable.
+          # An error path is diagnostic, not authorized for filesystem use.
           assert is_binary(abs)
 
-          # ⚠ LOCK (defect found BY this property): with a VALID slug, `..` is already
-          # impossible by construction → `:path_escape` must NEVER fire. Yet it fired on the
-          # `/` root: `under_root?` compared against the `root <> "/"` prefix, i.e. `"//"` for
-          # the root — which no expanded path carries. Fail-closed, hence not an escape, but a
-          # guard refusing the LEGAL case is an unusable guard (and its contract, a lie).
-          # Without this refute, the property stayed green on the bug: both outcomes were
-          # accepted.
+          # A valid slug cannot escape. Accepting any typed error here would hide false refusal
+          # for root /, even though that bug does not permit traversal.
           refute Slug.valid?(name),
                  "path_escape on a VALID slug (root=#{inspect(root)}, name=#{inspect(name)}) " <>
                    "— a slug cannot escape: the root is what is being compared wrong"
@@ -146,8 +116,6 @@ defmodule Fleet.SlugPropertyTest do
     end
   end
 
-  # REGRESSION of the same defect, spelled out (the `/` root is a legal edge case: a store
-  # mounted at the root, a test joining under `/`).
   test "REGRESSION — `/` root: confined_join joins, under_root? recognizes (no more false-reject)" do
     assert {:ok, "/proj"} = Slug.confined_join("/", "proj")
     assert Slug.under_root?("/x", "/")
@@ -157,15 +125,7 @@ defmodule Fleet.SlugPropertyTest do
     assert {:ok, "/proj"} = Slug.confined_join("/a/../..", "proj")
   end
 
-  # ── P2 — IDEMPOTENCE / exact leaf ──
-
-  # INVARIANT: for every `s` produced by the slug grammar, `cast(s) == {:ok, s}` (the
-  # smart-constructor TRANSFORMS nothing, it validates) and, under a clean root, `confined_join`
-  # returns exactly the leaf `Path.expand(root) <> "/" <> s`.
-  # WHY: if `cast/1` quietly normalized the name (lowercase, trim, substitution), the written
-  # path would no longer be the one the caller believes it asked for — two pods could end up
-  # in the SAME pod_dir after a normalization collision. The contract is "validate or refuse",
-  # never "repair".
+  # Validation must preserve the exact name; normalization could collapse distinct pod directories.
   property "P2 IDEMPOTENCE — cast(s) == {:ok, s} and the joined leaf is exactly root/s" do
     check all(s <- valid_slug(), segs <- list_of(seg(), min_length: 1, max_length: 3)) do
       assert {:ok, ^s} = Slug.cast(s)
@@ -176,17 +136,4 @@ defmodule Fleet.SlugPropertyTest do
       assert abs == root <> "/" <> s
     end
   end
-
-  # ── AUDIT NOTE — the `/`-root pitfall locked above ──
-  #
-  # A prefix-based `under_root?/2` (`dest == root or dest starts_with root <> "/"`) is WRONG
-  # for `root == "/"`: the concatenation yields `"//"` — and `"/x"` does not start with `"//"`.
-  #     Slug.under_root?("/x", "/")        would be false   (expected: true — "/x" IS under "/")
-  #     Slug.confined_join("/", "proj")    would be {:error, {:path_escape, "/proj"}}
-  # Consequence: a `"/"` root (or any root that `Path.expand`s to `"/"`, e.g. `"//"`) makes
-  # `confined_join/2` UNUSABLE — systematic refusal. The defect's direction is FAIL-CLOSED
-  # (false-reject, not false-accept): no escape, which is why property P1 would stay green by
-  # classifying the case under the `{:path_escape, _}` branch. Not a security hole, then, but a
-  # false-reject in a guard whose stated contract is "== root or under root" — hence the
-  # component-wise oracle in P1 and the REGRESSION test above.
 end

@@ -1,8 +1,6 @@
 defmodule Fleet.SystemConfigTest do
   @moduledoc """
-  A1 — the container-wide admin settings file (`/etc/lcars/fleet.json`). Both failure directions are
-  deliberate and PINNED: absent = defaults in silence (the nominal state of a fresh container);
-  present-but-broken = defaults OUT LOUD (an admin who wrote a file expects it to act).
+  Defaults are silent for a missing settings file; malformed content and unknown keys are diagnosed.
   """
   use ExUnit.Case, async: true
 
@@ -10,16 +8,8 @@ defmodule Fleet.SystemConfigTest do
 
   @moduletag :tmp_dir
 
-  # ⚠ ON NIE LE BRUIT DE CE MODULE, PAS TOUT BRUIT — `capture_log` LIT LE LOGGER GLOBAL. Cette
-  # assertion etait `assert log == ""`, dans un cas `async: true` : elle exigeait donc que RIEN dans
-  # toute la suite n'ecrive pendant ces quelques microsecondes. Mesure du 2026-08-20, gate rouge sur
-  # 3118 tests : la capture avait ramasse une ligne de `ProjectOnboard` d'un test voisin — un module
-  # qui n'a rien a voir avec celui-ci. Ce n'est pas un flake a retenter, c'est une assertion sur un
-  # objet PARTAGE, et la reponse n'est pas de passer le cas en `async: false` (ca reduirait la
-  # fenetre sans fermer la course, et paierait en temps de suite ce qui reste faux).
-  #
-  # Toutes les sorties de ce module portent son prefixe : le nier est exactement le contrat annonce
-  # — « un conteneur neuf n'est pas un evenement » — et c'est vrai quoi qu'il tourne a cote.
+  # capture_log can include concurrent modules. Assert absence of this module's prefix,
+  # not an empty global log, so unrelated activity cannot fail the silence test.
   test "absent file → defaults, in SILENCE (a fresh container is no event)", %{tmp_dir: dir} do
     log =
       ExUnit.CaptureLog.capture_log(fn ->

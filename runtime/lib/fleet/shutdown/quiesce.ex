@@ -29,21 +29,14 @@ defmodule Fleet.Shutdown.Quiesce do
 
   require Logger
 
-  # ── Synchronous-finalizer activity counter (drain visibility) ──
-  #
-  # The drain's aggregate counts the broker's work-items and the completion offloads —
-  # but a finalizer running SYNCHRONOUSLY inside a singleton (the poller tick's
-  # review/merge work, a completion handler between event reception and its offload)
-  # is invisible to it: three zero reads would conclude :drained while a merge is in
-  # flight. `busy/1` makes that window countable. Iron Law kept: an `:atomics` ref,
-  # no process (and no per-write `:persistent_term` put — the ref is stored once).
+  # Synchronous finalizers are absent from broker/offload counts. Track them too, or drain can
+  # conclude while a merge is still running. Store one atomics ref; counter updates need no process
+  # or repeated persistent_term writes.
 
   @busy_key {__MODULE__, :busy}
 
   @doc false
-  # Boot hook (`Fleet.Application.start`, single-threaded): materializes the counter ref
-  # before any concurrent first use (two concurrent lazy inits would orphan one ref and
-  # undercount its wrap).
+  # Initialize at single-threaded boot before concurrent use; racing lazy init can orphan a counter.
   @spec init_busy!() :: :ok
   def init_busy! do
     _ = busy_ref()
@@ -51,9 +44,8 @@ defmodule Fleet.Shutdown.Quiesce do
   end
 
   @doc """
-  Wraps a SYNCHRONOUS finalizer so the drain counts it as in-flight for the wrap's
-  duration. Crash-safe: the decrement runs in `after` — a raised finalizer never
-  freezes the drain. Returns the fun's result.
+  Counts a synchronous finalizer as in-flight and returns its result. The after block decrements
+  on normal return, raise, throw or exit; it cannot run if the process is externally killed.
   """
   @spec busy((-> result)) :: result when result: var
   def busy(fun) when is_function(fun, 0) do
@@ -76,21 +68,9 @@ defmodule Fleet.Shutdown.Quiesce do
     end
   end
 
-  # ⚠ `max(0, …)` SEUL RENDRAIT L'ANOMALIE INDETECTABLE : `signed: true` choisit deliberement un
-  # compteur capable de descendre sous zero, et un clamp muet effacerait la seule observation qui
-  # en tire quelque chose. Le clamp est la BONNE reponse cote sortie — un solde negatif veut dire
-  # « rien en vol », ce que le drain doit conclure — mais il ne doit pas etre la SEULE. Un
-  # desequilibre `add`/`sub` (un `after` joue deux fois, un `sub` sur une ref recreee) ferait mentir
-  # ce compteur durablement, sans jamais rien signaler.
-  #
-  # UNE LIGNE PAR NOUVEAU PLANCHER, jamais une par appel : `busy_count/0` alimente la somme d'en-vol
-  # du drain, sur une boucle de POLL. Journaliser a chaque lecture noierait le drain sous une
-  # anomalie qui est deja permanente. Le slot 2 porte le plancher deja signale, et
-  # `compare_exchange/4` le reclame — deux lecteurs concurrents ne produisent donc qu'UNE ligne.
-  #
-  # `error` et non `warning` : le compteur ment sur un fait durable, et la doctrine des niveaux du
-  # depot reserve `error` a la perte reelle ou a la condition terminale. Ici la perte est celle de
-  # l'observabilite du drain lui-meme.
+  # Clamp negative counts for the drain but log the accounting defect: it can hide active work.
+  # Slot 2 and compare_exchange limit logs to newly claimed lower floors across concurrent readers.
+  # Error level denotes lost drain observability; logging every poll would obscure the failure.
   defp report_if_negative(_ref, raw) when raw >= 0, do: raw
 
   defp report_if_negative(ref, raw) do
@@ -107,8 +87,7 @@ defmodule Fleet.Shutdown.Quiesce do
     0
   end
 
-  # DEUX SLOTS : 1 = le compteur, 2 = le plancher negatif deja signale (0 au depart, donc aucune
-  # ligne tant que le compteur reste sain).
+  # Slot 1 counts activity; slot 2 starts at zero and records the lowest reported negative count.
   defp busy_ref do
     case :persistent_term.get(@busy_key, nil) do
       nil ->

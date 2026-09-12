@@ -2,27 +2,14 @@ defmodule Fleet.SystemConfig do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Reader of the container-wide, ADMIN-OWNED settings file (`/etc/lcars/fleet.json`) — a pure, testable
-  primitive for `config/runtime.exs`, same family as `Fleet.EnvParse`.
+  Reads container-wide admin settings, normally /etc/lcars/fleet.json from runtime.exs at boot.
+  Provisioning must restrict writes to root: a human-controlled environment variable would let
+  workers override administrator policy. This reader neither checks ownership nor caches values;
+  editing the deployed file requires restarting the fleet to reload runtime configuration.
 
-  WHY A FILE AND NOT AN ENV VAR — the env passes through the HUMAN's hands: `fleet` sources
-  `~/.lcars/fleet.env` and any worker can export a variable in their shell. A setting that
-  belongs to the container's administrator (admiral) alone must come from a path only root writes —
-  same idiom as `/etc/lcars/deck-oidc.json` (posed by provisioning, read by the deck at boot).
-  `runtime.exs` runs ONCE at BEAM boot, so the value is frozen for the fleet's lifetime by
-  construction: a fleet starts WITH or WITHOUT, never flips mid-flight.
-
-  Failure directions, and both are deliberate:
-    * file ABSENT → every default, silently (absence is the nominal state of a fresh install, not
-      an event worth a log line);
-    * file PRESENT but unreadable/malformed → every default + a LOUD warning (an admin who wrote
-      a file expects it to act; a typo must be visible, but must not kill the boot — same doctrine
-      as `Fleet.EnvParse` boolean flags);
-    * unknown keys → LOUD warning, ignored (a misspelled knob must not silently do nothing).
-
-  One knob today: `conflict_engine` (boolean) — the GitWand kill-switch (tier-0 deterministic
-  conflict resolution). Inherited from the engine's origin project: off by default at install,
-  the admin opts in.
+  Missing files silently use defaults. Read/JSON errors warn and default; unknown keys warn and
+  are ignored. Invalid boolean fields warn and default individually. conflict_engine opts into
+  deterministic GitWand conflict resolution and defaults to false.
   """
 
   require Logger
