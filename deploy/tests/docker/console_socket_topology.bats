@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/console_socket_topology.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14

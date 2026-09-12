@@ -29,8 +29,8 @@ stub_bats() { # stub_bats <rc rendu>
   chmod 0755 "$BIN/bats"
 }
 
-temoin() { # temoin <fichier> <couche> [<corps>] — un témoin du décor, avec sa couche déclarée
-  printf '# bats file_tags=%s\n%s' "$2" "${3-}" > "$DECOR/tests/$1"
+temoin() { # temoin <fichier> <couche> [<corps>] — un témoin du décor, avec son shebang et sa couche déclarée
+  printf '#!/usr/bin/env bats\n# bats file_tags=%s\n%s' "$2" "${3-}" > "$DECOR/tests/$1"
 }
 
 # un PATH qui porte tout sauf UN outil : un PATH vide tuerait bash lui-même, et une liste d'outils
@@ -104,11 +104,39 @@ path_sans() { # path_sans <outil> → un dossier
 
 @test "un témoin sans couche déclarée = échec nommé, et bats n'est pas lancé" {
   temoin x.bats unit '@test "a" { true; }'
-  printf '@test "b" { true; }\n' > "$DECOR/tests/nu.bats"
+  printf '#!/usr/bin/env bats\n@test "b" { true; }\n' > "$DECOR/tests/nu.bats"
   stub_bats 0
   run bash "$DECOR/gate.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"sans couche déclarée"*"nu.bats"* ]]
+  refute_out "BATS APPELE" <<<"$output"
+}
+
+@test "la couche se lit en deuxième ligne, jamais dans un décor écrit plus bas" {
+  temoin x.bats unit '@test "a" { true; }'
+  printf '#!/usr/bin/env bats\n# SOURCE: decor\n@test "b" {\n  cat <<EOF > x\n# bats file_tags=structure\nEOF\n}\n' > "$DECOR/tests/tard.bats"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sans couche déclarée"*"tard.bats"* ]]
+}
+
+@test "un témoin sans shebang bats = échec nommé — il sortirait du plancher shellcheck en silence" {
+  temoin x.bats unit '@test "a" { true; }'
+  printf '# bats file_tags=unit\n@test "b" { true; }\n' > "$DECOR/tests/nu.bats"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sans shebang bats"*"nu.bats"* ]]
+  refute_out "BATS APPELE" <<<"$output"
+}
+
+@test "un argument de trop est refusé — une faute de frappe ne joue pas autre chose" {
+  temoin x.bats unit '@test "a" { true; }'
+  stub_bats 0
+  run bash "$DECOR/gate.sh" unit poubelle
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"un seul argument"* ]]
   refute_out "BATS APPELE" <<<"$output"
 }
 
@@ -204,22 +232,6 @@ go7_shape() { # go7_shape <fichier> <fonction> — la forme d'un prédicat : fen
   run env PATH="$nosc" "$nosc/bash" "$DECOR/gate.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"shellcheck absent"* ]]
-}
-
-@test "décor sans aucun fichier shell = échec nommé — la découverte est cassée, pas l'installeur" {
-  # la copie de la porte est elle-même un fichier shell par les règles de sa découverte : pour un
-  # décor sans fichier shell, elle perd son shebang et se joue par « bash <fichier> »
-  stub_bats 0
-  temoin un.bats unit '@test "un" { true; }'
-  tail -n +2 "$PORTE_SRC" > "$DECOR/porte"; chmod 0755 "$DECOR/porte"
-  rm -f "$DECOR/gate.sh"
-  refute grep -qE '^#!' "$DECOR/porte"
-  run bash "$DECOR/porte"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"aucun fichier shell"* ]]
-  [[ "$output" == *"découverte est cassée"* ]]
-  refute_out "BATS APPELE" <<<"$output"
-  refute_out "shellcheck plancher" <<<"$output"
 }
 
 @test "le plancher shellcheck refuse un avertissement dans un script du corpus" {

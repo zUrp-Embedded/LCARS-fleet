@@ -53,9 +53,18 @@ check_forge_login() {
 
 # 2. une PR peut fusionner : des runners enregistrés qui servent les labels que les workflows d'un projet demandent
 # « aucun runner » est un fait mesuré (200 avec total_count 0) ; tout autre corps est une non-mesure, sautée
-labels_demandes() { # labels_demandes → les runs-on des workflows du modèle de projet livré (checkout ou release posée)
-  find "$(dirname "${BASH_SOURCE[0]}")/../runtime" -path '*/project_template/main/.gitea/workflows/*.yml' -print0 2>/dev/null \
-    | xargs -0 -r grep -hoP '^\s*runs-on:\s*\K[a-z0-9._-]+' 2>/dev/null | sort -u
+labels_demandes() { # labels_demandes → les runs-on du modèle de projet de l'arbre qui sert : la release posée, sinon le checkout
+  local rt d
+  rt="$(dirname "${BASH_SOURCE[0]}")/../runtime"
+  local -a wfs=()
+  for d in "$rt"/rel/lcars_fleet/lib/lcars_fleet-*/priv/catalogue "$rt"/priv/catalogue; do
+    [[ -d "$d" ]] || continue
+    wfs=("$d"/project_template/main/.gitea/workflows/*.yml)
+    [[ -f "${wfs[0]}" ]] && break
+    wfs=()
+  done
+  [[ "${#wfs[@]}" -gt 0 ]] || return 0
+  grep -hoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "${wfs[@]}" 2>/dev/null | sort -u
 }
 check_ci() {
   local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
@@ -96,7 +105,7 @@ check_ci() {
   if [[ -n "$missing" ]]; then
     no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs d'un projet qui les demandent attendraient sans fin (servis : ${served:-aucun})"
   else
-    ok "CI : $n runner(s) servant les labels que les workflows d'un projet demandent (${want//$'\n'/ })"
+    ok "CI : $n runner(s) servant les labels que le modèle de projet livré demande (${want//$'\n'/ })"
   fi
 }
 

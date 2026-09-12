@@ -17,14 +17,17 @@ cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>`.
 
 ## Trois couches
 
-Chaque témoin déclare sa couche en deuxième ligne, `# bats file_tags=<couche>` ; la porte refuse
-un témoin qui n'en a pas.
+Chaque témoin déclare sa couche en deuxième ligne, sous son shebang, `# bats file_tags=<couche>` ;
+`gate.sh` refuse un témoin qui n'en a pas, ou qui n'a pas de shebang.
 
 | couche | ce qu'elle mesure | entrée |
 |---|---|---|
 | `unit` | les fonctions d'une lib, sourcées et jouées avec des doublures | `deploy/gate.sh unit` |
 | `integration` | un script ou un module joué entier sous un décor (`unshare -Ur` pour les chemins root) | `deploy/gate.sh integration` |
-| `structure` | ce que les sources doivent porter, lu sans les jouer : murs d'idiomes, manifestes, composes, Dockerfile | `deploy/gate.sh structure` |
+| `structure` | ce que les sources doivent porter, lu sans les jouer : invariants d'idiomes, manifestes, composes, Dockerfile | `deploy/gate.sh structure` |
+
+La couche est celle du fichier. Un fichier qui mêle des cas joués et des lectures de source porte
+la couche de ses cas joués ; le partage en deux fichiers se fait quand le fichier est repris.
 
 `deploy/gate.sh` sans argument joue tout, après le plancher shellcheck et les en-têtes
 déclaratifs ; c'est ce que `pack.sh` joue avant d'empaqueter. `runtime/test/shell_gate.sh` ne joue
@@ -35,6 +38,6 @@ rien d'ici.
 Un cas mesure une chose observable : ce qu'un script affiche, rend ou pose. Un `grep` sur la
 source n'est pas un témoin du comportement ; il n'a sa place que dans la couche `structure`, pour
 un invariant que le code ne peut pas tenir seul. Une assertion par ligne : dans un cas bats, `a &&
-b` n'échoue que si `b` échoue (mur I22 de `idiom_walls.bats`). Les doublures notent leur argv dans
+b` n'échoue que si `b` échoue (invariant I22 de `idiom_walls.bats`). Les doublures notent leur argv dans
 un fichier et rendent vite ; un secret ne passe jamais en argv. `refute.bash` est à la racine ; les
 sous-dossiers font `load ../refute`.

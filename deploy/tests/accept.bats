@@ -69,10 +69,15 @@ curl_stub() { # curl_stub — lit CURL_CODE, CURL_CORPS, CURL_RC de l'environnem
   chmod 0755 "$BINDIR/curl"
 }
 
-modele_de_projet() { # le modèle de projet livré, tel que la release le porte : un workflow qui demande « shell »
-  local wf="$SANDBOX/runtime/rel/lcars_fleet/lib/lcars_fleet-0.0.0/priv/catalogue/project_template/main/.gitea/workflows"
+modele() { # modele <sous-arbre de runtime> <label> — un modèle de projet qui demande ce label
+  local wf="$SANDBOX/runtime/$1/priv/catalogue/project_template/main/.gitea/workflows"
   mkdir -p "$wf"
-  printf 'jobs:\n  test:\n    runs-on: shell\n' > "$wf/ci.yml"
+  printf 'jobs:\n  test:\n    runs-on: %s\n' "$2" > "$wf/ci.yml"
+}
+modele_de_projet() { # la release posée demande « shell » ; sa génération de rollback et une fixture de test demandent autre chose
+  modele rel/lcars_fleet/lib/lcars_fleet-1.2.0 shell
+  modele rel/lcars_fleet.prev/lib/lcars_fleet-1.1.0 vieux-label
+  modele tmp/Fixture/priv-decor fixture-label
 }
 
 joue_ci() { # joue_ci <code http> <corps> [rc de curl] — --forge-url par la porte du script, une variable serait écrasée
@@ -118,7 +123,21 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl] — --forge-url par la po
 @test "check_ci : des runners qui servent le label demandé par le modèle de projet tiennent la capacité" {
   joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
   [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]]
-  [[ "$output" == *"OUI   CI : 1 runner(s) servant les labels que les workflows d'un projet demandent (shell)"* ]]
+  [[ "$output" == *"OUI   CI : 1 runner(s) servant les labels que le modèle de projet livré demande (shell)"* ]]
+}
+
+@test "check_ci : seul le modèle de la release qui sert compte — ni la génération .prev, ni une fixture sous runtime/tmp" {
+  joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
+  [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]]
+  refute_out "vieux-label" <<<"$output"
+  refute_out "fixture-label" <<<"$output"
+}
+
+@test "check_ci : sans release posée, le modèle du checkout (runtime/priv) sert de mesure" {
+  modele . checkout-label
+  SANS_MODELE=1 joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"checkout-label"}]}]}'
+  [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]]
+  [[ "$output" == *"(checkout-label)"* ]]
 }
 
 @test "check_ci : un runner qui ne sert pas le label demandé est un échec qui le nomme" {

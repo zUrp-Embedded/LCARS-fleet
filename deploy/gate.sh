@@ -32,6 +32,10 @@ if [[ -n "$COUCHE" && " $COUCHES " != *" $COUCHE "* ]]; then
   echo "ECHEC: couche inconnue « $COUCHE » — unit, integration ou structure." >&2
   exit 1
 fi
+if [[ $# -gt 1 ]]; then
+  echo "ECHEC: un seul argument, la couche — reçu : $*" >&2
+  exit 1
+fi
 
 echo "=== gate de l'installeur : $HERE${COUCHE:+ — couche $COUCHE} ==="
 
@@ -42,18 +46,28 @@ if [[ "${#BATS_FILES[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-couche_de() { sed -n 's/^# bats file_tags=\([a-z]*\)$/\1/p' "$1" | head -1; }
+# la couche se lit en deuxième ligne, sous le shebang — pas dans un décor écrit en heredoc plus bas
+couche_de() { sed -n '2s/^# bats file_tags=\([a-z]*\)$/\1/p' "$1"; }
+SANS_SHEBANG=()
 SANS_COUCHE=()
 JOUES=()
 for f in "${BATS_FILES[@]}"; do
+  IFS= read -r first < "$f" || true
+  [[ "$first" == "#!"*bats* ]] || { SANS_SHEBANG+=("${f#"$HERE/"}"); continue; }
   t="$(couche_de "$f")"
   case "$t" in
     unit|integration|structure) [[ -n "$COUCHE" && "$t" != "$COUCHE" ]] || JOUES+=("$f") ;;
     *) SANS_COUCHE+=("${f#"$HERE/"}") ;;
   esac
 done
+# un .bats sans shebang bats sortirait du plancher shellcheck en silence : il est refusé
+if [[ "${#SANS_SHEBANG[@]}" -gt 0 ]]; then
+  echo "ECHEC: ${#SANS_SHEBANG[@]} témoin(s) sans shebang bats en première ligne :" >&2
+  printf '   %s\n' "${SANS_SHEBANG[@]}" >&2
+  exit 1
+fi
 if [[ "${#SANS_COUCHE[@]}" -gt 0 ]]; then
-  echo "ECHEC: ${#SANS_COUCHE[@]} témoin(s) sans couche déclarée (« # bats file_tags=unit|integration|structure » en tête) :" >&2
+  echo "ECHEC: ${#SANS_COUCHE[@]} témoin(s) sans couche déclarée (« # bats file_tags=unit|integration|structure » en deuxième ligne) :" >&2
   printf '   %s\n' "${SANS_COUCHE[@]}" >&2
   exit 1
 fi
@@ -71,22 +85,16 @@ if ! command -v bats >/dev/null 2>&1; then
 fi
 
 # la liste vient d'un find, pas de git : la porte se joue aussi sur un kit détaré sans .git ; les
-# entrées sans extension se reconnaissent à leur shebang, et un .bats n'entre au plancher qu'avec
-# le shebang bats (lu comme du sh, shellcheck mourrait sur @test, ce qui n'est pas une mesure)
+# entrées sans extension se reconnaissent à leur shebang, et chaque .bats a le sien (vérifié ci-dessus)
 mapfile -t SHELL_FILES < <(
   find "$HERE" -type f 2>/dev/null | sort | while IFS= read -r f; do
     IFS= read -r first < "$f" || true
     case "$f" in
-      *.bats) [[ "$first" == "#!"*bats* ]] && printf '%s\n' "$f"; continue ;;
-      *.sh|*.bash) printf '%s\n' "$f"; continue ;;
+      *.bats|*.sh|*.bash) printf '%s\n' "$f"; continue ;;
     esac
     [[ "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] && printf '%s\n' "$f"
   done
 )
-if [[ "${#SHELL_FILES[@]}" -eq 0 ]]; then
-  echo "ECHEC: aucun fichier shell sous $HERE — la découverte est cassée, pas l'installeur." >&2
-  exit 1
-fi
 if ! command -v shellcheck >/dev/null 2>&1; then
   echo "ECHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
   echo "       Installer : apt install shellcheck." >&2

@@ -1,7 +1,7 @@
 # deploy — l'installeur de LCARS-fleet
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-09-12 (chantier installeur : un pipeline, trois couches de témoins, plus de workflows de CI)
+**Dernière révision** : 2026-09-12 (chantier installeur : un pipeline, trois couches de témoins, les workflows de CI et de publication partis)
 **Statut** : en service
 **Référencé par** : `install.sh` (racine), `README_fr.md`
 
@@ -15,9 +15,9 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 | commande | rôle |
 |---|---|
 | `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, demande confirmation et délègue. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration. `--check`, `--dry-run`, `--from-release`, les ports : voir `install.sh --help` |
-| `deploy/workstation up \| doctor [--from <kit>]` | le délégué du poste : une escalade `sudo`, puis `provision apply` depuis ce checkout ou depuis un kit détaré sous `~/.lcars/kits/<nom>/`, puis `accept` |
+| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit détaré sous `~/.lcars/kits/<nom>/`, puis `accept` ; `doctor` sonde sans escalader |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/` |
-| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : gate, release, doc, kit `.tar.gz`, installeur de la version, image docker. Tout reste dans `~/lcars-packs/dist/<tag>/` et le daemon ; `--publish` pousse le kit et l'installeur sur la release de la forge |
+| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : gate, release, doc, kit `.tar.gz`, installeur de la version, image docker. Tout reste dans le tiroir `<parent du checkout>/lcars-packs/dist/<tag>/` (`LCARS_PACK_DIR` le déplace) et dans le daemon ; `--publish` pousse l'image sur le registre, puis le kit et l'installeur sur la release de la forge |
 | `deploy/provision apply \| doctor \| update \| list \| audit` | le runner des modules, joué par `workstation` et par la construction de l'image |
 | `deploy/accept` | l'acceptation d'une installation : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows d'un projet demandent, la fleet démarre sous l'humain de fleet |
 
@@ -54,7 +54,7 @@ checkout) ou `kit` ; un canal ne se pose pas sur un autre.
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|
 | 00-preflight | any | any | les planchers (OS, bash, architecture, mémoire, disque, WSL2, espaces de noms utilisateur) et les faits d'entrée ; aucune mutation |
-| 10-packages | wsl linux docker | any | tmux, bubblewrap, git, curl, jq, unzip, et une sandbox bwrap réellement lancée sous l'humain |
+| 10-packages | wsl linux docker | any | tmux, bubblewrap, git, curl, jq, unzip, ca-certificates, python3, socat, et une sandbox bwrap réellement lancée sous l'humain |
 | 12-docker-engine | linux | linux | docker-ce depuis le dépôt upstream, posé une fois si aucun daemon ne répond ; ensuite le daemon est constaté, jamais touché. Sous WSL il vient de Docker Desktop |
 | 15-toolchain | wsl linux docker | wsl linux docker | Erlang par apt (plancher OTP) et Elixir précompilé épinglé par sha256 sous `/opt` ; de la compilation seulement, jamais dans le conteneur d'exécution |
 | 16-node | wsl linux docker | any | Node précompilé épinglé, qui bâtit la documentation du deck |
@@ -113,12 +113,15 @@ runner), `forge-runner.sh` (l'enrôlement d'un runner, joué par 49 et par le ba
 le tag est celui de git quand HEAD en porte un, sinon `<VERSION>-<sha>` (`LCARS_PACK_TAG` le
 pose) ; la forge, le propriétaire et le dépôt se dérivent d'`origin` (`LCARS_PACK_FORGE`,
 `LCARS_PACK_OWNER`, `LCARS_PACK_REPO` sinon) ; le jeton vient de `LCARS_PACK_TOKEN` ou de
-`LCARS_PACK_TOKEN_FILE`, portée `write:repository`, jamais en argv. La release naît en brouillon,
-reçoit ses assets (kit, `.sha256`, `install.sh`, `install.sh.sha256`, `.minisig` quand la clé est
-là), puis est publiée d'un coup. Une release du tag qui existe, brouillon compris, est un refus :
-pour refaire, la supprimer sur la forge. L'installeur publié porte en dur la base
+`LCARS_PACK_TOKEN_FILE`, portées `write:repository` et `write:package`, jamais en argv. L'image
+part d'abord, sur le registre de la forge (`ghcr.io` pour GitHub, `LCARS_PACK_REGISTRY` sinon) :
+un tag d'image qui existe est un refus. Puis la release naît en brouillon, reçoit ses assets (kit,
+`.sha256`, `install.sh`, `install.sh.sha256`, `.minisig` quand la clé est là), et est publiée d'un
+coup. Une release du tag qui existe, brouillon compris, est un refus : pour refaire, la supprimer
+sur la forge. L'installeur publié porte en dur la base
 `<forge>/<owner>/<repo>/releases/download/<tag>` et les sha256 de ses artefacts. Aucun workflow de
-CI ne publie.
+CI ne publie de version ; `.github/workflows/site.yml` publie la plaquette du site sur GitHub
+Pages, indépendamment.
 
 ## Ce que l'installeur ne fait pas
 

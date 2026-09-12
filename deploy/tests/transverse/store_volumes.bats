@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=unit
+# bats file_tags=structure
 # SOURCE: deploy/tests/transverse/store_volumes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19

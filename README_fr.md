@@ -210,8 +210,8 @@ se refait.
 Mode conteneur, avec la commande affichée sur la ligne `détruire` :
 
 ```bash
-deploy/docker/bench/bench-down.sh --project <projet> --yes   # le conteneur, la forge et le runner, volumes compris
-deploy/container -p <projet> reset                           # le conteneur, son image locale et ses volumes ; la forge reste
+deploy/docker/bench/bench-down.sh --project <base> --yes   # le conteneur, la forge et le runner, volumes compris
+deploy/container -p <base>-fleet reset                     # le conteneur, son image locale et ses volumes ; la forge reste
 ```
 
 Mode `--workstation` : la distribution WSL 2 se supprime (`wsl --unregister <distribution>` côté
@@ -241,13 +241,14 @@ humain.
 La pile est faite pour dire ce qui manque plutôt que pour avoir l'air en bonne santé :
 
 ```bash
-deploy/container -p <projet> status   # l'état de l'instance vu de l'hôte : 0 sain · 1 dégradé · 2 panne
-deploy/container -p <projet> logs     # le récit que le conteneur fait de son propre démarrage
-sudo deploy/provision doctor          # mode --workstation : ce qui est posé, ce qui a dérivé
+deploy/container -p <base>-fleet status   # l'état de l'instance vu de l'hôte : 0 sain · 1 dégradé · 2 panne
+deploy/container -p <base>-fleet logs     # le récit que le conteneur fait de son propre démarrage
+sudo deploy/provision doctor              # mode --workstation : ce qui est posé, ce qui a dérivé
 ```
 
-`-p <projet>` vise le projet compose créé par l'installation (`lcars` par défaut,
-`--forge-project` le change) ; la ligne `détruire` de l'écran final porte toujours le bon nom.
+`-p` vise le projet compose du conteneur, `<base>-fleet` (`lcars-fleet` par défaut ;
+`--forge-project` change la base). La ligne `détruire` de l'écran final porte la base, qui est ce
+que `bench-down.sh --project` attend.
 
 **Une PR bloquée par sa CI se répare depuis la PR.** Le runner joue le `ci.yml` du commit testé,
 la tête de la branche : corriger ce fichier là et repousser débloque la PR elle-même.
