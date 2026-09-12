@@ -1,10 +1,6 @@
 defmodule Fleet.ToolchainTest do
   @moduledoc """
-  Le document qu'un humain SIGNE, et ce qui le rend signable.
-
-  Ces cas ne testent pas un rendu joli : ils épinglent qu'un diff dit la vérité. Un manifeste dont
-  l'ordre bouge tout seul fait apparaître un changement là où il n'y en a pas, et un relecteur qui
-  apprend qu'un diff ment cesse de le lire — après quoi la garde humaine ne garde plus rien.
+  Stable manifests for human review, correlation keys and the renderer/converger round-trip.
   """
   use ExUnit.Case, async: true
 
@@ -31,7 +27,6 @@ defmodule Fleet.ToolchainTest do
         apt(["a"])
         |> Map.put("sysroot", %{"arch" => "arm64", "sources" => [], "packages" => []})
 
-      # Réparer en silence ferait approuver, au nom de l'humain, une forme qu'il n'a pas choisie.
       assert {:error, {:toolchain_form, msg}} = Toolchain.validate_form(req)
       assert msg =~ "2 formes"
     end
@@ -46,9 +41,6 @@ defmodule Fleet.ToolchainTest do
         "egress_hosts" => ["pypi.org", "files.pythonhosted.org"]
       }
 
-      # LE CAS QUI COMPTE : une map itérée dans l'ordre du runtime ferait apparaître un
-      # réordonnancement comme un changement, à chaque re-rendu, sur un document que quelqu'un
-      # relit avant de signer.
       assert Toolchain.render(req) == Toolchain.render(req)
     end
 
@@ -65,8 +57,6 @@ defmodule Fleet.ToolchainTest do
 
       assert out =~ "evidence: |-"
 
-      # Un bloc littéral n'est pas ré-échappé : une erreur porte des guillemets, des deux-points et
-      # des antislashs, et un mauvais échappement transformerait un diagnostic en erreur de parse.
       assert out =~ "  erreur: pas de wheel"
       assert String.trim_trailing(out) |> String.ends_with?("  ligne deux")
     end
@@ -84,8 +74,7 @@ defmodule Fleet.ToolchainTest do
       }
 
       out = Toolchain.render(req)
-      # `1.27` est un flottant pour YAML et une version pour tout le monde : sans guillemets, le
-      # convergeur lirait 1.27 et poserait autre chose que ce qui est écrit.
+      # A numeric version must remain a string in YAML.
       assert out =~ ~s(version: "1.27")
       assert out =~ "name: rustup"
     end
@@ -134,8 +123,6 @@ defmodule Fleet.ToolchainTest do
     end
 
     test "UN fichier par écosystème, pas un par demande" do
-      # Deux pods qui demandent python doivent converger sur le MÊME document : le second édite ce
-      # que le premier a déclaré, et le diff montre à un humain ce qui change réellement.
       assert Toolchain.manifest_path("python") == Toolchain.manifest_path("python")
       assert Toolchain.manifest_path("python") == "ops/toolchains.d/python.yaml"
       refute Toolchain.manifest_path("node") == Toolchain.manifest_path("python")
@@ -151,8 +138,6 @@ defmodule Fleet.ToolchainTest do
     end
 
     test "le dépôt est celui du domaine sysadmin, la branche n'est PAS `ops`" do
-      # `ops` porte le registre d'incidents, que le runtime ECRIT : la protéger casserait ces
-      # écritures. Même dépôt, branche différente, protections opposées.
       assert Toolchain.ops_repo() == "fleet/lcars"
       assert Toolchain.branch() == "tool_request"
       refute Toolchain.branch() == "ops"
@@ -160,12 +145,8 @@ defmodule Fleet.ToolchainTest do
   end
 
   describe "LE ROUND-TRIP écrivain↔lecteur — le témoin que la classe de panne exige" do
-    # La panne d'origine (B3) : le render émettait à 4 espaces, `list_under` du convergeur n'en
-    # lisait que 2 — apply_apt voyait ZÉRO paquet sur un manifeste réel, et CHAQUE CÔTÉ était vert
-    # avec ses propres fixtures. Les deux bats « GRAMMAIRE » épinglent la grammaire du lecteur sur
-    # une fixture À LA MAIN : si le render change d'indentation, ils restent verts (audit). CE
-    # témoin-ci ferme la classe : la sortie RÉELLE de `render/2` traverse le VRAI `list_under` du
-    # script — l'un des deux bouge sans l'autre, il casse.
+    # Feed actual render output to the real script parser: isolated fixtures missed a 4-space
+    # writer / 2-space reader mismatch that silently produced an empty package list.
     @tag :requires_toolchain_script
     test "render/2 → list_under du convergeur : les paquets ressortent identiques" do
       manifest =
@@ -182,18 +163,8 @@ defmodule Fleet.ToolchainTest do
 
       script = Path.expand("bin/lcars-toolchain-converge")
 
-      # LE SCRIPT EST UN ARBRE FRERE QUI N'EST PAS TOUJOURS LA, et sans cette garde le temoin ne
-      # mesurait pas ce qu'il croyait. Le stage `build` de l'image copie `runtime/` en EXCLUANT
-      # `deploy/` (`Dockerfile`, `COPY --exclude=deploy`) — deliberement : y toucher invaliderait la
-      # couche et rejouerait un gate de ~10 min a chaque edition de compose. Le `sed` rendait donc du
-      # vide, `eval ""` ne definissait aucune fonction, et le round-trip mourait en `{"", 127}`
-      # — « commande introuvable », un diagnostic qui n'accuse ni le script ni le rendu.
-      #
-      # SAUTE ET NOMME, jamais un vert silencieux — mais le `if` qui portait cette phrase la
-      # DEMENTAIT : sans le script, le corps ne mesurait rien et le temoin comptait PASSE. C'est le
-      # vert creux que `test_helper.exs` refuse en toutes lettres pour les binaires manquants.
-      # `:requires_toolchain_script` est resolu au demarrage, comme `:requires_git` : la ou
-      # `deploy/` manque, ce temoin apparait EXCLU dans le bilan, jamais passe.
+      # test_helper excludes :requires_toolchain_script when the script is unavailable in the
+      # build context. Do not replace that with an empty successful body or an opaque shell exit 127.
       shell = """
       set -euo pipefail
       eval "$(sed -n '/^block_under()/,/^}/p' #{script})"

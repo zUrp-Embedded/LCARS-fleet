@@ -1,10 +1,7 @@
 defmodule Fleet.LayoutTest do
   @moduledoc """
-  `Fleet.Layout` — the single authority for the imposed container layout. These paths are
-  the contract: pinning them here catches a silent regression if a root literal is ever
-  changed (the whole point of a single-source module is that the value IS the contract).
-  The structural enforcement (no other module hardcodes these roots) belongs to
-  `mix lcars.contracts.check`; this only pins the values and the fail-loud state_dir shape.
+  Fixed layout values, project faces and artifact round-trips. The contract checker separately
+  checks that consumers do not repeat structural roots.
   """
   use ExUnit.Case, async: true
 
@@ -21,52 +18,24 @@ defmodule Fleet.LayoutTest do
       sha = String.duplicate("a", 40)
       block = Layout.brief_pointer_trailer("briefs/issue-7-engineer.md", sha, "fleet/demo")
 
-      # The sentence exists and says the load-bearing part: editing the summary changes nothing.
-      # Without it, a ticket shows a summary and a pointer with nothing saying which one runs — and
-      # the summary is the half a human can edit.
+      # The editable ticket summary must not be mistaken for the pinned order.
       assert block =~ "résumé"
       assert block =~ "éditer ce résumé ne le change pas"
 
-      # transport_brief_v2 — the pointer is a CLICKABLE link (clean label + commit-browse URL), not
-      # a bare `ref @ sha`. The human sees neither the illegible filename nor the 40-hex sha as text.
       assert block =~
                "Brief: [le brief](/fleet/demo/src/commit/#{sha}/briefs/issue-7-engineer.md)"
 
       refute block =~ "Brief: briefs/issue-7-engineer.md @"
 
-      # And it costs the machine nothing: the parser reads ref+sha back OUT of the link URL.
       body = "Résumé humain sur plusieurs\nlignes.\n\n---\n" <> block
       assert {:ok, {"briefs/issue-7-engineer.md", ^sha}} = Layout.parse_brief_pointer(body)
     end
   end
 
   describe "project_name vs project_slug — a coincidence turned into a contract" do
-    # Two derivations of the same thing coexist. `project_name/1` is the DIRECTORY authority (its
-    # own @doc says so, and fourteen sites build paths from it); `project_slug/1` folds anything
-    # outside `[A-Za-z0-9-]` into `-` and exists for shell/tmux names. They diverge on `_`, `.` and
-    # uppercase — and `LaunchSpec` derives HOST paths (the ops mount, the code reference) from
-    # the SLUG, which the plan first read as a live bug.
-    #
-    # It is not one, and the reason is worth pinning rather than remembering: every entry point that
-    # INTRODUCES a project name goes through `validate_name`, whose charset is
-    # `^[a-z0-9][a-z0-9-]*[a-z0-9]$` — strictly inside what the slug preserves. So every project
-    # that HAS a directory has a name where the two derivations agree, and since the poller refuses
-    # a repo without one, no served project can reach the divergence.
-    #
-    # THE RULE, NOT A COUNT. This paragraph said "all SEVEN onboarding entry points" and the number
-    # had drifted — an inventory in a comment ages the moment someone adds a door. What holds is the
-    # property: a name enters through validation, or it does not enter. `migrate/3` is the one public
-    # function that skips `validate_name`, and it cannot introduce a name — it takes the full_name of
-    # a project that already exists, with its three local faces, and repoints them.
-    #
-    # That makes today's equality a property of the charset, not a contract. This test makes it a
-    # contract: widen `validate_name` and it goes red at the exact place the two part company,
-    # instead of a pod booting healthy on a directory that does not exist.
-    #
-    # ⚠ CETTE PHRASE ETAIT FAUSSE JUSQU'AU 6-079, et par un detail : le motif etait RECOPIE ici.
-    # Elargir la vraie charte ne faisait donc rien rougir — mesure du 2026-08-14, en la modifiant
-    # pour de bon. Un test qui epingle une inclusion contre sa propre copie de l'ensemble n'epingle
-    # rien du tout. On lit la source.
+    # Onboarding restricts names so directory names and launch slugs agree; migrate repoints
+    # an existing project rather than introducing a name. Read the real charset, not a copied regex.
+    # These cases cover selected names, not every string the validator might admit after widening.
     @onboardable_charset Fleet.Project.Onboard.name_charset()
 
     test "every name the onboarding admits derives IDENTICALLY through both" do
@@ -81,16 +50,8 @@ defmodule Fleet.LayoutTest do
       end
     end
 
-    # JG-078 — CE QUE PERSONNE N'EPINGLAIT. Le test ci-dessus compare les deux DERIVATIONS entre
-    # elles ; il ne dit rien du VALIDATEUR. Or `Fleet.Slug` refuse la majuscule
-    # (`\A[a-z0-9][a-z0-9_-]*\z`) la ou `project_slug/1` la conserve (`[^A-Za-z0-9-]`), et c'est ce
-    # couple-la qui casse : un slug que le producteur rend et que le validateur refuse fait
-    # `{:error, :project_required}` au point d'etranglement du spawn — le projet n'est pas prive de
-    # sa reprise de session, il n'est pas dispatchable du tout.
-    #
-    # Inatteignable aujourd'hui, et c'est justement pourquoi ca se pin : rien ne le tient. Elargir
-    # `validate_name` d'une seule majuscule rend le defaut vivant, et il se manifesterait comme un
-    # refus de spawn sans rapport apparent avec le nom du depot.
+    # project_slug preserves uppercase while Fleet.Slug rejects it. If onboarding admits uppercase,
+    # dispatch can fail with :project_required; agreement of the two name derivations is insufficient.
     test "tout nom onboardable produit un slug que le VALIDATEUR accepte" do
       for name <- ~w(tetris poc-8 a1 lcars-fleet x9y my-long-project-name 42 a-b-c-d) do
         slug = Layout.project_slug("fleet/#{name}")
@@ -102,8 +63,7 @@ defmodule Fleet.LayoutTest do
     end
 
     test "and OUTSIDE that charset they genuinely differ — the guard is not vacuous" do
-      # Without this, the test above would still pass if someone made `project_slug/1` the identity
-      # function, and the invariant it claims to hold would be empty.
+      # A counterexample prevents an identity implementation of project_slug from passing unnoticed.
       assert Layout.project_name("fleet/my_project") == "my_project"
       assert Layout.project_slug("fleet/my_project") == "my-project"
       refute Regex.match?(@onboardable_charset, "my_project")
@@ -165,17 +125,11 @@ defmodule Fleet.LayoutTest do
     end
 
     test "sanitize_artifact_name: ONE dash per CHARACTER, not per byte" do
-      # The regex ran on bytes, so an accented character — two bytes in UTF-8 — produced TWO
-      # dashes. Never unsafe (deterministic, path-safe, accepted by valid_brief_ref?/1), which is
-      # exactly why it survived: nothing broke, the names were only wrong to a human reading them.
-      # And this name becomes a `brief_ref` that the pointer work-order interpolates TWICE, with no
-      # truncation anywhere — a French title paid two characters per accent for nothing.
+      # Without Unicode mode each UTF-8 byte becomes a dash, inflating otherwise valid references.
       assert Layout.sanitize_artifact_name("D: placement latéral des pièces") ==
                "D--placement-lat-ral-des-pi-ces"
 
-      # A whole word of accents: SIX characters, six dashes — not twelve. The `x` prefix is the
-      # leading-char guard doing its job on a name that now starts with a dash; the two rules
-      # compose, they do not overlap.
+      # Six replacements plus the prefix required when the result does not start alphanumeric.
       assert Layout.sanitize_artifact_name("éèêàçù") == "x------"
     end
 
@@ -191,9 +145,6 @@ defmodule Fleet.LayoutTest do
     test "unified link pointer: one notation for Brief/Criteria/Verdict, parsed back from the URL" do
       sha = String.duplicate("b", 40)
 
-      # ONE renderer, one parser. The link carries a clean label + a commit-browse URL; the machine
-      # reads ref+sha OUT of the URL. Mutation-verified: a renderer that dropped the URL (or a parser
-      # that only knew the legacy shape) would fail the round-trip below.
       brief = Layout.pointer_line("Brief", "briefs/x.md", sha, "o/r")
       crit = Layout.criteria_pointer_line("gate-briefs/x--criteria.md", sha, "o/r")
 
@@ -238,8 +189,6 @@ defmodule Fleet.LayoutTest do
     end
 
     test "face_root/1: each face pairs with its own host root — three branches, three clones" do
-      # Git allows one worktree per branch, so the pairing is not a convention that could be
-      # collapsed: two faces sharing a root is not a tidier layout, it is an impossible one.
       assert Layout.face_root("code") == Layout.code_root()
       assert Layout.face_root("workshop") == Layout.workshop_root()
       assert Layout.face_root("ops") == Layout.ops_root()
@@ -258,11 +207,7 @@ defmodule Fleet.LayoutTest do
     end
 
     test "`ops` is NOT a card face — the enum is where that invariant lives" do
-      # The project HAS an ops branch; a producer may never be pointed at it. The wall is the
-      # workflow-map schema enum (`code | doc`) plus `additionalProperties: false`, not a check in
-      # code: an unwritable state needs no verification. This test reads the SHIPPED schema, so
-      # widening that enum breaks here rather than at the first pod handed a workspace on the
-      # record of its own judgement.
+      # Read the shipped schema: producers may work on code/workshop, never their own ops record.
       enum =
         :code.priv_dir(:lcars_fleet)
         |> to_string()
@@ -290,20 +235,13 @@ defmodule Fleet.LayoutTest do
       assert Layout.face_of("workshop") == "workshop"
       assert Layout.face_of("main") == "code"
 
-      # The distinction a per-face predicate cannot draw: a producer's feature branch is not the
-      # ops face, and it is not the code face either. A boolean answers `false` to both questions,
-      # and a caller reads that `false` as "the other face". Here it answers `nil`, and a caller
-      # that wants the code treatment for it has to write that clause itself.
+      # Feature branches have no structural face; callers must choose their treatment explicitly.
       assert Layout.face_of("lcars/issue-3-scribe") == nil
       assert Layout.face_of(nil) == nil
     end
 
     test "face_of/1 covers EVERY face in the map — the two directions cannot drift apart" do
-      # The clauses are generated from `@face_branches`, so this holds by construction today. It is
-      # written down because the construction is the guarantee: a face added to the map without a
-      # `face_of/1` clause would be a branch the runtime routes and cannot name, and the generation
-      # is the only thing standing between here and that. If the `for` comprehension is ever
-      # unrolled into hand-written clauses, this test is what notices the one that was forgotten.
+      # Preserve inverse mapping if generated clauses are ever replaced with handwritten ones.
       for face <- ["code", "workshop", "ops"] do
         assert Layout.face_of(Layout.face_branch(face)) == face,
                "#{face}: face_branch/1 and face_of/1 must be inverse on every declared face"

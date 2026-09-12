@@ -2,58 +2,28 @@ defmodule Fleet.Toolchain do
   use Boundary, deps: [Fleet.Labels], exports: []
 
   @moduledoc """
-  A blocked pod asks for a tool the container does not have — and the ask becomes a DIFF a human signs.
+  Renders toolchain requests and their forge correlation keys for MCP and the reconciler.
+  Callers open a PR containing the rendered manifest; human approval precedes reconciliation
+  and privileged convergence. This module neither calls the forge nor installs tools.
 
-  ## Why the pod never writes the declaration
-
-  The pod hands TYPED FIELDS through its MCP tool; this module renders them. That split is the
-  whole guard: the tool's `input_schema` bounds what can be expressed AT THE WIRE, so a request
-  outside the shape is refused before it is a request — not validated afterwards by a checker
-  someone can forget to call. What the human approves is therefore a document the runtime
-  composed, never prose the pod authored.
-
-  Two fields are the exception and they are load-bearing in opposite directions: `evidence` is
-  free text read BY THE HUMAN and by nothing else, and `ecosystem` is the key the container converges on.
-  Everything between them is a closed enum, a pattern, or a list of patterns.
-
-  ## What it produces
-
-  A YAML manifest on a request branch, and a pull request onto the protected branch. Nothing is
-  installed by this module and nothing is installed by the merge either: the reconciler notices the
-  branch moved and the converger applies it. Three actors, and the only one that runs as root takes
-  a manifest that a human already approved.
-
-  ## Why this sits at the FOUNDATION and not under `Fleet.Pilot`
-
-  Two domains read it and neither may depend on the other: `Fleet.MCP` renders the request the pod
-  typed, and the reconciler applies what a human merged. MCP sits BELOW the pilot by construction,
-  so a shared piece placed in either would force one of them upward. It carries no state, no forge
-  call and no side effect — only the vocabulary of a request and how it is written down.
-
-  ## The form is exclusive, and that is not tidiness
-
-  `apt`, `installer` and `sysroot` do different things to different places — the container's `/usr`, an
-  SDK tree under the store, a target sysroot. A request carrying two of them would make the human
-  approve one diff for two effects, and the executor pick an order nobody declared.
+  `ecosystem` identifies the manifest; `evidence` explains the request to the human approver.
+  MCP supplies the input schema, while `validate_form/1` separately requires one of apt
+  (container packages), installer (SDK store), or sysroot (target tree). Combining forms
+  would bundle distinct effects and leave their execution order unspecified.
   """
 
   alias Fleet.Labels
 
   @forms ~w(apt installer sysroot)
 
-  @typedoc "The typed request, as the MCP tool's `input_schema` bounds it."
+  @typedoc "Request map supplied by MCP; field validation is external to this type."
   @type request :: map()
 
   @doc """
-  Renders the request as the YAML the human will read in the diff.
-
-  DETERMINISTIC AND ORDERED, because it lands in a git diff: a map iterated in whatever order the
-  runtime felt like would show a reordering as a change, and a reviewer who learns that diffs lie
-  stops reading them. Keys go out in a fixed sequence, and lists keep the order they arrived in.
-
-  `evidence` is rendered LAST and as a block scalar. It is the only free text in the document, so
-  it sits where it cannot be mistaken for a field the executor reads — and a reviewer scrolling to
-  the end finds the reason for the whole request instead of hunting for it.
+  Renders YAML in stable key order, preserving list order so retries produce reviewable diffs.
+  Evidence appears last as a literal block for the human approver. Call `validate_form/1` first;
+  rendering itself selects the first map-valued form and does not validate field contents.
+  This renderer does not escape quotes, backslashes or newlines in ordinary scalar fields.
   """
   @spec render(request(), keyword()) :: String.t()
   def render(req, meta \\ []) when is_map(req) do
@@ -74,11 +44,8 @@ defmodule Fleet.Toolchain do
   end
 
   @doc """
-  Refuses a request that does not carry EXACTLY ONE of `apt`, `installer`, `sysroot`.
-
-  The wire schema cannot say "exactly one" on its own, so it is said here — and it is said as a
-  REFUSAL rather than a repair: picking one for the pod would approve, in the human's name, a form
-  they never chose.
+  Requires exactly one map-valued apt, installer or sysroot field. The current wire schema
+  leaves this exclusivity check to the caller; choosing a form silently would change the request.
   """
   @spec validate_form(request()) :: :ok | {:error, {:toolchain_form, String.t()}}
   def validate_form(req) when is_map(req) do
@@ -109,25 +76,16 @@ defmodule Fleet.Toolchain do
     do: "lcars/toolchain-" <> slug(work_item_id)
 
   @doc """
-  The request branch of an ANTICIPATED toolchain — une demande qu'aucun ticket ne porte.
-
-  ⚠ UN PRÉFIXE DISTINCT, ET C'EST LA RAISON D'ÊTRE DE CETTE FONCTION. Les deux clés viennent
-  d'espaces de noms indépendants — un `work_item_id` d'un côté, un `pod_id` de l'autre — et rien
-  n'interdit qu'ils rendent un jour le même slug. Deux besoins distincts qui atterrissent sur UNE
-  branche, c'est un manifeste qui en écrase un autre en silence. Le préfixe les sépare par
-  construction plutôt que par chance.
-
-  Même propriété d'idempotence que `branch_for/1` : un second appel du même pod retombe sur la même
-  branche au lieu d'ouvrir une deuxième pull request.
+  Stable branch for a request without a work item, using a pod-specific prefix.
+  The prefix distinguishes equal pod/work-item slugs; it does not guarantee uniqueness for
+  arbitrary inputs (a work-item slug beginning with `pod-` can overlap this namespace).
   """
   @spec branch_for_pod(String.t()) :: String.t()
   def branch_for_pod(pod_id) when is_binary(pod_id),
     do: "lcars/toolchain-pod-" <> slug(pod_id)
 
-  # LES SÉRIES DE TIRETS SONT REPLIÉES, et ce n'est pas cosmétique : la substitution travaille sur
-  # les OCTETS, donc un caractère non-ASCII en rend deux ou trois. Sans le repli, le nom de branche
-  # dépendrait de l'encodage de la clé — lisible pour un ascii, illisible pour le reste, et
-  # variable selon la largeur du caractère. Replié, il ne dépend que du contenu.
+  # Collapse byte-wise replacements of non-ASCII characters into readable separators.
+  # Slugging is lossy: distinct input keys can produce the same branch suffix.
   defp slug(key) do
     key
     |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
@@ -136,66 +94,34 @@ defmodule Fleet.Toolchain do
   end
 
   @doc """
-  The repository the sysadmin domain lands on — `:lcars_fleet, :pilot_ops_repo`, default
-  `"fleet/lcars"`.
-
-  ⚠ LA MÊME CLEF QUE `IncidentRegistry.Escalation.ops_repo/0`, ET C'EST VOULU : les issues
-  `error_system` et le manifeste d'outillage sont deux faces d'un même domaine, et son propre
-  moduledoc porte l'argument — *« a registry on repo A whose issues open on repo B is an alarm
-  nobody finds »*. Le lecteur est dupliqué parce que `Fleet.MCP` ne peut pas dépendre de
-  `Fleet.Pilot`, qui est au-dessus ; la CLEF et le DÉFAUT, eux, ne le sont pas. Les faire diverger
-  enverrait la demande sur un dépôt et son escalade sur un autre.
+  Sysadmin repository: `:lcars_fleet, :pilot_ops_repo`, default `fleet/lcars`.
+  Keep this key/default aligned with IncidentRegistry.Escalation so requests and incidents
+  reach the same repo. The reader is repeated because MCP cannot depend on Pilot.
   """
   @spec ops_repo() :: String.t()
   def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
 
   @doc """
-  The protected branch the manifest lives on — `"tool_request"`, and it is **frozen here**.
-
-  ⚠ CETTE FONCTION EST LA SOURCE UNIQUE DU NOM, ET C'EST POUR ÇA QU'ELLE NE LIT PLUS DE CONFIG.
-  Quatre composants doivent s'accorder sur ce nom : le module de provisioning qui crée la branche,
-  le geste qui pose sa protection, la skill qui relève le conteneur, et ce domaine qui lit son head.
-  Trois vivent en shell, un dans le BEAM — ils ne peuvent pas partager un littéral, donc le nom est
-  déclaré ICI et recopié là-bas, et le contrat `toolchain.branch_single_source` de
-  `mix lcars.contracts.check` refuse toute divergence. Un littéral vérifié vaut une source unique ;
-  une convention non vérifiée n'en est pas une.
-
-  ⚠ ET IL N'EST PAS RÉGLABLE, PAR DÉCISION (⚖ user). Le réglable à MOITIÉ — une clef d'app-env
-  ici, une variable d'environnement côté shell, aucun pont entre les deux — ne casse rien tant que
-  les défauts coïncident. Le jour où quelqu'un tourne celle du shell : la branche se crée sous le
-  nouveau nom, la protection le suit, et ce domaine continue d'interroger l'ancien pendant que les
-  manifestes atterrissent là où personne ne regarde. Aucun message, le rail a l'air calme.
-  **Une molette lue par la moitié des parties est pire que pas de molette.**
-
-  LE NOM DIT CE QUE LA BRANCHE FAIT, et pas quel métier s'en occupe : un mot qui désigne à la fois
-  une profession, une posture et un rôle ne désigne rien. Ce mécanisme-ci est le SEUL qui l'utilise
-  — un pod dépose une demande d'outil, un humain signe — donc elle porte le nom de ce qu'on y
-  dépose.
-
-  PAS `ops`, et la raison est mesurée : le runtime ÉCRIT déjà sur `ops` (le registre d'incidents),
-  donc la protéger casserait ces écritures. Même dépôt, branche différente, protections opposées.
+  Protected manifest branch, fixed by design as `tool_request`.
+  Provisioning, protection, convergence and the BEAM must agree; the contract checker
+  `toolchain.branch_single_source` checks the shell copies against this name. Do not add a
+  setting read by only part of that chain. This branch is separate from runtime-writable ops:
+  protecting ops would break incident-registry writes.
   """
   @spec branch() :: String.t()
   def branch, do: "tool_request"
 
   @doc """
-  The manifest path a request writes to, keyed on the ecosystem.
-
-  ONE FILE PER ECOSYSTEM, not one per request: two pods asking for python must converge on the same
-  document rather than accumulate one file each. The second request edits what the first declared,
-  and the diff shows a human what actually changes.
+  One manifest path per ecosystem, so later requests amend the same declaration.
+  The caller must validate the ecosystem before using it as this path component.
   """
   @spec manifest_path(String.t()) :: String.t()
   def manifest_path(ecosystem) when is_binary(ecosystem),
     do: "ops/toolchains.d/" <> ecosystem <> ".yaml"
 
   @doc """
-  Le numéro d'issue d'un `WorkItem.issue_id` (`"issue-<n>"`), ou `:error`.
-
-  ⚠ MIROIR, pas autorité : le format est composé par `Fleet.Pilot.IssueId.compose/1`, mais la
-  frontière interdit `Fleet.MCP -> Fleet.Pilot` — même motif que le miroir de slug du SeedStore
-  (`lcars.slug_witness` le confronte au réel). Deux lignes, un préfixe : si le format bouge,
-  le témoin du round-trip casse ici.
+  Parses an integer from `issue-<n>`, otherwise `:error`.
+  Mirrors Fleet.Pilot.IssueId's format across a dependency boundary; keep the round-trip witness.
   """
   @spec workitem_issue_number(String.t() | nil) :: {:ok, integer()} | :error
   def workitem_issue_number("issue-" <> rest) do
@@ -208,21 +134,14 @@ defmodule Fleet.Toolchain do
   def workitem_issue_number(_), do: :error
 
   @doc """
-  The hidden marker that ties a work item to its pull request.
-
-  On the ISSUE, in an HTML comment — invisible rendered, exact in the body text. Same shape and
-  same reason as `IncidentRegistry.Escalation`'s incident marker: the forge carries the key, never
-  a volatile map in the runtime, so a restart does not lose which ticket waits on which PR.
+  Hidden issue-body marker linking a work item to its PR, preserved on the forge across restarts.
   """
   @spec marker(integer()) :: String.t()
   def marker(pr) when is_integer(pr), do: "<!-- lcars-toolchain:#{pr} -->"
 
   @doc """
-  The hidden marker that ties a pull request BACK to its work item — the inverse of `marker/1`.
-
-  On the PR BODY. The reconciler's second pass reads it to find WHICH ticket to drain when the PR
-  closes (merged or refused) : la branche ne bouge pas sur une fermeture sans merge, donc la
-  comparaison de head ne verra JAMAIS ce cas — seul ce marqueur relie la PR au ticket qui attend.
+  Hidden PR-body marker linking back to the waiting issue. The reconciler needs it for
+  closure without merge, which does not move the protected branch head.
   """
   @spec workitem_marker(String.t(), integer()) :: String.t()
   def workitem_marker(repo, issue) when is_binary(repo) and is_integer(issue),
@@ -243,15 +162,10 @@ defmodule Fleet.Toolchain do
   def parse_workitem_marker(_), do: :error
 
   @doc """
-  The label a work item wears while its request is in flight — `Labels.awaits_toolchain/0`.
-
-  Restated here as a function rather than inlined at call sites so the vocabulary keeps ONE
-  source; `Fleet.Labels` explains why it is not `awaits_arch`.
+  Label for work awaiting a toolchain request, defined by `Fleet.Labels.awaits_toolchain/0`.
   """
   @spec waiting_label() :: String.t()
   def waiting_label, do: Labels.awaits_toolchain()
-
-  # ── rendering ───────────────────────────────────────────────────────────────────────────────
 
   defp form_block(req) do
     Enum.find_value(@forms, fn form ->
@@ -282,9 +196,7 @@ defmodule Fleet.Toolchain do
     end
   end
 
-  # A BLOCK SCALAR, and `|-` rather than a quoted string: an error message carries quotes, colons
-  # and backslashes, and re-escaping it would let a wrong escape turn a diagnosis into a parse
-  # error. `|-` takes the lines as they are; the indentation is the only syntax.
+  # A literal block preserves diagnostic quotes, colons and backslashes without scalar escaping.
   defp evidence_block(nil), do: nil
   defp evidence_block(""), do: nil
 
@@ -309,10 +221,8 @@ defmodule Fleet.Toolchain do
     end)
   end
 
-  # QUOTED WHEN IT COULD BE READ AS SOMETHING ELSE. A version like `1.27` is a float to YAML and a
-  # string to everyone else; `deb http://…` carries a colon-space that opens a mapping. The values
-  # here come through patterns that forbid quotes and newlines (the tool's schema), so quoting is
-  # enough and escaping would be theatre.
+  # Quote numeric-looking strings such as versions. This is not a general YAML escaper;
+  # some MCP fields (version, sources, paths) accept strings without character restrictions.
   defp yaml_scalar(v) when is_integer(v), do: Integer.to_string(v)
 
   defp yaml_scalar(v) when is_binary(v) do

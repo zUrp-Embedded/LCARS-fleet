@@ -2,130 +2,54 @@ defmodule Fleet.Layout do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  The single authority for the LCARS platform layout — "where things live" on the container.
+  Shared container paths, project faces and artifact references.
+  The dedicated-container deployment uses fixed platform roots; these are structural conventions,
+  not deployment knobs. Consumer test overrides may derive their defaults here.
 
-  ## Why these paths are fixed, not configurable
-
-  LCARS runs ALONE in a dedicated container (docker/WSL), never installed on a user's
-  workstation. The layout is imposed by design (BSD philosophy: we impose OUR own clean
-  tree, we do not adapt to the surrounding mess): one root per FACE — `/home/projects` (code),
-  `/home/projects.workshop` (drafts), `/home/projects.ops` (the runtime's record) — plus
-  `~/.lcars` (the per-human runtime state, each human created with their home at
-  register/onboarding). **These are NOT
-  deployment knobs**: a config file for paths that must never vary would be an API lie
-  (over-parametrizing the structural is a mistake). Structural → hardcoded, but typed in ONE
-  place: this module is the sole origin of these roots, so they are never re-hardcoded or
-  recomposed anywhere else.
-
-  Consumer TEST seams (e.g. `seed_store_root`) stay: their DEFAULT derives from here.
-
-  Foundation (next to `Fleet.Slug`): anything may depend down onto it.
+  Each project has standalone clones for code (main), workshop (drafts) and ops (runtime records).
+  Producer cards allow code/workshop only: an author must not write the record of its own judgement.
+  Shared names live in this foundation module so producers and validators across dependency
+  boundaries use the same convention.
   """
 
   @code_root "/home/projects"
   @ops_root "/home/projects.ops"
-  # THIRD ROOT, and it is a root and not a subdirectory because git imposes one worktree per
-  # branch: `workshop` cannot live inside `<ops_root>/<project>`, which is already checked out on
-  # `ops`. Same shape as the other two — a standalone clone, NOT a linked worktree, for the
-  # reason `ProjectOnboard` states about the ops face: a linked worktree keeps its git directory
-  # under the parent repo, which a pod mounting the parent RO could then not commit into.
+  # Separate clones give each face its checkout and writable Git metadata. Linked worktrees
+  # would keep metadata in the parent repo, which a pod may mount read-only.
   @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
-  # TWO CATALOGUE DIRECTORIES, AND THEY HOLD TWO DIFFERENT KINDS OF THING — not one editable copy
-  # of the other. Read as a `php.ini` / `php.ini-production` pair, a shipped demonstration looks
-  # installed.
-  #
-  # `/opt/lcars/catalogues` is the IMAGE's tree: SEEDS. What lives there is deposited on the forge
-  # at each apply and installed by nobody. It is rewritten by every update, which costs nothing —
-  # a seed is a projection of the image, not a state.
-  #
-  # `/opt/lcars/var/catalogues` holds what is INSTALLED, and it is a cache: `lcars catalogue
-  # install` drops the material and provisioning restores it from the forge at every boot. The
-  # authority is `<name>/_catalogue` on the forge; this is a local read-through of it.
-  #
-  # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
-  # layout INSIDE a catalogue. The split is the same one this module already draws for the project
-  # faces: where things sit on the container is one authority, what is inside them is another.
+  # Image seeds and installed catalogue cache are distinct; Fleet.Catalogue owns their inner layout.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The INSTALLED cache. It sits under `/opt/lcars/var` — the named volume that already carries the
-  # forge tokens, and that survives an image swap.
-  #
-  # ⚠ NOT UNDER `/home`, even though the material is operator-facing. `/home` is OUT of the
-  # uninstall perimeter ENTIRELY — no `rm`, no `userdel -r`, no exception — because a deploy that
-  # can reach under `/home` can destroy work that was never ours. A cache placed there would be
-  # created by every install and removed by none: it would accumulate, forever, on a path the
-  # operator was told the product manages. Where a tree that we create and must be able to remove
-  # can sit is settled before the question of who reads it is even asked.
+  # The installed cache shares the persistent var volume with forge tokens. Keep it outside /home,
+  # which uninstall must never remove: user work is outside the product's deletion perimeter.
   @installed_catalogues_root "/opt/lcars/var/catalogues"
 
-  # L'ETAT RUNTIME DU CONTENEUR — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
-  # `/run` et pas sous `@platform_root` pour la meme raison que le cache des catalogues : ce qui MEURT au
-  # redemarrage ne doit pas cohabiter avec ce qui EST l'image. `/run` est un tmpfs ; poser cet etat
-  # ailleurs le ferait survivre a un boot, et un marqueur qui survit ment sur le boot qu'il decrit.
-  #
-  # ⚠ UNE SOURCE, PARCE QUE CETTE RACINE PORTE TOUTE LA SURFACE PAR LAQUELLE UN POD PARLE AU RESTE
-  # DE LA MACHINE : les sockets de l'autorite, du privilegie, du MCP, de l'egress et des consoles.
+  # Deployment mounts /run as ephemeral state; boot markers must not survive with the image/cache.
   # Un chemin recopie chez chaque consommateur derive sans que rien ne rougisse.
   @runtime_root "/run/lcars"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
   @mcp_activity_marker "last_tool_call"
-  # A pod's deliverable workspace subfolder. It lives HERE and not in either consumer because BOTH
-  # need it and neither may depend on the other: Spawner already deps ProjectBootstrap, so the reverse
-  # edge would close a cycle. The foundation is the third way — both already depend down onto it.
+  # Shared by Spawner and ProjectBootstrap without adding a reverse dependency cycle.
   @pod_workspace_subdir "workspace"
 
-  # ops artifact layout — the SINGLE truth of where brief/provenance objects live and
-  # what a valid object name looks like. Producer (Fleet.Workflow.BriefArtifact/Provenance)
-  # COMPOSES through it; validator (Fleet.TaskQueue.WorkItem, BND-123) VALIDATES through it —
-  # the two sides of the boundary read one source instead of carrying twin copies.
+  # Workflow composes artifact refs; TaskQueue validates them against the same layout.
   @briefs_subdir "briefs"
   @gate_briefs_subdir "gate-briefs"
   @provenance_subdir "provenance"
-  # NO SUBDIR HERE IS AGENT-WRITABLE, and there is no exception: a door in the one tree that must
-  # stay read-only for everyone is a door for everyone. A note of design is DOC; it lives on the doc
-  # face, which its author mounts RW.
-  # Verdicts committed in full when they exceed the inlining threshold. RUNTIME-written like the
-  # trees above: an agent must never be able to address the tree its own judgement is recorded in.
+  # Runtime-written full verdicts above the inline threshold; the ops face stays read-only to agents.
   @verdicts_subdir "verdicts"
-  # Conflict-engine reports. A DELIBERATELY SEPARATE tree from `verdicts/`: a conflict report is not
-  # a judgement on a delivery, it is a machine explaining what it did to a branch. Filing it under
-  # `verdicts/` would also collide by name — one PR can carry a verdict and a conflict report from
-  # the same role — and the second write would displace the first while its pointer kept naming it.
+  # Conflict reports describe merge operations, separate from judgements to avoid overwriting them.
   @conflicts_subdir "conflicts"
-  # Gate-decision traces. Distinct from `verdicts/` on the SAME axis the brief trees already use:
-  # `briefs/` is a worker order and `gate-briefs/` a judge order; `verdicts/` judges a DELIVERY and
-  # this one records a gate decision. Same role, same issue, two different acts — one tree each,
-  # never a suffix inside one.
+  # Gate decisions and delivery verdicts are different acts even for the same issue and role.
   @gate_verdicts_subdir "gate-verdicts"
   @artifact_name_re ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
   @brief_ref_re Regex.compile!(
                   "\\A(#{@briefs_subdir}|#{@gate_briefs_subdir})/[A-Za-z0-9][A-Za-z0-9._-]*\\.md\\z"
                 )
 
-  # The three FACES of a project. A project is ONE forge repo with three orthogonal branches, each
-  # checked out in its own standalone host clone. The pairing branch<->root is structural, exactly
-  # like the roots above: which face a PRODUCER works on is business (the card's `face` key), but
-  # what the faces ARE is layout, and it lives here so no consumer ever re-derives a branch name
-  # from convention.
-  #
-  # THE CUT, and it is the whole reason there are three rather than two: `ops` carries what the
-  # SYSTEM manipulates — what was asked, what was judged, what was proven. `workshop` carries the
-  # material the project is built FROM. `code` carries what it IS. Fold the drafting material back
-  # into `ops` and one branch becomes simultaneously the tree a producer writes and the tree its
-  # judgement is recorded in — no rule can separate them, because they are then the same object.
-  #
-  # THE NAMES PAIR MECHANICALLY: root = `projects.<face>`, branch = `<face>`, with `code` as the one
-  # named exception (`/home/projects`, `main`) for a reason that is not ours — `main` is git's
-  # default. A name shared by several faces names the FAMILY and not the member, and every reader
-  # then picks the member they had in mind.
-  #
-  # TWO VOCABULARIES, and their difference is what makes the invariant structural rather than
-  # checked. A CARD's `face` enum is `code | workshop` — the faces a producer may work. This map is
-  # `code | workshop | ops` — the branches a project HAS. `ops` being absent from the card enum
-  # means no card can declare it, so no pod is ever given a workspace on it: the read-only treatment
-  # of the record has no exception to enforce because the exception cannot be written down.
+  # Project faces include ops; the narrower producer-card enum excludes it.
   @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
 
   @doc "Root of the CODE face (`/home/projects`) — imposed container layout."
@@ -145,9 +69,8 @@ defmodule Fleet.Layout do
   def ops_branch, do: @face_branches["ops"]
 
   @doc """
-  Branch of a face named by the card's `face` step key (`"code"` | `"workshop"`). Raises on anything
-  else: the workflow-map schema enum guards the vocabulary upstream, so an unknown face here is a
-  BYPASS of the schema (or a drift between it and this map), never an operator input to soften.
+  Branch for code, workshop or ops; raises ArgumentError on unknown faces.
+  Producer cards admit only code/workshop, a narrower vocabulary than this project layout.
   """
   @spec face_branch(String.t()) :: String.t()
   def face_branch(face) when is_map_key(@face_branches, face), do: @face_branches[face]
@@ -159,18 +82,9 @@ defmodule Fleet.Layout do
   end
 
   @doc """
-  The face `branch` IS, or `nil` when it is not a face at all (feature branch, `nil`, junk).
-
-  THE SHAPE IS THE POINT: this NAMES a face, it does not test for one. A predicate over a space of
-  faces (`ops_branch?`, `code_branch?`) answers "not that one", which every caller reads as "the
-  other one" — a reading that holds only while there are exactly two. It stays correct until the
-  day it silently is not, on every consumer at once, with nothing going red.
-
-  A clause per face, GENERATED from `@face_branches` so the two directions cannot drift: naming a
-  new face in that map gives it a `face_of/1` clause in the same gesture. The last clause is not a
-  catch-all over faces — it is the answer for a branch that is NOT one, which is legitimate and
-  frequent (a producer's feature branch), and every caller decides what to do with it explicitly
-  rather than inheriting a face by default.
+  Names the face for a structural branch, or nil for feature branches and other inputs.
+  Clauses derive from the forward map; callers must decide how to handle a branch without a face
+  instead of inferring another face from a false predicate.
   """
   @spec face_of(String.t() | nil) :: String.t() | nil
   for {face, branch} <- @face_branches do
@@ -180,10 +94,7 @@ defmodule Fleet.Layout do
   def face_of(_not_a_face), do: nil
 
   @doc """
-  A pod's deliverable workspace: `<pod_dir>/workspace`. PURE computation, SINGLE authority for the
-  placement convention — the PRODUCER (`ProjectBootstrap.Phase`, which creates and returns it) and the
-  RECOMPUTERS (`Spawner.Pod.Paths` and through it the facade, the cwd bind, the completion payload)
-  read the same literal instead of keeping it in sync by hand across a boundary they cannot cross.
+  Pod workspace path shared by ProjectBootstrap's creator and Spawner's cwd/payload consumers.
   """
   @spec pod_workspace_path(Path.t()) :: Path.t()
   def pod_workspace_path(pod_dir) when is_binary(pod_dir),
@@ -197,36 +108,22 @@ defmodule Fleet.Layout do
   def ops_root, do: @ops_root
 
   @doc """
-  Runtime state root (`#{@runtime_root}`) — the tmpfs tree that dies with the boot.
-
-  Sockets (authority, privileged, MCP, egress, consoles), boot markers and convergence locks live
-  here. It is NOT under `platform_root/0`: that tree IS the image, and a marker that survives a
-  reboot lies about the boot it describes.
+  Runtime root (`#{@runtime_root}`) for authority, privileged, MCP, egress and console sockets,
+  boot markers and convergence locks. Deployment must clear this state on container boot.
   """
   @spec runtime_root() :: Path.t()
   def runtime_root, do: @runtime_root
 
   @doc """
-  DRAFTING root (`/home/projects.workshop`) — the project's workshop, authored by a producer.
-
-  NOT the product's documentation, and reading it that way inverts the delivery boundary. What
-  lives here is the material a project is built FROM and that never ships with it: backlog, plans,
-  scratchpad, specs in progress. The documentation that DOES ship — user, maintainer, fork — lives
-  in `docs/` on the code face, is written by a producer working there, and is judged like any other
-  deliverable.
-
-  The distinction that decides which is which is the DESTINATION, never the nature of the artefact:
-  prose bound for `docs/` is a deliverable, prose bound for this tree is not.
+  Drafting root for backlog, plans, scratchpads and unfinished specs that do not ship.
+  Product documentation belongs in docs/ on the code face and is judged as a deliverable;
+  destination determines the face, not whether the artifact is prose.
   """
   @spec workshop_root() :: Path.t()
   def workshop_root, do: @workshop_root
 
   @doc """
-  Host root of a face, by the name a card and `@face_branches` use.
-
-  The pairing branch <-> root is the structural half of a face: a consumer that knows which face it
-  is on must never re-derive which directory that means. Raises on an unknown face for the same
-  reason `face_branch/1` does — the schema enum bounds the vocabulary upstream.
+  Host root for code, workshop or ops; raises ArgumentError for an unknown face.
   """
   @spec face_root(String.t()) :: Path.t()
   def face_root("code"), do: @code_root
@@ -258,29 +155,14 @@ defmodule Fleet.Layout do
     do: repo |> project_name() |> String.replace(~r/[^A-Za-z0-9-]/, "-")
 
   @doc """
-  Pod LABEL shown to the human: the terminal title and the Claude Desktop entry.
-  `<project>#<ticket>_<role>`, or `<project>_<role>` for a pod bound to a project rather than to a
-  ticket (architect, permanent). Takes the SLUG (`project_slug/1` upstream), never the `owner/name`.
-
-  SINGLE starting point BY DESIGN. The format is a UI/UX judgement that will be re-judged — spaces,
-  `@` and `#` all survive tmux and Desktop, but a label loaded with separators turns to mush in a
-  terminal, and Desktop offers no sort (most recent floats up), so the ticket number is what lets a
-  human tell two live engineers of one project apart. Keeping every producer on this one function is
-  what makes the next judgement a one-line change.
-
-  It is a LABEL: nothing downstream may read a fact back out of it. The project slug travels
-  alongside it as the explicit `:project_slug` spawn opt, and the spawn choke point refuses a named
-  pod that omits it (`Fleet.Spawner`, `:project_required`). Deriving the project from the label
-  instead is what FREEZES this format: adding `#42` to the name would then silently produce a pod
-  with no cwd remap and no checkpoint seed.
+  Terminal/Desktop label: `<project>#<ticket>_<role>`, `<project>_<role>`, or role alone for nil
+  project and ticket. Supply a project_slug, not owner/name; the ticket distinguishes concurrent pods.
+  Never parse identity back out of this presentation string. The separate :project_slug spawn opt
+  drives cwd remapping and seed storage, allowing this label format to change safely.
   """
   @spec pod_label(String.t() | nil, String.t(), pos_integer() | nil) :: String.t()
   def pod_label(project, role, ticket \\ nil)
 
-  # FLEET-LEVEL pod (starfleet): no project to name, so the label IS the role. Handled by the
-  # builder rather than skipped around it — a caller that "has no project" is the exact shape that
-  # produces a fourth hand-rolled label, and the single starting point only holds if every case
-  # has a clause here.
   def pod_label(nil, role, nil) when is_binary(role), do: role
 
   def pod_label(project, role, nil) when is_binary(project) and is_binary(role),
@@ -299,67 +181,30 @@ defmodule Fleet.Layout do
   def state_dir, do: Path.join(System.user_home!(), @state_dirname)
 
   @doc """
-  Catalogue SEEDS that ship with the image (`#{@platform_root}/#{@catalogues_dirname}`) —
-  read-only, and installed by nobody.
-
-  A seed is not an installation. What lives here is pushed to the forge as a DEPOSIT at each apply,
-  where it becomes `available` like any catalogue a human deposited from their laptop, and it only
-  runs once an admin plays `lcars catalogue install` on it. That is the whole demonstration
-  `web-demo` exists for, and it would be a lie if the container ran it merely because the image carried
-  the files.
-
-  Rewritten by every update, so an operator who edits one loses the edit at the next deploy — and
-  editing one is not how a catalogue is made anyway: it is forked, renamed in its manifest, and
-  deposited under its author's own account.
+  Image catalogue seeds (`#{@platform_root}/#{@catalogues_dirname}`), deposited as available
+  on the forge during apply. Presence here does not install or run a catalogue, including web-demo;
+  an admin must install it. Updates replace these files. To author a catalogue, fork it, rename
+  its manifest and deposit it under its author's account instead of editing image seeds.
   """
   @spec catalogues_shipped_dir() :: Path.t()
   def catalogues_shipped_dir, do: Path.join(@platform_root, @catalogues_dirname)
 
   @doc """
-  The INSTALLED catalogues (`#{@installed_catalogues_root}`) — a CACHE of what the forge carries.
+  Installed catalogue cache (`#{@installed_catalogues_root}`), restored from forge
+  `<name>/_catalogue` at container boot. Deleting a cache directory does not uninstall it.
+  The forge is authoritative; this material is not authored locally.
 
-  Nothing here is authored, and nothing here is worth backing up: `lcars catalogue install` drops
-  the material, and convergent provisioning restores it at every container boot from
-  `<name>/_catalogue` on the forge. Deleting a directory here uninstalls nothing; the next boot puts
-  it back.
-
-  ## Why it is a CONTAINER path and not `~/.lcars/catalogues`
-
-  Everything else under `state_dir/0` is per-human, which makes that the obvious family. Three
-  things make it the wrong one:
-
-  Which catalogues run is a property of the FORGE, and the forge is shared. Two humans on one container
-  cannot legitimately serve different ones, so a per-human copy is N copies of one fact — and N
-  places for it to drift.
-
-  Installing is a ROOT act (it reads a 0600 master token and writes the forge). Root dropping
-  material into one human's home has to pick which human, and a container has several.
-
-  Convergence has to run BEFORE the role tokens are minted, so the roster can be derived from the
-  installed catalogues rather than held by hand. The humans are enrolled after that, so at the
-  moment the material is needed no home exists yet.
-
-  Root-owned and world-readable: an admin installs, everyone reads.
+  Container-wide, root-owned and world-readable: installation uses the privileged master token,
+  and convergence precedes role-token minting and human enrolment. Per-human homes would duplicate
+  one shared roster and may not exist when provisioning needs it.
   """
   @spec catalogues_installed_dir() :: Path.t()
   def catalogues_installed_dir, do: @installed_catalogues_root
 
   @doc """
-  Absolute path of a pod's MCP ACTIVITY marker, derived from that pod's socket path.
-
-  The marker is the durable trace of a fact the MCP acceptor is the only one to hold: at time T,
-  this pod SPOKE to the fleet. Of the liveness signals it is the only PROOF rather than an
-  inference — a jsonl that grows, cpu jiffies, a repainting pane all say "something happened near
-  the pod", an MCP call says "the pod acted".
-
-  It is defined HERE, in foundation, because two domains need the same name and neither may call
-  the other: `Fleet.MCP` writes it (it owns the socket), `Fleet.Spawner` reads its mtime (it owns
-  the liveness tick). A name posed twice is a name that drifts once.
-
-  Takes the socket PATH, not the pod id: foundation must not learn where MCP puts its sockets, and
-  each side already holds that path from its own authority — MCP from `PodSocketSupervisor`, the
-  spawner from what the provisioning seam handed back at spawn. Rebuilding the directory here
-  would give the layout a third opinion on it.
+  Activity marker beside the supplied socket path. MCP writes it after completed tool calls;
+  Spawner reads its mtime for liveness. These domains share the filename through foundation.
+  Accepts the socket path rather than a pod ID so Layout need not reconstruct MCP's directory.
   """
   @spec pod_mcp_activity_marker(Path.t()) :: Path.t()
   def pod_mcp_activity_marker(socket_path) when is_binary(socket_path),
@@ -378,13 +223,9 @@ defmodule Fleet.Layout do
   end
 
   @doc """
-  The project's own declaration, at the ROOT of its code face: `.lcars.json`.
-
-  It carries `pipeline_default` — WHICH CARD routes the project's tickets, hence which jury, which
-  gates, which CI. Two domains need the name and neither may own it: `Fleet.Project.Declaration`
-  reads the file, and `Fleet.Workflow.DeliverableGate` REFUSES a deliverable chain that touches it
-  (a producer does not edit the declaration that picks its judges). `Workflow` does not depend on
-  `Project`, so a literal on either side would be two sources for one name.
+  Project declaration filename at the code root: `.lcars.json`, including pipeline_default.
+  Project.Declaration reads it; Workflow.DeliverableGate protects it because it selects the
+  producer's judges/gates. Layout shares the name without a Workflow-to-Project dependency.
   """
   @spec project_declaration_file() :: String.t()
   def project_declaration_file, do: ".lcars.json"
@@ -454,18 +295,9 @@ defmodule Fleet.Layout do
       )
 
   @doc """
-  Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
-
-  `/u` is LOAD-BEARING, and dropping it fails SILENTLY. Without it the regex works on BYTES, so one
-  accented character — two bytes in UTF-8 — yields two dashes: `"D: placement latéral des pièces"`
-  comes out `D--placement-lat--ral-des-pi--ces`. Never unsafe (deterministic, still path-safe, still
-  accepted by `valid_brief_ref?/1`), which is exactly why such a regression survives: nothing breaks,
-  the names are merely wrong in a way only a human reading them notices. One replacement per
-  CHARACTER is the rule.
-
-  It also costs LENGTH, and that is not cosmetic here: this name becomes a `brief_ref`, which is
-  interpolated TWICE into the pointer work-order and is bounded by nothing (no truncation anywhere
-  in `brief_ref/2`). A French ticket title would pay two characters per accent for nothing.
+  Replaces each character outside `[A-Za-z0-9._-]` with `-`; prefixes x when the result is empty
+  or does not start alphanumeric. Unicode mode ensures one dash per character, not per UTF-8 byte,
+  avoiding inflated accented names in brief references. There is no length truncation.
   """
   @spec sanitize_artifact_name(String.t()) :: String.t()
   def sanitize_artifact_name(name) do
@@ -473,21 +305,8 @@ defmodule Fleet.Layout do
     if Regex.match?(@artifact_name_re, sanitized), do: sanitized, else: "x" <> sanitized
   end
 
-  # ── POINTER notation, unified: Brief / Criteria / Verdict ─────────────────
-  # A consequential brief/criteria (and a verdict) lives as a doc committed in ops; the forge surface
-  # (ticket body, PR comment) carries a SUMMARY + a pointer to the pinned doc. ONE notation for every
-  # kind, ONE parser — three near-identical shapes drift the day one is retouched, and nobody finds
-  # the others. Composed by the delegation tool / the verdict completer
-  # (mcp, pilot), parsed by the dispatch (pilot). The notation lives HERE once (same reason as the ref
-  # shapes: two domains, one truth, foundation).
-  #
-  # The pointer is a CLICKABLE markdown link: its text is a clean label a human reads, its URL is the
-  # commit-browse address of the pinned doc — `/<repo>/src/commit/<sha>/<ref>`, host-relative (needs
-  # only the repo, never the forge host) and commit-addressed (resolves the PINNED version, on the
-  # orphan `ops` branch of that repo). The machine reads `ref` and `sha` back OUT of the URL, so the
-  # SAME line serves the human's eye AND the dispatch's resolver — no literal filename, no bare sha on
-  # the surface. The parser also accepts the LEGACY `<kind>: <ref> @ <sha>` shape (tickets written
-  # before the link notation: resolved verbatim, never re-derived).
+  # MCP/Pilot render shared pointer notation: human-readable label, host-relative URL pinned
+  # to a commit. Brief/Criteria parsers also accept legacy `kind: ref @ sha` ticket bodies.
 
   # Clean human label per kind — what the reader clicks, never the illegible filename.
   defp pointer_label("Brief"), do: "le brief"
@@ -537,9 +356,8 @@ defmodule Fleet.Layout do
   def parse_brief_pointer(body), do: parse_pointer("Brief", body)
 
   @doc """
-  Twin of `parse_brief_pointer/1` for the `Criteria:` pointer. Same shapes, same errors — the criteria
-  is a DIFFERENT artefact (the judge's declarative expected, self-contained because the judge mounts
-  nothing and a criterion that points is not a criterion), but its notation is the brief's, not a fork.
+  Parses a Criteria pointer with the same shapes and errors as `parse_brief_pointer/1`.
+  Its target contains the judge's self-contained expected criteria, a separate artifact from the brief.
   """
   @spec parse_criteria_pointer(String.t() | nil) ::
           {:ok, {String.t(), String.t()}} | :none | {:error, {:invalid_pointer_ref, String.t()}}
