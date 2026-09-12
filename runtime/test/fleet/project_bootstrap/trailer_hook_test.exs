@@ -1,19 +1,8 @@
 defmodule Fleet.ProjectBootstrap.TrailerHookTest do
   @moduledoc """
-  The format is PLACED, not asked for.
-
-  The brief used to DEMAND it — "add the exact trailer to EVERY git commit". It said WHAT and never
-  WHERE, and git parses only the LAST paragraph, so an agent obeying to the letter and writing the
-  line mid-message failed the push gate. The brief now carries a NOTICE instead: the signature is
-  placed for you, do not add it. Nothing is asked, and it happens systematically.
-
-  Measured cost of one such miss on the bench: `submit_result` succeeds, the publication is refused
-  after, nothing lands, the poller re-dispatches — a full producer run redone, clone included, for a
-  line in the wrong place. A wall that catches THAT is catching negligence; the case it exists for is
-  falsification.
-
-  Real `git` throughout: the hook is a shell script `git` runs, and a test that asserted its CONTENT
-  would prove the string, not the behaviour.
+  Exercises the installed hook with real Git commits, including --no-verify and messages
+  supplied through files. Git trailer extraction checks paragraph placement in the final
+  cases; string-presence checks alone would not prove the gate can read a trailer.
   """
   use ExUnit.Case, async: true
 
@@ -66,8 +55,7 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
       body = commit_message(ws, "feat: something")
 
       assert body =~ "Co-authored-by: LCARS-engineer <engineer@lcars.local>"
-      # The block is the LAST paragraph — the only place git parses. A trailer anywhere else is
-      # exactly the failure this exists to remove.
+      # This checks the last line; the later extraction tests check Git's trailer parsing.
       assert body |> String.trim() |> String.split("\n") |> List.last() =~ "Co-authored-by:"
     end
 
@@ -81,16 +69,8 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
           "feat: something\n\nCo-authored-by: LCARS-engineer <engineer@lcars.local>\n\nEt une explication qui suit."
         )
 
-      # The rule is an APPEND and it fits in a sentence: the last non-empty line is not the trailer,
-      # so the trailer becomes the last line. The stray one the agent left mid-message stays where
-      # it is — a duplicate, stated rather than hidden, and the accepted cost: the commit now ENDS
-      # with the trailer, the push gate passes, and the producer run is not redone. Cosmetic
-      # redundancy against a redone run is not a close call.
-      #
-      # An earlier version delegated this to `git interpret-trailers --if-exists doNothing`, whose
-      # notion of "already there" is the trailer BLOCK rather than the message — same outcome here,
-      # by a rule that took a real-git measurement to learn and that the next reader would have had
-      # to make again.
+      # Appending preserves the stray earlier line. The duplicate is intentional: do not
+      # suppress the final trailer merely because its text occurs elsewhere in the message.
       assert body |> String.trim() |> String.split("\n") |> List.last() =~
                "Co-authored-by: LCARS-engineer"
 
@@ -140,16 +120,13 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
       ws = clone(tmp, "engineer")
 
       assert File.exists?(Path.join([ws, ".git", "hooks", "prepare-commit-msg"]))
-      # `git status` sees nothing: the working tree carries no LCARS artifact.
+      # The installed hook does not appear in working-tree status.
       assert git!(ws, ["status", "--porcelain"]) == ""
     end
   end
 
   describe "the trailer must be a git TRAILER BLOCK, not just a last line" do
-    # The push gate reads the trailer with git's own extraction (`%(trailers:key=…)`), which sees
-    # only the last PARAGRAPH preceded by a blank line. A hook that guarantees "last line" and a
-    # gate that requires "last paragraph" are two notions of the same constraint, and the gap
-    # between them refuses the push — the exact failure the hook exists to remove.
+    # Use the gate's extraction format, not a substring check of the raw message.
     defp git_trailer(ws) do
       ws
       |> git!(["log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)"])
@@ -166,9 +143,8 @@ defmodule Fleet.ProjectBootstrap.TrailerHookTest do
     end
 
     test "a message with NO trailing newline still yields a trailer git can read", %{tmp_dir: tmp} do
-      # THE REGRESSION: `printf '\n%s\n'` gave a blank line only when the message already ended
-      # with one. `git commit -m` always does — which is why six tests passed while this shape
-      # produced `prose\nCo-authored-by: …` in one paragraph and git reported NOTHING.
+      # Without a trailing newline, appending just one newline joins prose and trailer
+      # into one paragraph. The hook must supply the blank separator itself.
       ws = clone(tmp, "engineer")
 
       assert commit_from_file(ws, "feat: x\nSome prose") =~ "LCARS-engineer"

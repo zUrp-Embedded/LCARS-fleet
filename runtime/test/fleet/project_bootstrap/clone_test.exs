@@ -1,10 +1,6 @@
 defmodule Fleet.ProjectBootstrap.CloneTest do
-  # Workspace clone (invoked world): the pod's PRODUCTION face. The other face is NOT cloned here —
-  # it reaches the pod as an RO bind (`LaunchSpec.other_face_reference_path/3`). A second mechanism
-  # cloning it into `<pod_dir>/work` existed and NEVER ran (its trigger field had no writer in the
-  # whole corpus); removed 2026-08-03.
-  # REAL git fixture (no mock) — source repo with `main` + orphan branch `ops`.
-  # async: git fixtures isolated by tmp_dir (git -C) — no application env mutated.
+  # Real Git fixtures, isolated by tmp_dir. This clones the production face; the other
+  # face is mounted read-only through LaunchSpec.other_face_reference_path/3.
   use ExUnit.Case, async: true
 
   alias Fleet.ProjectBootstrap.Phase.Clone
@@ -41,15 +37,6 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
   end
 
   describe "reset_in_place/3 — the SECOND ticket of a resident pod" do
-    # NOTHING TESTED THIS FUNCTION. It is the whole cleaning path of a slot-freeze pod between two
-    # tickets, and its own comment carries the scar it exists for: `sanitize_workspace` is "LAST and
-    # NON-optional (BL-6-16)" because `reset --hard` rebuilds the index from the tree object, which
-    # ERASES the skip-worktree bits and RESTORES every tracked victim — "without this call a pipe pod
-    # gets the hostile material back on its 2nd ticket".
-    #
-    # A scar written in a comment and held by nothing is removed by the next refactor. The audit
-    # reported a `__pycache__` surviving and inferred "the workspace is not cleaned between cycles";
-    # the cleaning is there. What was missing is the proof that it stays.
     setup %{tmp_dir: tmp} do
       src = Path.join(tmp, "src")
       make_source_repo(src)
@@ -68,9 +55,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       pod_dir: pod_dir,
       profile: profile
     } do
-      # The audit's own observation: `__pycache__/`, gitignored, left by the pod's harness. `-x` is
-      # what removes it; `clean -fd` alone would leave every ignored artifact of ticket N inside
-      # ticket N+1, and a build directory from another brief is material nobody handed the pod.
+      # Both ignored and ordinary untracked leftovers must disappear between tickets.
       File.write!(Path.join(ws, ".gitignore"), "__pycache__/\n")
       File.mkdir_p!(Path.join(ws, "__pycache__"))
       File.write!(Path.join([ws, "__pycache__", "stale.pyc"]), "from ticket 1\n")
@@ -83,13 +68,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       refute File.exists?(Path.join(ws, "scratch.txt"))
     end
 
-    # JG-061 (S1, trouvee par les DEUX auditeurs) — l'evasion de confinement, et elle ne passe pas
-    # par le pod : c'est le DAEMON qui execute le hook, hors bwrap, sous l'UID de l'humain, avec
-    # portee sur `~/.claude/.credentials.json`, les jetons de role et le catalogue.
-    #
-    # Le pod n'a besoin que d'ecrire un fichier et de le rendre executable — plusieurs profils canon
-    # portent Write ET Bash. `git clean -fdx` ne touche pas `.git/`, donc le hook survit a l'etape
-    # qui precede le checkout, et `checkout -B` le declenche.
+    # A pod-written hook must not execute with daemon rights during checkout; clean leaves .git.
     test "un hook depose par le pod n'est PAS execute cote monde au re-brief", %{
       ws: ws,
       pod_dir: pod_dir,
@@ -98,11 +77,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       hooks = Path.join([ws, ".git", "hooks"])
       File.mkdir_p!(hooks)
 
-      # Le temoin va dans `/tmp` et NON sous `pod_dir` : ExUnit derive son tmp_dir du nom du test,
-      # qui contient une apostrophe, et le hook mourait alors sur `Unterminated quoted string`.
-      # Il echouait donc AVANT de creer le temoin — le test aurait ete rouge sans le fix, mais pour
-      # la mauvaise raison. Chemin sans apostrophe + quoting dans le hook : ce qui est mesure est
-      # bien « le hook a-t-il TOURNE », pas « a-t-il su parser son propre chemin ».
+      # Avoid the apostrophe in ExUnit's test-derived directory: it would break the shell
+      # fixture's single quoting and make a nonexecuting hook an inconclusive result.
       temoin = Fleet.TestEnv.tmp_path("lcars-jg061")
       on_exit(fn -> File.rm(temoin) end)
 
@@ -116,9 +92,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       refute File.exists?(temoin),
              "le hook du pod a tourne cote monde — evasion de bwrap sous l'UID humain"
 
-      # NEUTRALISE, PAS EFFACE, et la distinction est le test : si le hook avait disparu on ne
-      # saurait pas si c'est `core.hooksPath` qui l'a rendu inerte ou un nettoyage qui l'a emporte.
-      # Sa presence prouve que c'est bien la neutralisation qui tient.
+      # Retained hook distinguishes disabling execution from deleting the fixture.
       assert File.exists?(hook)
     end
 
@@ -146,17 +120,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     @tag :tmp_dir
     test "a `.claude/` tracked IN THE BASE is neutralised again at every re-brief — the BL-6-16 scar",
          %{tmp_dir: tmp} do
-      # THE ONE THE COMMENT WARNS ABOUT, and my first attempt at it proved a NEIGHBOURING property:
-      # committing the `.claude/` in the workspace puts it AFTER the base, so `reset --hard` alone
-      # removes it and the sanitiser is never exercised. Measured — dropping `sanitize_workspace`
-      # from the reset left that version green.
-      #
-      # The scar is a `.claude/` tracked in the TARGET REPO, therefore present in the base tree.
-      # `reset --hard` rebuilds the index from that tree, which ERASES the skip-worktree bits and
-      # RESTORES the hostile material. Sanitising once at clone is not enough: a pipe pod would read
-      # the parking-lot's directives on its second ticket.
-      # Ticket 1: a clean base. Nothing to sanitise, so NO skip-worktree bit is set for a file
-      # that does not exist yet.
+      # Introduce the hostile file in the next BASE, not in workspace commits that reset
+      # already discards. At the first clone it does not exist, so it has no skip-worktree bit.
       src = Path.join(tmp, "hostile-src")
       make_source_repo(src)
       {sha1, 0} = git(["rev-parse", "HEAD"], src)
@@ -165,8 +130,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       p1 = cap(%{"repo_path" => src, "base_branch" => "main", "base_sha" => String.trim(sha1)})
       {:ok, ws, _} = Clone.clone_or_skip(pod_dir, p1, slug: "issue-1")
 
-      # BETWEEN the two tickets, the target repo gains instruction-tier material. This is the
-      # parking lot: it moves while nobody is looking at it.
+      # The remote base changes between tickets.
       File.mkdir_p!(Path.join(src, ".claude"))
       File.write!(Path.join([src, ".claude", "settings.json"]), ~s({"hostile": true}))
       {_, 0} = git(["add", "-A", "-f"], src)
@@ -196,11 +160,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       assert {:error, {:reset_failed, :no_base_sha}} = Clone.reset_in_place(pod_dir, profile, [])
     end
 
-    # JG-076 — `base_sha` ATTEIGNAIT LA LIGNE DE COMMANDE GIT SANS AUCUNE VERIFICATION, en DERNIERE
-    # position et sans `--`. Un argument qui commence par `-` est une OPTION pour git, pas une
-    # revision — et le second appel de `pin_base_sha/2` est celui qui porte les credentials de la
-    # forge et sort sur le reseau. Ses deux voisins immediats sur le meme `with` (`base_branch`,
-    # `feature`) passaient deja par `GitRef.valid?/1` : la parade etait a deux lignes.
+    # Option-like revisions must be refused before the authenticated fetch fallback.
     for {label, hostile} <- [
           {"une option longue", "--upload-pack=touch /tmp/pwned"},
           {"une option courte", "-x"},
@@ -222,9 +182,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       pod_dir: pod_dir,
       profile: profile
     } do
-      # Le `else` de ce `with` se termine par un fourre-tout `{:error, reason} -> {:git_exit, ...}`.
-      # Sans clause dediee, un refus de VALIDATION ressortait comme un echec de git qui n'a jamais
-      # tourne — et l'operateur cherchait une panne reseau.
+      # Keep validation refusals distinguishable from command/network failures.
       p = cap(Map.put(profile.spec["project"], "base_sha", "-x"))
       {:error, {:reset_failed, reason}} = Clone.reset_in_place(pod_dir, p, slug: "issue-2")
       refute match?({:git_exit, _}, reason)
@@ -265,15 +223,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(pod_dir, "work"))
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
-  # 6-135 — LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS.
-  #
-  # Le bloc SP commun aux juges ordonnait `git diff origin/main...HEAD` en expliquant que « le clone
-  # est mono-branche ». Au dispatch d'une review, `RoleDispatch` pose `base_branch: head` : le clone
-  # est donc `--branch <head> --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de
-  # preuve echouaient sur une revision inconnue, et un juge prive de son instrument improvise une
-  # comparaison non contractuelle — ou rend son verdict sur le seul brief, que la chaine compte
-  # ensuite comme un jugement du livrable.
+  # Review clones omit origin/main; the prompt's comparison must work through refs/lcars/base.
   describe "6-135 — `refs/lcars/base` : la base contre laquelle ce travail se juge" do
     defp base_ref(ws) do
       case git(["rev-parse", "--verify", "--quiet", "refs/lcars/base"], ws) do
@@ -342,10 +292,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     test "une base de PR introuvable ARRETE le spawn, nommee — jamais un juge aveugle", %{
       tmp_dir: tmp
     } do
-      # L'action prescrite dit « refuser le spawn si cette preuve ne peut etre materialisee », et
-      # c'est la bonne direction ici : un verdict rendu sans base est compte comme un jugement du
-      # livrable. Le refus est BORNE — il ne peut atteindre qu'un pod qui porte une base de PR — et
-      # il n'immobilise rien : le verrou n'est pas encore pose, le tick suivant retente.
+      # This checks the clone refusal, not the caller's locking or retry policy.
       src = make_source_repo(Path.join(tmp, "src"))
       pod_dir = Path.join(tmp, "pod-base-morte")
       File.mkdir_p!(pod_dir)
@@ -413,15 +360,12 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     {out, 0} = git(["branch", "-r"], ws)
     remotes = out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
 
-    # The measure is on the REMOTE refs, not the checkout: without `--single-branch` all three are
-    # fetched and every one of them is a `git checkout` away from an agent whose job is to reason
-    # from `base`. The bytes are not the point — the forge is local; the material being THERE is.
+    # Check remote refs as well as the current checkout.
     assert Enum.any?(remotes, &String.ends_with?(&1, "origin/main"))
     refute Enum.any?(remotes, &String.contains?(&1, "issue-41-engineer"))
     refute Enum.any?(remotes, &String.contains?(&1, "issue-42-scribe"))
 
-    # History is KEPT: this is the code face, and `log`/`blame` are legitimate tools. The doc mount
-    # is the asymmetric twin (present state only). A `--depth` here would be the wrong economy.
+    # This one-commit branch checks log accessibility, not retention of a longer history.
     {log, 0} = git(["log", "--oneline"], ws)
     assert log =~ "code"
   end
@@ -440,9 +384,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
 
   test "idempotence: residual workspace (dead predecessor pod) → cleaned + re-cloned, no clone_failed",
        %{tmp_dir: tmp} do
-    # A timed-out/crashed pod leaves its workspace behind; the pod_id being DETERMINISTIC, the
-    # re-dispatch lands on the same pod_dir → `git clone` refused (non-empty dest) → permanent wedge
-    # of the issue. The fix cleans the residue before re-cloning.
+    # Redispatch must reuse the directory without a nonempty-destination clone failure.
     src = make_source_repo(Path.join(tmp, "src-idem"))
     pod_dir = Path.join(tmp, "pod-idem-1")
     File.mkdir_p!(pod_dir)
@@ -452,7 +394,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
     File.write!(Path.join(ws, "leftover.txt"), "junk from a dead pod")
 
-    # re-dispatch on the SAME pod_dir: without rm_rf → {:error, {:clone_failed, _}}; with → clean re-clone.
+    # Residue moves to the morgue before cloning into the same path.
     assert {:ok, ws2, feature2} = Clone.clone_or_skip(pod_dir, profile, [])
     assert ws2 == ws
     assert feature2 =~ "feature/"
@@ -491,19 +433,9 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(ws, "b.txt"))
   end
 
-  # MA-22/F-BOOT-FM-03 — `rm_rf` parity: a residual `work/` (dead predecessor pod) must not
-  # wedge the re-dispatch on "destination already exists".
-  # ============================================================
-  # MOVE-1/MA-22 — the clone is BOUNDED by construction: a HANGING git is killed within the deadline,
-  # the pod does NOT stay zombie (the caller gets a typed error instead of freezing forever).
-  # ============================================================
   test "hanging clone (mute git server) → killed within the timeout, typed error (no hang)",
        %{tmp_dir: tmp} do
-    # Fake git server: a TCP socket that ACCEPTS the connection but NEVER answers. `git clone
-    # git://127.0.0.1:PORT/x` connects, sends its request, and waits for an answer that never comes →
-    # hang. Without the bound, `clone_or_skip` would freeze the calling process (in prod: the Pod
-    # GenServer → zombie pod). With the bound (`:git_timeout_ms`), git is killed and we return
-    # `{:clone_failed, {:git_timeout, ms}}` QUICKLY.
+    # A mute TCP server exercises clone timeout. No descendant-process death probe is made.
     {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
     {:ok, port} = :inet.port(listen)
     # An acceptor that accepts then sleeps: the connection is established but stays mute.
@@ -531,19 +463,10 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     # TYPED error (the wrapper cut it), not a silent success nor an unhandled crash.
     assert {:error, {:clone_failed, {:git_timeout, 400}}} = result
 
-    # We returned in ~400ms + margin, did NOT wait forever → the bound did kill the hanging git.
+    # Elapsed time is checked after return; this assertion is not an independent watchdog.
     assert elapsed < 5_000, "the clone hung for #{elapsed}ms — the bound did not cut"
   end
 
-  # O5 (Brick 5) — `set_git_identity` test REMOVED with the function. The pod's git identity is no
-  # longer set by a mutable `git config` in the workspace (falsifiable F-01) but injected as env at
-  # launch (bwrap_launch.sh); the F-01 enforcement is the `DeliverableGate` at push (covered by
-  # deliverable_gate_test.exs + executor_post_extract_test.exs git_native usurpation case).
-
-  # ============================================================
-  # SLOT-FREEZE — reset_in_place: COLD reset of a RESIDENT pipe's workspace for the next issue,
-  # WITHOUT rm_rf (the ws is bind-mounted into the live bwrap sandbox — rm_rf would break the mount).
-  # ============================================================
   test "reset_in_place — commit + untracked of the previous issue wiped, back to base_sha on feature/work, .git PRESERVED (no rm_rf)",
        %{tmp_dir: tmp} do
     src = make_source_repo(Path.join(tmp, "src-reset"))
@@ -584,7 +507,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     {status, 0} = git(["status", "--porcelain"], ws)
     assert String.trim(status) == ""
 
-    # 4. IN-PLACE: the .git sentinel SURVIVED -> no rm_rf (the bind mount would be preserved for real).
+    # Sentinel detects directory replacement; this fixture does not create a live bind mount.
     assert File.exists?(sentinel)
   end
 
@@ -603,14 +526,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
 
   test "reset_in_place — a REDUNDANT re-reprovision (caller timed out, the poll re-issues it) is a safe idempotent no-op",
        %{tmp_dir: tmp} do
-    # `reprovision_pipe_workspace` is a bounded GenServer.call. If its deadline is exceeded (the
-    # composed local git ops overrun only in a pathological case: a force-push erased the base AND a
-    # slow fetch AND a huge untracked tree), the pod gen_statem still runs the reset to completion and
-    # the poll re-issues reprovision on the next tick. Because the pod SERIALIZES its calls there is no
-    # concurrent git (hence no index.lock race — the ops-serializer readback site had that race, this
-    # one does not), so the only residual is a REDUNDANT reset. This proves that residual is harmless:
-    # repeating the reset any number of times converges to the same clean state (at base, feature
-    # branch, .git preserved) — the retry is a safe idempotent, never a corruption.
+    # Sequential retries converge in this fixture. They are destructive, not no-ops:
+    # the second reset removes an intervening leftover. No caller timeout/concurrency is tested.
     src = make_source_repo(Path.join(tmp, "src-redundant"))
     {base, 0} = git(["rev-parse", "HEAD"], src)
     base = String.trim(base)
@@ -639,11 +556,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     assert File.exists?(sentinel)
   end
 
-  # ── BL-6-16 — workspace sanitisation (the parking-lot USB never reaches the directive tier) ──
-
-  # Source repo whose INSTRUCTION TIER is hostile and TRACKED: .claude/settings.json,
-  # a nested lib/CLAUDE.md, and a root CLAUDE.md. The wall must neutralize all but the root
-  # (overwritten by the composed doc, Scaffold-side) without ever dirtying the pod's diff.
+  # Tracked instruction fixtures: sanitizer removes .claude and nested CLAUDE.md but keeps root.
   defp make_hostile_repo(dir) do
     File.mkdir_p!(Path.join(dir, ".claude"))
     File.mkdir_p!(Path.join(dir, "lib"))
@@ -681,7 +594,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     refute File.exists?(Path.join(ws, ".claude"))
     refute File.exists?(Path.join(ws, "lib/CLAUDE.md"))
     assert File.exists?(Path.join(ws, "src.txt"))
-    # The root CLAUDE.md survives (the composed one overwrites it Scaffold-side).
+    # Root CLAUDE.md remains available for legitimate project edits.
     assert File.exists?(Path.join(ws, "CLAUDE.md"))
     assert log =~ "neutralized"
 
@@ -703,9 +616,8 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
       assert {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
       refute File.exists?(Path.join(ws, ".claude"))
 
-      # The re-brief path: reset --hard RESTORES the tracked victims and erases the
-      # skip-worktree bits — reset_in_place must re-apply the wall or the pipe pod
-      # gets the hostile material back on its 2nd ticket.
+      # Despite the historical test title, this checks absence and clean staging, not erased
+      # index bits. The separate changed-base test exercises newly introduced victims.
       assert {:ok, ^ws, _} = Clone.reset_in_place(pod_dir, profile, [])
       refute File.exists?(Path.join(ws, ".claude"))
       refute File.exists?(Path.join(ws, "lib/CLAUDE.md"))
@@ -725,8 +637,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     ExUnit.CaptureLog.capture_log(fn ->
       {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
 
-      # Simulate the composed overwrite (2nd spawn world): the working tree lies,
-      # git still holds the original.
+      # Deliberately overwrite the working copy to distinguish it from HEAD.
       File.write!(Path.join(ws, "CLAUDE.md"), "COMPOSED — not the original")
       assert {:ok, original} = Clone.read_original_claude_md(ws)
       assert original =~ "## Build"
@@ -742,7 +653,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     profile = cap(%{"repo_path" => src, "base_branch" => "main"})
 
     {:ok, ws, _} = Clone.clone_or_skip(pod_dir, profile, [])
-    # The dead predecessor's uncommitted work — 10 minutes of a producer's life.
+    # Successful rename path only: this does not exercise the destructive fallback.
     File.write!(Path.join(ws, "review-in-progress.md"), "l'oeuvre non commitee")
 
     log =

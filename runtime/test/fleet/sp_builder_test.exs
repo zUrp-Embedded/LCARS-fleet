@@ -2,12 +2,6 @@ defmodule Fleet.SPBuilderTest do
   use ExUnit.Case, async: false
   use ExUnitProperties
 
-  # `doctest Fleet.SPBuilder` RETIRE le 2026-08-06 : le module n'a JAMAIS porte d'exemple `iex>`
-  # (`git log -S` sur ce fichier ne rend rien). La ligne declarait une couverture qui n'a jamais
-  # existe — zero cas execute, et un lecteur qui voit `doctest` croit le contraire. Retirer une
-  # ligne qui n'execute rien ne retire aucun test : le compte de la suite est identique avant et
-  # apres. Trouve par le check `tests.doctest_declarations_have_examples`, ecrit le jour meme.
-
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
@@ -21,10 +15,6 @@ defmodule Fleet.SPBuilderTest do
     {:ok, modop_root: modop_root}
   end
 
-  # ============================================================
-  # Fixtures
-  # ============================================================
-
   defp valid_cap_profile(extra_spec \\ %{}) do
     spec =
       Map.merge(
@@ -34,11 +24,9 @@ defmodule Fleet.SPBuilderTest do
             "git_ops_denied" => ["push"]
           },
           "knowledge" => %{"skills" => ["memory-query", "loop"]},
-          # R12: lifetime_scope nested under invocation (cap-profile schema).
           "invocation" => %{"lifetime_scope" => "one-shot"},
           "injects" => %{},
           "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 600},
-          # modop_set = MAP (schema: default/optional/incompatible).
           "modop_set" => %{"default" => []}
         },
         extra_spec
@@ -56,10 +44,6 @@ defmodule Fleet.SPBuilderTest do
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "sp.md"), content)
   end
-
-  # ============================================================
-  # compose/3
-  # ============================================================
 
   describe "compose/3" do
     test "composes SP from cap-profile with no modop bundles" do
@@ -125,41 +109,21 @@ defmodule Fleet.SPBuilderTest do
     end
 
     test "modop_root has a DEFAULT (fleet_cap_profile/modop-bundles): modop without explicit config → composed (F-C146/PORT)" do
-      # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
-      # app_dir(:lcars_fleet, "priv/catalogue/cap_profile/modop-bundles") (where the bundles live).
-      # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
-      # default.
-      #
-      # SCOPE of this proof, since the default is easy to over-read: it shows that `SPBuilder.compose`
-      # RESOLVES its bundle root without an explicit config. It does NOT show that a step's modops
-      # reach a pod — this calls `compose` DIRECTLY with a list, while the spawn path is
-      # `CapProfile.resolve/3` → `Pod`, which re-derives the list from `default_modops/1` and drops
-      # any step-selected optional modop on the way (see the KNOWN GAP note on the B-01 guard in
-      # `Fleet.CapProfile`). "The root resolves" and "the overlay reaches the pod" are two claims;
-      # only the first is tested here.
+      # Direct compose with the shipped default root; this does not prove step-selected
+      # optional modops survive dispatch into Pod. CapProfile documents that separate path.
       Application.delete_env(:lcars_fleet, :sp_builder_modop_root)
       profile = valid_cap_profile(%{"systemPrompt" => nil})
 
       assert {:ok, %{sp_md: sp_md, metadata: %{modop_bundles_used: ["fire-mode"]}}} =
                Fleet.SPBuilder.compose(profile, ["fire-mode"])
 
-      # The fire-mode modop's SP fragment is indeed INJECTED into the system-prompt.
       assert sp_md =~ "fire-mode"
     end
 
     @tag :tmp_dir
     test "subagent_template (F-C147/PORT): the SP fragment is injected; missing file → fail-loud",
          %{tmp_dir: tmp} do
-      # ⚠ CE TEST EMPRUNTAIT SON ARTEFACT AU CANON, ET LE CANON A CHANGÉ. Il composait
-      # `code-quality-reviewer` en comptant sur `subagent-code-quality-reviewer.md` livré par le
-      # catalogue — donc sur une COÏNCIDENCE : que ce fichier existe encore. La sortie de
-      # superpowers (⚖ user 2026-08-19) l'a supprimé avec ses deux frères, et le test est tombé
-      # alors que le MÉCANISME qu'il existe pour prouver n'avait pas bougé d'une ligne.
-      #
-      # Il fabrique donc son propre template, comme le fait déjà `catalogue_verify_test` depuis le
-      # même jour : ce qu'on veut prouver, c'est qu'un fragment DÉCLARÉ est injecté et qu'un
-      # fragment déclaré-mais-absent échoue fort — deux propriétés du composeur, qui ne doivent
-      # rien devoir au contenu du catalogue.
+      # Own the fixture: template resolution must remain tested when shipped templates retire.
       root = Path.join(tmp, "subagent-templates")
       File.mkdir_p!(root)
       File.write!(Path.join(root, "subagent-fixture-lentille.md"), "# fixture lentille\ncorps\n")
@@ -184,7 +148,6 @@ defmodule Fleet.SPBuilderTest do
       assert sp_md =~ "subagent-template:fixture-lentille"
       assert sp_md =~ "fixture lentille"
 
-      # Declared but file absent → fail-loud (the pod does not launch on a half-composed SP).
       bad =
         valid_cap_profile(%{
           "systemPrompt" => nil,
@@ -262,10 +225,6 @@ defmodule Fleet.SPBuilderTest do
     end
   end
 
-  # ============================================================
-  # compose_claude_md/3
-  # ============================================================
-
   describe "compose_claude_md/3" do
     test "renders conventions without repo CLAUDE.md path" do
       assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
@@ -316,29 +275,11 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "Random"
     end
 
-    # D1 — the pod's own CLAUDE.md said what it was FORBIDDEN and never how to prove a deliverable.
-    # A producer with no test command has two ways out and one of them is a lie; this block closes
-    # the second by naming it, so the absence gets REPORTED instead of papered over with "tests
-    # green". Rule P2(b): the obligation, not the observation.
     test "the pod is told to prove its deliverable, and what to do when the repo does not say how" do
-      # ⚠ CETTE DOCTRINE A DEMENAGE, ET LE DEMENAGEMENT EST LE SUJET DU TEST. Elle vivait dans le
-      # `CLAUDE.md` compose — un fichier ECRIT PAR-DESSUS celui du depot, qu'il fallait ensuite
-      # masquer (`skip-worktree`) pour qu'il ne parte pas dans le livrable. Ce masquage rendait le
-      # `CLAUDE.md` du projet INLIVRABLE : un producteur qui l'editait voyait `git status` propre.
-      # La doctrine est donc partie dans les blocs SP, qui arrivent par `--system-prompt-file`
-      # (remplacant et fiable), et le fichier du depot est redevenu celui du depot.
-      #
-      # Le test tient les DEUX bouts : la doctrine existe toujours pour l'agent, et elle n'est plus
-      # dans le fichier qui doit rester livrable. Sans la seconde assertion, la reintroduire dans le
-      # template rouvrirait le piege sans qu'aucun test ne bronche.
-      # Le MEME resolveur que le compositeur (`Blocks`), jamais un chemin rebati : les blocs vivent
-      # dans le catalogue systeme, la carte dans le catalogue metier, et un chemin en dur ici
-      # mesurerait un fichier que la fleet ne lit pas.
-      # (Lot B, 2026-08-18) SECOND déménagement, même sujet : l'ordre de preuve a quitté
-      # `core/evidence.md` (composé chez les DIX rôles — un juge qui obéissait rejouait la suite
-      # que le runner venait d'exécuter) pour `core/producer-output.md` (producteurs seuls). Le
-      # test suit, et tient désormais TROIS bouts : la doctrine existe pour le producteur, le
-      # socle universel reste chez tous, et l'ordre n'est PLUS chez les juges.
+      # Keep the proof instruction in producer-output, out of universal evidence and the
+      # composed CLAUDE.md. This protects the split from judges' instructions and avoids
+      # restoring the overwrite/skip-worktree scheme that hid legitimate project-doc edits.
+      # These are artifact-content checks via Catalogue.find, not full role composition.
       evidence =
         Fleet.Catalogue.find(
           Fleet.Catalogue.root(),
@@ -355,9 +296,8 @@ defmodule Fleet.SPBuilderTest do
         )
         |> File.read!()
 
-      # The universal floor stays with everyone…
       assert evidence =~ "## Preuve avant action"
-      # …and the proof ORDER left it: a judge must not be told to replay the runner's suite.
+      # Judges should not inherit an instruction to replay the runner's suite.
       refute evidence =~ "Prouver ce que tu livres"
 
       assert producer_output =~ "Prouver ce que tu livres"
@@ -370,26 +310,13 @@ defmodule Fleet.SPBuilderTest do
       assert {:ok, claude_md} = Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), nil)
       refute claude_md =~ "Prouver ce que tu livres"
 
-      # The containment doctrine it replaced: a constat that named the interdictions to the very
-      # agent they confine, and told it nothing it could act on. N8/A8 — same family as the launch
-      # trace that handed a confined agent the table of its own confinement.
-      #
-      # `git_ops_denied` went with it, and the reason is MEASURED, not aesthetic: a denied Bash
-      # pattern announces itself precisely at the moment it bites — "Permission to use Bash with
-      # command `git push origin main` has been denied" — and the agent attributes it to the
-      # permission layer, not to git, and does not retry. The obligation that replaces it is not
-      # here but where behaviour is shaped: the role SP already says "tu commites en LOCAL et le
-      # SYSTÈME pousse — tu ne push JAMAIS". Naming the wall a second time, in the file the agent
-      # re-reads most, bought nothing and cost the map of its own cage.
+      # Keep internal permission configuration out of the frequently reread project doc.
       refute claude_md =~ "Contraintes pod"
       refute claude_md =~ "disallowedTools"
       refute claude_md =~ "git_ops_denied"
     end
 
-    # C1 2026-08-18 — the machine key is a CONSIGNE, not a guessed convention: the block that
-    # defines a judge's output NAMES `details.findings` and its shape. Same resolver as the
-    # composer (`Catalogue.find`), same reason as the D1 test above: a hardcoded path here would
-    # measure a file the fleet does not read.
+    # Pin the machine-readable findings vocabulary in the judge artifact.
     test "the judge is told the machine key and its shape (details.findings)" do
       judge_verdict =
         Fleet.Catalogue.find(
@@ -415,10 +342,6 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.compose_claude_md(valid_cap_profile(), "/tmp/__no_such_file")
     end
   end
-
-  # ============================================================
-  # filter_skills/2
-  # ============================================================
 
   describe "filter_skills/2" do
     test "returns paths matching whitelist that exist on FS", %{tmp_dir: tmp_dir} do
@@ -462,12 +385,8 @@ defmodule Fleet.SPBuilderTest do
       refute Enum.any?(paths, &String.contains?(&1, "otp-thinking"))
     end
 
-    # Deux absences distinctes depuis le decoupage systeme/metier, et les confondre serait un
-    # mensonge dans les deux sens.
     test "racine metier absente mais systeme presente → les skills manquent, pas la racine" do
-      # Le deploiement A un arbre de skills (celui du systeme) : repondre `:skills_root_missing`
-      # dirait qu'il n'y en a aucun, et enverrait l'operateur chercher un probleme de deploiement
-      # la ou il a simplement nomme des skills qui n'existent pas.
+      # A system root exists: diagnose missing skill names, not absent deployment roots.
       assert {:error, {:skills_missing, missing}} =
                Fleet.SPBuilder.filter_skills(valid_cap_profile(), "/tmp/__no_such_dir")
 
@@ -484,10 +403,6 @@ defmodule Fleet.SPBuilderTest do
                Fleet.SPBuilder.filter_skills(valid_cap_profile(), "/tmp/__no_such_dir")
     end
   end
-
-  # ============================================================
-  # Property-based — sha256 determinism
-  # ============================================================
 
   defp non_empty_string_gen do
     string(:alphanumeric, min_length: 1, max_length: 24)

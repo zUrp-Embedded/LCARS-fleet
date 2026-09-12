@@ -9,58 +9,24 @@ defmodule Fleet.SPBuilder do
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.CapProfile,
-      # BL-6-16: the reception filter guards the repo-CLAUDE.md door (RepoSections) —
-      # foundation, shared with the Pilot-side adoption gate.
+      # RepoSections filters imported repository instructions.
       Fleet.ReceptionFilter
     ],
     exports: []
 
   @moduledoc """
-  System Prompt builder/composer (LCARS cap-profile schema).
+  Composes `system-prompt.md`, pod `CLAUDE.md` and skill mount paths from a
+  cap profile and catalogue artifacts. Reads published images or disk; EEx
+  templates execute in the daemon. Monk and RepoSections own their respective
+  injection and repository-section resolution.
 
-  Pure data transformer: composed `%Fleet.CapProfile{}` + modop bundles
-  (sp.md fragments) + pod identifiers → composed `system-prompt.md`,
-  `CLAUDE.md`, and filtered skills paths.
+  The launcher injects the composed prompt via `--system-prompt-file` from
+  `.lcars/`, avoiding prompt content in argv and the credentials bind over
+  `.claude/`. Brief content is referenced separately through `~/context/brief.md`.
 
-  No process, no state. Three public functions (`compose/3`,
-  `compose_claude_md/3`, `filter_skills/2`) implementing the
-  `Fleet.SPBuilder.Composer` behaviour.
-
-  ## The 6 canonical injection levels
-
-    * N0  — model weights (nothing at runtime)
-    * N1  — Anthropic server prompt (console config)
-    * N2  — `system-prompt.md` composed via `compose/3`
-    * N2bis — `~/context/brief.md` brief-specific (referenced, not composed)
-    * N3  — `~/.claude/CLAUDE.md` composed via `compose_claude_md/3`
-    * N3bis — `~/.claude/skills/` filtered via `filter_skills/2`
-
-  Vendor boundary: this module stays vendor-agnostic — it COMPOSES the content, it
-  injects nothing. INJECTING the SP into the pod is done by the **N1 boundary**
-  (`bin/claude_launch.sh` — the N1 boundary IS the `bin/` script), which reads the
-  composed SP from `<pod_dir>/.lcars/system-prompt.md` and passes it to `claude` via
-  **`--system-prompt-file`** (OUT of argv: an SP on the argv would leak via
-  `/proc/<pid>/cmdline` and graze ARG_MAX; `.lcars/` is readable in-sandbox, unlike
-  `.claude/` masked by the creds bind). The launch is an interactive REPL
-  (Remote Control), never headless/metered.
-
-  sha256 determinism: 2 runs on the same input produce an
-  identical `stable_sha256` (stable parts only, excludes
-  `pod_id`, `spawned_at`, `job_id`, `attempt_id`).
-
-  ## Split-out
-
-  Two concerns with their own data source are extracted (the compose facade + EEx
-  templating + path resolution stays here):
-
-    * `Fleet.SPBuilder.Monk` — resolution of the monk injection (YAML registry I/O);
-      `resolve_monk_injection/2` stays the public API (defdelegate).
-    * `Fleet.SPBuilder.RepoSections` — extraction of the named sections from the repo
-      `CLAUDE.md` (markdown mini-parser).
-
-  Path resolution (`modop_root`) is NOT extracted: these are the
-  config-accessors for THIS facade's reads (role SP, modop fragments), cohesive
-  with them — a "Paths" module would carry only two getters with no logic.
+  `stable_sha256` hashes resolved fragments and preloaded paths, excluding pod/job/
+  attempt identifiers and timestamps. It does not hash the enclosing EEx template
+  or the full rendered prompt; repeatability also requires unchanged artifact bytes.
   """
 
   @behaviour Fleet.SPBuilder.Composer
@@ -121,7 +87,7 @@ defmodule Fleet.SPBuilder do
 
   Preloaded paths affect `stable_sha256`; `pod_id`, `job_id`, `attempt_id` and
   `spawned_at` are volatile. Missing, unsafe or malformed inputs return typed
-  errors.
+  errors for the checked cases; malformed keyword containers or cap profiles may raise.
   """
   @impl Fleet.SPBuilder.Composer
   @spec compose(CapProfile.t(), [String.t()], compose_opts()) ::
@@ -206,10 +172,7 @@ defmodule Fleet.SPBuilder do
   @spec filter_skills(CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
   def filter_skills(%CapProfile{} = cap_profile, skills_root)
       when is_binary(skills_root) do
-    # THE resolver, like every other reader — a role and the material it declares resolve from the
-    # same search path, or a catalogue can carry a role it cannot equip (W-11: `starfleet` declares
-    # `card-revision`, the skill followed the role into the system catalogue, and the permanent pod
-    # respawn-looped every five seconds).
+    # Include system skills: a business role may depend on a skill shipped there.
     roots = Catalogue.search(skills_root, Catalogue.rel(:skills))
 
     if roots == [] do
@@ -253,9 +216,8 @@ defmodule Fleet.SPBuilder do
 
   defp read_modop_fragments([], _root), do: {:ok, []}
 
-  # La racine vient du PROFIL (`catalogue_root`), pas d'un argument transporte a cote : les fragments
-  # d'un role appartiennent au catalogue qui le declare. `nil` = le catalogue livre, ce que
-  # veut un appelant sans projet en main.
+  # Published fragments use the profile's root (nil selects the default image).
+  # The disk fallback still uses global Catalogue.search/1, unlike subagent templates.
   defp read_modop_fragments(modop_bundles, root) do
     case sp_image(root) do
       %{modop_sp: fragments} ->
@@ -275,8 +237,7 @@ defmodule Fleet.SPBuilder do
 
     result =
       Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
-        # The name stays confined under EACH root it is tried in — the confinement is what makes an
-        # untrusted name safe as a path segment, and trying a second root must not weaken it.
+        # Validate the path segment against each root tried; this is lexical confinement.
         case read_first_modop(roots, name) do
           {:ok, content} -> {:cont, {:ok, [{name, content} | acc]}}
           {:error, reason} -> {:halt, {:error, reason}}
@@ -309,9 +270,7 @@ defmodule Fleet.SPBuilder do
        )
        when is_binary(name) and name != "" do
     if Fleet.Slug.valid?(name) do
-      # La racine vient du PROFIL : le template de sous-agent d'un role est livre par le catalogue
-      # qui declare ce role. Le chercher dans l'image du premier catalogue rendrait
-      # `subagent_template_missing` sur un fichier bien present, dans l'autre.
+      # Select the profile's image, not another catalogue's identically named template.
       case fetch_subagent_content(name, cap.catalogue_root) do
         {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}
         :error -> {:error, {:subagent_template_missing, name}}
@@ -329,10 +288,7 @@ defmodule Fleet.SPBuilder do
         Map.fetch(templates, name)
 
       nil ->
-        # Le SCOPE du catalogue du pod (le sien + le systeme), JAMAIS une porte aplatie type
-        # `find/2` : elle resoudrait au premier catalogue installe qui porte le template, tous
-        # confondus, pendant que le regime image d'a cote est per-catalogue — et deux regimes qui
-        # repondent differemment est LE defaut (dette `search/1`).
+        # Match image precedence: this catalogue, then system; no other business catalogue.
         scope_root = root || Catalogue.root()
 
         Catalogue.tree_scope(scope_root, :subagent_templates)
@@ -341,10 +297,8 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  # LE REFUS EST FAIL-LOUD, ET C'EST LE POINT : filtrer silencieusement une skill absente laisserait
-  # un pod REVENDIQUER une skill qui n'existe pas.
-  # LA PREMIERE RACINE QUI PORTE LE NOM GAGNE — meme regle de precedence que partout ailleurs. Un
-  # nom qu'aucune racine ne porte reste ici avec `nil`, ce que le verdict transforme en manquant.
+  # First existing path wins. Missing skills fail the whole request; existence does not
+  # validate file type, readability or symlink confinement.
   defp located_skills(plain, roots) do
     plain
     |> Enum.map(fn name ->
@@ -386,23 +340,11 @@ defmodule Fleet.SPBuilder do
   defp render_template(:sp, assigns), do: do_render("sp_template.eex", assigns)
   defp render_template(:claude_md, assigns), do: do_render("claude_md_template.eex", assigns)
 
-  # EEx EVALUATES ARBITRARY ELIXIR, HERE, IN THE DAEMON'S PROCESS -- with the whole fleet's rights,
-  # not a confined pod's. It is not a restricted template language, and the source is catalogue
-  # DATA. So the question this function has to answer is not "does it render" but "WHOSE BYTES".
-  #
-  #   * `{:ok, source}` -- the PUBLISHED image: bytes read and sha256-fingerprinted at boot, AFTER
-  #     `Catalogue.verify!()`, and served from `:persistent_term`. A closed world, one epoch per
-  #     deployment: mutating the catalogue mid-life changes nothing until a restart republishes.
-  #     This is the provenance check, and it happened long before this call.
-  #   * `:not_found` -- under a published image an absent template is a CLOSED-WORLD error, never a
-  #     silent fall back to disk.
-  #   * `:unpublished` -- NO image: live disk, re-read at every render, verified by nothing. A
-  #     declared regime (the suites' hermetic default, tooling -- same posture as its twin in
-  #     `CapProfile.Catalog.read_role/2`), NOT a production path: the boot publishes unless
-  #     `:sp_builder_publish_image` is turned off, which only `config/test.exs` does. The
-  #     `boot.proven_image_regime` contract holds that switch to the test config, because flipping
-  #     it elsewhere moves a production daemon onto evaluate-whatever-is-on-disk and nothing in the
-  #     code would look any different.
+  # EEx executes arbitrary Elixir with daemon rights: catalogue templates must be trusted.
+  # Published bytes stay fixed until republished; an image miss never falls back to disk.
+  # With no image, each render reads live disk. Boot normally publishes; the
+  # boot.proven_image_regime contract checks the test-only configuration opt-out.
+  # A source fingerprint is not a sandbox or a validation of the template's behaviour.
   defp do_render(name, assigns) do
     case Image.template(name) do
       {:ok, source} -> {:ok, EEx.eval_string(source, assigns: assigns)}
@@ -426,23 +368,14 @@ defmodule Fleet.SPBuilder do
   end
 
   @doc """
-  Path of a role's SP draft on DISK, in the scope of `root` — the unpublished fallback's half of
-  what the image does at publish time, and the same pair the image is frozen from: the named
-  catalogue, then the system one. `nil` = the first installed catalogue, because that is what the
-  image regime answers for the same caller.
-
-  NOT the flattened `find/2` (the `search/1` debt): under it a role declared by two catalogues takes
-  its DRAFT from whichever installed first, while the image regime resolves in the pod's own — two
-  regimes answering differently, the defect itself.
-
-  Returns the scope's OWN path when the role has no draft anywhere, so the caller's `:enoent`
-  names the file an author would have to create — in their tree, never a foreign one.
+  Finds a role draft on disk in `root`, then system, matching image scope.
+  nil selects Catalogue.root/0. Avoid global search: duplicate role names must
+  resolve within the caller's catalogue. If absent, returns that catalogue's
+  expected path so the caller's file error identifies where to create the draft.
+  The caller must supply a safe role name; this function does not validate it.
   """
   @spec sp_draft_path(String.t(), Path.t() | nil) :: Path.t()
   def sp_draft_path(role, root \\ nil) when is_binary(role) do
-    # `Catalogue.root/0` et pas `hd(installed_roots())` : les deux rendent le meme chemin — la liste
-    # est CONSTRUITE a partir de cette fonction — mais l'un le NOMME la ou l'autre designe une
-    # POSITION.
     scope_root = root || Catalogue.root()
     name = "agent-#{role}-base.md"
 
