@@ -1,38 +1,20 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/workstation
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
-# STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
+# STARDATE: 2026-09-12
+# STATUS: le délégué du poste — escalade, provisionnement, acceptation, depuis ce checkout ou un kit
 #
-#     deploy/workstation {up|doctor}
-#     deploy/workstation up [--from <artefact>…]
+# USAGE
+#   deploy/workstation up     [--from <kit.tar.gz> | --from <kit détaré>] [options de provision]
+#   deploy/workstation doctor [options de provision]
 #
-#       --from <kit.tar.gz>     pose DEPUIS un kit : « <kit>.sha256 » vérifié s'il est à côté (dit
-#                               sinon), détaré sous l'humain dans ~/.lcars/kits/<nom>/, puis
-#                               « provision apply » DEPUIS ce kit — canal « kit »
-#       sans --from             ce checkout — canal « source » (« kit » s'il est un kit détaré)
+#   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
+#              détare sous l'utilisateur dans ~/.lcars/kits/<nom>/, et tout se joue depuis lui
+#              (canal « kit »). Sans --from : ce checkout (canal « source »).
+#   Un canal ne se pose pas sur un autre : une machine installée par kit refuse un checkout, et
+#   inversement — mise à jour par le même canal, ou le terrain se refait.
 #
-#     Un canal ne se pose pas sur un autre : une machine « installée par kit » refuse un checkout
-#     — une mise à jour par le même canal, ou le terrain se refait (il est jetable : pas de
-#     désinstalleur sur ce rail depuis le 2026-09-11).
-#
-# Jumeau de `deploy/container` : celui-là pilote un CONTENEUR, celui-ci provisionne CE SYSTÈME. Mêmes
-# verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
-# reste l'autorité : `deploy/provision`, que ces deux-là appellent sans jamais le doubler.
-#
-# ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-#
-# Tout ce qui suit vivait dans `install.sh`, la porte. Elle y faisait donc DEUX métiers : choisir un
-# rail, et exécuter l'un des deux. Le canon les sépare (« le rail poste sédimenté dans install.sh :
-# il SORT, dans son propre script »), pour une raison qui n'est pas de rangement :
-#
-# ⚠ LA PORTE SE REJOUAIT ELLE-MÊME SOUS SUDO. Elle devait donc se dire, à la seconde instance, de
-# sauter l'accueil et la pause qu'elle venait de jouer — d'où un drapeau `--consented`, c'est-à-dire
-# un script qui contourne un problème qu'il s'est créé en voulant tout porter. Ici l'escalade n'a
-# rien à sauter : ce script n'a ni accueil ni pause, et `EUID` suffit à distinguer les deux passages.
-# `--consented` MEURT avec ce déplacement, il n'est pas réimplémenté.
-#
-# EXIT : 0 convergé · 2 appliqué avec drift résiduel (rien n'est cassé) · 1 échec
+#   EXIT  0 convergé · 2 appliqué, drift résiduel · 1 échec du provisionnement ou de l'acceptation
 
 set -euo pipefail
 
@@ -40,9 +22,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVISION="$HERE/provision"
 PROVISION_LIB="$HERE/lib/provision-lib.sh"
 
-usage() { sed -n '/^#     deploy\/workstation/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE/,/^#   EXIT/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
-# ─── L'aide passe AVANT tout : elle doit marcher sans root et sans clone complet ─────────────────
 case "${1:-help}" in
   -h|--help|help) usage; exit 0 ;;
 esac
@@ -52,87 +33,38 @@ esac
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
-# ─── L'ESCALADE — ICI, ET NULLE PART AILLEURS ───────────────────────────────────────────────────
-#
-# ⚠ `sudo` FAIT `env_reset` : tout réglage posé avant l'escalade meurt en la traversant. Cette liste
-# est le SEUL passage — une variable qui n'y figure pas est mangée en SILENCE, et le geste qu'elle
-# commande ne produit rien. Le mode de défaillance est circulaire et muet : la seconde instance ne
-# voit pas le drapeau, se refuse elle-même, et invite à poser celui qu'on vient de poser.
-#
-# On les nomme une par une plutôt que d'ouvrir `-E` : une liste blanche se relit, `-E` laisse passer
-# tout ce que l'appelant traîne, y compris ce qui retunerait les témoins du gate joué plus bas.
-# ⚠ CETTE LISTE EST LA FRONTIERE DE L'ESCALADE, et ce qui n'y est pas MEURT au `sudo`. `sudo` remet
-# l'environnement a zero : une variable posee par la porte et absente d'ici traverse sans bruit et
-# n'arrive jamais — le geste demande par l'operateur disparait entre deux processus, sans une ligne.
-# `PROV_FORGE_MONTEE` porte `--bench` sur ce rail ; l'oublier ici aurait re-avale le drapeau qu'on
-# vient de cabler, un cran plus loin.
-#
-# ⚠ ET C'EST EXACTEMENT CE QUI EST ARRIVE A L'AUTRE MOITIE DE L'AXE. Aucune `FORGE_*` ne figurait
-# ici, alors que le rail les lit : `FORGE_BASE_URL` decide de MONTER ou de CONSOMMER
-# (`48-forge-host.sh:69`, `lib/provision-lib.sh:79`) et `FORGE_PUBLIC_URL` porte l'adresse que le
-# navigateur doit resoudre (`lib/provision-lib.sh:88`). Mesure : `FORGE_BASE_URL=http://forge.lan:3000
-# bash install.sh --workstation` affichait « forge fournie » au preflight — qui tourne NON-ROOT,
-# donc avant l'escalade — puis montait un conteneur Gitea sur 127.0.0.1, et `70-human.sh:195`
-# ecrivait ensuite cette adresse locale dans le `fleet.env` de chaque humain. La fleet visait la
-# mauvaise forge, sans qu'une seule ligne ait dit non. Sur ce rail, l'axe « forge fournie » du § 13
-# n'existait donc pas : la porte refuse root, `workstation up` escalade TOUJOURS.
-#
-# ⚠ AUCUN JETON ICI, ET C'EST UNE REGLE, PAS UN OUBLI. `sudo VAR=valeur` met la valeur dans l'argv
-# d'un process root, lisible par tout compte local. Un secret traverse par un FICHIER
-# (`$PROV_TOKENS_DIR`), jamais par cette liste — c'est la meme frontiere que le shim docker, qui
-# ecarte explicitement `*TOKEN*`, `*PASSWORD*` et `*SECRET*` de ce qu'il repasse.
+# sudo remet l'environnement à zéro : seule cette liste traverse, nommée variable par variable.
+# Aucun secret ici — « sudo VAR=valeur » met la valeur dans l'argv d'un processus root.
 ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
 
 escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0
   command -v sudo >/dev/null 2>&1 \
-    || fail "root requis et sudo absent" "lance ce script en root, ou installe sudo"
-  printf '\n  [sudo] Privilèges root requis — ton mot de passe peut être demandé.\n'
+    || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
+  echo ""
+  echo "  [sudo] Privilèges root requis — le mot de passe de l'utilisateur peut être demandé."
   local env_args=() v
   for v in "${ESCALADE_ENV[@]}"; do
     [[ -n "${!v:-}" ]] && env_args+=("$v=${!v}")
   done
-  # ⚠ AUCUN DRAPEAU DE PASSAGE. La seconde instance se reconnaît à `EUID`, qui est un FAIT ; un
-  # marqueur passé en argument est une CROYANCE, que n'importe qui peut poser à la main.
-  # Les faits mesurés AVANT l'escalade (le refus de mélange) meurent avec ce process : `exec` ne
-  # joue aucun trap EXIT, donc le fichier se retire ici, et la seconde instance re-mesure.
+  # exec ne rejoue pas le trap EXIT : ce qui doit partir part ici
   [[ -z "${FACTS_FILE:-}" ]] || rm -f "$FACTS_FILE"
   exec sudo "${env_args[@]}" bash "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
 }
 
-# ─── LES FAITS : LE MÊME PRÉFLIGHT QUE LA PORTE, REJOUÉ ─────────────────────────────────────────
-#
-# La porte a mesuré avant de proposer ; l'escalade sudo a vidé l'environnement entre les deux, donc
-# rien de ce qu'elle savait ne traverse. On rejoue LE module — pas une sonde à nous. C'est le même
-# code, il est read-only, et l'`apply` plus bas est sa vraie garde : deux lectures d'une mesure
-# unique, jamais deux mesures.
 FACTS_FILE=""
 fait() {
   [[ -n "$FACTS_FILE" ]] || return 0
   sed -n "s/^$1=//p" "$FACTS_FILE" 2>/dev/null | tail -1
 }
 mesurer() {
-  [[ -n "$FACTS_FILE" ]] || {
-    FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
-  }
+  [[ -n "$FACTS_FILE" ]] || FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
   [[ -n "$FACTS_FILE" ]] || return 0
   : > "$FACTS_FILE"
-  env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight >/dev/null 2>&1 || true
+  env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight "$@" >/dev/null 2>&1 || true
 }
 
-# ─── --from : D'OÙ VIENT CE QU'ON POSE, ET LE REFUS DE MÉLANGE ──────────────────────────────────
-#
-# Deux formes, un canal chacune (`prov_channel`, lib — lot 2 du chantier release) :
-#   sans --from           ce checkout — `prov_channel_here` : source, ou kit si c'est un kit détaré
-#   --from <kit.tar.gz>   kit — vérifié par son `.sha256` s'il est à côté, détaré SOUS L'HUMAIN, puis
-#                         `provision apply` DEPUIS le kit. La seconde instance (root) reçoit le
-#                         RÉPERTOIRE, pas le tar : elle ne détare rien en root dans un home.
-#
-# ⚠ UN CANAL NE SE POSE PAS SUR UN AUTRE, ET LE REFUS PRÉCÈDE L'ESCALADE : il ne coûte pas un mot
-# de passe. Le fait vient du préflight (`channel=`), jamais d'une sonde à nous — la même règle que
-# docker. Le même canal est une mise à jour ; `aucun`, une première pose ; un préflight d'avant ce
-# lot ne rend pas le fait, et une absence de mesure n'est pas un refus.
-canal_voulu() { # canal_voulu <artefact…> -> kit | source ; un mélange ou un inconnu est un refus
+canal_voulu() {
   [[ $# -gt 0 ]] || { prov_channel_here; return 0; }
   local a c=""
   for a in "$@"; do
@@ -145,52 +77,46 @@ canal_voulu() { # canal_voulu <artefact…> -> kit | source ; un mélange ou un 
   printf '%s\n' "$c"
 }
 
-refuser_melange() { # refuser_melange <voulu> — lit le fait « channel » ; un autre canal possède la machine = refus nommé
+refuser_melange() {
   local machine; machine="$(fait channel)"
+  # « inconnu » : un produit posé avant le tampon ; un kit comme un checkout le reprend et écrit le tampon
   case "$machine" in
-    ""|aucun|"$1") return 0 ;;
-    inconnu) return 0 ;;   # posé avant le tampon : un kit ou un checkout le reprend, et écrit le tampon
-    invalide) fail "le canal d'installation de cette machine est ILLISIBLE ($PROV_CHANNEL_FILE) — rien n'a été fait" \
-                   "corrige-le, ou retire-le si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
+    ""|aucun|inconnu|"$1") return 0 ;;
+    invalide) fail "le canal d'installation de cette machine est illisible ($PROV_CHANNEL_FILE) — rien n'a été posé" \
+                   "à corriger, ou à retirer si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
   esac
   local geste
   case "$machine" in
     kit) geste="deploy/workstation up --from <kit.tar.gz>" ;;
     *)   geste="deploy/workstation up, depuis un checkout" ;;
   esac
-  fail "cette machine est installée par « $machine », et ce geste poserait « $1 » — un canal ne se pose pas sur un autre. Rien n'a été fait" \
-       "mets à jour par le même canal : $geste — ou refais le terrain, il est jetable"
+  fail "cette machine est installée par « $machine », et ce geste poserait « $1 » — un canal ne se pose pas sur un autre. Rien n'a été posé sur la machine" \
+       "mise à jour par le même canal : $geste — ou refaire le terrain, il est jetable"
 }
 
-# kit_deballer <kit.tar.gz> -> la racine du kit détaré (celle qui porte deploy/provision), sous
-# ~/.lcars/kits/<nom>/ de CET humain. Se joue AVANT l'escalade, donc sous son compte et dans son
-# HOME — ce qui interdit de l'appeler en root : le kit d'un humain ne se détare pas sous /root.
 kit_deballer() {
   local tar="$1" nom dest
-  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance SANS sudo : le kit se détare sous ton compte, l'escalade vient après"
+  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance sans sudo : le kit se détare sous l'utilisateur, l'escalade vient après"
   [[ -f "$tar" ]] || fail "--from : kit introuvable : $tar"
   tar="$(readlink -f "$tar")"
   if [[ -f "$tar.sha256" ]]; then
     ( cd "$(dirname "$tar")" && sha256sum -c --quiet "$(basename "$tar").sha256" >/dev/null 2>&1 ) \
       || fail "--from : la somme sha256 de $tar ne correspond pas à $tar.sha256 — kit altéré ou incomplet, rien n'a été détaré" \
-              "re-télécharge le tar ET son .sha256, puis relance"
+              "retélécharger le tar et son .sha256, puis relancer"
     echo "  kit : sha256 vérifié ($tar.sha256)" >&2
   else
-    echo "  kit : AUCUN $tar.sha256 à côté — le kit n'est PAS vérifié ; je continue, tu es prévenu" >&2
+    echo "  kit : aucun $tar.sha256 à côté — le kit n'est pas vérifié, l'installation continue" >&2
   fi
   nom="$(basename "$tar" .tar.gz)"; dest="$HOME/.lcars/kits/$nom"
   mkdir -p "$dest" && tar -xzf "$tar" -C "$dest" || fail "--from : détarage de $tar dans $dest en échec"
   local -a racines=("$dest"/*/deploy/provision)
   [[ "${#racines[@]}" -eq 1 && -x "${racines[0]}" ]] \
-    || fail "--from : $dest ne porte pas UN deploy/provision — ce tar n'est pas un kit LCARS (${#racines[@]} trouvé(s))"
-  printf '%s\n' "${racines[0]%/deploy/provision}"
+    || fail "--from : $dest ne porte pas un deploy/provision — ce tar n'est pas un kit LCARS (${#racines[@]} trouvé(s))"
+  readlink -f "${racines[0]%/deploy/provision}"
 }
 
-# ─── LES IDENTIFIANTS — IMPRIMER PUIS DÉTRUIRE, DANS LE MÊME GESTE ──────────────────────────────
-#
-# ⚠ SUR TOUS LES CHEMINS DE SORTIE, Ctrl-C COMPRIS. Un `rm` qui s'exécute sans l'impression perd
-# POUR DE BON un secret déjà posé sur la forge : le compte existe, avec un mot de passe que personne
-# n'a jamais vu.
+# Les identifiants s'impriment avant que leur fichier parte, sur toute sortie, INT et TERM compris :
+# un secret déjà posé sur la forge et jamais montré est perdu.
 _CREDS_PRINTED=0
 print_credentials_once() {
   [[ "$_CREDS_PRINTED" -eq 0 ]] || return 0
@@ -205,50 +131,40 @@ nettoyer() {
   return 0
 }
 
-# ─── LE BANDEAU DE FIN ──────────────────────────────────────────────────────────────────────────
+# « <humain de fleet> » est un gabarit : à cette seconde il n'y a peut-être encore personne
 bandeau_final() {
-  local substrat="$1" step1 step1b step3 step3b
-  if [[ "$substrat" == "wsl" ]]; then
-    step1="1. WSL : si demandé, « wsl --shutdown » (PowerShell),"
-    step1b="   rouvrir un NOUVEL onglet, relancer cet install."
+  local -a corps=("  Suite :")
+  if [[ "$1" == "wsl" ]]; then
+    corps+=("  1. WSL : « wsl --shutdown » (PowerShell), rouvrir un onglet, relancer l'installation.")
   else
-    step1="1. Rien à redémarrer : ce terrain n'a pas de WSL."
-    step1b=""
+    corps+=("  1. Rien à redémarrer sur ce terrain.")
   fi
-  # ⚠ AUCUN NOM ICI : ce rail n'en crée plus, et à cette seconde il n'y a peut-être encore personne.
-  # Nommer un compte que l'opérateur n'a pas serait lui faire taper une commande qui échoue.
-  step3="3. « sudo -u <ton humain> fleet start » — la fleet tourne sous un"
-  step3b="   humain de fleet ; toi tu l'atteins par le groupe fleet. Personne encore ? Inscris-toi sur la forge, team « humans »."
-
-  local corps=("  Suite (les verdicts ci-dessus font foi) :" "  $step1")
-  [[ -n "$step1b" ]] && corps+=("  $step1b")
-  corps+=("  2. « claude » → /login (geste d'identité, une fois)." "  $step3" "  $step3b")
-  corps+=("  Sonde à tout moment : « deploy/workstation doctor »")
+  corps+=("  2. « claude » puis /login : l'identité, une fois."
+          "  3. « sudo -u <humain de fleet> fleet start » — la fleet tourne sous un humain inscrit"
+          "     sur la forge (team « humans »)."
+          "  Sonde : « deploy/workstation doctor »")
   echo ""
-  prov_box_emit --rule "       LCARS-FLEET v2 — PROVISIONING TERMINÉ" "${corps[@]}"
+  prov_box_emit --rule "       LCARS-FLEET — provisionnement terminé" "${corps[@]}"
 }
 
-# seed_bench_creds <humain> — les creds claude du siège chez l'humain de démo du banc, 0600, ou
-# l'absence DITE. `LCARS_CREDS_SRC` est la couture des témoins (le défaut est celles du siège).
 seed_bench_creds() {
   local human="$1" seat="${SUDO_USER:-}" src home grp
   home="$(getent passwd "$human" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { echo "  creds claude : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
   src="${LCARS_CREDS_SRC:-$(getent passwd "$seat" 2>/dev/null | cut -d: -f6)/.claude/.credentials.json}"
-  [[ -r "$src" ]] || { echo "  creds claude NON posées chez « $human » : le siège « ${seat:-?} » n'en a pas ($src) — aucun pod ne pourra penser. Geste : « claude », /login, /exit chez le siège, puis rejoue"; return 0; }
+  [[ -r "$src" ]] || { echo "  creds claude non posées chez « $human » : le compte qui a lancé l'installation (« ${seat:-?} ») n'en a pas ($src) — aucun pod ne pourra penser. « claude », /login, /exit sous ce compte, puis relancer l'installation"; return 0; }
   grp="$(id -gn "$human")"
   if install -d -m 0700 -o "$human" -g "$grp" "$home/.claude" \
      && install -m 0600 -o "$human" -g "$grp" "$src" "$home/.claude/.credentials.json"; then
-    echo "  creds claude posées chez « $human » (copie de celles de « $seat », 0600) — le spawn-boundary passera"
+    echo "  creds claude posées chez « $human » (copie de celles de « $seat », 0600)"
   else
-    echo "  creds claude NON posées chez « $human » (copie refusée) — aucun pod ne pourra penser"
+    echo "  creds claude non posées chez « $human » (copie refusée) — aucun pod ne pourra penser"
   fi
   return 0
 }
 
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
-  # ─── --from : les artefacts, séparés de ce qui va à provision ────────────────────────────────
   local -a from=() args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -256,14 +172,12 @@ cmd_up() {
       *)      args+=("$1"); shift ;;
     esac
   done
-  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce rail exige le checkout complet"
+  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce script exige l'arbre complet"
   local voulu; voulu="$(canal_voulu "${from[@]}")" || exit 1
-
-  # ─── LE REFUS DE MÉLANGE, AVANT L'ESCALADE ────────────────────────────────────────────────────
-  mesurer
+  mesurer "${args[@]}"
   refuser_melange "$voulu"
 
-  # ─── KIT : vérifié et détaré SOUS L'HUMAIN, avant l'escalade ; root reçoit le répertoire ──────
+  # wrapper, lib, provision et accept viennent tous du kit, jamais un mélange avec le checkout
   local kit_dir=""
   if [[ "${#from[@]}" -gt 0 ]]; then
     case "${from[0]}" in
@@ -272,94 +186,63 @@ cmd_up() {
     esac
     prov_delivery_is_binary "$kit_dir" \
       || fail "--from : $kit_dir ne se déclare pas paquet (pas de tampon à sa racine) — un kit se déclare ; un checkout se pose sans --from"
-    PROVISION="$kit_dir/deploy/provision"
-    echo "  kit : $kit_dir — « provision apply » se joue DEPUIS ce kit"
+    if [[ "$kit_dir/deploy" != "$HERE" ]]; then
+      [[ -f "$kit_dir/deploy/workstation" ]] || fail "--from : $kit_dir ne porte pas deploy/workstation — ce n'est pas un kit LCARS"
+      echo "  kit : $kit_dir — tout se joue depuis ce kit"
+      [[ -z "$FACTS_FILE" ]] || rm -f "$FACTS_FILE"
+      exec bash "$kit_dir/deploy/workstation" up --from "$kit_dir" "${args[@]}"
+    fi
   fi
-
-  # La seconde instance reçoit le RÉPERTOIRE du kit (elle ne détare rien en root) ; `args`, lui,
-  # reste ce qui va à provision.
-  local -a relance=("${args[@]}")
-  [[ -z "$kit_dir" ]] || relance+=(--from "$kit_dir")
-  escalade_si_besoin up "${relance[@]}"
-  # À partir d'ici : root, SUDO_USER = l'humain.
+  escalade_si_besoin up ${kit_dir:+--from "$kit_dir"} "${args[@]}"
 
   PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" \
     && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
   export PROV_ANNOUNCE_FILE
-  trap nettoyer EXIT INT TERM
+  trap nettoyer EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  [[ -s "${FACTS_FILE:-}" ]] || mesurer "${args[@]}"
 
-  mesurer
-
-  # ─── LES PAQUETS D'ABORD, SI C'EST LE RAIL QUI POSE DOCKER ───────────────────────────────────
-  # Sur une machine qui a déjà docker, rejouer trois modules serait du bruit ; sur une machine non
-  # déclarée, ce serait une promesse que `00-preflight` refusera dix secondes plus tard.
-  if [[ "$(fait docker)" == "absent" ]] \
-     && [[ "$(fait substrat)" == "linux" ]] \
-     && [[ "$(fait consent)" == "env" ]]; then
+  # docker-ce ne se pose qu'où le rail le peut : un linux déclaré par l'environnement, jamais autrement
+  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" == "env" ]]; then
     echo ""
     echo "  docker est absent : les paquets et docker-ce sont posés d'abord."
     "$PROVISION" apply "${args[@]}" --only 00-preflight --only 10-packages --only 12-docker-engine \
       || echo "  la tranche paquets n'a pas convergé — 48-forge-host dira ce qui manque."
-    # LA MESURE SE REJOUE : le fait valait « absent » il y a trente secondes, et la suite du rail
-    # travaillerait sinon sur une photographie prise avant l'installation.
-    mesurer
+    mesurer "${args[@]}"
   fi
 
-  # ─── L'AUTORITÉ ──────────────────────────────────────────────────────────────────────────────
-  # `provision apply` rend 0 (convergé), 2 (appliqué, drift résiduel — rien n'est cassé) ou 1
-  # (échec) : sous `set -e`, une ligne nue tuerait ce script sur 1 ET 2, sans un mot. Même lecture
-  # que `deploy/container` (`await_provision_verdict`) — deux délégués qui en tirent deux verdicts, c'est
-  # un code de retour qui ne veut plus rien dire.
   local rc=0
   "$PROVISION" apply "${args[@]}" || rc=$?
   case "$rc" in
     0) ;;
     2)
       echo ""
-      echo "  Provisionnement APPLIQUÉ, avec DRIFT RÉSIDUEL. Rien n'est cassé : un geste manque."
-      echo "  Les lignes DRIFT ci-dessus le nomment, et « workstation doctor » les relit."
+      echo "  Provisionnement appliqué, avec drift résiduel : un geste manque. Les lignes DRIFT"
+      echo "  ci-dessus le nomment ; « deploy/workstation doctor » les relit."
       ;;
     *)
       echo ""
-      echo "  Provisionnement EN ÉCHEC (rc=$rc) — l'installation n'est PAS complète."
-      echo "  Les lignes FAIL ci-dessus nomment ce qui a échoué ; « workstation doctor » les relit."
-      exit "$rc"
+      echo "  Provisionnement en échec (rc=$rc) : l'installation n'est pas complète. Les lignes FAIL"
+      echo "  ci-dessus nomment ce qui a échoué ; « deploy/workstation doctor » les relit."
+      exit 1
       ;;
   esac
-
-  # ─── LE BANC POSE LES CREDS CLAUDE CHEZ SON HUMAIN — ISO avec bench-up (--creds-from) ─────────
-  # ⚖ user 2026-09-11 : les deux installs sont ISO à la fin. bench-up copie ~/.claude/.credentials.json
-  # de l'opérateur chez l'humain de démo du conteneur ; ici l'opérateur est le siège (SUDO_USER) et
-  # l'humain de démo est celui que la porte a nommé (LCARS_BUILTIN_HUMAN, vide hors --bench). Sans
-  # creds chez le siège, on le DIT : aucun pod ne pourra penser, et « fleet start » le refusera en
-  # nommant le geste d'identité.
   [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || seed_bench_creds "$LCARS_BUILTIN_HUMAN"
 
-  # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ────────────────────────────────────────────────
-  # ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette
-  # passe — `nettoyer` détruit le fichier en sortant, et la forge n'en garde qu'un hash. Plus tard,
-  # on ne pourrait plus vérifier « je peux me connecter », seulement « le compte existe ».
   local accept_rc=0
   if [[ -x "$HERE/accept" ]]; then
     bash "$HERE/accept" --announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}" || accept_rc=$?
   fi
-
   bandeau_final "$(fait substrat)"
-
-  # Les identifiants en DERNIER : la dernière chose à l'écran est la seule qu'on est sûr de ne pas
-  # avoir fait défiler. `nettoyer` les imprimerait de toute façon — cet appel les place avant le
-  # code de sortie sur le chemin nominal.
   print_credentials_once
-  exit "$accept_rc"
+  [[ "$accept_rc" -eq 0 ]] || exit 1
+  exit "$rc"
 }
 
-# ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
-#
-# ⚠ AUCUNE ESCALADE ICI, ET C'EST LE CONTRAT. `doctor` est read-only : `NEEDS: root` n'est contrôlé
-# qu'à l'`apply` (`provision`, `run_module`). Demander sudo pour SONDER apprendrait à l'opérateur
-# qu'une sonde coûte un mot de passe — et il finirait par le donner à n'importe quoi.
+# une sonde ne coûte pas un mot de passe : doctor n'escalade pas
 cmd_doctor() {
-  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce rail exige le checkout complet"
+  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce script exige l'arbre complet"
   exec "$PROVISION" doctor "$@"
 }
 

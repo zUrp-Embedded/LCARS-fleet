@@ -154,7 +154,7 @@ export PROV_SOURCE_REV
 
 # ─── update : pull vérifié du checkout, puis re-exec du runner pullé en apply ───────────────────
 if [[ "$CMD" == "update" ]]; then
-  [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relance : sudo $SELF update"
+  [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relancer : sudo $SELF update"
   ROOT="$(repo_root)"
   git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
 
@@ -255,7 +255,7 @@ fi
 if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
   for i in "${!SELECTED[@]}"; do
     if [[ "${EFFECTIVE[$i]}" == "apply" && "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
-      die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relance : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
+      die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relancer : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
     fi
   done
 fi

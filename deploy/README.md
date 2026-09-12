@@ -134,7 +134,7 @@ exécutait ce code en root (6-109). Puis re-exec du runner FRAÎCHEMENT pullé e
 `--only` : un update partiel est irreprésentable). Déjà à jour → re-converge quand même.
 Le rebuild/redeploy effectif est décidé par `60-deploy` (sha déployé vs HEAD).
 
-Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=erreur-de-sonde.
+Codes retour : `apply` 0=convergé 1=échec 2=drift résiduel · `doctor` 0=conforme 1=drift 2=erreur-de-sonde.
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
