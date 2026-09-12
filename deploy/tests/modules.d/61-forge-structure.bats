@@ -1,22 +1,13 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/61-forge-structure.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-04
-# STATUS: bats tests for 61-forge-structure — la structure de la forge se derive de la release POSEE, sans mix
+# STARDATE: 2026-09-12
+# STATUS: témoins de 61-forge-structure — les préconditions, le roster dérivé de la release, la recette jouée sur une copie, le verdict lu dans la sortie de tofu
 #
-# CE QUE CE FICHIER GARDE, ET D'OU IL VIENT. Ces temoins vivaient dans le temoin de 48, sur
-# `48-forge-host`, quand ce module posait la structure de la forge dans le meme geste que son
-# amorcage. La structure exige le roster du catalogue, donc la release — que `60-deploy` pose douze
-# rangs plus loin. `48` la contournait en COMPILANT l'arbre (hex, rebar, deps.get, `mix run`) et en
-# devinant quelle release lire (`prov_release_bin`). ⚖ user 2026-09-04 (point 1 du chantier
-# deploy-independance) : couper `48`, poser la structure APRES 60. Ici la release est posee par
-# construction : un chemin, aucun `mix`, aucune devinette.
-#
-# ⚠ CES TEMOINS NE LANCENT NI DOCKER NI TOFU. Ce qui se mesure est la FORME de l'appel — c'est la
-# que les fautes etaient, et la seule partie qui serait silencieuse.
-# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
-# doivent atteindre l'outil TELS QUELS. Les quotes simples sont l'instrument, pas un oubli.
-# shellcheck disable=SC2016
+# Le module se joue entier dans un dépôt de décor : la lib y est copiée (repo_root y mène),
+# enroll-catalogue.sh et forge-gestures.sh sont des doublures qui notent ce qu'elles reçoivent,
+# tofu et curl aussi.
 
 load ../refute
 
@@ -24,190 +15,159 @@ setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  SRC="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
-  [ -f "$SRC" ]
-  SRC48="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  G="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  export PROVISION_MODULE=61-forge-structure
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"; [ -f "$MOD" ]
+  RACINE="$BATS_TEST_TMPDIR/racine"
+  mkdir -p "$RACINE/deploy/lib" "$RACINE/runtime/services/forge-recipe/instance"
+  cp "$BATS_TEST_DIRNAME"/../../lib/*.sh "$RACINE/deploy/lib/"
+  printf 'terraform {}\n' > "$RACINE/runtime/services/forge-recipe/versions.tf"
+  printf 'terraform {}\n' > "$RACINE/runtime/services/forge-recipe/instance/versions.tf"
+  mkdir -p "$RACINE/runtime/services/forge-recipe/.terraform"
+  export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
+  export PROVISION_MODULE=61-forge-structure PROV_SUBSTRATE=linux PROV_AUTHORITY_USER=root
+  export PROV_HUMAN; PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$PROV_TOKENS_DIR"
+  export PROV_MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"; printf 'tok\n' > "$PROV_MASTER_TOKEN_FILE"
   export PROV_PREFIX="$BATS_TEST_TMPDIR/prefix"
+  mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin"; printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"; chmod 0755 "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/tofu"; mkdir -p "$LCARS_TOFU_DIR"; printf 'x\n' > "$LCARS_TOFU_DIR/tofurc"
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
+  export GESTE_ENV="$BATS_TEST_TMPDIR/geste.env"; : > "$GESTE_ENV"
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
+  export LCARS_TOFU_BIN="$BIN/tofu"
+  cat > "$LCARS_TOFU_BIN" <<'EOF'
+#!/usr/bin/env bash
+echo "TOFU $PWD $*" >> "$CALLS"
+[[ -z "${STUB_INIT_KO:-}" ]] || { echo "init: provider introuvable dans le miroir" >&2; exit 1; }
+EOF
+  cat > "$BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+[[ "${STUB_FORGE_UP:-1}" == 1 ]] && exit 0 || exit 7
+EOF
+  cat > "$RACINE/deploy/lib/enroll-catalogue.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "ENROLL $* TOOL_EVAL=${LCARS_TOOL_EVAL:-}" >> "$CALLS"
+while [[ $# -gt 0 ]]; do [[ "$1" == --tofu-dir ]] && dir="$2"; shift; done
+[[ "${STUB_ROSTER:-}" == vide ]] || printf '{"roles":{"admiral":{}}}\n' > "$dir/roles.auto.tfvars.json"
+EOF
+  cat > "$RACINE/runtime/services/forge-gestures.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "GESTE $*" >> "$CALLS"
+{ env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE)=' | sort
+  echo "recette: $(ls -A "$LCARS_RECIPE_DIR" | sort | tr '\n' ' ')"
+  echo "instance: $(ls -A "$LCARS_RECIPE_DIR/instance" | sort | tr '\n' ' ')"
+} > "$GESTE_ENV"
+case "${STUB_GESTE:-pose}" in
+  pose)   echo "Apply complete! Resources: 3 added, 0 changed, 0 destroyed." ;;
+  rien)   echo "Apply complete! Resources: 0 added, 0 changed, 0 destroyed." ;;
+  echec)  echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
+esac
+EOF
+  chmod 0755 "$BIN"/* "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
 }
 
-code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
+mod() { run bash "$MOD" "$@"; }
+copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enroll.*' -o -name 'prov-recipe.*' -o -name 'prov-tofu.*' \); }
 
-# ─── LE RANG, ET CE QU'IL ACHETE ────────────────────────────────────────────────────────────────
-
-@test "le module vient APRES 60 et le DECLARE — la dependance etait un commentaire, elle est un AFTER" {
-  grep -qE '^# AFTER: .*\b60-deploy\b' "$SRC"
-  grep -qE '^# AFTER: .*\b48-forge-host\b' "$SRC"
-  grep -qE '^# AFTER: .*\b46-tofu\b' "$SRC"
-  # et le rang est l'ordre : le glob du runner met 60 avant 61
-  local _mods _ia _ib d="$BATS_TEST_DIRNAME/../../modules.d"
-  _mods="$(cd "$d" && printf '%s\n' *.sh)"
-  _ia="$(grep -nx '60-deploy.sh' <<<"$_mods" | cut -d: -f1)"
-  _ib="$(grep -nx '61-forge-structure.sh' <<<"$_mods" | cut -d: -f1)"
-  [ -n "$_ia" ]
-  [ -n "$_ib" ]
-  [ "$_ia" -lt "$_ib" ]
+@test "check : forge muette — un drift qui renvoie à 48, rien d'autre n'est sondé" {
+  STUB_FORGE_UP=0 mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 61-forge-structure: forge muette (http://127.0.0.1:21000) — rien à structurer tant que 48-forge-host"* ]]
+  [[ "$output" != *"release"* ]]
 }
 
-@test "48 ne pose PLUS la structure, ni le roster — il monte et amorce, c'est tout" {
-  local c48; c48="$(grep -vE '^\s*#|^\s*`#' "$SRC48")"
-  refute grep -q 'forge-gestures.sh" apply' <<<"$c48"
-  refute grep -q 'enroll-catalogue.sh' <<<"$c48"
-  refute grep -qE 'mix (local\.|deps\.|run |compile)' <<<"$c48"
-  refute grep -q 'prov_release_bin' <<<"$c48"
-  refute grep -q 'tofu init' <<<"$c48"
-  # et il le dit : celui qui structure est nomme
-  grep -q '61-forge-structure' "$SRC48"
+@test "check : forge vivante sans autorité, sans release, sans tofu — trois drifts qui nomment leur poseur" {
+  rm -f "$PROV_MASTER_TOKEN_FILE" "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet" "$LCARS_TOFU_BIN"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"* ]]
+  [[ "$output" == *"release absente ($PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy ne l'a pas posée"* ]]
+  [[ "$output" == *"tofu absent ($LCARS_TOFU_BIN) — 46-tofu le pose"* ]]
 }
 
-# ─── LE ROSTER, DEPUIS LA RELEASE POSEE — ET RIEN D'AUTRE ───────────────────────────────────────
-
-@test "le roster se derive de la release POSEE — un seul chemin, derive du prefixe" {
-  code | grep -q 'RELEASE_BIN="\$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"'
-  code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" --release "\$RELEASE_BIN"'
-  # ni l'arbre, ni une image, ni le paquet : la devinette est morte avec 48
-  code | refute_out '--repo'
-  code | refute_out '--image'
-  code | refute_out '_build/prod/rel'
-  code | refute_out 'prov_release_bin'
-  code | refute_out 'ref_catalogue'
-  code | refute_out 'Fleet.Catalogue.root'
+@test "check : tout en place — conforme, et la structure elle-même est renvoyée à 63" {
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"forge vivante"*"autorité de création présente"*"release posée"*"tofu présent"*"sondée compte par compte par 63-forge-tokens"* ]]
 }
 
-@test "AUCUN mix dans ce module — la release porte la fonction, le detour n'a plus d'objet" {
-  code | refute_out 'mix local'
-  code | refute_out 'mix deps'
-  code | refute_out 'mix run'
-  code | refute_out 'mix compile'
+@test "apply : forge muette — échec, aucun geste" {
+  STUB_FORGE_UP=0 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  61-forge-structure: forge muette (http://127.0.0.1:21000)"* ]]
+  [ ! -s "$CALLS" ]
 }
 
-@test "la derivation se joue sous l'humain, en mode OUTIL (GUARD B)" {
-  # La release refuse de s'evaluer sous le siege ; `LCARS_TOOL_EVAL=1` est le seam prevu pour un
-  # outil. Le dossier de sortie est cede a l'humain, sinon il ne peut pas y ecrire.
-  code | grep -q 'as_human env LCARS_TOOL_EVAL=1 "\$(dirname "\$PROVISION_LIB")/enroll-catalogue.sh"'
-  code | grep -q 'chown "\$PROV_HUMAN" "\$enroll"'
-  local rt="$BATS_TEST_DIRNAME/../../../runtime/config/runtime.exs"
-  grep -q 'tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"' "$rt"
+@test "apply : sans autorité de création — échec qui nomme 48, aucun geste" {
+  rm -f "$PROV_MASTER_TOKEN_FILE"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  61-forge-structure: aucune autorité de création"*"48-forge-host la minte"* ]]
+  [ ! -s "$CALLS" ]
 }
 
-@test "sans release posee, le REFUS nomme le poseur (60-deploy) et le chemin — jamais l'arbre" {
-  # Le fragment est joue contre des doublures : c'est du choix de chemin, il ne parle a personne.
-  local frag="$BATS_TEST_TMPDIR/frag.sh"
-  sed -n '/^  \[\[ -x "\$RELEASE_BIN" \]\] || {$/,/^  }$/p' "$SRC" > "$frag"
-  [ -s "$frag" ] || { echo "extraction du fragment ratee"; return 1; }
-  run bash -c "
-    p_fail() { echo \"FAIL \$*\"; }
-    verdict_apply() { exit 9; }
-    RELEASE_BIN='$BATS_TEST_TMPDIR/inexistant/lcars_fleet'
-    source '$frag'
-    echo CONTINUE"
-  [ "$status" -eq 9 ] || { echo "le module a continue sans release (rc=$status) : $output"; return 1; }
-  [[ "$output" == *"60-deploy"* ]]
-  [[ "$output" == *"inexistant/lcars_fleet"* ]]
-  refute grep -q 'roster non dérivable' <<<"$output"
-  [[ "$output" != *"CONTINUE"* ]]
+@test "apply : sans tofu — échec qui nomme 46, aucun geste" {
+  rm -f "$LCARS_TOFU_BIN"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  61-forge-structure: tofu absent ($LCARS_TOFU_BIN) — 46-tofu le pose"* ]]
+  [ ! -s "$CALLS" ]
 }
 
-# ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
-#
-# ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de recette
-# tofu ? » — la structure se jouait dans un conteneur transitoire. Elle se joue par le geste.
-
-@test "la structure est jouee par le GESTE, pas par un conteneur transitoire" {
-  code | grep -q 'forge-gestures.sh" apply'
-  code | refute_out 'd create --network'
-  code | refute_out 'd cp '
-  code | refute_out 'volume create'
-  code | refute_out 'forge-apply'
-  code | refute_out 'PROV_FORGE_IMAGE'
-  code | refute_out 'lcars-fleet:2'
-  code | refute_out 'image inspect'
+@test "apply : sans release posée — échec qui nomme 60 et le chemin, aucun geste" {
+  rm -f "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucune release exécutable posée ($PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy n'a pas abouti"* ]]
+  [ ! -s "$CALLS" ]
 }
 
-@test "l'AUTORITE est lue la ou 48 l'a ECRITE — LCARS_PRIVATE_DIR, jamais recomposee" {
-  grep -q 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$SRC"
-  grep -q 'PROV_MASTER_TOKEN_FILE' "$SRC"
-  grep -q 'MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-\$PRIVATE_DIR/forge-master.token}"' "$G"
-  grep -q 'SEED_FILE="${LCARS_FORGE_SEED_FILE:-\$PRIVATE_DIR/forge-seed.pass}"' "$G"
-  # et 48 pose bien les deux noms que le geste cherche
-  grep -q 'SEED_FILE="\$PROV_TOKENS_DIR/forge-seed.pass"' "$SRC48"
+@test "apply : le roster est dérivé de la release sous l'humain en mode outil, déposé dans une copie de la recette initialisée hors-ligne, le geste reçoit la forge et l'autorité, les copies partent, la pose est comptée" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^ENROLL --tofu-dir $TMPDIR/prov-enroll\..* --release $PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet TOOL_EVAL=1$" "$CALLS"
+  [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/ ]* init -input=false -no-color$" "$CALLS")" -eq 1 ]
+  [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/]*/instance init -input=false -no-color$" "$CALLS")" -eq 1 ]
+  grep -q '^GESTE apply$' "$CALLS"
+  grep -q "^FORGE_BASE_URL=http://127.0.0.1:21000$" "$GESTE_ENV"
+  grep -q "^LCARS_PRIVATE_DIR=$PROV_TOKENS_DIR$" "$GESTE_ENV"
+  grep -q "^LCARS_RECIPE_DIR=$TMPDIR/prov-recipe\." "$GESTE_ENV"
+  grep -q "^LCARS_DEMO_CATALOGUE=$RACINE/catalogues/web-demo$" "$GESTE_ENV"
+  grep -q "^TF_CLI_CONFIG_FILE=$LCARS_TOFU_DIR/tofurc$" "$GESTE_ENV"
+  grep -q '^recette: instance roles.auto.tfvars.json versions.tf $' "$GESTE_ENV"
+  [ -z "$(copies_restantes)" ]
+  [ ! -e "$RACINE/runtime/services/forge-recipe/roles.auto.tfvars.json" ]
+  [[ "$output" == *"POSÉ  61-forge-structure: structure de la forge posée — 63-forge-tokens peut minter les jetons de rôle"* ]]
 }
 
-@test "l'URL passee est la LOOPBACK de l'hote, plus le nom de service du reseau compose — UNE fois" {
-  [ "$(code | grep -c 'FORGE_BASE_URL="\$FORGE_URL"')" -eq 1 ]
-  code | refute_out 'FORGE_BASE_URL="http://forge:3000"'
+@test "apply : une recette qui n'a rien bougé est conforme, rien n'est compté" {
+  STUB_GESTE=rien mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"OK    61-forge-structure: structure de la forge déjà conforme — rien à poser"* ]]
+  [[ "$output" != *"POSÉ"* ]]
 }
 
-@test "la recette est une COPIE — le checkout de l'operateur ne recoit pas le roster genere" {
-  code | grep -q 'recipe="\$(mktemp -d'
-  code | grep -q 'LCARS_RECIPE_DIR="\$recipe"'
-  code | grep -q 'cp "\$enroll/roles.auto.tfvars.json" "\$recipe/roles.auto.tfvars.json"'
-  code | refute_out 'deps/roles\.auto\.tfvars\.json'
-  code | grep -q 'rm -rf "\$recipe" "\$enroll"'
+@test "apply : un geste en échec est un échec qui montre sa sortie, les copies partent" {
+  STUB_GESTE=echec mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  61-forge-structure: structure non posée (rc=1)"*"401 Unauthorized"* ]]
+  [ -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enroll.*' -o -name 'prov-recipe.*' \))" ]
 }
 
-@test "la copie est initialisée hors-ligne par 61, et le geste réinitialise la sienne avant chaque apply" {
-  local boucle; boucle="$(sed -n '/^  for m in instance \.; do/,/^  done/p' "$G")"
-  [ "$(grep -n 'tofu init' <<<"$boucle" | head -1 | cut -d: -f1)" -lt "$(grep -n 'tofu apply' <<<"$boucle" | head -1 | cut -d: -f1)" ]
-  code | grep -q '"$TOFU_BIN" init -input=false -no-color'
-  code | grep -q 'TF_CLI_CONFIG_FILE='
+@test "apply : un roster vide est refusé, le geste n'est pas joué" {
+  STUB_ROSTER=vide mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  61-forge-structure: roster vide — la recette serait appliquée sans comptes"* ]]
+  refute grep -q '^GESTE' "$CALLS"
+  [ -z "$(copies_restantes)" ]
 }
 
-@test "le \`.terraform\` de l'arbre NE VOYAGE PAS — un etat decrit un chemin, pas une recette" {
-  code | grep -q 'rm -rf "\$recipe/.terraform" "\$recipe/instance/.terraform"'
-}
-
-@test "le pre-requis manquant est NOMME avec le module qui le pose" {
-  grep -q '46-tofu' "$SRC"
-  code | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  refute grep -q 'container build' "$SRC"
-}
-
-@test "le depot de demo est recable, la REFERENCE se demande a son autorite — ce module ne la nomme pas" {
-  # La racine LIVREE est celle que Fleet.Layout declare (@platform_root + @catalogues_dirname) ; sur
-  # les deux terrains c'est 62 qui embarque `catalogues/` du kit a cet endroit — le COPY de l'image
-  # d'avant etait un jumeau, parti le 2026-09-11.
-  local layout="$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/layout.ex" racine
-  racine="$(sed -n 's/^\s*@platform_root\s*"\([^"]*\)".*/\1/p' "$layout")/$(sed -n 's/^\s*@catalogues_dirname\s*"\([^"]*\)".*/\1/p' "$layout")"
-  [[ "$racine" =~ ^/[^/]+/[^/]+/[^/]+$ ]] || { echo "racine livree illisible dans Fleet.Layout : « $racine »"; return 1; }
-  grep -q "DEMO_CATALOGUE=\"\${LCARS_DEMO_CATALOGUE:-$racine/web-demo}\"" "$G"
-  code | grep -q 'LCARS_DEMO_CATALOGUE='
-  # ⚠ LA REFERENCE N'EST PLUS PASSEE : 48 la derivait par `mix run` ; le geste la demande lui-meme
-  # a la release (`catalogue-root`), qui « existe pour que personne ne RECOMPOSE ce chemin ».
-  code | refute_out 'LCARS_REFERENCE_CATALOGUE'
-  grep -q 'catalogue-root' "$G"
-  [ -d "$BATS_TEST_DIRNAME/../../../catalogues/web-demo" ]
-}
-
-@test "ce module ne nomme AUCUN humain — l'autorite du nom est forge-gestures, et le banc seul le pose" {
-  code | refute_out 'LCARS_BUILTIN_HUMAN'
-  code | refute_out 'DISPOSABLE'
-  refute grep -qE '"lcars"|:-lcars\}' <<<"$(code)"
-  grep -qE '^\s*export TF_VAR_builtin_human=' "$G"
-}
-
-@test "« APPLIQUE » n'est pas « CHANGE » — le verdict compte les ressources que tofu dit avoir bougees" {
-  code | grep -q 'Apply complete!'
-  code | grep -q 'PROV_CHANGED=\$((PROV_CHANGED + 1))'
-  grep -q 'structure de la forge déjà conforme' "$SRC"
-  grep -q '63-forge-tokens peut minter' "$SRC"
-}
-
-@test "le check mesure les PRECONDITIONS et dit qui sonde la structure — il ne rejoue pas la recette" {
-  local c_check; c_check="$(sed -n '/^check() {/,/^}/p' "$SRC")"
-  grep -q 'RELEASE_BIN' <<<"$c_check"
-  grep -q 'PROV_MASTER_TOKEN_FILE' <<<"$c_check"
-  grep -q '63-forge-tokens' <<<"$c_check"
-  refute grep -q 'tofu plan' <<<"$c_check"
-  refute grep -q 'forge-gestures' <<<"$c_check"
-}
-
-@test "tofu est appele par SON chemin (TOFU_BIN), jamais par le PATH — sous apt, DPkg::Path n'a pas /usr/local/bin (banc 2004 : rc 127)" {
-  local src="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
-  grep -qE 'env -C "\$recipe/\$m" "\$TOFU_BIN" init' "$src"
-  refute grep -qE 'env -C "\$recipe/\$m" tofu init' "$src"
+@test "apply : une recette non initialisable hors-ligne est un échec qui nomme 46-tofu, le geste n'est pas joué" {
+  STUB_INIT_KO=1 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"recette non initialisable (instance) — le miroir de providers de 46-tofu"* ]]
+  refute grep -q '^GESTE' "$CALLS"
+  [ -z "$(copies_restantes)" ]
 }

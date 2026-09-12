@@ -1,99 +1,104 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/60-deploy.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-04
-# STATUS: bats tests for 60-deploy — le raccourci « rien a batir » lit le VRAI arbre du runtime
+# STARDATE: 2026-09-12
+# STATUS: témoins de 60-deploy — le raccourci « rien à bâtir », la pose par deploy-release.sh, le verrou, les intrus, le canal
 #
-# Relecture hostile 2026-09-04 : `git diff --quiet HEAD -- fleet` rendait toujours 0 (un pathspec
-# vide n'est pas une erreur pour git diff), donc « l'arbre du runtime est propre » etait
-# inconditionnellement vrai, et un apply sur un checkout modifie sautait la construction.
+# Le module se joue entier sous unshare -Ur (le prefix est root:fleet) dans un dépôt de décor : la
+# lib y est copiée, le runtime y est un mix.exs et le vrai release.manifest, deploy-release.sh est
+# une doublure qui note son appel, mix aussi. Les sondes d'intrus et de release se jouent en fonctions.
 
 load ../refute
 
-setup() { MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"; [ -f "$MOD" ]; }
-
-@test "le pathspec du raccourci est runtime/ — un arbre qui n'existe pas rendrait toujours « propre »" {
-  grep -vE '^\s*#' "$MOD" | grep -qE 'diff --quiet HEAD -- runtime'
-  refute grep -qE 'diff --quiet HEAD -- fleet' <(grep -vE '^\s*#' "$MOD")
-  [ -d "$BATS_TEST_DIRNAME/../../../runtime" ]
-}
-
-@test "TEMOIN DU TEMOIN : sur ce depot, un pathspec inexistant rend 0 et le vrai rend un verdict" {
-  local repo; repo="$BATS_TEST_DIRNAME/../../.."
-  git -C "$repo" diff --quiet HEAD -- nexistepas ; [ "$?" -eq 0 ]
-  git -C "$repo" ls-files runtime | grep -q .
-}
-
-# ─── S4 : LE DOCTOR VOIT CE QUI EST LA EN TROP, ET NOMME LA GENERATION PRECEDENTE ───────────────
-#
-# ⚠ RELECTURE HOSTILE DU 2026-09-04. La sonde iterait sur les entrees de `release.manifest`, donc
-# elle ne regardait jamais ce que `$PROV_PREFIX/bin` porte EN PLUS : au banc, `fleet_v2` (renomme
-# `fleet`) et son symlink `/usr/local/bin/fleet_v2` survivaient, et `60-deploy=OK`. Et `.prev`,
-# 31 Mo de rollback poses par `atomic_swap_dir`, n'etait nomme nulle part.
-#
-# Le module se source SANS son dispatch, dans un decor : le prefixe et le PATH sont des
-# repertoires de BATS_TEST_TMPDIR, le manifeste est le VRAI (c'est lui qui dit qui est intrus).
-
-decor() {
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  export PROVISION_MODULE=60-deploy
-  export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
+setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"; [ -f "$MOD" ]
+  MANIFEST="$BATS_TEST_DIRNAME/../../../runtime/etc/release.manifest"; [ -f "$MANIFEST" ]
+  RACINE="$BATS_TEST_TMPDIR/racine"
+  mkdir -p "$RACINE/deploy/lib" "$RACINE/runtime/etc"
+  cp "$BATS_TEST_DIRNAME"/../../lib/*.sh "$RACINE/deploy/lib/"
+  cp "$MANIFEST" "$RACINE/runtime/etc/release.manifest"
+  printf 'defmodule X do end\n' > "$RACINE/runtime/mix.exs"
+  export MARQUEUR="$BATS_TEST_TMPDIR/pose-appelee"
+  printf '#!/usr/bin/env bash\necho "POSE $LCARS_INSTALL_PREFIX $LCARS_RUNTIME_DIR gate=$LCARS_INSTALL_SKIP_GATE" >> "%s"\nexit "${STUB_POSE_RC:-0}"\n' "$MARQUEUR" > "$RACINE/deploy/lib/deploy-release.sh"
+  chmod 0755 "$RACINE/deploy/lib/deploy-release.sh"
+  git -C "$RACINE" init -q; git -C "$RACINE" add -A; git -C "$RACINE" -c user.email=t@t -c user.name=t commit -qm décor
+  HEAD_SHA="$(git -C "$RACINE" rev-parse --short HEAD)"
+  export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
+  export PROVISION_MODULE=60-deploy PROV_SUBSTRATE=linux PROV_HUMAN=root PROV_FLEET_GROUP=root
   export PROV_PREFIX="$BATS_TEST_TMPDIR/prefix"
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/path"
-  # Le CANAL est a nous : absent = « aucun », le module pose comme aujourd'hui (voir runtime_helpers.bats).
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/channel"; mkdir -p "$BATS_TEST_TMPDIR/etc"
+  export LCARS_CHANNEL_OWNER=root:root
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
-  mkdir -p "$PROV_PREFIX/bin" "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_LINK_DIR"
-  printf '#!/bin/sh\nexit 0\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  chmod +x "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  # tout ce que le manifeste nomme est la : ce qui se mesure ensuite est le SENS INVERSE
-  local n
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/mix"; chmod 0755 "$BIN/mix"
+  mkdir -p "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
+}
+
+release_posee() { # release_posee [sha du build] — la release et tout ce que le manifeste nomme
+  local rel="$PROV_PREFIX/rel/lcars_fleet" n
+  mkdir -p "$rel/bin" "$rel/lib/lcars_fleet-0.9.0/priv/api" "$rel/releases"
+  printf '#!/bin/sh\nexit 0\n' > "$rel/bin/lcars_fleet"; chmod 0755 "$rel/bin/lcars_fleet"
+  printf 'sha=%s\n' "${1:-$HEAD_SHA}" > "$rel/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
+  printf '15.2.7.4 0.9.0\n' > "$rel/releases/start_erl.data"
   while read -r n _; do
     [[ -n "$n" && "$n" != \#* ]] || continue
-    printf '#!/bin/sh\n' > "$PROV_PREFIX/bin/$n"; chmod +x "$PROV_PREFIX/bin/$n"
-  done < "$BATS_TEST_DIRNAME/../../../runtime/etc/release.manifest"
-  DECOR_MOD="$BATS_TEST_TMPDIR/mod.sh"
-  sed '/^case "${1:?usage/,$d' "$MOD" > "$DECOR_MOD"
+    printf '#!/bin/sh\n' > "$PROV_PREFIX/bin/$n"; chmod 0755 "$PROV_PREFIX/bin/$n"
+  done < "$MANIFEST"
 }
-mod() { run bash -c "set -euo pipefail; source '$DECOR_MOD' >/dev/null 2>&1; $1"; }
+verrouille() { chmod 0750 "$PROV_PREFIX"; }
+mod() {
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le module ne se joue pas ici"
+  run unshare -Ur bash "$MOD" "$@"
+}
+fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD') >/dev/null 2>&1; $1"; }
 
-@test "S4 : un intrus sous \$PROV_PREFIX/bin est un DRIFT, et le symlink du PATH qui le vise aussi" {
-  decor
+@test "check : release absente — drift, rien d'autre n'est sondé" {
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 60-deploy: release absente sous $PROV_PREFIX"* ]]
+  [[ "$output" != *"verrou"* ]]
+}
+
+@test "check : release posée, prefix non verrouillé — drift qui dit le mode attendu" {
+  release_posee; chmod 0755 "$PROV_PREFIX"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"release posée ($PROV_PREFIX, build $HEAD_SHA)"* ]]
+  [[ "$output" == *"DRIFT 60-deploy: prefix non verrouillé : root:root 755 ≠ root:root 750"* ]]
+}
+
+@test "check : release posée et verrouillée, symlinks du PATH absents — un drift par lien du manifeste" {
+  release_posee; verrouille
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"verrou RO du prefix (root:root 750)"* ]]
+  [[ "$output" == *"DRIFT 60-deploy: $PROV_LINK_DIR/fleet ≠ symlink vers $PROV_PREFIX/bin/fleet"* ]]
+}
+
+@test "intrus : une entrée de bin/ hors manifeste et le symlink du PATH qui la vise sont des drifts ; un lien qui vise ailleurs n'est pas à nous" {
+  release_posee; verrouille
   : > "$PROV_PREFIX/bin/fleet_v2"
   ln -s "$PROV_PREFIX/bin/fleet_v2" "$PROV_LINK_DIR/fleet_v2"
-  mod check
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"DRIFT"*"intrus $PROV_PREFIX/bin/fleet_v2"* ]]
-  [[ "$output" == *"DRIFT"*"symlink intrus $PROV_LINK_DIR/fleet_v2"* ]]
-}
-
-@test "S4 : sans intrus, pas de ligne intrus — et un lien du PATH qui vise ailleurs n'est pas a nous" {
-  decor
   ln -s /bin/true "$PROV_LINK_DIR/quelconque"
   mod check
-  refute grep -q 'intrus' <<<"$output"
+  [[ "$output" == *"DRIFT 60-deploy: intrus $PROV_PREFIX/bin/fleet_v2 — absent de release.manifest"* ]]
+  [[ "$output" == *"DRIFT 60-deploy: symlink intrus $PROV_LINK_DIR/fleet_v2 → $PROV_PREFIX/bin/fleet_v2"* ]]
+  [[ "$output" != *"quelconque"* ]]
 }
 
-@test "S4 : la generation precedente (.prev) est NOMMEE, avec sa taille" {
-  decor
-  mkdir -p "$PROV_PREFIX/rel/lcars_fleet.prev/bin"
-  head -c 4096 /dev/zero > "$PROV_PREFIX/rel/lcars_fleet.prev/bin/lcars_fleet"
-  mod check
-  [[ "$output" == *"génération précédente gardée : $PROV_PREFIX/rel/lcars_fleet.prev ("* ]]
-  [[ "$output" == *"rm -rf $PROV_PREFIX/rel/lcars_fleet.prev"* ]]
-}
-
-@test "S4 : l'apply retire les intrus des deux cotes, une ligne par retrait, et rien d'autre" {
-  decor
+@test "intrus : l'apply les retire des deux côtés, une ligne par retrait, et ne touche à rien d'autre" {
+  release_posee
   : > "$PROV_PREFIX/bin/fleet_v2"
   ln -s "$PROV_PREFIX/bin/fleet_v2" "$PROV_LINK_DIR/fleet_v2"
   ln -s "$PROV_PREFIX/bin/fleet" "$PROV_LINK_DIR/fleet"
   ln -s /bin/true "$PROV_LINK_DIR/quelconque"
-  mod 'prune_intrus; echo "rc=$?"'
-  [[ "$output" == *"retiré $PROV_PREFIX/bin/fleet_v2"* ]]
-  [[ "$output" == *"retiré symlink $PROV_LINK_DIR/fleet_v2"* ]]
-  [[ "$output" == *"rc=0"* ]]
+  fn 'prune_intrus; echo "rc=$?"'
+  [[ "$output" == *"retiré $PROV_PREFIX/bin/fleet_v2"*"retiré symlink $PROV_LINK_DIR/fleet_v2"*"rc=0"* ]]
   [ ! -e "$PROV_PREFIX/bin/fleet_v2" ]
   [ ! -L "$PROV_LINK_DIR/fleet_v2" ]
   [ -e "$PROV_PREFIX/bin/fleet" ]
@@ -101,77 +106,72 @@ mod() { run bash -c "set -euo pipefail; source '$DECOR_MOD' >/dev/null 2>&1; $1"
   [ -L "$PROV_LINK_DIR/quelconque" ]
 }
 
-@test "RELEASE A DEUX LIBS : le build annonce est celui qui DEMARRE, et la lib morte est un DRIFT nomme" {
-  decor
+@test "release à deux libs : le build annoncé est celui qui démarre, la lib morte est un drift nommé" {
+  release_posee d4d23d792; verrouille
   local rel="$PROV_PREFIX/rel/lcars_fleet"
-  mkdir -p "$rel/lib/lcars_fleet-0.1.0/priv/api" "$rel/lib/lcars_fleet-0.9.0/priv/api" "$rel/releases"
+  mkdir -p "$rel/lib/lcars_fleet-0.1.0/priv/api"
   printf 'sha=9ee4a4bcd\n' > "$rel/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
-  printf 'sha=d4d23d792\n' > "$rel/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
-  printf '15.2.7.4 0.9.0\n' > "$rel/releases/start_erl.data"
-  mod 'build_sha; release_libs_count'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"d4d23d792"* ]]
-  refute_out '9ee4a4bcd' <<<"$output"
-  [[ "$output" == *"2"* ]]
   mod check
-  [[ "$output" == *"DRIFT"*"porte 2 lib/lcars_fleet-*"*"lcars_fleet-0.9.0"* ]]
+  [[ "$output" == *"release posée ($PROV_PREFIX, build d4d23d792)"* ]]
+  [[ "$output" == *"DRIFT 60-deploy: la release posée porte 2 lib/lcars_fleet-*"*"celle qui démarre est lcars_fleet-0.9.0"* ]]
 }
 
-# ─── LE CANAL : SOUS `deb` CE MODULE NE POSE RIEN, ET SOUS `source`/`kit` IL ECRIT QUI A POSE ───
-#
-# Lot 2 du chantier release (2026-09-05). Le decor possede sa RACINE : la lib est COPIEE (c'est
-# elle qui donne `repo_root()`), `deploy-release.sh` est une DOUBLURE qui laisse un marqueur si on
-# l'appelle, `runtime/etc` est lie au depot (le manifeste de release est le vrai), et le canal comme
-# `dpkg` sont a nous. Un temoin qui lirait le canal ou le dpkg de la machine mesurerait la machine.
-
-decor_canal() { # decor_canal <source|kit|deb|snap|aucun>
-  decor
-  RACINE="$BATS_TEST_TMPDIR/racine"
-  mkdir -p "$RACINE/deploy" "$RACINE/runtime"
-  cp -a "$BATS_TEST_DIRNAME/../../lib" "$RACINE/deploy/lib"
-  ln -s "$BATS_TEST_DIRNAME/../../../runtime/etc" "$RACINE/runtime/etc"
-  MARQUEUR="$BATS_TEST_TMPDIR/POSE-APPELEE"
-  printf '#!/usr/bin/env bash\ntouch "%s"\nexit 0\n' "$MARQUEUR" > "$RACINE/deploy/lib/deploy-release.sh"
-  export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"; mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
-  export LCARS_CHANNEL_OWNER; LCARS_CHANNEL_OWNER="$(id -un):$(id -gn)"
-  case "$1" in aucun) rm -f "$LCARS_CHANNEL_FILE" ;; *) printf '%s\n' "$1" > "$LCARS_CHANNEL_FILE" ;; esac
+@test "apply : build déployé égal à HEAD et runtime propre — rien à bâtir, deploy-release.sh n'est pas appelé, les symlinks sont posés, le canal dit source" {
+  release_posee; verrouille
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"OK    60-deploy: build déployé $HEAD_SHA == HEAD source (runtime/ propre) — rien à bâtir"* ]]
+  [ ! -e "$MARQUEUR" ]
+  [ "$(readlink "$PROV_LINK_DIR/fleet")" = "$PROV_PREFIX/bin/fleet" ]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = source ]
 }
-dpkg_double() { # dpkg_double <lignes de dpkg -V…> — un `dpkg` du PATH qui dit le paquet installe et rend ces lignes
-  local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
-  { echo '#!/usr/bin/env bash'
-    echo 'case "$1" in -s) echo "Status: install ok installed"; exit 0 ;; -V) : ;; *) exit 2 ;; esac'
-    local l; for l in "$@"; do printf "printf '%%s\\\\n' '%s'\n" "$l"; done
-    echo 'exit 0'
-  } > "$d/dpkg"; chmod 0755 "$d/dpkg"
-  export PATH="$d:$PATH"
-}
-empreinte() { find "$PROV_PREFIX" "$PROV_LINK_DIR" -printf '%p %m %s %y\n' | sort; }
-module() { run bash "$MOD" "$1"; }   # le dispatch ENTIER : c'est lui qui lit le canal
 
-@test "CANAL source/kit : le canal s'ecrit APRES la pose, et il dit KIT quand la release venait d'un paquet" {
-  decor_canal aucun
-  DECOR_MOD="$BATS_TEST_TMPDIR/mod.sh"; sed '/^case "${1:?usage/,$d' "$MOD" > "$DECOR_MOD"
-  mod 'poser_canal'
-  [ "$status" -eq 0 ]
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
-  printf 'cafe1234\n' > "$RACINE/.source-revision"    # LE discriminant de prov_delivery, pas un second
-  mod 'poser_canal'
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "kit" ]
-  # ⚠ L'ORDRE, dans apply() : le canal vient APRES la pose ET apres le re-verrouillage — un canal
-  # ecrit avant une pose ratee dirait « kit » d'une machine qui n'a rien.
-  local corps; corps="$(sed -n '/^apply()/,/^}/p' "$MOD" | grep -vE '^\s*#')"
-  local n_pose n_verrou n_canal
-  n_pose="$(grep -n 'deploy-release.sh' <<<"$corps" | tail -1 | cut -d: -f1)"
-  n_verrou="$(grep -n 'chmod -R u=rwX' <<<"$corps" | tail -1 | cut -d: -f1)"
-  n_canal="$(grep -n 'poser_canal' <<<"$corps" | tail -1 | cut -d: -f1)"
-  [ -n "$n_pose" ]
-  [ -n "$n_verrou" ]
-  [ -n "$n_canal" ]
-  [ "$n_pose" -lt "$n_verrou" ]
-  [ "$n_verrou" -lt "$n_canal" ]
-  # et sur les DEUX autres sorties ou la release est deja en place (rejeu depuis la copie, raccourci)
-  [ "$(grep -c 'poser_canal || verdict_apply' <<<"$corps")" -eq 3 ]
-  # le seul ecrivain est poser_canal : aucun prov_channel_write nu dans apply
-  refute grep -q 'prov_channel_write' <<<"$corps"
+@test "apply : runtime modifié — deploy-release.sh est joué sous l'humain sans le gate, le prefix est reverrouillé root:fleet 750, le canal s'écrit après" {
+  release_posee; verrouille
+  printf '# modif\n' >> "$RACINE/runtime/mix.exs"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^POSE $PROV_PREFIX $RACINE/runtime gate=1$" "$MARQUEUR"
+  [ "$(stat -c '%U:%G %a' "$PROV_PREFIX")" = "$(id -un):$(id -gn) 750" ]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = source ]
+  [[ "$output" == *"POSÉ  60-deploy: runtime déployé : $PROV_PREFIX (build $HEAD_SHA) + /usr/local/bin câblé"* ]]
+}
+
+@test "apply : deploy-release.sh en échec — échec nommé, le canal n'est pas écrit, le prefix reste à l'humain pour inspection" {
+  release_posee; verrouille
+  printf '# modif\n' >> "$RACINE/runtime/mix.exs"
+  STUB_POSE_RC=1 mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  60-deploy: deploy-release.sh en échec (rc=1"* ]]
+  [ ! -e "$LCARS_CHANNEL_FILE" ]
+}
+
+@test "apply : livraison binaire — mix n'est pas requis, la release du kit est posée, le canal dit kit" {
+  release_posee 0000000; verrouille
+  rm -f "$BIN/mix"
+  printf 'cafe1234\n' > "$RACINE/.source-revision"
+  PATH="$BIN:/usr/bin:/bin" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"outillage mix non posé — livraison binaire"* ]]
+  [ -s "$MARQUEUR" ]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = kit ]
+}
+
+@test "apply : sans mix en livraison source — échec qui nomme 15-toolchain, rien n'est joué" {
+  release_posee 0000000; verrouille
+  rm -f "$BIN/mix"
+  PATH="$BIN:/usr/bin:/bin" mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  60-deploy: mix absent — 15-toolchain le pose"* ]]
+  [ ! -e "$MARQUEUR" ]
+}
+
+@test "apply : rejeu depuis la copie posée, sans source — la release en place est l'état-cible, le canal est écrit" {
+  release_posee; verrouille
+  rm -f "$RACINE/runtime/mix.exs"
+  PROV_ROOT="$RACINE" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"rejeu depuis la copie posée : release en place, aucune source ici"* ]]
+  [ ! -e "$MARQUEUR" ]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = source ]
 }
