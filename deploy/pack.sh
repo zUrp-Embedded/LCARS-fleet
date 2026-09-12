@@ -1,62 +1,31 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/pack.sh
 # AUTHOR: DrDree
-# STARDATE: 2026-08-23
-# STATUS: le paquet — gate, release, tar, et pousse sur la forge
-#
-# ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-#
-# Le gate tournait DEUX FOIS sur le même commit : une fois ici (ou en CI), une fois chez celui qui
-# installe — `deploy/lib/deploy-release.sh` le rejoue avant `mix release`. Sept minutes payées deux fois, et la
-# première ne produisait rien : `gate.yml` n'a aucun `upload`, ses produits de build sont jetés.
-#
-# ⚖ USER 2026-08-23 : « on fait le minimum pour pas jeter le boulot fait ici à chaque fois. »
-#
-# Ce script est ce minimum. Il ne réimplémente rien — `mix gate`, `mix release`, `tar` — et l'install
-# ne change que d'un cran : `build_release()` voit la release déjà là et ne compile pas. Tout le
-# reste du rail est identique, y compris la pose, les symlinks et les perms.
-#
-# LE TAR EST LE MÊME KIT QU'AUJOURD'HUI, la release en plus : on untar, on lance `install.sh`, ça
-# part. Il n'y a pas de second chemin à connaître.
-#
-# ⚠ « LA RELEASE EN PLUS » EST DEVENU « LA RELEASE ET LA DOC ». La doc n'était pas dans le périmètre
-# de ce script quand il a été écrit, et ça ne coûtait rien : la cible posait node et la bâtissait.
-# Depuis que le rail lit le discriminant de livraison (`prov_delivery`), une cible qui installe un
-# PAQUET ne pose plus node — donc si le paquet n'apporte pas la doc, personne ne la bâtira jamais.
-# Les deux produits voyagent ensemble ou la livraison est une moitié.
-#
-# ⚠ L'ARTEFACT PORTE SON OTP ET SON ARCH DANS SON NOM. Une release embarque son ERTS : elle est
-# compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
-# personne ne vérifie à ta place.
-#
-# USAGE : deploy/pack.sh            gate + release + DOC + tar + porte + IMAGE — dans le tiroir et le daemon, rien n'en sort
-#         deploy/pack.sh --publish  … puis la Release de la forge (tout le tiroir) et l'image au registre
-#         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit — et le dit)
-#         deploy/pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
-# ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
-#         LCARS_PACK_IMAGE le nom local de l'image (défaut `lcars-fleet` : tags `<tag>` et `local`)
+# STARDATE: 2026-09-12
+# STATUS: le lanceur de la version — gate, release, doc, kit tar, porte de la version, image docker, et leur publication depuis le poste
+# USAGE : deploy/pack.sh            gate + release + doc + tar + porte + image : dans le tiroir et le daemon, rien n'en sort
+#         deploy/pack.sh --publish  … puis la release de la forge (tout le tiroir) et l'image au registre
+#         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit)
+# ENV   : LCARS_PACK_DIR      le tiroir des paquets (défaut : lcars-packs à côté du checkout)
+#         LCARS_PACK_TAG      le tag de la version (défaut : le tag git de HEAD, sinon <MM-DD_HH-MM>-<sha>)
+#         LCARS_PACK_IMAGE    le nom local de l'image (défaut lcars-fleet : tags <tag> et local)
 #         LCARS_PACK_REGISTRY le registre du --publish (défaut : l'hôte de la forge, ou ghcr.io chez GitHub)
-#         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
-#         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
-#                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
-# PRÉ-REQUIS : `erl`, `mix` — et `npm`, depuis que ce script bâtit AUSSI la doc. Un poste en
-#              livraison source les a tous les trois : c'est de là qu'on packe.
-# EXIT  : 0 le paquet est là · 1 gate rouge, build KO, doc KO, ou push refusé
+#         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge du --publish quand origin n'est pas http
+#         LCARS_PACK_TOKEN, LCARS_PACK_TOKEN_FILE   le jeton du --publish (write:repository et write:package)
+#         LCARS_SITE_SRC, LCARS_SITE_BASE   les sources de la doc et sa base d'URL, les mêmes que 44-media
+# PRÉ-REQUIS : erl, mix, npm — un poste en livraison source les a tous
+# EXIT  : 0 la version est dans le tiroir · 1 gate rouge, build ou doc en échec, kit incomplet, publication refusée
 
 set -euo pipefail
-# ⚠ CE SCRIPT VIT SOUS `deploy/` ET TRAVAILLE DEPUIS LA RACINE DU DEPOT : tout ce qui suit
-# (`deploy/gate.sh`, `runtime/_build`, `assets/github.io`, `git archive`, le tiroir a cote du
-# clone) est relatif a elle, pas au dossier du script.
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 PUBLISH=0
 IMAGE=1
 for _arg in "$@"; do
   case "$_arg" in
-    --publish) PUBLISH=1 ;;
+    --publish)  PUBLISH=1 ;;
     --no-image) IMAGE=0 ;;
-    --no-push) PUBLISH=0 ;;   # l'ancien nom du défaut (les bancs et les journaux le portent)
-    *) echo "pack: option inconnue: $_arg (--publish | --no-image | --no-push)" >&2; exit 1 ;;
+    *) echo "pack: option inconnue: $_arg (--publish | --no-image)" >&2; exit 1 ;;
   esac
 done
 unset _arg
@@ -64,262 +33,112 @@ unset _arg
 say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 
-# ─── L'ARBRE DOIT ÊTRE PROPRE, ET CE REFUS A ÉTÉ PAYÉ ───────────────────────────────────────────
-#
-# ⚠ CE SCRIPT S'EXÉCUTE DEPUIS L'ARBRE DE TRAVAIL ET ARCHIVE `HEAD`. Les deux divergent dès qu'une
-# modification n'est pas commitée — et alors le paquet contient un code que le gate N'A PAS VU :
-# `mix gate` et `mix release` lisent l'arbre, `git archive HEAD` lit le commit.
-#
-# MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : le tar portait la doc que la
-# section neuve venait de batir — donc l'arbre de travail avait bien tourne — et la version HEAD des
-# modules, sans le correctif qui va avec. `44-media` est mort sur « npm absent », un message qui
-# decrit exactement l'etat que le correctif absent devait empecher.
-#
-# LE TAMPON MENTAIT DANS LES DEUX SENS. Il portait `+local` pour dire « arbre modifie » ; le paquet,
-# lui, ne contenait AUCUNE de ces modifications. Un lecteur en deduisait le contraire de la verite.
-# Le `+local` disparait donc d'ici — il garde tout son sens dans `prov_source_rev`, qui decrit un
-# ARBRE, jamais un paquet.
-#
-# On refuse plutot que d'archiver l'arbre : un paquet qu'on pousse sur une forge doit etre
-# reproductible depuis un commit. « Mieux vaut un echec explicite qu'un succes ambigu. »
-git diff --quiet HEAD -- 2>/dev/null || die "arbre modifie — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes differents dans un meme paquet. Commite (ou remise) d'abord."
+# le gate et la release lisent l'arbre, git archive lit HEAD : un arbre modifié donnerait deux codes dans un paquet
+git diff --quiet HEAD -- 2>/dev/null || die "arbre modifié — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes différents dans un même paquet. À commiter (ou remiser) d'abord."
 
-
-# ─── LA VERSION ─────────────────────────────────────────────────────────────────────────────────
-# ⚖ USER : un timestamp `MM-DD_HH-MM`. Il ordonne, il se lit, et il ne prétend rien sur le contenu —
-# le sha du commit est là pour ça. Deux paquets de la même minute écrasent : c'est voulu, on refait.
-VERSION="$(date +%m-%d_%H-%M)"
 SHA="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+VERSION="$(date +%m-%d_%H-%M)"
+TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
-NAME="lcars-fleet-${VERSION}-${SHA}-otp${OTP}-${ARCH}"
-# ─── OÙ ATTERRIT LE PAQUET — HORS DE L'ARBRE, ET C'EST LE POINT ─────────────────────────────────
-# Il vivait dans `dist/` à la racine du checkout. Gitignoré, donc invisible au `git status` — et
-# c'est exactement ce qui l'a rendu coûteux : chaque poste de travail accumulait ses tars de 14 Mo
-# dans son propre clone, et un clone se jette. MESURE DU 2026-08-26 : le paquet de la dernière
-# révision viable, bâti onze minutes avant un arrêt froid, n'existait que dans le clone qui allait
-# être détruit. Un artefact que la forge doit porter n'a rien à faire dans un répertoire de travail.
-#
-# La forge EST la destination (la pousse est plus bas) ; ce répertoire n'est qu'un tiroir de transit,
-# d'où l'on `scp` quand on veut essayer le paquet ailleurs. Il est donc DÉRIVÉ, jamais câblé : voisin
-# du checkout, ce qui donne UN tiroir partagé par tous les clones d'une même machine — et le nom du
-# fichier porte déjà sa révision, donc deux clones n'y entrent pas en collision.
-#
-# ⚠ AUCUN CHEMIN DE CETTE MACHINE NE S'ÉCRIT ICI. `/home/commons` était le tiroir évident sur le
-# poste où ce changement a été fait ; c'est un dossier de la v1, que `25-directories` a justement
-# cessé de poser. Un chemin d'installation particulier gravé dans le produit est une panne pour tous
-# les autres. `LCARS_PACK_DIR` est là pour ceux qui veulent choisir.
-#
-# ⚠ ET IL SE NORMALISE. Un `LCARS_PACK_DIR` qui porte un `..` (le cas nominal quand on packe depuis
-# un worktree : `<wt>/../lcars-packs`) ou qui est relatif donne un tiroir dont le nom dépend du cwd
-# de celui qui le lit — et le `scp` d'après n'a pas celui du pack. Cicatrice du 2026-09-08 : un
-# outil de la chaîne Debian, partie depuis, échouait sur ce `..` APRÈS le gate, la release et la
-# doc — sept minutes payées pour la faute la plus bête. `realpath -m` résout sans exiger que le
-# répertoire existe — il est créé plus bas.
-# ⚠ ET IL RÉSOUT AUSSI LES LIENS SYMBOLIQUES (mesuré le 2026-09-08 : `realpath -m <lien>/x` rend le
-# chemin RÉEL). C'est voulu — un chemin sans ambiguïté — mais ça veut dire que le tiroir ANNONCÉ peut
-# différer de celui que l'opérateur a tapé, sur un poste dont le `/home` est un lien. Le chemin
-# imprimé plus bas est le résolu : c'est celui-là qui compte, et c'est pour ça qu'il est imprimé.
+# le nom du kit porte le tag : c'est par lui que la porte le retrouve dans sa table (lcars-fleet-<tag>-*-<arch>)
+NAME="lcars-fleet-${TAG}-otp${OTP}-${ARCH}"
 PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
 PACK_DIR="$(realpath -m "$PACK_DIR")"
 OUT="$PACK_DIR/${NAME}.tar.gz"
 
-# ─── LE GATE, PUIS LA RELEASE — dans cet ordre et sans échappatoire ──────────────────────────────
-# C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
-# passés. Le sauter ici rendrait le paquet indistinguable d'un `mix release` à la main.
-say "gate du RUNTIME (compile strict + suite + bats + contrats + topologie + dialyzer)…"
+say "gate du runtime (compile strict + suite + bats + contrats + topologie + dialyzer)…"
 ( cd runtime && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
-
-# ─── ET LA PORTE DE L'INSTALLEUR — LE PAQUET PORTE LES DEUX LOGICIELS ────────────────────────────
-#
-# ⚠ SANS CETTE LIGNE, LE DETACHEMENT AURAIT ETE UNE PERTE DE COUVERTURE DEGUISEE EN RANGEMENT. Les
-# 1294 cas de `deploy/tests` — 73 % de tout le corpus bats — etaient joues par `mix gate` ; ils ne
-# le sont plus. Ce tar embarque `deploy/` (git archive HEAD le prend), donc il livre l'installeur :
-# l'empaqueter sans l'avoir joue reproduirait exactement ce que `@test_corpora` raconte, « a corpus
-# nobody runs rots while reporting a coverage it does not provide ».
-#
-# L'ORDRE N'EST PAS INDIFFERENT : le gate du runtime d'abord, parce qu'il est le plus long a
-# rougir sur du code neuf, et parce que la release qui suit en depend. Mais les DEUX sont des
-# conditions, aucune n'est un avertissement.
-say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
+say "gate de l'installeur…"
 bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
+# mix release --overwrite ne retire pas une lib/lcars_fleet-<ancienne> : on repart d'un répertoire vide et on vérifie le tampon
 say "release prod…"
-# ⚠ ASSEMBLEE PROPRE, ET C'EST UNE MESURE. `mix release --overwrite` reecrit ce qu'il assemble mais ne
-# retire PAS une `lib/lcars_fleet-<ancienne version>` laissee par une assemblee precedente : le tar
-# du 2026-09-05 portait la 0.1.0 de passe5 (sha 9ee4a4bcd) a cote de la 0.9.0 vivante, et le doctor
-# du banc 2003 annoncait le build de la morte. On repart d'un repertoire vide, puis on VERIFIE : une
-# seule lib, et son tampon porte le sha de HEAD — sinon le paquet ne vaut rien et ne sort pas.
 rm -rf runtime/_build/prod/rel/lcars_fleet
-( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release en échec"
 _libs=(runtime/_build/prod/rel/lcars_fleet/lib/lcars_fleet-*)
 [[ "${#_libs[@]}" -eq 1 && -d "${_libs[0]}" ]] \
-  || die "la release porte ${#_libs[@]} lib/lcars_fleet-* (${_libs[*]##*/}) — une assemblee n'en a qu'UNE ; rien n'est empaquete"
+  || die "la release porte ${#_libs[@]} lib/lcars_fleet-* (${_libs[*]##*/}) — une assemblée n'en a qu'une ; rien n'est empaqueté"
 _built="$(sed -n 's/^sha=//p' "${_libs[0]}/priv/api/build_info.txt" 2>/dev/null | head -1)"
 [[ "$_built" == "$SHA" ]] \
-  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $SHA — les bits assembles ne sont pas ceux du commit ; rien n'est empaquete"
+  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $SHA — les bits assemblés ne sont pas ceux du commit ; rien n'est empaqueté"
 say "release attestée : ${_libs[0]##*/}, build $_built"
 
-# ─── LA DOC — LA SECONDE MOITIÉ DE LA LIVRAISON, ET ELLE MANQUAIT ───────────────────────────────
-#
-# ⚠ CE SCRIPT NE BÂTISSAIT QUE LA RELEASE, et ce n'était pas un oubli quand il a été écrit : la doc
-# n'était pas dans son périmètre. Ce qui a changé, c'est la doctrine des deux livraisons — un paquet
-# est BINAIRE, donc « Elixir compilé ET doc compilée, rien à bâtir sur la cible ». Depuis que
-# `16-node` lit ce discriminant, une cible qui installe un paquet ne pose PLUS node : elle n'a donc
-# aucun moyen de bâtir la doc, et `44-media` échouerait sur « npm absent ».
-#
-# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni un
-# conteneur de prod (il a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
-# bâtir) — un troisième état que personne n'a décrit, avec un DRIFT que l'apply ne peut pas
-# converger.
-#
-# ⚠ NODE DEVIENT UN PRÉ-REQUIS DE CE SCRIPT, au même titre qu'`erl` et `mix`. C'est cohérent : on
-# packe depuis un poste, et un poste en livraison SOURCE pose node. Ça se dit, ça ne se devine pas.
-#
-# ⚠ ET `LCARS_SITE_BASE` VOYAGE, comme dans `44-media` et dans le Dockerfile. Sans elle le site sort
-# pour la racine : servi sous `/doc/`, chacune de ses URL d'asset serait fausse. Trois poseurs, une
-# seule valeur — celle-ci suit les deux autres.
+# une cible en livraison binaire ne pose pas node : la doc voyage bâtie, au chemin que 44-media lit
 SITE_SRC="${LCARS_SITE_SRC:-assets/github.io}"
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 [[ -d "$SITE_SRC" ]] || die "sources du site absentes ($SITE_SRC) — le paquet serait une demi-livraison"
 command -v npm >/dev/null 2>&1 \
-  || die "npm absent — ce script bâtit AUSSI la doc depuis $SITE_SRC ; pose node (le rail le fait en livraison source), puis relance"
-
+  || die "npm absent — ce script bâtit aussi la doc depuis $SITE_SRC ; un poste en livraison source pose node"
 say "doc du deck (npm ci + build, base $SITE_BASE)…"
 ( cd "$SITE_SRC" && npm ci --no-audit --no-fund >/dev/null 2>&1 ) \
-  || die "npm ci en echec ($SITE_SRC) — la doc ne peut pas etre batie"
+  || die "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"
 ( cd "$SITE_SRC" && LCARS_SITE_BASE="$SITE_BASE" npm run build >/dev/null 2>&1 ) \
-  || die "build du site en echec ($SITE_SRC) — un chemin du runtime a-t-il bouge ? le build LIT l arbre"
+  || die "build du site en échec ($SITE_SRC)"
 [[ -s "$SITE_SRC/dist/index.html" ]] \
-  || die "build termine sans index.html ($SITE_SRC/dist) — rien a servir"
-say "doc batie : $(find "$SITE_SRC/dist" -type f | wc -l) fichier(s)"
+  || die "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"
+say "doc bâtie : $(find "$SITE_SRC/dist" -type f | wc -l) fichier(s)"
 
-# ─── LE TAR — le kit d'install, release comprise ─────────────────────────────────────────────────
-# `git archive` donne l'arbre suivi (ce que la forge sert déjà en `main.tar.gz`), et on y ajoute le
-# `_build/prod/rel/` que le gate vient d'attester. Deux morceaux, une seule racine : untar, et
-# `install.sh` est là où il a toujours été.
-# ⚠ UNE RACINE, ET FIXE. Un tar qui se déverse dans le répertoire courant salit ce qu'il touche et
-# ne se défait pas ; le nom est le MÊME à chaque version — `tar xzf … && cd lcars_install &&
-# bash install.sh` s'écrit une fois et ne change plus. Le numéro vit dans le nom du fichier, pas
-# dans le chemin qu'on tape.
+# le kit : l'arbre suivi (git archive HEAD), la release et la doc bâties, sous une racine fixe, avec sa révision
 ROOT="lcars_install"
 say "tar → $OUT  (racine : $ROOT/)"
-mkdir -p "$PACK_DIR" || die "tiroir à paquets inaccessible : $PACK_DIR (pose LCARS_PACK_DIR ailleurs)"
+mkdir -p "$PACK_DIR" || die "tiroir à paquets inaccessible : $PACK_DIR (LCARS_PACK_DIR le pose ailleurs)"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 mkdir -p "$STAGE/$ROOT"
-git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
-
-# ⚠ LA RÉVISION VOYAGE AVEC L'ARCHIVE, ET SANS ELLE TOUTE INSTALL DEPUIS UN PACK MENT.
-#
-# `git archive` n'emporte PAS `.git` — c'est son métier. `prov_source_rev` cherche alors un
-# `.source-revision` à la racine (provision-lib:1175) et, sans lui, rend « inconnue ».
-# `62-runtime-helpers` estampille donc `/opt/lcars/.source-revision` avec « inconnue », et sa passe
-# suivante rend un DRIFT qui dit « absent » d'un fichier qui EXISTE et vaut « inconnue ». L'opérateur
-# cherche un fichier manquant, le trouve, et reste bloqué.
-#
-# MESURE DU 2026-08-25, install réelle depuis un pack : `-rw-r--r-- root:root 9 octets`, contenu
-# `inconnue`. Ce n'est pas un cas de bord — c'est le mode d'install nominal de ce dépôt.
-#
-# Le repli EXISTAIT déjà ; ce qui manquait était de l'alimenter. Une ligne ici rend le paquet
-# traçable à son commit, et rend au module de quoi comparer ce qui est posé à ce qui est en source —
-# la question qui a coûté un compte utilisateur le 2026-08-21.
-#
-# ⚠ `--short=8`, LA MÊME FORME QUE `prov_source_rev` : deux longueurs de sha ne se comparent pas, et
-# la comparaison est tout ce que ce fichier sert à faire.
-# ⚠ `+local` SUR UN ARBRE MODIFIÉ, ET SANS LUI LE STAMP MENT. `prov_source_rev`
-# (provision-lib:1171) marque `+local` quand l'arbre diffère de HEAD, et `runtime_helpers.bats`
-# assère cette convention. Un `rev-parse` nu ferait donc déclarer à un paquet fabriqué depuis un
-# arbre sale qu'il EST un commit publié — et la comparaison « posé vs source », celle qui a coûté un
-# compte utilisateur le 2026-08-21, se ferait contre une révision qui n'existe nulle part.
-#
-# Je viens de fermer « un message qui désigne le mauvais objet » ; l'écrire sans cette ligne le
-# rouvrait un étage au-dessus. `prov_rev_is_behind` fait déjà `${1%%+*}`, il l'encaisse.
+git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive en échec"
 _rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
-  || die "révision indéterminable — le paquet serait intraçable, et l'install le dirait mal"
+  || die "révision indéterminable — le paquet serait intraçable"
 printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
 say "révision estampillée : $_rev"
-
 mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
 cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
-
-# ⚠ LA DOC VOYAGE AU CHEMIN QUE `44-media` LIT DÉJÀ, et c'est ce qui évite d'inventer une convention.
-# Ce module copie `$SITE_SRC/dist/.` vers `/opt/lcars/share/doc` ; en posant le `dist/` bâti là où il
-# le cherche, le paquet n'a RIEN de nouveau à faire connaître au rail. Même raison que pour la
-# release : `git archive` ne l'emporte pas (`dist/` est gitignoré, comme `_build/`), donc les deux
-# s'ajoutent ici, côte à côte, pour la même raison.
 mkdir -p "$STAGE/$ROOT/$SITE_SRC"
-cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable apres le build ($SITE_SRC/dist)"
-# ⚠ LE KIT EST VERIFIE AVANT D'ETRE SCELLE, ET IL NE L'ETAIT PAS. Ce rapprochement — une ancre
-# declaree dont la source manque, un `bin/<nom>` que `release.manifest` nomme sans qu'il soit la,
-# un auxiliaire que `62` embarque et qui n'existe pas — vivait dans la chaine Debian et tournait
-# APRES cette ligne : il protegeait les `.deb` et JAMAIS le tar. Un kit incomplet partait donc en
-# archive. La chaine Debian est partie (2026-09-11) ; la verification, elle, est restee ici, du bon
-# cote du tar.
+cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable après le build ($SITE_SRC/dist)"
 # shellcheck source=lib/kit-verify.sh
 . deploy/lib/kit-verify.sh
 kit_verifie "$STAGE/$ROOT" "runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-  || die "kit incomplet — rien n'a ete scelle (les manques sont nommes ci-dessus)"
-say "kit verifie : ce que les listes declarent est dans l'arbre"
-
-tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
+  || die "kit incomplet — rien n'a été scellé (les manques sont nommés ci-dessus)"
+say "kit vérifié : ce que les listes déclarent est dans l'arbre"
+tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar en échec"
 ( cd "$PACK_DIR" && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
-
-
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
 say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 
-# ─── LE TIROIR DE LA VERSION, ET LA PORTE QUI LA CONNAIT ────────────────────────────────────────
-# La porte d'UNE version porte les sha256 de SES artefacts en dur (curl_bash_2026 § 07, lot 4) :
-# door-gen.sh les lit dans un tiroir qui ne contient que cette version. Le tiroir partagé
-# `lcars-packs` reste (les bancs y prennent par nom) ; `dist/<tag>/` en est la vue par version,
-# par liens durs — un fichier, deux noms, zéro copie. Le tag est celui du paquet generic d'avant
-# (`<VERSION>-<SHA>`) : il ordonne, il se lit, il porte le commit. BASE est la forme d'URL commune
-# à gitea et github ; sans forge dérivable (origin local), une base visiblement fausse — la porte
-# accepte LCARS_DOOR_BASE au banc et refuse tout http:// non déclaré.
-# LE TAG DE LA VERSION : celui de git quand HEAD en porte un (la CI sur tag, un opérateur qui
-# publie un `1.2.3` : la release s'appelle comme le tag, à la GitHub) ; sinon `<VERSION>-<SHA>`, qui
-# ordonne, se lit, et porte le commit. LCARS_PACK_TAG le pose autrement (un banc).
-TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
+# le tiroir de la version : les artefacts (liens durs) et la porte qui porte leurs sha256 et leur base d'URL
 DIST="$PACK_DIR/dist/$TAG"
 mkdir -p "$DIST"
 for _f in "$OUT" "${OUT}.sha256"; do
   [[ -f "$_f" ]] || continue
   ln -f "$_f" "$DIST/$(basename "$_f")"
 done
-# le compose et le profil seccomp de cette version entrent dans la table de la porte (copiés :
-# le tiroir peut vivre sur un autre système de fichiers que le checkout)
 for _f in deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json; do
   [[ -f "$_f" ]] || die "artefact de la version introuvable : $_f"
   cp -f "$_f" "$DIST/$(basename "$_f")"
 done
-_FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
-_OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
-_REPO="${LCARS_PACK_REPO:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p')}"
+# sans origin, la forge est indéterminable : un tiroir sans forge n'est pas une panne, la publication le dira
+_ORIGIN="$(git remote get-url origin 2>/dev/null || true)"
+_FORGE="${LCARS_PACK_FORGE:-$(sed -n 's|^\(https\?://[^/]*\)/.*|\1|p' <<<"$_ORIGIN")}"
+_OWNER="${LCARS_PACK_OWNER:-$(sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p' <<<"$_ORIGIN")}"
+_REPO="${LCARS_PACK_REPO:-$(sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p' <<<"$_ORIGIN")}"
 DOOR_BASE="${LCARS_DOOR_BASE:-${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/${_REPO:-lcars-fleet}/releases/download/$TAG}"
 say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
 bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
 
-# ─── L'IMAGE — LE MEME KIT, POSE PAR LE MEME RAIL, DANS UN CONTENEUR ────────────────────────────
-# ⚖ user 2026-09-10 : « pack.sh devrait récupérer la construction du container et sa publication »
-# — pas de jumeau. Le contexte du build est le stage du kit (release et doc dedans : livraison
-# binaire, rien ne se compile) ; le Dockerfile joue `provision apply --substrate docker` puis, au
-# stage verify, `provision doctor` — les mêmes modules que le poste, sélectionnés par leurs
-# en-têtes. L'image porte le tag de la version ET `<nom>:local`, le nom que `deploy/container up`
-# et le banc prennent par défaut. `--no-image` s'en passe, et le dit.
+# l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
 IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
 if [[ "$IMAGE" -eq 1 ]]; then
   # shellcheck source=lib/docker-endpoint.sh
   . deploy/lib/docker-endpoint.sh
   docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
-  say "image → $IMAGE_NAME:$TAG (le kit posé par le rail, puis son doctor)…"
+  say "image → $IMAGE_NAME:$TAG (le kit posé par les modules, puis leur doctor)…"
   "$PROV_DOCKER_BIN" build \
       -f "$STAGE/$ROOT/deploy/docker/Dockerfile" \
       --build-arg GIT_SHA="$_rev" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
       -t "$IMAGE_NAME:$TAG" -t "$IMAGE_NAME:local" \
       "$STAGE/$ROOT" \
-    || die "image NON bâtie — le rail a rougi dans le conteneur (le kit et la porte sont là, dans $DIST)"
+    || die "image non bâtie — les modules ont rougi dans le conteneur (le kit et la porte sont là, dans $DIST)"
   _img_rev="$("$PROV_DOCKER_BIN" image inspect "$IMAGE_NAME:$TAG" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
   [[ "$_img_rev" == "$_rev" ]] || die "l'image dit « $_img_rev », le kit $_rev — deux révisions dans une même version, rien ne sort"
   say "image : $IMAGE_NAME:$TAG (révision $_img_rev), aussi $IMAGE_NAME:local"
@@ -327,51 +146,19 @@ else
   say "--no-image : pas d'image — le kit et la porte seulement"
 fi
 
-# ─── LA PUBLICATION (--publish) : LA RELEASE DE LA FORGE ──────────────────────────────────────
-# (50-PUBLISH § 1) La Release porte TOUT le tiroir de la version — tar, sha256, la porte et sa
-# somme, les .minisig quand la clé est là — à la forme d'URL commune à Gitea et GitHub :
-# <forge>/<owner>/<repo>/releases/download/<tag>/<asset>. C'est CETTE base que la porte de la version
-# porte en dur (DOOR_BASE, ci-dessus) : publier ailleurs, c'est publier une porte qui ne trouve pas
-# ses artefacts. L'immutabilité est la nôtre : une release du tag qui existe = refus nommé, rien
-# réécrit (ADR 012). Le geste vit dans deploy/lib/forge-publish.sh — à blanc dans ses témoins, le
-# même sur le poste et dans la CI sur tag (publish.yml), qui joue CE script.
-#
-# L'ancien étage poussait le tar seul au paquet `generic` de la forge : la Release le remplace — un
-# seul endroit, la forme d'URL que la porte connaît.
 [[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et la porte restent dans $DIST, l'image dans le daemon"; exit 0; }
 
-# LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire le code, donc la version doit atterrir
-# au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour une forge,
-# c'est celle qu'on ne lit pas qui finit par être la bonne. LCARS_PACK_FORGE/OWNER/REPO la posent
-# quand origin n'est pas http (un clone local, un banc).
+# la publication : l'image d'abord (elle se rejoue), puis la release de la forge (immuable) ; le jeton ne passe ni en argv ni à l'écran
 FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
 [[ -n "$FORGE" && -n "$OWNER" ]] || die "--publish : forge ou owner indéterminables (origin n'est pas http) — LCARS_PACK_FORGE et LCARS_PACK_OWNER les posent"
-
-# ⚠ LE JETON N'EST PAS ÉCRIT ICI, ET CE N'EST PAS UN OUBLI DE CONFORT. Ce fichier est suivi par git :
-# un littéral partirait sur la forge ET dans chaque tar que ce script produit — le paquet livrerait
-# la clé de la forge qui le sert. Il vient de l'environnement (la CI : un secret du runner) ou d'un
-# fichier posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
-# dépôt. Portées : write:repository (la release est un objet du dépôt) ET write:package (l'image
-# va au registre de l'owner) — distinctes chez Gitea, aucune ne se déduit de l'autre ; celui des
-# `git push` n'a pas la seconde. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
-# un état se calcule AVANT d'être dit (cicatrice du 2026-08-25 : « jeton : trouvé9172f605… »).
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
-# L'ÉTAT DU JETON SE CALCULE AVANT D'ÊTRE DIT (pack_secrets.bats extrait ce bloc et le joue à blanc :
-# un jeton présent se dit « trouvé », jamais sa valeur ; un jeton absent se dit « absent »).
 _tok_state="absent"
 [[ -n "$TOKEN" ]] && _tok_state="trouvé"
 say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 [[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:repository + write:package)"
-
 # shellcheck source=lib/forge-publish.sh
 . deploy/lib/forge-publish.sh
-
-# ─── L'IMAGE D'ABORD, LA RELEASE ENSUITE — parce que la Release est IMMUABLE (ADR 012) ──────────
-# Une release publiée dont l'image manque ne se répare pas ; une image poussée dont la release
-# manque se rattrape en rejouant. Le registre est celui de la forge (`<hôte>/<owner>/<repo>`), ou
-# ghcr.io chez GitHub ; un tag qui existe déjà est un refus, jamais une réécriture. Le jeton est
-# celui de la release (write:package), lu sur stdin — jamais en argv.
 if [[ "$IMAGE" -eq 1 ]]; then
   _registry="${LCARS_PACK_REGISTRY:-}"
   if [[ -z "$_registry" ]]; then
@@ -381,15 +168,14 @@ if [[ "$IMAGE" -eq 1 ]]; then
   printf '%s' "$TOKEN" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
   if "$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" >/dev/null 2>&1; then
-    die "--publish : $IMAGE_REMOTE existe déjà — un tag publié ne se réécrit jamais (ADR 012) ; pour refaire, supprime-le sur la forge, ce script ne le fait pas"
+    die "--publish : $IMAGE_REMOTE existe déjà — un tag publié ne se réécrit jamais ; pour refaire, le supprimer sur la forge, ce script ne le fait pas"
   fi
   say "image → $IMAGE_REMOTE…"
   "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
-    || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est PAS créée (rien à réparer sur la forge)"
+    || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
   "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true
   say "image publiée : $IMAGE_REMOTE"
 fi
-
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
   || die "publication interrompue — voir ci-dessus"

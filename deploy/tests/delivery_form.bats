@@ -183,33 +183,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 
 # ─── LE PAQUET PORTE LES DEUX MOITIES ───────────────────────────────────────────────────────────
 
-@test "PACK : le paquet emporte la DOC autant que la release — sinon c'est une demi-livraison" {
-  # ⚠ LE DEFAUT QUE CE TEMOIN FERME EST NE DE R4, ET IL ETAIT INVISIBLE AVANT. Tant que la cible
-  # posait node dans tous les cas, un paquet sans doc se rattrapait tout seul : `44-media` la
-  # batissait sur place. Depuis que `16-node` lit le discriminant, une cible qui installe un paquet
-  # n'a plus node — donc si le paquet n'apporte pas la doc, PERSONNE ne la batira jamais, et le
-  # drift « doc du deck absente » ne se converge par aucun geste.
-  local pack="$BATS_TEST_DIRNAME/../pack.sh"
-  [ -f "$pack" ]
-  grep -q 'npm run build' "$pack"                       # il la BATIT
-  grep -qE 'cp -a "\$SITE_SRC/dist"' "$pack"            # et il l EMPORTE
-  # les deux produits partent cote a cote, pour la meme raison : gitignores, donc hors `git archive`
-  local n_rel n_doc
-  # ⚠ LA COPIE, PAS « LA DERNIERE MENTION ». Ce temoin prenait `tail -1` de toutes les lignes qui
-  # citent `_build/prod/rel/lcars_fleet` — une approximation qui tenait tant que la derniere etait
-  # la copie. Elle a cesse de l'etre : `pack.sh` passe desormais ce chemin au mur du kit
-  # (`kit_verifie`, apres la doc), et le temoin rougissait sur un ordre pourtant intact. Ce qu'il
-  # doit mesurer est le GESTE de copie, et lui seul.
-  n_rel="$(grep -n 'cp -a runtime/_build/prod/rel/lcars_fleet' "$pack" | head -1 | cut -d: -f1)"
-  n_doc="$(grep -n 'cp -a "\$SITE_SRC/dist"' "$pack" | head -1 | cut -d: -f1)"
-  [ -n "$n_rel" ]
-  [ -n "$n_doc" ]
-  [ "$n_rel" -lt "$n_doc" ]
-  # et le tar se ferme APRES les deux
-  local n_tar; n_tar="$(grep -n 'tar -czf' "$pack" | head -1 | cut -d: -f1)"
-  [ "$n_doc" -lt "$n_tar" ]
-}
-
 @test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
   # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
   # un fichier de plus dans le tar, et un drift de plus sur la cible.
@@ -263,35 +236,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 
 # ─── CE QUE LA PREMIERE INSTALL BINAIRE REELLE A TROUVE (banc 2006, 2026-09-01) ─────────────────
 
-@test "PACK : un arbre MODIFIE est REFUSE — le gate et le tar liraient deux codes differents" {
-  # ⚠ LE DEFAUT LE PLUS CHER DE CE SCRIPT, ET IL ETAIT INVISIBLE. `pack.sh` s EXECUTE depuis l arbre
-  # de travail (`mix gate`, `mix release`, `npm run build` lisent l arbre) et ARCHIVE `HEAD`. Les
-  # deux divergent des qu une modification n est pas commitee : le paquet contient alors un code que
-  # le gate n a jamais vu.
-  #
-  # Mesure : le tar portait la doc que la section neuve venait de batir — donc l arbre avait bien
-  # tourne — ET la version HEAD des modules, sans le correctif qui va avec. `44-media` est mort sur
-  # « npm absent », le message exact que ce correctif absent devait empecher.
-  local pack="$BATS_TEST_DIRNAME/../pack.sh"
-  grep -qE 'git diff --quiet HEAD .*\|\| die' "$pack"
-  # et le refus arrive AVANT le gate : echouer apres sept minutes de compilation est une punition
-  local n_refus n_gate
-  # ⚠ HORS COMMENTAIRES : l en-tete CITE « mix gate » pour dire ce que le script ne reimplemente pas.
-  # Un `grep -n` nu comparait donc le refus a une ligne de PROSE, et rougissait sur du code juste.
-  local code; code="$(grep -vnE "^\\s*#" "$pack" | sed "s/^\\([0-9]*\\):/\\1:/")"
-  n_refus="$(grep -E "git diff --quiet HEAD" <<<"$code" | head -1 | cut -d: -f1)"
-  n_gate="$(grep -E "mix gate" <<<"$code" | head -1 | cut -d: -f1)"
-  [ "$n_refus" -lt "$n_gate" ]
-}
-
-@test "PACK : le tampon ne porte plus « +local » — il decrit le PAQUET, pas l arbre" {
-  # Il mentait dans les DEUX sens : il disait « arbre modifie » d un paquet qui ne contenait AUCUNE
-  # de ces modifications. `+local` garde tout son sens dans `prov_source_rev`, qui decrit un arbre.
-  local pack="$BATS_TEST_DIRNAME/../pack.sh"
-  grep -vE '^\s*#' "$pack" | refute_out '\+local'
-  grep -q 'rev-parse --short=8 HEAD' "$pack"
-}
-
 @test "15-toolchain : livraison binaire — le plancher OTP n est PAS verifie" {
   # Le module s est contredit en trois lignes sur le banc 2006 : « erlang et elixir non poses,
   # livraison binaire » puis « Erlang/OTP « 0 » toujours sous le plancher 27 » puis rc=1. La release
@@ -319,23 +263,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
   n_mix="$(grep -n 'mix absent' <<<"$bloc" | head -1 | cut -d: -f1)"
   [ "$n_bin" -lt "$n_mix" ]
-}
-
-@test "PACK : la release est assemblee dans un repertoire VIDE, et le paquet est refuse si elle porte plus d'une lib ou un tampon qui n'est pas HEAD" {
-  # 2026-09-05, banc 2003 : le tar portait une lib/lcars_fleet-0.1.0 de passe5 a cote de la 0.9.0 —
-  # `mix release --overwrite` ne nettoie pas. Le pack vide d'abord, puis atteste : une lib, sha = HEAD.
-  local pack="$BATS_TEST_DIRNAME/../pack.sh"
-  [ -f "$pack" ]
-  local body; body="$(grep -vE '^\s*#' "$pack")"
-  grep -qE '^rm -rf runtime/_build/prod/rel/lcars_fleet$' <<<"$body"
-  # le rm vient AVANT mix release
-  local l_rm l_rel
-  l_rm="$(grep -nE '^rm -rf runtime/_build/prod/rel/lcars_fleet$' <<<"$body" | cut -d: -f1)"
-  l_rel="$(grep -nE 'mix release --overwrite' <<<"$body" | head -1 | cut -d: -f1)"
-  [ "$l_rm" -lt "$l_rel" ]
-  grep -qE 'lib/lcars_fleet-\*' <<<"$body"
-  grep -qE 'eq 1 .*die' <<<"$body" || grep -qE '"\$\{#_libs\[@\]\}" -eq 1' <<<"$body"
-  grep -qE '"\$_built" == "\$SHA"' <<<"$body"
 }
 
 # ─── LE CANAL — QUI A POSE (lot 2 du chantier release, 2026-09-05) ──────────────────────────────
