@@ -119,7 +119,7 @@ if [[ "$MODE" == "container" ]]; then
   [[ "${#PASSTHRU[@]}" -eq 0 ]] \
     || { echo "  ${PASSTHRU[0]} est un drapeau du mode --workstation : il pilote le provisionnement, que le conteneur n'appelle pas." >&2; exit 1; }
   [[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
-    || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas à nous." >&2; exit 1; }
+    || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
 fi
 PASSTHRU+=(${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
 MODE_FLAG=""; [[ "$MODE" != "workstation" ]] || MODE_FLAG=" --workstation"
@@ -294,7 +294,8 @@ case "$SUBSTRATE" in
   docker) TERRAIN="dans un conteneur" ;;
 esac
 SYSTEMD="systemd actif"; [[ "$(fait systemd)" == "oui" ]] || SYSTEMD="sans systemd"
-GROUPES="$(fait groupes | tr ',' ' ' | sed 's/ /, /g')"
+GROUPES="$(fait groupes | tr ',' '\n' | grep -xE 'sudo|docker|fleet' | paste -sd, - | sed 's/,/, /g')"   # ceux qui comptent ici
+[[ -n "$GROUPES" ]] || GROUPES="ni sudo, ni docker, ni fleet"
 
 echo "  ${W}Source${N}     $SOURCE_LIGNE"
 echo ""
@@ -345,11 +346,11 @@ PORTS_PRIS=""; ports_ligne=""; PORT_DECK=""; PORT_SSH=""
 for p in forge deck ssh; do
   v="$(fait "port_$p")"; n="${v%% *}"; etat="${v#* }"; [[ "$v" == *" "* ]] || etat=""
   [[ "$p" != "deck" ]] || PORT_DECK="$n"; [[ "$p" != "ssh" ]] || PORT_SSH="$n"
-  # la forge n'a pas de port à nous quand elle est fournie
+  # le port de la forge n'est pas à ce projet quand elle est fournie
   [[ "$p" == "forge" && "$FORGE_ETAT" != "montee" ]] && continue
   case "$etat" in
     libre)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) libre" ;;
-    nous*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) à nous" ;;
+    nous*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) publié par ce projet" ;;
     pris*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) ${R}${etat^^}${N}"; PORTS_PRIS="${PORTS_PRIS:+$PORTS_PRIS ; }$p $n $etat" ;;
     *)      ports_ligne="${ports_ligne:+$ports_ligne · }$(ou "$n") ($p) ${etat:-état inconnu}" ;;
   esac
@@ -500,7 +501,7 @@ if [[ "$MODE" == "workstation" ]]; then
   fi
   delegue workstation
   CMD=("$DELEGUE" up ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"})
-  [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/${ASSETS[0]}")
+  [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/lcars_install")   # le kit déjà détaré et vérifié, pas le tar une seconde fois
   RAPPEL="Installation dans ce système — deploy/workstation up"
 elif [[ "$WITH_BENCH" -eq 1 ]]; then
   delegue container

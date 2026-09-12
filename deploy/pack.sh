@@ -2,8 +2,8 @@
 # SOURCE: deploy/pack.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: le lanceur de la version — gate, release, doc, kit tar, porte de la version, image docker, et leur publication depuis le poste
-# USAGE : deploy/pack.sh            gate + release + doc + tar + porte + image : dans le tiroir et le daemon, rien n'en sort
+# STATUS: le lanceur de la version — gate, release, doc, kit tar, installeur de la version, image docker, et leur publication depuis le poste
+# USAGE : deploy/pack.sh            gate + release + doc + tar + installeur + image : dans le tiroir et le daemon, rien n'en sort
 #         deploy/pack.sh --publish  … puis la release de la forge (tout le tiroir) et l'image au registre
 #         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit)
 # ENV   : LCARS_PACK_DIR      le tiroir des paquets (défaut : lcars-packs à côté du checkout)
@@ -41,7 +41,7 @@ VERSION="$(date +%m-%d_%H-%M)"
 TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
-# le nom du kit porte le tag : c'est par lui que la porte le retrouve dans sa table (lcars-fleet-<tag>-*-<arch>)
+# le nom du kit porte le tag : c'est par lui que l'installeur le retrouve dans sa table (lcars-fleet-<tag>-*-<arch>)
 NAME="lcars-fleet-${TAG}-otp${OTP}-${ARCH}"
 PACK_DIR="${LCARS_PACK_DIR:-$(dirname "$PWD")/lcars-packs}"
 PACK_DIR="$(realpath -m "$PACK_DIR")"
@@ -105,7 +105,7 @@ tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar en échec"
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
 say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 
-# le tiroir de la version : les artefacts (liens durs) et la porte qui porte leurs sha256 et leur base d'URL
+# le tiroir de la version : les artefacts (liens durs) et l'installeur qui porte leurs sha256 et leur base d'URL
 DIST="$PACK_DIR/dist/$TAG"
 mkdir -p "$DIST"
 for _f in "$OUT" "${OUT}.sha256"; do
@@ -122,9 +122,9 @@ _FORGE="${LCARS_PACK_FORGE:-$(sed -n 's|^\(https\?://[^/]*\)/.*|\1|p' <<<"$_ORIG
 _OWNER="${LCARS_PACK_OWNER:-$(sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p' <<<"$_ORIGIN")}"
 _REPO="${LCARS_PACK_REPO:-$(sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p' <<<"$_ORIGIN")}"
 DOOR_BASE="${LCARS_DOOR_BASE:-${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/${_REPO:-lcars-fleet}/releases/download/$TAG}"
-say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
-bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
-say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
+say "installeur de la version → $DIST/install.sh (base $DOOR_BASE)…"
+bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "installeur de la version non généré"
+say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, installeur compris)"
 
 # l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
 IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
@@ -138,15 +138,15 @@ if [[ "$IMAGE" -eq 1 ]]; then
       --build-arg GIT_SHA="$_rev" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
       -t "$IMAGE_NAME:$TAG" -t "$IMAGE_NAME:local" \
       "$STAGE/$ROOT" \
-    || die "image non bâtie — les modules ont rougi dans le conteneur (le kit et la porte sont là, dans $DIST)"
+    || die "image non bâtie — les modules ont rougi dans le conteneur (le kit et l'installeur sont là, dans $DIST)"
   _img_rev="$("$PROV_DOCKER_BIN" image inspect "$IMAGE_NAME:$TAG" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
   [[ "$_img_rev" == "$_rev" ]] || die "l'image dit « $_img_rev », le kit $_rev — deux révisions dans une même version, rien ne sort"
   say "image : $IMAGE_NAME:$TAG (révision $_img_rev), aussi $IMAGE_NAME:local"
 else
-  say "--no-image : pas d'image — le kit et la porte seulement"
+  say "--no-image : pas d'image — le kit et l'installeur seulement"
 fi
 
-[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et la porte restent dans $DIST, l'image dans le daemon"; exit 0; }
+[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et l'installeur restent dans $DIST, l'image dans le daemon"; exit 0; }
 
 # la publication : l'image d'abord (elle se rejoue), puis la release de la forge (immuable) ; le jeton ne passe ni en argv ni à l'écran
 FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"

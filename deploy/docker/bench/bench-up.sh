@@ -163,8 +163,16 @@ if [[ ${#BUSY[@]} -gt 0 ]]; then
 fi
 
 # ─── La forge ───────────────────────────────────────────────────────────────────────────────────
+# un succès est une ligne, un échec montre la sortie : compose et tofu parlent beaucoup quand tout va bien
+quiet() { # quiet <cmd…> — la sortie n'apparaît que si la commande échoue (40 dernières lignes)
+  local out rc=0; out="$(mktemp "${TMPDIR:-/tmp}/bench-up.XXXXXX")"
+  "$@" > "$out" 2>&1 || rc=$?
+  [[ "$rc" -eq 0 ]] || tail -n 40 "$out" >&2
+  rm -f "$out"
+  return "$rc"
+}
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
-forge_mount "$DOCKER_BIN" "$DOCKER_DIR/forge-compose.yml" "$FORGE_PROJECT" "$FORGE_PORT" "$BIND" "$FORGE_URL" \
+quiet forge_mount "$DOCKER_BIN" "$DOCKER_DIR/forge-compose.yml" "$FORGE_PROJECT" "$FORGE_PORT" "$BIND" "$FORGE_URL" \
   || die "la forge ne monte pas" 2
 forge_wait "$FORGE_LOCAL_URL" || die "la forge ne répond pas sur $FORGE_LOCAL_URL" 2
 say "forge up"
@@ -176,7 +184,7 @@ say "conteneur : projet $CONTAINER_PROJECT, image $IMAGE, bind $BIND"
 # le conteneur matérialise admiral (uid 1000) ; l'humain vient de la forge, par le convergeur.
 # Le deck compare exactement l'entrée annoncée à son client OAuth2 : on ne nomme que celle-là, le
 # module 66 sème les deux écritures de la loopback.
-env LCARS_IMAGE="$IMAGE" \
+quiet env LCARS_IMAGE="$IMAGE" \
     LCARS_ADMIRAL="$ADMIRAL" \
     FORGE_BASE_URL="http://gitea:3000" \
     LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
@@ -188,7 +196,7 @@ env LCARS_IMAGE="$IMAGE" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "le conteneur ne se crée pas (le réseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
-d compose "${COMPOSE_ARGS[@]}" start lcars || die "le conteneur ne démarre pas" 3
+quiet d compose "${COMPOSE_ARGS[@]}" start lcars || die "le conteneur ne démarre pas" 3
 attendre_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
 say "conteneur healthy"
 if printf '%s:%s\n' "$ADMIRAL" "$ADMIRAL_PW" | in_container chpasswd 2>/dev/null; then
@@ -229,7 +237,7 @@ rm -rf "$ENROLL_DIR"
 
 printf '%s' "$MASTER_TOKEN" | in_container /opt/lcars/forge-gestures.sh config-token || die "jeton master refusé par le conteneur" 4
 printf '%s' "$SEED_PW"      | in_container /opt/lcars/forge-gestures.sh config-seed  || die "seed non posé dans le conteneur" 4
-d exec -i -u root -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN@lcars.local" \
+quiet d exec -i -u root -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN@lcars.local" \
     "$CONTAINER" /opt/lcars/forge-gestures.sh apply < /dev/null \
   || die "structure de la forge en échec dans $CONTAINER (rejouer : docker exec -u root $CONTAINER /opt/lcars/forge-gestures.sh apply)" 4
 say "structure posée par le conteneur (org $ORG, teams, comptes, adhésions, dépôt modèle)"

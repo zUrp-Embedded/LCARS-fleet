@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7-labs
 # SOURCE: deploy/docker/Dockerfile
 # AUTHOR: bob
 # STARDATE: 2026-09-11

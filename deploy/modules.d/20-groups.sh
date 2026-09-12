@@ -39,6 +39,7 @@ apply() {
   ensure_group "$PROV_FLEET_GROUP" || verdict_apply
   ensure_member "$PROV_HUMAN" "$PROV_FLEET_GROUP" || verdict_apply
   ensure_group "$PROV_CONSOLE_GROUP" || verdict_apply
+  [[ "${PROV_CHANGED:-0}" -gt 0 ]] || p_ok "groupes $PROV_FLEET_GROUP et $PROV_CONSOLE_GROUP en place, $PROV_HUMAN membre de $PROV_FLEET_GROUP"
   verdict_apply
 }
 

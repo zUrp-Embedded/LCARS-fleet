@@ -127,17 +127,17 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
   m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
   case "$m" in
     "Compiling"*)        echo "compilation" ;;
-    "Running ExUnit")    echo "suite ExUnit (3000+ temoins)" ;;
-    "Finished in "*)     echo "suite ExUnit terminee" ;;
+    "Running ExUnit")    echo "suite ExUnit (3000+ témoins)" ;;
+    "Finished in "*)     echo "suite ExUnit terminée" ;;
     "=== shell_gate"*)   echo "gate shell (python + bats)" ;;
     "--- bats"*)         echo "gate shell (bats)" ;;
     *"contracts.check green") echo "contrats" ;;
     "lcars.topology")    echo "topologie" ;;
     "Checking "*)        echo "dialyzer (construction du PLT)" ;;
     "Total errors"*)     echo "dialyzer" ;;
-    "done (passed"*)     echo "dialyzer termine" ;;
-    "Release created at") echo "release posee" ;;
-    *)                   echo "demarrage" ;;
+    "done (passed"*)     echo "dialyzer terminé" ;;
+    "Release created at") echo "release posée" ;;
+    *)                   echo "démarrage" ;;
   esac
 }
 
@@ -392,12 +392,17 @@ prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un reperto
   [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
   return 0
 }
-prov_promote_dir() { # prov_promote_dir <echafaudage> <final> — bascule (rm -rf du final, mv), puis note le nom FINAL
-  local from="$1" to="$2"
-  [[ -d "$from" ]] || { p_fail "prov_promote_dir: échafaudage absent: $from"; return 1; }
-  [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir: destination vide ou racine"; return 1; }
-  rm -rf -- "$to"
-  mv -- "$from" "$to" || { p_fail "prov_promote_dir: bascule refusée: $from → $to"; return 1; }
+prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — l'ancien final est renommé, le nouveau basculé, l'ancien effacé : à aucun moment le final manque
+  local from="$1" to="$2" old
+  [[ -d "$from" ]] || { p_fail "prov_promote_dir : échafaudage absent : $from"; return 1; }
+  [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir : destination vide ou racine"; return 1; }
+  old="$to.old.$$"
+  rm -rf -- "$old"
+  if [[ -e "$to" || -L "$to" ]]; then
+    mv -- "$to" "$old" || { p_fail "prov_promote_dir : l'ancien $to ne se renomme pas"; return 1; }
+  fi
+  mv -- "$from" "$to" || { [[ -e "$old" ]] && mv -- "$old" "$to"; p_fail "prov_promote_dir : bascule refusée : $from → $to"; return 1; }
+  rm -rf -- "$old"
   return 0
 }
 

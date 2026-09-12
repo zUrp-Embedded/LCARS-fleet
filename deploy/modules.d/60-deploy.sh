@@ -177,7 +177,9 @@ apply() {
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
   fi
   # LCARS_INSTALL_SKIP_GATE : l'installation compile et pose, l'attestation de la source vient de la CI et de pack.sh
-  run_step --ok 3 "build de la release" -- \
+  local etape="build de la release"
+  ! prov_delivery_is_binary || etape="pose de la release depuis le kit"
+  run_step --ok 3 "$etape" -- \
     as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \
       LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" || true
   local install_rc="$PROV_LAST_RC"

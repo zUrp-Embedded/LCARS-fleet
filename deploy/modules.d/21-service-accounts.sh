@@ -159,6 +159,7 @@ apply() {
     fi
   fi
 
+  [[ "${PROV_CHANGED:-0}" -gt 0 ]] || p_ok "comptes de service en place : $AUTHORITY_USER (membre de $PROV_FLEET_GROUP), $SYSTEM_USER (groupe $SYSTEM_GROUP)"
   verdict_apply
 }
 

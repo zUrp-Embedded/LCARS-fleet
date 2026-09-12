@@ -212,7 +212,7 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" == *"Source     archive (kit) · révision cafe1234"* ]]
   [[ "$output" == *"Système    Ubuntu 26.04 sous WSL2 · noyau 6.6.0 · systemd actif"* ]]
   [[ "$output" == *"x86_64 · 4 cœurs · 8 Go de RAM · 100 Go libres sur /"* ]]
-  [[ "$output" == *"utilisateur temoin · groupes temoin, sudo, docker"* ]]
+  [[ "$output" == *"utilisateur temoin · groupes sudo, docker"* ]]
   [[ "$output" == *"Outils     git, curl présents"* ]]   # sudo n'est requis que par --workstation
   [[ "$output" == *"Forge      aucune"* ]]
   porte "$a" --workstation --check
@@ -576,7 +576,7 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"téléchargé, sha256 vérifié"* ]]
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
-  [[ "$output" == *"WORKSTATION:up --from $KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz"* ]]
+  [[ "$output" == *"WORKSTATION:up --from $KITS/lcars_install"* ]]
   [ -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz.sha256" ]
   # sans clé : la porte le dit, et continue
   [[ "$output" == *"provenance non vérifiée (sha256 seul)"* ]]
@@ -660,7 +660,7 @@ pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
   pipee --workstation --bench
   [ "$status" -eq 0 ]
   pipee --workstation --bench --dry-run
-  [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --from $KITS/$a"* ]]
+  [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_install"* ]]
 }
 
 @test "le gabarit du dépôt, pipé, ne télécharge rien : sa table est vide, et il le dit" {

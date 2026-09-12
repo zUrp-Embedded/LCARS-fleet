@@ -289,6 +289,36 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+@test "prov_promote_dir : un final existant est remplacé par l'échafaudage, rien ne reste à côté, et un final absent est simplement posé" {
+  module_sh '
+    mkdir -p "$BATS_TEST_TMPDIR/p/final" "$BATS_TEST_TMPDIR/p/final.new"
+    echo ancien > "$BATS_TEST_TMPDIR/p/final/x"; echo nouveau > "$BATS_TEST_TMPDIR/p/final.new/x"
+    prov_promote_dir "$BATS_TEST_TMPDIR/p/final.new" "$BATS_TEST_TMPDIR/p/final"
+    [ "$(cat "$BATS_TEST_TMPDIR/p/final/x")" = nouveau ]
+    [ ! -e "$BATS_TEST_TMPDIR/p/final.new" ]
+    [ "$(ls "$BATS_TEST_TMPDIR/p" | tr "\n" " ")" = "final " ]
+    mkdir -p "$BATS_TEST_TMPDIR/q/final.new"; echo seul > "$BATS_TEST_TMPDIR/q/final.new/x"
+    prov_promote_dir "$BATS_TEST_TMPDIR/q/final.new" "$BATS_TEST_TMPDIR/q/final"
+    [ "$(cat "$BATS_TEST_TMPDIR/q/final/x")" = seul ]
+    [ "$(ls "$BATS_TEST_TMPDIR/q" | tr "\n" " ")" = "final " ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "prov_promote_dir : une bascule refusée laisse l'ancien final en place, dit, rc 1" {
+  module_sh '
+    mkdir -p "$BATS_TEST_TMPDIR/r/final" "$BATS_TEST_TMPDIR/r/final.new"
+    echo ancien > "$BATS_TEST_TMPDIR/r/final/x"
+    mv() { if [[ "$*" == *final.new* ]]; then return 1; fi; command mv "$@"; }
+    rc=0; prov_promote_dir "$BATS_TEST_TMPDIR/r/final.new" "$BATS_TEST_TMPDIR/r/final" || rc=$?
+    [ "$rc" -eq 1 ]
+    [ "$(cat "$BATS_TEST_TMPDIR/r/final/x")" = ancien ]
+    [ "$(ls "$BATS_TEST_TMPDIR/r" | tr "\n" " ")" = "final final.new " ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bascule refusée"* ]]
+}
+
 @test "ensure_mode, write_atomic, prov_scaffold_dir : « user: » est passé à chown avec le groupe de connexion nommé — les coreutils uutils ignorent la forme nue" {
   local faux="$BATS_TEST_TMPDIR/bin"; mkdir -p "$faux"
   printf '#!/usr/bin/env bash\nfor a; do [[ "$a" == -* ]] || { printf "%%s\\n" "$a" >> "%s"; break; }; done\nexec /usr/bin/chown "$@"\n' "$BATS_TEST_TMPDIR/chown.argv" > "$faux/chown"
@@ -577,13 +607,13 @@ STUB
   [ "$status" -eq 0 ]
   local -a lines; mapfile -t lines <<< "$output"
   [ "${lines[0]}" = "compilation" ]
-  [ "${lines[1]}" = "suite ExUnit (3000+ temoins)" ]
-  [ "${lines[2]}" = "suite ExUnit terminee" ]
+  [ "${lines[1]}" = "suite ExUnit (3000+ témoins)" ]
+  [ "${lines[2]}" = "suite ExUnit terminée" ]
   [ "${lines[3]}" = "gate shell (python + bats)" ]
-  [ "${lines[4]}" = "release posee" ]
-  [ "${lines[5]}" = "demarrage" ]
-  [ "${lines[6]}" = "demarrage" ]
-  [ "${lines[7]}" = "demarrage" ]
+  [ "${lines[4]}" = "release posée" ]
+  [ "${lines[5]}" = "démarrage" ]
+  [ "${lines[6]}" = "démarrage" ]
+  [ "${lines[7]}" = "démarrage" ]
 }
 
 @test "run_step: une ligne par CHANGEMENT de phase — pas une par seconde" {

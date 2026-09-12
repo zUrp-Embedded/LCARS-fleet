@@ -106,7 +106,7 @@ pack() { run bash "$R/deploy/pack.sh" "$@"; }
   grep -q "^DOOR_BASE=\"https://forge.invalid/lcars/lcars-fleet/releases/download/v9.9\"" "$dist/install.sh"
   grep -q '^mix deps.get$' "$CALLS"
   grep -q '^mix release --overwrite$' "$CALLS"
-  [[ "$output" == *"pack: --no-image : pas d'image"*"pack: sans --publish : le tar et la porte restent dans $dist"* ]]
+  [[ "$output" == *"pack: --no-image : pas d'image"*"pack: sans --publish : le tar et l'installeur restent dans $dist"* ]]
 }
 
 @test "sans tag, la version est <MM-DD_HH-MM>-<sha> et le kit se nomme d'elle" {

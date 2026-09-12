@@ -32,7 +32,7 @@ observe() {
       p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
     fi
   done < <(fleet_humans)
-  [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien a vérifier ici tant que personne ne s'est enrolé.
+  [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien à vérifier ici tant que personne ne s'est enrôlé.
      Le chemin : la page d'inscription de la forge, puis la team « $PROV_HUMANS_TEAM » — le convergeur matérialise au tour suivant.
      S'il ne matérialise pas : « journalctl -u lcars-converger » dit pourquoi (forge, jeton, team)."
 }
