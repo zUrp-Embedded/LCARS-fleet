@@ -1,16 +1,7 @@
 defmodule Fleet.Spawner.RecoveryTest do
-  # async: true — `recovery_action/1` is pure (function of the phase alone); no
-  # global config mutation (the `:recovery_resume_enabled` gate is gone).
   use ExUnit.Case, async: true
 
   alias Fleet.Spawner.Pod.Recovery
-
-  # `recovery_action/1` is pure: the PHASE alone decides. Terminal phase → :release
-  # (nothing to relaunch); everything else → :recreate (from scratch, fresh session).
-  # No `:resume` path: `--resume` on a server-side dead session = zombie pod
-  # (proven live). An in-flight (re)spawn rerolls; the task stays in the queue and
-  # re-drives a fresh REPL. Under `:temporary` the supervisor never resurrects;
-  # deliberate (re)spawn → explicit decision.
 
   test "terminal phase → :release (nothing to relaunch)" do
     assert :release = Recovery.recovery_action(:succeeded)

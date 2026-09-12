@@ -1,11 +1,7 @@
 defmodule Fleet.Spawner.SessionIdTest do
   @moduledoc """
-  Deterministic hexspeak encoder (`Fleet.Spawner.SessionId.encode/5`) — pure, async.
-  Locks the scheme `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>` (class + uid). This is a
-  PURE encoder: the class is an ARGUMENT, so these cases name a class, never a role — which role
-  carries which class is `CapProfile.kill_class/1`, and citing it here is how a title goes stale. The role→slot
-  catalog + the kill-class derivation live in the cap-profile (tested in `Fleet.CapProfileTest`);
-  here we test only the string arithmetic. A fixed `@uid` keeps the asserts deterministic.
+  UUID encoding/validation and diagnosed UID bounds at minting. Role/class catalog semantics
+  are tested in `Fleet.CapProfileTest`; a fixed UID keeps these identities independent of the OS.
   """
   use ExUnit.Case, async: true
 
@@ -73,11 +69,10 @@ defmodule Fleet.Spawner.SessionIdTest do
 
   describe "cast/1 — validation of an explicit session_id (BND-024)" do
     test "valid UUID v4 (including a deterministic hexspeak id) → {:ok, uuid}" do
-      # a genuine vendor v4 UUID
+      # A v4 UUID without deterministic field semantics.
       assert {:ok, "abcdef01-2345-4678-9abc-def012345678"} =
                SessionId.cast("abcdef01-2345-4678-9abc-def012345678")
 
-      # a deterministic id produced by encode/5 IS a legal UUID v4 → cast accepts it
       det = SessionId.encode(3, 1, @uid, 161)
       assert {:ok, ^det} = SessionId.cast(det)
     end
@@ -103,17 +98,8 @@ defmodule Fleet.Spawner.SessionIdTest do
     end
   end
 
-  # JG-032 (`S2`) — LE JUMEAU ETAIT GARDE, CELUI-CI NON. `<UID>` et `<REPO4>` sont les deux champs
-  # de quatre chiffres decimaux de la MEME identite, tous deux durs-gardes dans `encode/5`, et seul
-  # `<REPO4>` avait un refus DIAGNOSTIQUE cote appelant (DR-020). L'autre rendait une
-  # `FunctionClauseError` nue — et pas sur un chemin exotique : `encode/5` est atteint par TOUT role
-  # catalogue, fleet-scope compris, donc sur un hote dont l'humain siege au-dessus de 9999 AUCUN POD
-  # NE PEUT ETRE CREE, avec une erreur qui ne nomme ni l'uid ni la borne.
-  #
-  # 0..9999 est une hypothese de DEPLOIEMENT, pas une propriete : les uid de bureau y tiennent, les
-  # plages userns/subuid des conteneurs vivent a 100000+. Refuser plutot que replier, pour la raison
-  # deja arbitree sur `<REPO4>` : un `rem` donnerait a deux humains une seule identite deterministe,
-  # et un pod reprendrait la conversation de l'autre.
+  # Minting diagnoses deployment-incompatible UIDs before the encoder's FunctionClauseError;
+  # modulo would let different humans resume the same identity.
   describe "JG-032 — un uid hors borne est refuse en le NOMMANT, jamais par clause de fonction" do
     defp cap(name),
       do: %Fleet.CapProfile{
@@ -139,8 +125,6 @@ defmodule Fleet.Spawner.SessionIdTest do
       end
     end
 
-    # Le role fleet-scope (role_index 0) empruntait une AUTRE branche du `cond` et n'etait donc pas
-    # epargne : il atteint `encode/5` avec le meme uid. Le refus doit le couvrir aussi.
     test "fleet-scope (role_index 0) est couvert par le meme refus" do
       fleet = %Fleet.CapProfile{
         kind: "CapabilityProfile",
@@ -153,9 +137,6 @@ defmodule Fleet.Spawner.SessionIdTest do
       end
     end
 
-    # DEUX HUMAINS DISTINCTS NE COLLISIONNENT PAS — la seconde moitie de la preuve de sortie. Elle
-    # tient parce qu'on REFUSE au lieu de replier : il n'existe aucun couple d'uid distincts rendant
-    # la meme identite.
     test "deux uid valides distincts donnent deux identites distinctes" do
       a = SessionMint.mint(cap("engineer"), uid: 1000, repo_id: 7)
       b = SessionMint.mint(cap("engineer"), uid: 9000, repo_id: 7)

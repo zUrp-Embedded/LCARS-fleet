@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.StateFs do
   Persists pod recovery snapshots and removes terminal disk state.
 
   Snapshots are written atomically and failures are loud but non-fatal. Terminal cleanup removes the
-  state and pod directories only when each resolved path is strictly below its configured root.
+  state and pod directories only when each expanded path is strictly below its configured root.
   """
 
   require Logger
@@ -15,11 +15,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
   Clears a succeeded, released or killed snapshot before deliberate respawn. Missing, unreadable and
   non-terminal snapshots are left untouched.
 
-  Returns `{:error, reasons}` when a terminal snapshot was found and its erasure did NOT complete.
-  That return is the whole point: a surviving `state.json` makes `recover_or_init/1` read the
-  tombstone, class it `:release`, and stop the fresh pod right after teardown — a spawn that
-  reports success and produces nothing. Logging that failure here and then flattening it to `:ok`
-  leaves the caller unable to tell a CLEARED tombstone from a SURVIVING one.
+  Returns `{:error, reasons}` for incomplete erasure: a surviving tombstone would make
+  `recover_or_init/1` immediately release the fresh pod despite an apparently successful spawn.
   """
   @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) ::
           :ok | {:error, [term()]}
@@ -52,7 +49,6 @@ defmodule Fleet.Spawner.Pod.StateFs do
           {:error, reasons}
       end
     else
-      # Missing, unreadable or non-terminal: nothing to clear, and that is not a failure.
       _ -> :ok
     end
   end
@@ -114,42 +110,15 @@ defmodule Fleet.Spawner.Pod.StateFs do
       "issue_id" => state.issue_id,
       # Distinguishes a pod-process crash from a Fleet restart.
       "boot_id" => Fleet.Spawner.BootEpoch.id(),
-      # THE POOL SLOT THIS POD HOLDS, made durable.
-      #
-      # `PoolSlot` exists to stop two processes from sharing a deterministic `session_id`, and the
-      # in-memory `Registry` alone cannot be its source of truth. Pods are `:temporary` and the
-      # Registry
-      # dies with the BEAM, so after a restart it reads EMPTY while orphaned bwrap holders are
-      # still alive (a `kill -9` never runs `terminate/3`, and closing the port does not kill the
-      # holder). The PodWarden reaps them, but only after two ticks — and in that window the same
-      # index is reallocatable, which is exactly the collision the module exists to prevent.
-      #
-      # WRITTEN, not derived. The pool is already recoverable in principle — `SessionId.encode/5`
-      # packs it into the high nibble of the id stored right above — but decoding it would create a
-      # SECOND authority on that format, and a decoder drifting from the encoder narrows or widens
-      # the allocation SILENTLY. That is the very disease this module guards against. A fact
-      # written by its owner has no inverse to get wrong.
+      # PoolSlot needs occupancy after a BEAM crash, while orphaned holders await the warden.
+      # Persist the allocated slot directly rather than maintaining a second UUID-format decoder.
       "slot" => slot_payload(state)
     }
 
     tmp = state.state_fs_path <> ".tmp"
 
-    # `[:sync]` ON THE WRITE, and it is not the same guarantee as the rename.
-    #
-    # write-then-rename buys ATOMICITY: a reader sees the old file or the new one, never a torn
-    # one. It buys nothing about DURABILITY — POSIX rename orders the directory entry, it does not
-    # promise the bytes reached the platter. Without the flag, a machine losing power after the
-    # rename can leave the entry pointing at a zero-length file.
-    #
-    # It matters HERE and not for every writer of the codebase: this is the pod's only persistent
-    # state, and it carries the `boot_id` that arbitrates recovery. Losing it after a power cut
-    # loses the distinction "this pod died" / "the whole fleet restarted" — the one question the
-    # file exists to answer, at exactly the moment it is asked.
-    #
-    # NOT covered, and naming it rather than implying otherwise: the PARENT DIRECTORY is not
-    # fsynced, so the rename itself is not durable either. Doing that needs an `:file.open` on the
-    # directory and a `:file.sync`, which is a second gesture with its own failure modes; the write
-    # flag closes the half that costs one atom.
+    # Sync the snapshot bytes before atomic rename: recovery depends on its boot_id and slot.
+    # The parent directory is not fsynced, so the rename is not guaranteed durable on power loss.
     result =
       with :ok <- File.mkdir_p(Path.dirname(state.state_fs_path)),
            :ok <- File.write(tmp, Jason.encode!(payload, pretty: true), [:sync]) do

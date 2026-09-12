@@ -1,15 +1,7 @@
 defmodule Fleet.Spawner.PoolSlotTest do
   @moduledoc """
-  The `pool` nibble stops being decorative: it is allocated, capped, and the ceiling is hit like
-  a ceiling (a typed refusal the caller turns into a deferral) instead of like a bug (the
-  `pool in 0..0xF` guard of `SessionId.encode/5` raising mid-spawn).
-
-  Index **0 is reserved** and its occupant is DERIVED, not declared: a `slot_scope: project` pod is
-  not a fan-out member, so it takes the seat and consumes no slot. That is what makes the
-  reservation real — before, `0xF` was reserved for a meaning nobody ever wrote.
-
-  The allocation reads Registry VALUES, so these tests seed live slots with short-lived holder
-  processes — no pod is started, and no pod is ever called.
+  Pool allocation, capacity and reserved project slots. Holder processes populate Registry
+  values without starting pods.
   """
   use ExUnit.Case, async: false
 
@@ -17,20 +9,8 @@ defmodule Fleet.Spawner.PoolSlotTest do
   alias Fleet.TestEnv
 
   setup do
-    # An Agent, not ETS: an ETS table owned by the test process is already gone when `on_exit`
-    # runs in its own process — the cleanup would crash on a dead table.
-    #
-    # ⚠ AND `Agent.start`, NEVER `Agent.start_link`. `on_exit` runs in ANOTHER process, AFTER the
-    # test process has died, so anything LINKED to it is already dead by then — measured on this
-    # very file: `Process.alive?(holders)` was `false` in all 8 teardowns, which means the cleanup
-    # below had NEVER run once. And what it cleans is not optional: `occupy/4` creates its holders
-    # with `spawn`, UNLINKED, so they outlive the test and stay in `Fleet.Spawner.Registry` —
-    # exactly the leak `holder_loop/0` documents the cost of. The bookkeeping must outlive what it
-    # books: unlinked, the agent is still there when `on_exit` needs it.
-    #
-    # The `Process.alive?` guard it replaces was also a lost race in the other direction: when the
-    # death is still in flight the probe says `true` and the next call exits `:noproc` IN the
-    # teardown, which marks a PASSED test FAILED (seen under load, two suites in parallel).
+    # on_exit runs after the test process dies. An unlinked Agent keeps the holder list alive;
+    # test-owned ETS or a linked Agent would disappear before cleanup, leaking Registry holders.
     {:ok, holders} = Agent.start(fn -> [] end)
 
     on_exit(fn ->
@@ -72,11 +52,7 @@ defmodule Fleet.Spawner.PoolSlotTest do
     end
   end
 
-  # A holder ANSWERS. It sits in `Fleet.Spawner.Registry`, so anything that enumerates pods
-  # (`list_pods/0` → one `GenServer.call` per entry) reaches it. A mute holder is not a cheap stub:
-  # it is a FIVE-SECOND timeout for every enumerator in the suite. Measured — it turned a later
-  # test's 60 s budget into a red at the gate while every file stayed green in isolation, and the
-  # first suspect was the wrong one.
+  # Other tests may enumerate pods via GenServer.call; mute holders cause five-second timeouts.
   defp holder_loop do
     receive do
       {:"$gen_call", from, _request} ->
@@ -88,8 +64,6 @@ defmodule Fleet.Spawner.PoolSlotTest do
     end
   end
 
-  # The bucket is keyed on the forge REPO ID (an integer), not on `owner/name`: it is what the
-  # session_id encodes, and it is the key the dispatch actually carries in its spawn_opts.
   defp uniq_repo, do: System.unique_integer([:positive])
 
   describe "instance keying — the fan-out members" do
@@ -102,7 +76,6 @@ defmodule Fleet.Spawner.PoolSlotTest do
     test "index 0 is NEVER handed out: allocation starts at 1", %{holders: h} do
       repo = uniq_repo()
 
-      # Nothing occupied at all — the lowest free index in the whole nibble is 0, and it is skipped.
       assert {:ok, 1} = PoolSlot.allocate("engineer", repo, "instance")
 
       occupy(h, "engineer", repo, [1])
@@ -129,8 +102,6 @@ defmodule Fleet.Spawner.PoolSlotTest do
   describe "project keying — the reserved seat" do
     test "takes seat 0 without reading the registry", %{holders: h} do
       repo = uniq_repo()
-      # Even at capacity for the instance-keyed side, a project pod is unaffected: it does not
-      # compete, it holds the seat nobody allocates.
       TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 2)
       occupy(h, "architect", repo, [1, 2])
 
@@ -142,13 +113,9 @@ defmodule Fleet.Spawner.PoolSlotTest do
       TestEnv.put_env_restoring(:lcars_fleet, :spawner_max_pods_per_role, 2)
       repo = uniq_repo()
 
-      # Seat 0 held, plus one of the two allocatable slots.
       occupy(h, "engineer", repo, [0, 1])
 
-      # Slot 2 is still free. Counting the raw set size would say "2 taken, cap 2, full" and defer
-      # a spawn that has room — capacity silently down by one for anything that lands on 0.
-      # A bucket is homogeneous today (`slot_scope` is per role), which is precisely why neither
-      # the allocation nor the pre-flight is allowed to DEPEND on it.
+      # Counting the raw set size would incorrectly include reserved slot 0 and report full.
       assert {:ok, 2} = PoolSlot.allocate("engineer", repo, "instance")
       assert PoolSlot.has_free_slot?("engineer", repo, "instance")
 
@@ -167,8 +134,6 @@ defmodule Fleet.Spawner.PoolSlotTest do
     end
 
     test "every index the allocator can hand out is encodable — the guard is never reached" do
-      # 0 (the reserved seat, handed to project pods) through 15 (the last allocatable index):
-      # the whole range the allocator can produce, proven encodable rather than assumed so.
       for pool <- 0..PoolSlot.max_per_role() do
         assert is_binary(Fleet.Spawner.SessionId.encode(3, 1, 1000, 42, pool))
       end

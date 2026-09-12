@@ -1,11 +1,7 @@
 defmodule Fleet.Spawner.PoolSlotSurvivorTest do
   @moduledoc """
-  The slot a DEAD registry still owes to a LIVE holder.
-
-  `PoolSlot` exists so two processes never share a deterministic `session_id`, and it used to read
-  only the in-memory registry. After a BEAM restart that registry is empty while orphaned bwrap
-  holders are still alive — and the same index was handed out again, which is the collision the
-  module is for. This pins the survivor half, and that it is LIVENESS and nothing else that counts.
+  Snapshot occupancy while orphaned holders survive a BEAM restart and the Registry is empty.
+  Only matching slot metadata with confirmed liveness reserves a slot.
   """
   use ExUnit.Case, async: true
   @moduletag :tmp_dir

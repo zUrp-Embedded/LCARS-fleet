@@ -2,8 +2,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   @moduledoc """
   Pure recovery decisions for a deliberately respawned pod.
 
-  Terminal snapshots release without relaunch. Every non-terminal or ambiguous snapshot recreates a
-  fresh session; recovery never resumes a dead backend mid-flight.
+  Succeeded, released and killed snapshots release without relaunch. Other phases recreate;
+  these decisions do not select a session to resume.
   """
 
   @doc """
@@ -15,13 +15,8 @@ defmodule Fleet.Spawner.Pod.Recovery do
   end
 
   @doc """
-  Projects the recovery decision into fresh pod state.
-
-  The snapshot's `session_id` is NOT a parameter, and its absence is the contract: recovery does
-  not resume, so the persisted identity has no say in the decision. Passed and then ignored by both
-  clauses, it would be a SIGNATURE CLAIMING A SAY THE BODY NEVER TAKES — which reads as an oversight
-  rather than as the doctrine it is. The caller still matches on it to validate the
-  snapshot's shape; that is a different job.
+  Projects the phase-based decision into fresh pod state. The caller validates the snapshot's
+  shape, including `session_id`; the persisted identity does not participate in this decision.
   """
   @spec apply_recovery(map(), :recreate | :release, atom()) :: map()
   def apply_recovery(base, :recreate, _phase), do: Map.put(base, :recovery, :recreate)
