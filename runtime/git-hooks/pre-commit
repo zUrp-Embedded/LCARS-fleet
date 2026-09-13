@@ -1,0 +1,268 @@
+#!/bin/bash
+#
+#       ______________________________________________________
+#      /          LCARS FLEET - FEDERATION DATABASE           \
+#     |   ________   __________________________________________\
+#     |  |  2026  |  | SOURCE: pre-commit
+#     |  |________|  | AUTHOR: LORDZURP
+#     |   ________   | SYSTEM: LCARS-FLEET v0.9
+#     |  |  v0.9  |  | STATUS: OPERATIONAL
+#     |  |________|  |__________________________________________
+#     |              \__________________________________________\
+#      \    "To boldly go where no code has gone before..."     /
+#       \______________________________________________________/
+#
+#     +-----------------------------------------------------------+
+#     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
+#     +-----------------------------------------------------------+
+#     | MODULE: PRE-COMMIT        | SUBSYSTEM: GIT-HOOKS / QA     |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.247             |
+#     +-------------------------+---------------------------------+
+#
+# pre-commit — date auto-update + GO-7 header enforcement
+#
+# Adapts to repo type via hook-config.sh:
+#   LCARS repo  → STARDATE update (2026.077 format) + LCARS header check
+#   Project repo → ISO date update + **Date** check
+#
+# GO-7: every versioned file with comment support must carry a declarative header.
+# Pass 1: auto-updates date stamps (STARDATE / **Dernière révision** / **Last revised**,
+#         incl. the **Last revised** footer inside Elixir @moduledoc) — accepted convenience.
+# Pass 2: checks header presence only — never auto-fixes missing headers. Two language
+#         regimes by path: runtime code paths (runtime/{lib,test,bin,etc}) use EN
+#         labels (**Last revised**); everything else keeps FR labels.
+#
+# NO RULE FOR `.ex`, and the reason belongs here. A `**Last revised**: <date>` footer required in
+# every @moduledoc would be a mark PASS 1 ABOVE PAINTS ITSELF: a wall checking for its own paint.
+# Measured (2026-08-06): 235 of 235 stamps equalled `git log -1 --format=%cs` for their file —
+# tautologically, since pass 1 rewrites them to $TODAY on the commit that lands them. Nothing else
+# reads the line; it declares not a property of the file but the fact that this hook ran.
+# It is NOT replaced: all 238 `.ex` under lib/ carry a @moduledoc, so any presence marker would be
+# green by construction — the wall `no_check_passes_on_nothing_test` exists to forbid. The Elixir
+# contract is held elsewhere and better: @moduledoc as SSoT, boundary compiling the architecture,
+# `mix lcars.topology` refusing map divergence, the contract checks.
+#
+# Install: bash runtime/git-hooks/install-hooks.sh
+
+set -euo pipefail
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+[[ -z "$STAGED" ]] && exit 0
+
+# --- Evidence directories: a captured piece is worth the byte the agent read ---
+# A campaign corpus (a captured SP, a verbatim brief, a replay input) is valuable PRECISELY because
+# it is what the agent read. Inserting four lines of metadata at its top changes what a replay
+# replays: that is falsifying a piece of evidence, not bringing a file into compliance.
+#
+# A MARKER rather than a path list, and the reason is that the list cannot be written: a future
+# campaign is not predictable from inside this hook. Every campaign so far went in under
+# `--no-verify`, which does not skip GO-7 for the corpus — it skips EVERY check for EVERY file in
+# that commit. That silent blast radius is the real cost, not the missing header.
+#
+# It covers PASS 1 as well as pass 2, and that is the half a check-only exemption would miss:
+# pass 1 does `sed -i` on date stamps. Exempting the verdict while letting the auto-fix rewrite the
+# piece would protect the file from being refused and not from being altered.
+is_evidence_dir() {
+    local d
+    d=$(dirname "$1")
+    while :; do
+        [[ -f "$d/.go7-exempt" ]] && return 0
+        [[ "$d" == "." || "$d" == "/" ]] && return 1
+        d=$(dirname "$d")
+    done
+}
+
+# --- Source hook-config.sh for repo type detection ---
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK_CONFIG="$HOOK_DIR/hook-config.sh"
+if [ -f "$HOOK_CONFIG" ]; then
+    # shellcheck source=hook-config.sh
+    source "$HOOK_CONFIG"
+else
+    # shellcheck disable=SC2034  # repli du contrat de `hook-config.sh` : les deux variables
+    #   vont par paire, et `pre-push` (l.52) lit HOOK_REPO_TYPE.
+    HOOK_REPO_TYPE="project"
+    HOOK_DATE_FORMAT="iso"
+fi
+
+# --- Pass 1: Date bookkeeping (metadata update, not a fix) ---
+#
+# ⚠ CE PASSAGE N'EMBARQUE PAS LE TRAVAIL QUE L'HUMAIN A DELIBEREMENT LAISSE HORS DE L'INDEX.
+# Un `sed -i` sur le fichier de l'ARBRE DE TRAVAIL puis `git add "$file"` le ferait — `git add`
+# ne restage pas la ligne de date, il remplace l'entree d'index par TOUT le contenu courant, et un
+# fichier partiellement stage qui porte aussi des modifications non stagees les verrait partir
+# dans le commit, en silence. Ce serait alterer la selection explicite de l'humain : publier du
+# travail incomplet en croyant tamponner une date (6-116).
+#
+# ON TRANSFORME LE BLOB DE L'INDEX, jamais l'arbre de travail :
+#   `git show :<file>` → sed → `git hash-object -w` → `git update-index --cacheinfo`.
+# Le commit emporte exactement ce qui etait stage, plus la date. L'arbre de travail n'est touche
+# QUE s'il etait deja identique a l'index (cas nominal) — sinon il garde le travail en cours, avec
+# son ancienne date, qui se mettra a jour au prochain commit complet. Une date d'arbre de travail
+# en retard est un ecart visible ; du travail non stage publie ne l'est pas.
+#
+# ⚠ PAS DE `$(git show …)` : la substitution de commande MANGE les sauts de ligne finaux, donc
+# reecrire un blob par ce chemin tronquerait chaque fichier d'une ligne vide. On passe par des
+# fichiers temporaires, et `git hash-object -w <fichier>` rend un sha dont la substitution est sans
+# danger (40 caracteres, pas de fin de ligne signifiante).
+restage_dated_blob() {
+    local file="$1" expr="$2" tmp_old tmp_new sha mode wt_clean=0
+
+    tmp_old="$(mktemp)" || return 0
+    tmp_new="$(mktemp)" || { rm -f "$tmp_old"; return 0; }
+
+    if ! git show ":$file" > "$tmp_old" 2>/dev/null; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    sed "$expr" "$tmp_old" > "$tmp_new"
+    if cmp -s "$tmp_old" "$tmp_new"; then
+        rm -f "$tmp_old" "$tmp_new"
+        return 0
+    fi
+
+    # AVANT toute mutation : l'arbre de travail est-il deja celui de l'index ? Apres l'update-index
+    # la reponse serait fatalement « non », et on croirait a du travail non stage qui n'existe pas.
+    git diff --quiet -- "$file" && wt_clean=1
+
+    mode="$(git ls-files --stage -- "$file" | awk '{print $1}')"
+    if [[ -n "$mode" ]] && sha="$(git hash-object -w "$tmp_new")"; then
+        git update-index --cacheinfo "$mode,$sha,$file"
+        [[ "$wt_clean" -eq 1 ]] && cat "$tmp_new" > "$file"
+    fi
+
+    rm -f "$tmp_old" "$tmp_new"
+}
+
+if [[ "$HOOK_DATE_FORMAT" == "stardate" ]]; then
+    STARDATE=$(date '+%Y.%j')
+    STARDATE_PATTERN="STARDATE: [0-9][0-9][0-9][0-9]\.[0-9][0-9][0-9]"
+    while IFS= read -r file; do
+        [[ -z "$file" || ! -f "$file" ]] && continue
+        is_evidence_dir "$file" && continue
+        restage_dated_blob "$file" "s/$STARDATE_PATTERN/STARDATE: ${STARDATE}/"
+    done <<< "$STAGED"
+else
+    TODAY=$(date '+%Y-%m-%d')
+    while IFS= read -r file; do
+        [[ -z "$file" || ! -f "$file" ]] && continue
+        is_evidence_dir "$file" && continue
+        ext="${file##*.}"
+        case "$ext" in
+            md)
+                # Les deux en-tetes sont exclusifs dans les faits ; les appliquer tous deux est
+                # sans effet sur un fichier qui n'en porte qu'un, et le `cmp` decide. Pas de test
+                # « quelle date porte-t-il » sur l'ARBRE DE TRAVAIL : un fichier dont l'index porte
+                # une vieille date mais l'arbre la bonne ne serait jamais mis a jour. La comparaison
+                # des BLOBS repond a la meme question, sur le bon objet.
+                restage_dated_blob "$file" \
+                    "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/; s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/"
+                ;;
+        esac
+    done <<< "$STAGED"
+fi
+
+# --- Pass 2: GO-7 header check (block only — never auto-fix) ---
+FAILED=()
+
+# GO-7 exemptions. EVERY clause below must match at least one tracked file. A clause that matches
+# nothing does not exempt anything — it MISLEADS: it reads as covering a class that the wall in fact
+# refuses, and it rots without a sound, because nothing fails when its subject moves or disappears.
+# Two deaths, two remedies: the subject MOVED (correct the pattern), or the
+# subject was REMOVED (delete the clause; an exemption never outlives its subject).
+# For a tree that does not exist yet, the mechanism is the `.go7-exempt` MARKER above, which sits
+# next to what it exempts: a path list cannot be written ahead of the campaign it will exempt.
+# `tests/go7_exemptions_alive.bats` holds the property, and refuses an empty pattern set too.
+is_ipc_exception() {
+    local base
+    base=$(basename "$1")
+    case "$base" in
+        scratchpad.md) return 0 ;;
+    esac
+    [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
+    # Graines de projet genere, pas du lignage doc LCARS. Le motif suit l'arbre
+    # (`priv/catalogue/project_template/`) : une exemption qui cesse de matcher le fait EN SILENCE,
+    # et le mur refuse alors ce qu'elle est ecrite pour laisser passer —
+    # `tests/go7_exemptions_alive.bats` le tient.
+    [[ "$1" == *"project_template/"* ]] && return 0
+    # LE PACKAGE SP — hors perimetre par doctrine (`runtime/CLAUDE.md`, §Langue) : « ce n'est ni
+    # du code ni de la sortie, c'est un package de configuration [...] il ne se traduit pas, il se
+    # RE-ECRIT ». Un en-tete GO-7 y entrerait dans le contexte injecte a l'agent.
+    #
+    [[ "$1" == *"/sp_builder/"*.md ]] && return 0
+    [[ "$1" == *"/subagent-templates/"*.md ]] && return 0
+    [[ "$1" == *"/modop-bundles/"*"/sp.md" ]] && return 0
+    return 1
+}
+
+check_md_header() {
+    local h
+    h=$(head -15 "$1" 2>/dev/null)
+    echo "$h" | grep -qF "**Date**" && return 0
+    echo "$h" | grep -qE "^\s+date:" && return 0
+    echo "$h" | grep -qE "<!--\s*Date\s*:" && return 0
+    return 1
+}
+
+check_source_header() {
+    head -20 "$1" 2>/dev/null | grep -qEi "SOURCE:|AUTHOR:|STARDATE:"
+}
+
+# EN-label wall scope: the runtime's code tree. Deliberately NOT covered: fleet
+# root files (CLAUDE.md, README.md — agent-control/user-facing surfaces, FR by design)
+# and priv/** (system prompts, FR by engraved rule).
+is_runtime_code_path() {
+    case "$1" in
+        runtime/lib/*|runtime/test/*|runtime/bin/*|runtime/etc/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+while IFS= read -r file; do
+    [[ -z "$file" || ! -f "$file" ]] && continue
+    # Evidence directories opt out of GO-7 ENTIRELY, every extension: a captured script is as much
+    # a piece as a captured brief, and the source-header rule would falsify it the same way. The
+    # marker is the declaration, and it sits next to what it exempts rather than in this file.
+    is_evidence_dir "$file" && continue
+
+    ext="${file##*.}"
+    [[ "$ext" == "$(basename "$file")" ]] && continue
+
+    case "$ext" in
+        md)
+            is_ipc_exception "$file" && continue
+            check_md_header "$file" || FAILED+=("$file  ← missing **Date** header")
+            # Language wall: runtime code paths carry EN labels (the doc lineage keeps FR)
+            if is_runtime_code_path "$file" && grep -q '^\*\*Dernière révision\*\*' "$file"; then
+                FAILED+=("$file  ← FR header label under a runtime code path — use **Last revised**: YYYY-MM-DD")
+            fi
+            ;;
+        sh|py|cpp|c|h|hpp)
+            [[ "$(basename "$file")" == "__init__.py" ]] && continue
+            check_source_header "$file" || FAILED+=("$file  ← missing source header (SOURCE:/AUTHOR:/STARDATE:)")
+            ;;
+        *)
+            ;;
+    esac
+done <<< "$STAGED"
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+    echo ""
+    echo "⛔  [pre-commit] GO-7 violation — missing declarative header in:"
+    echo ""
+    for f in "${FAILED[@]}"; do
+        echo "  ✗  $f"
+    done
+    echo ""
+    echo "  .md (doc lineage)   → add after # Title:  **Date** : YYYY-MM-DD / **Dernière révision** : YYYY-MM-DD / **Statut** / **Référencé par**"
+    echo "  .md (runtime code)  → EN labels:          **Date** : YYYY-MM-DD / **Last revised**: YYYY-MM-DD / **Status** / **Referenced by**"
+    echo "  .ex (runtime lib)   → last line of @moduledoc:  **Last revised**: YYYY-MM-DD   (or @moduledoc false)"
+    echo "  source (.sh/.py/…)  → add LCARS STARDATE/AUTHOR/STATUS block at file top"
+    echo ""
+    echo "  Bypass (not recommended): git commit --no-verify"
+    echo ""
+    exit 1
+fi
+
+exit 0

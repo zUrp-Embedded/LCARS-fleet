@@ -1,0 +1,103 @@
+# =============================================================================
+#  ROLE : writer — celui qui redige (README, guides, notes de version)
+# =============================================================================
+#
+# A LIRE APRES `dev.yaml`. Les commentaires ne sont pas repetes d'un fichier a
+# l'autre : `dev.yaml` explique chaque cle une fois, les autres roles commentent
+# UNIQUEMENT ce qui change chez eux, et pourquoi.
+#
+# CE QUI CHANGE ICI — presque rien, et c'est l'enseignement.
+#
+# `writer` est un SECOND producteur. Comparez les deux fichiers : a part le nom,
+# l'index, un mode operatoire et le niveau d'effort, ils sont identiques.
+#
+# Ce qui separe reellement un dev d'un writer n'est donc PAS dans ce fichier :
+#
+#   1. Leur PROMPT (sp_builder/sp_drafts/agent-dev-base.md contre
+#      agent-writer-base.md). Le profil dit ce qu'un role a le droit de faire ;
+#      le prompt dit ce qu'il SAIT faire. Une competence n'est pas une permission.
+#
+#   2. Les CARTES qui les appellent. C'est la carte qui decide sur quelle branche
+#      le travail atterrit (`face: code` ou `face: workshop`), pas le role. Le
+#      writer de ce catalogue travaille sur l'atelier via la carte `content` — mais
+#      rien ne l'empeche d'etre appele par une carte qui livre sur la branche
+#      principale, le jour ou vous voulez de la doc publiee avec le produit.
+#
+# Deux producteurs est une configuration NORMALE et prevue : la regle de
+# cardinalite est « au moins un ». Ce sont les cartes qui choisissent lequel.
+# -----------------------------------------------------------------------------
+
+kind: CapabilityProfile
+
+metadata:
+  name: writer
+  # vitrine: Il produit le contenu | L'autre producteur de l'exemple : il rédige, là où le dev code. Deux producteurs, un catalogue.
+  containment: bwrap
+  role_index: 3
+
+spec:
+  capabilities: [producer]
+
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      - Monitor
+      - ToolSearch
+      # Bash reste necessaire : le writer commite lui aussi son travail dans son
+      # espace, et il lance les verificateurs de liens ou de formatage.
+      - Bash
+      - TaskCreate
+      - TaskUpdate
+      - TaskList
+      - TaskGet
+      - TaskStop
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - WebSearch
+      - WebFetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    git_ops_denied: [push]
+
+  knowledge:
+    skills: []
+    monk_registry: null
+    monk_instance: null
+
+  invocation:
+    lifetime_scope: pipe
+    slot_scope: instance
+    model: opus
+    # DIFFERENT du dev, et c'est un exemple de reglage assumable role par role :
+    # rediger un guide demande moins de raisonnement en profondeur que corriger un
+    # bug de concurrence. Baissez ou remontez selon ce que vous constatez — c'est
+    # une des deux cles a bouger en premier si le cout vous derange.
+    effort: medium
+    boot_at_start: false
+    subagent_template: null
+    host_native: false
+    bridge_enabled: false
+
+  modop_set:
+    default: []
+    # `tdd` n'a aucun sens pour de la prose : un role ne se voit proposer que les
+    # modes qui veulent dire quelque chose pour lui.
+    optional: []
+    incompatible: []
+
+  project: null
+
+  timeouts:
+    response_sec: 1800
+
+  brief_kind: worker
+  deliverable_mode: git_native
+  interlocutor: fleet

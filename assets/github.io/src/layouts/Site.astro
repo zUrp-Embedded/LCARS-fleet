@@ -1,0 +1,118 @@
+---
+// Le SEUL squelette du site. Rail a deux niveaux (les pages, puis les sections de la page
+// courante), bascule de theme, et pied de provenance. Aucune page ne redefinit tout ca :
+// c'est la difference entre un site et cinq fichiers qui se ressemblent.
+import { u, base } from '../lib/href.js';
+const { title, pages, current, sections = [] } = Astro.props;
+// Deux groupes, et la separation encode ce qu'elle separe : au-dessus on presente, en dessous
+// on reference. Une page de manuel n'a pas le meme lecteur qu'une page de presentation — celui-ci
+// arrive avec une question precise, il ne se laisse pas derouler.
+const PAGES = [
+  { href: u('/'),                 label: 'Ce que c’est' },
+  { href: u('/mecaniques/'),      label: 'Comment ça marche' },
+  { href: u('/equipage/'),        label: 'L’équipage' },
+  { href: u('/travailler-avec/'), label: 'Travailler avec' },
+  { href: u('/mettre-en-route/'), label: 'Mettre en route' }
+];
+const MANUAL = [
+  { href: u('/manuel/'),     label: 'La console' },
+  { href: u('/outils/'),     label: 'Les outils' },
+  { href: u('/catalogues/'), label: 'Les catalogues' }
+];
+const nav = pages ?? PAGES;
+
+// LA GARDE, et elle vaut mieux qu'une consigne : elle refuse le build. Un `href="/quelque-chose"`
+// ecrit en dur est juste a la racine et faux sous une base, en SILENCE — la page s'affiche et ses
+// liens partent ailleurs. Les composer par `u()` est la seule forme qui tienne pour les deux
+// sorties, donc on verifie que c'est bien ce qui est arrive.
+for (const p of [...nav, ...MANUAL]) {
+  if (!p.href.startsWith(base)) {
+    throw new Error(`Site.astro: lien interne hors base (${p.href}) — passer par u() de lib/href.js`);
+  }
+}
+
+// ─── LE RAIL COUVRE LES PAGES, ET LE BUILD LE VERIFIE ────────────────────────────────────────────
+//
+// Astro route par FICHIER : poser `src/pages/machin.astro` suffit a le construire et a le publier.
+// Le rail, lui, est une liste ECRITE ci-dessus — parce qu'il porte deux choses qu'un nom de fichier
+// ne dit pas : le groupe (on presente / on reference) et l'ordre de lecture.
+//
+// Ces deux faits vivent donc a deux endroits, et deux endroits derivent. La page nouvelle
+// existerait, servie a son URL, et n'apparaitrait dans aucune navigation : publiee et introuvable,
+// sans un mot. La liste reste ecrite ; c'est sa COUVERTURE qui devient mecanique.
+// ⚠ TOUTES LES EXTENSIONS QU'ASTRO ROUTE, PAS SEULEMENT `.astro`. Mesure du 2026-08-18 : un
+// `essai2.md` depose ici est sorti en NEUVIEME page, et ce garde — qui ne globait que `.astro` — ne
+// l'a pas vu. Il aurait donc laisse passer exactement ce qu'il existe pour empecher : une page
+// publiee et absente de toute navigation. Un garde partiel est pire qu'un garde absent, parce qu'on
+// s'y fie. (Un nom prefixe `_` n'est PAS route : c'est ainsi que le README de ce dossier y vit.)
+const ROUTES = Object.keys(import.meta.glob('../pages/*.{astro,md,mdx,html}'))
+  .map((f) => f.split('/').pop().replace(/\.(astro|md|mdx|html)$/, ''))
+  // Le `_` est la regle d'ASTRO, pas la notre : un nom prefixe n'est pas route. Ce garde doit la
+  // refleter exactement, sinon il reclame une entree de rail pour un fichier qui ne sera jamais
+  // servi — c'est ce qui est arrive au `_README.md` de `src/pages/`, une minute apres l'avoir ecrit.
+  .filter((n) => !n.startsWith('_'))
+  .map((n) => (n === 'index' ? u('/') : u(`/${n}/`)));
+const DECLARED = new Set([...PAGES, ...MANUAL].map((p) => p.href));
+const orphan = ROUTES.filter((r) => !DECLARED.has(r));
+const ghost = [...DECLARED].filter((d) => !ROUTES.includes(d));
+if (orphan.length || ghost.length) {
+  throw new Error(
+    'Site.astro: le rail et les pages ont diverge — ' +
+    (orphan.length ? `page(s) sans entree de rail : ${orphan.join(', ')} (ajouter a PAGES ou MANUAL). ` : '') +
+    (ghost.length ? `entree(s) de rail sans page : ${ghost.join(', ')}.` : '')
+  );
+}
+---
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{title}</title>
+  <link rel="icon" href={u('/favicon/favicon.svg')} type="image/svg+xml" />
+  <link rel="stylesheet" href={u('/styles/lcars.css')} />
+  <script is:inline>
+    // Le theme AVANT le premier rendu, sinon la page clignote. Le choix du lecteur l'emporte
+    // sur sa preference systeme ; sans choix, on ne pose rien et le media query decide.
+    try { const t = localStorage.getItem('lcars-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body>
+  <div class="shell">
+    <nav class="rail" aria-label="Navigation">
+      <a class="brand" href={u('/')}>LCARS</a>
+      <p class="grp">Le site</p>
+      {nav.map((p) => (
+        <a href={p.href} aria-current={p.href === current ? 'page' : undefined}>{p.label}</a>
+      ))}
+      <p class="grp">Manuel</p>
+      {MANUAL.map((p) => (
+        <a href={p.href} aria-current={p.href === current ? 'page' : undefined}>{p.label}</a>
+      ))}
+      {sections.length > 0 && <p class="grp">Cette page</p>}
+      {sections.map((s, i) => (
+        <a href={`#${s.id}`}><span class="n">{String(i + 1).padStart(2, '0')}</span>{s.label}</a>
+      ))}
+      <button class="themer" type="button" id="themer" aria-label="Basculer le thème">thème</button>
+    </nav>
+
+    <main><slot /></main>
+
+    <footer class="foot">
+      <span>LCARS &mdash; <b>Lightweight Contained Agent Resilient System</b></span>
+      <span>build <b>{__COMMIT__}</b></span>
+      <span><b>{__BUILT__}</b></span>
+      <span>cartes, sièges et verdicts <b>lus dans le catalogue de ce commit</b></span>
+    </footer>
+  </div>
+  <script is:inline>
+    document.getElementById('themer')?.addEventListener('click', () => {
+      const cur = document.documentElement.dataset.theme
+        || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('lcars-theme', next); } catch {}
+    });
+  </script>
+</body>
+</html>

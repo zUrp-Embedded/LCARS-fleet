@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# SOURCE: deploy/accept
+# AUTHOR: DrDree
+# STARDATE: 2026-09-12
+# STATUS: l'acceptation d'une installation : ce qu'un opérateur peut en faire — se connecter à la forge, faire fusionner une PR, démarrer la fleet
+# USAGE : accept --announce-file <chemin> [--forge-url URL]
+# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une manque · 2 argument inconnu
+
+set -euo pipefail
+
+ANNOUNCE="" ; FORGE_URL=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --announce-file) ANNOUNCE="${2:?}"; shift 2 ;;
+    --forge-url)     FORGE_URL="${2:?}"; shift 2 ;;
+    *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
+  esac
+done
+
+# le nom de l'humain de fleet se demande au geste de forge, il ne se reçoit pas
+FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../runtime/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+
+PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
+[[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
+
+_G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'
+[[ -t 1 ]] || { _G="" ; _R="" ; _A="" ; _N="" ; }
+# une capacité sautée n'est pas une capacité tenue : seul ce qui est établi porte la phrase finale
+FAILED=0 ; HELD=0 ; SKIPPED=0 ; SKIPPED_NAMES=""
+ok()   { printf '  %sOUI%s   %s\n' "$_G" "$_N" "$*"; HELD=$((HELD + 1)); }
+no()   { printf '  %sNON%s   %s\n' "$_R" "$_N" "$*"; FAILED=$((FAILED + 1)); }
+skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
+         SKIPPED_NAMES="${SKIPPED_NAMES}${SKIPPED_NAMES:+, }${1%% :*}"; }
+
+# 1. se connecter à la forge : on s'authentifie vraiment, avec chaque identifiant annoncé par la passe
+check_forge_login() {
+  local _label login pw code tested=0
+  [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PRIVATE_DIR/forge.url)"; return; }
+  [[ -s "$ANNOUNCE" ]] || { skip "forge : aucun identifiant annoncé par cette passe — rien à vérifier"; return; }
+  while IFS=$'\t' read -r _label login pw; do
+    [[ -n "$pw" ]] || continue
+    tested=$((tested + 1))
+    code="$(printf 'user = "%s:%s"\n' "$login" "$pw" \
+            | curl -K - -s -o /dev/null -w '%{http_code}' -m 15 "$FORGE_URL/api/v1/user" 2>/dev/null || true)"
+    if [[ "$code" == "200" ]]; then
+      ok "forge : « $login » s'authentifie avec le mot de passe annoncé"
+    else
+      no "forge : « $login » ne s'authentifie pas (HTTP ${code:-aucune réponse}) — l'identifiant affiché ne vaut rien"
+    fi
+  done < "$ANNOUNCE"
+  [[ "$tested" -gt 0 ]] || skip "forge : le fichier d'annonce est vide"
+}
+
+# 2. une PR peut fusionner : des runners enregistrés qui servent les labels que les workflows d'un projet demandent
+# « aucun runner » est un fait mesuré (200 avec total_count 0) ; tout autre corps est une non-mesure, sautée
+labels_demandes() { # labels_demandes → les runs-on du modèle de projet de l'arbre qui sert : la release posée, sinon le checkout
+  local rt d
+  rt="$(dirname "${BASH_SOURCE[0]}")/../runtime"
+  local -a wfs=()
+  for d in "$rt"/rel/lcars_fleet/lib/lcars_fleet-*/priv/catalogue "$rt"/priv/catalogue; do
+    [[ -d "$d" ]] || continue
+    wfs=("$d"/project_template/main/.gitea/workflows/*.yml)
+    [[ -f "${wfs[0]}" ]] && break
+    wfs=()
+  done
+  [[ "${#wfs[@]}" -gt 0 ]] || return 0
+  grep -hoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "${wfs[@]}" 2>/dev/null | sort -u
+}
+check_ci() {
+  local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
+  [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
+  if [[ ! -r "$tokfile" ]]; then
+    if [[ "$EUID" -ne 0 ]]; then
+      no "CI : cette mesure demande root (l'API des runners est site-admin, et son jeton appartient au détenteur des secrets) — à rejouer sous « sudo »"
+    else
+      no "CI : jeton master illisible ($tokfile) — l'état des runners n'est pas mesurable"
+    fi
+    return
+  fi
+  local code
+  body="$(printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$tokfile")" \
+          | curl -K - -s -m 15 -w '\n%{http_code}' "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  code="${body##*$'\n'}"
+  body="${body%$'\n'*}"
+  if [[ "$code" != "200" ]]; then
+    skip "CI : l'API admin des runners n'a pas répondu (HTTP ${code:-aucune}) — jeton hors portée site-admin, forge muette ou injoignable : rien n'est conclu, ni dans un sens ni dans l'autre"
+    return
+  fi
+  n="$(printf '%s' "$body" | jq -er '.total_count' 2>/dev/null)" || {
+    skip "CI : réponse 200 de l'API admin sans « total_count » — forme inattendue, rien n'est conclu"
+    return
+  }
+  [[ "$n" =~ ^[0-9]+$ ]] || { skip "CI : « total_count » n'est pas un nombre (« $n ») — rien n'est conclu"; return; }
+  if [[ "$n" -eq 0 ]]; then
+    no "CI : aucun runner enregistré — tout job reste en attente, aucune PR ne fusionne"
+    return
+  fi
+  served="$(printf '%s' "$body" | jq -r '[.runners[]?.labels[]?.name] | unique | join(" ")' 2>/dev/null || true)"
+  want="$(labels_demandes || true)"
+  [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans les workflows du modèle de projet — le contrôle des labels serait vide, donc faux"; return; }
+  local w
+  for w in $want; do
+    [[ " $served " == *" $w "* ]] || missing="$missing $w"
+  done
+  if [[ -n "$missing" ]]; then
+    no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs d'un projet qui les demandent attendraient sans fin (servis : ${served:-aucun})"
+  else
+    ok "CI : $n runner(s) servant les labels que le modèle de projet livré demande (${want//$'\n'/ })"
+  fi
+}
+
+# 3. la fleet peut démarrer, sous l'humain de fleet, avec le PATH qu'il aura vraiment (bash -lc)
+check_fleet_start() {
+  local login="$FLEET_HUMAN" home
+  [[ -n "$login" ]] || { skip "fleet : le nom de l'humain de fleet est indéterminable (forge-gestures.sh builtin-human) — rien à démarrer"; return; }
+  home="$(getent passwd "$login" | cut -d: -f6 || true)"
+  [[ -n "$home" ]] || { no "fleet : « $login » inconnu du système"; return; }
+  command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }
+  local as=(runuser -u "$login" -- env "HOME=$home" "USER=$login" "LOGNAME=$login")
+  "${as[@]}" bash -lc 'command -v fleet' >/dev/null 2>&1 \
+    || { no "fleet : « fleet » n'est pas dans le PATH de « $login »"; return; }
+
+  fleet_up() { # fleet_up → 0 si le BEAM de $login est vivant (capturé puis comparé : pas de grep -q sous pipefail)
+    local out; out="$("${as[@]}" fleet status 2>/dev/null || true)"
+    [[ "$out" == *"BEAM vivant"* ]]
+  }
+  if fleet_up; then
+    skip "fleet : déjà démarrée sous « $login » (laissée telle quelle) — « elle démarre » n'est pas établi par cette passe : ce verdict ne se mesure que fleet arrêtée"
+    return
+  fi
+  # sur un banc, la fleet démarre sans credentials claude et reste debout : c'est le contrat du banc
+  local -a sans_claude=()
+  [[ "${LCARS_BENCH:-}" != 1 ]] || sans_claude=(env LCARS_START_WITHOUT_CLAUDE=1)
+  if ! "${as[@]}" ${sans_claude[@]+"${sans_claude[@]}"} fleet start >/dev/null 2>&1; then
+    no "fleet : « fleet start » a échoué sous « $login » — à relancer à la main pour lire sa plainte"
+    return
+  fi
+  local alive=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if fleet_up; then alive=1; break; fi
+    sleep 2
+  done
+  if [[ "${LCARS_BENCH:-}" == 1 ]]; then
+    if [[ "$alive" -eq 1 ]]; then
+      ok "fleet : démarrée et vivante sous « $login », laissée debout (banc : démarrage sans credentials claude permis)"
+    else
+      no "fleet : démarrée sans erreur mais le BEAM n'est jamais apparu — « fleet status » sous « $login »"
+    fi
+    return
+  fi
+  "${as[@]}" fleet stop >/dev/null 2>&1 || true
+  if [[ "$alive" -eq 1 ]]; then
+    ok "fleet : démarre et vivante sous « $login » (arrêtée après mesure)"
+  else
+    no "fleet : démarrée sans erreur mais le BEAM n'est jamais apparu — « fleet status » sous « $login »"
+  fi
+}
+
+printf '\n  %sACCEPTATION — ce que cette installation permet%s\n' "$_N" "$_N"
+check_forge_login
+check_ci
+check_fleet_start
+printf '\n'
+
+if [[ "$FAILED" -gt 0 ]]; then
+  printf '  %s%d capacité(s) manquante(s)%s — l'"'"'installation est incomplète, quels que soient les verdicts de modules.\n\n' "$_R" "$FAILED" "$_N"
+  exit 1
+fi
+if [[ "$SKIPPED" -eq 0 ]]; then
+  printf '  %sLes trois tiennent.%s\n\n' "$_G" "$_N"
+else
+  printf '  %s%d capacité(s) sur 3 vérifiée(s)%s — %s : rien à mesurer dans cette passe, donc %spas établie(s)%s.\n' \
+    "$_G" "$HELD" "$_N" "$SKIPPED_NAMES" "$_A" "$_N"
+  printf '  Ce n'"'"'est pas un échec : rien de faux n'"'"'a été constaté. Ce n'"'"'est pas une garantie non plus.\n\n'
+fi

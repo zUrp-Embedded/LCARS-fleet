@@ -1,0 +1,85 @@
+defmodule Fleet.DurableLogTest do
+  # async: false — `:logger.add_handler` is a NODE-GLOBAL registration.
+  use ExUnit.Case, async: false
+  require Logger
+
+  @moduledoc """
+  Warning-level file logging, parent creation, idempotent attachment and diagnosed mkdir failure.
+  """
+
+  alias Fleet.DurableLog
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: tmp} do
+    path = Path.join([tmp, "nested", "log", "fleet.log"])
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :durable_log, path: path, level: :warning)
+    on_exit(fn -> :logger.remove_handler(:lcars_durable_log) end)
+    {:ok, path: path}
+  end
+
+  defp read_log(path) do
+    # `logger_std_h` writes asynchronously; sync/1 flushes it, so no sleep and no polling.
+    :ok = :logger_std_h.filesync(:lcars_durable_log)
+    File.read!(path)
+  end
+
+  test "warning+ lands on disk, and the parent directory is CREATED", %{path: path} do
+    refute File.exists?(Path.dirname(path))
+
+    assert :ok = DurableLog.attach()
+    assert File.dir?(Path.dirname(path))
+
+    Logger.warning("publish_deadline fired for pod-42")
+    Logger.error("pr-open-fail issue-7")
+
+    trace = read_log(path)
+    assert trace =~ "publish_deadline fired for pod-42"
+    assert trace =~ "pr-open-fail issue-7"
+
+    # Console colours must not leak into a file consumed by grep/parsers.
+    refute trace =~ "\e["
+  end
+
+  test "info does NOT land — a line per routine pass buries the one that matters", %{path: path} do
+    assert :ok = DurableLog.attach()
+
+    Logger.info("nominal tick, nothing to do")
+    Logger.warning("the line an incident review looks for")
+
+    trace = read_log(path)
+    refute trace =~ "nominal tick"
+    assert trace =~ "the line an incident review looks for"
+  end
+
+  test "attaching twice is a no-op, not an error (supervisor restart, double call)" do
+    assert :ok = DurableLog.attach()
+    assert :ok = DurableLog.attach()
+
+    assert [:lcars_durable_log] =
+             Enum.filter(:logger.get_handler_ids(), &(&1 == :lcars_durable_log))
+  end
+
+  test "no config = disabled, and `path/0` says so rather than guessing" do
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :durable_log, nil)
+
+    assert :ok = DurableLog.attach()
+    assert DurableLog.path() == nil
+    refute :lcars_durable_log in :logger.get_handler_ids()
+  end
+
+  test "an un-creatable path does NOT take the boot down — it warns and names the reason", %{
+    tmp_dir: tmp
+  } do
+    # A FILE where the log's parent directory should be: mkdir_p fails with :enotdir.
+    blocker = Path.join(tmp, "blocker")
+    File.write!(blocker, "")
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :durable_log, path: Path.join(blocker, "f.log"))
+
+    log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = DurableLog.attach() end)
+
+    assert log =~ "DurableLog: NOT installed"
+    assert log =~ "no recoverable trace"
+    refute :lcars_durable_log in :logger.get_handler_ids()
+  end
+end

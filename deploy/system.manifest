@@ -1,0 +1,145 @@
+# SOURCE: deploy/system.manifest
+# STARDATE: 2026-09-13
+# STATUS: data, not code — ce que le provisionnement a le droit de poser sur une machine ; lu par 21 (GID), 25 (sa table), audit
+#
+#   <classe>[:<trait>]  <objet>  <mode>  <propriétaire>  <substrat>
+#
+#   classe     prefix   la racine de l'installation
+#              dir      un répertoire durable
+#              anchor   un fichier à un chemin fixe hors préfixe (ce que l'OS ou le PATH exige)
+#              link     un symlink hors préfixe
+#              group    un groupe unix, avec son GID
+#              runtime  un objet volatile, refait au boot (tmpfs)
+#              human    un objet dans le home d'une personne
+#              account  un compte unix de service ; le mode porte le GID, le propriétaire le shell
+#              person   un compte unix d'humain
+#              preserve ce que l'installation ne touche jamais
+#   trait      cond     posé sous condition : son absence est un état normal, pas un drift
+#              merge    modifié, pas posé : le fichier appartient à quelqu'un d'autre
+#              single   posé pour une personne : le joker <human> ne s'applique pas
+#              unset    mode observé, pas affirmé : le doctor ne le compare pas
+#   mode       octal, ou - quand la classe n'en porte pas · propriétaire user:group, ou -
+#   substrat   any | wsl | linux | docker, ou une combinaison séparée par +
+#   <human> dans un chemin vaut pour chaque humain enrôlé ; <version> pour la version épinglée
+#
+# Les paquets apt ont leur table dans 10-packages.sh et leur journal par machine.
+
+prefix    /opt/lcars/runtime                              0750  root:fleet          any
+
+dir       /opt/lcars                                   0755  root:root           any
+# deux tampons sans rapport : .helpers-revision dit d'où sortent les auxiliaires (62) ; .source-revision
+# dit « cet arbre est un kit » (prov_delivery), posé ou retiré par 62 selon la livraison
+anchor:cond /opt/lcars/.source-revision                0644  root:root           any
+anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
+dir       /opt/lcars/tofu                              0755  root:root           any
+dir       /opt/lcars/tofu/providers                    0755  root:root           any
+dir       /opt/lcars/share                                  0755  root:root           any
+dir       /opt/lcars/share/avatars                     0755  root:root           any
+dir       /opt/lcars/share/favicon                     0755  root:root           any
+dir       /opt/lcars/share/doc                         0755  root:root           any
+# 44-media ne l'écrit que sur un arbre propre ; à côté de doc/, que prov_promote_dir remplace
+anchor:cond /opt/lcars/share/.doc-revision             0644  root:root           any
+# 0710 : le groupe traverse (forge.url en 0644 s'ouvre par son chemin), il ne liste pas, les secrets restent 0600
+dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
+dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
+# forge-gestures.sh y travaille sur les deux substrats
+dir       /var/lib/lcars                               0755  root:root           any
+
+# /var/tmp est 1777 : déclarés, ces répertoires sont posés par l'installeur et leur propriétaire est
+# relu à chaque passe, sinon le premier venu possède le dossier où root télécharge puis exécute
+dir       /var/tmp/lcars                               0755  root:root           any
+dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
+
+dir       /opt/lcars/var                               0755  root:root           any
+dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
+dir       /etc/lcars                                   0755  root:root           any
+
+dir       /opt/node-<version>                          0755  root:root           wsl+linux
+dir       /opt/elixir-<version>                        0755  root:root           wsl+linux
+
+anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           wsl+linux
+anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
+anchor    /etc/lcars/seat.uid                          0644  root:root           any
+# source ou kit : écrit par 60-deploy après la pose, lu par prov_channel ; un canal ne se pose pas sur un autre
+anchor    /etc/lcars/channel                           0644  root:root           any
+anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
+anchor    /usr/local/bin/tofu                          0755  root:root           any
+anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
+anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
+
+# les liens d'activation sont écrits par systemctl enable, jamais par un module : déclarés pour être audités
+link      /etc/systemd/system/multi-user.target.wants/lcars-landing.service     -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
+
+link      /usr/local/bin/fleet                      -     -                   any
+link      /usr/local/bin/lcars                         -     -                   any
+link      /usr/local/bin/node                          -     -                   wsl+linux
+link      /usr/local/bin/elixir                       -     -                   wsl+linux
+link      /usr/local/bin/elixirc                      -     -                   wsl+linux
+link      /usr/local/bin/mix                          -     -                   wsl+linux
+link      /usr/local/bin/iex                          -     -                   wsl+linux
+link      /usr/local/bin/npm                           -     -                   wsl+linux
+link      /usr/local/bin/npx                           -     -                   wsl+linux
+
+group     fleet                                        2000  -                   any
+group     lcars-console                                2001  -                   any
+# GID non fixés : ensure_group lit cette table, un numéro ici les figerait sur des machines qui en portent d'autres
+group:unset lcars-authority                            -     -                   any
+group:unset lcars-system                               -     -                   any
+
+# le groupe primaire est le groupe éponyme ; 21 le converge, useradd -g ne vaut qu'à la création
+account   lcars-authority                              -     /usr/sbin/nologin   any
+account   lcars-system                                 -     /usr/sbin/nologin   any
+
+runtime   /run/lcars                                   0755  root:root           wsl+linux
+runtime   /run/lcars/console                           0711  root:root           wsl+linux
+runtime   /run/lcars/console/<human>                   2710  <human>:lcars-console  wsl+linux
+# sgid : le marqueur posé par le BEAM doit rester du groupe fleet
+runtime   /run/lcars/toolchain                         2775  root:fleet          any
+runtime   /run/lcars/authority                         0750  lcars-authority:fleet  any
+# cond : les deux sockets n'existent que si le service d'autorité tourne, et il refuse de démarrer sans jeton master
+runtime:cond /run/lcars/authority/catalogue.sock       0660  lcars-authority:fleet  any
+runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fleet  any
+runtime   /run/lcars/privileged                        0750  root:fleet          any
+runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
+runtime   /run/lcars-converger.refused                 0644  root:root           any
+# les fichiers de boot du conteneur (/run/lcars-*.state, /opt/lcars/.verified, /run/sshd) sont des
+# objets du produit, posés par runtime/services/container et le Dockerfile : pas de colonne docker ici
+
+runtime   /run/lock/lcars                              0700  root:root           any
+
+# posé par tofu lui-même (cache de plugins sous le HOME de root) : déclaré parce que provoqué
+dir       /root/.terraform.d                           0755  root:root           wsl+linux
+
+human     /home/<human>/.lcars                         0700  <human>:-           any
+human     /home/<human>/.lcars/log                     0700  <human>:-           any
+human     /home/<human>/.lcars/fleet.env            0600  <human>:-           any
+human     /home/<human>/pods                           0700  <human>:-           any
+human:unset  /home/<human>/.local/bin/claude               0755  <human>:-        any
+
+# ~/.claude : créé au umask (mode observé), settings.json fusionné (le fichier est à l'humain),
+# le skill posé chez le siège seul
+human:unset  /home/<human>/.claude                        775   <human>:-        any
+human:merge  /home/<human>/.claude/settings.json          0644  <human>:-        any
+human:single /home/<human>/.claude/skills/system-issues   0755  <human>:-        any
+
+# posés par mix lui-même (mix local.hex), mode au umask de la machine
+human:unset  /home/<human>/.hex                           770   <human>:-        any
+human:unset  /home/<human>/.mix                           770   <human>:-        any
+
+# le compte, son groupe privé et son home arrivent ensemble par useradd ; la ligne dit ce qui peut être créé
+person    <human>                                      -     /bin/bash           any
+
+preserve  /home/projects                               2775  root:fleet          any
+preserve  /home/projects.ops                           2775  root:fleet          any
+preserve  /home/projects.workshop                      2775  root:fleet          any
+
+# le squelette de la distribution reçoit un bloc géré de trois lignes qui source lcars.bashrc, tout le reste est préservé
+anchor:merge /etc/skel/.bashrc                         0644  root:root           any
+anchor    /etc/lcars/lcars.bashrc                      0644  root:root           any

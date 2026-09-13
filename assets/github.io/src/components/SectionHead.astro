@@ -1,0 +1,8 @@
+---
+const { id, title, cap } = Astro.props;
+---
+<div class="sh">
+  <span class="tab"></span><h2 id={id}>{title}</h2>
+  {cap && <span class="cap">{cap}</span>}
+  <span class="line"></span><span class="end"></span>
+</div>

@@ -1,0 +1,93 @@
+# SOURCE: deploy/docker/docker-compose.yml
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: le compose de l'instance LCARS — un seul service, l'image se tire, la forge est ailleurs
+#
+# La forge n'est pas ici : LCARS est jetable, la forge porte le travail. Un banc en monte une par
+# `forge-compose.yml`, dans un projet séparé. `deploy/container` pilote ce fichier et exporte ce
+# qu'il lit ; `bench-up.sh` l'empile avec `docker-compose.bench.yml`.
+#
+# Ce que ce fichier exige de l'hôte, et pourquoi (mesuré, cf. container_privileges.bats) :
+#   - `SYS_ADMIN` + le profil seccomp durci : bwrap crée des namespaces (unshare, pivot_root)
+#     que le profil docker par défaut bloque ; le profil durci suffit, `SYS_ADMIN` reste requis ;
+#   - `apparmor=unconfined` : mesuré sur une Debian 13 avec AppArmor actif ;
+#   - `systempaths=unconfined` : sans lui bwrap ne peut pas monter `/proc` dans un user namespace,
+#     et aucun pod ne naît. Le chemin du profil est relatif à ce fichier.
+# Ces trois lignes sont le prix des sandboxes des pods, à demander à l'hôte, pas à corriger ici.
+#
+# À la main, sans `deploy/container` :
+#   export LCARS_STORE_PREFIX=<projet> LCARS_ADMIRAL=<login>
+#   for v in cache toolchains sysroots state; do docker volume create "$LCARS_STORE_PREFIX-$v"; done
+#   docker compose -p <projet> up -d
+# Les quatre volumes du magasin sont externes (un `down -v` ne les emporte pas) et nommés par le
+# projet (deux instances ne partagent pas de magasin) : ils existent avant le `up`.
+
+name: lcars
+
+services:
+  lcars:
+    # une release publiée, jamais une tête de branche : le tag est immuable, `missing` suffit
+    image: "${LCARS_IMAGE:-ghcr.io/zurp-embedded/lcars-fleet:v0.9-beta}"
+    pull_policy: missing
+    hostname: "${LCARS_HOSTNAME:-bridge}"
+    environment:
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
+      LCARS_UID: "${LCARS_UID:-1000}"
+      LCARS_STORE_ROOT: /var/lib/lcars
+      # les listeners écoutent sur toutes les interfaces du conteneur ; la frontière est la
+      # publication compose ci-dessous, sur la loopback de l'hôte
+      LCARS_BIND_HOST: "${LCARS_BIND_HOST:-0.0.0.0}"
+      LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
+      # sans défaut : c'est la seule variable par laquelle le conteneur écrit sur une forge
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # la même forge vue d'un navigateur, quand l'adresse interne ne se résout pas de l'extérieur
+      FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
+      LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      # sous le volume `var`, avec les jetons : un conteneur recréé garde son client OAuth
+      LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
+      LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-https://github.com/zurp-embedded/LCARS-fleet.git}"
+      LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
+    ports:
+      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
+    volumes:
+      - lcars-home:/home
+      - lcars-var:/opt/lcars/var
+      - lcars-cache:/var/lib/lcars/cache
+      - lcars-toolchains:/var/lib/lcars/toolchains
+      - lcars-sysroots:/var/lib/lcars/sysroots
+      - lcars-state:/var/lib/lcars/state
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=./lcars-hardened-seccomp.json
+      - apparmor=unconfined
+      - systempaths=unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+    networks: [lcars]
+
+volumes:
+  # au projet : les humains et l'état de cette instance meurent avec elle
+  lcars-home:
+  lcars-var:
+  # hors projet : ce qui coûte des heures à refabriquer survit à un `down -v` (cf. lib/store.sh)
+  lcars-cache:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — le nom du projet compose ; deploy/container le pose}-cache"
+  lcars-toolchains:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"
+  lcars-sysroots:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-sysroots"
+  lcars-state:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
+
+networks:
+  lcars:

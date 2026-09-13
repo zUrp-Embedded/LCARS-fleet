@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" shape-rendering="geometricPrecision">
+  <rect width="256" height="256" rx="32" fill="#0a0a0a"/>
+  <path d="M 32 16 L 96 16 L 96 40 L 56 40 L 56 72 L 32 72 Z" fill="#9966CC"/>
+  <rect x="208" y="16" width="32" height="24" rx="12" fill="#9966CC"/>
+  <rect x="32" y="88" width="192" height="140" rx="16" fill="#9966CC"/>
+
+  <!-- IDIC glyph: circle + equilateral triangle -->
+  <!-- circle r54 (not 56): buys 2px of headroom for the triangle's apex miter spike -->
+  <circle cx="128" cy="160" r="54" fill="none" stroke="#0a0a0a" stroke-width="15"/>
+
+  <!-- Equilateral triangle, side 104, apex on the circle's top arc (160 - 54 = 106) -->
+  <!-- stroke 16 (1px over the circle) + miter joins: the 3 corners spike past the ring -->
+  <polygon points="128,106 76,196 180,196"
+           fill="none" stroke="#0a0a0a" stroke-width="16" stroke-linejoin="miter"/>
+</svg>

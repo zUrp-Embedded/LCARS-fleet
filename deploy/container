@@ -1,0 +1,559 @@
+#!/usr/bin/env bash
+# SOURCE: deploy/container
+# AUTHOR: DrDree
+# STARDATE: 2026-09-12
+# STATUS: le délégué du conteneur — un compose, une conf par projet, les gestes de l'instance
+#
+# USAGE : deploy/container [-p <projet>] [--forge-project <nom>] [--port-deck N] [--port-ssh N] [--bench [--port-forge N]] <commande>
+#   up               démarre l'instance (détachée) depuis l'image LCARS_IMAGE ; avec --bench,
+#                    monte d'abord une forge jetable et son runner CI (deploy/docker/bench/bench-up.sh)
+#   pull             tire l'image LCARS_IMAGE depuis son registre — « up » ne tire jamais
+#   build            bâtit l'image sur ce poste (deploy/pack.sh : gate, kit, image)
+#   status           l'état de l'instance vu de l'hôte — sortie 0 sain · 1 dégradé · 2 panne
+#   shell            un shell dans le conteneur, en tant que LCARS_HUMAN (défaut lcars)
+#   logs             les logs du conteneur (suivi)
+#   down             arrête et retire le conteneur, les volumes restent
+#   reset            détruit conteneur, image locale et volumes du projet ; la forge n'est pas concernée
+#   config           pose côté hôte (~/.lcars/container/<projet>.env, <projet>.secrets/) l'env et
+#                    les secrets de l'instance ; sans variable, montre ce qui est posé
+#   forge-check      le contrat qu'une forge fournie doit tenir, et les gestes pour l'y amener
+#   forge-apply      pose la structure sur la forge fournie (OpenTofu tourne dans le conteneur)
+#   runner-token     un jeton d'enregistrement pour un runner CI (usage unique)
+#   source-push [DIR] copie un clone LCARS dans le conteneur (/home/projects/LCARS)
+#   help             cette aide
+#
+#   -p <projet>          le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
+#                        qui créent ou détruisent refusent un projet que ce compose n'a pas créé
+#   --forge-project <n>  la base des projets : <n>-fleet, et avec --bench <n>-forge, <n>-runner
+#   --port-deck N        port du deck publié sur 127.0.0.1 (défaut 20999)
+#   --port-ssh N         port ssh publié sur 127.0.0.1 (défaut 2222)
+#   --port-forge N       port de la forge jetable, avec --bench seulement
+#
+# ENV (optionnels) :
+#   LCARS_IMAGE                image de l'instance (défaut : lcars-fleet:local si présente, sinon celle du compose)
+#   LCARS_HUMAN                login cible de shell (défaut lcars) — pas le sysadmin, qui est LCARS_ADMIRAL
+#   LCARS_UID                  uid du sysadmin (défaut 1000)
+#   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
+#   LCARS_SSH_PORT             bind du port ssh (défaut 127.0.0.1:2222)
+#   LCARS_HOSTNAME             hostname du conteneur
+#   LCARS_CONTAINER_CONF_DIR   où vit la conf par projet (défaut ~/.lcars/container)
+#   FORGE_BASE_URL             la forge fournie, vue du conteneur (Docker Desktop :
+#                              http://host.docker.internal:<port> ; docker natif : le nom de service
+#                              sur un réseau partagé). Vide : la forge se monte avec --bench
+#   FORGE_PUBLIC_URL           la même forge vue du navigateur ; défaute sur FORGE_BASE_URL
+#   FORGE_ADMIN_TOKEN          jeton master site-admin — lu par « config » (qui le pose) et par
+#                              « forge-apply » ; transmis par stdin, jamais par argv
+#   FORGE_SEED_PASSWORD        mot de passe posé sur les comptes à leur création — « config » seul
+#   LCARS_HUMAN_EMAIL          email du compte forge de l'humain (défaut <humain>@lcars.local)
+#
+# EXIT : 0 succès · 1 erreur ou commande inconnue · status : 0 sain · 1 dégradé · 2 panne
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/deploy/docker/docker-compose.yml"
+SECRETS_FILE="$SCRIPT_DIR/deploy/docker/docker-compose.secrets.yml"
+BENCH_UP="$SCRIPT_DIR/deploy/docker/bench/bench-up.sh"
+PROJECT="${LCARS_PROJECT:-${LCARS_BASE:-lcars}-fleet}"
+WITH_BENCH=0
+FORGE_PORT=""
+declare -a PORTS=()   # ce que --bench transmet au banc
+
+# shellcheck source=lib/store.sh
+. "$SCRIPT_DIR/deploy/lib/store.sh"
+
+usage() { sed -n '/^# USAGE :/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--project)
+      [[ -n "${2:-}" ]] || { echo "container: -p attend un nom de projet" >&2; exit 1; }
+      PROJECT="$2"; shift 2 ;;
+    --forge-project)
+      [[ -n "${2:-}" ]] || { echo "container: --forge-project attend un nom" >&2; exit 1; }
+      PROJECT="$2-fleet"; shift 2 ;;
+    --port-deck)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "container: --port-deck attend un port" >&2; exit 1; }
+      export LCARS_LANDING_PORT_BIND="127.0.0.1:$2"; PORTS+=(--port-deck "$2"); shift 2 ;;
+    --port-ssh)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "container: --port-ssh attend un port" >&2; exit 1; }
+      export LCARS_SSH_PORT="127.0.0.1:$2"; PORTS+=(--port-ssh "$2"); shift 2 ;;
+    --port-forge)
+      [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "container: --port-forge attend un port" >&2; exit 1; }
+      FORGE_PORT="$2"; PORTS+=(--port-forge "$2"); shift 2 ;;
+    --bench) WITH_BENCH=1; shift ;;
+    *) break ;;
+  esac
+done
+[[ -z "$FORGE_PORT" || "$WITH_BENCH" -eq 1 ]] \
+  || { echo "container: --port-forge n'a d'objet qu'avec --bench — sans lui la forge est fournie (FORGE_BASE_URL)" >&2; exit 1; }
+
+case "${1:-help}" in
+  help|-h|--help) usage; exit 0 ;;
+esac
+
+# shellcheck source=lib/docker-endpoint.sh
+. "$SCRIPT_DIR/deploy/lib/docker-endpoint.sh"
+fail() { printf 'container: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
+docker_endpoint || fail "$PROV_DOCKER_WHY" \
+  "Rien n'a été construit, rien n'a été démarré. « container help » marche sans docker."
+# sur une socket root, la CLI sondée est un shim qui escalade : un « docker » nu le contournerait en silence
+DOCKER="$PROV_DOCKER_BIN"
+docker_compose_cmd || fail "$PROV_COMPOSE_WHY" \
+  "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
+# shellcheck disable=SC2206 # la commande compose est une liste de mots, posée par la lib
+COMPOSE=($PROV_COMPOSE_CMD)
+[[ -f "$COMPOSE_FILE" ]] || { echo "container: compose introuvable: $COMPOSE_FILE (checkout incomplet ?)" >&2; exit 1; }
+
+export LCARS_STORE_PREFIX="$PROJECT"
+
+# ─── La conf par projet, côté hôte ──────────────────────────────────────────────────────────────
+CONTAINER_CONF_DIR="${LCARS_CONTAINER_CONF_DIR:-$HOME/.lcars/container}"
+CONF_ENV="$CONTAINER_CONF_DIR/$PROJECT.env"
+CONF_SECRETS="$CONTAINER_CONF_DIR/$PROJECT.secrets"
+CONF_KEYS=(FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID LCARS_SSH_AUTHORIZED_KEYS
+           LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HOSTNAME LCARS_DECK_ORIGINS
+           LCARS_HUMAN)
+declare -A CONF_GIVEN=()   # ce que l'appelant a posé lui-même dans l'env, avant lecture du fichier
+
+load_conf() {
+  local k v line
+  for k in "${CONF_KEYS[@]}"; do [[ -n "${!k+x}" ]] && CONF_GIVEN[$k]="${!k}"; done
+  [[ -r "$CONF_ENV" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] || continue
+    k="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    [[ -n "${!k+x}" ]] && continue
+    export "$k=$v"
+  done < "$CONF_ENV"
+}
+
+# compose exige que les fichiers `secrets:` existent — vides, ils ne portent aucun secret
+_SECRETS_OK=0
+ensure_secrets() {
+  [[ "$_SECRETS_OK" -eq 0 ]] || return 0
+  _SECRETS_OK=1
+  install -d -m 0700 "$CONTAINER_CONF_DIR" "$CONF_SECRETS"
+  local f
+  for f in forge-master.token forge-seed.pass; do
+    [[ -e "$CONF_SECRETS/$f" ]] || ( umask 077; : > "$CONF_SECRETS/$f" )
+  done
+  export LCARS_CONTAINER_SECRETS="$CONF_SECRETS"
+}
+# lire l'instance ne prépare rien sur l'hôte : l'override des secrets et leurs fichiers ne servent qu'à la pose
+compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
+compose_pose() { ensure_secrets; "${COMPOSE[@]}" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
+load_conf
+
+# ─── Les gardes du projet ───────────────────────────────────────────────────────────────────────
+project_volumes() {
+  "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort || true
+}
+project_config_files() {
+  local ids
+  ids="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
+  [[ -n "$ids" ]] || return 0
+  # shellcheck disable=SC2086 # les ids sont des mots
+  "$DOCKER" inspect $ids \
+    --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
+}
+
+# un up qui changerait le volume de /home ou de /opt/lcars/var recréerait l'instance sur un volume vide
+assert_home_volume_kept() {
+  local id cible cle actuel attendu
+  id="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | head -n1)" || return 0
+  [[ -n "$id" ]] || return 0
+  for cible in /home:lcars-home /opt/lcars/var:lcars-var; do
+    cle="${cible#*:}"; cible="${cible%%:*}"
+    actuel="$("$DOCKER" inspect "$id" --format "{{range .Mounts}}{{if eq .Destination \"$cible\"}}{{.Name}}{{end}}{{end}}" 2>/dev/null)" || continue
+    [[ -n "$actuel" ]] || continue
+    attendu="$(compose config --format json 2>/dev/null \
+      | python3 -c "import json,sys; print(json.load(sys.stdin)['volumes']['$cle']['name'])" 2>/dev/null)" || continue
+    [[ -n "$attendu" && "$actuel" != "$attendu" ]] || continue
+    fail "le projet « $PROJECT » monte $cible depuis le volume « $actuel », et ce compose le monterait depuis « $attendu » — un up le recréerait sur un volume vide" \
+         "garder les données : docker run --rm -v $actuel:/from -v $attendu:/to alpine cp -a /from/. /to/ — ou les jeter : deploy/container -p $PROJECT reset — puis up"
+  done
+}
+
+# appliquer un compose à un projet qu'il n'a pas créé recrée et republie sans erreur
+assert_project_ours() {
+  local files line
+  files="$(project_config_files)"
+  [[ -n "$files" ]] || return 0
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case ",$line," in *",$COMPOSE_FILE,"*) return 0 ;; esac
+  done <<< "$files"
+  {
+    echo "container: refus — le projet compose « $PROJECT » existe, et ce n'est pas celui de ce fichier."
+    echo "  il a été créé depuis : ${files//$'\n'/ ; }"
+    echo "  ce script appliquerait : $COMPOSE_FILE"
+    echo ""
+    echo "  Appliquer un compose à un projet qu'il n'a pas créé recrée et republie sans erreur."
+    echo "  Viser le bon projet   : deploy/container -p <projet> $*"
+    echo "  Ou agir sur celui-ci avec sa recette (un banc se descend par bench/bench-down.sh)."
+    echo "  Projets visibles      : docker compose ls"
+  } >&2
+  exit 1
+}
+
+# ─── L'image ────────────────────────────────────────────────────────────────────────────────────
+cmd_pull() {
+  local img="$LCARS_IMAGE"
+  "$DOCKER" pull "$img" || fail "pull: « $img » n'a pas pu être tirée" "LCARS_IMAGE=<registre/image:tag> deploy/container pull — ou « deploy/container build » sur un poste de dev"
+  local rev; rev="$("$DOCKER" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null || true)"
+  echo "container pull: « $img » tirée (révision ${rev:-inconnue}). Puis :  deploy/container up   (conteneur recréé sur le même volume)"
+}
+
+cmd_build() {
+  local pack="${LCARS_PACK_BIN:-$SCRIPT_DIR/deploy/pack.sh}"
+  echo "container: build = deploy/pack.sh (gate, kit, image) — plusieurs minutes"
+  exec "$pack" "$@"
+}
+
+# ─── up ─────────────────────────────────────────────────────────────────────────────────────────
+cmd_up() {
+  local img="$LCARS_IMAGE"
+  if ! "$DOCKER" image inspect "$img" >/dev/null 2>&1; then
+    echo "container: image « $img » absente — un up ne la fabrique pas." >&2
+    echo "   la tirer   : deploy/container pull        (LCARS_IMAGE=<registre/image:tag> pour une autre)" >&2
+    echo "   la bâtir   : deploy/container build       (deploy/pack.sh : gate, kit, image — plusieurs minutes)" >&2
+    exit 1
+  fi
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    [[ -x "$BENCH_UP" ]] || fail "banc introuvable : $BENCH_UP" "l'arbre est incomplet"
+    export DOCKER_BIN="$DOCKER"
+    exec "$BENCH_UP" --forge-project "${PROJECT%-fleet}" --image "$img" ${PORTS[@]+"${PORTS[@]}"} "$@"
+  fi
+  assert_project_ours up
+  assert_home_volume_kept
+  store_ensure_volumes "$DOCKER" || { echo "container: magasin non posé — up annulé" >&2; exit 1; }
+  if [[ -z "${LCARS_DECK_ORIGINS:-}" ]]; then
+    local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" _h _p
+    _p="${_bind##*:}"; _h="${_bind%:*}"; [[ "$_h" == "0.0.0.0" || "$_h" == "$_bind" ]] && _h=127.0.0.1
+    export LCARS_DECK_ORIGINS="http://$_h:$_p,http://localhost:$_p"
+  fi
+  compose_pose up -d --no-build "$@"
+  echo ""
+  echo "LCARS fleet up (projet $PROJECT, image $img). Accès :"
+  echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet start"
+  echo "  deploy/container status                                   # l'état de l'instance, vu de l'hôte"
+  await_provision_verdict
+}
+
+await_provision_verdict() {
+  local deadline=$((SECONDS + ${LCARS_UP_VERDICT_TIMEOUT:-900})) rc=""
+  echo ""
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    rc="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
+    [[ "$rc" =~ ^[0-9]+$ ]] && break
+    rc=""
+    if [[ "$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" == "awaiting-config" ]]; then
+      echo ""
+      echo "container up: conteneur en attente de configuration — le siège ne peut pas se dériver sans l'autorité de la forge."
+      echo "              FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… deploy/container -p $PROJECT config, puis « docker restart »."
+      return 0
+    fi
+    sleep 5
+  done
+
+  case "$rc" in
+    "")
+      echo "container up: verdict de provisionnement non lu après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
+      echo "              Le conteneur tourne ; son état n'est pas mesuré. « deploy/container status »." ;;
+    0)
+      echo "container up: provisionnement convergé." ;;
+    2)
+      echo "container up: provisionnement appliqué avec drift résiduel — un geste manque."
+      echo "              « deploy/container status » le dit ; « deploy/container logs » nomme lequel." ;;
+    *)
+      echo "container up: provisionnement en échec (rc=$rc) — le conteneur tourne et ne produira rien."
+      echo "              « deploy/container logs » nomme ce qui manque." >&2
+      return 1 ;;
+  esac
+  local hrc
+  hrc="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hrc=""
+  case "$hrc" in
+    0)  echo "container up: humain(s) de fleet présent(s) — « fleet start » a quelqu'un." ;;
+    "") echo "container up: population d'humains non mesurée (pas de /run/lcars-humans.rc)." ;;
+    *)  echo "container up: aucun humain de fleet — le conteneur tourne, et personne ne peut lancer de fleet."
+        echo "              Un humain inscrit sur la forge, dans la team « humans », est matérialisé par le convergeur au tour suivant (30 s)." ;;
+  esac
+}
+
+cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
+
+# ─── La forge fournie : config, gestes ──────────────────────────────────────────────────────────
+gesture() { # gesture <geste> — le secret, s'il y en a un, arrive sur stdin
+  if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
+    compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"
+  elif [[ -x /opt/lcars/forge-gestures.sh ]]; then
+    /opt/lcars/forge-gestures.sh "$1"
+  else
+    echo "container: le geste « $1 » n'a nulle part où tourner — ni conteneur lcars, ni /opt/lcars/forge-gestures.sh" >&2
+    echo "     Sur un poste, « bash install.sh --workstation » le pose (62-runtime-helpers)." >&2
+    return 1
+  fi
+}
+
+cmd_config() {
+  local token="${FORGE_ADMIN_TOKEN:-}" seed="${FORGE_SEED_PASSWORD:-}" k v line
+  if [[ "${#CONF_GIVEN[@]}" -eq 0 && -z "$token" && -z "$seed" ]]; then
+    echo "container config: la configuration de l'instance « $PROJECT », côté hôte ($CONTAINER_CONF_DIR) :"
+    if [[ -s "$CONF_ENV" ]]; then sed 's/^/  /' "$CONF_ENV"; else echo "  (aucun env posé — les défauts du compose valent)"; fi
+    for k in forge-master.token:FORGE_ADMIN_TOKEN forge-seed.pass:FORGE_SEED_PASSWORD; do
+      if [[ -s "$CONF_SECRETS/${k%%:*}" ]]; then echo "  ${k#*:}=<posé>"; else echo "  ${k#*:}=<absent>"; fi
+    done
+    { echo ""
+      echo "  Ce que LCARS ne peut pas deviner se pose en variables d'env de cette commande :"
+      echo "    FORGE_BASE_URL=<url vue du conteneur>  FORGE_PUBLIC_URL=<url vue du navigateur>"
+      echo "    LCARS_ADMIRAL=<login du siège>  LCARS_UID=<uid>  LCARS_SSH_PORT=$LCARS_SSH_PORT …"
+      echo "    FORGE_ADMIN_TOKEN=<jeton master site-admin>   l'autorité qui crée sur la forge"
+      echo "       Dans Gitea : Settings → Applications → Generate New Token, scope « all »."
+      echo "    FORGE_SEED_PASSWORD=<mot de passe>            posé sur les comptes à leur création ;"
+      echo "       le conteneur le relit pour minter les jetons de rôle — le changer ne change rien"
+      echo "       sur la forge et casserait le mint."
+      echo "  Ce qui n'est pas donné n'est pas touché. Puis :  deploy/container up"
+    } >&2
+    return 0
+  fi
+  install -d -m 0700 "$CONTAINER_CONF_DIR" "$CONF_SECRETS"
+  if [[ "${#CONF_GIVEN[@]}" -gt 0 ]]; then
+    declare -A cur=()
+    if [[ -r "$CONF_ENV" ]]; then
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] && cur[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
+      done < "$CONF_ENV"
+    fi
+    for k in "${!CONF_GIVEN[@]}"; do
+      v="${CONF_GIVEN[$k]}"
+      [[ "$v" == *$'\n'* ]] && fail "config: $k porte un retour à la ligne — une valeur multi-ligne ne tient pas dans $CONF_ENV" \
+        "la donner dans l'env de « deploy/container up » à la place"
+      cur[$k]="$v"
+    done
+    local tmp="$CONF_ENV.tmp"
+    ( umask 077
+      { echo "# LCARS container « $PROJECT » — posé par « deploy/container config », lu par chaque « deploy/container … »."
+        echo "# L'env explicite de l'appelant prime sur ce fichier."
+        for k in "${CONF_KEYS[@]}"; do if [[ -n "${cur[$k]+x}" ]]; then printf '%s=%s\n' "$k" "${cur[$k]}"; fi; done
+      } > "$tmp" ) || fail "config: écriture impossible dans $CONTAINER_CONF_DIR"
+    mv -f "$tmp" "$CONF_ENV"
+    for k in "${!CONF_GIVEN[@]}"; do echo "container config: $k posé ($CONF_ENV)"; done
+  fi
+  local f
+  for f in forge-master.token:"$token" forge-seed.pass:"$seed"; do
+    v="${f#*:}"; [[ -n "$v" ]] || continue
+    ( umask 077; printf '%s\n' "$v" > "$CONF_SECRETS/${f%%:*}.tmp" ) && mv -f "$CONF_SECRETS/${f%%:*}.tmp" "$CONF_SECRETS/${f%%:*}"
+    echo "container config: ${f%%:*} posé ($CONF_SECRETS, lisible par cet utilisateur seul) — le conteneur l'importe et le vérifie au boot"
+  done
+  if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
+    [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
+    [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
+    [[ "${#CONF_GIVEN[@]}" -gt 0 ]] && echo "container config: le conteneur tourne — l'env ne le touche qu'au prochain « deploy/container up » (conteneur recréé)"
+  else
+    echo "container config: posé. Puis :  deploy/container up"
+  fi
+}
+
+cmd_forge_apply() {
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
+    -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
+    -e LCARS_HUMAN_EMAIL="${LCARS_HUMAN_EMAIL:-}" \
+    lcars /opt/lcars/forge-gestures.sh apply \
+    || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
+  echo ""
+  echo "container forge-apply: structure posée. Rejouable — un second passage importe ce qui existe."
+  echo "  deploy/container status         # ce que le conteneur voit de sa forge maintenant"
+}
+
+cmd_runner_token() {
+  printf '%s' "${FORGE_ADMIN_TOKEN:-}" | gesture runner-token
+}
+
+# ─── status ─────────────────────────────────────────────────────────────────────────────────────
+cmd_status() {
+  local id state health boot prov hum rev tampon rc=0
+  id="$(compose ps -q lcars 2>/dev/null | head -n1)"
+  [[ -n "$id" ]] || { echo "container status ($PROJECT) : aucun conteneur lcars — « deploy/container up »"; return 2; }
+  state="$("$DOCKER" inspect -f '{{.State.Status}}' "$id" 2>/dev/null || echo inconnu)"
+  health="$("$DOCKER" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sans healthcheck{{end}}' "$id" 2>/dev/null || echo inconnu)"
+  rev="$("$DOCKER" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id" 2>/dev/null || true)"
+  boot="$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" || boot=""
+  prov="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || prov=""
+  hum="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hum=""
+  tampon="$(compose exec -T lcars cat /opt/lcars/.verified 2>/dev/null | tr -d '[:space:]')" || tampon=""
+  echo "container status ($PROJECT)"
+  echo "  conteneur   : $state · santé : $health"
+  case "$boot" in
+    awaiting-config) echo "  boot        : en attente de configuration — « deploy/container config », puis « deploy/container up »" ;;
+    init-failed)     echo "  boot        : init en échec — « deploy/container logs »" ;;
+    "")              if [[ -n "$prov" ]]; then echo "  boot        : services démarrés"; else echo "  boot        : en cours (aucun verdict encore)"; fi ;;
+    *)               echo "  boot        : $boot" ;;
+  esac
+  case "$prov" in
+    0) echo "  forge       : gestes convergés (jetons, catalogues, branche ops, client OAuth2)" ;;
+    2) echo "  forge       : drift résiduel — un geste manque ; « deploy/container forge-check »" ;;
+    "") : ;;
+    *) echo "  forge       : échec d'un geste (rc=$prov) — « deploy/container logs »" ;;
+  esac
+  case "$hum" in
+    0) echo "  humains     : présents — « fleet start » a quelqu'un" ;;
+    "") : ;;
+    *) echo "  humains     : aucun humain de fleet — un humain s'inscrit sur la forge, team « humans »" ;;
+  esac
+  local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" deck_http
+  deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${_bind/0.0.0.0/127.0.0.1}/auth/login" 2>/dev/null || echo 000)"
+  case "$deck_http" in
+    2*|3*) echo "  deck        : répond sur http://$_bind (HTTP $deck_http)" ;;
+    409)   echo "  deck        : http://$_bind rend 409 — entrée non déclarée au client OAuth2 (LCARS_DECK_ORIGINS) ; relancer « deploy/container up »" ;;
+    000)   echo "  deck        : rien ne répond sur http://$_bind" ;;
+    *)     echo "  deck        : http://$_bind rend HTTP $deck_http" ;;
+  esac
+  if [[ -n "$tampon" ]]; then
+    if [[ -n "$rev" && ( "$rev" == "$tampon"* || "$tampon" == "$rev"* ) ]]; then
+      echo "  image       : vérifiée ($tampon) — la révision qui tourne est celle du build"
+    else
+      echo "  image       : tampon $tampon ≠ révision ${rev:-inconnue} — l'image a été reconstruite sans « container up » ?"
+    fi
+  else
+    echo "  image       : sans tampon de vérification (stage verify absent, ou conteneur pas prêt)"
+  fi
+  [[ "$state" == running ]] || rc=2
+  [[ "$boot" == init-failed || "$health" == unhealthy ]] && rc=2
+  [[ "$boot" == awaiting-config && "$state" == running ]] && rc=1
+  if [[ "$rc" -eq 0 ]]; then
+    [[ "$boot" == awaiting-config || "$prov" == 2 || "$health" == starting ]] && rc=1
+    [[ -n "$prov" && "$prov" != 0 && "$prov" != 2 ]] && rc=2
+    [[ -n "$hum" && "$hum" != 0 ]] && rc=1
+    [[ "$deck_http" == 409 || "$deck_http" == 000 ]] && rc=1
+  fi
+  return "$rc"
+}
+
+# ─── logs, down, reset, source-push ─────────────────────────────────────────────────────────────
+cmd_logs()  { compose logs -f "$@"; }
+
+cmd_down() {
+  assert_project_ours down
+  compose down "$@"
+}
+
+cmd_reset() {
+  assert_project_ours reset
+  local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//')"
+  echo "container: reset du projet « $PROJECT » — conteneur + image + volume(s) ${_vols:-<aucun>}."
+  echo "           La forge n'est pas concernée : elle vit dans son propre déploiement, le travail poussé y survit."
+  echo ""
+  store_spared_line | sed 's/^/           /'
+  read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
+  [[ "$a" == "yes" ]] || { echo "container: annulé."; exit 1; }
+  compose down --rmi local
+  local _v
+  while read -r _v; do
+    [[ -n "$_v" ]] || continue
+    "$DOCKER" volume rm -f "$_v" >/dev/null 2>&1 || echo "  volume non retiré : $_v"
+  done < <(project_volumes)
+  echo "container: reset fait. « deploy/container up » pour repartir de zéro."
+}
+
+cmd_source_push() {
+  local src="${1:-$SCRIPT_DIR}" ctr
+  src="$(cd "$src" && pwd)"
+  [[ -d "$src/.git" ]] || { echo "container: $src n'est pas un clone git (pas de .git)" >&2; exit 1; }
+  ctr="$(compose ps -q lcars)"
+  [[ -n "$ctr" ]] || { echo "container: conteneur lcars absent — « deploy/container up » d'abord" >&2; exit 1; }
+  local human="${LCARS_HUMAN:-lcars}"
+  echo "container: copie de $src → /home/projects/LCARS (historique git compris)…"
+  compose exec -T lcars rm -rf /home/projects/.LCARS.incoming
+  "$DOCKER" cp "$src/." "$ctr:/home/projects/.LCARS.incoming" || { echo "container: copie échouée" >&2; exit 1; }
+  compose exec -T lcars bash -c "
+    set -euo pipefail
+    chown -R '$human':fleet /home/projects/.LCARS.incoming
+    rm -rf /home/projects/.LCARS.old
+    if [ -e /home/projects/LCARS ]; then
+      if ! mv -T /home/projects/LCARS /home/projects/.LCARS.old; then
+        echo 'source-push : /home/projects/LCARS ne peut pas être déplacé (point de montage ?) — rien écrasé' >&2
+        exit 1
+      fi
+    fi
+    mv -T /home/projects/.LCARS.incoming /home/projects/LCARS
+    rm -rf /home/projects/.LCARS.old
+    git config --system --replace-all safe.directory /home/projects/LCARS
+    test -d /home/projects/LCARS/.git
+    git -C /home/projects/LCARS rev-parse --short HEAD"
+  echo "container: source posée (/home/projects/LCARS dans le conteneur) ; la fleet peut se maintenir."
+}
+
+# ─── Le contrat d'une forge fournie ─────────────────────────────────────────────────────────────
+cmd_forge_check() {
+  cat <<EOF
+container: le contrat de la forge — ce que LCARS attend d'elle, et rien de plus.
+
+LCARS ne fabrique pas la forge et ne la gère pas : elle porte les dépôts, les issues et les PR, la
+seule copie durable du travail ; LCARS est jetable. Il lui faut exactement trois choses, et les
+deux premières sont la même forge vue par deux observateurs.
+
+  1. Son adresse vue du conteneur   → FORGE_BASE_URL=http://<hôte-ou-service>:<port>
+     Le runtime l'ouvre depuis l'intérieur : « localhost » y désigne le conteneur.
+       · Docker Desktop (WSL2, macOS) → http://host.docker.internal:<port publié>
+       · Docker natif (Linux)         → host.docker.internal n'existe pas sans « extra_hosts:
+         host-gateway », que ce compose ne déclare pas : attacher le conteneur au réseau de la
+         forge et viser le nom de service avec son port interne, http://gitea:3000.
+  2. Son adresse vue du navigateur  → FORGE_PUBLIC_URL=http://<adresse tapée>:<port>
+     Celle des retours OAuth2 du deck. Elle défaute sur la précédente, et ce défaut n'est juste
+     que si les deux observateurs voient la même adresse — sur un poste de travail, jamais.
+     Omise, le login part et ne revient pas : la panne se lit au retour, où elle ressemble à
+     tout sauf à une variable manquante.
+  3. Un jeton master (site-admin) et un seed. Dans Gitea : Settings → Applications → Generate
+     New Token, scope « all ». Le seed est le mot de passe que les comptes de rôle reçoivent à
+     leur création. Posés une fois, ils restent dans le conteneur :
+         FORGE_ADMIN_TOKEN=<jeton-master> FORGE_SEED_PASSWORD=<seed> deploy/container config
+     Puis, sans rien installer sur la machine (OpenTofu, ses providers et la recette sont dans
+     l'image), rejouable — un second passage importe ce qui existe :
+         deploy/container forge-apply
+     Le jeton reste parce que la structure change pendant toute la vie du système (enrôler un
+     catalogue crée un compte par rôle) ; le prix est dit : le conteneur détient de quoi créer et
+     détruire sur la forge. Le boot nominal n'en a pas besoin, l'apply converge en lisant. Le
+     seed reste parce que le conteneur le relit pour minter les jetons de rôle, et tofu ne le
+     remplace pas sur un compte existant. Rotation réelle d'un mot de passe de rôle :
+         curl -X PATCH -H "Authorization: token <jeton-master>" -H 'Content-Type: application/json' \\
+           -d '{"login_name":"<compte>","source_id":0,"password":"<seed>","must_change_password":false}' \\
+           <url>/api/v1/admin/users/<compte>
+
+Ce que le conteneur vérifie à son boot, sans réparer ce qui ne lui appartient pas — et que
+« deploy/container status » relit : forge joignable, org présente, comptes de rôle, jetons
+valides, humain membre de l'org ; chaque manque est dit avec le geste exact pour le combler.
+
+Une forge jetable pour développer : deploy/container --bench up
+      (projet séparé, volumes à lui, détruit par bench-down.sh seulement).
+EOF
+}
+
+# ─── Défauts et dispatch ────────────────────────────────────────────────────────────────────────
+# les défauts viennent après load_conf : posés avant, ils masqueraient le fichier de conf du projet
+: "${LCARS_SSH_PORT:=127.0.0.1:2222}"
+image_defaut() {
+  if "$DOCKER" image inspect lcars-fleet:local >/dev/null 2>&1; then echo lcars-fleet:local
+  else sed -nE 's/^[[:space:]]*image: "\$\{LCARS_IMAGE:-([^}]+)\}".*$/\1/p' "$COMPOSE_FILE" | head -n1
+  fi
+}
+: "${LCARS_IMAGE:=$(image_defaut)}"
+export LCARS_SSH_PORT LCARS_IMAGE
+
+case "${1:-help}" in
+  build)  shift; cmd_build "$@" ;;
+  up)     shift; cmd_up "$@" ;;
+  pull)   cmd_pull ;;
+  status) cmd_status ;;
+  shell)  cmd_shell ;;
+  logs)   shift; cmd_logs "$@" ;;
+  down)   shift; cmd_down "$@" ;;
+  reset)  shift; cmd_reset "$@" ;;
+  source-push) shift; cmd_source_push "$@" ;;
+  config)      cmd_config ;;
+  forge-check) cmd_forge_check ;;
+  forge-apply) cmd_forge_apply ;;
+  runner-token) cmd_runner_token ;;
+  help|-h|--help) usage ;;
+  *) echo "container: commande inconnue: $1 — « container help » liste les verbes" >&2; exit 1 ;;
+esac

@@ -1,0 +1,77 @@
+# Pipeline V2 — workshop-direct (chantier trois faces)
+#
+# Date: 2026-08-02
+# Statut: actif — rail cable et PROUVE le 2026-08-02 sur fleet neuve docker (banc faceproof) :
+#         ticket destination/workshop -> burn (par la FACE, pas par le nom) -> scribe
+#         -> PR base=workshop -> merge scelle
+#         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
+# Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
+# Consommé par: Fleet.Workflow.Loader (clé `face` du step).
+#
+# LE CHEMIN DIRECT, et pourquoi il est direct — deux absences, toutes deux des DÉCISIONS :
+#
+#   PAS de scoper (pas de step brief-review) : sur un ticket documentaire, l'AUTEUR du brief est
+#   aussi le juge du retour (l'arch écrit la demande de doc, l'arch relit le doc livré dans son
+#   mount RW sur la face doc). Une porte de brief entre les deux arbitrerait un différend qui n'a
+#   qu'une partie. Propriété de CE chemin, pas règle globale — un ticket documentaire routé un jour
+#   vers un jury retrouverait sa porte.
+#
+#   PAS de jury (`jury: []`, configuration supportée — précédent : audit-only, c0-poc) : RIEN NE
+#   SORT DU PROJET par ce chemin. Un jury protège un lecteur ABSENT — un tiers, un fork, une
+#   session future qui devra répondre « ce qui a été demandé, jugé, prouvé ». Ici le consommateur
+#   de la revue est celui qui a écrit la demande, présent et en boucle : le mécanisme n'a pas de
+#   lecteur. Et un verdict ne compose que s'il existe une autorité qui CLÔT ; c'est l'arch, dans
+#   son mount, sur le doc mergé. Un jury de plus n'ajouterait pas un verdict mais un avis, sans
+#   arbitre pour les départager.
+#   ⚠ Ce motif est le bon, et il n'est PAS « la prose n'a pas de vérité terrain ». Ce motif-là
+#   était écrit ici et il devient faux au premier ticket de doc LIVRÉE : un guide utilisateur
+#   destiné à `docs/` est de la prose ET il sort — il passe par la face code et se fait juger comme
+#   le reste. Le critère est la destination, jamais la nature de l'artefact.
+#   Le plancher mécanique (identité, secrets, ancêtre, sceau) tient seul, comme sur tout jury vide.
+
+kind: WorkflowMap
+metadata:
+  name: workshop-direct
+  description: "Ticket d'atelier — le scribe rédige sur workshop, merge scellé direct, l'arch relit dans son mount. Pas de scoper (l'auteur du brief juge le retour), pas de jury (rien ne sort du projet, donc aucun lecteur absent à protéger)."
+  presentation: "Le chemin DIRECT de l'ATELIER : le scribe rédige sur workshop (le code en référence lecture seule), merge scellé sans jury, l'architecte relit dans son mount. Ce qui passe ici ne sort jamais du projet — brouillons, plans, specs en cours. Un document destiné à `docs/`, lui, est un livrable : il prend la voie code. Se déclare par ticket (`destination/workshop`), jamais par projet — toute carte de criticité garde son pipeline code."
+  # DECLARED PER TICKET, NEVER PER PROJECT — the presentation above already said it in prose, and
+  # prose is not readable by the front desk: the card was therefore offered in the framing catalogue
+  # as if a project could choose it. A project that declared it would route EVERY ticket through a
+  # jury-less direct seal. It is reached by an issue's genre (`destination/workshop`), a different rail.
+  #
+  # ⚠ CETTE LIGNE NE PORTE PLUS RIEN — elle SE DERIVE (2026-08-17). Une carte qui porte un
+  # producteur `face: workshop` EST le rail d'atelier de son catalogue, donc elle s'atteint par le
+  # genre : le loader en tire `scope: ticket` tout seul. Tenue a la main, elle a ete oubliee sur la
+  # carte d'atelier de `web-demo`, qu'un projet pouvait donc declarer. Elle reste ECRITE ici parce
+  # qu'elle aide le lecteur du YAML, et elle ne peut plus mentir : le publish refuse une carte
+  # d'atelier qui declarerait `scope: project`.
+  scope: ticket
+
+spec:
+  # Jury VIDE délibéré — cf. l'en-tête. Le plancher mécanique tient seul (précédent c0-poc).
+  jury: []
+  # CI IGNORÉE, et ici la raison est MÉCANIQUE, pas doctrinale : le rail CI livré aux projets vit
+  # dans `project_template/main/.gitea/workflows/`, sur la face CODE. Une PR basée sur `workshop`
+  # ne porte aucune définition de workflow, donc aucun runner ne la sert : sous `required` le gate
+  # lirait `:none`, attendrait sa borne, puis escaladerait — sur CHAQUE ticket documentaire. Le
+  # jour où la face doc porte son propre rail, cette ligne se relit.
+  ci: ignore
+  # Budget anti-emballement (obligatoire, donnée map-level). Sans jury il n'y a pas de
+  # déclencheur de rework mécanique ; le budget borne les relances arch → nouveau ticket.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step unique (racine ET terminal) : rédaction sur la face doc ---
+    build:
+      role: scribe
+      # LA clé du chantier : le workspace du producteur clone workshop, sa PR y retourne,
+      # le réalignement post-merge suit cette face, et `main` devient sa référence RO.
+      #
+      # PAS `ops`, et l'enum du schéma ne le permet plus. La face ops porte le REGISTRE que le
+      # runtime tient — briefs, verdicts, provenance. Un producteur qui y écrirait pourrait
+      # réécrire après coup ce qu'on lui a demandé et ce qu'on a jugé de son travail. La
+      # documentation du produit n'a rien à faire dans le même arbre que la preuve.
+      face: workshop
+      needs: []                     # racine DAG — et pas de successeur : chemin direct
+      inputs:
+        - ticket.body               # le brief rédigé par l'arch

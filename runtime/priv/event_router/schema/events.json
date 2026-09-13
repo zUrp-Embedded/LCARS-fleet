@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:events",
+  "title": "LCARS Events Catalogue",
+  "description": "Structural schema for priv/event_router/events.yaml (parsed YAML map). Exercised BOTH by events_schema_test.exs (build-time structural gate) AND by the runtime loader (Fleet.EventRouter.Catalog.load!/0) since the registry became load-bearing for ROUTING: an entry's value is either [] (unrouted - consumed by direct subscribers, documented per consumer moduledoc) or a routing object driving the incident classification (IncidentConsumer). The old tolerance for a non-empty handler-module list is GONE (audit B-05).",
+  "type": "object",
+  "required": [
+    "events"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "events": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map event_type -> [] (unrouted) OR routing object {source, action, incident?}. The routing is the declarative event+source -> classification/action table loaded at boot.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "array",
+            "maxItems": 0,
+            "description": "Unrouted: consumed by direct PubSub subscribers (see the consumers' moduledocs)."
+          },
+          {
+            "type": "object",
+            "required": [
+              "source",
+              "action"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "REQUIRED producer source (anti-spoof): the chain acts only on events carrying this source - a spoofed-source event of the type is ignored."
+              },
+              "action": {
+                "enum": [
+                  "incident"
+                ],
+                "description": "incident = incident recording/escalation via IncidentConsumer (requires the incident block; the block's `gate` field picks the door: immediate | recurrence)."
+              },
+              "incident": {
+                "type": "object",
+                "required": [
+                  "op",
+                  "subject"
+                ],
+                "additionalProperties": false,
+                "description": "Incident classification (action=incident only): op = the registry operation class (dedup namespace), subject = the payload key carrying the incident subject, escalate_kind = typed escalation override, forward = extra payload keys forwarded as diagnostic opts.",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "escalate_kind": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "forward": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    }
+                  },
+                  "gate": {
+                    "enum": [
+                      "immediate",
+                      "recurrence"
+                    ],
+                    "description": "The gate: immediate = durable issue on the FIRST occurrence (escalate_gated, cooldown only); recurrence (default) = first noted, recurrence escalated (record_or_escalate). immediate REQUIRES escalate_kind (closed kind table in Escalation - an unnamed kind crashes; refused at boot by the Catalog)."
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+# Carte type — c0-poc (2026-07-18)
+#
+# Date: 2026-07-18
+# Statut: actif — carte de production C0 (PoC jetable), la plus légère du catalogue.
+# Dérivé de: programme carte-driven 2026-07-18 (la mécanique de criticité EST le choix de la carte).
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Project.Roles.project_jury.
+#
+# ZÉRO JUGE, délibéré : l'engineer livre, la PR est scellée directement par le système.
+# Le plancher mécanique tient SEUL et n'est pas négociable par la carte : identité,
+# provenance (mur au sceau — le triplet SHA est vérifié à CHAQUE merge, carte ou pas),
+# pas de push direct sur main. La carte gouverne le JUGEMENT (ici : aucun), jamais le plancher.
+
+kind: WorkflowMap
+metadata:
+  name: c0-poc
+  description: "PoC jetable : engineer seul, AUCUN juge — sceau direct, le plancher mécanique (identité, provenance, protection main) tient seul."
+  presentation: "PoC JETABLE : l'engineer livre, AUCUN juge, merge direct. Le plancher mécanique (identité, provenance, protection main) tient seul. Pour explorer vite ce qu'on peut jeter sans regret."
+
+spec:
+  # Jury VIDE délibéré (doctrine schéma : « an empty array is a deliberate zero-judge card »).
+  # required_approvals = 0 à l'onboard ; requested == [] est le chemin NOMINAL du poller → merge scellé.
+  jury: []
+  # CI IGNORÉE, cohérent avec le sceau direct : la carte est celle du PoC jetable, elle assume de
+  # ne rien opposer entre le livrable et le merge. Le plancher mécanique (identité, provenance,
+  # protection main) n'est pas concerné — il tient quoi qu'il arrive et la carte ne le gouverne pas.
+  ci: ignore
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step unique : implémentation (engineer, fire-mode) ---
+    build:
+      role: engineer
+      needs: []            # racine DAG
+      inputs:
+        - ticket.body

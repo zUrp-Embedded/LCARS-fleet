@@ -1,0 +1,74 @@
+#!/usr/bin/env bats
+# SOURCE: runtime/test/services/container/init_secrets.bats
+# AUTHOR: bob
+# STARDATE: 2026-09-04
+# STATUS: bats tests for container/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive du conteneur
+#
+# ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets cote hote ; l'instance les importe au
+# boot. Une fois — et a nouveau seulement s'ils changent. Un montage vide n'est pas une faute.
+
+load ../../support/refute
+
+setup() {
+  SUT="$BATS_TEST_DIRNAME/../../../services/container/init.sh"
+  export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
+  export LCARS_SECRETS_DIR="$BATS_TEST_TMPDIR/run-secrets"; mkdir -p "$LCARS_SECRETS_DIR"
+  export LCARS_MODULE_TAG=container-init
+  # hors root, le proprietaire demande ne peut pas etre pose : le protocole le dit et continue
+  LCARS_AUTHORITY_USER="$(id -un)"; LCARS_FLEET_GROUP="$(id -gn)"
+  export LCARS_AUTHORITY_USER LCARS_FLEET_GROUP
+}
+
+@test "secrets : un montage VIDE ne pose rien et ne se plaint pas" {
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [ ! -e "$LCARS_PRIVATE_DIR/forge-master.token" ]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "secrets : le jeton master et le seed entrent dans le prive, en 0600" {
+  printf 'tok-master\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  printf 's33d\n' > "$LCARS_SECRETS_DIR/forge_seed_password"
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_PRIVATE_DIR/forge-master.token")" = tok-master ]
+  [ "$(cat "$LCARS_PRIVATE_DIR/forge-seed.pass")" = s33d ]
+  [ "$(stat -c %a "$LCARS_PRIVATE_DIR/forge-master.token")" = 600 ]
+  [[ "$output" == *"POSÉ"*"forge_master_token"* ]]
+}
+
+@test "secrets : deja en place = OK, pas de reecriture ; un secret CHANGE se reimporte (rotation)" {
+  printf 'tok-1\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  bash "$SUT" secrets >/dev/null
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  # le montage a ete FERME au premier import : le second passage le dit, sans rien relire ni reposer
+  [[ "$output" == *"deja en place"* || "$output" == *"montage ferme, deja importe"* ]]
+  [[ "$output" != *"POSÉ"* ]]
+  # une rotation cote hote est un NOUVEAU fichier (mv), pas une ecriture dans l'ancien — que l'init a ferme
+  rm -f "$LCARS_SECRETS_DIR/forge_master_token"; printf 'tok-2\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  run bash "$SUT" secrets
+  [ "$(cat "$LCARS_PRIVATE_DIR/forge-master.token")" = tok-2 ]
+  [[ "$output" == *"POSÉ"* ]]
+}
+
+@test "secrets : l'import precede le siege dans apply — le #1 de la forge se derive du jeton importe" {
+  grep -qE '^\s*secrets_import\s*$' <(sed -n '/^cmd_apply()/,/^}/p' "$SUT")
+  local order; order="$(sed -n '/^cmd_apply()/,/^}/p' "$SUT" | grep -nE 'secrets_import|seat_resolve' | cut -d: -f1 | tr '\n' ' ')"
+  [[ "$order" =~ ^([0-9]+)\ ([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -lt "${BASH_REMATCH[2]}" ]
+}
+
+@test "secrets : une fois importe, le MONTAGE se ferme (0000) — le siege, uid de l hote, ne le lit plus" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : la fermeture ne se mesure que sans privilege"
+  printf 'tok-master\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$LCARS_SECRETS_DIR/forge_master_token")" = 0 ]
+  [[ "$output" == *"montage retire"* ]]
+  # un second passage ne se plaint pas et ne rouvre rien
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"montage ferme, deja importe"* ]]
+  [ "$(cat "$LCARS_PRIVATE_DIR/forge-master.token")" = tok-master ]
+}

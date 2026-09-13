@@ -1,0 +1,219 @@
+---
+// LE MANUEL DE LA CONSOLE — page DERIVEE. Les verbes, leurs arguments, leurs options et les
+// variables d'environnement viennent de `lib/cli.js`, qui lit les deux scripts. Ce qui est ecrit
+// ici est la PROSE : ce qu'un `usage()` ne dit pas — pourquoi une commande refuse ce qu'elle
+// refuse, et ce qu'elle ne fait pas.
+//
+// L'APPARIEMENT EST GARDE. Chaque verbe lu doit avoir sa prose, et chaque prose doit correspondre
+// a un verbe lu : une commande ajoutee au script sans un mot ici, ou un paragraphe qui survit a la
+// commande qu'il decrivait, CASSE LE BUILD. C'est la seule facon qu'un manuel ecrit a la main ne
+// perime pas en silence — et il perimerait, personne ne relit un manuel pour verifier qu'il dit
+// encore vrai.
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Cmd from '../components/Cmd.astro';
+import { u } from '../lib/href.js';
+import { fleetVerbs, fleetStartOptions, lcarsEntries, envVars } from '../lib/cli.js';
+
+const verbs = fleetVerbs();
+const startOpts = fleetStartOptions();
+const entries = lcarsEntries();
+const env = envVars();
+
+// La prose, indexee par le verbe tel que le script l'ecrit.
+const FLEET = {
+  'start': `Démarre la fleet. Les rôles déclarés au boot — starfleet en tête — montent seuls,
+            sans qu'on ait à les demander.`,
+  'stop': `Arrêt gracieux, dans l'ordre : la fleet cesse d'accepter du nouveau travail, laisse
+           finir ce qui est en vol, puis démonte. Si le BEAM ne répond plus, elle retombe sur un
+           arrêt sec — et le dit.`,
+  'restart': `stop puis start. C'est le geste qui applique un changement de catalogue ou de forge :
+              la fleet gèle ses images au démarrage, rien de tout ça ne bascule à chaud.`,
+  'status': `Trois réponses d'un coup : quelle version tourne, si le BEAM est vivant, et la liste
+             des pods. Plus la commande pour aller lire les logs du daemon.`,
+  'version': `Le commit qui tourne, pas celui qu'on croit avoir déployé. En release il est lu dans
+              le build ; depuis les sources, demandé à git en direct. Un arbre modifié est marqué
+              dirty, et une release n'a pas de branche : elle est bâtie depuis un commit, ce que la
+              sortie dit au lieu d'afficher un champ vide.`,
+  'forge [nom]': `Sans argument : la forge active et les profils disponibles. Avec un nom :
+                  bascule vers ce profil, de façon persistante — le prochain démarrage l'utilise.
+                  Un nom sans fichier de profil est refusé plutôt qu'inventé.`
+};
+
+const LCARS = {
+  'lcars spawn': `Le dispatch est asynchrone : au retour, le pod n'est pas encore vivant. Un 202
+                  veut dire « mis en file ». Un 422 dit que le rôle n'existe pas — le cap-profile
+                  est validé avant l'accusé de réception, il n'y a plus de 202 menteur. Un 503 dit
+                  que la fleet s'arrête.`,
+  'lcars list': `Lu directement sur les sockets tmux, pas sur une API qui pourrait avoir une autre
+                 opinion : la commande marche même quand le daemon ne répond plus. Une socket sans
+                 session est signalée comme telle — un état nommé, pas un pod compté par erreur.`,
+  'lcars ls': `Le dispatcher acceptait l'alias depuis toujours ; seul l'usage l'ignorait, ce qui en
+               faisait une commande que personne n'instruisait.`,
+  'lcars attach': `Ctrl-b d rend la main sans tuer le pod. La molette fait défiler l'historique ;
+                   maintenir Maj pendant la sélection copie vers le presse-papier du système. Il
+                   faut le même UID que le daemon — chacun attache ses propres pods, sans privilège
+                   et sans cas particulier.`,
+  'lcars catalogue list': `L'état vient de la FORGE, pas des dossiers présents : « installé » veut
+                           dire que la forge porte l'organisation du catalogue et sa source. Sans
+                           release joignable, la liste dit qu'elle ne sait pas — un conteneur a déjà
+                           affiché « installé » pour un catalogue dont la forge n'avait jamais
+                           porté l'org.`,
+  'lcars catalogue install': `Le seul verbe, et il provisionne : l'organisation, les comptes de
+                              rôle, les teams, la source dans « <nom>/catalogue », le matériel sur
+                              le conteneur. Geste d'admin de forge — le runtime lit ce droit sur la
+                              forge, jamais dans un drapeau local.`,
+  'lcars catalogue verify': `Sans lui, un catalogue cassé se découvre au redémarrage suivant, par
+                             quelqu'un qui ne fera pas le lien.`,
+  'lcars project migrate': `Les deux moitiés, ou rien. Un transfert seul laisserait un projet qui
+                            marche par accident, par la redirection que la forge laisse derrière
+                            elle — jusqu'au jour où elle disparaît.`,
+  'lcars project reconcile': `La forge dit quels projets existent, le disque suit. Sur un /home neuf
+                              — conteneur réinstallé, second humain sur une fleet déjà peuplée — les
+                              faces locales n'existent pas alors que les projets, eux, sont
+                              intacts. Un projet en échec n'arrête pas les autres.`,
+  'lcars admiral': `Le seul pod qui vit hors du bac à sable, et il ne s'obtient que par ce geste :
+                    la porte générique refuse tout profil non sandboxé, et c'est cette commande qui
+                    pose l'acquittement nommé qui l'ouvre. Une séance, pas un dispatch — aucun
+                    argument, et le pod tourne sous TON uid. « lcars attach » pour s'y asseoir.`,
+  'lcars forge add': `Une forge de publication = une forge, un compte, un dépôt. L'auth n'est PAS
+                      stockée ici : c'est le CLI officiel (« gh auth login », « glab auth login »),
+                      déjà credential helper de git. Aucun jeton ne transite par LCARS.`,
+  'lcars forge list': `Le pool de CET humain, sous son propre espace. Chacun le sien : publier est
+                       un geste signé, pas une capacité du conteneur.`,
+  'lcars forge status': `Le doctor du pool : chaque forge déclarée, et si son CLI est authentifié.
+                         Une forge listée dont personne n'est connecté est exactement ce qu'on
+                         découvre au moment de publier, sinon.`,
+  'lcars approve': `Le gate manuel DUR de la publication, et il est manuel par décision : rien ne
+                    sort de chez vous sans qu'une personne l'ait tapé. L'attribution est réécrite
+                    (l'auteur est l'humain) avant tout push. Sans « --forge », c'est un envoi direct
+                    sur la base déjà liée, refusé si elle n'est pas un ancêtre de ce qu'on pousse.`,
+  'lcars publish status': `Le doctor du pool de publication : chaque forge déclarée, et si son CLI
+                           officiel est authentifié. L'auth n'est jamais stockée ici — c'est « gh
+                           auth login » ou « glab auth login », déjà credential helper de git.`,
+  'lcars publish run': `La publication qui se RÉPÈTE, une fois le projet lié : la branche roulante
+                        « lcars/publish » est poussée et une seule PR reste ouverte contre la base —
+                        c'est un humain qui la merge. Sans CLI authentifié, la branche part quand
+                        même et l'URL de la PR à ouvrir est imprimée : le rail ne s'arrête pas sur
+                        ce qui ne lui appartient pas. Même rail que le tool « project_publish » du
+                        côté pod, exposé ici pour pouvoir le rejouer et diagnostiquer. Une sortie 6
+                        dit que la réécriture a cessé d'être déterministe : le clone est CONSERVÉ et
+                        son chemin imprimé, parce qu'à ce moment-là c'est la seule pièce à charge.`,
+  'lcars tool': `Les portes outil du release, en un seul endroit : ce qu'un service du conteneur, un
+                 module de l'installeur ou l'image elle-même (« docker run IMAGE roles-tfvars »)
+                 demande au release sans monter de fleet. Elles vivaient dans l'entrypoint du
+                 conteneur ; un geste du produit qui exécute le PID 1 de l'image pour évaluer une
+                 fonction n'avait pas sa porte au bon endroit. Sous root, l'évaluation tombe en
+                 « nobody:fleet » : du code de catalogue ne s'exécute pas avec les pouvoirs du boot.`,
+  'lcars help': null
+};
+
+// LA GARDE. Un verbe sans prose, ou une prose sans verbe, arrete le build.
+const missing = [
+  ...verbs.filter((v) => !(v in FLEET)).map((v) => `fleet « ${v} » n'a pas de prose`),
+  ...Object.keys(FLEET).filter((k) => !verbs.includes(k)).map((k) => `la prose « ${k} » ne correspond à aucun verbe de fleet`),
+  ...entries.filter((e) => !(e.verb in LCARS)).map((e) => `lcars « ${e.verb} » n'a pas de prose`),
+  ...Object.keys(LCARS).filter((k) => !entries.some((e) => e.verb === k)).map((k) => `la prose « ${k} » ne correspond à aucune entrée de lcars`)
+];
+if (missing.length > 0) {
+  throw new Error(`manuel.astro : le manuel et les scripts ont divergé —\n  ${missing.join('\n  ')}`);
+}
+
+const sections = [
+  { id: 'fleet', label: 'fleet' },
+  { id: 'lcars', label: 'lcars' },
+  { id: 'env', label: 'Environnement' },
+  { id: 'pas-des-commandes', label: 'Ce qui n’en est pas' }
+];
+---
+<Site title="LCARS — Manuel de la console" current="/manuel/" sections={sections}>
+
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">Manuel · console</p>
+      <h1>Deux binaires,<br><em>{verbs.length + entries.length} gestes</em></h1>
+      <p class="lede">Toute la conduite du conteneur tient dans deux commandes.
+      <b>fleet</b> tient la vie de la fleet — la démarrer, l'arrêter, savoir ce qui tourne.
+      <b>lcars</b> tient ce qui vit dedans : les pods, les catalogues, les projets.</p>
+      <p class="lede">Elles sont installées dans <code>/usr/local/bin</code>. Tout le reste se
+      demande en français, dans la console d'un agent : le <b>projet</b> — le créer, l'importer, le
+      cadrer, le mettre en pause — à <b>starfleet</b> ; le <b>travail dedans</b> — les tickets, un
+      chantier — à l'<b>architecte</b>.</p>
+      <p class="sig">Les deux refusent plutôt que de deviner : un rôle inconnu, un profil de forge
+      absent, un catalogue qui ne passe pas ses contrôles <b>ne produisent pas un
+      demi-résultat</b>.</p>
+    </div>
+  </header>
+
+  <section id="fleet">
+    <SectionHead id="fleet" title="fleet" cap={`la vie du conteneur — ${verbs.length} verbes`} />
+    <p class="intro">Un daemon dans une session tmux. Il tourne sous <b>votre</b> UID : chaque
+    humain lance sa fleet, et n'attache que ses propres pods.</p>
+
+    <div class="entries">
+      {verbs.map((v) => v === 'start' ? (
+        <Cmd syn={`fleet ${v}`} args={startOpts.map((o) => `[${o.flag}]`)} blurb={FLEET[v]} tint="var(--blue)">
+          <dl class="kv">
+            {startOpts.map((o) => (<Fragment><dt>{o.flag}</dt><dd>{o.text}</dd></Fragment>))}
+          </dl>
+          <div class="warn"><b>Refus au démarrage si les credentials Claude manquent.</b> La fleet
+          démarrerait très bien — et aucun pod ne pourrait penser. Un succès qui ne produit rien est
+          pire qu'un refus.</div>
+        </Cmd>
+      ) : (
+        <Cmd syn={`fleet ${v}`} blurb={FLEET[v]} tint="var(--blue)" />
+      ))}
+    </div>
+  </section>
+
+  <section id="lcars">
+    <SectionHead id="lcars" title="lcars" cap={`pods · catalogues · projets — ${entries.length} entrées`} />
+    <p class="intro">Ce qui vit dans le conteneur. <code>lcars</code> ne parle jamais à la forge
+    lui-même : quand un geste en a besoin, il le passe au runtime et rend son verdict.</p>
+
+    <div class="entries">
+      {entries.map((e) => LCARS[e.verb] ? (
+        <Cmd syn={e.verb} args={e.args ? (e.args.match(/<[^>]*>|\[[^\]]*\]|\S+/g) ?? []) : []} blurb={e.text} tint="var(--mauve)">
+          <p>{LCARS[e.verb]}</p>
+        </Cmd>
+      ) : (
+        <Cmd syn={e.verb} args={e.args ? (e.args.match(/<[^>]*>|\[[^\]]*\]|\S+/g) ?? []) : []} blurb={e.text} tint="var(--mauve)" />
+      ))}
+    </div>
+  </section>
+
+  <section id="env">
+    <SectionHead id="env" title="Environnement" cap={`${env.length} variables, toutes avec un défaut`} />
+    <p class="intro">Les ports sont dérivés de votre UID : deux humains sur la même machine ne se
+    marchent pas dessus. <b>Aucun défaut statique ne peut donc être juste</b> — quand la valeur
+    manque, les commandes le disent au lieu de tenter un port au hasard.</p>
+
+    <dl class="kv">
+      {env.map((v) => (<><dt>{v.name}</dt><dd><code>{v.fallback || '—'}</code> · {v.scope}</dd></>))}
+    </dl>
+
+    <p class="note">La porte d'écriture (spawn) passe par une socket AF_UNIX, pas par le réseau :
+    elle est hors d'atteinte de ce que les pods peuvent joindre.</p>
+  </section>
+
+  <section id="pas-des-commandes">
+    <SectionHead id="pas-des-commandes" title="Ce qui n'est pas une commande"
+      cap="on le demande, on ne le tape pas" />
+    <p class="intro">Créer un projet, en importer un, le cadrer, le mettre en pause : ces gestes
+    existent, mais ils <b>ne se tapent pas dans un terminal</b>. On les demande à starfleet, en
+    français, dans sa console — c'est lui qui tient le portefeuille.</p>
+
+    <pre class="term"><span class="m"># dans la console de starfleet, pas dans un shell</span>
+
+<span class="p">&gt;</span> <span class="c">montre-moi les cartes de workflow disponibles</span>
+<span class="p">&gt;</span> <span class="c">importe le dépôt lordzurp/mon-projet, carte « livraison », criticité C2</span>
+<span class="p">&gt;</span> <span class="c">mets le projet vitrine en pause, je reprends lundi</span></pre>
+
+    <p class="note">La frontière n'est pas cosmétique : un shell exécute, starfleet arbitre. Un
+    import demande une carte, une criticité et un cadrage — trois choses qu'une ligne de commande
+    ne saurait pas réclamer au bon moment. <a href={u("/outils/")}>Les outils, par porteur →</a></p>
+  </section>
+
+</Site>

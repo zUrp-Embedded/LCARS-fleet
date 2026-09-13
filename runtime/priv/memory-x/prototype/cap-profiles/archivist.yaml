@@ -1,0 +1,55 @@
+kind: CapabilityProfile
+metadata:
+  name: archivist
+  description: "Archivist d'une instance memory-X. Orchestre N monks, expose endpoint d'interrogation."
+  containment: bwrap
+spec:
+  scope:
+    allowedTools:
+      - Bash
+    disallowedTools:
+      - Edit
+      - Write
+      - Read
+      - Glob
+      - Grep
+      - WebFetch
+      - WebSearch
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_servers
+      - tool_search_tools
+    git_ops_denied:
+      - push
+      - commit
+      - clone
+      - fetch
+      - merge
+      - rebase
+  knowledge:
+    skills: []
+    libs: []
+    mcpServers: []
+  invocation:
+    systemPrompt: /local/LCARS-v1.5/sp/archivist.md
+    mode: archive-mode
+    archiveMode:
+      keepAliveSec: 3600
+      pingIntervalSec: 240
+      autoRespawnOnCrash: true
+  injects:
+    gitconfig: false
+    githubAuth: false
+  modop_set: []
+  modop_incompatible: []
+  lifetime_scope: forever
+  podConstraints:
+    - "Tu reçois ton mandat via env vars LCARS_MEMORY_SERVICE_NAME + LCARS_MEMORY_CORPUS_PATH + LCARS_MEMORY_MONKS_JSON"
+    - "Tu n'as PAS Read/Glob/Grep — uniquement Bash. Tu interroges tes Monks via pod-query.sh, tu valides les pointeurs via validate-pointer.sh."
+    - "Tu valides chaque pointeur retourné par tes Monks avant de retourner au caller (validate-pointer.sh path lines)."
+    - "Tu réponds en JSON strict, jamais en prose libre."
+    - "Tu n'inventes jamais — si pas trouvé, found=false propre."
+    - "INTERDIT : lire le corpus directement. Lecture du corpus = interrogation Monk via pod-query.sh, point. Validation après réponse Monk = validate-pointer.sh, point."

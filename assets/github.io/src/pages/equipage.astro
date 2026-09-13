@@ -1,0 +1,131 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Seat from '../components/Seat.astro';
+import { seats } from '../lib/catalogue.js';
+
+// TOUT DERIVE DES CAP-PROFILES — la liste, la nature (producteur/juge/mecanique/reserve) ET la
+// presentation elle-meme : chaque siege porte sa ligne `# vitrine:` dans son propre fichier (comme
+// un deftool). Plus aucune prose statique ici. Un siege sans vitrine fait ECHOUER le build (garde
+// dans seats()), pas apparaitre sous son nom nu — c'est le mur qui manquait a cette page.
+const SEATS = seats();
+const byCat = (c) => SEATS.filter((s) => s.catalogue === c);
+const socle = byCat('système');
+const fleet = byCat('fleet');
+const demo = byCat('web-demo');
+
+// La couleur encode la NATURE (derivee), pas le role : un producteur, un juge, une piece de
+// mecanique et un siege reserve ne se lisent pas pareil.
+const NATURE = {
+  producteur: 'var(--salmon)',
+  juge:       'var(--mauve)',
+  mécanique:  'var(--amber)',
+  réservé:    'var(--faint)'
+};
+
+const ref = [...socle, ...fleet];
+const refJudges = ref.filter((s) => s.judge).length;
+
+const sections = [
+  { id: 'socle',   label: 'Le socle système' },
+  { id: 'fleet',   label: 'Le catalogue de référence' },
+  { id: 'exemple', label: 'Un catalogue d’exemple' },
+  { id: 'sas',     label: 'Un seul vous parle' },
+  { id: 'juge',    label: 'Un juge ne code pas' }
+];
+---
+<Site title="LCARS — L’équipage" current="/equipage/" sections={sections}>
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">L’équipage</p>
+      <h1>Ce ne sont pas des rôles.<br /><em>Ce sont des pouvoirs différents.</em></h1>
+      <p class="lede">Chaque siège reçoit un mandat, des outils, et un monde projeté qui s’arrête là
+      où son travail s’arrête. Un juge n’a pas les moyens d’écrire du code ; un producteur n’a pas
+      les moyens de valider le sien. <b>La séparation n’est pas une consigne de politesse, c’est une
+      différence de droits</b> — et c’est ce qui rend le jugement crédible.</p>
+      <p class="lede">L’équipage vient des <b>catalogues</b> : le <b>système</b> apporte la mécanique
+      qui fait tourner la flotte, le catalogue <b>métier</b> apporte les producteurs et les juges
+      d’un projet. C’est la frontière de la page catalogues — <em>machine et métier</em>.</p>
+      <p class="sig">{ref.length} sièges de référence sur deux catalogues, dont <b>{refJudges} juges</b>
+      · chacun avec son identité propre sur <b>votre</b> forge : commits et avis sont attribués, pas anonymes</p>
+    </div>
+  </header>
+
+  <section>
+    <SectionHead id="socle" title="Le socle — système" cap="la mécanique, qu’aucun projet ne choisit" />
+    <p class="intro">Ces sièges ne viennent d’aucun projet : ils font tourner <b>la flotte
+    elle-même</b>. Toujours là, jamais déclarés — c’est la machine, pas le métier.</p>
+    <div class="seats">
+      {socle.map((s) => (
+        <Seat name={s.name} role={s.label} color={NATURE[s.nature]} ghost={s.reserved}>{s.text}</Seat>
+      ))}
+    </div>
+  </section>
+
+  <section>
+    <SectionHead id="fleet" title="Le catalogue de référence — fleet" cap="l’équipage reçu par défaut" />
+    <p class="intro">Les producteurs et les juges livrés avec le conteneur. C’est cet équipage qu’un
+    projet utilise s’il ne déclare rien d’autre.</p>
+    <div class="seats">
+      {fleet.map((s) => (
+        <Seat name={s.name} role={s.label} color={NATURE[s.nature]} ghost={s.reserved}>{s.text}</Seat>
+      ))}
+    </div>
+    <p class="note">Cette grille est <b>construite depuis le canon</b> : chaque siège porte sa propre
+    présentation dans son cap-profile, sa qualité de juge dérivée de son <code>brief_kind</code>. Un
+    siège sans présentation ne s’affiche pas sous son nom nu — il casse le build.</p>
+  </section>
+
+  <section>
+    <SectionHead id="exemple" title="Un catalogue d’exemple — web-demo" cap="la preuve que l’équipage est un choix" />
+    <p class="intro">web-demo n’est pas la fleet : c’est un catalogue livré comme <b>exemple</b>,
+    disponible et <b>prêt à forker</b>. Il définit ses PROPRES rôles — même forme, autres noms — et
+    c’est la preuve mécanique que l’équipage n’est pas un casting figé : <b>c’est ce qu’un catalogue
+    apporte</b>. Le suffixe <code>-demo</code> dit lui-même que c’est du matériel d’exemple, pas une
+    offre.</p>
+    <div class="seats">
+      {demo.map((s) => (
+        <Seat name={s.name} role={s.label} color={NATURE[s.nature]} ghost={s.reserved}>{s.text}</Seat>
+      ))}
+    </div>
+  </section>
+
+  <section>
+    <SectionHead id="sas" title="Un seul vous parle" cap="le sas, et pourquoi il est unique" />
+    <p class="intro">Vous n’avez pas une flotte d’interlocuteurs à suivre. Vous en avez un, et il
+    porte la responsabilité de traduire ce que vous voulez en quelque chose d’exécutable. Les autres
+    ne s’adressent jamais à vous directement — ils déposent leur travail sur la forge.</p>
+    <div class="two">
+      <div class="tile"><b>Une seule porte, dans les deux sens</b><span>Vos instructions entrent par
+      lui. Les demandes de la flotte ressortent par lui. Rien ne vous parvient d’un agent qui aurait
+      décidé tout seul de vous interrompre.</span></div>
+      <div class="tile m"><b>Il ne code pas</b><span>Il découpe, écrit les briefs, suit ses projets
+      et vous rend la main. Le jour où il se mettrait à produire, il jugerait son propre travail.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <SectionHead id="juge" title="Un juge ne code pas" cap="et il ne peut pas le devenir en route" />
+    <p class="intro">C’est la propriété de sécurité la plus importante du système, et elle est
+    mécanique. Un agent ne « devient » pas juge parce qu’on le lui a demandé gentiment : son siège
+    lui donne un jeu d’outils, un contrat, et un ordre de mission d’une nature différente. Un juge
+    qui recevrait par erreur un brief exécutable <b>ferait le travail au lieu de le juger</b> — donc
+    le système refuse bruyamment plutôt que de laisser le doute s’installer.</p>
+    <div class="two">
+      <div class="tile g"><b>Le producteur ne se relit pas</b><span>Celui qui a écrit le code n’est
+      jamais dans le jury de sa propre livraison. Ce n’est pas configurable : c’est structurel.</span></div>
+      <div class="tile b"><b>Le juge ne pousse pas</b><span>Il n’a ni accès à la forge, ni droit de
+      fusion. Son seul pouvoir est de rendre un avis — que le système publiera sous son nom.</span></div>
+      <div class="tile s"><b>Aucune qualité ne s’infère</b><span>Un siège mal déclaré ne retombe pas
+      silencieusement sur « producteur ». Le système s’arrête et le dit.</span></div>
+    </div>
+    <blockquote style="margin-top:18px">
+      <p class="q">« Le bac à sable ne protège pas le monde de l’agent. Il protège l’agent du monde.&nbsp;»</p>
+      <p class="a">Chaque siège ne voit que son projet, son ordre de mission et la doctrine qui le
+      concerne. Pas par méfiance : parce qu’un agent affamé de contexte <b>devine</b>, et qu’une
+      supposition qui compile est le défaut le plus cher à trouver.</p>
+    </blockquote>
+  </section>
+</Site>

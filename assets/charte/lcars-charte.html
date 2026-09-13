@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LCARS — Charte Graphique</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a0a;--bg2:#111111;--bg3:#181818;--text:#FFCC99;--dim:#666666;--border:#222222;--orange:#FF9900;--font:'Liberation Mono','Consolas','Courier New',monospace;--sans:'Liberation Sans','Helvetica Neue',Arial,sans-serif}
+html{font-size:14px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;padding:0}
+.page{max-width:960px;margin:0 auto;padding:0 48px 80px}
+.header{background:var(--bg);border-bottom:3px solid var(--orange);padding:48px 48px 40px;max-width:960px;margin:0 auto}
+.header-logo svg{display:block;height:100px;width:auto}
+.header-title{font-size:36px;letter-spacing:8px;color:var(--orange);text-transform:uppercase;font-weight:700;line-height:1;margin-bottom:8px;margin-top:24px}
+.header-sub{font-size:12px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
+.header-meta{display:flex;gap:32px;margin-top:24px;padding-top:20px;border-top:1px solid var(--border);flex-wrap:wrap}
+.header-meta-item{font-size:11px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
+.header-meta-item strong{color:var(--text);display:block;font-size:13px;margin-bottom:2px}
+.section{margin-top:64px}
+.section-title{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:var(--orange);border-left:4px solid var(--orange);padding-left:12px;margin-bottom:28px;line-height:1}
+.section-title::before{content:"\25B8 "}
+.sep{height:1px;background:var(--border);margin:48px 0 0}
+.sys-palette{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.sys-swatch{border-radius:8px;padding:16px 12px;font-size:11px;letter-spacing:1px}
+.sys-name{font-weight:700;margin-bottom:4px;text-transform:uppercase}
+.sys-hex{font-size:10px;opacity:.7}
+.sys-use{font-size:10px;margin-top:6px;opacity:.6}
+.color-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.color-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex}
+.color-swatch{width:120px;flex-shrink:0;display:flex;flex-direction:column;justify-content:flex-end;padding:12px}
+.swatch-role{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.swatch-hex{font-size:10px;opacity:.75;margin-top:2px}
+.color-meta{padding:12px 16px;display:flex;flex-direction:column;justify-content:center;gap:4px}
+.color-glyph{font-size:11px;color:var(--dim);letter-spacing:1px}
+.color-desc{font-size:12px;color:var(--text)}
+.type-specimens{display:flex;flex-direction:column;gap:20px}
+.type-row{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:20px 24px;display:flex;align-items:baseline;gap:24px}
+.type-label{font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;width:140px;flex-shrink:0}
+.type-meta{font-size:10px;color:var(--dim);margin-top:4px}
+.avatar-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+.avatar-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 12px;text-align:center}
+.avatar-card img{border-radius:12px;display:block;margin:0 auto 12px;width:96px;height:96px}
+.av-role{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text)}
+.av-hex{font-size:10px;color:var(--dim);margin-top:3px;font-family:var(--font)}
+.favicon-strip{display:flex;align-items:flex-end;gap:32px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:28px 32px;flex-wrap:wrap}
+.fav-size{text-align:center}
+.fav-label{font-size:10px;color:var(--dim);margin-top:8px;letter-spacing:1px}
+.rules-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.rule-block{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px}
+.rule-block.do{border-left:4px solid #99CC66}
+.rule-block.dont{border-left:4px solid #CC6666}
+.rule-tag{font-size:10px;letter-spacing:3px;text-transform:uppercase;margin-bottom:12px;font-weight:700}
+.rule-tag.do{color:#99CC66}
+.rule-tag.dont{color:#CC6666}
+.rule-list{list-style:none;display:flex;flex-direction:column;gap:8px}
+.rule-list li{font-size:12px;color:var(--text);padding-left:14px;position:relative}
+.rule-list li::before{content:"\25B8";position:absolute;left:0;color:var(--dim)}
+.spec-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:16px}
+.spec-table th,.spec-table td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+.spec-table th{color:var(--orange);font-size:10px;letter-spacing:2px;text-transform:uppercase;font-weight:700}
+.spec-table td{color:var(--text)}
+.spec-table td:first-child{color:var(--dim);width:200px}
+.spec-table code{background:var(--bg3);padding:2px 6px;border-radius:3px;font-family:var(--font);color:#F0F0F0}
+.footer{margin-top:80px;padding:24px 48px;border-top:1px solid var(--border);max-width:960px;margin-left:auto;margin-right:auto;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase}
+.footer-bar{display:flex;gap:4px}
+.footer-pip{width:20px;height:6px;border-radius:3px}
+@media print{body{background:#fff;color:#000}.header-title{color:#000!important}.section-title{color:#333!important;border-color:#333!important}.color-card,.avatar-card,.rule-block{border:1px solid #ccc!important}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 150" shape-rendering="geometricPrecision">
+  <path d="M 148 4 L 148 52 L 96 52 A 20 20 0 0 0 76 72 L 76 146 L 28 146 L 28 76 A 72 72 0 0 1 100 4 Z" fill="#FF9900"/>
+  <rect x="156" y="4"  width="44" height="48" rx="6" fill="#CC99CC"/>
+  <rect x="206" y="4"  width="44" height="48" rx="6" fill="#6699CC"/>
+  <rect x="256" y="4"  width="44" height="48" rx="6" fill="#99CC66"/>
+  <rect x="306" y="4"  width="44" height="48" rx="6" fill="#CC6666"/>
+  <rect x="356" y="4"  width="44" height="48" rx="6" fill="#FFCC33"/>
+  <rect x="406" y="4"  width="44" height="48" rx="6" fill="#FF9900"/>
+  <rect x="456" y="4"  width="44" height="48" rx="6" fill="#9966CC"/>
+  <rect x="506" y="4"  width="44" height="48" rx="6" fill="#33BBCC"/>
+  <rect x="28"  y="80" width="40" height="18" rx="9" fill="#CC99CC"/>
+  <rect x="28"  y="104" width="40" height="18" rx="9" fill="#6699CC"/>
+  <rect x="28"  y="128" width="40" height="18" rx="9" fill="#9966CC"/>
+</svg></div>
+  <div class="header-title">LCARS</div>
+  <div class="header-sub">User Identity System &mdash; Charte Graphique</div>
+  <div class="header-meta">
+    <div class="header-meta-item"><strong>VERSION</strong>1.0</div>
+    <div class="header-meta-item"><strong>STATUT</strong>Actif</div>
+    <div class="header-meta-item"><strong>R&Ocirc;LES D&Eacute;FINIS</strong>8 identit&eacute;s</div>
+    <div class="header-meta-item"><strong>FORMAT SOURCE</strong>SVG 256&times;256</div>
+    <div class="header-meta-item"><strong>USAGE</strong>Forge Git &middot; PWA &middot; Documentation</div>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="section">
+    <div class="section-title">Palette syst&egrave;me</div>
+    <div class="sys-palette">
+      <div class="sys-swatch" style="background:#0a0a0a;border:1px solid #222;color:#FFCC99"><div class="sys-name">Background</div><div class="sys-hex">#0a0a0a</div><div class="sys-use">Fond principal — toujours</div></div>
+      <div class="sys-swatch" style="background:#111111;border:1px solid #222;color:#FFCC99"><div class="sys-name">Surface</div><div class="sys-hex">#111111</div><div class="sys-use">Cards, panneaux</div></div>
+      <div class="sys-swatch" style="background:#FF9900;color:#0a0a0a"><div class="sys-name">Orange</div><div class="sys-hex">#FF9900</div><div class="sys-use">Accent primaire, logo</div></div>
+      <div class="sys-swatch" style="background:#FFCC99;color:#0a0a0a"><div class="sys-name">Texte</div><div class="sys-hex">#FFCC99</div><div class="sys-use">Corps de texte</div></div>
+      <div class="sys-swatch" style="background:#222222;color:#666;border:1px solid #333"><div class="sys-name">Bordure</div><div class="sys-hex">#222222</div><div class="sys-use">S&eacute;parateurs</div></div>
+    </div>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">Palette des r&ocirc;les</div>
+    <div class="color-grid"><div class="color-card"><div class="color-swatch" style="background:#CC99CC;color:#0a0a0a"><span class="swatch-role">ARCHITECT</span><span class="swatch-hex">#CC99CC</span></div><div class="color-meta"><div class="color-glyph">&#9658; pyramid stratifiée</div><div class="color-desc">Conception système, décisions architecturales</div></div></div><div class="color-card"><div class="color-swatch" style="background:#6699CC;color:#0a0a0a"><span class="swatch-role">CONSULTANT</span><span class="swatch-hex">#6699CC</span></div><div class="color-meta"><div class="color-glyph">&#9658; bulle + ellipsis</div><div class="color-desc">Conseil externe, perspective tierce</div></div></div><div class="color-card"><div class="color-swatch" style="background:#99CC66;color:#0a0a0a"><span class="swatch-role">QUALIFIER</span><span class="swatch-hex">#99CC66</span></div><div class="color-meta"><div class="color-glyph">&#9658; check entre brackets [ ]</div><div class="color-desc">Validation, qualification, tests</div></div></div><div class="color-card"><div class="color-swatch" style="background:#CC6666;color:#0a0a0a"><span class="swatch-role">REVIEWER</span><span class="swatch-hex">#CC6666</span></div><div class="color-meta"><div class="color-glyph">&#9658; œil</div><div class="color-desc">Revue de code, scrutin, audit</div></div></div><div class="color-card"><div class="color-swatch" style="background:#FFCC33;color:#0a0a0a"><span class="swatch-role">STARFLEET</span><span class="swatch-hex">#FFCC33</span></div><div class="color-meta"><div class="color-glyph">&#9658; delta Starfleet</div><div class="color-desc">Commandement de flotte, supervision globale</div></div></div><div class="color-card"><div class="color-swatch" style="background:#FF9900;color:#0a0a0a"><span class="swatch-role">ENGINEER</span><span class="swatch-hex">#FF9900</span></div><div class="color-meta"><div class="color-glyph">&#9658; engrenage</div><div class="color-desc">Implémentation, build, opérations</div></div></div><div class="color-card"><div class="color-swatch" style="background:#9966CC;color:#0a0a0a"><span class="swatch-role">VULCAN</span><span class="swatch-hex">#9966CC</span></div><div class="color-meta"><div class="color-glyph">&#9658; IDIC (cercle + triangle)</div><div class="color-desc">Consultant externe, Kol-Ut-Shan</div></div></div><div class="color-card"><div class="color-swatch" style="background:#33BBCC;color:#0a0a0a"><span class="swatch-role">GATEKEEPER</span><span class="swatch-hex">#33BBCC</span></div><div class="color-meta"><div class="color-glyph">&#9658; portail ouvert</div><div class="color-desc">Contrôle d'accès, validation d'entrée</div></div></div></div>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">Typographie</div>
+    <div class="type-specimens">
+      <div class="type-row"><div class="type-label">H1 &mdash; Titre<div class="type-meta">28px &middot; Bold &middot; LS 6px</div></div><div style="font-size:28px;font-weight:700;letter-spacing:6px;text-transform:uppercase;color:#FF9900">LCARS SYSTEM</div></div>
+      <div class="type-row"><div class="type-label">H2 &mdash; Section<div class="type-meta">16px &middot; Bold &middot; LS 4px</div></div><div style="font-size:16px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:#FFCC99">USER IDENTITY MATRIX</div></div>
+      <div class="type-row"><div class="type-label">Label<div class="type-meta">11px &middot; Bold &middot; LS 2px</div></div><div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#FFCC99">ARCHITECT &middot; #CC99CC &middot; PYRAMID</div></div>
+      <div class="type-row"><div class="type-label">Corps<div class="type-meta">13px &middot; Regular</div></div><div style="font-size:13px;color:#FFCC99">Conception syst&egrave;me, d&eacute;cisions architecturales, plan de contr&ocirc;le d&eacute;terministe.</div></div>
+      <div class="type-row"><div class="type-label">Couleurs r&ocirc;les<div class="type-meta">12px &middot; Mono &middot; couleur var</div></div><div style="font-size:13px;display:flex;gap:12px;flex-wrap:wrap"><span style="color:#CC99CC">#CC99CC</span><span style="color:#6699CC">#6699CC</span><span style="color:#99CC66">#99CC66</span><span style="color:#CC6666">#CC6666</span><span style="color:#FFCC33">#FFCC33</span><span style="color:#FF9900">#FF9900</span><span style="color:#9966CC">#9966CC</span><span style="color:#33BBCC">#33BBCC</span></div></div>
+    </div>
+    <table class="spec-table">
+      <tr><th>Famille</th><th>Usage</th><th>Fallback</th></tr>
+      <tr><td>Primaire</td><td><code>Liberation Mono Bold</code></td><td>Consolas, Courier New, monospace</td></tr>
+      <tr><td>Secondaire</td><td><code>Liberation Sans Bold</code></td><td>Helvetica Neue, Arial, sans-serif</td></tr>
+      <tr><td>Ic&ocirc;nes</td><td>SVG natif uniquement</td><td>PNG 256 px minimum</td></tr>
+    </table>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">Avatars utilisateurs</div>
+    <div class="avatar-grid">
+      <div class="avatar-card"><img src="architect.svg" alt="ARCHITECT"/><div class="av-role">ARCHITECT</div><div class="av-hex" style="color:#CC99CC">#CC99CC</div></div>
+      <div class="avatar-card"><img src="consultant.svg" alt="CONSULTANT"/><div class="av-role">CONSULTANT</div><div class="av-hex" style="color:#6699CC">#6699CC</div></div>
+      <div class="avatar-card"><img src="qualifier.svg" alt="QUALIFIER"/><div class="av-role">QUALIFIER</div><div class="av-hex" style="color:#99CC66">#99CC66</div></div>
+      <div class="avatar-card"><img src="reviewer.svg" alt="REVIEWER"/><div class="av-role">REVIEWER</div><div class="av-hex" style="color:#CC6666">#CC6666</div></div>
+      <div class="avatar-card"><img src="starfleet.svg" alt="STARFLEET"/><div class="av-role">STARFLEET</div><div class="av-hex" style="color:#FFCC33">#FFCC33</div></div>
+      <div class="avatar-card"><img src="engineer.svg" alt="ENGINEER"/><div class="av-role">ENGINEER</div><div class="av-hex" style="color:#FF9900">#FF9900</div></div>
+      <div class="avatar-card"><img src="vulcan.svg" alt="VULCAN"/><div class="av-role">VULCAN</div><div class="av-hex" style="color:#9966CC">#9966CC</div></div>
+      <div class="avatar-card"><img src="gatekeeper.svg" alt="GATEKEEPER"/><div class="av-role">GATEKEEPER</div><div class="av-hex" style="color:#33BBCC">#33BBCC</div></div>
+    </div>
+    <table class="spec-table">
+      <tr><th>Contexte</th><th>Taille</th><th>Format</th></tr>
+      <tr><td>Forge Git &mdash; liste PR / issues</td><td>32 &times; 32 px</td><td>PNG</td></tr>
+      <tr><td>Forge Git &mdash; header profil</td><td>64 &times; 64 px</td><td>PNG</td></tr>
+      <tr><td>Documentation, charte</td><td>128 &times; 128 px</td><td>PNG ou SVG</td></tr>
+      <tr><td>Upload forge (r&eacute;f&eacute;rence)</td><td>256 &times; 256 px</td><td>PNG</td></tr>
+      <tr><td>Ic&ocirc;ne application / PWA</td><td>512 &times; 512 px</td><td>PNG</td></tr>
+    </table>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">Ic&ocirc;ne syst&egrave;me (favicon)</div>
+    <p style="font-size:12px;color:var(--dim);margin-bottom:20px;letter-spacing:1px">Coude LCARS orange sur fond #0a0a0a. Pills lavande + sand dans l&rsquo;espace int&eacute;rieur (visibles &agrave; 64 px+). Variante minimale &mdash; coude pur &mdash; recommand&eacute;e pour l&rsquo;onglet navigateur.</p>
+    <div class="favicon-strip">
+      <div class="fav-size"><img src="favicon-minimal.svg" width="16" height="16" style="display:block;margin:0 auto;border-radius:3px"/><div class="fav-label">16px</div></div>
+      <div class="fav-size"><img src="favicon-minimal.svg" width="32" height="32" style="display:block;margin:0 auto;border-radius:4px"/><div class="fav-label">32px</div></div>
+      <div class="fav-size"><img src="favicon.svg" width="48" height="48" style="display:block;margin:0 auto;border-radius:6px"/><div class="fav-label">48px</div></div>
+      <div class="fav-size"><img src="favicon.svg" width="64" height="64" style="display:block;margin:0 auto;border-radius:8px"/><div class="fav-label">64px</div></div>
+      <div class="fav-size"><img src="favicon.svg" width="128" height="128" style="display:block;margin:0 auto;border-radius:16px"/><div class="fav-label">128px</div></div>
+      <div class="fav-size"><img src="favicon.svg" width="256" height="256" style="display:block;margin:0 auto;border-radius:32px"/><div class="fav-label">256px</div></div>
+    </div>
+    <table class="spec-table">
+      <tr><th>Fichier</th><th>Usage</th></tr>
+      <tr><td><code>favicon-minimal.ico</code></td><td>Onglet navigateur &mdash; multi-taille 16/32/48/64</td></tr>
+      <tr><td><code>favicon-minimal.svg</code></td><td>SVG natif &mdash; navigateurs modernes, scaling parfait</td></tr>
+      <tr><td><code>favicon-180.png</code></td><td>Apple touch icon</td></tr>
+      <tr><td><code>favicon-192.png</code></td><td>PWA manifest (minimum)</td></tr>
+      <tr><td><code>favicon-512.png</code></td><td>PWA manifest (haute r&eacute;solution)</td></tr>
+    </table>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">Syst&egrave;me de construction des avatars</div>
+    <table class="spec-table">
+      <tr><th>&Eacute;l&eacute;ment</th><th>Valeur</th><th>Notes</th></tr>
+      <tr><td>Canvas</td><td><code>256 &times; 256 px</code></td><td>Carr&eacute;, viewBox SVG natif</td></tr>
+      <tr><td>Fond</td><td><code>#0a0a0a</code> &middot; rx=32</td><td>Coin arrondi, commun &agrave; tous</td></tr>
+      <tr><td>Coin LCARS (L-shape)</td><td>Top-left, couleur du r&ocirc;le</td><td>Signature syst&egrave;me identique sur tous</td></tr>
+      <tr><td>Pill accent</td><td>Top-right &middot; rx=12 &middot; h=24</td><td>Couleur du r&ocirc;le</td></tr>
+      <tr><td>Zone color&eacute;e</td><td>x=32 y=88 w=192 h=140 &middot; rx=16</td><td>Couleur du r&ocirc;le</td></tr>
+      <tr><td>Glyphe</td><td>Fill <code>#0a0a0a</code> sur fond color&eacute;</td><td>Noir solide, pas de stroke (sauf exceptions)</td></tr>
+      <tr><td>Coude &eacute;paisseur (logo)</td><td>R_ext=96, &eacute;paisseur=64</td><td>Favicon uniquement &mdash; ratio LCARS canonique</td></tr>
+    </table>
+  </section>
+
+  <div class="sep"></div>
+
+  <section class="section">
+    <div class="section-title">R&egrave;gles d&rsquo;usage</div>
+    <div class="rules-grid">
+      <div class="rule-block do">
+        <div class="rule-tag do">&#10003; &Agrave; faire</div>
+        <ul class="rule-list">
+          <li>Toujours sur fond #0a0a0a (dark uniquement)</li>
+          <li>Utiliser le PNG &agrave; la taille exacte de destination</li>
+          <li>Respecter le ratio 1:1 sans d&eacute;formation</li>
+          <li>Conserver 8 px d&rsquo;espace minimum autour de l&rsquo;avatar</li>
+          <li>Utiliser le SVG natif quand le contexte le supporte</li>
+          <li>Associer avatar + nom de r&ocirc;le en texte (accessibilit&eacute;)</li>
+          <li>Utiliser la couleur du r&ocirc;le pour les highlights associ&eacute;s</li>
+        </ul>
+      </div>
+      <div class="rule-block dont">
+        <div class="rule-tag dont">&#10007; &Agrave; &eacute;viter</div>
+        <ul class="rule-list">
+          <li>Fond clair ou blanc &mdash; non pr&eacute;vu dans le syst&egrave;me</li>
+          <li>Redimensionnement non uniforme (&eacute;tirement)</li>
+          <li>Modifier les couleurs d&rsquo;un r&ocirc;le hors proc&eacute;dure de mise &agrave; jour</li>
+          <li>Utiliser un avatar pour un r&ocirc;le diff&eacute;rent</li>
+          <li>Afficher sans arrondi (le rx=32 fait partie du syst&egrave;me)</li>
+          <li>Superposer du texte sur la zone glyphe</li>
+          <li>M&eacute;langer avatars LCARS et avatars ext&eacute;rieurs</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>LCARS USER IDENTITY SYSTEM &middot; REV 1.0</span>
+  <div class="footer-bar"><div class="footer-pip" style="background:#CC99CC"></div><div class="footer-pip" style="background:#6699CC"></div><div class="footer-pip" style="background:#99CC66"></div><div class="footer-pip" style="background:#CC6666"></div><div class="footer-pip" style="background:#FFCC33"></div><div class="footer-pip" style="background:#FF9900"></div><div class="footer-pip" style="background:#9966CC"></div><div class="footer-pip" style="background:#33BBCC"></div></div>
+  <span>DARK BACKGROUND ONLY</span>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,53 @@
+# Manifeste du CATALOGUE SYSTEME — la mecanique, pas le metier.
+#
+# CE QU'IL CONTIENT, ET POURQUOI CES QUATRE-LA
+#
+# Les roles que le RUNTIME va chercher lui-meme pour tenir sa propre mecanique. Le critere se teste
+# seul : est-ce qu'une CARTE le nomme ? Un role nomme par une carte est du metier — c'est le
+# producteur, c'est le juge. Un role que le runtime resout par capacite, sans que rien ne le
+# selectionne, est de la mecanique.
+#
+#   starfleet    l'accueil de niveau flotte — role_index 0, existe avant tout projet
+#
+# CONVENTION DE SLOT (2026-08-10). Le `role_index` est un nibble HEX dans l'UUID de session, donc
+# la convention se LIT sans documentation : une LETTRE est un role de la mecanique, un CHIFFRE est
+# un role metier. `0` reste l'accueil — c'est deja la valeur du « sans dimension » partout ailleurs
+# dans cet UUID (starfleet est le seul minte sur repo 0000, parce qu'il n'a pas de projet).
+#
+#   0        starfleet          l'accueil, niveau flotte
+#   d e f    architect gatekeeper chief
+#   a b c    LIBRES — reserves a la mecanique a venir
+#   1 .. 9   le METIER, neuf slots
+#
+# Les trois roles mecaniques portaient 1, 2 et 9 avant cette date : des chiffres dont le metier a
+# besoin, sur une echelle qui n'en compte que seize pour tout le deploiement.
+#
+# CONVENTION DE SLOT, posee le 2026-08-10 : le `role_index` est un nibble hex dans l'UUID de
+# session, donc la convention se LIT sans documentation — une LETTRE (a..f) est un role de la
+# mecanique, un CHIFFRE (1..9) est un role metier. `0` reste l'accueil : c'est deja la valeur du
+# « sans dimension » partout ailleurs dans cet UUID (starfleet est le seul minte sur repo 0000).
+# Les trois autres roles systeme portaient 1, 2 et 9 — des chiffres dont le metier a besoin.
+#   architect    le delegue du projet — le runtime l'`ensure` par depot
+#   gatekeeper   le signataire du sceau — exactement un
+#   chief        le resolveur de conflit tier-2 — exactement un
+#
+# Corollaire, et c'est la regle de tri : `producer` est la SEULE capacite selectionnable par carte.
+# Les quatre autres — onboarder, project_delegate, exception_judge, conflict_resolver — sont
+# resolues par le runtime et uniques. Ce sont les capacites du catalogue systeme.
+#
+# CE QU'IL N'EST PAS : un catalogue qu'on remplace. Il n'a pas de molette, il est embarque et
+# resolu comme les schemas et les planchers. Un operateur apporte son METIER ; il ne choisit pas sa
+# mecanique. C'est ce qui rend verifiable la phrase « ce catalogue est complet » : le systeme est
+# present et intact, le metier est conforme.
+#
+# LES MODES OPERATOIRES qui vivent ici y sont parce que des roles systeme les declarent. Ils
+# restent visibles du metier par l'union des deux racines : un catalogue metier en herite sans les
+# recopier, et ajoute les siens. Un meme nom des deux cotes est un REFUS — un nom doit vouloir dire
+# une seule chose.
+
+api_version: 1
+
+# Le NOM du catalogue, porte par le catalogue et non par son dossier — il l'adresse hors de ce
+# conteneur. Celui-ci est reserve : c'est la mecanique, elle est membre de tous les metiers et n'a pas
+# d'org a elle. Kebab-case, sans `_` (le souligne separe les moities d'un login de role).
+name: system

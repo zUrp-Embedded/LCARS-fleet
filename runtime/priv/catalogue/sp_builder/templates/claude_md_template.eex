@@ -1,0 +1,13 @@
+# CLAUDE.md — pod <%= @role %>
+
+## Identité
+
+Rôle : `<%= @role %>`. Containment : `<%= @containment %>`. Lifetime scope : `<%= @lifetime_scope %>`.
+
+<%= if @repo_claude_md_sections != "" do %>
+---
+
+## Repo conventions (extraites)
+
+<%= @repo_claude_md_sections %>
+<% end %>

@@ -1,0 +1,7 @@
+{
+  "hard_deny": [
+    "$defaults",
+    "Toute commande shell dont l'effet est de créer ou de modifier le contenu d'un fichier de travail de l'utilisateur : sed -i, perl -i, awk -i inplace, redirection > ou >>, heredoc, tee, patch, ed, truncate, ou n'importe quel script ou binaire (python, ruby, node, go, formateur, codemod) qui ouvre un fichier en écriture. Ces modifications doivent passer par les outils Edit et Write du harnais, qui produisent un diff relisible et annulable via /rewind. Cette règle vise l'effet, pas la syntaxe : une commande jamais vue qui écrit un fichier est concernée au même titre. Exceptions à autoriser normalement, car ce ne sont pas des fichiers de travail : écritures sous /tmp et dans le scratchpad de session, dans les caches (~/.cache, ~/.npm), dans les artefacts de build (node_modules, dist, build, target, .venv, __pycache__) et dans les fichiers internes de git (.git) — git, npm install, make et les compilateurs doivent continuer de fonctionner sans entrave."
+  ],
+  "classifyAllShell": true
+}

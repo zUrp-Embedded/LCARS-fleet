@@ -1,0 +1,46 @@
+/* Feuille de style du squelette. Minimale et sans dependance : elle donne au projet neuf
+   une page lisible, et sert de point d'accroche aux pages ajoutees ensuite. Remplacez-la. */
+
+:root {
+  --encre: #1c1c1c;
+  --papier: #fdfdfb;
+  --trait: #d8d5cd;
+  --accent: #3a5f7d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --encre: #e8e6e1;
+    --papier: #16171a;
+    --trait: #33363c;
+    --accent: #8fb3cc;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--papier);
+  color: var(--encre);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+}
+
+.page-en-tete h1 { margin: 0 0 .25rem; font-size: 2rem; line-height: 1.2; }
+.accroche { margin: 0; color: var(--accent); }
+
+.page-corps { margin: 2.5rem 0; }
+
+.page-pied {
+  border-top: 1px solid var(--trait);
+  padding-top: 1rem;
+  font-size: .9rem;
+}
+.page-pied ul { list-style: none; display: flex; gap: 1.25rem; margin: 0; padding: 0; }
+.page-pied a { color: var(--accent); }

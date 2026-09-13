@@ -1,0 +1,88 @@
+# =============================================================================
+#  CARTE : standard — deux portes autour du travail
+# =============================================================================
+#
+# A LIRE APRES `quick-fix.yaml`. C'est la meme mecanique, avec les portes mises.
+#
+# LA COMPARAISON EST L'ENSEIGNEMENT — trois lignes changent :
+#
+#                    quick-fix          standard
+#   jury             []                 [code-reviewer]
+#   ci               ignore             required
+#   steps            build              spec -> build
+#
+# Rien d'autre. Il n'y a pas de « mode strict » a activer quelque part : le niveau
+# d'exigence EST le contenu de ces trois lignes. C'est ce qui permet a deux tickets
+# du meme projet d'etre traites avec deux niveaux de soin differents, sans que
+# personne n'ait a changer un reglage global.
+#
+# LES DEUX PORTES SONT A DES ENDROITS DIFFERENTS, ET C'EST VOULU :
+#
+#   `spec` est AVANT le travail. Elle coute une minute et evite un cycle complet
+#   quand la demande est ambigue. C'est la porte la moins chere du pipeline.
+#
+#   `code-reviewer` est APRES, dans le jury. Il juge ce qui a ete produit.
+#
+# Une porte avant et une porte apres repondent a deux questions differentes :
+# « est-ce qu'on sait ce qu'on veut » et « est-ce qu'on a eu ce qu'on voulait ».
+# -----------------------------------------------------------------------------
+
+kind: WorkflowMap
+
+metadata:
+  name: standard
+  description: "Revue de la demande avant le travail, revue du code apres, integration continue exigee."
+  presentation: "Le chemin serieux : la demande est relue avant qu'on code (une demande ambigue remonte au responsable au lieu de partir en devinettes), le developpeur livre, puis le code est relu et l'integration continue doit etre verte avant la fusion. Pour tout ce qui vit plus d'une semaine."
+
+spec:
+  # LE JURY — la liste des roles qui jugent le livrable une fois la proposition de
+  # fusion ouverte. Chaque nom doit etre un role du catalogue ; le demarrage le
+  # verifie et refuse sur une faute de frappe.
+  #
+  # Ajouter un juge, c'est ajouter un nom ici. Rien d'autre : pas de code, pas de
+  # configuration. C'est le geste le plus courant quand un catalogue durcit.
+  jury: [code-reviewer]
+
+  # `required` : la proposition de fusion attend le verdict de l'integration
+  # continue. Si votre depot n'a pas de pipeline d'integration, mettez `ignore` —
+  # sinon chaque ticket attendra un resultat qui n'arrivera jamais.
+  ci: required
+
+  max_rework_rounds: 2
+
+  steps:
+    # --- Porte d'entree : la demande est-elle exploitable ? -------------------
+    spec:
+      role: spec-reviewer
+
+      # `judge_target` dit CE QUE le juge regarde, et c'est la cle a comprendre :
+      #
+      #   brief        il juge la DEMANDE — avant qu'on produise quoi que ce soit
+      #   deliverable  il juge ce qui a ete PRODUIT
+      #
+      # Le meme role peut servir aux deux endroits ; c'est la carte qui le braque.
+      # Ici : `brief`, parce que rien n'existe encore.
+      judge_target: brief
+
+      needs: []
+      inputs:
+        - ticket.body
+
+    # --- Le travail ------------------------------------------------------------
+    build:
+      role: dev
+
+      # Cette etape ne demarre QUE si `spec` a laisse passer. C'est tout le
+      # mecanisme du graphe : une etape attend celles qu'elle nomme.
+      needs: [spec]
+
+      inputs:
+        - ticket.body
+
+      # `modops` demande un mode operatoire pour CETTE etape uniquement.
+      # Le mode doit figurer dans `modop_set.optional` du role (voir `dev.yaml`) —
+      # sinon le demarrage refuse : on ne peut pas imposer a un role un mode qu'il
+      # n'a pas declare accepter.
+      #
+      # Decommentez pour que le dev travaille en test-d'abord sur cette carte :
+      # modops: [tdd]

@@ -1,0 +1,43 @@
+# Claude Code session artifacts — not versionable
+.claude/projects/
+.claude/file-history/
+.claude/telemetry/
+.claude/debug/
+.claude/paste-cache/
+.claude/cache/
+.claude/tasks/
+.claude/memory/
+.claude/history.jsonl
+.claude/backups/
+.claude/shell-snapshots/
+.claude/.credentials.json
+.claude/mcp-needs-auth-cache.json
+
+# Le settings LOCAL de chaque poste : par convention il n'est jamais versionne — c'est la couche
+# ou chacun pose ses permissions, ses repertoires et SON modele. Suivi ici depuis f274a67f6, il
+# imposait `model: claude-sonnet-4-6` a tout le monde, et le remettait a chaque checkout/pull :
+# la retirer en local ne tenait pas. Le settings.json versionne reste la couche partagee.
+.claude/settings.local.json
+
+# Generated fleet blueprint (system + profile merge)
+fleet/fleet.yaml
+
+# Work directory — ephemeral plans, side quests (per-instance, not versioned)
+work/
+# Python / pytest caches
+__pycache__/
+.pytest_cache/
+
+# Coverage output (bashcov/simplecov)
+coverage/
+fleet-audit-report/
+
+# Le seed de banc d'un ancien banc hors conteneur : un SECRET en clair, 0600, depose
+# DANS l'arbre suivi. Il n'etait ignore par rien — un `git add -A` de distance, et le depot est
+# public a terme. Ignore par MOTIF plutot que par chemin : le script le pose a cote de lui-meme, et
+# un jour il pourra etre appele d'ailleurs.
+.bench-seed.pass
+**/.bench-seed.pass
+
+# Les paquets de `pack.sh` — un artefact ne se versionne pas dans le dépôt qui le produit.
+dist/

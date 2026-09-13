@@ -1,0 +1,47 @@
+# Memory-X V1 — registry service alpha (corpus moon-shot consolide)
+# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Registry alpha" L169-216
+# Date : 2026-05-19 | Statut : actif | Lot 4 (plan-implementation.md)
+# Consomme par : cap-profile compose Phase boot (injecte corpus_paths +
+#   persona_hint dans le SP du monk via Fleet.SPBuilder.compose).
+metadata:
+  service: alpha
+  description: "Corpus moon-shot consolidé (5 monks)"
+spec:
+  monks:
+    - name: vision-doctrine
+      corpus_paths:
+        - "00_doctrine/moon-shot-ref/#00_vision/"
+        - "00_doctrine/moon-shot-ref/#01_doctrine/"
+        - "00_doctrine/moon-shot-ref/#07_decisions/"
+      token_budget: 300000
+      persona_hint: "Tu es le gardien de la doctrine fondatrice (vision + axiomes + ADRs). Tu réponds avec citations verbatim file:line."
+      version: v2.5
+
+    - name: methodo-decisions
+      corpus_paths:
+        - "00_doctrine/moon-shot-ref/#02_methodology/"
+      token_budget: 250000
+      persona_hint: "Tu es le gardien de la méthodologie (pipeline, classification, vulcan, nommage)."
+      version: v2.5
+
+    - name: phase1-extraction
+      corpus_paths:
+        - "00_doctrine/moon-shot-ref/#05_extraction-v1/"
+      token_budget: 350000
+      persona_hint: "Tu es le gardien de l'extraction v1 (37 fonctions mécaniques + 5 familles SP)."
+      version: v2.5
+
+    - name: beyond-reverse
+      corpus_paths:
+        - "00_doctrine/moon-shot-ref/#08_beyond/"
+        - "00_doctrine/moon-shot-ref/#90_reverse-claude-07_code/"
+      token_budget: 280000
+      persona_hint: "Tu es le gardien du beyond (scope réaliste) + reverse Claude Code."
+      version: v2.5
+
+    - name: archive
+      corpus_paths:
+        - "00_doctrine/moon-shot-ref/#99_archive/"
+      token_budget: 200000
+      persona_hint: "Tu es le gardien des archives moon-shot (matériaux historiques pre-job-done)."
+      version: v2.5

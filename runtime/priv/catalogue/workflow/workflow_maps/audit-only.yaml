@@ -1,0 +1,90 @@
+# Pipeline V2 — audit-only rev3 (B / §L441)
+#
+# Date: 2026-05-18 (rev1) — 2026-05-18 rev2 — 2026-06-10 rev3 (gatekeeper pattern B)
+# Statut: actif — pipeline canonique V2 compatible Fleet.Workflow.Loader chantier 12 PROMOTED
+# Dérivé de: design-notes/ring2/pipelines.md (audit-only existant) + format Loader chantier 12
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven (le moteur RAM Executor est supprimé).
+#
+# rev3 (B / §L441) : le step `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
+#   Le gatekeeper est un juge d'EXCEPTION dispatché par une gate non-tranchable, JAMAIS
+#   un step d'ordonnancement (§L441 ; GATE-D1). ⚠ SIGNAL (auditeur) : l'escalade
+#   "si non-mécanique" n'est PLUS exprimée — les `rules` de gate sont
+#   string-only (schema `additionalProperties:false`, `items:string`) et le chemin
+#   terminal-string (`Gates.eval_terminal_string`) n'a PAS de branche `:nontranchable`.
+#   Le SEUL véhicule d'escalade est une gate `soft` (toujours dispatch). Re-encoder
+#   l'escalade conditionnelle de l'audit en B = décision DIFFÉRÉE (soft trop large, ou
+#   étendre schema+predicate string pour une bande-milieu). cf. JOURNAL re-analyse-2026-06-09.
+
+kind: WorkflowMap
+metadata:
+  name: audit-only
+  description: "Audit indépendant — pas de code généré. 1 step, gate terminal vérifiée par le système (le document déclaré en `outputs` doit exister et ne pas être vide dans le workspace). Escalade gatekeeper sur échec de règle (dispatch_gatekeeper)."
+  presentation: "AUDIT PUR : un auditeur lit et rend un rapport, aucun code produit, pas de jury de PR. Pour évaluer l'existant quel qu'en soit l'enjeu."
+
+spec:
+  # Jury VIDE délibéré (fast-track C0/C1) : pas de juges de PR — le plancher mécanique
+  # (identité, secrets, ancêtre, sceau) tient seul ; l'auditeur passe post-hoc.
+  jury: []
+  # CI IGNORÉE : cette carte ne produit PAS de code — son livrable est un document d'audit. Le gate
+  # existe pour ne pas dépenser un juge sur du code que la machine n'a pas bâti ; il n'a rien à
+  # attester sur de la prose. Déclaration vivante malgré `jury: []` : une review demandée à la main
+  # sur la forge passe par le gate même sans jury de carte.
+  ci: ignore
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step 1: audit ---
+    #
+    # ⚠ CETTE CARTE A DISPATCHÉ UN JUGE POUR FAIRE UN TRAVAIL DE PRODUCTEUR, et elle ne pouvait pas
+    # aboutir. Le `scoper` est un juge de brief : son SP dit « ton input est le brief, PAS du code —
+    # tu ne codes pas et tu ne modifies rien », contre la gate ci-dessous qui exige un document
+    # PRODUIT et non vide. Un juge ne produit pas ; c'était la contradiction, et elle datait du
+    # split `consultant`→`scoper` (état d'avant, renommé).
+    #
+    # LE CORRECTIF N'EST PAS UN RÔLE NEUF, et c'est le piège dans lequel l'analyse est tombée deux
+    # fois : un nom de rôle est une ÉTIQUETTE qui distingue des workers, pas un pari sur leur
+    # compétence — c'est le même modèle sous tous. La question n'est donc jamais « quelle compétence
+    # nous manque » mais « quel siège existant a le bon livrable et les bons montages ».
+    #
+    # Ici : produire un document qui part sur la face atelier, c'est le scope EXACT du scribe — le
+    # producteur documentaire, dont la mécanique de livraison est identique à celle de l'engineer
+    # (commits locaux, le système pousse) et qui monte la face code en lecture seule pour lire ce
+    # qu'il audite.
+    audit:
+      role: scribe
+      # PAS de `face:` ici, et le gate l'a prouvé : la face est ce qui ÉLIT la carte du rail doc
+      # (`Loader.workshop_card_name/1` refuse deux prétendants). La déclarer ferait de cette carte
+      # d'audit une seconde candidate au rail documentaire du projet — elle produit un document,
+      # elle n'est pas LE rail des documents.
+      needs: []  # racine DAG
+      inputs:
+        - ticket.body
+        - audit_target  # files/repos à auditer (path explicit dans ticket.body)
+      outputs:
+        # LU PAR LE MOTEUR depuis BL-6-59. `Fleet.Workflow.StepOutputs` derive `outputs_exist` /
+        # `outputs_non_empty` de cette declaration, verifies dans le workspace du pod. Le `{date}`
+        # est resolu en GLOB (`*`), pas en date : personne n'a declare de format, et une resolution
+        # exacte refuserait un `20260813` la ou la carte attendait `2026-08-13` — elle bloquerait
+        # tous les audits pour une question de tiret.
+        - audits/scribe-{date}.json
+      gate:
+        # F-C110 : ex-knobs fallback_invoke_gatekeeper/on_blocking_severity retirés — ils étaient INERTES
+        # (le chemin terminal-string ne les évaluait pas), avoués tels quels.
+        # ⚠ Une règle `terminal` en échec rend {:fail} → REWORK borné, jamais une escalade
+        # gatekeeper : seul `type: soft` dispatche le juge (`Fleet.Workflow.Gates`). Ce commentaire
+        # a affirmé le contraire pendant des mois — corrigé A3, mesuré dans gates.ex.
+        type: terminal
+        rules:
+          # FAITS SYSTEME (BL-6-59, ferme). Ces deux cles sont produites par
+          # `Fleet.Workflow.StepOutputs` a partir du champ `outputs` ci-dessus, verifie dans le
+          # workspace que le runtime a cree lui-meme — et elles ECRASENT ce que le pod aurait mis
+          # dans son resultat sous le meme nom.
+          #
+          # Elles remplacent `audit_doc_exists AND audit_doc_non_empty`, qui venaient du `result`
+          # du pod : la porte demandait au SUJET s'il s'etait conforme, pendant que la carte
+          # declarait le chemin attendu trois lignes plus haut dans un champ que personne ne lisait.
+          # Les deux anciens noms n'ont plus aucun producteur ni aucun lecteur — ne pas les
+          # ressusciter, ils rendraient la regle auto-declaree en silence.
+          - "outputs_exist AND outputs_non_empty"
+

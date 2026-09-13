@@ -1,0 +1,65 @@
+# Pipeline V2 — brief-gate (#8, 2026-06-18)
+#
+# Date: 2026-06-18
+# Statut: actif — gate dure de revue de brief (scoper) AVANT dispatch engineer.
+# Dérivé de: DECISIONS-attribution-promotion-concurrence-2026-06-18 + design #8 (build-spec passe 2-4).
+# Consommé par: Fleet.Workflow.Loader / Fleet.Pilot.Entry (type:->workflow_map) + StepDispatcher.workflow_map_role.
+#
+# La workflow_map EST la machine à états : le 1er step (racine needs:[]) est brief-review (scoper,
+# juge NATIF depuis le split du 2026-07-30 ; le `brief_kind` du step reste declare, cf. son
+# commentaire). L'engineer
+# (step build) ne part QUE quand le scoper a validé le brief (gate dure mécanique : le poller ne
+# dispatche build qu'une fois la route avancée à `build`). Brief non-exécutable → escalade arch
+# (await_arch), PAS rework du scoper (re-juger ne corrige pas un mauvais brief — l'arch corrige).
+
+kind: WorkflowMap
+metadata:
+  name: brief-gate
+  description: "Revue du brief (scoper) AVANT l'engineer. Brief exécutable → build ; non → escalade arch."
+  presentation: "La carte STANDARD : un scoper valide le brief AVANT l'engineer (brief flou → escalade), puis jury qualifier + reviewer sur la PR. Le bon défaut pour du code qui compte."
+
+spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement) : reviews demandées sur la PR
+  # du producteur, approbations exigées avant sceau.
+  jury: [qualifier, reviewer]
+  # PORTE CI (chantier qualifier x runner) : le gate LIT le verdict du runner sur le sha de tete
+  # AVANT de convoquer le jury. Rouge -> rework producteur, aucun juge depense sur du rouge.
+  # Pending/aucun statut -> attente BORNEE (45 min) puis escalade LOUD : un runner mort ne doit pas
+  # ressembler a un gate qui travaille. Vert -> le jury est convoque et le FAIT voyage dans son
+  # brief (le juge ne re-derive pas ce qu'une machine atteste mieux que lui).
+  ci: required
+  # C2 — carte par DÉFAUT de la flotte (celle qu'un projet non déclaré obtient : « on ne sait pas,
+  # donc on juge »). Même plancher que standard-qa : seul un finding critique renverse une
+  # approbation. Un seuil plus bas sur la carte par défaut ferait payer la sévérité à des projets
+  # que personne n'a qualifiés — exactement ce qu'interdit l'absence de champ `level` dans le schéma.
+  verdict_policy:
+    block_at: critical
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step 1 (racine) : revue du brief par le scoper (juge natif) ---
+    brief-review:
+      role: scoper
+      # Redondant avec `brief_kind: judge` du profil scoper — et c'est desormais SANS danger de
+      # l'etre (BL-6-20 ferme) : la judge-ness est resolue UNE fois au dispatch (BriefBuilder,
+      # step || profil), estampillee, et le payload la porte jusqu'a la completion — retirer
+      # cette ligne ne hard-gate plus rien. Elle reste comme DECLARATION explicite de la carte
+      # (le step-override est le mecanisme legitime, et une carte canon dit ce qu'elle fait).
+      brief_kind: judge
+      judge_target: brief         # #8.E : juge le BRIEF (ticket.body), PAS un livrable/PR → pré-PR,
+                                    #        avance issue-level, no-PR légitime (vs deliverable = fail-loud)
+      needs: []                     # racine DAG
+      inputs:
+        - ticket.body               # le brief rédigé par l'arch
+      # #8.E : verdict-de-juge-SUR-ISSUE (gate_decide branché sur brief_kind:judge) →
+      #   continue      → advance(build)         (brief exécutable)
+      #   abandon       → close                  (brief à jeter)
+      #   escalate_user → await_arch (arch)     (brief à retravailler par l'arch)
+
+    # --- Step 2 : implémentation (engineer), gated par la validation du brief ---
+    build:
+      role: engineer
+      needs: [brief-review]       # ne part QUE si brief-review a avancé la route ici
+      inputs:
+        - ticket.body

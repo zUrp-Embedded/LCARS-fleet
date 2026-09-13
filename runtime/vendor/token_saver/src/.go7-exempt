@@ -1,0 +1,16 @@
+Sous-arbre VENDORE tel quel depuis ppgranger/token-saver @ 098873e (Apache-2.0).
+
+Marqueur GO-7 : ces fichiers ne portent pas d'en-tete LCARS, et ne doivent pas en porter.
+Trois raisons, et la premiere suffit :
+
+1. Apache-2.0 §4(b) — toute modification d'un fichier vendore exige une mention en tete. VENDOR.md
+   affirme « aucun fichier modifie », et cette affirmation est ce qui rend la licence tenue. Poser
+   un en-tete LCARS la rendrait fausse a l'echelle du sous-arbre.
+2. update_vendor.sh remonte l'amont par RE-COPIE. Un en-tete ajoute ici serait ecrase a chaque
+   update, ou forcerait un rejeu de patch a chaque version — exactement ce que le vendoring evite.
+3. Le sha du fichier est la preuve qu'il EST l'amont. Un en-tete le fait diverger de sa source, et
+   la comparaison qui vaut preuve cesse de valoir.
+
+Ce marqueur ne couvre PAS la couche LCARS (adapter.py, lcars_*.py, lcars_tests/, tools/,
+VENDOR.md, update_vendor.sh, run_tests.sh) : elle est a nous, GO-7 s'y applique, et elle vit
+deliberement HORS de ce sous-arbre.

@@ -1,0 +1,270 @@
+---
+// LES CATALOGUES — page DERIVEE pour ses faits enumerables : les douze arbres et leurs chemins,
+// les generations de contrat supportees, le nom reserve du catalogue livre, les arbres qui
+// portent une surcharge fine, les emplacements d'installation, le nombre de roles du systeme.
+// Tout vient de `Fleet.Catalogue` et `Fleet.Layout` par `lib/catalogue.js`.
+//
+// La prose reste ecrite : elle porte le POURQUOI, et le pourquoi n'est nulle part sous une forme
+// publiable — les `@moduledoc` qui le portent sont en anglais et s'adressent a un developpeur.
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+import { u } from '../lib/href.js';
+import { trees, supportedApiVersions, bundledName, fineOverrides, paths, states, systemRoleCount }
+  from '../lib/catalogue.js';
+
+const T = trees();
+const api = supportedApiVersions();
+const bundled = bundledName();
+const fines = fineOverrides();
+const P = paths();
+const ST = states();
+const sysRoles = systemRoleCount();
+
+// Le libelle humain d'un arbre. La GARDE est en dessous : un arbre ajoute au module sans un mot
+// ici casse le build, plutot que d'apparaitre sur la page sous son nom d'atome.
+const LABEL = {
+  cap_profiles:       ['Les rôles', 'Qui existe, ce qu’il a le droit de faire, comment il est lancé.', 'amber'],
+  workflow_maps:      ['Les cartes de workflow', 'Les chaînes de traitement qu’un projet peut choisir.', 'amber'],
+  brief_templates:    ['Les gabarits de brief', 'La forme des tickets que la fleet écrit.', 'amber'],
+  project_template:   ['Le gabarit de projet', 'Le squelette copié dans un projet neuf, une face par dossier.', 'amber'],
+  modops:             ['Les modes opératoires', 'Les fragments de comportement qu’un rôle compose.', 'blue'],
+  subagent_templates: ['Les gabarits de sous-agent', 'Ce qu’un rôle peut déléguer à l’intérieur de lui-même.', 'blue'],
+  monk_registry:      ['Le registre des moines', 'Les lecteurs de corpus, déclarés à part.', 'blue'],
+  sp_drafts:          ['Les brouillons de prompt', 'Les prompts de rôle générés, un par rôle.', 'green'],
+  sp_blocks:          ['Les blocs de prompt', 'Le substrat commun. Le noyau livré se remplace par son nom.', 'green'],
+  sp_templates:       ['Les gabarits de prompt', 'La forme que prend chaque prompt émis.', 'green'],
+  skills:             ['Les compétences', 'Ce qu’un agent sait faire au-delà de ses outils.', 'mauve'],
+  avatars:            ['Les visages', 'Le portrait d’un siège sur la forge, nommé par le rôle — facultatif : sans lui, l’identicon.', 'dim']
+};
+
+const unlabelled = T.filter((t) => !(t.key in LABEL)).map((t) => t.key);
+const orphanLabels = Object.keys(LABEL).filter((k) => !T.some((t) => t.key === k));
+if (unlabelled.length || orphanLabels.length) {
+  throw new Error(
+    `catalogues.astro : la page et Fleet.Catalogue ont divergé —` +
+    (unlabelled.length ? `\n  arbres sans libellé : ${unlabelled.join(', ')}` : '') +
+    (orphanLabels.length ? `\n  libellés sans arbre : ${orphanLabels.join(', ')}` : '')
+  );
+}
+
+const sections = [
+  { id: 'these', label: 'Machine et métier' },
+  { id: 'pile', label: 'La pile' },
+  { id: 'arbres', label: 'Ce qu’il contient' },
+  { id: 'manifeste', label: 'Le manifeste' },
+  { id: 'nom', label: 'Le nom' },
+  { id: 'declaration', label: 'La déclaration' },
+  { id: 'cycle', label: 'Le cycle' }
+];
+---
+<Site title="LCARS — Les catalogues" current="/catalogues/" sections={sections}>
+
+  <header class="head">
+    <div class="elbow" aria-hidden="true"></div>
+    <div>
+      <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p class="eyebrow">Manuel · catalogues</p>
+      <h1>Le code est la machine.<br><em>Le catalogue est le métier.</em></h1>
+      <p class="lede">Un catalogue apporte des rôles, des cartes de workflow, des gabarits, des
+      compétences — <b>{T.length} arbres</b> en tout : ce qu'une fleet fait, par opposition à la
+      façon dont elle le fait. Plusieurs peuvent tourner ensemble, <b>dans un ordre qui décide qui
+      gagne</b>.</p>
+      <p class="lede">La frontière n'est pas une convention de rangement : elle est
+      <b>mécanique</b>. Trois dossiers sont du métier et se remplacent ; tout le reste est du
+      runtime et n'a aucun bouton.</p>
+      <p class="sig">La règle tient en une phrase : <b>ce qu'un opérateur ne doit pas pouvoir
+      remplacer est un contrat, et un contrat qu'on peut remplacer ne contraint rien.</b></p>
+    </div>
+  </header>
+
+  <section id="these">
+    <SectionHead id="these" title="Machine et métier" cap="le discriminant est un chemin, pas un avis" />
+    <p class="intro">Une racine de catalogue — <code>priv/catalogue/</code>,
+    <code>priv/catalogue-system/</code>, ou celle qu'un opérateur apporte — porte le matériel qu'un
+    opérateur remplace légitimement. <b>Elle seule passe par la résolution de catalogue.</b> Le
+    reste de <code>priv/</code> est résolu sans aucun réglage.</p>
+    <p class="intro">Le corollaire est ce qui rend la règle utile : poser un contrat à l'intérieur
+    d'un catalogue le ferait <b>partir avec l'export</b>, son auteur l'éditerait — et rien ne
+    changerait. Un mensonge dit par le rangement, que ni le build ni la relecture n'attrapent.</p>
+
+    <div class="grid">
+      <div class="cell" style="--k:var(--green)"><b>Les schémas</b><i>le contrat</i>
+        <span>Ce contre quoi un catalogue est <b>validé</b>. Un catalogue qui embarquerait le schéma
+        qui le juge se noterait lui-même.</span></div>
+      <div class="cell" style="--k:var(--green)"><b>Le plancher</b><i>ce qu’on ne peut pas abaisser</i>
+        <span>Les gestes git interdits à tout agent, quel que soit son rôle et son catalogue. Un
+        plancher qu’on peut déplacer n’est pas un plancher.</span></div>
+    </div>
+    <p class="note">Conséquence voulue : <b>exporter un catalogue, c'est copier un répertoire</b>.
+    Rien de ce qu'il contient ne peut être un contrat.</p>
+  </section>
+
+  <section id="pile">
+    <SectionHead id="pile" title="La pile" cap="l’ordre est la précédence, écrit à un seul endroit" />
+    <p class="intro">On ne demande pas « quelle est la racine », on demande <b>un arbre</b>. La
+    réponse est une liste de répertoires, dans l'ordre, et <em>le premier qui porte le fichier
+    gagne</em>.</p>
+
+    <div class="stack">
+      <div class="layer" style="--k:var(--amber)">
+        <div class="r">1</div>
+        <div class="c"><b>catalogue installé</b>
+        <span>Le premier des installés. Un fichier qu'il porte <b>remplace</b> celui du
+        dessous.</span></div>
+      </div>
+      <div class="layer" style="--k:var(--amber-soft)">
+        <div class="r">2</div>
+        <div class="c"><b>catalogue installé suivant</b>
+        <span>Et ainsi de suite, dans l'ordre de déclaration. Un répertoire absent disparaît du
+        chemin — un catalogue qui ne livre que ce dont ses rôles ont besoin ne coûte rien.</span></div>
+      </div>
+      <div class="layer base" style="--k:var(--violet)">
+        <div class="r">∞</div>
+        <div class="c"><b>catalogue système</b>
+        <span>Toujours dernier, jamais déclaré. <b>Ce n'est pas un participant à la précédence,
+        c'est le socle</b> — {sysRoles} rôles de mécanique qu'aucune carte ne nomme.</span></div>
+      </div>
+    </div>
+    <p class="legend">↑ le premier couvre les suivants — règle du thème enfant</p>
+
+    <p class="intro">Cette résolution vit à <b>un seul endroit</b>. Avant, elle était réécrite à la
+    main en quatorze points d'appel derrière trois copies du même utilitaire — et les trois lecteurs
+    qui ne l'avaient jamais apprise étaient trois bugs.</p>
+
+    <div class="good"><b>Ce que la séparation rend vérifiable.</b> « Ce catalogue est complet » n'a
+    aucun sens quand tout vit dans un seul arbre : un catalogue métier devrait embarquer la
+    machinerie, et « il en manque » devient indiscernable de « il a choisi autrement ». Séparés,
+    les deux moitiés répondent chacune.</div>
+  </section>
+
+  <section id="arbres">
+    <SectionHead id="arbres" title="Ce qu'un catalogue contient" cap={`${T.length} arbres, chacun nommé une fois`} />
+    <p class="intro">Chaque arbre a <b>un seul chemin littéral</b>, écrit à un endroit. Un catalogue
+    n'est pas tenu de tous les porter : ce qui manque disparaît du chemin de recherche, il ne casse
+    rien.</p>
+
+    <div class="grid">
+      {T.map((t) => (
+        <div class="cell" style={`--k:var(--${LABEL[t.key][2]})`}>
+          <b>{LABEL[t.key][0]}</b>
+          <code>{t.path}</code>
+          <span>{LABEL[t.key][1]}</span>
+        </div>
+      ))}
+    </div>
+
+    <p class="intro" style="margin-top:22px"><b>{fines.length} de ces arbres</b> portent une
+    surcharge dédiée, qui les déplace <em>seuls</em> et garde la priorité sur toute la pile :
+    {fines.map((f) => LABEL[f]?.[0] ?? f).join(', ').toLowerCase()}.</p>
+    <p class="intro">Douze réglages, un par arbre, seraient l'erreur symétrique : il faudrait
+    redéclarer douze fois une seule intention, et <em>le douzième est celui qu'on oublie</em> — ce
+    qui donne une fleet tournant sur vos rôles et les fragments de prompt livrés. Un décalage
+    cohérent, qu'aucun message d'erreur ne signale.</p>
+    <p class="note">Une surcharge fine sort son arbre du catalogue : ce qu'elle déplace n'appartient
+    plus, délibérément, à aucun catalogue.</p>
+  </section>
+
+  <section id="manifeste">
+    <SectionHead id="manifeste" title="Le manifeste" cap="un fichier, à la racine, sur le tout" />
+    <p class="intro">À la racine de chaque catalogue, <code>catalogue.yaml</code> déclare deux
+    choses : la <b>génération de contrat</b> qu'il vise, et son <b>nom</b>. Il est lu au démarrage,
+    <em>avant que quoi que ce soit ne soit gelé depuis le disque</em>.</p>
+
+    <pre class="term"><span class="m"># catalogue.yaml — à la racine</span>
+<span class="c">api_version:</span> {api[0]}
+<span class="c">name:</span> web
+<span class="c">default_card:</span> livraison-standard   <span class="m"># optionnel</span></pre>
+
+    <p class="intro" style="margin-top:22px">Ce runtime consomme
+    {api.length > 1 ? `les générations ${api.join(', ')}` : `la génération ${api[0]}`}. C'est une
+    <b>liste</b>, pas un nombre unique : un runtime capable de lire deux générations est ce qui rend
+    la montée de version d'un opérateur <b>ordonnée</b> plutôt qu'atomique.</p>
+
+    <div class="warn"><b>Obligatoire, et introduit tôt exprès.</b> Un manifeste requis peut
+    s'ajouter tant qu'il n'existe qu'un catalogue. Une fois qu'un deuxième est entre les mains de
+    quelqu'un d'autre, le rendre requis casse un artefact distribué — et le laisser optionnel fait
+    échouer un catalogue d'une autre génération <b>à son premier chargement, sans jamais dire
+    pourquoi</b>.</div>
+  </section>
+
+  <section id="nom">
+    <SectionHead id="nom" title="Le nom" cap="propriété du catalogue, pas de son installation" />
+    <p class="intro">Le nom vient du catalogue lui-même — ni de la source, ni du dossier où on l'a
+    déballé, ni de la personne qui l'installe. C'était l'inverse, et c'était sans conséquence tant
+    que le nom n'était qu'une poignée locale. Ça cesse de l'être au moment où il <b>adresse quelque
+    chose hors du conteneur</b> :</p>
+
+    <div class="grid">
+      <div class="cell" style="--k:var(--salmon)"><b>L’org de la forge</b><i>où vivent ses projets</i>
+        <span>Un projet créé dans l’org <code>web</code> est <b>inouvrable</b> là où le même
+        catalogue répond au nom <code>frontend</code>.</span></div>
+      <div class="cell" style="--k:var(--salmon)"><b>Ses comptes de rôle</b><i>catalogue_role</i>
+        <span>Le login d’un compte de rôle est <code>&lt;catalogue&gt;_&lt;rôle&gt;</code>. Le
+        <b>souligné y est le séparateur</b> — donc il est refusé dans les deux moitiés.</span></div>
+    </div>
+
+    <p class="intro" style="margin-top:22px">D'où la charte : minuscules, chiffres et tirets, en
+    commençant par une lettre ou un chiffre. Un nom hors charte fait <b>refuser le démarrage</b>,
+    avec le motif écrit. Le nom <code>{bundled}</code> est réservé au catalogue métier livré dans le
+    release.</p>
+  </section>
+
+  <section id="declaration">
+    <SectionHead id="declaration" title="Installé, ou disponible" cap="l’état est un fait de forge" />
+    <p class="intro">Un catalogue est <b>installé</b> quand la forge porte son organisation et sa
+    source — et il l'est alors <b>pour tout le monde</b>, pas pour le conteneur qui l'a posé. Sinon il
+    est <b>disponible</b> : quelqu'un l'a déposé, personne ne l'a installé. Il n'y a pas de
+    troisième état, pas de fichier d'activation à tenir, pas d'ordre de précédence à arbitrer.</p>
+
+    <pre class="term"><span class="m"># lcars catalogue list — l'état vient de la forge, pas d'un fichier local</span>
+{ST.map((st) => `  ${st.shown.padEnd(12)}${st.door}`).join('\n')}</pre>
+
+    <dl class="kv">
+      <dt>{P.shipped}</dt><dd>le matériel local — un <b>cache</b>, reconstruit depuis la forge à chaque convergence</dd>
+      <dt>{P.operator}</dt><dd>l'espace de l'opérateur</dd>
+    </dl>
+
+    <div class="warn"><b>Ce que ce modèle remplace, et pourquoi.</b> Il y a eu un troisième état,
+    « actif », déclaré dans un fichier local dont l'ordre faisait la précédence. Un fait tenu à deux
+    endroits dérive : la CLI lisait le fichier pendant que le runtime appliquait « pas de
+    déclaration = le catalogue livré, seul ». Mesuré sur un conteneur où tout tournait sur le catalogue
+    livré — <code>list</code> l'affichait « inactif », <code>enable</code> le faisait sortir sans un
+    mot, <code>disable</code> répondait « n'est pas actif ». Trois sens du même modèle faux. La
+    réparation n'était pas de synchroniser les deux copies : c'était d'en supprimer une.</div>
+  </section>
+
+  <section id="cycle">
+    <SectionHead id="cycle" title="Le cycle" cap="un verbe, et ce qu’il pose vraiment" />
+    <div class="steps">
+      <div class="stp" style="--k:var(--blue)">
+        <div class="v">install</div>
+        <div class="x">Un seul geste, et il <b>provisionne</b> : l'organisation sur la forge, les
+        comptes de rôle, les teams, la source du catalogue dans <code>&lt;nom&gt;/catalogue</code>,
+        et le matériel posé sur le conteneur. C'est un geste d'<b>admin de forge</b> — le runtime lit ce
+        fait sur la forge, jamais dans un drapeau local.</div>
+      </div>
+      <div class="stp" style="--k:var(--yellow)">
+        <div class="v">verify</div>
+        <div class="x">Joue <b>exactement les contrôles du démarrage</b>. Le code de sortie est le
+        verdict.</div>
+      </div>
+      <div class="stp" style="--k:var(--green)">
+        <div class="v">list</div>
+        <div class="x">Interroge la forge et rend l'état de chacun. Sans release joignable, elle
+        <b>dit qu'elle ne sait pas</b> plutôt que de deviner depuis les dossiers présents.</div>
+      </div>
+      <div class="stp" style="--k:var(--amber)">
+        <div class="v">restart</div>
+        <div class="x">Les images sont gelées au démarrage — rôles et prompts sont figés avant
+        qu'aucun agent ne puisse naître. <b>Rien ne bascule à chaud</b>, et prétendre le contraire
+        serait un mensonge d'exploitation.</div>
+      </div>
+    </div>
+
+    <p class="note">Il n'y a plus de geste « activer », et son absence est le sujet : installer un
+    catalogue le rend servi. Ce qui se décide encore, c'est le catalogue d'un <b>projet</b> — fixé
+    pour sa vie à sa création, donc demandé et jamais deviné.
+    <a href={u("/manuel/")}>Les commandes de la console →</a></p>
+  </section>
+
+</Site>

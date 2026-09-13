@@ -1,0 +1,48 @@
+defmodule Fleet.Admiral.AuditConsumerTest do
+  @moduledoc """
+  Direct canonical-event injection with subscribe:false. Checks counting/ignoring
+  and continued process life, not log contents, persistence or Bus delivery.
+  """
+  use ExUnit.Case, async: true
+  import Fleet.Test.Barrier, only: [settle: 1]
+
+  alias Fleet.Admiral.AuditConsumer
+
+  defp start_consumer do
+    name = :"audit_#{System.unique_integer([:positive])}"
+    {:ok, pid} = start_supervised({AuditConsumer, name: name, subscribe: false})
+    {pid, name}
+  end
+
+  defp canon(source, type, opts \\ []) do
+    Fleet.Event.new(source, type, opts)
+  end
+
+  test "canonical boot_complete: handle_info → count++ (no crash)" do
+    {pid, _} = start_consumer()
+    send(pid, canon(:admiral, :"fleet.boot_complete", payload: %{"x" => 1}))
+
+    assert %{events_count: 1} = settle(pid)
+  end
+
+  test "canonical event not audited: ignored (no crash, NO count — the audit trail is selective)" do
+    {pid, _} = start_consumer()
+    send(pid, canon(:api, :"some.unknown"))
+    assert %{events_count: 0} = settle(pid)
+    assert Process.alive?(pid)
+  end
+
+  test "legacy tuple format: no longer consumed (no crash, no count — format removed)" do
+    {pid, _} = start_consumer()
+    send(pid, {:"fleet.boot_complete", %{"payload" => %{"x" => 1}}})
+    assert %{events_count: 0} = settle(pid)
+    assert Process.alive?(pid)
+  end
+
+  test "non-event msg: no crash" do
+    {pid, _} = start_consumer()
+    send(pid, :random_message)
+    _ = settle(pid)
+    assert Process.alive?(pid)
+  end
+end

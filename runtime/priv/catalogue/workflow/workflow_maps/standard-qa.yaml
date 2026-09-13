@@ -1,0 +1,53 @@
+# Pipeline V2 — standard-qa rev3 (réhabilitation 2026-07-18)
+#
+# Date: 2026-05-18 (rev1) — 2026-05-18 rev2 post-validation Lot 5 item 17 — 2026-07-18 rev3
+# Statut: actif — carte de production C2+ (réhabilitée : steps DISPATCHABLES uniquement).
+# Dérivé de: rev2 (6 steps méthodologiques brainstorm→plan→TDD→dual-review→finish) RÉDUITE aux
+#            steps que le dispatch actuel SERT réellement. Constat live 2026-07-18 (citation-snoopy) :
+#            un step `role: architect` spawnait un pod architecte ÉPHÉMÈRE (usurpation d'identité du
+#            sas humain + work-order producteur jamais servi) et `role: starfleet` n'est pas un worker —
+#            le projet partait en boucle reclaim/attente silencieuse. La méthode (TDD, plan) vit dans
+#            les MODOPS du producteur et le jugement dans le JURY, pas dans des steps non-dispatchables.
+# Consommé par: Fleet.Workflow.Loader → rail forge-driven ; jury lu par Fleet.Project.Roles.project_jury.
+
+kind: WorkflowMap
+metadata:
+  name: standard-qa
+  description: "Carte lourde : revue du brief (scoper) AVANT l'engineer, puis jury qualifier + reviewer sur la PR — la politique lourde du catalogue."
+  presentation: "La carte SÉRIEUSE : un scoper valide le brief AVANT l'engineer (brief flou → escalade à l'architecte), l'engineer implémente, puis DEUX juges sur la PR (qualifier : conformité + le code compile ; reviewer : qualité du code). Même moteur que brief-gate aujourd'hui : c'est ICI que les juges supplémentaires (tests runner, juges spécialisés) se brancheront."
+
+spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement).
+  jury: [qualifier, reviewer]
+  # PORTE CI (chantier qualifier x runner) : le gate LIT le verdict du runner sur le sha de tete
+  # AVANT de convoquer le jury. Rouge -> rework producteur, aucun juge depense sur du rouge.
+  # Pending/aucun statut -> attente BORNEE (45 min) puis escalade LOUD : un runner mort ne doit pas
+  # ressembler a un gate qui travaille. Vert -> le jury est convoque et le FAIT voyage dans son
+  # brief (le juge ne re-derive pas ce qu'une machine atteste mieux que lui).
+  ci: required
+  # C2 — LA COURBE DE TOLÉRANCE. Cette carte sert C2 à C4 : du firmware qui clignote au firmware
+  # qui peut blesser. Un juge qui documente un finding CRITIQUE et approuve quand même a mesuré un
+  # défaut et l'a laissé passer ; à cette criticité, c'est la carte qui dit non. Elle ne peut que
+  # DURCIR : un `request_changes` reste bloquant quoi qu'il arrive, jamais l'inverse.
+  verdict_policy:
+    block_at: critical
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+
+    # --- Step 1 (racine) : revue du brief par le scoper (juge natif) ---
+    brief-review:
+      role: scoper
+      brief_kind: judge             # redondant avec le profil, sans danger depuis BL-6-20 (cf. brief-gate)
+      judge_target: brief           # juge le BRIEF (ticket.body) → pré-PR, avance issue-level
+      needs: []                     # racine DAG
+      inputs:
+        - ticket.body
+
+    # --- Step 2 : implémentation (engineer), gated par la validation du brief ---
+    build:
+      role: engineer
+      needs: [brief-review]         # ne part QUE si brief-review a avancé la route ici
+      inputs:
+        - ticket.body
+

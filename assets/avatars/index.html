@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>LCARS forge avatars — preview</title>
+<style>
+  :root {
+    --bg: #000;
+    --fg: #FFCC99;
+    --dim: #666;
+    --accent: #FF9900;
+    --line: #222;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  header {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 16px;
+    margin-bottom: 40px;
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+  }
+  header h1 {
+    font-size: 20px;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  header .sub {
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 180px repeat(4, 1fr);
+    gap: 24px;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .grid.header-row {
+    border-bottom: 2px solid var(--accent);
+    margin-bottom: 8px;
+  }
+  .grid.header-row > div {
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .grid.header-row > div:first-child {
+    text-align: left;
+  }
+  .role {
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--fg);
+  }
+  .role small {
+    display: block;
+    font-size: 10px;
+    color: var(--dim);
+    margin-top: 4px;
+    letter-spacing: 1px;
+  }
+  .cell {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .cell img {
+    display: block;
+  }
+  .size-32  img { width: 32px;  height: 32px;  border-radius: 4px; }
+  .size-64  img { width: 64px;  height: 64px;  border-radius: 8px; }
+  .size-128 img { width: 128px; height: 128px; border-radius: 16px; }
+  .size-256 img { width: 256px; height: 256px; border-radius: 32px; }
+  footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LCARS ▸ FORGE AVATARS</h1>
+  <div class="sub">role identification matrix</div>
+</header>
+
+<div class="grid header-row">
+  <div>Role</div>
+  <div>32 px (forge list)</div>
+  <div>64 px (PR header)</div>
+  <div>128 px (profile)</div>
+  <div>256 px (native)</div>
+</div>
+
+<div class="grid">
+  <div class="role">Architect <small>#CC99CC · pyramid</small></div>
+  <div class="cell size-32"><img src="architect.svg" alt=""></div>
+  <div class="cell size-64"><img src="architect.svg" alt=""></div>
+  <div class="cell size-128"><img src="architect.svg" alt=""></div>
+  <div class="cell size-256"><img src="architect.svg" alt=""></div>
+</div>
+
+<div class="grid">
+  <div class="role">Consultant <small>#6699CC · bubble</small></div>
+  <div class="cell size-32"><img src="consultant.svg" alt=""></div>
+  <div class="cell size-64"><img src="consultant.svg" alt=""></div>
+  <div class="cell size-128"><img src="consultant.svg" alt=""></div>
+  <div class="cell size-256"><img src="consultant.svg" alt=""></div>
+</div>
+
+<div class="grid">
+  <div class="role">Qualifier <small>#99CC66 · gated check</small></div>
+  <div class="cell size-32"><img src="qualifier.svg" alt=""></div>
+  <div class="cell size-64"><img src="qualifier.svg" alt=""></div>
+  <div class="cell size-128"><img src="qualifier.svg" alt=""></div>
+  <div class="cell size-256"><img src="qualifier.svg" alt=""></div>
+</div>
+
+<div class="grid">
+  <div class="role">Reviewer <small>#CC6666 · eye</small></div>
+  <div class="cell size-32"><img src="reviewer.svg" alt=""></div>
+  <div class="cell size-64"><img src="reviewer.svg" alt=""></div>
+  <div class="cell size-128"><img src="reviewer.svg" alt=""></div>
+  <div class="cell size-256"><img src="reviewer.svg" alt=""></div>
+</div>
+
+<div class="grid">
+  <div class="role">Starfleet <small>#FFCC33 · delta</small></div>
+  <div class="cell size-32"><img src="starfleet.svg" alt=""></div>
+  <div class="cell size-64"><img src="starfleet.svg" alt=""></div>
+  <div class="cell size-128"><img src="starfleet.svg" alt=""></div>
+  <div class="cell size-256"><img src="starfleet.svg" alt=""></div>
+</div>
+
+<div class="grid">
+  <div class="role">Engineer <small>#FF9900 · gear</small></div>
+  <div class="cell size-32"><img src="engineer.svg" alt=""></div>
+  <div class="cell size-64"><img src="engineer.svg" alt=""></div>
+  <div class="cell size-128"><img src="engineer.svg" alt=""></div>
+  <div class="cell size-256"><img src="engineer.svg" alt=""></div>
+</div>
+
+<footer>
+  SVG vectoriels · fond #0a0a0a · coin LCARS (L-shape) commun · glyphe central dédié par rôle
+</footer>
+
+</body>
+</html>

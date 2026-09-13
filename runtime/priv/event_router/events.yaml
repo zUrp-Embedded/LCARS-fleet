@@ -1,0 +1,171 @@
+# Canonical event registry.
+#
+# `events.yaml` is a PURE REGISTRY: its KEYS are the `authorized_event_types`, loaded at boot by
+# `Fleet.EventRouter.Catalog.load!/0`; `Bus.broadcast/2` fails loud on any type outside it. Every
+# emitted event MUST have its key here.
+#
+# THE REGISTRY REFLECTS REALITY, in both directions: a key needs a real PRODUCER and a real
+# CONSUMER. A key registered "ready for a producer" reads as a live rail, and the next reader
+# looks for an emitter that does not exist; a key nobody consumes reads as coverage nobody gets.
+# Such a key is removed, never kept — and re-added in the SAME gesture as its producer and consumer.
+# The wall `events.*` of `mix lcars.contracts.check` holds the consumer side: every type a
+# `handle_info(%Fleet.Event{type: …})` matches must be a key here.
+#
+# CONSUMPTION is by DIRECT SUBSCRIBERS (Phoenix.PubSub: `Bus.subscribe` + `handle_info`) — there
+# is no dispatch table. Which consumer reads which event is documented in each consumer's
+# moduledoc (`Admiral.AuditConsumer`, `Spawner.PublishConsumer`, `Spawner.Pod`,
+# `Pilot.StepRunConsumer`, `Pilot.IncidentConsumer`, `Pilot.ArchFeed`, `Observation.ReadModel`).
+#
+# VALUES are `[]` (unrouted — direct subscribers only) OR a ROUTING object
+# `{source, action, incident?}`: the declarative `event + source -> action` table. `Catalog.load!`
+# validates the WHOLE file against `schema/events.json` at boot, fail-loud. Adding an incident
+# class is a YAML edit here, not code.
+#
+# LA DOCTRINE DU RAIL D'INCIDENTS tient en trois lignes : le systeme DETECTE, LOGGE et TICKETTE
+# (`error_system`, la boite de reception d'admiral) — aucune action automatique, aucun spawn,
+# aucune decision derriere le ticket. UN label ; DEUX portes, champ `gate` du bloc incident :
+# `immediate` (issue des la 1re occurrence) ou `recurrence` (defaut — 1re notee, recidive
+# escaladee, X=1 en dur). Les kinds tires DEPUIS LE CODE (repo_poll_crash, ops_root_missing,
+# issue_lock_residual, reroll_failed, awaits_arch_stuck) appellent leur porte au site : on ne
+# re-decrit pas des chemins de code dans une table. Production -> arch, defauts du systeme ->
+# sysadmin ; tout traversant est un bug de conception, pas une voie.
+events:
+  # --- Pod lifecycle (source :spawner, `Spawner.Pod`) ---
+  # `Spawner.Pod` emits exactly THREE lifecycle events: `pod.spawned` at launch-PROVEN (first
+  # entry into :monitoring), `pod.completed`, `pod.failed`. Pod PROGRESSION is not an event: the
+  # deck reads the live snapshot by design.
+  pod.completed: []
+  # Consumer: `Pilot.ArchFeed` (per-project feed line "<role> parti (#N)").
+  pod.spawned: []
+
+  pod.failed:
+    source: spawner
+    action: incident
+    incident: {op: pod, subject: pod_id}
+  # pod.deaf: PRODUCER `Fleet.MCP.SocketWarden` (tick, two-tick grace), CONSUMER the incident rail
+  # (note on first occurrence, sysadmin issue on recurrence).
+  #
+  # WHY IT EXISTS AS ITS OWN TYPE, and not as a `pod.failed` variant: a deaf pod has NOT failed. It
+  # is alive, its process is healthy, it keeps writing into a socket file whose acceptor died in a
+  # cascade — and it reports nothing, because from the pod's side there is nothing to report. Routing
+  # it as a failure would put it in front of consumers that respawn (PermanentWarden) a pod that is
+  # not dead. What it needs is a human, which is exactly what `action: incident` fetches.
+  pod.deaf:
+    source: mcp
+    action: incident
+    incident: {op: pod, subject: pod_id}
+  # wake.failed: emitted by `Spawner.Pod` when the onboarding kick is abandoned after N attempts
+  # (agent never acked) — payload `pod_id`/`reason` (stable category string, JSON-safe; keys the
+  # IncidentRegistry dedup signature)/`reason_detail`/`pane`. Consumed by `Pilot.IncidentConsumer`
+  # (`:sp_suspect` escalation, pane attached to the issue): a wake recurrence is an SP suspect.
+  #
+  # An authentication that dies is SEEN here, or as `pod.failed` — never as its own key: the OAuth
+  # refresh is the VENDOR's, native, on a `.credentials.json` the launcher binds RW
+  # (`bin/bwrap_launch.sh`). LCARS does not perform it, so it cannot observe its failure.
+  wake.failed:
+    source: spawner
+    action: incident
+    incident: {op: wake, subject: pod_id, escalate_kind: sp_suspect, forward: [pane]}
+  # spawn.failed: emitted by `Spawner.PublishConsumer` when the dispatch of an
+  # `admin.spawn.request` RAISES (CapProfile/spawn_pod fails unexpectedly) → the spawn is dropped.
+  # The admin socket has already answered "queued" BEFORE this async dispatch → without this event
+  # the drop is SILENT (zero pod, zero alarm). Twin of `pod.failed`, keyed on the ROLE (no pod was
+  # ever created): recurrence = "this role keeps failing to spawn". Payload `cap_profile_name`
+  # (sentinel "unknown" when both name and role are absent/empty — the alarm always reaches the
+  # rail)/`issue_id`/`reason` (stable category string)/`reason_detail`. Consumed by
+  # `Pilot.IncidentConsumer` (op="spawn", subject=cap_profile_name → note 1st / escalate recurrent).
+  spawn.failed:
+    source: spawner
+    action: incident
+    incident: {op: spawn, subject: cap_profile_name}
+
+  # --- Forge webhook (source :event_router, `WebhooksGitea`) ---
+  # The producer emits `gitea.<action>` for exactly THESE 10 actions, and the atoms are
+  # pre-registered by `event_router/application.ex` from this list. All 10 are registered so that
+  # none broadcasts as a silent `UnregisteredError` (webhook 200 OK, event never routed). The
+  # webhook is an ACCELERATOR of the poll rail, never a source of truth: its consumer is the
+  # poller's coalesced hint.
+  gitea.opened: []
+  gitea.closed: []
+  gitea.reopened: []
+  gitea.merged: []
+  gitea.edited: []
+  gitea.created: []
+  gitea.synchronized: []
+  gitea.deleted: []
+  gitea.push: []
+  gitea.unknown: []
+
+  # --- Admin spawn (source :api, `API.SpawnAdmission` → `Spawner.PublishConsumer`) ---
+  admin.spawn.request: []
+
+  # --- GitHub/GitLab publish (async, source :mcp) ---
+  # The `project_publish` MCP tool starts an OFF-turn Task (Task.Supervisor) that runs the host-side
+  # publish rail; these are the lossy observability signals of that Task (emitted via safe_emit, so a
+  # missing subscriber never crashes the producer). UNROUTED (`[]`): outcomes, not routing inputs.
+  # `Spawner.PublishConsumer` reads `done`/`failed` for the requesting pod.
+  project_publish.started: []
+  project_publish.done: []
+  project_publish.failed: []
+
+  # --- Boot lifecycle (source :admiral, `BootOrchestrator`) ---
+  fleet.boot_complete: []
+  fleet.boot_partial: []
+  fleet.boot_failed: []
+
+  # --- Workflow-map (source :workflow) ---
+  # `workflow_map.failed` — produit par `Pilot.StepRunConsumer` (draft, sur
+  # `:workflow_map_load_failed`) ; consomme par `IncidentConsumer` (route `incident` ci-dessous).
+  workflow_map.failed:
+    source: workflow
+    action: incident
+    # gate: immediate — une carte illisible bloque le dispatch de TOUTES les issues de son depot :
+    # issue des la 1re occurrence (cooldown seul), pas a la recidive. Le sujet est le NOM de la
+    # carte (payload "workflow_map") : c'est lui qui dit QUOI corriger.
+    incident: {op: workflow_map, subject: workflow_map, gate: immediate, escalate_kind: workflow_map_failed}
+
+  # --- Project : les deux fallbacks de declaration (source :project, `Fleet.Project.Incidents`) ---
+  # Le producteur publie vers le BAS (dep declaree) et `IncidentConsumer` convertit : c'est ainsi
+  # qu'un domaine sous le pilote atteint le registre d'incidents sans arete montante (BL-6-114).
+  # gate: immediate — une declaration qui ne charge pas refoirera a CHAQUE dispatch, et chaque
+  # occurrence d'ici le ticket est un projet qui tourne sur la carte par defaut sans que personne
+  # le sache. Sujet = le DEPOT : c'est sa declaration qu'on corrige (le detail — carte, fichier —
+  # est dans `reason_detail`).
+  project.card_failed:
+    source: project
+    action: incident
+    incident: {op: card, subject: repo, gate: immediate, escalate_kind: project_card_failed}
+  project.declaration_invalid:
+    source: project
+    action: incident
+    incident: {op: declaration, subject: repo, gate: immediate, escalate_kind: project_declaration_invalid}
+
+  # --- Deliverable (source :workflow — the publication IS a workflow op via Deliverable.publish) ---
+  # deliverable.published: emitted by `Pilot.StepRunCompleter` AFTER push + PR confirmed, carries
+  # `pod_id` (the producer pod, from the pod.completed payload). Consumed by `Spawner.Pod`: a
+  # resident pod (pipe) goes :publishing → :ready (its workspace has been READ/pushed, it can be
+  # reset for the next issue without racing the push).
+  deliverable.published: []
+  # deliverable.publish_lost (BL-6-03 S2): emitted by `Pilot.StepRunConsumer` when the OFFLOADED
+  # completion Task carrying a pod's publication DIES mid-work (witnessed by the Offload monitor's
+  # :DOWN; carries `pod_id` from the offload label meta + the death reason in the payload).
+  # Consumed by `Spawner.Pod`: a `:publishing` pipe lifts its flag NOW for a NAMED cause instead of
+  # expiring the 120s :publish_deadline blind — the deadline stays armed as the NET for the case
+  # where THIS event itself is lost.
+  deliverable.publish_lost: []
+
+  # --- TaskQueue lifecycle (source :task_queue, `TaskQueue.Server`) ---
+  # `work_item.completed` is the LOAD-BEARING one (`Broadcast.required/3`): the broker does not
+  # commit an item whose completion did not broadcast. The others are lossy observability.
+  work_item.enqueued: []
+  work_item.assigned: []
+  work_item.completed: []
+  work_item.cleared: []
+  work_item.failed: []
+
+  # --- MCP health (source :admiral, `Admiral.MCPMonitor`) ---
+  mcp.server_crashed: []
+
+  # --- Pilot step transitions (source :pilot) — every lock release is a step crossed,
+  # emitted at the unlock gesture (StepRunCompleter.unlock), consumed by the arch feed ---
+  step.unlocked: []

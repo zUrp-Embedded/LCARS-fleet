@@ -1,0 +1,99 @@
+defmodule Fleet.EventRouter.BusRegistryEmptyTest do
+  @moduledoc """
+  Checks both empty-registry policies on sampled types, their default, and the transition
+  to membership enforcement. A populated registry ignores the empty-registry flag.
+  """
+  use ExUnit.Case, async: false
+
+  alias Fleet.EventRouter.Bus
+
+  # Serialize global registry/config changes and restore the previous values on exit.
+  setup do
+    previous = Bus.authorized_event_types()
+    Bus.set_authorized_event_types(MapSet.new())
+    on_exit(fn -> Bus.set_authorized_event_types(previous) end)
+
+    # Tests set :permit_when_registry_empty themselves; capture-restore only.
+    Fleet.TestEnv.restore_env_on_exit(
+      :lcars_fleet,
+      :event_router_permit_when_registry_empty
+    )
+
+    :ok
+  end
+
+  defp ev(type), do: Fleet.Event.new(:spawner, type)
+
+  # Sample of arbitrary types (registered or not) — a mini-sweep exercising the property
+  # "the verdict depends ONLY on the regime, not on the precise type" when the registry is empty.
+  @arbitrary_types [
+    :"pod.completed",
+    :"phantom.never.registered",
+    :"work_item.completed",
+    :"some.random.type.xyz",
+    :wake_failed
+  ]
+
+  describe "EMPTY registry — explicit regime (:permit_when_registry_empty)" do
+    test "permit=true (default) → EVERY type passes (init safety-net, legacy behavior)" do
+      Application.put_env(:lcars_fleet, :event_router_permit_when_registry_empty, true)
+
+      for type <- @arbitrary_types do
+        assert :ok = Bus.broadcast("fleet.events", ev(type)),
+               "empty registry + permit=true must let #{inspect(type)} through"
+      end
+    end
+
+    test "IMPLICIT default (absent key) = permit (the safety-net is the default, not an option to set)" do
+      # The key is NOT set → the guard must fall back on the `true` default. Locks that the default
+      # is permissive (a fail-closed default would break early boot + all test hermeticity).
+      Application.delete_env(:lcars_fleet, :event_router_permit_when_registry_empty)
+      assert :ok = Bus.broadcast("fleet.events", ev(:"pod.completed"))
+    end
+
+    test "permit=false → EVERY type raises UnregisteredError (fail-closed)" do
+      Application.put_env(:lcars_fleet, :event_router_permit_when_registry_empty, false)
+
+      for type <- @arbitrary_types do
+        assert_raise Fleet.Event.UnregisteredError, fn ->
+          Bus.broadcast("fleet.events", ev(type))
+        end
+      end
+    end
+  end
+
+  describe "POPULATED registry — the flag has no effect anymore (strict membership validation)" do
+    # Whatever `permit_when_registry_empty` is, once the set is populated the guard decides by
+    # membership: the init window is closed, the flag only applies to an EMPTY set.
+    for permit <- [true, false] do
+      test "permit=#{permit}: type INSIDE passes, type OUTSIDE raises" do
+        Application.put_env(
+          :lcars_fleet,
+          :event_router_permit_when_registry_empty,
+          unquote(permit)
+        )
+
+        Bus.set_authorized_event_types(MapSet.new([:"pod.completed"]))
+
+        assert :ok = Bus.broadcast("fleet.events", ev(:"pod.completed"))
+
+        assert_raise Fleet.Event.UnregisteredError, fn ->
+          Bus.broadcast("fleet.events", ev(:"phantom.never.registered"))
+        end
+      end
+    end
+  end
+
+  test "empty→populated transition: an unregistered type passes while empty, raises once the set is populated" do
+    # Drive the registry setter directly; this checks policy transition, not actual boot ordering.
+    Application.put_env(:lcars_fleet, :event_router_permit_when_registry_empty, true)
+
+    assert :ok = Bus.broadcast("fleet.events", ev(:"phantom.never.registered"))
+
+    Bus.set_authorized_event_types(MapSet.new([:"pod.completed"]))
+
+    assert_raise Fleet.Event.UnregisteredError, fn ->
+      Bus.broadcast("fleet.events", ev(:"phantom.never.registered"))
+    end
+  end
+end

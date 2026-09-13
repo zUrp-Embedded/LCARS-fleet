@@ -1,0 +1,35 @@
+# Pipeline PoC — délégation hello-world (run live e2e 2026-06-14)
+#
+# But : prouver la chaîne de délégation minimale — l'engineer reçoit un brief
+# (l'ask passe via le contexte start_pipeline → build_brief), implémente, et
+# rend son livrable via submit_result. PAS de gate human-approval (caillou C1) ;
+# 1 seul step pour isoler la mécanique avant d'enrichir (qualifier/reviewer/gate).
+#
+# Statut : DÉMO — pipeline volontairement minimal (1 step, sans gate) pour prouver/démontrer la
+# chaîne de délégation de bout en bout. Canon en tant que démo, pas un pipeline de production
+# (les pipelines de prod ajoutent qualifier/reviewer/gatekeeper — cf. standard-qa).
+
+kind: WorkflowMap
+metadata:
+  name: poc-helloworld
+  status: demo
+  description: "PoC délégation : engineer implémente hello_world (1 step, no human-gate)"
+  presentation: "Carte TECHNIQUE — démo de la chaîne de délégation minimale : un engineer reçoit le brief, implémente, rend son livrable (1 step, aucune gate, jury qualifier + reviewer hérité). Sert à prouver la mécanique de bout en bout ; pour un vrai PoC, prendre c0-poc."
+
+spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
+  jury: [qualifier, reviewer]
+  # CI IGNORÉE — démo de la chaîne de DÉLÉGATION, réduite exprès à ce qu'elle prouve. Même raison
+  # que gk-smoke : ajouter une dépendance à un runner ferait échouer la démo pour une cause
+  # étrangère à ce qu'elle démontre. Pour un vrai PoC, prendre c0-poc ; pour du code jugé, c1-light.
+  ci: ignore
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+    implement:
+      role: engineer
+      needs: []
+      inputs:
+        - ticket.body
+      outputs:
+        - deliverable

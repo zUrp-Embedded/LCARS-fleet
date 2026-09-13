@@ -1,0 +1,23 @@
+---
+// UNE COMMANDE, REPLIABLE — meme <details> zero-JS que Tool.astro, adapte au manuel.
+// Replie : le synopsis + ses arguments (requis <…> visibles, optionnels […] discrets) + une ligne
+// courte (ce que fait la commande — le texte du script, ou la prose du verbe fleet).
+// Ouvert : la prose profonde (le pourquoi, les options) passee en slot.
+// Sans slot, l'entree N'EST PAS repliable (`nofold`) : rien a reveler, donc pas de fausse fleche.
+const { syn, args = [], blurb, tint = 'var(--dim)' } = Astro.props;
+const hasBody = Astro.slots.has('default');
+---
+<details class:list={['entry', !hasBody && 'nofold']} style={`--k:${tint}`}>
+  <summary>
+    <b class="nm">{syn}</b>
+    {args.length > 0 && (
+      <span class="args">
+        {args.map((t) => (
+          <i class:list={['arg', t.startsWith('<') ? 'rq' : t.startsWith('[') ? 'op' : 'lit']}>{t}</i>
+        ))}
+      </span>
+    )}
+    {blurb && <span class="blurb">{blurb}</span>}
+  </summary>
+  {hasBody && <div class="bd"><slot /></div>}
+</details>

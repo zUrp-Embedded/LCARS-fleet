@@ -1,0 +1,477 @@
+#!/usr/bin/env bash
+# SOURCE: bin/fleet
+# AUTHOR: starfleet
+# STARDATE: 2026-06-15
+# STATUS: PROTO-V2 — human launcher. `fleet start` runs the fleet AS the human, detached;
+#         starfleet (front-desk) comes up permanent and is reachable through Claude Desktop, NOT a
+#         terminal. No arch attach: the arch is per-project, spawned when a project is opened.
+
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+BIN_DIR="$(dirname "$SELF")"
+RUNTIME_DIR="$(dirname "$BIN_DIR")"
+
+cd "$HOME" || { echo "fleet: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD fiable" >&2; exit 1; }
+
+ERL_NODE="fleet_$(id -un)@127.0.0.1"
+ERL_COOKIE=""
+DIST_ON=""
+ENV_LOADED=""
+
+load_env() {
+  [[ -n "$ENV_LOADED" ]] && return 0
+  local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
+  # shellcheck source=/dev/null
+  if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
+  ENV_LOADED=1
+  ERL_COOKIE="${LCARS_FLEET_ERL_COOKIE:-lcars}"
+  [[ -n "${LCARS_FLEET_ERL_NODE:-}" ]] && DIST_ON=1 || true
+}
+TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
+SESSION="${LCARS_FLEET_SESSION:-fleet}"
+DAEMON_SOCK="${LCARS_FLEET_SOCK:-$HOME/.lcars/run/fleet.sock}"
+MIX_ENV_DEFAULT="${LCARS_FLEET_MIX_ENV:-prod}"
+
+# DUPLIQUE de `Fleet.Pilot.Poller.Admission.max_fan_ceiling/0` — une porte shell ne peut pas appeler
+# le BEAM. Un test lit ce litteral et le compare a l'autorite Elixir : les deux ne peuvent pas deriver.
+MAX_FAN_CEILING=15
+
+die() { echo "fleet: $*" >&2; exit 1; }
+dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
+
+# ⚠ AUCUN PORT DERIVE DE L'UID ICI, ET C'EST DELIBERE. La formule seduit (un numero deterministe
+# sans coordination) mais publie sur l'axe humain des faits qui n'y vivent pas, et l'UID venant de la
+# forge, les blocs ne sont meme pas contigus.
+
+setup_env() {
+  load_env
+  local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
+
+  # Forge active, 3 niveaux (le plus fort gagne) :
+  #   1. LCARS_FORGE pose dans l'env                             → override ONE-SHOT
+  #   2. ~/.lcars/forge.active (`fleet forge <nom>`)          → le commutateur PERSISTANT
+  #   3. sinon                                                   → `work`
+  # Source APRES l'env plat, donc le profil gagne. Sans profil, les FORGE_* du fichier plat tiennent.
+  local _forge_deliberate="${LCARS_FORGE+set}"
+  local forge_active_file="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
+  if [[ -z "$_forge_deliberate" && -r "$forge_active_file" ]]; then
+    local _active; _active="$(tr -d '[:space:]' < "$forge_active_file" 2>/dev/null || true)"
+    [[ -n "$_active" ]] && { LCARS_FORGE="$_active"; _forge_deliberate="set"; }
+  fi
+  : "${LCARS_FORGE:=work}"
+  local forge_file="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}/${LCARS_FORGE}.env"
+  if [[ -f "$forge_file" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$forge_file"
+    set +a
+  elif [[ -n "$_forge_deliberate" ]]; then
+    die "profil forge inconnu : « $LCARS_FORGE » — $forge_file absent (« fleet forge <nom> » vers un profil existant, ou ajoute le fichier)"
+  fi
+
+  : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour le scan des projets + le push}"
+
+  mkdir -p "$HOME/.lcars/run"
+
+  export LCARS_FLEET_MCP_BRIDGE_PATH="${LCARS_FLEET_MCP_BRIDGE_PATH:-$BIN_DIR/fleet_mcp_stdio_bridge.py}"
+
+  # Les trois launchers viennent du MEME $BIN_DIR : c'est son parent que la sandbox binde en RO.
+  # Les cap-profiles ne sont PAS poses ici — la release lit son priv bundle, et prod reste autonome.
+  export LCARS_BWRAP_LAUNCH_PATH="${LCARS_BWRAP_LAUNCH_PATH:-$BIN_DIR/bwrap_launch.sh}"
+  export LCARS_HOST_LAUNCH_PATH="${LCARS_HOST_LAUNCH_PATH:-$BIN_DIR/host_launch.sh}"
+  export LCARS_CLAUDE_LAUNCH_PATH="${LCARS_CLAUDE_LAUNCH_PATH:-$BIN_DIR/claude_launch.sh}"
+
+  # Exporte explicitement pour que le wait, l'attach et la CLI `lcars` calculent le MEME chemin.
+  export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
+
+  # Scope = THIS fleet life: a flag whose lifetime is a process's has no lifecycle of its own —
+  # nothing to toggle, nothing to persist, nothing to reconcile mid-run. Absent = off, and nothing
+  # in `etc/fleet.env.template` offers it: this is a start-time gesture, not a setting.
+  #
+  # Applied AFTER `load_env` so the flag beats the file, and by OR so it can only ever ADD.
+  apply_start_flags
+  [[ -n "${LCARS_DEBUG_VISIBILITY:-}" ]] && export LCARS_DEBUG_VISIBILITY
+  [[ -n "${LCARS_MAX_FAN:-}" ]] && export LCARS_MAX_FAN
+
+  # Sous le home : le defaut central (/run/lcars/mcp) n'est pas inscriptible sans privilege quand un
+  # HUMAIN lance la fleet. UNE source pour les deux cotes — runtime.exs cree la socket ici,
+  # bwrap_launch.sh binde le dossier par-pod au MEME chemin absolu dans la sandbox.
+  export LCARS_FLEET_MCP_SOCK_BASE="${LCARS_FLEET_MCP_SOCK_BASE:-$HOME/.lcars/run/mcp}"
+
+  export LCARS_FLEET_EGRESS_SOCK_BASE="${LCARS_FLEET_EGRESS_SOCK_BASE:-$HOME/.lcars/run/egress}"
+
+  export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
+  # AF_UNIX n'est PAS supprimee a la fermeture : la socket d'une instance morte reste et bloque le bind.
+  rm -f "$LCARS_API_SOCK"
+
+  # HOST-BOOT SIGNAL (D2) : runtime.exs ne declare `boot_environment: :host` que si ceci est pose —
+  # la declaration POSITIVE vient donc du launcher, jamais d'un fichier de config qui se declarerait
+  # lui-meme. L'env projete d'un pod est une liste blanche et ne porte rien de tel, donc un BEAM
+  # demarre dans ce monde reste :pod. NON surchargeable a dessein : seul fleet peut dire vrai ici.
+  export LCARS_HOST_BOOT=1
+
+  export LCARS_BOOT_PERMANENT_AT_START="${LCARS_BOOT_PERMANENT_AT_START:-true}"
+  export LCARS_PILOT_STEP="${LCARS_PILOT_STEP:-true}"
+
+  # La release distribue `-sname lcars_fleet` par DEFAUT — un nom FIXE partage : deux humains
+  # atterrissent sur le meme node de l'epmd partage et le second BEAM CRASHE. D'ou le forcage en
+  # node par-humain ou `RELEASE_DISTRIBUTION=none` dans cmd_start.
+
+  mkdir -p "$LCARS_TMUX_SOCK_BASE" "$LCARS_FLEET_MCP_SOCK_BASE" "$LCARS_FLEET_EGRESS_SOCK_BASE" "$(dirname "$DAEMON_SOCK")"
+
+  # Persist the computed runtime env so the human can drive `lcars` afterwards (`source` this file).
+  cat > "$HOME/.lcars/run/fleet.runtime.env" <<RT
+# Genere par fleet start — \`source\` pour utiliser lcars (spawn/list/attach) hors de cette session.
+export LCARS_API_SOCK="$LCARS_API_SOCK"
+export LCARS_TMUX_SOCK_BASE="$LCARS_TMUX_SOCK_BASE"
+export LCARS_FLEET_EGRESS_SOCK_BASE="$LCARS_FLEET_EGRESS_SOCK_BASE"
+RT
+}
+
+fleet_up_notice() {
+  echo "fleet: fleet up (daemon tmux). starfleet (front-desk) est dans Claude Desktop." >&2
+  echo "fleet: logs BEAM : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION » · un pod : « lcars attach <pod_id> »" >&2
+}
+
+parse_start_opts() {
+  while (( $# )); do
+    case "$1" in
+      --debug)
+        # Porte sur les pods lances TANT QU'IL EST ON : il ne rattrape pas ceux deja debout.
+        DEBUG_VISIBILITY_FLAG=1
+        shift
+        ;;
+      --max-fan)
+        # Le runtime RELIT la valeur a chaque decision de dispatch : elle se deplace a chaud, et un
+        # redemarrage revient a ce qui est tape ici.
+        shift
+        [[ $# -ge 1 ]] || die "--max-fan attend une valeur (1..${MAX_FAN_CEILING})"
+        [[ "$1" =~ ^[0-9]+$ ]] || die "--max-fan : « $1 » n'est pas un entier (1..${MAX_FAN_CEILING})"
+        (( $1 >= 1 && $1 <= MAX_FAN_CEILING )) ||
+          die "--max-fan $1 hors bornes (1..${MAX_FAN_CEILING} : au-dela, un role demanderait un siege de pool qui n'existe pas)"
+        MAX_FAN_FLAG="$1"
+        shift
+        ;;
+      --) shift; break ;;
+      -*)
+        die "option inconnue : $1 (voir « fleet help »)"
+        ;;
+      *) break ;;
+    esac
+  done
+
+  START_ARGS=("$@")
+}
+
+# Doit tourner APRES `load_env` : le fichier humain est source avec `set -a` et ecraserait ce que le
+# parseur a pose. Chaque drapeau est ADDITIF — il allume, il n'eteint jamais.
+apply_start_flags() {
+  [[ -n "${DEBUG_VISIBILITY_FLAG:-}" ]] && LCARS_DEBUG_VISIBILITY=1
+  [[ -n "${MAX_FAN_FLAG:-}" ]] && LCARS_MAX_FAN="$MAX_FAN_FLAG"
+  return 0
+}
+
+# Le siege vit dans un fichier `root:root` que le garde ne peut pas reecrire, et le FICHIER GAGNE sur
+# la variable : sans cette precedence, il suffirait de reposer la variable pour desarmer la garde.
+# AUCUN REPLI — fichier absent ou illisible = machine NON PROVISIONNEE, un etat et pas une valeur.
+seat_uid() {
+  local f v
+  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  [[ -r "$f" ]] || die "siege non declare ($f absent ou illisible) — cette machine n'est pas provisionnee, et GUARD B refuse un lancement qu'il ne peut pas verifier. « sudo deploy/provision apply » le pose."
+  v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+  # ⚠ LE NON-NUMERIQUE SE REFUSE, IL NE SE REMPLACE PAS : `(( x == abc ))` lit `abc` comme un NOM de
+  # variable en contexte arithmetique, donc `unbound variable` sous `set -u` — la garde MEURT au lieu
+  # de refuser. Meme cicatrice que `uid_floor` dans le convergeur.
+  [[ "$v" =~ ^[0-9]+$ ]] || die "siege illisible ($f ne porte pas un uid : « $v ») — GUARD B refuse un lancement qu'il ne peut pas verifier."
+  echo "$v"
+}
+
+cmd_start() {
+  parse_start_opts "$@"
+  set -- "${START_ARGS[@]}"
+
+  # GUARD B. Le siege ne peut PAS etre produit par une formule : le sysadmin est cree par l'entrypoint
+  # avec un uid EXPLICITE (`useradd -u ${LCARS_UID:-1000}`), hors du `forge_id + UID_OFFSET` par lequel
+  # le convergeur derive les humains — d'ou une condition, et non un intervalle.
+  local _uid _uid_min _uid_max _missing _defs
+  _uid="$(id -u)"
+  _defs="${PASSWD_DEFS:-/etc/login.defs}"
+  # ⚠ `|| true` LOAD-BEARING : sous `set -euo pipefail`, un `login.defs` absent fait echouer `awk`,
+  # donc la substitution, donc le script — qui MEURT SANS UN MOT avant d'avoir garde quoi que ce soit.
+  _uid_min="$(awk '$1 == "UID_MIN" {print $2; exit}' "$_defs" 2>/dev/null || true)"
+  _uid_max="$(awk '$1 == "UID_MAX" {print $2; exit}' "$_defs" 2>/dev/null || true)"
+  # ⚠ AUCUN REPLI SUR 1000 NI SUR 60000, et c'est delibere — la politique du BEAM que ce lanceur
+  # lance (config/runtime.exs, R-no-uid-min) et du protocole des humains (`uid_bounds`) : un
+  # login.defs illisible n'est pas « la frontiere est a 1000 », c'est « la frontiere n'est pas
+  # etablie », et une garde qui ne peut pas mesurer refuse. Le BEAM refuserait derriere de toute
+  # facon ; autant que le lanceur le dise, avec le meme mot. DEUX BORNES, comme le protocole, la
+  # console et le BEAM (lot 15) : au-dessus de UID_MAX vivent `nobody` (65534, sur toute machine)
+  # et les comptes de service hauts — et une seule borne lisible n'etablit pas la frontiere.
+  # Cinq lignes plutot qu'un `source` du protocole — il pose un vocabulaire fait pour un module,
+  # pas pour ce lanceur — et `fleet.bats` tient l'egalite de la phrase avec `UID_BOUNDS_WHY` du
+  # protocole, sur chacune des deux bornes.
+  _missing=""
+  [[ "$_uid_min" =~ ^[0-9]+$ ]] || _missing=UID_MIN
+  [[ -n "$_missing" || "$_uid_max" =~ ^[0-9]+$ ]] || _missing=UID_MAX
+  [[ -z "$_missing" ]] || die "refus de lancer une fleet sous l'uid $_uid : la frontiere systeme/humain n'est pas etablie ($_missing illisible dans $_defs) — la borne est declaree par le systeme, pas par ce processus : repare $_defs"
+  if (( _uid < _uid_min )); then
+    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte SYSTEME (uid < UID_MIN=$_uid_min, declare dans $_defs). Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
+  fi
+  if (( _uid > _uid_max )); then
+    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte HORS DE LA PLAGE DES HUMAINS (uid > UID_MAX=$_uid_max, declare dans $_defs) : nobody et les comptes de service hauts n'y sont pas. Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
+  fi
+  local _seat; _seat="$(seat_uid)"
+  if (( _uid == _seat )); then
+    die "refus de lancer une fleet sous l'uid $_uid (admiral/sysadmin) — lance-la sous un compte humain de la fleet (uid >= $(( _seat + 1 )))."
+  fi
+
+  command -v "$TMUX_BIN" >/dev/null 2>&1 || die "tmux introuvable ($TMUX_BIN)"
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    # Fleet ALREADY up: re-source the runtime env (to match the live fleet) and just report.
+    local rt="$HOME/.lcars/run/fleet.runtime.env"
+    # shellcheck source=/dev/null
+    [[ -r "$rt" ]] && { set -a; . "$rt"; set +a; }
+    echo "fleet: la fleet tourne." >&2
+    fleet_up_notice
+    return 0
+  fi
+  setup_env
+
+  local cred="$HOME/.claude/.credentials.json"
+  if [[ ! -s "$cred" && -z "${LCARS_START_WITHOUT_CLAUDE:-}" ]]; then
+    die "credentials claude absentes ($cred) — la fleet demarrerait, mais AUCUN pod ne peut penser (fail silencieux).
+  Geste d'identite : lance 'claude', /login, bonjour, /exit — puis relance 'fleet start'.
+  Demarrage sans agents assume : LCARS_START_WITHOUT_CLAUDE=1 fleet start"
+  fi
+
+  local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
+
+  # Le mode se DERIVE de l'endroit ou vit ce launcher, rien n'est code en dur. Dans les deux cas le
+  # catalogue est l'arbre source vivant : `_build/<env>/lib/lcars_fleet/priv` est un lien vers `priv/`.
+  local erl_node="$ERL_NODE" erl_cookie="$ERL_COOKIE" dist_on="$DIST_ON"
+
+  local rel_bin="$RUNTIME_DIR/rel/lcars_fleet/bin/lcars_fleet"
+  local mode launch_cmd
+  if [[ -x "$rel_bin" ]]; then
+    mode="release"
+    # The install is RO (system-owned) → the BEAM writes its tmp in the human's home, not the install.
+    export RELEASE_TMP="${RELEASE_TMP:-$HOME/.lcars/tmp}"
+    mkdir -p "$RELEASE_TMP"
+    # Override the `-sname lcars_fleet` default (shared → multi-human collision).
+    if [[ -n "$dist_on" ]]; then
+      export RELEASE_DISTRIBUTION=name RELEASE_NODE="$erl_node" RELEASE_COOKIE="$erl_cookie"
+    else
+      export RELEASE_DISTRIBUTION=none
+    fi
+    launch_cmd="exec '$rel_bin' start"
+  else
+    mode="dev (mix run, MIX_ENV=$mix_env)"
+    [[ -n "$dist_on" ]] && export ELIXIR_ERL_OPTIONS="-name $erl_node -setcookie $erl_cookie ${ELIXIR_ERL_OPTIONS:-}"
+    launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
+  fi
+
+  echo "fleet: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
+  echo "fleet: aucun port — API et deck sur socket, webhook eteint (decision)" >&2
+  echo "fleet: scan multi-projet — tout depot des orgs de catalogue (F-037, aucun repo fixe)" >&2
+
+  # Socket tmux DEDIEE : un serveur frais capture l'env exporte ci-dessus.
+  MIX_ENV="$mix_env" dtmux new-session -d -s "$SESSION" "$launch_cmd"
+  dtmux set -g mouse on 2>/dev/null || true
+
+  fleet_up_notice
+}
+
+# F7 : le `kill-server` tmux n'est que le FALLBACK. Un kill-server direct fait qu'AUCUN chemin
+# d'arret n'execute le rail Shutdown — le drain et le teardown ordonne pour lesquels il a ete bati.
+# LE BEAM EST LE PROCESS DU PANE, PAS UN DE SES ENFANTS — et cette ligne a coute le drain entier.
+#
+# `tmux new-session` lance `exec ...` : le shell du pane est REMPLACE, le script de release aussi,
+# jusqu'a `beam.smp`, qui garde donc le pid du pane. MESURE dans les DEUX modes le 2026-09-05 :
+# release (`comm` du pane = `beam.smp`) et `mix run` (le `sh` annonce son pid, le beam porte le
+# meme). Il n'y a pas de cas connu ou le beam soit ailleurs.
+#
+# Ce que le code cherchait — `pgrep -P <pane> | head -1` — est donc le premier ENFANT du beam :
+# `erl_child_setup`, l'auxiliaire qu'OTP fork pour ses ports. Le `SIGTERM` y allait, le BEAM n'en
+# recevait aucun, `Fleet.Application.prep_stop` (le drain) ne tournait JAMAIS, la boucle attendait
+# ses 90 s pour rien et `tmux kill-server` finissait le travail. Le « stop graceful » coupait donc
+# le travail en vol a chaque arret, et le boot suivant le disait sans que personne le lise :
+# « cold-boot sweep of stale socket ... (residue of a previous instance — kill -9?) ».
+#
+# FAIL-CLOSED, et c'est le fond de l'affaire : si le pane n'est pas un beam, on ne signale RIEN et
+# on dit ce qu'on a trouve. Viser un pid au juge est exactement ce qui a produit ce defaut ; un
+# refus nomme est ce qui l'aurait montre le premier jour.
+pane_comm() { # pane_comm <pid> -> le `comm` du process, ou « ? »
+  cat "${LCARS_PROC_DIR:-/proc}/${1:-}/comm" 2>/dev/null || echo "?"
+}
+
+beam_pid_of_pane() { # beam_pid_of_pane <pane_pid> -> le pid du BEAM, ou 1 sans rien imprimer
+  local pane="${1:-}"
+  [[ -n "$pane" ]] || return 1
+  [[ "$(pane_comm "$pane")" == "beam.smp" ]] || return 1
+  printf '%s\n' "$pane"
+}
+
+cmd_stop() {
+  load_env
+  if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "fleet: pas de fleet active." >&2
+    return 0
+  fi
+
+  # SIGTERM suffit, sans distribution Erlang : OTP le tourne en `:init.stop` et appelle `prep_stop`
+  # avant qu'un superviseur ne meure. Encore faut-il qu'il l'atteigne — `beam_pid_of_pane` porte
+  # cette question et ce qu'une erreur y coute.
+  echo "fleet: stop graceful (drain puis teardown, dans l'ordre)..." >&2
+  local pane_pid beam_pid
+  pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
+  beam_pid="$(beam_pid_of_pane "$pane_pid" || true)"
+
+  if [[ -n "$beam_pid" ]]; then
+    kill -TERM "$beam_pid" 2>/dev/null || true
+
+    # DERIVE de `LCARS_SHUTDOWN_GRACE_MS`, jamais un litteral pose ici (BL-6-52) : deux nombres pour
+    # un seul fait laisseraient le launcher rendre la main sur une fleet qui draine encore.
+    local _grace_s=$(( ${LCARS_SHUTDOWN_GRACE_MS:-45000} / 1000 ))
+    local i=0 max_wait="${FLEET_STOP_WAIT:-$(( _grace_s + 45 ))}"
+    while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < max_wait )); do
+      sleep 1
+      i=$((i + 1))
+    done
+  else
+    echo "fleet: BEAM introuvable sous la session tmux (pane=${pane_pid:-<aucun>}, " \
+      "comm=$(pane_comm "$pane_pid")) — AUCUN signal envoye, fallback kill direct." >&2
+  fi
+
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    dtmux kill-server 2>/dev/null || true
+    echo "fleet: BEAM mort (fallback kill — le prochain start reape les pods restants)." >&2
+  else
+    echo "fleet: BEAM mort proprement (drain puis teardown)." >&2
+  fi
+}
+
+status_debug_visibility() {
+  local pane_pid beam_pid env_file
+  pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
+  beam_pid="$(beam_pid_of_pane "$pane_pid" || true)"
+
+  # MEME DERIVATION QUE `cmd_stop`, ET ELLE ETAIT FAUSSE ICI AUSSI. Le defaut y etait invisible :
+  # `erl_child_setup` est forke PAR le beam, donc il herite de son environnement et la reponse
+  # tombait juste par accident. Un lecteur qui corrige un des deux sites doit corriger l'autre —
+  # d'ou la fonction partagee plutot que deux copies qui divergeront.
+  env_file="${LCARS_PROC_DIR:-/proc}/${beam_pid}/environ"
+
+  if [[ -z "$beam_pid" || ! -r "$env_file" ]]; then
+    echo "fleet: visibilite debug : indeterminee (environnement du BEAM illisible)"
+  elif tr '\0' '\n' < "$env_file" 2>/dev/null | grep -qx 'LCARS_DEBUG_VISIBILITY=1'; then
+    echo "fleet: visibilite debug : ON (pods spawnes pendant cette vie visibles dans Claude Desktop)"
+  else
+    echo "fleet: visibilite debug : off (relancer avec 'fleet start --debug' pour l'activer)"
+  fi
+}
+
+cmd_status() {
+  cmd_version
+  if dtmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "fleet: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
+    status_debug_visibility
+    LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
+      "$BIN_DIR/lcars" list 2>/dev/null || true
+  else
+    echo "fleet: fleet morte."
+  fi
+}
+
+# La version est OBSERVEE, jamais inferee — memes donnees que /api/version et que le log de boot.
+cmd_version() {
+  local rel_root="$RUNTIME_DIR/rel/lcars_fleet"
+  local build_file
+  # CE chemin doit suivre l'ecrivain BEAM (`Application.app_dir(:lcars_fleet, "priv/api/...")`) : sinon
+  # le glob rate, on retombe sur git — absent au runtime release — et le status MENT « build unknown ».
+  # ⚠ ET PAS « la premiere du glob » : une release peut porter une lib/lcars_fleet-<ancienne> que
+  # `mix release --overwrite` n'a pas retiree (banc 2003, 2026-09-05 : la 0.1.0 de passe5 a cote de la
+  # 0.9.0 vivante). La version qui DEMARRE est dans releases/start_erl.data — meme lecture que
+  # `release_app_dir` de l'installeur (deploy-release.sh, 60-deploy).
+  local _vsn _app=""
+  _vsn="$(awk '{print $2; exit}' "$rel_root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$_vsn" && -d "$rel_root/lib/lcars_fleet-$_vsn" ]]; then _app="$rel_root/lib/lcars_fleet-$_vsn"
+  else local _d=("$rel_root"/lib/lcars_fleet-*); [[ "${#_d[@]}" -eq 1 && -d "${_d[0]}" ]] && _app="${_d[0]}"; fi
+  build_file=""; [[ -n "$_app" && -f "$_app/priv/api/build_info.txt" ]] && build_file="$_app/priv/api/build_info.txt"
+
+  if [[ -n "$build_file" && -f "$build_file" ]]; then
+    # RELEASE: read the embedded file (key=value, written by write_build_info/1).
+    local sha dirty ref dflag=""
+    sha="$(sed -n 's/^sha=//p' "$build_file")"
+    dirty="$(sed -n 's/^dirty=//p' "$build_file")"
+    ref="$(sed -n 's/^ref=//p' "$build_file")"
+    [[ "$dirty" == "true" ]] && dflag="-dirty"
+    echo "fleet: build ${sha:-unknown}${dflag} ref=${ref:-<aucune : bati depuis un commit>} (source=release)"
+  else
+    # SOURCE/dev: git LIVE in the repo (git failure → unknown, never a hard error).
+    local sha ref dflag=""
+    sha="$(git -C "$RUNTIME_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    ref="$(git -C "$RUNTIME_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+    [[ -n "$(git -C "$RUNTIME_DIR" status --porcelain 2>/dev/null)" ]] && dflag="-dirty"
+    echo "fleet: build ${sha}${dflag} ref=${ref:-<illisible : git muet>} (source=working_tree)"
+  fi
+}
+
+cmd_forge() {
+  local name="${1:-}"
+  local state="${LCARS_FORGE_STATE:-$HOME/.lcars/forge.active}"
+  local dir="${LCARS_FORGE_DIR:-$HOME/.lcars/forge.d}"
+  if [[ -z "$name" ]]; then
+    local active="work (aucun switch en place)"
+    if [[ -r "$state" ]]; then local a; a="$(tr -d '[:space:]' < "$state")"; [[ -n "$a" ]] && active="$a"; fi
+    echo "fleet: forge active = $active"
+    if [[ -d "$dir" ]]; then
+      local profils=""
+      for f in "$dir"/*.env; do [[ -f "$f" ]] && profils+=" $(basename "$f" .env)"; done
+      echo "fleet: profils disponibles :${profils:- (aucun sous $dir)}"
+    else
+      echo "fleet: aucun profil (dir $dir absent)"
+    fi
+    return 0
+  fi
+  [[ -f "$dir/$name.env" ]] || die "profil forge « $name » inconnu ($dir/$name.env absent) — ajoute-le d'abord"
+  mkdir -p "$(dirname "$state")"
+  printf '%s\n' "$name" > "$state"
+  echo "fleet: forge active → $name (persistant ; le prochain « fleet start » l'utilise)"
+}
+
+cmd_restart() {
+  cmd_stop
+  cmd_start "$@"
+}
+
+# Source guard : sourcer le fichier charge les fonctions SANS lancer le dispatcher.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
+
+case "${1:-help}" in
+  start)   shift; cmd_start "$@" ;;
+  stop)    shift; cmd_stop "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
+  status)  shift; cmd_status "$@" ;;
+  version) shift; cmd_version "$@" ;;
+  forge)   shift; cmd_forge "$@" ;;
+  # `help` tombe ici EXPRES (c'est le defaut de `${1:-help}`) et sort en 1 : une invocation nue
+  # n'est pas un succes.
+  *)
+    cat >&2 <<'USAGE'
+usage: fleet {start|stop|restart|status|version|forge [nom]}
+
+  start [--debug] [--max-fan N]
+                    demarre la fleet (daemon tmux)
+                    --max-fan N : nombre de workflow_runs qu'UN projet tient en vol
+                              (1..15, defaut 5). 1 = serialise, un ticket de bout en bout.
+                              Relu a chaque decision de dispatch : ajustable en vol sur le
+                              node ; un redemarrage revient a la valeur tapee ici.
+                    --debug : les pods spawnes PENDANT cette vie de fleet sont visibles dans
+                              Claude Desktop, y compris ceux qui sont invisibles par defaut.
+                              Porte sur la vie de la fleet : ni bascule a chaud, ni reglage
+                              persistant, et sans effet sur les pods deja lances.
+USAGE
+    exit 1
+    ;;
+esac

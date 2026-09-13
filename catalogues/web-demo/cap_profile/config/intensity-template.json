@@ -1,0 +1,17 @@
+{
+  "_comment": "Gabarit du fichier intensity.json d'un projet. Copiez-le a la racine du projet et adaptez-le. LE NIVEAU EST UNE DECLARATION HUMAINE : il repond a 'que se passe-t-il si ce livrable est faux, et combien de temps va-t-il vivre'. Un agent ne s'auto-evalue pas — laisse a lui-meme, il revoit toujours la criticite a la baisse.",
+  "_schema": "lcars/intensity-v1",
+  "level": "C1",
+  "declared_at": "2026-08-10",
+  "declared_by": "tech-lead",
+  "justification": "NON DECLARE — valeur par defaut. Remplacez par la declaration de l'humain.",
+  "nature": "generic",
+  "pipeline_default": "standard",
+  "_levels_reference": {
+    "C0": "Jetable. Une maquette, un essai, une page qu'on refera. L'erreur ne coute rien.",
+    "C1": "Petit outil ou page interne. Vit quelques mois, peu d'utilisateurs.",
+    "C2": "Composant du produit. Evolue, d'autres s'appuient dessus.",
+    "C3": "Brique centrale. Une panne se voit immediatement, une regression coute cher.",
+    "C4": "Critique. Un echec a des consequences financieres, legales ou irreversibles."
+  }
+}

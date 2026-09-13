@@ -1,0 +1,119 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+const sections = [{ id: 'gain', label: 'Ce que vous gagnez' }, { id: 'tour', label: 'Le tour en 10 minutes' }, { id: 'refus', label: 'Ce qu’il refuse de faire' }];
+---
+<Site title="LCARS — Écrivez le brief, revenez sur une PR mergée" current="/" sections={sections}>
+
+    <header class="head">
+      <div class="elbow" aria-hidden="true"></div>
+      <div>
+        <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="eyebrow">Une flotte d'agents, tenue par une forge</p>
+        <h1>Un agent ne sera jamais déterministe.<br><em>Tout ce qui l'entoure l'est.</em></h1>
+        <p class="lede">Vous écrivez un brief, vous revenez sur une pull request mergée. Entre les
+        deux, l'inférence est confinée à la seule tâche qui la mérite — <b>produire</b>. Qui reçoit le
+        travail, qui a le droit de le juger, ce qui peut être fusionné : c'est de la mécanique,
+        garantie par du code et non par une consigne dans un prompt.</p>
+        <p class="claim">On ne promet pas l'absence d'erreur. On fait en sorte qu'elle soit
+        <em>visible</em>, <em>ciblée</em> et <em>bornée</em>.</p>
+        <p class="sig">tourne chez vous, dans un conteneur · s'appuie sur <b>votre</b> forge Gitea ·
+        rien de propriétaire à apprendre : des issues, des branches, des PR, des reviews</p>
+      </div>
+    </header>
+
+    <section id="gain">
+      <SectionHead id="gain" title="Ce que vous gagnez" cap="quatre choses, la quatrième porte les trois autres" />
+      <p class="intro">Faire écrire du code par un agent, tout le monde sait le faire aujourd'hui.
+      Ce qui manque, c'est la chaîne autour : qui décide du travail, qui le vérifie, et qui vous
+      prévient quand ça part de travers.</p>
+      <div class="bands">
+        <div class="band">
+          <div class="lab" style="background:var(--amber)"><b>Un moteur autonome</b><i>vous n'êtes pas dans la boucle</i></div>
+          <div class="body">Vous décrivez l'intention une fois. La flotte découpe, attribue, produit,
+          fait relire et livre. <b>Elle n'attend pas votre relance</b> : il n'y a pas de « continue »
+          à taper, pas de fenêtre à garder ouverte. Vous partez, ça tourne.</div>
+        </div>
+        <div class="band">
+          <div class="lab" style="background:var(--blue)"><b>Une forge qui se tient seule</b><i>rien de maison à apprendre</i></div>
+          <div class="body">Tout se passe dans les objets que vous connaissez déjà : une issue par
+          mission, une branche par livrable, une PR par livraison, des reviews pour les verdicts.
+          <b>Aucun tableau de bord obligatoire</b> — votre projet se lit dans l'outil que vous
+          utilisiez avant d'installer LCARS.</div>
+        </div>
+        <div class="band">
+          <div class="lab" style="background:var(--green)"><b>Du travail vérifié en sortie</b><i>pas d'auto-relecture</i></div>
+          <div class="body">Ce n'est jamais le producteur qui se relit. Le jury est composé
+          d'<b>autres agents</b>, avec d'autres mandats et d'autres identités sur la forge. Et le merge
+          n'est pas une politesse : l'agent qui a écrit le code <b>n'a pas le pouvoir</b> de le
+          fusionner, quoi qu'il en pense.</div>
+        </div>
+        <div class="band">
+          <div class="lab" style="background:var(--salmon)"><b>Et rien qui vous mente</b><i>la garantie des trois autres</i></div>
+          <div class="body">Une flotte autonome qui embellit ses résultats ne vaut rien — elle
+          déplace juste le travail de vérification. LCARS préfère s'arrêter que deviner, et le dit.
+          C'est le sujet de la dernière section, et c'est <b>le seul argument qui rende les trois
+          précédents crédibles</b>.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tour">
+      <SectionHead id="tour" title="Le tour en 10 minutes" cap="ce que vous faites, ce qu'elle fait" />
+      <p class="intro">Quatre temps. Deux vous appartiennent, deux ne vous demandent rien —
+      et c'est la proportion qui compte.</p>
+      <div class="ladder">
+        <div class="step"><div class="k" style="background:var(--mauve)"><b>Vous</b><i>2 minutes</i></div>
+          <div class="t"><b>Vous dictez l'intention</b>
+            <span>À l'agent qui vous répond, en langage humain. Il en fait un document versionné et
+            ouvre le ticket. Vous ne remplissez pas de formulaire.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--amber)"><b>Elle</b><i>vous partez</i></div>
+          <div class="t"><b>Le brief est jugé avant que quiconque code</b>
+            <span>Trop flou pour être exécuté, il vous revient tout de suite. C'est l'étape la moins
+            chère du parcours, et celle qui évite le plus de travail perdu.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--amber)"><b>Elle</b><i>vous êtes ailleurs</i></div>
+          <div class="t"><b>Le travail est produit, puis relu</b>
+            <span>Un agent implémente et livre ; d'autres relisent et votent. Un seul avis négatif
+            renvoie le travail — le jury est unanime, pas majoritaire.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--mauve)"><b>Vous</b><i>30 secondes</i></div>
+          <div class="t"><b>Vous relisez ce qui a été livré</b>
+            <span>La fusion a déjà eu lieu, et c'est tout l'intérêt&nbsp;: il n'y a pas de bouton à
+            presser pour que le travail existe. Vous lisez une pull request fermée, avec les avis
+            dedans et signés — et vous gardez tous les recours de git si vous n'êtes pas d'accord.</span></div></div>
+      </div>
+      <p class="note">Le seul moment où votre attention est requise, c'est le premier et le dernier.
+      Entre les deux, une seule chose peut vous rappeler : une escalade — et elle est explicite.</p>
+    </section>
+
+    <section id="refus">
+      <SectionHead id="refus" title="Ce qu'il refuse de faire" cap="et pourquoi c'est ce qui vend" />
+      <p class="intro">Un système d'agents qui ne dit jamais non paraît formidable pendant une
+      semaine. Ensuite on découvre ce qu'il a comblé tout seul. Les quatre refus qui suivent sont
+      la contrepartie exacte de la promesse d'en haut&nbsp;: c'est en s'interdisant ces
+      quatre gestes qu'un système garde des erreurs qu'on peut voir et cerner.</p>
+      <div class="ladder refus">
+        <div class="step"><div class="k" style="background:var(--salmon)"><b>ne devine pas</b></div>
+          <div class="t"><b>Un brief illisible ne devient pas un livrable approximatif</b>
+            <span>Il vous revient avec la raison. Un agent affamé de contexte invente — et une
+            supposition qui compile est le défaut le plus cher à trouver.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--yellow)"><b>ne comble pas</b></div>
+          <div class="t"><b>Une mesure impossible n'est jamais rendue verte</b>
+            <span>« Je n'ai pas pu regarder » et « j'ai regardé, tout va bien » sont deux réponses
+            différentes, et elles ne sont jamais confondues.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--mauve)"><b>ne contourne pas</b></div>
+          <div class="t"><b>Aucun agent ne peut sauter l'étape qui le juge</b>
+            <span>Ce n'est pas une consigne dans un prompt, c'est un pouvoir qu'il n'a pas :
+            il n'a ni accès à la forge, ni jeton, ni droit de fusion.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--faint)"><b>n'oublie pas</b></div>
+          <div class="t"><b>Rien d'important ne vit dans la mémoire d'un agent</b>
+            <span>Chaque décision est posée sur la forge avant de compter. Coupez tout au milieu,
+            rallumez : la flotte reprend là où elle en était, parce qu'elle relit.</span></div></div>
+      </div>
+      <blockquote style="margin-top:22px">
+        <p class="q">« Mieux vaut un échec explicite qu'un succès ambigu. »</p>
+        <p class="a">C'est la phrase qui explique le plus de comportements du système. Elle coûte
+        quelque chose : LCARS s'arrête plus souvent qu'un outil complaisant. En échange, quand il
+        ne s'arrête pas, ça veut dire quelque chose.</p>
+      </blockquote>
+    </section>
+</Site>

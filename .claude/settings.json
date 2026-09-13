@@ -1,0 +1,14 @@
+{
+  "skipDangerousModePermissionPrompt": true,
+  "projects": {
+    "$ARCHITECT_HOME": {
+      "hasTrustDialogAccepted": true
+    },
+    "/home/commons": {
+      "hasTrustDialogAccepted": true
+    },
+    "~": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}

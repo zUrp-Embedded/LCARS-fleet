@@ -1,0 +1,127 @@
+#!/usr/bin/env bats
+# bats file_tags=integration
+# SOURCE: deploy/tests/lib/door_gen.bats
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: bats tests for deploy/lib/door-gen.sh — la porte d'une version : constantes remplies, table complete, sha juste
+#
+# shellcheck disable=SC2016
+
+load ../refute
+
+setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+  GEN="$BATS_TEST_DIRNAME/../../lib/door-gen.sh"
+  TEMPLATE="$BATS_TEST_DIRNAME/../../../install.sh"
+  [ -f "$GEN" ]
+  [ -f "$TEMPLATE" ]
+  DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
+  printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
+  printf 'a1\n' > "$DIST/annexe-a.bin"
+  printf 'b2\n' > "$DIST/annexe-b.bin"
+  printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
+  printf 'sig\n'  > "$DIST/annexe-a.bin.minisig"
+}
+
+gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" LCARS_DOOR_IMAGE="${IMG-ghcr.io/o/r:0.9.0}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
+sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
+  bash -c "$(sed -n '/^sums() {/,/^}/p' "$1")"$'\nsums'
+}
+
+@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
+  run head -8 "$GEN"
+  [[ "$output" == *"SOURCE:"* ]]; [[ "$output" == *"AUTHOR:"* ]]; [[ "$output" == *"STARDATE:"* ]]; [[ "$output" == *"STATUS:"* ]]
+}
+
+@test "il est EXECUTABLE dans l index git" {
+  run git -C "$BATS_TEST_DIRNAME/../../.." ls-files -s deploy/lib/door-gen.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == 100755* ]]
+}
+
+@test "la TABLE couvre TOUS les artefacts du tiroir, avec leur sha256 juste — et rien d'autre" {
+  gen; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$DIST/install.sh" ]
+  local table; table="$(sums_of "$DIST/install.sh")"
+  ( cd "$DIST" && printf '%s\n' "$table" | sha256sum -c --quiet --strict )
+  [ "$(printf '%s\n' "$table" | grep -c .)" -eq 3 ]
+  local a; for a in lcars-fleet-0.9.0-otp27-x86_64.tar.gz annexe-a.bin annexe-b.bin; do
+    [ "$(grep -c "  $a\$" <<<"$table")" -eq 1 ] || { echo "$a manque a la table"; return 1; }
+  done
+  refute_out 'sha256|minisig|install\.sh' <<<"$table"
+}
+
+@test "les CONSTANTES sont remplies : --version dit le tag (pipee), BASE et la cle sont ecrites sur leurs lignes marquees" {
+  gen; [ "$status" -eq 0 ]
+  local porte="$DIST/install.sh"
+  run bash -c "cat '$porte' | bash -s -- --version"
+  [ "$output" = "0.9.0" ]
+  grep -qE '^DOOR_BASE="https://forge\.test/o/r/releases/download/0\.9\.0" +# @@DOOR_BASE@@' "$porte"
+  grep -qE '^MINISIGN_PUBKEY="RWQcle" +# @@DOOR_PUBKEY@@' "$porte"
+  grep -qE '^LCARS_DOOR_VERSION="0\.9\.0" +# @@DOOR_VERSION@@' "$porte"
+  grep -qE '^DOOR_IMAGE="ghcr\.io/o/r:0\.9\.0" +# @@DOOR_IMAGE@@' "$porte"
+  IMG="" gen; [ "$status" -eq 0 ]
+  grep -qE '^DOOR_IMAGE="" +# @@DOOR_IMAGE@@' "$porte"
+  local m; for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_IMAGE DOOR_SUMS_BEGIN DOOR_SUMS_END; do
+    [ "$(grep -c "@@$m@@" "$porte")" -eq 1 ]
+  done
+  [ -x "$porte" ]
+}
+
+@test "install.sh.sha256 est JUSTE — c'est ce que quelqu'un compare a ce qui lui est servi (§ 07.8)" {
+  gen; [ "$status" -eq 0 ]
+  [ -f "$DIST/install.sh.sha256" ]
+  ( cd "$DIST" && sha256sum -c --quiet --strict install.sh.sha256 )
+  [[ "$output" == *"sha256 de l'installeur : $(cut -d' ' -f1 < "$DIST/install.sh.sha256")"* ]]
+  local avant; avant="$(cat "$DIST/install.sh.sha256")"
+  gen; [ "$status" -eq 0 ]
+  [ "$(cat "$DIST/install.sh.sha256")" = "$avant" ]
+}
+
+@test "SANS cle publique : la porte est generee AVEC une cle vide, et le generateur le DIT — jamais en silence" {
+  PUB="" gen; [ "$status" -eq 0 ]
+  [[ "$output" == *"aucune clé publique"*"NON vérifiée"* ]]
+  grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
+  printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
+  PUB="" gen; [ "$status" -eq 0 ]
+  grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
+  refute_out 'aucune clé' <<<"$output"
+  refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
+}
+
+@test "REFUS : un tiroir vide, un gabarit sans marqueur, un tag ou une base mal formes — rien n'est ecrit" {
+  rm -f "$DIST"/*
+  gen; [ "$status" -eq 1 ]; [[ "$output" == *"aucun artefact"* ]]; [ ! -f "$DIST/install.sh" ]
+  printf 'kit\n' > "$DIST/k.tar.gz"
+  local mutile="$BATS_TEST_TMPDIR/gabarit-mutile.sh"
+  grep -v '@@DOOR_PUBKEY@@' "$TEMPLATE" > "$mutile"
+  run env LCARS_DOOR_TEMPLATE="$mutile" bash "$GEN" 0.9.0 https://f/x "$DIST"
+  [ "$status" -eq 1 ]; [[ "$output" == *"0 fois @@DOOR_PUBKEY@@"* ]]; [ ! -f "$DIST/install.sh" ]
+  run bash "$GEN" 'v0.9.0; rm -rf /' https://f/x "$DIST"
+  [ "$status" -eq 1 ]; [[ "$output" == *"tag"* ]]; [ ! -f "$DIST/install.sh" ]
+  run bash "$GEN" 0.9.0 ftp://f/x "$DIST"
+  [ "$status" -eq 1 ]; [[ "$output" == *"http(s)"* ]]; [ ! -f "$DIST/install.sh" ]
+}
+
+@test "le generateur ne SUBSTITUE pas, il rebatit : une base qui porte & ou \\ est recopiee telle quelle" {
+  run env LCARS_MINISIGN_PUBKEY="" bash "$GEN" 0.9.0 'https://f/x?a=1&b=2' "$DIST"
+  [ "$status" -eq 0 ]
+  grep -qF 'DOOR_BASE="https://f/x?a=1&b=2"' "$DIST/install.sh"
+}
+
+@test "pack.sh : la porte de la version est generee APRES les artefacts, dans un tiroir PAR VERSION (dist/<tag>) par liens durs" {
+  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
+  local body; body="$(grep -vE '^\s*#' "$pk")"
+  grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
+  grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
+  grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
+  local l_tar l_door; l_tar="$(grep -nE '^tar -czf "\$OUT"' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
+  [ -n "$l_tar" ]
+  [ -n "$l_door" ]
+  [ "$l_tar" -lt "$l_door" ]
+  grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
+  grep -qE '^for _f in deploy/docker/docker-compose\.yml deploy/docker/lcars-hardened-seccomp\.json' <<<"$body"
+  grep -qE 'artefact de la version introuvable' <<<"$body"
+}

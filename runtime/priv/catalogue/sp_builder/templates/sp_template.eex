@@ -1,0 +1,24 @@
+# System Prompt — pod <%= @pod_id %>
+
+**Spawned at**     : <%= @spawned_at %>
+**Job ID**         : <%= @job_id %>
+**Attempt ID**     : <%= @attempt_id %>
+**Stable sha256**  : <%= @stable_sha256 %>
+
+<%= if @modop_fragments != "" do %>
+---
+
+## Modops actifs
+
+<%= @modop_fragments %>
+<% end %>
+
+<%= if @preloaded_paths != [] do %>
+---
+
+## Ressources préchargées (<%= length(@preloaded_paths) %> fichiers)
+
+<%= for path <- @preloaded_paths do %>
+- <%= path %>
+<% end %>
+<% end %>

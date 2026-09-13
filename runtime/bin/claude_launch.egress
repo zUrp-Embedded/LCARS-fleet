@@ -1,0 +1,51 @@
+# SOURCE: bin/claude_launch.egress
+# AUTHOR: DrDree
+# STARDATE: 2026-08-11
+# STATUS: the ONLY place `api.anthropic.com` is written in this repository
+#
+# Egress declaration of the `claude` vendor: the hosts its launcher needs to reach, one per line.
+# Read by `Fleet.Spawner.Pod.Egress.Vendor`, resolved FROM the launcher path so the two can never
+# name different vendors.
+#
+# A pod is sealed (`--unshare-all`, no `--share-net`) and leaves through a CONNECT proxy on a unix
+# socket. This list is that proxy's allowlist for every pod, whatever its role; a role that browses
+# adds its own hosts on top, and every other role gets exactly this.
+#
+# A SECOND VENDOR BRINGS ITS OWN: `bin/codex_launch.sh` would sit beside a `bin/codex_launch.egress`
+# naming `api.openai.com`. Adding a vendor is adding two files next to the others — never editing a
+# list inside the runtime, which is what would make the projected world itself vendor-aware.
+#
+# ─── WHERE THIS LIST COMES FROM ───────────────────────────────────────────────────────────────
+# Anthropic PUBLISHES the one a sandboxed Claude Code expects (`sandbox-runtime`, the "sandbox
+# environments" doc, managed-settings). It is READ, never reconstructed host by host: the first
+# version of this file carried a single entry, and a pod that reaches neither statsig nor sentry has
+# no channel to say what it is missing — it fails silently, and the wall looks like a broken network.
+#
+# And the published list is not copied blind either. It is the starting point; the wall is the
+# present state, and the two are crossed — see Datadog below.
+api.anthropic.com
+
+# TELEMETRY. Not optional here: `bwrap_launch.sh` rules on it — "telemetry OFF -> the agent falls
+# back to the `engage` kick instead of the MONITOR. We PREFER the Monitor, so telemetry is ON by
+# default." The telemetry->Monitor coupling lives on the Anthropic relay side.
+# WARNING: switch it off with ITS OWN knob (`LCARS_POD_DISABLE_TELEMETRY=1`), never by removing
+# these lines — removing them leaves the config declaring a rail the relay never receives.
+statsig.anthropic.com
+statsig.com
+# The address actually OBSERVED on this bench, which no doc carries: the relay moved.
+http-intake.logs.us5.datadoghq.com
+
+# ERROR REPORTING. The subdomains are required, and forgetting them in an enforced allowlist is a
+# known bug on their side (claude-code#66567).
+sentry.io
+*.sentry.io
+*.ingest.us.sentry.io
+
+# ─── WHAT IS DELIBERATELY ABSENT ──────────────────────────────────────────────────────────────
+# `registry.npmjs.org` — on the published list, but an LCARS pod installs no package: its vendor is
+# already laid down in its world. To be added the day a role needs it, not before.
+#
+# `raw.githubusercontent.com` — the CLI binary names it for its CHANGELOG (and for playwright, never
+# invoked). It is on NO official list: it appears only in the "GitHub recipe", an example for
+# whoever wants to GRANT GitHub access. It was added here on a 0.7s correlation and then removed —
+# a changelog is not a reason to open an egress.

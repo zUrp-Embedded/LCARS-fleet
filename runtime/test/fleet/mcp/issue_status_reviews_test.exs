@@ -1,0 +1,239 @@
+defmodule Fleet.MCP.IssueStatusReviewsTest do
+  @moduledoc """
+  Status rendering preserves review bodies and timestamps alongside verdicts so
+  otherwise identical approvals remain distinguishable. Missing records is a
+  partial response, distinct from a forge outage. Policy forwarding is tested
+  against the project-card fallback, without exercising the engraved-issue route.
+  """
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
+
+  alias Fleet.Forge.PayloadFixture
+  alias Fleet.MCP.PodTools
+  alias Fleet.TestEnv
+
+  @qualifier %{
+    "login" => "qualifier",
+    "verdict" => "approved",
+    "submitted_at" => "2026-08-04T10:00:01Z",
+    "body" => ""
+  }
+
+  @reviewer %{
+    "login" => "reviewer",
+    "verdict" => "approved",
+    "submitted_at" => "2026-08-04T10:00:59Z",
+    "body" => "Gate vert, 3 cas limites verifies, cf. gate-brief @ abc123."
+  }
+
+  defmodule Forge do
+    @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
+
+    def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
+
+    @impl true
+    def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open", "title" => "Brique"}}
+
+    @impl true
+    def list_pulls(_repo, _opts),
+      do:
+        {:ok,
+         [
+           PayloadFixture.pull(
+             number: 6,
+             state: "open",
+             merged: false,
+             head_ref: "lcars/issue-42-eng_sw",
+             head_sha: "deadbeef"
+           )
+         ]}
+
+    @impl true
+    def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
+
+    @impl true
+    # Ce monde n'a pas de route gravée : la politique de verdict retombe donc sur la carte du
+    # projet, et le rendu arch exerce le repli plutôt que la branche carte-de-l'issue.
+    def get_route(_repo, _number, _opts), do: :none
+
+    @impl true
+    def pr_review_state(_repo, _index, opts) do
+      send(self(), {:review_state_opts, opts})
+      Process.get(:review_state)
+    end
+
+    @impl true
+    def create_issue(_r, _t, _b, _o), do: raise("read-only")
+    @impl true
+    def add_label(_r, _n, _l, _o), do: raise("read-only")
+    @impl true
+    def repo_label_id(_r, _n, _o), do: raise("read-only")
+    @impl true
+    def post_comment(_r, _n, _b, _o), do: raise("read-only")
+    @impl true
+    def close_issue(_r, _n, _o), do: raise("read-only")
+    @impl true
+    def close_pr(_r, _n, _o), do: raise("read-only")
+    @impl true
+    def list_open_issues(_r, _o), do: {:ok, []}
+    @impl true
+    def merged_pr_of_issue(_r, _n, _o), do: :none
+  end
+
+  setup do
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, Forge)
+
+    TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _ ->
+      {:ok, %{role: "architect", repo: "fleet/demo"}}
+    end)
+
+    :ok
+  end
+
+  defp status do
+    {:ok, %{content: [%{"text" => txt}]}, _} =
+      PodTools.handle_tool_call("issue_status", %{"number" => 42}, %{pod_id: "pod-arch"})
+
+    Jason.decode!(txt)
+  end
+
+  describe "the substance reaches the architect" do
+    setup do
+      Process.put(:review_state, {
+        :ok,
+        %{
+          verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+          reviewers: ["qualifier", "reviewer"],
+          records: [@qualifier, @reviewer],
+          outcome: :approved
+        }
+      })
+
+      :ok
+    end
+
+    test "each verdict arrives with its body and its timestamp" do
+      pr = status()["pr"]
+
+      assert [q, r] = pr["reviews"]
+      assert q["login"] == "qualifier"
+      assert q["submitted_at"] == "2026-08-04T10:00:01Z"
+      assert r["body"] =~ "gate-brief"
+    end
+
+    test "an EMPTY body is kept — 'approved and wrote nothing' is the fact worth seeing" do
+      [q, _] = status()["pr"]["reviews"]
+
+      assert q["verdict"] == "approved"
+      assert q["body"] == ""
+    end
+
+    test "the two approvals are now distinguishable, which is the entire point" do
+      [q, r] = status()["pr"]["reviews"]
+
+      assert q["verdict"] == r["verdict"]
+      refute q["body"] == r["body"]
+      refute q["submitted_at"] == r["submitted_at"]
+    end
+
+    test "the routing verdicts are untouched — this ADDS, it does not replace" do
+      pr = status()["pr"]
+
+      assert pr["verdicts"] == %{"qualifier" => "approved", "reviewer" => "approved"}
+      assert pr["review"] == "approved"
+    end
+  end
+
+  describe "the signpost travels in the answer" do
+    setup do
+      Process.put(
+        :review_state,
+        {:ok, %{verdicts: %{}, reviewers: [], records: [], outcome: :no_jury}}
+      )
+
+      :ok
+    end
+
+    test "the status names the tool that holds the thread and the timestamps" do
+      result = status()
+
+      assert result["voir_aussi"] =~ "get_issue(42)"
+      assert result["voir_aussi"] =~ "horodatages"
+    end
+
+    test "it says WHY the two are not redundant — one derives, the other restores" do
+      # Explain the thread link's distinct contents so callers do not mistake it for duplicate status.
+      assert status()["voir_aussi"] =~ "DÉRIVE"
+    end
+  end
+
+  describe "nothing true to say" do
+    test "no in-force review → the key is ABSENT, never an empty list" do
+      Process.put(
+        :review_state,
+        {:ok,
+         %{
+           verdicts: %{},
+           reviewers: ["qualifier"],
+           records: [],
+           outcome: {:pending, ["qualifier"]}
+         }}
+      )
+
+      pr = status()["pr"]
+
+      refute Map.has_key?(pr, "reviews")
+      assert pr["review"] == "pending"
+    end
+  end
+
+  describe "the two degraded paths must not be confused" do
+    test "a seam WITHOUT :records renders the verdicts and says so — it is not an outage" do
+      Process.put(
+        :review_state,
+        {:ok,
+         %{verdicts: %{"qualifier" => :approved}, reviewers: ["qualifier"], outcome: :approved}}
+      )
+
+      log = capture_log(fn -> send(self(), {:pr, status()["pr"]}) end)
+      assert_received {:pr, pr}
+
+      assert pr["verdicts"] == %{"qualifier" => "approved"}
+      assert pr["review"] == "approved"
+      refute Map.has_key?(pr, "reviews")
+      assert log =~ "returned no :records"
+      refute log =~ "forge unreachable"
+    end
+
+    test "a MUTE forge is the other message, and it does not claim an empty jury" do
+      Process.put(:review_state, {:error, :forge_down})
+
+      log = capture_log(fn -> send(self(), {:pr, status()["pr"]}) end)
+      assert_received {:pr, pr}
+
+      assert pr["review"] == "unknown"
+      assert log =~ "forge unreachable"
+      refute log =~ "returned no :records"
+    end
+  end
+
+  describe "C2 — la surface arch et le gate lisent la MÊME politique" do
+    test "la politique de verdict traverse jusqu'à la lecture d'état" do
+      # Assert the resolved policy value, not just key presence: nil would leave the jury
+      # read without the project's threshold. The fixture has no engraved route, so
+      # it exercises the project-card fallback. head_sha below is checked only for presence.
+      Process.put(:review_state, {:ok, %{verdicts: %{}, reviewers: [], records: []}})
+      _ = status()
+
+      assert_received {:review_state_opts, opts}
+
+      assert Keyword.fetch!(opts, :verdict_policy) == %{"block_at" => "critical"},
+             "la surface arch a lu l'état du jury SANS la courbe du projet : elle peut afficher " <>
+               "approuvé pendant que le gate renvoie en rework"
+
+      assert Keyword.has_key?(opts, :head_sha),
+             "témoin : le scoping par commit voyage toujours par la même porte"
+    end
+  end
+end

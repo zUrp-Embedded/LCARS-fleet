@@ -1,0 +1,26 @@
+# Memory-X V1 monk beta — pod permanent Type 1 (boot_at_start)
+# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile monk" L142-167 + registry beta.yaml entree "findings-old"
+# budget canon-derive engineer.yaml (DN monk template sans budget ; schema l'exige).
+# ADR #565 verdict B applique : sp_template sous knowledge, subagent_template retire (G24-11 N/A pour monks permanents).
+kind: CapabilityProfile
+metadata:
+  name: monk-beta-findings-old
+  containment: bwrap
+spec:
+  invocation:
+    boot_at_start: true
+    lifetime_scope: forever
+    host_native: false
+    mcp_channels:
+      - "fleet-control.memory.beta.query.*"
+  scope:
+    allowedTools: [Read]
+    disallowedTools: [Bash, Edit, Write, WebFetch, WebSearch, code_execution, bash_code_execution]
+    boundary: read-only-pod
+  knowledge:
+    sp_template: monk
+    monk_registry: beta.yaml
+    monk_instance: findings-old
+  modop_set:
+    default: [archive-mode, fire-mode]
+  injects: {}

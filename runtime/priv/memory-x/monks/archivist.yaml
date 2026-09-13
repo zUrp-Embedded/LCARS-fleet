@@ -1,0 +1,25 @@
+# Memory-X V1 archivist — pod permanent Type 1 (consolide reponses monks)
+# DERIVED FROM: 04_design-notes/ring2/fleet_memory.md §"Cap-profile archivist" L297-321
+# budget canon-derive (DN archivist template sans budget). GAP G24-11 #565 (subagent_template).
+kind: CapabilityProfile
+metadata:
+  name: archivist
+  containment: bwrap
+spec:
+  invocation:
+    boot_at_start: true
+    lifetime_scope: forever
+    host_native: false
+    mcp_channels:
+      - "fleet-control.memory.alpha.response.*"
+      - "fleet-control.memory.beta.response.*"
+  scope:
+    allowedTools: [Read]
+    disallowedTools: [Bash, Edit, Write, WebFetch, WebSearch, code_execution]
+    boundary: read-only-pod
+  knowledge:
+    sp_template: archivist
+    consolidation_strategy: "judged-pointers"
+  modop_set:
+    default: [archive-mode, fire-mode]
+  injects: {}

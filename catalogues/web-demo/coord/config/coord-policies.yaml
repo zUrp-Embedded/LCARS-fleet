@@ -1,0 +1,57 @@
+# =============================================================================
+#  POLITIQUES D'ESCALADE — que faire quand quelque chose se passe mal
+# =============================================================================
+#
+# Ce fichier est une TABLE, pas du code : a chaque evenement anormal, il associe
+# une action et un chemin de remontee. C'est le dernier morceau du catalogue, et
+# le plus court.
+#
+# La cle est le nom de l'evenement, tel que le runtime l'emet.
+#
+#   action           ce qu'on fait
+#     notify_dashboard   on l'affiche, le cycle continue
+#     escalate_human     on remonte a un humain — quelque chose est bloque
+#
+#   escalation_path  par ou l'information passe, dans l'ordre
+#     dashboard          le tableau de bord de la flotte
+#     issue_comment      un commentaire sur le ticket concerne
+#     starfleet_alert    l'alerte de niveau flotte
+#
+# COMMENT CHOISIR. La question est : « est-ce que quelqu'un doit se lever ? »
+# Si le systeme peut continuer sans intervention, c'est `notify_dashboard`. Si
+# rien n'avancera tant qu'un humain n'a pas agi, c'est `escalate_human`.
+#
+# Mettre `escalate_human` partout est le reflexe de depart, et c'est une erreur :
+# une alerte qui se declenche pour tout n'est plus lue au bout d'une semaine, et
+# celle qui comptait passe avec les autres.
+# -----------------------------------------------------------------------------
+
+mappings:
+  # Le signataire refuse la fusion. Ce n'est PAS une anomalie : c'est le systeme
+  # qui fonctionne. On l'affiche et on commente le ticket, personne ne se leve.
+  "halt.gatekeeper.refuse":
+    action: notify_dashboard
+    escalation_path:
+      - dashboard
+      - issue_comment
+
+  # Un agent s'ecarte de sa mission. Rien ne le rattrapera tout seul : un humain
+  # doit regarder.
+  "escalate.pod_drift":
+    action: escalate_human
+    escalation_path:
+      - dashboard
+      - starfleet_alert
+
+  # Une carte de pipeline a echoue en cours de route. Le ticket est immobilise ;
+  # on l'affiche et on l'ecrit sur le ticket pour que ce soit visible la ou on le
+  # cherchera.
+  "escalate.workflow_map_failed":
+    action: notify_dashboard
+    escalation_path:
+      - dashboard
+      - issue_comment
+
+  # Les identifiants d'acces ne se renouvellent plus. Plus rien ne fonctionnera
+  # d'ici peu : c'est l'archetype de l'evenement qui merite de reveiller
+  # quelqu'un.

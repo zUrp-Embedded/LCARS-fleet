@@ -1,0 +1,214 @@
+# Cap-profile: architect
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile.json
+kind: CapabilityProfile
+metadata:
+  name: architect
+  # vitrine: Il vous parle | Votre interlocuteur une fois le projet ouvert : starfleet tient le portefeuille, lui tient le travail. Il traduit votre intention en brief versionné, ouvre les tickets, et vous rend la main quand la flotte bloque.
+  # bwrap: the arch is persistent AND sandboxed. Its real need = seeing every project
+  # (via the catalogue mounts below), NOT "being the human's home" (a host_launch side
+  # effect — harmful: doctrine contamination through the human's ~/.claude + zero sandbox).
+  # Under bwrap, HOME=pod_dir -> claude reads pod_dir/.claude, never the human's ~/.claude,
+  # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
+  containment: bwrap
+  # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
+  # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
+  # `vendor-only` : leur matiere de reference arrive par leur brief, leur lot, ou la face montee.
+  # C'est une DECLARATION, pas une derivation : le jour ou un producteur en a besoin, il le dit.
+  network: egress
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID.
+  # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la
+  # convention se LIT sans documentation : une lettre = un role de la mecanique, un chiffre
+  # = un role metier. `0` reste l'accueil de niveau flotte, parce que 0 est deja la valeur
+  # du « sans dimension » partout ailleurs dans cet UUID (starfleet est minte sur repo 0000).
+  # Ce role portait 1 avant le 2026-08-10 : il occupait un chiffre dont le metier a besoin.
+  role_index: 13   # 0xd
+  # PER-PROJECT (reorg 2026-07-19): the architect is a project-bound worker, ONE per active project,
+  # spawned on-open by starfleet (repo in its UUID → a stable Desktop slot per repo).
+  # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`
+  # (effective_project). Narrow focal length = the container it cannot reach out of.
+spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  # `onboarder` was here and is GONE: onboarding means enrolling a project into the fleet, and this
+  # role lives INSIDE one project. The capability was inert anyway — `require_onboarder` guards the
+  # portfolio tools (create/import/open/adopt/close/revise), and `allowedTools` below carries none
+  # of them, by the same reorg that wrote the comment there. So the declaration granted nothing and
+  # described nothing; it only made `onboarder` look like a capability with two carriers, which is
+  # the fact the cardinality regimes were reasoned from.
+  capabilities: [project_delegate]
+  # Worker role (interactive): brief = executable instruction, never a judge. REQUIRED (schema) — never inferred.
+  brief_kind: worker
+  # Fleet AND human on the same terminal: the machine kicks this pod (`wake_send_keys: true`,
+  # spawned on-open with no brief) and a human talks to it through `lcars attach` / the Desktop
+  # bridge. Both contracts are injected — the work-item cycle AND the human addendum. REQUIRED
+  # (schema): before this field existed, every pod was served the machine contract unconditionally,
+  # so this interactive role held one telling it no handoff exists.
+  interlocutor: both
+  scope:
+    # Tool naming convention (consistent with G24-9):
+    #   - PascalCase  = native Claude Code tools, run POD-SIDE by the CLI
+    #   - snake_case  = Anthropic API server tools, executed SERVER-SIDE
+    # The 2 namespaces are DISJOINT — no contradiction when a name appears in both lists
+    # (e.g. `WebFetch` allowed pod-side + `web_fetch` disallowed server-API-side).
+    #
+    # ⚠ WHAT ENFORCES THEM, and it is not what this comment used to say. It named the SDK's
+    # `can_use_tool` permission callback; this deployment does not use the SDK and has no such
+    # callback anywhere — `claude_launch.sh` passes `--permission-mode default` plus these two
+    # lists to the CLI, and the vendor decides. Naming a mechanism the runtime does not have made a
+    # reader believe the enforcement was ours and auditable in `lib/`.
+    #
+    # ⚠ THE TWO LISTS ARE NOT THE SAME KIND OF THING, AND THIS COMMENT SAID THEY WERE. It read
+    # "the lists declare, they do not construct" — half right, and the wrong half was load-bearing.
+    # Measured on a bench 2026-08-09, CLI 2.1.221, three runs of one prompt that asks for `Bash`:
+    #
+    #   allow=Bash            deny=—      -> the tool runs
+    #   allow=Read (no Bash)  deny=—      -> the tool runs ANYWAY        <- allow DECLARES
+    #   allow=Bash            deny=Bash   -> the tool is ABSENT from the session, and deny beats
+    #                                        allow when both name it     <- deny CONSTRUCTS
+    #
+    # So: `allowedTools` is an INTENT — a tool merely missing from it stays reachable.
+    # `disallowedTools` is a WALL: the CLI removes the tool from the session, and it validates its
+    # own rules ("Permission deny rule X matches no known tool") so a typo announces itself instead
+    # of silently opening.
+    #
+    # ⚠ AND IN A POD THE ALLOW LIST DOES NOT MERELY DECLARE — IT DECIDES WHAT DOES NOT HANG.
+    # The three runs above were `-p` (one shot, nobody to prompt), where an unlisted tool simply
+    # proceeded. A pod runs `--remote-control` with `--permission-mode default`, and MEASURED there
+    # on 2026-08-09: a scribe reached for `NotebookEdit` — absent from its allow list AND from its
+    # deny list — and the CLI asked "Do you want to insert this cell? 1. Yes 2. Yes, allow all
+    # 3. No". The pod froze on that prompt. Not refused: WAITING, and nobody answers a pod.
+    #
+    # So a tool missing from `allowedTools` is not a tool the pod will avoid — it is a tool that
+    # WEDGES it: still "alive", holding its slot and the ticket's `lcars-in-flight` lock, producing
+    # nothing. `claude_launch.sh` names this for MCP tools ("an unlisted MCP tool PROMPTS → headless
+    # hang"); it holds for native tools too. The list must therefore cover everything a role might
+    # LEGITIMATELY reach for, not only what we want it to do — and a gap shows up neither at the
+    # gate, nor at spawn, nor in a log, only in a pod that returns nothing.
+    #
+    # The recovery chain DOES hold (seen end to end on the bench): pod.failed →
+    # `exited_before_result` → incident → the poller's reconciliation finds the orphan lock
+    # ("no live pod (dead/reaped) → reclaiming") → re-dispatch. It works well enough that the next
+    # pod goes and wedges in the same place, which is exactly what makes the gap expensive.
+    #
+    # 🛑 DO NOT RE-MEASURE THIS WITH `-p`. That mode is FORBIDDEN for production here — it is under
+    # a x50 billing reprieve from the vendor (user, 2026-08-09). The admissible probe is a real pod
+    # given a work item whose deliverable IS the report of what it could invoke, which is also the
+    # only mode that answers the question being asked.
+    #
+    # THE RULE THAT FOLLOWS: what a role must NOT do belongs in `disallowedTools`. Leaving it out of
+    # `allowedTools` closes nothing and reads exactly like closing it.
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Bash
+      - Write
+      - Edit
+      - WebFetch       # PascalCase: native Claude Code tool, allowed pod-side
+      - WebSearch      # PascalCase: native Claude Code tool, allowed pod-side
+      - ToolSearch     # PascalCase: loads the deferred tools (Monitor, mcp__fleet__*)
+      - Monitor        # PascalCase: wake-by-flag (watch.sh) — wake without content send-keys
+      # 6-136 — ORDONNÉ PAR UN MODOP DE CE RÔLE, DONC IL DOIT ÊTRE DANS LA LISTE. Le bundle
+      # `brainstorming` (déclaré ici en `modop_set.optional`) écrit « You MUST create a TodoWrite
+      # task pour chaque item » ; l'outil n'était dans aucune des deux listes. C'est exactement le
+      # cas mesuré au-dessus le 2026-08-09 : sous `--permission-mode default`, un outil absent
+      # d'`allowedTools` ne se saute pas, il PROMPTE — et un pod n'a personne pour répondre. Un
+      # modop que le catalogue accepte pouvait donc GELER le pod qui l'active, verrou du ticket
+      # compris. La règle écrite trois lignes plus haut s'applique littéralement : la liste couvre
+      # ce que le rôle peut LÉGITIMEMENT atteindre, pas seulement ce qu'on veut qu'il fasse.
+      # ⚠ LA RAISON CI-DESSUS A CHANGÉ LE 2026-08-19 (sortie de superpowers) : le bundle
+      # `brainstorming` qui ORDONNAIT ce TodoWrite n'existe plus. L'outil RESTE, et c'est
+      # délibéré — le retirer parce que son commanditaire a disparu rejouerait exactement le
+      # gel 6-136 : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
+      # saute pas, il PROMPTE, et un pod n'a personne pour répondre. La règle écrite plus haut
+      # tient toute seule sans le modop : la liste couvre ce que le rôle peut LÉGITIMEMENT
+      # atteindre, et un rôle de conception atteint légitimement une liste de tâches.
+      - TodoWrite
+      # Role-specific fleet MCP tools of the arch — the DELEGATION head ONLY (its project). Onboarding
+      # (framing and onboarding) belongs to starfleet (fleet-master) since the
+      # 2026-07-19 reorg — the arch works INSIDE one project, it does not organize the portfolio.
+      # The universal work-item pair comes from the launcher.
+      - mcp__fleet__issue_create
+      - mcp__fleet__issue_status
+      - mcp__fleet__escalation_list  # return channel: reads the awaits-arch escalations (worker verdict)
+      - mcp__fleet__issue_list       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
+      - mcp__fleet__issue_get         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
+      - mcp__fleet__issue_comment     # return channel: replies on an in-flight ticket (in the role's name)
+      # Rail toolchain (chantier admiral 2026-08-19) : l'arch peut demander un outillage AVANT que
+      # les producers butent dessus (anticiper une toolchain, un essai voulu par l'humain). La
+      # demande reste une PR vers `tool_request` qu'un admin signe — le grant n'installe rien.
+      - mcp__fleet__scratch           # gare une note dans le scratchpad de l'atelier (ajout seul, pousse)
+      - mcp__fleet__toolchain_request
+    disallowedTools:
+      # snake_case: server-side API tools. Declared here, enforced by the vendor — cf. the
+      # convention note above `allowedTools`.
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+    # Destructive patterns come from the universal baseline
+    # (`baseline/git-denied.yaml`, intangible) — not duplicated here.
+    #
+    # `push` added here for the SAME reason as every other role: NO pod publishes its own
+    # work. The baseline denies only what is destructive and states that a plain push is
+    # legitimate outside it, so an empty list here granted the architect a `git push` its own
+    # face contract forbids (`Fleet.Project.Architect`: "nothing pushes this face on its own").
+    # Publication is a SYSTEM act — the world-side gate (`Fleet.Workflow.DeliverableGate`:
+    # base ancestry, commit identity, secret scan) can only bind what the system pushes.
+    git_ops_denied: [push]
+  knowledge:
+    # Pruned 2026-08-02 (BL-6-22): memory-query/brainstorming/plan named skills that NEVER
+    # existed on disk — with the skills root wired, a whitelist naming a ghost fails the spawn
+    # loud (skills_missing, by design). A skill returns here the day it is WRITTEN under the
+    # catalogue skills tree. NB: `brainstorming` below in modop_set.optional is a DIFFERENT
+    # object (a real modop-bundle) — it stays.
+    skills: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    lifetime_scope: forever  # lives for its project's duration (resumable, holds context) — NOT booted at start
+    # DECLARED, not derived (g24_15): the architect is ONE pod per project, the same identity
+    # across every ticket of that project. The derivation would land on `project` too, but the
+    # derivation is a choice on this side of the axis, and a choice belongs in the catalogue.
+    slot_scope: project
+    # DECLARED (g24_16): a project-keyed pod has a stable identity, so whether it deserves a
+    # durable Desktop handle is a decision. Here it is not even a preference — `interlocutor: both`
+    # means a human addresses this pod, and a pod a human must reach without a handle is a
+    # contradiction.
+    remote_control: true
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
+    # PER-PROJECT: spawned on-open by starfleet (project_create/relaunch), NOT at fleet boot. The
+    # boot-orchestrator role is starfleet's now (reorg 2026-07-19).
+    boot_at_start: false
+    subagent_template: null
+    host_native: false
+    bridge_enabled: true
+    # TRUE because this flag gates EVERY send-keys, `engage` included — not just the wake fallback
+    # it was set to false for. An architect is spawned BY THE MACHINE, on-open, with no brief
+    # enqueued: the kick loop then reads `bootstrap? and not profile_send_keys?` and CANCELS
+    # itself, so the pod came up and sat at an untouched prompt forever, waiting for a human to
+    # type into it. A pod nobody can start is not a quieter pod, it is a dead one.
+    # The cost this re-accepts is the one the false was buying: a wake fallback may type into a
+    # session the human is using (spurious turn, seen live 2026-07-19 during nominal Monitor
+    # delivery). That fallback is separately gated by the GLOBAL knob `:wake_send_keys` — a
+    # per-pod flag that also silences bootstrap is the wrong instrument for it.
+    wake_send_keys: true
+  modop_set:
+    # `adresser-un-agent` : dans le default de TOUS les roles, tenu par le contrat
+    # `sp.adresser_un_agent`. Ce role est le premier concerne — c'est lui qui redige les briefs, et
+    # les deux defauts mesures le 2026-08-20 (sur-expliquer, sur-specifier) sont sortis d'ici.
+    # Jamais dans un `incompatible:` : ce n'est pas un mode, il ne se commute pas.
+    default: [long-session-discipline, adresser-un-agent]
+    # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (brainstorming)
+    # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
+    # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
+    # ils étaient livrés et jamais composés. Le tri n'a rien trouvé à rapatrier — leur
+    # doctrine était soit importée telle quelle, soit déjà couverte par nos propres blocs.
+    optional: [rubber-duck]
+    incompatible: [[fire-mode, long-session-discipline]]
+  project: null

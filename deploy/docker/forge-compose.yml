@@ -1,0 +1,52 @@
+# SOURCE: deploy/docker/forge-compose.yml
+# AUTHOR: consultant
+# STARDATE: 2026-09-12
+# STATUS: la forge jetable du banc — un projet compose à elle, montée par bench-up.sh et par 48-forge-host
+#
+# Ce n'est pas le déploiement d'une forge de production : en production, la forge est fournie
+# (FORGE_BASE_URL et un jeton master), LCARS vérifie qu'elle tient le contrat. Dans son propre
+# projet compose, ses volumes n'appartiennent qu'à elle et aucune commande de `container` ne les
+# atteint.
+#
+#   docker compose -f deploy/docker/forge-compose.yml -p <projet>-forge up -d
+#   docker compose -f deploy/docker/forge-compose.yml -p <projet>-forge down -v
+#
+# ROOT_URL veut un port nu et `ports` une adresse de bind complète : une seule variable pour les
+# deux donnerait `http://127.0.0.1:127.0.0.1:3301/` et Gitea refuserait de démarrer.
+
+name: lcars-devforge
+
+services:
+  gitea:
+    # 1.26.1 est la version validée avec le runtime (marqueurs, jetons, webhooks) ; épinglée par digest
+    image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
+    hostname: devforge
+    environment:
+      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://gitea:3000/}"
+      GITEA__server__HTTP_PORT: "3000"
+      # sans ce verrou, une forge vierge sert l'assistant /install : `/` répond 200, l'API 404, rien n'est automatisable
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__actions__ENABLED: "true"
+      # l'inscription est libre par construction : un compte seul est inerte, l'enrôlement est l'ajout à l'équipe humans
+      GITEA__service__DISABLE_REGISTRATION: "false"
+      # les comptes de rôle sont `<catalogue>_<rôle>` (un login est unique à l'instance) ; l'interface montre le nom du rôle
+      GITEA__ui__DEFAULT_SHOW_FULL_NAME: "true"
+      # l'interface aplatit une arborescence déposée : `.claude/settings.json` arriverait en `settings.json` à la racine,
+      # et la porte d'adoption cherche l'arbre. `_0x2E_` écrit le point d'une section INI dans un nom de variable
+      GITEA__repository_0x2E_upload__ENABLED: "false"
+    ports:
+      - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
+    volumes:
+      - data:/var/lib/gitea
+      - config:/etc/gitea
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  data:
+  config:

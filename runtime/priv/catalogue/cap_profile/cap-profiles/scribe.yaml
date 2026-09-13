@@ -1,0 +1,110 @@
+# Cap-profile: scribe
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile.json
+#
+# The DOCUMENTARY producer (chantier face-projet 2026-08-02): same delivery mechanics as the
+# engineer — git-native commits, forge-blind, the system verifies and pushes — on the OTHER face
+# of the project. The card's step names the FACE (`code` or `workshop` — `ops` is NOT one of
+# them, cf. the schema enum); this profile only says WHO works and HOW.
+# A doc deliverable that needed different mechanics would be the design smell, not the goal:
+# ops is ordinary git, and that identity is the whole thesis of the chantier.
+kind: CapabilityProfile
+metadata:
+  name: scribe
+  # vitrine: Il produit la doctrine | Même métier, autre face : il rédige les documents du projet, avec le code en référence lecture seule.
+  containment: bwrap
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID. 0..6 taken (architect/starfleet collapsed on 0).
+  role_index: 7
+spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  # Second producer of the catalogue (with engineer): the card names which one it dispatches per
+  # step — Roles.resolve_producer! refuses the LAST-RESORT fallback on a multi-producer catalogue
+  # by design ("a catalogue with eng_hw and eng_sw"), and that refusal is the intended behavior.
+  capabilities: [producer]
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
+      - Monitor
+      - ToolSearch
+      # GENERIC Bash (grep/wc, local git). Same rationale as the engineer: a SCOPED Bash
+      # prompts-and-hangs under --permission-mode default; real enforcement = the MOUNT
+      # (RO/RW, shaped zones) + `git_ops_denied` (forge-blind barrier).
+      - Bash
+      - TaskCreate
+      - TaskUpdate
+      - TaskList
+      - TaskGet
+      - TaskStop
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+      # CLIENT twins of the two above (cf. engineer.yaml): both faces closed, this role
+      # does not browse — a doc grounded on a web read nobody can replay is unanchored.
+      - WebSearch
+      - WebFetch
+    # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`,
+    # intangible). `push` = the MECHANICAL forge-blind barrier, same as every producer.
+    git_ops_denied: [push]
+  knowledge:
+    skills: []  # modops are listed in modop_set
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    # `pipe`, like the engineer and for the same slot economics (one resident process per
+    # project, re-briefed between tickets). The re-brief pipeline is producer machinery,
+    # not code machinery — nothing in it reads the face.
+    lifetime_scope: pipe
+    # TICKET-LIVE — one pod per TICKET, surviving its rework rounds without outliving its ticket.
+    # `pipe` alone derived `slot_scope: project`: ONE pod for the whole repo, re-briefed by a
+    # workspace reset plus `/clear` — the process survived and the CONTEXT died. Yet the context is
+    # what matters when a deliverable comes back for correction. Declaring `instance` keys the pod
+    # on (repo, issue, role): a re-dispatch of the SAME ticket lands on the SAME pod and re-briefs
+    # it without erasing anything.
+    slot_scope: instance
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
+    boot_at_start: false
+    # null: direct execution (get_work_item -> work -> submit_result). Same G24-11 note as
+    # the engineer: with `lifetime_scope: pipe`, a subagent_template would violate the rule.
+    subagent_template: null
+    # No forge write channel — forge-blind barrier, same as every worker.
+    host_native: false
+    bridge_enabled: false
+  modop_set:
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Ce role ECRIT le contrat que les autres liront — une spec est le cas ou « ce qui fait foi »
+    # doit rester distinguable de ce qui a cesse. Jamais dans un `incompatible:`.
+    default: [adresser-un-agent]
+    # (`tdd` était nommé ici — « code-shaped, test-first has no doc analog » — pour dire
+    # pourquoi ce profil ne le prenait PAS. Le bundle a été supprimé le 2026-08-19 avec la
+    # sortie de superpowers ; la raison de son absence n'a plus d'objet, et un commentaire
+    # qui nomme un artefact disparu envoie le prochain lecteur le chercher.)
+    optional: [rubber-duck]
+    incompatible: []
+  project: null
+  # Same delivery contract as the engineer: commits in its own workspace, the system
+  # verifies (I-CBC gate: identity/secrets/base) then pushes on the branch it chose.
+  # The FACE that workspace clones is the card's business (`code` | `workshop`), never this
+  # file's — and never `ops`, which no producer may author.
+  # Producer watchdog (BL debug scribe 2026-08-02): 300 s default killed a producer mid-way
+  # through ONE long generation (the jsonl only grows at message boundaries; the pane-hash
+  # probe now carries in-generation liveness, this raises the true-idle budget too — real
+  # producer sessions run hours).
+  timeouts:
+    response_sec: 1800
+  deliverable_mode: git_native
+  # brief = executable instruction (the issue body), the role ACTS. REQUIRED (schema).
+  brief_kind: worker
+  # The fleet alone: no human at this REPL. REQUIRED (schema) — never inferred.
+  interlocutor: fleet

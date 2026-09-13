@@ -1,0 +1,369 @@
+defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
+  @moduledoc """
+  Resolves completion intent, a decoded judge verdict, or gatekeeper escalation.
+
+  Terminal producers enter review; terminal nonproducers can promote on a mapped
+  pass. Lifecycle stages absent from the map and routes owned by another role use
+  the card-less path instead. Judge brief kinds decode verdicts rather than evaluate gates.
+
+  A failed worker gate posts a signed-run marker before reading the issue-wide budget:
+  step_count * (max_rework_rounds + 1). Exhaustion or unreadable/unwritable state returns
+  an error; otherwise rebound selects the first step. Posting/counting is not atomic,
+  the marker has no dedup option, and replay may spend another run.
+  """
+
+  require Logger
+
+  alias Fleet.Forge.Payload
+  alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
+  alias Fleet.Pilot.StepRunConsumer.Verdict
+  alias Fleet.Pilot.WorkflowMapNav
+
+  defmodule Seams do
+    @moduledoc """
+    Dependencies and per-run forge context used by the gate engine.
+    """
+    @enforce_keys [:loader, :deliverable_mode_fun, :escalation]
+    defstruct [
+      :loader,
+      :deliverable_mode_fun,
+      :repo,
+      :forge_opts,
+      :forge_client,
+      :escalation
+    ]
+
+    @type t :: %__MODULE__{
+            loader: module() | (String.t() -> map()),
+            deliverable_mode_fun: (String.t(), Path.t() | nil ->
+                                     {:ok, String.t()} | {:error, term()}),
+            repo: String.t() | nil,
+            forge_opts: keyword(),
+            forge_client: module() | nil,
+            escalation: GatekeeperEscalation.Seams.t()
+          }
+  end
+
+  @typedoc "Next assignee and step; `{nil, nil}` is terminal."
+  @type routing :: {String.t() | nil, String.t() | nil}
+
+  @typedoc """
+  Completion intent, decoded judge verdict, asynchronous escalation, or error.
+  """
+  @type decision ::
+          {:ok, atom(), routing()}
+          | {:judge_verdict, String.t(), String.t(), map()}
+          | {:escalate, term(), map()}
+          | {:error, term()}
+
+  @doc """
+  Resolves the next intent from the payload's workflow-map context, or as a single brick when absent.
+  """
+  # Reuse the consumer's classification; nil direct callers resolve it here.
+  # The consumer's resumed-verdict path reclassifies because no earlier fact is in scope.
+  @spec resolve_next(map(), pos_integer(), Seams.t(), boolean() | nil) :: decision()
+  def resolve_next(payload, n, %Seams{} = seams, producer? \\ nil) do
+    case {payload["workflow_map"], payload["step"]} do
+      {workflow_map_name, step} when is_binary(workflow_map_name) and is_binary(step) ->
+        with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name, payload),
+             do: mapped_resolve(workflow_map, step, payload, n, seams, producer?)
+
+      _ ->
+        no_workflow_map_resolve(payload, seams, producer?)
+    end
+  end
+
+  # Lifecycle stages are outside the map; inherited routes belong to another role.
+  # Neither should let this map promote a PR judge on the producer's terminal step.
+  defp mapped_resolve(workflow_map, step, payload, n, seams, producer?) do
+    cond do
+      lifecycle_stage?(workflow_map, step) ->
+        no_workflow_map_resolve(payload, seams, producer?)
+
+      inherited_route?(workflow_map, step, payload["role"]) ->
+        no_workflow_map_resolve(payload, seams, producer?)
+
+      true ->
+        gate_decide(workflow_map, step, payload, n, seams, producer?)
+    end
+  end
+
+  @doc """
+  Uses a supplied binary mode directly: only git_native is a producer; other strings
+  are nonproducers without vocabulary validation. Otherwise resolves a binary role
+  with its catalogue root. Returned resolver errors propagate; nonbinary roles return false.
+  """
+  # The singleton serves multiple catalogues; resolve the root per event, not once at init.
+  @spec producer?(
+          term(),
+          (String.t(), Path.t() | nil -> {:ok, String.t()} | {:error, term()}),
+          String.t() | nil,
+          Path.t() | nil
+        ) :: {:ok, boolean()} | {:error, term()}
+  def producer?(role, deliverable_mode_fun, effective_mode \\ nil, root \\ nil)
+
+  def producer?(_role, _deliverable_mode_fun, mode, _root) when is_binary(mode),
+    do: {:ok, mode == "git_native"}
+
+  def producer?(role, deliverable_mode_fun, _mode, root) when is_binary(role) do
+    case deliverable_mode_fun.(role, root) do
+      {:ok, mode} -> {:ok, mode == "git_native"}
+      {:error, _} = err -> err
+    end
+  end
+
+  def producer?(_role, _deliverable_mode_fun, _mode, _root), do: {:ok, false}
+
+  @doc """
+  Advances in the workflow map. A terminal producer returns `:review`; a terminal judge returns
+  `:promote`.
+  """
+  @spec advance_intent(map(), String.t(), boolean()) ::
+          {:ok, atom(), routing()} | {:error, term()}
+  def advance_intent(workflow_map, step, producer?),
+    do: tag_advance(advance(workflow_map, step), producer?)
+
+  defp inherited_route?(workflow_map, step, role) do
+    case WorkflowMapNav.step_spec(workflow_map, step) do
+      {:ok, spec} ->
+        case Map.get(spec, "role") do
+          r when is_binary(r) -> r != role
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  # A lifecycle name is a stage only when it is absent from the map's steps.
+  defp lifecycle_stage?(workflow_map, step) do
+    step in [Fleet.Labels.stage_review(), Fleet.Labels.stage_merged()] and
+      not match?({:ok, _}, WorkflowMapNav.step_spec(workflow_map, step))
+  end
+
+  defp producer_fact(producer?, _payload, _seams) when is_boolean(producer?), do: {:ok, producer?}
+
+  defp producer_fact(nil, payload, seams),
+    do:
+      producer?(
+        payload["role"],
+        seams.deliverable_mode_fun,
+        payload["deliverable_mode"],
+        catalogue_root(payload)
+      )
+
+  defp no_workflow_map_resolve(payload, seams, producer?) do
+    case producer_fact(producer?, payload, seams) do
+      {:ok, true} -> {:ok, :review, {nil, nil}}
+      {:ok, false} -> {:ok, :reviewed, {nil, nil}}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc false
+  # Shared event-to-catalogue reader for consumer, gate engine and builder.
+  @spec catalogue_root(map()) :: Path.t() | nil
+  def catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
+
+  @doc false
+  # Nested repository name precedes the bare repo key; no configured fallback here.
+  @spec payload_repo(map()) :: String.t() | nil
+  def payload_repo(payload),
+    do: Payload.repository_full_name(payload) || payload["repo"]
+
+  defp judge_kind?(payload, spec) do
+    case payload["brief_kind"] do
+      "judge" -> true
+      "worker" -> false
+      _absent_or_out_of_vocab -> Map.get(spec, "brief_kind") == "judge"
+    end
+  end
+
+  defp gate_decide(workflow_map, step, payload, n, seams, producer?) do
+    spec =
+      case WorkflowMapNav.step_spec(workflow_map, step) do
+        {:ok, s} -> s
+        :error -> %{}
+      end
+
+    result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
+
+    if judge_kind?(payload, spec) do
+      judge_verdict(workflow_map, step, spec, payload, n, result)
+    else
+      spec
+      |> Fleet.Workflow.Gates.evaluate(system_over_declared(spec, result, payload), %{})
+      |> gate_outcome(workflow_map, step, payload, n, seams, producer?, result)
+    end
+  end
+
+  # Carry schema failure detail to VerdictCorrection instead of leaving it only in logs.
+  defp judge_verdict(workflow_map, step, spec, payload, n, result) do
+    {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
+
+    ctx = %{
+      n: n,
+      role: payload["role"],
+      payload: payload,
+      workflow_map: workflow_map,
+      step: step,
+      judge_target: Map.get(spec, "judge_target"),
+      invalid_reason: invalid_reason
+    }
+
+    {:judge_verdict, decision, Verdict.verdict_comment(payload["role"], decision, result), ctx}
+  end
+
+  defp gate_outcome(:pass, workflow_map, step, payload, _n, seams, producer?, _result) do
+    case producer_fact(producer?, payload, seams) do
+      {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp gate_outcome({:fail, reason}, workflow_map, step, payload, n, seams, _producer?, _result) do
+    Logger.info("StepRunConsumer: gate FAIL repo=#{seams.repo}##{n} step=#{step}: #{reason}")
+
+    case sign_failed_run(seams, n, payload["role"], step, reason) do
+      :ok -> tag(:rework, rebound(workflow_map, n, seams))
+      {:error, err} -> {:error, {:gate_fail_unsigned, err}}
+    end
+  end
+
+  defp gate_outcome({:human_approval, reason}, _wm, _step, _payload, _n, _seams, _prod?, _result),
+    do: {:error, {:human_approval_required, reason}}
+
+  defp gate_outcome(
+         {:dispatch_gatekeeper, _info},
+         workflow_map,
+         step,
+         payload,
+         n,
+         seams,
+         _p,
+         result
+       ) do
+    case GatekeeperEscalation.dispatch(
+           workflow_map,
+           step,
+           result,
+           payload,
+           n,
+           payload["role"],
+           seams.escalation
+         ) do
+      {:ok, corr} ->
+        {:escalate, corr,
+         %{
+           n: n,
+           role: payload["role"],
+           payload: payload,
+           workflow_map: workflow_map,
+           step: step
+         }}
+
+      {:error, reason} ->
+        {:error, {:gatekeeper_dispatch, reason}}
+    end
+  end
+
+  # Workspace-derived output facts override the pod's claims when derive returns data.
+  # With no derived facts (%{}), claims remain unchanged. Keep filesystem reads here
+  # so Gates.evaluate stays pure; other callers must supply system facts themselves.
+  defp system_over_declared(spec, result, payload) do
+    case Fleet.Workflow.StepOutputs.derive(spec, payload["workspace"]) do
+      empty when empty == %{} ->
+        result
+
+      system ->
+        claimed = Enum.filter(Fleet.Workflow.StepOutputs.system_keys(), &Map.has_key?(result, &1))
+
+        if claimed != [] do
+          Logger.info(
+            "StepRunConsumer: pod self-declared system-owned gate facts #{inspect(claimed)} " <>
+              "(role=#{payload["role"]}) — overridden by the workspace check"
+          )
+        end
+
+        Map.merge(result, system)
+    end
+  end
+
+  defp tag_advance({:ok, {nil, nil}}, true), do: {:ok, :review, {nil, nil}}
+  defp tag_advance({:ok, {nil, nil}}, false), do: {:ok, :promote, {nil, nil}}
+  defp tag_advance({:ok, routing}, _producer?), do: {:ok, :advance, routing}
+  defp tag_advance(other, _producer?), do: other
+
+  defp tag(intent, {:ok, routing}), do: {:ok, intent, routing}
+  defp tag(_intent, other), do: other
+
+  defp advance(workflow_map, step) do
+    case WorkflowMapNav.next_step(workflow_map, step) do
+      {:ok, {next_step, next_role}} -> {:ok, {next_role, next_step}}
+      :terminal -> {:ok, {nil, nil}}
+      {:error, reason} -> {:error, {:workflow_map_nav, reason}}
+    end
+  end
+
+  defp rebound(workflow_map, n, seams) do
+    budget = step_count(workflow_map) * (max_rework_rounds(workflow_map) + 1)
+
+    case count_step_runs(seams, n) do
+      {:ok, step_runs} when step_runs >= budget ->
+        {:error, {:rework_exhausted, %{step_runs: step_runs, budget: budget}}}
+
+      {:ok, _step_runs} ->
+        case WorkflowMapNav.first_step(workflow_map) do
+          {:ok, {first_step, first_role}} -> {:ok, {first_role, first_step}}
+          {:error, reason} -> {:error, {:workflow_map_nav, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:rework_budget_unreadable, reason}}
+    end
+  end
+
+  defp step_count(workflow_map) do
+    workflow_map |> Map.get("steps", %{}) |> map_size()
+  end
+
+  defp max_rework_rounds(workflow_map), do: Map.fetch!(workflow_map, "max_rework_rounds")
+
+  defp count_step_runs(seams, n) do
+    forge = seams.forge_client || Fleet.Forge.Client
+    forge.count_signed_step_runs(seams.repo, n, seams.forge_opts)
+  end
+
+  @spec sign_failed_run(map(), pos_integer(), String.t() | nil, String.t(), term()) ::
+          :ok | {:error, term()}
+  defp sign_failed_run(seams, n, role, step, reason) do
+    forge = seams.forge_client || Fleet.Forge.Client
+
+    body =
+      "Gate en échec — step `#{step}` : #{reason}\n\n" <>
+        Fleet.Forge.Protocol.step_run_marker(role || "unknown", "gate-fail")
+
+    case forge.post_comment(seams.repo, n, body, seams.forge_opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, err} ->
+        Logger.warning(
+          "StepRunConsumer: gate-fail signing KO #{seams.repo}##{n} (#{inspect(err)}) — " <>
+            "run NOT budgeted; refusing to rebound unbudgeted, escalating to arch"
+        )
+
+        {:error, err}
+    end
+  end
+
+  # Resolve the engraved card name in the event's repository catalogue.
+  defp load_workflow_map(seams, workflow_map_name, payload),
+    do:
+      WorkflowMapNav.safe_load(
+        seams.loader,
+        workflow_map_name,
+        Fleet.Workflow.Loader.card_opts_for_repo(payload_repo(payload))
+      )
+end

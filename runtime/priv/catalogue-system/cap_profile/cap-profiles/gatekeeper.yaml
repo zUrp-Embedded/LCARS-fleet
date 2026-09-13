@@ -1,0 +1,98 @@
+# Cap-profile: gatekeeper
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile.json
+kind: CapabilityProfile
+metadata:
+  name: gatekeeper
+  # vitrine: Il scelle | Il vérifie que l'arbre fusionné est bien celui qui a été jugé, et scelle la décision de promotion. C'est aussi lui qu'on appelle quand un jugement ne tranche pas.
+  containment: bwrap
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT).
+  # PER-PROJECT (reorg 2026-07-19, cf. DESIGN-carte-des-roles §7): the gatekeeper is a project-bound
+  # ONE-SHOT judge, spawned per gate eval by GatekeeperEscalation — the old fleet-level resident
+  # singleton (documented as an MVP awaiting the project model) is gone. repo in its UUID.
+  # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la
+  # convention se LIT sans documentation : une lettre = un role de la mecanique, un chiffre
+  # = un role metier. `0` reste l'accueil de niveau flotte, parce que 0 est deja la valeur
+  # du « sans dimension » partout ailleurs dans cet UUID (starfleet est minte sur repo 0000).
+  # Ce role portait 2 avant le 2026-08-10 : il occupait un chiffre dont le metier a besoin.
+  role_index: 14   # 0xe
+spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  # `exception_judge` ONLY. `conflict_resolver` lived here for as long as this role wore both
+  # costumes; it now belongs to `chief`, whose profile can declare `brief_kind: worker` — which
+  # this one cannot, since it declares `judge` for the gate-escalation path it keeps.
+  capabilities: [exception_judge]
+  scope:
+    allowedTools:
+      - Read
+      - Grep
+      - Glob
+      # GENERIC Bash (inspect the deliverable: git diff/log/show + shell). A SCOPED
+      # pattern-list is incompatible with --permission-mode default (off-pattern command
+      # -> prompt -> hang). Real enforcement = the MOUNT (RO/RW) + git_ops_denied
+      # (push -> `Bash(git push:*)` hard-denied = forge-blind).
+      - Bash
+      # Wake rail (Monitor loaded via ToolSearch at boot) — required in --permission-mode default.
+      - Monitor
+      - ToolSearch
+      # Judgment report: Write/Edit BOUNDED by the RW MOUNT (RO/RW zones shaped per pod),
+      # not by the tool-list; the forge stays out of reach (push denied + forge-blind below).
+      - Write
+      - Edit
+      # No git push/commit/mv/tag, no `tea issues edit/close/comment` — forge-blind
+      # barrier: the gatekeeper hands off its verdict via `submit_result`
+      # (fleet-control channel); the SYSTEM writes `verdict.json` + pushes + routes.
+      # The pod NEVER touches the forge. See git_ops_denied.
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+      # CLIENT twins of the two above: `web_search`/`web_fetch` deny Anthropic's SERVER-SIDE
+      # tools, `WebSearch`/`WebFetch` are the Claude Code tools running INSIDE the pod. Denying
+      # one face leaves the other open. This role does not browse: both faces are closed.
+      - WebSearch
+      - WebFetch
+    # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`,
+    # intangible) — not duplicated here. `push` = the MECHANICAL forge-blind barrier:
+    # `Bash(git push:*)` stays denied even if re-added to allowedTools (defense in
+    # depth, same as engineer).
+    git_ops_denied: [push]
+  knowledge:
+    skills: []
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    # ONE-SHOT (reorg 2026-07-19): a judge must be FRESH — each gate eval gets a new pod, no
+    # accumulated context; the re-eval is forge-driven (the persisted verdict, not the pod).
+    lifetime_scope: one-shot
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
+    boot_at_start: false
+    subagent_template: null
+    # No forge channel — forge-blind barrier: the gatekeeper hands off its verdict via
+    # `fleet-control.gatekeeper.*` (submit_result); the system writes the forge.
+    host_native: false
+    bridge_enabled: false
+    remote_control: false  # invisible to Claude Desktop (never human-facing — the arch is the sole human airlock) — no --remote-control
+  modop_set:
+    # `adresser-un-agent` : dans le default de TOUS les roles, tenu par le contrat
+    # `sp.adresser_un_agent`. Un verdict est aussi un texte adresse a un agent — le `reason` d'un
+    # redirect est lu par l'architecte, pas par un humain seul. Jamais dans un `incompatible:`.
+    default: [rubber-duck, adresser-un-agent]
+    optional: []
+    incompatible: []
+    # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,
+    # self-exit one-shot — predates MCP submit_result and contradicted the runtime protocol; the
+    # anti-conversation discipline lives in the base worker SP blocks.)
+  project: null
+  # The gatekeeper is a JUDGE: it receives a DEFUSED I-CBC GateBrief (context +
+  # deliverable + verdict contract, NO executable instruction). Declared by catalogue
+  # (not a magic "gatekeeper" name in the code). Entry dual of deliverable_mode.
+  brief_kind: judge
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet

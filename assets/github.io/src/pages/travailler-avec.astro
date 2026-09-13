@@ -1,0 +1,128 @@
+---
+import Site from '../layouts/Site.astro';
+import SectionHead from '../components/SectionHead.astro';
+const sections = [{ id: 'brief', label: 'Écrire un brief' }, { id: 'jugement', label: 'Le jugement, et après' }, { id: 'sas', label: 'Quand elle vous appelle' }, { id: 'voir', label: 'Regarder tourner' }];
+---
+<Site title="LCARS — Travailler avec" current="/travailler-avec/" sections={sections}>
+
+    <header class="head">
+      <div class="elbow" aria-hidden="true"></div>
+      <div>
+        <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="eyebrow">L'utilisation</p>
+        <h1>Votre travail tient<br>en <em>deux gestes</em>.</h1>
+        <p class="lede">Écrire ce que vous voulez, et répondre quand on vous appelle. Le reste du
+        temps, il n'y a rien à surveiller pour que ça avance — et surtout, rien à surveiller pour
+        que ça reste honnête. Cette page dit comment bien faire les deux, et comment lire ce qui
+        se passe entre.</p>
+        <p class="sig">un brief est la seule chose que la flotte ne peut pas produire à votre
+        place · c'est aussi <b>la seule qui décide de la qualité du reste</b></p>
+      </div>
+    </header>
+
+    <section id="brief">
+      <SectionHead id="brief" title="Écrire un brief" cap="le geste à plus fort levier" />
+      <p class="intro">Un brief n'est pas une spécification. C'est un contrat court qui dit ce qu'on
+      veut, jusqu'où, et à quoi on reconnaîtra que c'est fini. Vous n'avez pas à le rédiger vous-même :
+      vous le dictez, l'architecte l'écrit. Mais ce que vous lui dites décide de tout ce qui suit.</p>
+      <div class="two">
+        <div class="tile g"><b>Donnez le critère d'arrêt</b>
+          <span>« C'est fini quand… ». Sans lui, un agent s'arrête au hasard — trop tôt, ou bien
+          après avoir refait la moitié du projet parce que ça lui semblait lié.</span></div>
+        <div class="tile g"><b>Donnez le périmètre</b>
+          <span>Ce qu'on touche, et surtout ce qu'on ne touche pas. C'est la phrase qui vous évite
+          de découvrir une refonte que personne n'avait demandée.</span></div>
+        <div class="tile s"><b>Ne décidez pas à sa place</b>
+          <span>Dire « fais-le avec telle bibliothèque » sans dire pourquoi vous prive de la seule
+          chose qu'un agent fait bien : explorer. Dites la contrainte, pas la solution.</span></div>
+        <div class="tile s"><b>N'empilez pas deux missions</b>
+          <span>Un ticket, un livrable. Deux intentions dans un brief donnent une PR qu'aucun juge
+          ne peut trancher — et qui vous reviendra entière.</span></div>
+      </div>
+      <p class="note">Un brief que le scoper renvoie ne vous coûte que quelques minutes. Le même
+      brief accepté par complaisance vous coûte une PR entière à relire et à jeter.</p>
+    </section>
+
+    <section id="jugement">
+      <SectionHead id="jugement" title="Le jugement, et après" cap="ce que vous lisez sur la PR" />
+      <p class="intro">Les verdicts ne sont pas dans un rapport à part : ce sont les reviews de
+      votre forge, écrites par des agents distincts sous leur propre identité. Vous les lisez comme
+      vous liriez celles d'un collègue, avec la même interface et les mêmes conventions.</p>
+      <div class="ladder">
+        <div class="step"><div class="k" style="background:var(--green)"><b>Tous d'accord</b><i>ça passe</i></div>
+          <div class="t"><b>Le sceau tombe et la PR est fusionnée</b>
+            <span>Le jury est unanime, pas majoritaire : il ne suffit pas d'avoir la moyenne. Si
+            tout le monde approuve, la provenance est vérifiée et le merge se fait.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--salmon)"><b>Un seul non</b><i>ça repart</i></div>
+          <div class="t"><b>Le producteur corrige, sur la même branche</b>
+            <span>Rien n'est jeté. Il reçoit le verdict, reprend son travail, repousse — et le jury
+            re-vote sur le nouvel état. Les avis précédents restent dans l'historique, datés et
+            signés, mais ils ne portent plus sur le code présent.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--mauve)"><b>Trop de tours</b><i>on vous appelle</i></div>
+          <div class="t"><b>La boucle est bornée par la politique du projet</b>
+            <span>Au-delà, ça ne tourne pas indéfiniment : le ticket s'arrête et remonte. Une
+            flotte qui s'acharne coûte plus cher qu'une flotte qui demande.</span></div></div>
+      </div>
+      <p class="note">Vous pouvez évidemment intervenir dans la PR comme sur n'importe quelle autre
+      — commenter, demander des changements. Vous êtes un relecteur de plus, pas un cas particulier.</p>
+    </section>
+
+    <section id="sas">
+      <SectionHead id="sas" title="Quand elle vous appelle" cap="l'escalade, et ce qu'elle vaut" />
+      <p class="intro">Trois situations font remonter un ticket : un brief qu'on ne peut pas
+      exécuter, un jugement qui ne tranche pas, un nombre de reprises dépassé. Dans les trois cas
+      le ticket <b>s'arrête</b> — il ne repart pas tout seul — et il porte la raison.</p>
+      <div class="two">
+        <div class="tile m"><b>C'est visible</b>
+          <span>Le ticket est marqué et n'avance plus. Vous n'avez pas à surveiller un flux
+          d'événements pour découvrir qu'on vous attend.</span></div>
+        <div class="tile m"><b>C'est ciblé</b>
+          <span>Vous savez quel agent, quelle étape, et sur quel argument. Pas « ça a échoué » :
+          l'endroit exact et la raison écrite.</span></div>
+        <div class="tile m"><b>C'est borné</b>
+          <span>Un ticket bloqué ne contamine pas les autres. Le reste de la flotte continue —
+          l'arrêt est local à la mission qui pose problème.</span></div>
+      </div>
+      <blockquote style="margin-top:18px">
+        <p class="q">« Une flotte qui ne vous dérange jamais a appris à se débrouiller sans vous. »</p>
+        <p class="a">Ce n'est pas un compliment. Un système d'agents qui ne remonte rien a forcément
+        comblé les trous tout seul, et vous découvrirez lesquels plus tard, dans le code. Les
+        escalades de LCARS sont un coût assumé : elles sont la preuve que le système préfère
+        s'arrêter plutôt que d'inventer.</p>
+      </blockquote>
+    </section>
+
+    <section id="voir">
+      <SectionHead id="voir" title="Regarder tourner" cap="et le vocabulaire de ce qu'on ne sait pas" />
+      <p class="intro">Vous pouvez tout suivre depuis votre forge — c'est le mode par défaut, et il
+      suffit. Pour aller voir sous le capot, des consoles web donnent l'état des agents et l'accès à
+      leur terminal. Mais l'essentiel n'est pas l'affichage : c'est ce que le système s'autorise à
+      dire quand il ne sait pas.</p>
+      <div class="ladder">
+        <div class="step"><div class="k" style="background:var(--green)"><b>conforme</b></div>
+          <div class="t"><b>Mesure prise, résultat bon</b>
+            <span>Le seul état qui autorise à passer à la suite sans réserve.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--faint)"><b>éteint</b></div>
+          <div class="t"><b>Rien de déclaré à atteindre</b>
+            <span>Une absence légitime — vous n'avez pas configuré ce morceau. Ce n'est pas une
+            panne, et ça ne doit pas être peint en rouge.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--yellow)"><b>dégradé</b></div>
+          <div class="t"><b>Mesure prise, résultat mauvais</b>
+            <span>Un fait constaté et nommable. C'est l'état le plus actionnable du jeu.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--salmon)"><b>aveugle</b></div>
+          <div class="t"><b>L'instrument est cassé</b>
+            <span>Aucun constat sur la cible. Ce n'est pas le système qui va mal : c'est un trou
+            dans ce qu'on voit, et il invalide tout raisonnement fondé sur ce silence.</span></div></div>
+        <div class="step"><div class="k" style="background:var(--mauve)"><b>ambigu</b></div>
+          <div class="t"><b>La mesure a eu lieu et ne tranche pas</b>
+            <span>Une ambiguïté déclarée est un résultat honnête. Elle ne fait pas échouer, elle
+            se dit.</span></div></div>
+      </div>
+      <blockquote style="margin-top:18px">
+        <p class="q">« Aveugle n'est pas dégradé. »</p>
+        <p class="a">Confondre les deux fabrique deux mensonges opposés. Peindre en rouge une absence
+        normale apprend à ignorer le rouge&nbsp;; peindre en vert ce qu'on n'a pas pu regarder
+        apprend à faire confiance au vide. C'est pour ça que ces cinq mots existent séparément.</p>
+      </blockquote>
+    </section>
+</Site>

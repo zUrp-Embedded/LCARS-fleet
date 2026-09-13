@@ -1,0 +1,364 @@
+#!/usr/bin/env bash
+# SOURCE: runtime/bin/lcars-toolchain-converge   (posé: /usr/local/bin/lcars-toolchain-converge)
+# AUTHOR: bob
+# STARDATE: (posee par /push-github)
+# STATUS: PROTO — l'UNIQUE geste privilegie du rail d'outillage : appliquer un manifeste deja signe
+#
+# Il n'interprete RIEN : il lit des champs TYPES d'un manifeste deja signe et joue des gabarits de
+# commande fixes. Aucun champ libre — `evidence` existe pour l'humain qui signe, pas pour ce script.
+#
+# ⚠ LA FERMETURE, PAS LE PAQUET NOMME. `apt-get download <pkg>` reussit, extrait proprement, et rend
+# un sysroot MORT : `libssl.so -> libssl.so.3` pend, parce que la cible vit dans `libssl3`, un AUTRE
+# paquet. Vert a l'extraction, casse a l'edition de liens. `install --print-uris` est la condition
+# pour que le sysroot linke, pas une optimisation.
+#
+# USAGE : lcars-toolchain-converge <sha>
+#   Lit `ops/toolchains.d/*.yaml` du depot ops AU SHA donne, et applique chaque manifeste.
+#   Idempotent : rejouer applique le meme etat. Un ecosysteme deja pose est saute.
+#
+# EXIT : 0 tout applique · 1 usage/dependance manquante · 2 manifeste refuse (forme, motif)
+#      · 3 une application a echoue (le reconciliateur ne notera PAS le SHA)
+
+set -euo pipefail
+
+STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
+OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
+FORGE="${FORGE_BASE_URL:-}"
+# `FORGE_TOKEN` est une entree EXPLICITE posee sur l'unite, jamais un chemin que ce script irait
+# ouvrir : savoir OU trouver un secret, c'est deja avoir le droit de le lire.
+TOKEN="${FORGE_TOKEN:-}"
+# ⚠ AUCUN MODE NI PROPRIETAIRE RECOPIE ICI : `deploy/system.manifest` en est la source unique, et un
+# chiffre recopie dans un commentaire ment le jour ou la table bouge, sans que rien ne rougisse. La
+# regle, elle : un aptroot jetable n'a rien a faire imbrique dans l'etat sensible d'un autre
+# proprietaire — le jour ou l'un se nettoie, il emporte l'autre.
+WORK="${LCARS_TOOLCHAIN_WORK:-/var/tmp/lcars/toolchain-work}"
+
+# PRIS AVANT TOUT LE RESTE : `apt-get` n'est PAS reentrant — deux processus root en parallele se
+# battent sur /var/lib/dpkg/lock et l'un des deux meurt en laissant dpkg a moitie configure.
+LOCK="${LCARS_TOOLCHAIN_LOCK:-/var/lock/lcars-toolchain.lock}"
+
+die() { echo "toolchain-converger: $2" >&2; exit "$1"; }
+
+[[ $# -eq 1 ]] || die 1 "usage: lcars-toolchain-converge <sha>"
+SHA="$1"
+[[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || die 1 "sha invalide: '$SHA' (attendu 7-40 hex)"
+
+for _b in curl jq apt-get dpkg-deb; do
+  command -v "$_b" >/dev/null 2>&1 || die 1 "dependance manquante: $_b"
+done
+
+mkdir -p "$(dirname "$LOCK")" "$WORK"
+exec 9>"$LOCK" || die 1 "verrou inouvrable ($LOCK)"
+flock -n 9 || die 0 "une convergence tourne deja — celle-ci n'a rien a faire (ce n'est PAS un echec)"
+
+[[ -n "$FORGE" ]] || die 1 "FORGE_BASE_URL absent — impossible de lire le manifeste"
+
+# ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV se lit dans `/proc/<pid>/cmdline`. Le tube
+# ferme la fuite.
+api() {
+  if [[ -n "$TOKEN" ]]; then
+    printf 'header = "Authorization: token %s"\n' "$TOKEN" \
+      | curl -sS -m 30 -K - "$FORGE/api/v1$1"
+  else
+    curl -sS -m 30 "$FORGE/api/v1$1"
+  fi
+}
+
+# ⚠ UN LITTERAL, JAMAIS UNE VARIABLE : `toolchain.branch_single_source` exige que chaque lecteur
+# shell en porte la COPIE et refuse tout reglage. Reglable, il ouvrirait la borne qui empeche
+# d'installer en root un manifeste que personne n'a signe.
+BRANCH="tool_request"
+head_of_branch() {
+  api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
+}
+HEAD_SHA="$(head_of_branch || true)"
+[[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
+  || die 1 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
+[[ "${HEAD_SHA:0:${#SHA}}" == "$SHA" ]] \
+  || die 1 "sha '$SHA' n'est PAS la tete de la branche protegee « $BRANCH » ($HEAD_SHA) — refuse. Un manifeste ne s'applique qu'a la revision qu'un humain a signee sur cette branche."
+
+# ⚠ LU AU SHA, JAMAIS SUR LA BRANCHE. Lire « la derniere version » ouvrirait une fenetre entre le
+# constat d'ecart du reconciliateur et cette lecture : un merge qui atterrit entre les deux serait
+# applique SANS que le SHA note lui corresponde.
+list_manifests() {
+  api "/repos/$OPS_REPO/contents/ops/toolchains.d?ref=$SHA" \
+    | jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else empty end'
+}
+
+fetch_manifest() {
+  api "/repos/$OPS_REPO/contents/$1?ref=$SHA" | jq -r '.content' | base64 -d
+}
+
+# `yq` n'est pas garanti present. Un champ inconnu n'est pas une erreur : c'est un champ qu'on ne
+# joue pas. La lecture a plat n'est PAS ambigue parce que `apt`, `installer` et `sysroot` sont
+# EXCLUSIFS (`validate_form/1`) — chacune de ces clefs apparait au plus une fois par manifeste.
+field() { sed -n "s/^ *$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
+
+# Le scope qui empeche `  packages` d'un bloc d'aspirer celui d'un autre : apt.packages (HOTE) vs
+# sysroot.packages (CIBLE). ⚠ Un manifeste COMBINE ne peut pas venir du rail, mais ce script lit un
+# FICHIER — pose a la main, il n'est pas passe par le schema, et la ceinture est ici.
+block_under() { # block_under <yaml> <cle top-level> -> les lignes du bloc
+  awk -v key="$2:" '
+    $0 == key { inb=1; next }
+    inb && /^[^ ]/ { inb=0 }
+    inb { print }
+  ' <<< "$1"
+}
+
+list_under() { # list_under <yaml> <cle (avec son indentation)> -> une entree par ligne
+  awk -v key="$2:" '
+    BEGIN { kind=0; while (substr(key, kind+1, 1) == " ") kind++ }
+    $0 == key { inb=1; next }
+    inb {
+      ind=0; while (substr($0, ind+1, 1) == " ") ind++
+      if ($0 ~ /^[[:space:]]*- / && ind >= kind) {
+        line=$0; sub(/^[[:space:]]*- /,"",line); gsub(/^"|"$/,"",line); print line; next
+      }
+      if ($0 != "" && ind <= kind) inb=0
+    }
+  ' <<< "$1"
+}
+
+# ⚠ LA CEINTURE EST ICI, ET ELLE EST LA DERNIERE. Le schema de l'outil MCP borne deja ce qu'un pod
+# peut exprimer, mais ce script lit un FICHIER : un manifeste pose a la main, ou une PR editee apres
+# coup, n'est pas passe par ce schema. Un nom de paquet qui commence par `-` serait pris pour une
+# option d'`apt-get`.
+safe_pkg() { [[ "$1" =~ ^[a-z0-9][a-z0-9+.:-]*$ ]]; }
+safe_eco() { [[ "$1" =~ ^[a-z][a-z0-9-]{1,31}$ ]]; }
+
+applied_marker() { echo "$STORE/state/eco.d/$1.applied"; }
+
+apply_apt() { # apply_apt <yaml>
+  local pkgs=() p
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    safe_pkg "$p" || die 2 "nom de paquet refuse: '$p'"
+    pkgs+=("$p")
+  done < <(list_under "$(block_under "$1" apt)" "  packages")
+
+  [[ ${#pkgs[@]} -eq 0 ]] && return 0
+  echo "toolchain-converger: apt-get install ${pkgs[*]}"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -- "${pkgs[@]}"
+}
+
+# Racine apt PRIVEE : l'hote garde son `dpkg --print-foreign-architectures` vide et son apt intact,
+# et ce repertoire se jette avec un `rm -rf`.
+apply_sysroot() { # apply_sysroot <yaml> <eco>
+  local arch; arch="$(field arch "$1")"   # motif deja verifie par validate_manifest
+
+  local root="$WORK/aptroot-$2" target="$STORE/sysroots/$2"
+  rm -rf "$root"; mkdir -p "$root"/etc/apt/{sources.list.d,preferences.d,apt.conf.d,trusted.gpg.d} \
+                          "$root"/var/lib/apt/lists/partial "$root"/var/cache/apt/archives/partial \
+                          "$root"/var/lib/dpkg
+  : > "$root/var/lib/dpkg/status"
+  list_under "$(block_under "$1" sysroot)" "  sources" > "$root/etc/apt/sources.list"
+
+  # ⚠ LE KEYRING N'EST PAS OPTIONNEL, et la commodite serait grande : `AllowInsecureRepositories`
+  # fait marcher le reste tout de suite, au prix d'un convergeur qui installe des paquets non signes.
+  local keyring; keyring="$(field keyring "$1")"   # lisibilite deja verifiee
+  cp "$keyring" "$root/etc/apt/trusted.gpg.d/target.gpg"
+
+  local O=(-o "Dir::State=$root/var/lib/apt" -o "Dir::State::status=$root/var/lib/dpkg/status"
+           -o "Dir::Cache=$root/var/cache/apt" -o "Dir::Etc=$root/etc/apt"
+           -o "APT::Architecture=$arch" -o "APT::Architectures::=$arch")
+
+  apt-get "${O[@]}" update
+  local pkgs=() p
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    safe_pkg "$p" || die 2 "nom de paquet refuse: '$p'"
+    pkgs+=("$p")
+  done < <(list_under "$(block_under "$1" sysroot)" "  packages")
+  [[ ${#pkgs[@]} -eq 0 ]] && return 0
+
+  mkdir -p "$target"
+  ( cd "$root" && apt-get "${O[@]}" install --print-uris -y -- "${pkgs[@]}" \
+      | grep "^'http" | sed "s/^'//;s/'.*//" | xargs -r -n1 curl -sSO )
+  for d in "$root"/*.deb; do [[ -e "$d" ]] && dpkg-deb -x "$d" "$target"; done
+  rm -rf "$root"
+  echo "toolchain-converger: sysroot $2 assemble dans $target"
+}
+
+# CE VERBE REND L'OUVERTURE PERSISTANTE. Les deux sources d'aujourd'hui vivent DANS L'IMAGE : un
+# rebuild les restaure telles qu'au build, donc une ouverture qu'un humain a signee serait EFFACEE —
+# silencieusement, puisqu'un pod qui ne joint rien ressemble a un pod que personne n'a ouvert.
+#
+# ⚠ ET DEUX CLEFS, PAS UNE : ce fichier ne fait rien si le role n'est pas en `network: egress` dans
+# le catalogue, et le convergeur ne peut pas poser cette premiere clef — elle est du code.
+apply_egress() { # apply_egress <yaml> <eco>
+  local hosts=() h
+  while IFS= read -r h; do
+    [[ -z "$h" ]] && continue
+    [[ "$h" =~ ^[*a-zA-Z0-9._-]+$ ]] || die 2 "hote refuse: '$h' (nom d'hote seul — ni schema, ni port, ni chemin)"
+    hosts+=("$h")
+  done < <(list_under "$1" "egress_hosts")
+
+  [[ ${#hosts[@]} -eq 0 ]] && return 0
+
+  local dir="$STORE/state/egress.d" role
+  mkdir -p "$dir"
+  for role in ${LCARS_TOOLCHAIN_EGRESS_ROLES:-engineer}; do
+    local f="$dir/$role.hosts" tmp
+    tmp="$(mktemp "$dir/.$role.XXXXXX")"
+    { printf '# genere par le rail toolchain (%s) — NE PAS EDITER\n' "$2"
+      printf '%s\n' "${hosts[@]}"; } > "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$f"
+    echo "toolchain-converger: egress $role <- ${hosts[*]}"
+  done
+
+}
+
+# ⚠ JAMAIS `curl | sh` : un telechargement coupe produit un script TRONQUE que `sh` execute quand
+# meme, et l'etat partiel passe ensuite pour « deja fait ». Telecharger, VERIFIER le sha256, executer.
+#
+# ⚠ SOUS LE MAGASIN, PAS SOUS LE $HOME DU CONVERGEUR : ce script tourne en root, et un `export.sh`
+# de SDK qui calcule ses chemins depuis `$HOME` rendrait `IDF_PATH=/root/.espressif/…`, absent du pod.
+# L'install sortirait verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
+apply_installer() { # apply_installer <yaml> <eco>
+  local name url version sha256 env_script tree
+  name="$(field name "$1")"; url="$(field url "$1")"
+  version="$(field version "$1")"; sha256="$(field sha256 "$1")"
+  env_script="$(field env_script "$1")"
+
+  # name / url / sha256 : motifs deja verifies par validate_manifest, hors sous-shell.
+
+  tree="$STORE/toolchains/$2"
+  mkdir -p "$tree"
+
+  local script="$WORK/$name-$version.sh"
+  curl -sSfL -o "$script" "$url" || die 3 "telechargement de l'installeur $name echoue"
+  # EXIT 3 ET PAS 2 : le manifeste est BIEN FORME, c'est l'artefact qui ne correspond pas — et un
+  # pin perime se repare seul au tick suivant, la ou un `2` ferait attendre un humain sans objet.
+  echo "$sha256  $script" | sha256sum -c - >/dev/null 2>&1 \
+    || die 3 "sha256 de l'installeur $name NE CORRESPOND PAS — rien n'est execute"
+
+  # Le contexte du POD, pas celui de root : c'est ce qui rend le delta valide de l'autre cote.
+  ( cd "$tree" && HOME="$tree" IDF_TOOLS_PATH="$tree" CARGO_HOME="$tree/cargo" \
+      RUSTUP_HOME="$tree/rustup" sh "$script" ) || die 3 "installeur $name en echec"
+
+  [[ -n "$env_script" ]] && freeze_env "$tree" "$env_script" "$2"
+  echo "toolchain-converger: installeur $name $version pose dans $tree"
+}
+
+# L'`env_script` est joue UNE fois, ICI, et son resultat fige a plat : le pod ne source jamais de
+# script. Un chemin absolu HORS magasin est un delta FAUX, et un delta faux est indetectable cote pod.
+#
+# ⚠ LES VARIABLES DE BUILD UNIVERSELLES SONT REFUSEES, liste close. `CARGO_HOME` n'est lu que par
+# cargo ; `CC` est lu par TOUT systeme de build : pose globalement, le premier pod Python qui
+# installe un paquet a extension C native compile de l'ARM64, `pip` REUSSIT, et l'import echoue plus
+# tard en « Exec format error » sans une ligne qui nomme l'environnement de compilation.
+freeze_env() { # freeze_env <tree> <env_script> <eco>
+  local tree="$1" out="$STORE/state/env.d/$3.env" before after tmp
+  mkdir -p "$(dirname "$out")"
+  before="$(env | sort)"
+  # shellcheck disable=SC1090  # `$tree` est un arbre TEMPORAIRE fabrique a l'appel : il n'y a
+  #   pas de chemin constant a declarer, c'est le sujet meme de la mesure.
+  after="$(cd "$tree" && HOME="$tree" . "$tree/$2" >/dev/null 2>&1 && env | sort || true)"
+  [[ -z "$after" ]] && { echo "toolchain-converger: env_script muet pour $3" >&2; return 0; }
+
+  tmp="$(mktemp "$(dirname "$out")/.$3.XXXXXX")"
+  printf '# genere par le rail toolchain — delta fige, NE PAS EDITER\n' > "$tmp"
+  # ⚠ `< <(comm …)` et PAS un pipe : dans `comm | while`, le `die 2` du refus hors-magasin ne tuait
+  # que le sous-shell — freeze_env CONTINUAIT et posait l'env.d tronque comme un succes.
+  while IFS= read -r pair; do
+    local k="${pair%%=*}" v="${pair#*=}"
+    [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
+    case "$k" in
+      CC|CXX|LD|AR|NM|RANLIB|STRIP|CFLAGS|CXXFLAGS|LDFLAGS|CPPFLAGS)
+        echo "toolchain-converger: $k LARGUEE (variable de build universelle)" >&2; continue ;;
+      HOME|PWD|SHLVL|OLDPWD|_) continue ;;
+      PATH) printf 'LCARS_PATH_PREPEND=%s\n' "${v%%:$PATH}" >> "$tmp"; continue ;;
+    esac
+    case "$v" in
+      /*) [[ "$v" == "$STORE"/* ]] || { rm -f "$tmp"; die 2 "$3: $k pointe HORS du magasin ('$v') — delta faux"; } ;;
+    esac
+    printf '%s=%s\n' "$k" "$v" >> "$tmp"
+  done < <(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
+  mv -f "$tmp" "$out"
+  echo "toolchain-converger: environnement de $3 fige dans $out"
+}
+
+# ⚠ HORS DU SOUS-SHELL D'APPLICATION : un `die 2` place dans le `( set -e … )` termine LE SOUS-SHELL,
+# pas le script, et le code devenait 3 — « on reessaiera » — pour un manifeste qui ne marchera
+# JAMAIS. D'ou l'ordre : on REFUSE un manifeste entier avant d'avoir touche quoi que ce soit.
+validate_manifest() { # validate_manifest <yaml> <eco>
+  local v
+  grep -q '^kind: ecosystem_enable' <<< "$1" || die 2 "kind inattendu"
+
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    safe_pkg "$v" || die 2 "nom de paquet refuse: '$v'"
+  done < <(list_under "$1" "  packages")
+  # ^ GLOBAL voulu : on VALIDE les noms de TOUS les blocs (apt + sysroot) ; l'application, elle,
+  #   scope par bloc (block_under) — la cible ne s'installe jamais sur l'hote.
+
+  while IFS= read -r v; do
+    [[ -z "$v" ]] && continue
+    [[ "$v" =~ ^[*a-zA-Z0-9._-]+$ ]] || die 2 "hote refuse: '$v' (nom d'hote seul — ni schema, ni port, ni chemin)"
+  done < <(list_under "$1" "egress_hosts")
+
+  if grep -q '^sysroot:' <<< "$1"; then
+    v="$(field arch "$1")"; [[ "$v" =~ ^[a-z0-9]+$ ]] || die 2 "arch refusee: '$v'"
+    v="$(field keyring "$1")"
+    [[ -n "$v" && -r "$v" ]] || die 2 "keyring de la cible absent ou illisible: '$v'"
+  fi
+
+  if grep -q '^installer:' <<< "$1"; then
+    v="$(field name "$1")";    [[ "$v" =~ ^[a-z][a-z0-9-]{1,31}$ ]] || die 2 "nom d'installeur refuse: '$v'"
+    v="$(field url "$1")";     [[ "$v" =~ ^https:// ]]              || die 2 "url d'installeur refusee (https requis): '$v'"
+    v="$(field sha256 "$1")";  [[ "$v" =~ ^[a-f0-9]{64}$ ]]         || die 2 "sha256 d'installeur refuse pour '$2'"
+  fi
+}
+
+rc=0
+for path in $(list_manifests); do
+  eco="$(basename "$path" .yaml)"
+  safe_eco "$eco" || die 2 "nom d'ecosysteme refuse: '$eco'"
+
+  # Le marqueur ne gate QUE LES VERBES MAGASIN, et c'est le cas du REBUILD : il vit sur le magasin
+  # (volume externe) et lui SURVIT, pendant que /usr — la cible d'apt — meurt avec le conteneur.
+  # Gater le manifeste entier ferait annoncer « deja a <sha> » sur un /usr nu.
+  marker="$(applied_marker "$eco")"
+  store_current=0
+  [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
+
+  yaml="$(fetch_manifest "$path")"
+  validate_manifest "$yaml" "$eco"
+
+  if ( set -e
+       grep -q '^apt:'         <<< "$yaml" && apply_apt       "$yaml"
+       if [[ "$store_current" -eq 0 ]]; then
+         grep -q '^sysroot:'   <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
+         grep -q '^installer:' <<< "$yaml" && apply_installer "$yaml" "$eco"
+       fi
+       grep -q '^egress_hosts:' <<< "$yaml" && apply_egress   "$yaml" "$eco"
+       true )
+  then
+    mkdir -p "$(dirname "$marker")"; printf '%s\n' "$SHA" > "$marker"
+    if [[ "$store_current" -eq 1 ]]; then
+      echo "toolchain-converger: $eco — magasin deja a $SHA (verbes magasin sautes), apt rejoue"
+    else
+      echo "toolchain-converger: $eco applique a $SHA"
+    fi
+  else
+    sub=$?
+    if [[ "$sub" -eq 2 ]]; then
+      echo "toolchain-converger: $eco REFUSE en application (document faux) — le marqueur n'est PAS pose" >&2
+      [[ "$rc" -eq 3 ]] || rc=2
+    else
+      echo "toolchain-converger: $eco A ECHOUE (rc=$sub) — le marqueur n'est PAS pose" >&2
+      rc=3
+    fi
+  fi
+done
+
+#
+# Pose SEULEMENT si la passe est ENTIEREMENT verte : un rc=3 laisse l'etat en arriere d'au moins
+# un manifeste, et estampiller dirait « courant au SHA » sur un conteneur qui ne l'est pas.
+if [[ "$rc" -eq 0 ]]; then
+  mkdir -p "$STORE/state/egress.d"
+  printf '%s\n' "$SHA" > "$STORE/state/egress.d/.applied"
+fi
+
+exit "$rc"
