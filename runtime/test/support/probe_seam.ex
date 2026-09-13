@@ -1,8 +1,7 @@
 defmodule Fleet.Test.ProbeSeam do
   @moduledoc """
-  A seam module that lives in `_build` (not in a test file), so a witness can UNLOAD it and prove
-  what a probe sees before the first call: `function_exported?/3` says `false`, `Fleet.Opts.exported?/3`
-  loads it and says `true`. Used by `Fleet.OptsExportedTest` only.
+  Compiled support module for OptsExportedTest: it can be unloaded to compare
+  function_exported?/3 with Fleet.Opts.exported?/3's load-before-probe behavior.
   """
   use Boundary, deps: [], exports: []
 

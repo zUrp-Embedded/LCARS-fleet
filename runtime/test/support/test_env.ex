@@ -1,52 +1,20 @@
 defmodule Fleet.TestEnv do
-  # Own boundary (same pattern as `Fleet.CapProfileFixture`): a support module used from every
-  # domain's tests is not the property of any one domain. It touches `Application` and
-  # `ExUnit.Callbacks` — plus `Fleet.Credentials`, for the ONE fixture that must not spell a path
-  # the runtime owns: a role token's file name is derived (`RoleIdentity.token_path/1`), and a fixture
-  # writing it by hand is a fixture that keeps passing on a scheme production has left.
   use Boundary, deps: [Fleet.Credentials], exports: []
 
   @moduledoc """
-  Application-env helper for the whole suite's tests (B6 harness dedup).
+  Token-fixture and Application-env helpers. Call restoration helpers from setup/test
+  in the test process. fetch_env preserves absent keys versus keys set to nil or false;
+  on_exit callbacks unwind nested changes in reverse order.
 
-  Replaces the idiom rewritten in every file: "save `prev = Application.get_env`;
-  `on_exit` → `put_env(prev)` or `delete_env`". The capture goes through `Application.fetch_env/2`
-  (not `get_env`): an ABSENT key is re-deleted on restore, a SET key — even to `nil` or
-  `false` — is re-set as-is. Capturing via `get_env` would conflate the two through its `nil`.
-
-  Call from `setup`/`test` (the test process): the restoration registers via
-  `ExUnit.Callbacks.on_exit/1`. `on_exit` callbacks run in LIFO order → nested sets
-  (module setup then describe setup) unwind in the right order.
-
-  ONE module for the whole suite. It used to be copied once per domain because umbrella apps could
-  not see each other's `test/support`; the single-app collapse removed that wall —
-  `elixirc_paths(:test)` compiles `test/support` as one tree, so the copies had lost their reason
-  and only kept six bodies in sync by hand.
+  Environment writes are global to the node: tests using them must be async: false.
   """
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   @doc """
-  Un chemin JETABLE sous `/tmp`, qui ne peut pas entrer en collision avec un autre utilisateur.
-
-  ## Ce que `System.unique_integer` ne suffit pas a garantir
-
-  C'est un compteur PAR NŒUD : il repart a chaque demarrage de la BEAM, donc deux runs successifs
-  produisent la meme suite d'entiers. Sur un `/tmp` PARTAGE, deux utilisateurs de la meme machine
-  finissent donc par viser le meme chemin — et le second trouve un repertoire qui existe deja,
-  appartenant au premier. `File.mkdir_p!/1` REUSSIT (il ne cree rien, le repertoire est la), et
-  c'est l'ECRITURE qui echoue, une ligne plus loin, sur une permission.
-
-  ⚠ MESURE DU 2026-08-23. `step_dispatcher_test.exs` est mort sur
-  `could not write to file "/tmp/lcars-gk-only-38882/system_gatekeeper.gitea_token":
-  permission denied`, sur un repertoire pose par un AUTRE compte de la machine trois jours plus tot.
-  Le test n'avait pas change ; l'echec ne dependait que de qui avait joue la suite avant.
-
-  Le pid du systeme d'exploitation tranche : il est unique parmi les processus VIVANTS, donc deux
-  runs concurrents — meme utilisateur ou non — ne peuvent pas se retrouver sur le meme chemin.
-  Combine au compteur, il rend aussi les chemins distincts A L'INTERIEUR d'un run.
-
-  Ne cree RIEN : l'appelant garde son `File.mkdir_p!/1` et son nettoyage.
+  Returns a path under System.tmp_dir!() containing the OS pid and a per-VM counter.
+  This separates concurrent VMs sharing a pid namespace and calls within one VM, but
+  stale paths can recur after pid reuse. Creates nothing; callers own creation and cleanup.
   """
   @spec tmp_path(String.t()) :: Path.t()
   def tmp_path(prefix) when is_binary(prefix) do
@@ -57,15 +25,9 @@ defmodule Fleet.TestEnv do
   end
 
   @doc """
-  Writes `content` as `role`'s forge token, AT THE PATH THE RUNTIME READS.
-
-  A fixture that spells `<dir>/<role>.gitea_token` itself is a fixture that keeps passing on a
-  scheme the runtime no longer uses — and this scheme moved: the file is keyed by the ACCOUNT
-  (`<tier>_<role>`), because a role name is only unique inside its own catalogue. Asking
-  `RoleIdentity.token_path/1` is what makes a fixture follow.
-
-  It also RAISES on a role no catalogue declares, and that is the point rather than a nuisance: the
-  flat namespace let a fixture invent a role and be handed a credential for it. Two of them did.
+  Writes the token at RoleIdentity.token_path/1, creating parent directories, and returns
+  that path. Account-derived filenames distinguish catalogue tiers. Raises if the role
+  cannot resolve to an account or the write fails.
   """
   def put_role_token!(role, content) do
     case Fleet.Credentials.RoleIdentity.token_path(role) do
@@ -82,23 +44,13 @@ defmodule Fleet.TestEnv do
   end
 
   @doc """
-  Removes `role`'s forge token, at the path the runtime reads.
-
-  The inverse of `put_role_token!/2`, and it exists because provisioning EVERY signer became the
-  honest default the day the seal split into two rails — the boot requires them all
-  (`Pilot.Application.require_signer_tokens!`). A fixture proving a fail-closed refusal can no
-  longer do it by OMISSION; it must take one away. Which is also the real shape of that failure: a
-  mid-flight token loss, never a provisioning gap discovered at merge time.
-
-  Raises on an undeclared role, exactly like its counterpart: deleting the token of a role no
-  catalogue carries would assert on a world that does not exist.
+  Removes the resolved token path recursively and returns it, even if already absent.
+  Raises for an undeclared role or removal error. Use to remove a signer token explicitly
+  when a fixture otherwise provisions all signers required at boot.
   """
   def delete_role_token!(role) do
     case Fleet.Credentials.RoleIdentity.token_path(role) do
       {:ok, path} ->
-        # `_ =` : `rm_rf!` rend la LISTE des chemins supprimés, et le gate refuse les retours non
-        # appariés (`:unmatched_returns`). On ne l'inspecte pas — un fichier déjà absent rend `[]`,
-        # ce qui est le cas nominal ici : la fixture veut l'ABSENCE, pas une suppression.
         _ = File.rm_rf!(path)
         path
 
@@ -109,20 +61,8 @@ defmodule Fleet.TestEnv do
   end
 
   @doc """
-  Sets `value` under `{app, key}` and registers restoration of the PREVIOUS value
-  (re-set, or deletion if the key was absent) at the end of the test. Set + restore
-  in one call — the call site writes neither `prev` nor `on_exit`.
-
-  ⚠ **A TEST FILE THAT CALLS THIS IS `async: false`.** The restoration is per-test; the WRITE is
-  global to the node, and no `on_exit` narrows that. Between the set and the restore, every
-  concurrent test reading that key reads this one's value.
-
-  Not a theoretical hazard — measured 2026-08-17. `CardRolesTest` pointed
-  `:workflow_workflow_maps_root` at its own tmp root, and `Fleet.Pilot.ApplicationTest`, running
-  concurrently, resolved its cards THERE and died on a path that was never its own and no longer
-  existed. It surfaced in the image build while the host gate was green at the same commit: the
-  collision needs both modules inside the same window, so it depends on core count and seed order,
-  and it fires on the busiest machine.
+  Sets an Application value after registering restoration on test exit.
+  The write is global; use only in synchronous tests.
   """
   def put_env_restoring(app, key, value) do
     restore_env_on_exit(app, key)
@@ -130,9 +70,8 @@ defmodule Fleet.TestEnv do
   end
 
   @doc """
-  Captures the current value of `{app, key}` and registers its restoration at the end of
-  the test, WITHOUT setting anything. For setups whose tests then mutate the key themselves
-  (free `put_env`/`delete_env` in the test body).
+  Registers restoration of the current value or absence on test exit without changing it.
+  Call before direct mutations in a synchronous test.
   """
   def restore_env_on_exit(app, key) do
     prev = Application.fetch_env(app, key)

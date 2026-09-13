@@ -1,51 +1,27 @@
 defmodule Fleet.Test.AuthorityDouble do
   @moduledoc """
-  Le double du service d'autorité, pour la suite — `roles.sock` sans `catalogue-executor.py`.
+  Unix-socket authority double backed by token fixture files. Each request resolves
+  `:credentials_role_tokens_dir` again (fallback `/opt/lcars/var/tokens`) and reads
+  `<account>.gitea_token`. No Forge membership or master-authority checks are performed;
+  use `force_fail/1` to exercise those refusal responses.
 
-  ## Pourquoi il existe, et pourquoi il lit des fichiers
-
-  `Fleet.Credentials.RoleToken.token/1` ne lit plus `<dir>/<compte>.gitea_token` : il le DEMANDE à
-  `roles.sock`. Une centaine de témoins, eux, posent leurs jetons en écrivant ces fichiers dans un
-  `tmp` et en pointant `:credentials_role_tokens_dir` dessus.
-
-  Ce double sert exactement ce que le vrai service sert, DEPUIS LE MÊME ENDROIT — il résout le
-  répertoire à CHAQUE requête, via la même clé de config que les témoins posent déjà. Aucun fichier
-  de test n'a donc eu à changer de fixture : ce qui a changé est QUI ouvre le fichier, et c'était
-  tout l'objet du chantier.
-
-  ⚠ **C'est un double, pas une simulation de la forge.** Le vrai service demande d'abord à la forge
-  si le demandeur appartient à l'équipe `humans` (`FAIL:not_a_worker`), et sait dire qu'il n'a pas
-  d'autorité (`FAIL:no_authority`). Ici il n'y a ni forge ni master : ces causes-là se jouent par
-  `force_fail/1`, et un témoin qui veut les prouver le dit explicitement. Un double qui rendrait
-  toujours un jeton prouverait le chemin heureux et rien d'autre.
-
-  ## Le protocole, recopié depuis `catalogue-executor.py:serve_role_token`
-
-      -> <compte>\\n
-      <- <jeton>\\n   |   FAIL:<cause>\\n
-
-  Une ligne, une réponse, la connexion se ferme. `rstrip("\\r\\n")` et pas `strip()` : le vrai
-  service a payé ce défaut une fois — `.strip()` normalisait le fil et faisait passer un nom mal
-  cadré pour un nom valide.
+  One account line yields one token or `FAIL:<cause>` line, then the connection closes.
+  The reader removes trailing LF characters only; it does not trim account whitespace
+  or CR. This is not a complete reproduction of the service's input normalization.
   """
 
-  # Aucune dépendance Fleet : ce double parle le protocole du service, pas l'API du runtime. C'est
-  # ce qui le rend capable de prouver que le BEAM passe bien par la socket — un double qui appellerait
-  # `RoleToken` prouverait que `RoleToken` s'appelle lui-même.
+  # Keep the double independent of RoleToken so tests cross the actual socket protocol.
   use Boundary, deps: [], exports: []
   use GenServer
 
   @name __MODULE__
-  # Le même que le service (`ROLE_RX`). Recopié, donc comparé : `authority_double.bats` épingle
-  # l'égalité des deux motifs. Une copie que personne ne vérifie n'est pas une source de vérité.
+  # authority_double.bats compares this copied pattern with the service's ROLE_RX.
   @role_rx ~r/^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
   @doc """
-  Démarre le double, pose `:credentials_authority_socket` sur sa socket, et rend son chemin.
-
-  Idempotent : un second appel rend la socket déjà en service. La suite l'appelle une fois depuis
-  `test_helper.exs` — le répertoire servi étant résolu par requête, un seul process suffit pour
-  tous les témoins, y compris ceux qui changent de `tmp` entre deux.
+  Starts the named double and returns its socket path. Initialization sets
+  `:credentials_authority_socket`; repeated calls reuse the process without resetting
+  that configuration. The suite starts it once from test_helper.exs.
   """
   @spec start() :: Path.t()
   def start do
@@ -62,8 +38,8 @@ defmodule Fleet.Test.AuthorityDouble do
   def socket_path, do: GenServer.call(@name, :socket_path)
 
   @doc """
-  Force la prochaine réponse (et les suivantes) à une cause donnée, ou rétablit le service normal
-  avec `nil`. C'est par là que se prouvent les causes qu'un double sans forge ne peut pas produire.
+  Forces subsequent responses to `FAIL:<cause>` until reset with nil.
+  This setting is shared by all tests using the double.
   """
   @spec force_fail(atom() | nil) :: :ok
   def force_fail(cause), do: GenServer.call(@name, {:force_fail, cause})
@@ -73,18 +49,13 @@ defmodule Fleet.Test.AuthorityDouble do
     path =
       Path.join(
         System.tmp_dir!(),
-        # ⚠ LE PID DE L'OS, PAS SEULEMENT LE COMPTEUR DU BEAM. `System.unique_integer` repart de
-        # petits nombres à chaque VM : deux suites lancées par DEUX UTILISATEURS sur la même
-        # machine se disputent le même nom dans `/tmp`, et le second échoue en `:eaddrinuse` sur
-        # une socket qu'il n'a pas le droit d'effacer (sticky bit). Le pid du système sépare les
-        # deux runs ; le compteur sépare les listeners d'un même run.
+        # OS pid separates concurrent VMs; the counter separates listeners within a VM.
         "lcars-authority-double-#{System.pid()}-#{System.unique_integer([:positive])}.sock"
       )
 
     _ = File.rm(path)
 
-    # ⚠ `{:local, path}` AVEC `0` EN PORT : la forme qu'Erlang exige pour AF_UNIX. Le zéro n'est pas
-    # un port — même idiome que le vrai listener côté BEAM.
+    # AF_UNIX uses {:local, path} with port 0.
     {:ok, listen} =
       :gen_tcp.listen(0, [
         {:ifaddr, {:local, path}},
@@ -116,10 +87,7 @@ defmodule Fleet.Test.AuthorityDouble do
   defp accept_loop(listen, parent) do
     case :gen_tcp.accept(listen) do
       {:ok, conn} ->
-        # ⚠ SERVI DANS UNE TÂCHE À PART, ET CE N'EST PAS DU CONFORT. Servi dans la boucle, un client
-        # qui ouvre sans écrire bloquerait tous les autres — et le témoin qui en souffrirait ne
-        # serait pas celui qui l'a ouvert. Un double qui fait échouer un témoin voisin est pire
-        # qu'un double absent : il déplace le diagnostic.
+        # A client that connects without writing must not block other clients.
         {:ok, _} = Task.start(fn -> serve(conn, parent) end)
         accept_loop(listen, parent)
 
@@ -160,9 +128,7 @@ defmodule Fleet.Test.AuthorityDouble do
     end
   end
 
-  # `no_role_token` COUVRE AUSSI LE FICHIER VIDE, comme dans le vrai service. Rendre une ligne vide
-  # ferait passer « aucun jeton » pour « ce jeton-ci », et le refus arriverait de la forge, en 401,
-  # loin d'ici.
+  # An empty token file is a refusal, not an empty credential.
   defp token_or_fail({:ok, raw}) do
     case String.trim(raw) do
       "" -> "FAIL:no_role_token"
