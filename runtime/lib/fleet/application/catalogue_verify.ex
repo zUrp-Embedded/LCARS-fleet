@@ -1,8 +1,9 @@
 defmodule Fleet.Application.CatalogueVerify do
   @moduledoc """
-  Standalone catalogue-root proof using the daemon's own verification functions in
-  boot order. It proves one directory, not deployment credentials or fine-grained
-  overrides, and must run in an ephemeral VM because image publication is global.
+  Runs catalogue checks using boot functions, without starting the supervision tree
+  or validating deployment credentials. Use an ephemeral VM: verification publishes
+  global images and only restores catalogue_root, not images or other configuration.
+  boot.verifier_covers_rail checks stage coverage separately.
   """
 
   require Logger
@@ -19,34 +20,17 @@ defmodule Fleet.Application.CatalogueVerify do
           | {:error, %{root: Path.t(), findings: [finding()], assumptions: [String.t()]}}
 
   @doc """
-  The RELEASE door: run `verify/1`, print the same report the `mix` task prints, and halt with the
-  boot's verdict (0 pass, 1 refused). Called from the image's entrypoint via a release eval —
-
-      bin/lcars_fleet eval 'Fleet.Application.CatalogueVerify.eval_main("/cat")'
-
-  so the entrypoint's `verify <root>` is a one-liner and the exit code is the whole contract on the
-  shell side. Uses `IO.puts` + `System.halt/1` because a release has no `Mix.shell` — the ONLY
-  difference from the dev door, the checks themselves being identical (they are `verify/1`).
+  Release eval entry: verifies root, prints assumptions/findings and exits 0 or 1.
+  Uses the same verifier as the Mix task; ReleaseDoor reserves stdout for the report.
   """
   @spec eval_main(Path.t()) :: no_return()
   def eval_main(root) when is_binary(root) do
-    # Le rapport EST la sortie de cette porte, et l'entrypoint le rend a l'operateur. Meme regle que
-    # les autres portes release : le logger va sur stderr, le rapport garde stdout pour lui seul.
-    # Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
     Fleet.ReleaseDoor.claim_stdout!()
 
     case verify(root) do
       {:ok, %{assumptions: assumptions}} ->
         print(assumptions)
-        # ⚠ CETTE LIGNE NE DIT PAS « every check the boot runs passed » (6-008) : rien ici ne
-        # tiendrait cette equivalence. Que ce verificateur rejoue UNE garde de moins que le rail de
-        # boot, et un vert d'ici PRECEDE un boot rouge — le contraire de son objet. L'equivalence
-        # des deux sequences est tenue par le check `boot.verifier_covers_rail`, qui les lit a
-        # l'AST et refuse la divergence.
-        #
-        # La phrase nomme donc ce qui EST prouve. Le verificateur prouve UN REPERTOIRE avec
-        # les fonctions du boot ; il ne prouve ni les credentials de deploiement, ni les surcharges
-        # fines, ni l'ordre reel de demarrage — ce que la liste d'hypotheses au-dessus dit deja.
+        # Report catalogue checks only; boot-stage coverage is a separate contract check.
         IO.puts(
           "catalogue OK — les controles catalogue du boot passent (cf. hypotheses ci-dessus)."
         )
@@ -68,12 +52,11 @@ defmodule Fleet.Application.CatalogueVerify do
   end
 
   @doc """
-  Verifies the catalogue at `root`. Sets `:lcars_fleet, :catalogue_root` to it for the duration, restores
-  the previous value on the way out. Collects findings instead of raising on the first — an operator
-  fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
-  manifest is a precondition (nothing downstream is meaningful without it), and the images are a
-  precondition for the spawn proof and the card guards (both read the frozen image, so a failed
-  image would cascade into noise).
+  Temporarily sets catalogue_root and collects stage exceptions/throws/exits.
+  Manifest failure skips everything downstream; either image failure skips spawn,
+  card and business-advice stages. Otherwise those stages all run and accumulate
+  findings. A stage's returned error tuple alone does not count as a finding.
+  The report names the root and fine-override scope; it is not full deployment proof.
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do
@@ -99,13 +82,8 @@ defmodule Fleet.Application.CatalogueVerify do
     end
   end
 
-  # THREE STATES USED TO SHARE ONE SILENCE: a catalogue that brings no role on purpose, a
-  # `cap-profiles` directory mislaid (a typo, or the pre-0.9 `canon/` level), and a directory that
-  # is there. The first is legal (`Fleet.Workflow.CardRoles`: a catalogue with no profiles of its
-  # own is fine as long as its cards only name system roles) and the second is the dangerous one —
-  # zero role published, every stage green. Refusing would set a policy this verifier has no mandate
-  # for; so the state is NAMED in the assumptions the operator reads, and a mislaid directory reads
-  # as « none of its own » where they expected their roles (2026-09-04).
+  # A missing cap-profile directory can be intentional or misplaced. State it in
+  # assumptions rather than refusing a valid catalogue that only uses system roles.
   defp cap_profiles_assumption(root) do
     dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
 
@@ -114,8 +92,6 @@ defmodule Fleet.Application.CatalogueVerify do
       else: "cap-profiles: NONE of its own (#{dir} absent) — its cards can only name system roles"
   end
 
-  # Tier 1 — the manifest. Without a readable root and a supported api_version, nothing below can be
-  # published or proved; a precondition, so it short-circuits.
   defp run(root, _assumptions) do
     case guard("catalogue manifest", fn -> Fleet.Catalogue.verify!() end) do
       [] -> after_manifest(root)
@@ -123,9 +99,7 @@ defmodule Fleet.Application.CatalogueVerify do
     end
   end
 
-  # Tier 2 — the two proven-good images. The spawn proof and the card guards read the FROZEN image,
-  # so a failed publish would make them fail too, as cascade noise. If either image fails, we skip
-  # those two and still prove the policies (which read their own file), then report.
+  # Image failures suppress dependent stages to avoid cascading findings.
   defp after_manifest(root) do
     image_findings =
       Enum.flat_map(
@@ -142,15 +116,11 @@ defmodule Fleet.Application.CatalogueVerify do
           {"canon spawn-proof", fn -> Fleet.Spawner.prove_canon!() end},
           {"cards + structural roles",
            fn -> Fleet.Pilot.Application.verify_cards_and_roles!() end},
-          # L'ARETE ENTRE LES DEUX IMAGES : chaque carte nomme-t-elle des roles qui existent ?
-          # Elle est jouee au boot, et elle DOIT l'etre ici — `catalogue install` appelle cette
-          # porte avant de toucher la forge, et une porte qui ne couvre pas le boot rend un vert
-          # suivi d'un boot rouge (6-008).
+          # Match the boot card-to-role check before catalogue installation changes the forge.
           {"cards -> roles", fn -> Fleet.Workflow.CardRoles.verify!(root) end},
           {"business catalogue advice", fn -> advise_business!(root) end}
         ]
       else
-        # Images broke → the spawn proof and card guards would only echo it.
         []
       end
 
@@ -163,36 +133,15 @@ defmodule Fleet.Application.CatalogueVerify do
     end
   end
 
-  # What the BUSINESS half declares on its own, judged alone. One warning, and NO refusal — in
-  # particular pas ces deux-la : « un role metier ne peut pas declarer une capability systeme » et
-  # « un role metier ne peut pas prendre `role_index: 0` ».
-  #
-  # Les deux sont justes SOUS UN CATALOGUE MONO-RACINE, ou une collision de nom est elle-meme un
-  # refus : rien ne peut se superposer a rien, donc declarer `project_delegate` ne peut etre qu'une
-  # usurpation. Des lors que le resolveur lit un CHEMIN DE RECHERCHE ORDONNE, surcharger un role
-  # systeme PAR NOM est le geste SUPPORTE — et une surcharge d'`architect.yaml` declare
-  # necessairement `project_delegate`, une surcharge de `starfleet.yaml` porte necessairement le
-  # slot 0. Ces deux refus cesseraient de tracer une frontiere pour INTERDIRE LA FONCTIONNALITE.
-  #
-  # What replaces them looks at the MERGED index instead of the files, which is what lets it tell
-  # the two apart on its own: an override is ONE entry (one delegate, one claim on slot 0) and
-  # passes; two different names on one slot, or two delegates, are real conflicts and are refused —
-  # by `Fleet.CapProfile.Image.publish!/0` and `Fleet.Project.Roles.resolve_structural_roles!/0`,
-  # at BOOT, which is also where a deployment that never runs this verifier is finally covered.
-  #
-  # The warning stays a warning on purpose: a catalogue with no judge is LEGITIMATE (a card may
-  # declare `jury: []` and mean it), it is just almost always an oversight. Refusing it would set a
-  # policy this check has no mandate for — the same restraint `validate_workshop_card!/1` applies.
-  #
-  # The unreadable case still raises even though the image stage above would normally reach it
-  # first: this reads ONE root where the image reads the union, and a guard that relies on another
-  # stage running before it is a guard with a hidden precondition.
+  # Same-name system-role overrides are supported. Conflicting slots/delegates are
+  # checked in the merged index by image/structural-role validation, not forbidden
+  # merely because a business file declares a system capability.
+  # No judge in this root is advice, not refusal: zero-jury workflows are legitimate.
+  # Other unreadable-index errors still raise; this is a root-local inspection.
   defp advise_business!(root) do
     cap_root = Path.join(root, "cap_profile/cap-profiles")
 
     case Fleet.CapProfile.index_of(cap_root) do
-      # Legal, and already NAMED to the operator by `cap_profiles_assumption/1` — the advice stage
-      # has nothing to judge alone when there is nothing of its own.
       {:error, :enoent} ->
         :ok
 
@@ -214,8 +163,7 @@ defmodule Fleet.Application.CatalogueVerify do
 
   defp judge_role?({_name, raw}), do: get_in(raw, ["spec", "brief_kind"]) == "judge"
 
-  # Runs one stage. `[]` on success, a one-element finding list on any raise/throw — the boot raises,
-  # the verifier collects, so the caller sees every failure the deployment would have hit.
+  # Only raised/thrown/exited failures produce findings; normal return values are ignored.
   defp guard(stage, fun) do
     fun.()
     []

@@ -1,16 +1,13 @@
 defmodule Fleet.ApplicationPrepStopTest do
   @moduledoc """
-  The nominal stop's graceful door: SIGTERM → :init.stop → prep_stop, which drains
-  through Shutdown.begin BEFORE any supervisor dies. An absent server (hermetic boots)
-  or a failing drain must never wedge the teardown — prep_stop always passes the state
-  through.
+  Calls prep_stop directly with absent or NoOp Shutdown. Checks state passthrough;
+  does not send SIGTERM, fail the drain or assert its invocation/order against teardown.
   """
   # async: false — registers the REAL Fleet.Admiral.Shutdown global name.
   use ExUnit.Case, async: false
 
   test "with the Shutdown server up, prep_stop drains and passes the state through" do
-    # Real server under its global name (prep_stop resolves it by Process.whereis),
-    # NoOp dispatcher default, fast poll — the drain concludes immediately (0 in-flight).
+    # Real named server with NoOp counting and short polls; no actual work drains.
     start_supervised!({Fleet.Admiral.Shutdown, name: Fleet.Admiral.Shutdown, poll_ms: 10})
 
     assert Fleet.Application.prep_stop(:app_state) == :app_state
