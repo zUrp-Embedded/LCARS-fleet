@@ -76,7 +76,7 @@ ensure_docker_repo() {
 deb [arch=$arch signed-by=$DOCKER_KEYRING] $url $codename stable
 EOF
 
-  if ! run_quiet apt-get update -o Dir::Etc::sourcelist="$DOCKER_LIST" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
+  if ! run_capture apt-get update -o Dir::Etc::sourcelist="$DOCKER_LIST" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
     local restaure=""
     if [[ "$list_avant" -eq 1 && -f "$sauve/list" ]]; then
       cp -p "$sauve/list" "$DOCKER_LIST" && restaure="$DOCKER_LIST"
@@ -94,6 +94,7 @@ EOF
     else
       p_fail "dépôt docker : « apt-get update » refuse la source — retirée avec sa clé ($DOCKER_LIST, $DOCKER_KEYRING), ni l'une ni l'autre n'était là avant"
     fi
+    prov_dump_last
     return 1
   fi
   [[ -n "$sauve" ]] && rm -rf "$sauve"

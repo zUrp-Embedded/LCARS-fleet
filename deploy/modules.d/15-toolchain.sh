@@ -180,8 +180,8 @@ apply() {
     rm -rf "${ELIXIR_HOME}.partial"
     prov_scaffold_dir "${ELIXIR_HOME}.partial" 0755 root:root || verdict_apply
     p_step "Elixir $PROV_ELIXIR_PIN — décompression du précompilé officiel (OTP $PROV_ELIXIR_OTP_MAJOR)"
-    if ! run_quiet unzip -q "$zip" -d "${ELIXIR_HOME}.partial"; then
-      rm -rf "${ELIXIR_HOME}.partial" "$zip"; p_fail "extraction du précompilé Elixir"; verdict_apply
+    if ! run_capture unzip -q "$zip" -d "${ELIXIR_HOME}.partial"; then
+      rm -rf "${ELIXIR_HOME}.partial" "$zip"; p_fail "extraction du précompilé Elixir"; prov_dump_last; verdict_apply
     fi
     prov_promote_dir "${ELIXIR_HOME}.partial" "$ELIXIR_HOME" || verdict_apply
     rm -f "$zip"

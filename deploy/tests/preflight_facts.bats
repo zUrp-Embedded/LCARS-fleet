@@ -41,6 +41,20 @@ preflight() { # preflight <substrat> [VAR=val…]
 
 fact() { sed -n "s/^$1=//p" "$FACTS" 2>/dev/null | tail -1; }
 
+path_sans() { # path_sans <outil> → un dossier qui porte tout le PATH système sauf l'outil
+  local sans="$BATS_TEST_TMPDIR/sans-$1" d f n; mkdir -p "$sans"
+  for d in /usr/sbin /usr/bin /sbin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -x "$f" ] || continue
+      n="$(basename "$f")"
+      [ "$n" = "$1" ] && continue
+      [ -e "$sans/$n" ] || ln -sf "$f" "$sans/$n"
+    done
+  done
+  echo "$sans"
+}
+
 docker_qui_repond() { # un docker qui répond à version et compose, publie <conteneur> (projet <projet>) sur tout port, et connaît <projet-existant>
   cat > "$BIN/docker" <<EOF
 #!/usr/bin/env bash
@@ -203,6 +217,31 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ "$(fact compose)" = "oui" ]
 }
 
+@test "docker sans nom de plateforme : la variante est le paquet propriétaire du dockerd local" {
+  docker_qui_repond
+  sed -i 's/29.0.0|Docker Engine - Test/29.1.3|/' "$BIN/docker"
+  printf '#!/usr/bin/env bash\n' > "$BIN/dockerd"; chmod 0755 "$BIN/dockerd"
+  printf '#!/usr/bin/env bash\necho "docker.io: $3"\n' > "$BIN/dpkg-query"; chmod 0755 "$BIN/dpkg-query"
+  preflight docker DOCKER_HOST=unix:///dev/null
+  [ "$(fact docker_server)" = "29.1.3" ]
+  [ "$(fact docker_flavor)" = "docker.io" ]
+}
+
+@test "docker sans nom de plateforme ni dockerd local : la variante reste vide" {
+  docker_qui_repond
+  sed -i 's/29.0.0|Docker Engine - Test/29.1.3|/' "$BIN/docker"
+  preflight docker DOCKER_HOST=unix:///dev/null PATH="$BIN:$(path_sans dockerd)"
+  [ "$(fact docker)" = "oui" ]
+  [ -z "$(fact docker_flavor)" ]
+}
+
+@test "coreutils sans mv --exchange : échec dit, une bascule de dossier n'aurait pas de forme atomique" {
+  printf '#!/usr/bin/env bash\necho "Usage: mv SOURCE DEST"\n' > "$BIN/mv"; chmod 0755 "$BIN/mv"
+  preflight docker
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: coreutils sans « mv --exchange »"* ]]
+}
+
 
 @test "forge fournie : l'URL est un fait, sa joignabilité un autre" {
   preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-absente"
@@ -352,18 +391,7 @@ EOF
 }
 
 @test "sudo : absent du PATH, le fait dit « absent » (« root » sous root)" {
-  # un PATH qui porte tout sauf sudo, et la doublure docker devant
-  local sans="$BATS_TEST_TMPDIR/sans-sudo" d f n; mkdir -p "$sans"
-  for d in /usr/sbin /usr/bin /sbin /bin; do
-    [ -d "$d" ] || continue
-    for f in "$d"/*; do
-      [ -x "$f" ] || continue
-      n="$(basename "$f")"
-      [ "$n" = sudo ] && continue
-      [ -e "$sans/$n" ] || ln -sf "$f" "$sans/$n"
-    done
-  done
-  [ ! -e "$sans/sudo" ]
+  local sans; sans="$(path_sans sudo)"
   local attendu=absent; [[ "$EUID" -ne 0 ]] || attendu=root
   preflight docker PATH="$BIN:$sans"
   [ "$(fact sudo)" = "$attendu" ]

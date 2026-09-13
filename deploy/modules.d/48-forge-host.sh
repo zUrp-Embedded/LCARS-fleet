@@ -216,8 +216,8 @@ apply() {
     fi
     [[ "$was_up" -eq 1 ]] \
       || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
-    run_quiet forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_BIND" "$PUBLIC_URL" \
-      || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
+    run_capture forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_BIND" "$PUBLIC_URL" \
+      || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; prov_dump_last; verdict_apply; }
     forge_wait "$FORGE_URL" || { p_fail "forge montée mais muette sur $FORGE_URL après 120 s"; verdict_apply; }
   fi
 

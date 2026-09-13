@@ -52,6 +52,43 @@ module_sh() {
   [[ "$output" == *FAIL* ]]
 }
 
+@test "run_capture : un échec rend le code sans verdict, sa sortie attend dans PROV_LAST_OUT" {
+  module_sh '
+    rc=0
+    run_capture bash -c "echo boom-output; exit 3" || rc=$?
+    [ "$rc" -eq 3 ]
+    [ "$PROV_LAST_RC" -eq 3 ]
+    [ "$PROV_FAILED" -eq 0 ]
+    [ "$(cat "$PROV_LAST_OUT")" = boom-output ]
+    rm -f "$PROV_LAST_OUT"
+  '
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "run_capture : un succès ne garde rien" {
+  module_sh '
+    run_capture bash -c "echo rien"
+    [ -z "$PROV_LAST_OUT" ]
+    [ "$PROV_LAST_RC" -eq 0 ]
+  '
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "prov_dump_last : les dernières lignes de la sortie capturée, le fichier conservé" {
+  module_sh '
+    export PROV_DUMP_LINES=2
+    run_capture bash -c "echo l1; echo l2; echo l3; exit 1" || true
+    prov_dump_last
+    [ -s "$PROV_LAST_OUT" ]
+    rm -f "$PROV_LAST_OUT"
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"l2"*"l3"*"conservée"* ]]
+  [[ "$output" != *"l1"* ]]
+}
+
 @test "B1: run_quiet success stays silent and counts nothing" {
   module_sh '
     run_quiet true
@@ -644,6 +681,7 @@ STUB
     [ "$PROV_FAILED" -eq 1 ]
   '
   [ "$status" -eq 0 ]
+  [[ "$output" == *"FAIL  test-mod: commande en échec (rc=7) : etape"* ]]
   [[ "$output" == *"ligne-200"* ]]
   [[ "$output" != *"ligne-100"* ]]
   [[ "$output" == *"sortie COMPLÈTE conservée"* ]]
@@ -663,14 +701,15 @@ STUB
     || { echo "run_step a laisse $((after - before)) fichier(s) dans son propre TMPDIR :"; find "$container" -maxdepth 1 -name 'prov-out.*'; return 1; }
 }
 
-@test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
+@test "run_step --ok N : un code tolere n'est pas un echec, il NE TUE PAS l'appelant, et aucun verdict n'est posé" {
   module_sh '
     run_step --ok 3 "etape" -- bash -c "sleep 1.1; exit 3"
     [ "$PROV_LAST_RC" -eq 3 ]
     [ "$PROV_FAILED" -eq 0 ]
+    [ -z "$PROV_LAST_OUT" ]
   '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"OK    test-mod:"* ]]
   [[ "$output" != *"FAIL"* ]]
 }
 
@@ -693,7 +732,7 @@ STUB
     [ "$PROV_FAILED" -eq 0 ]
   '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"OK    test-mod:"* ]]
   [[ "$output" != *"FAIL"* ]]
 }
 
@@ -705,7 +744,7 @@ STUB
     [ "$PROV_FAILED" -eq 0 ]
   '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"code attendu"* ]]
+  [[ "$output" != *"OK    test-mod:"* ]]
   [[ "$output" != *"FAIL"* ]]
 }
 

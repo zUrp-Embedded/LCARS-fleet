@@ -259,7 +259,7 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
            write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
            fetch_verify() { : > "$3"; }
            dpkg() { echo arm64; }
-           run_quiet() { return 0; }
+           run_capture() { return 0; }
            ensure_docker_repo'
   [ "$status" -eq 0 ]
   run cat "$BATS_TEST_TMPDIR/docker.list"
@@ -284,7 +284,7 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
         # reconnaitre au second tour que ce qui est en place EST ce qui etait attendu.
         fetch_verify() { echo "FETCH"; : > "$3"; }
         dpkg() { echo amd64; }
-        run_quiet() { return 0; }
+        run_capture() { return 0; }
         ensure_docker_repo
         ensure_docker_repo' _ "$head"
   [ "$status" -eq 0 ]
@@ -306,7 +306,7 @@ repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
         write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
         fetch_verify() { mkdir -p "$(dirname "$3")"; echo "CLE-LCARS" > "$3"; }
         dpkg() { echo amd64; }
-        run_quiet() { return 1; }        # « apt-get update » refuse
+        run_capture() { return 1; }        # « apt-get update » refuse
         ensure_docker_repo' _ "$head"
 }
 

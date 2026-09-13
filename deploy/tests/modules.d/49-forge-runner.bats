@@ -87,14 +87,17 @@ mod() { run bash "$MODULE" "$1"; }
   [ ! -s "$CALLS" ]
 }
 
-@test "le délégué refuse : drift, sa sortie remonte, le temporaire est retiré" {
+@test "le délégué refuse : drift, sa sortie remonte et reste lisible, le jeton n'apparaît pas" {
   stub_curl '{"runners":[],"total_count":0}'
   stub_delegue 1 "REFUS : image(s) introuvable(s)"
   mod apply
   [ "$status" -eq 2 ]
-  [[ "$output" == *"     REFUS : image(s) introuvable(s)"*"DRIFT 49-forge-runner: runner CI NON enrôlé (rc=1"* ]]
+  [[ "$output" == *"REFUS : image(s) introuvable(s)"*"DRIFT 49-forge-runner: runner CI NON enrôlé (rc=1"* ]]
+  [[ "$output" != *"FAIL"* ]]
+  [[ "$output" != *"admin-token-file"* ]]
   [ -s "$CALLS" ]
-  [ -z "$(ls -A "$TMPDIR")" ]
+  f="$(printf '%s\n' "$output" | sed -n 's/.*conservée : \([^ ]*\).*/\1/p' | tail -n1)"
+  [ -s "$f" ]
 }
 
 @test "le délégué réussit : posé, il reçoit la forge, le jeton, le réseau, le projet et les labels ; le temporaire est retiré" {

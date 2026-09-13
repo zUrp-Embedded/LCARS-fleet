@@ -136,13 +136,13 @@ EOF
   fi
 
   for m in "${mods[@]}"; do
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_quiet env -C "$m" "$TOFU_BIN" providers mirror -platform="linux_${arch}" "$TOFU_DIR/providers" \
-      || { p_fail "miroir de providers : échec sur $m"; rm -rf "$work"; verdict_apply; }
+    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_capture env -C "$m" "$TOFU_BIN" providers mirror -platform="linux_${arch}" "$TOFU_DIR/providers" \
+      || { p_fail "miroir de providers : échec sur $m"; prov_dump_last; rm -rf "$work"; verdict_apply; }
   done
   chmod -R a+rX "$TOFU_DIR" 2>/dev/null || true
   for m in "${mods[@]}"; do
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_quiet env -C "$m" "$TOFU_BIN" init -input=false -no-color \
-      || { p_fail "tofu : init hors-ligne en échec dans $m après miroir — le miroir ne couvre pas la recette"; rm -rf "$work"; verdict_apply; }
+    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_capture env -C "$m" "$TOFU_BIN" init -input=false -no-color \
+      || { p_fail "tofu : init hors-ligne en échec dans $m après miroir — le miroir ne couvre pas la recette"; prov_dump_last; rm -rf "$work"; verdict_apply; }
   done
   rm -rf "$work"
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "miroir de providers hors-ligne ($TOFU_DIR/providers)"

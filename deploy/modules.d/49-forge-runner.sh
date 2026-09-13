@@ -40,24 +40,19 @@ converge_ci_runner() {
     return 0
   fi
   p_step "forge du poste : enrôlement du runner CI (projet $PROV_RUNNER_PROJECT, réseau $PROV_FORGE_NET)"
-  # pas run_quiet : il imprime la commande en échec, jeton compris, et rendrait un second verdict
-  local out rc=0
-  out="$(mktemp "${TMPDIR:-/tmp}/forge-runner.XXXXXX")"
+  local rc=0
   DOCKER_BIN="$PROV_DOCKER_BIN" \
-    bash "$(repo_root)/deploy/docker/forge-runner.sh" \
+    run_capture bash "$(repo_root)/deploy/docker/forge-runner.sh" \
       --forge-api "$LOCAL_URL/api/v1" --admin-token-file "$PROV_MASTER_TOKEN_FILE" \
       --network "$PROV_FORGE_NET" --project "$PROV_RUNNER_PROJECT" \
       ${PROV_RUNNER_LABELS:+--labels "$PROV_RUNNER_LABELS"} \
-      ${PROV_RUNNER_ACCEPT_GENERIC:+--accept-generic} \
-      >"$out" 2>&1 || rc=$?
+      ${PROV_RUNNER_ACCEPT_GENERIC:+--accept-generic} || rc=$?
   if [[ "$rc" -eq 0 ]]; then
-    rm -f "$out"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
     return 0
   fi
-  sed 's/^/     /' "$out" >&2
-  rm -f "$out"
+  prov_dump_last
   p_drift "runner CI NON enrôlé (rc=$rc — le refus du délégué est au-dessus) — la CI restera en attente"
 }
 

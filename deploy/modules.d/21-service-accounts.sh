@@ -99,29 +99,32 @@ apply() {
 
   if ! account_exists "$AUTHORITY_USER"; then
     # --system : uid sous UID_MIN, donc bin/fleet refuse une fleet sous ce compte, gratuitement
-    if run_quiet "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
+    if run_capture "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
                  -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $AUTHORITY_USER"
     else
       p_fail "création de $AUTHORITY_USER en échec — le service d'autorité restera sans identité"
+      prov_dump_last
       verdict_apply
     fi
   fi
 
   if [[ "$(shell_of "$AUTHORITY_USER")" != "$NOLOGIN" ]]; then
-    if run_quiet "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
+    if run_capture "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "$AUTHORITY_USER -> $NOLOGIN"
     else
       p_fail "$AUTHORITY_USER : shell non convergé vers $NOLOGIN"
+      prov_dump_last
     fi
   fi
 
   if [[ "$(primary_group_of "$AUTHORITY_USER")" != "$AUTHORITY_GROUP" ]]; then
-    if run_quiet "$USERMOD" -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
+    if run_capture "$USERMOD" -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $AUTHORITY_USER -> $AUTHORITY_GROUP"
     else
       p_fail "$AUTHORITY_USER : groupe primaire non convergé vers $AUTHORITY_GROUP"
+      prov_dump_last
       verdict_apply
     fi
   fi
@@ -132,29 +135,32 @@ apply() {
   ensure_group "$SYSTEM_GROUP" || { p_fail "groupe $SYSTEM_GROUP non posé — la landing n'aura pas de groupe à elle, et le secret OAuth2 du deck resterait sur un groupe partagé"; verdict_apply; }
 
   if ! account_exists "$SYSTEM_USER"; then
-    if run_quiet "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
+    if run_capture "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
                  -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $SYSTEM_USER"
     else
       p_fail "création de $SYSTEM_USER en échec — la landing retomberait sur « nobody »"
+      prov_dump_last
       verdict_apply
     fi
   fi
 
   if [[ "$(shell_of "$SYSTEM_USER")" != "$NOLOGIN" ]]; then
-    if run_quiet "$USERMOD" -s "$NOLOGIN" -- "$SYSTEM_USER"; then
+    if run_capture "$USERMOD" -s "$NOLOGIN" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "$SYSTEM_USER -> $NOLOGIN"
     else
       p_fail "$SYSTEM_USER : shell non convergé vers $NOLOGIN"
+      prov_dump_last
     fi
   fi
 
   if [[ "$(primary_group_of "$SYSTEM_USER")" != "$SYSTEM_GROUP" ]]; then
-    if run_quiet "$USERMOD" -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
+    if run_capture "$USERMOD" -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $SYSTEM_USER -> $SYSTEM_GROUP"
     else
       p_fail "$SYSTEM_USER : groupe primaire non convergé vers $SYSTEM_GROUP"
+      prov_dump_last
       verdict_apply
     fi
   fi

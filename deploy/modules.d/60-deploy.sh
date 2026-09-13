@@ -181,12 +181,8 @@ apply() {
   ! prov_delivery_is_binary || etape="pose de la release depuis le kit"
   run_step --ok 3 "$etape" -- \
     as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \
-      LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" || true
-  local install_rc="$PROV_LAST_RC"
-  if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
-    p_fail "deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
-    verdict_apply
-  fi
+      LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" \
+    || { p_warn "le prefix reste déverrouillé pour inspection"; verdict_apply; }
   release_present || { p_fail "deploy-release.sh vert mais release absente ($PREFIX_REL) — incohérence à inspecter"; verdict_apply; }
   chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown"; verdict_apply; }
   chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod"; verdict_apply; }

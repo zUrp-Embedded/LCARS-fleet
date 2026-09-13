@@ -156,32 +156,55 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
   esac
 }
 
-run_step() { # run_step [--ok N]… <label> -- <cmd…>
-  local ok_codes=()
-  while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
+# Exécuter et qualifier sont deux gestes : run_capture exécute et rend le code, l'appelant pose le
+# verdict. run_quiet et run_step posent le verdict ordinaire — un échec est un FAIL, avec sa sortie.
+run_capture() { # run_capture <cmd…> — sur échec, la sortie reste dans PROV_LAST_OUT
+  local rc=0
+  PROV_LAST_OUT=""
+  if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
+    "$@" || rc=$?
+  else
+    PROV_LAST_OUT="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
+    "$@" >"$PROV_LAST_OUT" 2>&1 || rc=$?
+    [[ "$rc" -ne 0 ]] || { rm -f "$PROV_LAST_OUT"; PROV_LAST_OUT=""; }
+  fi
+  PROV_LAST_RC="$rc"
+  return "$rc"
+}
+
+prov_dump_last() { # les dernières lignes de la sortie capturée ; le fichier est conservé
+  [[ -n "${PROV_LAST_OUT:-}" && -f "$PROV_LAST_OUT" ]] || return 0
+  local n; n="$(wc -l < "$PROV_LAST_OUT")"
+  {
+    printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
+    tail -n "$PROV_DUMP_LINES" "$PROV_LAST_OUT"
+    printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$PROV_LAST_OUT"
+  } >&2
+}
+
+run_quiet() { # run_quiet <cmd…>
+  local rc=0
+  run_capture "$@" || rc=$?
+  [[ "$rc" -eq 0 ]] || { p_fail "commande en échec (rc=$rc) : $*"; prov_dump_last; }
+  return "$rc"
+}
+
+_run_watch() { # comme run_capture, avec la phase et la durée à l'écran
   local label="$1"; shift
-  [[ "${1:-}" == "--" ]] && shift
-  local rc=0 c
+  local rc=0
+  PROV_LAST_OUT=""
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     p_step "$label"
     "$@" || rc=$?
     PROV_LAST_RC="$rc"
-    if [[ "${#ok_codes[@]}" -gt 0 ]]; then
-      for c in "${ok_codes[@]}"; do
-        [[ "$rc" == "$c" ]] || continue
-        p_ok "$label — terminé (rc=$rc, code attendu)"
-        return 0
-      done
-    fi
-    [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
     return "$rc"
   fi
-  local out t0="$SECONDS" phase="" prev="" el
-  out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
-  "$@" >"$out" 2>&1 &
+  local t0="$SECONDS" phase="" prev="" el
+  PROV_LAST_OUT="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
+  "$@" >"$PROV_LAST_OUT" 2>&1 &
   local pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    phase="$(_prov_phase_of "$out")"
+    phase="$(_prov_phase_of "$PROV_LAST_OUT")"
     el="$(printf '%02d:%02d' "$(( (SECONDS - t0) / 60 ))" "$(( (SECONDS - t0) % 60 ))")"
     if [[ -t 1 ]]; then
       printf '\r\033[K%s>>%s    %s: %s · %s · %s' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase" "$el"
@@ -193,50 +216,26 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   done
   wait "$pid" || rc=$?
   [[ -t 1 ]] && printf '\r\033[K'
+  [[ "$rc" -ne 0 ]] || { rm -f "$PROV_LAST_OUT"; PROV_LAST_OUT=""; }
   PROV_LAST_RC="$rc"
-  if [[ "${#ok_codes[@]}" -gt 0 ]]; then
-    for c in "${ok_codes[@]}"; do
-      [[ "$rc" == "$c" ]] || continue
-      p_ok "$label — terminé (rc=$rc, code attendu)"
-      rm -f "$out"
-      return 0
-    done
-  fi
-  if [[ "$rc" -ne 0 ]]; then
-    p_fail "commande en échec (rc=$rc) : $*"
-    local n; n="$(wc -l < "$out")"
-    {
-      printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
-      tail -n "$PROV_DUMP_LINES" "$out"
-      printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$out"
-    } >&2
-    return "$rc"
-  fi
-  rm -f "$out"
-  return 0
+  return "$rc"
 }
 
-run_quiet() {
-  local out rc=0
-  if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
-    "$@" || rc=$?
-    [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
-    return "$rc"
-  fi
-  out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
-  "$@" >"$out" 2>&1 || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    p_fail "commande en échec (rc=$rc) : $*"
-    local n; n="$(wc -l < "$out")"
-    {
-      printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
-      tail -n "$PROV_DUMP_LINES" "$out"
-      printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$out"
-    } >&2
-    return "$rc"
-  fi
-  rm -f "$out"
-  return 0
+run_step() { # run_step [--ok N]… <label> -- <cmd…> — un code listé rend 0 sans verdict : l'appelant le qualifie sur PROV_LAST_RC
+  local ok_codes=()
+  while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
+  local label="$1"; shift
+  [[ "${1:-}" == "--" ]] && shift
+  local rc=0 c
+  _run_watch "$label" "$@" || rc=$?
+  for c in "${ok_codes[@]}"; do
+    [[ "$rc" == "$c" ]] || continue
+    [[ -z "$PROV_LAST_OUT" ]] || rm -f "$PROV_LAST_OUT"
+    PROV_LAST_OUT=""
+    return 0
+  done
+  [[ "$rc" -eq 0 ]] || { p_fail "commande en échec (rc=$rc) : $label"; prov_dump_last; }
+  return "$rc"
 }
 
 prov_parse_remote() {
@@ -407,17 +406,16 @@ prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un reperto
   [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
   return 0
 }
-prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — l'ancien est renommé, le nouveau basculé, l'ancien effacé : l'ancienne génération survit jusqu'à la bascule, mais le final manque entre les deux renommages
-  local from="$1" to="$2" old
+prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — un final existant est échangé en un seul renommage (coreutils 9.5) : il ne manque à aucun instant
+  local from="$1" to="$2"
   [[ -d "$from" ]] || { p_fail "prov_promote_dir : échafaudage absent : $from"; return 1; }
   [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir : destination vide ou racine"; return 1; }
-  old="$to.old.$$"
-  rm -rf -- "$old"
   if [[ -e "$to" || -L "$to" ]]; then
-    mv -- "$to" "$old" || { p_fail "prov_promote_dir : l'ancien $to ne se renomme pas"; return 1; }
+    mv --exchange -T -- "$from" "$to" || { p_fail "prov_promote_dir : bascule refusée : $from → $to"; return 1; }
+    rm -rf -- "$from"
+  else
+    mv -T -- "$from" "$to" || { p_fail "prov_promote_dir : bascule refusée : $from → $to"; return 1; }
   fi
-  mv -- "$from" "$to" || { [[ -e "$old" ]] && mv -- "$old" "$to"; p_fail "prov_promote_dir : bascule refusée : $from → $to"; return 1; }
-  rm -rf -- "$old"
   return 0
 }
 

@@ -82,8 +82,8 @@ apply() {
   rm -rf "$recipe/.terraform" "$recipe/instance/.terraform"
   local m
   for m in instance .; do
-    TF_CLI_CONFIG_FILE="$TOFU_RC" run_quiet env -C "$recipe/$m" "$TOFU_BIN" init -input=false -no-color \
-      || { p_fail "recette non initialisable ($m) — le miroir de providers de 46-tofu ne couvre pas cette recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+    TF_CLI_CONFIG_FILE="$TOFU_RC" run_capture env -C "$recipe/$m" "$TOFU_BIN" init -input=false -no-color \
+      || { p_fail "recette non initialisable ($m) — le miroir de providers de 46-tofu ne couvre pas cette recette"; prov_dump_last; rm -rf "$recipe" "$enroll"; verdict_apply; }
   done
 
   local rc=0 tf_out

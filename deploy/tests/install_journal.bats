@@ -266,7 +266,7 @@ SH
   [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
 }
 
-@test "M8 : prov_promote_dir REMPLACE un final existant (la bascule est un rm -rf + mv, comme avant)" {
+@test "M8 : prov_promote_dir REMPLACE un final existant" {
   mkdir -p "$BATS_TEST_TMPDIR/final/vieux"
   lib "prov_scaffold_dir '$BATS_TEST_TMPDIR/final.new' 0755 >/dev/null; prov_promote_dir '$BATS_TEST_TMPDIR/final.new' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ]

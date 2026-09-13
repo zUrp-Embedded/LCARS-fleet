@@ -66,6 +66,11 @@ check() {
   else
     p_drift "bash ${BASH_VERSION} < 4.4 — un bash récent est requis"
   fi
+  if [[ "$(mv --help 2>/dev/null)" == *"--exchange"* ]]; then
+    p_ok "coreutils avec « mv --exchange » (plancher 9.5)"
+  else
+    p_fail "coreutils sans « mv --exchange » (plancher 9.5) — les bascules de dossiers n'ont pas de forme atomique"
+  fi
 
   local arch; arch="$(uname -m)"
   p_fact arch "$arch"
@@ -147,11 +152,15 @@ check() {
   if docker_endpoint; then
     docker_repond=1
     serveur="$("$PROV_DOCKER_BIN" version --format '{{.Server.Version}}|{{.Server.Platform.Name}}' 2>/dev/null || true)"
+    # le paquet docker.io ne nomme pas sa plateforme : le paquet propriétaire d'un dockerd local la donne
+    local saveur="${serveur#*|}" dockerd
+    dockerd="$(command -v dockerd || true)"
+    [[ -n "$saveur" || -z "$dockerd" ]] || saveur="$(dpkg-query -S "$(readlink -f "$dockerd")" 2>/dev/null | cut -d: -f1)"
     p_fact docker oui
     p_fact docker_bin "$PROV_DOCKER_BIN"
     p_fact docker_host "${PROV_DOCKER_HOST:-${DOCKER_HOST:-}}"
     p_fact docker_server "${serveur%%|*}"
-    p_fact docker_flavor "${serveur#*|}"
+    p_fact docker_flavor "$saveur"
     p_fact docker_why ""
     p_ok "docker répond (serveur ${serveur%%|*}, ${PROV_DOCKER_HOST:-${DOCKER_HOST:-endpoint par défaut}})"
   else
