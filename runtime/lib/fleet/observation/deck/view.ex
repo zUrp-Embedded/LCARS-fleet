@@ -1,15 +1,13 @@
 defmodule Fleet.Observation.Deck.View do
   @moduledoc """
-  Pure HTML rendering for the observation deck. The LCARS shell pulls JSON
-  client-side; the basic table renders supplied data server-side. This module
-  reads no runtime source, and all interpolated values are escaped.
+  HTML rendering for the observation deck, without runtime reads. Table/error values
+  pass through HTML escaping; embedded JS uses its own esc helper, which does not
+  escape quotes for attribute contexts. Rendering assumes supported value types.
   """
 
   @doc """
-  Static LCARS shell: BRIDGE header (health LED + clock) + the 7 decks
-  (PODS live, the others fed by the read-model projection). The embedded
-  JS pulls `/api/pods` and `/api/projection` every 3 s — the page
-  itself carries no server data.
+  Returns a static seven-panel shell that fetches pods and projection every 3 s.
+  GATEKEEPER remains in the shell although the read model no longer supplies that deck.
   """
   @spec page() :: String.t()
   def page do
@@ -161,12 +159,8 @@ defmodule Fleet.Observation.Deck.View do
   end
 
   @doc """
-  Basic server-rendered table (zero CSS/JS, auto-refresh `<meta refresh>` 3 s).
-  `roles` = the roles to display (a row ALWAYS present per role, "absent"
-  if no live pod carries it); `pods_by_role` = the live pods grouped by
-  role (a role can carry several: all listed). Pure — the controller
-  (`Deck`, `/table` route) provides both. `border="1"` is the minimum for the
-  cells to be visible.
+  Renders supplied roles and grouped pods as a table, refreshing every 3 s.
+  Each role gets at least an absent row; multiple pods produce multiple rows.
   """
   @spec table_page([String.t()], %{optional(String.t() | nil) => [map()]}) :: String.t()
   def table_page(roles, pods_by_role) when is_list(roles) and is_map(pods_by_role) do
@@ -191,10 +185,8 @@ defmodule Fleet.Observation.Deck.View do
   end
 
   @doc """
-  HTML shown when the role catalogue can NOT be read (F-C125). `Fleet.CapProfile.list/0` is DELIBERATELY
-  fail-loud (an unreadable/corrupt catalogue ≠ an empty one), so the deck surfaces that error instead of a
-  silent-empty table that would lie "no roles" during a broken cap-profile deploy. `reason` is an internal
-  error term (`inspect`-ed), not client input.
+  Renders a catalogue error separately from an empty role list, with its inspected
+  reason escaped as HTML. The router still serves this page with status 200.
   """
   @spec error_page(term()) :: String.t()
   def error_page(reason) do
@@ -233,12 +225,11 @@ defmodule Fleet.Observation.Deck.View do
     end)
   end
 
-  # A deck = one LCARS panel section.
   defp deck(num, name, body) do
     ~s|<section class="panel"><div class="panel-head"><span class="panel-num">#{num}</span><span class="panel-name">#{name}</span></div><div class="panel-body">#{body}</div></section>|
   end
 
-  # Escapes for HTML — any value (phase atom, string, nil) → safe text.
+  # Values need String.Chars support; nil renders as empty text.
   defp h(nil), do: ""
   defp h(v), do: v |> to_string() |> Plug.HTML.html_escape()
 end

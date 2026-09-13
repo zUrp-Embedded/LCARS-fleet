@@ -1,39 +1,24 @@
 defmodule Fleet.Observation.DeckStylesheetTest do
   @moduledoc """
-  The deck stylesheet DESCRIBES a DOM. Nothing else confronts it with the DOM the view emits.
+  Caps a textual inventory of CSS class names absent from the entire view source.
+  Regression: a real lcars-frame rule reserved a 110px track for absent lcars-rail;
+  auto-placement put the main panel in that track. Checking only unused selectors'
+  placement declarations would miss this effect on a real parent.
 
-  A class selector is prose in the imperative mood: `.lcars-rail { … }` states that a rail exists.
-  When the view never emits it the rule reads as live intent for every session after — and it can
-  ACT. Measured live (2026-08-02): `.lcars-frame` reserved a 110px track for `.lcars-rail`, a class
-  `view.ex` never renders. The track did not stay empty; the first auto-placed child
-  (`.lcars-main`) landed IN it and stacked the seven panels in a column while three quarters of the
-  screen sat black. The gate could not see it: it measures code, and this was a disagreement
-  between two descriptions.
-
-  THE ANCHOR IS AN INVENTORY, DELIBERATELY. A first attempt asserted that no ghost class may carry
-  a placement declaration; it flagged rules that are inert (they need a ghost ancestor state to
-  apply at all) and it would have MISSED the one that bit — the harmful rule belonged to a REAL
-  class reserving a track for an absent child. A guard that misses its own motivating case is worse
-  than none. What does catch it, upstream and cheaply: `.lcars-rail` was styled and never emitted,
-  so the ghost count would have risen the day it was written.
-
-  The count is high today (a stylesheet written for a DOM this repo never rendered). Purging is
-  render-neutral by construction — a selector that matches nothing does nothing — but it would
-  erase design intent that lives nowhere else, so it is its own pass, not a side effect of this one.
+  This is a substring heuristic, not DOM/CSS execution: comments can satisfy a match,
+  and dynamic construction can evade it. CSS cleanup requires its own rendering review.
   """
   use ExUnit.Case, async: true
 
   @view_path "lib/fleet/observation/deck/view.ex"
   @css_path "priv/observation/static/lcars-tva.css"
 
-  # Selectors whose element is posed by the browser or an extension, never by the view. Each entry
-  # states why: an unexplained one is how a dead rule comes back through the door.
+  # Explicit exemption retained by the inventory; crt-overlay is also present in page markup.
   @not_emitted_by_the_view MapSet.new([
-                             # decorative overlay injected client-side, no server markup
                              "crt-overlay"
                            ])
 
-  # Measured 2026-08-02. May only go DOWN — a wall, not a target.
+  # Baseline ceiling measured 2026-08-02; lower it when the inventory shrinks.
   @known_ghosts 118
 
   defp read!(rel), do: File.read!(Path.join(File.cwd!(), rel))
@@ -44,8 +29,7 @@ defmodule Fleet.Observation.DeckStylesheetTest do
     |> then(&Regex.scan(~r/\.(-?[_a-zA-Z][\w-]*)/, &1))
     |> Enum.map(fn [_, name] -> name end)
     |> Enum.uniq()
-    # The view holds BOTH the markup and the JS that builds the live rows: a name present anywhere
-    # in that file reaches a browser at some point. Absent from it, it reaches one never.
+    # Search the whole source, including JS and comments; a match does not prove emission.
     |> Enum.reject(&(MapSet.member?(@not_emitted_by_the_view, &1) or String.contains?(view, &1)))
     |> Enum.sort()
   end

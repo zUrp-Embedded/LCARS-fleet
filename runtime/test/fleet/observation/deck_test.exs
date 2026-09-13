@@ -1,12 +1,11 @@
 defmodule Fleet.Observation.DeckTest do
   @moduledoc """
-  Deck `:8091` tested via `Plug.Test` (never a real socket — hermetic
-  invariant, `start_listener: false` in test). Read-only, no-auth.
+  Plug.Test coverage of read-only deck routes and temporary media roots, with no
+  real listener or browser execution. JSON and source-text assertions have separate limits.
   """
   alias Fleet.Observation.Deck
 
-  # Ecrit `:media_root` dans l'app env, globale au noeud : sync, comme les 38 autres suites qui
-  # font un `put_env`. Celle-ci etait la seule async — une course qui attend un second lecteur.
+  # Shared media_root configuration requires synchronous tests.
   use ExUnit.Case, async: false
   import Plug.Test
 
@@ -18,8 +17,6 @@ defmodule Fleet.Observation.DeckTest do
 
   describe "roles_for_display/1 — F-C125 (unreadable catalog ≠ empty)" do
     test "{:error, reason} → propagated (NOT flattened to []) — /table will surface the error, not a lying « aucun rôle »" do
-      # `Fleet.CapProfile.list/0` is DELIBERATELY fail-loud (missing dir :enoent / corrupted YAML / collision).
-      # The deck must NOT collapse that into [] (a lie during a broken cap-profile deployment).
       assert {:error, :enoent} = Deck.roles_for_display({:error, :enoent})
 
       assert {:error, {:invalid_yaml, "x"}} =
@@ -39,9 +36,6 @@ defmodule Fleet.Observation.DeckTest do
     assert %{"status" => "ok", "deck" => "fleet_observation"} = Jason.decode!(conn.resp_body)
   end
 
-  # The read-diagnostic plane re-homed off the deleted `fleet_api` TCP listener: the aggregator stays
-  # in `Fleet.API.{Readiness,BuildInfo}` (they hold the cross-domain deps) and the read socket serves
-  # it. The operator's `state_of_the_fleet` skill curls these at `$OBS` — their absence left it blind.
   test "GET /api/readiness/deep → 200 JSON, global verdict + per-subsystem list" do
     conn = call(:get, "/api/readiness/deep")
     assert %Plug.Conn{status: 200} = conn
@@ -51,9 +45,7 @@ defmodule Fleet.Observation.DeckTest do
   end
 
   test "GET /api/version → 200 JSON build info (read-socket twin of `fleet version`)" do
-    # ⚠ `is_map` EST VRAI DE `%{}`. Perdre toutes les cles — ou les renommer — laissait ce temoin
-    # vert (mutation jouee le 2026-09-07), et le jumeau de `fleet version` cessait de rendre la
-    # moindre information sans que rien ne rougisse. On epingle les cles que le consommateur lit.
+    # Assert consumer keys: is_map alone would accept an empty version response.
     conn = call(:get, "/api/version")
     assert %Plug.Conn{status: 200} = conn
 
@@ -68,16 +60,15 @@ defmodule Fleet.Observation.DeckTest do
     assert %Plug.Conn{status: 200} = conn
     body = conn.resp_body
     assert body =~ "LCARS // OBSERVATION"
-    # the 7 decks present
+
     for name <- ~w(BRIDGE PODS FLOW GATEKEEPER COORDINATION STREAM DIAGNOSTICS) do
       assert body =~ name, "deck #{name} missing from the shell"
     end
 
-    # starfleet boundary: no starfleet panel (non-negotiable #2)
+    # Keep the observation shell free of a STARFLEET panel.
     refute body =~ "STARFLEET"
 
-    # The shell surfaces the projection status (a :deaf/:unavailable read-model must not read as a
-    # calm fleet) and does NOT swallow the projection fetch error — the deaf/blind states are shown.
+    # Checks status/error-handling text exists, without executing its browser behavior.
     assert body =~ ~s(id="proj-status")
     assert body =~ "projStatus"
     assert body =~ "_status"
@@ -85,8 +76,6 @@ defmodule Fleet.Observation.DeckTest do
   end
 
   test "error_page/1 escapes the interpolated reason (no raw markup from an internal error term)" do
-    # The catalogue-error page interpolates inspect(reason). The module contract is "every server-side
-    # value goes through h/1" — a reason carrying < > & \" must be ESCAPED, never rendered as live markup.
     html = Fleet.Observation.Deck.View.error_page({:invalid, ~s|<script>alert(1)</script>&"|})
 
     refute html =~ "<script>alert(1)</script>"
@@ -95,15 +84,7 @@ defmodule Fleet.Observation.DeckTest do
     assert html =~ "&quot;"
   end
 
-  # 6-057 — `/api/pods` SERVAIT `role: null` POUR UN ROLE SANS ICONE. `role_of/2` filtrait sur la
-  # liste des `.svg` presents : un pod `chief` — le seul role du catalogue sans asset, mesure le
-  # 2026-08-14 — devenait indiscernable d'un pod sans role. Le point de terminaison est du JSON
-  # consomme par `console-deck.py` (qui affiche « ? »), pas une vue.
-  #
-  # Le repli generique existait DEJA cote page (`favicon-minimal.svg`) : masquer le role etait le
-  # MOYEN d'y arriver. Les deux questions sont maintenant separees, et c'est la doctrine que ce
-  # fichier enonce deja deux fois — le commentaire de `project_slug` (« nil est une reponse reelle,
-  # pas un trou ») et F-C125 juste au-dessus.
+  # Role data must survive missing icons; the page's generic fallback is independent.
   describe "6-057 — pod_view/2 : le role est la donnee, l'icone est l'affichage" do
     test "role sans asset → le ROLE est servi, seule l'ICONE tombe au generique" do
       view = Deck.pod_view(pod("chief"), ~w(architect reviewer))
@@ -119,8 +100,6 @@ defmodule Fleet.Observation.DeckTest do
       assert view.role_icon == "architect"
     end
 
-    # Le second bras du Declencheur de la fiche : repertoire d'icones illisible -> `display_roles/0`
-    # rend `[]`. Avant, TOUS les roles disparaissaient d'un coup ; maintenant seules les icones.
     test "aucune icone lisible → AUCUN role masque", %{} do
       for role <- ~w(chief architect reviewer) do
         view = Deck.pod_view(pod(role), [])
@@ -129,9 +108,7 @@ defmodule Fleet.Observation.DeckTest do
       end
     end
 
-    # TEMOIN — sans lui, rendre `Map.get(info, :role)` tel quel passerait les trois tests ci-dessus
-    # et laisserait des termes runtime arbitraires entrer dans le JSON, ce que cette vue existe pour
-    # empecher. `nil` ici veut vraiment dire « pas de role ».
+    # A malformed role maps to nil; this does not validate other JSON fields.
     test "TEMOIN — un role non-binaire reste exclu du JSON, aux deux champs" do
       for bad <- [nil, :architect, 42] do
         view = Deck.pod_view(pod(bad), ~w(architect))
@@ -145,10 +122,7 @@ defmodule Fleet.Observation.DeckTest do
     end
   end
 
-  # Un pod qui REPOND. `list_pods/0` enumere le Registry puis appelle chaque entree (`:info`) : une
-  # entree muette n'est pas un stub bon marche, c'est un timeout de cinq secondes pour tout
-  # enumerateur de la suite. `spawn_link` : le porteur meurt avec le processus de test et le
-  # Registry le desinscrit tout seul — pas de teardown, donc pas de teardown qui sonde.
+  # Registry stand-in must answer :info so enumeration does not time out.
   defp seme_un_pod(info) do
     moi = self()
 
@@ -173,10 +147,7 @@ defmodule Fleet.Observation.DeckTest do
   end
 
   test "GET /api/pods → 200 JSON {pods, count} (read-only, JSON-safe)" do
-    # UN POD, SINON CE TEMOIN NE MESURE RIEN. Sur une flotte vide, `pods` vaut `[]` et
-    # `count == length(pods)` est vrai sur le vide : remplacer `Fleet.Spawner.list_pods()` par `[]`
-    # laissait ce temoin ET LA SUITE ENTIERE verts — mutation jouee contre les 3576 temoins le
-    # 2026-09-07. Ce qui se pince est que le listing RAPPORTE ce qui tourne, pas sa forme.
+    # Seed a responding pod: count == length([]) would otherwise accept a broken empty listing.
     pod_id = "pod-deck-#{System.unique_integer([:positive])}"
     seme_un_pod(%{pod_id: pod_id, role: "architect", phase: "running"})
 
@@ -193,8 +164,6 @@ defmodule Fleet.Observation.DeckTest do
     conn = call(:get, "/api/projection")
     assert %Plug.Conn{status: 200} = conn
 
-    # F-C124 — read-model off here: the emptiness comes with `_status:"unavailable"` (explicit DOWN),
-    # not an empty 200 indistinguishable from a quiet fleet.
     assert %{"total" => 0, "stream" => [], "counts" => %{}, "_status" => "unavailable"} =
              Jason.decode!(conn.resp_body)
   end
@@ -206,23 +175,9 @@ defmodule Fleet.Observation.DeckTest do
   end
 
   describe "/media — one installed source, and the guards that keep it one" do
-    # ⚠ CE QUE CES TEMOINS TIENNENT. Les avatars ont eu TROIS exemplaires — `assets/` (la marque),
-    # `fleet/deploy/deps/avatars/` (les png de la charte forge) et `priv/observation/static/assets/`
-    # (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf roles communs differaient entre la
-    # marque et ce deck, non par decision mais parce qu'une mise a jour touchait un dossier et pas
-    # les autres. Le deck affichait une generation d'avatars pendant que la forge en posait une
-    # autre, et rien ne pouvait le signaler.
-    #
-    # La source est `assets/`, l'installation la pose sous `media_root`, tout le monde y lit.
-    #
-    # ⚠ LE DECOR EST FABRIQUE ICI, IL NE POINTE PLUS SUR `assets/` DU DEPOT. `config/test.exs` l'y
-    # visait, avec un motif qui sonnait juste — « les tests mesurent le vrai arbre plutot qu'un
-    # decor ». Il couplait la suite a un arbre qui n'est pas toujours la : le stage `build` de
-    # l'image copie `fleet` SEUL, donc `../../assets` n'y existe pas et ces quatre temoins ont fait
-    # ECHOUER LA CONSTRUCTION DE L'IMAGE (mesure du 2026-08-20). Ce qu'ils tiennent — la route, les
-    # deux arbres freres, les extensions, la traversee — ne demande pas les vrais fichiers de
-    # marque ; le lien avec la marque reelle est tenu par le dernier temoin, qui se DIT hors
-    # perimetre quand l'arbre n'est pas la plutot que de rougir.
+    # Use temporary avatars/favicon fixtures: image-build contexts can omit the brand tree.
+    # Duplicated brand copies previously diverged; the installed root is the source.
+    # The requires_brand case separately checks the repository brand when available.
     setup do
       root =
         Fleet.TestEnv.tmp_path("lcars-media-test")
@@ -268,8 +223,6 @@ defmodule Fleet.Observation.DeckTest do
     end
 
     test "le favicon est un arbre FRERE, pas un avatar de role" do
-      # Il a vecu dans le dossier des avatars, et `deps/avatars/favicon.png` etait l'octet pour
-      # octet `assets/favicon/favicon-512.png` sous un autre nom.
       assert %Plug.Conn{status: 200} = call(:get, "/media/favicon/favicon.svg")
       assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/favicon.svg")
     end
@@ -280,8 +233,8 @@ defmodule Fleet.Observation.DeckTest do
     end
 
     test "`..` ne sort pas de la racine — la plus vieille faute du web" do
-      # Verifie contre le chemin RESOLU, jamais par filtrage de la chaine : un filtrage se contourne
-      # par encodage, et la racine voisine porte la doc et le favicon.
+      # These requests are rejected, but the tests do not prove symlink containment or
+      # isolate the prefix guard from route-shape rejection.
       assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/../favicon/favicon.svg")
       assert %Plug.Conn{status: 404} = call(:get, "/media/avatars/..%2f..%2fetc%2fpasswd")
     end
@@ -291,26 +244,15 @@ defmodule Fleet.Observation.DeckTest do
     end
 
     test "le deck n'a PLUS de jeu a lui — la troisieme copie ne peut pas renaitre" do
-      # Vrai partout, y compris dans le stage `build` : c'est une absence dans `priv/`, pas une
-      # presence dans un arbre voisin.
       refute File.dir?(Application.app_dir(:lcars_fleet, "priv/observation/static/assets"))
 
-      # Et la liste des roles se lit dans l'arbre `avatars/`, jamais ailleurs : le favicon est un
-      # frere, il ne peut pas fuiter dans les roles.
       roles = Deck.display_roles()
       assert "architect" in roles
       refute Enum.any?(roles, &String.starts_with?(&1, "favicon"))
     end
 
-    # ⚠ HORS PERIMETRE QUAND L'ARBRE N'EST PAS LA, ET C'EST LE BILAN QUI LE DIT. `assets/` est un
-    # voisin de `runtime/`, et un contexte legitime ne le porte pas : le stage `build` de l'image
-    # copie `fleet` SEUL puis joue ce gate.
-    #
-    # La garde etait un `if File.dir?(brand) do <propriete> else IO.puts(...) end` DANS le corps :
-    # vert la ou rien n'est mesure, et compte comme un succes. C'est le vert creux que
-    # `test_helper.exs` refuse en toutes lettres pour les binaires — meme resolution, meme endroit,
-    # meme bilan : `:requires_brand` est resolu au demarrage et le temoin apparait EXCLU quand
-    # l'arbre manque, jamais passe.
+    # test_helper excludes requires_brand when assets are absent; it must not count an
+    # unexecuted brand check as a pass.
     @tag :requires_brand
     test "les roles affiches viennent de la MARQUE REELLE du depot" do
       brand = Path.expand("../../../../assets/avatars", __DIR__)

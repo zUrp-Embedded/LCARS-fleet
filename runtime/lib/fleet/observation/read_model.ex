@@ -1,9 +1,9 @@
 defmodule Fleet.Observation.ReadModel do
   @moduledoc """
-  Single event-stream consumer maintaining a JSON-safe ETS projection. Writes
-  serialize through the GenServer; deck reads bypass it through protected ETS.
-  It observes public events only and reports subscription health separately from
-  an empty, healthy stream.
+  GenServer projection of public Bus events into protected named ETS; reads bypass
+  the server. Restart loses history. Stream/deck lists are capped, but counts are not.
+  Subscription status records the last successful attempt, not ongoing Bus health;
+  deliberately unsubscribed static mode reports live.
   """
 
   use GenServer
@@ -15,26 +15,19 @@ defmodule Fleet.Observation.ReadModel do
   @stream_max 100
   @deck_max 20
 
-  # Subscription failure remains visible while bounded retries self-heal.
+  # Returned subscribe failures retry indefinitely with capped exponential delay.
   @resubscribe_base_ms 1_000
   @resubscribe_max_ms 30_000
 
-  # Deck routing catalogue (DATA, not mechanics): type prefix → deck.
-  # Order matters (first matched prefix wins). One single mechanic
-  # (`String.starts_with?`), the catalogue varies.
+  # First matching event prefix selects a deck.
   @deck_prefixes [
     {"workflow_map.", :workflow_runs},
     {"gitea.", :coordination},
     {"fleet.boot", :diagnostics},
     {"oauth.", :diagnostics},
     {"mcp.server_crashed", :diagnostics}
-    # ⚠ AUCUNE ENTREE POUR UN TYPE QUE PERSONNE N'EMET : elle trierait un FLUX VIDE tout en se
-    # lisant comme une categorie alimentee. Le motif est toujours le meme — un consommateur reste
-    # apres le depart de son producteur (6-016, BL-6-113) — et c'est pourquoi la regle est ecrite
-    # UNE fois plutot qu'a chaque entree.
+    # Add routes only for emitted event families; orphan categories imply nonexistent input.
   ]
-
-  # ── Client ────────────────────────────────────────────────────────────────
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -42,19 +35,15 @@ defmodule Fleet.Observation.ReadModel do
   end
 
   @doc """
-  Reads the current projection. **Direct ETS read** — does NOT do a `GenServer.call`
-  (bypass, Iron Law). If the ReadModel isn't started (table absent), returns
-  an empty projection — the deck never crashes on a dead read-model.
+  Reads ETS directly. Missing table or key returns an empty projection; a missing
+  table also warns. Read projection_status separately to distinguish unavailable
+  from empty. The two reads are not an atomic snapshot.
   """
   @spec projection() :: map()
   def projection do
     :ets.lookup_element(@table, :projection, 2)
   rescue
     ArgumentError ->
-      # A dead ReadModel (ETS table gone) renders as `empty()` = INDISTINGUISHABLE from a quiet-healthy
-      # fleet (total:0, decks empty) → the deck is silently blind. Distinguish: table ABSENT = the
-      # read-model is DOWN (a real blind spot) → log LOUD; table present but the `:projection` key not yet
-      # written (fresh boot, transient) → silent `empty()`. Supervised → the absent window is brief.
       if :ets.whereis(@table) == :undefined do
         Logger.warning(
           "ReadModel: ETS table #{inspect(@table)} absent — read-model is DOWN, the projection " <>
@@ -66,13 +55,9 @@ defmodule Fleet.Observation.ReadModel do
   end
 
   @doc """
-  Health of the read-model behind `projection/0` (F-C124, DR-027):
-    * `:unavailable` — the ETS table is DOWN (table gone → `projection/0` reads `empty()`);
-    * `:deaf` — the process is ALIVE but its Bus subscribe FAILED → no event can arrive (a deaf
-      read-model is INDISTINGUISHABLE from a quiet-healthy fleet without this signal);
-    * `:live` — table present AND subscribed (or deliberate static no-subscribe mode).
-  Surfaced in `/api/projection` (`_status`) so a client sees a DEAD/DEAF read-model instead of a false
-  "quiet fleet". (A `:live` table can still be transiently stale on a fresh boot — brief, silent by design.)
+  Returns unavailable for an absent table, live for a recorded subscription or
+  deliberate static mode, otherwise deaf. Later subscription loss is not monitored;
+  live does not establish event freshness or delivery.
   """
   @spec projection_status() :: :live | :deaf | :unavailable
   def projection_status do
@@ -89,30 +74,21 @@ defmodule Fleet.Observation.ReadModel do
     ArgumentError -> false
   end
 
-  # ── Server ──────────────────────────────────────────────────────────────────
-
   @impl GenServer
   def init(opts) do
-    # Table owned by THIS process (`:protected`) → concurrent reads bypass,
-    # writes via the GenServer. Auto-deleted on process death.
+    # ETS is owned by this process and disappears with it.
     _ = :ets.new(@table, [:set, :protected, :named_table, read_concurrency: true])
     :ets.insert(@table, {:projection, empty()})
     subscribe? = Keyword.get(opts, :subscribe, true)
 
-    # DR-027: `:subscribed` gates the :live status. A REAL subscribe (subscribe? true) starts PESSIMISTIC
-    # (false) and flips true only once the Bus subscribe SUCCEEDS (handle_continue) — an alive-but-deaf
-    # read-model then reads :deaf, never a lying :live. The deliberate no-subscribe mode (subscribe? false,
-    # test/static) is live from init (no subscribe attempt = not a failure; also avoids a boot race).
+    # Real subscription starts pessimistically; deliberate static mode is live immediately.
     :ets.insert(@table, {:subscribed, not subscribe?})
 
     {:ok,
      %{
        proj: empty(),
        subscribe?: subscribe?,
-       # Seam: the subscribe fn (default `Bus.subscribe/1`) — injectable to exercise the DEAF path in test.
        subscribe_fun: Keyword.get(opts, :subscribe_fun, &Bus.subscribe/1),
-       # Current backoff delay for the re-subscribe retry (grows on failure, resets on success). Base
-       # overridable so tests exercise the recovery without a real-time wait.
        resubscribe_base_ms: Keyword.get(opts, :resubscribe_base_ms, @resubscribe_base_ms),
        resubscribe_delay: Keyword.get(opts, :resubscribe_base_ms, @resubscribe_base_ms)
      }, {:continue, :subscribe}}
@@ -123,7 +99,6 @@ defmodule Fleet.Observation.ReadModel do
     {:noreply, try_subscribe(state)}
   end
 
-  # Deliberate no-subscribe mode (test/static config): already :live from init (no subscribe attempt).
   def handle_continue(:subscribe, state), do: {:noreply, state}
 
   defp try_subscribe(%{subscribe_fun: subscribe_fun} = state) do
@@ -132,15 +107,11 @@ defmodule Fleet.Observation.ReadModel do
     case subscribe_fun.(topic) do
       :ok ->
         :ets.insert(@table, {:subscribed, true})
-        # Recovered (or first-try success) → reset the backoff for any future re-subscribe.
+
         %{state | resubscribe_delay: state.resubscribe_base_ms}
 
       other ->
-        # DR-027 hollow-green: a failed subscribe leaves the read-model ALIVE but DEAF — no event will
-        # ever arrive, and `projection_status/0` would otherwise say :live (a deaf process INDISTINGUISHABLE from
-        # a quiet-healthy fleet). We leave `:subscribed` FALSE → status reports :deaf, and we LOG LOUD.
-        # We also RETRY (bounded backoff) — a deaf read-model must self-heal once the Bus is up,
-        # never stay deaf until a manual restart. The status stays honest (:deaf) until a retry lands.
+        # Returned failures schedule retries; exceptions in subscribe_fun crash the server.
         Logger.error(
           "ReadModel: subscribe #{topic} FAILED (#{inspect(other)}) — read-model is DEAF: no event " <>
             "will arrive, /api/projection reports :deaf. Retrying in #{state.resubscribe_delay} ms."
@@ -150,14 +121,11 @@ defmodule Fleet.Observation.ReadModel do
     end
   end
 
-  # Schedules the next re-subscribe attempt and grows the backoff (capped). Returns the state with the
-  # NEXT delay so successive failures back off, resetting to base on success.
   defp schedule_resubscribe(state) do
     Process.send_after(self(), :resubscribe, state.resubscribe_delay)
     %{state | resubscribe_delay: min(state.resubscribe_delay * 2, @resubscribe_max_ms)}
   end
 
-  # Bounded backoff re-subscribe: fired by `schedule_resubscribe/1` after a failed attempt.
   @impl GenServer
   def handle_info(:resubscribe, %{subscribe?: true} = state),
     do: {:noreply, try_subscribe(state)}
@@ -168,10 +136,7 @@ defmodule Fleet.Observation.ReadModel do
     {:noreply, %{state | proj: proj}}
   end
 
-  # Defensive: a non-`%Fleet.Event{}` message is ignored, never a crash.
   def handle_info(_other, state), do: {:noreply, state}
-
-  # ── Projection (pure) ────────────────────────────────────────────────────────
 
   @doc false
   @spec project(map(), Fleet.Event.t()) :: map()
@@ -196,8 +161,8 @@ defmodule Fleet.Observation.ReadModel do
     end
   end
 
-  # `payload` excluded (can carry non-encodable terms); we keep only
-  # JSON-safe fields.
+  # Exclude arbitrary payload terms. IDs pass through unchanged and type/source require
+  # String.Chars, so malformed direct Event structs are not guaranteed JSON-safe.
   defp summarize(%Fleet.Event{} = e) do
     %{
       type: to_string(e.type),
