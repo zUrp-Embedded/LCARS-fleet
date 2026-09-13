@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # bats file_tags=structure
-# SOURCE: deploy/tests/docker/deck_doc.bats
+# SOURCE: deploy/tests/modules.d/44-media_deck_doc.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
 # STATUS: la doc du deck — posée là où le deck la lit, hors du préfixe de release que son compte de service ne peut pas traverser

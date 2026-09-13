@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/docker/enroll_catalogue.bats
+# SOURCE: deploy/tests/lib/enroll-catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-18
 # STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la derivation du roster ne demande pas de

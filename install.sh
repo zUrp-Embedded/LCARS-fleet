@@ -334,7 +334,8 @@ echo "             utilisateur $(ou "$(fait utilisateur)") · groupes ${GROUPES:
 DOCKER_OK=0
 case "$(fait docker)" in
   oui)    DOCKER_OK=1
-          echo "  ${W}Docker${N}     serveur $(ou "$(fait docker_server)") · $(ou "$(fait docker_flavor)") · $(ou "$(fait docker_host)")" ;;
+          echo "  ${W}Docker${N}     serveur $(ou "$(fait docker_server)") · $(ou "$(fait docker_flavor)") · $(ou "$(fait docker_host)")"
+          [[ "$(fait compose)" != "non" ]] || echo "             ${R}compose absent${N} — $(fait compose_why)" ;;
   refuse) echo "  ${W}Docker${N}     ${R}accès refusé${N} — $(fait docker_why)" ;;
   *)      if [[ "$SUBSTRATE" == "linux" && "$MODE" == "workstation" ]]; then
             echo "  ${W}Docker${N}     absent · sera posé par l'installation (docker-ce, dépôt download.docker.com)"
@@ -425,6 +426,15 @@ if [[ "$DOCKER_OK" -eq 0 ]]; then
     stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas." \
          "L'installer, ou donner la machine à l'installation dans le système :  LCARS_ALLOW_ANY_HOST=1 $PORTE_CMD --workstation"
   fi
+else
+  # le daemon qui a répondu au préflight, pas un DOCKER_HOST de l'environnement qu'il a écarté
+  DOCKER_HOST_VU="$(fait docker_host)"
+  if [[ -n "$DOCKER_HOST_VU" ]]; then export DOCKER_HOST="$DOCKER_HOST_VU"; else unset DOCKER_HOST; fi
+fi
+if [[ "$MODE" == "container" && "$(fait compose)" == "non" ]]; then
+  stop "${R}Docker répond, mais compose est absent.${N} Le conteneur se pose par docker compose." \
+       "$(fait compose_why)" \
+       "Poser le plugin compose de docker (paquet docker-compose-plugin), puis relancer."
 fi
 case "$FORGE_ETAT" in
   aucune) stop "${R}Les deux installations ont besoin d'une forge et de son runner CI. Aucune n'est indiquée.${N}" \

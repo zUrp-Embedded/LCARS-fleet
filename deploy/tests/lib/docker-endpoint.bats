@@ -189,3 +189,28 @@ sonde() { # sonde <socket> — docker_endpoint avec une CLI muette
   LCARS_SUBSTRATE_ROOT="$root" run env -u LCARS_DOCKER bash -c ". '$LIB'; detect_substrate"
   [ "$output" = docker ]
 }
+
+@test "DOCKER_HOST : un daemon qui répond à cette adresse est gardé tel quel, sans sonder les sockets" {
+  printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == tcp://daemon:2375 ]]\n' > "$BIN/docker"; chmod +x "$BIN/docker"
+  run env DOCKER_HOST=tcp://daemon:2375 LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" PATH="$BIN:/usr/bin:/bin" \
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=[$PROV_DOCKER_HOST]"' _ "$LIB"
+  [[ "$output" == *"rc=0 host=tcp://daemon:2375 prov=[]"* ]]
+}
+
+@test "DOCKER_HOST mort : il est retiré, la socket qui répond le remplace, et l'adresse morte ne descend pas" {
+  local sock="$BATS_TEST_TMPDIR/d.sock"
+  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$sock"
+  [ -S "$sock" ]
+  printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == unix://%s ]]\n' "$sock" > "$BIN/docker"; chmod +x "$BIN/docker"
+  run env DOCKER_HOST=unix:///nulle/part.sock LCARS_DOCKER_SOCKETS="$sock" PATH="$BIN:/usr/bin:/bin" \
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=$PROV_DOCKER_HOST"' _ "$LIB"
+  [[ "$output" == *"rc=0 host=unix://$sock prov=unix://$sock"* ]]
+}
+
+@test "DOCKER_HOST mort et aucune socket : le refus nomme l'adresse de l'environnement, et DOCKER_HOST est retiré" {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/docker"; chmod +x "$BIN/docker"
+  mkdir -p "$BATS_TEST_TMPDIR/linux"
+  run env DOCKER_HOST=unix:///nulle/part.sock LCARS_SUBSTRATE_ROOT="$BATS_TEST_TMPDIR/linux" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/aucune.sock" PATH="$BIN:/usr/bin:/bin" \
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=[${DOCKER_HOST:-}]"; echo "$PROV_DOCKER_WHY"' _ "$LIB"
+  [[ "$output" == *"rc=1 host=[]"*"unix:///nulle/part.sock[env,rien à cette adresse]"* ]]
+}

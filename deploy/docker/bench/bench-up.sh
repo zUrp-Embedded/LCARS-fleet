@@ -4,7 +4,7 @@
 # STARDATE: 2026-09-12
 # STATUS: le banc — forge jetable, conteneur, structure, humain de démonstration, runner, fleet
 #
-# USAGE : bench-up.sh [--forge-project lcars-nuit] [--port-forge 21000] [--port-deck 20999] [--port-ssh 2222]
+# USAGE : bench-up.sh [--forge-project lcars] [--port-forge 21000] [--port-deck 20999] [--port-ssh 2222]
 #                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>] [--image lcars-fleet:local]
 #                     [--creds-from ~/.claude/.credentials.json] [--no-creds]
 #                     [--runner-labels <liste>] [--no-runner] [--human lcars]
@@ -18,8 +18,9 @@
 #
 # EXIT  : 0 banc prêt (« banc PRÊT », ou « banc PRÊT sans CI » sous --no-runner) · 1 arguments ou
 #         dépendance · 2 la forge ne monte pas · 3 le conteneur ne monte pas · 4 amorçage de la forge ·
-#         5 humain ou credentials · 6 le verdict final ne passe pas (runner demandé qui ne sert pas,
-#         conteneur en échec de convergence) · 7 la source ne se sème pas (révision de l'image)
+#         5 humain ou credentials · 6 le banc n'est pas prêt (jeton système absent après la relance,
+#         runner demandé qui ne sert pas, conteneur en échec de convergence) · 7 la source ne se sème
+#         pas (révision de l'image, push, alignement du clone du conteneur)
 
 set -euo pipefail
 
@@ -27,7 +28,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 
-PROJECT="lcars-nuit"
+PROJECT="lcars"
 FORGE_PORT="21000"
 DECK_PORT="20999"
 SSH_PORT="2222"
@@ -56,7 +57,7 @@ while [[ $# -gt 0 ]]; do
     --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
     --no-creds)   WITH_CREDS=0; shift ;;
     --human)      HUMAN="${2:?}"; shift 2 ;;
-    -h|--help)    sed -n '/^# USAGE/,/^#         conteneur en échec/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '/^# USAGE/,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-up: option inconnue: $1" >&2; exit 1 ;;
   esac
 done
@@ -103,8 +104,7 @@ d()   { "$DOCKER_BIN" "$@"; }
 in_container() { d exec -i -u root "$CONTAINER" "$@"; }
 as_human()     { d exec -i -u "$HUMAN" "$CONTAINER" "$@"; }
 attendre_healthy() {
-  local i
-  for i in $(seq 1 90); do
+  for _ in $(seq 1 90); do
     [[ "$(d inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == "healthy" ]] && return 0
     sleep 2
   done
@@ -115,20 +115,9 @@ attendre_healthy() {
 for _outil in curl python3 git; do
   command -v "$_outil" >/dev/null 2>&1 || die "$_outil requis sur ce poste (le banc lit la forge par son API et sème sa source)" 1
 done
-[[ "$DOCKER_BIN" == */* ]] && { [[ -f "$DOCKER_BIN" && -x "$DOCKER_BIN" ]] || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"; } \
-  || command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
-if [[ -z "${DOCKER_HOST:-}" ]]; then
-  DD_SOCK="/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"
-  if [[ -S "$DD_SOCK" && -w "$DD_SOCK" ]]; then
-    export DOCKER_HOST="unix://$DD_SOCK"
-    say "daemon : socket Docker Desktop directe"
-  elif [[ -n "${LCARS_DOCKER_RELAY_SOCK:-}" && -S "$LCARS_DOCKER_RELAY_SOCK" ]]; then
-    export DOCKER_HOST="unix://$LCARS_DOCKER_RELAY_SOCK"
-    say "daemon : relais $LCARS_DOCKER_RELAY_SOCK (la sonde de flux dira s'il est amputé)"
-  fi
-fi
-d version --format '{{.Server.Version}}' >/dev/null 2>&1 \
-  || die "aucun daemon docker joignable (DOCKER_HOST=${DOCKER_HOST:-<vide>}) — Docker Desktop est-il lancé ?" 1
+PROV_DOCKER_BIN="$DOCKER_BIN"
+docker_endpoint || die "$PROV_DOCKER_WHY" 1
+DOCKER_BIN="$PROV_DOCKER_BIN"
 d image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement : $IMAGE — la tirer (deploy/container pull) ou la bâtir (deploy/pack.sh)" 1
 IMAGE_REV="$(d image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE" 2>/dev/null || true)"
@@ -137,14 +126,12 @@ if [[ -z "$IMAGE_REV" || "$IMAGE_REV" == "unknown" ]]; then
 else
   IMAGE_REV_STATE="$IMAGE_REV"
 fi
-PROBE="$(d run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/dev/null | tr -d '[:space:]')"
+PROBE="$(d run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$PROBE" == "flux-ok" ]] || die \
-  "le daemon répond mais un flux attaché revient vide (reçu : '${PROBE:-<rien>}') — DOCKER_HOST=${DOCKER_HOST:-<vide>}
-   C'est le relais systemd : il ne supporte pas le hijack HTTP de docker exec/run/cp.
-   Sortie connue (root, une fois par démarrage de Docker Desktop) :
-     sudo chgrp fleet /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock
-     sudo chmod 660  /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock" 1
-_noms="$(d ps -a --format '{{.Names}}')"
+  "le daemon répond mais un conteneur lancé de $IMAGE ne rend pas sa sortie (reçu : '${PROBE:-<rien>}') — DOCKER_HOST=${DOCKER_HOST:-<vide>}
+   Le banc lit ses mesures par docker exec et docker run : un chemin vers le daemon qui avale les flux
+   attachés (contexte distant, proxy de socket) le rendrait aveugle. Viser la socket du daemon." 1
+_noms="$(d ps -a --format '{{.Names}}' || true)"
 if grep -qx -- "$CONTAINER" <<<"$_noms"; then
   die "le projet $PROJECT existe déjà ($CONTAINER) — le détruire d'abord (bench-down.sh --project $PROJECT --yes) ou changer --forge-project" 1
 fi
@@ -183,12 +170,11 @@ store_ensure_volumes "$DOCKER_BIN" || die "magasin non posé — le conteneur ne
 say "conteneur : projet $CONTAINER_PROJECT, image $IMAGE, bind $BIND"
 # le conteneur matérialise admiral (uid 1000) ; l'humain vient de la forge, par le convergeur.
 # Le deck compare exactement l'entrée annoncée à son client OAuth2 : on ne nomme que celle-là, le
-# module 66 sème les deux écritures de la loopback.
+# geste deck-oidc sème les deux écritures de la loopback.
 quiet env LCARS_IMAGE="$IMAGE" \
     LCARS_ADMIRAL="$ADMIRAL" \
     FORGE_BASE_URL="http://gitea:3000" \
     LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
-    LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="$FORGE_URL" \
@@ -250,7 +236,7 @@ charte_out="$(d exec "$CONTAINER" bash -c \
     'cd /opt/lcars/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIRAL"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -z "$l" ]] || say "charte: $l"; done
 
-# ─── La relance : 63 minte les jetons de rôle, le convergeur matérialise l'humain ──────────────
+# ─── La relance : le geste tokens minte les jetons de rôle, le convergeur matérialise l'humain ──
 say "relance du conteneur : les jetons de rôle se mintent au boot, sur le seed"
 d restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
 attendre_healthy || die "le conteneur ne redevient pas healthy après relance" 3
@@ -315,6 +301,22 @@ PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q
   git a dit : $PUSH_ERR" 7
 [[ "$SEED_DIR" == "$REPO_ROOT" ]] || rm -rf "$SEED_DIR"
 say "$ORG/lcars : main poussé ($SEED_DIT)"
+# la relance a cloné le dépôt tel que la structure l'a créé, avant le semis : le clone du conteneur
+# se réaligne sur le main poussé, sous le compte qui le possède
+SOURCE_IN="${LCARS_SOURCE_DIR:-/home/projects/LCARS}"
+SOURCE_OWNER="$(in_container stat -c %U "$SOURCE_IN" 2>/dev/null | tr -d '[:space:]' || true)"
+SOURCE_REMOTE_IN="http://gitea:3000/$ORG/lcars.git"
+if [[ -n "$SOURCE_OWNER" && "$SOURCE_OWNER" != "UNKNOWN" ]]; then
+  quiet d exec -i -u "$SOURCE_OWNER" "$CONTAINER" \
+      git -C "$SOURCE_IN" fetch -q --depth 1 "$SOURCE_REMOTE_IN" main < /dev/null \
+    && quiet d exec -i -u "$SOURCE_OWNER" "$CONTAINER" git -C "$SOURCE_IN" reset -q --hard FETCH_HEAD < /dev/null \
+    || die "$ORG/lcars : le clone du conteneur ($SOURCE_IN) ne se réaligne pas sur main — rejouer : docker exec -u $SOURCE_OWNER $CONTAINER git -C $SOURCE_IN pull" 7
+  say "source du conteneur alignée sur main ($SOURCE_IN)"
+else
+  quiet d exec -i -u "$ADMIRAL" "$CONTAINER" git clone -q --depth 1 "$SOURCE_REMOTE_IN" "$SOURCE_IN" < /dev/null \
+    || die "$ORG/lcars : aucun clone dans le conteneur et « git clone » y échoue ($SOURCE_IN)" 7
+  say "source du conteneur clonée depuis main ($SOURCE_IN)"
+fi
 WORK_TREE="${LCARS_WORK_TREE:-}"
 if [[ -z "$WORK_TREE" ]]; then
   say "$ORG/lcars : ops non poussé (LCARS_WORK_TREE non posé — le clone qui porte la branche ops, si le banc doit l'avoir)"
@@ -326,7 +328,7 @@ fi
 
 # ─── L'état du conteneur, le runner, la fleet ───────────────────────────────────────────────────
 ROLE_TOKENS="$(in_container bash -c 'ls /opt/lcars/var/tokens/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
-CREDS_OK="$(as_human bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
+CREDS_OK="$(as_human bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non' || echo non)"
 CONTAINER_PROV_RC="$(in_container cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$CONTAINER_PROV_RC" =~ ^[0-9]+$ ]] || CONTAINER_PROV_RC=""
 CONTAINER_PROV_OK=1
@@ -345,10 +347,16 @@ if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
 else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
-  REG_TOKEN="$(in_container /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
+  # les jetons passent à forge-runner par des fichiers 0600, jamais par son argv
+  RUNNER_SECRETS="$(mktemp -d "${TMPDIR:-/tmp}/bench-up-jetons.XXXXXX")"
+  trap 'rm -rf "$RUNNER_SECRETS"' EXIT
+  printf '%s\n' "$MASTER_TOKEN" > "$RUNNER_SECRETS/master"
+  in_container /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 > "$RUNNER_SECRETS/reg" || true
+  reg_args=()
+  [[ -z "$(tr -d '[:space:]' < "$RUNNER_SECRETS/reg")" ]] || reg_args=(--reg-token-file "$RUNNER_SECRETS/reg")
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
-       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token "$MASTER_TOKEN" \
-       ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
+       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$RUNNER_SECRETS/master" \
+       ${reg_args[@]+"${reg_args[@]}"} \
        --instance-url "http://${JOB_HOST}:${FORGE_PORT}" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
     RUNNERS="$(printf 'header = "Authorization: token %s"\n' "$MASTER_TOKEN" \

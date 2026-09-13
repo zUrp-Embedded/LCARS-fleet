@@ -106,9 +106,9 @@ EOF
   export DOCKER_HOST=unix:///daemon-double
 }
 
-publier() { # publier [VAR=val…] — une publication complète vers une forge https doublée
+publier() { # publier — une publication complète vers une forge https doublée ; les doublures se règlent par l'environnement de l'appel
   run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN=jeton-du-temoin \
-    "$@" bash "$R/deploy/pack.sh" --publish
+    bash "$R/deploy/pack.sh" --publish
 }
 
 @test "un arbre modifié est refusé avant tout — ni gate, ni release" {

@@ -32,10 +32,15 @@
 # ENV (optionnels) :
 #   LCARS_IMAGE                image de l'instance (défaut : lcars-fleet:local si présente, sinon celle du compose)
 #   LCARS_HUMAN                compte de shell et de source-push (défaut : le siège de l'instance)
+#   LCARS_ADMIRAL              login du siège, quand la forge ne le donne pas encore
 #   LCARS_UID                  uid du sysadmin (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
 #   LCARS_SSH_PORT             bind du port ssh (défaut 127.0.0.1:2222)
+#   LCARS_LANDING_PORT_BIND    bind du port du deck (défaut 127.0.0.1:20999)
+#   LCARS_DECK_ORIGINS         les entrées du deck déclarées au client OAuth2 (défaut : celles du bind)
 #   LCARS_HOSTNAME             hostname du conteneur
+#   LCARS_SOURCE_REMOTE        le dépôt que le conteneur clone comme source (défaut : celui du compose)
+#   LCARS_SOURCE_REF           la branche ou le tag de ce clone (défaut : la branche par défaut du dépôt)
 #   LCARS_CONTAINER_CONF_DIR   où vit la conf par projet (défaut ~/.lcars/container)
 #   FORGE_BASE_URL             la forge fournie, vue du conteneur (Docker Desktop :
 #                              http://host.docker.internal:<port> ; docker natif : le nom de service
@@ -96,7 +101,7 @@ esac
 fail() { printf 'container: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 docker_endpoint || fail "$PROV_DOCKER_WHY" \
   "Rien n'a été construit, rien n'a été démarré. « container help » marche sans docker."
-# sur une socket root, la CLI sondée est un shim qui escalade : un « docker » nu le contournerait en silence
+# la CLI qui a répondu à la sonde, pas un « docker » du PATH : PROV_DOCKER_BIN peut en nommer une autre
 DOCKER="$PROV_DOCKER_BIN"
 docker_compose_cmd || fail "$PROV_COMPOSE_WHY" \
   "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
@@ -112,7 +117,7 @@ CONF_ENV="$CONTAINER_CONF_DIR/$PROJECT.env"
 CONF_SECRETS="$CONTAINER_CONF_DIR/$PROJECT.secrets"
 CONF_KEYS=(FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID LCARS_SSH_AUTHORIZED_KEYS
            LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HOSTNAME LCARS_DECK_ORIGINS
-           LCARS_HUMAN)
+           LCARS_HUMAN LCARS_SOURCE_REMOTE LCARS_SOURCE_REF)
 declare -A CONF_GIVEN=()   # ce que l'appelant a posé lui-même dans l'env, avant lecture du fichier
 
 load_conf() {
@@ -480,7 +485,7 @@ cmd_reset() {
   store_spared_line | sed 's/^/           /'
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "container: annulé."; exit 1; }
-  compose down --rmi local
+  compose down
   local _v
   while read -r _v; do
     [[ -n "$_v" ]] || continue

@@ -4,13 +4,15 @@
 # STARDATE: 2026-09-13
 # STATUS: l'enrôlement d'un runner CI sur la forge jetable — jeton d'enregistrement, réseau des jobs, runner-compose.yml de l'opérateur, preuve par la forge
 #
-# USAGE : forge-runner.sh --forge-api <url-api avec /api/v1> (--admin-token <jeton> | --admin-token-file <chemin>)
+# USAGE : forge-runner.sh --forge-api <url-api avec /api/v1> --admin-token-file <chemin>
 #                         --network <réseau compose de la forge> --project <projet compose du runner>
-#                         [--instance-url http://gitea:3000] [--verify-repo fleet/lcars] [--reg-token <jeton>]
+#                         [--instance-url http://gitea:3000] [--verify-repo fleet/lcars] [--reg-token-file <chemin>]
 #                         [--labels "shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
 #                         [--accept-generic]
-# EXIT  : 0 runner enregistré (et job vérifié avec --verify-repo) · 1 arguments · 2 la forge refuse
-#         3 le runner ne s'enregistre pas · 4 le job de vérification ne passe pas
+# EXIT  : 0 runner enregistré (et job vérifié avec --verify-repo) · 1 arguments, ou label dont l'image
+#         est introuvable · 2 la forge ne rend pas de jeton d'enregistrement · 3 le runner ne se monte
+#         pas, son daemon embarqué ne répond pas, une image n'y est pas semée, ou la forge ne le liste
+#         pas · 4 le job de vérification ne passe pas
 #
 # Rejouable après chaque destruction de la forge : l'identité d'un runner appairé à une forge morte
 # survit dans le volume du projet, d'où le `down -v` avant chaque pose.
@@ -28,10 +30,9 @@ ACCEPT_GENERIC=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-api)    FORGE_API="${2:?}"; shift 2 ;;
-    --admin-token)  TOKEN="${2:?}"; shift 2 ;;
-    # le chemin n'est pas un secret, le fichier porte ses droits : le jeton ne transite pas par argv
+    # les jetons arrivent par fichier : un argv se lit dans /proc par tout l'hôte
     --admin-token-file) TOKEN="$(tr -d '[:space:]' < "${2:?}")"; shift 2 ;;
-    --reg-token)    REG_GIVEN="${2:?}"; shift 2 ;;
+    --reg-token-file)   REG_GIVEN="$(tr -d '[:space:]' < "${2:?}")"; shift 2 ;;
     --instance-url) INSTANCE_URL="${2:?}"; shift 2 ;;
     --network)      NETWORK="${2:?}"; shift 2 ;;
     --project)      PROJECT="${2:?}"; shift 2 ;;
@@ -41,7 +42,7 @@ while [[ $# -gt 0 ]]; do
     *) echo "forge-runner : option inconnue : $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "forge-runner : --forge-api et --admin-token(-file) requis" >&2; exit 1; }
+[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "forge-runner : --forge-api et --admin-token-file (non vide) requis" >&2; exit 1; }
 [[ -n "$NETWORK" && -n "$PROJECT" ]] || { echo "forge-runner : --network et --project requis (le réseau compose de la forge visée)" >&2; exit 1; }
 
 # le jeton passe à curl par sa config sur stdin : jamais en argv, que /proc expose à tout l'hôte
@@ -85,29 +86,27 @@ EOM
 
 check_labels
 
-# le jeton d'enregistrement se minte par l'API admin ; --reg-token le court-circuite quand le jeton
-# de l'appelant n'a pas la portée (403 vu avec un jeton pourtant admin) : la forge sait en minter
-# un depuis son conteneur (gitea actions generate-runner-token)
+# le jeton d'enregistrement se minte par l'API admin ; un jeton admin peut en être refusé (403), et
+# --reg-token-file apporte alors celui que la forge mint depuis son conteneur
 if [[ -n "${REG_GIVEN:-}" ]]; then
   REG="$REG_GIVEN"
-  say "jeton d'enregistrement fourni (--reg-token), pas d'appel API"
+  say "jeton d'enregistrement fourni (--reg-token-file), pas d'appel API"
 else
   REG=$(forge_curl -s -m 10 -X POST "$FORGE_API/admin/actions/runners/registration-token" \
         | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
 fi
 [[ -n "$REG" ]] || {
-  say "la forge n'a pas rendu de jeton d'enregistrement (portée du jeton ? --reg-token)"
+  say "la forge n'a pas rendu de jeton d'enregistrement (portée du jeton ? --reg-token-file)"
   exit 2
 }
-say "jeton d'enregistrement minté (${#REG} caractères)"
+say "jeton d'enregistrement prêt (${#REG} caractères)"
 
 # ce répertoire n'est pas nettoyé : override.yml est un -f de compose, inscrit dans les labels du
 # projet, et l'effacer casserait tout compose ultérieur sur ce projet ; il ne porte aucun secret
 # hors le jeton d'enregistrement, à usage unique
 GEN="$(mktemp -d)"
-# aucun réseau forcé pour les jobs : le runner est dind, ses jobs n'ont que le bridge de son daemon
-# et héritent de son résolveur ; forcer le réseau de la forge (celui du daemon de la machine) les
-# tuait à la création
+# aucun réseau forcé pour les jobs : ils vivent sur le bridge du daemon embarqué, qui ne connaît pas
+# le réseau de la forge, et un réseau inconnu fait échouer leur création
 cat > "$GEN/config.yaml" <<'EOF'
 # Généré par forge-runner.sh.
 container:
@@ -128,9 +127,8 @@ networks:
     external: true
 EOF
 
-# les variables d'interpolation voyagent par un env-file 0600 : l'appel traverse peut-être un shim
-# qui escalade par sudo, et sudo remet l'environnement à zéro ; le down porte des valeurs factices
-# parce que runner-compose.yml exige LCARS_FORGE_URL même pour un down
+# le jeton d'enregistrement voyage par un env-file 0600 ; le down porte des valeurs factices parce
+# que runner-compose.yml exige LCARS_FORGE_URL même pour un down
 RUNNER_ENV="$GEN/runner.env"
 umask 077
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_RUNNER_LABELS=%s\n' \
@@ -138,11 +136,13 @@ printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_R
 RUNNER_ENV_DOWN="$GEN/runner-down.env"
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "$INSTANCE_URL" " " > "$RUNNER_ENV_DOWN"
 
-$DOCKER_BIN compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
-$DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
-# la config part par docker cp, jamais par bind : le daemon vit dans la VM de Docker Desktop, un bind d'un chemin de cette distribution lui est invisible
-$DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-act-1:/data/bench-config.yaml"
-$DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
+"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
+pose_runner() {
+  "$DOCKER_BIN" compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start \
+    && "$DOCKER_BIN" cp "$GEN/config.yaml" "$PROJECT-act-1:/data/bench-config.yaml" \
+    && "$DOCKER_BIN" compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
+}
+pose_runner || { say "ÉCHEC : le runner ne se monte pas (compose ou copie de sa config, sortie au-dessus)"; exit 3; }
 say "runner lancé (projet $PROJECT, réseau $NETWORK, config copiée dans le volume)"
 
 # le daemon embarqué du runner démarre vide : les images publiques, il les tire ; les images
@@ -156,10 +156,10 @@ seed_dind_images() {
   done
   [[ -n "$out" ]] || {
     say "REFUS : le daemon embarqué du runner ne rend rien après 60 s."
-    say "  soit il n'a pas démarré (privileged ? apparmor=rootlesskit ?), soit ce relais docker"
-    say "  avale la sortie de « exec » — dans les deux cas rien ne peut être semé, et un runner"
-    say "  sans ses images locales annonce des labels qu'il ne sait pas servir."
-    exit 1
+    say "  soit il n'a pas démarré (privileged ? apparmor=rootlesskit ?), soit le chemin vers le daemon"
+    say "  (contexte, proxy) avale la sortie de « exec » — dans les deux cas rien ne peut être semé, et"
+    say "  un runner sans ses images locales annonce des labels qu'il ne sait pas servir."
+    exit 3
   }
   say "daemon embarqué du runner : docker $out"
 
@@ -176,7 +176,7 @@ seed_dind_images() {
     "$DOCKER_BIN" save "$image" 2>/dev/null | "$DOCKER_BIN" exec -i "$c" docker load >/dev/null 2>&1 || true
     [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] || {
       say "REFUS : $image absente du daemon du runner après semis — le label qui la nomme serait un mensonge"
-      exit 1
+      exit 3
     }
   done
   say "magasin du runner : toutes les images des labels sont résolubles"
@@ -216,7 +216,7 @@ fi
 if [[ -n "$VERIFY_REPO" ]]; then
   say "vérification de bout en bout sur $VERIFY_REPO…"
   ok=""
-  # 20 min : la forge sert d'abord au runner neuf le gate complet du dépôt lcars, 4 min ne suffisaient pas
+  # 20 min : le premier job servi à un runner neuf peut être le gate complet du dépôt lcars
   for _ in $(seq 1 200); do
     sleep 6
     st=$(forge_curl -s -m 6 "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" \

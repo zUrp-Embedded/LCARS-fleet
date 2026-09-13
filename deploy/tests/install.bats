@@ -282,6 +282,30 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"docker-ce si aucun daemon ne répond"* ]]
 }
 
+@test "compose absent : dit au bilan, arrête le conteneur avant la confirmation, laisse passer le système" {
+  local a; a="$(_arbre compose=non "compose_why=docker répond, mais compose est absent (ni le plugin)")"
+  porte "$a" --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"compose absent"*"ni le plugin"*"Docker répond, mais compose est absent"*"docker-compose-plugin"* ]]
+  refute_out "Entrée pour continuer" <<<"$output"
+  refute_out "CONTAINER:" <<<"$output"
+  porte "$a" --bench --workstation --check
+  [ "$status" -eq 0 ]
+}
+
+@test "le délégué reçoit le DOCKER_HOST que le préflight a vu répondre, pas celui de l'environnement" {
+  local a; a="$(_arbre docker_host=unix:///var/run/docker.sock)"
+  printf '#!/usr/bin/env bash\necho "CONTAINER:$*"; echo "DOCKER_HOST=[${DOCKER_HOST:-}]"\n' > "$a/deploy/container"
+  DOCKER_HOST=unix:///mort.sock porte "$a" --bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CONTAINER:--bench up"*"DOCKER_HOST=[unix:///var/run/docker.sock]"* ]]
+  a="$(_arbre docker_host=)"
+  printf '#!/usr/bin/env bash\necho "CONTAINER:$*"; echo "DOCKER_HOST=[${DOCKER_HOST:-}]"\n' > "$a/deploy/container"
+  DOCKER_HOST=unix:///mort.sock porte "$a" --bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DOCKER_HOST=[]"* ]]
+}
+
 @test "Linux natif : --workstation exige LCARS_ALLOW_ANY_HOST, mesuré par le préflight" {
   local a; a="$(_arbre substrat=linux consent=none)"
   porte "$a" --bench --workstation

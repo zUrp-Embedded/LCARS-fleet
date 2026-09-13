@@ -60,5 +60,5 @@ EOF
   export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/jamais-posé"
   run "$LIST"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"client d'autorite absent"* ]]
+  [[ "$output" == *"client d'autorité absent"* ]]
 }

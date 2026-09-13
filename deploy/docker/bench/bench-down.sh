@@ -5,10 +5,13 @@
 # STATUS: détruit un banc complet, volumes compris — le runner, le conteneur, la forge, le magasin
 #
 # USAGE : bench-down.sh --project <base> --yes
-# EXIT  : 0 détruit · 1 arguments · 2 rien à détruire sous ce nom
+# EXIT  : 0 détruit · 1 arguments, ou ce qui porte ce nom n'est pas un banc · 2 rien à détruire sous ce nom
 #
 # Un banc = trois projets compose dérivés de la base : <base>-fleet (le conteneur), <base>-forge,
-# <base>-runner. Aucun défaut de projet : ce geste efface des volumes, le nom s'écrit.
+# <base>-runner, plus le magasin <base>-fleet-*. Aucun défaut de projet : ce geste efface des
+# volumes, le nom s'écrit. Une instance posée sans banc porte le même nom <base>-fleet : elle est
+# refusée, parce que son conteneur n'a pas été créé avec docker-compose.bench.yml, ou, sans
+# conteneur, parce qu'aucune forge de banc ne l'accompagne.
 
 set -euo pipefail
 
@@ -43,23 +46,41 @@ CONTAINER="${CONTAINER_PROJECT}-lcars-1"
 RUNNER="${RUNNER_PROJECT}-act-1"
 FORGE="${FORGE_PROJECT}-gitea-1"
 
+STORE_NAMES="$(store_volume_names)"
+NOMS="$("$DOCKER_BIN" ps -a --format '{{.Names}}' || true)"
+VOLUMES="$("$DOCKER_BIN" volume ls --format '{{.Name}}' || true)"
 # les volumes comptent seuls : ils portent l'état, et down -v les emporte même sans conteneur
-RESIDU_C="$("$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -cxE "$CONTAINER|$RUNNER|$FORGE" || true)"
-RESIDU_V="$("$DOCKER_BIN" volume ls --format '{{.Name}}' \
-  | grep -cE "^(${CONTAINER_PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" || true)"
+RESIDU_C="$(grep -cxE "$CONTAINER|$RUNNER|$FORGE" <<<"$NOMS" || true)"
+RESIDU_V="$(grep -cE "^(${CONTAINER_PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" <<<"$VOLUMES" || true)"
+RESIDU_S="$(grep -cxF -f <(printf '%s\n' "$STORE_NAMES") <<<"$VOLUMES" || true)"
 
-[[ "$RESIDU_C" -gt 0 || "$RESIDU_V" -gt 0 ]] \
-  || { echo "bench-down : aucun conteneur ni volume de « $PROJECT » (ni $CONTAINER, $RUNNER, $FORGE) — rien à détruire" >&2; exit 2; }
+[[ "$RESIDU_C" -gt 0 || "$RESIDU_V" -gt 0 || "$RESIDU_S" -gt 0 ]] \
+  || { echo "bench-down : aucun conteneur ni volume de « $PROJECT » (ni $CONTAINER, $RUNNER, $FORGE, ni son magasin) — rien à détruire" >&2; exit 2; }
 
-# le runner d'abord : il tient le réseau de la forge. Les valeurs voyagent par un env-file parce que
-# runner-compose.yml exige LCARS_FORGE_URL même pour un down, et qu'un shim sudo remet l'environnement à zéro
+refus_provenance() {
+  {
+    echo "bench-down : refus — « $CONTAINER_PROJECT » n'est pas un banc : $1"
+    echo "  Une instance posée par install.sh ou deploy/container porte ce nom sans banc ; ce geste effacerait son /home."
+    echo "  La retirer : deploy/container -p $CONTAINER_PROJECT reset"
+  } >&2
+  exit 1
+}
+FLEET_IDS="$("$DOCKER_BIN" ps -aq --filter "label=com.docker.compose.project=$CONTAINER_PROJECT" || true)"
+if [[ -n "$FLEET_IDS" ]]; then
+  # shellcheck disable=SC2086 # les ids sont des mots
+  FICHIERS="$("$DOCKER_BIN" inspect $FLEET_IDS --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' || true)"
+  [[ "$FICHIERS" == *docker-compose.bench.yml* ]] \
+    || refus_provenance "son conteneur a été créé sans docker-compose.bench.yml (${FICHIERS:-fichiers illisibles})"
+elif [[ "$(grep -cxE "$FORGE|$RUNNER" <<<"$NOMS" || true)" -eq 0 \
+        && "$(grep -cE "^(${FORGE_PROJECT}|${RUNNER_PROJECT})_" <<<"$VOLUMES" || true)" -eq 0 ]]; then
+  refus_provenance "aucune forge ni runner de banc « $PROJECT » n'accompagne ses volumes"
+fi
+
+# le runner d'abord : il tient le réseau de la forge. runner-compose.yml exige LCARS_FORGE_URL même
+# pour un down, d'où une valeur factice
 echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
-RUNNER_ENV_DOWN="$(mktemp "${TMPDIR:-/tmp}/bench-down-runner.XXXXXX")"
-chmod 0600 "$RUNNER_ENV_DOWN"
-printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "$RUNNER_ENV_DOWN"
-"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
+LCARS_FORGE_URL="http://gitea:3000" "$DOCKER_BIN" compose -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
   down -v --remove-orphans || true
-rm -f "$RUNNER_ENV_DOWN"
 
 echo "[bench-down] destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true

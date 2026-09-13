@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/docker/bench_runner_labels.bats
+# SOURCE: deploy/tests/docker/forge-runner_labels.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-05
 # STATUS: bats tests for forge-runner.sh — a label is a promise, checked before it is made
@@ -53,7 +53,8 @@ EOF
 }
 
 run_runner() {
-  run bash "$SRC" --forge-api http://f/api/v1 --admin-token tok \
+  printf "tok\n" > "$BATS_TEST_TMPDIR/admin.token"
+  run bash "$SRC" --forge-api http://f/api/v1 --admin-token-file "$BATS_TEST_TMPDIR/admin.token" \
       --network t_default --project t-runner "$@"
 }
 

@@ -4,21 +4,21 @@
 # STARDATE: 2026-09-13
 # STATUS: remplace l'image du conteneur d'un banc déjà semé — la forge, son semis et ses jetons restent
 #
-# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project <base>] [--bind 0.0.0.0]
-#                             [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
+# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--forge-project lcars] [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
+#                             [--port-forge 21000] [--port-deck 20999] [--port-ssh 2222]
 #                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human lcars]
 # EXIT  : 0 conteneur remplacé · 1 arguments ou dépendance · 3 le conteneur ne monte pas · 5 credentials
-#         6 le verdict final ne passe pas
+#         6 aucun jeton de rôle après la relance
 #
-# Détruit le conteneur LCARS et lui seul (pods en vol, worktrees, journaux BEAM partent avec).
-# Ne démarre pas la fleet : le verdict final le rappelle.
+# Détruit le conteneur LCARS et lui seul : ses volumes restent, ce qui vit hors d'eux (pods en vol,
+# journaux BEAM) part avec. Ne démarre pas la fleet : le verdict final le rappelle.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 
-PROJECT="lcars-nuit"
+PROJECT="lcars"
 # mêmes défauts que bench-up.sh : des ports différents republieraient le conteneur ailleurs que sa forge ne l'annonce
 FORGE_PORT="21000"
 DECK_PORT="20999"
@@ -33,10 +33,10 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project)    PROJECT="${2:?}"; shift 2 ;;
-    --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
-    --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
-    --ssh-port)   SSH_PORT="${2:?}"; shift 2 ;;
+    --project|--forge-project)  PROJECT="${2:?}"; shift 2 ;;
+    --forge-port|--port-forge)  FORGE_PORT="${2:?}"; shift 2 ;;
+    --deck-port|--port-deck)    DECK_PORT="${2:?}"; shift 2 ;;
+    --ssh-port|--port-ssh)      SSH_PORT="${2:?}"; shift 2 ;;
     --bind)       BIND="${2:?}"; shift 2 ;;
     --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
     --image)      IMAGE="${2:?}"; shift 2 ;;
@@ -52,6 +52,7 @@ CONTAINER_PROJECT="${PROJECT}-fleet"
 FORGE_PROJECT="${PROJECT}-forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 CONTAINER="${CONTAINER_PROJECT}-lcars-1"
+COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
 
 export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
 # shellcheck source=../../lib/provision-lib.sh
@@ -59,7 +60,7 @@ source "$DOCKER_DIR/../lib/provision-lib.sh"
 # shellcheck source=../../lib/forge-bootstrap.sh
 source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
 if [[ -z "${ADVERTISE:-}" ]]; then advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"; fi
-FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
+FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 
 say() { echo "bench-swap-image : $*"; }
 die() { echo "bench-swap-image : $1" >&2; exit "${2:-1}"; }
@@ -80,34 +81,20 @@ say "banc $PROJECT — le conteneur passe sur $IMAGE (forge, semis et jetons pr�
 
 "$DOCKER_BIN" rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
-# create → connect → start, jamais un up : gitea doit résoudre avant le premier boot, sinon le
-# provisionnement part en drift. Les variables passent par un env-file 0600 hors /tmp : un shim
-# sudo remet l'environnement à zéro, et un docker cp en root dans /tmp (sticky) laisse un fichier
-# que son créateur ne peut plus effacer
-SWAP_ENV="${XDG_RUNTIME_DIR:-$HOME/.cache}/lcars-bench-swap.$PROJECT.env"
-mkdir -p "$(dirname "$SWAP_ENV")"
-( umask 077; : > "$SWAP_ENV" )
-cat > "$SWAP_ENV" <<ENVEOF
-LCARS_IMAGE=$IMAGE
-LCARS_ADMIRAL=admiral
-FORGE_BASE_URL=http://gitea:3000
-LCARS_SOURCE_REMOTE=http://gitea:3000/fleet/lcars.git
-LCARS_BIND=$BIND
-LCARS_SSH_PORT=${BIND}:${SSH_PORT}
-LCARS_LANDING_PORT_BIND=${BIND}:${DECK_PORT}
-FORGE_PUBLIC_URL=http://${ADVERTISE}:${FORGE_PORT}
-LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
-ENVEOF
-trap 'rm -f "$SWAP_ENV"' EXIT
-
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" create \
-  || die "le conteneur ne se crée pas" 3
-
-"$DOCKER_BIN" network connect "$FORGE_NET" "$CONTAINER" \
-  || die "le conteneur ne se branche pas sur $FORGE_NET" 3
-say "conteneur branché sur $FORGE_NET — « gitea » résout avant le premier boot"
-
-"$DOCKER_BIN" compose -p "$CONTAINER_PROJECT" start || die "le conteneur ne démarre pas" 3
+# create puis start, jamais un up : l'override de banc branche le réseau de la forge à la création,
+# et « gitea » résout avant le premier boot
+env LCARS_IMAGE="$IMAGE" \
+    LCARS_ADMIRAL="admiral" \
+    FORGE_BASE_URL="http://gitea:3000" \
+    LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
+    LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
+    LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
+    FORGE_PUBLIC_URL="$FORGE_URL" \
+    LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
+    LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
+    "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
+  || die "le conteneur ne se crée pas (le réseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
+"$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" start lcars || die "le conteneur ne démarre pas" 3
 
 wait_healthy() {
   for _ in $(seq 1 90); do
@@ -119,8 +106,7 @@ wait_healthy() {
 wait_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
 say "conteneur healthy"
 
-# le statut de chpasswd se lit une fois : un « && say || say » lirait celui de say
-if printf 'admiral:%s\n' "$(bench_admiral_password)" | "$DOCKER_BIN" exec -i "$CONTAINER" chpasswd 2>/dev/null; then
+if printf 'admiral:%s\n' "$(bench_admiral_password)" | "$DOCKER_BIN" exec -i -u root "$CONTAINER" chpasswd 2>/dev/null; then
   say "mot de passe de banc posé sur admiral (ssh, sudo)"
 else
   say "admiral : mot de passe non posé — ssh par clé, ou « docker exec -u admiral $CONTAINER bash »"
@@ -136,14 +122,11 @@ else
   say "credentials non posées (--no-creds) — aucun pod ne pourra démarrer, par choix"
 fi
 
-# une relance suffit : la graine de la forge existe, 63-forge-tokens minte les jetons de rôle au boot
-say "relance pour que 63-forge-tokens minte les jetons de rôle sur la graine existante"
+# une relance suffit : la graine de la forge existe, le geste tokens minte les jetons de rôle au boot
+say "relance pour que le geste tokens minte les jetons de rôle sur la graine existante"
 "$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
 wait_healthy || die "le conteneur ne redevient pas healthy après relance" 3
 
-# mesuré par cp et inspect, jamais par exec : à travers un relais de socket, exec rend 0 et zéro
-# octet, et une mesure bâtie dessus lit le vide ; le flux tar de docker cp dit la taille sans
-# toucher le disque
 ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun jeton de rôle après relance — le conteneur ne voit pas la graine de la forge" 6
 
@@ -156,7 +139,7 @@ else
 fi
 
 REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null \
-            | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1)"
+            | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1 || true)"
 REVISION="${REVISION:-inconnue}"
 
 say "─────────────────────────────────────────────────────────"

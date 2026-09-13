@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/docker/bench_up.bats
+# SOURCE: deploy/tests/docker/bench/bench-up.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins du banc — forge, conteneur, amorçage, humain, semis, runner, fleet, verdict
 
-load ../refute
+load ../../refute
 
 free_ports() { # free_ports <n> — n ports libres distincts, sur une ligne
   python3 -c 'import socket,sys; ss=[socket.socket() for _ in range(int(sys.argv[1]))]; [s.bind(("127.0.0.1",0)) for s in ss]; print(" ".join(str(s.getsockname()[1]) for s in ss))' "$1"
@@ -16,10 +16,10 @@ setup() {
   BENCH="$ROOT/deploy/docker/bench"
   DOCKER_D="$ROOT/deploy/docker"
   mkdir -p "$BENCH" "$ROOT/deploy/lib" "$ROOT/.git"
-  cp "$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
+  cp "$BATS_TEST_DIRNAME/../../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   REAL="$BENCH/bench-up.sh"
   local f
-  for f in provision-lib.sh docker-endpoint.sh store.sh forge-bootstrap.sh; do cp "$BATS_TEST_DIRNAME/../../lib/$f" "$ROOT/deploy/lib/"; done
+  for f in provision-lib.sh docker-endpoint.sh store.sh forge-bootstrap.sh; do cp "$BATS_TEST_DIRNAME/../../../lib/$f" "$ROOT/deploy/lib/"; done
   : > "$DOCKER_D/docker-compose.yml"; : > "$DOCKER_D/docker-compose.bench.yml"; : > "$DOCKER_D/forge-compose.yml"
   read -r BF BD BS < <(free_ports 3)
   export BF BD BS
@@ -43,12 +43,19 @@ setup() {
   export REMOTE_MAIN="$BATS_TEST_TMPDIR/remote_main";   : > "$REMOTE_MAIN"
   export ANCESTOR_RC="$BATS_TEST_TMPDIR/ancestor";      echo "0" > "$ANCESTOR_RC"
   export PATCH_CODE="$BATS_TEST_TMPDIR/patch";          echo "200" > "$PATCH_CODE"
+  export DAEMON_MORT="$BATS_TEST_TMPDIR/daemon-mort"
+  export PS_RC="$BATS_TEST_TMPDIR/ps_rc";               echo "0" > "$PS_RC"
+  export SOURCE_OWNER_OUT="$BATS_TEST_TMPDIR/owner";    echo "admiral" > "$SOURCE_OWNER_OUT"
   export PORT_HOLDER="$BATS_TEST_TMPDIR/port_holder"
   export CREDS_POSED="$BATS_TEST_TMPDIR/creds_posed"
 
   cat > "$DOCKER_D/forge-runner.sh" <<'FAKE'
 #!/usr/bin/env bash
 echo "RUNNER:$*" >> "$CALLS"
+while [[ $# -gt 0 ]]; do
+  case "$1" in *-file) echo "RUNNER-FILE:$1=$(cat "$2") mode=$(stat -c %a "$(dirname "$2")")" >> "$CALLS"; shift ;; esac
+  shift
+done
 rc="$(cat "$RUNNER_RC")"
 [[ "$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
 exit "$rc"
@@ -73,9 +80,10 @@ case "$argv" in
   *" create lcars"*|*" up -d")   env | grep '^LCARS_\|^FORGE_' | sort >> "$CALLS"; exit 0 ;;
   *"ps --filter publish="*)      [[ -f "$PORT_HOLDER" ]] && cat "$PORT_HOLDER"; exit 0 ;;
   *"com.docker.compose.project"*) echo "un-autre-projet"; exit 0 ;;
-  version*)                      echo "29.0.0"; exit 0 ;;
+  version*)                      [[ -e "$DAEMON_MORT" ]] && exit 1; echo "29.0.0"; exit 0 ;;
   "run --rm"*)                   echo flux-ok; exit 0 ;;
-  "ps -a"*)                      exit 0 ;;
+  "ps -a"*)                      exit "$(cat "$PS_RC")" ;;
+  *"stat -c %U "*)               cat "$SOURCE_OWNER_OUT"; exit 0 ;;
   "inspect -f {{.State.Health.Status}}"*) echo healthy; exit 0 ;;
   "image inspect -f"*)           cat "$IMAGE_REV_OUT"; exit 0 ;;
   "image inspect"*)              exit 0 ;;
@@ -169,11 +177,14 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 }
 
 
-@test "le runner reçoit la forge, le jeton d'enregistrement, le réseau, le projet et les trois labels, sans le label elixir" {
+@test "le runner reçoit la forge, les deux jetons par fichier, le réseau, le projet et les trois labels, sans le label elixir" {
   run_bench
   [ "$status" -eq 0 ]
   local ligne; ligne="$(grep '^RUNNER:' "$CALLS")"
-  [[ "$ligne" == *"--forge-api http://127.0.0.1:$BF/api/v1"*"--reg-token REG-TOKEN-TEMOIN"*"--network bt-forge_default"*"--project bt-runner"* ]]
+  [[ "$ligne" == *"--forge-api http://127.0.0.1:$BF/api/v1 --admin-token-file "*" --reg-token-file "*"--network bt-forge_default"*"--project bt-runner"* ]]
+  [[ "$ligne" != *MASTER* && "$ligne" != *REG-TOKEN-TEMOIN* ]]
+  grep -qx 'RUNNER-FILE:--admin-token-file=MASTER mode=700' "$CALLS"
+  grep -qx 'RUNNER-FILE:--reg-token-file=REG-TOKEN-TEMOIN mode=700' "$CALLS"
   [[ "$ligne" == *"shell:docker://alpine:3.20"*"dood:docker://docker:cli"*"ubuntu-latest:docker://catthehacker/ubuntu:act-latest"* ]]
   [[ "$ligne" != *"elixir:"* ]]
 }
@@ -386,4 +397,58 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench --no-runner
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet     : « fleet start » a échoué sous lcars"* ]]
+}
+
+# ─── la source du conteneur, le daemon, les substitutions ──────────────────────────────────────
+
+@test "après le semis, le clone du conteneur se réaligne sur le main poussé, sous son propriétaire, et après le push" {
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local push fetch reset
+  push="$(grep -n 'GIT:.* push -q ' "$CALLS" | head -1 | cut -d: -f1)"
+  fetch="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/LCARS fetch -q --depth 1 http://gitea:3000/fleet/lcars.git main' "$CALLS" | cut -d: -f1)"
+  reset="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/LCARS reset -q --hard FETCH_HEAD' "$CALLS" | cut -d: -f1)"
+  [ -n "$push" ]
+  [ -n "$fetch" ]
+  [ -n "$reset" ]
+  [ "$push" -lt "$fetch" ]
+  [ "$fetch" -lt "$reset" ]
+  [[ "$output" == *"source du conteneur alignée sur main (/home/projects/LCARS)"* ]]
+}
+
+@test "sans clone dans le conteneur, la source y est clonée depuis main par admiral" {
+  : > "$SOURCE_OWNER_OUT"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git clone -q --depth 1 http://gitea:3000/fleet/lcars.git /home/projects/LCARS' "$CALLS"
+  [[ "$output" == *"source du conteneur clonée depuis main"* ]]
+}
+
+@test "aucun daemon joignable : le refus de la sonde commune, en 1, avant toute forge" {
+  touch "$DAEMON_MORT"
+  LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/pas-de-socket" run_bench --no-runner
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun daemon docker joignable"*"pas-de-socket[absent]"* ]]
+  refute grep -q 'forge-compose.yml' "$CALLS"
+}
+
+@test "un « docker ps » en échec ne tue pas le banc en silence" {
+  echo 1 > "$PS_RC"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"banc PRÊT sans CI"* ]]
+}
+
+@test "le conteneur ne reçoit pas de LCARS_BIND, que le compose ne lit pas" {
+  run_bench --no-runner
+  [ "$status" -eq 0 ]
+  refute grep -q '^LCARS_BIND=' "$CALLS"
+  grep -qx "LCARS_SSH_PORT=0.0.0.0:$BS" "$CALLS"
+}
+
+@test "les fichiers de jetons du runner ne survivent pas au banc" {
+  local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
+  TMPDIR="$T" run_bench
+  [ "$status" -eq 0 ]
+  [ "$(find "$T" -name 'bench-up-jetons.*' | wc -l)" -eq 0 ]
 }
