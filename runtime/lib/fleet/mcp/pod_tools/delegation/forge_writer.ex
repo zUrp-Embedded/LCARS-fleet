@@ -1,31 +1,14 @@
 defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   @moduledoc """
-  La surface qui écrit du CONTENU sur la forge — branche, fichier, pull request.
-
-  ## Pourquoi elle n'est PAS dans `ForgeClient`
-
-  `ForgeClient` porte l'état des TICKETS : poser un label, commenter, fermer, lire un jury. Son
-  effet est visible sur la forge et nulle part ailleurs. Ces trois-ci fabriquent un **diff qu'un
-  humain va signer**, et ce que ce diff dit devient ce que root applique. Deux natures, deux
-  contrats.
-
-  Le motif est aussi mécanique, et il aurait suffi à lui seul : `Delegation.conforming/2` exige
-  qu'une implémentation exporte **tous** les callbacks de son behaviour. Six doublures de test
-  implémentent `ForgeClient` ; y ajouter trois callbacks les aurait toutes rendues non conformes
-  d'un coup, pour un chemin qu'aucune n'emprunte. Un contrat séparé n'oblige à écrire une doublure
-  qu'à ce qui s'en sert.
-
-  ⚠ **Aucun pod n'appelle ceci.** Le pod tape des champs typés dans son outil MCP ; c'est le
-  RUNTIME qui rend le manifeste et l'écrit. La séparation est le fond du rail : ce qu'un humain
-  approuve est un document que le système a composé, jamais de la prose qu'un pod a rédigée.
+  Content-writing forge callbacks used by runtime-composed toolchain requests.
+  Separate from the issue/PR read surface so stubs declare only contracts they need.
+  Gate.conforming checks every declared export; it does not validate the content
+  or prove that a human approved a change. Callers compose typed MCP inputs into manifests.
   """
 
   @doc """
-  Crée une branche depuis une référence existante.
-
-  Site d'appel : la demande d'outillage — la branche de demande, sur laquelle le manifeste est
-  écrit avant d'être proposé. Rien n'atterrit sur la branche protégée avant le merge : un lecteur
-  (le convergeur, un bug futur) ne doit jamais pouvoir trouver une déclaration non validée.
+  Creates a request branch from an existing ref, keeping proposed manifests off the
+  protected branch until merge. Downstream reconciliation consumes the merged declaration.
   """
   @callback create_branch(
               repo :: String.t(),
@@ -35,11 +18,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
             ) :: {:ok, term()} | {:error, term()}
 
   @doc """
-  Écrit (ou remplace) un fichier sur une branche.
-
-  UN FICHIER PAR ÉCOSYSTÈME, jamais un par demande : deux pods qui demandent python convergent sur
-  le même document plutôt que d'accumuler un fichier chacun. Le second remplace ce que le premier a
-  déclaré, et le diff montre à un humain ce qui change réellement.
+  Writes/replaces a file on a branch. Toolchain uses one path per ecosystem so
+  successive requests modify the same declaration instead of accumulating files.
   """
   @callback put_file(
               repo :: String.t(),
@@ -49,11 +29,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
             ) :: {:ok, term()} | {:error, term()}
 
   @doc """
-  Ouvre une pull request.
-
-  C'EST LA GARDE, pas une notification. Et rien ne s'installe au merge non plus : le réconciliateur
-  voit la branche bouger et le convergeur applique. Trois acteurs, et le seul qui tourne en root
-  prend un manifeste qu'un humain a déjà approuvé.
+  Schedules automatic merging of an existing PR, subject to forge policy.
+  This callback does not create a PR or itself establish human approval.
   """
   @callback schedule_auto_merge(
               repo :: String.t(),
@@ -75,12 +52,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
               opts :: keyword()
             ) :: {:ok, term()} | {:error, term()}
 
-  # LE CONTRAT EST CELUI DU CLIENT CANONIQUE, ET IL EST ETROIT : `Fleet.Forge.Client.open_pr/5`
-  # rend `{:ok, integer}` — le NUMERO de la PR — dans ses DEUX branches, y compris le 409 (une PR
-  # existe deja pour ce couple head→base : le client la retrouve et rend son numero). Un `{:ok,
-  # term()}` laisserait un double rendre une map — double vert, `pr_number/1` en prod recevant un
-  # entier qu'il ne sait pas lire, et une reponse MCP portant `"pr" => nil` a chaque appel (mesure
-  # 2026-08-19).
+  # open_pr returns a number, including lookup of an existing PR after HTTP 409.
+  # Preserve that narrow return contract; a map-returning stub can hide a broken wire PR number.
   @callback open_pr(
               repo :: String.t(),
               head :: String.t(),
@@ -90,18 +63,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
             ) :: {:ok, integer()} | {:error, term()}
 
   @doc """
-  L'implémentation configurée, ou le client canonique.
-
-  MÊME CLEF que `ForgeClient.resolved/0` (`:lcars_fleet, :mcp_forge_client`) — le seam est le MÊME
-  objet, seul le contrat qu'on lui demande de tenir diffère. Deux clefs pour un client seraient deux
-  façons de brancher un test sur des moitiés différentes de la même forge, et un test qui remplace
-  l'une sans l'autre verrait ses écritures partir sur la vraie.
-
-  ⚠ PAS DE COPIE DU DÉFAUT ICI (un `@default_writer Fleet.Forge.Client` à côté) : une clef unique
-  avec deux REPLIS laisse l'un sur l'ancienne implantation quand l'autre change — et seulement en
-  l'absence de configuration, donc jamais en test et toujours en production. La délégation rend
-  l'invariant vrai par construction au lieu de le rendre vrai par relecture. Même forme que
-  `EscalationForge`.
+  Uses ForgeClient.resolved so reads and writes share both :mcp_forge_client and
+  its default. Separate keys/defaults could leave a partially stubbed test writing
+  through the real client.
   """
   @spec resolved() :: module()
   def resolved, do: Fleet.MCP.PodTools.Delegation.ForgeClient.resolved()

@@ -1,24 +1,12 @@
 defmodule Fleet.MCP.PodTools.Delegation.Gate do
   @moduledoc """
-  The authorization base of the delegation channels — and the resolution of what an authorized
-  gesture is allowed to reach.
+  Shared capability checks, runtime seam export checks and explicit catalogue selection.
+  PodTools supplies channel state; roles resolve through PodResolver and capabilities
+  through Spawner. The architect gate additionally requires a nonempty repo binding.
 
-  Three things live here, and they share one property: EVERY delegation channel goes through them,
-  so a divergence between two copies would be a divergence between two authorizations.
-
-    * the two capability gates (`require_architect/1`, `require_onboarder/1`) — the role is
-      resolved from the CHANNEL identity (`state.pod_id`, carried by the socket acceptor), never
-      from a wire argument, then asked for a CAPABILITY (`B-03`: authorize a capability, never a
-      role name). The two heads and what each admits are documented in `Delegation` itself;
-      this module is their single implementation, not their contract.
-    * the seam conformance guard (`conforming/2`) — a runtime seam is duck-typed, so a missing
-      callback becomes a named `{:seam_misconfigured, impl, missing}` BEFORE dispatch instead of
-      an `UndefinedFunctionError` raised half-way through a gesture.
-    * `resolve_org/1` — the catalogue of a project decides its forge org, and that link is fixed
-      for the project's life.
-
-  Every function is `@doc false`: this is the delegation family's own floor, not a surface any
-  other domain calls. It is public only because the channels are separate modules.
+  conforming checks exported callback names/arities, not result shapes or semantics.
+  resolve_org requires an installed catalogue rather than inferring it from a card.
+  Public functions are internal helpers shared across delegation modules.
   """
 
   alias Fleet.MCP.PodTools.Delegation.{EscalationForge, ForgeClient, ProjectOnboard}
@@ -50,20 +38,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
   def conforming_escalation_forge,
     do: conforming(EscalationForge, EscalationForge.resolved())
 
-  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est FIXE POUR SA VIE : « ou vit ce
-  # projet » repond a « quel catalogue le traite ».
-  #
-  # ⚠ UN CATALOGUE NON INSTALLE EST REFUSE : le poller scanne les orgs des catalogues INSTALLES,
-  # donc un projet onboarde ailleurs serait un RAIL MORT, silencieux — rien ne le dispatcherait
-  # jamais.
-  #
-  # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference parait gratuite
-  # et ne l'est pas : elle achete un comportement qui CHANGE quand un tiers installe un catalogue
-  # portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
-  # POPULATION du conteneur. L'information, elle, n'est pas absente — elle est dans l'objet que
-  # l'appelant vient de lire, qui rend chaque carte AVEC son catalogue.
-  #
-  # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.
+  # Catalogue chooses the onboarding org. Require it explicitly: a card name can
+  # become ambiguous when another catalogue is installed. Restrict to installed
+  # catalogues because those are the orgs the poller discovers.
   @doc false
   @spec resolve_org(map()) :: {:ok, String.t()} | {:error, term()}
   def resolve_org(args) do
@@ -71,8 +48,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
 
     case Map.get(args, "catalogue") do
       cat when is_binary(cat) and cat != "" ->
-        # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
-        # deux formulations d'un meme refus dedoublent le vocabulaire.
+        # Reuse Onboard's named refusal for an uninstalled catalogue.
         if cat in installed,
           do: {:ok, cat},
           else: Fleet.Project.Onboard.catalogue_not_installed(cat)
@@ -100,8 +76,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
 
   def require_architect(_state), do: {:error, :pod_id_required}
 
-  # LA CAPACITE NE SUFFIT PAS : un architecte dont l'identite de canal ne porte aucun depot ne peut
-  # deleguer NULLE PART, et `:repo_unbound` le dit au lieu de laisser passer un depot vide.
+  # Capability without a project binding cannot authorize project-bound delegation.
   defp bound_repo(role, repo) when is_binary(repo) and repo != "",
     do: {:ok, %{role: role, repo: repo}}
 

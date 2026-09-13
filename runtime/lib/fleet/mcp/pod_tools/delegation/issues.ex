@@ -1,21 +1,9 @@
 defmodule Fleet.MCP.PodTools.Delegation.Issues do
   @moduledoc """
-  DELEGATION / TRACKING / READ channels — placing a ticket for the poller, then reading back what
-  became of it.
-
-  Forge-state-machine model: author = the caller's role account (traceability), assignee = the
-  human owner (routing + ownership) — and STOPS. The POLLER takes over. The ROUTING is NOT done
-  here: the system onboards any assigned routeless issue.
-
-  The gate is the DELEGATION one (`Gate.require_architect/1`), which additionally requires a repo
-  binding: delegating outside a project is not a thing.
-
-  ## Pourquoi la composition du CORPS vit ici et pas dans un module a part
-
-  Pointeur, criteres, lot, supersede, marqueur d'idempotence : quatorze fonctions, toutes
-  consommees par `create_issue/10` et `comment_issue/3` et par personne d'autre. Les sortir aurait
-  demande quatorze `@doc false` — une frontiere que rien ne franchit dans l'autre sens n'est pas
-  une frontiere, c'est la seconde moitie d'une fonction avec un nom de module dessus.
+  Creates and reads issues in the channel-bound project behind the delegation gate.
+  Creation uses the caller role's token and assigns the configured human. Poller
+  admission owns route engraving; this module supplies destination labels and body artifacts.
+  Body composition and retry readback stay with their issue/comment callers.
   """
 
   require Logger
@@ -26,25 +14,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   alias Fleet.MCP.PodTools.Delegation.{Dependencies, Gate, IssuePR, Render, Retirement, Workshop}
   alias Fleet.Project.GitOps
 
-  # THE WIRE TOKEN OF THE DOCUMENTARY GENRE, from its single authority and evaluated at compile
-  # time so this module recompiles if the token changes. A local literal here is what let the
-  # wire enum and this clause drift apart, and the drift is silent in the worst direction: the
-  # tool advertises a value the router does not match, so every documentary ticket takes the
-  # code path while the description says otherwise.
+  # Compile-time dependency on the wire-token authority keeps dispatch aligned with the schema.
   @workshop_destination Labels.destination_workshop_token()
 
   defmodule Request do
     @moduledoc """
-    LA DEMANDE DE DELEGATION, telle que l'architecte l'ecrit : les neuf champs de l'outil MCP
-    `delegate_implementation`, ni plus ni moins.
-
-    Ils voyageaient en dix parametres positionnels dont sept optionnels a defaut `nil`. ⚠ SIX
-    D'ENTRE EUX SONT DE TYPES COMPATIBLES — `summary`, `destination`, `lot`, `criteria` sont des
-    chaines ou `nil` — donc en intervertir deux compile, passe les types, et cree un ticket dont le
-    resume est la destination. Le handler MCP les lit deja par leur nom dans `args` ; ils le gardent.
-
-    Pas d'`@enforce_keys` au-dela des deux obligatoires : les sept autres SONT optionnels dans le
-    schema de l'outil, et leur `nil` est une reponse, pas un oubli.
+    Named issue_create fields avoid positional swaps between compatible string/nil values.
+    Only title and brief are enforced struct keys; optional fields default to nil.
+    Downstream validation can still require criteria depending on destination.
     """
     @enforce_keys [:title, :brief]
     defstruct [
@@ -75,20 +52,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   end
 
   @doc """
-  Places a forge issue ready for the poller — architect gate included.
-
-  Forge-state-machine model: author = the caller's role account (traceability),
-  **assignee = human owner** (fixed point: routing + ownership) — and STOPS. The
-  POLLER takes over (assigned unlocked issue → spawns the producer role).
-  The ROUTING (burning the workflow_map) is NOT here: it is the responsibility of the
-  SYSTEM (the poller onboards any assigned routeless issue, cf.
-  `StepDispatcher.ensure_workflow_map_or_onboard`, `Fleet.Pilot` side).
-
-  Refusals (fail-closed, nothing is created): non-architect role / unknown pod (gate),
-  `:role_token_unavailable` (the role account's token absent = provisioning hole —
-  posting under the system account would mask traceability and bypass
-  least-privilege), `{:human_unresolved, _}` / `{:issue_creation_failed, _}` (forge),
-  `{:lot_unpublishable, name, reason}` (a lot was named and could not be published).
+  Creates a bound-project issue as the calling role and assigns the human owner.
+  Missing role credentials refuse without a system-token fallback. Supersede state
+  is checked before creation; later retirement failures can leave a warning on success.
+  Artifact publication precedes issue creation and is not rolled back by a forge error.
+  A lot failure refuses creation; brief/criteria materialization have separate degradations.
   """
 
   @spec create_issue(Request.t(), map()) :: {:ok, map()} | {:error, term()}
@@ -104,37 +72,17 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
       criteria: criteria
     } = req
 
-    # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
-    # gate (the pod's spawn binding): the arch has "the project", it never names
-    # a repo over the wire (no param to refuse = no leak that other repos exist). The arch then
-    # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
-    # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
-    # `brief_pointer` (E4, validated by the tool handler): the ticket body becomes
-    # summary + the canonical pointer line (Layout notation) — the pinned ops doc IS the
-    # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
-    # dispatch-time ops push (F-15) — no separate publication rail.
-    # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
-    # threshold — ⚖ user: the ticket stays a readable summary, the
-    # committed doc carries the detail; degraded → inline legacy, never a wall).
-    # `supersedes` — the rework gesture is ONE act with BOTH halves:
-    # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
-    # Without the second half, the old ticket stays dispatchable and loops (scoper re-reviews
-    # the same stale brief every time the arch answers its escalation).
+    # Resolve the forge surface, then gate the channel and obtain its role credentials.
+    # Supplied pointers are structurally checked by PodTools; no artifact fetch occurs here.
     with {:ok, forge} <- Gate.conforming_forge(),
          {:ok, %{role: role, repo: repo}} <- Gate.require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
          :ok <- refuse_pointing_criteria(criteria),
          :ok <- require_criteria_for_code(destination, criteria),
          {:ok, target_state} <- IssuePR.target_state_preflight(forge, repo, supersedes) do
-      # The stdio bridge (`bin/fleet_mcp_stdio_bridge.py`) times out a mutation at 30s, but the worker +
-      # forge POST CONTINUE — a physicalize (push ops) + create_issue can exceed it. The agent then
-      # re-emits the SAME tool call and a bare create would post a DUPLICATE issue (the forge enforces no
-      # uniqueness on issues). Idempotency by READBACK (same family as the incident dedup marker): the act
-      # carries a content-derived `<!-- lcars-op:<sig> -->` marker; we look for an open issue already
-      # bearing it BEFORE physicalizing (so a retry re-pushes no brief doc either) and reuse it. The
-      # supersede retirement still runs on the reuse path — it is itself idempotent via the preflight state
-      # (an already-closed target is a no-op), so a first attempt that timed out AFTER the create but
-      # BEFORE the retirement is completed by the retry.
+      # A bridge timeout can outlive its forge write. Read the content marker before
+      # republishing artifacts; reuse still retries supersede retirement if needed.
+      # Reuse does not reattach depends_on edges or update destination.
       marker = op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria)
 
       case find_open_issue_with_marker(forge, repo, marker) do
@@ -149,11 +97,6 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
            )}
 
         dedup ->
-          # THE LOT FIRST, and its failure is a REFUSAL where the brief's is a degradation. The two
-          # are not the same object: a brief that cannot be materialized still travels, inline, so
-          # the producer has its order. A lot has no inline form — degrading would create a ticket
-          # that HAS matter into one that has none, and the producer would work against material it
-          # never saw. Published before the brief doc so a refusal costs no ops push either.
           compose_and_create(
             forge,
             repo,
@@ -177,17 +120,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # LE LOT D'ABORD, et son echec est un REFUS la ou celui du brief est une degradation. Les deux ne
-  # sont pas le meme objet : un brief qui ne se materialise pas voyage quand meme, inline, donc le
-  # producteur a son ordre. Un lot n'a pas de forme inline — degrader creerait un ticket qui A de la
-  # matiere en un ticket qui n'en a pas, et le producteur travaillerait contre du materiel qu'il n'a
-  # jamais vu. Publie avant le doc de brief pour qu'un refus ne coute meme pas un push ops.
-  #
-  # LES CRITERES DU JUGE sont un SECOND artefact, pas une seconde copie du brief : materialises sous
-  # `gate-briefs/` (kind: "judge") et pointes par `Criteria: <ref> @ <sha>`, pour que le dispatch
-  # resolve un document EPINGLE DIFFERENT pour le juge et pour le producteur. Un ticket d'atelier
-  # (sans jury) ne passe aucun critere ; une materialisation degradee laisse tomber le pointeur
-  # plutot que de murer le ticket, meme posture que le brief.
+  # Publish the lot first: it has no inline fallback, so refusal should precede brief work.
+  # Brief materialization can fall back to full inline text. Criteria is a separate
+  # gate-briefs artifact; if its materialization fails, its pointer is omitted and
+  # no inline criteria is added here.
   defp compose_and_create(
          forge,
          repo,
@@ -222,22 +158,13 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # Split out of `create_issue/2` so the lot's `with` stays readable: the creation and everything
-  # the forge owes the ticket afterwards (dependency edges, supersede retirement).
   defp create_and_finish(forge, repo, {title, full_body}, identity, routing, target_state) do
     %{destination: destination, depends_on: depends_on, supersedes: supersedes} = routing
 
     case do_create_issue(forge, repo, title, full_body, [token: identity.token], destination) do
       {:ok, result} ->
-        # THE ORDER BETWEEN TICKETS IS WRITTEN ON THE FORGE, not only in prose. The forge
-        # refuses to close a blocked ticket, and admission refuses to START one while a
-        # blocker is open (`wait/depends`). Without the edge the constraint lives only in the
-        # brief: it holds as long as an agent reads it, which is to say it does not.
-        #
-        # Best-effort ASSUMED, and it is the only asymmetry with the supersede: here the
-        # ticket is already created and correct — a missing edge degrades the ORDER, it makes
-        # nothing false. The supersede refuses to close when the carry-over fails, because
-        # closing RELEASES. Writing an edge < releasing one.
+        # Creation-time edges are best effort and report failures. Supersede instead
+        # keeps the old issue open if carrying its edges fails.
         result = Dependencies.attach_dependencies(forge, repo, result, depends_on)
         {:ok, Retirement.retire_superseded(forge, repo, supersedes, target_state, result)}
 
@@ -246,20 +173,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
-  # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
-  # a local literal would drift ("stage/merged" = `stage_prefix() <> stage_merged()`).
+  # Use shared label vocabulary for merge evidence.
   @merged_label Labels.stage_prefix() <> Labels.stage_merged()
 
   @doc """
-  Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
-  delegation stays reserved to the architect, consistent with `issue_create`/`project_create`).
-  Read-only (ForgeClient); the repo comes from the CHANNEL BINDING (`require_architect/1`),
-  never from a wire argument.
-
-  Result: `{"issue", "title", "outcome"}` + `"pr"` when there is something true to say.
-  `outcome` is the ONE tracking verdict (subsumes the old `issue_state`+`delivered` pair) —
-  the arch only chains issue N+1 on `outcome == "merged"`.
+  Reads issue and PR status behind the project-bound delegation gate.
+  A closed issue needs a merge label or merged PR to report merged; closed alone
+  reports closed_without_merge. Issue-read failure yields unknown. PR absence omits
+  pr; PR-read failure renders an error object. This read does not enforce caller sequencing.
   """
   @spec issue_status(integer(), map()) :: {:ok, map()} | {:error, term()}
   def issue_status(number, state) when is_integer(number) do
@@ -271,9 +192,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
             {Map.get(issue, "state", "unknown"), Payload.label_names(issue),
              Map.get(issue, "title")}
 
-          # LOUD before the fallback: without the warning, a forge outage folds into
-          # {outcome: "unknown"} with no operator trace. "unknown" stays SAFE (the arch waits),
-          # but the operator must be able to tell a mute forge from a genuine non-delivery.
+          # Log before reporting unknown so an outage has an operator trace.
           err ->
             Logger.warning(
               "Delegation: issue_status #{repo}##{number} forge unreachable (get_issue → " <>
@@ -285,18 +204,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
       pr = issue_pr_status(forge, repo, number)
 
-      # Axiom: no "repo" in the result — the arch has "the project".
-      # One meaning per shape: no polysemous null — `title`/`pr` are ABSENT
-      # when there is nothing true to say, never null (cf. put_pr/2).
-      # THE SIGNPOST TRAVELS IN THE ANSWER, not only in the catalogue read once at boot. Measured
-      # on the bench: an architect complained that this status carried no timestamp, WITHOUT
-      # inventorying its own toolbox — while `issue_get`'s description names this tool by name to
-      # orient the choice. Same bias as the producer's — delivering costs less than refusing —
-      # here: complaining costs less than looking.
-      #
-      # So the pointer arrives where the agent actually looks — inside what it just received.
-      # Same doctrine as the CI fact riding into the judge's brief: the information goes to the
-      # reader, we do not wait for the reader to come and get it.
+      # Omit absent title/PR; the caller already has the project binding.
+      # Include a thread-tool pointer in the result, where the caller needs the missing timestamps.
       result =
         %{
           "issue" => number,
@@ -458,17 +367,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Rendre `:none` pour les
-  # deux — marqueur absent d'un tableau LU, et tableau ILLISIBLE — laisse la creation avoir lieu dans
-  # les deux cas, ce qui est le bon arbitrage (poster bat perdre la reponse), mais rend le retour MCP
-  # identique : l'agent ne peut alors pas savoir que son doublon est possible. Or c'est lui qui
-  # reessaie, et la relecture echoue precisement quand la forge va mal — au moment ou il va rejouer
-  # l'appel.
-  #
-  # Le projet interdit « never two live tickets for one brick » (`pod_tools.ex`) et le marqueur
-  # existe pour ca. On ne refuse pas la creation pour autant : on la NOMME. Une reutilisation porte
-  # `"idempotent" => true` ; une creation dont la deduplication n'a pas pu etre verifiee porte
-  # `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
+  # Failed readback still allows posting, but dedup_unverified distinguishes unknown
+  # prior effects from a successful empty read. A reused artifact carries idempotent: true.
   defp with_dedup_unverified(result, {:unverified, why}),
     do: Map.put(result, "dedup_unverified", inspect(why))
 
@@ -492,10 +392,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # Creates as the role and assigns the human owner.
-  # LE LABEL DE DESTINATION MONTE AVEC LA CREATION, jamais apres : un ticket workshop cree sans son
-  # label existe, le temps d'un tick, comme un ticket de projet — et le poller le routerait comme
-  # tel. Un label irresolvable fait donc echouer la creation au lieu de la laisser partir nue.
+  # Resolve the workshop destination label for the initial issue write; adding it
+  # later lets a poller tick see the ticket as ordinary project work.
   defp with_destination_label(@workshop_destination, issue_opts, forge, repo, author_opts) do
     case forge.repo_label_id(repo, Labels.destination_workshop(), author_opts) do
       {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
@@ -527,18 +425,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING (burning the
-  # workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns the default
-  # workflow_map on any assigned routeless issue (cf. `Fleet.Pilot`). A single actor creates+assigns;
-  # the system routes. (Uniform: a routeless human issue is onboarded the same way.) The visual TYPE
-  # is a label for humans — NEVER routing: the result is discarded, nothing mechanical reads it, and
-  # its absence is directly visible on the issue in the forge UI. It is DERIVED from the destination,
-  # not fixed: a workshop ticket wearing `type:feature` contradicts the card its own destination
-  # routes it to, and the contradiction is only visible to the human it misleads.
-  #
-  # Axiom: the repo is NEVER named back to the arch — it has "the project". `title` is ECHOED as
-  # registered so the arch CONFIRMS the number↔title association instead of presuming it
-  # (protocol-carried correlation, not memory).
+  # Add the visual type label best effort; the poller owns route engraving.
+  # Echo number/title/assignee so the caller can correlate the created issue.
   defp created_issue({:ok, number}, forge, repo, title, human, destination) do
     _ = forge.add_label(repo, number, Labels.type_for_destination(destination), [])
 
@@ -557,25 +445,15 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # Arch-facing PR object. `review` renders the gate's own routing predicate, computed
-  # pilot-side (`Jury.review_outcome/2`) and carried as DATA by `pr_review_state` — factored,
-  # never copied here.
-  #
-  # C2 — ET LA POLITIQUE DE VERDICT ENTRE ICI AUSSI, PAR LA MÊME PORTE QUE LE GATE. Depuis que la
-  # carte peut refuser ce qu'un juge a approuvé, « ce que dit le jury » et « ce que fait le rail »
-  # ne coïncident plus tout seuls : cette surface afficherait `approved` à un architecte pendant
-  # que le pilote renvoie le producteur en rework, et l'architecte n'aurait aucun moyen de voir
-  # pourquoi sa PR ne bouge pas. `Roles.verdict_policy_for/4` est la résolution UNIQUE, appelée des
-  # deux côtés avec le client forge de l'appelant — c'est précisément pour cette propriété que
-  # `review_outcome` est factorisée plutôt que recopiée, et la respecter coûte cet argument.
+  # Use the gate's shared policy resolution and computed review outcome;
+  # otherwise status could say approved while the same card sends the PR to rework.
   defp render_pr(forge, repo, issue_number, pr) do
     policy = Fleet.Project.Roles.verdict_policy_for(forge, repo, issue_number)
 
     read_opts = [
       head_sha: Payload.head_sha(pr),
       verdict_policy: policy,
-      # C3 — même exigence que la courbe : l'arbitre entre des DEUX côtés ou d'aucun. Sans lui,
-      # cette surface rendrait `gray_zone` sur une PR que le gate a déjà tranchée.
+      # Include the arbiter so status reflects a gray-zone decision already made by the gate.
       verdict_arbiter: Fleet.Project.Roles.gatekeeper_role()
     ]
 
@@ -584,10 +462,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
         {:ok, %{verdicts: verdicts, outcome: outcome, records: records}} ->
           {verdicts, records, review_string(outcome)}
 
-        # A seam that answers WITHOUT `records` is not a mute forge and must not be reported as
-        # one: the routing verdicts are usable, only the substance is missing. Distinct message,
-        # distinct rendering — collapsing the two would hide a stub or an out-of-date
-        # implementation behind an outage.
+        # Missing records is a partial result, not an unavailable forge.
         {:ok, %{verdicts: verdicts, outcome: outcome}} ->
           Logger.warning(
             "Delegation: issue_status #{repo} PR##{pr["number"]} — the review seam returned no " <>
@@ -596,8 +471,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
           {verdicts, [], review_string(outcome)}
 
-        # LOUD before the fallback (same stance as get_issue above): a mute forge must not
-        # read as "no verdicts yet" — review=unknown marks the degraded read.
+        # Log a failed review read and render unknown, not an empty jury.
         err ->
           Logger.warning(
             "Delegation: issue_status #{repo} PR##{pr["number"]} forge unreachable " <>
@@ -607,10 +481,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
           {%{}, [], "unknown"}
       end
 
-    # `reviews` carries what `verdicts` structurally cannot: WHAT each judge wrote and WHEN. Two
-    # approvals are the same value in `verdicts` and were never the same thing on the forge — one
-    # cites its gate-brief, the other lands a second after being asked. The architect spent three
-    # campaigns reconstituting that difference from the outside; it was in the payload all along.
+    # Bodies and timestamps distinguish reviews with the same verdict.
     %{
       "number" => pr["number"],
       "state" => pr["state"],
@@ -629,12 +500,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp review_string(:changes_requested), do: "changes_requested"
   defp review_string(:approved), do: "approved"
 
-  # C3 — l'état que l'arch DOIT pouvoir lire : le jury a rendu un AVIS FAVORABLE, la courbe de la
-  # carte refuse, et
-  # personne n'a encore arbitré. Le rendre `changes_requested` mentirait sur qui refuse (aucun juge
-  # ne refuse) ; le rendre `approved` mentirait sur ce qui va se passer (rien ne se scellera). Un
-  # nom à lui est la seule sortie honnête, et c'est aussi celui que l'humain verra dans un rapport
-  # quand il se demandera pourquoi sa PR ne bouge pas.
+  # gray_zone means favorable jury advice still needs policy arbitration;
+  # neither approved nor changes_requested expresses that state.
   defp review_string(:gray_zone), do: "gray_zone"
 
   # A supplied pointer keeps its summary; failed materialization keeps the inline brief.
@@ -677,20 +544,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_pointer(brief, {ref, sha}, repo),
     do: brief <> "\n\n---\n" <> Layout.brief_pointer_trailer(ref, sha, repo)
 
-  # The criteria doc lives under `gate-briefs/` — `kind: "judge"` routes it there (`brief_ref/2`).
-  # `nil`/empty criteria (a workshop ticket, or a degraded materialize) → no pointer, never a wall:
-  # the same posture as the brief, where a producer without a resolvable doc still gets an order.
+  # Criteria uses gate-briefs; absent criteria or failed materialization yields no pointer.
   defp ensure_criteria_pointer(_repo, _title, criteria)
        when not is_binary(criteria) or criteria == "",
        do: nil
 
   defp ensure_criteria_pointer(repo, title, criteria) do
-    # transport_brief_v2 (#3.3) — the criteria carries a `--criteria` suffix so its BASENAME differs
-    # from the brief's. Both derive from the same title; the folder (`gate-briefs/` vs `briefs/`)
-    # already disambiguates for the runtime (the ref always carries it), but a human reading a bare
-    # filename in a log or a `git status` could not tell the brief from the criteria — same slug, two
-    # trees. The suffix kills that trap. The suffix cannot land in `brief_ref/2`: that primitive also
-    # names the judge WORK-ORDERS (`issue-N-<role>.md`), which must stay unmarked.
+    # Distinct basenames help humans reading logs without parent paths. Keep the suffix
+    # here: the shared brief_ref primitive also names judge work orders that must stay unmarked.
     base = [
       name_hint: Layout.sanitize_artifact_name(title) <> "--criteria",
       kind: "judge",
@@ -714,18 +575,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_criteria_pointer(body, {ref, sha}, repo),
     do: body <> "\n" <> Layout.criteria_pointer_line(ref, sha, repo)
 
-  # THE CRITERIA MUST STAND ALONE — the judge mounts nothing but its criterion, so a criterion that
-  # DELEGATES to another committed doc points at a tree the judge will never read. This wall is the
-  # NON-AMBIGUOUS half of that promise: a criteria that literally embeds a Layout pointer line
-  # (`Brief:`/`Criteria: <ref> @ <sha>`) is a delegation, refused loudly at authoring where the arch
-  # can still inline what it meant.
-  #
-  # ⚠ WHAT THIS DOES NOT CATCH, stated: a PROSE reference ("voir les 8 critères de spec.md") is not
-  # a machine pointer and cannot be told from a criterion that merely mentions a doc as context.
-  # Fuzzy detection there would fail-close legitimate criteria. That half is the authoring
-  # discipline's — and the split itself (a criteria is now its own authored artefact, the tool says
-  # "self-contained") is what pushes toward it. The wall bites the form it can prove, not the form it
-  # would have to guess.
+  # Reject canonical embedded Brief/Criteria pointers so the judge's criteria is self-contained.
+  # Prose references cannot be distinguished from contextual mentions and remain authoring discipline.
   defp refuse_pointing_criteria(criteria) when is_binary(criteria) and criteria != "" do
     cond do
       match?({:ok, _}, Layout.parse_brief_pointer(criteria)) ->
@@ -741,10 +592,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
   defp refuse_pointing_criteria(_), do: :ok
 
-  # A CODE TICKET IS JUDGED, so it MUST carry its judge's criteria. A judge without a criterion
-  # approves — the one false GREEN this whole rail exists to refuse — and the split only helps if
-  # the criteria is actually authored. A `workshop` ticket has no jury (the arch closes the loop in
-  # its own mount), so it carries none. Absent/`code` destination = it ships → criteria required.
+  # Every destination except workshop requires nonempty criteria; this does not assess their quality.
   defp require_criteria_for_code(destination, criteria) do
     workshop = Labels.destination_workshop_token()
 
@@ -755,17 +603,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # ── the user LOT ───────────────────────────────────────────────────────────────────────────
-  # The brief is the TASK; the lot is the MATTER it works on — several docs, a directory, images,
-  # written by the human and the delegating role together on the workshop face. No text field
-  # carries that, and it does not have to: git already carries directories and binaries, so the
-  # lot travels as a COMMIT and the ticket names it. The producer's clone then starts FROM that
-  # commit instead of from the head of its face.
-  #
-  # THE POD DOES NOT PUSH IT. Same invariant as every deliverable: the producer commits, the
-  # SYSTEM publishes, through the one boundary that gates a push (base ancestry, commit identity,
-  # secret scan). Reusing `Deliverable` rather than pushing here is the whole point — a second
-  # push path would be content reaching the forge without that gate.
+  # Lots are committed workshop material, not task text. Publish through Deliverable
+  # to retain ancestry, identity and secret checks rather than introducing another push path.
 
   defp publish_lot(_repo, _role, nil), do: {:ok, nil}
 
@@ -790,10 +629,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # `:coauthor_role` is deliberately ABSENT: the gate's trailer check exists to attest WHICH
-  # producer made a deliverable, and a lot has no producer — it is what the human and the
-  # delegating role wrote at a terminal. The identity check still binds (the commits must be
-  # authored by the human), and so do base ancestry and the secret scan.
+  # No coauthor_role is required: a lot is human/delegator material, not a producer delivery.
+  # Allowed author identity, ancestry and secret checks still apply.
   defp publish_lot_commits(dir, ref, base_sha, identity) do
     Fleet.Workflow.Deliverable.publish(%{
       mode: :git_native,
@@ -823,24 +660,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_supersedes(body, n),
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
-  # ⚠ CE MARQUEUR EST UN IDENTIFIANT DURABLE : il n'est pas calcule puis jete, il est ECRIT DANS LE
-  # CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR — potentiellement apres une
-  # montee d'OTP. Sa stabilite depend donc du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
-  # l'implementation, hors de ce depot. AUCUN test d'ici ne peut surveiller cette propriete — il
-  # faudrait deux executions sur deux VM.
-  #
-  # LA LIGNE A RELIRE : si la flotte change de version MAJEURE d'OTP, verifier que ce digest est
-  # stable AVANT de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
-  # acte. C'est le seul evenement qui rend le defaut reel.
-  #
-  # ⚠ ET NE PAS REECRIRE UN ENCODEUR CANONIQUE ICI : mesure par mutation, il n'achete AUCUNE
-  # propriete observable de plus — les temoins ecrits pour lui restent verts avec l'encodage
-  # d'origine. Il n'est pas gratuit non plus : changer l'entree du digest ORPHELINE les marqueurs
-  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
-  #
-  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee dans les issues OUVERTES d'UN depot
-  # — quelques milliers de marqueurs au plus. L'elargir couterait la lisibilite du corps de ticket
-  # pour le mauvais risque.
+  # Persisted 64-bit digest prefix over Erlang term encoding. Preserve encoding/input
+  # compatibility across deployments (check on OTP upgrades): changing it orphans
+  # existing markers and can duplicate retries. This is not collision-free uniqueness.
+  # Destination and depends_on are not in the digest; lot is its name, not its current commit.
   defp op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria) do
     sig =
       :crypto.hash(

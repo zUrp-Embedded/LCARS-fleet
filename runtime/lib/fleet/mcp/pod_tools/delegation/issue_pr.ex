@@ -1,31 +1,17 @@
 defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
   @moduledoc """
-  Finding the pull request that belongs to an issue, and refusing a gesture whose target state
-  cannot be established.
-
-  The forge has no back-link from an issue to its PR: the tie is the feature branch, and reading
-  it is a SEARCH that can fail three different ways — no PR, a PR already merged, a forge that
-  cannot be reached. The three are kept apart all the way up, because "no PR" and "I could not
-  ask" authorize opposite decisions on a retirement.
+  Finds an issue's PR by feature branch, then merged-seal fallback. Preserve the
+  distinction between no PR and an unreadable forge when deciding retirement.
+  Selection is a snapshot: it provides no lock against a subsequent state change.
   """
 
   require Logger
 
   alias Fleet.Forge.Payload
 
-  # Supersede pre-flight — BEFORE any write, fail-loud on anything unverifiable: the retirement
-  # is a destructive gesture executed by the SYSTEM on the arch's intent. A mute forge is a refusal,
-  # not a guess (a half-checked supersede could retire the wrong brick). An already-closed target is
-  # LEGITIMATE (re-take an abandoned brick): filiation only, no retirement to execute.
-  #
-  # A LIVE PR IS NOT A REFUSAL, IT IS THE OTHER HALF OF THE GESTURE. Retiring the ticket without
-  # closing its PR leaves that PR on an INDEPENDENT rail (`dispatch_review` polls pulls, outside the
-  # lease) — judged, then merged, into a retired ticket. Refusing the retirement instead would
-  # protect against an incoherence the gesture itself can prevent.
-  #
-  # And the intent of a retirement — stop the machine, bound the cost — does not depend on whether a
-  # PR exists. So the gesture is COMPLETE (`:with_pr` → the PR closes with the ticket) rather than
-  # forbidden.
+  # Read before retirement. An already-closed issue needs filiation only and skips
+  # PR lookup. Other successful issue responses are treated as open; this is not
+  # strict payload validation. A live PR is returned so retirement can close it too.
   @doc false
   @spec target_state_preflight(module(), String.t(), integer() | nil | term()) ::
           {:ok, nil | :closed | :open | {:open, integer()}} | {:error, term()}
@@ -55,8 +41,7 @@ defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
 
   def target_state_preflight(_forge, _repo, _bad), do: {:error, :invalid_target}
 
-  # The retired ticket's PR dies with it. A failure PROPAGATES: closing the issue while leaving its
-  # PR alive recreates the exact incoherence this gesture exists to prevent.
+  # Propagate PR closure failure so retirement does not continue with a live PR.
   @doc false
   @spec close_live_pr(module(), String.t(), integer() | nil) :: :ok | {:error, term()}
   def close_live_pr(_forge, _repo, nil), do: :ok
@@ -98,9 +83,7 @@ defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
     end
   end
 
-  # A merged PR's head no longer resolves once its branch is deleted, so the issue's `[merge:pr-N]`
-  # marker is what recovers it — the measurement that establishes this lives with the marker, in
-  # `Fleet.Forge.Protocol.merge_marker/1`.
+  # Deleted merged branches can lose the feature ref; recover through the merge seal.
   defp merged_pr_fallback(forge, repo, number) do
     case forge.merged_pr_of_issue(repo, number, []) do
       {:ok, pr} ->
@@ -120,8 +103,7 @@ defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
     end
   end
 
-  # Several PRs can match one issue across state=all (a cancelled attempt + its successor):
-  # the LIVE one wins, else the most recent (highest number).
+  # Prefer the first open match in forge order; otherwise choose the highest PR number.
   defp pick_pr([]), do: nil
 
   defp pick_pr(matches),

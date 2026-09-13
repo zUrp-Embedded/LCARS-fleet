@@ -1,10 +1,8 @@
 defmodule Fleet.MCP.PodTools.Delegation.Render do
   @moduledoc """
-  What the delegation channels put in the map they hand back to the pod.
-
-  Two writers, and both exist because a key present with `nil` is not the same answer as a key
-  ABSENT: the first reads as "the fleet looked and found nothing", the second as "the fleet did
-  not look". Every channel renders the same way, so the two readings never diverge between tools.
+  Shared optional-field rendering. put_present omits nil, but retains empty lists
+  and other values; callers decide their meaning. put_architect requires a status
+  map and omits its nil fields. Neither helper removes an already-present key.
   """
 
   @doc false
