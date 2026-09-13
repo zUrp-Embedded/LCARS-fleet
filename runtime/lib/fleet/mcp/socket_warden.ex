@@ -1,33 +1,17 @@
 defmodule Fleet.MCP.SocketWarden do
   @moduledoc """
-  Runtime reaper for sockets whose pod disappeared without release, and detector of the SYMMETRIC
-  failure: pods whose acceptor disappeared without them.
+  Reconciles owned acceptors against live pods, and socket paths against acceptors.
+  The first comparison releases orphaned acceptors after two observations. The
+  second emits pod.deaf for unmatched paths without deleting or repairing them;
+  it does not establish that the corresponding pod is alive.
 
-  Two reconciliations on the same tick, and they are not the same question:
+  Deaf-path detection runs even if live-pod enumeration fails. Each source failure
+  preserves its state. PeriodicCheck catches remaining check failures and re-arms
+  after the check, but already performed effects are not rolled back.
 
-    * **acceptor without pod** — we own a live acceptor whose pod is gone (brutal teardown). The
-      socket is ours to close, so this one is REAPED.
-    * **pod without acceptor** — a socket file on disk with no acceptor behind it, after a
-      `:one_for_one` cascade. The pod is alive and holds that path; reaping the file would only
-      hide it. This one is a DEAF POD: it keeps writing into a socket nobody listens on, reports
-      nothing, and looks exactly like an agent with nothing to say. It is raised as an incident.
-
-  Both carry two-tick grace (`Fleet.Grace.two_tick/2`), because both have a legitimate transient:
-  a pod being torn down passes through "acceptor alive, pod gone", and a release passes through
-  "file present, acceptor gone". Enumeration failure reaps nothing, raises nothing, and preserves
-  suspects — an unreadable directory is not an empty one.
-
-  The tick plumbing — arm, re-arm LAST, the net under the check, the `:check_now` hook — is
-  `Fleet.PeriodicCheck`; this module keeps its state, its sources and its two decisions. The net
-  also covers the two calls into `PodSocketSupervisor` (`owned_fun`, `release_fun`) that the
-  per-source rescues below do not: a supervisor mid-cascade no longer takes the warden with it.
-
-  ## Options (`start_link/1`)
-
-    * `:name` — GenServer name (default the module; tests pass `nil` to co-exist).
-    * `:interval_ms` — tick period (default `60_000`).
-    * `:live_pods_fun`, `:owned_fun`, `:release_fun`, `:deaf_fun`, `:emit_fun` — the seams,
-      defaulting to the real sources and effects.
+  Options: :name (module by default, nil for unnamed), :interval_ms (60_000),
+  :live_pods_fun, :owned_fun, :release_fun, :deaf_fun and :emit_fun. Functions default
+  to the production readers/effects below. Grace counts observations, not elapsed time.
   """
 
   use GenServer
@@ -41,8 +25,8 @@ defmodule Fleet.MCP.SocketWarden do
   def start_link(opts \\ []), do: PeriodicCheck.start_link(__MODULE__, opts)
 
   @doc """
-  Replays one tick NOW, synchronously — the `:check_now` hook of `PeriodicCheck`. Replies the two
-  suspect sets after the pass.
+  Runs a synchronous check and returns both suspect sets. This advances grace
+  without changing timer cadence; failures outside the source wrappers propagate.
   """
   @spec check_now(GenServer.server()) ::
           {:ok, %{suspects: MapSet.t(), deaf_suspects: MapSet.t()}}
@@ -60,10 +44,8 @@ defmodule Fleet.MCP.SocketWarden do
       emit_fun: Keyword.get(opts, :emit_fun, &Bus.safe_emit/4),
       suspects: MapSet.new(),
       deaf_suspects: MapSet.new(),
-      # Deja signale : un pod sourd le reste jusqu'a ce qu'un humain agisse, et le tick repasse
-      # toutes les 60 s. Sans cette memoire, la chaine d'incident recevrait le meme sujet en boucle
-      # et son propre compteur de recurrence — celui qui decide « note » ou « issue sysadmin » —
-      # mesurerait le tick du warden au lieu de mesurer le probleme.
+      # Suppress repeated emissions while a path stays deaf so incident recurrence
+      # does not count the warden's polling cadence.
       deaf_reported: MapSet.new()
     }
 
@@ -85,10 +67,7 @@ defmodule Fleet.MCP.SocketWarden do
       )
 
   defp do_check(state) do
-    # LES DEUX RECONCILIATIONS SONT INDEPENDANTES, ET C'EST POUR CA QU'ELLES SONT SEPAREES ICI. La
-    # detection des sourds ne lit PAS la liste des pods vivants — elle compare le disque au registre
-    # des acceptors. La ranger dans la branche qui reussit aurait fait qu'une panne d'enumeration des
-    # pods aveugle une detection qui n'en depend pas : une panne cachant l'autre, en silence.
+    # Deaf-path detection does not depend on live-pod enumeration.
     state = report_deaf_pods(state)
 
     case live_pod_ids(state) do
@@ -113,17 +92,13 @@ defmodule Fleet.MCP.SocketWarden do
     end
   end
 
-  # UN POD SOURD NE SE REPARE PAS ICI, ET C'EST DELIBERE. Le fichier appartient a un pod VIVANT qui
-  # ecrit dedans ; le supprimer ne rendrait pas l'oreille, ça retirerait la seule trace. Redemarrer
-  # un acceptor sous un pod deja lance est une decision de cycle de vie qui appartient au spawner,
-  # pas au balayeur de sockets. Ce que ce module doit a la fleet, c'est de le rendre AUDIBLE — et
-  # `pod.deaf` porte `action: incident`, donc note a la 1re occurrence, issue sysadmin a la
-  # recurrence. C'est la moitie durable ; le log ci-dessous n'est que la moitie immediate.
+  # Preserve unmatched paths as evidence; restarting acceptors is a lifecycle decision.
+  # Emission is an incident input, not proof of durable receipt. Its return is ignored
+  # and the subject is marked reported even when the emitter returns an error.
   defp report_deaf_pods(state) do
     case safe_deaf(state) do
       :error ->
-        # On ne sait pas : on ne blanchit personne. `deaf_reported` est conserve tel quel, sinon la
-        # prochaine lecture reussie re-signalerait des sujets deja ouverts.
+        # Preserve reported subjects on read failure to avoid spurious re-emissions.
         state
 
       deaf ->
@@ -148,9 +123,7 @@ defmodule Fleet.MCP.SocketWarden do
         %{
           state
           | deaf_suspects: deaf_suspects,
-            # Un pod qui n'est plus sourd sort du registre : s'il le redevient, c'est un fait neuf
-            # et il doit se redire. Garder la marque a vie transformerait « signale une fois » en
-            # « ne le dira plus jamais ».
+            # Forget recovered paths so a later recurrence can be reported.
             deaf_reported: MapSet.intersection(MapSet.union(state.deaf_reported, fresh), deaf)
         }
     end

@@ -1,12 +1,8 @@
 defmodule Fleet.MCP.ToolInputSchemaTest do
   use ExUnit.Case, async: true
 
-  # 2026-09-04 — NOBODY on the server side validates a call against its `input_schema`: ExMCP checks
-  # prompt arguments only, and the handlers read their keys by hand. `required` is read by the
-  # CLIENT that builds the call. So a `required` naming a key `properties` does not describe is an
-  # obligation the agent cannot meet — the realistic drift is a half-done rename (the property
-  # moves, the list does not), which no compiler and no wall sees. Measured on the 32 tools the day
-  # this test was written: zero drift. This pins it.
+  # A half-renamed property can leave an impossible required key. Check root schemas
+  # directly; the socket now enforces them, while direct handler calls bypass validation.
   test "every deftool's `required` names only keys its `properties` describe" do
     tools = Fleet.MCP.PodTools.get_tools()
     assert map_size(tools) >= 12, "population guard: a deftool reshape emptied the tool set"

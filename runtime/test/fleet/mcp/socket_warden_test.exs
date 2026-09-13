@@ -1,12 +1,8 @@
 defmodule Fleet.MCP.SocketWardenTest do
   @moduledoc """
-  The RUNTIME net for orphaned MCP sockets.
-
-  `release_pod_socket/1` runs in the pod's `terminate/3` — which a BRUTAL kill (wedged tmux
-  teardown, kill -9) NEVER executes: acceptor + AF_UNIX listener + Registry entry + file would
-  outlive their pod until the BEAM reboots (the cold-boot sweep only covers boot). tmux and
-  pod_dirs have their warden; sockets need theirs too. This warden closes the asymmetry — by
-  reconciling, never by guessing.
+  Injected-source tests for orphan release and deaf-path incident emission.
+  Runtime reconciliation covers abrupt termination that can skip a pod's cleanup;
+  cold-boot sweeping alone cannot reclaim such sockets during the same BEAM run.
   """
   use ExUnit.Case, async: true
 
@@ -28,10 +24,8 @@ defmodule Fleet.MCP.SocketWardenTest do
       end
     )
 
-    # 1st tick: suspect. 2nd tick: orphan CONFIRMED → release. The grace exists because
-    # `ensure_pod_socket` runs during :projecting — a socket can legitimately exist for a few
-    # moments before the pod registers. Reclaiming on the 1st hit would kill the socket of a
-    # pod being born.
+    # Provisioning can precede pod registration, so an initial orphan observation needs grace.
+    # This assertion waits for release; the returning-pod case below checks transient survival.
     assert_receive {:released, "pod-ghost"}, 1_000
     refute_received {:released, "pod-live"}
   end
@@ -82,7 +76,6 @@ defmodule Fleet.MCP.SocketWardenTest do
         :counters.add(counter, 1, 1)
         n = :counters.get(counter, 1)
 
-        # Le tick s'ANNONCE : sans lui, rien ne prouve qu'il a eu lieu (cf. le commentaire du refute).
         send(parent, {:tick, n})
         if n == 1, do: [], else: ["pod-slow"]
       end,
@@ -92,24 +85,14 @@ defmodule Fleet.MCP.SocketWardenTest do
       end
     )
 
-    # ⚠ « LA GRACE PROTEGE LA COURSE » N'EST PROUVE QUE SI LES DEUX TICKS ONT EU LIEU. Ce temoin
-    # n'avait qu'une assertion, NEGATIVE : il est vert quand le warden ne tourne pas du tout, quand
-    # son intervalle est trop long pour la fenetre, ou si la grace passait de deux ticks a N. Un
-    # refute sans preuve que le sujet a ete exerce ne mesure rien (revue du 2026-09-06).
+    # Observe both ticks before asserting no release; otherwise an idle warden would pass.
     assert_receive {:tick, 1}, 1_000
     assert_receive {:tick, 2}, 1_000
 
     refute_receive {:released, "pod-slow"}, 300
   end
 
-  # ─── LA DIRECTION SYMETRIQUE : LE POD SOURD ───────────────────────────────────────────────────
-  #
-  # Ces temoins existent parce que la sonde qui NOMME les sourds (`MCP.Supervisor.deaf_pods/0`)
-  # n'avait AUCUN lecteur runtime. Elle etait ecrite, testee, et branchee sur rien : son seul
-  # consommateur etait `/api/readiness/deep`, parti avec la surface API. Un pod sourd — fichier de
-  # socket present, acceptor mort dans une cascade — continuait donc a ecrire dans le vide sans que
-  # rien ne le remarque. Ce warden reconcilie deja des sockets sur un tick ; il lui manquait l'autre
-  # sens de la soustraction.
+  # Exercise the runtime consumer of deaf_pods through its injected source.
 
   defp deaf_warden(opts) do
     parent = self()
@@ -143,13 +126,8 @@ defmodule Fleet.MCP.SocketWardenTest do
   test "vu sur UN SEUL tick → RIEN de leve : c'est la grace, et le test precedent ne la prouvait pas" do
     counter = :counters.new(1, [])
 
-    # ⚠ CE TEMOIN EXISTE PARCE QUE LE PRECEDENT NE MESURAIT PAS CE QUE SON TITRE ANNONÇAIT. Il
-    # s'appelait « au 2e tick seulement » et se contentait d'attendre une emission — un warden SANS
-    # grace l'aurait rendu vert aussi. Ici le pod n'est sourd qu'au premier tour : si quoi que ce
-    # soit part, c'est que la grace n'existe pas.
-    #
-    # Et l'etat transitoire est reel : `release_pod_socket/1` termine l'acceptor PUIS retire le
-    # fichier. Entre les deux, un demontage parfaitement propre ressemble a un pod sourd.
+    # A one-observation path models the gap between acceptor termination and file removal.
+    # This timed negative assertion does not explicitly acknowledge that its ticks ran.
     deaf_warden(
       deaf_fun: fn ->
         :counters.add(counter, 1, 1)
@@ -164,9 +142,7 @@ defmodule Fleet.MCP.SocketWardenTest do
     deaf_warden(deaf_fun: fn -> {:ok, ["pod-deaf"]} end)
 
     assert_receive {:emitted, :mcp, :"pod.deaf", _}, 1_000
-    # Le tick est a 10 ms : sans memoire, 300 ms rendraient des dizaines d'incidents sur le meme
-    # sujet, et le compteur qui decide « note » ou « issue sysadmin » compterait des tours de boucle.
-    # Un pod sourd le RESTE tant qu'un humain n'agit pas.
+    # Continued deafness should not increment incident recurrence on every poll.
     refute_receive {:emitted, :mcp, :"pod.deaf", _}, 300
   end
 
@@ -187,10 +163,7 @@ defmodule Fleet.MCP.SocketWardenTest do
   end
 
   test "cross-check en ERREUR → rien de leve, ET le warden survit" do
-    # ⚠ LE `refute` SEUL SERAIT CREUX : il passe aussi sur un warden qui ne detecte rien du tout,
-    # et meme sur un warden MORT. La propriete qui compte est la survie — le tick doit continuer,
-    # sinon la premiere erreur de scan eteint la surveillance pour de bon, en silence. C'est le
-    # meme piege que le temoin d'enumeration plus haut, et il se ferme de la meme facon.
+    # Also check survival: no emission alone would pass for a dead warden.
     warden = deaf_warden(deaf_fun: fn -> {:error, :enoent} end)
 
     refute_receive {:emitted, :mcp, :"pod.deaf", _}, 300
@@ -205,10 +178,7 @@ defmodule Fleet.MCP.SocketWardenTest do
   end
 
   test "la detection des sourds tourne MEME si l'enumeration des pods vivants echoue" do
-    # Les deux reconciliations sont independantes : l'une compare le disque au registre des
-    # acceptors, l'autre les sockets possedees aux pods vivants. Rangee dans la branche qui reussit,
-    # la detection des sourds aurait ete aveuglee par une panne qui ne la concerne pas — une panne
-    # en cachant une autre, en silence.
+    # A failed pod listing must not disable the independent path/acceptor comparison.
     deaf_warden(
       live_pods_fun: fn -> raise "spawner unavailable" end,
       deaf_fun: fn -> {:ok, ["pod-deaf"]} end
@@ -218,8 +188,7 @@ defmodule Fleet.MCP.SocketWardenTest do
   end
 
   test "le socket d'un sourd n'est JAMAIS reclame — le fichier appartient a un pod VIVANT" do
-    # `owned_fun` ne le contient pas : son acceptor est mort, la socket n'est plus a nous. La
-    # supprimer ne rendrait pas l'oreille au pod, ça retirerait la seule trace de son probleme.
+    # This fixture has no owned acceptor; reporting its unmatched path must not release it.
     deaf_warden(deaf_fun: fn -> {:ok, ["pod-deaf"]} end)
 
     assert_receive {:emitted, :mcp, :"pod.deaf", _}, 1_000

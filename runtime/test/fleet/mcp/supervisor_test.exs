@@ -1,10 +1,8 @@
 defmodule Fleet.MCP.SupervisorTest do
   @moduledoc """
-  Integration smoke of the `fleet_mcp` root supervisor: the umbrella booted
-  `Fleet.MCP.Supervisor` + its permanent children — `Fleet.MCP.Server` (boot
-  guard), the `Fleet.MCP.PodSocketRegistry` `Registry`, and the socket-acceptor
-  DynamicSupervisor `Fleet.MCP.PodSocketSupervisor` (started host-side
-  unconditionally, with no socket at all as long as no pod is provisioned).
+  Integration checks against the test application's MCP supervisor and children.
+  Socket fixtures are ordinary files, sufficient for the path scan; no connection
+  health is measured. Serialized because registry/configuration are shared.
   """
   use ExUnit.Case, async: false
 
@@ -18,13 +16,7 @@ defmodule Fleet.MCP.SupervisorTest do
   end
 
   describe "deaf_pods/0 — NAMES the pods writing into a socket nobody listens on" do
-    # Un pod atteint sa socket par un CHEMIN, pas par un processus. Quand son acceptor meurt (cascade
-    # `:one_for_one`), le fichier reste et le pod continue d'ecrire dedans : rien ne remonte, cote
-    # pod il n'y a rien a remonter. C'est le mode de panne qui ressemble exactement au silence.
-    #
-    # ⚠ ET C'EST POURQUOI ON REND DES NOMS. La sonde rendait un COMPTE, ce qui suffisait a colorer un
-    # statut mais pas a ouvrir un incident : « il y a 2 sourds » n'est pas actionnable, « pod-x et
-    # pod-y sont sourds » l'est. Le repertoire porte le pod_id — c'est `socket_path/1` qui le pose.
+    # Directory names identify incident subjects. These fixtures model paths without acceptors.
     setup do
       base = Fleet.TestEnv.tmp_path("deaf")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, base)
@@ -55,26 +47,11 @@ defmodule Fleet.MCP.SupervisorTest do
     test "énumération des acceptors impossible → {:error, _}, JAMAIS une liste vide", %{
       base: base
     } do
-      # ⚠ LE SYMÉTRIQUE DU CAS CI-DESSOUS, ET C'EST CELUI QUI MANQUAIT. `deaf_pods/0` soustrait les
-      # acceptors VIVANTS des fichiers PRÉSENTS. Le témoin d'à côté garde l'opérande « fichiers » :
-      # répondre `[]` sur un répertoire illisible BLANCHIRAIT des pods. L'autre opérande a la faute
-      # inverse et personne ne la gardait : répondre `[]` sur une énumération cassée déclare SOURDS
-      # tous les pods du disque, puisque `difference(on_disk, [])` vaut `on_disk`.
-      #
-      # Le warden ne tue pas un pod sourd, mais il ouvre un incident `pod.deaf` par pod après deux
-      # ticks, avec issue sysadmin à la récurrence : une panne du registre produisait une alarme de
-      # masse au moment précis où le signal réel comptait.
+      # An empty fallback for a failed registry read would label every on-disk path deaf.
       put_socket_file(base, "pod-x")
 
-      # ⚠ LA PREMIÈRE VERSION DE CE TÉMOIN NE FORÇAIT RIEN. Elle retirait la liaison de NOM du
-      # registre (`Process.unregister/1`) en croyant faire lever `Registry.select/2` — or celui-ci
-      # lit les tables ETS dérivées de l'ATOME, pas le processus enregistré : le select réussissait,
-      # et l'assertion échouait en le disant. Une mutation qui ne mute rien est un témoin vert sur
-      # une garantie absente.
-      #
-      # On arrête donc le registre pour de bon, par son superviseur — déterministe, réversible, et
-      # sans course : aucun pod n'est provisionné dans l'env de test, donc aucun acceptor ne
-      # référence ce registre.
+      # Stop the registry through its supervisor: unregistering its name alone leaves
+      # ETS tables available to Registry.select. Restore it in after.
       Supervisor.terminate_child(Fleet.MCP.Supervisor, Fleet.MCP.PodSocketRegistry)
 
       try do
@@ -94,9 +71,7 @@ defmodule Fleet.MCP.SupervisorTest do
     end
 
     test "scan impossible → {:error, _}, JAMAIS une liste vide" do
-      # ⚠ LA DISTINCTION QUI PORTE TOUT : repondre `[]` sur un repertoire qu'on n'a pas pu lire
-      # BLANCHIRAIT des pods que la sonde ne voit pas. « je n'ai rien trouve » et « je n'ai pas pu
-      # regarder » sont deux reponses, et une seule autorise a conclure.
+      # A non-path base forces a scan exception; this does not test filesystem permission failures.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, 123)
 
       ExUnit.CaptureLog.capture_log(fn ->

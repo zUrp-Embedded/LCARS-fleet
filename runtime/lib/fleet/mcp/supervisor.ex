@@ -1,9 +1,8 @@
 defmodule Fleet.MCP.Supervisor do
   @moduledoc """
-  Root supervisor for the system-side MCP server and pod-facing socket substrate.
-  Per-pod AF_UNIX channels bind identity outside the wire; a bounded Task pool
-  isolates connections, while idempotency collapses concurrent mutation retries.
-  Server containment makes pod-side boot fail closed.
+  Supervises the MCP boot guard, per-pod acceptors, connection/publish task pools
+  and mutation arbitration. The boot guard defaults to refusing undeclared boots;
+  it is configuration-based (see Server), not a process-origin check.
   """
 
   use Supervisor
@@ -55,22 +54,14 @@ defmodule Fleet.MCP.Supervisor do
   end
 
   @doc """
-  Returns readiness from the live acceptor supervisor plus its on-disk socket
-  cross-check. Scan failure is `:unknown`, never a hollow operational state.
+  Reports acceptor-supervisor liveness and a socket-path cross-check.
+  Caught enumeration failures yield unknown. Counts and registry/path reads are
+  separate observations, not an atomic snapshot or a connection-health probe.
   """
   @spec pod_facing_status() :: {:operational | :degraded | :unknown, map()}
   def pod_facing_status do
     if acceptor_supervisor_alive?() do
-      # Socket files without acceptors witness deaf pods after an acceptor cascade.
-      #
-      # LE STATUT ET L'INCIDENT LISENT LA MEME SOUSTRACTION. `deaf_pods/0` NOMME les sourds ; ce
-      # statut n'en garde que le compte. Recalculer ici `fichiers - enfants_du_superviseur` donnerait
-      # un second resultat, et un statut qui contredit l'incident qu'il accompagne est pire que pas
-      # de statut : c'est celui qu'on croit parce qu'il est plus facile a lire.
-      #
-      # ⚠ LES DEUX LECTURES PEUVENT ECHOUER, ET AUCUNE NE REND UN CHIFFRE PLAUSIBLE QUAND ELLE
-      # ECHOUE. C'est le contrat annonce par le `@doc` de cette fonction — « scan failure is
-      # `:unknown`, never a hollow operational state » — et il vaut pour les deux operandes.
+      # Reuse deaf_pods for the incident's subject set; do not recompute a second difference.
       with {:ok, sockets} <- active_sockets(),
            {:ok, deaf} <- deaf_pods() do
         deaf_verdict(sockets, deaf)
@@ -91,15 +82,10 @@ defmodule Fleet.MCP.Supervisor do
   end
 
   @doc """
-  Pod ids holding a socket file with NO acceptor behind it — deaf pods.
-
-  A pod reaches its socket through a path, not through a process: when its acceptor dies (a
-  `:one_for_one` cascade, a crash storm hitting `max_restarts`), the file stays and the pod keeps
-  writing into it. Nothing on the pod's side reports an error, so this is the failure mode that
-  looks exactly like silence.
-
-  `{:error, reason}` when the scan itself could not run — an unreadable directory is NOT an empty
-  one, and answering `[]` there would clear pods this function cannot see.
+  Returns directory names with a matching */sock path but no registered acceptor.
+  Does not verify file type, live pod membership or an existing connection's health.
+  Caught scan/registry failures return errors; Path.wildcard does not distinguish
+  every unreadable or missing directory from an empty match set.
   """
   @spec deaf_pods() :: {:ok, [String.t()]} | {:error, term()}
   def deaf_pods do
@@ -109,16 +95,7 @@ defmodule Fleet.MCP.Supervisor do
     end
   end
 
-  # ⚠ JAMAIS `[]` SUR ECHEC : l'invariant du `@doc` ci-dessus vaut pour CET operande aussi, en sens
-  # inverse. « An unreadable directory is NOT an empty one » ; et un superviseur injoignable n'est
-  # pas un superviseur SANS acceptor — repondre `[]` ici declarerait SOURDS tous les pods du disque
-  # (`difference(on_disk, [])` vaut `on_disk`).
-  #
-  # Le warden ne tue pas un pod sourd (il refuse de reparer, deliberement), mais il ouvre un
-  # incident `pod.deaf` par pod apres confirmation sur deux ticks, avec issue sysadmin a la
-  # recurrence. Une panne du superviseur d'acceptors produirait donc une alarme de masse, au moment
-  # precis ou le signal reel compte le plus. `SocketWarden.report_deaf_pods/1` traite `:error` par
-  # « on ne blanchit personne » : c'est ce chemin que cet operande emprunte.
+  # Treat a failed registry read as unknown; an empty fallback would mark every disk path deaf.
   defp live_acceptor_ids do
     {:ok, PodSocketSupervisor.live_pod_ids()}
   rescue
@@ -127,12 +104,7 @@ defmodule Fleet.MCP.Supervisor do
     :exit, reason -> acceptor_enumeration_failed({:exit, reason})
   end
 
-  # `count_children` sur un superviseur vivant ne devrait pas echouer — mais « ne devrait pas » est
-  # exactement ce que ce module refuse ailleurs : un `0` rendu par une lecture cassee est
-  # indiscernable d'un `0` mesure, et il ferait rendre `:operational` a un statut aveugle.
-  # LE COMPTE DES SOURDS VIENT DE `deaf_pods/0`, PAS D'UNE SECONDE SOUSTRACTION. Recalculer ici
-  # `fichiers - enfants` donnerait un resultat qui peut contredire l'incident qu'il accompagne, et
-  # un statut plus facile a lire qu'un incident est celui qu'on croit.
+  # Count failures must remain unknown, not an operational status with a fabricated zero.
   defp deaf_verdict(sockets, []),
     do: {:operational, %{acceptor_supervisor: true, sockets: sockets}}
 
@@ -168,9 +140,7 @@ defmodule Fleet.MCP.Supervisor do
     {:error, {:acceptor_enumeration, reason}}
   end
 
-  # Le repertoire porte le pod_id — c'est `PodSocketSupervisor.socket_path/1` qui le pose. On rend
-  # donc les NOMS et non un compte : un compte dit qu'il y a des sourds, il ne dit pas lesquels, et
-  # un incident sans sujet n'est pas actionnable.
+  # The parent basename identifies the incident subject; counts alone cannot name affected pods.
   defp socket_dirs_on_disk do
     base = PodSocketSupervisor.base_dir()
 
