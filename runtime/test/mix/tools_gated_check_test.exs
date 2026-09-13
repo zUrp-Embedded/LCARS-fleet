@@ -1,15 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
   @moduledoc """
-  The `mcp.tools_gated` wall, proven against CRAFTED trees — because it reports absences.
+  Synthetic-source tests for gate-pattern detection and declared/dispatch name
+  agreement. Discarded and unused pod identity bindings exercise separate cases.
 
-  A check that only ever runs on a clean repo cannot tell "nothing is wrong" from "nothing was
-  measured". Three of the day's thirteen defects were carried by the instrument, not the subject.
-  So every refusal this wall is supposed to make is exercised here on a fixture, and each is paired
-  with the inverse case where it must stay silent.
-
-  What it guards: `tools/list` is discovery, `tools/call` re-verifies nothing against it. A
-  `deftool` wired to an ungated body is callable by any pod, and a `handle_tool_call` with no
-  `deftool` is callable while absent from every catalogue.
+  Discovery does not authorize a call. These fixtures only test the scanner's
+  syntactic predicates; they do not run tools or prove that a matched gate protects
+  the execution path. Catch-all clauses have no literal name and are not inspected.
   """
   use ExUnit.Case, async: true
 
@@ -18,7 +14,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
   @deleg_rel "lib/fleet/mcp/pod_tools/delegation.ex"
 
-  # A delegation module with 10 gated functions (the instrument floor) plus whatever the caller adds.
   defp delegation(extra \\ "") do
     gated =
       Enum.map_join(1..10, "\n", fn i ->
@@ -37,7 +32,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
     """
   end
 
-  # 12 tools (the instrument floor), all routed to gated delegations, plus whatever the caller adds.
   defp pod_tools(extra_tools \\ "", extra_clauses \\ "") do
     tools = Enum.map_join(1..12, "\n", &"  deftool \"t#{&1}\" do\n    :schema\n  end\n")
 
@@ -164,16 +158,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
     end
   end
 
-  # JG-134 — RECEVOIR L'IDENTITE N'EST PAS S'EN SERVIR. `PodSocketAcceptor` construit
-  # `%{pod_id: pod_id}` pour CHAQUE `tools/call`, a l'identique et sans condition : la presence de
-  # cette cle dans une tete de clause ne dit donc rien de l'autorisation. Un predicat qui chercherait
-  # `\bpod_id:` accepterait `%{pod_id: _}` — une clause qui filtre l'identite, la jette, puis agit
-  # globalement serait rapportee comme gardee. Un mur de la largeur d'un underscore.
-  #
-  # Mesure avant de resserrer, parce qu'un mur ne peut naitre que vert : 23 des 25 outils sont
-  # ROLE-gardes (`require_architect`/`require_onboarder`), tous les mutateurs parmi eux, et les deux
-  # seuls admis par ce predicat sont `get_work_item` et `submit_result` — qui lient et qui
-  # utilisent. Le trou etait reel et personne ne se tenait dedans.
+  # Receiving pod_id alone must not satisfy the binding-and-use predicate.
   describe "pod-scoped — la clause doit LIER l'identite du canal et s'en servir" do
     defp scoped_tool(head_state, body) do
       check(

@@ -1,14 +1,10 @@
 defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
   @moduledoc """
-  The `mcp.tool_effects` wall, proven against CRAFTED trees — because it reports absences.
+  Tests equality of tool names and effect-map keys, including missing and orphan
+  entries. A real-tree case checks the current inventory.
 
-  What it guards (6-106): the acceptor protected FIVE tools out of ~17 against a double effect,
-  from a list of bare words living far from the definitions it claimed to cover. Moving that list
-  next to the `deftool`s makes a rename traverse it — which is the 2026-08-11 failure — but does
-  NOT make it exhaustive: nothing forces whoever adds a tool to classify it. This wall does.
-
-  Both directions matter, and the second is the first bug seen from the other side: an effect
-  declared for a tool that no longer exists is the residue of a rename.
+  The scanner does not validate effect values or execute a tool, so these tests
+  do not prove correct mutation classification or duplicate-call protection.
   """
   use ExUnit.Case, async: true
 
@@ -16,7 +12,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
 
-  # 12 tools (the instrument floor) + a matching `@tool_effects`, plus whatever the caller adds.
   defp pod_tools(extra_tools \\ "", extra_effects \\ "") do
     tools = Enum.map_join(1..12, "\n", &"  deftool \"t#{&1}\" do\n    :schema\n  end\n")
     effects = Enum.map_join(1..12, ",\n", &"    \"t#{&1}\" => :read")
@@ -51,8 +46,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
     end
 
     test "tools present but NO `@tool_effects` at all is BROKEN, not merely unclassified" do
-      # La distinction porte : « je n'ai rien trouve » et « j'ai trouve une classification vide »
-      # produisent la meme liste de manquants, et seule la premiere accuse l'instrument.
       tools = Enum.map_join(1..12, "\n", &"  deftool \"t#{&1}\" do\n    :schema\n  end\n")
       result = check("defmodule PodTools do\n#{tools}\nend\n")
 
@@ -106,17 +99,11 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
 
-      # ⚠ ANCRE. Un `result.note =~ "0 tools"` — une SOUS-CHAINE — rougirait au 30e outil,
-      # `"30 tools"` contenant `"0 tools"`, comme au 20e, au 40e et a tous les comptes ronds (mesure
-      # du 2026-08-20, en ajoutant `run_probe` : le mur a mordu son propre depot sans qu'aucune
-      # propriete soit violee). Une garde d'instrument qui tombe sur un COMPTE apprend a ignorer
-      # les gardes d'instrument.
+      # Bound zero as a word so counts such as 20 or 30 do not match it.
       refute result.note =~ ~r/\b0 tools\b/
     end
 
     test "un nom d'outil cite dans un COMMENTAIRE ne peut pas verdir ce mur" do
-      # Lu depuis l'AST, jamais d'un grep : sinon un commentaire qui mentionne l'outil manquant
-      # suffirait a le faire passer pour classe.
       result =
         check(
           pod_tools("""

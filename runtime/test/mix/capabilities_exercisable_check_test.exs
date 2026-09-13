@@ -1,15 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   @moduledoc """
-  The `roles.capabilities_exercisable` wall, proven against CRAFTED trees — because it reports an
-  absence, and an absence is what a blind instrument reports too.
+  Synthetic-source tests for capability-to-tool derivation and grant checks.
+  Invented capability names exercise the derivation without a hardcoded catalogue.
 
-  What it guards: a cap-profile may declare a capability whose gate opens tools the role does not
-  carry. The gate would admit the pod and no call ever reaches it, so the declaration authorizes
-  nothing and describes nothing — while reading, to every human and every agent, as a granted
-  permission. That is how `architect` carried `onboarder` through a transition that had ended.
-
-  Nothing here hardcodes a capability name: the check derives gate -> capability -> delegation ->
-  tool from the AST, so these fixtures invent their own capabilities and the wall still finds them.
+  The one-tool case gives each capability exactly one available tool; it does not
+  test a strict subset of several tools for the same capability. Fixtures are
+  inspected, not executed as authorization paths.
   """
   use ExUnit.Case, async: true
 
@@ -19,8 +15,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   @deleg_rel "lib/fleet/mcp/pod_tools/delegation.ex"
   @roles_rel "priv/catalogue/cap_profile/cap-profiles"
 
-  # Two gates, each asking about ONE capability — the shape the derivation reads. `gates` lets a
-  # test shrink that to one, which is the instrument floor rather than a real defect.
+  # One literal capability per gate; reducing the count exercises the population floor.
   defp delegation(gates) do
     defs =
       Enum.map_join(1..gates, "\n", fn i ->
@@ -64,7 +59,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
     """
   end
 
-  # `roles` is a list of {name, capabilities, allowedTools}.
   defp tree(roles, opts \\ []) do
     gates = Keyword.get(opts, :gates, 2)
     root = Fleet.TestEnv.tmp_path("caps_exercisable")
@@ -88,7 +82,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   end
 
   test "a role declaring a capability and carrying NONE of its tools is REFUSED, and named" do
-    # The exact defect: the gate would say yes, and no call can reach it.
     root = tree([{"worker", ["cap_1"], ["Read", "mcp__fleet__tool_2"]}])
 
     assert %{status: :fail, evidence: evidence} = Tools.check_capabilities_exercisable(root)
@@ -96,8 +89,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   end
 
   test "ONE tool of the capability is enough — the check is a floor, not an inventory" do
-    # A role legitimately carries a subset: the arch has the delegation head's read verbs and not
-    # its writes. Demanding the full set would turn every narrowing into a red.
     root =
       tree(
         [{"worker", ["cap_1", "cap_2"], ["mcp__fleet__tool_1", "mcp__fleet__tool_2"]}],
@@ -108,8 +99,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   end
 
   test "a capability NO gate reads is out of scope, not a violation" do
-    # `producer` is selected by a card, the judges are resolved by the runtime to spawn someone:
-    # nothing about them is exercised by reaching for a tool, so there is no list to compare.
+    # Capabilities without a derived tool gate remain outside the check.
     root = tree([{"worker", ["producer"], ["Read"]}])
 
     assert %{status: :pass, evidence: []} = Tools.check_capabilities_exercisable(root)
@@ -132,9 +122,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   end
 
   test "INSTRUMENT: a tree the derivation cannot read is a FAIL, never a silent pass" do
-    # One gate instead of two — modelling an AST shape change that empties the derivation. Without
-    # this floor the check would report "no inert capability" while having measured nothing, which
-    # is the failure mode it exists to prevent in the roles it inspects.
     root = tree([{"worker", ["cap_1"], ["Read"]}], gates: 1)
 
     assert %{status: :fail, evidence: [evidence]} = Tools.check_capabilities_exercisable(root)
