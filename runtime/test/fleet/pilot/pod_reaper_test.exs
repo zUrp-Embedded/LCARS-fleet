@@ -1,10 +1,7 @@
 defmodule Fleet.Pilot.PodReaperTest do
   @moduledoc """
-  A dead ticket takes its pods with it — and touches nothing else.
-
-  The registry is the source of truth (never an enumeration of roles): every live pod whose id
-  ENCODES this issue dies, whatever its role. A project-scoped pod encodes no instance, so it is
-  structurally out of reach — which is the point: the architect outlives the tickets.
+  Checks issue/PR/project identity separation, profile guards and enumeration shape.
+  Serialized because the injected :pilot_spawner is global application state.
   """
   use ExUnit.Case, async: false
 
@@ -26,9 +23,8 @@ defmodule Fleet.Pilot.PodReaperTest do
       "fleet-other-issue-42-engineer"
     ]
 
-    # The REAL seam (`Fleet.Spawner.list_pods/0`) enumerates the pods' `:info` MAPS. This fake
-    # used to return bare ids — and that single divergence hid, for the whole life of the module,
-    # the fact that the reaper matched nothing at all.
+    # Match the real list_pods contract: info maps, not bare IDs. A bare-ID fake
+    # would hide a reaper that silently fails to extract production IDs.
     def list_pods, do: Enum.map(@pods, &%{pod_id: &1, role: "engineer", phase: :running})
 
     def kill_pod(pod_id) do
@@ -72,11 +68,7 @@ defmodule Fleet.Pilot.PodReaperTest do
     refute_received {:killed, _}
   end
 
-  # ─── Le mur : une derive de forme du seam CRIE, elle ne filtre plus ───────────────────────────
-  # Le defaut du 2026-08-04 n'etait pas une mauvaise regle, c'etait une regle qui ne voyait rien :
-  # `parse_ref/2` garde sur `is_binary`, donc chaque map tombait dans son clause fourre-tout, la
-  # comprehension rendait `[]`, et les deux appelants sont best-effort — silence complet. Un module
-  # qui TUE des pods ne doit jamais deviner ce qu'il regarde.
+  # Reject an incompatible enumeration shape rather than silently reaping nothing.
   defmodule LegacyShapeSpawner do
     def list_pods, do: ["fleet-myproj-issue-42-engineer"]
     def kill_pod(_), do: :ok

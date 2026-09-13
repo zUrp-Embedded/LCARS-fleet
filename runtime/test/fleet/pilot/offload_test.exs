@@ -1,23 +1,13 @@
 defmodule Fleet.Pilot.OffloadTest do
   @moduledoc """
-  The offloaded task's DEATH is observed: the monitor is created in the
-  CALLING consumer, the `:DOWN` is routed to `handle_down/3`, and a mid-work death leaves the LOUD
-  trace this mechanism exists for — before it, the consumer's catch-all swallowed the only witness
-  of a lost completion.
+  Checks monitored task outcomes, context cleanup, returned admission failures and
+  inline fallback. Real exits are coordinated by a go-signal; the :noproc case
+  injects monitor context directly and does not reproduce the timing race.
   """
   use ExUnit.Case, async: true
 
-  # ⚠ LA FENETRE N'EST PAS UNE MESURE DE VITESSE, ET 1 s EN ETAIT DEVENUE UNE. Ces temoins attendent
-  # un message d'un process qui vit sous un `Task.Supervisor` : sous `async: true`, six coeurs et une
-  # douzaine de cas en parallele, la famine d'ordonnancement suffit a depasser la seconde sans que
-  # rien ne soit bloque. C'est le defaut que `Fleet.Test.Barrier` a mesure sur cette suite le
-  # 2026-08-21 — « roughly one full run in three, NEVER in isolation », et `--max-cases 4` l'eteint —
-  # et il y a repondu par le meme raisonnement : assez long pour qu'atteindre la borne signifie
-  # VRAIMENT bloque, et sous la deadline d'ExUnit (60 s), pour que le diagnostic reste celui de
-  # l'instrument qui sait ce qu'il attendait.
-  #
-  # Le cout est nul sur un temoin vert : `assert_receive` rend des que le message arrive. Une borne
-  # a 30 s ne se paie que sur un echec, ou elle remplace un faux negatif par un vrai.
+  # Allow scheduler contention without turning message waits into speed tests.
+  # The window remains below ExUnit's timeout so failures keep a local diagnostic.
   @window 30_000
 
   alias Fleet.Pilot.Offload
@@ -171,8 +161,7 @@ defmodule Fleet.Pilot.OffloadTest do
 
   describe "async_or_inline — saturation runs the work, never drops it" do
     test "offload REFUSED (max_children 0) → the work runs INLINE, {:ok, :inline}" do
-      # A saturated pool was the exact hole: the completion was dropped with a log — the ONE
-      # moment (burst) where losing work hurts most. The shared policy runs it inline instead.
+      # Pool saturation must run work inline rather than discard it.
       sup =
         start_supervised!(
           Supervisor.child_spec(
