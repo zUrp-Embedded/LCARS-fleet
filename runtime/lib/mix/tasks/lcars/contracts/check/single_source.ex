@@ -215,6 +215,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
+  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION. provision-lib compose `$PROV_ROOT/var/catalogues`
+  # depuis une racine ecrite UNE fois ; on accepte la forme que la lib PORTE si elle se resout a la
+  # valeur de l'autorite — sinon on exige le litteral, et le miroir rougit en nommant le fichier.
+  defp lib_installed_form(root, installed) do
+    with {:ok, lib_src} <- File.read(Path.expand("../deploy/lib/provision-lib.sh", root)),
+         {raw, ^installed} <- Support.shell_default_resolved(lib_src, "PROV_CATALOGUES_DIR") do
+      raw
+    else
+      _ -> installed
+    end
+  end
+
   @doc """
   The two catalogue roots are declared ONCE in `Fleet.Layout` and copied into the shell, and the
   copies are checked here.
@@ -282,22 +294,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       }
     else
       shipped = Path.join(platform, dirname)
-
-      # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION. Depuis le lot 0, provision-lib compose
-      # `$PROV_ROOT/var/catalogues` depuis une racine ecrite UNE fois ; on accepte la forme que la
-      # lib PORTE si elle se resout a la valeur de l'autorite — sinon on exige le litteral, et le
-      # miroir rougit en nommant le fichier (Support.shell_default_resolved/2).
-      lib_installed_form =
-        case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
-          {:ok, lib_src} ->
-            case Support.shell_default_resolved(lib_src, "PROV_CATALOGUES_DIR") do
-              {raw, ^installed} -> raw
-              _ -> installed
-            end
-
-          _ ->
-            installed
-        end
+      lib_installed_form = lib_installed_form(root, installed)
 
       mirrors = [
         {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
