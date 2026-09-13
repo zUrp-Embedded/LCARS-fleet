@@ -914,8 +914,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$container" && grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$container" \
     || { echo "MUR 17 rompu — LCARS_SSH_PORT / LCARS_IMAGE non exportees par deploy/container : compose ne les verra pas" >&2; rompu=1; }
   grep -qF -- "\${LCARS_SSH_PORT:-$port}:22" "$compose" || { echo "MUR 17 rompu — docker-compose.yml ne replie pas LCARS_SSH_PORT sur « $port »" >&2; rompu=1; }
-  # une release : un tag qui commence par un chiffre après le dernier /, jamais :main ni :latest ni un nom nu
-  grep -qE 'image: "\$\{LCARS_IMAGE:-[^} ]*/[^}/:]+:[0-9][^}/:]*\}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut une release taguee" >&2; rompu=1; }
+  # une release : un tag qui commence par un chiffre, ou par v puis un chiffre, après le dernier / — jamais :main ni :latest ni un nom nu
+  grep -qE 'image: "\$\{LCARS_IMAGE:-[^} ]*/[^}/:]+:v?[0-9][^}/:]*\}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut une release taguee" >&2; rompu=1; }
   grep -qE 'image: "\$\{LCARS_IMAGE:-[^}]*:(main|latest)\}"' "$compose" && { echo "MUR 17 rompu — l'image par defaut vise une tete de branche" >&2; rompu=1; }
   grep -qE "^#   LCARS_SSH_PORT .*défaut $port\)" "$container" || { echo "MUR 17 rompu — l'aide de container n'annonce pas « $port » pour LCARS_SSH_PORT" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — le compose la lit et replie sur la meme valeur." >&2; return 1; }

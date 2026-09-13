@@ -224,6 +224,8 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
 
 @test "une source en retard sur ce qui est posé est un échec au check, et l'apply l'annonce avant d'écrire" {
   need_git_checkout
+  git -C "$BATS_TEST_DIRNAME" rev-parse --verify -q HEAD~1 >/dev/null \
+    || skip "HEAD n'a pas de parent (dépôt à un seul commit) — ce témoin pose un ancêtre réel du dépôt"
   mod apply
   local head prev
   head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
