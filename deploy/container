@@ -10,10 +10,10 @@
 #   pull             tire l'image LCARS_IMAGE depuis son registre — « up » ne tire jamais
 #   build            bâtit l'image sur ce poste (deploy/pack.sh : gate, kit, image)
 #   status           l'état de l'instance vu de l'hôte — sortie 0 sain · 1 dégradé · 2 panne
-#   shell            un shell dans le conteneur, en tant que LCARS_HUMAN (défaut lcars)
+#   shell            un shell dans le conteneur, en tant que LCARS_HUMAN (défaut : le siège de l'instance)
 #   logs             les logs du conteneur (suivi)
 #   down             arrête et retire le conteneur, les volumes restent
-#   reset            détruit conteneur, image locale et volumes du projet ; la forge n'est pas concernée
+#   reset            détruit le conteneur et les volumes du projet ; la forge n'est pas concernée
 #   config           pose côté hôte (~/.lcars/container/<projet>.env, <projet>.secrets/) l'env et
 #                    les secrets de l'instance ; sans variable, montre ce qui est posé
 #   forge-check      le contrat qu'une forge fournie doit tenir, et les gestes pour l'y amener
@@ -25,13 +25,13 @@
 #   -p <projet>          le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
 #                        qui créent ou détruisent refusent un projet que ce compose n'a pas créé
 #   --forge-project <n>  la base des projets : <n>-fleet, et avec --bench <n>-forge, <n>-runner
-#   --port-deck N        port du deck publié sur 127.0.0.1 (défaut 20999)
-#   --port-ssh N         port ssh publié sur 127.0.0.1 (défaut 2222)
+#   --port-deck N        port du deck publié sur 127.0.0.1, sur toutes les interfaces avec --bench (défaut 20999)
+#   --port-ssh N         port ssh publié sur 127.0.0.1, sur toutes les interfaces avec --bench (défaut 2222)
 #   --port-forge N       port de la forge jetable, avec --bench seulement
 #
 # ENV (optionnels) :
 #   LCARS_IMAGE                image de l'instance (défaut : lcars-fleet:local si présente, sinon celle du compose)
-#   LCARS_HUMAN                login cible de shell (défaut lcars) — pas le sysadmin, qui est LCARS_ADMIRAL
+#   LCARS_HUMAN                compte de shell et de source-push (défaut : le siège de l'instance)
 #   LCARS_UID                  uid du sysadmin (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
 #   LCARS_SSH_PORT             bind du port ssh (défaut 127.0.0.1:2222)
@@ -44,7 +44,6 @@
 #   FORGE_ADMIN_TOKEN          jeton master site-admin — lu par « config » (qui le pose) et par
 #                              « forge-apply » ; transmis par stdin, jamais par argv
 #   FORGE_SEED_PASSWORD        mot de passe posé sur les comptes à leur création — « config » seul
-#   LCARS_HUMAN_EMAIL          email du compte forge de l'humain (défaut <humain>@lcars.local)
 #
 # EXIT : 0 succès · 1 erreur ou commande inconnue · status : 0 sain · 1 dégradé · 2 panne
 
@@ -54,7 +53,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/deploy/docker/docker-compose.yml"
 SECRETS_FILE="$SCRIPT_DIR/deploy/docker/docker-compose.secrets.yml"
 BENCH_UP="$SCRIPT_DIR/deploy/docker/bench/bench-up.sh"
-PROJECT="${LCARS_PROJECT:-${LCARS_BASE:-lcars}-fleet}"
+PROJECT="${LCARS_PROJECT:-lcars-fleet}"
 WITH_BENCH=0
 FORGE_PORT=""
 declare -a PORTS=()   # ce que --bench transmet au banc
@@ -222,10 +221,17 @@ cmd_up() {
   fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     [[ -x "$BENCH_UP" ]] || fail "banc introuvable : $BENCH_UP" "l'arbre est incomplet"
+    [[ "$PROJECT" == *-fleet ]] \
+      || fail "un banc nomme ses projets <base>-fleet, <base>-forge, <base>-runner : « $PROJECT » n'en est pas un" \
+              "deploy/container --forge-project <base> --bench up"
     export DOCKER_BIN="$DOCKER"
     exec "$BENCH_UP" --forge-project "${PROJECT%-fleet}" --image "$img" ${PORTS[@]+"${PORTS[@]}"} "$@"
   fi
   assert_project_ours up
+  if [[ "$(project_config_files)" == *docker-compose.bench.yml* ]]; then
+    fail "le projet « $PROJECT » est un banc : le recréer sans son override le sortirait du réseau de sa forge" \
+         "deploy/container --forge-project ${PROJECT%-fleet} --bench up"
+  fi
   assert_home_volume_kept
   store_ensure_volumes "$DOCKER" || { echo "container: magasin non posé — up annulé" >&2; exit 1; }
   if [[ -z "${LCARS_DECK_ORIGINS:-}" ]]; then
@@ -234,54 +240,73 @@ cmd_up() {
     export LCARS_DECK_ORIGINS="http://$_h:$_p,http://localhost:$_p"
   fi
   compose_pose up -d --no-build "$@"
+  conf_ecrire
+  local rc=0 s
+  await_boot_verdict || rc=$?
+  s="$(siege)"
   echo ""
   echo "LCARS fleet up (projet $PROJECT, image $img). Accès :"
-  echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet start"
-  echo "  deploy/container status                                   # l'état de l'instance, vu de l'hôte"
-  await_provision_verdict
+  echo "  ssh ${s:-<siège>}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}"
+  echo "  deploy/container -p $PROJECT status      # l'état de l'instance, vu de l'hôte"
+  return "$rc"
 }
 
-await_provision_verdict() {
-  local deadline=$((SECONDS + ${LCARS_UP_VERDICT_TIMEOUT:-900})) rc=""
+await_boot_verdict() {
+  local deadline=$((SECONDS + ${LCARS_UP_VERDICT_TIMEOUT:-900})) rc="" etat=""
   echo ""
   while [[ "$SECONDS" -lt "$deadline" ]]; do
-    rc="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
+    rc="$(compose exec -T lcars cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
     [[ "$rc" =~ ^[0-9]+$ ]] && break
     rc=""
-    if [[ "$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" == "awaiting-config" ]]; then
-      echo ""
-      echo "container up: conteneur en attente de configuration — le siège ne peut pas se dériver sans l'autorité de la forge."
-      echo "              FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… deploy/container -p $PROJECT config, puis « docker restart »."
-      return 0
-    fi
+    etat="$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" || etat=""
+    case "$etat" in
+      awaiting-config)
+        echo "container up: conteneur en attente de configuration — le siège ne se dérive pas sans l'autorité de la forge."
+        echo "              FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… deploy/container -p $PROJECT config"
+        echo "              puis : deploy/container -p $PROJECT up --force-recreate"
+        return 1 ;;
+      init-failed)
+        echo "container up: init de l'instance en échec — aucun service n'est démarré." >&2
+        echo "              « deploy/container -p $PROJECT logs » nomme ce qui manque." >&2
+        return 1 ;;
+    esac
     sleep 5
   done
 
   case "$rc" in
     "")
-      echo "container up: verdict de provisionnement non lu après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
-      echo "              Le conteneur tourne ; son état n'est pas mesuré. « deploy/container status »." ;;
+      echo "container up: verdict du démarrage non lu après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
+      echo "              Le conteneur tourne ; son état n'est pas mesuré. « deploy/container -p $PROJECT status »." ;;
     0)
-      echo "container up: provisionnement convergé." ;;
+      echo "container up: gestes de forge convergés." ;;
     2)
-      echo "container up: provisionnement appliqué avec drift résiduel — un geste manque."
-      echo "              « deploy/container status » le dit ; « deploy/container logs » nomme lequel." ;;
+      echo "container up: gestes de forge appliqués avec drift résiduel — un geste manque."
+      echo "              « deploy/container -p $PROJECT status » le dit ; « deploy/container -p $PROJECT logs » nomme lequel." ;;
     *)
-      echo "container up: provisionnement en échec (rc=$rc) — le conteneur tourne et ne produira rien."
-      echo "              « deploy/container logs » nomme ce qui manque." >&2
+      echo "container up: un geste de forge en échec (rc=$rc) — le conteneur tourne et ne produira rien."
+      echo "              « deploy/container -p $PROJECT logs » nomme ce qui manque." >&2
       return 1 ;;
   esac
   local hrc
   hrc="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hrc=""
   case "$hrc" in
     0)  echo "container up: humain(s) de fleet présent(s) — « fleet start » a quelqu'un." ;;
+    2)  echo "container up: population d'humains non mesurée — « deploy/container -p $PROJECT logs » dit ce qui l'empêche." ;;
     "") echo "container up: population d'humains non mesurée (pas de /run/lcars-humans.rc)." ;;
     *)  echo "container up: aucun humain de fleet — le conteneur tourne, et personne ne peut lancer de fleet."
         echo "              Un humain inscrit sur la forge, dans la team « humans », est matérialisé par le convergeur au tour suivant (30 s)." ;;
   esac
 }
 
-cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
+siege() { compose exec -T lcars cat /run/lcars-seat.login 2>/dev/null | tr -d '[:space:]' || true; }
+humain_cible() { # le compte d'une console : LCARS_HUMAN s'il est donné, sinon le siège de l'instance
+  [[ -z "${LCARS_HUMAN:-}" ]] || { printf '%s\n' "$LCARS_HUMAN"; return 0; }
+  local s; s="$(siege)"
+  [[ -n "$s" ]] || fail "le siège de l'instance n'est pas lu (/run/lcars-seat.login) — LCARS_HUMAN=<login> le désigne"
+  printf '%s\n' "$s"
+}
+
+cmd_shell() { compose exec -it -u "$(humain_cible)" lcars bash; }
 
 # ─── La forge fournie : config, gestes ──────────────────────────────────────────────────────────
 gesture() { # gesture <geste> — le secret, s'il y en a un, arrive sur stdin
@@ -318,28 +343,7 @@ cmd_config() {
     return 0
   fi
   install -d -m 0700 "$CONTAINER_CONF_DIR" "$CONF_SECRETS"
-  if [[ "${#CONF_GIVEN[@]}" -gt 0 ]]; then
-    declare -A cur=()
-    if [[ -r "$CONF_ENV" ]]; then
-      while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] && cur[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
-      done < "$CONF_ENV"
-    fi
-    for k in "${!CONF_GIVEN[@]}"; do
-      v="${CONF_GIVEN[$k]}"
-      [[ "$v" == *$'\n'* ]] && fail "config: $k porte un retour à la ligne — une valeur multi-ligne ne tient pas dans $CONF_ENV" \
-        "la donner dans l'env de « deploy/container up » à la place"
-      cur[$k]="$v"
-    done
-    local tmp="$CONF_ENV.tmp"
-    ( umask 077
-      { echo "# LCARS container « $PROJECT » — posé par « deploy/container config », lu par chaque « deploy/container … »."
-        echo "# L'env explicite de l'appelant prime sur ce fichier."
-        for k in "${CONF_KEYS[@]}"; do if [[ -n "${cur[$k]+x}" ]]; then printf '%s=%s\n' "$k" "${cur[$k]}"; fi; done
-      } > "$tmp" ) || fail "config: écriture impossible dans $CONTAINER_CONF_DIR"
-    mv -f "$tmp" "$CONF_ENV"
-    for k in "${!CONF_GIVEN[@]}"; do echo "container config: $k posé ($CONF_ENV)"; done
-  fi
+  conf_ecrire --dire
   local f
   for f in forge-master.token:"$token" forge-seed.pass:"$seed"; do
     v="${f#*:}"; [[ -n "$v" ]] || continue
@@ -347,18 +351,44 @@ cmd_config() {
     echo "container config: ${f%%:*} posé ($CONF_SECRETS, lisible par cet utilisateur seul) — le conteneur l'importe et le vérifie au boot"
   done
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
-    [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
-    [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
-    [[ "${#CONF_GIVEN[@]}" -gt 0 ]] && echo "container config: le conteneur tourne — l'env ne le touche qu'au prochain « deploy/container up » (conteneur recréé)"
+    if [[ -n "$token" ]]; then printf '%s' "$token" | gesture config-token || exit 1; fi
+    if [[ -n "$seed" ]]; then printf '%s' "$seed" | gesture config-seed || exit 1; fi
+    if [[ "${#CONF_GIVEN[@]}" -gt 0 \
+          || "$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" == awaiting-config ]]; then
+      echo "container config: le conteneur ne relit sa configuration qu'à sa recréation : deploy/container -p $PROJECT up --force-recreate"
+    fi
   else
-    echo "container config: posé. Puis :  deploy/container up"
+    echo "container config: posé. Puis :  deploy/container -p $PROJECT up"
   fi
+}
+
+conf_ecrire() { # conf_ecrire [--dire] — ce que l'appelant a donné dans l'env rejoint le fichier de conf du projet
+  local k v line dire="${1:-}"
+  [[ "${#CONF_GIVEN[@]}" -gt 0 ]] || return 0
+  declare -A cur=()
+  if [[ -r "$CONF_ENV" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] && cur[${BASH_REMATCH[1]}]="${BASH_REMATCH[2]}"
+    done < "$CONF_ENV"
+  fi
+  for k in "${!CONF_GIVEN[@]}"; do
+    v="${CONF_GIVEN[$k]}"
+    [[ "$v" == *$'\n'* ]] && fail "config: $k porte un retour à la ligne — une valeur multi-ligne ne tient pas dans $CONF_ENV" \
+      "la donner dans l'env de « deploy/container up » à la place"
+    cur[$k]="$v"
+  done
+  install -d -m 0700 "$CONTAINER_CONF_DIR"
+  ( umask 077
+    { echo "# LCARS container « $PROJECT » — posé par « deploy/container config » ou « up », lu par chaque « deploy/container … »."
+      echo "# L'env explicite de l'appelant prime sur ce fichier."
+      for k in "${CONF_KEYS[@]}"; do if [[ -n "${cur[$k]+x}" ]]; then printf '%s=%s\n' "$k" "${cur[$k]}"; fi; done
+    } > "$CONF_ENV.tmp" ) || fail "config: écriture impossible dans $CONTAINER_CONF_DIR"
+  mv -f "$CONF_ENV.tmp" "$CONF_ENV"
+  [[ -z "$dire" ]] || for k in "${!CONF_GIVEN[@]}"; do echo "container config: $k posé ($CONF_ENV)"; done
 }
 
 cmd_forge_apply() {
   printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
-    -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
-    -e LCARS_HUMAN_EMAIL="${LCARS_HUMAN_EMAIL:-}" \
     lcars /opt/lcars/forge-gestures.sh apply \
     || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
   echo ""
@@ -379,25 +409,28 @@ cmd_status() {
   health="$("$DOCKER" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sans healthcheck{{end}}' "$id" 2>/dev/null || echo inconnu)"
   rev="$("$DOCKER" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id" 2>/dev/null || true)"
   boot="$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" || boot=""
-  prov="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || prov=""
+  prov="$(compose exec -T lcars cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]')" || prov=""
   hum="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hum=""
   tampon="$(compose exec -T lcars cat /opt/lcars/.verified 2>/dev/null | tr -d '[:space:]')" || tampon=""
+  local p="deploy/container -p $PROJECT" relancer="deploy/container -p $PROJECT up --force-recreate"
+  [[ "$(project_config_files)" != *docker-compose.bench.yml* ]] || relancer="deploy/container --forge-project ${PROJECT%-fleet} --bench up"
   echo "container status ($PROJECT)"
   echo "  conteneur   : $state · santé : $health"
   case "$boot" in
-    awaiting-config) echo "  boot        : en attente de configuration — « deploy/container config », puis « deploy/container up »" ;;
-    init-failed)     echo "  boot        : init en échec — « deploy/container logs »" ;;
+    awaiting-config) echo "  boot        : en attente de configuration — « $p config », puis « $relancer »" ;;
+    init-failed)     echo "  boot        : init en échec — « $p logs »" ;;
     "")              if [[ -n "$prov" ]]; then echo "  boot        : services démarrés"; else echo "  boot        : en cours (aucun verdict encore)"; fi ;;
     *)               echo "  boot        : $boot" ;;
   esac
   case "$prov" in
     0) echo "  forge       : gestes convergés (jetons, catalogues, branche ops, client OAuth2)" ;;
-    2) echo "  forge       : drift résiduel — un geste manque ; « deploy/container forge-check »" ;;
+    2) echo "  forge       : drift résiduel — un geste manque ; « $p logs » nomme lequel" ;;
     "") : ;;
-    *) echo "  forge       : échec d'un geste (rc=$prov) — « deploy/container logs »" ;;
+    *) echo "  forge       : échec d'un geste (rc=$prov) — « $p logs »" ;;
   esac
   case "$hum" in
     0) echo "  humains     : présents — « fleet start » a quelqu'un" ;;
+    2) echo "  humains     : population non mesurée — « $p logs » dit ce qui l'empêche" ;;
     "") : ;;
     *) echo "  humains     : aucun humain de fleet — un humain s'inscrit sur la forge, team « humans »" ;;
   esac
@@ -405,7 +438,7 @@ cmd_status() {
   deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${_bind/0.0.0.0/127.0.0.1}/auth/login" 2>/dev/null || echo 000)"
   case "$deck_http" in
     2*|3*) echo "  deck        : répond sur http://$_bind (HTTP $deck_http)" ;;
-    409)   echo "  deck        : http://$_bind rend 409 — entrée non déclarée au client OAuth2 (LCARS_DECK_ORIGINS) ; relancer « deploy/container up »" ;;
+    409)   echo "  deck        : http://$_bind rend 409 — entrée non déclarée au client OAuth2 (LCARS_DECK_ORIGINS) ; « $relancer »" ;;
     000)   echo "  deck        : rien ne répond sur http://$_bind" ;;
     *)     echo "  deck        : http://$_bind rend HTTP $deck_http" ;;
   esac
@@ -441,7 +474,7 @@ cmd_down() {
 cmd_reset() {
   assert_project_ours reset
   local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//')"
-  echo "container: reset du projet « $PROJECT » — conteneur + image + volume(s) ${_vols:-<aucun>}."
+  echo "container: reset du projet « $PROJECT » — conteneur et volume(s) ${_vols:-<aucun>}."
   echo "           La forge n'est pas concernée : elle vit dans son propre déploiement, le travail poussé y survit."
   echo ""
   store_spared_line | sed 's/^/           /'
@@ -462,7 +495,7 @@ cmd_source_push() {
   [[ -d "$src/.git" ]] || { echo "container: $src n'est pas un clone git (pas de .git)" >&2; exit 1; }
   ctr="$(compose ps -q lcars)"
   [[ -n "$ctr" ]] || { echo "container: conteneur lcars absent — « deploy/container up » d'abord" >&2; exit 1; }
-  local human="${LCARS_HUMAN:-lcars}"
+  local human; human="$(humain_cible)"
   echo "container: copie de $src → /home/projects/LCARS (historique git compris)…"
   compose exec -T lcars rm -rf /home/projects/.LCARS.incoming
   "$DOCKER" cp "$src/." "$ctr:/home/projects/.LCARS.incoming" || { echo "container: copie échouée" >&2; exit 1; }

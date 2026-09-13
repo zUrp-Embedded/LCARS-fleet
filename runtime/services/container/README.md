@@ -47,5 +47,5 @@ joués par `boot.sh` après lui ; les humains (le convergeur) ; les services (`b
 pourtant une copie, sous `/opt/lcars/deploy` : `62-runtime-helpers` l'embarque sur tout substrat, le
 stage `verify` du Dockerfile y joue le doctor au build, et `final`, qui part de `runtime`, la garde
 avec le tampon `/opt/lcars/.verified`. Les fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
-(`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
+(`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-forge.rc`,
 `/run/lcars-humans.rc`, `/opt/lcars/.verified` — `deploy/container status` les lit de l'hôte.

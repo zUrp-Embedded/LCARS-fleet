@@ -62,9 +62,9 @@ CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 # ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot
-# precedent, et « container status » lirait un `awaiting-config` ou un `provision.rc` d'hier comme
+# precedent, et « container status » lirait un `awaiting-config` ou un `forge.rc` d'hier comme
 # l'etat de maintenant (relecture hostile 2026-09-04). Chaque boot part d'un /run vide de ses verdicts.
-rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
+rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
 say() { echo "[container-boot] $*"; }
 [[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
   echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
@@ -90,22 +90,25 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 # Les quatre gestes du produit (`forge.d/`) : jetons de role, cache des catalogues, branche ops,
 # client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
-RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
+RC_FILE="${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}"
+# le verdict publié : le pire rencontré — un échec l'emporte sur un drift, un drift (init compris) sur 0
 prov_rc=0
+[[ "$init_rc" -ne 2 ]] || prov_rc=2
 # Les jetons de role d'abord (le geste `tokens` lit le siege pour sonder son onboardabilite), puis
-# les trois autres. Plus AUCUN module de l'installeur au boot : `deploy/` n'y est plus pour rien.
+# les trois autres.
 for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
-    bash "/opt/lcars/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+    bash "${LCARS_FORGE_D:-/opt/lcars/services/forge.d}/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
-    2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant" ;;
+    2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant"
+       [[ "$prov_rc" -ne 0 ]] || prov_rc=2 ;;
     *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme" ; prov_rc=$g_rc ;;
   esac
 done
 
-# La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
+# La publication descend donc APRÈS les deux mesures, et `lcars-forge.rc` s'écrit EN DERNIER :
 # sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
 # n'a plus à connaître l'ordre — c'est le producteur qui le tient.
 #
@@ -199,28 +202,21 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
   # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
   # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et le conteneur l'annoncait.
-  # LE FAIT SE LIT SUR LA MACHINE, PAR LE PREDICAT DU PROTOCOLE : un humain de fleet est un membre
-  # du groupe `fleet` que `is_fleet_human` reconnait — uid au-dessus du plancher de la machine
-  # (`UID_MIN` de login.defs, la meme lecture que le convergeur et `console-humans.sh`), et pas le
-  # siege. Le protocole est source dans un SOUS-SHELL : il pose des defauts et un vocabulaire faits
-  # pour un module, pas pour le PID 1 — rien n'en fuit ici. Sans protocole, la population n'est
-  # PAS mesuree, et ca se dit : un 1 invente serait aussi faux que le 0 d'avant.
+  # Un humain de fleet est un membre du groupe `fleet` que `is_fleet_human` reconnait (uid au-dessus
+  # de UID_MIN, pas le siege). Le protocole est source dans un sous-shell : ses defauts sont faits
+  # pour un module, pas pour le PID 1.
   HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
-  # TROIS REPONSES, PAS DEUX : 0 quelqu'un, 1 personne, 2 la population n'est PAS mesuree — la
-  # frontiere systeme/humain n'est pas etablie (login.defs illisible ; le protocole dit le remede,
-  # une fois, sur cette sortie). Un 1 la-dessus enverrait l'operateur enroler quelqu'un sur la
-  # forge alors que c'est le fichier qu'il faut reparer ; un 0 dirait « present » sans mesure —
-  # c'est ce que 1000 devine faisait (fail-closed partout, ⚖ user 2026-09-05).
+  # Trois reponses : 0 quelqu'un, 1 personne, 2 population non mesuree (protocole absent, bornes
+  # d'uid illisibles). Un 1 sur une mesure impossible enverrait inscrire quelqu'un sur la forge
+  # alors que c'est la machine qu'il faut reparer.
   humans_rc=1 pop_rc=1
   if [[ ! -r "$HUMAN_PROTOCOL" ]]; then
+    pop_rc=2
     say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
   else
     pop_rc=0
-    # L'HOTE, PAS UN MODULE (lot 15) : ce bloc n'a pas UN sujet, il en nomme un a chaque appel
-    # (`is_fleet_human "$_m"`). Il se declare comme le convergeur — `LCARS_HUMAN_PROTOCOL_HOST=1`,
-    # jamais exporte, retire des le protocole charge — au lieu d'emprunter le login du siege comme
-    # sujet : le siege n'est pas ce que cette mesure regarde, et un sujet d'emprunt ferait de toute
-    # lecture « de la personne » (`human_home`) celle d'admiral.
+    # hote du protocole, comme le convergeur : ce bloc nomme un sujet a chaque appel au lieu
+    # d'emprunter le siege, sinon toute lecture « de la personne » serait celle d'admiral
     ( export LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
       LCARS_HUMAN_PROTOCOL_HOST=1
       # shellcheck source=../lib/human-protocol.sh
@@ -232,8 +228,8 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
         is_fleet_human "$_m" && exit 0
       done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
       exit 1 ) || pop_rc=$?
-    if [[ "$pop_rc" -eq 0 ]]; then humans_rc=0; fi
   fi
+  case "$pop_rc" in 0) humans_rc=0 ;; 2) humans_rc=2 ;; esac
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   elif [[ "$pop_rc" -eq 2 ]]; then
@@ -250,8 +246,8 @@ else
 fi
 
 # LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
-# tourné ; sans elle, seul `provision.rc` est publié et `container up` dit « NON MESURÉE » — ce qui est
-# exactement vrai. La présence de `provision.rc` garantit que l'autre est là quand il doit l'être.
+# tourné ; sans elle, seul `forge.rc` est publié et `container up` dit « NON MESURÉE » — ce qui est
+# exactement vrai. La présence de `forge.rc` garantit que l'autre est là quand il doit l'être.
 publier_verdicts
 
 # ─── 3bis. La console web (ttyd sous l'humain, sur SA socket AF_UNIX) ───────────────────────────

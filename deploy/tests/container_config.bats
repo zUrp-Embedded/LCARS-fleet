@@ -28,9 +28,11 @@ if [[ "\$1" == inspect ]]; then
   esac; exit 0
 fi
 if [[ "\$*" == *"cat /run/lcars-boot.state"* ]];   then [[ -n "\${STUB_BOOT:-}" ]]   || exit 1; echo "\$STUB_BOOT"; exit 0; fi
-if [[ "\$*" == *"cat /run/lcars-provision.rc"* ]]; then [[ -n "\${STUB_PROV:-}" ]]   || exit 1; echo "\$STUB_PROV"; exit 0; fi
+if [[ "\$*" == *"cat /run/lcars-forge.rc"* ]]; then [[ -n "\${STUB_PROV:-}" ]]   || exit 1; echo "\$STUB_PROV"; exit 0; fi
 if [[ "\$*" == *"cat /run/lcars-humans.rc"* ]];    then [[ -n "\${STUB_HUM:-}" ]]    || exit 1; echo "\$STUB_HUM"; exit 0; fi
 if [[ "\$*" == *"cat /opt/lcars/.verified"* ]];    then [[ -n "\${STUB_TAMPON:-}" ]] || exit 1; echo "\$STUB_TAMPON"; exit 0; fi
+if [[ "\$*" == *"cat /run/lcars-seat.login"* ]];   then [[ -n "\${STUB_SEAT:-}" ]]   || exit 1; echo "\$STUB_SEAT"; exit 0; fi
+if [[ "\$*" == *" exec -it -u "* ]]; then echo "SHELL \$*"; exit 0; fi
 all="\$*"   # \${*##…} s'appliquerait a CHAQUE parametre, pas a la ligne
 if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR/pushed.\${all##* config-}"; exit 0; fi
 exit 0
@@ -41,7 +43,7 @@ EOS
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_HUM STUB_TAMPON STUB_DECK_HTTP LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND
+  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -92,7 +94,7 @@ EOS
   [ -e "$BATS_TEST_TMPDIR/pushed.token" ] || { echo "$output"; cat "$CALLS"; false; }
   [ "$(cat "$BATS_TEST_TMPDIR/pushed.token")" = tok-2 ]
   [ "$(cat "$SECRETS/forge-master.token")" = tok-2 ]
-  [[ "$output" == *"prochain"*"up"* ]]
+  [[ "$output" == *"up --force-recreate"* ]]
 }
 
 @test "config : une valeur multi-ligne est REFUSEE, elle ne tient pas dans un fichier d'env" {
@@ -151,7 +153,7 @@ EOS
   export STUB_IDS=c0ffee STUB_BOOT=awaiting-config STUB_HEALTH=starting
   run bash "$SRC" status
   [ "$status" -eq 1 ]
-  [[ "$output" == *"en attente de configuration"*"container config"* ]]
+  [[ "$output" == *"en attente de configuration"*"config"*"up --force-recreate"* ]]
 }
 
 @test "status : drift de forge ou aucun humain = degrade (1) ; init en echec ou conteneur mort = panne (2)" {
@@ -163,6 +165,54 @@ EOS
   run bash "$SRC" status; [ "$status" -eq 2 ]; [[ "$output" == *"init en échec"* ]]
   unset STUB_BOOT; export STUB_STATE=exited
   run bash "$SRC" status; [ "$status" -eq 2 ]
+}
+
+@test "status : population d'humains non mesurée — dite comme telle, jamais « aucun humain »" {
+  export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=2
+  run bash "$SRC" status
+  [[ "$output" == *"humains     : population non mesurée"* ]]
+  [[ "$output" != *"aucun humain"* ]]
+}
+
+@test "up sur un conteneur en attente de configuration : rc 1, le geste de config et la recréation sont dits" {
+  export STUB_BOOT=awaiting-config LCARS_UP_VERDICT_TIMEOUT=30
+  run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"en attente de configuration"*"config"*"up --force-recreate"* ]]
+}
+
+@test "up sur un init en échec : rc 1 aussitôt, sans attendre le délai du verdict" {
+  export STUB_BOOT=init-failed LCARS_UP_VERDICT_TIMEOUT=60
+  local t0=$SECONDS
+  run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"init de l'instance en échec"* ]]
+  [ $((SECONDS - t0)) -lt 30 ]
+}
+
+@test "config de secrets seuls sur un conteneur qui tourne : rc 0" {
+  export STUB_IDS=c0ffee
+  FORGE_ADMIN_TOKEN=tok-3 FORGE_SEED_PASSWORD=graine run bash "$SRC" config
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/pushed.token")" = tok-3 ]
+}
+
+@test "up retient ce qu'on lui a donné : l'image et la forge valent pour les gestes suivants" {
+  export STUB_PROV=0 LCARS_UP_VERDICT_TIMEOUT=10
+  LCARS_IMAGE=registre/lcars:v1 FORGE_BASE_URL=https://forge.exemple run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'LCARS_IMAGE=registre/lcars:v1' "$ENV_FILE"
+  grep -qx 'FORGE_BASE_URL=https://forge.exemple' "$ENV_FILE"
+  run bash "$SRC" pull
+  grep -q '^pull registre/lcars:v1$' "$CALLS"
+}
+
+@test "shell entre sous le siège de l'instance quand LCARS_HUMAN n'est pas donné" {
+  export STUB_IDS=c0ffee STUB_SEAT=zoe
+  run bash "$SRC" shell
+  [[ "$output" == *"exec -it -u zoe lcars bash"* ]]
+  LCARS_HUMAN=ana run bash "$SRC" shell
+  [[ "$output" == *"exec -it -u ana lcars bash"* ]]
 }
 
 @test "status : une image reconstruite sans up se VOIT — tampon ≠ revision" {

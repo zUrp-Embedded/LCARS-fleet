@@ -327,13 +327,13 @@ fi
 # ─── L'état du conteneur, le runner, la fleet ───────────────────────────────────────────────────
 ROLE_TOKENS="$(in_container bash -c 'ls /opt/lcars/var/tokens/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
 CREDS_OK="$(as_human bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
-CONTAINER_PROV_RC="$(in_container cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]' || true)"
+CONTAINER_PROV_RC="$(in_container cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$CONTAINER_PROV_RC" =~ ^[0-9]+$ ]] || CONTAINER_PROV_RC=""
 CONTAINER_PROV_OK=1
 case "$CONTAINER_PROV_RC" in
   0)  CONTAINER_PROV_STATE="convergé" ;;
   2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER /opt/lcars/deploy/provision doctor le nomme)" ;;
-  "") CONTAINER_PROV_STATE="non mesuré — /run/lcars-provision.rc illisible dans le conteneur (il n'a peut-être pas fini de converger)" ;;
+  "") CONTAINER_PROV_STATE="non mesuré — /run/lcars-forge.rc illisible dans le conteneur (il n'a peut-être pas fini de converger)" ;;
   *)  CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER /opt/lcars/deploy/provision doctor)"
       CONTAINER_PROV_OK=0 ;;
 esac

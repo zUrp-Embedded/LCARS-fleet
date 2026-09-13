@@ -87,7 +87,7 @@ case "$argv" in
   *"system_starfleet.gitea_token"*) cat "$SYS_TOKEN_OUT"; exit 0 ;;
   *"*.gitea_token"*)             echo 9; exit 0 ;;
   *"credentials.json"*)          [[ "$argv" == *"mkdir"* ]] && { touch "$CREDS_POSED"; exit 0; }; [[ -e "$CREDS_POSED" ]] && echo oui || echo non; exit 0 ;;
-  *"lcars-provision.rc"*)        cat "$PROV_RC_OUT"; exit 0 ;;
+  *"lcars-forge.rc"*)        cat "$PROV_RC_OUT"; exit 0 ;;
   *"forge-gestures.sh runner-token"*) echo REG-TOKEN-TEMOIN; exit 0 ;;
   *"gitea-runner --version"*)    echo "v1"; exit 0 ;;
   *" env "*"fleet start")        exit "$(cat "$FLEET_RC")" ;;
@@ -154,7 +154,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 }
 
 @test "un verdict de conteneur illisible est une non-mesure, dite, pas un échec" {
-  printf 'cat: /run/lcars-provision.rc: No such file or directory\n' > "$PROV_RC_OUT"
+  printf 'cat: /run/lcars-forge.rc: No such file or directory\n' > "$PROV_RC_OUT"
   run_bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRÊT"*"non mesuré"* ]]

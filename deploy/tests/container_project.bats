@@ -29,14 +29,9 @@ case "\$1 \$2" in
   "volume ls")       printf '%s' "\${STUB_VOLUMES:-}"; [[ -n "\${STUB_VOLUMES:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
-# Le verdict de provisionnement, lu par 'up' DANS le conteneur. STUB_PROV_RC vide = le fichier n'est
-# pas encore la, ce qui est l'etat normal pendant tout le provisionnement.
-# ⚠ PAS D'ACCENTS GRAVES ICI : ce heredoc n'est PAS quote, donc bash y fait de la SUBSTITUTION DE
-# COMMANDE — un mot entre accents graves est EXECUTE a l'ecriture du fichier, meme dans un
-# commentaire. Ces deux-la imprimaient « up: command not found » et « STUB_PROV_RC: command not
-# found » a chaque setup, un bruit que personne ne lisait parce que les tests passaient. Meme
-# cicatrice que 042f351d6, dans un autre fichier.
-if [[ "\$*" == *"cat /run/lcars-provision.rc"* ]]; then
+# Le verdict des gestes de forge, lu par 'up' DANS le conteneur ; STUB_PROV_RC vide = pas encore ecrit.
+# Pas d'accents graves ici : ce heredoc n'est pas quote, un mot entre accents graves y serait execute.
+if [[ "\$*" == *"cat /run/lcars-forge.rc"* ]]; then
   [[ -n "\${STUB_PROV_RC:-}" ]] || exit 1
   printf '%s\n' "\${STUB_PROV_RC}"
   exit 0
@@ -215,7 +210,7 @@ seed_project() {
 @test "up: verdict 0 -> convergé, sortie 0, et compose n'a jamais bâti" {
   STUB_PROV_RC=0 run "$SRC" -p lcars up
   [ "$status" -eq 0 ]
-  [[ "$output" == *"provisionnement convergé"* ]]
+  [[ "$output" == *"gestes de forge convergés"* ]]
   grep -q -- ' up -d --no-build' "$CALLS"
   refute grep -qE '(^| )build( |$)' "$CALLS"
 }
@@ -256,46 +251,24 @@ seed_project() {
 }
 
 
-@test "la racine DELEGUE, et transmet l'argv VERBATIM" {
-  local root="$BATS_TEST_TMPDIR/arbre"
-  mkdir -p "$root/deploy/lib"
-  mkdir -p "$root/deploy"; cp "$SRC" "$root/deploy/container"
-  cp "$REPO/deploy/lib/docker-endpoint.sh" "$root/deploy/lib/"
-  cat > "$root/deploy/container" <<'FAKE'
-#!/usr/bin/env bash
-printf '%s\n' "$#"; printf '[%s]' "$@"; echo
-FAKE
-  chmod 0755 "$root/deploy/container"
-
-  run bash "$root/deploy/container" logs --tail "deux mots" -f
+@test "logs suit le journal et transmet ses arguments à compose" {
+  run bash "$SRC" -p lcars-fleet logs --tail 20 lcars
   [ "$status" -eq 0 ]
-  [[ "${lines[0]}" == "4" ]]
-  [[ "${lines[1]}" == '[logs][--tail][deux mots][-f]' ]]
+  grep -qF -- "-p lcars-fleet logs -f --tail 20 lcars" "$CALLS"
 }
 
-
-
-@test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
-  local container="$BATS_TEST_DIRNAME/../container"
-  grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$container"
-  refute grep -q '^usage() { exec ' "$container"
-
-  # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
-  # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
-  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"USAGE : deploy/container"* ]]
-  [[ "$output" == *"EXIT :"* ]]
+@test "un banc ne se recrée pas par un up simple : il sortirait du réseau de sa forge" {
+  seed_project "$CF,$REPO/deploy/docker/docker-compose.bench.yml"
+  run bash "$SRC" -p lcars-fleet up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"est un banc"*"--forge-project lcars --bench up"* ]]
+  refute grep -q -- ' up -d' "$CALLS"
 }
 
-@test "les DEUX portes rendent le MEME texte — une aide recopiee derive" {
-  local container="$BATS_TEST_DIRNAME/../container"
-  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
-  local par_la_porte="$output"
-  # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
-  # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
-  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
-  [[ "$par_la_porte" == "$output" ]]
+@test "--bench avec un projet qui ne suit pas le nommage du banc est refusé avant tout" {
+  run bash "$SRC" -p mon-instance --bench up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« mon-instance » n'en est pas un"* ]]
 }
 
 @test "l'aide ne promet plus une forge que l'operateur devrait apporter" {

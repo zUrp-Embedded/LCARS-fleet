@@ -7,7 +7,7 @@
 # CE QUE CES TEMOINS FERMENT. Le conteneur rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le
 # `exec sshd` et sa premiere passe, le conteneur se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
-# — et n'a personne. `container up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
+# — et n'a personne. `container up` lit `/run/lcars-forge.rc`, qui vaut 0 parce qu'il mesure les
 # MODULES, pas la population. Il n'avait aucune raison de douter.
 #
 # ⚠ LE RAIL POSTE AVAIT FERME EXACTEMENT CA LE 2026-08-25, ET PAS CELUI-CI. `64-services` tire le
@@ -49,7 +49,7 @@ setup() {
   export LCARS_CONVERGER_LOG="$BATS_TEST_TMPDIR/converger.log"
   JOURNAL="$BATS_TEST_TMPDIR/journal"
 
-  export LCARS_PROV_RC_FILE="$BATS_TEST_TMPDIR/provision.rc"
+  export LCARS_FORGE_RC_FILE="$BATS_TEST_TMPDIR/forge.rc"
 
   # Le predicat du protocole, et ce qu'il lit : le plancher de la machine (`login.defs` de decor,
   # 1000 par defaut — un temoin le change) et le siege (`LCARS_SYSADMIN_UID`, le fichier est absent).
@@ -101,7 +101,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
     LCARS_UID=1000
     LCARS_ADMIRAL='${ADMIRAL_DECOR-admiral}'
     MODULE_PROTOCOL='$LCARS_MODULE_PROTOCOL'
-    RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_FORGE_RC_FILE'
     prov_rc=0
     source '$BLOC'"
 }
@@ -158,20 +158,20 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'convergence des humains ACTIF' "$JOURNAL"
 }
 
-@test "L'ORDRE DE PUBLICATION FERME LA COURSE : provision.rc est ecrit APRES humans.rc" {
-  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `container up` poll `lcars-provision.rc`
-  # toutes les 5 s, le trouve, puis lit `lcars-humans.rc` UNE SEULE FOIS. Tant que `provision.rc`
+@test "L'ORDRE DE PUBLICATION FERME LA COURSE : forge.rc est ecrit APRES humans.rc" {
+  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `container up` poll `lcars-forge.rc`
+  # toutes les 5 s, le trouve, puis lit `lcars-humans.rc` UNE SEULE FOIS. Tant que `forge.rc`
   # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `container up` lisait
   # un fichier pas encore ecrit, et affichait « population NON MESUREE » A TOUS LES COUPS, quelle
   # que soit la population reelle. Le lot precedent avait donc ajoute une mesure que son unique
   # lecteur ne pouvait jamais voir.
   #
-  # On mesure l'ORDRE, pas la presence : c'est l'ordre qui porte la garantie. `provision.rc` present
+  # On mesure l'ORDRE, pas la presence : c'est l'ordre qui porte la garantie. `forge.rc` present
   # DOIT impliquer `humans.rc` present.
   bloc 0 0
   [ "$status" -eq 0 ]
   [ -f "$LCARS_HUMANS_RC_FILE" ]
-  [ -f "$LCARS_PROV_RC_FILE" ]
+  [ -f "$LCARS_FORGE_RC_FILE" ]
   # ⚠ ON NE COMPARE PAS LES MTIME, ET LA PREMIERE VERSION LES CALCULAIT POUR RIEN. Les deux
   # ecritures tombent dans la meme milliseconde : `-nt` ne les separe pas, et `stat %N` n'existe pas
   # partout. L'ordre se lit dans le CORPS de la fonction, qui est la source de la garantie.
@@ -182,7 +182,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   # celle du provisionnement et lirait l'ordre a l'envers (vu au lot 8, apres le renommage)
   l_p="$(grep -nE '(^|[^A-Z_])RC_FILE' <<<"$fn" | head -1 | cut -d: -f1)"
   [ -n "$l_h" ] && [ -n "$l_p" ] || { echo "publier_verdicts n'ecrit plus les deux"; return 1; }
-  [ "$l_h" -lt "$l_p" ] || { echo "provision.rc ecrit AVANT humans.rc — la course est rouverte"; return 1; }
+  [ "$l_h" -lt "$l_p" ] || { echo "forge.rc ecrit AVANT humans.rc — la course est rouverte"; return 1; }
 }
 
 @test "un convergeur PRESENT mais NON EXECUTABLE compte comme absent — pas comme lancable" {
@@ -201,7 +201,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION=/bin/true
-    RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_FORGE_RC_FILE'
     prov_rc=0
     source '$BLOC'"
   [ "$status" -eq 0 ]
@@ -225,7 +225,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION=/bin/true
-    RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_FORGE_RC_FILE'
     prov_rc=0
     source '$BLOC'"
   [ "$status" -eq 0 ]
@@ -261,14 +261,11 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'présent' "$JOURNAL"
 }
 
-@test "bornes d'uid ILLISIBLES : la population n'est PAS mesuree — humans.rc dit 1, le bloc ne dit ni « present » ni « AUCUN humain », et le remede nomme le fichier" {
-  # Fail-closed, herite du protocole (⚖ user 2026-09-05). zoe est dans le groupe : avec 1000 devine
-  # elle serait « presente » ; sans frontiere etablie, personne ne l'est — et ce n'est PAS « AUCUN
-  # humain, enrole quelqu'un » : c'est le fichier qu'il faut reparer, et le bloc le dit.
+@test "bornes d'uid ILLISIBLES : la population n'est PAS mesuree — humans.rc dit 2, le bloc ne dit ni « present » ni « AUCUN humain », et le remede nomme le fichier" {
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
   bloc 0 0
   [ "$status" -eq 0 ]
-  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 2 ]
   grep -q 'NON mesuree' "$JOURNAL"
   grep -q "nulle-part/login.defs" "$JOURNAL"
   refute grep -q 'présent' "$JOURNAL"
@@ -308,13 +305,11 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   refute grep -q 'LCARS_LOGIN non pose' <<<"$output"
 }
 
-@test "protocole ABSENT : la population n'est PAS mesuree, humans.rc dit 1, et le bloc nomme le fichier" {
-  # Un 0 invente dirait « quelqu'un peut lancer une fleet » sans avoir regarde ; un 1 muet ferait
-  # chercher un humain manquant la ou c'est l'image qui est incomplete.
+@test "protocole ABSENT : la population n'est PAS mesuree, humans.rc dit 2, et le bloc nomme le fichier" {
   export LCARS_HUMAN_PROTOCOL="$BATS_TEST_TMPDIR/absent/human-protocol.sh"
   bloc 0 0
   [ "$status" -eq 0 ]
-  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 2 ]
   grep -q 'protocole des humains introuvable' "$JOURNAL"
 }
 
