@@ -4,7 +4,7 @@
 **Dernière révision** : 2026-09-04
 **Statut** : EN SERVICE — source canonique de ce qui est posé en `/opt/lcars`
 **Référencé par** : `deploy/modules.d/62-runtime-helpers.sh` (les pose) · `deploy/modules.d/64-services.sh`
-(les démarre) · `deploy/docker/Dockerfile` (les copie dans l'image)
+(les démarre) · `deploy/docker/Dockerfile` (`ENTRYPOINT` sur `container/boot.sh`)
 
 ## Ce que ce répertoire est
 
@@ -39,27 +39,23 @@ Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
 | `console-landing.sh` + `console-deck.py` | `/opt/lcars/` | systemd `lcars-landing` |
 | `console.sh` · `console-humans.sh` · `console-status.sh` · `console-pod.sh` | `/opt/lcars/` | piloté par `lcars-converger` |
 | `forge-gestures.sh` · `forge-recipe/` | `/opt/lcars/` ; la recette à côté (même cible que ci-dessus) | le boot du conteneur **et** l'exécuteur |
-| `provision-role-tokens.sh` | `/opt/lcars/` | le minteur de jetons de rôle — `63-forge-tokens` sur un poste, l'init du conteneur |
+| `provision-role-tokens.sh` | `/opt/lcars/` | le minteur de jetons de rôle — joué par `forge.d/tokens.sh` : `63-forge-tokens` sur un poste, le boot du conteneur |
 | `forge.d/` · `human.d/` · `lib/` · `container/` | `/opt/lcars/services/` | les MODULES du produit, leur protocole, et l'init/boot du conteneur (voir ci-dessous) |
-| `supervise.sh` | `/opt/lcars/` | le CONTENEUR (`docker/entrypoint.sh`), à la place du `Restart=` que le poste laisse à systemd |
+| `supervise.sh` | `/opt/lcars/` | le boot du conteneur (`container/boot.sh`), à la place du `Restart=` que le poste laisse à systemd |
 | `admiral/skills/` | le `~/.claude` du siège | le provisioning |
 | `console.tmux.conf` · `lcars.bashrc` | données du même rail | — |
 
-Deux rails, une source : le `COPY` du Dockerfile côté conteneur, `62-runtime-helpers` côté poste. Le
-miroir entre les deux est tenu dans les deux sens par `deploy/tests/transverse/runtime_helpers.bats`.
+Une seule pose : `62-runtime-helpers`, joué sur un poste comme au build de l'image.
 
 ## Les modules du produit — `human.d/`, `forge.d/`, `lib/`, `container/`
 
-⚖ user 2026-09-04 (chantier deploy-independance, Q3) : « la frontière, c'est : joué uniquement à
-l'install, ou utilisé en prod ? ». Trois familles de modules sont **utilisées en prod** et vivent
-donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `LCARS_*`), sur le protocole de
+Trois familles de modules sont **utilisées en prod** et vivent donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `LCARS_*`), sur le protocole de
 `lib/module-protocol.sh` (`lib/human-protocol.sh` y ajoute la personne) :
 
 - `human.d/` — les modules per-humain, joués par `human-converger.sh` à chaque humain que la
   forge inscrit, sous l'identité de l'humain ;
 - `forge.d/` — les gestes de forge (jetons de rôle, cache des catalogues, branche ops, client
-  OAuth2 du deck), joués par le conteneur à l'init de son instance et à chaque boot, et par
-  l'installeur à l'install (`deploy/modules.d/50-catalogues`, `63-forge-tokens`, `65-ops-branch`,
+  OAuth2 du deck), joués par le boot du conteneur, et par l'installeur à l'install (`deploy/modules.d/50-catalogues`, `63-forge-tokens`, `65-ops-branch`,
   `66-deck-oidc` sont des appelants minces) ;
 - `container/` — l'init de l'instance et le boot du conteneur (`init.sh`, `boot.sh`, le PID 1 de l'image).
 
@@ -85,13 +81,8 @@ d'ici (`*.sh`/`*.py`) lui donnerait sur le `PATH` un autre nom que le sien.
 
 ## La règle, et le témoin qui la tient
 
-**Tout fichier d'ici est POSÉ quelque part** — dans `HELPERS=()` du module, ou dans un `COPY`.
+**Tout fichier d'ici est POSÉ quelque part** — dans les listes de `62-runtime-helpers`.
 `deploy/tests/services_dir.bats` le vérifie, et vérifie aussi que `deploy/docker/` n'en reprend
 aucun.
-
-⚠ Ce n'est pas une redondance avec le miroir : celui-ci croise **deux listes**, celui-là croise le
-**répertoire** avec elles. Un fichier présent et déclaré nulle part est invisible au premier
-(mesuré : une exploration de 1211 lignes est restée trois semaines dans l'arbre sans être copiée,
-posée ni appelée).
 
 **Un fichier rangé est un fichier dont plus personne ne se demande s'il sert.**

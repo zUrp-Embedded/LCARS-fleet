@@ -4,24 +4,19 @@
 # STARDATE: 2026-09-04
 # STATUS: actif — l'INIT DE L'INSTANCE du conteneur, cote produit : le siege, les zones, le layout du volume
 #
-# ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : « pour docker, pourquoi on pourrait pas
-# build l'image, et qu'elle reste alive entre 2 demarrages ? … dans docker, le deploy semble n'avoir
-# aucun interet a partir dans le container ». Le modele est celui de Docker : l'image est le
-# produit, le conteneur une instance, l'etat dans le volume. Ce que le boot du conteneur faisait par
-# `provision apply --substrate docker` — rejouer l'INSTALLEUR a chaque demarrage — est ici, cote
-# produit, en un geste idempotent : ce qu'une instance neuve doit avoir sur son volume, et rien
-# de plus. Pas de `mix`, pas de table de l'installeur, pas de `deploy/`.
+# Ce qu'une instance neuve doit avoir sur son volume, et rien de plus, en un geste idempotent. Pas de
+# `mix`, pas de table de l'installeur, pas de `deploy/`.
 #
 # CE QUE CE GESTE POSE (et d'ou chaque ligne vient) :
 #   - le SIEGE : le sysadmin du conteneur — resolu (table `forge-uid.map`, sinon le #1 de la forge
 #     par le jeton master, sinon la semence `LCARS_ADMIRAL`), cree a l'uid `LCARS_UID`, sudoer,
-#     `authorized_keys` s'il y en a une. C'etait le §1 de l'entrypoint.
+#     `authorized_keys` s'il y en a une.
 #   - `/etc/lcars/seat.uid` : ce que GUARD B lit pour refuser une fleet sous le siege.
-#   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet) — §1bis.
-#   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`) — §1ter.
-#   - les cles d'hote SSH, PERSISTANTES dans le volume `/home` — §2.
-#   - le LAYOUT du volume : ce que `25-directories` et `26-store` posent côté poste, posé ici
-#     en substrat docker — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
+#   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet).
+#   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`).
+#   - les cles d'hote SSH, PERSISTANTES dans le volume `/home`.
+#   - le LAYOUT du volume : ce que `25-directories` pose dans l'image et sur un poste, repose ici
+#     sur les volumes du conteneur — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
 #     skill du siege, `pilot.assignee`. Les memes chemins, modes et proprietaires que la table de
 #     l'installeur declare (`deploy/system.manifest`, substrat `any`) — par CONVENTION, pas par
 #     lecture : c'est le contrat entre les deux rails, et `verify` le mesure au build.
@@ -228,8 +223,7 @@ store() {
   store_tree sysroots   0755 root:root
   store_tree state      2775 "root:$LCARS_FLEET_GROUP"
 }
-# La skill du siege et la projection du siege dans le magasin — ce que `45-sudoers-toolchain` posait
-# pour l'uid du sysadmin. `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
+# `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
 seat_extras() {
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
   if [[ -d "$SKILL_SRC/system-issues" && -n "$home" && -d "$home" ]]; then

@@ -5,15 +5,13 @@
 **Status**: active — the launch (`bin/fleet`) and release substrate of `runtime/`
 **Referenced by**: `runtime/CLAUDE.md`
 
-> ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontière, c'est : joué uniquement
-> à l'install, ou utilisé en prod ? ». `etc/` ne porte plus que des **données** du produit —
-> `release.manifest` (ce que la release livre) et `fleet.env.template` (le gabarit d'env de
-> chaque humain). Ses deux outils joués à l'install seulement vivent dans `deploy/lib/` :
-> `deploy-release.sh` (bâtit et pose la release), `enroll-catalogue.sh` (dérive le roster de la
-> recette forge) — témoins dans `deploy/tests/lib/`, joués par `deploy/gate.sh`. Le troisième,
-> `provision-role-tokens.sh` (minte les jetons de rôle), est un GESTE DE FORGE du produit — le conteneur
-> le joue à l'init de son instance — et vit dans `services/`, à côté de `forge-gestures.sh` ;
-> le poste l'appelle depuis `63-forge-tokens`.
+`etc/` ne porte que des **données** du produit — `release.manifest` (ce que la release livre) et
+`fleet.env.template` (le gabarit d'env de chaque humain). Les deux outils joués à l'install
+seulement vivent dans `deploy/lib/` : `deploy-release.sh` (bâtit ou reprend la release, et la
+pose), `enroll-catalogue.sh` (dérive le roster de la recette forge), témoins sous `deploy/tests/`,
+joués par `deploy/gate.sh`. Le minteur des jetons de rôle, `provision-role-tokens.sh`, est un geste
+de forge du produit et vit dans `services/` : `forge.d/tokens.sh` le joue, au boot du conteneur
+comme depuis `63-forge-tokens` sur un poste.
 
 Ce dossier porte ce qui lance la fleet et ce qui la livre. Il ne porte aucun contrat de module :
 le contrat d'une variable d'environnement est le commentaire de `config/runtime.exs` qui la lit,
@@ -45,7 +43,7 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 |---|---|
 | `fleet.env.template` | le catalogue des env vars du conteneur, à copier en `~/.lcars/fleet.env` |
 | `release.manifest` | ce qui part de `bin/` dans l'install (fichier, exec/noexec, `link`) — des données, pas du code |
-| `deploy-release.sh` (vit dans `deploy/lib/`) | gate → `mix release` → pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
+| `deploy-release.sh` (vit dans `deploy/lib/`) | depuis les sources : gate → `mix release` ; depuis un kit : la release du kit — puis pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
 | `enroll-catalogue.sh` (vit dans `deploy/lib/`) | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |
 | `provision-role-tokens.sh` (vit dans `services/`) | mint idempotent des jetons de rôle sur une forge, détenus par le service d'autorité |
 
@@ -57,8 +55,9 @@ launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/us
 (`fleet`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc
 le même endroit.
 
-`deploy/lib/deploy-release.sh` fait la procédure entière et s'arrête sur un gate rouge : `mix gate` sur
-l'arbre source, `MIX_ENV=prod mix release`, swap atomique de `rel/` (la génération précédente reste
+`deploy/lib/deploy-release.sh` fait la procédure entière. Depuis les sources, il s'arrête sur un
+gate rouge : `mix gate` sur l'arbre source, puis `MIX_ENV=prod mix release`. Depuis un kit, la
+release est celle que `pack.sh` a bâtie après son gate : ni gate ni compilation. Puis swap atomique de `rel/` (la génération précédente reste
 en `.prev`), copie atomique de chaque entrée du manifest, template d'env, perms, symlinks. Il refuse
 de tourner en root (seule la pose demande des droits ; `deploy/modules.d/60-deploy.sh` le joue
 comme l'humain puis repose les liens). Sortie `3` = release posée, liens PATH incomplets : un fait
@@ -75,8 +74,8 @@ Les comptes de rôle postent en leur nom. Leurs jetons sont mintés par `provisi
 (`lcars-authority`), seul lecteur. Le runtime ne lit aucun fichier de jeton : il **demande** le
 jeton d'un compte au service (`bin/lcars-authority-ask`, socket `roles.sock`) au moment de pousser.
 Minter exige la basic auth du compte : Gitea refuse la création de jeton par en-tête, même
-site-admin (mesuré 2026-07-05). `--check` sonde sans écrire. Témoins : `deploy/tests/lib/` (bats, joués par `deploy/gate.sh`) et `runtime/test/services/provision-role-tokens.bats` (joué par
-gate).
+site-admin (mesuré 2026-07-05). `--check` sonde sans écrire. Témoin : `runtime/test/services/provision-role-tokens.bats` (joué par
+le gate).
 
 ## Tests d'intégration et sondes manuelles (hors `mix gate`)
 

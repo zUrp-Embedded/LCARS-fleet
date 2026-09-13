@@ -43,9 +43,9 @@ compose donne au conteneur — et les défauts du protocole pour le reste.
 Ce qu'il ne fait pas : les gestes de forge (`../forge.d/`, le minteur `../provision-role-tokens.sh`),
 joués par `boot.sh` après lui ; les humains (le convergeur) ; les services (`boot.sh`).
 
-`boot.sh` ne joue AUCUN module de l'installeur, et rien dans le conteneur ne lit `deploy/` : l'image
-runtime ne le porte plus (lot 7) — seul le stage `verify` du Dockerfile le copie pour jouer le
-doctor au build, et `final` repart de `runtime` avec le tampon `/opt/lcars/.verified`. Les
-fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
+`boot.sh` ne joue AUCUN module de l'installeur, et rien au boot ne lit `deploy/`. L'image en porte
+pourtant une copie, sous `/opt/lcars/deploy` : `62-runtime-helpers` l'embarque sur tout substrat, le
+stage `verify` du Dockerfile y joue le doctor au build, et `final`, qui part de `runtime`, la garde
+avec le tampon `/opt/lcars/.verified`. Les fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
 (`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
 `/run/lcars-humans.rc`, `/opt/lcars/.verified` — `deploy/container status` les lit de l'hôte.

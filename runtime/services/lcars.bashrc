@@ -6,15 +6,11 @@
 # ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
 #
 # ⚠ PAS UNE COPIE DU `.bashrc` DE LA DISTRIBUTION. Un `skel.bashrc` recopie en entier avec trois
-# lignes changees ECRASERAIT `/etc/skel/.bashrc` sur les deux rails (`62-runtime-helpers` cote
-# poste, un `COPY` cote image), sans sauvegarde de l original : une machine desinstallee garderait
-# le squelette de LCARS a la place du sien, pour toujours, et une mise a jour de `bash` par la
-# distribution ne l atteindrait plus.
+# lignes changees ECRASERAIT `/etc/skel/.bashrc` (pose par `62-runtime-helpers`, sur un poste comme
+# dans l'image), et une mise a jour de `bash` par la distribution ne l atteindrait plus.
 #
 # ICI, LCARS N APPORTE QUE CE QUI EST A LUI. Le `.bashrc` de la distribution reste intact ; un bloc
-# gere de trois lignes le source. Ce qui est repris a la desinstallation est ce fichier ; le bloc
-# survit et devient INERTE, parce qu il teste la presence avant de sourcer — c est ce qui rend le
-# geste honnete sans promettre une restauration bit-a-bit qu on ne tiendrait pas.
+# gere de trois lignes le source, et teste la presence de ce fichier avant de le sourcer.
 #
 # ⚠ PAS DE `force_color_prompt=yes`, ET CE N EST PAS UN OUBLI : il colorerait le PS1 que Debian
 # construit — celui que la ligne du dessous ECRASE de toute facon. Ce serait regler un objet qui

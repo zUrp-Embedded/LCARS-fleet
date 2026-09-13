@@ -258,9 +258,9 @@ locals {
   #
   # ⚠ ET CETTE ABSENCE DÉPEND D'UN RÉGLAGE D'INSTANCE : sous `DEFAULT_USER_IS_RESTRICTED=true`,
   # l'adhésion à `<catalogue>:humans` serait la SEULE chose qui rend un catalogue visible à un
-  # humain — un compte restreint ne voit que ce qui lui est explicitement accordé (mesuré le
-  # 2026-08-17 : 404 sur l'org d'un catalogue en étant connecté, 200 en anonyme). La forge naît sans
-  # ce drapeau, et `50-forge` signale en drift un compte restreint ; le remettre aveuglerait tous les
+  # humain — un compte restreint ne voit que ce qui lui est explicitement accordé (404 sur l'org
+  # d'un catalogue en étant connecté, 200 en anonyme). La forge naît sans ce drapeau, et
+  # `forge.d/tokens.sh` signale en drift un compte restreint ; le remettre aveuglerait tous les
   # humains sur tous les catalogues.
   #
   # LA FORME EST UN CONDITIONNEL ET PAS UN MODULE SÉPARÉ, mesuré : un module neuf n'hérite pas de la

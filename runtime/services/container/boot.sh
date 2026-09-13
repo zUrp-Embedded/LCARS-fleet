@@ -14,9 +14,9 @@
 # Sans porte : le boot du conteneur (PID 1 sous tini).
 #
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
-# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. Ce
-# script est la transposition Docker du « re-run convergent » : l'image est immutable (build),
-# le VOLUME /home converge ICI à chaque boot via LE MÊME `provision` que le chemin WSL.
+# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. L'image est
+# posée au build par les modules de l'installeur ; au boot, aucun module ne tourne : le VOLUME
+# converge ICI, par `container/init.sh apply` puis les gestes de `forge.d/`.
 #
 # Un échec de convergence NE TUE PAS le conteneur : le conteneur doit rester joignable pour être
 # réparée (fail-loud dans les logs, pas fail-dead) — sshd démarre quoi qu'il arrive.
@@ -54,14 +54,8 @@ esac
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
 # ─── 1. L'INIT DE L'INSTANCE — COTE PRODUIT ─────────────────────────────────────────────────────
 #
-# ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : le modele est celui de Docker — l'image
-# est le produit, le conteneur une instance, l'etat dans le volume. Ce bloc rejouait ici, en shell
-# d'entrypoint, le siege, les zones, les clones et les cles ; puis `provision apply` rejouait
-# l'installeur entier a chaque boot. Tout cela est `runtime/services/container/init.sh`, un geste du
-# PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
-# la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
-# substrat docker. Il rend 3 quand le conteneur n'a rien pour determiner son siege : c'est l'etat « en
-# attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
+# `container/init.sh` rend 3 quand le conteneur n'a rien pour determiner son siege : c'est l'etat
+# « en attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
