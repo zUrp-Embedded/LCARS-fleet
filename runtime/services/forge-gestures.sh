@@ -98,8 +98,8 @@ die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
 need_forge_url() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
-    echo "forge-gestures: ce conteneur n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
-    echo "                FORGE_BASE_URL=<url> deploy/container up, puis rejoue." >&2
+    echo "forge-gestures: cette machine n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
+    echo "                Sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_BASE_URL=<url> deploy/container config » depuis l'hôte, puis « deploy/container up »." >&2
     exit 2; }
 }
 
