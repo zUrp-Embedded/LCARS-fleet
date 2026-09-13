@@ -1,23 +1,10 @@
 defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
   @moduledoc """
-  Sept murs de la famille `runtime`, prouves contre des arbres FABRIQUES.
+  Synthetic-source tests for gate seams, spawn guards, deadline patterns, verdict
+  unwrapping, gatekeeper step roles and workflow-loader arity.
 
-  `gates.no_runtime_seam`, `spawn.has_brief`, `spawn.gates_wired`,
-  `spawner.result_deadline_cancelled`, `verdict.worker_envelope_unwrapped`,
-  `gatekeeper.not_an_ordering_step`, `workflow.loader_arity`. Aucun n'avait de temoin.
-
-  ## Ce que cette famille garde, et pourquoi ces murs-la sont fragiles
-
-  Ce sont des murs de PRESENCE : ils cherchent une garde, un appel, une transition, dans un fichier
-  a chemin fixe. Trois modes de defaillance leur sont propres, et aucun ne se voit sur le depot :
-
-  1. **le fichier disparait** — zero occurrence, donc « aucune violation », donc vert pour toujours
-     sur un contrat qui n'existe plus ;
-  2. **le marqueur migre dans la prose** — un `{:error, :brief_required}` cite dans un `@doc`
-     satisfait un grep naif, et le mur atteste alors sa propre documentation (BND-111) ;
-  3. **le marqueur passe en commentaire** — un `# defp normalize(...)` desactive compte encore.
-
-  Les trois sont exercees ici, mur par mur, parce qu'un depot sain ne peut en produire aucune.
+  These fixtures exercise recognised forms and selected absent/comment/doc cases;
+  they do not execute the spawn path or prove every check rejects all prose shapes.
   """
   use ExUnit.Case, async: true
 
@@ -36,7 +23,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     root
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "gates.no_runtime_seam — un jugement appartient a un role, pas a la machinerie" do
     defp gates(corps), do: [{"lib/fleet/workflow/gates.ex", "defmodule G do\n#{corps}end\n"}]
 
@@ -55,9 +41,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ TROIS CONTOURNEMENTS QU'UN GREP NAIF LAISSERAIT PASSER" do
-      # `Application.get_env`/`fetch_env` et `apply(` sont les deux formes evidentes. Le mur lit
-      # l'AST justement pour attraper les autres : `get_all_env`, `compile_env`, et le dispatch par
-      # cible non statique — qui est la forme la PLUS pure de l'injection de module qu'on refuse.
       for {code, attendu} <- [
             {"  def eval(_), do: Application.get_all_env(:a)\n", "Application.get_all_env"},
             {"  def eval(_), do: Application.compile_env(:a, :b)\n", "Application.compile_env"},
@@ -77,13 +60,8 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "spawn.has_brief — les trois refus du spawn, executables et non documentes" do
-    # ⚠ LES TROIS TUPLES OUVRENT LEUR LIGNE, ET CE N'EST PAS DU STYLE. La confirmation du mur est
-    # ancree a gauche (`~r/^\s*\{:error, :brief_required\}/`) : un `:no_brief -> {:error, …}` sur
-    # UNE ligne ne compte pas. C'est ce que `mix format` produit sur une clause `->` dont le corps
-    # depasse, donc la forme reelle du spawner — et l'ancre est ce qui distingue le RETOUR d'une
-    # garde d'une mention du meme atome au fil d'une expression.
+    # Refusal tuples begin their own lines because the check anchors on that formatting.
     @spawner_ok """
     defmodule Fleet.Spawner do
       def spawn_pod(o) do
@@ -121,11 +99,7 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ BND-111 — UN MARQUEUR DANS UN `@doc` N'EST PAS UNE GARDE" do
-      # LE FAUX-VERT QUE CE MUR EXISTE POUR REFUSER, ET IL EST SUBTIL : `{:error, :brief_required}`
-      # figure legitimement dans la doc de valeur de retour du spawner. Un grep du fichier entier
-      # est donc satisfait par la documentation de ce qu'il est cense verifier — le controleur
-      # anti-faux-vert attesterait sa propre prose. Les lignes de heredoc `@doc` sont retirees avant
-      # comparaison.
+      # Doc heredoc mentions must not stand in for the refusal tuple lines.
       documente = """
       defmodule Fleet.Spawner do
         @doc \"\"\"
@@ -162,7 +136,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "spawn.gates_wired — deux faits conjoints dans DEUX fichiers" do
     defp cablage(pod, launch_env),
       do: [
@@ -179,9 +152,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ LA MOITIE DANS L'AUTRE FICHIER COMPTE — un mur d'un seul fichier n'en tiendrait aucune" do
-      # `pod.ex` appelle `LaunchEnv.build`, et c'est `LaunchEnv.build` qui chaine
-      # `Credentials.Gate.validate`. La porte est donc cablee au spawn par DEUX faits conjoints
-      # dans deux fichiers : garder le premier seul laisse une delegation creuse.
       assert %{status: :fail, evidence: [ev]} =
                Runtime.check_spawn_gates_wired(arbre(cablage(@pod_ok, "  def build(o), do: o\n")))
 
@@ -199,7 +169,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "spawner.result_deadline_cancelled — le frein qui tue les pods permanents au cycle 2" do
     @pod_deadline """
     defmodule P do
@@ -227,9 +196,7 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ LA RUSTINE `forever -> 60_000` EST REFUSEE MEME QUAND TOUT LE RESTE EST VERT" do
-      # Un mur qui ne verifierait que la presence des deux mecanismes laisserait revenir le
-      # pansement qui les rendait inoffensifs. La troisieme preuve est une ABSENCE exigee, pas une
-      # presence — et c'est la seule des trois de cette forme.
+      # This residue check intentionally inspects raw text, including a commented shortcut.
       avec = @pod_deadline <> "\n# \"forever\" -> 60_000\n"
 
       assert %{status: :fail, evidence: ev} =
@@ -257,7 +224,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "verdict.worker_envelope_unwrapped — la decision reste enfouie" do
     test "le depliage present → vert" do
       assert %{status: :pass} =
@@ -270,9 +236,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ LE FICHIER SUPPRIME EST UN ECHEC — la route de verdict EST ce consommateur" do
-      # Un `not File.exists?(abs) or …` rendrait le rail VERT si le fichier etait efface :
-      # l'invariant disparu, et le mur d'accord. Son absence est elle-meme le defaut, et deplacer
-      # le depliage ailleurs est un changement de design qui DOIT mettre ce mur a jour.
       assert %{status: :fail, evidence: ev} = Runtime.check_verdict_envelope_unwrapped(arbre([]))
       assert ev != []
     end
@@ -288,7 +251,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "gatekeeper.not_an_ordering_step — un raisonneur LLM dans la mecanique" do
     defp carte(nom, contenu), do: {"priv/catalogue/workflow/workflow_maps/#{nom}.yaml", contenu}
 
@@ -309,9 +271,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ `target_role: gatekeeper` EST LEGITIME — l'ancre de gauche fait toute la difference" do
-      # Le gatekeeper EST la cible d'exception d'une escalade. Sans l'ancre `\\brole:`, la
-      # sous-chaine `role:` de `target_role:` produit un faux positif sur une carte parfaitement
-      # canonique — et un mur qui accuse le nominal est un mur qu'on desactive.
       assert %{status: :pass, evidence: []} =
                Runtime.check_gatekeeper_not_a_step(
                  arbre([
@@ -329,7 +288,6 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "workflow.loader_arity — une carte chargee sans son catalogue" do
     defp loader_appels(sites) do
       [
@@ -361,9 +319,7 @@ defmodule Mix.Tasks.Lcars.Contracts.RuntimeFamilyCheckTest do
     end
 
     test "⚠ LE TUBE EST DEPLIE — sinon l'arite se lit fausse DANS LES DEUX SENS" do
-      # L'AST d'un `|>` garde la valeur tubee dans le noeud du pipe : lire l'arite sur le noeud
-      # d'appel seul rend `n |> load!()` pour zero argument et `n |> load!(o)` pour un seul. Le
-      # premier serait ignore (ni binaire ni unaire), le second accuse a tort.
+      # Unpipe before counting args: otherwise unary pipes are missed and binary pipes look unary.
       sites =
         cinq_binaires() ++
           [appelant(9, "  def go(n, o), do: n |> Fleet.Workflow.Loader.load!(o)\n")]

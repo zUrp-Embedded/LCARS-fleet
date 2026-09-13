@@ -1,47 +1,21 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
-  # Z4 — classe dans la boundary de son sujet, comme la tache qui l'utilise.
   use Boundary, classify_to: Fleet.Application
 
   @moduledoc """
-  Les rails du runtime : les invariants qu'aucun type ne peut porter et qu'aucun test ne traverse.
+  Inspects selected runtime integration rules through source patterns and ASTs.
 
-  Chacun de ces murs garde une COUTURE — un endroit ou deux morceaux de code doivent s'accorder sans
-  qu'aucun appel ne les relie. Une porte cablee d'un cote et pas de l'autre, une enveloppe de verdict
-  qu'un consommateur ne deballe plus, un drapeau pose et jamais efface, un backend de lancement qui
-  s'echappe de son conteneur. Rien de tout cela ne casse a la compilation, et la plupart ne cassent
-  pas non plus a l'execution : ils DERIVENT.
-
-  ⚠ LA FORME COMMUNE EST L'ABSENCE, ET L'ABSENCE EST MUETTE. « Ce marqueur doit exister », « ce
-  residu ne doit plus exister » : les deux se lisent sur le CODE, jamais sur la prose — un marqueur
-  cite dans un commentaire ne compte pas, sinon le mur serait satisfait par sa propre documentation.
-  C'est ce que `Support.code_match?/4` garantit, et c'est pourquoi ces murs l'empruntent tous.
+  Presence checks recognise expected spellings and residue checks reject known
+  obsolete forms. Coverage varies by function: some strip comments/doc blocks,
+  others inspect raw text. None traces the runtime call graph or proves that
+  matched guards execute. Read each check's scope and population guard.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Support
 
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
-  # Invariant: the LLM gate (soft + terminal non-adjudicable) is judged by the **gatekeeper** on the
-  # workflow side. `Workflow.Gates` is SYSTEM machinery and stays PURE — it must not acquire a
-  # runtime seam that re-installs a judgement inside it.
-  #
-  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM : un mur qui cherche des chaines qu'aucun commit
-  # ne peut plus produire se lit comme une garantie et n'en tient AUCUNE — tout en verdissant sur la
-  # vraie faute.
-  #
-  # `boundary` attrape deja toute delegation EN DUR vers un autre domaine, a la compilation. Ce
-  # qu'il ne voit PAS est le seam passe EN VALEUR — lecture d'app-env puis `apply/3` — et c'est donc
-  # lui qu'on refuse ici. Les deux couches se composent sans se recouvrir.
-  #
-  # Le mur nait VERT, seul etat dans lequel un mur puisse naitre.
-  #
-  # ## Preuve, mutation jouee a la pose
-  # Un seam insere dans `gates.ex` fait ECHOUER ce check, qui NOMME le site. Quatre contournements
-  # de la version grep sont rejoues et ROUGES depuis la lecture AST : `get_all_env`, un
-  # `compile_env` en attribut de module, un dispatch sur cible non statique, une fonction injectee.
-  #
-  # ANGLE MORT DECLARE : la granularite est le FICHIER. Un seam installe dans un module voisin
-  # passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste dans le meme.
+  # Workflow.Gates should leave LLM judgement to the gatekeeper.
+  # Inspect only gates.ex; an injected seam moved to a neighbouring file is outside this check.
   @doc false
   @spec check_gates_no_runtime_seam(String.t()) :: Support.result()
   def check_gates_no_runtime_seam(root) do
@@ -72,11 +46,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # UN SEAM D'EXECUTION, LU SUR L'AST ET NON SUR LE TEXTE. Un grep qui ne nommerait que
-  # `Application.get_env`/`fetch_env` et `apply(` laisserait passer au vert trois contournements
-  # qui font exactement la meme chose : `Application.get_all_env`, `Application.compile_env`, et le
-  # dispatch par cible non statique (`mod().f()`, `fun.()`), qui est la forme la plus pure de
-  # l'injection de module qu'on refuse ici.
+  # Recognise Application calls, apply and dynamic targets; no alias resolution or effect analysis.
   defp runtime_seam({{:., _, [{:__aliases__, _, [:Application]}, f]}, _, _}),
     do: "Application.#{f}"
 
@@ -85,12 +55,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
   defp runtime_seam({:apply, _, args}) when is_list(args), do: "apply/#{length(args)}"
 
-  # `fun.(…)` — une fonction injectee est un seam sans nom de module.
   defp runtime_seam({{:., _, [target]}, _, _}) when not is_atom(target),
     do: "appel d'une fonction injectee"
 
-  # `expr.f(…)` dont la cible n'est ni un alias ni un atome. `meta[:no_parens]` distingue l'ACCES
-  # (`state.field`, qui n'est pas un dispatch) de l'APPEL (`mod().f()`, qui en est un).
+  # no_parens distinguishes field-access syntax from a dynamic call.
   defp runtime_seam({{:., _, [target, f]}, meta, _}) when is_atom(f) do
     cond do
       meta[:no_parens] == true -> nil
@@ -102,13 +70,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
   defp runtime_seam(_), do: nil
 
-  # `compose_claude_md/3` must read `spec.invocation.lifetime_scope` (the canonical
-  # schema), not `spec.lifetime_scope` (a path the schema does not define) — otherwise the pod's CLAUDE.md
-  # always shows "unknown". The twin `check_lifetime_scope/1` (cap_profile.ex)
-  # already reads the right path.
-  # The pattern covers get_in (list form `spec, ["lifetime_scope"]`) AND Map.get
-  # (string form `spec, "lifetime_scope"`) — future-proof against a regression that
-  # would reintroduce the wrong path under another form.
+  # Reject two spellings of the obsolete spec.lifetime_scope path;
+  # the schema places it under spec.invocation.lifetime_scope.
   @doc false
   @spec check_capprofile_lifetime_scope_path(String.t()) :: Support.result()
   def check_capprofile_lifetime_scope_path(root) do
@@ -123,12 +86,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     })
   end
 
-  # `check_modop_incompatible/1` must read `spec.modop_set.incompatible` (the
-  # schema) + compare against the active modops (`default` ++ `optional`), not
-  # `spec.modop_incompatible` (nonexistent key) nor `spec.modop_set` treated as
-  # a list → otherwise the invariant never fires. Post-strip confirmation looser
-  # than the grep: any CODE mention of `modop_incompatible` on a
-  # `Map.get(spec, …)` line counts, even reformatted.
+  # Reject the obsolete modop_incompatible key in the profile and invariants sources.
   @doc false
   @spec check_capprofile_modop_incompatible_path(String.t()) :: Support.result()
   def check_capprofile_modop_incompatible_path(root) do
@@ -136,8 +94,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       id: "capprofile.modop_incompatible_path",
       remediation:
         "keep the modop-incompatibility guard (check_modop_incompatible) in cap_profile.ex / invariants.ex",
-      # The guarded function (check_modop_incompatible) lives in invariants.ex — the rail watches
-      # BOTH files (the wrong path can come back in either one).
       files: [
         "lib/fleet/cap_profile.ex",
         "lib/fleet/cap_profile/invariants.ex"
@@ -149,15 +105,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     })
   end
 
-  # `TmuxBackend` (claude --remote-control OUTSIDE bwrap, whose control-path is broken) does not exist.
-  # This check guards that removal: red if it reappears OR if runtime.exs re-references TmuxBackend.
-  # NB this is NOT about forbidding all host-launch — `containment: none` is served by
-  # `bin/host_launch.sh` (the PROVEN tmux-holder mechanism of bwrap_launch, selected by `do_launch`
-  # via `launcher_path`), not by the bare remote-control of the former TmuxBackend. The rail forbids
-  # the resurrection of the broken MECHANISM, not the host path.
-  # NB the runtime.exs side matches the RAW source (no strip_comment):
-  # even a comment mention of TmuxBackend in the runtime config is
-  # a resurrection signal to flag.
+  # Guard removal of the old bare remote-control backend, not all host launches.
+  # containment:none uses host_launch.sh; runtime config is scanned raw, including comments.
   @doc false
   @spec check_launch_backend_containment(String.t()) :: Support.result()
   def check_launch_backend_containment(root) do
@@ -181,24 +130,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     )
   end
 
-  # A REAL backend without `mcp_server_spec` must be refused (fail-loud) — a real pod
-  # speaks MCP, without MCP it starts broken (silent timeout). MCP provisioning lives in its own
-  # module (`mcp_provision.ex`); this check guards the guard at TWO levels, both required
-  # (otherwise fail):
-  #   level 1 (wiring) — pod.ex CALLS `McpProvision.maybe_provision_mcp_config(` in
-  #     its provisioning with-chain (without this call, the guard, even present in
-  #     the dedicated module, would never run on the spawn path);
-  #   level 2 (real guard) — `mcp_provision.ex` carries the fail-loud, marker being the error
-  #     `:mcp_server_spec_required` in the return TUPLE `{:error, {:mcp_server_spec_required, …}}`.
-  # Red if either of the two is missing; clear evidence pointing at the offending file.
-  #
-  # ⚠ Hardened anti-hollow-green (level 2): the moduledoc of `mcp_provision.ex` DOCUMENTS the same
-  # tuple `{:error, {:mcp_server_spec_required, backend}}` (as inline-code). Grepping the bare atom
-  # would leave the check GREEN even if the real code clause were removed (the doc keeping the
-  # token present) — exactly the hollow-green this checker exists to block. So we require
-  # the token on a CODE LINE that IS the error tuple (`^\s*{:error,` after strip_comment);
-  # the doc line (prose prefixed by a backtick, not `{:error,`) does not count. Unwiring the
-  # real clause turns it RED again, whatever the doc says.
+  # Require both the pod's MCP-provision call spelling and the provisioner's error-tuple line.
+  # This couples the two files without proving that the call reaches the refusal branch.
   @doc false
   @spec check_mcp_required_real_backend(String.t()) :: Support.result()
   def check_mcp_required_real_backend(root) do
@@ -216,9 +149,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       [
         {code_match?(root, pod, ~r/McpProvision\.maybe_provision_mcp_config\(/),
          "#{pod}: McpProvision.maybe_provision_mcp_config not called (MCP provisioning unwired from the spawn path)"},
-        # CONJUNCTIVE confirmation (both regexes on the stripped line): the token
-        # must live on a line that IS the error tuple — cf. the hardened
-        # anti-hollow-green above (the moduledoc carries the same token in prose).
+        # Match the error atom and tuple prefix on the same stripped line.
         {code_match?(root, mcp, ~r/:mcp_server_spec_required/, [
            ~r/:mcp_server_spec_required/,
            ~r/^\s*\{:error,/
@@ -227,18 +158,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     )
   end
 
-  # `Fleet.Spawner.spawn_pod/3` must enforce the one-shot-brief REAL invariant, not merely NAME it
-  # (DR-030): a marker-only `:brief_required` presence would pass on the @doc prose alone. The
-  # EXECUTABLE clauses are asserted (doc blocks excluded by `code_match?`, BND-111):
-  #   1. one-shot without brief → refused: the executable tuple `{:error, :brief_required}` on its line.
-  #   2. a cap-profile WITHOUT `lifetime_scope` is not a spawnable state (DR-019): spawn_pod gates on
-  #      `CapProfile.fetch_lifetime_scope/1` and refuses `{:error, :cap_profile_no_lifetime_scope}` — so
-  #      "absent lifetime_scope" is not silently exempted from the brief rule (the hole DR-019/BND-099 closed).
-  #   3. same structural guard on `interlocutor`: it selects WHICH protocol contract a pod is
-  #      provisioned with, so an undeclared profile must not spawn. Defaulting it would restore the
-  #      silence the field exists to end — the pod boots and looks healthy while holding a contract
-  #      nobody chose for it, which is undetectable from the outside.
-  # Unwiring any clause turns this RED, whatever the docs say.
+  # Require the three refusal tuple shapes and lifetime/interlocutor fetch spellings.
+  # Brief, lifetime and protocol selection are separate spawn prerequisites.
   @doc false
   @spec check_spawn_has_brief(String.t()) :: Support.result()
   def check_spawn_has_brief(root) do
@@ -276,34 +197,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   @doc """
-  Every site that SETS `awaits-arch` must CLEAR `in-flight` in the same file.
+  Requires a recognised in-flight clearing form in each file setting awaits-arch.
+  Leaving the lock can let reconciliation reclaim and redispatch a blocked ticket.
 
-  An invariant stated in prose and guarded by nothing is honoured by some writers and not by
-  others — and a registry meant to record which is which goes stale itself. A wall makes the
-  registry's accuracy irrelevant: the property holds whether or not anyone remembered to write it
-  down.
+  Setters match label-addition calls; clearing matches removal calls or any unlock(
+  spelling in the same file. The scan does not pair execution paths, resolve unlock
+  targets or distinguish live helpers from unused ones. Compiler warnings can catch
+  unused private helpers, but do not establish this path pairing.
 
-  What a writer that clears nothing costs, observed on the bench: `awaits-arch` takes a ticket out of dispatch
-  but the in-flight lock stays. Reconciliation then finds that lock orphaned (no live pod),
-  reclaims it, re-dispatches — and a fresh pod goes to block in the same place, every tick, until a
-  human closes the ticket. The brake was on and the wheel kept turning.
-
-  Clearing is any of the three real shapes: `remove_label` with the in-flight label,
-  `StepRunCompleter.unlock/6` (which removes it, stops the role stopwatch and emits
-  `step.unlocked`), or the `@in_flight_label` attribute passed to a removal. File granularity is
-  deliberate — the pairing is a property of the escalation PATH, and a checker chasing it across
-  call boundaries would be guessing.
-
-  ## What this check does NOT see, and what does
-
-  Measured with two mutations. Strip the clearing from a writer entirely and this check FAILS,
-  naming the file. Strip only the CALL and leave the clearing function behind, and this check
-  PASSES — file granularity cannot tell a live helper from a dead one.
-
-  That second one is caught, but by the compiler: an unused private function is a warning, and the
-  gate compiles `--warnings-as-errors`. The two layers compose and neither covers the other, which
-  is worth stating because the obvious "improvement" — chasing the call graph here — would trade a
-  precise wall for a guessing one and cover nothing new.
+  Both source and writer populations must be nonempty.
   """
   @spec check_awaits_arch_clears_in_flight(Path.t()) :: map()
   def check_awaits_arch_clears_in_flight(root) do
@@ -316,8 +218,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       |> Enum.reject(&clears_in_flight?/1)
       |> Enum.map(&Path.relative_to(&1, root))
 
-    # The population is the SETTERS, and an empty one is not a green: it means the reader stopped
-    # seeing the label writers — the exact way a wall goes quiet while the code drifts underneath.
     cond do
       measured_nothing?(sources) ->
         broken_result("labels.awaits_arch_clears_in_flight", "source under lib/")
@@ -341,24 +241,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # ANCHORED ON THE CALL, not on the file. Asking "does this file mention add_label AND the
-  # awaits-arch label?" flags `pod_tools/delegation.ex`, which READS the label to list the arch's
-  # escalation inbox and adds an unrelated one. A file-level co-occurrence answers a neighbouring
-  # question, and the answer looks like a finding.
-  #
-  # The label may arrive as `@attr` or as the accessor call, so the argument span has to tolerate
-  # ONE level of nesting (`Fleet.Labels.awaits_arch()` carries its own parens) — a plain `[^)]*`
-  # stops at that inner paren and sees nothing. Newlines are allowed on purpose: all three real
-  # sites keep the label on the call's line today, and a checker that silently depends on that
-  # would go quiet the day someone reformats.
+  # Bind the label to add_label arguments, not arbitrary file-level co-occurrence.
+  # The regex allows one nested-parenthesis level and a bounded span across lines.
   @label_arg_span "(?:[^()]|\\([^()]*\\)){0,200}?"
 
   defp sets_awaits_arch?(path),
     do: calls_with_label?(path, "add_label", "@awaits_arch_label|Labels\\.awaits_arch\\(\\)")
 
   defp clears_in_flight?(path) do
-    # `unlock/6` is the third real shape: it removes the label AND stops the role stopwatch AND
-    # emits `step.unlocked`. A site delegating to it clears the lock without naming it.
+    # StepRunCompleter.unlock also clears the lock; this pattern accepts any unlock name.
     calls_with_label?(path, "remove_label", "@in_flight_label|Labels\\.in_flight\\(\\)") or
       match_source?(path, ~r/\bunlock\(/)
   end
@@ -367,10 +258,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     match_source?(path, Regex.compile!("#{fun}\\(#{@label_arg_span}(#{label_alt})", "s"))
   end
 
-  # ⚠ ON MESURE LE CODE, PAS LA PROSE. Sur la source BRUTE, un `# was: unlock(...)` laisse par
-  # l'auteur qui vient justement de RETIRER l'appel satisferait le mur : le commentaire qui explique
-  # la suppression tiendrait lieu de la chose supprimee. `code_of/1` retire les commentaires ligne
-  # a ligne — il existe pour ca.
+  # Remove comments through code_of before checking label-call patterns.
   defp match_source?(path, re) do
     case File.read(path) do
       {:ok, src} -> Regex.match?(re, code_of(src))
@@ -378,14 +266,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # Every HTTP listener child-spec `{Plug.Cowboy, …}` must be built by the SINGLE authority
-  # `Fleet.EventRouter.Listener.cowboy_child/1` — that is where the loopback `:ip` bind is set BY
-  # CONSTRUCTION (via BindAddress). A surface that builds its own `{Plug.Cowboy, …}` elsewhere would
-  # bypass the loopback-by-default guarantee (network exposure by accident). Red if a `{Plug.Cowboy,`
-  # child-spec appears on a code line outside listener.ex. NB the pattern matches the child-spec tuple
-  # `{Plug.Cowboy,` (comma), NOT `Plug.Cowboy.Handler` (a dispatch clause) nor comments (strip_comment).
-  # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
-  # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
+  # Route Cowboy child construction through Listener.cowboy_child for the default bind address.
+  # This line scan can match strings/docs; checker output must avoid the literal tuple prefix.
   @doc false
   @spec check_no_cowboy_bypass(String.t()) :: Support.result()
   def check_no_cowboy_bypass(root) do
@@ -405,8 +287,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
         |> Enum.map(fn {ln, _} -> "#{Path.relative_to(file, root)}:#{ln}" end)
       end)
 
-    # The BUILDER is part of the population too: this wall says "nobody but the listener builds a
-    # Cowboy child", and if the listener itself has moved, the sentence is about nothing.
     if measured_nothing?(lib_sources) or not File.exists?(Path.join(root, builder)) do
       broken_result("listener.no_cowboy_bypass", "source under lib/ (or the listener itself)")
     else
@@ -425,32 +305,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # ── Remediation rails ─────────────────────────────────────────────
-  # These rails promote invariants from a documentary closure to a closure
-  # by constraint: an invariant we already violated for lack of a check becomes here an
-  # executable check. An agent who re-derives → `mix release` REFUSES
-  # (contracts_gate), red build, immediate fix.
-
-  # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
-  # kills the long-lived forever/pipe/run pods at cycle 2). The cancellation is not a home-made
-  # impl (`Process.cancel_timer`) but NATIVE to `gen_statem`: `:result_deadline` is a **state_timeout of the
-  # `:monitoring` state**, and the `:monitoring → :extracting` transition (triggered by the result arriving,
-  # `work_item.completed`) AUTOMATICALLY cancels this state_timeout (a state_timeout is
-  # cancelled at the state change). So this check verifies the TWO pillars of this
-  # native invariant in pod.ex:
-  #   (a) `:result_deadline` is indeed armed/handled as a `:state_timeout` (otherwise it
-  #       would not cancel itself at the state change);
-  #   (b) the cancelling transition `{:next_state, :extracting, …}` exists (otherwise the result
-  #       would arrive without ever leaving `:monitoring` → deadline not cancelled → kill at cycle 2).
-  # Red if one is missing, OR if the band-aid `"forever" -> 60_000` (a HACK) reappears.
+  # gen_statem cancels a state_timeout on state change.
+  # Require deadline/timeout tokens on one line and an extracting transition somewhere in pod.ex.
+  # These patterns do not prove arming conditions, source state or transition reachability.
+  # The obsolete forever timeout shortcut is searched in raw text, including comments.
   @doc false
   @spec check_result_deadline_cancelled(String.t()) :: Support.result()
   def check_result_deadline_cancelled(root) do
     pod = "lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
 
-    # (a) :result_deadline handled as state_timeout (one CODE line carries both tokens:
-    #     the arming `{:state_timeout, _, :result_deadline}` AND the handler `:state_timeout, :result_deadline`).
     state_timeout? =
       Path.join(root, pod)
       |> grep_lines(~r/:state_timeout.*:result_deadline|:result_deadline.*:state_timeout/)
@@ -461,7 +325,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           Regex.match?(~r/:result_deadline/, stripped)
       end)
 
-    # (b) the cancelling transition :monitoring → :extracting (natively cancels the state_timeout).
     cancels_via_transition? =
       Path.join(root, pod)
       |> grep_lines(~r/:next_state,\s*:extracting/)
@@ -493,28 +356,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # The spawn-boundary gates must be wired onto the real spawn path,
-  # NOT test-only, otherwise they are HOLLOW containment/credentials gates (called
-  # in test but never in prod — the "hollow-gate" failure mode this checker
-  # exists to block). The containment gate stays direct in pod.ex; the credentials
-  # gate (login-validity; no scope/plan sub-gates, those are vendor-redundant)
-  # lives behind Fleet.Credentials.Gate, reached through Pod.LaunchEnv. 3 checks (all required):
-  #     (1) CapProfile.validate — containment gate (refusal of native server-tools), at do_allocate;
-  #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
-  #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the login-validity gate.
-  # Red if one is missing. A gate that runs only in test guards nothing in prod.
+  # Check containment validation and both halves of the LaunchEnv/credentials delegation.
   @doc false
   @spec check_spawn_gates_wired(String.t()) :: Support.result()
   def check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
-    # The env construction + the credentials gate live in Pod.LaunchEnv. do_launch (pod.ex) calls
-    # LaunchEnv.build, which wires Gate.validate. The gate is thus wired to the spawn by TWO conjoint
-    # facts: pod.ex calls LaunchEnv.build AND LaunchEnv.build contains Gate.validate — a single-file
-    # check would hold neither half once the code is split.
     launch_env = "lib/fleet/spawner/pod/launch_env.ex"
 
-    # Each check = {relative_file, regex, label}. The label names the expected file.
     items =
       for {rel, re, label} <- [
             {pod, ~r/CapProfile\.validate\(/,
@@ -539,23 +388,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     )
   end
 
-  # The gatekeeper is an EXCEPTION-inference judge (dispatched by a
-  # :soft/:nontranchable gate), NEVER an ordering step. Red if a workflow_map
-  # declares a step `role: gatekeeper` — meta-axiom: an LLM reasoner in the
-  # coordination mechanics is a signal of failing design.
-  # NB the outer parentheses around `(… || [])` are load-bearing: without them
-  # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
-  # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
+  # Gatekeeper is an exception judge, not a workflow ordering step.
+  # This scan recognises unquoted role: gatekeeper text; it does not decode YAML.
   @doc false
   @spec check_gatekeeper_not_a_step(String.t()) :: Support.result()
   def check_gatekeeper_not_a_step(root) do
     dir = "priv/catalogue/workflow/workflow_maps"
     abs = Path.join(root, dir)
 
-    # Anti-hollow-green (mirror of `check_verdict_envelope_unwrapped`): an ABSENT/empty workflow-map
-    # corpus must NOT let this rail pass vacuously — a deleted catalogue would silently green a check
-    # that vouches for the content of files that are no longer there. So :pass REQUIRES at least one
-    # yaml AND no `role: gatekeeper` step.
     yaml_files = (File.dir?(abs) && Path.wildcard(Path.join(abs, "*.yaml"))) || []
 
     gatekeeper_steps =
@@ -563,10 +403,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       |> Enum.flat_map(fn path ->
         rel = Path.relative_to(path, root)
 
-        # `\brole:` (left anchor) — targets ONLY the `role: gatekeeper` steps,
-        # NOT `target_role: gatekeeper` (legitimate escalation, e.g. standard-qa
-        # `on_escalation.target_role`: the gatekeeper IS the exception target, not a
-        # step). Without the anchor, `target_role:` contains `role:` → false positive.
+        # The word boundary excludes target_role, a legitimate escalation target.
         path
         |> grep_lines(~r/\brole:\s*gatekeeper\b/)
         |> Enum.filter(fn {_ln, line} ->
@@ -591,20 +428,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # StepRunConsumer must unwrap the worker envelope `%{status, result}` before reading the
-  # decision (resume_gate/gate_result) OR evaluating the gate (gate_decide) — otherwise
-  # decision/outputs stay buried → false escalation / wrongful hard-gate.
+  # Worker status/result envelopes must be unwrapped before gate decisions.
   @doc false
   @spec check_verdict_envelope_unwrapped(String.t()) :: Support.result()
   def check_verdict_envelope_unwrapped(root) do
     step_run = "lib/fleet/pilot/step_run_consumer.ex"
     abs = Path.join(root, step_run)
 
-    # Anti-hollow-green: a `not File.exists?(abs) or …` would turn the rail GREEN if `step_run_consumer.ex` were
-    # DELETED (the verdict-route invariant gone but pass anyway). The verdict-route IS the
-    # step_run_consumer: its absence is itself a defect → we REQUIRE the file AND the unwrapping
-    # (strip_comment: a commented-out `# unwrap_worker_envelope` does not count). Moving the unwrap elsewhere
-    # = a design change that MUST update this rail (which this fail-on-absence forces).
+    # Require the consumer file and unwrap-name text; this does not prove an invocation.
     unwrap_present? =
       File.exists?(abs) and
         abs
@@ -633,11 +464,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # Verifies that the anti-root self-check exists in the boot path
-  # (config/runtime.exs). Red if it disappears; this check guards its PRESENCE, not its shape —
-  # the guard is unconditional on environment, and this wall stays green either way. Post-strip
-  # confirmation looser than the grep (`root` alone): the long marker may live partly
-  # in a comment on the line, only `root` needs to survive in the code.
+  # Require the anti-root marker with root surviving comment stripping.
+  # The check does not inspect the guard's condition or establish refusal at boot.
   @doc false
   @spec check_no_root_runtime_guard(String.t()) :: Support.result()
   def check_no_root_runtime_guard(root) do
@@ -654,23 +482,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   @doc false
-  # ONE FACT, TWO RENDERS — the hard ceiling on a project's in-flight workflow_runs. It is typed in
-  # Elixir (`Admission.max_fan_ceiling/0`, itself derived from the pool seats a role actually has)
-  # and AGAIN in `declaration.json`, because a JSON Schema cannot call a function. The declaration
-  # a human writes is validated by the schema; the value the dispatcher enforces comes from the
-  # module. Let those two drift and a project declares a throughput the schema accepts and the
-  # engine silently clamps away — a declaration that validates and does not apply, which is the
-  # worst of the three possible outcomes.
+  # Compare the declaration schema maximum with the source @max_max_fan literal.
   @spec check_declaration_max_fan_ceiling(String.t()) :: Support.result()
   def check_declaration_max_fan_ceiling(root) do
     path = Path.join([root, "priv", "cap_profile", "schema", "declaration.json"])
     src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
 
-    # Read from the SOURCE, never by calling `Admission.max_fan_ceiling/0`. Two reasons, and the
-    # first is the one that bites: `Admission` is not exported by the `Fleet.Pilot` boundary, and
-    # widening an export so a checker can peek is the reflex the boundary exists to refuse. The
-    # second is the older rule of this file — a gate instrument MEASURES the tree, it does not run
-    # the product; a check that needs the app compiled cannot report on a tree that does not build.
+    # Read the source literal without widening Admission's Boundary exports.
     module_ceiling =
       with {:ok, code} <- File.read(src),
            [_, n] <- Regex.run(~r/@max_max_fan\s+(\d+)/, code) do
@@ -717,16 +535,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # LE VERIFICATEUR AUTONOME DOIT COUVRIR LE BOOT, ET SEUL CE MUR TIENT L'EQUIVALENCE (6-008).
-  # `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
-  # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
-  # rail boot ». Mesure a la pose : six gardes au boot, quatre au verificateur
-  # (`validate_workshop_card!` et `validate_default_card_loads!` manquaient) — un verificateur VERT
-  # precedait un boot ROUGE, le contraire de son objet.
-  #
-  # Les deux sequences sont lues A L'AST, pas au grep : une garde citee dans un commentaire ne doit
-  # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
-  # compare les APPELS de `validate_*!` dans les deux corps de fonction.
+  # The verifier must contain every recognised validate_*! name found in the boot function.
+  # Compare name sets, not order, arguments, modules or execution paths.
   @doc false
   @spec check_verifier_covers_rail(String.t()) :: Support.result()
   def check_verifier_covers_rail(root) do
@@ -758,9 +568,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           status: if(manquantes == [], do: :pass, else: :fail),
           evidence:
             Enum.map(manquantes, &"#{rel}: #{&1} au boot, absente du verificateur autonome"),
-          # Le sens de la couverture est ORIENTE : le verificateur doit contenir le boot, jamais
-          # l'inverse. Une garde qu'il joue en PLUS est conservatrice (un rouge de trop, jamais un
-          # vert menteur) — d'ou deux comptes affiches et pas une egalite.
+          # Extra verifier guards are allowed; this is inclusion, not equality.
           note:
             "boot: #{MapSet.size(boot)} gardes `validate_*!` · verificateur: " <>
               "#{MapSet.size(verifier)} — le boot est couvert"
@@ -768,9 +576,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # Les `validate_<x>!(…)` appelees dans le corps de `fun` — a l'AST. Le nom de la fonction porte
-  # l'intention (`validate_` + `!`), et c'est ce qui permet de comparer deux sequences sans tenir
-  # une troisieme liste qui deriverait a son tour.
   defp validate_calls(ast, fun) do
     ast
     |> collect(fn
@@ -779,10 +584,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       _ -> nil
     end)
     |> List.flatten()
-    # Local calls AND qualified ones (`CatalogueGuards.validate_x!()`): the guards live outside
-    # this file, and the natural way to add one is the qualified call — invisible to a matcher
-    # that only reads bare names, which is how the wall would stay green while the two sequences
-    # diverge.
+    # Include qualified calls; both forms contribute only the function name.
     |> collect(fn
       {name, _, _args} when is_atom(name) ->
         if validate_guard?(name), do: [Atom.to_string(name)], else: nil
@@ -803,31 +605,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   @doc """
-  Toute fonction nommee dans une porte `eval` d'un script est EXPORTEE par le module qu'elle nomme.
+  Checks names used by recognised eval calls in immediate bin/ and etc/ files
+  against def or defdelegate spellings in lib/ source. At least three doors must
+  be found. This catches functions moved away from names still used by shell.
 
-  ## Le defaut que ce mur ferme
-
-  `bin/lcars project migrate` execute
-  `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"`. Un decoupage qui descend `eval_migrate/2`
-  et `eval_reconcile/1` dans `Onboard.Migration` SANS les re-exporter leve un `UndefinedFunctionError`
-  sur les deux verbes du CLI, et le provisioning d'une machine fraiche echoue a l'etape
-  `lcars project reconcile` (mesure).
-
-  RIEN D'AUTRE NE PEUT LE VOIR. Le CLI est du SHELL : le compilateur ne lit pas cette chaine,
-  dialyzer non plus, et les temoins de la fonction, rebranches sur le sous-module, restent verts.
-  Huit etapes de gate, zero signal. C'est la definition d'une couture non tenue : un appel qui
-  traverse une frontiere de langage n'est verifie par personne, sauf par un mur qui la traverse
-  aussi.
-
-  ## Ce qu'il mesure exactement
-
-  Dans `bin/` et `etc/`, chaque `eval "Module.fonction(...)"` ; puis, dans le module ainsi nomme
-  (retrouve par son `defmodule`, pas par une derivation de chemin — plusieurs modules vivent dans
-  un meme fichier), la presence d'un `def fonction` ou d'un `defdelegate fonction`.
-
-  Le NOM, pas l'arite : les arguments d'une porte sont interpoles par le shell, et compter des
-  virgules dans une chaine shell serait un instrument plus fragile que ce qu'il mesure. Le nom
-  suffit pour la classe de defaut qui existe — une fonction qui DEMENAGE.
+  Only the function name is checked, not arity. Column-zero defmodule declarations
+  index the whole file, so another module's function or a doc example can satisfy
+  the export regex. This does not prove an actual module export or shell-call
+  reachability.
   """
   @spec check_eval_doors_resolve(String.t()) :: Support.result()
   def check_eval_doors_resolve(root) do
@@ -836,12 +621,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     modules = source_by_module(root)
     portes = eval_calls_in_scripts(root)
 
-    # ⚠ PAS DE `src = …` DANS LA COMPREHENSION, ET C'EST TOUT L'OBJET DE CETTE FORME. Une
-    # affectation posee entre deux filtres EST un filtre : `src = Map.get(modules, mod)` rend `nil`
-    # quand le module n'existe pas, `nil` est faux, et la porte disparaissait du resultat en
-    # silence. Le cas le plus GRAVE des deux — un script qui nomme un module entierement disparu —
-    # etait donc le seul que ce mur ne pouvait pas voir, pendant que son message annoncait de le
-    # distinguer (« module introuvable » etait du code mort).
+    # Do not filter out missing modules while constructing findings.
     absents =
       portes
       |> Enum.reject(fn {_rel, mod, fun} -> exporte?(modules, mod, fun) end)
@@ -856,8 +636,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           "aucune etape du gate ne lit cette chaine a part ce mur",
       broken: broken,
       findings: Enum.sort(absents),
-      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « chacune resolue » inconditionnel affirmait la
-      # conformite dans le rapport meme d'un echec. Meme regle que le mur voisin sur stdout.
       note:
         "#{length(portes)} porte(s) `eval` nommee(s) par les scripts, " <>
           if(absents == [],
@@ -872,9 +650,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     is_binary(src) and Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)
   end
 
-  # ⚠ LA CAUSE SE LIT SUR `Map.has_key?`, PAS SUR LA VERITE DE `src`. Les deux pannes envoient le
-  # lecteur a des endroits differents — chercher une fonction dans un module qui n'existe pas est
-  # une perte de temps que le message evite.
   defp porte_absente(modules, {rel, mod, fun}) do
     cause =
       if Map.has_key?(modules, mod), do: "le module ne l'exporte pas", else: "module introuvable"
@@ -882,9 +657,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     "#{rel}: #{mod}.#{fun} — #{cause}"
   end
 
-  # `%{"Fleet.X" => source}` — la source de chaque module de `lib/`, indexee par son nom ECRIT. On
-  # lit le nom du `defmodule`, pas un atome resolu : ce mur compare ce que les SCRIPTS ecrivent a ce
-  # que l'arbre porte, et un script ne connait que des noms.
+  # Each column-zero module name maps to the entire file, not an isolated module body.
   defp source_by_module(root) do
     root
     |> Path.join("lib/**/*.ex")
@@ -899,8 +672,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     |> Map.new()
   end
 
-  # Les `eval "Mod.fun("` ecrits par les scripts de `bin/` et `etc/` — la seule chose qui traverse
-  # la frontiere de langage, et qu'aucune etape du gate ne lit a part ce mur.
   defp eval_calls_in_scripts(root) do
     ["bin/*", "etc/*"]
     |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
@@ -914,49 +685,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   @doc """
-  Une porte qui ECRIT sur stdout doit d'abord le RECLAMER — porte `eval*` OU tache Mix.
+  Checks stdout writers for a Fleet.ReleaseDoor.claim_stdout! call, which redirects
+  the default Logger handler away from payloads consumed as JSON or shell fields.
 
-  ## Ce que ca a coute, mesure
+  Recognised writes are IO.puts/1 calls and captures, excluding two-argument writes
+  and Mix.shell output. Eval-prefixed public definitions are scanned individually;
+  a file containing use Mix.Task is scanned as a whole, including private helpers.
 
-  Une porte `eval` a un flux de sortie CONTRACTUEL : `catalogue-source` rend `<depot> <branche>
-  <sha>` que l'appelant donne a `git clone` ; `roles-tfvars` rend du JSON redirige dans un fichier
-  que tofu lit et repasse dans `jq`. Le handler Logger par defaut ecrit, lui aussi, sur stdout.
-  `Fleet.ReleaseDoor.claim_stdout!/0` le renvoie vers stderr, et c'est le seul geste qui separe les
-  deux flux.
-
-  Mesure, sur un poste : `lcars catalogue install web-demo` rend
-
-      forge-gestures: web-demo <-  (@)
-      fatal: repository 'http://127.0.0.1:21000/.git/' not found
-
-  La porte imprime une ligne vide, puis un `Logger.info`, puis sa reponse ; `read -r repo branch
-  sha` lit la premiere ligne, l'URL est construite sur du vide et git se fait accuser.
-
-  Le `@doc` de cette porte ENONCE la regle — « and nothing else: the caller feeds it to `git
-  clone`, so a line of politeness would become part of a URL » — et seul ce mur la tient : le
-  defaut dort tant qu'aucun log ne sort sur ce chemin, et se reveille quand la fleet publie son
-  catalogue de reference, dont l'ecartement est DIT.
-
-  ## Pourquoi un mur et pas une relecture
-
-  Mesure a la pose : quatre portes sur sept reclamaient stdout, trois non — dont deux que personne
-  n'avait regardees (`Fleet.Roster.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail,
-  une etape plus loin). Une regle tenue par quatre sites sur sept est une regle que le huitieme rate.
-
-  Derive de l'AST, donc rien a maintenir : une porte ajoutee demain est mesuree par construction.
-
-  ## Ce qu'il mesure exactement
-
-  Une fonction dont le corps porte `IO.puts/1` (un seul argument — `IO.puts(:stderr, x)` en a deux
-  et ne compte pas) ou la capture `&IO.puts/1`, sans appel a `Fleet.ReleaseDoor.claim_stdout!/0`
-  dans le meme corps, et qui est l'une des deux formes de porte :
-
-  - une fonction dont le nom commence par `eval` — la porte atteinte par `bin/lcars_fleet eval` ;
-  - le `run/1` d'une tache sous `lib/mix/tasks/` — la porte atteinte par `mix <tache>`.
-
-  Le second cas a ete ajoute le 2026-09-08, apres avoir mesure que le jumeau mix de
-  `Fleet.Roster.eval_tfvars/1` — celui qu'`enroll-catalogue.sh` appelle — ne reclamait pas stdout
-  alors que le jumeau image, lui, etait garde par ce mur meme.
+  The AST scan checks co-occurrence, not call order or reachability. A claim in an
+  unrelated branch can satisfy it; writes through other functions may be missed.
+  Minimum door, writer and Mix-task populations guard against a blind scan.
   """
   @spec check_eval_doors_claim_stdout(String.t()) :: Support.result()
   def check_eval_doors_claim_stdout(root) do
@@ -969,26 +707,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     writers = Enum.filter(doors, fn {_f, _n, out, _c} -> out end)
     naked = for {f, n, _, claim} <- writers, not claim, do: "#{Path.relative_to(f, root)}: #{n}"
 
-    # INSTRUMENT GUARD. Chaque finding est une ABSENCE, et un parseur casse en produit autant. La
-    # forme `def f(x) when g` est le piege : la tete est enveloppee dans un `:when`, donc une sonde
-    # naive ne scanne aucun corps — et rendrait un vert parfait sur un arbre qui porte TROIS portes
-    # nues. Le plancher est pose sous l'etat du jour, pas dessus.
     tasks = Enum.filter(doors, fn {_f, n, _, _} -> n == :"<the whole task>" end)
 
     broken =
       cond do
-        # Le chemin balaye est NOMME dans la phrase : un instrument casse doit dire OU il n'a rien
-        # trouve, sinon le lecteur cherche dans l'arbre entier.
         length(doors) < 15 ->
           "lib/**/*.ex: only #{length(doors)} door(s) found (expected 15+)"
 
         writers == [] ->
           "lib/**/*.ex: no door writes to stdout — the scan matched no IO.puts/1"
 
-        # ⚠ LA GARDE DE LA SECONDE FAMILLE. Si `mix_task?/1` cesse de reconnaitre un module
-        # `Mix.Tasks.*`, les taches disparaissent du scan EN SILENCE et le mur redevient vert sur
-        # la moitie qu'il vient d'apprendre a voir. Une absence ne se distingue pas d'une
-        # conformite : on plante le plancher sous l'etat du jour, huit taches.
+        # Require a Mix-task population separately from eval functions.
         length(tasks) < 6 ->
           "lib/**/*.ex: only #{length(tasks)} Mix task(s) matched (expected 6+)"
 
@@ -1003,8 +732,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           "CONTRACT read by a shell — a log line there becomes part of a URL or breaks a JSON",
       broken: broken,
       findings: Enum.sort(naked),
-      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « all claiming it » sans condition affirmerait la
-      # conformite dans le rapport meme d'un echec.
       note:
         "#{length(doors)} door(s) (`eval*` + Mix task `run/1`), #{length(writers)} writing to " <>
           "stdout, " <>
@@ -1012,33 +739,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     })
   end
 
-  # ⚠ `def_name/1` (plus bas) DEPLIE le `:when` : la tete d'un `def f(x) when g` y est enveloppee,
-  # et sans ce depliage aucun corps n'est atteint. Pas de doublon local de ce depliage : le meme
-  # code, deux maisons, est exactement ce que ce fichier refuse partout ailleurs.
-  # ⚠ DEUX FAMILLES, UN SEUL CONTRAT, ET DEUX PORTEES DIFFERENTES. Une porte `eval*` est atteinte
-  # par `bin/lcars_fleet eval` : c'est UNE FONCTION dans un module qui en porte d'autres, donc la
-  # portee du scan est son corps. Une tache Mix est atteinte par `mix <tache>` : le module ENTIER
-  # est la porte, il n'a qu'un point d'entree, et decouper son travail en `defp` ne change pas de
-  # quel flux sort la charge utile.
-  #
-  # Ce sont les DEUX contextes qui existent — un depot avec `mix`, une image livree sans — et le
-  # depot le declare lui-meme : `lcars.catalogue.roles` s'annonce « twin of the release doors ».
-  # Un contrat tenu d'un cote seulement est un contrat que l'autre cote rate.
-  #
-  # Mesure du 2026-09-08 : `mix lcars.catalogue.roles <root> --tfvars 2>/dev/null` — la forme
-  # EXACTE de `enroll-catalogue.sh:120`, dont la sortie devient un `*.auto.tfvars.json` — ne
-  # reclamait pas stdout. Le handler Logger par defaut y ecrit, et le `2>/dev/null` de l'appelant
-  # n'attrape rien puisque le bruit part sur le flux de la charge utile, pas sur stderr.
-  #
-  # ⚠ ET LA PORTEE FONCTION L'AURAIT RATE. Les deux `IO.puts/1` de cette tache vivent dans des
-  # `defp` (`report_names/2`, `report_tfvars/2`), jamais dans `run/1` : un mur qui n'aurait
-  # regarde que le corps de `run/1` aurait rendu un vert parfait sur la porte meme qui a motive son
-  # extension. Mesure a la pose, avant correction de la portee.
-  #
-  # `IO.puts/1` DANS UNE TACHE MIX EST UNE CHARGE UTILE PAR CONSTRUCTION, et c'est mesure, pas
-  # suppose : sur les huit taches `lcars.*`, deux seulement l'emploient (`catalogue.roles`,
-  # `contracts.check`), les six autres passant par `Mix.shell()` pour tout ce qui s'adresse a un
-  # humain. Le discriminant n'est donc pas le nom de la fonction, c'est le flux choisi.
+  # Eval functions are scanned by body; any use Mix.Task makes the whole file a door.
+  # This includes private output helpers, but also unrelated modules in the same file.
   defp eval_doors_in(path) do
     ast = quoted!(Path.dirname(path), Path.basename(path))
 
@@ -1049,15 +751,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # ⚠ `use Mix.Task` FAIT FOI, NI LE CHEMIN NI LE NOM DE MODULE, ET LES DEUX AUTRES SONT DES PIEGES
-  # MESURES. Sous `lib/mix/tasks/` vivent DIX-HUIT modules nommes `Mix.Tasks.*` dont dix ne sont
-  # pas des taches : les familles de murs (`…Contracts.Check.Runtime`, ce fichier meme) portent ce
-  # namespace sans etre atteignables par `mix`. Un predicat sur le nom les traitait toutes comme des
-  # portes — mesure du 2026-09-08, a la pose : 18 au lieu de 8, et le plancher d'instrument pose
-  # dessus aurait cache la moitie manquante le jour ou le scan se serait casse.
-  #
-  # `use Mix.Task` est ce que Mix lui-meme exige pour qu'une commande existe : le discriminant du
-  # mur est donc celui du systeme qu'il garde, pas une convention de rangement.
+  # A Mix.Tasks namespace alone includes non-task support modules; use Mix.Task is the marker.
   defp mix_task?(ast) do
     ast_any?(ast, fn
       {:use, _, [{:__aliases__, _, [:Mix, :Task]} | _]} -> true
@@ -1101,22 +795,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end)
   end
 
-  # ── An `eval` door that reaches the forge must START its transport ───────
-  # `LCARS_TOOL_EVAL=1` skips the whole deployment-config body of `config/runtime.exs` — that is
-  # what the flag is FOR — so a release `eval` LOADS the app without STARTING it. `Fleet.Forge`'s
-  # Finch pool is supervised by the app, so it does not exist, and the first forge call dies on
-  # `** (ArgumentError) unknown registry: Fleet.Forge.Finch`.
-  #
-  # ⚠ THE SAME FAULT SURFACES ON EVERY NEW DOOR, WITH THE SAME MESSAGE (found twice, on two
-  # doors, measured on a bench): `lcars catalogue list` prints the ArgumentError under its own
-  # "the forge did not answer" line, i.e. a network diagnostic for a startup failure. Unit tests
-  # cannot catch it: they inject forge doubles, so the path that needs the pool is taken by nobody.
-  #
-  # THE RULE IS FILE-LEVEL AND THAT IS DELIBERATE. Deciding per function whether a door "reaches"
-  # the forge means following calls across modules — fragile, and wrong the day an indirection is
-  # added. A file that defines an `eval` door AND names `Fleet.Forge` is a file whose door can
-  # reach the forge; it owes the start. The false positive (a door that names Forge without
-  # calling it) costs three lines; the false negative costs a bench session.
+  # Release eval does not start the application, so forge calls need their Finch transport.
+  # This check only requires finch_spec text in files naming eval_ definitions and Fleet.Forge;
+  # comments/strings can satisfy it and it does not verify pool startup.
   @doc false
   @spec check_eval_doors_start_transport(String.t()) :: Support.result()
   def check_eval_doors_start_transport(root) do
@@ -1150,20 +831,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # ── Un nom de module NU qui ne resout sur rien ───────────────────────
-  # Elixir fait d'un `__aliases__` un ATOME, toujours : `DependencyForge` non alias devient
-  # `Elixir.DependencyForge`, un atome parfaitement valide. Quand ce nom est APPELE, le
-  # compilateur avertit (« module is not available ») ; quand il est passe comme VALEUR —
-  # `Gate.conforming(DependencyForge, forge)` — il n'avertit RIEN. Mesure au decoupage de
-  # `Delegation` : 34 temoins tombes au runtime, et rien d'autre ne l'avait vu, ni
-  # `--warnings-as-errors`, ni les 71 murs d'alors.
-  #
-  # DEUX RESTRICTIONS, chacune parce qu'elle separe le defaut d'un usage legitime :
-  #   · UN SEUL SEGMENT. Un nom de processus enregistre (`Fleet.PubSub`, `Fleet.MCP.PodSocketRegistry`)
-  #     est un atome qui ne designe aucun module ET c'est voulu ; ils sont tous qualifies. Le
-  #     defaut, lui, est le nom court qu'on a oublie d'aliaser.
-  #   · HORS `use Boundary`. Ses `deps:`/`exports:` nomment des modules RELATIFS a la frontiere,
-  #     et c'est boundary qui les resout — pas le compilateur d'Elixir.
+  # A short module name used as a value can compile as an atom without resolving.
+  # Check single-segment aliases outside use Boundary, whose names can be boundary-relative.
+  # Aliases and local modules are collected across each file without lexical scope or target validation.
   @doc false
   @spec check_bare_alias_resolves(String.t()) :: Support.result()
   def check_bare_alias_resolves(root) do
@@ -1260,28 +930,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     l
   end
 
-  # ── workflow.loader_arity ──────────────────────────────────────────────
-  #
-  # `Fleet.Workflow.Loader.load!/2` takes the catalogue in its `opts`; `load!/1` resolves the
-  # engraved NAME in the default image, so a project of another catalogue gets a foreign card of
-  # the same name (`WorkflowMapNav.safe_load/3` says what that costs: a rail that reads as a 403).
-  # A unary CAPTURE (`&Loader.load!/1`) handed to `safe_load/3` drops the opts the same way. Both
-  # forms are refused everywhere in `lib/` but the loader itself, AT THE AST: a comment or a
-  # `@doc` quoting `load!/1` is prose, not a call (BND-111); a pipe (`name |> Loader.load!()`) is
-  # unfolded first, because the AST of a pipe carries the piped value OUTSIDE the call node.
-  #
-  # What it reads: a call whose alias ends in `Loader` — `Fleet.Workflow.Loader.load!`, or `Loader`
-  # after `alias Fleet.Workflow.Loader`. What it does NOT read, by construction: a module held in a
-  # variable (`m.load!(name)`), `apply/3`, and an `as:` alias — none exists for this loader
-  # today, and a wall that claims more than it measures is the false green it exists to refuse.
+  # Unary Loader calls/captures discard catalogue opts and can select a foreign same-name card.
+  # Inspect the three alias spellings below after expanding pipes, without resolving aliases.
+  # Renamed aliases, dynamic targets and apply are outside coverage; opts content is not checked.
   @doc false
   @spec check_workflow_loader_arity(String.t()) :: Support.result()
   def check_workflow_loader_arity(root) do
     id = "workflow.loader_arity"
     own = "lib/fleet/workflow/loader.ex"
 
-    # The exclusion is checked: a loader that moved would make the exclusion dead and, one day,
-    # the loader's own `load!(name)` default a violation — better an instrument alarm than either.
+    # A missing loader invalidates the exemption and raises a loader_moved throw.
     if not File.regular?(Path.join(root, own)),
       do: throw({:loader_moved, own})
 
@@ -1299,10 +957,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
         {n_bin + b, bad ++ Enum.map(u, fn {line, form} -> "#{rel}:#{line} — #{form}" end)}
       end)
 
-    # Population guard: the rails call `load!/2` at a dozen sites; zero means the walker no
-    # longer recognises the call shape, and a wall that sees nothing must not stay green. The
-    # unary sites found so far ride along, so a regression that both removes binary sites and
-    # adds a unary one still names the culprit.
+    # Require five recognised binary calls; include unary findings if that floor fails.
     if binary < 5 do
       broken_result(
         id,
@@ -1322,9 +977,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # `{binary_count, [{line, form}]}` — every `<alias>.load!` whose alias is the workflow loader
-  # (`Fleet.Workflow.Loader`, or the bare `Loader` an `alias` leaves): a call with ONE argument,
-  # or a capture `&….load!/1`. Pipes are unfolded first (`unpipe/1`).
   @loader_aliases [[:Loader], [:Workflow, :Loader], [:Fleet, :Workflow, :Loader]]
 
   defp loader_call_sites(ast) do

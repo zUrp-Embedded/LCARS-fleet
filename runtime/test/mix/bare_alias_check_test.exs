@@ -1,17 +1,8 @@
 defmodule Mix.Tasks.Lcars.Contracts.BareAliasCheckTest do
   @moduledoc """
-  Le mur `code.bare_alias_resolves`, et le defaut qui l'a fait naitre.
-
-  Elixir fait d'un `__aliases__` un ATOME, toujours. `DependencyForge` sans son `alias` devient
-  `Elixir.DependencyForge` : un atome valide, donc rien ne proteste. Quand ce nom est APPELE, le
-  compilateur avertit ; quand il est passe comme VALEUR — `Gate.conforming(DependencyForge, forge)`
-  — il n'avertit rien du tout. Le decoupage de `Delegation` a produit exactement cette forme, et
-  34 temoins sont tombes au runtime : ni `--warnings-as-errors` ni les 71 murs ne l'avaient vue.
-
-  Le mur naitrait vert sur le depot — c'est voulu, un mur connu rouge apprend que rouge est
-  normal. Sa preuve est donc ICI : sur un corpus construit, il doit NOMMER le nom qui ne resout
-  sur rien, et il doit refuser de repondre sur un corpus trop petit pour avoir mesure quoi que ce
-  soit.
+  Tests unresolved short module names used as values, aliases and Boundary exemptions.
+  Synthetic files exercise the scanner; a separate case checks the real tree.
+  These tests do not establish lexical-scope or alias-target validation.
   """
   use ExUnit.Case, async: true
 
@@ -19,9 +10,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BareAliasCheckTest do
 
   @moduletag :tmp_dir
 
-  # Le mur exige un corpus PLANCHER avant de se prononcer : un arbre de trois fichiers n'est pas
-  # un depot, et repondre « aucun nom casse » dessus serait une reponse sur rien. Le remplissage
-  # sert donc a franchir ce plancher — chaque fichier porte deux noms courts qui, eux, resolvent.
+  # Filler files cross the file/reference population floors with resolvable names.
   defp arbre(fichiers, n_remplissage \\ 120) do
     root = Fleet.TestEnv.tmp_path("bare_alias")
     lib = Path.join(root, "lib/fleet")

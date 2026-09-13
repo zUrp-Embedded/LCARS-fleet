@@ -1,23 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
   @moduledoc """
-  Huit murs de plus, contre des arbres FABRIQUES : l'ordre de boot, l'artefact, et cinq murs de
-  presence de la famille `runtime`.
+  Synthetic-tree tests for boot order, artifact residues, listener construction,
+  anti-root markers, MCP provisioning shapes and eval-door names.
 
-  `boot.order_f8`, `boot.catalogue_before_freeze`, `bats.descriptions_inert`,
-  `config.no_legacy_namespace`, `listener.no_cowboy_bypass`, `runtime.no_root_boot_guard`,
-  `mcp.required_for_real_backend`, `runtime.eval_doors_resolve`.
-
-  ## Les deux murs d'ORDRE ne mesurent pas une presence, mais un decalage
-
-  `boot.order_f8` et `boot.catalogue_before_freeze` lisent des OFFSETS dans `application.ex`. Leur
-  mode de defaillance propre : un des trois reperes disparait, `:binary.match` rend `:nomatch`, et
-  une comparaison d'entiers sur une absence n'a plus de sens. Les deux se ferment donc AVANT de
-  comparer — et c'est cette moitie-la qu'un depot sain ne peut jamais exercer.
-
-  ## Les murs d'ABSENCE heritent tous du meme piege
-
-  « Rien ne viole X » et « je n'ai rien regarde » sortent identiques. Chaque mur ci-dessous qui
-  repond a cette forme doit donc sa population a son lecteur, et chaque temoin la lui demande.
+  Missing anchors and source populations exercise scanner failures separately
+  from violations. No fixture boots a fleet, executes Bats or provisions a pod;
+  passing source patterns are not execution proofs.
   """
   use ExUnit.Case, async: true
 
@@ -36,7 +24,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     root
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "boot.order_f8 — le Bus est le substrat de tout abonne" do
     defp application(enfants) do
       [
@@ -90,9 +77,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ UN REPERE DISPARU FERME LE MUR AVANT DE COMPARER" do
-      # `:binary.match` rend `:nomatch`, et comparer des offsets a une absence ne veut rien dire.
-      # Le mur ne dit alors pas « ordre correct », il dit qu'il ne trouve plus la liste — la seule
-      # reponse honnete, et celle qu'un depot sain ne produit jamais.
       sans_mcp = ["Fleet.EventRouter.Application", "Fleet.Spawner.Application"]
 
       assert %{status: :fail, evidence: [ev]} =
@@ -102,7 +86,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "boot.catalogue_before_freeze — une image gelee depuis un catalogue non verifie" do
     defp start(corps),
       do: [
@@ -143,7 +126,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "bats.descriptions_inert — le nom d'un test bats est EVALUE par le shell" do
     test "une description sobre → vert" do
       root = arbre([{"test/x.bats", "@test \"le pod refuse un brief vide\" {\n  true\n}\n"}])
@@ -167,8 +149,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ L'ECHAPPEMENT EST RESPECTE — un backtick echappe est inerte, donc licite" do
-      # Sans cette moitie, la seule facon de nommer un test qui PARLE d'un backtick serait de ne
-      # pas le nommer. Un mur qui interdit l'echappement force a contourner le mur.
       root =
         arbre([{"test/x.bats", "@test \"refuse un \\` nu dans la description\" {\n  true\n}\n"}])
 
@@ -176,8 +156,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ L'ARBRE SE BALAIE — un `.bats` hors des dossiers connus est vu aussi" do
-      # Un mur qui enumererait `test/` et `deploy/tests/` raterait `git-hooks/tests/` et
-      # `.claude/skills/`, c'est-a-dire justement les repertoires qu'on oublie.
+      # Exercise an additional directory under the supplied root, not a sibling checkout.
       root = arbre([{"git-hooks/tests/y.bats", "@test \"sortie de `pwd`\" {\n  true\n}\n"}])
 
       assert %{status: :fail, evidence: [ev]} = Artifact.check_bats_descriptions_inert(root)
@@ -185,7 +164,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "config.no_legacy_namespace — deux services sur le port l'un de l'autre" do
     test "la config prefixee sous :lcars_fleet → vert" do
       root =
@@ -198,17 +176,7 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "un namespace `:fleet_<domaine>` survivant est nomme" do
-      # Le prefixe n'est pas cosmetique : `http_port` et `start_listener` COLLISIONNENT entre `api`
-      # et `observation`. Une fusion a plat ferait ecouter un service sur le port d'un autre.
-      # ⚠ L'ATOME MORT SE COMPOSE, IL NE S'ECRIT PAS EN TOUTES LETTRES — NI DANS UN COMMENTAIRE.
-      # Ce mur balaie `lib/`, `test/` ET `config/`, et il lit le corps BRUT : contrairement a ses
-      # voisins il ne depouille pas les commentaires. Un exemple ecrit en clair ici, meme derriere
-      # un `#`, EST un namespace mort du point de vue du depot — mesure du 2026-09-08, gate rouge
-      # deux fois de suite, d'abord sur la fixture puis sur la phrase qui l'expliquait.
-      #
-      # La stricte est le bon sens ici et on ne la relache pas : un namespace mort cite dans un
-      # commentaire est de la documentation qui ment, et assouplir un mur va toujours dans la
-      # direction qui ne rougit jamais.
+      # Build the legacy atom in pieces: the real-tree scan includes raw test source and comments.
       mort = ":fleet_" <> "observation"
 
       root = arbre([{"config/config.exs", "config #{mort}, http_port: 4001\n"}])
@@ -225,7 +193,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "listener.no_cowboy_bypass — un listener qui ne serait pas en loopback" do
     @listener {"lib/fleet/event_router/listener.ex",
                "defmodule L do\n  def cowboy_child(o), do: {Plug.Cowboy, o}\nend\n"}
@@ -251,8 +218,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ LE CONSTRUCTEUR FAIT PARTIE DE LA POPULATION — s'il a bouge, la phrase ne parle de rien" do
-      # Le mur dit « personne d'autre que le listener ne batit un enfant Cowboy ». Sans le listener,
-      # cette phrase n'a plus de sujet, et zero violation se lit comme une conformite.
       root = arbre([{"lib/fleet/autre.ex", "defmodule A do\nend\n"}])
 
       assert %{status: :fail, evidence: [ev]} = Runtime.check_no_cowboy_bypass(root)
@@ -271,7 +236,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "runtime.no_root_boot_guard — root resout ~/.gitea_token vers le jeton admin" do
     test "la garde presente et ancree → vert" do
       root =
@@ -285,8 +249,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ L'ANCRE EN COMMENTAIRE NE COMPTE PAS — la garde doit etre du CODE" do
-      # `presence_check` confirme sur la ligne DEPOUILLEE de son commentaire : une ligne
-      # `# R-no-root-runtime : a faire` documente une intention, elle ne refuse aucun boot.
       root =
         arbre([
           {"config/runtime.exs", "# R-no-root-runtime : refuser un boot en root\nimport Config\n"}
@@ -304,7 +266,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "mcp.required_for_real_backend — deux niveaux, et il faut les deux" do
     @pod {"lib/fleet/spawner/pod.ex",
           "defmodule P do\n  def go(o), do: McpProvision.maybe_provision_mcp_config(o)\nend\n"}
@@ -325,8 +286,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "⚠ CONFIRMATION CONJOINTE — le jeton doit vivre sur la ligne QUI EST le tuple d'erreur" do
-      # Le `@moduledoc` du provisionneur porte le meme atome en prose. Une confirmation par le seul
-      # atome ferait attester au mur la documentation de ce qu'il verifie.
       en_prose =
         {"lib/fleet/spawner/pod/mcp_provision.ex",
          "defmodule M do\n  @moduledoc \"rend :mcp_server_spec_required si le backend est reel\"\n" <>
@@ -339,12 +298,8 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "runtime.eval_doors_resolve — une porte qui nomme une fonction qui n'existe plus" do
-    # ⚠ CE MUR A UN PLANCHER DE POPULATION : moins de trois portes nommees par les scripts et il se
-    # declare casse. Le decor en porte donc trois, deja valides, et le temoin sous test ajoute la
-    # sienne — sinon la violation qu'on veut mesurer serait masquee par une panne d'instrument, et
-    # le temoin passerait au rouge pour la mauvaise raison.
+    # Supply three valid doors so a missing export, rather than the population floor, is measured.
     defp socle do
       [
         {"lib/fleet/roster.ex",
@@ -377,8 +332,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "un module introuvable se distingue d'une fonction manquante" do
-      # Les deux cassent la porte, mais pas au meme endroit : le message doit dire lequel, sinon
-      # l'operateur cherche la fonction dans un module qui n'existe pas.
       root = arbre(avec(~S|eval "Fleet.Fantome.eval_main(\"/c\")"| <> "\n"))
 
       assert %{status: :fail, evidence: [ev]} = Runtime.check_eval_doors_resolve(root)
@@ -386,8 +339,6 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
 
     test "un `defdelegate` compte comme un export" do
-      # Une porte peut legitimement deleguer : exiger un `def` ferait rougir un module qui exporte
-      # bel et bien la fonction que le script appelle.
       root =
         arbre(
           avec(

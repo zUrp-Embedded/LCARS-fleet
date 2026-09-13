@@ -1,26 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
   @moduledoc """
-  Les huit murs de la famille `events`, prouves contre des arbres FABRIQUES.
+  Synthetic-tree tests for event handlers, registry keys, consumer syntax,
+  envelope normalization, severity enums, escalation kinds and visual types.
 
-  `events.handlers.exist`, `events.registry.keys_aligned`, `event.consumers.canon`,
-  `pipeline.envelope.normalized`, `findings.severities_aligned`, `incident.kinds_closed`,
-  `labels.visual_types_derived`, `reconciliation.pulled_states_declared`. Aucun n'avait de temoin.
-
-  ## Ce que cette famille garde
-
-  Le bus est un fast-path LOSSY : la forge fait foi. Ce que ces murs tiennent, ce n'est donc pas la
-  livraison d'un message, c'est l'ACCORD entre des ensembles qui ne se rencontrent jamais a
-  l'execution — un registre YAML et des modules, un enum JSON et une liste Elixir, une table de
-  clauses et ses producteurs. Aucun de ces desaccords ne casse un test : ils font naitre un type
-  gris, refuser une charge au fil, ou lever un `FunctionClauseError` sur le chemin ou un ticket
-  sort du pipeline en silence.
-
-  ## Trois temoins par mur
-
-  La VIOLATION est nommee, la forme conforme passe, et le GARDE D'INSTRUMENT se declenche. Ce
-  dernier compte double ici : la moitie de ces murs lisent un fichier a chemin FIXE, et un fichier
-  qu'ils ne savent pas lire rend un ensemble vide — donc « aucun desaccord », donc vert, pour
-  toujours, sur un contrat qui n'est plus verifie du tout.
+  Fixtures exercise source/YAML comparisons, not event delivery or handler execution.
+  Visual-type tests isolate count mismatch, literal duplication and missing derivation
+  references so one failed condition does not mask another.
   """
   use ExUnit.Case, async: true
 
@@ -41,7 +26,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
 
   defp yaml(evenements), do: {"priv/event_router/events.yaml", "events:\n" <> evenements}
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "events.handlers.exist — une route vers un module fantome" do
     test "un handler qui n'existe pas est NOMME" do
       root =
@@ -64,9 +48,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ UN REGISTRE ABSENT NE VAUT PAS « aucun handler fantome »" do
-      # LE FAUX-VERT QUE CE GARDE FERME : `events.yaml` disparu, `Map.values` sur rien, liste vide,
-      # `:pass`. Le mur « tout handler existe » passerait PRECISEMENT quand le registre qu'il lit
-      # n'est plus la. Un deploiement casse n'est pas une conformite.
       assert %{status: :fail, evidence: [ev]} = Events.check_events_handlers_exist(arbre([]))
       assert ev =~ "absent or invalid"
       assert ev =~ "hollow-green guard"
@@ -80,7 +61,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "events.registry.keys_aligned — un type consomme hors registre" do
     @consommateur """
     defmodule Fleet.Truc do
@@ -111,9 +91,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ LES DEUX COTES SONT UNE POPULATION — une source vide rend le mur muet" do
-      # Un registre vide rend tout type consomme non declare : bruyant, donc sans danger. Mais un
-      # ENSEMBLE DE SOURCES vide rend `consumed` vide, et le mur devient vert sur un code qu'il n'a
-      # jamais ouvert. C'est le sens qui ne crie pas, donc le seul qui ait besoin d'un garde.
       root = arbre([yaml("  \"pod.completed\": []\n")])
 
       assert %{status: :fail, evidence: [ev]} = Events.check_events_registry_keys_aligned(root)
@@ -130,11 +107,8 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "event.consumers.canon — le tuple `event_type` d'avant" do
     test "un consommateur sur la forme d'avant est NOMME, ou qu'il soit sous lib/" do
-      # Le NOM du mur revendique le canon pour TOUS les consommateurs : un balayage d'un seul
-      # fichier rendrait la garantie plus etroite que son etiquette.
       root =
         arbre([
           {"lib/fleet/quelque/part/loin.ex",
@@ -155,7 +129,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "pipeline.envelope.normalized — la clause qui deplie l'enveloppe" do
     @loader_ok """
     defmodule Fleet.Workflow.Loader do
@@ -172,8 +145,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "la clause presente mais JAMAIS appelee est nommee" do
-      # Deux moities, et une seule ne suffit pas : deplier sans appeler laisse le consommateur lire
-      # `steps = nil`, exactement comme ne pas deplier du tout.
       sans_appel =
         String.replace(@loader_ok, "def load(yaml), do: normalize(yaml)", "def load(y), do: y")
 
@@ -186,9 +157,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ UNE CLAUSE COMMENTEE NE COMPTE PAS — le mur lit le CODE, pas la prose" do
-      # ANTI-FAUX-VERT EXPLICITE : un `~r/normalize/i` sur la source entiere rendrait le rail vert
-      # des qu'un COMMENTAIRE contient « normalize ». Le mur retire le commentaire de chaque ligne
-      # avant de decider, et c'est cette propriete-la qu'on epingle.
       commentee =
         """
         defmodule Fleet.Workflow.Loader do
@@ -207,7 +175,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "findings.severities_aligned — un vocabulaire ecrit d'un seul cote" do
     defp findings(code_sev, enum_sev, enum_max) do
       [
@@ -238,9 +205,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ LE SECOND ENUM EST LU AUSSI — c'est le seul qu'une porte compare" do
-      # `severity_max` n'est pas une redite : c'est l'operande de `Gates.Predicate`
-      # (`"severity_max != critical"`). Un mur qui ne lirait que l'enum par-finding laisserait
-      # passer une severite ajoutee ici et pas la — et le juge perdrait sa charge entiere.
+      # Check the aggregate severity enum independently of the per-finding enum.
       root = arbre(findings(~w(low high), ~w(low high), ~w(low none)))
 
       assert %{status: :fail, evidence: ev} = Events.check_findings_severities_aligned(root)
@@ -259,7 +224,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "incident.kinds_closed — la table des kinds, fermee dans les DEUX sens" do
     defp escalade(clauses),
       do:
@@ -296,9 +260,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ UN `escalate_kind` EN COMMENTAIRE DU YAML NE GARDE PAS UNE CLAUSE VIVANTE" do
-      # Un mur qui lit un commentaire mesure ce que quelqu'un a ECRIT, pas ce que le systeme EMET :
-      # une ligne « historique : on avait un jour escalate_kind: zzz » suffirait a garder vivante
-      # une clause que plus personne ne produit.
       root =
         arbre([
           escalade([:recurrence, :zzz_mort]),
@@ -326,7 +287,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "labels.visual_types_derived — un type produit et jamais seme nait gris" do
     defp labels(corps_visual, n_dest, n_clauses) do
       {"lib/fleet/labels.ex",
@@ -350,9 +310,6 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ LA RECOPIE LITTERALE EST REFUSEE — c'est elle qui a diverge seize jours" do
-      # Un mur qui compterait seulement clauses contre destinations resterait VERT sur
-      # `def visual_types, do: [\"type:d1\", \"type:d2\"]` : il ne lirait jamais la fonction dont il
-      # porte le nom. Constater la DERIVATION, pas ses deux operandes.
       root = arbre([labels(~s(["type:d1", "type:d2"]), 2, 2)])
 
       assert %{status: :fail, evidence: ev} = Events.check_visual_types_derived(root)
@@ -360,14 +317,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EventsFamilyCheckTest do
     end
 
     test "⚠ LA DERIVATION EST UNE MOITIE A PART — sans litteral et sans lecture, c'est ROUGE aussi" do
-      # Ma premiere ecriture ne tenait `derived?` que par la bande : la recopie litterale echoue
-      # DEJA sur `literals != []`, donc supprimer le constat de derivation laissait le fichier
-      # entier vert (mesure du 2026-09-08, mutation `derived? = true`). Un `and` a trois termes
-      # demande trois entrees, une par terme.
-      #
-      # Celle-ci : les comptes sont bons, aucun type en dur, et pourtant `visual_types/0` ne lit
-      # NI `@destinations` NI `type_for_destination/1`. C'est la forme qu'un refactor produit sans
-      # y penser — deleguer a une autre fonction — et elle rouvre exactement la divergence.
+      # Counts agree and no literals remain: only the missing derivation references must fail.
       root = arbre([labels("une_autre_source()", 2, 2)])
 
       assert %{status: :fail, evidence: ev} = Events.check_visual_types_derived(root)
