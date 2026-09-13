@@ -1,11 +1,6 @@
 defmodule Fleet.Pilot.Poller.AdmissionWaitTest do
   @moduledoc """
-  BL-6-48, pas 3 (moitié ISSUES) — la règle PURE du label d'attente.
-
-  Les 63 sites qui produisent un `{:skipped, reason}` sont consommés à deux endroits, et les deux
-  jetaient la raison. Un ticket en file était donc indiscernable d'un ticket oublié. Ce qui est
-  épinglé ici n'est pas l'écriture forge mais la DÉCISION : quand écrire, quand retirer, et surtout
-  quand ne rien faire.
+  Checks wait-label decisions without forge I/O: adding, clearing and retaining state.
   """
   use ExUnit.Case, async: true
 
@@ -17,16 +12,13 @@ defmodule Fleet.Pilot.Poller.AdmissionWaitTest do
     end
 
     test "une attente portée, plus d'attente → on RETIRE" do
-      # Le cas que l'exclusivité native ne couvre PAS : elle agit quand on POSE un autre label du
-      # scope, et un ticket qui cesse d'attendre ne pose rien. L'oublier fabriquerait l'état périmé
-      # que BL-6-48 existe pour tuer — on aurait troqué une famille de défaut contre une autre.
+      # Exclusivity replaces a label when another is added; it cannot clear a wait
+      # when nothing new is written.
       assert Admission.wait_transition("wait/role", nil) == {:remove, "wait/role"}
     end
 
     test "la MÊME attente déjà portée → :noop (écriture sur CHANGEMENT seulement)" do
-      # Sans cette clause, un `criterion_unavailable` intermittent ferait battre le label toutes les
-      # 30 s dans le fil de l'issue : on aurait échangé une attente invisible contre du bruit
-      # permanent.
+      # An unchanged wait must not cause a write on every poll.
       assert Admission.wait_transition("wait/criterion", "wait/criterion") == :noop
     end
 
@@ -39,8 +31,7 @@ defmodule Fleet.Pilot.Poller.AdmissionWaitTest do
     end
 
     test ":keep ne touche à RIEN, quel que soit ce qui est porté" do
-      # `:keep` n'est pas un troisième label, c'est l'ABSENCE d'opinion. Une erreur de dispatch ne
-      # dit rien de ce qu'un ticket attend ; écrire dessus transformerait une panne en « attente ».
+      # A dispatch error supplies no new wait opinion.
       assert Admission.wait_transition(nil, :keep) == :noop
       assert Admission.wait_transition("wait/role", :keep) == :noop
     end
@@ -67,8 +58,7 @@ defmodule Fleet.Pilot.Poller.AdmissionWaitTest do
     end
 
     test "une raison silencieuse RETIRE une attente précédente — elle ne la laisse pas pourrir" do
-      # Subtil et load-bearing : un ticket qui passe de `role_busy` à `onboarded` n'attend plus rien
-      # de ce que le vocabulaire sait dire. Le laisser porter `wait/role` serait un état périmé.
+      # A silent skip can still require removal of an older wait label.
       assert Admission.wait_transition("wait/role", Fleet.Labels.wait_for(:onboarded)) ==
                {:remove, "wait/role"}
     end

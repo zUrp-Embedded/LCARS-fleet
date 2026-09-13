@@ -1,33 +1,11 @@
 defmodule Fleet.Pilot.Poller.Admission do
   @moduledoc """
-  THE passage point of the two dispatch rails — issues (`Lease.process_issues`) and pulls
-  (`Poller.step_process_pulls`).
+  Shared result accounting and wait-label policy for issue and PR dispatch.
+  Lease owns admission arithmetic; the PR path advances existing runs without
+  charging their started? result as new entries.
 
-  ## Why it exists
-
-  There are two entry points into dispatch, and a TRANSVERSE rule written on one of them is written
-  once for a system that reads it twice. Nothing checks the second copy, and the asymmetry runs in
-  both directions: an in-flight count kept on the issues rail only lets a repo serialized to one
-  workflow_run start a second as soon as the first reaches its jury; a wait-label convergence
-  written on the pulls rail alone leaves the lease branch silent. Two rules, two rails, two
-  different omissions — and neither is visible until someone counts.
-
-  So the rule is not "remember to write it twice". The rule is that a transverse decision has ONE
-  home and both rails traverse it. What lives here:
-
-    * the **accounting** of a dispatch result (tally + whether the lease was taken),
-    * the **wait vocabulary** (`wait/*`) — when to write it, when to remove it, when to say nothing,
-    * the **current wait label** of a ticket, read the same way on both sides.
-
-  What does NOT live here: the lease arithmetic (who holds it, who waits) is the issues rail's own
-  business, and the pulls rail has no equivalent.
-
-  ## The wall
-
-  This funnel cannot force a future rule to be written inside it — no test can. What holds is
-  narrower and mechanical: `Fleet.Pilot.Poller.AdmissionTest` MEASURES `lib/` and refuses a second
-  site that maps a dispatch result to a tally. A rail that starts accounting on its own reddens,
-  which is the moment a rule is about to be duplicated.
+  AdmissionTest scans for a known tally-update syntax outside this module. That
+  guard detects duplication of the established pattern, not every possible rewrite.
   """
 
   require Logger
@@ -36,17 +14,13 @@ defmodule Fleet.Pilot.Poller.Admission do
   alias Fleet.Pilot.Poller.Lease
 
   @doc """
-  Runs one dispatch and accounts for it: calls `dispatch_fun`, converges the ticket's `wait/*` from
-  the result, and folds the result into `acc`.
+  Calls dispatch_fun, attempts wait-label convergence, then returns {tally, started?}.
+  A successful result counts as dispatched. The wake_unreached four-field error
+  counts as an error while taking a lease: lock, pod and enqueue preceded wake.
+  Other errors do not count as started. PR callers ignore started?.
 
-  Returns `{tally, started?}`. `started?` is the LEASE fact and not a success fact — the two rails
-  read it differently and only one of them reads it at all. The canonical spawn order is
-  lock -> pod -> enqueue -> WAKE, so `{:error, {:wake_unreached, _}}` means the workflow_run IS
-  started (lease taken) while the anomaly still counts as an error. The pulls rail ignores
-  `started?`: the judges of an already-active run are not an entry.
-
-  `issue_number` is `nil` for anything that is not one of our tickets (a foreign PR whose branch
-  does not parse) — the wait convergence then does nothing, which is correct and not a side effect.
+  A nil issue_number disables wait writes, as for an unrecognized PR branch.
+  Callback exceptions/throws/exits can interrupt this sequence.
   """
   @spec admit((-> term()), keyword(), integer() | nil, String.t() | nil, Lease.tally()) ::
           {Lease.tally(), boolean()}
@@ -57,39 +31,20 @@ defmodule Fleet.Pilot.Poller.Admission do
     {account(result, acc), started?(result)}
   end
 
-  # How many workflow_runs one human may have in flight on one repo. Per repo and not fleet-wide:
-  # the thing being protected is a repo's merge surface, and two projects do not race each other's
-  # base. Ceiling 15 = the pool slots a role actually has (`PoolSlot`, seats 1..15, seat 0 reserved)
-  # — asking for a 16th producer is asking for a slot that does not exist.
+  # Per-human, per-repository entry ceiling; separate projects have separate budgets.
+  # The upper bound follows the 15 numbered pool seats, not a promise of free capacity.
   @default_max_fan 5
   @max_max_fan 15
 
   @doc """
-  The FLEET default ceiling on workflow_runs in flight **PER HUMAN** — `:lcars_fleet,
-  :pilot_max_fan`, default #{@default_max_fan}, clamped to `1..#{@max_max_fan}`. A project that
-  declares its own throughput overrides it: `max_fan/2` is what a dispatch decision reads.
+  Reads :pilot_max_fan, default #{@default_max_fan}, clamped to 1..#{@max_max_fan}.
+  The budget applies per human on each repository because Poller supplies
+  human-filtered listings. A project-level declaration changes that value, not
+  its ownership scope; different humans have separate budgets.
 
-  **PER HUMAN, BY DESIGN — et ce n'est pas une fuite du filtre.** Le compte se fait sur la liste que
-  le poller a obtenue avec `assigned_by=<son humain>`, donc deux humains sur un depot tiennent deux
-  budgets. C'est le modele de la fleet, entier : un architect est un agent DE l'humain, cape par
-  uid ; les pods, le feed, le scoping le sont aussi. Une config centrale qui accorde un quota PAR
-  UTILISATEUR est la forme ordinaire de la chose (quotas disque, rate-limit par cle), et l'endroit
-  ou la valeur est DECLAREE ne dit rien de QUI elle borne.
-
-  ⚠ Ecrit ici parce que l'intuition inverse — « c'est declare dans le fichier du projet, donc ca
-  borne le projet » — se tire toute seule, et une fois au point d'ouvrir un chantier pour un defaut
-  qui n'existe pas. Ce qui borne le DEPOT est ailleurs et se nomme : les sieges de
-  pool par `(role, repo)`, et le fusible `Spawner.max_pods` (128) en dernier ressort.
-
-  **Serial is this ceiling at 1**, not another mechanism. A "serialized?" boolean and this counter
-  are the same parameter at two resolutions, which is why such a boolean can only ever say "one"
-  or "as many as there are" — and "as many as there are" is genuinely UNBOUNDED: a repo with forty
-  queued tickets starts forty runs.
-
-  Clamped rather than refused HERE because this is read on every dispatch decision (a tick, then a
-  ticket): a value that fails must fail at a DOOR, once — `runtime.exs` for the env, the flag parser
-  for `--max-fan` — not on a rail that would then log the same complaint every thirty seconds. The
-  clamp is the belt behind those doors, never the place a mistake is reported.
+  Serial admission is max_fan 1. Pool seats and Spawner.max_pods impose additional
+  capacity limits. Invalid settings should be reported at configuration/CLI entry;
+  this hot-path reader clamps integers and defaults other values without logging.
   """
   @spec max_fan() :: pos_integer()
   def max_fan do
@@ -102,16 +57,10 @@ defmodule Fleet.Pilot.Poller.Admission do
   end
 
   @doc """
-  The ceiling for THIS project: its declaration if it made one, the fleet default otherwise.
-
-  Per PROJECT, because the counter is: a per-container knob would make `--max-fan 1`, used to watch one
-  pipeline end to end, serialize every other project in the fleet — a brake laid on unrelated work.
-  The declaration lives in `<project>/.lcars.json` (see
-  `Fleet.Project.Declaration`) because a project can route its tickets through several cards, and a
-  per-card ceiling cannot bound something that spans them.
-
-  Clamped HERE and only here: `max_fan/0` and this share one authority for `1..#{@max_max_fan}`,
-  so a declaration cannot buy a 16th pool seat that does not exist.
+  Uses the project's .lcars.json declaration, falling back to max_fan/0.
+  Project scope lets one project serialize without affecting others, and spans
+  all its workflow cards. The budget still applies per human.
+  Declared integers are clamped to 1..#{@max_max_fan}.
   """
   @spec max_fan(String.t(), keyword()) :: pos_integer()
   def max_fan(repo, opts \\ []) when is_binary(repo) do
@@ -126,15 +75,8 @@ defmodule Fleet.Pilot.Poller.Admission do
   def max_fan_ceiling, do: @max_max_fan
 
   @doc """
-  Accounts for an item the rail refuses WITHOUT dispatching it — the PR-open, ceiling and
-  dependency branches of `Lease.process_issues/4`.
-
-  Same funnel as `admit/5`, and that is the point: a refusal is a decision about a ticket, so it
-  owes that ticket the same wait vocabulary a dispatched skip does. Left out of the convergence,
-  these two branches make a ticket held back by the lease wait silently, tick after tick,
-  indistinguishable from a forgotten one.
-
-  Always `{tally, false}`: refusing takes nothing.
+  Accounts for refusal before dispatch through the same wait policy as admit/5.
+  PR-open, capacity and dependency refusals return {tally, false}: no entry started.
   """
   @spec refuse(atom() | tuple(), keyword(), integer() | nil, String.t() | nil, Lease.tally()) ::
           {Lease.tally(), boolean()}
@@ -142,27 +84,21 @@ defmodule Fleet.Pilot.Poller.Admission do
     admit(fn -> {:skipped, reason} end, opts, issue_number, current_wait, acc)
   end
 
-  # ONE mapping for both rails. `{:ok, _}` covers `{:spawned, _, _}` (a producer or a judge) AND
-  # `{:merged, _}` (a PR sealed by the pulls rail) — the issues rail cannot produce the second, and
-  # matching it here costs nothing while a rail-local mapping that omits it raises.
+  # Count all successful result shapes, including PR merge/adoption, in one place.
   defp account({:ok, _}, acc), do: %{acc | dispatched: acc.dispatched + 1}
   defp account({:skipped, _reason}, acc), do: %{acc | skipped: acc.skipped + 1}
   defp account({:error, _reason}, acc), do: %{acc | errors: acc.errors + 1}
 
-  # The lease is taken by anything that got as far as a pod, INCLUDING an unreachable wake: the lock
-  # is placed and the pod exists, so a second start on that repo would be a duplicate. A real
-  # dispatch failure compensated the lock and killed the pod -> nothing started.
+  # Wake failure is the specific error shape that still consumes an entry lease.
   defp started?({:ok, _}), do: true
   defp started?({:error, {:wake_unreached, _pod_id, _role, _reason}}), do: true
   defp started?(_), do: false
 
   @doc """
-  Converges the `wait/*` label of ticket `number` from its `current` value and a dispatch `result`.
-
-  THE single write point of the wait vocabulary — both rails call it, so the two halves cannot
-  drift into two dialects. The issues rail reads `current` off the payload it already listed; the
-  PR rail reads it from the `issue -> wait/*` map the tick threads alongside `awaits_arch_ids`.
-  Neither pays a forge call to know it.
+  Attempts to update the ticket's wait label from the supplied current value and
+  result; nil numbers skip writes. Callers supply already-listed labels.
+  Returned forge errors are discarded; write exceptions are logged and rescued,
+  but exits and throws propagate. Success here does not prove a label was written.
   """
   @spec converge_wait(keyword(), integer() | nil, String.t() | nil, term()) :: :ok
   def converge_wait(_opts, nil, _current, _result), do: :ok
@@ -175,30 +111,22 @@ defmodule Fleet.Pilot.Poller.Admission do
   end
 
   @doc """
-  The PURE rule of the wait label: `current` (on the ticket) + `desired` (from the dispatch) ->
-  `:noop | {:add, label} | {:remove, label}`.
-
-  PURE for the same reason `Fleet.Forge.Client.route_from_labels/1` is: a decision buried
-  under a forge call is a decision nobody can exercise. Every branch below is reachable from a test
-  without a network.
-
-  `:keep` is NOT a third label, it is the ABSENCE of an opinion — a dispatch error says nothing
-  about what a ticket is waiting for, and writing on it would turn a failure into a "wait".
+  Computes noop, add or remove from current and desired wait state.
+  :keep means no opinion: dispatch errors must not invent or clear an expectation.
+  Replacing one label with another only adds the new one, relying on the forge's
+  configured scope exclusivity to remove the previous label.
   """
   @spec wait_transition(String.t() | nil, String.t() | nil | :keep) ::
           :noop | {:add, String.t()} | {:remove, String.t()}
   def wait_transition(_current, :keep), do: :noop
-  # `(same, same)` also covers `(nil, nil)`: nothing carried, nothing wanted, nothing to do. An
-  # explicit `(nil, nil)` clause would be dead — and dead code lies without the compiler saying so.
+  # Equality covers nil/nil as well as an unchanged label.
   def wait_transition(same, same), do: :noop
   def wait_transition(current, nil), do: {:remove, current}
   def wait_transition(_current, desired), do: {:add, desired}
 
   @doc """
-  The `wait/*` label a ticket currently carries, or `nil`. Read from labels ALREADY in hand — the
-  issues rail holds them on the payload, the tick projects them into a map for the pulls rail. One
-  derivation, because two ways of answering "what is this ticket waiting for" is how the two rails
-  earned their two dialects in the first place.
+  Returns the first wait-prefixed label found in the payload, or nil.
+  This does not repair or diagnose multiple wait labels.
   """
   @spec current_wait(map() | nil) :: String.t() | nil
   def current_wait(payload) when is_map(payload) do
@@ -217,9 +145,8 @@ defmodule Fleet.Pilot.Poller.Admission do
   defp desired_wait_label({:skipped, reason}) do
     Fleet.Labels.wait_for(reason)
   rescue
-    # `wait_for/1` raises on a reason absent from the table — that is the WALL, and a test that
-    # measures `lib/` holds it. In production we degrade rather than abort a whole tick over a
-    # label: the trace is missing, the dispatch goes on. The red belongs to the gate, not the rail.
+    # Unknown skip reasons retain the current label and warn; source-level tests
+    # check the known vocabulary without aborting a production tick here.
     ArgumentError ->
       Logger.warning(
         "Poller: skip reason #{inspect(reason)} absent from the BL-6-48 wait table — " <>
@@ -242,8 +169,7 @@ defmodule Fleet.Pilot.Poller.Admission do
 
     :ok
   rescue
-    # Best-effort by obligation: a label that cannot be posted must never block a dispatch. The
-    # trace is missing, the work goes through.
+    # Rescue write exceptions so label failure does not prevent result accounting.
     e ->
       Logger.warning(
         "Poller: wait label #{inspect(op)} on ##{number} failed (#{inspect(e)}) — dispatch unaffected"

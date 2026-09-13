@@ -1,18 +1,10 @@
 defmodule Fleet.Pilot.Poller.AdmissionTest do
   @moduledoc """
-  The funnel both dispatch rails traverse.
-
-  What is pinned here is not that the funnel WORKS — the wait rule has its own file and the tally
-  is three clauses. It is that there is only ONE of it: the two rails each forgot a different
-  transverse rule (the in-flight count on the pulls side, the wait convergence on the lease branch)
-  and nothing said so until someone counted.
+  Checks shared dispatch accounting, wait writes and max_fan resolution.
+  A source regex detects known tally-update syntax outside Admission; it does not
+  prove every possible accounting implementation passes through this module.
   """
-  # ⚠ `async: false` : ce fichier ECRIT `:pilot_max_fan` en env d'APPLICATION, qui est
-  # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
-  # lit cette cle lit la valeur de celui-ci. Mesure du 2026-08-17 : la meme forme a tue
-  # `Pilot.ApplicationTest` sur une racine de catalogue temporaire qui ne lui appartenait pas, dans
-  # le build d'image et pas sur la machine de dev — la collision depend du nombre de coeurs et de
-  # l'ordre du seed, donc elle mord la ou ca coute le plus cher.
+  # Serialized because max_fan tests mutate global application configuration.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.Poller.Admission
@@ -80,10 +72,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
     end
 
     test "the ticket LOSES wait/capacity when a seat frees" do
-      # The other half of the refusal, and the one that makes it safe to write at all: a label
-      # nobody removes is a stale state that outlives its cause. The dispatch succeeds, the
-      # convergence sees a `{:ok, _}` (no opinion to carry) against a ticket that holds one, and
-      # removes it. Without this, a project that had ever been full would look permanently full.
+      # Successful dispatch must clear a previous wait label to avoid stale capacity state.
       assert {%{dispatched: 1}, true} =
                Admission.admit(
                  fn -> {:ok, {:spawned, "pod", "engineer"}} end,
@@ -97,9 +86,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
     end
 
     test "both saturation refusals write the SAME label — one ceiling or the other" do
-      # `:at_capacity` (project ceiling, `max_fan`) and `:role_at_capacity` (the role's pool seats)
-      # are two ceilings and ONE fact for the reader: not started yet. Two labels would make a
-      # human learn a taxonomy to read a queue.
+      # Project-entry and role-pool saturation share the user's wait/capacity label.
       Admission.refuse(:at_capacity, opts(), 1, nil, Lease.zero_tally())
       Admission.refuse(:role_at_capacity, opts(), 2, nil, Lease.zero_tally())
 
@@ -135,12 +122,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
 
   describe "THE WALL — one accounting site, measured in lib/" do
     test "no rail maps a dispatch result to a tally on its own" do
-      # This is the test of the item. It does not restate the funnel — it MEASURES the code,
-      # because a funnel that only documents itself protects nothing. The pattern catches the
-      # shape both rails used to carry: `%{acc | dispatched: acc.dispatched + 1}` and its siblings.
-      #
-      # A rail that starts accounting again is a rail about to be handed a transverse rule the
-      # other one will not get. That is the moment this reddens.
+      # Scan for the established map-update form; rewriting its syntax can evade this guard.
       rx = ~r/%\{\s*acc\d*\s*\|\s*(dispatched|skipped|errors):/
 
       sites =
@@ -148,8 +130,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
         |> Enum.filter(fn path -> path |> File.read!() |> then(&Regex.match?(rx, &1)) end)
         |> Enum.sort()
 
-      # Guard on the instrument itself: if it finds NOTHING, it is the instrument that broke, not
-      # the code that became clean. A wall that measures nothing always passes.
+      # Require a positive match so an ineffective pattern cannot pass vacuously.
       assert Enum.any?(sites),
              "the pattern matches no site at all — the instrument is broken, not the code " <>
                "(measured: 1 site, lib/fleet/pilot/poller/admission.ex, on 2026-08-03)"
@@ -201,9 +182,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
     end
 
     test "an UNPARSEABLE declaration does not invent a throughput" do
-      # `pipeline_default/2` alarms on a broken file because substituting a CARD changes the
-      # judgment layer. Here the fallback changes a RATE, and a second alarm for the same file
-      # would teach a reader that it means something new.
+      # Throughput fallback is quiet here; card-resolution diagnostics are a separate concern.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 4)
       assert Admission.max_fan("fleet/p", code_root: root_with("{ not json")) == 4
     end
@@ -217,9 +196,7 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
 
   describe "max_fan/0 — the reader clamps, it does not report" do
     test "below 1 or above the ceiling → clamped, never zero and never a slot that does not exist" do
-      # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
-      # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read
-      # on every dispatch decision: a bad value must fail at a DOOR, once, not every thirty seconds.
+      # Clamp at this hot-path reader; configuration/CLI entry owns invalid-value reporting.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 0)
       assert Admission.max_fan() == 1
 

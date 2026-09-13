@@ -1,14 +1,16 @@
 defmodule Fleet.Pilot.Poller.Backoff do
   @moduledoc """
-  Pure poller timing: ±10% jitter and capped exponential discovery-error backoff.
+  Poller delay calculation with jitter and exponential backoff.
   """
 
-  # Five-minute recovery cap.
+  # Cap before jitter.
   @max_backoff_ms 300_000
   @jitter_ratio 0.1
 
   @doc """
-  Jitters nominal interval or capped exponential backoff.
+  For zero errors, jitters the base interval. Otherwise doubles by streak (exponent
+  capped at 10), caps at 300_000 ms, then jitters. The resulting delay can reach
+  330_000 ms; the five-minute cap is applied before jitter.
   """
   @spec next_delay(non_neg_integer(), pos_integer()) :: pos_integer()
   def next_delay(0, base_ms), do: jitter(base_ms)

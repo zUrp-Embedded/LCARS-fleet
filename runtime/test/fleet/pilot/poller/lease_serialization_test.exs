@@ -1,13 +1,8 @@
 defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   @moduledoc """
-  `max_fan` — how many workflow_runs one PROJECT holds in flight at once.
-
-  It replaces the `:repo_serialized_lease` boolean, and these tests changed with it rather than
-  passing unchanged: they used to set a boolean and assert "one or all". The boolean and the
-  counter were the same parameter at two resolutions — **serial IS this ceiling at 1** — and the
-  `false` side was genuinely unbounded, which is what the ceiling ends.
-
-  async: false — the knob is a global config.
+  Checks entry counts and issue ordering under max_fan, including jury seats and
+  awaiting-architect routes. Poller supplies per-human scope; these fixtures contain
+  one supplied issue set. Serialized because configuration changes are global.
   """
   use ExUnit.Case, async: false
 
@@ -16,13 +11,10 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   alias Fleet.TestEnv
 
   defmodule NoRouteForge do
-    # L'admission lit les preconditions avant de DEMARRER un ticket : un stub sans cette lecture
-    # ne peut pas voir la porte, et la laisserait disparaitre sans qu'un test rougisse.
+    # Queued starts read dependencies; supply that production capability in the stub.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
 
-    # No `wfmap/*` route engraved: every issue is a fresh one → QUEUED, never ENGAGED. The lease
-    # DERIVES the route from the labels it already holds, so `:none` here is the answer to a
-    # question asked without I/O — a stub of `get_route/3` would answer one nobody asks anymore.
+    # Derive route state from listed labels; a network get_route stub would not be called.
     def route_from_labels(_labels), do: :none
 
     # The refusal now WRITES: a full project says so on the ticket instead of skipping in silence.
@@ -35,12 +27,8 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   end
 
   defmodule CountingDispatcher do
-    # Stands in for StepDispatcher: says WHICH ticket the lease let through.
-    #
-    # It used to read `payload["number"]`, which is always nil: the lease wraps the issue
-    # (`%{"issue" => issue, "repository" => …}`), the shape the real dispatcher reads. Every test
-    # here asserted counts only, so the broken identity read cost nothing and said nothing — until
-    # an order test needed it and got `{:dispatched, nil}` three times.
+    # Report the nested issue number, not the absent top-level field, so ordering
+    # assertions identify tickets instead of counting indistinguishable nil messages.
     def dispatch_issue(payload, _opts) do
       send(self(), {:dispatched, get_in(payload, ["issue", "number"])})
       {:ok, {:spawned, "pod", "engineer"}}
@@ -102,8 +90,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   end
 
   test "a refused ticket carries wait/capacity — the ceiling is not silent" do
-    # The lease branch never converged its wait label: a ticket held back was indistinguishable
-    # from a forgotten one. It is the same refusal as the ceiling's, so it is the same label.
+    # Pre-dispatch refusal must be visible on the refused ticket.
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
 
     Lease.process_issues(issues(), MapSet.new(), opts(), seams())
@@ -123,8 +110,6 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   end
 
   test "max_fan = 2 → two start, the third waits (the counter is not a boolean)" do
-    # The shape the boolean could not express, and the reason for the item: "one" and "all" were
-    # the only two answers it had.
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
     tally = Lease.process_issues(issues(), MapSet.new(), opts(), seams())
@@ -134,8 +119,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   end
 
   test "a ticket already in its JURY phase eats a seat" do
-    # 5.1's repair, read through the ceiling: in-flight crosses both rails, so a jury ticket fills
-    # the project as surely as a producer does.
+    # Jury work still occupies a workflow-run seat.
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
     # #41 carries an open fleet PR → skipped on this rail, but it counts.
@@ -147,9 +131,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
 
   describe "admission order — ascending ticket, decided here" do
     test "three tickets 12/7/30 and ONE seat → the 7 starts" do
-      # The listing carries no `sort`, so the order was the forge's default ("most recently
-      # touched" under Gitea): the last seat went to whichever ticket someone had just commented
-      # on. A rule nobody wrote, that changes when a human types.
+      # Input order must not decide who gets the last seat.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
 
       out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
@@ -163,9 +145,8 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
     end
 
     test "the refused ticket keeps its place at the next tick" do
-      # Ascending id is stable across ticks, which is what makes a queue a queue: a ticket refused
-      # today is not overtaken tomorrow by one that merely got touched. Two seats, so 7 and 12 go
-      # and 30 waits — twice, identically.
+      # Repeat identical input to check stable admission order; the stub does not
+      # persist the started runs between calls.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 2)
 
       out_of_order = for n <- [12, 7, 30], do: %{"number" => n, "labels" => []}
@@ -189,10 +170,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
     end
 
     test "the SHELL door and the rail hold the SAME ceiling" do
-      # `bin/fleet --max-fan` validates at the door and cannot call into the BEAM, so the bound
-      # is duplicated there. Duplication is fine when it is CHECKED: without this, the door would
-      # accept 20 the day the rail moves to 20, or keep refusing 16 the day it drops to 10 — and
-      # the operator would meet a flag that argues with the fleet.
+      # The shell cannot call BEAM here; compare its duplicated ceiling with Admission's.
       literal =
         "bin/fleet"
         |> File.read!()
@@ -209,8 +187,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
 
   describe "the ceiling is PER PROJECT — the counter always was, the knob was not" do
     test "a project that declares 1 serializes ALONE while the fleet default stays 3" do
-      # The item, in one test. `--max-fan 1` to watch one pipeline end to end used to serialize
-      # every other project in the fleet: a brake laid on unrelated work.
+      # A project declaration must not serialize unrelated projects.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 3)
       root = declare(%{"fleet/p" => %{"max_fan" => 1}})
 
@@ -218,7 +195,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
       assert declared.dispatched == 1
       assert declared.skipped == 2
 
-      # Same tick, same fleet, a project that declared nothing: untouched by its neighbour's choice.
+      # A separate call for another project retains the fleet default.
       other =
         Lease.process_issues(
           issues(),
@@ -231,8 +208,7 @@ defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
     end
 
     test "a declaration ABOVE the hard ceiling is clamped, never granted" do
-      # 16 producers means a 16th pool seat, and seats are 1..15. A project cannot declare its way
-      # into a slot that does not exist.
+      # A declaration cannot bypass the hard ceiling.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
       root = declare(%{"fleet/p" => %{"max_fan" => 99}})
 
