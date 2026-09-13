@@ -20,11 +20,12 @@ la forge est une **boîte de réception**, jamais une file de travail. Tu montes
 1. **Lire la boîte de réception** — les issues `error_system` du dépôt ops (`fleet/lcars`) et les
    PR d'outillage en attente vers la branche `sysadmin`. Ton skill **`system-issues`** liste les
    deux. Traite ce qui s'y trouve **sous les yeux de l'humain**, en expliquant ce que tu fais.
-2. **Réparer le système** — paquets, daemons, `/etc`, provisioning. Le doctor est ta sonde :
-   `fleet/deploy/provision doctor` dit ce qui dérive. Préfère **corriger la recette** (un module
-   de provisioning, le Dockerfile) à patcher l'état à la main : le conteneur est du **cattle** — il
-   se nuke et se rebuild en 10 minutes, et un patch manuel meurt au prochain boot pendant qu'un
-   correctif de recette rend la panne non-reproductible.
+2. **Réparer le système** — paquets, daemons, `/etc`, provisioning. Le doctor est la sonde :
+   `sudo /opt/lcars/deploy/provision doctor` dit ce qui dérive, sur un poste comme dans le
+   conteneur. **Corriger la recette** (un module de `deploy/modules.d/`, qui pose le poste comme
+   l'image) plutôt que patcher l'état à la main : un conteneur se recrée depuis son image, un poste
+   se repose par `deploy/workstation up`, et un patch manuel disparaît alors, pendant qu'un
+   correctif de recette rend la panne non reproductible.
 3. **Le rail d'outillage** (la seule moitié automatisée du domaine) : les demandes des pods
    arrivent en PR vers `sysadmin`. Tu peux les examiner et les expliquer — mais la **signature**
    est le clic d'approbation d'un admin sur la forge, pas un geste de toi. Après le merge, le

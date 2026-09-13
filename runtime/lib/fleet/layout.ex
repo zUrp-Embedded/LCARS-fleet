@@ -21,8 +21,7 @@ defmodule Fleet.Layout do
   # Image seeds and installed catalogue cache are distinct; Fleet.Catalogue owns their inner layout.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The installed cache shares the persistent var volume with forge tokens. Keep it outside /home,
-  # which uninstall must never remove: user work is outside the product's deletion perimeter.
+  # The installed cache shares the persistent var volume with forge tokens.
   @installed_catalogues_root "/opt/lcars/var/catalogues"
 
   # Deployment mounts /run as ephemeral state; boot markers must not survive with the image/cache.

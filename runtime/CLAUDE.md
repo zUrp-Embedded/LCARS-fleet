@@ -18,7 +18,7 @@ Une app Elixir/OTP unique, `:lcars_fleet`, qui lance, surveille et récolte des 
 seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de vérité.
 
 `runtime/` est un logiciel distinct de `deploy/`, l'installeur, qui a sa propre porte
-(`deploy/gate.sh`) et son propre `CLAUDE.md`. Rien ici ne parle de l'installation.
+(`deploy/gate.sh`) et sa carte (`deploy/README.md`). Rien ici ne parle de l'installation.
 
 ## Où sont les choses
 

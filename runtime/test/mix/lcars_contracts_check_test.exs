@@ -408,7 +408,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert result.status == :fail
       assert result.note =~ "unreadable"
-      assert result.note =~ "the entrypoint only covers docker"
+      assert result.note =~ "container/init.sh only covers the container volumes"
     end
   end
 

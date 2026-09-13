@@ -85,7 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   end
 
   # Runtime omits the ubiquitous lib prefix in test paths; deploy retains lib alongside
-  # modules.d/docker/deps. Named zones need no corresponding source directory.
+  # modules.d and docker. Named zones need no corresponding source directory.
   @test_zones %{
     "test" => ~w(support fixtures integration crosscutting probes),
     "../deploy/tests" => ~w(transverse)

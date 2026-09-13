@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Compare forge-identity logins in both directions, including ReservedSeats.
-  # PROV_ROLES overrides the token minter's default during provisioning.
+  # PROV_ROLES is the floor the workstation installer hands the token minter (LCARS_ROLES).
   @doc false
   @spec check_roles_provisioning_locked(String.t()) :: Support.result()
   def check_roles_provisioning_locked(root) do
@@ -110,8 +110,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
            "its account"},
         {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
-         "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
-           "absent here gets no token on a fresh fleet)"}
+         "add/remove the role in PROV_ROLES (the floor the workstation installer hands the " <>
+           "token minter as LCARS_ROLES; the minter adds the release roster and the installed " <>
+           "catalogues' rosters, and the container passes no floor)"}
       ]
 
     {lists, skipped} = split_out_of_scope(lists)
@@ -296,7 +297,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
               evidence: [Path.relative_to(module, root)],
               note:
                 "the provision module's `2775` zone table is unreadable — guard fail-closed " <>
-                  "(this is the creator on every substrate; the entrypoint only covers docker)"
+                  "(25-directories is the creator on every substrate; container/init.sh only " <>
+                  "covers the container volumes)"
             }
 
           {expected, at_boot, on_every_substrate} ->
@@ -314,8 +316,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
               evidence: missing,
               note:
                 "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
-                  "miroirs — le module provision (tout substrat) et l'entrypoint docker (l'ordre " <>
-                  "de boot l'exige avant `provision apply`) : #{Enum.join(expected, ", ")}"
+                  "miroirs — le module 25-directories (tout substrat) et container/init.sh (les " <>
+                  "volumes du conteneur, au boot) : #{Enum.join(expected, ", ")}"
             }
         end
     end
