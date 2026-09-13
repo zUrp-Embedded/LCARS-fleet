@@ -6,10 +6,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
   alias Fleet.Pilot.WakeRecovery
 
   test "fail :unreachable (slow, not proven absent) → DEFER: no re-roll, no registry, no escalation" do
-    # The spawner's contract split: an info-call timeout is :unreachable, never :not_found.
-    # Re-rolling here was the destructive path — a fresh spawn on the deterministic id, then
-    # the reap of a maybe-LIVING agent mid-work. seen_before_fun flunks to prove the failure
-    # handler is never even entered.
+    # An initial info timeout must bypass both respawn and recurrence lookup.
     log =
       capture_log(fn ->
         assert {:error, :unreachable} =
@@ -83,8 +80,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
         if n == 0, do: {:error, :dead}, else: :ok
       end,
       seen_before_fun: fn _ -> false end,
-      # Registry unavailable: the note fails → the anchor is NOT set → the next recurrence will not
-      # be seen as one (no escalation). The fix: LOUD log, no lying "recorded".
+      # An unavailable registry cannot record the recovery anchor.
       note_fun: fn _, _ -> {:error, :registry_unavailable} end
     ]
 
@@ -95,17 +91,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     assert log =~ "NOT recorded"
 
-    # LE REFUTE NOMME SA PROPRE CIBLE. `capture_log/1` capture le DEVICE, pas le processus, et ce
-    # fichier est `async: true` : un voisin qui journalise « → incident recorded » pendant la
-    # fenetre faisait tomber un refute global — vert en isolation, rouge en suite complete. C'est
-    # `IncidentConsumer: pod.failed pod_1 → incident recorded` qui passait. L'intention est « CE
-    # reveil n'a pas menti en disant l'ancre posee », et le message porte la cle du wake : la
-    # nommer suffit, sans dependre de qui d'autre ecrit au meme instant.
-    #
-    # ⚠ ET IL AVAIT ETE RESSERRE JUSQU'A NE PLUS RIEN POUVOIR TOUCHER : il niait
-    # `wake:issue-N-engineer:dead → …`, qui ne correspond ni au prefixe emis (`WakeRecovery:`), ni
-    # a la cle de ce temoin (`issue-7-engineer`). Une negation qu'aucune sortie ne peut satisfaire
-    # est verte pour toujours — le contraire de ce qu'un resserrement cherche.
+    # capture_log can include concurrent writers. Match this pod's actual emitted
+    # success message: a global fragment can collide, an impossible fragment proves nothing.
     refute log =~ "issue-7-engineer : re-roll OK → incident recorded"
   end
 
@@ -134,9 +121,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     # "re-roll échoué" pins the FR user-facing sysadmin issue title (Escalation).
     assert title =~ "re-roll échoué"
 
-    # fix F-RUN-2: create_issue WITHOUT label (the Gitea POST requires int IDs, not names → 422);
-    # the error_system label is set AFTERWARDS by NAME via add_label. Et sans projection du siege
-    # (ni config ni fichier sur ce banc), AUCUNE option assignees — omise, jamais nil (B1-A).
+    # Creation takes integer label IDs; add_label resolves names separately.
+    # With no seat projection, assignment is omitted in this fixture.
     refute Keyword.has_key?(iopts, :labels)
     refute Keyword.has_key?(iopts, :assignees)
     assert_received {:label, "fleet/lcars", 1, "error_system"}
@@ -167,14 +153,13 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     opts = [
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> true end,
-      # failure on BOTH attempts (with assignee + label-only fallback) = forge really down
+      # The create stub always fails; this case does not assert retry count.
       create_issue_fun: fn _r, _t, _b, _o -> {:error, :forge_down} end
     ]
 
     log =
       capture_log(fn ->
-        # NO issue opened → the return SAYS the failure, not a reassuring `:escalated`; the caller
-        # does not believe a sysadmin was notified when the alarm never went through.
+        # This stub reports failure; successful escalation must not be returned.
         assert {:error, {:escalation_failed, :forge_down}} =
                  WakeRecovery.wake(
                    "pod-down",
@@ -191,8 +176,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     pid = self()
 
     opts = [
-      # L'assignee vient desormais de la PROJECTION (ou d'opts) — ce temoin teste le RETRY, donc il
-      # en fournit un explicitement.
+      # Supply an assignee explicitly so this case exercises the retry branch.
       assignee: "un-admin",
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> true end,
@@ -215,9 +199,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     assert_received :with_assignee
 
-    # fix F-RUN-2: the fallback (assignee absent) creates WITHOUT assignee NOR label; the
-    # error_system label is set AFTERWARDS by NAME via add_label — on issue 7 actually created by
-    # the fallback.
+    # The fallback omits assignment and creation labels; label the returned issue.
     assert_received {:fallback, "fleet/lcars", fb_opts}
     refute Keyword.has_key?(fb_opts, :labels)
     refute fb_opts[:assignees]

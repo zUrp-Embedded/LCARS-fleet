@@ -1,20 +1,25 @@
 defmodule Fleet.Pilot.WakeRecovery do
   @moduledoc """
-  Recovery policy for failed pod wakes. Recurrent failures escalate directly;
-  first failures re-roll once, record successful recovery, and escalate a failed
-  repair. `:unreachable` is not proof of death and never triggers destructive re-roll.
+  Recovers failed wakes: known signatures escalate directly; first failures invoke
+  respawn once, then retry wake. A successful retry attempts to record the incident.
+  An initial :unreachable is not proof of death and returns without respawning.
+
+  Escalation bypasses registry cooldown and relies on Escalation's open-issue
+  readback. Callback exceptions propagate; recovery does not schedule a future retry.
   """
   require Logger
 
   alias Fleet.Pilot.IncidentRegistry
 
   @doc """
-  Wakes `pod_id` with recovery. `respawn_fun/0` = the type-specific re-spawn injected by the caller
-  (gatekeeper reboot; worker re-spawn). Prerequisite: the brief is ALREADY queued.
+  Wakes a pod whose brief is already queued. The caller supplies respawn_fun/0;
+  its return is ignored before re-waking the same pod ID.
 
-  Returns `:ok` | `{:error, term()}` (from the re-wake) | `{:error, {:escalated, reason}}` (sysadmin issue
-  ACTUALLY opened) | `{:error, {:escalation_failed, reason}}` (recurrence/re-roll failed but the issue
-  opening failed — forge down? — NO issue exists: HONEST return, not a reassuring `:escalated`).
+  :ok means wake succeeded, even if recording the recovered incident failed (logged).
+  Escalation success returns {:error, {:escalated, original_reason}}. Escalation
+  failure returns {:error, {:escalation_failed, cause}}; a created issue can still
+  exist when adding its discovery label failed. Initial :unreachable is returned
+  directly; any unsuccessful second wake attempts escalation.
   """
   @spec wake(String.t(), (-> any()), keyword()) :: :ok | {:error, term()}
   def wake(pod_id, respawn_fun, opts \\ [])
@@ -25,10 +30,7 @@ defmodule Fleet.Pilot.WakeRecovery do
       :ok ->
         :ok
 
-      # UNREACHABLE (the pod's info call timed out) is not a dead pod: re-rolling here would be
-      # the destructive path — a fresh spawn on the deterministic id, then the reap of a
-      # maybe-LIVING agent mid-work. DEFER: a slow pod self-corrects at the next tick, and
-      # a truly stuck one is the response-deadline's job, never a blind respawn.
+      # A timed-out info call does not prove death; respawn could destroy a live agent.
       {:error, :unreachable} = err ->
         Logger.warning(
           "WakeRecovery: #{pod_id} UNREACHABLE (slow, not proven absent) → deferred, no re-roll"
@@ -63,9 +65,8 @@ defmodule Fleet.Pilot.WakeRecovery do
   defp re_wake(pod_id, reason, sig, wake_fun, note_fun, opts) do
     case wake_fun.(pod_id) do
       :ok ->
-        # The incident anchor MUST persist: it is what makes the NEXT occurrence of `sig` a RECURRENCE
-        # (→ direct escalation). A swallowed note-failure + a log claiming "recorded" would be a lie —
-        # the recurrence would be seen as a first-time wake and re-rolled forever, no escalation.
+        # A failed note must not be logged as recorded. WAL failure can still leave
+        # the registry's in-memory anchor intact, despite the broad log below.
         case note_fun.(sig, reason) do
           :ok ->
             Logger.info("WakeRecovery: #{pod_id} : re-roll OK → incident recorded (#{sig})")
@@ -88,11 +89,8 @@ defmodule Fleet.Pilot.WakeRecovery do
     end
   end
 
-  # Opens the sysadmin issue AND propagates the OBSERVED result (never `:escalated` out of optimism):
-  #   - issue opened (`{:ok, _}`) → `{:error, {:escalated, reason}}` (wake failed + alarm raised);
-  #   - opening failed (`{:error, _}`, forge down?) → LOUD log + `{:error, {:escalation_failed, _}}`:
-  #     NO issue exists, the caller must not believe a sysadmin was notified.
-  # Shared by the 2 escalation gates (direct recurrence / exhausted re-roll) — same propagation.
+  # Preserve escalation's result separately from wake failure. Label failure can
+  # leave an existing issue despite this branch's unconditional log wording.
   defp escalate_or_signal(kind, pod_id, reason, sig, opts) do
     case IncidentRegistry.escalate(kind, pod_id, reason, sig, opts) do
       {:ok, _num} ->
