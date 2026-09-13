@@ -30,21 +30,6 @@ setup() {
   grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_MONTEE' "$DEPLOY/workstation"
 }
 
-@test "C1 : le module HONORE la demande, meme quand FORGE_BASE_URL est posee" {
-  # C'est le seul apport du drapeau sur ce rail : la montee est deja le defaut sans URL. S'il ne
-  # gagnait pas sur `FORGE_BASE_URL`, il resterait exactement aussi inerte qu'avant.
-  local mod="$MODS/48-forge-host.sh"
-  local bloc; bloc="$(sed -n '/^if \[\[ "\${PROV_FORGE_MONTEE/,/^fi$/p' "$mod")"
-  [ -n "$bloc" ]
-  # la surcharge est TESTEE EN PREMIER, sinon `FORGE_BASE_URL` la court-circuite
-  local n_montee n_url
-  n_montee="$(grep -n 'PROV_FORGE_MONTEE' "$mod" | head -1 | cut -d: -f1)"
-  n_url="$(grep -n 'elif \[\[ -n "\${FORGE_BASE_URL' "$mod" | head -1 | cut -d: -f1)"
-  [ -n "$n_montee" ]
-  [ -n "$n_url" ]
-  [ "$n_montee" -lt "$n_url" ]
-}
-
 @test "C1 : la banniere du POSTE ne promet pas ce que fait le CONTENEUR" {
   local bloc; bloc="$(sed -n "/Installation dans ce système.*LCARS s'installe/,/Pour installer en conteneur/p" "$PORTE")"
   [ -n "$bloc" ]

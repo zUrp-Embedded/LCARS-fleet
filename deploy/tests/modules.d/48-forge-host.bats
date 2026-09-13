@@ -93,6 +93,13 @@ mod() {
   [[ "$output" != *"http://localhost:21000"* ]]
 }
 
+@test "avec --bench (PROV_FORGE_MONTEE=1), un FORGE_BASE_URL résiduel ne détourne pas le module : la forge est celle du poste" {
+  PROV_FORGE_MONTEE=1 FORGE_BASE_URL=http://ailleurs:9 STUB_PORTS="0.0.0.0:21000->3000/tcp" mod check
+  [[ "$output" == *"http://127.0.0.1:21000"* ]]
+  refute_out "forge fournie" <<<"$output"
+  refute_out "ailleurs" <<<"$output"
+}
+
 @test "une forge fournie s'annonce à FORGE_PUBLIC_URL quand elle est donnée, jamais à l'adresse du poste" {
   rm -f "$BIN/docker"
   FORGE_BASE_URL="http://gitea:3000" FORGE_PUBLIC_URL="https://forge.lan/" mod apply

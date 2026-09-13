@@ -171,6 +171,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 
   local up_line ensure_line
   ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/container" | head -1 | cut -d: -f1)"
-  up_line="$(grep -n "compose up -d" "$DEPLOY/container" | head -1 | cut -d: -f1)"
+  up_line="$(grep -n "compose_pose up -d" "$DEPLOY/container" | head -1 | cut -d: -f1)"
   [ "$ensure_line" -lt "$up_line" ]
 }
