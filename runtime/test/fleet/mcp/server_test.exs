@@ -1,13 +1,8 @@
 defmodule Fleet.MCP.ServerTest do
   @moduledoc """
-  `Fleet.MCP.Server` = ADR-C boot guard (DN D7-bis: NEVER started pod-side).
-  **Uniquely named** instances per test (test-seam `:name`) → no coupling to the
-  umbrella singleton (elixir-thinking: fix the global coupling). `async: false`
-  (shared umbrella Fleet.PubSub).
-
-  The husk API `register_channel`/`list_channels`/`stop` was removed (F049 —
-  dead push channel, 0 prod callers); only the containment guard +
-  `boot_environment/1` remain.
+  Boot-environment guard using uniquely named processes. Serialized because tests
+  modify application configuration. Default host startup relies on config/test.exs;
+  only :pod is refused by start_link, as distinct from an exclusive :host allowlist.
   """
   use ExUnit.Case, async: false
 
@@ -18,8 +13,7 @@ defmodule Fleet.MCP.ServerTest do
   test "ADR-C conformance: start_link refused pod-side (boot_environment :pod)" do
     name = uniq()
     assert {:error, :forbidden_in_pod} = Server.start_link(boot_environment: :pod, name: name)
-    # This unique name was never registered → the guard did short-circuit
-    # BEFORE any process start (conformance proven without global coupling).
+    # A unique name avoids observing the application's already-running singleton.
     assert Process.whereis(name) == nil
   end
 
@@ -39,10 +33,7 @@ defmodule Fleet.MCP.ServerTest do
   end
 
   test "boot_environment/1: FAIL-CLOSED default :pod (neither opts nor app env → refuses, never permissive :host)" do
-    # Soft-fallback #6: the default used to be `:host` (permissive) — a boot that does NOT inject `:pod`
-    # (config drift) started the system MCP server. Fail-closed: the ABSENCE of declaration → `:pod`
-    # (refuses). The host declares itself POSITIVELY (runtime.exs on the daemon, config/test.exs in test);
-    # a boot that does not is refused, never started by omission.
+    # With both configuration sources absent, the :pod default must refuse startup.
     saved = Application.fetch_env(:lcars_fleet, :mcp_boot_environment)
     Application.delete_env(:lcars_fleet, :mcp_boot_environment)
 

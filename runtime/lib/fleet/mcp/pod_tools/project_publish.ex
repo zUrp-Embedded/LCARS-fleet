@@ -1,22 +1,17 @@
 defmodule Fleet.MCP.PodTools.ProjectPublish do
   @moduledoc """
-  ASYNC worker behind the `project_publish` tool.
+  Worker body for project_publish tasks under Fleet.MCP.PublishTaskSupervisor.
+  The caller enqueues work so whole-history rewriting does not block its tool turn.
 
-  The tool call itself only ENQUEUES (a Task under `Fleet.MCP.PublishTaskSupervisor`) and returns
-  `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
-  so the pod's turn must not block on it. This module IS that Task's body.
+  Reads the per-human ~/.lcars/publish/<owner__name>.json binding written by lcars
+  approve, then calls publish-rail.sh. The rail force-pushes a rolling branch and
+  opens/updates a PR/MR when its CLI is available, otherwise returns a manual URL.
+  External authentication stays with host CLI/credential helpers. The internal
+  forge token is obtained from Authority and written to a temporary file.
 
-  It resolves the project's PER-HUMAN publish binding (`~/.lcars/publish/<org__name>.json`, written by
-  `lcars approve`), then runs the host-side rail `bin/publish-rail.sh` — which force-pushes a rolling
-  branch and, if the forge CLI is present+authed (Tier 1), opens/updates the PR/MR; otherwise (Tier 2)
-  it hands back a ready-to-open compare/new-MR URL. NO EXTERNAL TOKEN IS HANDLED here or by the rail:
-  auth is the forge's official CLI (`gh`/`glab`, the wired git credential helper) or the operator's own
-  wired helper — nothing token-shaped ever enters a pod, an argv, or a config we write.
-
-  The outcome is emitted on the Bus (lossy/observability, `safe_emit` — a missing subscriber never
-  crashes the Task): `project_publish.done` with the url and a `manual` flag (true = Tier 2, the url is a
-  "PR/MR to open" link, not an opened request), or `project_publish.failed` with the reason. Not-linked /
-  missing forge config / a non-zero rail / a raise all land as `.failed`, never a crash.
+  Reports done/failed through the lossy Bus, including requester and manual-URL
+  status. Returned failures and rescued exceptions become failed events; throws
+  and exits are not caught, and publication is not rolled back by a reporting failure.
   """
 
   require Logger
@@ -27,12 +22,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   @rail_timeout_ms 15 * 60 * 1000
 
   @doc """
-  Runs one publish of `repo` (internal `owner/name`) to its linked external forge, start to finish.
-
-  Meant to be the body of a `Fleet.MCP.PublishTaskSupervisor` Task (the tool enqueues it). Always
-  returns `:ok` and reports the outcome ONLY on the Bus (`project_publish.done` / `.failed`) — every
-  failure path, including a raise, is turned into a `.failed` event, never a crash that the supervisor
-  would restart into a re-publish.
+  Runs a linked publication and reports its outcome through the Bus, returning :ok
+  on handled paths. Rescues exceptions; cleanup is in do_run's normal/error branches,
+  not an after block, so an exception can bypass cleanup.
   """
   @spec run(String.t(), String.t() | nil) :: :ok
   def run(repo, requester \\ nil) when is_binary(repo) do
@@ -82,10 +74,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   end
 
   @doc """
-  The per-human binding filename key for an internal `owner/name` repo: **org-qualified** (`owner__name`)
-  so two projects with the same name in different orgs (`fleet/demo`, `archives/demo`) do NOT collide on
-  one `~/.lcars/publish/<key>.json`. `bin/lcars` (`cmd_approve`) derives the SAME key (`${repo//\\//__}`);
-  the write and the read miss each other if the two ever diverge.
+  Org-qualified binding filename key: owner/name becomes owner__name.
+  Must match bin/lcars cmd_approve's encoding so reads find the written binding.
   """
   @spec binding_key(String.t()) :: String.t()
   def binding_key(repo) when is_binary(repo), do: String.replace(repo, "/", "__")
@@ -103,10 +93,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
          args = rail_args(repo, b, forge_url, forge_tok, work),
          {:ok, {out, code}} <-
            Fleet.Credentials.Shell.run(rail_path(), args, timeout_ms: @rail_timeout_ms) do
-      # ⚠ LE JETON PART AVANT LE BALAYAGE, ET C'EST TOUTE LA RAISON DE CETTE LIGNE. `sweep_work`
-      # CONSERVE le repertoire en sortie 6 (« pour inspection ») : le jeton y survivrait
-      # indefiniment, dans le repertoire temporaire du systeme, sur le chemin d'ERREUR — celui que
-      # personne ne relit.
+      # Attempt token removal before sweep: exit 6 deliberately keeps the clone for inspection.
+      # Removal results are ignored, so this is not a guaranteed secret cleanup.
       _ = File.rm(Path.join(base, @token_basename))
       _ = sweep_work(base, code)
 
@@ -115,37 +103,16 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
         _ -> {:error, {:rail_exit, code, last_line(out)}}
       end
     else
-      # ⚠ ECHEC AVANT LE RAIL : `materialise_token/1` a pu creer `base` et y ecrire un SECRET. Le
-      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie — un
-      # maillon qui ECRIT quelque chose doit nettoyer son propre chemin d'erreur.
-      #
-      # La clause est TOTALE (`other`), pas `{:error, _}`. Un `else` partiel leve un
-      # `WithClauseError` sur toute forme non prevue : le maillon suivant deciderait ce que fait le
-      # chemin d'erreur du maillon precedent, et le secret resterait sur le disque.
+      # Clean partial token setup on any nonmatching with result, not just error tuples.
       other ->
         _ = File.rm_rf(base)
         other
     end
   end
 
-  # ─── LE JETON SE DEMANDE, ET IL FINIT QUAND MEME DANS UN FICHIER ──────────────────────────────
-  #
-  # Lire `FORGE_TOKEN_FILE` rendrait ici le chemin d'un jeton du magasin, ouvert par le rail SOUS
-  # L'UID DU POD — donc sous celui de l'humain, a travers un groupe dont l'appartenance est une
-  # projection refaite periodiquement.
-  #
-  # ⚠ CE LECTEUR-CI N'EST PAS DE LA MEME CLASSE QUE LES DEUX AUTRES. `lcars publish run` est tape
-  # par un humain qui voit le refus ; ici c'est un AGENT en vol, au milieu d'un workflow. Son echec
-  # touche l'arbitrage « on ne perd pas de travail », d'ou le soin sur les deux chemins de sortie.
-  #
-  # Le fichier reste parce que `publish-rail.sh` prend un CHEMIN. Passer le jeton en argument le
-  # mettrait dans `/proc/<pid>/cmdline`. Ce fichier-ci vit dans un repertoire `0700` que ce process
-  # vient de creer, porte `0600`, et meurt avec le geste.
-  #
-  # ⚠ `:exclusive` A L'ECRITURE : le fichier doit etre NEUF. Sans ce mode, un fichier pose la par un
-  # tiers — meme chemin, deja ouvert par lui — se verrait ecraser d'un jeton frais qu'il tiendrait
-  # encore. `base` est unique par run, donc le cas est theorique ; ecrire un secret sur un
-  # descripteur qu'on n'a pas cree ne se fait pas sur la foi d'un « ca n'arrivera pas ».
+  # Request the internal forge token from Authority rather than reading a projected store path.
+  # The rail accepts a filename: passing the token itself in argv would expose it in cmdline.
+  # Use a 0700 parent, exclusive file creation and 0600 mode; cleanup follows in do_run.
   defp materialise_token(base) do
     with {:ok, account} <- forge_account(),
          {:ok, token} <- ask_authority(account),
@@ -175,20 +142,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     end
   end
 
-  # NOBODY ELSE SWEEPS, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail
-  # refuses a path that already exists (phase 1, `lcars approve`, sweeps its own with
-  # `trap 'rm -rf' EXIT`). Without this, every publish leaves a COMPLETE rewritten clone of the
-  # project in the system temp dir, forever: the size of the repository, once per publication. A
-  # unique path per run satisfies the rail's refusal and answers nothing about the previous one.
-  #
-  # A COMPOUND EFFECT WORTH NAMING: `System.unique_integer/1` is unique WITHIN a runtime instance and
-  # restarts low after a reboot. With nothing ever swept, a path left by a pre-restart run can be
-  # drawn again — and the rail then refuses with "--work must be a fresh path", failing the publish
-  # for a reason with no relation to publishing.
-  #
-  # EXIT 6 IS THE EXCEPTION, and it is deliberate on the rail's side: it means the rewrite lost its
-  # determinism, and it leaves the clone "pour inspection". Sweeping it would erase the only evidence
-  # of the one failure nobody can diagnose after the fact.
+  # The caller owns --work cleanup. Exit 6 preserves evidence of a nondeterministic rewrite.
+  # Unique integers are VM-local; failed cleanup can leave paths that collide after restart.
   @keep_work_on_exit 6
 
   @doc false
@@ -197,15 +152,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   def sweep_work(_work, @keep_work_on_exit), do: :kept_for_inspection
   def sweep_work(work, _code), do: File.rm_rf(work)
 
-  # The per-human binding is the source of truth for WHERE this project publishes.
-  #
-  # ⚠ `base` EST UNE CLE REQUISE. Un `Map.get(b, "base") || "main"` ici ferait publier
-  # silencieusement contre `main` toute liaison ecrite par une version anterieure d'`approve`,
-  # editee a la main ou tronquee — quelle que soit la branche par defaut de la destination. Et le
-  # defaut a DEUX entrees independantes, l'ecriture (`approve`) et la lecture (ici) : en fermer une
-  # seule laisse le rail casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une
-  # liaison : elle est refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une
-  # supposition.
+  # Require an explicit destination base: defaulting to main could silently target the wrong branch.
+  # Missing or empty required strings return binding_incomplete.
   defp read_binding(slug) do
     path = Path.join([System.user_home!(), ".lcars", "publish", "#{slug}.json"])
 
@@ -263,9 +211,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     ]
   end
 
-  # publish-rail.sh is co-located with the launchers in bin/ (install manifest). The bin dir is the
-  # one already resolved for the launcher; reading its config keeps a single source of the bin
-  # location without an MCP->Spawner call (config read, not a boundary edge).
+  # Resolve the co-installed rail from launcher configuration without an MCP-to-Spawner call.
   defp rail_path do
     launcher =
       Application.get_env(
@@ -277,22 +223,14 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     Path.join(Path.dirname(launcher), "publish-rail.sh")
   end
 
-  # Le repertoire PORTEUR d'un run, unique. Le clone est `<base>/clone` et le jeton `<base>/.forge-token`.
-  #
-  # ⚠ CE N'EST PAS `--work` LUI-MEME, ET LA DISTINCTION COMPTE : le rail REFUSE un `--work` qui
-  # existe deja. Rendre ce chemin directement au rail ET y ecrire le jeton avant de l'appeler
-  # ferait echouer chaque publication sur « --work doit etre un chemin neuf ». D'ou le niveau
-  # intermediaire : le repertoire est a nous, le chemin que le rail recoit reste vierge.
+  # Keep the token in the parent and pass its absent clone child as --work;
+  # the rail refuses a work path that already exists.
   defp fresh_work(slug) do
     Path.join(System.tmp_dir!(), "lcars-publish-#{slug}-#{System.unique_integer([:positive])}")
   end
 
-  # The rail prints the url after `-> ` on success. Two shapes:
-  #   Tier 1 auto: "PR/MR ouverte -> <pull/MR url>" / "actualisee ... -> <pull/MR url>"
-  #   Tier 2 degraded: "branche ... poussee -- ouvre la PR/MR ici -> <compare|merge_requests/new url>"
-  # "rien a publier" is a legitimate no-op success with no url. `manual` is inferred from the URL SHAPE
-  # (compare / new-MR forms), not from prose: the rail's Tier-2 outcome is a "one more click", relayed
-  # to the pod as such rather than as an opened request.
+  # Read the last -> URL. Compare/new-MR URL shape means manual completion;
+  # a successful no-op has no URL. This does not verify the request remotely.
   defp parse_result(out) do
     url = parse_url(out)
     {url, manual_url?(url)}
@@ -320,14 +258,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     out |> String.split("\n", trim: true) |> List.last() |> Kernel.||("")
   end
 
-  # ⚠ REND `:ok` EXPLICITEMENT, ET C'EST CE QUI REND LE `@spec` DE `run/2` VRAI. `Bus.safe_emit/4`
-  # rend `:ok | {:error, _}` : une branche de `run/2` qui se termine dessus fait rendre CE type-la a
-  # la fonction, alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec absent —
-  # dialyzer le dit en `unmatched_return`, le lecteur, lui, le croit.
-  #
-  # Le rejet est DELIBERE : le Bus est le rail lossy (doctrine D1), `run/2` rapporte son issue par
-  # evenement et ne doit JAMAIS crasher — un raise ici ferait redemarrer la Task, donc re-publier.
-  # `safe_emit` loggue deja ses propres echecs.
+  # Bus delivery is lossy; discard its return explicitly to preserve run's :ok contract.
   @spec safe_emit(atom(), map(), String.t()) :: :ok
   defp safe_emit(type, payload, repo) do
     _ = Bus.safe_emit(:mcp, type, [payload: payload], context: "ProjectPublish: #{repo}")

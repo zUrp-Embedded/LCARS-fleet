@@ -4,14 +4,9 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
   alias Fleet.MCP.PodTools.Probe
 
   @moduledoc """
-  Ce que le juge peut demander, et ce qu'il ne peut PAS choisir.
-
-  `async: false` : ces tests posent les coutures d'application (`:mcp_pod_resolver`,
-  `:mcp_probe_forge_client`, `:forge_actions`), qui sont globales au nœud.
-
-  `:forge_actions` est la seule sans prefixe de proprietaire, et c'est deliberе : elle est PARTAGEE
-  avec `Fleet.Pilot.MergeAndPromote`, pour que la sonde et sa verification ne puissent pas rendre
-  deux avis differents en test. Les deux sites le disent.
+  Probe subject derivation, declaration parsing and result preservation with injected
+  forge callbacks. Serialized because :mcp_pod_resolver, :mcp_probe_forge_client and
+  the shared :forge_actions configuration are node-global.
   """
 
   # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
@@ -86,8 +81,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, ForgeStub)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, ActionsStub)
 
-    # Un juge de livrable : lié par `repo_id`, JAMAIS par `repo` — c'est l'état réel d'un pod
-    # dispatché (le `slot_key` du spawner se clef sur l'id, cf. `Fleet.Spawner`).
+    # Numeric binding exercises dispatched pods that carry repo_id without a repository name.
     Fleet.TestEnv.put_env_restoring(
       :lcars_fleet,
       :mcp_pod_resolver,
@@ -131,8 +125,6 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "un juge NE PEUT PAS choisir sa base : ses inputs n'écrasent pas ceux du rail" do
-      # ⚠ LE TEST QUI PORTE LE §10c. Un juge qui nommerait sa base nommerait celle qui l'arrange, et
-      # la mesure censée le contraindre serait redevenue son opinion.
       assert {:ok, _} =
                Probe.run(judge_pod_id(), "test-relevance", %{
                  "base_sha" => "la-base-qui-m-arrange",
@@ -176,12 +168,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
   end
 
-  # ═══ LE TROU QUI A LAISSÉ PASSER DEUX FAUTES ═══
-  #
-  # `declarations/3` — la lecture du `CLAUDE.md` du projet — n'avait AUCUN test. Les tests ci-dessus
-  # injectent un `CLAUDE.md` unique et bien formé, donc ils exerçaient le parseur sur le seul cas
-  # où il ne pouvait pas se tromper. Une relecture adversariale y a trouvé deux fautes, toutes deux
-  # du même genre : le parseur lisait CONFIANT quelque chose qui n'était pas la déclaration.
+  # Declaration cases below cover ambiguous headings and fenced examples beyond the nominal stub.
   describe "declarations/3 — ce que le parseur lit, et ce qu'il refuse de lire" do
     defp md_forge(content) do
       Module.create(
@@ -201,11 +188,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "⚠ LE TITRE DANS UN BLOC DE CODE N'EST PAS UN TITRE" do
-      # LA FAUTE CRITIQUE, mesurée sur le VRAI template : son `CLAUDE.md` documente `## Harness` et
-      # en montre un exemple dans un bloc ``` dont la ligne `## Harness` est en colonne 0. Le
-      # parseur s'y accrochait et rendait `"tests/ ``` **À quoi elle sert.** La sonde …"` — l'exemple
-      # de la doc PLUS toute la prose qui suit. Un projet qui écrit sa section SOUS la
-      # documentation, geste naturel, n'était jamais lu.
+      # The template documents Harness inside a fence; that example must not become a declaration.
       tpl = File.read!(Path.join(File.cwd!(), "priv/catalogue/project_template/main/CLAUDE.md"))
 
       # Le template SEUL ne déclare rien : c'est de la documentation, pas une déclaration.
@@ -218,9 +201,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "⚠ `## Test suite` N'EST PAS `## Test` — le titre est le nom, seul sur sa ligne" do
-      # La deuxième faute, et mon commentaire affirmait exactement l'inverse de la vérité : `\b`
-      # tombe entre `t` et l'espace, donc `## Test paths` MATCHAIT. Un projet portant `## Test
-      # suite` avant son `## Test` faisait tourner la sonde avec la mauvaise commande.
+      # A word boundary after Test also matches Test suite; require the entire heading.
       d = declared("## Test suite\n\nsh faux.sh\n\n## Test\n\nsh vrai.sh\n")
       assert d.test_cmd == "sh vrai.sh"
 
@@ -230,18 +211,13 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "TÉMOIN — un corps ENCADRÉ reste lisible" do
-      # ⚠ SANS CE TÉMOIN, LA CORRECTION SE SERAIT MANGÉ ELLE-MÊME. Ma première version masquait les
-      # blocs AVANT la recherche, ce qui effaçait aussi le CORPS d'une section légitimement
-      # encadrée — `## Test` suivi d'un bloc contenant `mix test`, forme parfaitement normale. Le
-      # titre se cherche hors des blocs ; le corps se rend tel qu'il est écrit.
+      # Ignoring fenced headings must not erase a legitimate fenced section body.
       d = declared("## Test\n\n```\nmix test\n```\n\n## Doc\n\nx\n")
       assert d.test_cmd == "mix test"
     end
 
     test "un `## Test` MULTI-LIGNES reste un script, il n'est pas aplati" do
-      # ⚠ LE CORPS ÉTAIT JOINT PAR DES ESPACES : `make build` + `make test` rendait
-      # `"make build make test"`, UNE commande avec des arguments. La sonde tournait et son verdict
-      # portait sur autre chose que la suite du projet.
+      # Preserve two commands: flattening newlines would produce make build make test.
       d = declared("## Test\n\nmake build\nmake test\n\n## Doc\n\nx\n")
       assert d.test_cmd == "make build\nmake test"
     end
@@ -279,9 +255,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "`blind` reste `blind` et `inapplicable` reste `inapplicable`" do
-      # ⚠ CE MODULE NE SAIT PAS CE QUE « blind » VEUT DIRE, ET C'EST VOULU. Adoucir `blind` en
-      # « pas concluant » ou durcir `inapplicable` en `blind` serait décider à la place du juge —
-      # et `inapplicable` n'est SURTOUT pas un vert : c'est l'absence de mesure.
+      # Preserve the measured verdict; inapplicable is absence of measurement, not success.
       assert Probe.facts("LCARS-PROBE verdict=blind")["verdict"] == "blind"
 
       inapp = Probe.facts("LCARS-PROBE verdict=inapplicable reason=head-suite-red")
@@ -305,9 +279,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
 
     test "run ANNULÉ sans le moindre fait → l'absence de verdict est EXPLICABLE" do
-      # ⚠ SANS L'ÉTAT DU RUN, DEUX FAITS OPPOSÉS ONT LA MÊME FORME : « la sonde a été interrompue »
-      # et « la sonde a tourné et n'a rien conclu » rendaient tous deux une map sans `verdict`. Le
-      # juge ne pouvait pas les séparer, et l'un est une panne quand l'autre est une mesure.
+      # Run state distinguishes interruption from a probe that completed without facts.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Cancelled)
 
       assert {:ok, facts} = Probe.run(judge_pod_id(), "test-relevance")

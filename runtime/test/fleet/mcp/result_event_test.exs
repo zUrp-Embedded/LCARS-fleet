@@ -1,12 +1,8 @@
 defmodule Fleet.MCP.ResultEventTest do
   @moduledoc """
-  Event-driven completion — on `submit_result`, the `fleet_task_queue` **broker**
-  broadcasts `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` on `fleet.events`.
-
-  `pod.ex` (spawner) subscribes to it to trigger its completion WITHOUT reading fleet_mcp
-  directly. Here we prove the emission via the `submit_result` tool (PURE, no claude).
-  The pod identity comes from the `state` (`%{pod_id: pod}`) — carried by the socket acceptor
-  in prod, never by the arguments.
+  Direct submit_result calls through PodTools must broadcast TaskQueue completion
+  with pod identity, correlation and business payload. Spawner consumes that event
+  without calling MCP; its handling and socket authentication are outside these tests.
   """
   use ExUnit.Case, async: false
 
@@ -56,11 +52,8 @@ defmodule Fleet.MCP.ResultEventTest do
   end
 
   test "submit_result with work_item_id NESTED in the payload (not top-level) → accepted + closes the brief" do
-    # Live (e2e) regression: a judge agent puts its work_item_id INSIDE the verdict payload instead of
-    # the top-level parameter. The broker correlates pod_id ↔ work_item_id wherever it sits → the
-    # deliverable must NOT be lost (otherwise the review step_run times out → escalation → frozen
-    # pipeline, observed on a qualifier endlessly retrying `payload:{decision, work_item_id}` against
-    # `:work_item_id_required`).
+    # Judges can place the correlator inside payload; accepting this shape prevents
+    # repeated refusals from stalling completion. PodTools still requires an explicit id.
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, task} = TaskQueue.enqueue(pod, %{brief: "x"})
     tid = task.id
@@ -95,9 +88,7 @@ defmodule Fleet.MCP.ResultEventTest do
   end
 
   test "submit_result with work_item_id NEITHER top-level NOR in the payload → :work_item_id_required (guard held)" do
-    # The placement tolerance does NOT reopen the removed fallback: work_item_id absent from BOTH =
-    # clean refusal (otherwise the broker would fall back on "the pod's latest active" — the
-    # impersonation lever).
+    # Placement tolerance must not fall back to the pod's latest active item.
     pod = "pod-evt-#{System.unique_integer([:positive])}"
     {:ok, _task} = TaskQueue.enqueue(pod, %{brief: "x"})
     Phoenix.PubSub.subscribe(Fleet.PubSub, "fleet.events")

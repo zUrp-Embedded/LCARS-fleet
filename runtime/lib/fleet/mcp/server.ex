@@ -1,32 +1,15 @@
 defmodule Fleet.MCP.Server do
   @moduledoc """
-  Boot guard of `Fleet.MCP`: the MCP server is system-side, outside bwrap.
+  Supervised boot guard, idle after initialization. PodTools owns tool dispatch.
 
-  **Containment invariant**: the MCP server must NEVER start on the pod side (the pod
-  is a CLIENT of the server, not its host). This process, supervised by `Fleet.MCP.Supervisor`,
-  carries the guard: `start_link/1` reads `:boot_environment` (priority opts > app env >
-  default **`:pod`**, FAIL-CLOSED) and refuses (`{:error, :forbidden_in_pod}`) on `:pod` → the child
-  fails → the supervisor fails → the app does not boot. The HOST declares itself POSITIVELY
-  (`config :lcars_fleet, mcp_boot_environment: :host` in `runtime.exs` on the daemon boot, and in
-  `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
-  permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
-  ⚠ `runtime.exs` NE DÉCLARE PAS `:host` INCONDITIONNELLEMENT : il le déclare seulement sous
-  `LCARS_HOST_BOOT=1`, que `bin/fleet` exporte au démarrage du daemon. Déclaré sans condition, le
-  fichier de config parlerait DE LUI-MÊME, et la doctrine « refusé par omission » décrirait quelque
-  chose qui ne peut pas arriver — un pod exécutant le BEAM complet lirait le même fichier et s'y
-  verrait déclaré host. A pod's projected environment is
-  a whitelist (`LaunchEnv`) and carries no such variable. Cost of the hardening, stated where it
-  bites: a boot bypassing the launcher must say so (`LCARS_HOST_BOOT=1 iex -S mix`).
+  Boot environment resolves from options, then :mcp_boot_environment, then :pod.
+  start_link rejects :pod; other values currently start the process, not just :host.
+  The default therefore refuses an undeclared boot, but this is a configuration
+  guard rather than proof of process origin.
 
-  ## Why this process exists
-
-  The containment guard above is **load-bearing** (tested by the conformance):
-  this GenServer is its carrier, nothing more. The pod-facing drive
-  (`get_work_item`/`submit_result`) lives in `Fleet.MCP.PodTools`, not here;
-  there is NO push channel (the fleet is PULL-only by doctrine).
-
-  **GenServer with no business state**: the process exists to be the supervised
-  child whose `start_link` runs the guard at boot (idle thereafter).
+  runtime.exs declares host only with LCARS_HOST_BOOT=1, exported by bin/fleet and
+  absent from LaunchEnv's pod whitelist. A direct daemon boot must set it explicitly
+  (LCARS_HOST_BOOT=1 iex -S mix); config/test.exs declares host for tests.
   """
 
   use GenServer

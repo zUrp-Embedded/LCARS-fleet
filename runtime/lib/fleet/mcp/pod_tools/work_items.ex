@@ -1,33 +1,16 @@
 defmodule Fleet.MCP.PodTools.WorkItems do
   @moduledoc """
-  "drive work-item" domain logic — extracted from `Fleet.MCP.PodTools` (which keeps the
-  `handle_tool_call/3` routing table and the MCP content format).
-
-  The pod's two channels to the `Fleet.TaskQueue` broker:
-
-    * `get_work_item/1`: IN channel — the pod PULLs its brief. `%{"done" => true}` when
-      there is no brief (the pod stops); otherwise `%{"done" => false, "work_item" => %{...}}`.
-    * `submit_result/3`: OUT channel — the pod PUSHes its deliverable (`payload`), correlated
-      to ONE specific brief by the MANDATORY `work_item_id`.
-
-  Server-side mediation: the pod never touches the TaskQueue directly (the queue, its
-  schema, its storage stay invisible to the pod). This module is a **`correlation_id`
-  carrier**: `work_item_id` exposed on the `get_work_item` side, validated on the
-  `submit_result` side (the broker rejects a `work_item_id` ≠ the active brief).
-
-  Identity (which pod) DOES NOT ARRIVE here: it is resolved upstream by the socket
-  acceptor (identity IS the channel) and verified by `PodTools`'s clauses — this module
-  receives an already-established `pod_id`, never read off the wire.
+  TaskQueue adapter for pod work-item pulls and correlated submissions.
+  PodTools supplies the channel's pod_id; this module does not authenticate it.
+  Pull exposes work_item_id; submission requires that explicit correlator and lets
+  the broker validate it against the pod's work.
   """
 
   alias Fleet.TaskQueue
 
   @doc """
-  PULLs the pod's active brief from the broker.
-
-  Returns the tool result map (`%{"done" => boolean(), ...}`): `done: true` = no more
-  task (the pod stops), otherwise the work item under a JSON envelope (`work_item_id` =
-  correlation_id, exposed so the pod hands it back to `submit_result`).
+  Returns done: true when no task is available, otherwise the work-item envelope.
+  The pod must return its work_item_id with the deliverable.
   """
   @spec get_work_item(String.t()) :: map()
   def get_work_item(pod_id) when is_binary(pod_id) and pod_id != "" do
@@ -55,16 +38,12 @@ defmodule Fleet.MCP.PodTools.WorkItems do
     end
   end
 
-  # CE QUE LA FILE REPOND, TRADUIT POUR LE POD. Deux des six reponses ne sont pas des erreurs de son
-  # point de vue, et c'est tout l'interet de les avoir cote a cote.
   defp submit_outcome({:ok, _task}), do: {:ok, "Result received by the fleet. Task closed."}
 
   defp submit_outcome({:error, :double_submit_ignored}),
     do: {:ok, "Result already received (ignored)."}
 
-  # ⚠ LE POD FERME UN MANDAT QU'IL N'A JAMAIS TIRE. Remonte comme une ERREUR et pas adouci :
-  # contrairement au double envoi, rien ici n'est idempotent — il n'y a aucune livraison anterieure
-  # a pointer, et repondre `{:ok, …}` accuserait reception d'un travail qui n'a meme pas ete lu.
+  # Unlike an accepted duplicate, an unpulled item has no acknowledged delivery.
   defp submit_outcome({:error, :work_item_not_pulled}), do: {:error, :work_item_not_pulled}
   defp submit_outcome({:error, :no_active_work_item}), do: {:error, :no_active_work_item}
   defp submit_outcome({:error, :work_item_id_mismatch}), do: {:error, :work_item_id_mismatch}
@@ -79,22 +58,9 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   defp present_work_item_id(tid) when is_binary(tid) and tid != "", do: tid
   defp present_work_item_id(_), do: nil
 
-  # JSON envelope of the work order exposed to the pod — work_item_id = correlation_id.
-  #
-  # `brief_ref`/`brief_sha` = the ADDRESS of the physical brief (`briefs/issue-<n>-<role>.md`
-  # committed in ops; `gate-briefs/` for judges; `brief_sha` = the introducing COMMIT).
-  # Exposed so the pod CITES the version it acted on, auditable from the forge by any third party.
-  #
-  # WHAT `"brief"` CARRIES: the FULL TEXT of the order, always. The dispatcher resolves the pinned
-  # object and ships its content — the pod never fetches anything, and it has no path to the tree
-  # that object lives in.
-  #
-  # NEVER a short pointer into a mounted ops tree: the pod mounts no ops. A stale claim on a payload
-  # contract does not sit inert — a reader, human or agent, meets it before the code and sends the
-  # next change to the wrong mechanism.
-  #
-  # nil `brief_ref`/`brief_sha` means the order was never materialized (transient failure, marked
-  # unprovable) or a non-producer mandate: nothing to cite, the text stands alone.
+  # brief carries the full order text; the pod does not fetch a mounted ops tree.
+  # Optional brief_ref/brief_sha identify the committed version for audit (briefs/ or
+  # gate-briefs/). Nil pointers can mean failed materialization or a mandate without an artifact.
   defp envelope(%Fleet.TaskQueue.WorkItem{} = t) do
     %{
       "work_item_id" => t.id,

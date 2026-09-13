@@ -1,52 +1,20 @@
 defmodule Fleet.MCP.PodTools.Probe do
   @moduledoc """
-  Le juge DEMANDE une mesure ; il n'obtient jamais d'accès. Le rail exécute, lit, et rend un FAIT.
+  Dispatches a named project workflow and returns its LCARS-PROBE facts without
+  interpreting verdicts. Public names map to workflow filenames in `@probes`; adding
+  a name still requires updating that map as well as supplying the workflow.
 
-  ## Ce que ce module refuse de faire, et pourquoi c'est l'essentiel
+  Repository identity comes from PodResolver and the PR number from PodId. This
+  module checks the PR identity shape, not role capabilities. References come from
+  the forge and declarations from the delivered SHA, never caller overrides.
+  Other inputs are stringified and forwarded without checking workflow declarations.
 
-  Trois formes sont possibles pour cet outil. Deux sont écartées, et la raison ne se rattrape pas
-  plus tard :
-
-    * `check_test_relevance(fichier)` — l'outil EST la sonde. Plus court aujourd'hui, condamné
-      demain : chaque question nouvelle demanderait un déploiement de flotte, et l'angle mort
-      resterait permanent. Une carotte qui ne peut poser qu'UNE question mesure ce qu'elle sait
-      mesurer, pas ce qui compte ;
-    * `run_script(script)` — le juge écrit la mesure qui soutient son verdict. C'est un RNG en
-      uniforme avec une couche d'exécution pour le crédibiliser.
-
-  Retenu : **`run_probe(probe, inputs)`**, où `probe` est un NOM. Ajouter une sonde devient alors une
-  DONNÉE dans un projet — un fichier de workflow de plus — et non une livraison de flotte. C'est la
-  condition d'architecture, payée à la première ligne ou jamais.
-
-  ## Ce que le juge ne fournit PAS, et ne peut pas fournir
-
-  Le dépôt, la PR, les SHAs et les chemins de preuve viennent tous du CANAL et des DÉCLARATIONS du
-  projet, jamais du fil. Un juge qui pourrait nommer sa base nommerait la base qui l'arrange, et la
-  mesure censée le contraindre serait redevenue son opinion (§10c — juge et partie).
-
-  Ce qu'il peut passer, ce sont les `inputs` déclarés par la sonde elle-même. Ils sont
-  ADDITIONNELS : les clés que le rail calcule ne sont jamais écrasées (`Map.merge` dans ce
-  sens-là, et c'est délibéré).
-
-  ## Le résultat est un fait, pas un verdict
-
-  La sonde sort toujours en 0 et écrit ses lignes `LCARS-PROBE` (cf. le workflow du template). Ce
-  module les extrait, les rend en clés/valeurs, et **n'interprète rien** : `blind` ne devient pas
-  « mauvaise livraison », `inapplicable` ne devient pas `blind`, et l'absence de fait ne devient pas
-  un vert. Le juge lit et tranche.
+  Execution status accompanies facts, so an interrupted run without measurements
+  remains distinguishable from a completed probe. Workflow success is not enforced here.
   """
 
-  # LE CATALOGUE DE SONDES EST UNE DONNÉE, ET IL EST VOLONTAIREMENT MINUSCULE.
-  #
-  # Une entrée = un nom public → le fichier de workflow que le projet porte. C'est le seul endroit
-  # de la flotte qui connaisse des noms de sondes, et il ne connaît QUE des noms : ce que la sonde
-  # fait vit dans le dépôt du projet, relisible et modifiable par lui. Une deuxième sonde s'ajoute
-  # ici en une ligne.
-  #
-  # Le préfixe `probe-` n'est pas cosmétique : un contexte de statut `probe-… / …` ne matche pas le
-  # glob `CI / *` de la protection de `main` (cf. `Onboard.Faces.main_status_check_contexts/0`), donc une
-  # sonde ne peut pas devenir un mur. Ajouter ici un workflow nommé autrement contournerait cette
-  # garde par le catalogue.
+  # Workflows live in the project. Keep their probe- naming distinct from the
+  # CI / * contexts required by Onboard.Faces main-branch protection.
   @probes %{
     "test-relevance" => "probe-test-relevance.yml"
   }
@@ -60,10 +28,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   def known, do: Map.keys(@probes)
 
   @doc """
-  Joue `probe` pour le pod `pod_id` et rend le fait mesuré.
-
-  Le pod est un JUGE sur une PR : son `pod_id` porte le dépôt et le numéro de PR (`PodId.for_pr/3`),
-  donc l'identité EST le canal. Toute la résolution en découle.
+  Runs a known probe for a PR-bound pod and returns facts plus execution metadata.
   """
   @spec run(String.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(pod_id, probe, inputs \\ %{}, opts \\ [])
@@ -104,14 +69,8 @@ defmodule Fleet.MCP.PodTools.Probe do
     end
   end
 
-  # LE DÉPÔT D'UN POD DISPATCHÉ NE S'ÉCRIT PAS `owner/name` DANS SON LIEN DE SPAWN, ET C'EST VOULU :
-  # le `slot_key` du spawner se clef sur `:repo_id`, donc y mettre la chaîne mettrait tous les
-  # producteurs et tous les juges de tous les projets dans un même seau. Conséquence pour ici :
-  # `identity.repo` est `nil` pour un juge, et ne l'est PAS pour un architecte.
-  #
-  # On lit donc les deux, dans cet ordre — la chaîne quand elle est là, sinon la traduction de l'ID
-  # par la forge. Refuser sur l'absence de `:repo` rendrait cet outil inutilisable par
-  # exactement les rôles pour lesquels il est écrit.
+  # Dispatched pods can carry repo_id without repo; resolve the numeric id through
+  # the forge instead of rejecting the roles this tool serves.
   defp identity(pod_id, opts) do
     case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
       {:ok, %{repo: repo}} when is_binary(repo) and repo != "" ->
@@ -131,9 +90,7 @@ defmodule Fleet.MCP.PodTools.Probe do
     end
   end
 
-  # LE NUMÉRO DE PR VIENT DU POD_ID, PAS DU FIL. Un juge de livrable est minté `for_pr/3`, donc son
-  # identité de canal porte déjà la PR qu'il juge. Un pod dont l'id ne porte PAS de PR n'est pas un
-  # juge de livrable : le refus le dit plutôt que de sonder au hasard.
+  # Parse the PR from the pod identity; issue-bound pods cannot select an arbitrary PR.
   defp pr_of(pod_id, repo) do
     case Fleet.PodId.parse_ref(pod_id, repo) do
       {:ok, {:pr, n}} -> {:ok, n}
@@ -145,14 +102,9 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ── Déclarations du projet ─────────────────────────────────────────────────────────────────────
 
   @doc """
-  Lit `## Harness` et `## Test` dans le `CLAUDE.md` du dépôt, AU SHA LIVRÉ.
-
-  Au SHA et pas sur `main`, et c'est une correction de sens : une livraison qui déplace ses tests
-  met à jour sa déclaration DANS LA MÊME PR. Lire `main` mesurerait la livraison d'aujourd'hui avec
-  la carte d'hier.
-
-  Une déclaration absente n'est pas une erreur — c'est le cas `inapplicable` que la sonde sait dire.
-  On rend donc `""`, et c'est le workflow qui le nomme.
+  Reads exact `## Harness` and `## Test` sections from CLAUDE.md at `ref`.
+  `run/4` passes the delivered SHA so declarations can change with the PR.
+  Missing file or section yields empty strings; other forge errors propagate.
   """
   @spec declarations(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def declarations(repo, ref, opts \\ []) do
@@ -168,21 +120,9 @@ defmodule Fleet.MCP.PodTools.Probe do
     end
   end
 
-  # Extraction d'une section de niveau 2, corps jusqu'au prochain `##`. On ne réutilise PAS
-  # `SPBuilder.RepoSections` : celui-là répond à « que voyage-t-il jusqu'au pod », question dont la
-  # réponse est close à sept noms et dont `Harness` est délibérément absent. Emprunter son parseur
-  # ferait dépendre une mesure de rail d'une liste faite pour autre chose, et le jour où la liste
-  # bouge la mesure bougerait sans raison.
-  #
-  # LE TITRE SE CHERCHE HORS DES BLOCS DE CODE. Un `CLAUDE.md` DOCUMENTE la section `## Harness` et
-  # en montre un exemple encadré, dont la ligne `## Harness` est en colonne 0 : une regex `^` en
-  # mode `m` y matche, et la sonde lit l'EXEMPLE DE LA DOC puis toute la prose qui suit. Un projet
-  # qui écrit sa section SOUS la documentation — le geste naturel — n'est jamais lu.
-  #
-  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ : masquer les blocs avant la
-  # recherche effacerait le CORPS d'une section dont la valeur est légitimement encadrée (`## Test`
-  # suivi d'un bloc contenant `mix test`). Le titre se cherche hors des blocs, le corps se rend tel
-  # qu'il est écrit — une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
+  # RepoSections has a separate whitelist for prompt content and excludes Harness.
+  # Scan headings outside backtick fences but retain fenced section bodies: removing
+  # all code blocks first would also erase a legitimate fenced test command.
   defp section(md, name) do
     md
     |> String.split("\n")
@@ -209,28 +149,11 @@ defmodule Fleet.MCP.PodTools.Probe do
     end
   end
 
-  # ANCRÉ EN FIN DE LIGNE, et un `\b` ne remplacerait pas l'ancre : il tombe entre `t` et l'espace,
-  # donc `## Test paths` matcherait — un projet portant `## Test suite` avant son `## Test` ferait
-  # tourner la sonde avec la mauvaise commande.
+  # Match the entire heading: a word boundary would also accept ## Test suite.
   defp ours?(line, name), do: String.trim_trailing(line) == "## " <> name
 
-  # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins : la
-  # recherche du titre ignore les blocs, celui-ci nettoie le CORPS d'une section dont la valeur est
-  # légitimement encadrée.
-  #
-  # ⚠ ON JOINT PAR DES SAUTS DE LIGNE, PAS PAR DES ESPACES. Le corps d'un `## Test` est un SCRIPT :
-  #
-  #     ## Test
-  #     make build
-  #     make test
-  #
-  # Joint par un espace, ça rendrait `"make build make test"` — UNE commande avec des arguments, qui
-  # n'est ni l'une ni l'autre : la sonde tourne, rend un verdict, et il porte sur autre chose que la
-  # suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
-  #
-  # `## Harness`, lui, est une LISTE de chemins, et le workflow la découpe sur tout blanc — un saut
-  # de ligne y est aussi bon qu'un espace. Les deux sections partagent donc ce nettoyage sans que
-  # l'une paie pour l'autre.
+  # Strip backtick delimiters, preserving newlines: joining make build and make test
+  # with a space would turn two commands into one. Harness paths tolerate either whitespace.
   defp strip_fences(text) do
     text
     |> String.split("\n")
@@ -239,9 +162,7 @@ defmodule Fleet.MCP.PodTools.Probe do
     |> String.trim()
   end
 
-  # LES CLÉS DU RAIL GAGNENT SUR CELLES DU JUGE, et c'est le sens du `Map.merge`. Un juge qui
-  # passerait `base_sha` choisirait la base qui l'arrange ; ses entrées à lui s'ajoutent, elles ne
-  # remplacent pas.
+  # Computed inputs override caller keys so a judge cannot choose a favorable comparison base.
   defp rail_inputs(refs, declared, judge_inputs) do
     judge_inputs
     |> Map.new(fn {k, v} -> {to_string(k), to_string(v)} end)
@@ -255,10 +176,8 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   # ── Attente et lecture ─────────────────────────────────────────────────────────────────────────
 
-  # ATTENTE BORNÉE, ET DANS LE TOUR D'OUTIL DU JUGE — jamais dans le tick du pilote. C'est tout
-  # l'arbitrage Q1 : trois secondes sont négligeables pour un agent qui attend son propre appel, et
-  # coûteuses dans une boucle qui sert plusieurs dépôts. Le plafond existe parce qu'un runner mort
-  # ne rend pas d'erreur : il ne rend rien.
+  # Poll within the tool call, not the shared Pilot tick. The deadline is checked
+  # between forge calls; it does not interrupt a blocked call.
   defp await_logs(repo, run_id, opts) do
     deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :max_wait_ms, @max_wait_ms)
     poll(repo, run_id, deadline, opts)
@@ -267,10 +186,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   defp poll(repo, run_id, deadline, opts) do
     case forge_actions().run(repo, run_id, forge_opts(opts)) do
       {:ok, %{"status" => status} = run} when status in ~w(success failure cancelled skipped) ->
-        # ⚠ L'ETAT DU RUN VOYAGE AVEC LES FAITS. Un run ANNULE avant d'avoir ecrit ses lignes
-        # `LCARS-PROBE` rend une map vide — indiscernable de « la sonde a tourne et n'a rien
-        # conclu ». Deux faits opposes, une meme forme. Le juge doit pouvoir les separer, et ca
-        # coute deux cles.
+        # Preserve execution state even when no LCARS-PROBE lines were emitted.
         case forge_actions().run_logs(repo, run_id, forge_opts(opts)) do
           {:ok, logs} -> {:ok, logs, Map.take(run, ["status", "conclusion"])}
           {:error, _} = err -> err
@@ -278,8 +194,7 @@ defmodule Fleet.MCP.PodTools.Probe do
 
       {:ok, _still_going} ->
         if System.monotonic_time(:millisecond) >= deadline do
-          # On NOMME l'attente épuisée. Un `{:ok, %{}}` ici ferait passer « on n'a pas attendu assez »
-          # pour « la sonde n'a rien trouvé », et le juge lirait une absence de fait comme un fait.
+          # Timeout is an error, not evidence that the probe found nothing.
           {:error, {:probe_timeout, run_id}}
         else
           Process.sleep(Keyword.get(opts, :poll_ms, @poll_ms))
@@ -292,10 +207,8 @@ defmodule Fleet.MCP.PodTools.Probe do
   end
 
   @doc """
-  Extrait les faits `LCARS-PROBE` des logs, en clés/valeurs.
-
-  Les lignes tardives gagnent : la sonde écrit son contexte puis son verdict, dans cet ordre.
-  Aucune interprétation — ce module ne sait pas ce que « blind » veut dire, et c'est voulu.
+  Extracts whitespace-separated key=value tokens after LCARS-PROBE in log lines.
+  Later duplicate keys win; values remain strings and no verdict is inferred.
   """
   @spec facts(String.t()) :: map()
   def facts(logs) when is_binary(logs) do
@@ -319,33 +232,11 @@ defmodule Fleet.MCP.PodTools.Probe do
     end)
   end
 
-  # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
-  #
-  # ⚖ `:mcp_probe_forge_client` porte son proprietaire ; `:forge_actions` reste nue, et le motif
-  # est juste en dessous — ce n'est pas un oubli.
-  #
-  # LA REGLE : les clefs d'app env de ce projet sont `<proprietaire>_<chose>` — `admiral_`, `mcp_`,
-  # `pilot_`, `spawner_`, `workflow_`, `credentials_`… Un prefixe DIT QUI POSE ; sans lui, un meme
-  # nom nu peut couvrir deux mecanismes de portees differentes (une injection par appel et une
-  # valeur globale au noeud), et il faut tenir la difference en tete pour lire trois lignes.
-  #
-  # POURQUOI PAS `:mcp_forge_client`, QUI EXISTE : ce serait unifier avec le seam de `Delegation`,
-  # et sa propre doctrine le prescrirait (« le seam est le MEME objet »). Elle ne mord pas ici : sa
-  # raison est qu'un test qui remplace une moitie du client et pas l'autre verrait ses ecritures
-  # partir sur la vraie forge — or la sonde et la delegation sont deux chaines independantes,
-  # qu'aucun appel ne traverse ensemble. Unifier n'achete rien et couple deux suites.
+  # Probe's forge seam is separate from Delegation's: these are independent call paths.
   defp forge, do: Application.get_env(:lcars_fleet, :mcp_probe_forge_client, Fleet.Forge.Client)
 
-  # ⚠ `:forge_actions` NE SUIT PAS LA REGLE, ET C'EST VOULU. Elle est PARTAGEE A DESSEIN par TROIS
-  # modules — cette sonde, `Fleet.Pilot.MergeAndPromote` et
-  # `Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate` — qui interrogent le MEME sous-domaine :
-  # deux clefs en donneraient deux avis en test. Un prefixe de proprietaire est donc faux ici : la
-  # clef n'a pas UN proprietaire, elle a un sous-domaine, et c'est precisement ce que le partage
-  # exprime.
-  #
-  # La convention veut un prefixe parce qu'un prefixe DIT QUI POSE. Quand la reponse est « trois
-  # modules, exprès », le nom nu est la forme juste — et cette exception se lit AUX TROIS SITES,
-  # jamais deduite du silence.
+  # Shared with Pilot merge/promotion and CiGate for one Actions view across consumers.
+  # This deliberate shared-domain key is the exception to owner-prefixed configuration.
   defp forge_actions,
     do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
 
