@@ -1,10 +1,11 @@
 defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   @moduledoc """
-  Non-blocking side effects after a producer deliverable reaches the forge.
+  Side effects after producer publication: a slot-release event and a role-signed issue summary.
 
-  The completion sequence discards every result from this module. Publication events
-  release resident pod slots; engineer summaries add a role-signed issue trace. Failures
-  are logged and never invalidate the published deliverable.
+  Callers discard results. deliverable_published rescues exceptions; post_eng_summary
+  does not. Missing role identity skips the summary, but only absent role names and
+  returned post failures log here; token lookup errors return :ok without a local warning.
+  Summary posts have no dedup signature and may repeat during completion replay.
   """
 
   require Logger
@@ -12,9 +13,10 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   alias Fleet.Forge.Client, as: ForgeClient
 
   @doc """
-  Emits `deliverable.published` for the producer pod after its commit and PR exist.
+  Emits the publication event when pod_id is a binary; otherwise returns :noop.
 
-  Missing `pod_id` is a no-op. The pod's publish deadline backstops missed emissions.
+  Event failures are logged and exceptions rescued. The pod's publish deadline can
+  release a missed notification; it does not confirm publication by itself.
   """
   @spec deliverable_published(map(), integer()) :: :ok | :noop
   def deliverable_published(step_run, pr) do
@@ -49,10 +51,9 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   end
 
   @doc """
-  Posts a non-empty producer summary on the issue using that producer's role token.
-
-  The full note lives only on the issue; the PR opening may contain its pointer. Missing
-  identity or post failure never invalidates completion.
+  Posts a nonempty issue summary using the producer's role token.
+  The PR opening may link here before the summary is posted. Missing identity and
+  returned post errors do not fail completion; exceptions, throws and exits can propagate.
   """
   @spec post_eng_summary(map(), keyword()) :: :ok | :noop
   def post_eng_summary(step_run, opts) do

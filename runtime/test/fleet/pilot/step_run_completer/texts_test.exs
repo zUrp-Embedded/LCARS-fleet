@@ -3,9 +3,7 @@ defmodule Fleet.Pilot.StepRunCompleter.TextsTest do
 
   alias Fleet.Pilot.StepRunCompleter.Texts
 
-  # The default markdown of the completion — three generators, pure. What is pinned: the PR body
-  # never auto-closes the issue (`Closes #N` would let the forge close before the seal comment), a
-  # judge's approval says it is NOT an acceptance, and each text names the role it speaks for.
+  # Keep the issue open for explicit sealing; a judge's favorable opinion is not acceptance.
   test "pr_body/2,3 names the role and the brick, links the note when asked, never `Closes #N`" do
     body = Texts.pr_body(42, "engineer")
     assert body =~ "#42"

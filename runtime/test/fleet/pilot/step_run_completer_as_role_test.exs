@@ -1,16 +1,13 @@
 defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
-  # async: false — mutates the global `:role_tokens_dir` config (cf. Fleet.Credentials.RoleTokenTest).
+  # Serial: changes credentials_role_tokens_dir globally.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepRunCompleter
 
   @moduletag :tmp_dir
 
-  # F-E6 — captures the `token` of the forge_opts passed to `post_comment`: the VERDICT comment must
-  # be IN THE JUDGE'S NAME (role token), not the system account's. Labels stay system-signed (not
-  # captured).
+  # Capture role-token options for comments; label signing is not observed.
   defmodule TokenCaptureForge do
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def post_comment(_repo, _n, _body, opts) do
@@ -22,10 +19,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
     def start_stopwatch(_repo, _n, _opts), do: :ok
 
-    # Captures (n, token) — proves that the stop of the ISSUE stopwatch (started by the PRODUCER,
-    # persistent through the whole review) is PRODUCER-signed even when a JUDGE finishes the brick
-    # (route(:promote)), while the stop of the PR stopwatch stays JUDGE-signed (its own review
-    # turn). Two stops, two distinct identities, never conflated.
+    # Capture PR/judge vs issue/producer timer identities independently.
     def stop_stopwatch(_repo, n, opts) do
       send(self(), {:stop_stopwatch, n, opts[:token]})
       :ok
@@ -51,8 +45,6 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
-    # Read by the seal to name the accounts that approved before it writes its closing
-    # comment (it must not claim verdicts that do not exist). No jury here -> empty.
     def get_route(_r, _n, _o), do: :none
 
     def pr_review_state(_repo, _n, _opts),
@@ -60,19 +52,16 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
   end
 
   setup %{tmp_dir: tmp} do
-    # The DIRECTORY first: the fixture no longer spells the file name, it asks for the path the
-    # runtime reads (`RoleIdentity.token_path/1`, keyed by the ACCOUNT), and that path is rooted here.
+    # Root the account-keyed token paths before writing fixtures.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
 
-    # resolvable scoper role token → `as_role("scoper")` must inject it.
     Fleet.TestEnv.put_role_token!("scoper", "tok-scoper")
     Fleet.TestEnv.put_role_token!("reviewer", "tok-reviewer")
     Fleet.TestEnv.put_role_token!("engineer", "tok-engineer")
-    # B-04: a non-engineer producer (the doc rail's scribe) needs its own resolvable token.
+
     Fleet.TestEnv.put_role_token!("scribe", "tok-scribe")
 
-    # :promote goes through `MergeAndPromote.merge_and_promote` (fail-closed, soft-default #3) → LES
-    # DEUX jetons de rail sont requis depuis le 2026-08-20 : `chief` fusionne, `gatekeeper` promeut.
+    # Chief merges; gatekeeper promotes, requiring separate credentials.
     Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
     Fleet.TestEnv.put_role_token!("chief", "tok-chief")
 
@@ -95,7 +84,6 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    # the base system token is OVERWRITTEN by the role token → forge author = Consultant (anti-masking).
     assert_received {:comment_token, "tok-scoper"}
   end
 
@@ -138,23 +126,14 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    # PR stopwatch (7): the JUDGE (reviewer) who just closed the brick started this stopwatch
-    # itself (its own review turn) → stop signed WITH ITS OWN token.
+    # The PR watch belongs to this judge's review turn.
     assert_received {:stop_stopwatch, 7, "tok-reviewer"}
 
-    # ISSUE stopwatch (42): started by the PRODUCER at `dispatch_issue`, persistent through the
-    # whole review — the stop MUST stay PRODUCER-signed (engineer), NEVER the finishing judge's role
-    # (otherwise Gitea refuses the stop — per-user — and the engineer's stopwatch leaks forever).
-    # Post-B-04 this identity comes from the branch (`lcars/issue-42-engineer`), not the config global.
+    # The issue watch belongs to the producer named by the branch, not the finishing judge.
     assert_received {:stop_stopwatch, 42, "tok-engineer"}
   end
 
-  # B-04 (catalogue chantier 2026-07-20): the producer is whoever the CARD dispatched — read from the
-  # feature branch, NOT the `Roles.producer_role` config global (a fixed "engineer"). A `scribe`
-  # card (docs into ops, not code into main) is the motivating case: pre-B-04 the ISSUE stopwatch
-  # stop was signed "engineer" (config) → Gitea per-user refuses the mis-signed stop → the
-  # scribe's watch leaks forever. This is the SAME branch source the poller-driven promote
-  # already reads (`ReviewLifecycle.promote_pr` — "no fork"); this test locks the workflow_map path onto it.
+  # A scribe producer distinguishes branch-derived identity from the default engineer.
   test "judge :promote → ISSUE stopwatch stop signed by the CARD's producer (scribe), not the config default" do
     step_run = %{
       repo: "fleet/docs-proj",
@@ -173,22 +152,13 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
                forge_opts: [token: "system-token"]
              )
 
-    # The ISSUE stopwatch (99) is stopped as DOCUMENTALIST — the producer the branch names — even
-    # though `Roles.producer_role` defaults to "engineer". Pre-B-04 this asserted "tok-engineer".
     assert_received {:stop_stopwatch, 99, "tok-scribe"}
   end
 
-  # BL-6-34 — the measured bench signature: a producer role whose forge account/token does NOT
-  # exist (the scoper lesson: a role added to the catalogue without its forge account loops in
-  # role_token_unavailable). The deliverable is pushed, then the PR is refused FAIL-CLOSED between
-  # push and PR-open — and the stall must be named ON the issue, posted with the SYSTEM token:
-  # the missing ROLE token is exactly what the marker has to survive, or the ticket goes mute.
+  # A post-publication credential failure must remain visible with caller/system credentials.
   test "producer WITHOUT role token → PR refused fail-closed, pr-open-fail marker under the SYSTEM token",
        %{tmp_dir: tmp} do
-    # The setup provisions this producer, so the ABSENCE is staged here rather than by naming a role
-    # nobody declares: a token directory that holds nothing. Naming a phantom role would prove the
-    # wrong thing now — an unknown role has no ACCOUNT, so its refusal comes from the roster and not
-    # from the missing credential this test is about.
+    # Use a declared role with no token: a phantom role would test roster resolution instead.
     empty = Path.join(tmp, "no-tokens")
     File.mkdir_p!(empty)
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
@@ -239,9 +209,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     end
 
     test "a step_run with NO role posts nothing, and says so" do
-      # The note carries a role's name AND is posted with that role's token. Defaulting the role
-      # would sign one producer's summary as another's — the same refusal the missing-token path
-      # already applies. Absence is skipped and LOGGED, never dressed up.
+      # No role means no invented identity for a summary.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert :ok =

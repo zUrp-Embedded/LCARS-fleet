@@ -1,11 +1,7 @@
 defmodule Fleet.Pilot.StepRunCompleterTest do
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: one test here flips the GLOBAL `:lcars_fleet, :spawner_debug_visibility`, which
-  # every pod launch reads through `LaunchSpec.remote_control?/1`. Async peers would see the flip
-  # mid-flight and decide a different visibility than they assert. Same lesson as the
-  # `:require_onboarded` flake: restore-on-exit makes the value right AFTER the test and wrong
-  # DURING it, for everyone else.
+  # Serial: changes global spawner visibility and catalogue images; restoration does not isolate peers.
 
   alias Fleet.CapProfile.Image
   alias Fleet.Pilot.ForgeStubs.MergeFailForge
@@ -13,8 +9,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   alias Fleet.Test.BizCatalogueFixture
   alias Fleet.Workflow.Loader
 
-  # Forge stub that RECORDS the call order (send to the test) to verify the
-  # canonical §5 sequence: comment → state → (close|assignee) → unlock.
+  # Local call spy. Selective assert_received checks presence, not ordering; tests that
+  # inspect the full message list can assert sequence.
   defmodule OrderForge do
     def post_comment(_repo, _n, body, opts) do
       send(self(), {:call, :comment, body, opts[:dedup_signature]})
@@ -55,10 +51,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def publish(_opts), do: {:error, :base_not_ancestor}
   end
 
-  # Returns the REAL HEAD of the workspace it publishes — the prod contract (`Deliverable.publish`
-  # reads `head_sha(workspace)` post-push). The BL-6-34 belt checks the provenance subject against
-  # that workspace: a hardcoded fake sha trips it by design, so the provenance-walking tests use
-  # THIS stub over a real fixture repo.
+  # Returns a real workspace commit so provenance's local commit check can pass.
+  # No push happens in this stub despite its pushed? return field.
   defmodule HeadDeliverable do
     def publish(opts) do
       send(self(), {:published, opts})
@@ -67,12 +61,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  # PR-native forge stub: records the PR calls (send to the test). Returns the REAL
-  # `ForgeClient` contract: `post_review`/`merge_pr`/`request_review` → `:ok` (not `{:ok, _}`).
+  # Match the forge's :ok returns for review, merge and review-request methods.
   defmodule PrForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    # No jury verdicts or conflict markers in this fixture.
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def get_route(_r, _n, _o), do: :none
@@ -90,8 +81,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       :ok
     end
 
-    # Gatekeeper seal (F-arch-MCP): promote posts the closing comment before the merge.
-    # Real `ForgeClient.post_comment/4` shape = {:ok, :posted | :already}, NOT {:ok, 1}.
+    # The real seal posts only after merge succeeds; this method merely records a comment.
     def post_comment(_repo, n, body, opts) do
       send(self(), {:comment, n, body, opts})
       {:ok, :posted}
@@ -106,8 +96,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
   end
 
-  # A forge answering in GITEA'S REAL SHAPE: the message a reader needs, plus the `url` pointer
-  # Gitea attaches to every error body. The distinction is the subject of its test.
+  # Fixture error separates the actionable message from the swagger URL metadata.
   defmodule GiteaShapedFailForge do
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
@@ -128,9 +117,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   defmodule PrFailForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    # No jury verdicts or conflict markers in this fixture.
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -139,10 +126,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def open_pr(_r, _h, _b, _t, _o), do: {:error, {:http, 422, "no commits between"}}
     def post_review(_r, _pr, _e, _b, _o), do: {:error, {:http, 500, "boom"}}
 
-    # SIGNALS the comment: the seal is MERGE-FIRST (only comments if the merge succeeds) → on the
-    # 409 merge, post_comment must NEVER be called. We signal so that a `refute_received {:comment}`
-    # at the call site is PROBATIVE (if it were called by a comment-before-merge regression, the
-    # test would see it).
+    # Observe comments so a failed merge can explicitly refute a false seal.
     def post_comment(_r, n, body, opts) do
       send(self(), {:comment, n, body, opts})
       {:ok, :posted}
@@ -151,11 +135,8 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def merge_pr(_r, _pr, _o), do: {:error, {:http, 409, "not fast-forward"}}
   end
 
-  # COMPLETE forge stub for the `complete_pr/2` orchestrator (all PR primitives + issue bridge).
   defmodule OrchForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
+    # No jury verdicts or conflict markers in this fixture.
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -201,7 +182,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       :ok
     end
 
-    # The eng's voice (outgoing info): the producer's summary posted as a PR comment.
+    # Capture producer summaries on the issue.
     def post_comment(_repo, pr, body, _opts) do
       send(self(), {:comment, pr, body})
       {:ok, :posted}
@@ -216,8 +197,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  # Same producer-advance surface as OrchForge, but post_route FAILS — proves the
-  # state-first order fails SAFE (no review trigger ever fired on the stale route).
+  # Failed route must prevent the review request from exposing a stale workflow position.
   defmodule RouteFailForge do
     def open_pr(_repo, _head, _base, _title, _opts), do: {:ok, 7}
     def stop_stopwatch(_repo, _n, _opts), do: :ok
@@ -232,7 +212,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     def post_route(_repo, _n, _workflow_map, _step, _opts), do: {:error, {:http, 500, "boom"}}
   end
 
-  # PR not found (the judge falls before any review); FF merge impossible (open ok, merge 409).
+  # PR lookup failure before native review.
   defmodule NoPrForge do
     def get_pr_for_branch(_r, _h, _b, _o), do: {:error, :pr_not_found}
   end
@@ -243,7 +223,6 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         repo: "lordzurp/lcars-test",
         issue_number: 42,
         role: "engineer",
-        # chantier face-projet : la face est assertee par le completer, la fixture la dit comme la prod
         base_branch: "main",
         deliverable_opts: %{mode: :git_native, workspace: "/tmp/ws", base_sha: "cafe"}
       },
@@ -255,8 +234,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     [deliverable: StubDeliverable, forge_client: OrderForge, forge_opts: []]
   end
 
-  # A real one-commit git repo standing for the publish workspace — its HEAD is what
-  # `HeadDeliverable` returns and what the BL-6-34 belt verifies the subject against.
+  # Local commit fixture for provenance subject resolution.
   defp init_workspace_repo!(tmp) do
     ws = Path.join(tmp, "ws-real")
     File.mkdir_p!(ws)
@@ -295,10 +273,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     test "publishes, signed comment, CLOSE, unlock — in the §5 order" do
       assert {:ok, :completed} = StepRunCompleter.complete(base_step_run(), seams())
 
-      # Step 1: publish called with the deliverable's opts
       assert_received {:published, %{mode: :git_native, base_sha: "cafe"}}
 
-      # Steps 2→4 in the canonical order (FIFO mailbox; step 3 state:* removed — #5.2 D4)
+      # These selective receives check calls, not their relative order.
       assert_received {:call, :comment, body, sig}
       assert sig == "[step_run:engineer:deadbeef]"
       assert body =~ "[step_run:engineer:deadbeef]"
@@ -306,7 +283,6 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:call, :close}
       assert_received {:call, :unlock, "lcars-in-flight"}
 
-      # No reassignment in terminal
       refute_received {:call, :assignee, _}
     end
 
@@ -323,9 +299,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:call, :comment, _, _}
 
-      # #8.A: the advance NO LONGER overwrites the assignee (= human); the next-role is derived from
-      # the route at dispatch. (Here no workflow_map context → no route either, cf. defensive case
-      # below.)
+      # No map/step here: reassigned returns without changing route or human assignee.
       refute_received {:call, :assignee, _}
       assert_received {:call, :unlock, "lcars-in-flight"}
       refute_received {:call, :close}
@@ -341,7 +315,6 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :reassigned} = StepRunCompleter.complete(step_run, seams())
 
-      # #8.A: the advance records the next step's ROUTE; the assignee (human) is NO LONGER touched.
       assert_received {:call, :route, "poc-cycle", "spec-review"}
       refute_received {:call, :assignee, _}
     end
@@ -423,9 +396,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       refute_received {:open_pr, _, _, _}
 
-      # The ledger of the brake: one [publish-fail:issue-N:base-<sha12>] marker comment on the
-      # ISSUE, carrying the gate base (deliverable_opts.base_sha "cafe"). Without it the brake
-      # counts nothing and the loop is unbounded — this is the half the poster owns.
+      # Publish-failure markers feed a separate brake on the issue, keyed by publication base.
       assert_received {:comment, 42, body, _}
       assert body =~ Fleet.Forge.Protocol.publish_fail_marker(42, "cafe")
       assert body =~ ":base_not_ancestor"
@@ -454,20 +425,16 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                StepRunCompleter.open_deliverable_pr(pr_step_run(), opts)
     end
 
-    # Regression: provenance hooked onto `complete/2` (verdicts WITHOUT deliverable) is never
-    # emitted on the REAL producer path (`open_deliverable_pr` is the only publication point of a
-    # git deliverable). This test walks that path and demands the full triplet — it would go red on
-    # the wrong wiring. (The `:ops_root` seam replaces the untestable global
-    # `Fleet.Layout.ops_root()`.)
+    # Exercise provenance through producer PR publication, not only its pure statement builder.
+    # complete/2 can also publish but does not emit this attestation.
     @tag :tmp_dir
     test "emits the provenance triplet (brief_sha, input_sha, livrable_sha) under ops `provenance/`",
          %{tmp_dir: tmp} do
-      # the project's ops: project_name("lordzurp/lcars-test") = "lcars-test", a real git repo.
       work_dir = Path.join(tmp, "lcars-test")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
-      # real publish workspace: the subject sha is ITS head (BL-6-34 belt — a fake sha is refused).
+      # Use a resolvable local subject, not a fabricated SHA.
       {ws, sha} = init_workspace_repo!(tmp)
       sha7 = String.slice(sha, 0, 7)
 
@@ -489,30 +456,27 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, %{commit_sha: ^sha}} = StepRunCompleter.open_deliverable_pr(step_run, opts)
 
-      # The provenance appears, human-named on the issue (sha7 of the livrable), committed,
-      # COMPLETE triplet.
+      # Verify statement fields and local Git commit; no remote publication is exercised.
       prov = Path.join(work_dir, "provenance/issue-42-#{sha7}.json")
       assert File.exists?(prov)
       json = prov |> File.read!() |> Jason.decode!()
-      # (livrable, brief, input) = the 3 vertices of the triplet, each in its in-toto place.
+
       assert get_in(json, ["subject", Access.at(0), "digest", "gitCommit"]) == sha
 
       assert get_in(json, ["predicate", "invocation", "configSource", "digest", "gitCommit"]) ==
                brief_sha
 
       assert get_in(json, ["predicate", "buildConfig", "input_sha"]) == "cafe"
-      # The builder's mode travels with the triplet — stated, not omitted, on the nominal path.
+      # Assert the completion-time visibility value is threaded into provenance.
       assert get_in(json, ["predicate", "invocation", "environment", "debug_visibility"]) == false
-      # committed, not just written on disk.
+
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
       assert log =~ "provenance: provenance/issue-42-#{sha7}.json"
     end
 
     @tag :tmp_dir
     test "a deliverable produced in DEBUG mode carries the mark", %{tmp_dir: tmp} do
-      # The whole point of the stamp: an auditor reading this file must be able to tell that a
-      # human could reach the pod's REPL while it worked. Asserting it end-to-end (and not only on
-      # `statement/1`) is what pins the WIRING — the completer reading the mode at all.
+      # Changes the global mode at completion time; no pod launch or REPL access is observed.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_debug_visibility, true)
 
       work_dir = Path.join(tmp, "lcars-test")
@@ -542,10 +506,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert get_in(json, ["predicate", "invocation", "environment", "debug_visibility"]) == true
     end
 
-    # BL-6-34 ordering pin: the engrave lives AFTER the PR is born. A completion that stalls
-    # between push and PR must never leave a "delivered" attestation with no integration surface —
-    # the measured signature was exactly that (branch on the forge, zero PR, provenance engraved,
-    # ticket mute). The marker is the anti-mute half: the stall is named ON the issue.
+    # Failed PR creation must leave no attestation and emit a failure marker.
+    # The stub's fake subject also prevents provenance emission, so absence alone is not
+    # a discriminating assertion of publication order.
     @tag :tmp_dir
     test "open_pr fails → NO provenance engraved + pr-open-fail marker on the issue (BL-6-34)",
          %{tmp_dir: tmp} do
@@ -570,19 +533,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert body =~ "422"
       assert body =~ "feature/issue-42"
 
-      # The OPERATION tag survives — it names which gesture failed, and a reader needs that.
       assert body =~ "open_pr"
     end
 
     @tag :tmp_dir
     test "the pr-open-fail comment carries the forge's MESSAGE, never its swagger pointer",
          %{tmp_dir: tmp} do
-      # This comment is read by a human and by the architect. It used to paste `inspect/1` of the
-      # raw reason, and Gitea puts a `"url" => ".../api/swagger"` in every error body — so the
-      # pointer shipped into the message. Measured 2026-08-11 on a stalled PR: the signal was
-      # `403 user must be a collaborator`, and the swagger URL was read as signal twice, once by a
-      # human asking which forge it named and once inside an architect's root-cause analysis.
-      # Noise that reaches a decision-maker is not neutral: it gets interpreted.
+      # Preserve the actionable HTTP error while excluding unrelated swagger metadata.
       work_dir = Path.join(tmp, "lcars-test")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -603,9 +560,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute body =~ "api/swagger"
     end
 
-    # BL-6-34 belt: a subject that is NOT a commit of the publish workspace is a proof from the
-    # wrong point of view — the engrave is REFUSED loud, the completion itself is unharmed (the
-    # deliverable is real and pushed; provenance stays best-effort, F-15).
+    # An unresolvable local subject refuses the archive; the stub publication result survives.
     @tag :tmp_dir
     test "subject not a commit of the publish workspace → engrave REFUSED loud, completion unharmed",
          %{tmp_dir: tmp} do
@@ -613,7 +568,6 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
 
-      # real workspace whose HEAD is NOT the sha the stub claims ("deadbeef").
       {ws, _sha} = init_workspace_repo!(tmp)
 
       step_run =
@@ -639,11 +593,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
-  # ═══ B2 — LE POINT DE FAUCHE DU JUGE ═══
-  #
-  # La mort d'un juge était un EFFET DE BORD ; elle a maintenant un déclencheur causal, au même
-  # étage du rail que celle du producteur (`MergeAndPromote.reap_ticket_producer/3`) : la revue
-  # native est POSÉE, donc le livrable du juge est INGÉRÉ, donc le juge a fini.
+  # Reaping follows successful native review ingestion, subject to profile/scope guards.
   describe "B2 — la mort du juge est causée par l'ingestion de son verdict" do
     defmodule ReapSpy do
       @moduledoc false
@@ -678,14 +628,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:ok, :reviewed} =
                StepRunCompleter.record_review(judge_run(), forge_client: PrForge, forge_opts: [])
 
-      # `PodId.for_pr/3` — jamais une chaîne devinée. Un juge est clefé sur la PR, pas sur l'issue.
       assert_received {:killed, pod_id}
       assert pod_id == Fleet.PodId.for_pr("fleet/proj", 7, "qualifier")
     end
 
     test "revue EN ÉCHEC → AUCUNE fauche : on ne tue que ce dont on a le résultat" do
-      # ⚠ LA MOITIÉ QUI COMPTE. Faucher avant que la revue tienne perdrait le verdict ET son
-      # auteur : le rail rejoue sur `{:error, {:review, _}}`, et il rejouerait dans le vide.
+      # Failed review must not invoke the kill spy.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapSpy)
 
       assert {:error, {:review, _}} =
@@ -698,8 +646,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "fauche EN ÉCHEC → le verdict tient quand même" do
-      # Un pod qui survit est un coût, pas une corruption. Rendre une erreur ici ferait rejouer une
-      # revue DÉJÀ POSÉE — on transformerait une place perdue en double verdict.
+      # A returned kill error must not fail an already-posted review; exceptions are untested.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapFails)
 
       log =
@@ -715,8 +662,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "un PRODUCTEUR qui passerait par ce chemin n'est PAS fauché ici" do
-      # La garde lit `brief_kind`, pas un nom de rôle : la mort du producteur appartient au sceau,
-      # à la fusion, pas à une revue. Deux morts, deux causes, et elles ne se recouvrent pas.
+      # The loaded profile's brief_kind distinguishes producer from judge here.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, ReapSpy)
 
       assert {:ok, :reviewed} =
@@ -744,11 +690,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :approve, body}
       assert body =~ "qualifier"
-      # "APPROUVÉ" pins the FR user-facing review body.
-      # ⚖ TAXONOMIE : un juge rend un AVIS (tag JUDGED — « jamais acceptation seule »), il
-      # n'approuve pas. L'état de la review sur la forge reste `APPROVED` — c'est le protocole, et
-      # la branch-protection les compte — mais la prose lue par un humain ne doit pas attribuer au
-      # juge un acte qui appartient au rail.
+      # Favorable opinion is not final acceptance; the forge's APPROVED state remains protocol.
       assert body =~ "AVIS FAVORABLE"
 
       refute body =~ "APPROUVÉ",
@@ -774,14 +716,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   describe "record_review/2 — the machine verdict engraved beside the prose" do
-    # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings` rides the
-    # step_run as `:review_findings` and lands as `verdicts/issue-<n>-<role>.json`, committed in
-    # the ops worktree next to the prose pin. Best-effort like the provenance triplet: every
-    # degradation below posts the review anyway and RECORDS the absence loud.
+    # Archive findings beside prose while preserving native review on returned write failures.
     @tag :tmp_dir
     test "review_findings → verdicts/issue-42-qualifier.json engraved (committed), review posted",
          %{tmp_dir: tmp} do
-      # the project's ops face: project_name("fleet/proj") = "proj", a real git repo.
       work_dir = Path.join(tmp, "proj")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -809,19 +747,18 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :approve, _body}
 
-      # The object on disk IS the validated payload — nothing wrapped, nothing fabricated: the
-      # path carries (issue, role), git carries the identity, the file carries the judge's words.
+      # The JSON file contains the submitted payload directly.
       path = Path.join(work_dir, "verdicts/issue-42-qualifier.json")
       assert File.exists?(path)
       assert path |> File.read!() |> Jason.decode!() == findings
 
-      # committed, not just written: an uncommitted machine verdict has no citable identity.
+      # Verify a local commit, not an ops push.
       {log, 0} = System.cmd("git", ["log", "--oneline"], cd: work_dir)
       assert log =~ "verdict: verdicts/issue-42-qualifier.json"
     end
 
-    # C2 2026-08-19 — le MÊME payload part aussi SUR LA REVIEW. L'objet gravé est l'archive ; le
-    # corps de la review est le TRANSPORT que le gate consomme (`Jury` fetch déjà tous les corps).
+    # The review body transports findings to Jury; the ops object is their archive.
+    # This short body does not exercise the pinning threshold named in the title.
     @tag :tmp_dir
     test "review_findings → le corps posté PORTE le bloc machine, hors du résumé", %{tmp_dir: tmp} do
       work_dir = Path.join(tmp, "proj")
@@ -857,11 +794,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "un juge dont le payload a été REFUSÉ n'est pas accusé de s'être tu" do
-      # MESURÉ AU BANC (2026-08-19, probe-rails#47) : sur trois émissions, DEUX refusées par le
-      # schéma — un `findings` sérialisé en chaîne, un `severity_max: "none"` hors énumération.
-      # Le log d'absence les rangeait toutes deux en « ce juge n'a rien envoyé », et cette phrase
-      # m'a envoyé chercher pendant des heures pourquoi les juges se taisaient — alors qu'ils
-      # parlaient. Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un rail muet.
+      # A schema-refused payload must be diagnosed differently from absent emission.
       step_run = %{
         repo: "fleet/proj",
         issue_number: 42,
@@ -886,11 +819,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "un juge SANS verdict machine poste le corps d'aujourd'hui, et son silence est DIT" do
-      # Deux propriétés en un test, parce qu'elles sont le même arbitrage : la compat est
-      # byte-for-byte (un juge qui n'émet rien ne voit pas sa review changer), MAIS l'absence
-      # cesse d'être muette. Mesuré au banc le 2026-08-19 : un qualifier a rendu un excellent
-      # verdict et zéro payload machine, sans qu'une ligne le dise nulle part — et c'est
-      # exactement ce qui affamerait la fonction d'agrégation qui vient.
+      # Missing findings preserve prose bytes while emitting an absence warning.
       step_run = %{
         repo: "fleet/proj",
         issue_number: 42,
@@ -936,15 +865,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         end)
 
       assert_received {:review, 7, :approve, _body}
-      # Same doctrine as the provenance {:work_dir_missing, _}: the missing record says so.
+
       assert log =~ "findings NOT engraved"
       refute File.exists?(Path.join([tmp, "proj", "verdicts"]))
     end
 
     @tag :tmp_dir
     test "engrave failure (ops write refused) → loud warning, review UNHARMED", %{tmp_dir: tmp} do
-      # A `verdicts` regular FILE where the subdir must go: OpsObject's mkdir_p returns
-      # {:error, _} — a clean commit failure, no raise, exercising the degraded branch.
+      # A file blocking the verdicts directory exercises a returned write error, not an exception.
       work_dir = Path.join(tmp, "proj")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -973,16 +901,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert log =~ "findings NOT engraved"
     end
 
-    # ⚠ CE TEST A CHANGÉ DE VERDICT LE 2026-08-19, ET C'EST UN RENVERSEMENT ASSUMÉ. Il s'appelait
-    # « no machine file and NO noise (the legacy judge is nominal) » et épinglait le silence : au
-    # 18 août, `findings` venait de naître, aucun SP ne le nommait, et un juge qui n'en émettait
-    # pas était un juge legacy — un cas NOMINAL, que rien ne devait accuser.
-    #
-    # Ce qui a changé n'est pas l'avis, c'est le monde : tous les SP de juge composent désormais la
-    # consigne. Une absence ne dit plus « ce juge n'a jamais entendu parler de la clé », elle dit
-    # « on lui a demandé et il ne l'a pas fait » — mesuré au banc le 2026-08-19 (PR#34 : verdict
-    # excellent, zéro payload, zéro trace). Le fichier machine reste absent (rien à graver) ; ce
-    # qui devient faux, c'est le silence.
+    # Distinguish absent payload from failed archival write; neither invents a machine verdict.
     @tag :tmp_dir
     test "no review_findings → toujours aucun fichier machine, mais l'absence est DITE", %{
       tmp_dir: tmp
@@ -1046,7 +965,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:ok, :promoted} =
                StepRunCompleter.promote(step_run, forge_client: PrForge, forge_opts: [])
 
-      # Seal (F-arch-MCP): gatekeeper comment on the issue THEN merge.
+      # Observe both calls; these selective receives do not establish merge/comment order.
       assert_received {:comment, 42, _body, _opts}
       assert_received {:merge, 7}
     end
@@ -1063,10 +982,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:error, {:merge, {:http, 409, _}}} =
                StepRunCompleter.promote(step_run, forge_client: PrFailForge, forge_opts: [])
 
-      # Invariant F-MERGE-CLAIM-BEFORE-REALITY: the seal is MERGE-FIRST → a 409 merge must leave NO
-      # "sealed/merged" comment on the issue (commenting before confirmation would freeze a success
-      # that never happened). PrFailForge SIGNALS its comments → this refute is probative (it would
-      # break on a comment-before-merge regression, the exact bug MergeAndPromote avoids).
+      # Failed merge must not post a seal. The comment spy makes this refusal observable.
       refute_received {:comment, _, _, _}
     end
   end
@@ -1125,15 +1041,13 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       refute body =~ "Closes"
       assert_received {:request_review, 7, ["qualifier"]}
-      # producer: the lock is on the ISSUE (dispatch_issue); no more set_assignee (PR-driven)
+
       refute_received {:assignee, _, _}
 
-      # The ISSUE lock is NOT lifted at advance anymore — it persists until the final :promote
-      # (the brick stays in-flight through the whole review, not just the coding).
+      # Producer advance keeps its issue lock through review.
       refute_received {:unlock, _, _}
 
-      # BUT the eng's build STOPWATCH closes at hand-off (on ISSUE 42) — decoupled from the lock:
-      # otherwise the eng's time would span the whole review (cycle time ≠ work time).
+      # Build timing stops at handoff even while the issue lock remains.
       assert_received {:stopwatch_stopped, 42}
     end
 
@@ -1147,9 +1061,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
-      # The dispatched judge derives its map position from the ISSUE's engraved route:
-      # trigger-first exposed it to the PREVIOUS step on any racing tick (off-map
-      # resolution, soft gates never evaluated). Mailbox order IS call order.
+      # A racing judge reads the issue's route; collect ordered tags to verify route precedes request.
       {:messages, msgs} = Process.info(self(), :messages)
 
       calls =
@@ -1169,9 +1081,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert {:error, {:route, {:http, 500, _}}} =
                StepRunCompleter.complete_pr(step_run, orch_opts(forge_client: RouteFailForge))
 
-      # Trigger-first used to LAY the review request and THEN fail the route: the judge
-      # evaluated the previous step deterministically. State-first leaves the brick
-      # stuck-but-consistent — lock held, no judge, the error visible.
+      # A returned route failure prevents the review trigger in this call.
       refute_received {:request_review, _, _}
     end
 
@@ -1184,18 +1094,16 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert {:ok, :review_requested} = StepRunCompleter.complete_pr(step_run, orch_opts())
 
-      # the FULL NOTE (the prose) lives ONCE, on the ISSUE (42).
-      # "Note de l'engineer" pins the FR user-facing comment heading.
+      # Summary prose belongs on the issue; replay deduplication is not tested.
       assert_received {:comment, 42, issue_body}
       assert issue_body =~ "j'ai implémenté le décodeur, choisi un buffer circulaire"
       assert issue_body =~ "Note de l'engineer"
 
-      # the POINTER is FOLDED into the PR's OPENING body (7) — not a 2nd separate comment.
+      # The opening body links to the issue note.
       assert_received {:open_pr, _head, _base, pr_body}
       assert pr_body =~ "ticket #42"
       refute pr_body =~ "j'ai implémenté le décodeur"
 
-      # zero comments on the PR: a single "as engineer" post on the PR side (the opening itself).
       refute_received {:comment, 7, _}
     end
 
@@ -1226,7 +1134,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       refute_received {:open_pr, _, _, _}
 
-      # no PR yet -> the engineer stays assigned (Entry) and re-spawns next tick; unlock the issue
+      # Rework unlocks the issue; dispatch follows routing, not the assignee in the test title.
       refute_received {:assignee, _, _}
       assert_received {:unlock, 42, _}
     end
@@ -1241,7 +1149,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, _}
       assert_received {:request_review, 7, ["reviewer"]}
       refute_received {:assignee, _, _}
-      # judge: the lock is on the PR (dispatch_review), not the issue
+
       assert_received {:unlock, 7, "lcars-in-flight"}
     end
 
@@ -1254,8 +1162,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :approve, _}
       assert_received {:merge, 7}
 
-      # The ISSUE lock (never lifted since the producer's :advance, persisted through the whole
-      # review) lifts HERE, AT THE SAME TIME as the judge's PR lock — the entire brick is done.
+      # Both unlock calls occur here; they are separate writes, not simultaneous.
       assert_received {:unlock, 7, _}
       assert_received {:unlock, 42, _}
     end
@@ -1274,11 +1181,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "judge with unexpected intent and no :review_event → FAIL-CLOSED review (REQUEST_CHANGES, never approve by omission)" do
-      # Derivation by intent (`:review_event` absent): an intent that is NOT an explicit gate-pass
-      # (`:advance`/`:promote`) must NEVER self-approve. Here `:reviewed` (a no-workflow_map judge
-      # that lost its verdict) falls on the fail-closed catch-all → REQUEST_CHANGES, not APPROVED.
-      # Under an `_ -> :approve` catch-all, this step_run validated by omission (the worst default
-      # for a verdict).
+      # Without an explicit review event, :reviewed maps to request_changes rather than implicit approval.
       step_run = judge_step_run(:reviewed, %{role: "qualifier"})
 
       assert {:ok, :reviewed} = StepRunCompleter.complete_pr(step_run, forge_client: OrchForge)
@@ -1288,26 +1191,20 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
 
     test "producer :review on a ROUTED map → the ENGRAVED card's jury, never the project's (faceproof bench)" do
-      # chantier face-projet: the step_run carries the engraved map (workshop-direct, jury []) — the
-      # review request must convene THAT card's jury, not the project card's. Reading the project
-      # card laid brief-gate's qualifier+reviewer onto a zero-judge ops PR: REQUEST_CHANGES x2 on
-      # prose, rework loop. Measured on the faceproof bench before this test existed.
+      # An engraved empty jury distinguishes this card from the project's fallback jury.
       step_run = producer_step_run(:review, %{workflow_map: "ops-zero"})
 
       zero_loader = fn "ops-zero" ->
         %{"jury" => [], "steps" => %{"build" => %{"role" => "scribe", "needs" => []}}}
       end
 
-      # NO reviewer_roles seam here — it would win over both cards and prove nothing. The
-      # discriminant is real: without the fix, the fallback `project_jury` loads the delegation
-      # default card (brief-gate, jury qualifier+reviewer) and a request_review fires.
+      # Do not override reviewer_roles: that would bypass the card selection under test.
       assert {:ok, :review_requested} =
                StepRunCompleter.complete_pr(
                  step_run,
                  orch_opts(workflow_map_loader: zero_loader)
                )
 
-      # Zero-judge engraved card → NOBODY convened. The promote is dispatch_review's (:no_jury).
       refute_received {:request_review, _, _}
     end
 
@@ -1322,24 +1219,20 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:open_pr, "lcars/issue-42-engineer", "main", body}
       refute body =~ "Closes"
-      # DN §1.4: qualifier + reviewer requested at once
+
       assert_received {:request_review, 7, ["qualifier", "reviewer"]}
-      # ②.1e: the commissioning human (id -un) is assigned to the PR (#7)
+      # Observe assignment to a human; this does not establish how credentials resolved it.
       assert_received {:assignee, 7, _human}
 
-      # unlock PR only (rework re-delivery, dispatch_review lock) — the ISSUE (1st delivery,
-      # dispatch_issue lock) is NOT lifted here anymore: it persists until the final :promote.
+      # Review handoff releases the PR lock while retaining the producer's issue lock.
       assert_received {:unlock, 7, "lcars-in-flight"}
       refute_received {:unlock, 42, _}
-      # no merge here: the merge is driven by the PR-state (dispatch_review)
+
       refute_received {:merge, _}
     end
 
     test "producer :review on a ZERO-JUDGE card (jury []) → opens PR, NO request_review, NO error" do
-      # An empty jury is a DELIBERATE card choice (schema doctrine), not a config hole:
-      # nothing to request here — the poller seals directly on its next tick
-      # (`dispatch_by_verdicts` zero-judge path). The rest of the hand-off is unchanged
-      # (human assigned, PR lock lifted, no merge on this side).
+      # Empty jury is valid; this test exercises handoff, not the later poller promotion.
       assert {:ok, :review_requested} =
                StepRunCompleter.complete_pr(
                  producer_step_run(:review),
@@ -1360,11 +1253,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:get_pr, "lcars/issue-42-engineer", "main"}
       assert_received {:review, 7, :approve, _}
-      # judge: lock on the PR (dispatch_review)
+
       assert_received {:unlock, 7, "lcars-in-flight"}
 
-      # the judge does not merge and does not re-request a review: the poller (reviews-driven)
-      # decides. No action on requested_reviewers (Gitea does not empty it; we read the reviews list).
+      # Later PR-state routing decides promotion; this call neither merges nor re-requests.
       refute_received {:merge, _}
       refute_received {:request_review, _, _}
     end
@@ -1415,9 +1307,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   describe "step_run_jury — the jury of the PROJECT's catalogue card, through the default loader" do
     @tag :tmp_dir
     test "a producer :review on a `biz` project convenes the `biz` card's judge", %{tmp_dir: tmp} do
-      # `standard` lives in `biz` only; a default loader that drops the catalogue falls back to
-      # the project card's jury (the bundled default). No `:workflow_map_loader` in the opts: the
-      # completer's own default is the subject.
+      # No loader override: exercise repository catalogue selection through the default loader.
       %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
       :ok = Image.publish!()
@@ -1429,9 +1319,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       end)
 
       judge = BizCatalogueFixture.judge()
-      # The PROJECT declares the jury-less card, so the fallback (engraved card unloadable in the
-      # wrong root) convenes nobody; `[judge]` can only come from `standard` read in `biz`. The
-      # producer signs as `engineer` — the bench holds its token, the step role is not the point.
+      # The project's no-jury fallback differs from the engraved standard card's judge.
       code_root = Path.join(tmp, "projects")
       BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
 
@@ -1451,9 +1339,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     @tag :tmp_dir
     test "producer :review with an unloadable `workflow_map` → the declared card's jury, said",
          %{tmp_dir: tmp} do
-      # The project DECLARES `standard` (jury `[code-reviewer]`, a name the delegation card does
-      # not carry): the fallback must read THAT card, not the delegation default the same fallback
-      # would reach through `Roles.jury(nil, _)` — the two replies differ, so the witness can tell.
+      # Project-declared standard has a distinct judge, so a delegation-default fallback fails this assertion.
       %{install_dir: dir} = BizCatalogueFixture.write!(tmp)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
       :ok = Image.publish!()
@@ -1488,8 +1374,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
   end
 
   describe "promote/2 — the seal's two pre-write refusals cross the completer (2026-09-05)" do
-    # `promote/2` listed three of the five error forms `merge_and_promote/7` returns. The two
-    # missing ones are pronounced BEFORE any write and were a CaseClauseError on the terminal rail.
+    # Explicit seal refusal shapes must propagate rather than raise through an unmatched case.
     defmodule SignalDownOrchForge do
       defdelegate pr_review_state(r, n, o), to: OrchForge
       defdelegate get_pr_for_branch(r, h, b, o), to: OrchForge
@@ -1498,15 +1383,14 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       defdelegate remove_label(r, n, l, o), to: OrchForge
       defdelegate stop_stopwatch(r, n, o), to: OrchForge
       defdelegate post_comment(r, p, b, o), to: OrchForge
-      # The conflict signal the seal reads FIRST, unreadable: no method can be chosen.
+
       def count_comments_marked(_r, _n, _p, _o), do: {:error, :forge_down}
     end
 
     alias Fleet.Test.ProvenanceWallHarness, as: Wall
     alias Fleet.Test.ProvenanceWallHarness.WallForge
 
-    # `OrchForge` plus `branch_head/3` (so the wall RUNS) and `add_label/4` (so `await_arch/2` can
-    # lay `lcars-awaits-arch`) — mirrored by reflection, an inventory by hand drifts.
+    # Add subject lookup and architect labels; reflect shared methods to avoid a second inventory.
     defmodule WallOrchForge do
       for {name, arity} <- OrchForge.__info__(:functions) do
         args = Macro.generate_arguments(arity, __MODULE__)
@@ -1563,8 +1447,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     @tag :requires_git
     test "through route(:promote): the wall's refusal goes to the ARCHITECT, not to a log line",
          %{tmp_dir: tmp} do
-      # The work item is already completed on this rail: an error here is a warning and nothing
-      # else. So the judge's PR lock lifts and the ISSUE goes to `await_arch/2`.
+      # Provenance refusal routes to await_arch after attempting judge unlock.
       %{head: head, alien: alien} = Wall.harness(tmp, "proj")
       :ok = Wall.statement(tmp, 42, head, alien, "proj")
       opts = Wall.opts(tmp, head, 42)
@@ -1580,7 +1463,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:comment, 42, body}
       assert body =~ "PROVENANCE"
       assert body =~ "re-livrer"
-      # The judge's PR lock and the issue lock both lift — the brick is with a human now.
+
       assert_received {:unlock, 7, _}
       assert_received {:unlock, 42, _}
     end

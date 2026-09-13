@@ -1,58 +1,26 @@
 defmodule Fleet.Pilot.StepRunCompleter do
   @moduledoc """
-  **Step-run-completion** primitive (the forge IS the state machine; this module
-  applies its transitions). When a pod (current step) has finished, the
-  **SYSTEM** — not the pod, which has neither token nor forge tool (forge-blind) —
-  applies the transition to the next step, as an idempotent forge-driven sequence
-  (no RAM inter-step chaining).
+  Applies completion to the forge using system-held credentials on behalf of each role.
 
-  ## Ordered idempotent sequence
+  complete/2 publishes (or uses an explicit step_run_sha), posts a signed trace, spaces
+  writes, advances the engraved route or closes the issue, then removes the lock.
+  The poller reads workflow/stage routing, not the human assignee. A nonterminal
+  completion without workflow_map/next_step returns reassigned without writing a route.
 
-  Atomicity is impossible (Gitea has no transaction; one step_run = ~5 HTTP
-  writes). We replace it with an ORDER where the poller trigger (the ENGRAVED
-  ROUTE of the next step — the poller reads the route, never the assignee)
-  is the **second-to-last** and the lock is lifted **last**:
+  PR completion opens a producer PR or posts a judge review, then routes by intent.
+  Producer issue locks generally span review; judge PR locks cover one turn.
+  Routing stays here because it shares promotion and unlock operations.
 
-    1. **Commit + push deliverable** — delegated to `Deliverable.publish`
-       (workspace coherence gate + bounded push). Inseparable: the local commit
-       alone is not seen by the forge. Returns the `commit_sha` that signs the step_run.
-    2. **Signed comment** `[step_run:<role>:<sha>]` — dedup by signature (replay-safe).
-       *(No step 3 "PATCH `state:*`": the position lives in the scoped labels `wfmap/*`+`stage/*`
-       (post_route), not in a `state:*` label. The following step numbers keep their mapping.)*
-    4. **Routing to the next step**:
-         * `next_assignee` present (multi-step) → engraves the NEXT step's ROUTE
-           (`post_route`); the assignee STAYS the human — the poller reads the
-           engraved route (never the assignee) to spawn the next step, and only
-           once 1-3 are OK. **(computing `next_assignee` from the workflow_map
-           is upstream, not here.)**
-         * `next_assignee == nil` (1-step / terminal) → `close_issue`.
-    5. **Removes `lcars-in-flight`** — LAST: the poller re-spawns the next one
-       only once EVERYTHING is done.
+  There is no transaction or blanket exactly-once guarantee. CompletionOutbox supplies
+  replay for retained entries, but the consumer's offload success can delete an entry
+  before this sequence finishes. Signed issue traces request author-aware deduplication; open_pr resolves
+  an existing head/base on conflict. Native reviews and producer summaries can repeat,
+  writes may partly succeed, and exceptions can interrupt after publication or unlock.
+  Recovery must also race with the poller's orphan reclamation.
 
-  **Crash guarantee**: a crash at any step leaves the lock in place (except after
-  5) → the poller does not re-spawn; recovery replays the sequence, the done
-  steps skip (idempotent write-ops + comment dedup + idempotent push). No
-  double-deliverable nor double-comment.
-
-  ## Seams
-
-  `:deliverable` (default `Fleet.Workflow.Deliverable`), `:forge_client` (default
-  `Fleet.Forge.Client`) — stubbed in test. `:deliverable_opts` when the step_run
-  produces a git deliverable; absent/`nil` = no git deliverable (e.g. judge
-  verdict in payload mode — the `step_run_sha` is then supplied explicitly).
-
-  ## Sub-modules
-
-    * `Texts` — DEFAULT wording (pr_body/review_body/signed comment), pure generators;
-      the caller's overrides take precedence.
-    * `Emissions` — SIDE emissions of the producer delivery (eng voice,
-      `deliverable.published` slot-freeze); out of sequence by contract: the
-      completion depends on none of their results (the deliverable truth = the
-      pushed commit + open PR). Failure visibility per emission: `Emissions` doc.
-
-  Intent routing (`route/3` ×5) stays HERE: it calls back the public primitives
-  (`promote`) and shares `unlock`/`post_route_if_present` (sole authorities) with the
-  in-house sequence — extracting it would create a bidirectional seam (wrong boundary).
+  Seams: :deliverable, :forge_client and :forge_opts. With no deliverable_opts,
+  step_run_sha must be provided. Texts supplies defaults (caller bodies take precedence),
+  Attestations writes ops material, and Emissions handles publication events and summaries.
   """
 
   require Logger
@@ -63,42 +31,23 @@ defmodule Fleet.Pilot.StepRunCompleter do
   alias Fleet.Layout
   alias Fleet.Project.Roles
 
-  # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by
-  # contract (the completion depends on none of their results: the deliverable truth is the
-  # pushed commit + open PR), hence their extraction.
   alias Fleet.Pilot.StepRunCompleter.Attestations
   alias Fleet.Pilot.StepRunCompleter.Emissions
 
-  # Authority for the default WORDING (pr_body/review_body/signed comment) — pure generators;
-  # the caller's overrides (`:pr_body`/`:review_body`/`:comment_body`) always take precedence.
   alias Fleet.Pilot.StepRunCompleter.Texts
 
-  # `Pinning` is aliased under its FULL name deliberately: `StepRunCompleter.Emissions`
-  # already lives in this file, and `Emission`/`Emissions` side by side is the kind of neighbouring
-  # name that gets misread once and then trusted.
+  # Keep Pinning distinct from the adjacent Emissions helper.
   alias Fleet.Workflow.Pinning
 
-  # Protocol vocabulary = single source Fleet.Labels.
   @in_flight_label Labels.in_flight()
 
   @typedoc """
-  Describes the step-run-completion of a role on an issue.
-
-    * `:repo` / `:issue_number` — forge target (mandatory)
-    * `:role` — the role that has just finished (signs the comment)
-    * `:deliverable_opts` — opts passed as-is to `Deliverable.publish/1`
-      (mode/workspace/base_sha/remote/target_branch/...). `nil` = no git
-      deliverable; then `:step_run_sha` required.
-    * `:step_run_sha` — override of the step_run signature (default = published commit_sha)
-    * `:next_assignee` — login of the next role (workflow_map); `nil` = terminal → close
-    * `:comment_body` — human-readable body of the comment (the machine signature is
-      always appended); default generated
+  Completion data for a role on repo/issue_number. deliverable_opts passes unchanged
+  to publish; without it, step_run_sha is required. A supplied step_run_sha overrides
+  the published SHA. next_assignee selects advance vs terminal close, without assigning
+  that login. comment_body overrides prose but the machine signature is appended.
   """
-  # The issue-level contract of `complete/2`, plus what the other two doors read: `complete_pr/2`
-  # takes the PR-native keys (built by `StepRunConsumer.StepRunBuild`), `await_arch/2` takes
-  # `:decision` (posed by `TerminalEscalation`); `:closure` is posed by
-  # `StepRunConsumer.close_with_trace` and read by `complete/2`. Listed so the type describes
-  # the THREE doors.
+  # Includes keys used by complete_pr and await_arch as well as complete; callers select the shape.
   @type step_run :: %{
           required(:repo) => String.t(),
           required(:issue_number) => integer(),
@@ -126,8 +75,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   @doc """
   Publishes and traces a completed step, advances or closes its issue, then unlocks it.
 
-  Accepts `:deliverable`, `:forge_client` and `:forge_opts` seams. Replays are
-  idempotent. Returns `:completed`, `:reassigned`, or the failing operation.
+  Accepts :deliverable, :forge_client and :forge_opts seams. Returns :completed,
+  :reassigned or the failing supported operation; replay guarantees are operation-specific.
   """
   @spec complete(step_run(), keyword()) ::
           {:ok, :completed | :reassigned} | {:error, {atom(), term()}}
@@ -165,11 +114,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
         "(jamais deux tickets vivants pour la même brique)."
 
   @doc """
-  Records a role-signed verdict that requires the architect, marks the issue
-  `lcars-awaits-arch`, then removes `lcars-in-flight`.
+  Posts an architect-directed role verdict, adds lcars-awaits-arch, then unlocks.
 
-  The issue is neither closed nor reassigned and remains outside dispatch until the
-  architect acts. Returns `:awaiting_arch` or the failing forge operation.
+  On success the open issue stays outside dispatch while that label remains. Returned
+  errors are wrapped as :await_arch; earlier writes remain and exceptions propagate.
   """
   @spec await_arch(map(), keyword()) :: {:ok, :awaiting_arch} | {:error, {:await_arch, term()}}
   def await_arch(step_run, opts \\ []) when is_map(step_run) do
@@ -186,8 +134,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       Map.get(step_run, :comment_body) ||
         "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
-    # The gesture follows the cause: a brief a judge refused is re-framed and re-submitted; a
-    # brick whose provenance lies is re-delivered or re-framed, never « superseded » as a brief.
+    # Provenance incoherence asks for redelivery or reframing; brief refusal asks for reframing.
     body =
       "**Architecte** (auteur du brief) — " <>
         lead <>
@@ -201,11 +148,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          {:ok, _} <- forge.post_comment(repo, n, body, comment_opts),
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
-         # UNLOCK, pas un `remove_label`. Retirer `lcars-in-flight` EN LIGNE saute les deux autres
-         # gestes de `unlock/6` : le chronometre Gitea du role n'est jamais arrete — il tourne
-         # pendant TOUTE l'attente humaine, qui peut durer des jours — et `step.unlocked` n'est
-         # jamais emis, donc une escalade ne laisse AUCUNE ligne de feed. Le seul etat que l'arch
-         # doit voir arriver serait le seul a n'en produire aucune.
+         # Shared unlock also stops the role's timer and emits a feed event after label removal.
          {:ok, _} <- unlock(forge, repo, n, forge_opts, role, :awaiting_arch) do
       Logger.info(
         "StepRunCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
@@ -218,11 +161,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  Publishes a producer's deliverable and opens its native review PR as that role.
-
-  `:base_branch` and `deliverable_opts.target_branch` are required; the face is
-  decided upstream and never defaulted here. Branch birth, content push and PR creation
-  are spaced for forge chronology. Existing head PRs make replays idempotent.
+  Publishes and opens a role-signed PR. Requires base_branch and deliverable_opts.target_branch;
+  face selection belongs upstream. Branch pre-creation is optional and returned failures
+  only warn. Spacing separates selected writes; it is not a server timestamp guarantee.
+  On a conflict response, the default forge client looks up an existing open head/base PR.
   """
   @spec open_deliverable_pr(map(), keyword()) ::
           {:ok, %{commit_sha: String.t(), pr_number: integer()}} | {:error, {atom(), term()}}
@@ -260,29 +202,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     with {:ok, sha} <-
            step1_publish(step_run, deliverable) |> record_publish_failure(step_run, opts),
-         # Gap BEFORE the PR: the content push takes a `created_at` strictly earlier than the
-         # PR-opened action (a same-second tie renders inverted in the feed).
+         # Space the content push from PR creation to reduce same-second feed ties.
          :ok <- space_writes(opts),
-         # Both post-push legs record their failure ON THE ISSUE (BL-6-34): between a landed push
-         # and a born PR, an {:error, _} is otherwise a host-log line — pushed branch, mute ticket,
-         # wedged brick. The marker turns the stall into a named refusal.
+         # Record returned role-token/PR failures on the issue after publication.
          {:ok, role_opts} <-
            ForgeClient.as_role(forge_opts, role) |> record_pr_open_failure(step_run, sha, opts),
          {:ok, pr} <-
            open_pr_step(forge, repo, head, base, title, body, role_opts)
            |> record_pr_open_failure(step_run, sha, opts) do
-      # SLSA triplet: (brief_sha, base_sha=input_sha, livrable_sha=sha) → in-toto provenance
-      # committed under ops `provenance/`. HERE = the ONLY point where a real producer git
-      # deliverable is published (PR-native path); `complete/2` carries ONLY verdicts without
-      # deliverable_opts (abandon/brief), never a deliverable. Engraved AFTER the PR exists
-      # (BL-6-34): a completion that stalls between push and PR must never leave a "delivered"
-      # attestation with no integration surface. BEST-EFFORT (degrades LOUD) — NOT load-bearing:
-      # never a blocked PR over a trace file.
+      # Request provenance only after PR creation succeeds. Returned attestation errors degrade;
+      # exceptions can still interrupt. complete/2 also accepts git deliverables but does not emit this.
       _ = Attestations.maybe_emit_provenance(step_run, sha, opts)
 
-      # `set_stage(stage_review)` is NOT done here: it lives in `complete_producer`, AFTER the
-      # comment (eng voice) — same order "comment THEN stage transition" as `complete/2`
-      # (scoper gate), with the same `space_writes` anti-same-second gap. Dashboard coherence.
+      # complete_producer projects stage/review after the summary and spacing.
       Logger.info("StepRunCompleter: ##{n} #{role} → PR ##{pr} (head=#{head}, sha=#{sha})")
       {:ok, %{commit_sha: sha, pr_number: pr}}
     end
@@ -296,20 +228,16 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  **PR-native** — judge verdict → **native review** on the PR, not an in-house
-  `[step_run:role:sha]` comment: the gate verdict lives as a Gitea review (APPROVED / REQUEST_CHANGES),
-  traceable, readable without a custom query. It is the durable HOME of the verdict.
+  Posts a native PR review using the judge's role token, then attempts judge reaping.
 
-  `step_run`: `:repo`, `:issue_number`, `:pr_number`, `:role`, `:review_event` (`:approve` |
-  `:request_changes` | `:comment`), `:review_body` (optional, default generated from role + verdict),
-  `:review_findings` (optional — the schema-valid `details.findings` machine payload, engraved
-  as `verdicts/issue-<n>-<role>.json` next to the prose pin, best-effort).
-  Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
+  Requires repo, pr_number, issue_number and review_event; role must resolve for signing.
+  review_body overrides Texts. Upstream-validated review_findings are archived as ops JSON
+  and appended outside prose pinning as FindingsWire, so the jury reads them in the review.
+  The issue number names the prose/JSON archive; it is never guessed.
 
-  `:issue_number` is REQUIRED and fetched fail-loud: a verdict long enough to be committed is
-  committed at `verdicts/issue-<n>-<role>.md`, and a verdict that cannot name its issue has no
-  business being filed under a guessed one. The real caller always carries it (`build_step_run`);
-  a caller that does not is a caller that has not said which delivery it is judging.
+  Supported review errors are wrapped as :review; missing role token returns its bare error.
+  Archival writes precede token lookup and posting. Returned archive/kill failures can
+  degrade, but exceptions propagate, including after a successfully posted review.
   """
   @spec record_review(map(), keyword()) :: {:ok, :reviewed} | {:error, {:review, term()}}
   def record_review(step_run, opts \\ []) when is_map(step_run) do
@@ -322,21 +250,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.get(step_run, :role, "juge")
     work_dir = Attestations.verdict_work_dir(repo, opts)
 
-    # C1: the MACHINE verdict (`details.findings`, validated at build) is engraved
-    # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
-    # same reason (OpsObject's idempotent content probe: a re-run re-finds the commit, never forks
-    # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
-    # blocks the review — the human matter of the findings already lives in the `reason` prose,
-    # so the verdict loses its machine copy, not its substance.
+    # Archive before review posting. Returned failures warn; the same findings still travel
+    # in the review body below, without relying on an archive read.
     :ok = Attestations.maybe_engrave_findings(step_run, work_dir, role)
 
-    # SUMMARY + POINTER above the threshold. A long verdict pasted into a review is unreadable in
-    # the UI, unquotable (nothing addresses a version of it) and EDITABLE — a human amending the
-    # comment amends the only copy, silently. Committed and cited, it is an immutable object with a
-    # name, and the surface keeps what a human scanning the PR actually needs.
-    #
-    # The generic fallback body is short by construction and never pins: `render/2` returns it
-    # untouched, so the cheap path stays one function call with no forge write.
+    # Pin long prose for a versioned citation; short/default text remains inline.
     body =
       step_run
       |> Map.get(:review_body, Texts.review_body(role, event))
@@ -348,23 +266,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
         repo: repo
       )
 
-    # ⚠ LE VERDICT MACHINE VOYAGE SUR LA REVUE ELLE-MEME. Le graver comme objet d'archive est le bon
-    # ARCHIVAGE et le mauvais TRANSPORT : la porte qui doit le consommer lit deja tous les corps de
-    # revue en un appel, la ou l'archive est en ecriture seule. Ajoute ici, il l'atteint sans requete
-    # ni chemin de lecture supplementaires — et une revue supersedee emporte ses conclusions AVEC elle.
-    #
-    # ⚠ HORS DU RENDU EPINGLE, DELIBEREMENT : un corps epingle est RESUME, donc ce qu'on y fond
-    # disparait exactement sur les verdicts LONGS — ceux dont les conclusions valent d'etre lues.
-    # Rendu dedans, le fil marcherait sur les revues courtes, c'est-a-dire la ou personne ne
-    # remarquerait son absence.
+    # Append machine transport outside the summary/pointer rendering, including for long prose.
+    # Jury reads review bodies, so superseding a review also supersedes its findings.
     body = body <> Fleet.FindingsWire.render(Map.get(step_run, :review_findings))
 
-    # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
-    # the review author = qualifier/reviewer (honest avatar/trace), not the system account. Token
-    # absent → `{:error, :role_token_unavailable}` (fail-closed: no review under the system account).
-    # The pod has no token; it is the SYSTEM that posts the review in its name (the pod stays forge-blind).
-    # NB `ForgeClient.post_review/5` returns `:ok` (not `{:ok, _}`) on success — match both
-    # (a test seam may return either; the real contract = `:ok`).
+    # Sign as the judge, never silently as system. Accept both supported success shapes.
     case ForgeClient.as_role(forge_opts, Map.get(step_run, :role)) do
       {:ok, role_opts} ->
         case forge.post_review(repo, pr, event, body, role_opts) do
@@ -378,36 +284,19 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # ═══ LE POINT DE FAUCHE DU JUGE ═══
-  #
-  # DEUX ROLES, DEUX CRITERES, ET LA DIFFERENCE EST CE QUE CHACUN POSSEDE :
-  #
-  #   * le PRODUCTEUR possede le TICKET jusqu'a sa livraison fusionnee — il meurt au merge
-  #     (`MergeAndPromote.reap_ticket_producer/3`), parce qu'un rework le rappelle et qu'il doit
-  #     retrouver son contexte ;
-  #   * le JUGE ne possede que SON VERDICT — il meurt quand ce verdict est ingere, c'est-a-dire
-  #     quand sa revue native tient sur la PR. Un rework le rappellera FROID, par design : re-lire
-  #     sans prejuge est le mandat, pas un pis-aller.
-  #
-  # ⚠ APRES LA POSE, JAMAIS AVANT. Un juge fauche avant que sa revue tienne serait un verdict perdu
-  # sans personne pour le refaire — et le chemin d'echec ci-dessus rend `{:error, {:review, _}}`
-  # precisement pour que le rail le rejoue. On ne tue que ce dont on a le resultat.
-  #
-  # ⚠ ET LA FAUCHE NE PEUT PAS FAIRE ECHOUER L'INGESTION. Elle rend `{:ok, :reviewed}` quoi qu'il
-  # arrive : le verdict est publie, c'est un fait acquis: un pod qui survit est un cout, pas une
-  # corruption. L'inverse — rendre une erreur parce qu'un `kill_pod` a rate — ferait rejouer une
-  # revue deja posee.
+  # Judges can restart cold for rework after their review is ingested; producers retain
+  # ticket context until merge. Reaper applies profile/scope guards, ignores returned
+  # kill errors, but may raise after the review was already posted.
   defp verdict_ingested(repo, pr, role) do
     _ = Fleet.Pilot.PodReaper.reap_judge(repo, pr, role)
     {:ok, :reviewed}
   end
 
   @doc """
-  Seals and rebases the PR, then closes its issue through `MergeAndPromote`.
+  Delegates merge method selection, sealing and issue closure to MergeAndPromote.
 
-  Merge, close and role-token failures propagate without unlocking the brick, and so do the two
-  refusals the seal pronounces BEFORE any write (`conflict_signal_unreadable`,
-  `provenance_incoherent`).
+  Maps success to :promoted and propagates the explicitly listed errors. It does not
+  unlock here. An unrecognized return raises through the case rather than becoming success.
   """
   @spec promote(map(), keyword()) ::
           {:ok, :promoted}
@@ -441,12 +330,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
          ) do
       :ok -> {:ok, :promoted}
       {:error, {:merge, _}} = err -> err
-      # F-C066
       {:error, {:close_after_merge, _}} = err -> err
       {:error, :role_token_unavailable} = err -> err
-      # The seal's two pre-write refusals, NAMED and not caught by a `_`: Dialyzer says nothing
-      # about a non-exhaustive `case`, so a sixth form the seal learns to return must fail here
-      # with its shape in the log rather than pass as a generic error (2026-09-05).
+      # Enumerate pre-write refusals too; an added return shape needs an explicit clause.
       {:error, {:conflict_signal_unreadable, _}} = err -> err
       {:error, {:provenance_incoherent, _}} = err -> err
     end
@@ -499,7 +385,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
       repo = Map.fetch!(step_run, :repo)
       n = Map.fetch!(step_run, :issue_number)
 
-      # CI-13
       case forge.set_stage(repo, n, Labels.stage_review(), forge_opts) do
         {:ok, _} ->
           :ok
@@ -599,16 +484,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
           {:ok, :promoted}
         end
 
-      # A TERMINAL refusal: the deterministic wall found the statement lying about the brick, and
-      # no tick will change that. On this rail the work item is already completed, so an error
-      # here would be a log line and nothing else — the same fact `ReviewLifecycle` escalates on
-      # the PR rail. The judge's PR lock lifts (its brick is done) and the ISSUE goes to the
-      # architect through `await_arch/2`, the rail's own airlock (2026-09-05).
+      # Incoherent provenance needs architect action, not an unchanged merge retry.
       {:error, {:provenance_incoherent, reason}} ->
-        # The escalation is the load-bearing gesture and the judge's PR unlock the accessory
-        # one: a PR lock left behind is reclaimed by the reconciliation, an issue left without
-        # `lcars-awaits-arch` is the silent loop. So the unlock is best-effort and named, and
-        # `await_arch/2` runs whatever it returned.
+        # Continue to await_arch despite returned judge-unlock errors; exceptions still interrupt.
+        # Reconciliation may later reclaim the PR lock, subject to its own observations/grace.
         case unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role) do
           {:ok, _} ->
             :ok
@@ -707,8 +586,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp step_run_jury(step_run, opts) do
-    # Arity 2 so `safe_load/3` can hand over WHICH catalogue answers (wall
-    # `workflow.loader_arity`, 2026-09-05).
+    # Arity 2 lets safe_load forward the repository catalogue to the loader.
     loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2)
 
     with name when is_binary(name) and name != "" <- Map.get(step_run, :workflow_map),
@@ -785,11 +663,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  Stops the role's forge stopwatch, removes `lcars-in-flight`, then emits
-  `step.unlocked`.
+  Attempts the role's stopwatch stop, removes lcars-in-flight, then emits step.unlocked.
 
-  The stopwatch is non-blocking; label removal is the lock authority and propagates
-  failure. `role` must be the identity that started the stopwatch.
+  Returned stopwatch failures are ignored; label failure returns {:error, {:unlock, reason}}.
+  Use the role that started the watch. Exceptions are not broadly rescued, and event
+  construction can fail after label removal.
   """
   @spec unlock(module(), String.t(), integer(), keyword(), String.t()) ::
           {:ok, term()} | {:error, term()}
@@ -809,7 +687,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp emit_step_unlocked(repo, n, role, milestone) do
-    # CI-09
     _ =
       Fleet.EventRouter.Bus.safe_emit(
         :pilot,
@@ -895,14 +772,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp record_publish_failure(outcome, _step_run, _opts), do: outcome
 
-  # Records ONE post-push propagation failure on the issue (BL-6-34): the deliverable IS pushed
-  # (the branch survives on the forge) but the PR was never born (role token unavailable, PR API
-  # refusal). Without the marker the stall is a host-side warning — pushed branch, MUTE ticket,
-  # brick wedged under its lock with no automatic retry (unlike the publish leg, whose brake
-  # replays rework). Same posture as `record_publish_failure`, its pre-push twin: BEST-EFFORT and
-  # error-transparent — the original error passes through untouched, a failed post degrades to the
-  # log, loud. Posted with the CALLER's (system) token on purpose: the missing ROLE token is one
-  # of the exact failures this marker must survive.
+  # Name a post-publication role-token/PR error on the issue using caller credentials:
+  # missing role credentials must not suppress that diagnosis. No dedup option is sent.
+  # Returned marker failures warn and preserve the original error; exceptions propagate.
   defp record_pr_open_failure({:error, reason} = err, step_run, sha, opts) do
     with repo when is_binary(repo) <- Map.get(step_run, :repo),
          n when is_integer(n) <- Map.get(step_run, :issue_number) do
@@ -936,8 +808,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   defp record_pr_open_failure(outcome, _step_run, _sha, _opts), do: outcome
 
-  # SANS LIVRABLE, LE SHA DU STEP-RUN EST LA SEULE ANCRE — et son absence est une erreur, pas un
-  # defaut : un step-run sans livrable NI sha n'a rien a quoi rattacher son marqueur.
+  # Without a deliverable, an explicit signature anchor is required.
   defp step1_publish(step_run, deliverable) do
     case Map.get(step_run, :deliverable_opts) do
       nil -> step_run_sha_only(step_run)
@@ -952,9 +823,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # ⚠ LA MARQUE `in_flight` NE SE POSE QUE S'IL Y A UN POD A MARQUER. Elle borne la fenetre pendant
-  # laquelle le deadline de publication du pod ne doit pas le tuer ; sans pod_id, il n'y a personne
-  # a proteger et la publication se fait nue.
+  # Protect a named pod from publish-deadline handling while publication runs.
   defp publish_deliverable(step_run, deliverable, d_opts) do
     publish = fn ->
       case deliverable.publish(d_opts) do
@@ -978,13 +847,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
     case ForgeClient.as_role(forge_opts, role) do
       {:ok, role_opts} ->
-        # LA DEDUP DOIT VOIR CE QUE L'ECRIVAIN A POSE. Le marqueur est signe sous le compte du ROLE
-        # (F-E6 l'exige), et `comment_signed?` filtre par defaut sur l'auteur SYSTEME : sans
-        # `dedup_role`, elle ne voit jamais le marqueur precedent, rend `false`, et le repose a
-        # chaque rejeu — contre le `replay-safe` que le moduledoc promet. On ne desactive
-        # PAS le filtre (ce serait offrir a un tiers de SUPPRIMER un marqueur legitime en postant
-        # la signature en premier) : on dit sous quel role il a ete pose, et la dedup fait confiance
-        # a ce compte-la EN PLUS du systeme.
+        # Dedup must recognize the role author as well as system. Trusting any author would
+        # let a third party suppress a legitimate trace by posting its signature first.
         comment_opts =
           role_opts
           |> Keyword.put(:dedup_signature, signature)
@@ -1003,15 +867,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
       nil ->
-        # DEUX TERMINAUX, PAS UN. `next_assignee: nil` couvre aussi bien « la derniere etape s'est
-        # achevee » que « le brief a ete ABANDONNE » ; fermes tous deux en `:delivered`
-        # (`stage/merged`), `outcome/3` rendrait `"merged"` — la valeur exacte que la description
-        # de l'outil presente a l'architecte comme *« the delivery proof; only chain issue N+1 on
-        # this »* — et un abandon inviterait a chainer dessus.
-        #
-        # `Labels.stage_retired/0` existe pour ca et le dit : « fermeture SANS livraison (supersede,
-        # abandon) ». L'appelant declare donc sa fermeture, le defaut restant `:delivered` — le cas
-        # nominal de tous les autres.
+        # Abandonment must close as retired, not delivered: downstream outcome readers use
+        # delivery as evidence for dependent work. The caller sets closure; default is delivered.
         closure = Map.get(step_run, :closure, :delivered)
 
         case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, closure)) do

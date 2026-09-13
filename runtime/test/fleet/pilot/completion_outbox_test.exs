@@ -1,17 +1,7 @@
 defmodule Fleet.Pilot.CompletionOutboxTest do
   @moduledoc """
-  6-127 — LE RESULTAT DE L'AGENT SURVIT A LA MORT DE LA CHAINE DE COMPLETION.
-
-  Ce que la fiche vise n'est pas l'idempotence — elle EXISTE deja, concue et documentee dans le
-  `@moduledoc` de `StepRunCompleter` (verrou leve EN DERNIER, ecritures rejouables, « recovery
-  replays the sequence, the done steps skip »). Ce qui manquait est le REJOUEUR, et une copie
-  durable du resultat a rejouer : `TaskQueue` marque l'item `completed` des que la diffusion locale
-  rend `:ok`, donc la charge utile est la SEULE copie du travail de l'agent quand la chaine
-  demarre. Une Task qui meurt l'emportait, le poller reclamait l'orphelin, et un agent REFAISAIT le
-  travail — ce que la preuve de sortie interdit explicitement.
-
-  Les trois points de mort que la fiche nomme (avant push, apres push avant PR, apres PR avant
-  unlock) sont tous DANS la chaine : ils se simulent par un completer qui leve a l'etape voulue.
+  Exercises JSON journal retention, deletion and corrupt/temporary file handling.
+  No process crash, completion chain replay, concurrent writer or disk durability is tested.
   """
   use ExUnit.Case, async: false
 
@@ -54,8 +44,7 @@ defmodule Fleet.Pilot.CompletionOutboxTest do
     end
 
     test "SANS `work_item_id` on ne fabrique PAS d'identite" do
-      # Une cle inventee ferait dedupliquer deux completions distinctes. L'appelant continue sans
-      # journal — le comportement d'avant 6-127, borne et nomme.
+      # Do not invent a key that could merge distinct completions.
       assert {:error, :no_work_item_id} = CompletionOutbox.put(%{"issue_id" => "42"})
       assert {:error, :no_work_item_id} = CompletionOutbox.put(payload(""))
       assert CompletionOutbox.pending() == []
@@ -77,14 +66,11 @@ defmodule Fleet.Pilot.CompletionOutboxTest do
         end)
 
       assert log =~ "entree ILLISIBLE"
-      # Elle reste : c'est la seule piece a conviction d'un resultat d'agent qu'on ne saura pas
-      # reprendre. L'effacer detruirait la trace du probleme avec le probleme.
+      # Retain the corrupt artifact for diagnosis.
       assert File.exists?(corrompue)
     end
 
-    # TEMOIN — sans lui, une ecriture qui ne produit jamais de `.json` passerait tous les tests
-    # ci-dessus (ils ne liraient que ce qu'ils viennent d'ecrire), et un fichier temporaire
-    # abandonne serait relu comme une completion due.
+    # Tests exclusion of .tmp files, not atomicity under crashes or concurrent writes.
     test "TEMOIN — l'ecriture est atomique : aucun `.tmp` n'est jamais rendu par `pending/0`", %{
       root: root
     } do
