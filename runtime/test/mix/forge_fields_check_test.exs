@@ -1,17 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
   @moduledoc """
-  Probe n°1 of the 2026-08-04 pattern hunt, as a wall — with the trap it fell into on its first run.
+  Tests forge-field inventory and exposed-mutation scanners against synthetic
+  sources and the real tree. Checker/tooling mentions must not count as product
+  readers; deliberately unread fields retain an explicit rationale-debt count.
 
-  The forge hands back whole objects; the code picks what it needs and drops the rest silently. That
-  is correct until the dropped part is the answer someone is reconstructing from outside. Measured
-  that day: `submitted_at`, `merged_at`, `closed_at`, `html_url` arrived in payloads already fetched
-  and no line of `lib/` touched them — the exact list an architect had spent three campaigns
-  rebuilding, produced by one command.
-
-  THE TRAP, and it is why this file exists: the allowlist of deliberately-unread fields lives INSIDE
-  the checker, so the first run found `"closed_at" =>` in its own source and reported all three as
-  read. The instrument measured its own declaration. A wall that reads its allowlist as evidence
-  passes forever, and this one is built to catch precisely that shape.
+  The fixtures exercise recognised text shapes, not actual response consumption
+  or execution of exposed forge mutations.
   """
   use ExUnit.Case, async: true
 
@@ -38,8 +32,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
     end
 
     test "the allowlist ADMITS when it has no reason — a queue is not an answer" do
-      # An allowlist that invents rationales is worse than one saying "not decided". The note
-      # carries that count so the debt is visible from the gate output, not only from the source.
       assert Tools.check_forge_fields_read(File.cwd!()).note =~ "no reason recorded"
     end
   end
@@ -54,8 +46,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
     end
 
     test "a field that LOST its last reader is named" do
-      # Every inventoried field absent from this crafted tree: the check must say so rather than
-      # shrug. One entry is enough to prove the direction.
       result = Tools.check_forge_fields_read(tree(%{"a.ex" => "defmodule A do\\nend\\n"}))
 
       assert result.status == :fail
@@ -66,9 +56,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
 
   describe "the trap: the checker must not read its own allowlist" do
     test "gate tooling is excluded — a field named by a mix task is not the product reading it" do
-      # `lib/mix/tasks/` is where the allowlist lives. Before the exclusion, `"closed_at" =>` in the
-      # checker counted as a reader and the three deliberately-unread fields reported themselves as
-      # read: the wall passing on its own declaration.
+      # Keep allowlist mentions outside the product-reader population.
       root =
         tree(%{
           "real.ex" =>
@@ -86,8 +74,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ForgeFieldsCheckTest do
 
       result = Tools.check_forge_fields_read(root)
 
-      # The two names appear in the tree, under `tasks/`. If the exclusion regressed, the check
-      # would report them as "now read, remove from the allowlist".
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
   end

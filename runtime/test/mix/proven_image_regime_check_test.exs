@@ -1,20 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
   @moduledoc """
-  The `boot.proven_image_regime` wall, proven against CRAFTED config trees.
+  Tests literal image-publication switches in synthetic config sources and the
+  real tree. False is allowed in test.exs and rejected in other config files.
+  Missing config or unobserved switches exercise population guards.
 
-  What it guards (6-026): `SPBuilder` renders its templates with `EEx.eval_string/2`. EEx evaluates
-  arbitrary Elixir at render time, in the DAEMON's process, with the whole fleet's rights and not a
-  confined pod's — and the source is catalogue DATA.
-
-  Two regimes decide whose bytes get evaluated. Under a PUBLISHED image the bytes were read and
-  sha256-fingerprinted at boot, after `Catalogue.verify!()`, and are served from `:persistent_term`:
-  the provenance check happened long before the render. With NO image, the template is re-read from
-  live disk at every render and verified by nothing.
-
-  The second regime is declared and legitimate (the suites' hermetic default, tooling). What has no
-  legitimate reason to exist is the switch being flipped ANYWHERE ELSE than `config/test.exs`: it
-  moves a production daemon onto evaluate-whatever-is-on-disk, and nothing in the code looks any
-  different afterwards.
+  These tests inspect AST; they do not publish images, render EEx or prove
+  template provenance. Frozen bytes do not by themselves establish trusted authorship.
   """
   use ExUnit.Case, async: true
 
@@ -42,8 +33,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
     end
 
     test "config files but NO switch found is BROKEN too — the reader lost its subject" do
-      # `config/test.exs` turns both off by design. Finding none means the extractor stopped seeing
-      # the switch, and a wall that cannot see its subject passes everything.
       r = Artifact.check_proven_image_regime(tree([{"test.exs", "import Config\n"}]))
       assert r.status == :fail
       assert Enum.any?(r.evidence, &(&1 =~ "measured nothing" or &1 =~ "BROKEN"))
@@ -79,8 +68,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
 
   describe "ce qu'il doit LAISSER PASSER" do
     test "l'hermetisme des suites reste legitime" do
-      # Sans ce temoin, un mur qui refuserait tout commutateur eteint passerait les deux tests
-      # ci-dessus — et casserait l'hermetisme que les suites reposent dessus.
       r = Artifact.check_proven_image_regime(tree([{"test.exs", @hermetic}]))
 
       assert r.status == :pass
@@ -89,8 +76,6 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
     end
 
     test "le commutateur a TRUE ailleurs n'est pas un offenseur" do
-      # Le mur mesure l'EXTINCTION, pas la mention. Un `true` explicite en prod dit la meme chose
-      # que le defaut et doit rester ecrivable.
       src = """
       import Config
       config :lcars_fleet, sp_builder_publish_image: true

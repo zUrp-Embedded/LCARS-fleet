@@ -1,28 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
   @moduledoc """
-  Les quatre derniers verrous `single_source`, prouves contre des depots FABRIQUES.
+  Synthetic-repository tests for branch/repository defaults, system-account
+  mirrors and config fallback expressions. Exercise required literals, forbidden
+  Terraform defaults and selected branch-environment forms independently.
 
-  `toolchain.branch_single_source`, `toolchain.ops_repo_single_source`,
-  `forge.system_account_single_source`, `config.single_default`.
-
-  ## Ce qu'un verrou de source unique garde vraiment
-
-  Le BEAM et le shell ne peuvent pas s'appeler. Un fait qui vit des deux cotes — un nom de branche,
-  un nom de compte, un depot — est donc RECOPIE, et c'est le verrou qui rend la recopie vraie. Une
-  divergence ne casse aucun test : elle fait converger un rail root sur une branche que personne
-  d'autre n'ecrit, ou creer un compte de forge sous un nom que personne n'a choisi.
-
-  ## Les trois formes de miroir, et elles sont dans le meme moteur
-
-  1. le miroir **PORTE** le litteral — le cas ordinaire ;
-  2. le miroir doit **NE PAS** le porter (`:forbidden`) — `forge.tf` RECOIT le nom par
-     `roles.auto.tfvars.json` ; un `default =` rendrait a tofu le pouvoir de creer le compte sous un
-     nom que personne n'a choisi, en silence. C'est le miroir qui compte le plus ;
-  3. le miroir ne doit porter **aucun reglage** — une branche gelee qui se relit d'une variable
-     d'environnement n'est plus gelee, et c'est une BORNE DE SECURITE : le convergeur refuse tout
-     SHA qui n'est pas la tete de cette branche.
-
-  Les trois sont exercees ici. Aucune ne l'etait.
+  The fixtures are inspected, not executed; they do not verify signature checks,
+  protected branches, account creation or effective environment configuration.
   """
   use ExUnit.Case, async: true
 
@@ -34,8 +17,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
 
     runtime = Path.join(root, "runtime")
     File.mkdir_p!(Path.join(runtime, "lib/fleet"))
-    # Les miroirs d'un des verrous vivent sous `../deploy` : l'arbre frere doit EXISTER, sinon ils
-    # sont sautes comme hors artefact et le mur ne mesure plus ce qu'on croit.
+    # Keep deploy present so sibling mirrors are checked rather than skipped.
     File.mkdir_p!(Path.join(root, "deploy/lib"))
 
     for {rel, contenu} <- fichiers do
@@ -47,7 +29,6 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     runtime
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "toolchain.branch_single_source — un nom que la moitie du rail peut retuner" do
     @branche "lcars/toolchain"
 
@@ -85,17 +66,11 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "⚠ UN REGLAGE REND LA BRANCHE TUNABLE — et c'est une borne de SECURITE qui tombe" do
-      # Le convergeur refuse tout SHA qui n'est pas la tete de CETTE branche ; c'est ce refus qui
-      # empeche un membre du groupe de faire installer en root un manifeste que personne n'a signe.
-      # Une branche relue d'une variable n'est plus gelee : porter le litteral ne suffit pas.
+      # A matching literal must not hide a recognised environment-derived branch.
       [premier | reste] = cinq_miroirs(~s[BRANCHE="#{@branche}"\n])
       {rel, _} = premier
 
       for {contenu, attendu} <- [
-            # Les trois formes de reglage, et le mur les distingue dans son message — un operateur
-            # qui lit « expansion » ne cherche pas au meme endroit que celui qui lit
-            # « environment ». Le troisieme cas est nomme a part parce que c'est un ANCIEN reglage
-            # dont le nom seul doit suffire a rougir, meme sans expansion autour.
             {~s[BRANCHE="${LCARS_BRANCH:-#{@branche}}"\n], "expansion"},
             {~s[b = os.environ.get("SYS_BRANCH", "#{@branche}")\n], "from the environment"},
             {~s[BRANCHE="$LCARS_SYSADMIN_BRANCH"\n], "LCARS_SYSADMIN_BRANCH"}
@@ -110,9 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "⚠ UNE AUTORITE COMPOSEE REND LE VERROU ILLISIBLE — pas un prefixe tronque" do
-      # Sans l'ancre de fin de ligne, `do: "lcars/" <> "toolchain"` se lirait `"lcars/"`, et le mur
-      # comparerait les miroirs a une valeur TRONQUEE : il rougirait quand meme, mais en accusant
-      # cinq fichiers sains d'un ecart qu'ils n'ont pas. Le lecteur cherche alors au mauvais endroit.
+      # A composed authority should identify that source, not accuse correctly matching mirrors.
       root =
         depot([
           toolchain(~s[  def branch, do: "lcars/" <> "toolchain"\n])
@@ -126,7 +99,6 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "toolchain.ops_repo_single_source — le depot et sa branche sont deux moities d'une adresse" do
     @ops "fleet/ops"
 
@@ -166,13 +138,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "⚠ UNE AUTORITE COMPOSEE EST DECLAREE ILLISIBLE — pas comparee sur un PREFIXE" do
-      # ROUGE DES DEUX COTES NE SUFFIT PAS, ET C'EST LA LECON QUE LE MUR JUMEAU PORTE DEJA. Si
-      # l'ancre de la regex se relache, `do: … "fleet/" <> "ops"` se lit `"fleet/"` : le verrou
-      # compare alors les miroirs a une valeur TRONQUEE. Il rougit — donc le defaut ne passe pas —
-      # mais il accuse deux fichiers SAINS d'un ecart qu'ils n'ont pas, et le lecteur cherche au
-      # mauvais endroit.
-      #
-      # Le temoin doit donc epingler LAQUELLE des deux erreurs est rendue, pas seulement le rouge.
+      # Assert the unreadable-authority diagnosis, not just failure on a truncated value.
       root =
         depot([
           {"runtime/lib/fleet/toolchain.ex",
@@ -186,14 +152,11 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       assert note =~ "the authority is unreadable"
       assert note =~ "nothing was compared"
 
-      # Et la preuve nomme le FICHIER de l'autorite, pas les miroirs : c'est la que le lecteur doit
-      # aller.
       assert %{evidence: ["lib/fleet/toolchain.ex"]} =
                SingleSource.check_ops_repo_single_source(root)
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "forge.system_account_single_source — le miroir INVERSE" do
     @compte "system_starfleet"
 
@@ -226,10 +189,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "⚠ LE MIROIR INVERSE — un `default =` dans la recette est une VIOLATION" do
-      # `forge.tf` ne porte PAS le litteral : il RECOIT la valeur par `roles.auto.tfvars.json`,
-      # projetee depuis l'autorite. Ce qui se garde ici n'est donc pas « la copie s'accorde » mais
-      # « il n'y a PAS de copie » — un `default =` rendrait a tofu le pouvoir de creer le compte
-      # sous un nom que personne n'a choisi, en silence.
+      # Terraform receives the projected system account; adding a default creates a second declaration.
       avec_defaut =
         ~s[variable "system_account" {\n  type = string\n  default = "#{@compte}"\n}\n]
 
@@ -271,7 +231,6 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "config.single_default — deux replis pour une clef" do
     test "une clef lue avec le meme repli partout → vert" do
       root =
@@ -286,8 +245,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "⚠ DEUX REPLIS DIVERGENTS — ils ne divergent QU'EN L'ABSENCE de configuration" do
-      # Donc jamais en test, ou la baseline pose la valeur, et toujours en production, ou elle
-      # manque. C'est exactement le mode de panne qu'aucune suite ne peut reproduire.
+      # Different defaults matter when the configuration key is absent, in tests or production.
       root =
         depot([
           {"runtime/lib/a.ex",

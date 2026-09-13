@@ -1,14 +1,11 @@
 defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   @moduledoc """
-  The `mcp.seam_surface_declared` wall, proven against CRAFTED trees.
+  Tests recognised seam calls against loaded behaviour callbacks using synthetic
+  delegation source. Name and arity, field access, reflection and piped calls are
+  distinct cases; a real-tree test checks the current surface.
 
-  What it guards: `conforming/2` refuses a seam module missing a callback, and it can only see what
-  a behaviour declares. An op called through the seam and declared nowhere is a call the guard
-  vouches for without ever having looked at it — measured 2026-08-04 on three dependency ops that
-  ran inside the supersede retirement, past the point where the live PR is already closed.
-
-  Both sides of the comparison can empty out on their own, and only one of the two is loud: an AST
-  shape change empties the CALLS and everything looks declared. Hence the instrument tests first.
+  This compares call shapes with a union of declared callbacks, without proving
+  that the injected target for each call implements the matching behaviour.
   """
   use ExUnit.Case, async: true
 
@@ -24,12 +21,10 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
     Delegation.ProjectOnboard
   ]
 
-  # A behaviour too small to be a credible seam contract — used to prove the floor bites.
   defmodule TinyBehaviour do
     @callback close_pr(binary(), integer(), keyword()) :: :ok
   end
 
-  # 16 seam calls, every one of them a real declared callback.
   @declared_calls [
     "forge.close_pr(repo, pr, [])",
     "forge.close_issue(repo, n, [])",
@@ -130,14 +125,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   end
 
   describe "⚠ LE TUBE, ET L'ARITE QU'IL DEPLACE" do
-    # Mesure du 2026-09-08 : ce mur a accuse `post_comment: 3` sur un appel a QUATRE arguments dont
-    # le premier passait par un tube. L'AST d'un `|>` garde la valeur tubee dans le noeud du pipe,
-    # donc une lecture d'arite sur le noeud d'APPEL seul est fausse — et elle l'est DANS LES DEUX
-    # SENS : elle accuse un appel sain, et elle raterait une op tubee reellement absente du
-    # behaviour, qui est le defaut que ce mur existe pour attraper.
-    #
-    # `workflow.loader_arity` portait deja la lecon dans son coin ; `Support.unpipe/1` la porte
-    # maintenant pour les deux.
+    # Expand pipes before counting arity; the piped value is outside the call node.
     test "un appel TUBE et declare passe — l'arite se compte apres depliage" do
       assert %{status: :pass} =
                check(["repo |> forge.post_comment(n, body, [])"])
@@ -152,8 +140,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
     end
 
     test "un tube SANS parentheses se deplie aussi — `x |> f` est un appel a un argument" do
-      # C'est l'autre moitie de `unpipe/1` : `{call, meta, nil}` au lieu d'une liste d'arguments.
-      # Sans elle, `repo |> forge.list_open_issues()` se lirait zero argument.
+      # This fixture pipes into an explicitly parenthesised zero-argument call.
       result = check(["repo |> forge.pas_un_callback()"])
 
       assert result.status == :fail

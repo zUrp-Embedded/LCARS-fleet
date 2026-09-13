@@ -1,16 +1,9 @@
 defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
   @moduledoc """
-  The `cap_profile.project_keys_declared` wall, proven against CRAFTED trees.
-
-  What it guards (6-077): `spec.project` carries TWO populations in one slot. The catalogue schema
-  declares four keys with `additionalProperties: false`; the pilot injects four MORE at dispatch
-  (`repo`, `base_sha`, `gate_base_sha`, `pr_base_branch`) through `with_project/2`, which does not
-  re-validate. The contradiction was silent in both directions — a reader of the schema concluded a
-  catalogue could not pin a base, a reader of the code concluded the schema allowed one.
-
-  The two halves stay APART on purpose: a card that set `base_sha` would validate and then be
-  overwritten at every dispatch, i.e. a knob that reads as configuration and does nothing. What must
-  not happen is the lists DRIFTING, and that is the only thing this wall measures.
+  Tests separation of catalogue project keys from runtime-injected keys.
+  Synthetic schema/resolver inputs use the loaded CapProfile runtime-key declaration;
+  a real-tree case checks current counts. These tests compare declarations, not
+  dispatch overwrite behaviour or schema revalidation.
   """
   use ExUnit.Case, async: true
 
@@ -27,8 +20,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
     })
   end
 
-  # The resolver's shape: a function returning `{:ok, %{...}}`. `repo_path` is the anchor the
-  # extractor keys on, so every crafted map carries it.
+  # Every crafted resolver map carries repo_path, the extractor's anchor.
   defp resolver(keys) do
     pairs = Enum.map_join(keys, ",\n", &~s|      "#{&1}" => v|)
 
@@ -56,8 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
 
   defp check(props, keys), do: Tools.check_cap_profile_project_keys(tree(props, keys))
 
-  # The four the pilot really injects — the check reads them from the live module, not from the
-  # crafted tree, so a test that renamed them would be measuring itself.
+  # Runtime keys come from the loaded module, not the synthetic tree.
   defp runtime, do: Fleet.CapProfile.runtime_project_keys()
 
   describe "the instrument answers for itself first" do
@@ -82,8 +73,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
 
   describe "the drift it exists for" do
     test "une cle ecrite par le resolveur et declaree NULLE PART fait echouer" do
-      # Le cas concret : quelqu'un ajoute une cinquieme cle au resolveur. Sans ce mur, elle est
-      # lue par du code vivant et validee par rien, exactement comme `base_sha` l'etait.
       r = check(%{"repo_path" => %{}}, ["repo_path" | runtime()] ++ ["cle_inventee"])
 
       assert r.status == :fail
@@ -91,8 +80,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
     end
 
     test "une cle declaree des DEUX cotes fait echouer — le slot n'a pas deux proprietaires" do
-      # `base_sha` au schema ET en runtime : la carte valide, puis se fait ecraser a chaque
-      # dispatch. Le bouton se lit comme de la configuration et ne fait rien.
+      # Schema/runtime overlap would let dispatch overwrite declared configuration.
       [first_runtime | _] = runtime()
       props = %{"repo_path" => %{}, first_runtime => %{}}
 
@@ -105,7 +93,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
 
   describe "ce qu'il doit LAISSER PASSER" do
     test "le partage nominal — schema d'un cote, runtime de l'autre, disjoints" do
-      # Sans ce temoin, un mur qui refuserait tout passerait les deux tests ci-dessus.
       r = check(%{"repo_path" => %{}, "base_branch" => %{}}, ["repo_path" | runtime()])
 
       assert r.status == :pass
@@ -113,9 +100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
     end
 
     test "une cle du SCHEMA que le resolveur n'ecrit pas reste legitime" do
-      # `branch_isolation` et `reference_repo_path` sont declarees par une carte et jamais injectees.
-      # Le mur mesure ce que le resolveur ECRIT, pas une egalite des deux listes — l'exiger
-      # interdirait a une carte de porter une option que le pilote n'a pas a poser.
+      # Catalogue-only options need not be written by the resolver; inclusion is not equality.
       props = %{"repo_path" => %{}, "branch_isolation" => %{}, "reference_repo_path" => %{}}
 
       assert %{status: :pass} = check(props, ["repo_path" | runtime()])
