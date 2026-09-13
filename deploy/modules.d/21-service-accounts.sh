@@ -95,7 +95,7 @@ check() {
 }
 
 apply() {
-  ensure_group "$AUTHORITY_GROUP" || { p_fail "groupe $AUTHORITY_GROUP non posé — le compte de service n'aura pas de groupe à lui, et tout chown sur les secrets échouera"; verdict_apply; }
+  ensure_group "$AUTHORITY_GROUP" || verdict_apply
 
   if ! account_exists "$AUTHORITY_USER"; then
     # --system : uid sous UID_MIN, donc bin/fleet refuse une fleet sous ce compte, gratuitement
@@ -132,7 +132,7 @@ apply() {
   ensure_member "$AUTHORITY_USER" "$PROV_FLEET_GROUP" || verdict_apply
 
   # pas d'adhésion à fleet pour lcars-system : ce qu'il traverse lui est accordé par processus (setpriv --groups)
-  ensure_group "$SYSTEM_GROUP" || { p_fail "groupe $SYSTEM_GROUP non posé — la landing n'aura pas de groupe à elle, et le secret OAuth2 du deck resterait sur un groupe partagé"; verdict_apply; }
+  ensure_group "$SYSTEM_GROUP" || verdict_apply
 
   if ! account_exists "$SYSTEM_USER"; then
     if run_capture "$USERADD" --system --no-create-home --shell "$NOLOGIN" \

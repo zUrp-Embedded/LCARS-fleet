@@ -87,14 +87,14 @@ mod() { run bash "$MODULE" "$1"; }
   [ ! -s "$CALLS" ]
 }
 
-@test "le délégué refuse : drift, sa sortie remonte et reste lisible, le jeton n'apparaît pas" {
+@test "le délégué refuse : drift, sa sortie remonte et reste lisible, sa ligne de commande n'est pas imprimée" {
   stub_curl '{"runners":[],"total_count":0}'
   stub_delegue 1 "REFUS : image(s) introuvable(s)"
   mod apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"REFUS : image(s) introuvable(s)"*"DRIFT 49-forge-runner: runner CI NON enrôlé (rc=1"* ]]
   [[ "$output" != *"FAIL"* ]]
-  [[ "$output" != *"admin-token-file"* ]]
+  [[ "$output" != *"--forge-api"* ]]
   [ -s "$CALLS" ]
   f="$(printf '%s\n' "$output" | sed -n 's/.*conservée : \([^ ]*\).*/\1/p' | tail -n1)"
   [ -s "$f" ]

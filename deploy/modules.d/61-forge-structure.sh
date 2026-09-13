@@ -68,8 +68,8 @@ apply() {
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
   chown "$PROV_HUMAN" "$enroll" \
     || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
-    || { p_fail "roster non dérivable de la release ($RELEASE_BIN) — la sortie ci-dessus nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
+  run_step "roster du catalogue, dérivé de la release ($RELEASE_BIN)" -- as_human env LCARS_TOOL_EVAL=1 "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
+    || { rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
 

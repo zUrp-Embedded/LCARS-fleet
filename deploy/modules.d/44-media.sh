@@ -110,10 +110,10 @@ build_doc() {
   fi
   command -v "$NPM_BIN" >/dev/null 2>&1 \
     || { p_fail "npm absent — 16-node pose le précompilé épinglé"; verdict_apply; }
-  run_step "doc du deck · dépendances" -- as_human env -C "$SITE_SRC" "$NPM_BIN" ci --no-audit --no-fund \
-    || { p_fail "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"; verdict_apply; }
-  run_step "doc du deck · build" -- as_human env -C "$SITE_SRC" LCARS_SITE_BASE="$SITE_BASE" "$NPM_BIN" run build \
-    || { p_fail "build du site en échec ($SITE_SRC)"; verdict_apply; }
+  run_step "doc du deck · dépendances (npm ci, $SITE_SRC)" -- as_human env -C "$SITE_SRC" "$NPM_BIN" ci --no-audit --no-fund \
+    || verdict_apply
+  run_step "doc du deck · build ($SITE_SRC)" -- as_human env -C "$SITE_SRC" LCARS_SITE_BASE="$SITE_BASE" "$NPM_BIN" run build \
+    || verdict_apply
   [[ -s "$SITE_SRC/dist/index.html" ]] \
     || { p_fail "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"; verdict_apply; }
   poser_doc

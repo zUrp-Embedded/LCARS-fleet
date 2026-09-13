@@ -221,10 +221,22 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   docker_qui_repond
   sed -i 's/29.0.0|Docker Engine - Test/29.1.3|/' "$BIN/docker"
   printf '#!/usr/bin/env bash\n' > "$BIN/dockerd"; chmod 0755 "$BIN/dockerd"
-  printf '#!/usr/bin/env bash\necho "docker.io: $3"\n' > "$BIN/dpkg-query"; chmod 0755 "$BIN/dpkg-query"
+  printf '#!/usr/bin/env bash\n[[ "$1" == -S && "$2" == "%s" ]] || exit 1\necho "docker.io: $2"\n' "$BIN/dockerd" > "$BIN/dpkg-query"; chmod 0755 "$BIN/dpkg-query"
   preflight docker DOCKER_HOST=unix:///dev/null
   [ "$(fact docker_server)" = "29.1.3" ]
   [ "$(fact docker_flavor)" = "docker.io" ]
+}
+
+@test "docker sans nom de plateforme, dockerd hors paquet : la variante reste vide et le préflight rend son verdict" {
+  docker_qui_repond
+  sed -i 's/29.0.0|Docker Engine - Test/29.1.3|/' "$BIN/docker"
+  printf '#!/usr/bin/env bash\n' > "$BIN/dockerd"; chmod 0755 "$BIN/dockerd"
+  printf '#!/usr/bin/env bash\necho "dpkg-query: no path found" >&2; exit 1\n' > "$BIN/dpkg-query"; chmod 0755 "$BIN/dpkg-query"
+  preflight docker DOCKER_HOST=unix:///dev/null
+  [ "$status" -ne 3 ]
+  [ "$(fact docker)" = "oui" ]
+  [ -z "$(fact docker_flavor)" ]
+  [ -n "$(fact sudo)" ]
 }
 
 @test "docker sans nom de plateforme ni dockerd local : la variante reste vide" {
@@ -235,11 +247,12 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ -z "$(fact docker_flavor)" ]
 }
 
-@test "coreutils sans mv --exchange : échec dit, une bascule de dossier n'aurait pas de forme atomique" {
-  printf '#!/usr/bin/env bash\necho "Usage: mv SOURCE DEST"\n' > "$BIN/mv"; chmod 0755 "$BIN/mv"
+@test "mv --exchange refusé : échec dit, une bascule de dossier n'aurait pas de forme atomique" {
+  printf '#!/usr/bin/env bash\n[[ "$*" != *--exchange* ]] || { echo "mv: unrecognized option" >&2; exit 1; }\nexec /bin/mv "$@"\n' > "$BIN/mv"; chmod 0755 "$BIN/mv"
   preflight docker
   [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  00-preflight: coreutils sans « mv --exchange »"* ]]
+  [[ "$output" == *"FAIL  00-preflight: « mv --exchange » refusé"* ]]
+  [ -z "$(ls -d "${TMPDIR:-/tmp}"/prov-echange.* 2>/dev/null)" ]
 }
 
 

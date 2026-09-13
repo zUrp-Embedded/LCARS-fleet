@@ -530,8 +530,8 @@ fetch_verify() {
   local dir tmp actual
   dir="$(dirname "$dest")"
   tmp="$(mktemp "$dir/.fetch.XXXXXX")" || { p_fail "fetch_verify : tmp impossible dans $dir"; return 1; }
-  if ! run_quiet curl -fsSL --proto '=https' -m 300 -o "$tmp" "$url"; then
-    rm -f "$tmp"; p_fail "fetch_verify : téléchargement raté : $url"; return 1
+  if ! run_capture curl -fsSL --proto '=https' -m 300 -o "$tmp" "$url"; then
+    rm -f "$tmp"; p_fail "fetch_verify : téléchargement raté : $url"; prov_dump_last; return 1
   fi
   actual="$(sha256sum "$tmp" | awk '{print $1}')"
   if [[ "$actual" != "$sha" ]]; then
@@ -665,6 +665,7 @@ apt_ensure() {
 PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
 PROV_LAST_RC=0
+PROV_LAST_OUT=""
 
 wsl_networking_mode() {
   [[ -n "${LCARS_WSL_NETWORKING_MODE:-}" ]] && { echo "$LCARS_WSL_NETWORKING_MODE"; return 0; }

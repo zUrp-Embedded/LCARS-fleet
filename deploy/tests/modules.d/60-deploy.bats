@@ -156,6 +156,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   STUB_POSE_RC=3 mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -s "$MARQUEUR" ]
+  [[ "$output" == *"WARN  60-deploy: deploy-release.sh signale un lien du PATH manquant (rc 3)"* ]]
   [[ "$output" == *"POSÉ  60-deploy: runtime déployé"* ]]
 }
 
@@ -164,8 +165,8 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   printf '# modif\n' >> "$RACINE/runtime/mix.exs"
   STUB_POSE_RC=1 mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  60-deploy: commande en échec (rc=1) : build de la release"* ]]
-  [[ "$output" == *"WARN  60-deploy: le prefix reste déverrouillé pour inspection"* ]]
+  [[ "$output" == *"FAIL  60-deploy: "*"build de la release"* ]]
+  [[ "$output" == *"WARN  60-deploy: $PROV_PREFIX reste déverrouillé pour inspection"* ]]
   [ "$(grep -c 'FAIL  60-deploy' <<< "$output")" -eq 1 ]
   [ ! -e "$LCARS_CHANNEL_FILE" ]
 }

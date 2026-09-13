@@ -66,11 +66,14 @@ check() {
   else
     p_drift "bash ${BASH_VERSION} < 4.4 — un bash récent est requis"
   fi
-  if [[ "$(mv --help 2>/dev/null)" == *"--exchange"* ]]; then
-    p_ok "coreutils avec « mv --exchange » (plancher 9.5)"
+  local echange; echange="$(mktemp -d "${TMPDIR:-/tmp}/prov-echange.XXXXXX")"
+  mkdir -p "$echange/a" "$echange/b"
+  if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
+    p_ok "« mv --exchange » joué : les bascules de dossiers ont une forme atomique (coreutils 9.5)"
   else
-    p_fail "coreutils sans « mv --exchange » (plancher 9.5) — les bascules de dossiers n'ont pas de forme atomique"
+    p_fail "« mv --exchange » refusé (coreutils 9.5 requis) — les bascules de dossiers n'ont pas de forme atomique"
   fi
+  rm -rf -- "$echange"
 
   local arch; arch="$(uname -m)"
   p_fact arch "$arch"
@@ -155,7 +158,9 @@ check() {
     # le paquet docker.io ne nomme pas sa plateforme : le paquet propriétaire d'un dockerd local la donne
     local saveur="${serveur#*|}" dockerd
     dockerd="$(command -v dockerd || true)"
-    [[ -n "$saveur" || -z "$dockerd" ]] || saveur="$(dpkg-query -S "$(readlink -f "$dockerd")" 2>/dev/null | cut -d: -f1)"
+    if [[ -z "$saveur" && -n "$dockerd" ]]; then
+      saveur="$(dpkg-query -S "$(readlink -f "$dockerd")" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    fi
     p_fact docker oui
     p_fact docker_bin "$PROV_DOCKER_BIN"
     p_fact docker_host "${PROV_DOCKER_HOST:-${DOCKER_HOST:-}}"
