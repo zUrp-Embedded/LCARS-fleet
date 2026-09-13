@@ -1,62 +1,22 @@
 defmodule Fleet.Pilot.IncidentConsumer do
   @moduledoc """
-  Bus consumer of the **incident** events — every type whose route carries `action: incident` in
-  `priv/event_router/events.yaml` (seven types from four sources: `pod.failed`, `wake.failed`,
-  `spawn.failed` from `:spawner`; `pod.deaf` from `:mcp`; `workflow_map.failed` from `:workflow`;
-  `project.card_failed`, `project.declaration_invalid` from `:project`) →
-  `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). The table routes, this
-  module has no clause per type. Subscribes `Fleet.EventRouter.Bus` (topic `fleet.events`).
+  Consumes Bus events whose events.yaml route has `action: incident`. The route
+  supplies the operation, subject key, diagnostic fields and escalation kind.
+  Recurrence routes note first and escalate later; immediate routes attempt an
+  issue on the first occurrence, then use the registry's cooldown.
 
-  ## Why a consumer SEPARATE from the StepRunConsumer
+  This mailbox is separate from step completion. Production injects `offload_async/1`;
+  without a `:runner`, registry calls run synchronously. Refused task admission falls
+  back inline; task death is logged, without replay here.
 
-  Pod failures are a **distinct** concern from step-run-end (completion): they touch neither the
-  workflow_map, nor the gate, nor the completion state — just "this incident, 1st or recurrent?" → registry.
-  Both handlers are **stateless** (they read no state of the consumer). Isolating them in their
-  own singleton: (a) the StepRunConsumer (completion singleton) does not carry a 2nd
-  bolted-on responsibility, (b) a burst of failures does not share the completion path's mailbox (reduced
-  blast-radius). The escalation POLICY (1st=note / recurrent=root-cause, kinds, labels) lives in
-  `IncidentRegistry`; this module only **routes the event to it**.
+  Successful or suppressed recurrence escalation can brake a pod result timeout:
+  add awaits-arch on its work ticket, then attempt to clear in-flight. Failed
+  escalation does not brake. The default brake logs returned errors and rescues
+  exceptions; injected callbacks and synchronous recording can still raise.
 
-  ## Escalation decision (delegated to `IncidentRegistry`)
-
-  The three `:spawner` types, in detail; the four others (`pod.deaf`, `workflow_map.failed`,
-  `project.card_failed`, `project.declaration_invalid`) carry their gate and subject in the table
-  the same way.
-
-    * `pod.failed` — a failed pod (`transition_failed`: result_timeout/dead-REPL, allocate/launch/
-      auth/project). 1st = noted (tolerated, possibly random); recurrent = escalated (pattern → root-cause).
-    * `wake.failed` — the ack-driven loop exhausted the cap (the agent NEVER acked: neither flag, nor
-      send-keys). Recurrence = **SP suspect** (inference targets the SP, not the agent: 1×=random, recurrent
-      = bad/drifted SP) → `escalate_kind: :sp_suspect` (+ `pane` for the diag).
-    * `spawn.failed` — the `admin.spawn.request` dispatch DROPPED the spawn AFTER the API answered 202
-      (no pod created → no pod_id). Subject = `cap_profile_name` (the role: recurrence = "this role keeps
-      failing to spawn"; issue_id is per-request → never recurs). op="spawn", default recurrence escalation.
-
-  ## La porte immédiate (`gate: immediate`)
-
-  Déclarée dans la table (`events.yaml`, champ `gate` du bloc `incident`) : issue durable dès la
-  PREMIÈRE occurrence via `IncidentRegistry.escalate_gated/5` — seuls les REPEATS de la même
-  signature sous le cooldown du registre sont supprimés (l'issue ouverte porte l'alarme). Le kind
-  est nommé dans la route (`escalate_kind`, exigé au boot par le Catalog : la table
-  `kind_describe` est close). Ce n'est PAS une classe de sévérité : un second label sans définition,
-  au bout d'une chaîne de modules, dit la même chose sans que rien ne la vérifie.
-
-  ## Offload (`:runner`)
-
-  `record_or_escalate` touches the forge (registry read/write) → OFFLOAD into a
-  `Task.Supervisor` so as not to block the consumer's mailbox on a burst of failures. Seam `:runner`:
-  default `nil` → **SYNC** (the outcome is logged inline; deterministic tests without injection). Prod
-  (`application.ex`) injects `&offload_async/1` → supervised async (a `record` that crashes is isolated).
-
-  ## Config / seams
-
-    * `:subscribe` — bool default `true` (tests: `false` + manual sending via `send/2`).
-    * `:record_fun` — `fn op, subject, reason, opts -> :recorded | {:escalated|…, _} end`
-      (default `&Fleet.Pilot.IncidentRegistry.record_or_escalate/4`). Test seam (zero forge).
-    * `:escalate_fun` — `fn kind, subject, reason, sig, opts -> {:ok, n} | {:suppressed, n} | {:error, _} end`
-      (default `&Fleet.Pilot.IncidentRegistry.escalate_gated/5`). Porte `gate: immediate` : 1st
-      occurrence immediate, repeats under the registry cooldown suppressed.
-    * `:runner` — offload seam (see above). Default `nil` → sync.
+  Seams: `:subscribe` (default true), `:routing_fun` (Bus routing), `:record_fun`
+  (record_or_escalate/4), `:escalate_fun` (escalate_gated/5), `:brake_fun`
+  (default_brake/3) and `:runner` (a function accepting the work closure).
   """
 
   use GenServer
@@ -64,8 +24,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   alias Fleet.EventRouter.Bus
 
-  # Task supervisor for the offload (prod). Name shared between `application.ex` (which starts it BEFORE
-  # this consumer) and `offload_async/1`. Specific to this consumer (not the StepRunConsumer's): clean separation.
+  # Separate from the completion pool; started by Pilot.Application.
   @task_supervisor Fleet.Pilot.IncidentConsumer.TaskSupervisor
 
   defstruct record_fun: nil, escalate_fun: nil, runner: nil, routing_fun: nil, brake_fun: nil
@@ -81,7 +40,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   @spec task_supervisor() :: module()
   def task_supervisor, do: @task_supervisor
 
-  # Saturation runs inline: incident memory is never dropped.
+  # Refused task admission runs inline; this does not guarantee recording succeeds.
   @doc false
   @spec offload_async((-> any())) ::
           {:ok, :inline | :offloaded} | {:error, :inline_crashed}
@@ -104,8 +63,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
         Keyword.get(opts, :escalate_fun, &Fleet.Pilot.IncidentRegistry.escalate_gated/5),
       runner: Keyword.get(opts, :runner),
       brake_fun: Keyword.get(opts, :brake_fun, &__MODULE__.default_brake/3),
-      # The event → op/escalation-kind CLASSIFICATION is TABLE data (`events.yaml` routing —
-      # audit B-05); the seam keeps the unit tests hermetic (no global persistent_term mutation).
+      # Inject the table in tests without mutating global published routing.
       routing_fun: Keyword.get(opts, :routing_fun, &Bus.event_routing/0)
     }
 
@@ -113,11 +71,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   @impl GenServer
-  # TABLE-DRIVEN consumer (audit B-05): which event becomes WHICH incident class — op, subject key,
-  # escalation kind, forwarded diag keys — is DATA (`events.yaml` routing), this module is the
-  # MECHANIC. Adding an incident class is a registry edit, not a new clause. Actions owned here:
-  # `incident` — porte `recurrence` (record_or_escalate) ou `immediate` (escalate_gated), champ
-  # `gate` de la route. Unrouted events are ignored.
+  # Classification comes from routing data; unrelated events are ignored.
   def handle_info(%Fleet.Event{source: source, type: type, payload: p} = ev, state) do
     case Map.get(state.routing_fun.(), {source, type}) do
       %{action: :incident, incident: inc} ->
@@ -130,9 +84,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
     {:noreply, state}
   end
 
-  # BEFORE the catch-all: the death of an OFFLOADED record/escalate task (Offload monitors it;
-  # the :DOWN lands here). Same witness rule as StepRunConsumer — a recording task dying mid-work
-  # must leave a loud trace, not vanish into the catch-all.
+  # Handle monitored task deaths before the catch-all so failures are logged.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     _ = Fleet.Pilot.Offload.handle_down(ref, pid, reason)
     {:noreply, state}
@@ -141,14 +93,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # Any other message (non-failure events we also see via the Bus, or non-Fleet.Event) → no-op.
   def handle_info(_other, state), do: {:noreply, state}
 
-  # Routes the incident to the registry, offloaded via `:runner` (default sync). The 4-tuple
-  # `(op, subject, reason, opts)` is the contract of `IncidentRegistry.record_or_escalate/4` (`op="pod"` →
-  # `opts=[]`; `op="wake"` → `escalate_kind:/pane:`). The outcome is logged (never swallowed): an
-  # unrecorded incident / a failed escalation must be VISIBLE (forge down? registry unavailable?).
-  # Applies one `incident` route: subject from the DECLARED payload key, universal mechanics
-  # (reason/reason_detail/correlation_id) + declared extras (escalate_kind, forwarded diag keys —
-  # e.g. wake's `pane`). A routed event whose subject key is missing is a PRODUCER bug: named
-  # LOUD, never recorded under a nil subject (the dedup signature would collapse).
+  # Missing or non-binary subjects are rejected: nil would collapse dedup keys.
+  # Stable reason and variable diagnostic detail travel separately.
   defp handle_incident(state, inc, payload, ev) do
     case Map.get(payload, inc.subject) do
       subject when is_binary(subject) ->
@@ -160,13 +106,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
             if(inc.escalate_kind, do: [escalate_kind: inc.escalate_kind], else: []) ++
             for key <- inc.forward, do: {key, payload[Atom.to_string(key)]}
 
-        # LA PORTE EST UN CHAMP DE LA ROUTE, PAS UNE CLASSE DE SEVERITE :
-        # `immediate` ouvre l'issue des la PREMIERE occurrence (cooldown seul — via escalate_gated,
-        # la meme porte que les kinds tires du code) ; `recurrence` note d'abord. Le Catalog a
-        # deja garanti au boot qu'`immediate` porte un escalate_kind nomme.
-        # Map.get et pas inc.gate : la table canonique (Catalog) pose TOUJOURS la cle, mais la
-        # couture :routing_fun accepte des tables ecrites a la main — absent = defaut, la meme
-        # semantique que le YAML.
+        # Hand-written routing seams may omit :gate; use the YAML recurrence default.
         case Map.get(inc, :gate, :recurrence) do
           :immediate ->
             escalate_immediate(state, inc, subject, payload["reason"], reg_opts)
@@ -183,9 +123,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
     end
   end
 
-  # Porte immediate DECLARATIVE — issue durable des la 1re occurrence, cooldown seul. Offloadee
-  # comme record/6 (touche la forge). Un echec est BRUYANT : perdre l'alarme re-silencierait
-  # exactement ce que la porte existe pour dire tout de suite.
+  # Immediate signatures use op:subject, without recurrence-key normalization.
   defp escalate_immediate(state, inc, subject, reason, reg_opts) do
     sig = "#{inc.op}:#{subject}"
 
@@ -248,17 +186,13 @@ defmodule Fleet.Pilot.IncidentConsumer do
           )
 
         {:escalation_suppressed, issue} ->
-          # Recurrence under cooldown: noted at the registry (count/last_seen), the existing issue
-          # carries the alarm — :debug (a durable failure recurs at EVERY tick, one warning per
-          # tick would drown the trace the open issue already covers).
+          # Count/last_seen still advance under cooldown; log repeats at debug level.
           Logger.debug(
             "IncidentConsumer: #{op}.failed #{pod_id} recurrent under cooldown — noted, " <>
               "existing issue #{inspect(issue)} carries the alarm"
           )
 
-          # The brake applies UNDER COOLDOWN too: the suppression concerns the SYSADMIN ISSUE (not
-          # opening one per tick), NOT the re-dispatch loop. Braking only on `{:escalated, _}` would
-          # let the ticket restart forever from the second recurrence on.
+          # Cooldown suppresses sysadmin issue creation, not the work-ticket brake.
           maybe_brake(state, op, reason, payload)
 
         other ->
@@ -271,20 +205,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
     (state.runner || (&run_sync/1)).(exec)
   end
 
-  # ─── LE FREIN (BL-6-37.6) ────────────────────────────────────────────────────────────────────
-  # The incident rail KNOWS "recurrence" — its sysadmin issue says "Deja vu — ROOT-CAUSE required" —
-  # and that alone does not stop the poller re-dispatching, forever. Measured on the tetris bench: a
-  # producer killed mid-writing, respawned in a loop, invisible on its own ticket. Detecting without
-  # unplugging builds a damage counter, not a brake.
-  #
-  # The consequence that makes it one: put `lcars-awaits-arch` on the WORK TICKET. The vocabulary
-  # exists and does exactly the right thing — the poller takes an issue carrying it OUT of dispatch,
-  # and a human/the arch decides. We do not kill, we do not retry harder: we hand back.
-  #
-  # ⚠ RESTRICTED to the timeout, deliberately. The entry measures `result_timeout` — a loop where
-  # the pod is working and gets cut. Braking on ANY recurrent category would pull tickets out of
-  # dispatch for causes nobody measured here (an `exited_before_result` can be a brief error that a
-  # rework fixes). Widening happens on a measurement, not on an intuition.
+  # Restrict braking to pod result timeouts: other recurrent failures may be
+  # recoverable through rework. A sysadmin issue alone does not stop redispatch.
   defp maybe_brake(state, "pod", reason, payload) when is_map(payload) do
     with true <- timeout_reason?(reason),
          repo when is_binary(repo) <- payload["repo"],
@@ -297,26 +219,14 @@ defmodule Fleet.Pilot.IncidentConsumer do
 
   defp maybe_brake(_state, _op, _reason, _payload), do: :ok
 
-  # The category normalised producer-side (`Fleet.Event.reason_fields/1`) — we compare on the
-  # STABLE shape, never on the original tuple, which does not cross the bus.
+  # Match the bus reason's textual category by substring.
   defp timeout_reason?(reason), do: to_string(reason) =~ "result_timeout"
 
   @doc false
-  # Best-effort BY OBLIGATION: a brake that cannot be placed must not break the incident rail,
-  # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
-  # silently absent brake, which is worse than no brake at all (you would believe you are covered).
+  # Returned errors and exceptions are logged; throws and exits are not caught.
   @spec default_brake(String.t(), integer(), term()) :: :ok
-  # ⚠ PAS DE SEAM ICI, ET C'EST UNE ABSENCE MESUREE. Un `:pilot_forge_client` a cet endroit aurait
-  # UN lecteur et ZERO poseur — ni `config/`, ni `runtime.exs`, ni un test, ni le deploiement — donc
-  # il rendrait `Fleet.Forge.Client` a tous les coups : le client ecrit en trois lignes, et un
-  # TROISIEME nom pour lui (`:forge_client`, `:mcp_forge_client`).
-  #
-  # ⚠ NE PAS BALAYER SES VOISINS PAR RESSEMBLANCE. `:mcp_pod_reaper` et `:mcp_tool_handler` n'ont pas
-  # de poseur non plus, et ils sont LEGITIMES : ce sont des seams de FRONTIERE — `Fleet.MCP` n'a pas
-  # le droit de dependre de `Fleet.Pilot` a la compilation, et l'indirection est ce qui casse le lien.
-  # Un seam d'ici n'aurait pas cette excuse : son defaut nommerait `Fleet.Forge.Client` en litteral,
-  # dans un module de `Pilot` qui en depend deja partout ailleurs. Le critere n'est pas « personne ne
-  # le pose », c'est « il ne casse rien ET personne ne le pose ».
+  # The brake callback is injectable at the consumer; its default uses Forge.Client.
+  # Unlike MCP boundary indirection, another configurable client adds no boundary here.
   def default_brake(repo, number, reason) do
     forge = Fleet.Forge.Client
 
@@ -344,23 +254,10 @@ defmodule Fleet.Pilot.IncidentConsumer do
       :ok
   end
 
-  # THE BRAKE IS TWO GESTURES, NOT ONE — and the second is what makes the first hold.
-  #
-  # `awaits-arch` takes the ticket out of dispatch. It does NOT release the in-flight lock, and a
-  # lock left on a ticket nobody can advance is not inert: the poller's reconciliation finds it
-  # orphaned (no live pod), reclaims it, and re-dispatches — a fresh pod goes and blocks in the
-  # same place. Observed on the bench, and only closing the ticket by hand stops it.
-  # So the two labels must never coexist, and every site that sets one clears the other
-  # (`labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` holds all three).
-  #
-  # A bare `remove_label` and not `StepRunCompleter.unlock/6`, deliberately: unlock also stops the
-  # ROLE's forge stopwatch and emits `step.unlocked`, and both need the role identity that took the
-  # lock. This rail acts as the SYSTEM on a recurring incident — it does not know that identity and
-  # will not guess it. What it therefore cannot do: the role's stopwatch keeps running through the
-  # human wait, and this escalation produces no feed line.
-  #
-  # Best-effort like its sibling, and for the same reason: a brake that cannot be fully placed must
-  # not break the rail of last resort. Failure is LOUD, because half a brake reads as a whole one.
+  # Clear in-flight after awaits-arch to avoid orphan-lock reconciliation.
+  # This is best effort: a failed removal can leave both labels present.
+  # Do not use StepRunCompleter.unlock: the incident has no locking-role identity.
+  # Consequently its stopwatch is not stopped and no step.unlocked feed event is emitted.
   defp clear_in_flight(forge, repo, number) do
     case forge.remove_label(repo, number, Fleet.Labels.in_flight(), []) do
       {:ok, _} ->

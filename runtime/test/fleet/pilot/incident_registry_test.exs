@@ -1,8 +1,6 @@
 defmodule Fleet.Pilot.IncidentRegistryTest do
-  # `async: false` : ce fichier pilote les horloges REELLES du registre (`sync_debounce_ms`,
-  # `retry_ms`, `escalation_cooldown_ms`, avec des `receive` bornes) ; sous un ordonnanceur charge
-  # par les modules async, ces bornes deviennent des flakes. Aucun etat global n'est ecrit ici :
-  # `with_store/2`, qui ecrit `LCARS_STORE_ROOT`, vit avec les temoins d'`Escalation`.
+  # Serialized to reduce scheduler contention around real timers and bounded receives.
+  # Environment-mutating projection tests live in EscalationTest.
   use ExUnit.Case, async: false
   import Fleet.Test.Barrier, only: [settle: 1]
 
@@ -41,11 +39,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name
     end
 
-    # Walks the forge-sync puts until the STAMPED one (bounded). The sync can legitimately fire
-    # twice around an escalation: `{:observe, …}` schedules a debounce, the stamp lands in a
-    # second `{:mark_escalated, …}` call which re-schedules — under load the first put is a
-    # PRE-STAMP snapshot (measured: directory-scope run, seed 763143). The contract is not "the
-    # first write carries the stamp": it is "the stamp survives the sync that FOLLOWS it".
+    # Observation and cooldown stamping are separate calls: a pre-stamp sync can
+    # arrive first. Wait for a stamped snapshot rather than asserting on the first PUT.
     defp receive_stamped_put(puts_left \\ 5)
     defp receive_stamped_put(0), do: flunk("no forge sync carried the escalation stamp")
 
@@ -72,7 +67,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
       assert Reg.seen_before?("wake:p:dead", server: name)
 
-      # crash-survivable local WAL, written BEFORE the forge
+      # The note has written the WAL before replying; this is not a power-loss test.
       assert {:ok, content} = File.read(Path.join(tmp, "incidents.json"))
 
       assert {:ok, %{"wake:p:dead" => %{"count" => 1, "last_reason" => ":dead"}}} =
@@ -82,11 +77,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_receive {:put, _}, 1000
     end
 
-    # The window is the ops-commit budget: a durable failure is noted at EVERY tick, and each
-    # sync is one commit on the ops branch. Notes inside one window must land as ONE put that
-    # carries the LAST count — the timeline is not lost, only its intermediate commits. The
-    # first put carrying count 3 is the whole proof; the refute behind it only guards a sync
-    # that would re-arm itself.
+    # Coalesce notes into one PUT carrying the latest count; intermediate commits
+    # are unnecessary. The bounded refute also detects immediate rescheduling.
     test "sync window: three notes inside one window → ONE put, carrying count 3", %{
       tmp_dir: tmp
     } do
@@ -143,11 +135,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert content =~ "wake:p:dead"
     end
 
-    # The registry sync is a commit the RUNTIME makes — no human initiated it, no pod produced it,
-    # and no pod could (a pod never holds the forge token). It signed `LCARS-starfleet` /
-    # `starfleet@lcars.local`, which is the one shape `ForgeIdentity` forbids: author = the human,
-    # role = a verified TRAILER, committer = the system. Nothing caught it because nothing looked at
-    # the identity of this put — only at its content.
+    # Registry synchronization is a system action. Verify its identity as well as content.
     test "sync: the put is signed by the SYSTEM, never by a pod role", %{tmp_dir: tmp} do
       pid = self()
 
@@ -193,9 +181,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
 
-      # A failed (non-404) forge READ used to collapse to {%{}, nil} → a PUT that could OVERWRITE the
-      # remote registry (cross-machine incidents we never read = data loss). Now: unreadable → NO put at
-      # all; the local WAL holds the data and the sync retries (retry_ms) until the forge returns.
+      # A failed read must not overwrite remote incidents with the local view.
       refute_receive {:put, _}, 250
       # local memory intact (the note is remembered)
       assert Reg.seen_before?("wake:p:dead", server: name)
@@ -235,25 +221,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert Reg.seen_before?("wake:p:dead", server: name)
     end
 
-    # JG-123 — LE MOTIF TRI-ETAT EXISTAIT DANS LE MEME FICHIER, quarante lignes plus haut, et le
-    # site du tampon de cooldown ne l'avait pas : `_ = write_wal(...)` jetait le seul fait qui
-    # distingue « tampon grave » de « tampon perdu », et la reponse etait `:ok` DANS LES DEUX CAS.
-    # Aucun appelant ne pouvait donc le savoir, meme en le voulant.
-    #
-    # ⚠ Le retour public de `record_or_escalate/4` NE CHANGE PAS, et c'est mesure : ici un WAL perdu
-    # coute une issue REDONDANTE a la recurrence suivante (borne, auto-reparant), la ou le voisin
-    # perdait l'INCIDENT lui-meme (la chronologie ment). Ce qui manquait n'etait pas un verdict,
-    # c'etait que le fait EXISTE.
-    # JG-122 — UN FICHIER CORROMPU N'EST PAS UN REGISTRE VIDE. `decode/1` rendait `%{}` et son propre
-    # commentaire disait la perte (« real amnesia, not an absence ») ; c'est ensuite le SHA du
-    # fichier CORROMPU qui partait en `sha:` du PUT, donc l'ecrasement reussissait. La discipline
-    # existait cent-cinquante lignes plus haut, sur l'autre moitie du probleme : « an unreadable
-    # forge is NOT an empty one … pushing our LOCAL view would OVERWRITE cross-machine incidents ».
-    # JG-113 — `nil` DISAIT DEUX CHOSES : « le tableau a ete LU et ne porte pas ce marqueur » et
-    # « le tableau est ILLISIBLE ». Les deux menaient au meme geste (creer, fail-closed vers l'alarme
-    # — l'arbitrage est ecrit et il ne change pas) ET au meme RESULTAT : une issue sysadmin
-    # identique. Or son lecteur est un humain devant le tableau ops : si un doublon apparait, rien
-    # dans l'issue ne lui dit pourquoi ni qu'il doit chercher sa jumelle.
+    # Corrupt backing must block writes; unreadable dedup must warn in the issue body.
+    # Lost cooldown persistence is separate from a successful escalation result.
     test "JG-113: relecture de dedup ILLISIBLE → l'issue le DIT dans son corps", %{tmp_dir: tmp} do
       pid = self()
 
@@ -418,9 +387,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       assert {:ok, content} = File.read(Path.join(tmp, "incidents.json"))
 
-      # 2 incidents → 4 lines (`{`, incident a, incident b, `}`): ONE incident per line. Bites if we
-      # go back to the compact `JSON.encode!` (which would glue everything on one line → unreadable
-      # git diff).
+      # One incident per line keeps the ops diff readable.
       lines = content |> String.trim_trailing() |> String.split("\n")
       assert length(lines) == 4
       assert hd(lines) == "{"
@@ -481,13 +448,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "boot: forge file CORRUPT (present but not a JSON map) → treated empty, LOUD",
          %{tmp_dir: tmp} do
-      # The file EXISTED (≠ 404) but its content is not a JSON map — real amnesia, must be loud.
-      #
-      # ⚠ ET LA POSTURE SE MESURE SUR L'ETAT, PAS SUR LA PHRASE. Ce temoin n'assertait que
-      # `log =~ "CORRUPT"` : rendre `{:ok, %{}}` juste apres le `Logger.error` — donc lire un
-      # registre corrompu comme un registre VIDE, ce que tout le module existe pour refuser — le
-      # laissait vert (mutation jouee le 2026-09-07 ; un temoin voisin l'attrapait, celui-ci non).
-      # Son jumeau ILLISIBLE, juste au-dessus, mesure `sync_pending` : meme posture, meme mesure.
+      # Assert scheduled recovery as well as the log: logging then accepting empty
+      # backing would conceal corruption despite the historical test title.
       name = :"reg_#{System.unique_integer([:positive])}"
 
       log =
@@ -508,10 +470,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
          %{
            tmp_dir: tmp
          } do
-      # A WAL present but unreadable = LOSS of the cross-session memory (recurrences are no longer
-      # detected, no more escalation). Swallowing the decode error into `%{}` would boot
-      # "0 signatures" as if nominal. Fix: direct Jason.decode → LOUD log (the amnesia must be
-      # visible), reg boots empty.
+      # Corrupt WAL must be reported even when boot proceeds with empty local memory.
       File.write!(Path.join(tmp, "incidents.json"), "this is not JSON {{{")
 
       name = :"reg_#{System.unique_integer([:positive])}"
@@ -541,10 +500,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     test "boot: CORRUPT WAL is QUARANTINED, never overwritten by the fresh registry", %{
       tmp_dir: tmp
     } do
-      # The old flow logged the corruption then let the next write rename a fresh WAL over it —
-      # erasing the only forensic trace of what corrupted the cross-machine memory. Now the corrupt
-      # file is moved aside to a `.corrupt-<ts>` sibling BEFORE booting empty, and a subsequent write
-      # lands on the clean path.
+      # Preserve corrupt evidence while subsequent notes populate a fresh WAL.
       wal = Path.join(tmp, "incidents.json")
       File.write!(wal, "this is not JSON {{{")
 
@@ -581,10 +537,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "boot: NON-MAP entry in the WAL/forge (hand-edited file) → LOUD drop, NEVER a boot-loop",
          %{tmp_dir: tmp} do
-      # The forge file (ops) and the WAL are hand-editable: a non-map VALUE under a signature
-      # entered RAM then made merge_entry raise in handle_continue(:load) → boot-loop reproducible
-      # at every reboot until the file was repaired. Unreadable-WAL doctrine: VISIBLE memory loss
-      # (drop logged error), never a boot crash.
+      # A non-map entry must be dropped visibly while valid neighboring entries survive.
       File.write!(
         Path.join(tmp, "incidents.json"),
         Jason.encode!(%{"wake:p:bad" => "garbage-string", "wake:p:ok" => %{"count" => 1}})
@@ -693,12 +646,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
         )
 
-      # Return = the issue's NUMBER (1, returned by the stub), not the reason: an `{:escalated, num}`
-      # PROVES an issue really exists. (An honesty fix: the return used to carry the reason and came
-      # out even when opening the issue failed — cf. the "forge DOWN" test below.)
-      # MECHANICS (fix F-RUN-2): `issue_create` receives the assignee but NO label (the Gitea POST
-      # requires integer IDs, not names → 422); the `error_system` label is set AFTERWARDS via
-      # `add_label` by NAME. We verify BOTH calls.
+      # Return the created issue number and add its label by name in a separate call.
+      # These assertions check both calls, not their order.
       assert {:escalated, 1} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,
@@ -715,9 +664,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert_received {:issue, "fleet/lcars", title, iopts}
       # "récurrence" pins the FR user-facing sysadmin issue title (Escalation).
       assert title =~ "récurrence"
-      # create_issue NO LONGER carries a label (otherwise 422). Et SANS projection du siege
-      # (ni config, ni fichier — l'etat de ce banc), il ne porte AUCUN assignee : l'option est
-      # OMISE, pas posee a nil — cf. resolve_assignee/1, plus aucun login en dur.
+      # This fixture has no seat projection: omit assignment rather than sending nil.
+      # Label names must not be passed to the integer-ID creation field.
       refute Keyword.has_key?(iopts, :labels)
       refute Keyword.has_key?(iopts, :assignees)
       # The durable label is set by NAME on the created issue.
@@ -726,11 +674,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "recurrence UNDER cooldown → {:escalation_suppressed, N}, NO new issue (escalation memory)",
          %{tmp_dir: tmp} do
-      # Escalating on EVERY recurrence — a durably unreadable workflow_map on a routed issue =
-      # 1 forge issue PER TICK (~2,880/day), self-amplified by the webhook-kick ("the dedup IS the
-      # throttle" was false: the dedup throttled nothing). Instead: the escalation records
-      # last_escalated_at/escalated_issue in the entry; a recurrence under the cooldown is NOTED
-      # (count/last_seen — the timeline stays true) but suppressed.
+      # Under cooldown, note repeated occurrences without creating another issue.
       pid = self()
 
       name =
@@ -792,10 +736,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "the forge sync PRESERVES the escalation memory (merge_entry carries last_escalated_at/escalated_issue)",
          %{tmp_dir: tmp} do
-      # The BLOCKING point of the verify: merge_entry rebuilt the entry with 4 hardcoded keys →
-      # the escalation stamp would have been silently lost at every forge sync (2s debounce) and
-      # the storm would resume. Here the forge returns the entry WITHOUT the stamp (other machine,
-      # pre-cooldown): after the merge, the recurrence must STILL be suppressed.
+      # Merging an older forge entry without cooldown fields must preserve the local stamp.
       pid = self()
       sig = Reg.signature("pod", "issue-9-eng", :launch_failed)
 
@@ -823,9 +764,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert {:escalated, 43} = Reg.record_or_escalate("pod", "issue-9-eng", :launch_failed, opts)
       assert_received :issue_created
 
-      # The sync (5ms debounce) merges WAL ∪ forge-without-stamp and REWRITES the memory: the stamp
-      # must survive the merge (last_escalated_at/escalated_issue pair carried by merge_entry).
-      # Walked, not first-put-asserted: a pre-stamp snapshot may precede it (cf. receive_stamped_put).
+      # Wait past possible pre-stamp snapshots, then check that merging retained cooldown.
       content = receive_stamped_put()
       assert content =~ "escalated_issue"
 
@@ -837,9 +776,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "escalate_gated (porte immediate): 1st occurrence IMMEDIATE, repetition under cooldown suppressed",
          %{tmp_dir: tmp} do
-      # La porte immediate (gate: immediate des routes declaratives, et les kinds tires du code) :
-      # issue des la PREMIERE occurrence — seules les repetitions intra-cooldown de la meme
-      # signature sont supprimees (une panne permanente ne re-cree pas une issue par event).
+      # Immediate escalation skips the first-note gate but retains repeat cooldown.
       pid = self()
 
       name =
@@ -872,12 +809,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
     test "F-C075: add_label FAILS (persistent) → {:escalation_failed, {:discovery_label_failed,_}}, NEVER a lying {:escalated}",
          %{tmp_dir: tmp} do
-      # `error_system` = THE durable discovery signal (the poller/human finds the issue BY this label).
-      # Fallback B-#5: failed label → escalate returned `{:ok, 1}` → record_or_escalate →
-      # {:escalated, 1} = alarm "delivered" while the incident is UNFINDABLE by label filter.
-      # F-C075: after bounded retry, we SURFACE the failure →
-      # {:escalation_failed, {:discovery_label_failed, num, reason}} (the alarm re-fires on
-      # recurrence, the operator must act; the issue exists, its number travels in the reason).
+      # Label failure is an escalation failure even after issue creation; return
+      # the number so that discovery can be repaired.
       sig = Reg.signature("pod", "issue-7-engineer", :result_timeout)
 
       name =
@@ -941,9 +874,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
         )
 
-      # `issue_create` fails on BOTH attempts (with assignee, then label-only fallback) = forge down.
-      # The return must SAY the failure — never a reassuring `{:escalated, _}` while no sysadmin
-      # issue was opened.
+      # The create stub always fails. This checks error propagation, not retry count;
+      # without an assignee, escalation makes only one create attempt.
       assert {:escalation_failed, :forge_down} =
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,

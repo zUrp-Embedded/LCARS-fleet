@@ -1,14 +1,8 @@
 defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
   @moduledoc """
-  `Fleet.Pilot.IncidentRegistry.Escalation` — the sysadmin issue as a STATELESS act: idempotency by
-  readback of the marker, the describe clause of the kind that once cost a ticket
-  (`:awaits_arch_stuck`), the assignee as a projection.
-
-  `async: false`: `with_store/2` writes `LCARS_STORE_ROOT`, global to the node, and restores it.
-  Run in parallel with `Fleet.Spawner.Pod.LaunchSpecTest` — which writes and reads the same — that
-  restoration lands in the middle of its tests and makes them read a root that is not theirs
-  (measured 2026-08-20, full `mix gate`). `Fleet.TestEnv`'s rule holds for the OS env as for the
-  application env: a file that writes it is `async: false`.
+  Checks marker reuse, the awaits_arch_stuck kind and provisioned assignee lookup.
+  Serialized because with_store/2 mutates the global LCARS_STORE_ROOT environment.
+  Readback tests do not exercise concurrent creation or transport ambiguity.
   """
   use ExUnit.Case, async: false
 
@@ -86,11 +80,8 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
   describe "every kind that fires has a describe clause" do
     alias Fleet.Pilot.IncidentRegistry.Escalation
 
-    # TROUVE PAR LA RELECTURE 2026-08-19 : `:awaits_arch_stuck` (emis par
-    # `StepRunConsumer.drain_failed/4`) n'avait pas de clause `kind_describe/1` — l'escalade
-    # crashait en FunctionClauseError au lieu d'ouvrir l'issue, exactement sur le chemin
-    # « un ticket sort du pipeline en silence ». Le temoin du drain stubbe `escalate_fun`,
-    # donc SEUL un appel au VRAI `Escalation.escalate/5` peut attraper cette classe de trou.
+    # Drain tests stub escalate_fun; call real escalation here to catch a missing
+    # kind_describe clause.
     test ":awaits_arch_stuck opens an issue instead of crashing on kind_describe" do
       pid = self()
 
@@ -202,11 +193,8 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
     end
 
     test "aucun login en dur ne survit dans ce module" do
-      # ⚠ INTERDIRE DEUX LOGINS N'INTERDIT PAS LE TROISIEME. Les deux `refute` d'avant nommaient
-      # `"starfleet"` et `"admiral"` : coder en dur `"captain"` — ou n'importe quel autre compte —
-      # les laissait verts, et c'est precisement le defaut que ce temoin existe pour fermer (un
-      # siege projete au lieu d'un login devine). On interdit la FORME : toute chaine qui ressemble
-      # a un login de compte dans une ligne de CODE, hors commentaires et hors messages.
+      # Check the assignment syntax rather than a blacklist of known account names.
+      # This source regex is a guard against literals, not a full data-flow proof.
       src = File.read!("lib/fleet/pilot/incident_registry/escalation.ex")
 
       suspects =

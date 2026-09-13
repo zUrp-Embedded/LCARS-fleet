@@ -12,7 +12,8 @@ defmodule Fleet.Pilot.IssueId do
   def compose(number), do: @prefix <> to_string(number)
 
   @doc ~S'''
-  Parses only the canonical spelling emitted by `compose/1`; signed, padded or partial suffixes fail.
+  Parses canonical integer spelling, including negatives (`issue--5`); explicit +,
+  leading zeros and partial suffixes fail. This does not validate forge-number bounds.
   '''
   @spec parse(String.t()) :: {:ok, integer()} | :error
   def parse(@prefix <> rest) do

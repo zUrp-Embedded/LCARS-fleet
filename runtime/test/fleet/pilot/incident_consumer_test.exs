@@ -3,12 +3,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   alias Fleet.Pilot.IncidentConsumer
 
-  # subscribe: false (no stray Bus) + default runner (nil → SYNC, deterministic) + injected
-  # record_fun (zero forge) that echoes the call back to the test. We verify the ROUTING event →
-  # contract `record_or_escalate(op, subject, reason, opts)`, not the escalation policy (tested on
-  # the registry side).
-  # Canon-equivalent classification table via the `:routing_fun` seam (the consumer is a MECHANIC
-  # over the table — audit B-05); hermetic (no global persistent_term mutation, async stays true).
+  # Direct events, synchronous callbacks and a local routing table isolate routing
+  # from Bus delivery, global configuration and the registry's escalation policy.
   defp routing do
     %{
       {:spawner, :"pod.failed"} => %{
@@ -84,9 +80,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     end
 
     test "recurrence SOUS COOLDOWN → le frein s'applique AUSSI (c'est la que vit la boucle)" do
-      # LE cas qui discrimine. La suppression concerne l'ISSUE SYSADMIN — ne pas en ouvrir une par
-      # tick — pas la boucle de re-dispatch. Ne freiner que sur `{:escalated, _}` laisserait le
-      # ticket repartir a l'infini des la deuxieme recurrence, c'est-a-dire l'incident mesure.
+      # Cooldown suppresses sysadmin issue creation, not the work-ticket brake.
       pid = start_with({:escalation_suppressed, 77})
 
       send(
@@ -117,8 +111,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     end
 
     test "recurrence sur une AUTRE categorie → aucun frein (restriction deliberee)" do
-      # Un `exited_before_result` peut etre une erreur de brief qu'un rework corrige. Elargir le
-      # frein se fera sur une mesure, pas sur une intuition.
+      # Other failures may be recoverable through rework; braking is deliberately narrow.
       pid = start_with({:escalated, 77})
 
       send(
@@ -134,8 +127,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
     end
 
     test "payload SANS depot → aucun frein, et aucun crash du rail d'incident" do
-      # `issue_id` vaut `issue-<n>` : un numero sans depot ne designe rien d'ecrivable. Le rail
-      # d'incident est le rail de derniere instance — il degrade, il ne tombe pas.
+      # An issue number without a repository cannot identify the ticket to brake.
       pid = start_with({:escalated, 77})
 
       send(pid, brake_event(%{"issue_id" => "issue-42", "reason" => "result_timeout"}))
@@ -184,8 +176,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   end
 
   test "the classification is DATA: re-declaring the op in the table changes the recording, zero code" do
-    # The killer discriminator vs hardcoded clauses: the SAME wake.failed event records under the
-    # op the TABLE declares — the old handler carried "wake" in code and could not follow.
+    # Changing the table must change routing for the same event.
     me = self()
 
     fun = fn op, subject, reason, opts ->
@@ -259,10 +250,7 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
   end
 
   test "spawn.failed → record_or_escalate(\"spawn\", cap_profile_name, reason, opts)" do
-    # The rail was ORPHANED (produced by PublishConsumer, never consumed): the 202 of
-    # POST /api/admin/spawn lied silently when the dispatch dropped the spawn. Subject =
-    # cap_profile_name (the role): recurrence groups "this role fails to spawn" (issue_id is
-    # per-request → would never recur).
+    # Group failed spawns by role rather than per-request issue identity.
     pid = start(echo_fun())
 
     send(

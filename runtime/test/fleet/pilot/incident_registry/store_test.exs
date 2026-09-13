@@ -1,7 +1,7 @@
 defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
   @moduledoc """
-  The registry's magasin, read alone: the three states of a WAL read, the atomic write, and the
-  merge rule that makes two machines' memories one.
+  Checks WAL round-trips, corruption handling, merge fields and no-op forge writes.
+  These tests do not simulate power loss or concurrent cross-machine writes.
   """
   use ExUnit.Case, async: true
 
@@ -81,9 +81,7 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
 
   describe "sync_forge/2 — the put that would change nothing" do
     setup %{tmp_dir: tmp} do
-      # The forge's bytes are produced by the same encoder as the WAL's: the file IS the text a
-      # sync would push for this registry. The transport is octet-exact (`Files.get_file/3`
-      # decodes the base64 it received); a divergence there is that client's to witness.
+      # Use the WAL encoder for exact forge bytes; transport decoding is tested elsewhere.
       reg = %{
         "wake:p:dead" => %{
           "count" => 2,

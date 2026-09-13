@@ -1,44 +1,27 @@
 defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   @moduledoc """
-  SYSADMIN escalation of an incident (opening an `error_system` forge issue), extracted
-  from `Fleet.Pilot.IncidentRegistry`: the registry is the MEMORY (GenServer, WAL + forge
-  sync); the escalation is a STATELESS act (no read of the GenServer — everything comes
-  from the arguments + config) that builds and posts the issue. Two concerns, two modules.
+  Creates or reuses a sysadmin incident issue without registry-memory access.
+  The open-issue marker read reduces duplicates but is not atomic with creation.
+  An unreadable listing still permits creation, with the uncertainty in its body.
 
-  Shared by `WakeRecovery` and the failure consumers via the facade
-  `IncidentRegistry.escalate/5` (DRY — a single writer of the sysadmin issue).
+  Success requires the discovery label (default error_system), with three immediate
+  attempts. A label failure returns the existing issue number for repair. Assignment
+  is secondary: any create error with an assignee retries once without it, without
+  another dedup read. Callback exceptions are not caught here.
 
-  ## Contract
-
-    * Label `error_system` = DURABLE signal (the poller/human finds the issue by it); added with a
-      BOUNDED retry. A PERSISTENT label failure (F-C075) → `{:error, {:discovery_label_failed, num, _}}`
-      → `record_or_escalate` renders `{:escalation_failed, _}` (never a lying `{:escalated}` for an
-      unfindable incident). The sysadmin assignee is a SECONDARY discovery path (account absent →
-      retry WITHOUT assignee: escalation takes precedence over naming; the durable path is the
-      label, and a missing assignee is visible on the issue itself).
-    * Forge down (create) → `{:error, _}` propagated (`record_or_escalate` renders it as
-      `{:escalation_failed, _}`, never a lying `{:escalated}`).
-    * `kind` qualifies the MESSAGE (recurrence / failed re-roll / recurrent pod /
-      SP suspect / …) — the diagnosis guides the sysadmin toward the root-cause. The table
-      `kind_describe/1` is CLOSED: a kind without a clause CRASHES here instead of opening the
-      issue (paid once — `:awaits_arch_stuck`), so declarative immediate routes are boot-checked
-      by the Catalog.
+  kind_describe/1 is a closed set: unsupported kinds raise. Declarative immediate
+  routes are checked by Catalog; code-origin kinds also need a supported clause.
   """
 
   require Logger
 
   @doc """
-  Opens a system issue (default label `error_system` — `opts[:label]` overrides; assignee = the
-  PROJECTED login of the sysadmin seat, cf. `resolve_assignee/1` — never a literal) for an
-  incident. `kind`: `:recurrence` | `:reroll_failed` |
-  `:sp_suspect` | `:awaits_arch_stuck` | `:workflow_map_failed` |
-  `:project_card_failed` | `:project_declaration_invalid`. The label is a DURABLE discovery signal (always set,
-  bounded retry); the assignee is not load-bearing — if the account does not exist the issue is
-  retried WITHOUT assignee (the escalation itself must land; naming is secondary and its absence
-  is visible on the issue). `opts[:correlation_id]` engraves the incident↔mandate link in the body;
-  `opts[:reason_detail]` engraves the full failure term (producers put the stable dedup CATEGORY in
-  `reason` and the variable detail aside — see `Fleet.Event.reason_fields/1`).
-  Returns `{:ok, number}` | `{:error, term}`.
+  Opens or reuses the issue for sig and ensures its discovery label. Repository,
+  label and assignee can be overridden by opts or configuration. Otherwise the
+  assignee is read from the provisioned seat projection.
+
+  :reason_detail preserves variable failure diagnostics outside the dedup category;
+  :correlation_id links the source mandate and :pane supplies captured output.
   """
   alias Fleet.Forge.Client
 
@@ -60,11 +43,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     {kind_label, kind_note} = kind_describe(kind)
     title = "[#{label}] #{kind_label} : #{subject}"
 
-    # STABLE machine key of THIS incident occurrence, hidden in the body. create_issue is not
-    # idempotent: a create that TIMES OUT after the forge committed, then a retry (or a recurrence
-    # before the cooldown stamp is written — the stamp only lands on a successful escalation), would
-    # open a SECOND issue for the same occurrence. Before creating, we read back the open issues and
-    # reuse the one already carrying this marker — the forge's own state is the idempotency key.
+    # Reuse open issues carrying this signature marker after an ambiguous create.
+    # Read and create are separate: concurrent calls can still create duplicates.
     marker = incident_marker(sig)
 
     body = """
@@ -84,10 +64,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     result =
       case dedup do
         {:ok, existing} ->
-          # An open issue already carries this occurrence's marker — the create either landed and its
-          # ack was lost, or a concurrent escalation won. Reuse it (ensure the discovery label), never
-          # a duplicate. `nil` = readback said "none" (or was unreadable → create, fail-closed toward
-          # having an issue rather than suppressing an alarm).
+          # Repair the existing issue's discovery label without another create.
           Logger.info(
             "IncidentRegistry: incident #{inspect(sig)} already open as ##{existing} — reusing (idempotent), no duplicate"
           )
@@ -118,23 +95,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     result
   end
 
-  # ── L'ASSIGNEE EST UNE PROJECTION, JAMAIS UN NOM EN DUR ──────────────────────────────────────
-  #
-  # Le login du siege est VARIABLE (celui de l'installeur en prod — `admiral` n'est qu'un
-  # full_name, on n'assigne pas une issue a un full_name). Le provisioning le PROJETTE a chaque
-  # boot dans `<store>/state/pilot.assignee` (`services/container/init.sh`, le siege resolu) ;
-  # ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
-  # tout conteneur dont l'installeur n'a pas ce login, et nommer un ROLE plutot que le siege assigne
-  # l'issue a quelqu'un qui ne peut pas l'ouvrir.
-  #
-  # Etats, et qui les dit :
-  #   * fichier present, non vide  -> l'assignee projete ;
-  #   * store present, fichier ABSENT ou VIDE -> nil + WARNING a chaque escalade (le provisioning
-  #     n'est pas passe, ou LCARS_ADMIRAL n'est pas pose — panne dite, patron `egress.ex`) ;
-  #     ⚠ VIDE = ABSENT, jamais `""` : un `assignees: [""]` partirait sur la forge, echouerait,
-  #     et le retry de `create_system_issue/5` rattraperait en brulant un appel — panne invisible ;
-  #   * store absent (pas de LCARS_STORE_ROOT) -> nil, silencieux : le nominal d'un conteneur sans
-  #     magasin (avant le lot F). L'issue s'ouvre SANS assignee — le label reste le chemin durable.
+  # Provisioning writes <LCARS_STORE_ROOT>/state/pilot.assignee at each boot
+  # (`services/container/init.sh`, the resolved seat). Read the seat's login, not its display name
+  # or a guessed role login. Missing/empty projection with a store logs a warning; no store
+  # silently omits assignment. Explicit opts/config take precedence.
   defp resolve_assignee(opts) do
     case opts[:assignee] || Application.get_env(:lcars_fleet, :pilot_system_issue_assignee) do
       name when is_binary(name) and name != "" ->
@@ -173,30 +137,20 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   end
 
   defp create_and_label(create_fun, add_label_fun, repo, title, body, assignee, label) do
-    # `issue_create` expects INTEGER label IDs (ForgeClient contract), NOT names. So we follow the
-    # established pattern (`PodTools.do_create_issue`): create the issue (with the assignee) THEN set the label by
-    # NAME via `add_label` (name->id resolution + org-label auto-creation on the ForgeClient side). Passing
-    # `labels: [name-string]` to the POST -> 422 Gitea "cannot unmarshal string into int64" — the
-    # sysadmin escalation would create NO issue (silent dead rail).
+    # Creation accepts integer label IDs; add_label resolves the name afterwards.
     with {:ok, number} <- create_system_issue(create_fun, repo, title, body, assignee) do
       finalize_escalation(add_label_fun, repo, number, label)
     end
   end
 
   defp finalize_escalation(add_label_fun, repo, number, label) do
-    # `error_system` is THE durable DISCOVERY label — the moduledoc's contract is « the poller/human finds
-    # the issue BY this label ». `add_label` is NOT fail-loud on the ForgeClient side (bare tuple, no log).
     case add_discovery_label(add_label_fun, repo, number, label) do
       :ok ->
         {:ok, number}
 
       {:error, reason} ->
-        # F-C075 — a PERSISTENTLY failing discovery label (after retries) leaves the sysadmin issue
-        # INVISIBLE to label-filtered discovery. We do NOT report a clean `{:ok, number}` (which
-        # `record_or_escalate` turns into a LYING `{:escalated}` — the alarm looks delivered while the
-        # incident is unfindable). We SURFACE it → mapped to `{:escalation_failed, _}`: the alarm keeps
-        # firing on recurrence, an operator must act. The issue EXISTS (created + usually assigned); its
-        # number rides in the reason for cleanup / label-repair.
+        # The issue exists but label-filtered discovery misses it. Return its number
+        # with the failure so later attempts or an operator can repair the label.
         Logger.error(
           "IncidentRegistry: sysadmin issue ##{number} created but discovery label " <>
             "#{inspect(label)} NOT added after retries (#{inspect(reason)}) — NOT label-discoverable, " <>
@@ -207,21 +161,11 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # Hidden, stable per-occurrence marker (an HTML comment — invisible in the rendered issue, exact in
-  # the body text). The idempotency key of the create.
+  # Hidden stable signature marker; shared across recurrences, not a unique occurrence.
   defp incident_marker(sig), do: "<!-- lcars-incident:#{sig} -->"
 
-  # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number.
-  #
-  # L'ARBITRAGE : une relecture ratee ne doit PAS supprimer une alarme, donc on cree quand meme —
-  # le risque de doublon est le moindre mal devant une non-escalade silencieuse.
-  #
-  # ⚠ MAIS `:none` ET `{:unverified, _}` SONT DEUX FAITS, PAS UN. « Le tableau a ete LU et ne porte
-  # pas ce marqueur » et « le tableau est ILLISIBLE » menent au meme geste ; les rendre par une
-  # meme valeur leur fait produire la meme ISSUE. Or le lecteur de cette issue est un humain devant
-  # le tableau ops : si un doublon apparait, rien ne lui dit POURQUOI, ni qu'il doit chercher sa
-  # jumelle. Meme forme que JG-045 (creation conservee, doute nomme), sauf qu'ici le doute doit
-  # voyager jusqu'a l'HUMAIN et pas jusqu'a l'appelant.
+  # A failed listing must not suppress the alarm. Distinguish it from an empty
+  # listing so the created issue warns its reader about a possible duplicate.
   defp find_open_incident(list_fun, repo, marker) do
     case list_fun.(repo, []) do
       {:ok, issues} when is_list(issues) ->
@@ -232,8 +176,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # LA PROJECTION D'UN LOGIN DE ROLE, LUE SUR DISQUE. Un fichier VIDE n'est pas un login vide :
-  # c'est une projection absente, et le silence ferait ecrire l'issue sous un nom nul.
+  # Treat an empty projection as absent, avoiding an invalid assignees option.
   defp projected_login("", path) do
     warn_projection_missing(path, :empty)
     nil
@@ -246,13 +189,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     if is_integer(num) and String.contains?(Map.get(issue, "body") || "", marker), do: {:ok, num}
   end
 
-  # La phrase que le doublon eventuel portera, dans le CORPS de l'issue — pas seulement dans un log
-  # que personne ne relit en face d'un tableau ops.
-  #
-  # ⚠ UNE SEULE CLAUSE : un `dedup_warning(_none)` rendant `""` « au cas ou » ne peut jamais
-  # matcher (dialyzer, `pattern_match_cov`), cette fonction n'etant appelee que depuis la branche
-  # `{:unverified, _}`. Le « present = doute, absent = mesure » vit dans le CHOIX DE BRANCHE de
-  # l'appelant, pas dans un repli ici.
+  # Put dedup uncertainty in the issue body, where its reader can see it.
   defp dedup_warning({:unverified, why}) do
     """
 
@@ -263,21 +200,14 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   end
 
   @doc """
-  The fleet's OPS repo — SINGLE authority (`:lcars_fleet, :pilot_ops_repo`, default `"fleet/lcars"`).
-
-  Two things land there and must never drift apart: the incident REGISTRY file (branch `ops`,
-  `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
-  incident — a registry on repo A whose issues open on repo B is an alarm nobody finds. The two
-  specific knobs (`:pilot_incident_registry_repo` / `:pilot_system_issue_repo`) remain as explicit
-  overrides.
+  Shared default repository for registry backing and incident issues, configured
+  by :pilot_ops_repo. :pilot_incident_registry_repo and :pilot_system_issue_repo
+  remain explicit overrides for splitting their destinations.
   """
   @spec ops_repo() :: String.t()
   def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
 
-  # F-C075 — BOUNDED retry of the DISCOVERY label (`error_system`): a transient forge blip (name→id
-  # resolution / org-label auto-create / HTTP 500) self-heals; a persistent failure is SURFACED by
-  # `escalate/5` (no lying `{:escalated}`). Immediate retries (no sleep): `escalate` is a stateless act off
-  # the hot path, the dominant cause is a momentary forge hiccup.
+  # Retry returned label errors immediately, without sleep.
   @label_attempts 3
   defp add_discovery_label(add_label_fun, repo, number, label, attempt \\ 1) do
     case add_label_fun.(repo, number, label, []) do
@@ -297,21 +227,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # Creates the system issue with the sysadmin assignee; nonexistent assignee (account absent) -> retry WITHOUT
-  # assignee (escalation takes precedence over naming: the issue must land; the durable discovery path is the
-  # label, and the missing assignee is visible on the issue). Forge down on both attempts -> {:error, _}
-  # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
-  #
-  # THE RETRY DROPS THE ASSIGNEE ON ANY FIRST ERROR, not only an invalid-assignee 422, and that
-  # width is deliberate: a real forge-down fails BOTH attempts (→ `{:error}`, no spurious drop), the
-  # invalid-assignee case is exactly when dropping is correct, and only a transient error resolving
-  # BETWEEN the two attempts drops a valid assignee — a rare race, on a SECONDARY discovery path.
-  # The durable one is the `error_system` label (retried, surfaced fail-loud, F-C075), so a dropped
-  # assignee loses NO discoverability. Narrowing this to "drop only on a 422-assignee error" would
-  # couple the retry to the forge's HTTP error shape for a negligible gain.
-  # ASSIGNEE NIL => L'OPTION EST OMISE, UN SEUL APPEL. Un `assignees: [nil]` (ou `[""]`) partirait
-  # sur la forge, echouerait, et le retry ci-dessous rattraperait — temoin vert, un appel API brule
-  # par escalade, panne invisible.
+  # With an assignee, retry ANY returned create error once without assignment.
+  # This avoids coupling fallback to HTTP error shapes but may drop a valid login
+  # or duplicate a create whose acknowledgement was lost. Without an assignee,
+  # omit the option and make one attempt. The discovery label remains required.
   defp create_system_issue(create_fun, repo, title, body, nil) do
     create_fun.(repo, title, body, [])
   end
@@ -323,9 +242,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     end
   end
 
-  # Full failure detail (producer-side `inspect/1` of the original reason term) — "Raison"
-  # above carries the STABLE dedup category only; this block restores the variable part for
-  # the human diagnosis. Empty when the producer had nothing beyond the category.
+  # Restore variable diagnostics omitted from the stable reason category.
   defp detail_block(detail) when is_binary(detail) and detail != "" do
     "Détail : `#{detail}`.\n"
   end
@@ -339,8 +256,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   defp pane_block(_), do: ""
 
-  # Incident ↔ mandate link (correlation_id = the source issue, threaded end-to-end): the
-  # operator walks back from the symptom to the causing mandate without digging the logs.
+  # Link back to the source mandate without requiring log correlation.
   defp correlation_block(corr) when is_binary(corr) and corr != "" do
     "Mandat lié (correlation_id) : `#{corr}`.\n"
   end
@@ -384,11 +300,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
 
-  # ⚠ CE KIND DOIT AVOIR SA CLAUSE ICI : il est emis par `StepRunConsumer.drain_failed/4` (drain de
-  # `lcars-awaits-arch`), et sans clause l'escalade crashe en FunctionClauseError au lieu d'ouvrir
-  # l'issue — precisement sur le chemin « un ticket sort du pipeline en silence ». Le temoin du
-  # drain stubbe `escalate_fun`, donc il ne peut pas le voir : cette table est close, et un kind
-  # sans clause y crashe (cf. l'interdit de la porte immediate).
+  # Drain tests stub escalation; a real escalation test must cover this kind.
   defp kind_describe(:awaits_arch_stuck),
     do:
       {"awaits-arch NON draine — ticket sorti du pipeline",
@@ -403,9 +315,6 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "personne ne corrige. Une carte illisible bloque le dispatch de TOUTES ses issues — " <>
          "d'ou l'issue des la premiere occurrence, pas a la recidive."}
 
-  # Les deux kinds du rail projet (BL-6-114) : le fallback local a DEJA tourne — le projet
-  # continue sur la carte par defaut. Ce que l'issue dit : la substitution est SILENCIEUSE tant
-  # que personne ne corrige la declaration, et elle rejouera a chaque dispatch.
   defp kind_describe(:project_card_failed),
     do:
       {"carte declaree illisible — le projet tourne sur la carte par defaut",
