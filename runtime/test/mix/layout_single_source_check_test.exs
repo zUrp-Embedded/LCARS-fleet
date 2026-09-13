@@ -275,9 +275,10 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "layout.catalogue_roots_single_source — la fleet lit ou l'image n'a jamais ecrit" do
-    # Sept miroirs recopient deux valeurs derivees (`<platform>/<dirname>` et
-    # `@installed_catalogues_root`), dont le `COPY` du Dockerfile — le CREATEUR de l'arbre. Le BEAM
-    # et le shell ne peuvent pas s'appeler : l'accord EST le verrou.
+    # Six miroirs recopient deux valeurs derivees (`<platform>/<dirname>` et
+    # `@installed_catalogues_root`), dont la ligne du manifeste — le CREATEUR de l'arbre installe.
+    # L'arbre livre n'a plus de second createur : `62-runtime-helpers` le pose sur les deux
+    # terrains. Le BEAM et le shell ne peuvent pas s'appeler : l'accord EST le verrou.
     defp miroirs(shipped, installed) do
       [
         {"runtime/bin/lcars",
@@ -286,35 +287,33 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
         {"runtime/services/forge-gestures.sh",
          "D=\"${LCARS_DEMO_CATALOGUE:-#{shipped}/web-demo}\"\n" <>
            "I=\"${LCARS_CATALOGUES_DIR:-#{installed}}\"\n"},
-        {"deploy/docker/Dockerfile", "COPY catalogues #{shipped}\n"},
         {"deploy/system.manifest", "dir #{installed} 0755 root root\n"},
         {"deploy/lib/provision-lib.sh", ": \"${PROV_CATALOGUES_DIR:=#{installed}}\"\n"}
       ]
     end
 
-    test "les sept miroirs d'accord → vert, et la preuve NOMME les fichiers lus" do
+    test "les six miroirs d'accord → vert, et la preuve NOMME les fichiers lus" do
       root = depot(fichiers: miroirs("/opt/lcars/catalogues", "/opt/lcars/var/catalogues"))
 
       assert %{status: :pass, evidence: ev, note: note} =
                SingleSource.check_catalogue_roots_single_source(root)
 
-      # ⚠ CE MUR PORTE SA PREUVE MEME AU VERT, et c'est une propriete, pas un residu : les sept
+      # ⚠ CE MUR PORTE SA PREUVE MEME AU VERT, et c'est une propriete, pas un residu : les six
       # miroirs vivent dans quatre arbres dont deux hors artefact, donc « vert » sans la liste ne
-      # dirait pas COMBIEN ont ete lus. Ma premiere ecriture attendait `evidence: []` et rougissait
-      # sur un mur parfaitement sain.
-      assert Enum.any?(ev, &(&1 =~ "Dockerfile"))
+      # dirait pas COMBIEN ont ete lus.
+      assert Enum.any?(ev, &(&1 =~ "system.manifest"))
       assert Enum.any?(ev, &(&1 =~ "bin/lcars"))
-      assert note =~ "7 checked copies"
+      assert note =~ "6 checked copies"
     end
 
-    test "⚠ LE CREATEUR QUI DERIVE — un `COPY` qui ne suit pas l'autorite est nomme" do
-      # LE MIROIR QUI COMPTE LE PLUS : si le `COPY` de l'image ne suit pas, la fleet lit un arbre
-      # que l'image n'a jamais ecrit — et le CLI montre le cache en mode DEGRADE, au moment precis
-      # ou l'operateur n'a aucune seconde source pour recouper.
+    test "⚠ LE CREATEUR QUI DERIVE — une ligne de manifeste qui ne suit pas l'autorite est nommee" do
+      # LE MIROIR QUI COMPTE LE PLUS : si le manifeste cree l'arbre installe ailleurs, la forge
+      # restaure dans un arbre que la fleet ne lit pas — et le CLI montre le cache en mode DEGRADE,
+      # au moment precis ou l'operateur n'a aucune seconde source pour recouper.
       fichiers =
         miroirs("/opt/lcars/catalogues", "/opt/lcars/var/catalogues")
         |> Keyword.new(fn {k, v} -> {String.to_atom(k), v} end)
-        |> Keyword.put(:"deploy/docker/Dockerfile", "COPY catalogues /opt/lcars/seeds\n")
+        |> Keyword.put(:"deploy/system.manifest", "dir /opt/lcars/ailleurs 0755 root root\n")
         |> Enum.map(fn {k, v} -> {Atom.to_string(k), v} end)
 
       root = depot(fichiers: fichiers)
@@ -322,7 +321,7 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
       assert %{status: :fail, evidence: ev} =
                SingleSource.check_catalogue_roots_single_source(root)
 
-      assert Enum.any?(ev, &(&1 =~ "Dockerfile"))
+      assert Enum.any?(ev, &(&1 =~ "system.manifest"))
     end
 
     test "une autorite illisible fait ECHOUER, elle ne fait pas « rien a comparer »" do
