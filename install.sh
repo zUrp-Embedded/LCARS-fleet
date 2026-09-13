@@ -19,8 +19,8 @@
 #                       (FORGE_BASE_URL).
 #       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Pipé, il s'arrête avant de télécharger.
 #       --dry-run       tout jusqu'au bilan, puis la commande qui serait exécutée.
-#       --from-release  depuis un clone : prendre le kit de cette version, vérifié, au lieu de
-#                       l'arbre courant. C'est ce que fait le script quand il est pipé (curl | bash).
+#       --from-release  depuis un clone : installer la dernière version publiée du dépôt au lieu de
+#                       l'arbre courant (son installeur, vérifié par sa somme, est rejoué).
 #       --repo URL      le dépôt dont les releases sont tirées (défaut : celui de cette version).
 #       --substrate S   forcer le substrat mesuré : wsl, linux ou docker.
 #       --forge-project N   la base des projets compose (défaut lcars) : N-forge, N-runner, N-fleet.
@@ -36,9 +36,11 @@
 
 set -euo pipefail
 
-LCARS_DOOR_VERSION="2026-09-05"   # @@DOOR_VERSION@@ le tag de la release — door-gen.sh l'ecrit ici
+LCARS_DOOR_VERSION=""              # @@DOOR_VERSION@@ le tag de la release — door-gen.sh l'ecrit ici
 
 main() {
+declare -a ARGS=("$@")
+VERSION_DITE="${LCARS_DOOR_VERSION:-non publiée}"
 
 if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
    || { [[ -z "${PROV_COLOR:-}" ]] && [[ ! -t 1 ]]; }; then
@@ -101,12 +103,12 @@ while [[ $# -gt 0 ]]; do
       echo "  $1 est retiré : un développeur clone lui-même ; une évaluation prend le kit (--from-release)." >&2; exit 1 ;;
     --tar|--uninstall|--disposable|--consented|--fleet-human)
       echo "  $1 est retiré : il n'y a plus de paquet système, ni de désinstalleur, ni d'humain semé hors --bench." >&2; exit 1 ;;
-    --version) echo "$LCARS_DOOR_VERSION"; exit 0 ;;
+    --version) echo "$VERSION_DITE"; exit 0 ;;
     --help|-h)
       if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
         sed -n '/^#     install.sh — /,/^#     Relancer/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
       else
-        echo "install.sh $LCARS_DOOR_VERSION — l'installeur de LCARS-FLEET."
+        echo "install.sh $VERSION_DITE — l'installeur de LCARS-FLEET."
         echo "  (sans option) conteneur Docker · --workstation dans ce système · --bench la forge montée"
         echo "  --check · --dry-run · --from-release · --repo URL · --substrate S"
         echo "  --forge-project N · --port-forge N · --port-deck N · --port-ssh N · --env F · --human U · --only M"
@@ -180,13 +182,35 @@ delegue_dit() { # la commande du délégué, en mots, pour un --dry-run ou un --
   else echo "deploy/container up"
   fi
 }
+derniere_release() { # le script du dépôt n'a pas de table : il rejoue l'installeur de la dernière release, vérifié par sa somme
+  local url="${REPO_URL%.git}/releases/latest/download" dest="$HOME/.lcars/kits/installeur-derniere-release" a
+  local -a suite=()
+  for a in "${ARGS[@]}"; do [[ "$a" == --from-release ]] || suite+=("$a"); done
+  if [[ "$DRY_RUN" -eq 1 || "$DOCTOR_MODE" -eq 1 ]]; then
+    echo "  Ce script n'est pas celui d'une release : rien n'est téléchargé. La commande serait :"
+    echo "    curl -fsSL $url/install.sh | bash -s --${suite[*]:+ ${suite[*]}}"
+    exit 0
+  fi
+  command -v curl >/dev/null 2>&1 || { echo "  ${R}curl est absent — apt install curl${N}"; exit 1; }
+  mkdir -p "$dest"
+  if ! fetch "$url/install.sh" "$dest/install.sh" || ! fetch "$url/install.sh.sha256" "$dest/install.sh.sha256"; then
+    rm -f "$dest/install.sh" "$dest/install.sh.sha256"
+    echo "  ${R}$url : l'installeur de la dernière release ou sa somme sont introuvables — rien n'est posé.${N}"
+    echo "  Une forge qui ne sert pas releases/latest se prend par le script d'une version : <dépôt>/releases/download/<version>/install.sh"
+    exit 1
+  fi
+  ( cd "$dest" && sha256sum -c --quiet --strict install.sh.sha256 >/dev/null 2>&1 ) \
+    || { rm -f "$dest/install.sh"; echo "  ${R}l'installeur de la dernière release ne correspond pas à sa somme publiée — rien n'est posé.${N}"; exit 1; }
+  echo "  source : dernière release de ${REPO_URL%.git} — installeur vérifié par sa somme"
+  exec bash "$dest/install.sh" ${suite[@]+"${suite[@]}"}
+}
 source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vérifié, détaré → c'est l'arbre
   local arch a s manque=0 rc
+  [[ -n "$DOOR_BASE" ]] || derniere_release
   arch="$(uname -m)"
   mapfile -t ASSETS < <(assets_for "$arch")
   [[ -n "${ASSETS[0]:-}" ]] || {
     echo "  ${R}aucun kit $LCARS_DOOR_VERSION pour $arch dans la table de ce script.${N}"
-    echo "  Le gabarit du dépôt ne télécharge rien : lancer depuis un clone, ou prendre le script d'une release."
     exit 1
   }
   KITS_DIR="$HOME/.lcars/kits/$LCARS_DOOR_VERSION"
@@ -231,7 +255,7 @@ ${AMBER}     ____________________________________________________
    /             ${W}LCARS FLEET - FEDERATION DATABASE${N}        ${AMBER}\\
   |   ________   __________________________________________\\
   |  |  2026  |  | ${N}LCARS-FLEET — installeur${AMBER}
-  |  |________|  | ${N}version $LCARS_DOOR_VERSION · runtime Elixir/OTP${AMBER}
+  |  |________|  | ${N}version $VERSION_DITE · runtime Elixir/OTP${AMBER}
   |   ________   | ${N}licence AGPL-3${AMBER}
   |  |  v2.0  |  |__________________________________________
   |  |________|  \\__________________________________________\\

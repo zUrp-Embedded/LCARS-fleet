@@ -28,6 +28,7 @@ printf '%s\n' "$*" >> "${FAKE_ARGV:-/dev/null}"   # l'argv ENTIER : les murs de 
 [[ "${FAKE_DOWN:-0}" == 1 ]] && { printf 000; exit 7; }   # le vrai curl rend 000 avec -w quand rien ne répond
 case "$method $url" in
   "GET "*/releases/tags/*) printf '{"id":7,"draft":%s}' "${FAKE_TAG_DRAFT:-false}" > "$out"; printf '%s' "${FAKE_TAG:-404}" ;;
+  "GET "*/releases?per_page=100\&page=1) if [[ -n "${FAKE_PAGE1_FULL:-}" ]]; then { printf '['; for i in $(seq 1 100); do printf '%s{"tag_name":"v%s"}' "$([[ $i -gt 1 ]] && echo ,)" "$i"; done; printf ']'; } > "$out"; else printf '[%s]' "${FAKE_DRAFT_TAG:+{\"tag_name\":\"$FAKE_DRAFT_TAG\",\"draft\":true\}}" > "$out"; fi; printf '%s' "${FAKE_LIST:-200}" ;;
   "GET "*/releases?per_page=*) printf '[%s]' "${FAKE_DRAFT_TAG:+{\"tag_name\":\"$FAKE_DRAFT_TAG\",\"draft\":true\}}" > "$out"; printf '%s' "${FAKE_LIST:-200}" ;;
   "GET "*/git/commits/*) : > "$out"; printf '%s' "${FAKE_COMMIT:-200}" ;;
   "POST "*/releases) printf '{"id":42}' > "$out"; printf 201 ;;
@@ -224,6 +225,22 @@ _pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zurp-embed
   [[ "$output" == *"BROUILLON"* ]]
   [[ "$output" == *"0.1-abc"* ]]
   ! grep -q '^POST' "$TRACE" || { echo "un POST est parti malgre le brouillon existant"; return 1; }
+}
+
+@test "GITHUB : un brouillon au-delà des cent premières releases est vu, la liste est lue page après page" {
+  FAKE_PAGE1_FULL=1 FAKE_DRAFT_TAG=0.1-abc _pub_gh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BROUILLON"* ]]
+  grep -q 'releases?per_page=100&page=2' "$TRACE"
+  ! grep -q '^POST' "$TRACE"
+}
+
+@test "fp_precheck seul : mesure le tag et le commit, n'envoie rien" {
+  run bash -c ". '$LIB'; fp_precheck http://forge.test fleet lcars 0.1-abc deadbeefcafe"
+  [ "$status" -eq 0 ]
+  grep -q '^GET http://forge.test/api/v1/repos/fleet/lcars/releases/tags/0.1-abc$' "$TRACE"
+  grep -q '^GET http://forge.test/api/v1/repos/fleet/lcars/git/commits/deadbeefcafe$' "$TRACE"
+  ! grep -qE '^(POST|PATCH)' "$TRACE"
 }
 
 @test "GITHUB : une liste de releases injoignable est un REFUS — une garde qui ne mesure pas ne passe pas" {

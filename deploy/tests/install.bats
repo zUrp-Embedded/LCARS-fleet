@@ -105,19 +105,18 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 # bats test_tags=structure
 @test "le gabarit du dépôt porte ses marqueurs de version, une fois chacun" {
   local m
-  for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_SUMS_BEGIN DOOR_SUMS_END; do
+  for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_IMAGE DOOR_SUMS_BEGIN DOOR_SUMS_END; do
     [ "$(grep -c "@@$m@@" "$SRC")" -eq 1 ]
   done
 }
 
 
-@test "--version répond, pipée aussi, sans lire de fichier" {
+@test "--version du script du dépôt dit qu'il n'est pas publié, pipé aussi" {
   run bash "$SRC" --version
   [ "$status" -eq 0 ]
-  [ "$output" = "$(sed -n 's/^LCARS_DOOR_VERSION="\([^"]*\)".*/\1/p' "$SRC")" ]
+  [ "$output" = "non publiée" ]
   run bash -c "cat '$SRC' | bash -s -- --version"
-  [ "$status" -eq 0 ]
-  [ -n "$output" ]
+  [ "$output" = "non publiée" ]
 }
 
 @test "--help marche sans docker et pipée, et nomme tous les drapeaux acceptés" {
@@ -696,7 +695,9 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
 @test "minisign : une signature invalide refuse et efface ; une clé sans .minisig refuse ; minisign absent se dit" {
   _release
   local pub="RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
+  : > "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"
   PORTE="$(_porte "$DIST" "$pub")"
+  rm -f "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"   # la signature disparue du serveur après la génération
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
   pipee --workstation --bench
   [ "$status" -ne 0 ]
@@ -742,11 +743,39 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_install"* ]]
 }
 
-@test "le gabarit du dépôt, pipé, ne télécharge rien : sa table est vide, et il le dit" {
+@test "le script du dépôt, pipé avec --dry-run, dit l'installeur de la dernière release qu'il rejouerait, sans rien télécharger" {
   _machine
-  run bash -c "cat '$SRC' | bash -s -- --workstation"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"aucun kit"*"Le gabarit du dépôt ne télécharge rien"* ]]
+  run bash -c "cat '$SRC' | bash -s -- --workstation --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rien n'est téléchargé"*"curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --workstation --dry-run"* ]]
+  [ ! -e "$HOME/.lcars" ]
+}
+
+@test "--from-release depuis un clone : l'installeur de la dernière release est vérifié par sa somme, rejoué, et pose le kit de sa version" {
+  _machine; DIST="$(_dist)"
+  local forge="$BATS_TEST_TMPDIR/forge"
+  mkdir -p "$forge/o/r/releases/latest" "$forge/o/r/releases/download"
+  _serveur "$forge"
+  ln -s "$DIST" "$forge/o/r/releases/download/$TAG"
+  LCARS_DOOR_TEMPLATE="$SRC" bash "$REPO/deploy/lib/door-gen.sh" "$TAG" "$SERVEUR_URL/o/r/releases/download/$TAG" "$DIST" >/dev/null 2>&1
+  ln -s "$DIST" "$forge/o/r/releases/latest/download"
+  run bash "$SRC" --from-release --workstation --bench --repo "$SERVEUR_URL/o/r" < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"dernière release de $SERVEUR_URL/o/r — installeur vérifié par sa somme"* ]]
+  [[ "$output" == *"Source     release $TAG"* ]]
+  [ -x "$HOME/.lcars/kits/$TAG/lcars_install/deploy/provision" ]
+}
+
+@test "--from-release depuis un clone : un installeur qui ne correspond pas à sa somme n'est pas rejoué" {
+  _machine
+  local forge="$BATS_TEST_TMPDIR/forge"; mkdir -p "$forge/o/r/releases/latest/download"
+  printf '#!/usr/bin/env bash\necho EXECUTE\n' > "$forge/o/r/releases/latest/download/install.sh"
+  printf '%064d  install.sh\n' 0 > "$forge/o/r/releases/latest/download/install.sh.sha256"
+  _serveur "$forge"
+  run bash "$SRC" --from-release --workstation --repo "$SERVEUR_URL/o/r" < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne correspond pas à sa somme publiée"* ]]
+  [[ "$output" != *"EXECUTE"* ]]
 }
 
 @test "--from-release depuis un clone prend le kit de la version, pas l'arbre courant" {

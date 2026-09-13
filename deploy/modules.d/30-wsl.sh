@@ -145,9 +145,11 @@ apply() {
   local home mask
   home="$(human_home)"
   if [[ -n "$home" && -d "$home" ]]; then
-    ensure_dir "$home/.config" 0755 "$PROV_HUMAN:" || verdict_apply
-    ensure_dir "$home/.config/systemd" 0755 "$PROV_HUMAN:" || verdict_apply
-    ensure_dir "$home/.config/systemd/user" 0755 "$PROV_HUMAN:" || verdict_apply
+    local d
+    # un dossier de l'humain qui existe garde le mode qu'il lui a donné ; seul ce qui manque est posé
+    for d in "$home/.config" "$home/.config/systemd" "$home/.config/systemd/user"; do
+      [[ -d "$d" ]] || ensure_dir "$d" 0700 "$PROV_HUMAN:" || verdict_apply
+    done
     mask="$(gpg_socket_mask_path)"
     ensure_symlink "$mask" /dev/null || verdict_apply
   else
@@ -161,11 +163,8 @@ apply() {
   if [[ -f "$dcfg" ]] && grep -q '"credsStore"' "$dcfg" 2>/dev/null; then
     local dtmp
     dtmp="$(mktemp "${TMPDIR:-/tmp}/prov-dockercfg.XXXXXX")" || { p_fail "tmp config docker impossible"; verdict_apply; }
-    sed -e 's/"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"[[:space:]]*,//g' \
-        -e 's/,[[:space:]]*"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"//g' \
-        -e 's/"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"//g' \
-        "$dcfg" > "$dtmp" \
-      || { rm -f "$dtmp"; p_fail "config docker: réécriture ratée ($dcfg)"; verdict_apply; }
+    jq 'del(.credsStore)' "$dcfg" > "$dtmp" 2>/dev/null \
+      || { rm -f "$dtmp"; p_fail "config docker : $dcfg n'est pas un JSON lisible par jq — rien n'est réécrit"; verdict_apply; }
     [[ -s "$dtmp" ]] \
       || { rm -f "$dtmp"; p_fail "config docker: résultat VIDE — rien n'est écrit ($dcfg)"; verdict_apply; }
     write_atomic "$dcfg" 0600 "$PROV_HUMAN:" < "$dtmp" \

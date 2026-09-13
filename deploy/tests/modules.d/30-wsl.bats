@@ -140,6 +140,25 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
   [[ "$output" == *"docker.io (ou docker-ce) est le daemon, c'est voulu"* ]]
 }
 
+@test "credsStore en dernière clé, dans la forme sur plusieurs lignes qu'écrit docker : le fichier reste un JSON valide" {
+  mkdir -p "$HOME_DIR/.docker"
+  printf '{\n\t"auths": {},\n\t"credsStore": "desktop.exe"\n}\n' > "$HOME_DIR/.docker/config.json"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run jq -c . "$HOME_DIR/.docker/config.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"auths":{}}' ]
+}
+
+@test "un ~/.config que l'humain a restreint garde son mode ; les dossiers absents naissent en 0700" {
+  mkdir -p "$HOME_DIR/.config"; chmod 0770 "$HOME_DIR/.config"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(stat -c '%a' "$HOME_DIR/.config")" = 770 ]
+  [ "$(stat -c '%a' "$HOME_DIR/.config/systemd")" = 700 ]
+  [ "$(stat -c '%a' "$HOME_DIR/.config/systemd/user")" = 700 ]
+}
+
 @test "credsStore : retiré quand il désigne le helper Windows, les autres clés survivent, rien n'est inventé" {
   mkdir -p "$HOME_DIR/.docker"
   printf '{"auths":{"reg.example":{"auth":"eyJ="}},"credsStore":"desktop.exe"}' > "$HOME_DIR/.docker/config.json"

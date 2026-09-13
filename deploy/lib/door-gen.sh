@@ -15,6 +15,7 @@ TEMPLATE="${LCARS_DOOR_TEMPLATE:-$HERE/../../install.sh}"
 say() { echo "door-gen: $*" >&2; }
 die() { echo "door-gen: ERREUR — $*" >&2; exit 1; }
 
+[[ "$EUID" -ne 0 ]] || die "door-gen ne se lance pas en root : son auto-test lance l'installeur généré, qui refuse root"
 [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "tag « $TAG » : lettres, chiffres, . _ - seulement"
 [[ "$BASE" == https://* || "$BASE" == http://* ]] || die "base « $BASE » : une URL http(s) — install.sh n'accepte http que sous LCARS_DOOR_INSECURE_HTTP=1"
 [[ -f "$TEMPLATE" ]] || die "gabarit introuvable : $TEMPLATE"
@@ -29,8 +30,13 @@ PUBKEY="${LCARS_MINISIGN_PUBKEY:-}"
 if [[ -z "$PUBKEY" && -f "$DIST/minisign.pub" ]]; then
   PUBKEY="$(grep -v '^untrusted comment' "$DIST/minisign.pub" | head -1 || true)"
 fi
+# une clé inscrite fait exiger une signature à l'installeur : sans .minisig dans le tiroir, il refuserait son propre kit
 if [[ -n "$PUBKEY" ]]; then
   [[ "$PUBKEY" =~ ^[A-Za-z0-9+/=]+$ ]] || die "clé publique illisible (base64 attendu) : « $PUBKEY »"
+  for _k in "$DIST"/*.tar.gz; do
+    [[ -e "$_k" ]] || continue
+    [[ -f "$_k.minisig" ]] || die "une clé publique est fournie, mais $(basename "$_k").minisig manque : l'installeur refuserait ce kit — signer, ou retirer la clé"
+  done
 else
   say "aucune clé publique (LCARS_MINISIGN_PUBKEY, ou $DIST/minisign.pub) — l'installeur dira « provenance NON vérifiée (sha256 seul) »"
 fi
@@ -46,16 +52,16 @@ TABLE="$(cd "$DIST" && sha256sum "${ARTEFACTS[@]}")"
 OUT="$DIST/install.sh"
 IMAGE="${LCARS_DOOR_IMAGE:-}"
 [[ -z "$IMAGE" || "$IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/:-]*$ ]] || die "image « $IMAGE » : un nom registre/image:tag"
-awk -v tag="$TAG" -v base="$BASE" -v pub="$PUBKEY" -v image="$IMAGE" -v table="$TABLE" '
+DG_TAG="$TAG" DG_BASE="$BASE" DG_PUB="$PUBKEY" DG_IMAGE="$IMAGE" DG_TABLE="$TABLE" awk '
   function rebuild(prefix, value,   i) {   # <prefix>="<value>" puis le marqueur et sa glose, tels quels
     i = index($0, "# @@")
     printf "%-34s %s\n", prefix "=\"" value "\"", substr($0, i)
   }
-  /# @@DOOR_VERSION@@/    { rebuild("LCARS_DOOR_VERSION", tag); next }
-  /# @@DOOR_BASE@@/       { rebuild("DOOR_BASE", base); next }
-  /# @@DOOR_PUBKEY@@/     { rebuild("MINISIGN_PUBKEY", pub); next }
-  /# @@DOOR_IMAGE@@/      { rebuild("DOOR_IMAGE", image); next }
-  /# @@DOOR_SUMS_BEGIN@@/ { print; print table; print "SUMS"; skip = 1; next }
+  /# @@DOOR_VERSION@@/    { rebuild("LCARS_DOOR_VERSION", ENVIRON["DG_TAG"]); next }
+  /# @@DOOR_BASE@@/       { rebuild("DOOR_BASE", ENVIRON["DG_BASE"]); next }
+  /# @@DOOR_PUBKEY@@/     { rebuild("MINISIGN_PUBKEY", ENVIRON["DG_PUB"]); next }
+  /# @@DOOR_IMAGE@@/      { rebuild("DOOR_IMAGE", ENVIRON["DG_IMAGE"]); next }
+  /# @@DOOR_SUMS_BEGIN@@/ { print; print ENVIRON["DG_TABLE"]; print "SUMS"; skip = 1; next }
   /# @@DOOR_SUMS_END@@/   { skip = 0 }
   skip { next }
   { print }

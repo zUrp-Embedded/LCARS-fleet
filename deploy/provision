@@ -179,6 +179,8 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   if [[ "${#ONLY[@]}" -gt 0 ]]; then
     keep=0
     for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
+    # le préflight est la barrière de tout apply : --only choisit ce qui mute, pas ce qui garde
+    [[ "$CMD" == apply && "$name" == 00-* ]] && keep=1
     [[ "$keep" -eq 1 ]] || continue
   fi
   substrate_in "$check_on" || continue

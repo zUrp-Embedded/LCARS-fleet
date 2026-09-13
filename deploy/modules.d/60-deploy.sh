@@ -77,6 +77,28 @@ release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}
 # le canal s'écrit après la pose, jamais avant : écrit d'abord, une pose ratée laisserait une machine « kit » qui n'a rien
 poser_canal() { prov_channel_write "$(prov_channel_here)"; }
 
+source_build() { # source_build → la révision que porte la source, vide si runtime/ est modifié ou si rien ne la dit
+  local root; root="$(repo_root)"
+  if git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$root" diff --quiet HEAD -- runtime 2>/dev/null || return 0
+    git -C "$root" rev-parse --short HEAD 2>/dev/null || true
+  elif [[ -r "$root/$PROV_SOURCE_STAMP" ]]; then
+    head -n1 "$root/$PROV_SOURCE_STAMP" | tr -d '[:space:]'
+  fi
+}
+meme_build() { [[ -n "$1" && -n "$2" && ( "$1" == "$2"* || "$2" == "$1"* ) ]]; }
+
+prefix_verrouille() {
+  [[ "$(stat -c '%U:%G %a' "$PROV_PREFIX" 2>/dev/null)" == "root:$PROV_FLEET_GROUP 750" ]] || return 1
+  [[ -z "$(find "$PROV_PREFIX" \( ! -user root -o ! -group "$PROV_FLEET_GROUP" -o -perm /o=rwx -o -perm /g=w \) -print -quit 2>/dev/null)" ]]
+}
+verrouiller_prefix() {
+  prefix_verrouille && return 0
+  chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown de $PROV_PREFIX"; return 1; }
+  chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod de $PROV_PREFIX"; return 1; }
+  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "prefix verrouillé : $PROV_PREFIX (root:$PROV_FLEET_GROUP 750)"
+}
+
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
@@ -147,13 +169,12 @@ apply() {
   fi
   id "$PROV_HUMAN" >/dev/null 2>&1 || { p_fail "humain-bâtisseur inconnu: $PROV_HUMAN"; verdict_apply; }
 
-  # --short nu des deux côtés : le build embarque le short par défaut de git
   local src_sha deployed_sha
-  src_sha="$(git -C "$(repo_root)" rev-parse --short HEAD 2>/dev/null || true)"
+  src_sha="$(source_build)"
   deployed_sha="$(build_sha)"
-  if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
-      && git -C "$(repo_root)" diff --quiet HEAD -- runtime 2>/dev/null && release_present; then
-    p_ok "build déployé $deployed_sha == HEAD source (runtime/ propre) — rien à bâtir"
+  if meme_build "$src_sha" "$deployed_sha" && release_present; then
+    p_ok "build déployé $deployed_sha, celui de la source — rien à bâtir"
+    verrouiller_prefix || verdict_apply
     local name _mode is_link
     while read -r name _mode is_link; do
       [[ "$is_link" -eq 1 ]] || continue
@@ -185,8 +206,7 @@ apply() {
     || { p_warn "$PROV_PREFIX reste déverrouillé pour inspection"; verdict_apply; }
   [[ "$PROV_LAST_RC" -ne 3 ]] || p_warn "deploy-release.sh signale un lien du PATH manquant (rc 3) — reposé ci-dessous"
   release_present || { p_fail "deploy-release.sh vert mais release absente ($PREFIX_REL) — incohérence à inspecter"; verdict_apply; }
-  chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown"; verdict_apply; }
-  chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod"; verdict_apply; }
+  verrouiller_prefix || verdict_apply
   local name _mode is_link
   while read -r name _mode is_link; do
     [[ "$is_link" -eq 1 ]] || continue

@@ -19,6 +19,7 @@ setup() {
   [ -f "$TEMPLATE" ]
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
   printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
+  printf 'sig\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig"
   printf 'a1\n' > "$DIST/annexe-a.bin"
   printf 'b2\n' > "$DIST/annexe-b.bin"
   printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
@@ -106,22 +107,15 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
 }
 
 @test "le generateur ne SUBSTITUE pas, il rebatit : une base qui porte & ou \\ est recopiee telle quelle" {
-  run env LCARS_MINISIGN_PUBKEY="" bash "$GEN" 0.9.0 'https://f/x?a=1&b=2' "$DIST"
+  run env LCARS_MINISIGN_PUBKEY="" bash "$GEN" 0.9.0 'https://f/x?a=1&b=2\tc' "$DIST"
   [ "$status" -eq 0 ]
-  grep -qF 'DOOR_BASE="https://f/x?a=1&b=2"' "$DIST/install.sh"
+  grep -qF 'DOOR_BASE="https://f/x?a=1&b=2\tc"' "$DIST/install.sh"
 }
 
-@test "pack.sh : la porte de la version est generee APRES les artefacts, dans un tiroir PAR VERSION (dist/<tag>) par liens durs" {
-  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
-  local body; body="$(grep -vE '^\s*#' "$pk")"
-  grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
-  grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
-  grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
-  local l_tar l_door; l_tar="$(grep -nE '^tar -czf "\$OUT"' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
-  [ -n "$l_tar" ]
-  [ -n "$l_door" ]
-  [ "$l_tar" -lt "$l_door" ]
-  grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
-  grep -qE '^for _f in deploy/docker/docker-compose\.yml deploy/docker/lcars-hardened-seccomp\.json' <<<"$body"
-  grep -qE 'artefact de la version introuvable' <<<"$body"
+@test "une clé publique sans la signature du kit dans le tiroir est un refus : l'installeur refuserait son propre kit" {
+  rm -f "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig manque"* ]]
+  [ ! -f "$DIST/install.sh" ]
 }

@@ -226,6 +226,27 @@ EOF
   grep -q "20-suivant:check" "$RUN_LOG"
 }
 
+@test "apply --only garde le préflight comme barrière : un terrain refusé ne reçoit pas le module choisi" {
+  stub_module 00-preflight any any human STUB_RC_PRE
+  stub_module 20-suivant any any human
+  export STUB_RC_PRE=1
+  stub_impersonation
+  run "$SANDBOX/provision" apply --substrate wsl --human "$(id -un)" --only 20
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le préflight refuse ce terrain"* ]]
+  refute grep -q "20-suivant" "$RUN_LOG"
+}
+
+@test "apply --only sur un terrain accepté joue le préflight puis le seul module choisi" {
+  stub_module 00-preflight any any human
+  stub_module 20-suivant any any human
+  stub_module 30-autre any any human
+  stub_impersonation
+  run "$SANDBOX/provision" apply --substrate wsl --human "$(id -un)" --only 20
+  [ "$status" -eq 0 ]
+  [ "$(cat "$RUN_LOG")" = "$(printf '00-preflight:apply\n20-suivant:apply')" ]
+}
+
 @test "aucun module sélectionné est un refus qui nomme le substrat et le filtre" {
   stub_module 20-amont any any human
   run "$SANDBOX/provision" doctor --substrate docker --only 99-absent

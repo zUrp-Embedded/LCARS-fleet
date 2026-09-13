@@ -125,10 +125,33 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   release_posee; verrouille
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"OK    60-deploy: build déployé $HEAD_SHA == HEAD source (runtime/ propre) — rien à bâtir"* ]]
+  [[ "$output" == *"OK    60-deploy: build déployé $HEAD_SHA, celui de la source — rien à bâtir"* ]]
   [ ! -e "$MARQUEUR" ]
   [ "$(readlink "$PROV_LINK_DIR/fleet")" = "$PROV_PREFIX/bin/fleet" ]
   [ "$(cat "$LCARS_CHANNEL_FILE")" = source ]
+}
+
+@test "apply : rien à bâtir sur un prefix resté ouvert après un apply avorté — il est reverrouillé, et le check qui suit est conforme" {
+  release_posee; chmod -R 0777 "$PROV_PREFIX"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -e "$MARQUEUR" ]
+  [[ "$output" == *"POSÉ  60-deploy: prefix verrouillé"* ]]
+  ln -sf "$PROV_PREFIX/bin/fleet" "$PROV_LINK_DIR/fleet"
+  mod check
+  [[ "$output" != *"prefix non verrouillé"* ]]
+}
+
+@test "apply : kit détaré sans git, déjà posé à sa révision — rien à bâtir, deploy-release.sh n'est pas rejoué" {
+  rm -rf "$RACINE/.git"
+  printf '%s\n' "$HEAD_SHA" > "$RACINE/.source-revision"
+  release_posee; verrouille
+  rm -f "$BIN/mix"
+  PATH="$BIN:/usr/bin:/bin" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"rien à bâtir"* ]]
+  [ ! -e "$MARQUEUR" ]
+  [[ "$output" != *"runtime déployé"* ]]
 }
 
 @test "apply : runtime modifié — deploy-release.sh est joué sous l'humain sans le gate, le prefix est reverrouillé root:fleet 750, le canal s'écrit après" {

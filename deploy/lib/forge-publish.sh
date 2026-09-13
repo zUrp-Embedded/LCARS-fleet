@@ -66,18 +66,20 @@ fp_dialect() {
   esac
 }
 
-fp_publish_dist() {
-  local forge="${1%/}" owner="$2" repo="$3" tag="$4" dist="$5" target="$6"
-  local body code id f n
-  local dialect; dialect="$(fp_dialect "$forge")"
-  local api web
-  if [[ "$dialect" == github ]]; then
-    api="https://api.github.com/repos/$owner/$repo"; web="https://github.com"
+fp_api() { # fp_api <forge> <owner> <repo> → « <api> <web> » selon le dialecte
+  local forge="${1%/}" owner="$2" repo="$3"
+  if [[ "$(fp_dialect "$forge")" == github ]]; then
+    printf '%s %s\n' "https://api.github.com/repos/$owner/$repo" "https://github.com"
   else
-    api="$forge/api/v1/repos/$owner/$repo"; web="$forge"
+    printf '%s %s\n' "$forge/api/v1/repos/$owner/$repo" "$forge"
   fi
+}
+
+fp_precheck() { # fp_precheck <forge> <owner> <repo> <tag> <sha> — la release du tag n'existe pas, brouillon compris, et le commit est sur la forge
+  local forge="${1%/}" owner="$2" repo="$3" tag="$4" target="$5"
+  local body code api web page n
+  read -r api web < <(fp_api "$forge" "$owner" "$repo")
   [[ -n "${FP_TOKEN:-}" ]] || { echo "fp: REFUS — FP_TOKEN absent (le jeton, dans l'environnement — jamais en argv)" >&2; return 1; }
-  [[ -d "$dist" ]] || { echo "fp: REFUS — le tiroir $dist n'existe pas" >&2; return 1; }
   command -v jq >/dev/null || { echo "fp: REFUS — jq absent (la release se décrit en JSON)" >&2; return 1; }
   body="$(mktemp)"
   # shellcheck disable=SC2064  # $body est résolu maintenant, c'est voulu
@@ -86,13 +88,19 @@ fp_publish_dist() {
   code="$(fp_curl "$body" "$api/releases/tags/$tag")"
   case "$code" in
     404)
-      if [[ "$dialect" == github ]]; then
-        code="$(fp_curl "$body" "$api/releases?per_page=100")"
-        if [[ "$code" == 200 ]] && jq -e --arg t "$tag" 'any(.[]; .tag_name == $t)' "$body" >/dev/null 2>&1; then
-          echo "fp: REFUS — un BROUILLON du tag « $tag » existe déjà sur $web/$owner/$repo (invisible à GET /releases/tags/, qui ne voit que les publiées) — à supprimer sur la forge avant de rejouer, ce script ne le fait pas." >&2
-          return 1
-        fi
-        [[ "$code" == 200 ]] || { echo "fp: REFUS (${code:-vide}) — impossible de lister les releases de $owner/$repo pour chercher un brouillon : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1; }
+      if [[ "$(fp_dialect "$forge")" == github ]]; then
+        page=1
+        while :; do
+          code="$(fp_curl "$body" "$api/releases?per_page=100&page=$page")"
+          [[ "$code" == 200 ]] || { echo "fp: REFUS (${code:-vide}) — impossible de lister les releases de $owner/$repo pour chercher un brouillon : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1; }
+          if jq -e --arg t "$tag" 'any(.[]; .tag_name == $t)' "$body" >/dev/null 2>&1; then
+            echo "fp: REFUS — un BROUILLON du tag « $tag » existe déjà sur $web/$owner/$repo (invisible à GET /releases/tags/, qui ne voit que les publiées) — à supprimer sur la forge avant de rejouer, ce script ne le fait pas." >&2
+            return 1
+          fi
+          n="$(jq 'length' "$body" 2>/dev/null || echo 0)"
+          [[ "$n" -eq 100 ]] || break
+          page=$((page + 1))
+        done
       fi
       ;;
     200) echo "fp: REFUS — la release « $tag » existe déjà sur $forge/$owner/$repo ($(jq -r 'if .draft then "brouillon" else "publiée" end' "$body" 2>/dev/null)). Un tag publié ne se réécrit jamais — pour la refaire, la supprimer sur la forge, ce script ne le fait pas." >&2; return 1 ;;
@@ -106,6 +114,18 @@ fp_publish_dist() {
     404) echo "fp: REFUS — le commit $target n'est pas sur $forge/$owner/$repo : on publie un commit poussé, pas un arbre local (git push, puis rejouer)" >&2; return 1 ;;
     *) echo "fp: REFUS (${code:-vide}) — la forge ne dit pas si le commit $target est là ($(fp_err "$body"))" >&2; return 1 ;;
   esac
+}
+
+fp_publish_dist() {
+  local forge="${1%/}" owner="$2" repo="$3" tag="$4" dist="$5" target="$6"
+  local body code id f n api web
+  local dialect; dialect="$(fp_dialect "$forge")"
+  read -r api web < <(fp_api "$forge" "$owner" "$repo")
+  [[ -d "$dist" ]] || { echo "fp: REFUS — le tiroir $dist n'existe pas" >&2; return 1; }
+  fp_precheck "$forge" "$owner" "$repo" "$tag" "$target" || return 1
+  body="$(mktemp)"
+  # shellcheck disable=SC2064  # $body est résolu maintenant, c'est voulu
+  trap "rm -f '$body'" RETURN
 
   local json; json="$(jq -cn --arg t "$tag" --arg n "lcars $tag" --arg b "$(fp_release_body "$dist" "$target" "$forge/$owner/$repo/releases/download/$tag" "${FP_IMAGE:-}")" --arg c "$target" \
                       '{tag_name:$t, name:$n, body:$b, draft:true, prerelease:false, target_commitish:$c}')"

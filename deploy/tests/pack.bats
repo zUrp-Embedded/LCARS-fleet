@@ -60,11 +60,56 @@ EOF
   printf '#!/usr/bin/env bash\necho "CURL $*" >> "$CALLS"; cat >/dev/null; printf 000\n' > "$BIN/curl"
   chmod 0755 "$BIN"/*
   export LCARS_PACK_DIR="$BATS_TEST_TMPDIR/packs"
-  export LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/aucun-jeton"
   ARCH="$(uname -m)"
 }
 
 pack() { run bash "$R/deploy/pack.sh" "$@"; }
+
+forge_qui_repond() { # une forge Gitea doublée : le tag n'existe pas (ou FORGE_TAG_CODE), le commit est là, la release se crée
+  cat > "$BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+out=""; m=GET; url=""; prev=""
+for a in "$@"; do case "$prev" in -o) out="$a" ;; -X) m="$a" ;; esac; [[ "$a" == http* ]] && url="$a"; prev="$a"; done
+echo "CURL $m $url" >> "$CALLS"
+case "$m $url" in
+  "GET "*/releases/tags/*) printf '{}' > "$out"; printf '%s' "${FORGE_TAG_CODE:-404}" ;;
+  "GET "*/git/commits/*)   printf '{}' > "$out"; printf 200 ;;
+  "POST "*/releases)       printf '{"id":1}' > "$out"; printf 201 ;;
+  "POST "*/assets*)        : > "$out"; printf 201 ;;
+  "PATCH "*)               : > "$out"; printf 200 ;;
+  *) printf 599 ;;
+esac
+EOF
+  chmod 0755 "$BIN/curl"
+}
+
+docker_double() { # un daemon doublé qui journalise ; STUB_MANIFEST=absent|present|injoignable, STUB_PUSH_RC
+  cat > "$BIN/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "DOCKER $*" >> "$CALLS"
+case "$1" in
+  version) exit 0 ;;
+  image)   git rev-parse --short=8 HEAD ;;
+  login)   cat >/dev/null ;;
+  manifest)
+    case "${STUB_MANIFEST:-absent}" in
+      present) exit 0 ;;
+      absent) echo "no such manifest: $3" >&2; exit 1 ;;
+      *) echo "Get https://registre: dial tcp: i/o timeout" >&2; exit 1 ;;
+    esac ;;
+  push) exit "${STUB_PUSH_RC:-0}" ;;
+esac
+exit 0
+EOF
+  chmod 0755 "$BIN/docker"
+  export DOCKER_HOST=unix:///daemon-double
+}
+
+publier() { # publier [VAR=val…] — une publication complète vers une forge https doublée
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN=jeton-du-temoin \
+    "$@" bash "$R/deploy/pack.sh" --publish
+}
 
 @test "un arbre modifié est refusé avant tout — ni gate, ni release" {
   printf 'x\n' >> "$R/install.sh"
@@ -73,6 +118,105 @@ pack() { run bash "$R/deploy/pack.sh" "$@"; }
   [[ "$output" == *"pack: ERREUR — arbre modifié"* ]]
   [ ! -s "$GATE_LOG" ]
   [ ! -s "$CALLS" ]
+}
+
+@test "un fichier non suivi est refusé avant tout : le gate le lirait, le kit ne l'emporterait pas" {
+  printf 'defmodule Neuf do end\n' > "$R/runtime/neuf.ex"
+  pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"fichiers non suivis"* ]]
+  [ ! -s "$GATE_LOG" ]
+}
+
+@test "un tag mal formé est refusé avant le gate" {
+  LCARS_PACK_TAG='v1/2' pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag « v1/2 »"* ]]
+  [ ! -s "$GATE_LOG" ]
+}
+
+@test "lancé en root : refus avant le gate" {
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles"
+  run unshare -Ur bash "$R/deploy/pack.sh" --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne se lance pas en root"* ]]
+  [ ! -s "$GATE_LOG" ]
+}
+
+@test "origin https avec identifiants et suffixe .git : la base de l'installeur n'emporte ni l'un ni l'autre" {
+  git -C "$R" remote add origin https://utilisateur:jeton-secret@forge.example/Flotte/Depot.git
+  LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^DOOR_BASE="https://forge.example/Flotte/Depot/releases/download/v9.9" ' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
+  refute grep -q 'jeton-secret' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
+  [[ "$output" != *"jeton-secret"* ]]
+}
+
+@test "origin en http : --publish est refusé avant le gate, et un tiroir local le dit sans refuser" {
+  git -C "$R" remote add origin http://10.42.0.118:80/fleet/lcars
+  LCARS_PACK_TAG=v9.9 LCARS_PACK_TOKEN=t pack --no-image --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas en https"*"LCARS_PACK_FORGE=https://"* ]]
+  [ ! -s "$GATE_LOG" ]
+  LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"base de l'installeur en clair"*"LCARS_DOOR_INSECURE_HTTP=1"* ]]
+}
+
+@test "LCARS_DOOR_BASE avec --publish est refusée : l'installeur publié chercherait son kit ailleurs" {
+  LCARS_DOOR_BASE=http://banc.local:28090 LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"LCARS_DOOR_BASE est posée"* ]]
+  [ ! -s "$GATE_LOG" ]
+}
+
+@test "un second pack du même tag vide le tiroir de la version : aucun artefact d'avant n'y reste" {
+  LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ]
+  printf 'vieux\n' > "$LCARS_PACK_DIR/dist/v9.9/lcars-fleet-v9.9-otp26-$ARCH.tar.gz"
+  LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ]
+  [ ! -e "$LCARS_PACK_DIR/dist/v9.9/lcars-fleet-v9.9-otp26-$ARCH.tar.gz" ]
+  refute grep -q 'otp26' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
+}
+
+@test "--publish : une release du tag déjà là est vue avant l'image — rien n'est poussé" {
+  forge_qui_repond; docker_double
+  FORGE_TAG_CODE=200 publier
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"existe déjà"* ]]
+  refute grep -q '^DOCKER push' "$CALLS"
+  refute grep -q '^CURL POST' "$CALLS"
+}
+
+@test "--publish : un registre qui ne dit pas si l'image existe est un refus, et le jeton est retiré du daemon" {
+  forge_qui_repond; docker_double
+  STUB_MANIFEST=injoignable publier
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le registre ne dit pas si"* ]]
+  refute grep -q '^DOCKER push' "$CALLS"
+  grep -q '^DOCKER logout forge.decor' "$CALLS"
+}
+
+@test "--publish : un push refusé laisse la release non créée, et le jeton est retiré du daemon" {
+  forge_qui_repond; docker_double
+  STUB_PUSH_RC=1 publier
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"push de forge.decor/fleet/lcars-fleet:v9.9 refusé"* ]]
+  refute grep -q '^CURL POST' "$CALLS"
+  grep -q '^DOCKER logout forge.decor' "$CALLS"
+}
+
+@test "--publish complet : l'image poussée puis la release créée sur le commit, le jeton jamais imprimé" {
+  forge_qui_repond; docker_double
+  publier
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^DOCKER push forge.decor/fleet/lcars-fleet:v9.9$' "$CALLS"
+  local l_push l_post
+  l_push="$(grep -n '^DOCKER push' "$CALLS" | cut -d: -f1)"; l_post="$(grep -n '^CURL POST .*/releases$' "$CALLS" | cut -d: -f1)"
+  [ "$l_push" -lt "$l_post" ]
+  [[ "$output" != *"jeton-du-temoin"* ]]
+  grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
 }
 
 @test "une option inconnue est refusée en se nommant" {
@@ -145,14 +289,14 @@ pack() { run bash "$R/deploy/pack.sh" "$@"; }
 }
 
 @test "--publish : sans jeton, refus qui nomme les deux sources ; avec un jeton, son état est dit et jamais sa valeur" {
-  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=http://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
+  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
   [ "$status" -eq 1 ]
   [[ "$output" == *"jeton : absent"*"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE"* ]]
   local sentinelle="s3cr3t-de-forge-a-ne-jamais-imprimer"
   : > "$CALLS"
-  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=http://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN="$sentinelle" pack --no-image --publish
+  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN="$sentinelle" pack --no-image --publish
   [ "$status" -eq 1 ]
-  [[ "$output" == *"jeton : trouvé"*"publication → http://forge.decor/fleet/lcars-fleet, release v9.9"* ]]
+  [[ "$output" == *"jeton : trouvé"*"publication refusée avant tout envoi"* ]]
   [[ "$output" != *"$sentinelle"* ]]
   refute grep -q "$sentinelle" "$CALLS"
 }
