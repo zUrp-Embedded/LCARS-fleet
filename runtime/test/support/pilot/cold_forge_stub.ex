@@ -1,11 +1,8 @@
 defmodule Fleet.Pilot.ColdForgeStub do
   @moduledoc """
-  Forge seam used to reproduce the COLD-CODE-TABLE condition of `Spawn.repo_id/3`.
-
-  It has to be a real module compiled to a `.beam` on disk — not one built with `Code.compile_*`
-  at test time — because the test deletes and purges it to make `module_loaded?` false, and only a
-  module the code server can find again is reloadable. That is the whole point: the resolution must
-  survive a module that exists but is not loaded yet.
+  Forge fixture for `Spawn.repo_id/3` with an available but unloaded module.
+  It must compile to a `.beam` on disk: the test purges it, then relies on the code
+  server to reload it. A module created only by `Code.compile_*` cannot serve this test.
   """
 
   @repo_id 4242

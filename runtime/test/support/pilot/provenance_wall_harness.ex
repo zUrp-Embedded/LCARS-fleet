@@ -1,10 +1,8 @@
 defmodule Fleet.Test.ProvenanceWallHarness do
   @moduledoc """
-  The git harness of the PROVENANCE WALL, shared by every witness that needs the seal to actually
-  run its deterministic check (`merge_and_promote_test`, `step_run_completer_test`,
-  `step_dispatcher_test`). One project clone with a base commit, a delivered head and an ALIEN
-  orphan commit; the statement is written where the seal reads it — `refs/lcars/provenance/<sha>`
-  in the clone (BL-6-43). `input = base` is coherent, `input = alien` is not.
+  Git fixtures for the seal's provenance check: a base, its descendant head and an
+  unrelated orphan commit. `input = base` is coherent; `input = alien` is not.
+  `statement/5` writes to `refs/lcars/provenance/<sha>` in the project clone.
   """
 
   use Boundary, deps: [Fleet.Workflow], exports: [WallForge]
@@ -16,7 +14,6 @@ defmodule Fleet.Test.ProvenanceWallHarness do
     def pr_review_state(_repo, _n, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
-    # branch_head exported → the wall RUNS (stubs without it exercise the skip path).
     def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}
 
     def post_comment(_r, n, body, o) do

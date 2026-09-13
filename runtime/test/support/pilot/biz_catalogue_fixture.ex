@@ -1,18 +1,13 @@
 defmodule Fleet.Test.BizCatalogueFixture do
   @moduledoc """
-  A SECOND catalogue, `biz`, installed beside the bundled one and published into the images —
-  the fixture behind every witness that a project reads the card of ITS catalogue and not the
-  default image's. Its card `standard` names a judge that exists nowhere in the bundled catalogue,
-  so a resolution in the wrong root has nothing to find: a role present on both sides would prove
-  nothing.
+  Writes a second catalogue, `biz`, whose judge is absent from the bundled catalogue:
+  resolving its card in the wrong root cannot accidentally find the same role.
 
-  The fixture only WRITES the catalogue. Arming it is the caller's, in three lines, so this module
-  needs no reach into the images (Boundary): declare the install dir
-  (`Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [install_dir])`),
-  publish both images (`Fleet.CapProfile.Image.publish!/0`, `Fleet.Workflow.Loader.publish_image!/0`)
-  and, on exit, unpublish BOTH (`Fleet.CapProfile.Image.unpublish/0`,
-  `Fleet.Workflow.Loader.unpublish_all_images/0` — a persistent image outlives the test). Global
-  state: callers are `async: false`.
+  The caller sets `:catalogue_install_dirs` to `[install_dir]`, then calls
+  `Fleet.CapProfile.Image.publish!/0` and `Fleet.Workflow.Loader.publish_image!/0`.
+  On exit, call `Fleet.CapProfile.Image.unpublish/0` and
+  `Fleet.Workflow.Loader.unpublish_all_images/0`: persistent images outlive the test.
+  Callers use `async: false` because these settings and images are global.
   """
 
   use Boundary, deps: [Fleet.Catalogue], exports: []
@@ -83,9 +78,7 @@ defmodule Fleet.Test.BizCatalogueFixture do
             - ticket.body
     """)
 
-    # A second card, judged by NOBODY: the witnesses declare it as the PROJECT card so that a rail
-    # falling back to the project card (the engraved one unloadable in the wrong root) convenes
-    # `[]` — observably not `[#{@judge}]`.
+    # A project default with no jury makes a mistaken fallback from the engraved card observable.
     File.write!(Path.join(cards, "no-jury.yaml"), """
     kind: WorkflowMap
     metadata:
@@ -103,9 +96,7 @@ defmodule Fleet.Test.BizCatalogueFixture do
             - ticket.body
     """)
 
-    # A third card, `strict`: the same judge AND `ci: required` — the one card whose two readings
-    # (jury, CI policy) both differ from `no-jury`'s, so a witness can prove the two come from ONE
-    # resolution.
+    # Both jury and CI differ from no-jury, exposing inconsistent card resolution.
     File.write!(Path.join(cards, "strict.yaml"), """
     kind: WorkflowMap
     metadata:
