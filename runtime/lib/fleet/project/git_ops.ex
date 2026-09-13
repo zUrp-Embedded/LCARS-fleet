@@ -7,7 +7,9 @@ defmodule Fleet.Project.GitOps do
   alias Fleet.Credentials.ForgeAuth
 
   @doc """
-  Runs bounded git, optionally with forge auth and an explicit author.
+  Runs Git through Shell with :auth (boolean, default false) and optional :author
+  (%{name: ..., email: ...}). Other options are not forwarded; use Git arguments
+  such as -C to select the working directory. Success discards captured output.
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
   def run(args, opts \\ []) do
@@ -18,8 +20,8 @@ defmodule Fleet.Project.GitOps do
   end
 
   @doc """
-  Like `run/2` but RETURNS the captured (trimmed) stdout on exit 0 — for local READ ops
-  (`config --get`, `rev-parse`…) where the output IS the answer. Same `opts`/bound/typed errors as `run/2`.
+  Like run/2, returning trimmed captured output on success. The name does not
+  restrict Git verbs to read-only operations.
   """
   @spec read([String.t()], keyword()) :: {:ok, String.t()} | {:error, term()}
   def read(args, opts \\ []) do
@@ -29,8 +31,6 @@ defmodule Fleet.Project.GitOps do
     end
   end
 
-  # Single source of the bounded git call (auth/identity env + typed error mapping); `run/2` discards the
-  # stdout, `read/2` keeps it. On exit 0 → `{:ok, raw_out}`.
   defp exec(args, opts) do
     with {:ok, forge_env} <- forge_env(Keyword.get(opts, :auth, false)) do
       env = forge_env ++ identity_env(Keyword.get(opts, :author))
@@ -55,15 +55,12 @@ defmodule Fleet.Project.GitOps do
     end
   end
 
-  # `auth: true` → forge auth REQUIRED → fail-loud on a present-but-malformed credential (DR-024), never
-  # run unauthenticated. `auth: false` → local op (reset/commit/worktree), no forge auth → empty env.
+  # Request ForgeAuth only for auth: true; invalid credentials fail before Git runs.
   defp forge_env(true), do: ForgeAuth.git_env_result()
   defp forge_env(false), do: {:ok, []}
 
-  # Commit (author set): `GIT_AUTHOR` = what the caller declares; `GIT_COMMITTER` = the human,
-  # resolved ROBUSTLY via `ForgeIdentity.human_identity` (git config → GECOS → login) — so it does NOT depend
-  # on the human's `~/.gitconfig`. Without this committer, an unconfigured human would get "empty ident name" →
-  # commit refused. Author absent (`nil`) → no identity env (the ops without commit don't care).
+  # Explicit author, human committer from ForgeIdentity when available. If resolution
+  # fails, no committer override is supplied; Git's own identity resolution applies.
   defp identity_env(%{name: name, email: email}) do
     committer =
       case Fleet.Credentials.ForgeIdentity.human_identity() do

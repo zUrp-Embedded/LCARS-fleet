@@ -1,32 +1,18 @@
 defmodule Fleet.Project.Declaration do
   @moduledoc """
-  Single owner of the per-project criticality declaration (`<project>/.lcars.json`,
-  schema `declaration`) — writes it at onboarding, reads it at the workflow-map burn.
+  Reads and writes the project declaration named by Layout.project_declaration_file/0.
+  Card choice represents the human's criticality decision; this module records
+  caller-supplied choices and attribution, without verifying who made them.
+  No card choice writes an undeclared record using the delegation default.
 
-  **The CARD is the HUMAN's declaration** (elicited by the framing interview — what happens
-  if this deliverable is wrong? how long will it live? — and RELAYED by the architect; an
-  agent never self-assesses criticality). Undeclared is a LEGITIMATE state: the file is still
-  written, complete and schema-valid, running on the delegation default card and explicitly
-  marked undeclared — absence is recorded, never fabricated into facts, and never a wall
-  (a blocked declaration teaches the human to lie to the arch).
+  Explicit nonempty card names must be listed, loadable and project-scoped in the
+  selected catalogue. Ticket-scoped workshop cards cannot become project defaults.
+  max_fan is project-wide throughput, not a per-card setting; omission preserves
+  runtime default resolution rather than freezing today's fleet limit in the file.
 
-  **The declaration names its card** (`pipeline_default`): the criticality mechanic IS the
-  card choice (user arbitration). An explicit `workflow_map` override the catalogue can ANSWER
-  is always accepted. A name the loader cannot load is a different question and is REFUSED
-  (`refute_unloadable_card/2`): a disagreement with a card is a judgement, a name nobody can burn
-  is a typo, and the schema cannot tell them apart because `pipeline_default` is a free string.
-
-  **The declaration also names its THROUGHPUT** (`max_fan`, optional): how many workflow_runs this
-  project may hold in flight. It lives HERE and not on the workflow card, and the difference is not
-  cosmetic — a card serves one workflow_run and a project can carry several, so a per-card ceiling
-  could not bound a project whose tickets route through two different cards. Absent = the fleet
-  default (`--max-fan` / `LCARS_MAX_FAN`) — which alone cannot serialize ONE project: the counter
-  is per project and that knob is per container.
-
-  Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
-  the delegation default card, silently. A file that no longer NAMES a card (unreadable, or the
-  key gone) → LOUD warning + default card. It reads ONLY the card name, never the whole schema:
-  a legacy file still carrying a retired key resolves its real card instead of the default.
+  Read paths deliberately skip whole-schema validation for legacy declarations.
+  pipeline_default/2 accepts any binary card value without loading it, including
+  an empty string; subsequent consumers decide whether the card can run.
   """
 
   require Logger
@@ -35,22 +21,8 @@ defmodule Fleet.Project.Declaration do
   alias Fleet.Project.Roles
   alias Fleet.Workflow.Loader
 
-  # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Ce fichier atterrit a la racine d'un
-  # depot — y compris ADOPTE, ou la fleet ecrit dans l'arbre de quelqu'un d'autre. Un fichier de
-  # configuration d'outil porte le point que portent tous les autres (`.gitignore`,
-  # `.editorconfig`), et son nom nomme son PROPRIETAIRE : un lecteur qui ouvre un depot inconnu
-  # doit pouvoir dire « ca, c'est a l'outil » sans lire le contenu.
-  #
-  # ⚠ L'EXTENSION N'EST PAS POUR LE LECTEUR — `Jason.decode` ne la regarde pas et aucun glob
-  # `*.json` ne ramasse ce fichier. Elle est ce qui evite une COLLISION : `.lcars` tout court est
-  # deja le repertoire d'etat per-humain (`~/.lcars`) et celui du pod
-  # (`<pod_dir>/.lcars/system-prompt.md`). Un fichier `.lcars` a la racine d'un workspace, a cote
-  # d'un repertoire `.lcars/` dans le home du meme pod, ce sont deux natures sous une chaine.
-  # ⚠ LE NOM VIT DANS `Fleet.Layout`, PAS ICI. Il a un SECOND lecteur dans
-  # un autre domaine : `Workflow.DeliverableGate` refuse une chaine de livraison qui touche ce
-  # fichier (un producteur ne modifie pas la declaration qui choisit son jury), et `Workflow` ne
-  # depend pas de `Project` — donc un literal la-bas aurait fait deux sources pour un nom. Layout est
-  # l'autorite du rangement et les deux domaines en dependent deja.
+  # Layout shares this name with DeliverableGate across domain boundaries.
+  # The .json suffix distinguishes the tool's config file from .lcars state directories.
   @file_name Layout.project_declaration_file()
 
   # The declaration schema lives in the cap_profile canon (data, not a module frontier —
@@ -58,13 +30,14 @@ defmodule Fleet.Project.Declaration do
   @schema_rel Path.join(["cap_profile", "schema", "declaration.json"])
 
   @doc """
-  Composes, validates and writes `<proj_dir>/.lcars.json` from the onboarding opts
-  (`:justification`, `:workflow_map`, `:max_fan` — all optional: nothing declared →
-  the delegation default card, marked undeclared).
+  Composes a declaration, checks any explicit nonempty :workflow_map, validates
+  its schema and replaces the destination through a sibling .tmp file.
+  The project directory must already exist; concurrent writers share the temp name.
 
-  `{:error, {:invalid_declaration, errors}}` on a schema-invalid composition (malformed
-  FORM is returned to the caller — fixing a format is not lying); `{:error, term}` on a
-  write failure. An explicit `workflow_map` override the loader can answer is accepted.
+  Options include :repo for catalogue selection, :workflow_maps_root for explicit
+  disk reads, :justification, :onboarded_by and integer :max_fan (schema range 1..15).
+  Non-integer max_fan is omitted. Returns validation/file errors; configuration or
+  composition exceptions are not universally rescued.
   """
   @spec write(Path.t(), keyword()) :: :ok | {:error, term()}
   def write(proj_dir, opts) when is_binary(proj_dir) and is_list(opts) do
@@ -80,15 +53,9 @@ defmodule Fleet.Project.Declaration do
   end
 
   @doc """
-  Refuses an explicit `:workflow_map` a project cannot legitimately declare — absent option is `:ok`.
-
-  A LOADABLE card the human names explicitly stands — naming the card IS the criticality choice.
-  A name that does not LOAD is a different question: it is a typo, not a judgement — and the schema
-  cannot catch it because `pipeline_default` is a free string, unique only inside one catalogue.
-
-  Enforced HERE, at the single writer, so no entry point can bypass it; the creation verbs call it
-  again as a preflight so the refusal lands BEFORE the repo exists, next to the human preflight
-  that is there for the same reason.
+  Checks a nonempty binary :workflow_map with declarable_card/3.
+  Missing, empty or non-binary options skip this preflight; write/2 still validates
+  the composed declaration. Creation verbs can use it before creating a repo.
   """
   @spec refute_unloadable_card(String.t() | nil, keyword()) :: :ok | {:error, term()}
   def refute_unloadable_card(repo, opts) when is_list(opts) do
@@ -99,40 +66,20 @@ defmodule Fleet.Project.Declaration do
   end
 
   @doc """
-  The rule itself, for a card named EXPLICITLY — whatever verb names it.
+  Requires the named card to appear in Loader.canon_names/1 and load with scope project.
+  Presence selects the load/error path; absence reports unknown_card or names other
+  catalogues carrying it. Enumeration and loading are separate reads and can race.
 
-  ⚠ **LOADABLE IS NOT DECLARABLE.** A ticket-scoped card (`workshop-direct`, reached by an issue's
-  genre) loads perfectly and would route EVERY ticket of the project through a jury-less direct
-  seal. Leaving it off a listing closes nothing and reads exactly like closing it — only a refusal
-  refuses.
-
-  It guards every verb that names a card, not the REVISION alone: otherwise the verb that changes a
-  project's card refuses a typo while the verbs that DECLARE it accept one. The refusal names the
-  cards the project's catalogue ships, because one that does not say what to write instead sends
-  the operator back through the same call.
+  Explicit workflow_maps_root takes precedence, otherwise use the repo's catalogue
+  options. No repo falls back to loader defaults. Exceptions during loading become
+  card_load_failed with their original message; enumeration errors are not rescued.
   """
   @spec declarable_card(String.t(), String.t() | nil, keyword()) :: :ok | {:error, term()}
   def declarable_card(name, repo, opts \\ []) when is_binary(name) do
     lopts = loader_opts(repo, opts)
 
-    # ⚠ L'ABSENCE SE DEMANDE, ELLE NE SE DEDUIT PAS D'UNE EXCEPTION.
-    #
-    # Un `rescue _ ->` rebaptise TOUTE levee de `load!` en « carte inconnue », et le symptome est
-    # un `{:error, {:unknown_card, …}}` intermittent sur une carte canon qui EXISTE — irreproductible
-    # par construction, puisque la preuve est detruite a la source (BL-6-116).
-    # `load!` leve pour au moins six raisons distinctes : nom non-slug (`Slug.cast!`),
-    # carte absente de l'image publiee, YAML illisible, schema invalide, graphe invalide, `spec.ci`
-    # manquant. UNE SEULE est une absence ; les cinq autres sont un catalogue casse, et se faisaient
-    # passer pour la premiere.
-    #
-    # La question « cette carte existe-t-elle ici » a une fonction qui y repond, et elle traverse le
-    # MEME aiguillage que `load!` — image publiee sinon disque (`canon_names/1` = `image_names` |
-    # `disk_canon_names` ; `load!` = `image_card` | `load_from_disk!`). Cette appartenance EST donc le
-    # predicat d'absence de `load!`, sans avoir a classer ce qu'il a leve — classer aurait voulu dire
-    # reconnaitre un message d'exception, ce qui ment le jour ou le message est reformule.
-    #
-    # Et le nom non-slug reste refuse comme INCONNU : `Slug.cast!` VALIDE sans transformer, donc un
-    # nom invalide ne figure dans aucune liste.
+    # Test membership explicitly so load failures do not all become unknown_card.
+    # Disk enumeration can include invalid slug filenames; loading then reports its error.
     if name in Loader.canon_names(lopts) do
       load_declared(name, lopts)
     else
@@ -140,13 +87,7 @@ defmodule Fleet.Project.Declaration do
     end
   end
 
-  # La carte EXISTE la ou on la cherche. Ce qui sort d'ici n'est donc jamais une absence : c'est un
-  # catalogue casse, et il est nomme comme tel.
-  #
-  # On ne laisse PAS l'exception voler — cette fonction est aussi le preflight de la creation de
-  # projet (`Onboard`), dont tout le contrat est de rendre `:ok | {:error, _}` AVANT que le depot
-  # existe. Mais le terme d'erreur porte le message d'origine, et le journal est en `error` et non
-  # en `warning` : au prochain flake, la cause est ecrite, pas a redecouvrir.
+  # Preserve load failure details for onboarding preflight; membership is not a schema check.
   defp load_declared(name, lopts) do
     case Loader.load!(name, lopts) do
       %{"scope" => "project"} ->
@@ -165,25 +106,9 @@ defmodule Fleet.Project.Declaration do
       {:error, {:card_load_failed, name, Exception.message(e)}}
   end
 
-  # Le refus d'une carte reellement absente d'ici. Il est atteint par un test d'appartenance et non
-  # par la retombee d'une exception — la distinction vaut pour l'entree, pas pour les deux termes
-  # qu'il rend.
+  # Absence from this catalogue can still mean the caller selected the wrong catalogue.
   defp refuse_absent(name, repo, lopts) do
-    # ⚠ « INCONNUE ICI » N'EST PAS « INCONNUE », ET LA DIFFERENCE EST LA SEULE CHOSE UTILE A DIRE.
-    # Mesure, transcript d'un starfleet : le guichet lui presente `standard` du
-    # catalogue `web-demo` (la liste NOMME le catalogue de chaque carte), il la choisit, et
-    # `project_create` la refuse en `{:unknown_card, "standard"}` — parce que l'appel n'a pas
-    # porte `catalogue`, donc l'org a pris le defaut et la carte s'est resolue chez `fleet`. Le
-    # refus enumerait alors les cartes de `fleet`, ou celle demandee ne figure evidemment pas :
-    # un message qui accuse le NOM alors que ce qui manque est l'ARGUMENT VOISIN.
-    #
-    # L'agent qui lit ce refus conclut « la creation ne sait resoudre que les cartes de fleet »,
-    # ce qui est faux : elle resout dans le catalogue du PROJET, et c'est le projet qui a atterri
-    # dans le mauvais. Le meme agent a bien travaille par ailleurs (aucun depot cree a moitie, pas
-    # de contournement, deux sorties nommees) — c'est le message qui l'a egare.
-    #
-    # On ne devine PAS a sa place — le catalogue fixe l'org du projet POUR SA VIE, donc choisir
-    # pour lui serait le pire des services. On NOMME : la carte existe la-bas, voici l'argument.
+    # Name alternative catalogues without silently choosing a different project org.
     elsewhere = carriers_of(name, repo)
 
     Logger.warning(
@@ -204,9 +129,7 @@ defmodule Fleet.Project.Declaration do
     end
   end
 
-  # Les porteurs, MOINS celui du projet. La question « qui porte cette carte » a UNE reponse et elle
-  # vit chez le loader (`catalogues_carrying/1`, lue aussi par l'inference d'org du guichet) : la
-  # deriver ici en second ferait de ce refus et de cette inference deux verites d'un meme fait.
+  # Reuse Loader's offer enumeration and exclude the project's own catalogue.
   defp carriers_of(name, repo) do
     mine =
       case Loader.card_root_for_repo(repo) do
@@ -223,14 +146,7 @@ defmodule Fleet.Project.Declaration do
     Loader.catalogues_carrying(name) -- [mine]
   end
 
-  # LA MEME RESOLUTION QUE LES LECTEURS, et c'est une condition de correction et non un detail :
-  # un CONTROLE plus strict que ce qu'il garde refuse des configurations que le lecteur accepte.
-  # Deux niveaux, dans cet ordre :
-  #   * l'override FIN `:workflow_maps_root` gagne — « the fixture's own door », dit le loader, et
-  #     `Roles.load_project_card/2` le respecte deja de la meme facon ;
-  #   * sinon le catalogue du PROJET, par son org. Charger sans options du tout resoudrait dans
-  #     l'image du catalogue par DEFAUT : un projet d'une autre org se verrait refuser une carte que
-  #     son propre catalogue publie.
+  # Match reader selection: explicit disk-root key, else project catalogue.
   defp loader_opts(repo, opts) do
     case Keyword.take(opts, [:workflow_maps_root]) do
       [] -> Loader.card_opts_for_repo(repo)
@@ -238,7 +154,7 @@ defmodule Fleet.Project.Declaration do
     end
   end
 
-  # CI-07
+  # Rename replaces the destination; fixed temp names require serialized writers.
   defp atomic_write(path, content) do
     tmp = path <> ".tmp"
 
@@ -253,20 +169,17 @@ defmodule Fleet.Project.Declaration do
   end
 
   @doc """
-  Returns the project's declared card. Absence quietly uses the delegation default; invalid or
-  unreadable data logs, records an incident, and uses that default.
+  Reads the binary pipeline_default field without whole-schema validation.
+  A missing file silently uses the delegation default. Returned read/JSON/field
+  errors log, attempt an incident and use that default. Some decoded non-map shapes
+  raise during field access; this function has no outer rescue.
   """
   @spec pipeline_default(String.t(), keyword()) :: String.t()
   def pipeline_default(repo, opts \\ []) when is_binary(repo) do
     root = Keyword.get(opts, :code_root, Layout.code_root())
     path = Path.join([root, Layout.project_name(repo), @file_name])
 
-    # Legacy-tolerant read: only that a card is NAMED, never the whole schema. A legacy `.lcars.json`
-    # still carrying a retired key (`level`, `nature`) is `additionalProperties: false`-invalid but
-    # its card is intact — full-validating here would drop every existing project to the default. We
-    # read the raw access (not a guard-bound var) on purpose: it keeps the pre-existing `binary()`
-    # success type (a verified catalogue that ships cards always names a loadable default), so the
-    # spec stays honest and `load_project_card` keeps its non-nil guarantee.
+    # Retired schema keys must not discard an otherwise named legacy card.
     with {:ok, raw} <- File.read(path),
          {:ok, declaration} <- Jason.decode(raw),
          true <- is_binary(declaration["pipeline_default"]) do
@@ -301,13 +214,10 @@ defmodule Fleet.Project.Declaration do
   end
 
   @doc """
-  The project's declared throughput — workflow_runs in flight, `nil` if undeclared.
-
-  Deliberately QUIETER than `pipeline_default/2` on a broken file: that one records an INCIDENT,
-  because substituting a card changes the project's judgment layer. Falling back to the fleet
-  default throughput changes a RATE. Alarming twice for one bad file would teach a reader that the
-  second alarm means something new. The resolution + clamp belong to `Admission.max_fan/2`, the
-  single owner of the ceiling; this function only reports what the human wrote.
+  Reads an integer max_fan, or nil for missing/unreadable/invalid data.
+  It does not enforce positivity or the schema ceiling on existing files, despite
+  the narrower spec. Admission owns default resolution and clamping. This reader
+  stays quiet to avoid a second incident for a file whose card read already reports one.
   """
   @spec declared_max_fan(String.t(), keyword()) :: pos_integer() | nil
   def declared_max_fan(repo, opts \\ []) when is_binary(repo) do
@@ -340,9 +250,7 @@ defmodule Fleet.Project.Declaration do
       "pipeline_default" => card || Roles.delegation_workflow_map(opts)
     }
 
-    # Written ONLY when declared. A key absent means "the fleet default", and materializing that
-    # default into the file would freeze today's flag into the project's permanent record — the
-    # human would then be bound by a number they never chose.
+    # Omit an unspecified limit so future fleet defaults can still apply.
     case Keyword.get(opts, :max_fan) do
       n when is_integer(n) -> Map.put(base, "max_fan", n)
       _ -> base

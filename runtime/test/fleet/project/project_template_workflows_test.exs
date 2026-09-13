@@ -2,17 +2,9 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
   use ExUnit.Case, async: true
 
   @moduledoc """
-  Ce que le template LIVRE en `.gitea/workflows/`, et la seule propriété de ces fichiers qui soit
-  vraiment portante.
-
-  ## Pourquoi un test sur du YAML que ce dépôt n'exécute jamais
-
-  Ces workflows tournent chez le RUNNER d'un projet, des semaines plus tard. Rien ici ne les joue,
-  donc rien ici ne les casse — et c'est précisément la forme d'artefact qui dérive sans bruit. Une
-  suite verte ne prouve rien d'un fichier qu'elle ne lit pas.
-
-  On n'essaie pas de simuler un runner. On épingle ce qui, s'il bougeait, transformerait un
-  MÉCANISME DE MESURE EN MUR — et qui ne se verrait nulle part ailleurs.
+  Verifie les textes des workflows livres et leur accord avec les lecteurs Elixir.
+  Les regex controlent des motifs, pas l'ensemble de la semantique YAML, les codes
+  de sortie possibles ni les protections effectives d'un runner Gitea.
   """
 
   @workflows_dir "priv/catalogue/project_template/main/.gitea/workflows"
@@ -26,27 +18,22 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     name
   end
 
-  # Le glob de la protection, tel que Gitea le comprend : `CI / *` matche tout contexte qui commence
-  # par `CI / `. Un contexte vaut `<workflow> / <job> (<déclencheur>)`, donc la question se ramène
-  # au NOM DU WORKFLOW.
+  # Comparateur local du nom avant /, adapte aux contextes actuels ; pas un moteur de glob Gitea.
   defp glob_prefix(glob), do: glob |> String.split("/") |> List.first() |> String.trim()
   defp matches_glob?(workflow_name, glob), do: workflow_name == glob_prefix(glob)
 
   describe "la garde de nommage — la seule chose qui empêche une sonde de devenir un mur" do
     test "AUCUN workflow `probe-*` ne matche les contextes exigés sur main" do
-      # ⚠ LE GLOB EST LU CHEZ SON PROPRIÉTAIRE, JAMAIS RECOPIÉ. Si `Onboard` durcit un jour sa
-      # protection, ce test doit BOUGER AVEC — un `"CI / *"` en dur ici resterait vert en décrivant
-      # une protection qui n'existe plus, et c'est exactement le mode de panne qu'on traque.
+      # Lire les contextes chez Faces pour suivre les changements de protection.
       globs = Fleet.Project.Onboard.Faces.main_status_check_contexts()
 
-      # Garde d'instrument n°1 : un glob dont on ne saurait pas extraire le préfixe rendrait
-      # `matches_glob?/2` faux pour tout le monde, et ce test vert sans rien mesurer.
+      # Refuser un prefixe vide ; cela ne valide pas toute syntaxe de glob.
       prefixes = Enum.map(globs, &glob_prefix/1)
       refute Enum.any?(prefixes, &(&1 == "")), "glob non interprétable : #{inspect(globs)}"
 
       probes = wf_dir() |> File.ls!() |> Enum.filter(&String.starts_with?(&1, "probe-"))
 
-      # Garde d'instrument n°2 : zéro sonde et tout passe, en ne prouvant rien.
+      # Exiger au moins une sonde pour eviter une verification vide.
       assert probes != [], "aucun workflow `probe-*` trouvé — l'instrument mesure le vide"
 
       for file <- probes, glob <- globs do
@@ -60,8 +47,7 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     end
 
     test "TÉMOIN — `ci.yml`, lui, matche : sans ça la garde ci-dessus passerait pour rien" do
-      # Le contre-test. Si `matches_glob?/2` rendait toujours `false`, le test précédent serait vert
-      # quel que soit le nom des sondes. Ici on prouve que l'instrument SAIT dire oui.
+      # Temoin positif : un comparateur toujours faux doit echouer ici.
       [glob | _] = Fleet.Project.Onboard.Faces.main_status_check_contexts()
       assert matches_glob?(workflow_name(read_wf("ci.yml")), glob)
     end
@@ -71,17 +57,14 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     setup do: %{wf: read_wf("probe-test-relevance.yml")}
 
     test "déclenchable HORS push, et seulement comme ça", %{wf: wf} do
-      # `workflow_dispatch` est la seule porte qui s'ouvre sans commit — c'est toute la raison
-      # d'être de `Fleet.Forge.Client.Actions`. Et pas de `push:`/`pull_request:` : une sonde qui
-      # part toute seule à chaque poussée mesure sans qu'on lui demande et facture le runner.
+      # Verifier dispatch et absence des deux declencheurs push/PR ; les autres ne sont pas examines.
       assert wf =~ ~r/^\s+workflow_dispatch:/m
       refute wf =~ ~r/^\s+push:/m
       refute wf =~ ~r/^\s+pull_request:/m
     end
 
     test "les quatre entrées que le rail doit fournir sont déclarées", %{wf: wf} do
-      # Une entrée manquante côté workflow rend un 422 nommant le schéma, pas la clé — le rail
-      # chercherait au mauvais étage.
+      # Les quatre noms d'entree attendus doivent figurer dans le texte.
       for input <- ~w(base_sha head_sha harness test_cmd) do
         assert wf =~ ~r/^\s+#{input}:/m, "entrée `#{input}` absente du workflow_dispatch"
       end
@@ -90,15 +73,12 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     test "`harness` est la seule entrée FACULTATIVE — l'absence est un cas, pas une panne", %{
       wf: wf
     } do
-      # Un projet qui n'a pas déclaré ses chemins de preuve doit obtenir « inapplicable », pas une
-      # erreur de dispatch : la dégradation est honnête, le refus serait une panne inventée.
+      # Seule l'option required:false de harness est verifiee ici.
       assert wf =~ ~r/harness:\s*\n\s+description:.*\n\s+required:\s*false/m
     end
 
     test "sort TOUJOURS en 0 : la sonde rapporte, elle ne tranche pas", %{wf: wf} do
-      # Un run rouge serait indiscernable d'un runner cassé ou d'une image sans interpréteur — le
-      # fait le plus utile deviendrait le plus ambigu. Et échouer quand la suite est aveugle serait
-      # DÉCIDER : le mécanisme est un GAIN, jamais une précondition.
+      # Cherche exit 0 et l'absence de exit 1 ; ne prouve pas que toute execution termine en zero.
       refute wf =~ ~r/exit\s+1/
       assert wf =~ "exit 0"
     end
@@ -106,14 +86,7 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     test "le fait sort sous LE préfixe QUE LE RAIL CHERCHE, lisible dans les logs du JOB", %{
       wf: wf
     } do
-      # Le rail lit ce marqueur via `Actions.run_logs/3` — qui descend par les jobs, parce que les
-      # logs d'un run n'existent pas comme endpoint.
-      #
-      # ⚠ CE TÉMOIN ÉPINGLAIT UN LITTÉRAL, DES DEUX CÔTÉS, ET LEUR ACCORD N'ÉTAIT MESURÉ NULLE
-      # PART. Le workflow livré porte `LCARS-PROBE` et `Probe` porte `@fact_prefix "LCARS-PROBE"` :
-      # renommer l'attribut en `LCARS_PROBE` laissait ce témoin vert, et le rail cessait de trouver
-      # le moindre fait — la sonde tournerait, le juge ne lirait rien, et personne ne rougirait.
-      # On lit donc le préfixe QUE LE CODE UTILISE et on exige que le workflow porte CELUI-LÀ.
+      # Extraire le prefixe du consommateur pour detecter une divergence avec le workflow.
       prefixe =
         "lib/fleet/mcp/pod_tools/probe.ex"
         |> File.read!()
@@ -132,9 +105,7 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     end
 
     test "le TÉMOIN existe : une suite déjà rouge rend `inapplicable`, pas `relevant`", %{wf: wf} do
-      # SANS LUI, LA SONDE EST UN TIRAGE AU SORT. Si la suite est déjà rouge sur la tête livrée, son
-      # rouge sur le code de base ne prouve rien — on mesurerait une panne et on l'appellerait une
-      # couverture.
+      # Une suite deja rouge doit rendre la mesure inapplicable ; ici on cherche le marqueur.
       assert wf =~ "verdict=inapplicable reason=head-suite-red"
     end
   end
@@ -145,16 +116,12 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     test "`## Harness` est documentée et NE PEUT PAS être confondue avec `## Test`", %{md: md} do
       assert md =~ "## Harness"
 
-      # ⚠ LE PIÈGE QUE LE PLAN PORTAIT. `Fleet.SPBuilder.RepoSections` reconnaît `## Test` sur une
-      # FRONTIÈRE DE MOT : `## Test paths` matcherait donc, partirait au pod comme une seconde
-      # section `## Test`, et le producteur y lirait des chemins là où son contrat promet « la
-      # commande EXACTE, et rien d'autre ». On le prouve au lieu de le croire.
+      # La frontiere de mot de RepoSections ferait de Test paths une section Test.
       refute md =~ ~r/^##\s+Test paths/m
     end
 
     test "PREUVE du piège : `## Test paths` serait bien extraite comme une section `## Test`" do
-      # Le contre-test qui donne son poids au `refute` ci-dessus. Sans lui, « pas de `## Test
-      # paths` » serait une préférence de style ; avec lui, c'est une nécessité mesurée.
+      # Temoin positif du comportement d'extraction qui motive le nom Harness.
       assert Fleet.SPBuilder.RepoSections.extract("## Test paths\n\ntests/\n") =~ "Test paths",
              "le parseur ignore ce titre : le piège n'existe pas, ce test non plus"
     end
@@ -162,18 +129,14 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     test "et `## Harness`, elle, NE voyage PAS au pod — même quand des sections voyagent", %{
       md: md
     } do
-      # ⚠ LE TEMPLATE NE PRÉ-REMPLIT AUCUNE DES SEPT, DÉLIBÉRÉMENT. Extraire son CLAUDE.md tel quel
-      # rend donc `""`, et un `refute extrait =~ "Harness"` y serait vert POUR LA MAUVAISE RAISON —
-      # il ne prouverait que le vide. On ajoute donc une section qui, elle, DOIT voyager : le test
-      # ne peut passer que si le parseur a réellement tourné.
+      # Ajouter une section Test reconnue pour que l'absence de Harness ne soit pas un resultat vide.
       rempli = md <> "\n## Test\n\nsh test.sh\n"
       extrait = Fleet.SPBuilder.RepoSections.extract(rempli)
 
       assert extrait =~ "sh test.sh",
              "le parseur n'a rien extrait : la mesure suivante ne vaut rien"
 
-      # C'est la propriété qui justifie ce nom-là : un fait que le rail lit, pas une directive que
-      # l'agent tient pour vraie sans recours.
+      # Harness appartient au lecteur du rail, pas aux sections envoyees au pod.
       refute extrait =~ "Harness"
     end
   end

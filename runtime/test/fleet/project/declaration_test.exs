@@ -1,16 +1,9 @@
 defmodule Fleet.Project.DeclarationTest do
   @moduledoc """
-  The criticality declaration: always written complete and schema-valid; the human's CARD
-  choice RELAYED (never agent-assessed — the card IS the criticality); absence recorded
-  honestly (undeclared, on the default card), never fabricated and never walled; the burn
-  reads the declared card with quiet/loud fallbacks.
+  Tests declaration composition, catalogue selection and legacy read fallbacks.
+  Explicit incident callbacks are observed as calls, not durable incident storage.
   """
-  # ⚠ `async: false` : ce fichier ECRIT `:catalogue_install_dirs` — la cle la plus large des six : toute resolution de
-  # catalogue la lit en env d'APPLICATION, qui est globale au node. Pendant la fenetre — restauration `on_exit` comprise
-  # — tout test concurrent qui lit cette cle lit la valeur de celui-ci. Mesure du 2026-08-17 : la meme forme a tue
-  # `Pilot.ApplicationTest` sur une racine de catalogue temporaire qui ne lui appartenait pas, dans le build d'image et
-  # pas sur la machine de dev — la collision depend du nombre de coeurs et de l'ordre du seed, donc elle mord la ou ca
-  # coute le plus cher.
+  # Mutates the global catalogue_install_dirs setting; restoration does not isolate concurrent readers.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -23,9 +16,7 @@ defmodule Fleet.Project.DeclarationTest do
        %{
          tmp_dir: tmp
        } do
-    # Even when a caller still passes the retired opts, compose writes NEITHER key: the card carries
-    # the whole gate now, and a decorative level written back would resurrect the "declared C0, still
-    # blocked" confusion the removal exists to kill.
+    # Retired level/nature options must not reappear in the declaration.
     assert :ok =
              ProjectDeclaration.write(tmp,
                workflow_map: "standard-qa",
@@ -45,9 +36,7 @@ defmodule Fleet.Project.DeclarationTest do
   @tag :tmp_dir
   test "a declaration whose declarer is unknown records UNKNOWN, never a plausible role",
        %{tmp_dir: tmp} do
-    # `declared_by` ships in the project repo for good. A caller that declares a card without saying
-    # who must not have a role name written on its behalf: that is a permanent false attribution, the
-    # same one `MergeAndPromote` refuses when it declines the system token.
+    # Missing attribution must remain unknown rather than inventing a role name.
     assert :ok = ProjectDeclaration.write(tmp, workflow_map: "standard-qa")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
@@ -60,9 +49,7 @@ defmodule Fleet.Project.DeclarationTest do
 
   test "undeclared: writes a complete, schema-valid declaration naming the default card — absence recorded, never walled",
        %{tmp_dir: tmp} do
-    # Nobody declared: the file is still written, complete and schema-valid, and it NAMES the
-    # delegation default card. The card IS the criticality declaration — there is no separate level
-    # to assert (crit_quarantine removed it).
+    # Absence still writes a record identifying the system default.
     assert :ok = ProjectDeclaration.write(tmp, [])
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
@@ -82,8 +69,7 @@ defmodule Fleet.Project.DeclarationTest do
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
     refute Map.has_key?(d, "level")
-    # The ACTUAL onboarder, not a role the code picked: starfleet onboards too since the
-    # 2026-07-19 reorg, and this field ships in the project's repo for good.
+    # Preserve caller-supplied attribution without substituting the architect role.
     assert d["declared_by"] == "starfleet"
     assert d["justification"] =~ "Carte choisie explicitement"
     assert d["pipeline_default"] == "standard-qa"
@@ -103,19 +89,14 @@ defmodule Fleet.Project.DeclarationTest do
 
     key = {ProjectDeclaration, :schema, path}
 
-    # A validation that re-reads the file through a private pipeline leaves this key
-    # unpopulated — the assertion pins the authority, not just the outcome.
+    # Check that the shared schema cache key is populated; earlier calls can also populate it.
     assert %ExJsonSchema.Schema.Root{} = :persistent_term.get(key, :not_cached),
            "validation did not go through Fleet.SchemaCache (key not populated)"
   end
 
   test "6-125: an override the loader cannot answer is REFUSED, and the refusal names the cards",
        %{tmp_dir: tmp} do
-    # La distinction que le schema ne peut PAS faire : `pipeline_default` est une chaine libre, et
-    # un nom de carte n'est unique qu'a l'interieur d'un catalogue. Hors-matrice reste accepte —
-    # c'est un arbitrage humain contre ce que la carte dit d'elle-meme ; un nom qui ne CHARGE pas
-    # n'est pas un arbitrage, c'est une faute de frappe, et la declaration engraverait une route
-    # que personne ne peut bruler.
+    # Free-string schema validation alone cannot resolve a card in its catalogue.
     log =
       capture_log(fn ->
         assert {:error, {:unknown_card, "wfmap/ghost"}} =
@@ -133,9 +114,7 @@ defmodule Fleet.Project.DeclarationTest do
 
   test "6-125: a TICKET-scoped card is refused at declaration too — loadable is not declarable",
        %{tmp_dir: tmp} do
-    # `workshop-direct` charge parfaitement : elle est atteinte par le GENRE d'un ticket, et un
-    # projet qui la declare routerait CHAQUE ticket par un sceau direct sans jury. La revision de
-    # carte refusait deja ce cas ; la declaration l'acceptait.
+    # A loadable ticket-scoped card is not a valid project default.
     assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
              ProjectDeclaration.write(tmp,
                justification: "x",
@@ -146,9 +125,7 @@ defmodule Fleet.Project.DeclarationTest do
   end
 
   test "6-125: no card declared at all → the catalogue default, never a refusal", %{tmp_dir: tmp} do
-    # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
-    # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur un conteneur dont le
-    # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
+    # Positive control: absent explicit override retains the catalogue default.
     assert :ok = ProjectDeclaration.write(tmp, justification: "x")
 
     d = tmp |> Path.join(".lcars.json") |> File.read!() |> Jason.decode!()
@@ -188,9 +165,7 @@ defmodule Fleet.Project.DeclarationTest do
   test "an invalid declaration records a durable INCIDENT, never only a warning", %{
     tmp_dir: tmp
   } do
-    # The never-stall fallback swaps the project's judgment layer (an audit-only project
-    # would burn as a producing rail): the substitution must become a durable fact
-    # (recurrence → sysadmin issue), not a whisper in a log nobody tails.
+    # Observe the incident callback alongside fallback; this stub does not persist an incident.
     broken = Path.join(tmp, "broken")
     File.mkdir_p!(broken)
     File.write!(Path.join(broken, ".lcars.json"), "{not json")
@@ -244,9 +219,7 @@ defmodule Fleet.Project.DeclarationTest do
         end
       end
 
-      # UNE CARTE DECLAREE PAR LE CATALOGUE ET ILLISIBLE : le fichier existe, donc `canon_names` la
-      # liste, mais son enveloppe viole le schema (`ci`, `max_rework_rounds`, `steps` absents), donc
-      # `load!` leve. C'est exactement le cas que le `rescue _` d'avant rebaptisait « inconnue ».
+      # Listed filename with an invalid envelope distinguishes load failure from absence.
       File.write!(
         Path.join([tmp, "bbb", Fleet.Catalogue.rel(:workflow_maps), "cassee.yaml"]),
         "kind: WorkflowMap\nmetadata:\n  name: cassee\nspec:\n  jury: []\n"
@@ -257,20 +230,13 @@ defmodule Fleet.Project.DeclarationTest do
     end
 
     test "la carte existe chez le VOISIN : le refus le NOMME, et nomme l'argument manquant" do
-      # ⚠ MESURE DU 2026-08-17, transcript d'un starfleet, reproduite au caractere pres : le guichet
-      # presente `standard` du catalogue `web-demo`, l'agent la choisit, `project_create` refuse en
-      # `{:unknown_card, "standard"}` en enumerant les cartes de `fleet`. Cause : l'appel n'a pas
-      # porte `catalogue`, l'org a pris le defaut, et la carte s'est resolue dans le mauvais
-      # catalogue. Le message accusait le NOM alors que ce qui manquait etait l'ARGUMENT VOISIN —
-      # l'agent en a conclu, raisonnablement et faussement, que « la creation ne sait resoudre que
-      # les cartes de fleet ».
+      # A card offered by another catalogue needs a catalogue-selection diagnostic.
       assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
                ProjectDeclaration.declarable_card("propre-a-aaa", "bbb/un-projet", [])
     end
 
     test "vraiment inconnue partout : `unknown_card`, comme avant" do
-      # Le refus d'origine survit pour ce qu'il decrit VRAIMENT — une faute de frappe. Sans cette
-      # separation, le nouveau message dirait « elle existe ailleurs » en listant zero catalogue.
+      # Truly absent cards must not be reported as available elsewhere.
       assert {:error, {:unknown_card, "carte-fantome"}} =
                ProjectDeclaration.declarable_card("carte-fantome", "bbb/un-projet", [])
     end
@@ -279,12 +245,7 @@ defmodule Fleet.Project.DeclarationTest do
       assert :ok = ProjectDeclaration.declarable_card("commune", "bbb/un-projet", [])
     end
 
-    # ─── LE MEME AIGUILLAGE, MAIS PAR LA PORTE QUE LES APPELANTS EMPRUNTENT ─────────────────────
-    #
-    # Les trois tests ci-dessus interrogent `declarable_card/3`, ou le depot est un ARGUMENT qu'on ne
-    # peut pas omettre. `write/2`, lui, le lit dans ses options — et c'est cette lecture-la que les
-    # quatre portes d'`Onboard` ne nourrissaient pas. Epingler la resolution sur la fonction dont la
-    # signature protege deja l'appelant, c'est mesurer le cas qui ne casse jamais.
+    # Exercise write/2's repo option, not just declarable_card/3's positional repo.
     test "write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme" do
       tmp = Fleet.TestEnv.tmp_path("wr")
       File.mkdir_p!(tmp)
@@ -310,26 +271,17 @@ defmodule Fleet.Project.DeclarationTest do
                  onboarded_by: "starfleet"
                )
 
-      # RIEN N'EST ECRIT SUR UN REFUS : la declaration est le contrat du projet, et une carte que le
-      # projet ne peut pas charger y serait un mensonge committe.
+      # Refusal must leave no declaration file.
       refute File.exists?(Path.join(tmp, Fleet.Layout.project_declaration_file()))
     end
 
     test "sans depot, write/2 resout dans le catalogue RACINE — le silence que les appelants ont mange" do
-      # ⚠ CE TEST N'EPINGLE PAS UN BON COMPORTEMENT, IL EPINGLE LE PIEGE. `write/2` ne peut pas
-      # exiger `:repo` : 38 appels le declarent sans, et prennent la racine A BON DROIT. Sa
-      # tolerance est donc legitime ICI et fatale chez un appelant qui tient le depot et l'oublie —
-      # d'ou l'entonnoir a argument positionnel dans `Onboard`. Le jour ou quelqu'un voudra faire
-      # refuser `write/2`, ce test lui dira ce qu'il casse.
+      # Omitting repo intentionally retains default-root behavior; callers holding a repo must pass it.
       tmp = Fleet.TestEnv.tmp_path("wr")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      # LA PREUVE EST DANS LA LISTE `available:`, PAS DANS LE TERME D'ERREUR. Les deux appels
-      # refusent, et de la meme FORME — ce qui differe est le catalogue consulte, et c'est
-      # exactement ce que le transcript de l'architecte montrait : deux lignes de journal, deux
-      # listes, un seul appel. Un temoin qui ne regarderait que le terme passerait au vert sur le
-      # bug qu'il est cense tenir.
+      # Error shapes are identical; the logged available list distinguishes consulted catalogues.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
@@ -345,14 +297,7 @@ defmodule Fleet.Project.DeclarationTest do
     end
 
     test "declaree mais ILLISIBLE : `card_load_failed`, PAS `unknown_card` — BL-6-116" do
-      # ⚠ LE POINT DE TOUT C1. Le corps etait un `rescue _ ->` qui rebaptisait chaque levee de
-      # `load!` en « carte inconnue » : nom non-slug, absence de l'image, YAML illisible, schema
-      # invalide, graphe invalide, `spec.ci` manquant — six causes, un seul terme. Mesure : un
-      # `{:unknown_card, "brief-gate"}` intermittent sur une carte canon qui existe, que douze seeds
-      # pleins n'ont pas reproduit parce que la preuve etait detruite a la source.
-      #
-      # `cassee` EST dans le catalogue de `bbb` — c'est le fichier ecrit par le setup. La confondre
-      # avec une absence est le bug ; l'assertion negative ci-dessous est donc la moitie qui compte.
+      # A listed but schema-invalid card must retain the load failure, not become unknown_card.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_load_failed, "cassee", message}} =
@@ -361,9 +306,7 @@ defmodule Fleet.Project.DeclarationTest do
           assert message =~ "schema"
         end)
 
-      # Le journal NOMME la classe d'exception et l'endroit consulte : au prochain flake, la cause
-      # est ecrite. Et il est en `error` — une carte declaree qui ne charge pas est un catalogue
-      # casse, pas un refus de routine.
+      # Keep an error-level diagnostic naming the load failure.
       assert log =~ "FAILED TO LOAD"
       assert log =~ "[error]"
 

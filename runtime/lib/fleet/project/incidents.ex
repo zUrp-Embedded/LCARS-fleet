@@ -1,24 +1,11 @@
 defmodule Fleet.Project.Incidents do
   @moduledoc """
-  Producer of the project incident EVENTS — downward, on the bus, never through an upward seam
-  (BL-6-114).
+  Publishes project fallback events through EventRouter instead of calling the
+  Pilot incident registry across the domain boundary. The incident consumer and
+  events.yaml routes own conversion to durable incident records.
 
-  Calling `Fleet.Pilot.IncidentRegistry` from here through an app-env seam would pass the module
-  across the boundary AS A VALUE, in the direction the stratification exists to forbid (`work` →
-  `steering`), where boundary cannot see it. And the registry is a COUNTER-AND-TICKET desk, nothing
-  of the piloting layer: such a dependency buys NO SEMANTICS, only a private door.
-
-  So this module PUBLISHES on the bus (`Fleet.EventRouter`, a declared dep, downward), and the
-  conversion to a durable incident happens where it belongs — the `incident` routes of
-  `events.yaml` (`gate: immediate`), consumed by `Pilot.IncidentConsumer`, which subscribes on its
-  own floor. One destination (registry → `error_system` issue in admiral's inbox), one path.
-
-  ## What a lost event means here, and what it does NOT mean
-
-  The caller's own behaviour is unchanged — a card that will not load already falls back to the
-  delegation default and says so in a warning; the event is the DURABLE half, the one a human
-  reads later. `Bus.safe_emit` is lossy by contract (a missing subscriber never crashes the
-  producer): a fallback that runs is never made worse by its trace failing to land.
+  Bus.safe_emit is lossy: returning :ok here does not establish delivery, persistence
+  or ticket creation. The caller's fallback does not depend on that trace.
   """
 
   require Logger
@@ -30,10 +17,9 @@ defmodule Fleet.Project.Incidents do
   @events %{"card" => :"project.card_failed", "declaration" => :"project.declaration_invalid"}
 
   @doc """
-  Publishes the incident event for a card/declaration fallback, or says loudly that nothing left.
-
-  Contract of the `:incident_fun` seam at both call sites: `(op, subject, reason, opts)`, always
-  `:ok` — fire-and-forget, the fallback never depends on its trace.
+  Emits the card/declaration event and returns :ok without awaiting its consumer.
+  Unknown operations log and return :ok without emitting. This is the incident_fun
+  callback used by project fallback callers; reason must support to_string/1.
   """
   @spec emit(String.t(), String.t(), atom(), keyword()) :: :ok
   def emit(op, subject, reason, opts \\ [])

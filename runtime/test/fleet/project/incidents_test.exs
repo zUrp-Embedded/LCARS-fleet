@@ -1,10 +1,7 @@
 defmodule Fleet.Project.IncidentsTest do
   @moduledoc """
-  BL-6-114 — le producteur du rail projet. L'ancien module traversait la frontière VERS LE HAUT
-  (module en valeur via `:project_incident_rail`, invisible pour boundary) ; celui-ci PUBLIE sur
-  le bus, et la conversion en incident vit dans les routes `events.yaml`. Ces témoins tiennent le
-  contrat du producteur : les deux ops connus deviennent LEUR événement (source `:project`, sujet
-  = dépôt), un op inconnu ne devient RIEN — bruyamment.
+  Verifie les deux evenements du producteur projet et le refus bruyant d'un op inconnu.
+  L'abonnement observe le bus ; la conversion en incident durable n'est pas exercee.
   """
   use ExUnit.Case, async: false
 
@@ -47,8 +44,7 @@ defmodule Fleet.Project.IncidentsTest do
   end
 
   test "op inconnu → RIEN n'est émis, et c'est dit — la table est close" do
-    # Un troisième op exige sa route events.yaml + sa clause kind_describe : un passthrough
-    # silencieux émettrait un événement que personne ne route (perdu sans trace).
+    # Une nouvelle operation demande aussi son routage d'evenement.
     log =
       capture_log(fn ->
         assert :ok = Incidents.emit("autre", "fleet/x", :whatever)

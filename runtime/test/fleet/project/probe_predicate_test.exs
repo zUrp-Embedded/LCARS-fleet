@@ -3,34 +3,17 @@ defmodule Fleet.Project.ProbePredicateTest do
   @moduletag :tmp_dir
 
   @moduledoc """
-  LE PRÉDICAT, JOUÉ POUR DE VRAI — sur le fichier que le template LIVRE.
-
-  ## Pourquoi ces tests existent, et pourquoi ils ne sont pas des tests de YAML
-
-  Doctrine : *chaque mur PROUVE qu'il mord.* Un prédicat qui n'a jamais rejeté ne prouve rien, et
-  celui-ci vit dans un script shell embarqué dans un workflow — l'endroit du dépôt le plus facile à
-  déclarer correct sans l'avoir jamais exécuté.
-
-  Alors on l'exécute. Le script est EXTRAIT du `probe-test-relevance.yml` livré (jamais recopié :
-  une copie testerait la copie), ses `${{ inputs.… }}` sont substitués, et il tourne sous `sh` sur
-  de vrais dépôts git fabriqués ici.
-
-  ## Les trois fixtures, et la deuxième est celle qui compte
-
-  1. **Une suite qui prouve** — elle devient rouge quand on retire le code : `relevant`.
-  2. **LE FAUX-VERT** — la suite appelle bien le livrable, mais jette son résultat
-     (`cmd >/dev/null`), donc elle reste verte sans lui : `blind`. C'est la matière du ticket #33,
-     absente du dépôt jusqu'ici : sans elle, rien ne prouvait que ce prédicat sait dire non.
-  3. **Une suite déjà rouge sur la tête** — rien n'est concluable : `inapplicable`. Le témoin, sans
-     lequel le rouge de la fixture 1 pourrait être un rouge de panne.
+  Execute sous sh le bloc Sonder extrait du workflow livre, sur des depots Git locaux.
+  Couvre une suite sensible au code retire, une suite qui ignore son resultat et
+  un temoin deja rouge, ainsi que les commandes/pathspecs et l'environnement du test.
+  Ce harnais ne reproduit pas un runner distant, son authentification HTTP ou son isolation.
   """
 
   @workflow "priv/catalogue/project_template/main/.gitea/workflows/probe-test-relevance.yml"
 
   # ── Extraction du script LIVRÉ ────────────────────────────────────────────────────────────────
 
-  # On prend le bloc `run: |` de l'étape « Sonder » dans le fichier réel. Un YAML complet serait
-  # plus élégant et moins honnête : ce qui doit être mesuré, c'est le texte que le runner recevra.
+  # Extraction textuelle du bloc Sonder : depend de cette structure YAML, sans parser complet.
   defp probe_script do
     yaml = File.read!(Path.join(File.cwd!(), @workflow))
 
@@ -40,9 +23,7 @@ defmodule Fleet.Project.ProbePredicateTest do
         yaml
       )
 
-    # ⚠ L'INDENTATION SE MESURE, ELLE NE SE DEVINE PAS. Elle était codée en dur à dix espaces : une
-    # ré-indentation du YAML aurait produit un script mal désindenté — bruyamment rouge dans un
-    # sens, silencieusement inchangé dans l'autre. On lit le retrait de la première ligne non vide.
+    # Mesurer le retrait pour que la reindentation du YAML ne laisse pas dix espaces en dur.
     lines = String.split(block, "\n")
 
     indent =
@@ -71,14 +52,8 @@ defmodule Fleet.Project.ProbePredicateTest do
     String.trim(out)
   end
 
-  # BASE = un dépôt sans le livrable, mais AVEC un harnais. HEAD = le livrable ajouté, harnais
-  # éventuellement modifié. C'est exactement la forme d'une PR de livraison.
-  #
-  # ⚠ ET ON FABRIQUE UNE VRAIE ORIGINE, DEPUIS LE 2026-08-20. La récupération vivait dans un step à
-  # part que ces fixtures n'exerçaient pas ; elle est descendue dans le script, donc elles la jouent
-  # maintenant — `git fetch` par SHA, avec la configuration serveur que ça exige
-  # (`uploadpack.allowReachableSHA1InWant`). C'est la seule façon de mesurer le script que le runner
-  # recevra plutôt qu'une portion choisie de ce script.
+  # BASE porte le harnais, HEAD ajoute le livrable. Une origine bare locale permet
+  # de jouer aussi la recuperation Git contenue dans le script extrait.
   defp build_repo(tmp, base_files, head_files) do
     src = Path.join(tmp, "src")
     File.mkdir_p!(src)
@@ -98,9 +73,8 @@ defmodule Fleet.Project.ProbePredicateTest do
 
     origin = Path.join(tmp, "projet.git")
     git!(tmp, ["clone", "-q", "--bare", src, origin])
-    # LA CONFIGURATION QUE LE SCRIPT EXIGE DE LA FORGE, posée ici explicitement : sans elle,
-    # `git fetch origin <sha>` répond « Server does not allow request for unadvertised object ».
-    # La fixture la déclare, donc le test dit AUSSI ce que le déploiement doit fournir.
+    # Autoriser explicitement les requetes de SHA atteignables dans cette fixture;
+    # ce test ne demontre pas les exigences de tous les protocoles/serveurs.
     git!(origin, ["config", "uploadpack.allowReachableSHA1InWant", "true"])
 
     %{dir: src, origin: origin, base: base, head: head}
@@ -128,32 +102,19 @@ defmodule Fleet.Project.ProbePredicateTest do
     path = Path.join(tmp, "sonde.sh")
     File.write!(path, script)
 
-    # Le script clone lui-même, depuis `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git` — donc on
-    # lui donne une origine locale. Le jeton est vide EXPRÈS : le script ne doit l'injecter que
-    # dans une URL http(s), et un `file://` qui recevrait un `user:pass@` deviendrait invalide.
-    # Ce test est donc aussi la preuve de ce refus.
+    # Origine file:// et FORGE_TOKEN vide : ne teste pas l'injection d'un vrai jeton HTTP.
     work = Path.join(tmp, "job")
     File.mkdir_p!(work)
 
-    # ⚠ UN `HOME` PLANTÉ, PARCE QUE LES SECRETS NE VIVENT PAS QUE DANS L'ENVIRONNEMENT. `.netrc`,
-    # `.git-credentials`, `.aws/credentials`, `.docker/config.json` sont sur DISQUE : aucun filtre
-    # de variables ne les atteint jamais, et la suite jugée les lirait avec un `cat`. Le script donne
-    # à la suite un `HOME` VIERGE ; celui-ci porte un `.netrc` pour que ce geste ait quelque chose à
-    # cacher — sans lui, « la suite ne voit pas de `.netrc` » serait vrai avant comme après.
+    # Planter un .netrc factice donne un temoin au changement de HOME.
+    # Changer HOME ne constitue pas une isolation filesystem.
     fake_home = Path.join(tmp, "home")
     File.mkdir_p!(fake_home)
     File.write!(Path.join(fake_home, ".netrc"), "machine forge login x password netrc-secret\n")
 
-    # ⚠ ON PLANTE DE VRAIS SECRETS. Sans eux, la fixture de fuite passerait sans rien mesurer :
-    # l'environnement d'un test ExUnit n'en porte aucun, donc « zéro secret survivant » serait vrai
-    # avant comme après le nettoyage. `ACTIONS_RUNTIME_TOKEN` est celui que le runner Gitea injecte
-    # réellement ; les autres représentent ce qu'un opérateur y met.
-    #
-    # ⚠ ET LA SECONDE MOITIÉ DE CETTE LISTE EST LE TÉMOIN D'UN DÉFAUT MESURÉ. Le nettoyage était un
-    # motif sur les noms — `…(TOKEN|SECRET|PASSWORD)$` — et ces quatre-là lui échappaient tous :
-    # `AWS_SECRET_ACCESS_KEY` finit par `_KEY`, `DEPLOY_KEY` aussi, `DATABASE_URL` porte son mot de
-    # passe dans l'URL, `KUBECONFIG` n'a aucun suffixe connu. Ils sont ici pour que le retour à une
-    # liste noire soit ROUGE, et pas seulement déconseillé en commentaire.
+    # Secrets factices : les noms en _KEY, DATABASE_URL et KUBECONFIG echappaient
+    # au filtre par suffixe TOKEN/SECRET/PASSWORD. Le harnais compte toutes les
+    # variables hors liste autorisee, pas seulement ces noms connus.
     env = [
       {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
       {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
@@ -182,9 +143,7 @@ defmodule Fleet.Project.ProbePredicateTest do
   exit 0
   """
 
-  # ⚠ LE FAUX-VERT, ET C'EST LA MATIÈRE DU TICKET #33. La suite APPELLE bien le livrable — un
-  # lecteur pressé voit un test qui « couvre » `hello.sh` — mais elle jette sa sortie ET son code
-  # de retour. Elle passe donc à l'identique que le livrable existe, soit cassé, soit absent.
+  # Ticket #33 : appeler le livrable tout en ignorant sortie et code retour reste un faux vert.
   @false_green """
   #!/bin/sh
   sh ./hello.sh >/dev/null 2>&1
@@ -211,9 +170,7 @@ defmodule Fleet.Project.ProbePredicateTest do
     end
 
     test "LE FAUX-VERT : une suite qui jette son résultat → verdict=blind", %{tmp_dir: tmp} do
-      # ⚠ LE TEST QUI DONNE SA VALEUR À TOUS LES AUTRES. Sans lui, ce prédicat n'a jamais dit non,
-      # et un prédicat qui n'a jamais rejeté ne prouve rien — il pourrait rendre `relevant` par
-      # construction sans que personne ne s'en aperçoive.
+      # Temoin negatif : un predicat toujours relevant doit echouer ici.
       repo =
         build_repo(
           tmp,
@@ -231,8 +188,7 @@ defmodule Fleet.Project.ProbePredicateTest do
     end
 
     test "TÉMOIN : une suite déjà rouge sur la tête → inapplicable, pas relevant", %{tmp_dir: tmp} do
-      # Sans ce chemin, le rouge de la fixture 1 serait ambigu : on ne saurait pas si la suite a
-      # détecté l'absence du code ou si elle était cassée depuis le début.
+      # Le temoin deja rouge distingue une panne preexistante d'une sensibilite au code retire.
       broken = "#!/bin/sh\nexit 3\n"
 
       repo =
@@ -269,25 +225,9 @@ defmodule Fleet.Project.ProbePredicateTest do
       refute Map.has_key?(r.facts, "witness_exit")
     end
 
-    # ⚠ LE SECRET NE DOIT PLUS ÊTRE LÀ QUAND LE CODE JUGÉ S'EXÉCUTE.
-    #
-    # La commande de test vient du `CLAUDE.md` de la TÊTE JUGÉE — donc du livrable qu'on évalue. Elle
-    # tournait dans un répertoire dont `.git/config` portait le jeton de forge en clair (écrit par
-    # `git remote add origin "$auth"`), et dans un shell qui portait `FORGE_TOKEN`. Un
-    # `cat .git/config` suffisait.
-    #
-    # « Pas de privilège nouveau » restait vrai — qui contrôle `tests/run.sh` exécute déjà du code
-    # arbitraire ici. Ça justifiait de ne pas paniquer, pas de laisser le geste.
-    #
-    # Ce test s'exécute DEPUIS LA PLACE DE L'ATTAQUANT : le harnais lui-même va chercher les deux.
-    # ⚠ LE COMPTE EST TOTAL, ET C'EST TOUTE LA DIFFÉRENCE. Il comptait les variables au NOM DE
-    # SECRET (`…(TOKEN|SECRET|PASSWORD)$`) — le même motif que le nettoyage d'alors, donc un test
-    # qui ne pouvait pas voir ce que ce motif ratait. `AWS_SECRET_ACCESS_KEY` survivait, et le
-    # compte restait à zéro.
-    #
-    # Ici on compte TOUT ce qui n'est pas dans la liste blanche du script. Le complément d'une liste
-    # blanche est fermé : le test n'a plus besoin de connaître le nom du secret de demain pour le
-    # voir passer. `PWD`/`SHLVL`/`OLDPWD`/`_` sont posés par `sh` lui-même après `env -i`.
+    # Le harnais inspecte son propre environnement, le remote Git et HOME/.netrc.
+    # Compter le complement de la liste autorisee detecte les variables oubliees
+    # par un filtre de noms ; PWD/SHLVL/OLDPWD/_ peuvent etre ajoutes par sh.
     @leak_check """
     #!/bin/sh
     echo "LEAKCHECK remote=[$(git config --get remote.origin.url)] token=[${FORGE_TOKEN}]"
@@ -307,46 +247,26 @@ defmodule Fleet.Project.ProbePredicateTest do
 
       r = sonde(tmp, repo, "tests/", "sh tests/leak.sh")
 
-      # Les deux vecteurs, dans une seule ligne écrite par le code jugé lui-même.
-      #
-      # ⚠ CE QUE CETTE FIXTURE PROUVE, ET CE QU'ELLE NE PROUVE PAS. Mutation jouée : en retirant les
-      # deux lignes du workflow, `remote=[file:///…/projet.git]` apparaît et ce test devient rouge —
-      # donc la moitié `remote` MORD.
-      #
-      # La moitié `token`, elle, ne discrimine PAS ici : l'origine du test est un `file://` et
-      # `FORGE_TOKEN` y vaut `""` par construction, donc `token=[]` serait vrai même sans `unset`.
-      # Elle reste écrite parce qu'elle épingle la FORME de ce qu'on interdit, et parce qu'un jour
-      # une fixture http la rendra discriminante. Elle ne compte pas comme preuve aujourd'hui, et
-      # ce paragraphe est là pour qu'on ne la lise pas comme telle.
+      # Le remote est present avant nettoyage. Le jeton est vide des le depart,
+      # donc token=[] n'est pas un temoin discriminant de son effacement.
       assert r.out =~ "LEAKCHECK remote=[] token=[]",
              "le livrable jugé voit encore un secret : #{r.out}"
 
-      # ⚠ ET LE SECRET SUR DISQUE, QUI EST L'AUTRE MOITIÉ. `.netrc` ne vit dans aucune variable :
-      # un filtre d'environnement, si large soit-il, ne l'a jamais atteint. C'est le `HOME` vierge
-      # qui le ferme, et cette ligne est la seule qui le prouve.
+      # Verifie HOME/.netrc, pas l'inaccessibilite du fichier par un autre chemin.
       assert r.out =~ "NETRC=[]", "le livrable jugé lit les identifiants sur disque : #{r.out}"
 
-      # ⚠ ET PAS SEULEMENT LE NÔTRE, ET PAS SEULEMENT CEUX QU'ON SAIT NOMMER. Le runner injecte ses
-      # propres secrets — `ACTIONS_RUNTIME_TOKEN` — et l'opérateur les siens. Le harnais compte
-      # lui-même, DEPUIS LA PLACE DE L'ATTAQUANT, tout ce qui survit HORS de la liste blanche.
-      # Zéro, donc : les quatre plantés que l'ancien motif ratait (`AWS_SECRET_ACCESS_KEY`,
-      # `DEPLOY_KEY`, `DATABASE_URL`, `KUBECONFIG`) sont dedans, et le compte les voit.
+      # Le compte doit aussi voir les variables que l'ancien filtre par suffixe ratait.
       assert r.out =~ "LEAKSCAN=[0]",
              "des variables survivent hors de la liste blanche : #{r.out}"
 
-      # ⚠ ET LA SONDE MARCHE TOUJOURS. Couper le remote après les `fetch` ne doit rien casser :
-      # tout ce qui suit est du `checkout` local. Sans cette moitié, on aurait pu « corriger » en
-      # cassant la mesure sans que rien ne le dise.
+      # Controle positif : retirer les identifiants ne doit pas empecher la mesure locale.
       assert r.facts["witness_exit"] == "0"
       assert r.facts["verdict"] in ["relevant", "blind"]
       assert r.code == 0
     end
 
     test "commande de test VIDE → inapplicable, jamais un `blind` fabriqué", %{tmp_dir: tmp} do
-      # ⚠ LE SEUL MENSONGE QUE CETTE SONDE POUVAIT PRODUIRE, trouvé par relecture adversariale.
-      # `( )` est une sous-shell POSIX valide et sort en 0 : sans garde, le témoin passait, la
-      # mesure passait, et la sonde annonçait « la suite reste verte sans le code livré » à un
-      # projet qui n'a AUCUNE suite. Un fait faux présenté comme une mesure.
+      # Une commande absente doit etre inapplicable, pas mesuree comme une suite aveugle.
       repo =
         build_repo(
           tmp,
@@ -364,13 +284,8 @@ defmodule Fleet.Project.ProbePredicateTest do
 
     test "une commande qui COLLE au délimiteur du heredoc → inapplicable, pas une mesure partielle",
          %{tmp_dir: tmp} do
-      # ⚠ MÊME CLASSE QUE LA COMMANDE VIDE : un verdict rendu sur autre chose que la commande du
-      # projet. Une ligne de `## Test` égale au délimiteur ferme le heredoc à cet endroit — le
-      # fichier ne reçoit que le début, le reste retombe dans le shell de la sonde, et la mesure
-      # porte sur une commande tronquée sans que rien ne le dise.
-      #
-      # La sentinelle rend la troncature VISIBLE. Ce test est ce qui prouve qu'elle mord : en la
-      # retirant du workflow, la sonde rend un verdict ordinaire sur `echo before` seul.
+      # Une collision avec le delimiteur peut tronquer le fichier de commande.
+      # Le verdict doit signaler cette transcription incomplete avant de lancer la mesure.
       repo =
         build_repo(
           tmp,
@@ -389,15 +304,8 @@ defmodule Fleet.Project.ProbePredicateTest do
     end
 
     test "une commande MULTI-LIGNES s'arrête à la première erreur", %{tmp_dir: tmp} do
-      # ⚠ MESURÉ LE 2026-08-20. Le corps d'un `## Test` était joint par des ESPACES, donc
-      # « make build \n make test » devenait `make build make test` — une commande avec des
-      # arguments, ni l'une ni l'autre. Et substituée en ligne dans `( … )`, une version
-      # multi-lignes aurait pris le code de retour de la DERNIÈRE : la première étape pouvait
-      # échouer et le témoin rester vert.
-      #
-      # Ici la première ligne ÉCHOUE. La suite doit être vue rouge — c'est la sémantique de la CI
-      # (première erreur, arrêt), et le template exige que `## Test` et `ci.yml` portent la même
-      # commande.
+      # Preserver les retours a la ligne et constater l'echec de la premiere commande,
+      # meme si la suivante aurait reussi. Ce cas ne couvre pas toutes les exceptions de sh -e.
       repo =
         build_repo(
           tmp,
@@ -415,8 +323,7 @@ defmodule Fleet.Project.ProbePredicateTest do
     end
 
     test "une commande MULTI-LIGNES qui passe entièrement mesure bien", %{tmp_dir: tmp} do
-      # Le témoin du témoin : sans lui, « multi-lignes → rouge » passerait aussi si le multi-lignes
-      # était cassé de bout en bout.
+      # Temoin positif du support des commandes multi-lignes.
       repo =
         build_repo(
           tmp,
@@ -431,10 +338,8 @@ defmodule Fleet.Project.ProbePredicateTest do
     end
 
     test "un harnais qui ressemble à un GLOB n'est pas développé par le shell", %{tmp_dir: tmp} do
-      # ⚠ `$harness` est délibérément NON quoté — c'est ainsi qu'on obtient plusieurs chemins — et
-      # sans `set -f` le shell y appliquait AUSSI l'expansion de motifs : un projet déclarant
-      # `*.test` aurait vu la sonde travailler sur ce que le répertoire contient au moment du run,
-      # pas sur ce qu'il a déclaré. Ici, `*.sh` ne doit désigner AUCUN fichier existant.
+      # Garder la separation par blancs sans expansion des globs du shell.
+      # Le motif absent est refuse avant son eventuelle interpretation comme pathspec Git.
       repo =
         build_repo(
           tmp,
