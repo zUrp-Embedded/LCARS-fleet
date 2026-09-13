@@ -1,11 +1,7 @@
 defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   @moduledoc """
-  DEPOSIT channel — a project published as a deposit others can install, and the binding that ties
-  an installed deposit back to the forge it came from.
-
-  The binding is written on disk and READ back; it is never inferred from a name. Two projects can
-  carry the same short name on two forges, and a deposit that guessed its origin would reinstall
-  from the wrong one without a word.
+  Onboarder operations for personal deposit imports and external publish bindings.
+  Persist/read the chosen origin rather than inferring it from a short project name.
   """
 
   alias Fleet.EventRouter.Bus
@@ -13,17 +9,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   alias Fleet.MCP.PodTools.ProjectPublish
 
   @doc """
-  ENQUEUES a publish of `repo` to its linked external forge.
-
-  Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
-  PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
-  a large repo, so blocking the pod's turn is not an option. Returns
-  `{:ok, %{"status" => "queued", "repo" => _}}`
-  immediately; the outcome (PR/MR url or failure) arrives later on the Bus as `project_publish.done` /
-  `project_publish.failed`. The external token never enters a pod — the rail reads it host-side.
-
-  A project with no publish binding (never `lcars approve`d) is not caught here: the Task resolves the
-  binding and emits `project_publish.failed` — the request is well-formed, the target simply is not set.
+  Queues a publish task after the onboarder gate and owner/name shape check.
+  Returns queued after task start; completion/failure arrives on the lossy Bus with
+  requester identity. Missing bindings are detected by the worker, not this call.
+  Publication runs host-side so history rewriting does not block the tool turn.
   """
   @spec project_publish(map(), map()) :: {:ok, map()} | {:error, term()}
   def project_publish(%{"full_name" => repo}, state) when is_binary(repo) do
@@ -40,17 +29,13 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
 
   def project_publish(_args, _state), do: {:error, :invalid_arguments}
 
-  # `requester` est le pod DEMANDEUR, porte jusqu'au worker pour que l'issue le reveille (notify_pod
-  # via un consumer Spawner sur `project_publish.{done,failed}`) — nil pour un appelant sans pod_id.
+  # Carry the requesting pod id into the completion event consumed by Spawner.
   defp enqueue_publish(repo, requester) do
     case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
            ProjectPublish.run(repo, requester)
          end) do
       {:ok, _pid} ->
-        # `_ =` DELIBERE : le Bus est le rail LOSSY (doctrine D1), et cet evenement annonce un
-        # travail deja lance — le perdre ne change rien a ce qui se passe. `safe_emit` porte deja
-        # son propre log d'echec. Ce qui n'est PAS acceptable est de jeter le retour sans le dire :
-        # `_ =` est la difference entre « on a choisi » et « on n'a pas regarde ».
+        # The task is already started; losing this observability event does not cancel it.
         _ =
           Bus.safe_emit(
             :mcp,
@@ -78,12 +63,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   end
 
   @doc """
-  Lists a human's DEPOSIT candidates — the repos they pushed to their personal space that no
-  catalogue org already carries.
-
-  The human's login is not a wire parameter: it comes from `Fleet.Credentials.Human.current/0`,
-  the same source that owns every issue this fleet creates. A login on the wire would let a caller
-  enumerate somebody else's personal space, which is a listing tool wearing an import tool's name.
+  Lists deposit candidates from the configured human's personal space through Onboard.
+  The login comes from Human.current, never a wire argument naming another person.
   """
   @spec list_deposits(map()) :: {:ok, map()} | {:error, term()}
   def list_deposits(state) do
@@ -101,10 +82,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   end
 
   @doc """
-  Lists the human's registered EXTERNAL forges (the pool under `~/.lcars/forges/`, written by
-  `lcars forge add`) — onboarder gate, read-only. Lets starfleet PRESENT the forges before proposing a
-  publish link. Whether each forge's CLI is authenticated is a SEPARATE host check (`lcars forge
-  status`), not this. Returns `{"status":"listed","forges":[{"name","host","dest_host","owner"}, ...]}`.
+  Lists ~/.lcars/forges JSON registrations, sorted by filename, behind the onboarder gate.
+  Directory read errors yield an empty list; unreadable/invalid files are skipped.
+  Entry fields can be nil. CLI authentication is a separate lcars forge status check.
   """
   @spec list_forges(map()) :: {:ok, map()} | {:error, term()}
   def list_forges(state) do
@@ -144,12 +124,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   end
 
   @doc """
-  Links a project to a registered forge — writes its publish binding
-  (`~/.lcars/publish/<owner__name>.json`), onboarder gate. This is the REVERSIBLE intent ("this project
-  publishes HERE"), NOT the push: nothing goes external until the human's `lcars approve` (first
-  populate, the hard host gate) and the PR/MR merge. `repo` = internal `owner/name`; `forge` = a name
-  from `list_forges`; `as` = the destination repo name (it becomes `<forge.owner>/<as>` on the forge).
-  Fails if the forge is not in the pool. Returns `{"status":"linked","repo":...,"dest":...,"base":...}`.
+  Writes or overwrites a publish binding for a registered forge, behind the onboarder gate.
+  full_name is the internal owner/name; as forms <forge.owner>/<as> at the destination.
+  Currently pins base to main without destination discovery or validation of as.
+  This call does not push. The later rail requires a destination base head, but
+  there is no approval receipt checked here or by the worker.
   """
   @spec publish_link(map(), map()) :: {:ok, map()} | {:error, term()}
   def publish_link(%{"full_name" => repo, "forge" => forge_name, "as" => as}, state)
@@ -197,19 +176,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
     end
   end
 
-  # The binding key is `ProjectPublish.binding_key/1` — the single source of the org-qualified format
-  # the worker and `lcars approve` both use. Mode 600, no token in it (auth is the wired helper).
+  # Share ProjectPublish's org-qualified filename encoding. Binding contains no token.
   defp write_binding(repo, binding) do
     dir = Path.join([System.user_home!(), ".lcars", "publish"])
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{ProjectPublish.binding_key(repo)}.json")
 
-    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Appele hors du `with`, son retour est jete : un
-    # fichier ecrit dont la serrure n'a pas pu etre posee ressort `:ok` et le binding reste lisible
-    # par tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le
-    # tient.
-    # Meme forme fail-closed que `PodSocketAcceptor.restrict/2` : on ne laisse pas derriere soi une
-    # porte sans verrou, on retire ce qu'on n'a pas su fermer.
+    # Chmod failure is an error and triggers attempted removal. This is not an atomic
+    # replacement: writing can overwrite an existing binding before chmod, and removal can fail.
     with {:ok, json} <- Jason.encode(binding, pretty: true),
          :ok <- File.write(path, json),
          :ok <- File.chmod(path, 0o600) do
@@ -222,17 +196,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   end
 
   @doc """
-  Adopts a DEPOSITED repo (`<login>/<name>`) into `catalogue`'s org — the third import door.
-
-  The gate lives INSIDE the seam call (foreign `.claude/` refused en bloc, every `CLAUDE.md`
-  through the reception filter, default branch normalized): this verb adds no filtering of its own,
-  it names the actor, the destination and the FRAMING. The source is not consumed — the human keeps
-  their repo.
-
-  The framing (`workflow_map` + criticality) travels like it does on every other creation verb, and
-  for the same reason: a project that lands without a declared card gets the default one at C0, and
-  the declaration says it was never declared. That is a readable state; a project with no card at
-  all is a hole.
+  Imports a personal repository into the requested catalogue through Onboard.
+  Forwards justification, workflow_map and the resolved acting role; reception
+  filtering and source preservation belong to Onboard. Returns source and face paths.
+  This adapter forwards no separate criticality field.
   """
   @spec import_deposit(String.t(), String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def import_deposit(source, catalogue, args, state)

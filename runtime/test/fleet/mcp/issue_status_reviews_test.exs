@@ -1,18 +1,9 @@
 defmodule Fleet.MCP.IssueStatusReviewsTest do
   @moduledoc """
-  A rubber stamp and a real review had the same signature — in the ARCHITECT'S TOOLS, never in the
-  data.
-
-  On the forge the two were always distinguishable: `/pulls/N/reviews` carries a `body` and a
-  `submitted_at` per verdict, and a qualifier citing its gate-brief at 59s does not look like an
-  approval landed 1s after the request. `pr_review_state` read all of it and kept `login → verdict`.
-  The architect's first blind spot was therefore FALSE at the level of the data and TRUE at the
-  level of what it could see — three campaigns spent reconstituting from the outside something that
-  was in the payload the whole time.
-
-  The other half of this file is about the DEGRADED path, and it is the part that matters more: a
-  seam answering without `records` must not be reported as an unreachable forge. Collapsing the two
-  is how a stub, or an implementation left behind, hides behind an outage message.
+  Status rendering preserves review bodies and timestamps alongside verdicts so
+  otherwise identical approvals remain distinguishable. Missing records is a
+  partial response, distinct from a forge outage. Policy forwarding is tested
+  against the project-card fallback, without exercising the engraved-issue route.
   """
   use ExUnit.Case, async: false
 
@@ -39,7 +30,6 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     @impl true
@@ -173,9 +163,7 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
     end
 
     test "it says WHY the two are not redundant — one derives, the other restores" do
-      # The bench defect was not a missing field: an architect complained about an absent
-      # timestamp without inventorying its own toolbox. A pointer that does not say what the
-      # other tool IS gets read as a duplicate and ignored again.
+      # Explain the thread link's distinct contents so callers do not mistake it for duplicate status.
       assert status()["voir_aussi"] =~ "DÉRIVE"
     end
   end
@@ -232,22 +220,9 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
 
   describe "C2 — la surface arch et le gate lisent la MÊME politique" do
     test "la politique de verdict traverse jusqu'à la lecture d'état" do
-      # LA PROPRIÉTÉ QUE CE GESTE EXISTE POUR TENIR. `Jury.review_outcome` est factorisée — son
-      # @doc dit « factored so the status surface can NEVER drift from what the gate actually
-      # does ». Depuis que la carte peut refuser une PR que les juges ont approuvée, cette phrase
-      # n'est vraie que si la courbe entre des DEUX côtés. Ici on prouve le côté arch : la surface
-      # résout la politique par `Roles.verdict_policy_for/4` — la fonction que le gate appelle —
-      # et la passe à la lecture d'état au lieu de rendre un verdict de jury nu.
-      #
-      # Ce banc n'a pas de route gravée (`get_route → :none`) : la politique résolue est celle de
-      # la carte du PROJET, et c'est `%{"block_at" => "critical"}` (mesuré).
-      #
-      # ⚠ ET C'EST LA VALEUR QU'ON ÉPINGLE, PAS LA PRÉSENCE DE LA CLÉ. « Une clé `:verdict_policy`
-      # est présente » était la formulation d'avant, et elle ne distinguait pas ce qu'elle
-      # prétendait distinguer : passer `verdict_policy: nil` au lieu de la politique du projet la
-      # laissait verte — et la SUITE ENTIÈRE avec elle (mutation jouée contre les 3576 témoins le
-      # 2026-09-07). Une clé présente ne prouve pas qu'on a demandé ; une clé qui porte la réponse,
-      # si.
+      # Assert the resolved policy value, not just key presence: nil would leave the jury
+      # read without the project's threshold. The fixture has no engraved route, so
+      # it exercises the project-card fallback. head_sha below is checked only for presence.
       Process.put(:review_state, {:ok, %{verdicts: %{}, reviewers: [], records: []}})
       _ = status()
 

@@ -1,11 +1,8 @@
 defmodule Fleet.MCP.PodTools.Delegation.Escalations do
   @moduledoc """
-  ESCALATION channel — the architect's inbox: the tickets a producer handed back, labelled
-  `awaits-arch` and assigned to the human the fleet runs as.
-
-  An unreadable inbox is surfaced as `{:inbox_unreadable, repo, reason}`, never as an EMPTY
-  inbox: "nothing to arbitrate" and "I could not look" are the same screen and the opposite
-  situation.
+  Reads awaits-arch issues in the pod-bound project, scoped to the configured human.
+  Issue-list failure returns inbox_unreadable. Individual verdict-read failures are
+  logged and rendered as nil, indistinguishable in the result from no marked comment.
   """
 
   require Logger
@@ -66,14 +63,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Escalations do
 
   defp latest_verdict(_forge, _repo, number) when not is_integer(number), do: nil
 
-  # LE DERNIER COMMENTAIRE N'EST PAS UN VERDICT. Rendre le dernier corps non vide du fil, sans
-  # filtre, renvoie a l'arch SA PROPRE REPONSE comme etant la question a trancher des qu'il a
-  # repondu a une escalade — sous une description d'outil qui promet « the worker's escalation
-  # comment — the reasoning ». On cherche donc le marqueur d'escalade, pas la recence.
-  #
-  # `nil` quand aucun commentaire n'en porte, et c'est un resultat : le frein sur recurrence
-  # (`IncidentConsumer.default_brake/3`) pose le label SANS commentaire, donc il n'y a rien a
-  # rendre. Mieux vaut « pas de verdict enregistre » qu'un texte qui n'en est pas un.
+  # Select the escalation marker, not a later architect reply. A recurrence brake
+  # can label an issue without posting a verdict, so nil need not mean an outage.
   defp latest_verdict(forge, repo, number) do
     case forge.escalation_verdict(repo, number, []) do
       {:ok, body} ->

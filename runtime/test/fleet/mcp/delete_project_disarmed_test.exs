@@ -1,18 +1,9 @@
 defmodule Fleet.MCP.DeleteProjectDisarmedTest do
   @moduledoc """
-  The one irreversible act in the tool surface is OFF by default.
-
-  `force: true` already made the gesture deliberate, and deliberate is not the same as available.
-  `project_delete` destroys the forge repo AND both worktrees, its target is a free argument, and it
-  was permanently reachable by any onboarder pod. Nothing in the fleet's normal life needs it:
-  end-of-life teardown is an operator decision.
-
-  Same shape as the bench's `--human-admin` — a real power, off by default, whose cost is written
-  next to its switch.
-
-  The switch is checked BEFORE the gate on purpose, and the tests below fix that order: a pod that
-  is not an onboarder learns that the tool is disabled, not that it would have been refused. An
-  unauthorized caller has no business finding out whether it would have been authorized.
+  Project deletion requires an explicit boolean deployment switch before the onboarder
+  gate. force does not arm that switch. Direct handler tests record the stub call;
+  they do not delete repositories or worktrees. Disabled calls return the same refusal
+  before resolving whether the role would be authorized.
   """
   use ExUnit.Case, async: false
 

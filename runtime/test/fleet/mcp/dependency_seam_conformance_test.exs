@@ -1,25 +1,17 @@
 defmodule Fleet.MCP.DependencySeamConformanceTest do
   @moduledoc """
-  The seam guard must cover the ops the seam actually CALLS.
-
-  `conforming/2` exists so a misconfigured seam yields a clear `{:seam_misconfigured, mod, missing}`
-  instead of an `UndefinedFunctionError` deep in the delegation. It can only see what a behaviour
-  declares — and on 2026-08-04 the delegation declared 12 callbacks while calling 16 functions
-  through the seam. The three dependency ops were among the four uncovered: called on every
-  `depends_on` creation and inside every supersede retirement, guarded by nothing.
-
-  The retirement path is where it costs: the carry-over runs AFTER the live PR has been closed, so a
-  raise there leaves the old ticket half-retired with its edges dropped — and closing RELEASES
-  everything it blocked.
+  Check dependency callback exports and callers' partial-failure behavior.
+  Creation retains its issue id with an edge warning; supersede keeps the old issue
+  open when edges cannot be carried, even if the PR was already closed.
+  The minimum callback assertion below names three operations; the implementation
+  check derives all declared callbacks, including removal.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.MCP.PodTools.Delegation
   alias Fleet.MCP.PodTools.Delegation.DependencyForge
 
-  # ─── The instrument first ───────────────────────────────────────────────────────────────────
-  # A wall that checks an empty contract passes everything. Assert the contract is NOT empty before
-  # believing anything the tests below prove.
+  # A nonempty minimum set prevents a vacuous conformance check.
 
   describe "the contract itself" do
     test "the behaviour declares the three ops the delegation calls — an empty one would pass all" do
@@ -50,7 +42,7 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
   # ─── A seam that cannot write edges ─────────────────────────────────────────────────────────
 
   defmodule BlindForge do
-    # No dependency op at all. Before the guard, touching one of them raised.
+    # Missing dependency callbacks must produce a warning instead of invoking an absent function.
     def close_pr(_repo, pr, _opts) do
       send(self(), {:pr_closed, pr})
       {:ok, :closed}

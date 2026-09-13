@@ -1,26 +1,12 @@
 defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
   @moduledoc """
-  Dependency-edge behaviour — the CONTRACT of the forge ops that WRITE AND READ the order between
-  tickets (`depends_on` at creation, edge carry-over at supersede), DISTINCT from the delegation
-  `ForgeClient` behaviour.
+  Dependency callbacks, separate from ForgeClient so stubs can declare the surfaces
+  they use. Check the already-resolved module with Gate.conforming; resolving again
+  could validate a different implementation.
 
-  Why it exists: the `conforming/2` guard turns a seam module missing a callback into a clear
-  `{:seam_misconfigured, mod, missing}` instead of an obscure `UndefinedFunctionError` deep in the
-  delegation — and it can only answer for what a behaviour DECLARES. A seam call with no @callback
-  on its path is vouched for by nothing.
-
-  The failure it prevents is not cosmetic. The edge carry-over runs INSIDE the supersede retirement,
-  after the live PR has been closed: an `UndefinedFunctionError` there leaves the old ticket closed
-  as a side effect of a crash, with its edges dropped — the exact "closing RELEASES what it blocked"
-  hazard the carry-over exists to prevent.
-
-  Why a SEPARATE behaviour (same reasoning as `EscalationForge`, DR-012): adding these to
-  `ForgeClient` would cascade onto every delegation stub, including the many whose tests never touch
-  a dependency. Two behaviours = each stub adopts only the surface it must satisfy.
-
-  Checked against the module the caller was ALREADY HANDED (`conforming(DependencyForge, forge)`),
-  not against a fresh resolution: the question is whether THIS module carries the surface, and
-  re-resolving could answer about a different one.
+  Retirement checks this surface before carrying edges and closing the old issue.
+  Its PR may already be closed when that check fails, so the result is a partial
+  retirement warning, not an atomic rollback.
   """
 
   @doc "The issues BLOCKING `number` — what it waits on (raw Gitea maps)."
@@ -32,10 +18,9 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
               {:ok, [map()]} | {:error, term()}
 
   @doc ~S"""
-  Adds "`number` depends on `blocker`" (same repo).
-
-  A 409 on an edge that already exists is NOMINAL on the replay path, and the callers treat it as
-  such — the contract is "the edge is there afterwards", not "this call created it".
+  Adds number's dependency on blocker in the same repo.
+  Retirement carry-over treats HTTP 409 as replay success without readback;
+  direct edits and creation-time attachment do not normalize that error here.
   """
   @callback add_issue_dependency(
               repo :: String.t(),
@@ -45,10 +30,8 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
             ) :: {:ok, map()} | {:error, term()}
 
   @doc """
-  Removes "`number` depends on `blocker`" (same repo).
-
-  A retirement without a replacement has nowhere to move its edges, so it LIFTS them. Without this,
-  closing the retired blocker would release every dependent as if the work had landed.
+  Removes number's dependency on blocker. Retirement without a replacement uses
+  removal to detach edges; this does not preserve a blocker on the dependent ticket.
   """
   @callback remove_issue_dependency(
               repo :: String.t(),

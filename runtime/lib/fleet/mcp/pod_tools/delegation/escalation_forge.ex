@@ -1,9 +1,7 @@
 defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
   @moduledoc """
-  Inspectable forge seam for architect escalation inbox reads and replies.
-
-  DR-012 keeps this surface separate from `ForgeClient`, so test stubs implement only the callbacks
-  they consume. Both behaviours resolve the same runtime forge module without an upward compile edge.
+  Forge callbacks for escalation inbox reads and replies, separate from ForgeClient
+  so stubs can declare the surfaces they use. Both resolve the same runtime module.
   """
 
   @doc "OPEN issues of `repo` (raw Gitea maps; `opts[:assigned_by]` scopes to the human)."
@@ -15,12 +13,9 @@ defmodule Fleet.MCP.PodTools.Delegation.EscalationForge do
               {:ok, [map()]} | {:error, term()}
 
   @doc """
-  The last comment carrying an ESCALATION marker, or `nil`.
-
-  Separate from `list_comments/3` on purpose: the marker FORMAT belongs to the pilot domain
-  (`ForgeProtocol` builds it at both writing sites) and this boundary refuses to reach into it. The
-  inbox asks; the client knows the protocol. `nil` is a result — the recurrence brake poses the
-  label with no comment at all, so there is nothing to arbitrate on.
+  Returns the last escalation-marked comment or nil. The client owns marker parsing;
+  MCP need not depend on the producer's marker construction. A recurrence brake can
+  set the escalation label without a comment, so nil can be a valid result.
   """
   @callback escalation_verdict(repo :: String.t(), number :: integer(), opts :: keyword()) ::
               {:ok, String.t() | nil} | {:error, term()}

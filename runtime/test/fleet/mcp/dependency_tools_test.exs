@@ -1,15 +1,8 @@
 defmodule Fleet.MCP.DependencyToolsTest do
   @moduledoc """
-  The order between two tickets can be stated AFTER they exist — and the tool says what it does not
-  do.
-
-  `create_issue(depends_on:)` could only order work at birth, so a dependency discovered later had
-  nowhere to go but the prose of a brief, where it holds exactly as long as someone reads it.
-
-  The half these tests spend most lines on is the honest result. On a ticket ALREADY in flight the
-  edge stops nothing: the admission gate reads blockers when a step STARTS, and that reading has
-  happened. What it blocks is the CLOSURE. An architect told "dependency added" about a running
-  ticket would believe it had pulled a brake it never touched — and would stop watching.
+  Direct tool calls check edge writes, bound-repo authorization and returned scope.
+  An added dependency does not stop an already-admitted step. These stubs verify
+  that the closure caveat is communicated; they do not exercise forge enforcement.
   """
   use ExUnit.Case, async: false
 
@@ -19,7 +12,6 @@ defmodule Fleet.MCP.DependencyToolsTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     def add_issue_dependency(repo, n, b, _opts) do

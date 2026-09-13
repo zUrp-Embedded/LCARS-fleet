@@ -1,24 +1,12 @@
 defmodule Fleet.MCP.CreateIssueLotTest do
   @moduledoc """
-  The USER LOT: matter handed to a producer as FILES, not as words.
+  A user lot carries committed workshop files/directories, separate from the task brief.
+  Publish through Deliverable so matter uses the same ancestry, identity and secret
+  checks as code. An unpublishable lot refuses creation because it has no inline fallback.
 
-  A brief is the task. A lot is what the task works on — several documents, a directory, images —
-  written by the human and the delegating role together on the workshop face. No text field carries
-  that, and none has to: git already carries directories and binaries, so the lot travels as a
-  COMMIT and the ticket names it (`Lot: <ref> @ <sha>`).
-
-  What these tests pin is the part that is easy to get wrong twice:
-
-    * the pod does NOT push it. The commits leave through the same publication boundary as every
-      deliverable (`Fleet.Workflow.Deliverable`), so base ancestry, commit identity and the secret
-      scan apply to matter exactly as they apply to code. A second push path would be content
-      reaching the forge past that gate, which is the one thing that boundary exists to prevent;
-    * a lot that cannot be published REFUSES the ticket. The brief degrades (it still travels,
-      inline); the lot has no inline form, so degrading would turn a ticket that HAS matter into
-      one that has none — and the producer would work against material it never saw.
-
-  Real git fixtures (a bare origin + a workshop clone), no network: the publication is a push to a
-  `file://` remote, which is what makes "the branch is really on the forge" assertable.
+  Real local Git origin/clone fixtures check the branch SHA, machine-readable pointer,
+  absence of a lot, empty workshop and a detected secret. They do not enumerate every
+  publication gate or exercise remote forge authentication.
   """
   use ExUnit.Case, async: false
 
@@ -65,9 +53,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
 
   defp g(dir, args), do: System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
 
-  # A bare origin carrying the workshop face, plus the local clone the human and the architect
-  # write in. Identity = the RUNTIME human's, resolved the same way the publication gate resolves
-  # it — a fixture that hardcoded an address would pass on this container and nowhere else.
+  # Use the runtime human identity so the fixture matches Deliverable's identity check.
   defp workshop_fixture(tmp, human) do
     origin = Path.join(tmp, "origin.git")
     clone = Path.join([tmp, "workshop", "demo"])
@@ -126,8 +112,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
         %{
           "title" => "reprendre la doc du protocole",
           "brief" => "part du paquet",
-          # A code ticket is judged → it must carry criteria (P8b). These tests exercise the LOT, not
-          # the criteria; a self-contained placeholder keeps them valid code tickets.
+          # Supply criteria so these cases reach lot publication instead of an unrelated refusal.
           "criteria" => "l'attendu : le lot est repris fidèlement"
         },
         args
@@ -143,8 +128,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
 
       assert {:ok, _result, _state} = create(%{"lot" => "morse-ui-v2"})
 
-      # The branch is really on the remote, at the commit the arch made — nobody pushed it from
-      # the pod, and nothing was re-derived on the way.
+      # The local bare origin must contain the exact workshop commit.
       {out, 0} = g(origin, ["rev-parse", "lcars/lot-morse-ui-v2"])
       assert String.trim(out) == sha
 
