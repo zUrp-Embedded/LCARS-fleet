@@ -1,10 +1,8 @@
 defmodule Fleet.Project.Onboard.Lifecycle do
   @moduledoc """
-  Ce qui arrive a un projet APRES son entree : le rouvrir, l'enumerer, le parquer, le supprimer.
-
-  `close_project/2` PARQUE — le materiel reste, un marqueur dit que le projet dort — la ou
-  `delete_project/2` detruit, et n'accepte de le faire que sur des preuves : un depot dont l'origin
-  prouve l'identite, ou un arbre prouve vide. Il n'y a pas de `rm` de confiance dans ce fichier.
+  Lists, opens, parks and deletes local projects.
+  Parking records forge marker issues while retaining project files. Deletion removes the
+  forge repo first, then checks each local face for a matching parsed origin or empty debris.
   """
 
   alias Fleet.Forge.Client, as: ForgeClient
@@ -16,17 +14,9 @@ defmodule Fleet.Project.Onboard.Lifecycle do
 
   require Logger
 
-  # Le defaut vaut le PREMIER catalogue installe, toujours celui du release : il vit dedans, donc il
-  # est installe par construction et en tete. Un deploiement qui apporte le sien nomme son org au
-  # guichet, ce qui est le geste voulu — un defaut ne devine pas quel metier l'appelant visait.
-  #
-  # ⚖ L'org d'un projet est fixee POUR SA VIE : elle s'ENONCE, elle ne se devine pas. Les verbes
-  # d'entree l'exigent donc tous.
-  #
-  # ⚠ DEFAUT CONNU, MESURE, NON CORRIGE ICI : `describe_project/3` recoit `[]` de ses deux
-  # appelants, donc tout projet est etiquette sous l'org du catalogue racine — y compris ceux d'un
-  # AUTRE catalogue — et l'etat de parking est ensuite interroge avec cette mauvaise cle. La bonne
-  # source est l'ORIGINE git du projet, qu'aucun lecteur de ce depot ne lit encore.
+  # Listing assigns opts[:org] or the first installed catalogue (fallback fleet) to every entry.
+  # It does not read origins: mixed-catalogue directories can be labelled with the wrong repo,
+  # and parking is then queried using that wrong key.
   defp listing_org_placeholder do
     case Onboard.installed_orgs() do
       [org | _] -> org
@@ -35,11 +25,9 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   end
 
   @doc """
-  Opens a project already present on the machine.
-
-  All parked markers must be read and closed before the per-project architect is ensured. Missing
-  local faces or an unreadable/unclosable parked state are refusals. Returns the common project
-  result shape used by `onboard/2` and `import/2`.
+  Opens a project after checking that all three local directories exist.
+  Origins and branch contents are not verified. Closes all parked markers before architect
+  ensure; a later close failure leaves earlier markers closed. Returns the common project result.
   """
   @spec open(String.t(), keyword()) :: {:ok, Onboard.result()} | {:error, term()}
   def open(full_name, opts \\ []) when is_binary(full_name) do
@@ -55,7 +43,6 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     end
   end
 
-  # BL-6-30
   defp unpark(full_name, opts) do
     forge = forge_issues(opts)
 
@@ -74,8 +61,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
 
   defp close_markers(markers, full_name, forge, opts) do
     Enum.reduce_while(markers, :ok, fn %{"number" => n}, :ok ->
-      # `closure: :marker` — ce ne sont PAS des tickets mais les marqueurs de parking de l'onboard :
-      # rien a estampiller, et surtout pas un `stage/*` qui les ferait ressembler a du travail.
+      # Marker closure must not stamp stage labels that would turn parking state into work.
       case forge.close_issue(full_name, n, Keyword.put(Repo.fc_opts(opts), :closure, :marker)) do
         {:ok, _} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, {:unpark_failed, {n, reason}}}}
@@ -92,34 +78,17 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     end
   end
 
-  # Issue-side forge seam of the close/open verbs (the repo seam `:forge_repo` carries only the
-  # provisioning ops). Default = the real client; injectable for tests.
+  # Issue operations have a separate seam from forge_repo provisioning.
   defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, ForgeClient)
 
   @doc """
-  Enumerates the projects on this container, with what governs each one.
+  Lists sorted directories under code_root, without requiring Git or a project declaration.
+  Uses opts[:org] or the listing placeholder for every repo identity, not its Git origin.
 
-  The onboarder can `create`, `open`, `import`, `adopt`, `close`, `revise` and `delete` a project.
-  Without this verb it could destroy a project it had no way to name. A pure read — the only
-  listing in the delegation surface that writes nothing.
-
-  Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
-  the forge that was never cloned here is not something this container can act on, and a disk project not
-  yet published is precisely what `project_adopt` exists for.
-
-  Per project, three facts and no derivation:
-
-    * the DECLARED card (`.lcars.json`), reported as declared or NOT — criticality IS the card,
-      no separate level field. An undeclared
-      project falls back to the fleet default at burn time, and that fallback is deliberately NOT
-      applied here: reporting the effective card would make an undeclared project indistinguishable
-      from one that declared the default on purpose, and `Declaration.pipeline_default/2`
-      records an INCIDENT on the invalid path — a listing must not have side effects.
-    * the STATE, read from the forge: an open parked-marker issue is the state machine
-      (`project_close`'s own truth, not a second reading of it).
-    * `state: "unknown"` with `state_error` when that forge read fails. Never a silent "open" — an
-      unreadable state and a running project must not look the same to the actor that can delete
-      either one.
+  Reports the stored card as declared/undeclared/invalid/unreadable, without resolving a
+  fallback or recording Declaration reader incidents. A binary pipeline_default is accepted
+  without loading the card. Reads parking from forge marker issues; failed reads produce
+  unknown plus state_error, never a confident open.
   """
   @spec list_projects(keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_projects(opts \\ []) do
@@ -141,17 +110,9 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   end
 
   @doc """
-  The open tickets of `full_name` that this fleet would act on — the scope an emergency stop closes.
-
-  Lives here and not on the caller's side for the same reason `list_projects/1` does: "which tickets
-  is the fleet working on" is composed of two facts that belong to this domain — the poller's own
-  scoping (issues assigned to the human owner) and the parked-marker vocabulary. Re-deriving either
-  MCP-side would put a second authority next to the one that creates and closes them, and MCP cannot
-  reference the forge protocol at all (upward boundary).
-
-  The PARKED MARKER IS EXCLUDED, and it is not a detail: that marker is an open issue assigned to
-  the same human, and closing it means UNPARKING the project. A brake that reopens a deliberately
-  closed project does the opposite of stopping.
+  Returns integer issue numbers from the current human's assigned open-issue listing,
+  excluding parked markers. Closing a marker would reopen the project instead of stopping it.
+  Kept in Project so MCP does not duplicate the forge protocol vocabulary.
   """
   @spec list_stoppable_issues(String.t(), keyword()) :: {:ok, [integer()]} | {:error, term()}
   def list_stoppable_issues(full_name, opts \\ []) when is_binary(full_name) do
@@ -179,7 +140,6 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     |> Map.merge(parked_state(full_name, opts))
   end
 
-  # What the project DECLARES, never what it would fall back to.
   defp declaration_facts(proj_dir) do
     case File.read(Path.join(proj_dir, Fleet.Layout.project_declaration_file())) do
       {:ok, raw} ->
@@ -219,23 +179,14 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   end
 
   @doc """
-  CLOSES a project (BL-6-30) — the verb between `open` and `delete`: stops the fleet ON this
-  project while disk and forge stay intact. The closed state is a FORGE OBJECT (the forge IS
-  the state machine): an OPEN marker issue (`ForgeProtocol.parked_issue_title/0`, assignee =
-  the human — the same fixed point `issue_create` uses, and REQUIRED for the poller's
-  `assigned_by` scoping to see it). The poller reads it in the per-repo listing it already
-  does and skips the whole step rail; the marker is posted BEFORE the architect stops, so a
-  tick between the two gestures dispatches nothing. In-flight workers are NOT reaped — the
-  running brick finishes, the skip stops the NEXT one (same philosophy as the lease). Reopen:
-  `project_open` (immediate, closes the marker(s) then ensures the architect), or the human
-  closing the marker in the forge UI (a LEGITIMATE unpark — the rail resumes, and the
-  architect self-respawns at the first pending escalation via the ArchWake net).
+  Parks a project by creating a marker issue assigned to the current human, then stopping
+  its architect. Existing markers avoid a second create but still retry the stop.
+  Requires the main directory's parsed origin to match owner/name; host is not compared.
 
-  Identity preflight at the delete standard (proj_dir's git origin must PROVE `full_name` — a
-  basename homonym is never the project we close); already parked → honest no-op
-  (`outcome: :already_closed`, the architect stop still converges). The architect stop is
-  best-effort (`:stopped` / `:none` / `:error` — a spawner hiccup never fails the close: the
-  MARKER is the state, and it is already posted).
+  In-flight workers are not stopped. The marker is written before architect stop, but this
+  does not synchronize with a poller's already-read state. Stop exceptions/exits become an
+  error outcome without undoing the marker. Reopen through project_open or by closing
+  the marker in the forge UI.
   """
   @spec close_project(String.t(), keyword()) :: {:ok, Onboard.close_result()} | {:error, term()}
   def close_project(full_name, opts \\ []) when is_binary(full_name) do
@@ -303,13 +254,16 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   end
 
   @doc """
-  Deletes a project's forge repository and proven local runtime footprint. `CI-07`
+  Deletes the forge repository, then requests worker cleanup and removes eligible local faces.
+  Requires a truthy force option. A failed forge probe/deletion returns before local cleanup.
 
-  `force: true` is mandatory. A forge outage refuses the operation. Each local directory is removed
-  only when its origin resolves to `full_name`, or when it has no origin and is proven empty of both
-  commits and content; ambiguous state is kept. The architect is stopped only after local ownership
-  is proven. Local removal and architect-stop failures are reported but do not reverse a decided forge
-  deletion.
+  A matching parsed owner/name origin admits removal without comparing hosts. If the origin
+  read fails, deletion requires no entries besides .git and an empty commit query; commit-query
+  errors count as no commits. This is a heuristic, not proof against unreadable Git history.
+
+  Architect stop runs only if at least one local face was removed, including empty debris.
+  Local removal/stop failures do not undo forge deletion. Worker sweep errors may appear as
+  zero killed; its exit signals are not caught by the sweep helper.
   """
   @spec delete_project(String.t(), keyword()) :: {:ok, Onboard.delete_result()} | {:error, term()}
   def delete_project(full_name, opts \\ []) when is_binary(full_name) do
@@ -319,12 +273,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     with :ok <- Onboard.validate_name(name),
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- Repo.delete_forge(full_name, opts) do
-      # THE WORKERS DIE BEFORE THEIR WORLD DOES. Stop the architect alone and an engineer in flight
-      # outlives the removal of its own project: its workspace still exists, so it does not even
-      # crash — it keeps reading a reference that is no longer there and carries on.
-      # Killed FIRST, before the faces go: a pod losing its world mid-read has nothing to say about
-      # it, whereas one killed outright is indistinguishable from a crash, which the reconciliation
-      # is built to handle.
+      # Request worker cleanup before removing their project faces; forge deletion already happened.
       pods = kill_project_workers(full_name, opts)
 
       proj = nuke_if_is(full_name, dirs.code, opts)
@@ -346,8 +295,6 @@ defmodule Fleet.Project.Onboard.Lifecycle do
          repo: full_name,
          forge: forge,
          architect: architect,
-         # REPORTED, because a deletion that cost work in flight must not read as free. The caller
-         # relays this to a human who may not know anything was running.
          workers_killed: pods.killed,
          project_dir: dirs.code,
          work_dir: dirs.ops,
@@ -417,8 +364,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     if Keyword.get(opts, :force, false), do: :ok, else: {:error, {:force_required, full_name}}
   end
 
-  # Best-effort like `stop_architect/2` below, and for the same reason: the faces are already
-  # committed to going. A sweep that failed must not turn a deletion into a half-state.
+  # Continue after returned errors or rescued exceptions; exits are not caught here.
   defp kill_project_workers(full_name, opts) do
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
 
@@ -456,9 +402,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
       :error
   end
 
-  # ALL THREE faces, and the workshop one is not optional here: `open` is what hands a project to
-  # the architect, whose producer path is on `workshop`. Opening a project whose workshop face never
-  # landed would succeed and then fail at the first documentary ticket, far from the cause.
+  # Require workshop too, so open does not hand the architect a missing writable path.
   defp require_all_faces_on_machine(full_name, dirs) do
     if Enum.all?([dirs.code, dirs.ops, dirs.workshop], &File.dir?/1),
       do: :ok,

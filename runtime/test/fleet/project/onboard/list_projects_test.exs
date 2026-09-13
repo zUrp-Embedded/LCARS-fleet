@@ -1,22 +1,10 @@
 defmodule Fleet.Project.Onboard.ListProjectsTest do
   @moduledoc """
-  The onboarder could destroy a project it had no way to name.
-
-  `require_onboarder` opened create / open / import / adopt / close / delete / revise, and there
-  were zero occurrences of any listing anywhere in the surface. Not a filter to widen — a half that
-  was never built.
-
-  Two things this listing must NOT do, and they are the same mistake twice: report a fallback as if
-  it were a declaration, and report an unreadable state as if it were a known one. Both turn
-  "we do not know" into a confident answer, in front of the actor that can delete the subject.
+  Disk listing must distinguish a declared card from its fallback, and unknown parking
+  state from open. Fixtures are directories, not Git repos; they exercise placeholder org
+  naming and do not establish origin-based identity.
   """
-  # `async: false`, and it is the SEAM that decides it, not a preference. `:pod_resolver` is a
-  # GLOBAL app-env key: this file and `list_projects_test` both set it, to different roles, and
-  # `put_env_restoring` RESTORES it when a test ends — so one suite's teardown blanks the other's
-  # seam mid-flight and `resolve_identity` answers `:pod_unknown`, which is neither role but the
-  # absence of one. Observed once on 2026-08-05 as a lone red in an otherwise green suite; proven by
-  # construction on 2026-08-06 rather than by catching it again. The six other suites touching this
-  # key were already `async: false` — these two were the outliers.
+  # This suite mutates global mcp_pod_resolver; run synchronously to avoid clobbering other suites.
   use ExUnit.Case, async: false
 
   alias Fleet.Project.Onboard, as: ProjectOnboard
@@ -66,9 +54,7 @@ defmodule Fleet.Project.Onboard.ListProjectsTest do
 
   describe "the card is reported as DECLARED or not — never as its fallback" do
     test "a declared card carries who declared it — never the fallback", %{tmp_dir: tmp} do
-      # THE FIXTURE IS WRITTEN BY THE WRITER, and that is the point of this test as much as the
-      # assertions are: a fixture hand-shaped like the reader proves the reader agrees with itself.
-      # Naming a card IS the declaration now — there is no separate level to carry (crit_quarantine).
+      # Use the declaration writer so the reader is checked against a real produced record.
       dir = project(tmp, "alpha")
 
       :ok =

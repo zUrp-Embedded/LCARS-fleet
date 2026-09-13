@@ -1,41 +1,20 @@
 defmodule Fleet.Project.Onboard.Refute do
   @moduledoc """
-  Le refus du DEPOT-MAGASIN : un projet ne peut pas s'appeler comme le magasin de son catalogue.
-
-  Le magasin est un depot comme un autre du point de vue de la forge, et rien dans son nom ne le
-  distingue — c'est la declaration du catalogue qui dit lequel il est. Un projet onboarde a cette
-  adresse ecraserait le magasin sans qu'aucune erreur ne soit levee : la forge repondrait 200 a
-  chaque geste.
+  Guards against treating a catalogue store as a project.
+  Existing repositories are classified by manifest identity; new destinations by the
+  reserved store address, where a later catalogue installation can force-push.
   """
 
   alias Fleet.Project.Onboard.Repo
 
   @doc """
-  Refuses to treat a catalogue's STORE as a project — `:ok` when the repo is not one.
+  Reads catalogue.yaml at HEAD and refuses when its declared name equals the repo owner.
+  Shares Catalogue.manifest_name with CatalogueDeposits to avoid divergent parsers.
 
-  ## Why the explicit doors need this and `reconcile` does not
-
-  `reconcile/2` is already guarded, and better than by a name: it asks every repo *"do you carry a
-  project declaration (`.lcars.json` on `main`)?"* — a guard by PROPERTY, which holds without ever
-  knowing the word `catalogue`.
-
-  The doors where an ADMIN TYPES THE NAME have no such shield. An admin imports `web/_catalogue` to
-  see what happens, the fleet lays three faces and writes `.lcars.json` at its root — and the store
-  becomes a declared project. The property guard then turns around: from the next pass on, it
-  DEFENDS the property that was laid by mistake. That is why this is a refusal at the door and not
-  a repair afterwards.
-
-  ## The discriminant is the identity, and an unknown is a REFUSAL
-
-  `owner == manifest.name`, read from the repo's own `catalogue.yaml` — the same question
-  `Fleet.Application.CatalogueDeposits.split/2` asks, so the two cannot disagree about what a
-  store is.
-
-  A `:not_found` is an ANSWER (not a catalogue — the overwhelmingly common case, and silent). Any
-  OTHER read failure is an ABSENCE of an answer, and it refuses: importing a store is expensive and
-  self-defending, retrying an import is free. ⚖ user: an explicit failure beats an ambiguous
-  success. The refusal for that case says what it could not read, never that this IS a store — a
-  refusal that named the wrong cause would send the admin to delete a repo that is fine.
+  Missing files or manifests without a parsed name are admitted; other read errors return
+  store_check_unreadable, distinct from a positively identified store. This checks identity,
+  not full manifest validity. Explicit import/migration need this guard even though general
+  reconciliation filters by the presence of a project declaration on main.
   """
   @spec refute_store(String.t(), keyword()) ::
           :ok
@@ -70,22 +49,10 @@ defmodule Fleet.Project.Onboard.Refute do
   end
 
   @doc """
-  Refuses to CREATE a repo at the address the fleet pushes a store to — `:ok` otherwise.
+  Refuses the reserved store destination before creation.
 
-  ## Why this door asks a different question, and why the answer is a name
-
-  `refute_store/2` asks an EXISTING repo what it declares. `adopt_project/2` publishes a disk-only
-  project to a repo that does not exist yet, so there is nothing to ask. What it can collide with is
-  the ADDRESS: `push_store` force-pushes there, so a project adopted at that name is a project the
-  next `catalogue install` silently overwrites.
-
-  `require_forge_absent/2` already covers the case where the store is there — but the dangerous
-  window is precisely the one it does not see: the org exists, its catalogue is NOT installed yet,
-  nothing occupies the name, and the collision arrives later.
-
-  Checking a name here is not the defect this rule closed. That one answered "what IS this repo"
-  with a name; this one answers "may I WRITE here", which is what an address is for. Cf.
-  `Fleet.Catalogue.store_repo/0`, which says it and says why in the same breath.
+  An absent repository has no manifest to inspect. Its address must still be reserved:
+  a later catalogue install can force-push there, so checking current forge absence is insufficient.
   """
   @spec refute_store_address(String.t(), String.t()) ::
           :ok | {:error, {:store_address, String.t(), String.t()}}
@@ -104,12 +71,7 @@ defmodule Fleet.Project.Onboard.Refute do
     end
   end
 
-  # LA REGLE DU MANIFESTE N'EST PAS RECOPIEE ICI. `Fleet.Catalogue` la porte — colonne zero,
-  # guillemets, commentaire de fin de ligne — et une seconde ecriture de la meme regle serait
-  # exactement le defaut que ce garde ferme, un cran plus bas : deux lecteurs d'un discriminant est
-  # un discriminant qui derive le jour ou un seul est corrige. Elle vit dans la FONDATION parce que
-  # l'autre lecteur (`Fleet.Application.CatalogueDeposits`) est derriere une frontiere que
-  # `Fleet.Project` ne peut pas referencer — et on n'elargit pas une frontiere pour avoir raison.
+  # Keep parsing in Catalogue: Project cannot depend on the other consumer, Application.
   defp declared_catalogue_name(full_name, opts) do
     fc = Keyword.put(Repo.fc_opts(opts), :ref, "HEAD")
 

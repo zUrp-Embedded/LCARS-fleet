@@ -1,12 +1,8 @@
 defmodule Fleet.Project.Onboard.Migration do
   @moduledoc """
-  Deplacer un projet d'un catalogue a un autre, et faire reconverger un conteneur sur ce que la forge
-  porte vraiment.
-
-  Deux rails, une seule question : « l'etat sur disque et l'etat sur la forge disent-ils la meme
-  chose ? ». `migrate/3` repond en DEPLACANT, la reconciliation repond en CONSTATANT — chaque verbe
-  a sa forme `eval_*` qui rend le diagnostic sans rien ecrire, parce que `bin/lcars` n'a aucun
-  acces au BEAM et lit un verdict, pas un effet.
+  Moves projects between catalogue orgs and reconciles local faces with forge inventory.
+  Release eval doors execute these operations and report outcomes; they are not dry runs.
+  Only reconcile's check mode avoids project mutations.
   """
 
   alias Fleet.Project.GitOps
@@ -18,23 +14,15 @@ defmodule Fleet.Project.Onboard.Migration do
   require Logger
 
   @doc """
-  MIGRE un projet d'un catalogue vers un autre — le transfert forge ET le repointage local.
+  Transfers the forge repository to the target catalogue, then repoints local origins.
 
-  L'org d'un projet EST le nom de son catalogue : migrer, c'est donc transferer le depot dans l'org
-  du catalogue cible. Le transfert est un seul appel et tout survit (issues, PR, labels, protection,
-  attribution) ; ce qui NE suit pas est ce qu'on ne veut pas voir suivre — les droits se REDERIVENT
-  des teams de l'org d'arrivee, donc les roles de l'ancien catalogue perdent l'ecriture et leur
-  historique reste a leur nom, ce qui est la verite : ce travail-la a bien ete fait par ce catalogue.
+  Local paths are keyed by project name, so the org change leaves their paths unchanged.
+  Only directories with a .git directory are repointed; others are reported in absent,
+  including linked worktrees. Existing origins are not checked against the source.
 
-  Les trois faces locales sont clees par le NOM du projet, pas par l'org : elles survivent. Mais leur
-  `origin` pointe l'ancienne URL et ne vit plus que par la redirection `301` de Gitea — les repointer
-  fait partie du geste, sans quoi la migration laisse un projet qui marche par accident.
-
-  Ce que cette fonction NE fait pas, et ne peut pas faire : attendre la quiescence. Elle n'en a pas
-  besoin — un catalogue ne change pas sous un projet vivant (les images gelent au boot, et le boot
-  refuse une carte nommant un role absent). Ce qui reste est le cas ou l'operateur migre pendant
-  qu'un step-run est ouvert : la PR en vol a ete produite par un role que le nouveau catalogue ne
-  porte pas, et c'est a lui de le savoir.
+  There is no quiescence check or rollback. A URL/repoint failure can follow a successful
+  transfer and leave some origins unchanged; in-flight work and target role compatibility
+  are not validated here. Forge metadata/permission transfer is delegated to the API.
   """
   @spec migrate(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def migrate(full_name, target_catalogue, opts \\ [])
@@ -42,9 +30,7 @@ defmodule Fleet.Project.Onboard.Migration do
     name = Fleet.Layout.project_name(full_name)
     dirs = Faces.face_dirs(name, opts)
 
-    # La loi d'ordre, la meme qu'a l'import : les refus PURS et LOCAUX d'abord, la forge ensuite.
-    # `refute_store` lit le manifeste de la cible ; le faire avant `require_target_installed` ferait
-    # payer un aller-retour a une migration refusee sur un fait que le disque portait deja.
+    # Local target checks precede the manifest's forge read.
     with :ok <- refute_same_catalogue(full_name, target_catalogue),
          :ok <- require_target_installed(target_catalogue),
          :ok <- Refute.refute_store(full_name, opts),
@@ -74,33 +60,15 @@ defmodule Fleet.Project.Onboard.Migration do
     end
   end
 
-  # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que ce conteneur n'a
-  # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
-  # les orgs des catalogues INSTALLES, donc le projet deviendrait invisible, pas casse.
-  #
-  # ⚠ DEUX ETATS, ET PAS TROIS. Une declaration locale d'ACTIVITE serait un troisieme etat entre
-  # « le materiel est la » et « la forge le porte », tenu a la main. Deux etats qui repondent a la
-  # meme question finissent par se contredire, et l'ecart tue une flotte entiere : mesure au banc,
-  # declare actif et jamais installe, le poller derive ses orgs de la declaration et cherche des
-  # jetons de role que personne n'a frappes.
-  #
-  # Ce qui reste tient en une phrase : le materiel est ICI ou il n'y est pas, et il n'y arrive que
-  # par la forge. Le pendant forge (le preflight, plus bas) n'est PAS un
-  # troisieme etat — c'est le meme fait mesure a sa source, pour le cas ou l'install a ete
-  # interrompu entre l'org et le materiel.
+  # An uninstalled destination catalogue would be outside this container's discovery scope.
   defp require_target_installed(target), do: Onboard.require_installed(target)
 
-  # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
-  # cosmetique : sur un banc, ce geste annonce « trois faces repointees » sur un conteneur ou les
-  # trois sont absentes — la moitie forge est juste, et le rapport ment. Un appelant qui
-  # affiche la liste visee affirme un travail qu'il n'a pas fait.
+  # Report completed repoints, not the target list: this container may have no local faces.
   defp repoint_faces(dirs, url) do
     Enum.reduce_while(Map.values(dirs), {:ok, []}, &repoint_one(&1, &2, url))
   end
 
-  # Une face absente n'est pas un echec : un projet peut n'avoir jamais ete ouvert ICI. Le transfert
-  # forge a deja eu lieu, et refuser maintenant laisserait les deux moities en desaccord. Elle
-  # n'entre simplement pas dans le compte rendu.
+  # Skipping a missing .git directory does not undo the already completed forge transfer.
   defp repoint_one(dir, {:ok, done}, url) do
     if File.dir?(Path.join(dir, ".git")) do
       case GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false) do
@@ -113,24 +81,19 @@ defmodule Fleet.Project.Onboard.Migration do
   end
 
   @doc """
-  Porte RELEASE de la migration : rend un verdict sur stdout et sort par le CODE.
+  Runs migration from a release eval, prints its result and halts.
 
       bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_migrate("fleet/vitrine", "web")'
 
-  Meme forme que `CatalogueVerify.eval_main/1`, et pour la meme raison : `bin/lcars` n'a aucun acces
-  forge, et lui en donner un ferait d'une commande locale un acteur distant. Le conteneur, lui, porte
-  deja les jetons et la config.
+  Starts the forge HTTP pool without booting a second fleet. Exit codes: 0 success,
+  1 named catalogue/owner refusal, 2 other error.
   """
   @spec eval_migrate(String.t(), String.t()) :: no_return()
   def eval_migrate(full_name, target) when is_binary(full_name) and is_binary(target) do
-    # `eval` LOADS the app, it does not START it: the forge HTTP pool has no supervisor here, and
-    # the transfer died on `unknown registry: Fleet.Forge.Finch`. Started standalone, like the mix
-    # task that already does it — never `app.start`, because a second fleet must not boot from a
-    # tool. The door needs exactly this one process and starts exactly it.
+    # Release eval loads without starting the app: start only the HTTP pool, not a second fleet.
     {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
 
-    # Le rapport de cette porte est lu par un operateur, pas parse — mais un « migre : a -> b »
-    # entrelace d'avertissements du transfert se lit tout aussi mal. Meme regle, meme geste.
+    # Keep logger output separate from the operator report.
     Fleet.ReleaseDoor.claim_stdout!()
 
     case migrate(full_name, target) do
@@ -138,8 +101,6 @@ defmodule Fleet.Project.Onboard.Migration do
         IO.puts("migre : #{full_name} -> #{new_name}")
         for d <- faces, do: IO.puts("  origin repointe : #{d}")
 
-        # Une face jamais ouverte ICI est normale, et le taire ferait lire « rien a repointer »
-        # comme « tout est repointe ». On dit ce qu'on n'a pas fait.
         for d <- absent, do: IO.puts("  face absente (jamais ouverte ici) : #{d}")
 
         System.halt(0)
@@ -157,10 +118,7 @@ defmodule Fleet.Project.Onboard.Migration do
         IO.puts(:stderr, "REFUSE : #{full_name} est deja dans le catalogue #{inspect(cat)}.")
         System.halt(1)
 
-      # Gitea demande le PROPRIETAIRE du depot pour un transfert — pas l'admin, mesure : un compte
-      # membre avec write recoit ce 403 mot pour mot. Le compte systeme n'est proprietaire d'aucune
-      # org, par construction : c'est une identite de service, pas une autorite d'onboarding. Nomme,
-      # parce qu'un tuple HTTP brut envoie l'operateur debugger la porte au lieu de lire la reponse.
+      # Give the observed owner-required 403 a specific diagnostic instead of a raw HTTP tuple.
       {:error, {:http, 403, %{"message" => "user should be the owner of the repo"}}} ->
         IO.puts(:stderr, "REFUSE : le compte de service n'est pas proprietaire de #{full_name}.")
 
@@ -181,33 +139,22 @@ defmodule Fleet.Project.Onboard.Migration do
   end
 
   @doc """
-  Porte RELEASE de la reconvergence de `/home` : la forge dit quels projets existent, le disque suit.
+  Lists forge-declared projects and checks or imports their local faces.
 
       bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_reconcile(:check)'
       bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_reconcile(:apply)'
 
-  L'INVENTAIRE N'EXISTE QUE SUR LA FORGE, et c'est ce qui rend cette porte necessaire.
-  `list_projects/1` enumere le DISQUE (`code_root`) : sur un conteneur neuf — ou apres un nuke, ou
-  pour un second humain qui arrive sur une fleet deja peuplee — il n'y a rien a enumerer, alors que
-  les projets, eux, sont intacts. Aucun verbe n'est ecrit ici : `import/2` est deja le rail
-  forge→conteneur et deja idempotent. Ce qui n'existe nulle part ailleurs, c'est la LISTE.
-
-  Sortie : un mot par projet, sur une ligne. `check` ne touche rien (`DEJA` / `MANQUE`), `apply`
-  importe (`DEJA` / `IMPORTE`). Un projet en echec n'arrete pas les autres — un conteneur auquel il
-  manque neuf projets sur dix doit en recuperer neuf, pas zero.
-
-  Codes de sortie : `0` tout converge · `1` au moins un `ECHEC` · `2` au moins un `MANQUE` et aucun
-  echec. Le module de provisioning qui joue cette porte lit les LIGNES et rend son propre verdict ;
-  ces codes sont la pour l'operateur qui l'appelle a la main.
+  Provisioning parses stdout: DEJA / MANQUE in check mode, DEJA / IMPORTE in apply,
+  ECHEC for returned errors, RIEN for an empty inventory. Exit codes are 1 if any failed,
+  otherwise 2 if any missing, otherwise 0. Returned per-project failures do not stop
+  later entries; uncaught exceptions can abort the invocation.
   """
   @spec eval_reconcile(:check | :apply) :: no_return()
   def eval_reconcile(mode) when mode in [:check, :apply] do
-    # Meme raison qu'`eval_migrate` : `eval` CHARGE l'app, il ne la demarre pas, et le premier appel
-    # forge meurt alors en `unknown registry: Fleet.Forge.Finch`.
+    # Start the HTTP pool for release eval without starting the fleet.
     {:ok, _sup} = Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one)
 
-    # Le module qui lit cette porte parse un mot par ligne : `stdout` est un format de fil, pas une
-    # console. Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
+    # Provisioning parses stdout; ReleaseDoor separates logs from that protocol.
     Fleet.ReleaseDoor.claim_stdout!()
 
     entries = reconcile(mode)
@@ -225,20 +172,14 @@ defmodule Fleet.Project.Onboard.Migration do
   end
 
   @doc """
-  L'etat de reconvergence de chaque projet des catalogues installes — la porte sans la sortie.
+  Returns repo/status/reason entries for repositories in installed catalogue orgs.
 
-  Rend une liste de `%{repo:, status:, reason:}`. `:check` lit (`:present` / `:missing`), `:apply`
-  agit (`:already` / `:imported`), les deux rendent `:failed` avec sa raison.
+  A successful read of .lcars.json on main admits a repository without validating its contents.
+  Missing declarations are skipped; unreadable declarations or orgs are reported as failed.
 
-  LE FILTRE EST `.lcars.json` SUR `main`, et il ne se derive pas du nom. Une org de catalogue porte
-  aussi des depots qui ne sont pas des projets — a commencer par le `catalogue` qui la signe — et les
-  importer creerait trois faces autour d'un depot qu'aucun humain n'a ouvert. Mesure sur la forge du
-  banc : un projet rend `200` sur ce fichier, le magasin rend `404`.
-
-  La liste de ces depots n'est PAS fermee, et c'est la raison d'etre du filtre par propriete : un
-  humain depose ce qu'il veut dans son org, et un garde qui enumererait des noms devrait etre corrige
-  a chaque depot nouveau — et a chaque depot retire, ce qui arrive aussi. Le filtre par propriete ne
-  bouge d'aucune ligne dans les deux cas.
+  Check tests only that all three local directories exist, not their Git identities.
+  Apply delegates to Onboard.import, which can refuse partial local state rather than repair it.
+  Its default architect callback reports deferred; callers may override it.
   """
   @spec reconcile(:check | :apply, keyword()) :: [
           %{repo: String.t(), status: atom(), reason: term()}
@@ -247,8 +188,7 @@ defmodule Fleet.Project.Onboard.Migration do
     Enum.flat_map(Onboard.installed_orgs(), &reconcile_org(&1, mode, opts))
   end
 
-  # UNE ORG ILLISIBLE EST UN ECHEC, PAS UNE ORG VIDE. Rendre `[]` ferait lire « rien a importer » a
-  # un `check` qui n'a simplement pas su demander, et les autres orgs, elles, restent lisibles.
+  # Preserve unreadable orgs as failures; an empty list would incorrectly mean no work.
   defp reconcile_org(org, mode, opts) do
     case Repo.repo_mod(opts).list_org_repos(org, Repo.fc_opts(opts)) do
       {:ok, names} ->
@@ -274,8 +214,6 @@ defmodule Fleet.Project.Onboard.Migration do
     case Repo.files_mod(opts).get_file(full_name, file, fc) do
       {:ok, _} -> {:ok, true}
       {:error, :not_found} -> {:ok, false}
-      # Une forge muette ne prouve pas l'absence de declaration : la nommer ici evite qu'un projet
-      # bien reel disparaisse de l'inventaire sur un timeout.
       {:error, reason} -> {:error, {:declaration_unreadable, file, reason}}
     end
   end
@@ -283,32 +221,21 @@ defmodule Fleet.Project.Onboard.Migration do
   defp converge_project(full_name, :check, opts) do
     dirs = Faces.face_dirs(Fleet.Layout.project_name(full_name), opts)
 
-    # LES TROIS FACES, PAS UNE. Un projet dont il manque une seule face n'est pas ouvert ici : son
-    # architecte monterait un chemin absent. `check` ne tranche pas plus finement — il dit qu'il y a
-    # a faire, et `apply` dit quoi, avec le refus exact d'`import/2` si l'etat est a moitie pose.
+    # Check all three directories; a partial project remains missing even if code is present.
     if Enum.all?([dirs.code, dirs.ops, dirs.workshop], &File.dir?/1),
       do: %{repo: full_name, status: :present, reason: nil},
       else: %{repo: full_name, status: :missing, reason: nil}
   end
 
-  # ⚠ L'ARCHITECTE NE S'ASSURE PAS D'ICI, ET CE N'EST PAS UN RACCOURCI. Mesure au banc : l'import
-  # pose ses trois faces puis MEURT sur
-  # `GenServer.call(Fleet.Spawner.Supervisor, …) ** (EXIT) no process` — `eval` charge l'app, il ne
-  # la demarre pas, donc aucun superviseur de spawn n'existe dans cette VM. La convergence
-  # aboutit sur le disque et rend un echec, sans compensation, a la derniere jambe.
-  #
-  # Ce qui prend la suite existe deja : le poller de la fleet assure l'architecte de chaque projet
-  # qu'il sert (`Architect.ensure_alive/2`, a chaque tour). La reconvergence pose les FACES ; les
-  # pods appartiennent au cycle de vie d'une fleet vivante, qui n'est pas celui d'un provisionnement.
+  # Eval has no spawn supervisor. Report deferred by default rather than crash after import.
+  # This callback does not schedule a future ensure; live fleet lifecycle owns that work.
   defp converge_project(full_name, :apply, opts) do
     opts =
       Keyword.put_new(opts, :ensure_architect, fn _repo, _o ->
         {:deferred, "aucune fleet dans cette VM — le poller l'assure au demarrage"}
       end)
 
-    # QUALIFIE OBLIGATOIREMENT, et pour deux raisons qui se cumulent depuis le decoupage :
-    # `import/2` nu est la forme speciale du compilateur, pas ce verbe — et le verbe vit maintenant
-    # sur la facade du domaine, plus dans ce module.
+    # Qualify the facade call: bare import is an Elixir special form.
     case Onboard.import(full_name, opts) do
       {:ok, %{idempotent: true}} -> %{repo: full_name, status: :already, reason: nil}
       {:ok, _} -> %{repo: full_name, status: :imported, reason: nil}
@@ -332,11 +259,14 @@ defmodule Fleet.Project.Onboard.Migration do
   end
 
   @doc """
-  Reprojects the canonical `main` protection for a fully seeded project.
+  Reapplies canonical main protection when the forge reports an ops branch.
+  This is a readiness heuristic, not proof of a complete onboarding. Absence skips the write;
+  unreadable branch state is an error. No repository names are special-cased.
 
-  The rule is sized from the current card jury, rejects direct pushes, dismisses stale approvals
-  and blocks rejected reviews. Unseeded repositories and the configured project template are left
-  untouched.
+  The rule sizes approvals from the local card jury, disables direct pushes, dismisses stale
+  approvals, blocks rejected reviews and requires CI / * status contexts.
+
+  Passes the supplied options both to local role resolution and as nested forge_opts.
   """
   @spec reconcile_main_protection(String.t(), keyword()) :: :ok | {:error, term()}
   def reconcile_main_protection(repo, forge_opts) when is_binary(repo) do
@@ -349,19 +279,7 @@ defmodule Fleet.Project.Onboard.Migration do
     end
   end
 
-  # ⚠ TROIS ETATS, TROIS REPONSES : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
-  # illisible (on ne sait pas — on le DIT et l'appelant retentera). Un `false` sur une forge
-  # illisible enverrait `reconcile_main_protection/2` dans son `else` rendre **`:ok`** : « rien a
-  # faire ici », mot pour mot ce que rend un depot legitimement non seede — aucune trace, le Poller
-  # horodate le depot comme reconcilie, et la protection de `main` n'est jamais posee.
-  #
-  # ⚠ PAS DE CAS PARTICULIER POUR UN DEPOT TEMPLATE : rien ne cree `<catalogue>/project-template`,
-  # donc rien n'a besoin d'etre exclu pour que la reconciliation ne lui pose pas une protection de
-  # `main` dimensionnee sur un jury qui ne le concerne pas.
-  #
-  # Un garde par PROPRIETE, pas par nom : un depot qui ne porte pas de branche `ops` n'est pas un
-  # projet, quel que soit son nom. Le magasin d'un catalogue n'en porte pas — il est donc hors de
-  # portee, sans que rien n'ait a le nommer.
+  # Keep unknown distinct from absent so a failed probe is not recorded as successful reconciliation.
   defp seeded_project?(repo, opts) do
     Repo.repo_mod(opts).branch_exists?(repo, "ops", Repo.fc_opts(opts))
   end

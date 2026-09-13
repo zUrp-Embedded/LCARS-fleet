@@ -2,12 +2,13 @@ defmodule Fleet.Project.Onboard.Scaffold do
   require Logger
 
   @moduledoc """
-  Filesystem projection of the project template used by `Fleet.Project.Onboard`.
+  Projects template files for onboarding, expanding supported dollar-brace placeholders.
+  Resolves the catalogue via opts[:org], omits .gitea/template control files and writes
+  regular source files. Unknown placeholders survive. Missing template trees can yield
+  a successful empty write; source read failures raise.
 
-  `main/3` and `face/4` read their respective faces from
-  `priv/catalogue/project_template`, expand the supported Gitea `${VAR}` placeholders, omit the
-  `.gitea/template` control file, and fail with a typed `:scaffold_write` error at the first file
-  that cannot be created.
+  Destination mkdir/write failures return scaffold_write at the first attempted failure.
+  Earlier writes remain; file enumeration order is not a publication transaction.
   """
 
   @doc """
@@ -19,30 +20,14 @@ defmodule Fleet.Project.Onboard.Scaffold do
   def main(dir, name, opts), do: write_face(dir, "main", name, opts, "(à compléter)")
 
   @doc """
-  La racine de catalogue d'où le squelette d'un projet de `org` est lu — la SIENNE, ou celle du
-  catalogue livré si le sien n'en porte pas.
+  Selects the named catalogue's project_template tree if present, otherwise the bundled tree.
 
-  ## Pourquoi ce n'est pas `Fleet.Catalogue.root/0`
+  User-approved fallback applies to templates, not named roles/cards whose catalogue
+  determines identity. Selection checks the whole template directory, not each face:
+  a missing subtree in an own template does not trigger per-face fallback.
 
-  `root/0` rend TOUJOURS la racine livrée. Un `Scaffold.main` branché dessus scaffolde chaque
-  projet depuis le catalogue de référence, quel que soit le sien : un projet naît du template de
-  `fleet` pendant que son propre catalogue livre des fichiers que rien ne lit jamais. Un arbre
-  présent dans un catalogue et inatteignable par tout appelant n'est pas une fonctionnalité en
-  attente de câblage, c'est du poids mort qui a l'air câblé.
-
-  La résolution vit ICI et pas dans une couche template, parce que c'est ce chemin-ci qui peuple un
-  projet neuf.
-
-  ## Le repli, et pourquoi il est ANNONCÉ
-
-  ⚖ user : *« le template, on peut prendre celui de fleet par défaut s'il n'y en a pas,
-  ça ne change rien »*. C'est le SEUL arbre qui puisse se replier, et la raison est structurelle :
-  tout le reste d'un catalogue est nommé PAR SON NOM — une carte nomme un rôle, un rôle nomme son
-  profil — donc se replier résoudrait un nom dans un catalogue qui ne l'a jamais déclaré. Un
-  squelette de projet ne nomme rien et n'est nommé par rien.
-
-  Il est DIT au moment où il arrive : un catalogue qui scaffolde silencieusement depuis le matériel
-  d'un voisin est exactement la forme du défaut ci-dessus, une couche plus bas.
+  This resolver is silent; writing entry points announce named fallback at info level
+  and missing org at warning level.
   """
   @spec template_root(String.t() | nil) :: {Path.t(), :own | :fallback}
   def template_root(org) do
@@ -75,8 +60,6 @@ defmodule Fleet.Project.Onboard.Scaffold do
     |> Enum.reject(&String.ends_with?(&1, ".gitea/template"))
   end
 
-  # ⚠ LA RACINE SUIT LE CATALOGUE DU PROJET, PAS LA RACINE LIVREE. `opts[:org]` porte le catalogue ;
-  # son absence (un appelant qui n'en a pas) retombe sur le livre, ce qui est le repli documente.
   defp face_root(face, opts) do
     org = Keyword.get(opts, :org)
     {root, origin} = template_root(org)
@@ -85,19 +68,8 @@ defmodule Fleet.Project.Onboard.Scaffold do
     Path.join(root, face)
   end
 
-  # ⚠ TROIS ETATS, ET LE TROISIEME EST LE PLUS DANGEREUX. Un repli sur un catalogue NOMME est
-  # legitime et se dit une fois. Un appelant SANS org, lui, ne sait pas de quel catalogue il parle :
-  # il scaffolde depuis le livre sans que personne ne l ait decide — le meme defaut que ci-dessus,
-  # avec une cause de plus : l absence d argument au lieu d une resolution cablee en dur. Il monte
-  # donc d un cran : `warning`.
-  # ⚠ PAS DE CLAUSE QUI TAIRAIT LE REPLI DU CATALOGUE LIVRE : elle serait MORTE, puisque
-  # `root_for(<nom livre>)` rend la racine livree, qui porte son propre `project_template/` — donc
-  # `:own`, jamais `:fallback`. Le seul monde ou elle tirerait est celui d'un release dont le
-  # catalogue livre n'a pas d'arbre : la racine de repli y est le MEME repertoire absent, rien n'est
-  # ecrit, et taire cette ligne-la cacherait la seule trace du probleme. Une telle clause porterait
-  # en plus le nom du catalogue livre en dur, troisieme copie d'un nom qui vit dans
-  # `Fleet.Catalogue` — et retirer bat parametrer : un litteral qui n'existe pas ne peut pas
-  # deriver.
+  # Named fallback is allowed; absent org is warned because the caller may have lost its scope.
+  # Do not suppress bundled-name fallback: a damaged release can lack its own template tree.
   defp announce_fallback(:own, _org), do: :ok
 
   defp announce_fallback(:fallback, org) when is_binary(org) do
@@ -117,8 +89,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
     )
   end
 
-  # Extracted so the workflow-only door expands the SAME placeholders as a full face: two expanders
-  # would let a `${VAR}` reach a repository raw the day one of them learns a new one.
+  # Full-face and workflow-only writes share placeholder expansion.
   defp template_vars(name, opts, pitch_default) do
     pitch = Keyword.get(opts, :pitch) || Keyword.get(opts, :description, pitch_default)
     [year, month, day] = opts |> today() |> String.split("-", parts: 3)
@@ -133,19 +104,9 @@ defmodule Fleet.Project.Onboard.Scaffold do
     }
   end
 
-  # LE RAIL LIVRE EST VERT DES DEUX COTES — `protect_main` exige `CI / *` pour TOUT LE MONDE, et ce
-  # mur ne se negocie pas : c'est lui qui empeche une main humaine de passer a cote du rail. Ce qui
-  # change avec la carte n'est donc PAS l'existence du statut, c'est ce que ce vert VEUT DIRE, et
-  # personne ne le disait.
-  #
-  #   `required` — la carte a quelque chose a prouver : ce vert est un PLACEHOLDER, et le projet le
-  #               remplace par sa suite le jour ou il sait ce qu'il est.
-  #   `ignore`   — la carte declare n'avoir rien a prouver (PoC jetable, smoke technique, audit sans
-  #               code) : ce vert est le RECU du plancher, pas une preuve. Y poser une suite
-  #               gaterait un livrable que personne n'attend.
-  #
-  # Le defaut est `required` : une carte qu'on n'a pas su lire recoit l'invitation a prouver, jamais
-  # la dispense.
+  # CI stance changes the template's explanation, not the required forge status glob.
+  # Ignore describes a receipt; the default asks the project to replace the placeholder with tests.
+  # Neither template stance guarantees runner success.
   defp ci_stance_line(:ignore),
     do:
       "Cette carte declare n'avoir RIEN a prouver (ci: ignore) : ce vert est le recu du plancher " <>
@@ -161,27 +122,12 @@ defmodule Fleet.Project.Onboard.Scaffold do
   end
 
   @doc """
-  Adds the template's CI workflows to `dir` — and ONLY the ones it does not already have.
+  Adds missing template files under .gitea/workflows, returning sorted added paths.
+  Existing destination paths are skipped after an existence check; there is no exclusive-create
+  protection against concurrent writers.
 
-  ⚠ **`main/3` CANNOT BE USED HERE.** It writes the whole face — `README.md`, `CLAUDE.md`,
-  `.gitignore` — which is right for a repository the fleet just created and destructive for one it
-  imported: the project's own README would be replaced by a template. This door writes the
-  workflows and nothing else.
-
-  **WHY AN IMPORTED REPOSITORY NEEDS THEM.** `main` protection requires a `CI / *` status, and a
-  repository that ships no `.gitea/workflows/` produces none — ever. No check appears, no pull
-  request can merge, and the delivery rail is dead before its first ticket. `CIGate` already reads
-  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured on a repository
-  imported from GitHub), but naming it leaves the human to write the file — which is how one of
-  them landed with a `runs-on:` no runner served, waiting forever instead of failing.
-
-  `probe-test-relevance.yml` travels with it, and not as a bonus: without it `run_probe` — the
-  judges' only way to MEASURE a deliverable instead of opining on it — cannot run on that project.
-  Same absence, second victim.
-
-  **NEVER OVERWRITES.** An imported repository may carry its own CI, and a human may have written
-  one by hand after hitting the dead end. Both are answers, and replacing them with a placeholder
-  would be worse than the gap this closes.
+  Imported repositories need CI and probe workflows without replacing their README or other
+  project content, which main's full-face projection would overwrite.
   """
   @spec ci_workflows(Path.t(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
@@ -204,20 +150,9 @@ defmodule Fleet.Project.Onboard.Scaffold do
   end
 
   @doc """
-  RÉÉCRIT le rail CI de `dir` depuis le template — celui-là écrase, et c'est tout ce qui le sépare
-  de `ci_workflows/3`.
-
-  **POURQUOI DEUX PORTES ET PAS UN DRAPEAU.** `ci_workflows/3` n'écrase JAMAIS, délibérément : un
-  dépôt importé porte peut-être sa propre CI, et un humain en a peut-être écrit une à la main après
-  s'être cogné au mur. Les deux sont des réponses, et les remplacer par un placeholder serait pire
-  que le trou. Cette porte-ci fait exactement ce que l'autre refuse, donc elle ne peut pas être une
-  option de l'autre : on ne se trompe pas de porte par défaut.
-
-  **CE QU'ELLE EXISTE POUR DÉBLOQUER.** Un `ci.yml` cassé — image sans `node`, `runs-on:` qu'aucun
-  runner ne sert, workflow renommé hors de `CI` — ne produit plus le statut que la protection de
-  `main` exige. Aucune PR ne fusionne, et personne ne peut le réparer côté forge : les humains y
-  sont en `read`. Le rail livré, lui, est vert par construction (`no-harness-yet` echo). Le
-  remettre est la sortie de secours, et elle est EXPLICITE : personne ne l'appelle par accident.
+  Overwrites template-named CI workflow files and returns their sorted paths.
+  Workflows not named by the template are retained. A separate entry point keeps destructive
+  repair distinct from adoption's add-missing behavior; no justification is checked here.
   """
   @spec reset_ci_workflows(Path.t(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
@@ -239,18 +174,14 @@ defmodule Fleet.Project.Onboard.Scaffold do
   end
 
   @doc """
-  Writes a WRITER face's template subtree (`"ops"`, `"workshop"`). `:pitch` falls back to
-  `:description`, then `""`; `:today` overrides the current UTC date.
-
-  The subtree name is a PARAMETER and not a per-face function because nothing about the writing
-  differs between faces — only which directory of the template is read. A face is added by shipping
-  its subtree under `project_template/`, not by growing this module.
+  Writes a writer template subtree (ops or workshop).
+  Pitch falls back to description, then an empty string; today overrides the UTC date.
+  The subtree is a parameter because writing semantics are shared across faces.
   """
   @spec face(Path.t(), String.t(), String.t(), keyword()) ::
           :ok | {:error, {:scaffold_write, String.t(), term()}}
   def face(dir, template, name, opts), do: write_face(dir, template, name, opts, "")
 
-  # F-C087
   defp today(opts) do
     Keyword.get(opts, :today) || Date.to_iso8601(Date.utc_today())
   end
@@ -269,7 +200,6 @@ defmodule Fleet.Project.Onboard.Scaffold do
     end)
   end
 
-  # F-C086
   defp ensure_dir(path) do
     case File.mkdir_p(path) do
       :ok -> :ok

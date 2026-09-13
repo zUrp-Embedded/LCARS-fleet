@@ -1,11 +1,9 @@
 defmodule Fleet.Project.Onboard.Import do
   @moduledoc """
-  Faire entrer sur le conteneur ce qui vient d'AILLEURS : une forge externe (`import_external/3`) ou le
-  magasin d'un catalogue (`import_deposit/3`), plus l'inventaire de ce qu'un humain peut deposer
-  (`deposit_candidates/2`).
-
-  Ces verbes CREENT le depot d'arrivee, donc leur compensation le supprime en entier — c'est ce qui
-  les separe d'`import/2`, dont la cible preexiste et qui ne peut defaire que ce qu'il a pousse.
+  Copies external or personal-space repositories into a new catalogue-org repository.
+  Sources are retained. Both entry points share adoption checks and finish steps; returned
+  finish errors attempt deletion of the new destination and three local faces. Exceptions
+  bypass that compensation, while scratch cleanup is attempted in after.
   """
 
   alias Fleet.Credentials.Shell
@@ -15,32 +13,14 @@ defmodule Fleet.Project.Onboard.Import do
 
   require Logger
 
-  # LE TROISIEME REFUS, et c'est celui qui empeche le mensonge silencieux. L'org d'un projet EST le
-  # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur un conteneur qui
-  # n'a pas le catalogue `web` ne doit PAS retomber sur le catalogue local. Le projet tournerait avec
-  # les roles, les cartes et les SP d'un autre metier, sans que rien ne le dise — c'est exactement
-  # l'etat que le lien fixe existe pour interdire.
-  #
-  # Le refus NOMME le catalogue manquant et le geste qui le pose, parce qu'un refus qui ne dit pas
-  # quoi faire ne se distingue pas d'une panne.
   @doc """
-  DEPOT : enrole un depot depuis l'espace PERSONNEL d'un humain vers l'org du catalogue choisi.
+  Copies a public personal-space source into an installed catalogue org.
+  Source must be owner/name outside installed catalogue orgs. The destination name defaults
+  to the source basename and may be overridden with name.
 
-  C'est la troisieme porte d'entree, et elle existe parce que les deux autres refusent ce cas par
-  construction, chacune pour sa bonne raison :
-
-    * `import/2` ne prend que des depots DEJA dans une org de catalogue (`require_catalogue_installed`)
-      et ne filtre donc rien — il n'a pas a le faire ;
-    * `import_external/3` exige `https` + un hote de son allowlist, et notre forge est en `http` :
-      elle serait refusee sur le SCHEMA. Cette garde borne « depuis quel hote ETRANGER on clone »,
-      et un depot personnel sur notre forge n'est pas un hote etranger — c'est une PROVENANCE
-      etrangere. Deux notions, deux gardes.
-
-  La frontiere d'adoption n'est donc pas « notre forge / forge externe » mais **« dans une org de
-  catalogue / hors org »** : tout ce qui vient d'un espace personnel passe le gate, meme depose par
-  un humain de confiance sur notre propre forge. Le transport ne change pas la provenance.
-
-  Le depot source n'est PAS consomme : il reste chez son proprietaire, c'est sa copie.
+  Personal-space content passes the same adoption gate as an external repository:
+  internal transport does not establish trusted provenance. The source is not consumed.
+  The visibility probe precedes destination name/card admission, unlike import_external.
   """
   @spec import_deposit(String.t(), String.t(), keyword()) ::
           {:ok, Onboard.result()} | {:error, term()}
@@ -49,9 +29,7 @@ defmodule Fleet.Project.Onboard.Import do
     with {:ok, owner, src_name} <- split_repo(source),
          :ok <- refute_source_in_org(owner, source),
          :ok <- require_destination_catalogue(catalogue),
-         # LAST of the admission checks: the only one that costs a forge read. The three above
-         # answer from the catalogue alone, so a malformed name or an unknown destination is
-         # refused without touching the network.
+         # Source syntax and catalogue checks are local; destination name/card checks occur after this read.
          :ok <- require_public_source(source, opts) do
       name = Keyword.get(opts, :name, src_name)
       full_name = "#{catalogue}/#{name}"
@@ -94,21 +72,12 @@ defmodule Fleet.Project.Onboard.Import do
   end
 
   @doc """
-  A human's DEPOSIT CANDIDATES: the repos in their personal space that no catalogue org already
-  carries under the same name.
+  Lists user repositories whose basenames are absent from every installed catalogue org.
+  Name-based suppression avoids repeatedly offering the retained source copy; it is not a
+  content or provenance comparison and can suppress unrelated same-name repositories.
 
-  THE LOCATION IS THE STATE: a repo in a personal space is a candidate, a repo in a catalogue org is
-  enrolled. So there is no marker, no label and no registry to keep — "is this project in LCARS?"
-  is answered by an `ls` on the forge. Multiple catalogues REINFORCE that rather than weaken it:
-  whatever the number of orgs, *outside every org* stays one unambiguous location.
-
-  The filter is by NAME because the source repo is NOT consumed — importing takes a copy and leaves
-  the original with its owner — so without it every pass would propose the same repo again.
-
-  Each candidate carries whether its NAME is admissible, and the rule when it is not. The name is
-  checked here rather than at import alone because the import is too late: the human has already
-  pushed everything by then, and learning the rule at that point is learning it after paying for
-  it. The listing is the first moment the fleet can say it.
+  Reports name admissibility and guidance before import. It does not check source visibility
+  or adoption material. An unreadable catalogue org aborts the listing rather than widening it.
   """
   @spec deposit_candidates(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def deposit_candidates(human, opts \\ []) when is_binary(human) do
@@ -125,9 +94,6 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # The name rule, rendered rather than merely applied: an agent that must PRESENT a candidate to a
-  # human needs to say what is wrong with it, and `{:error, {:invalid_name, _}}` at import time
-  # says it to the wrong reader at the wrong moment.
   defp describe_candidate(full_name) do
     name = Fleet.Layout.project_name(full_name)
 
@@ -147,8 +113,6 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # The names already carried by an INSTALLED catalogue org. Fail-loud: an unreachable org would make
-  # the candidate list too WIDE, i.e. offer to import what is already in.
   defp enrolled_names(repo, fc) do
     Enum.reduce_while(Onboard.installed_orgs(), {:ok, MapSet.new()}, fn org, {:ok, acc} ->
       case repo.list_org_repos(org, fc) do
@@ -168,9 +132,7 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # Un depot deja dans une org de catalogue n'est pas un DEPOT : c'est un projet enrolle. Le
-  # reprendre par cette porte le clonerait puis le recreerait ailleurs, alors que les verbes justes
-  # existent — `import/2` pour l'adopter localement, `migrate/3` pour le changer de catalogue.
+  # A source in an installed catalogue org belongs to the import/migrate paths.
   defp refute_source_in_org(owner, source) do
     if owner in Onboard.installed_orgs(),
       do: {:error, {:source_already_enrolled, source, owner}},
@@ -179,17 +141,8 @@ defmodule Fleet.Project.Onboard.Import do
 
   defp require_destination_catalogue(catalogue), do: Onboard.require_installed(catalogue)
 
-  # A PRIVATE deposit is refused, and it is refused HERE rather than left to the clone.
-  #
-  # There is no config lever to force public repos on this forge: `[repository] DEFAULT_PRIVATE`
-  # does NOT exist in the Gitea we run (measured on the image's own binary, with a witness — the
-  # neighbouring `DEFAULT_SHOW_FULL_NAME` is there, this one is not). So a private repo stays
-  # creatable, and the only honest place to stop it is the door.
-  #
-  # Asking the forge is not the same as watching the clone fail: this runtime's git carries the
-  # system token, so a private source would clone WITHOUT error and its content would land in a
-  # public org repo. A visibility change nobody asked for is worse than a refusal, and it is
-  # invisible exactly when it happens.
+  # Probe visibility before authenticated cloning: successful access does not authorize
+  # copying private source content into an org repository with different visibility.
   defp require_public_source(source, opts) do
     case Repo.repo_mod(opts).private?(source, Repo.fc_opts(opts)) do
       {:ok, false} -> :ok
@@ -198,9 +151,6 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # Clones the deposit. The visibility question is settled BEFORE this, by `require_public_source/2`
-  # — not by letting the clone fail, because this call carries the system token and a private repo
-  # would clone just fine, copying private content into a public org repo with nothing said.
   defp clone_deposit(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
@@ -218,49 +168,35 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # External forges this verb repatriates from (BL-6-31, user perimeter). Everything else is a
-  # named refusal — extending the list is a deliberate one-line decision here.
+  # User-defined external host perimeter; changing it is a deliberate scope change.
   @external_hosts ~w(github.com gitlab.com)
 
   @doc """
-  IMPORTS a repo from an EXTERNAL forge (GitHub/GitLab — BL-6-31): repatriate → adoption gate →
-  create in the org → push → the existing local import leg. One-way: the external origin is
-  LEFT BEHIND (origin is re-pointed at OUR forge — an import, never a mirror).
+  Copies an external repository into a new catalogue-org project; it is not a mirror.
 
-  The sequence (plan 6-16/6-31 v2.1, orchestration NEW, primitives reused):
-    1. URL gate — https + host ∈ #{inspect(@external_hosts)}; anything else refuses
-       `{:unsupported_forge, _}`.
-    2. System clone into a per-gesture SCRATCH (`--no-recurse-submodules` — a hostile submodule
-       is never repatriated silently), cleaned on EVERY exit. Auth is the WIRED git credential
-       helper (gh/glab Tier 1, or the operator's own helper Tier 2), reached via the inherited HOME
-       under `GIT_TERMINAL_PROMPT=0` — the same tiered model as publish, no external token handled.
-       Public repos clone tokenless; a private one needs gh/glab authed (or a wired helper).
-    3. ADOPTION GATE (the parking-lot USB, BL-6-16): a non-empty `.claude/` tree is refused EN
-       BLOC (`{:foreign_claude_dir, _}` — we do not adopt someone else's hooks; org repos
-       re-enter via `import/2`, never through this verb), and every `CLAUDE.md` must pass
-       `Fleet.ReceptionFilter` (`{:hostile_material, label, path}` otherwise). Nothing reaches
-       the org on a refusal — the operator expurges at the SOURCE and retries.
-    4. Default branch → `main`, THREE cases: already main → no-op; main absent → rename;
-       default ≠ main while a remote `main` EXISTS → `{:branch_collision, _}` (half-migrated
-       repos are common; we never guess which is the real one).
-    5. Empty org repo + protocol labels + declaration committed IN the scratch BEFORE the push
-       (the push must CARRY .lcars.json or every later jury read falls back in silence) →
-       push main (full history) → the local `finish_import` leg (clone from OUR forge,
-       ops, protection — its `lock_main` reads the now-present local declaration).
+  The default URL gate accepts https on #{inspect(@external_hosts)}. Git clones without
+  recursive submodules into a scratch directory using inherited credential-helper setup;
+  clone_timeout_ms defaults to 120000. Adoption refuses .claude directories and scans
+  CLAUDE.md files with ReceptionFilter, excluding .git paths. This is a bounded material
+  check, not validation of the whole repository.
 
-  Refusals before any effect: dirs already on machine (`{:already_on_machine, _}` — that
-  project wants `open`/`import`), forge repo existing (`{:repo_already_exists, _}`).
-  Compensation: forge repo deleted DIRECT (the 6-32 lesson — an empty just-created repo probes
-  absent through delete_forge and would leak) + both local dirs; the scratch dies in `after`.
+  Keeps main if it is current; otherwise renames the default branch unless origin/main
+  already exists, which returns branch_collision. Publishes that main history, not all refs.
+  Creates an empty destination, seeds labels, adds missing declaration/CI files, pushes,
+  then imports local faces and applies protection.
+
+  Existing local paths or a known forge destination are refusals. After successful creation,
+  returned finish errors attempt direct forge deletion and all three local cleanups.
+  Cleanup outcomes are logged; they do not replace the original error or guarantee a clean retry.
+  Scratch removal is attempted in after, including exceptions; process death can bypass it.
   """
   @spec import_external(String.t(), String.t(), keyword()) ::
           {:ok, Onboard.result()} | {:error, term()}
   def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
     dirs = Faces.face_dirs(name, opts)
-    # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
+    # Tests can override the URL gate for file:// fixtures.
     url_gate = Keyword.get(opts, :url_gate, &default_external_url_gate/1)
 
-    # L'ADMISSION COMMUNE D'ABORD, LES SPECIFICITES ENSUITE — uniformement sur les cinq verbes.
     with {:ok, org} <- Onboard.required_org(opts),
          :ok <- Onboard.admit(org, name, opts),
          full_name = "#{org}/#{name}",
@@ -304,9 +240,7 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # The compensable window — finish_adopt's proven order (declaration BEFORE push), then the
-  # existing local import leg for what it does (clone from OUR forge brings .lcars.json
-  # back down, so ITS lock_main reads the right jury).
+  # Keep provenance-specific commit wording for the shared external/deposit finish path.
   defp declaration_commit_message(opts) do
     door =
       case Keyword.get(opts, :source_host, "") do
@@ -320,9 +254,6 @@ defmodule Fleet.Project.Onboard.Import do
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <- Repo.seed_protocol_labels(full_name, opts),
-         # The commit message names the ACTUAL door: this leg is shared by the external import and
-         # the deposit, and a deposit whose history says "import-externe" tells the project's own
-         # log something that did not happen.
          :ok <-
            Onboard.ensure_declaration(scratch, full_name, opts, declaration_commit_message(opts)),
          :ok <-
@@ -362,9 +293,7 @@ defmodule Fleet.Project.Onboard.Import do
       else: :ok
   end
 
-  # Per-gesture unique scratch (two concurrent imports of the same name never share one; the
-  # NAME collision itself is refused upstream by require_forge_absent). BEAM-side, outside any
-  # pod sandbox. (NOT the card-revision scratch_dir/1 above — different lifecycle, per-gesture.)
+  # Scratch is unique within this VM; destination absence probes do not serialize concurrent imports.
   defp external_scratch_dir(name) do
     Path.join(
       System.tmp_dir!(),
@@ -375,12 +304,9 @@ defmodule Fleet.Project.Onboard.Import do
   defp clone_external(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
-    # Auth is the WIRED git credential helper — gh/glab (Tier 1) or the operator's own helper (Tier 2),
-    # reached via the inherited HOME, the SAME tiered model as publish. No external token is read,
-    # stored, or passed. Shell.git's default env is
-    # ForgeAuth.git_env/0 — GIT_TERMINAL_PROMPT=0 (a missing helper fails LOUD, never hangs a headless
-    # clone) plus the INTERNAL forge extraheader, scoped to the internal host and so inert for an
-    # external clone (a private external repo needs gh/glab authed, or a wired helper — Tier 2).
+    # Shell.git uses ForgeAuth's anti-prompt environment and configured internal-host auth;
+    # external authentication depends on inherited credential helpers. Clone error output is
+    # returned in bounded form and may contain the URL, despite the success log omitting it.
     case Shell.git(
            ["clone", "--no-recurse-submodules", url, scratch],
            timeout_ms: timeout
@@ -396,16 +322,9 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # The parking-lot USB check (BL-6-16/6-31): instruction-tier material only — scanning the
-  # whole code would drown in false positives (a README legitimately says "force-push").
-  #
-  # ⚠ DECLARED BLIND SPOT — `.gitmodules` IS NOT READ. This gate probes exactly two things,
-  # `**/.claude` and `**/CLAUDE.md`, and a foreign repo can carry a `.gitmodules` pointing anywhere.
-  # Nothing is fetched from it: `clone_external` passes `--no-recurse-submodules`, and the fleet
-  # never runs `git submodule update` on an imported project — so the practical risk today is low.
-  # This sentence exists because an unwritten limit makes a gate people lean on too hard, and a
-  # perimeter nobody knows is exactly that. Widening the probe is a decision, not
-  # a reflex; the honest minimum is to say what is not looked at, next to what is.
+  # Scan instruction material only, to avoid broad code/README false positives.
+  # .gitmodules is not inspected; this clone does not fetch submodules. Any matched .claude
+  # directory is refused, even empty; a regular file named .claude is not covered.
   defp adoption_gate(scratch) do
     case foreign_claude_dirs(scratch) do
       [] -> scan_claude_mds(scratch)
@@ -435,7 +354,6 @@ defmodule Fleet.Project.Onboard.Import do
 
     case File.read(path) do
       {:ok, content} -> filter_verdict(Fleet.ReceptionFilter.scan(content), rel)
-      # Unreadable instruction material in a fresh clone: refused, never waved through.
       {:error, reason} -> {:halt, {:error, {:unreadable_material, rel, reason}}}
     end
   end
@@ -445,8 +363,6 @@ defmodule Fleet.Project.Onboard.Import do
   defp filter_verdict({:match, label, _excerpt}, rel),
     do: {:halt, {:error, {:hostile_material, label, rel}}}
 
-  # Le renommage n'est tente QUE quand les deux cas au-dessus sont ecartes : ni deja `main`, ni une
-  # `origin/main` distante qui ferait de ce renommage une collision.
   defp rename_to_main(scratch, head) do
     case Shell.git(["-C", scratch, "branch", "-m", head, "main"], env: []) do
       {:ok, {_, 0}} -> :ok
@@ -455,8 +371,7 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # Three cases (plan F6): a half-migrated repo (default=master AND a remote main) is REFUSED —
-  # we never guess which branch is the real one; the operator settles it at the source.
+  # If default differs from main but origin/main exists, let the operator resolve the ambiguity.
   defp normalize_default_branch(scratch) do
     with {:ok, {head_out, 0}} <-
            Shell.git(["-C", scratch, "symbolic-ref", "--short", "HEAD"],
@@ -480,8 +395,8 @@ defmodule Fleet.Project.Onboard.Import do
     end
   end
 
-  # Same direct-primitive posture as compensate_adopt (the 6-32 lesson), plus both local dirs —
-  # unlike adopt, EVERYTHING local here was created by this call.
+  # Delete the newly created repo directly: an empty repo can look absent to a default-branch probe.
+  # Cleanup failures are logged; the caller still receives the original finish error.
   defp compensate_external(full_name, dirs, reason, opts) do
     forge =
       case Repo.repo_mod(opts).delete_repo(full_name, Repo.fc_opts(opts)) do

@@ -1,15 +1,9 @@
 defmodule Fleet.Project.Onboard.Repo do
   @moduledoc """
-  Ce que l'onboarding demande a la FORGE, et rien d'autre : l'org du catalogue, le depot, ses
-  labels de protocole, son URL, son origin.
-
-  Tout est `@doc false` : c'est le vocabulaire forge de la famille onboarding, public seulement
-  parce que les gestes vivent dans des modules voisins. La seule exception est
-  `classify_create_repo/3`, publique et testee directement — une decision PURE sur
-  le resultat d'une creation, sans forge en face.
-
-  Les trois modules de seam (`repo_mod/1`, `files_mod/1`, et le seeder de labels) se lisent des
-  `opts` : c'est ainsi qu'un temoin substitue la forge sans que rien ici ne connaisse un double.
+  Forge adapters for onboarding: org/repository probes, creation, labels and URLs.
+  Callers can supply forge_repo, forge_files, forge_users and ensure_labels seams.
+  API calls take nested forge_opts; repository URL construction uses top-level base_url
+  or pilot_forge configuration.
   """
 
   alias Fleet.Forge.Client, as: ForgeClient
@@ -92,22 +86,8 @@ defmodule Fleet.Project.Onboard.Repo do
   @spec files_mod(keyword()) :: module()
   def files_mod(opts), do: Keyword.get(opts, :forge_files, ForgeClient.Files)
 
-  # L'ORG DU CATALOGUE EXISTE-T-ELLE SUR CETTE FORGE ? C'est la SEULE question que cette porte pose,
-  # et elle la pose DIRECTEMENT.
-  #
-  # ⚠ ELLE NE VERIFIE PAS L'HUMAIN, et ce n'est pas un trou : l'admission est tenue UNE FOIS au
-  # lancement — le BEAM refuse de demarrer sous un uid systeme et herite de cet uid pour ses pods.
-  # Le verifier ici exigerait de l'humain un droit qu'il a deja et n'utilise pas : l'org est
-  # publique donc il LIT, et ce n'est pas lui qui ecrit mais le JETON SYSTEME.
-  #
-  # ⚠ ET LE 404 NE SE DEDUIT PAS D'UNE AUTRE QUESTION : porte par la branche d'erreur d'un test
-  # voisin, il ne tombe que si CE test-la rend 404 — donc jamais quand la reponse arrive autrement.
-  # La question se pose EN DIRECT.
-  #
-  # ⚠ `org_exists?/2` ET PAS UNE SONDE SUR LES COMPTES : dans Gitea une org est une ligne de la MEME
-  # table `user`, donc un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
-  # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test rendrait
-  # `true` et le seul message qui nomme le geste manquant retomberait en erreur brute.
+  # Probe org existence directly: a same-name personal account is not a catalogue org.
+  # This does not authenticate the human or verify org membership.
   @doc false
   @spec ensure_catalogue_org_on_forge(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_catalogue_org_on_forge(org, opts) do
@@ -117,17 +97,11 @@ defmodule Fleet.Project.Onboard.Repo do
       {:ok, true} ->
         :ok
 
-      # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus local lit le
-      # materiel present sur le conteneur ; celui-ci demande a la forge si l'org existe. Les deux ne
-      # peuvent diverger qu'entre les deux moities d'un install interrompu, et c'est precisement ce
-      # cas-la qu'il faut nommer : sans lui l'appelant recevrait, deux gestes plus tard, un « user
-      # redirect does not exist [name: web] / GetOrgByName » dont personne ne remonte jusqu'a « le
-      # materiel est ici et la forge ne porte pas son org ».
+      # Distinguish missing forge org from installed local material: interrupted install can leave both apart.
       {:ok, false} ->
         {:error, {:catalogue_not_installed, org, half_install_gesture(org)}}
 
-      # ON N'HABILLE PAS UNE LECTURE RATEE D'UN DIAGNOSTIC INVENTE : forge injoignable, jeton mort,
-      # 500 — l'erreur remonte brute, et l'appelant sait qu'il n'a pas mesure.
+      # An unreadable forge is not evidence of a missing org.
       {:error, reason} ->
         {:error, {:forge_preflight_failed, reason}}
     end
@@ -143,10 +117,7 @@ defmodule Fleet.Project.Onboard.Repo do
       "material got here. `lcars catalogue list` shows what the forge actually carries."
   end
 
-  # BL-6-33
-  #
-  # ⚠ LES LABELS VIENNENT DU CODE, par le seul chemin qui existe — jamais recopies d'un depot
-  # template par la forge (`labels: true` de `generate_repo`) : une source, pas une copie.
+  # Seed protocol labels from code, not a copied forge template.
   @doc false
   @spec seed_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def seed_protocol_labels(full_name, opts) do
@@ -160,7 +131,7 @@ defmodule Fleet.Project.Onboard.Repo do
   end
 
   @doc false
-  # F-C084
+
   @spec classify_create_repo(
           {:ok, String.t() | :already_exists} | {:error, term()},
           String.t(),

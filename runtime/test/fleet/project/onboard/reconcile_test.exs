@@ -1,20 +1,8 @@
 defmodule Fleet.Project.Onboard.ReconcileTest do
   @moduledoc """
-  `reconcile/2` — la forge dit quels projets existent, le disque suit.
-
-  Ce que ces temoins tiennent, et pourquoi chacun coute quelque chose :
-
-    * LE FILTRE. Une org de catalogue porte des depots qui ne sont PAS des projets — a commencer
-      par le `catalogue` qui la signe, et ensuite tout ce qu'un humain depose chez lui. Les
-      importer poserait trois faces autour d'un depot qu'aucun humain n'a ouvert. Le discriminant
-      est `.lcars.json` sur `main`, mesure du 2026-08-17 : le projet rend 200, les autres 404.
-      Le stub en tient DEUX qui n'en sont pas, et pas un seul : un filtre qui ne saute qu'un depot
-      passe aussi bien quand il ne sait exclure que celui-la.
-    * LA DIFFERENCE ENTRE 404 ET MUET. Un `not_found` est une reponse (« pas un projet ») ; toute
-      autre erreur est une ABSENCE de reponse, et la traiter comme un 404 ferait disparaitre un
-      projet bien reel de l'inventaire sur un simple timeout.
-    * L'ORG ILLISIBLE. Elle rend un ECHEC nomme, jamais une liste vide — vide se lirait « rien a
-      importer », qui est le mot d'un conteneur converge.
+  Reconciliation inventory distinguishes missing declarations from failed reads.
+  Two non-project repo names prevent an exclusion-by-one-name implementation from passing.
+  Fixtures exercise directory presence, not Git identity or successful import completion.
   """
   use ExUnit.Case, async: false
 
@@ -22,8 +10,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
 
   @moduletag :tmp_dir
 
-  # `installed_names()` rend `["fleet"]` sous le catalogue livre : les stubs repondent pour cette
-  # org, et la question posee au stub est epinglee (une org derivee d'ailleurs se verrait ici).
+  # Stub only the bundled org so a differently scoped query fails visibly.
   defmodule Repo do
     def list_org_repos("fleet", _fc),
       do: {:ok, ["fleet/notes-perso", "fleet/vitrine", "fleet/catalogue"]}
@@ -34,7 +21,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
   end
 
   defmodule Files do
-    # Seul `vitrine` DECLARE. Les deux autres depots existent et ne sont pas des projets.
+    # Successful declaration reads admit vitrine without validating this fixture's schema.
     def get_file("fleet/vitrine", ".lcars.json", fc) do
       send(self(), {:declaration_read, "fleet/vitrine", Keyword.get(fc, :ref)})
       {:ok, %{content: ~s({"schema":"declaration"}), sha: "deadbeef"}}
@@ -42,7 +29,6 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
 
     def get_file(_repo, ".lcars.json", _fc), do: {:error, :not_found}
 
-    # Aucun de ces depots n'est un catalogue : `import/2` le demande desormais avant d'agir.
     def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
   end
 
@@ -73,9 +59,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
       assert [%{repo: "fleet/vitrine", status: :missing}] =
                ProjectOnboard.reconcile(:check, roots(dir))
 
-      # La declaration est lue SUR `main`, pas sur la branche par defaut du client HTTP : une org
-      # dont le depot vit sur une autre branche par defaut est deja refusee a l'import, et lire
-      # ailleurs ferait entrer dans l'inventaire un projet que l'import refusera.
+      # Read main explicitly; the default HTTP ref may point at another branch.
       assert_received {:declaration_read, "fleet/vitrine", "main"}
     end
 
@@ -86,9 +70,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
       assert [%{repo: "fleet/vitrine", status: :present}] = ProjectOnboard.reconcile(:check, opts)
     end
 
-    # ⚠ CE N'EST PAS UN DETAIL DE PRUDENCE. Une face manquante sur trois = un architecte qui monte
-    # un chemin absent. `check` ne tranche pas plus finement : il dit qu'il y a a faire, et `apply`
-    # dira quoi, avec le refus exact d'`import/2` sur un etat a moitie pose.
+    # One directory must not pass the three-face presence check.
     test "une face sur trois ne suffit pas", %{tmp_dir: dir} do
       opts = roots(dir)
       File.mkdir_p!(Path.join(Keyword.fetch!(opts, :code_root), "vitrine"))
@@ -120,9 +102,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
   end
 
   describe "apply — le rail est `import/2`, pas un second verbe" do
-    # Le temoin ne monte pas un git complet : il prouve que `apply` DESCEND dans `import/2` en
-    # epinglant le refus que seul `import/2` produit — `admit/3` sur un nom hors kebab-case. Un
-    # `apply` qui se contenterait de regarder le disque rendrait `:imported` ici.
+    # Reach import admission through apply and observe its invalid-name refusal.
     defmodule BadNameRepo do
       def list_org_repos("fleet", _fc), do: {:ok, ["fleet/Vitrine_2"]}
     end
@@ -134,14 +114,8 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
       def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
     end
 
-    # ⚠ CE QUI N'EST PAS EPINGLE ICI, ET OU IL L'EST. `apply` pose un assureur d'architecte DIFFERE
-    # (`Keyword.put_new`) parce qu'un `eval` n'a pas de superviseur de spawn — mesure du 2026-08-17
-    # au banc : l'import posait ses trois faces puis mourait sur
-    # `GenServer.call(Fleet.Spawner.Supervisor, …) ** (EXIT) no process`, sans compensation. Aucun
-    # temoin d'ici ne peut le voir : ces stubs ne montent pas de forge, donc l'import s'arrete
-    # AVANT la derniere jambe. Ce qui est epingle en unite est l'issue `:deferred` elle-meme
-    # (`OnboardCompensationTest`, sur une vraie forge `file://`) ; le CABLAGE, lui, se mesure au
-    # banc, et c'est le banc qui l'a trouve.
+    # These stubs stop before architect ensure and do not test apply's deferred wiring.
+    # OnboardCompensationTest covers the deferred result with a real file:// forge.
 
     test "un depot que l'import refuse remonte en ECHEC avec la raison de l'import", %{
       tmp_dir: dir
