@@ -51,7 +51,7 @@ ARG VERSION=2.0
 ENV PROV_SOURCE_REV=${GIT_SHA} LCARS_IMAGE_REVISION=${GIT_SHA} LANG=C.UTF-8 LCARS_DOCKER=1
 LABEL org.opencontainers.image.title="LCARS fleet v2" \
       org.opencontainers.image.description="Control plane pour workloads agentiques faillibles — runtime Elixir/OTP, pods bwrap, forge-state-machine. L'humain SSH dans le conteneur et lance sa fleet." \
-      org.opencontainers.image.source="https://github.com/lordzurp/LCARS-fleet" \
+      org.opencontainers.image.source="https://github.com/zurp-embedded/LCARS-fleet" \
       org.opencontainers.image.licenses="AGPL-3.0" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_SHA}" \

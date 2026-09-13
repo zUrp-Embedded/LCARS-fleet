@@ -136,7 +136,7 @@ SH
   [ ! -s "$TRACE" ]
 }
 
-_pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zUrp-Embedded LCARS-temp 0.1-abc '$DIST' deadbeefcafe"; }
+_pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zurp-embedded LCARS-fleet 0.1-abc '$DIST' deadbeefcafe"; }
 
 @test "GITHUB : le dialecte se lit sur la forge, et lui seul décide" {
   run bash -c ". '$LIB'; fp_dialect https://github.com; fp_dialect https://github.com/; fp_dialect http://10.42.0.118; fp_dialect https://gitea.example.org"
@@ -148,22 +148,22 @@ _pub_gh() { run bash -c ". '$LIB'; fp_publish_dist https://github.com zUrp-Embed
   _pub_gh; [ "$status" -eq 0 ]
   rang() { grep -n -- "$1" "$TRACE" | head -1 | cut -d: -f1; }
   local r_tag r_commit r_post
-  r_tag="$(rang 'GET https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases/tags/0.1-abc')"
-  r_commit="$(rang 'GET https://api.github.com/repos/zUrp-Embedded/LCARS-temp/git/commits/deadbeefcafe')"
-  r_post="$(rang 'POST https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases ')"
+  r_tag="$(rang 'GET https://api.github.com/repos/zurp-embedded/LCARS-fleet/releases/tags/0.1-abc')"
+  r_commit="$(rang 'GET https://api.github.com/repos/zurp-embedded/LCARS-fleet/git/commits/deadbeefcafe')"
+  r_post="$(rang 'POST https://api.github.com/repos/zurp-embedded/LCARS-fleet/releases ')"
   [ -n "$r_tag" ] && [ -n "$r_commit" ] && [ -n "$r_post" ] \
     || { echo "un des trois appels d'API manque — trace :"; cat "$TRACE"; return 1; }
   [ "$r_tag" -lt "$r_commit" ] && [ "$r_commit" -lt "$r_post" ] \
     || { echo "l'ordre est faux (tag=$r_tag commit=$r_commit post=$r_post) — on sonde le tag, on verifie le commit, PUIS on cree"; cat "$TRACE"; return 1; }
-  [ "$(grep -c '^POST https://uploads.github.com/repos/zUrp-Embedded/LCARS-temp/releases/42/assets?name=' "$TRACE")" -eq 4 ]
+  [ "$(grep -c '^POST https://uploads.github.com/repos/zurp-embedded/LCARS-fleet/releases/42/assets?name=' "$TRACE")" -eq 4 ]
   ! grep -q 'POST https://api.github.com/.*/assets' "$TRACE" \
     || { echo "un asset est parti sur api.github.com : GitHub y rend 422"; return 1; }
-  [[ "$(tail -1 "$TRACE")" == "PATCH https://api.github.com/repos/zUrp-Embedded/LCARS-temp/releases/42"* ]]
+  [[ "$(tail -1 "$TRACE")" == "PATCH https://api.github.com/repos/zurp-embedded/LCARS-fleet/releases/42"* ]]
 }
 
 @test "GITHUB : l'URL rendue est celle du web, pas celle de l'API" {
   _pub_gh; [ "$status" -eq 0 ]
-  [[ "$output" == *"release https://github.com/zUrp-Embedded/LCARS-temp/releases/tag/0.1-abc — 4 assets"* ]]
+  [[ "$output" == *"release https://github.com/zurp-embedded/LCARS-fleet/releases/tag/0.1-abc — 4 assets"* ]]
 }
 
 @test "un caractere RESERVE dans un nom d'asset part ENCODE — sinon la forge stocke une espace et la porte rend 404" {

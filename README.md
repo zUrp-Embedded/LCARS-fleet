@@ -34,14 +34,14 @@ requise pour les installer.
 La dernière version publiée s'installe en une commande. En conteneur :
 
 ```bash
-curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --bench
 ```
 
 Dans ce système (une distribution WSL 2, ou une machine Linux dédiée déclarée par
 `LCARS_ALLOW_ANY_HOST=1`) :
 
 ```bash
-curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --workstation --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --workstation --bench
 ```
 
 `install.sh` mesure la machine, affiche ce qui sera installé, attend une confirmation (Entrée
@@ -98,7 +98,7 @@ ou `LCARS_IMAGE=<registre/image:tag> deploy/container pull` la tire. `--from-rel
 kit de cette version à la place.
 
 ```bash
-git clone --branch <version> https://github.com/zurp-embedded/LCARS-temp.git lcars-fleet
+git clone --branch <version> https://github.com/zurp-embedded/LCARS-fleet.git lcars-fleet
 cd lcars-fleet
 bash install.sh --workstation --bench
 ```
@@ -241,14 +241,14 @@ install them.
 The latest published version installs with one command. In a container:
 
 ```bash
-curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --bench
 ```
 
 Into this system (a WSL 2 distribution, or a dedicated Linux machine declared with
 `LCARS_ALLOW_ANY_HOST=1`):
 
 ```bash
-curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --workstation --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --workstation --bench
 ```
 
 `install.sh` measures the machine, shows what will be installed, waits for a confirmation (Enter
@@ -305,7 +305,7 @@ required, and the full gate runs), or `LCARS_IMAGE=<registry/image:tag> deploy/c
 pulls it. `--from-release` takes that version's kit instead.
 
 ```bash
-git clone --branch <version> https://github.com/zurp-embedded/LCARS-temp.git lcars-fleet
+git clone --branch <version> https://github.com/zurp-embedded/LCARS-fleet.git lcars-fleet
 cd lcars-fleet
 bash install.sh --workstation --bench
 ```

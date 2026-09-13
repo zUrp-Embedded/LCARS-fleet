@@ -63,7 +63,7 @@ else
   PORTE_CMD="curl -fsSL <install.sh> | bash -s --"
 fi
 
-REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
+REPO_URL="https://github.com/zurp-embedded/LCARS-fleet.git"
 # Les constantes d'une version : vides dans le gabarit, écrites par deploy/lib/door-gen.sh sur les
 # lignes marquées @@DOOR_…@@, et sur elles seules.
 DOOR_BASE=""                       # @@DOOR_BASE@@ <forge>/<owner>/<repo>/releases/download/<tag>
