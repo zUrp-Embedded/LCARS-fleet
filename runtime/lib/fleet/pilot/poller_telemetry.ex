@@ -3,90 +3,35 @@ defmodule Fleet.Pilot.PollerTelemetry do
   require Logger
 
   @moduledoc """
-  The poller's telemetry, ATTACHED (BL-6-40 Phase 0).
+  Collects poller telemetry in separate rolling windows of #{100} samples for
+  :poll and :cycle. Poll samples mix per-repository measurements and discovery
+  failures; cycle samples describe whole passes. They must not share percentiles.
+  Counts are cumulative since this process started; distributions cover each window.
 
-  `Fleet.Pilot.Poller` emits `[:lcars_fleet, :pilot_poller, :poll]` from three sites — duration,
-  dispatched/skipped/errors, per-repo status. Emission alone measures nothing: without an
-  attachment every sample is computed and dropped, and nobody, human or agent, can state how long
-  a poll took. This module IS the attachment (`:telemetry.attach_many`), which is what makes the
-  amplifier of a slow poll (the 15 s network `ls-remote` of `ProjectResolver`, inside the GenServer
-  — `list_pods` is one call per tick and the route is read off the labels in hand) measurable
-  rather than reasoned about. It is deliberately the first phase of BL-6-40: the rest is a set of
-  optimisations that cannot be proven without it.
+  Named telemetry callbacks run inline in the emitter and cast to this singleton.
+  They rescue exceptions to avoid handler detachment, but do not validate field
+  values. Casts have no acknowledgement or bounded mailbox here: the sample windows
+  are bounded, not admission to the process. Missing recipients can lose samples.
 
-  ## What it does, and what it deliberately does NOT do
+  Poll samples warn on error status or duration at/above :pilot_poller_slow_tick_ms
+  (default 10_000). Nominal samples are quiet. Cycle samples do not warn: a repository
+  threshold would misclassify large multi-repo passes. Item-error tallies carried by
+  successful poll events are not retained; only status == :error contributes errors.
 
-  Keeps the last #{100} samples in a ring and answers `stats/0` — count, last, p50/p95/max, and
-  the error tally by scope. Logs ONLY when a sample crosses `:poller_slow_tick_ms` (default 10 s)
-  or reports an error status.
-
-  ⚠ **A sample is ONE REPO, not one cycle.** `[:lcars_fleet, :pilot_poller, :poll]` is emitted once per
-  repo — every emission carries `repo:` — so this distribution describes what a single repo costs
-  to poll, never what a full pass costs — N repos at a fixed interval make the counter advance by N
-  per cycle. **The cost of a CYCLE is not measured here**, and no name in this module may suggest
-  otherwise: a readiness key called `tick` asserts a scope the mechanism does not have, and a
-  measurement gets read wrong for exactly as long as such a name stands.
-  Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
-  not) — that is a different instrument, not an arithmetic on this one.
-
-  That different instrument is `[:lcars_fleet, :pilot_poller, :cycle]`, kept in a SECOND ring and read by
-  `cycle_stats/0`: one sample per whole pass, carrying the repo count that produced it. Two rings
-  rather than one field, because the two scales have different cardinalities (R against 1) — mixed
-  in a single ring, the p50 would describe neither a repo nor a pass.
-
-  It does not log nominal ticks, and that restraint is a contract, not a taste: the poller is a
-  ~30 s cron, its own moduledoc records that logging every nominal pass drowns the trace under
-  hundreds of routine lines. An observability layer that re-introduces the noise the observed
-  module removed on purpose has made the trace less readable, not more.
-
-  ## The handler runs in the POLLER's process — three consequences
-
-  `:telemetry.execute` invokes handlers inline, in the emitting process. So:
-
-    * **It must be total.** A raise makes telemetry DETACH the handler permanently (by design) —
-      the blindness would come back silently, and later than the change that caused it. Hence a
-      `rescue`, and a body with nothing in it that can fail.
-    * **It must not block.** `cast`, never `call`: a `call` would put this process's mailbox on
-      the poller's critical path, which is exactly the class of coupling BL-6-40 is about.
-    * **It is a NAMED function, never a closure.** `:telemetry` warns on anonymous handlers because
-      they pin the defining module's code version; a captured `&__MODULE__.fun/4` does not.
-
-  `cast` is lossy under saturation, and that is the correct trade here: dropping a metric is
-  strictly better than delaying the poll it measures. A mailbox that actually grows is itself the
-  signal — and that is what the gauge below measures.
-
-  ## The mailbox gauge (BL-6-40's cousin, delivered here)
-
-  "No `message_queue_len` gauge on the StepRunConsumer/Poller mailboxes — a consumer falling behind
-  is invisible until the symptom." It is sampled at EVERY poll, in this module rather than
-  elsewhere, because the poll is already the cadence at which we want the answer: no extra timer,
-  no extra process, and the instrument measures both singletons of the rail.
-
-  It warns on CROSSING the threshold, not on every poll above it: a mailbox that stays high is ONE
-  fact, and repeating it every 30 s would drown the trace this module exists to keep readable — the
-  same discipline as the silent nominal poll. The return below the threshold is announced too:
-  without it, an operator cannot tell resolved from dead.
-
-  ## Config
-    * `:lcars_fleet, :pilot_poller_slow_tick_ms` — warn threshold (default `10_000`).
+  On handling each poll sample, gauge Poller and StepRunConsumer mailbox lengths.
+  Warn on crossing ten messages and report observed recovery below it. This is a
+  queue-length signal, not proof of a stuck process; cycle events do not sample it.
+  A stalled emitter produces no new gauge observations.
   """
 
   @window 100
-  # The two singletons of the rail whose mailbox is a signal: the Poller (if its ticks pile up, the
-  # fleet is behind itself) and the StepRunConsumer (a consumer falling behind is INVISIBLE until
-  # the symptom — BL-6-40, named cousin). They are sampled HERE
-  # because a repo poll is already the cadence at which we want the answer: no extra timer, no extra
-  # process.
+  # Sample these singleton queues on poll events, without another timer.
   @watched [Fleet.Pilot.Poller, Fleet.Pilot.StepRunConsumer]
-  # Beyond this, the mailbox no longer absorbs: it accumulates. Deliberately LOW — these two
-  # processes handle a message in tens of milliseconds, so ten waiting already means something is
-  # stuck, not that the load is high.
+  # Alert threshold; queue length alone does not identify the cause of backlog.
   @mailbox_warn 10
   @default_slow_tick_ms 10_000
   @event [:lcars_fleet, :pilot_poller, :poll]
-  # The cycle is a DISTINCT event, not one more field on `:poll`: the two have different scales (one
-  # repo / one pass) and different cardinalities (R against 1). Mixed into a single ring, the p50
-  # would describe neither a repo nor a pass.
+  # Separate event scales require separate windows.
   @cycle_event [:lcars_fleet, :pilot_poller, :cycle]
   @handler_id "fleet-pilot-poller-telemetry"
 
@@ -105,50 +50,32 @@ defmodule Fleet.Pilot.PollerTelemetry do
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc """
-  Rolling summary of the last #{@window} PER-REPO polls, or `:no_data` before the first one.
+  Summarizes the last #{@window} poll events, or :no_data. Durations and status-error
+  counts cover the window; count is cumulative. Scope-less errors are grouped as
+  :discovery. Repositories are pooled together, and discovery failures also enter
+  this distribution; these are not cycle durations.
 
-  `p50`/`p95`/`max` are over the window, not since boot: the question this answers is "is the
-  poller healthy NOW", and an all-time average hides a rail that started degrading an hour ago
-  behind the thousands of fast samples that preceded it.
-
-      %{count: 412, window: 100, last_ms: 82, p50_ms: 76, p95_ms: 310, max_ms: 5_204,
-        errors: %{repo_list: 2}, slow_tick_ms: 10_000}
-
-  `count` is the total observed since boot; every other figure describes the window.
-
-  ⚠ Every figure here is scoped to ONE REPO (cf. the moduledoc). With R repos in the org the
-  counter advances by R per cycle, so `count` is not a number of cycles and `p50_ms` is not the
-  duration of one.
+  slow_tick_ms is configuration and mailboxes is the latest gauge snapshot, not
+  a window statistic. Calls can exit if the telemetry process is unavailable.
   """
   @spec stats() :: map() | :no_data
   def stats, do: GenServer.call(__MODULE__, :stats)
 
   @doc """
-  Rolling summary of the last #{@window} POLL CYCLES, or `:no_data` before the first one.
+  Summarizes the last #{@window} cycle events, or :no_data. count is cumulative;
+  durations and errors cover the window. last_repos and last_served accompany the
+  most recent duration; missing served remains nil.
 
-  A cycle is one whole pass: discover the org's repos, snapshot the pods, fold the R repos
-  SERIALLY, then the two fleet-global passes. `last_repos` carries R for the most recent one, so a
-  duration is readable against the size of the org that produced it — the single figure that made
-  `stats/0` unreadable as a cycle cost.
-
-      %{count: 96, window: 96, last_ms: 164, last_repos: 12, last_served: 12, p50_ms: 158, p95_ms: 402,
-        max_ms: 1_204, errors: 0}
-
-  This is the figure to use when asking whether a value frozen at the start of a pass (a
-  `base_sha`, the pod snapshot) can go stale before the pass ends. `stats/0` cannot answer that:
-  it describes one repo and does not know how many there are.
+  Both regular and kick cycles enter the same distribution; retained mode is not
+  exposed. This measures pass duration but does not certify every repository was
+  processed or that a snapshot stayed fresh. Calls can exit if the owner is absent.
   """
   @spec cycle_stats() :: map() | :no_data
   def cycle_stats, do: GenServer.call(__MODULE__, :cycle_stats)
 
   @doc false
-  # The telemetry callback. Public because `:telemetry` dispatches to it by name from the poller's
-  # process — NOT an API anyone should call (BL-6-42: a public function that exists only for a
-  # framework is documented as such, here, rather than left looking like a surface).
-  #
-  # `@spec` and not `@impl`: `:telemetry` takes a raw function reference, it declares no behaviour,
-  # so nothing else carries these types. Both clauses `rescue` to `:ok` — a telemetry handler that
-  # raises is DETACHED by `:telemetry` for the rest of the run, and the counters would go quiet.
+  # Framework callback, named to avoid pinning an anonymous handler's code version.
+  # Rescue conversion exceptions here; malformed values can still reach the GenServer.
   @spec handle_event([atom()], map(), map(), term()) :: :ok
   def handle_event(@cycle_event, measurements, metadata, _config) do
     GenServer.cast(
@@ -157,9 +84,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
         :cycle,
         Map.get(measurements, :duration_ms, 0),
         Map.get(measurements, :repos, 0),
-        # ABSENT N'EST PAS ZERO, et la distinction porte un verdict : `serving?/1` degrade sur un
-        # compte de servis a ZERO, donc un defaut a 0 ferait accuser tout emetteur qui ne
-        # renseigne pas la mesure. `nil` = « pas mesure », et aucune sonde ne conclut dessus.
+        # Missing served must remain unknown; zero would spuriously degrade readiness.
         Map.get(measurements, :served),
         Map.get(metadata, :status, :ok),
         Map.get(metadata, :mode)
@@ -176,9 +101,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
        Map.get(metadata, :scope), Map.get(metadata, :repo)}
     )
   rescue
-    # Total by obligation: a raise here detaches the handler for the lifetime of the node, and the
-    # blindness returns without a word. Nothing above can realistically fail, which is the point —
-    # if it ever does, we lose one metric, not the instrument.
+    # Avoid detaching the telemetry handler on callback exceptions.
     _ -> :ok
   end
 
@@ -192,9 +115,8 @@ defmodule Fleet.Pilot.PollerTelemetry do
       Keyword.get(opts, :slow_tick_ms) ||
         Application.get_env(:lcars_fleet, :pilot_poller_slow_tick_ms, @default_slow_tick_ms)
 
-    # Attach here rather than at application boot: the handler's target is THIS process, so the
-    # attachment must not outlive it. `:already_exists` is not an error — a supervisor restart
-    # re-attaches over the previous incarnation's registration.
+    # Attach the named callback for this owner. An existing registration is accepted,
+    # not replaced; casts resolve the singleton name after a restart.
     case :telemetry.attach_many(
            @handler_id,
            [@event, @cycle_event],
@@ -211,10 +133,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   @impl GenServer
   def terminate(_reason, _state) do
-    # Detach on the way out: a handler pointing at a dead process would make every subsequent
-    # `execute` in the poller do a doomed cast, and telemetry has no way to know.
-    # `{:error, :not_found}` is a legitimate outcome, not a failure: init tolerates re-attaching
-    # over a previous incarnation, so a restart pair can detach a registration already replaced.
+    # Detach on orderly termination. An untrappable kill can bypass this callback.
     _ = :telemetry.detach(@handler_id)
     :ok
   end
@@ -236,11 +155,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   @impl GenServer
   def handle_cast({:cycle, duration_ms, repos, served, status, mode}, state) do
-    # No warn here: the `slow_tick_ms` threshold is calibrated on ONE REPO. A cycle over R repos
-    # legitimately exceeds it R times over, so reusing that number would fire on every pass as soon
-    # as the org grows — noise that teaches an operator to ignore the instrument. The cycle's
-    # threshold is a separate decision, and until it is taken we MEASURE without alerting rather
-    # than alert on a number nobody chose.
+    # A whole-cycle alert needs its own policy; do not reuse the per-poll threshold.
     {:noreply,
      %{
        state
@@ -316,9 +231,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   defp maybe_warn(_state, _ms, _status, _scope, _repo), do: :ok
 
-  # `Process.info(pid, :message_queue_len)` on a LIVE pid only — an unregistered name (rail off,
-  # restart in progress) drops OUT of the measurement instead of entering it as a zero, which would
-  # look like "healthy".
+  # Omit unregistered processes rather than report false zero backlog.
   defp sample_mailboxes do
     for name <- @watched, pid = Process.whereis(name), into: %{} do
       case Process.info(pid, :message_queue_len) do
@@ -329,10 +242,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
     end
   end
 
-  # Warn on CROSSING, not on every tick above the threshold: a mailbox that stays high is ONE fact,
-  # and repeating it every 30 s would drown the trace this module exists to keep readable. The
-  # return below the threshold is announced too — without it, an operator cannot tell resolved from
-  # dead.
+  # Report threshold transitions only; disappearance is not a measured recovery.
   defp warn_saturated(now, before) do
     for {name, n} <- now, is_integer(n) do
       was = Map.get(before, name)
@@ -353,9 +263,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
     end
   end
 
-  # Nearest-rank on a SORTED list. No interpolation: these are millisecond counts over a window of
-  # at most #{@window} samples, where an interpolated value would suggest a precision the sample
-  # size does not carry.
+  # Nearest-rank percentiles on sorted durations; no interpolation.
   defp percentile([single], _p), do: single
 
   defp percentile(sorted, p) do

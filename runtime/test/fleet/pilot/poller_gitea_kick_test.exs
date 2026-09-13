@@ -1,17 +1,8 @@
 defmodule Fleet.Pilot.PollerGiteaKickTest do
   @moduledoc """
-  Z6e (D-13) — the gitea.* webhook as a poll ACCELERATOR.
-
-  Contract tested: a gitea.* event received by the Poller schedules ONE accelerated poll
-  (`:gitea_kick`, coalesced over `@gitea_kick_debounce_ms`) — a burst = one poll;
-  the kick does NOT touch the tick chain (no `:poll` injected); a non-gitea event
-  kicks nothing. The kick is DISPATCH-ONLY: counted separately (`kick_count`,
-  poll_count intact) and it consumes NO tick-based clock — neither the reconciliation's
-  2-tick grace nor the G4 throttle (counting kicks would compress ~60s/~5min down to
-  webhook-traffic pace: reclaim right inside the publication window → double
-  dispatch). The Bus subscribe itself is opt-in (default false, wired by
-  Application.step_children!) — here we test the handler MECHANICS by direct send
-  (the subscription is only the message's source).
+  Directly sends webhook hints to check coalescing, separate kick counts and
+  preservation of regular reconciliation observations. Bus subscription is outside
+  these tests. Force polls stand in for regular ticks; they do not wait real grace time.
   """
   use ExUnit.Case, async: true
 
@@ -26,11 +17,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
   # The Poller's coalescing window is 1_000 ms — margin for CI async.
   @debounce_wait 1_400
 
-  # ⚠ LE GARDIEN D'ARCHITECTE EST DOUBLE PARTOUT DANS CE FICHIER. Sans lui, chaque passe appelle le
-  # VRAI `Fleet.Project.Architect.ensure_alive/2`, qui lit le dossier durable des pods sous le
-  # `~/.lcars` DE L'HUMAIN QUI JOUE LA SUITE : un etat de la machine, hors du banc. Mesure du
-  # 2026-09-07 (profil dans `do_poll`) : 186 a 216 ms PAR DEPOT ET PAR PASSE, contre 0 a 9 ms pour
-  # tout le reste de la passe. C'est un geste d'hermetisme dont la vitesse est la consequence.
+  # Stub the architect keeper to avoid reading the user's durable pod state.
 
   defp start_poller!(name) do
     {:ok, pid} =
@@ -59,8 +46,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
     for _ <- 1..5, do: send(pid, gitea_event(:"gitea.issue"))
     Process.sleep(@debounce_wait)
 
-    # 5 events in the window → exactly 1 kick-poll, the flag has dropped, and poll_count
-    # (the unit of the tick-based invariants: 2-tick grace, G4 throttle) stays INTACT.
+    # A burst consumes one kick count without advancing regular observations.
     assert %{poll_count: 0, kick_count: 1} = Poller.stats(pid)
 
     # next burst → the kick fires again (the flag did not stay stuck)
@@ -135,18 +121,14 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
     Poller.force_poll(name)
     refute_received {:remove_label, 8, _}
 
-    # Burst of webhook kicks — exactly the forge traffic the completion sequence generates
-    # itself (push, comment, label). If the kick ran the reconciliation and counted as the
-    # "2nd tick", the reclaim would land ~2s after seeding, right inside the publication
-    # window → re-dispatch of the same step, double pod, double claude spend. Dispatch-only
-    # instead: no reclaim, suspects pass through unchanged.
+    # Publication webhooks must not confirm or reclaim an orphan between regular
+    # observations. Verify both the write spy and the separate counters.
     for _ <- 1..3, do: send(pid, gitea_event(:"gitea.push"))
     Process.sleep(@debounce_wait)
     refute_received {:remove_label, _, _}
     assert %{poll_count: 1, kick_count: 1} = Poller.stats(pid)
 
-    # Regular tick #2: the kick did not ERASE the grace either — the still-confirmed orphan is
-    # reclaimed exactly where the calibration (2 regular ticks) promises it.
+    # The kick must also preserve the earlier suspicion for the next full observation.
     Poller.force_poll(name)
     assert_received {:remove_label, 8, "lcars-in-flight"}
 
