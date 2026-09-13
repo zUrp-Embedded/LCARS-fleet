@@ -1,13 +1,10 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
   @moduledoc """
-  The CI gate, seen through `dispatch_review/2`: a red CI is the producer's rework (counted on
-  the ticket, never on a queue), a pending CI waits — bounded, and said when the bound is passed —
-  and a card `ci: ignore` waits for nothing. The gate's own decision table is `CiGateTest`.
+  Exercises post-merge-refusal CI rework and waiting through dispatch_review/2.
+  CI rework uses an issue marker separate from judge verdict counts. Ignore policy
+  does not bypass forge protection; this recovery path still reads actual CI state.
   """
-  # `async: false`, inherited from the file these witnesses were cut from and not re-audited: the
-  # bench itself writes no application env, but role tokens are files under a shared dir
-  # (`Fleet.TestEnv.put_role_token!/2`), and this file is not the place to prove the rail is
-  # parallel-safe.
+  # Shared fixtures use a global role-token directory; keep access serialized.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepDispatcher
@@ -18,15 +15,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
 
   describe "dispatch_review/2 — the CI gate on the PR rail" do
     test "merge blocked by a RED CI → PRODUCER rework, not a human (the rung, 2026-08-03)" do
-      # Measured on a live bench: a PR whose head carried `CI / ci (push)` = failure was PROMOTED —
-      # nothing in the runtime read a commit status and the forge rule had `enable_status_check:
-      # false`. Requiring the check closes the merge door; this test holds the other half, without
-      # which the fix would only trade a silent promotion for a silent wedge.
-      #
-      # A red CI is not a human matter and does not re-converge: nothing changes until the producer
-      # pushes a new commit. Sending it to the arch — which is what `{:policy, :no_rerequest}` did,
-      # naming the absence of a re-request rather than the actual cause — summons a human for work
-      # only the engineer can do.
+      # A forge policy refusal with failed CI must reach producer rework instead of unexplained escalation.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -45,27 +34,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
           ]
         )
 
-      # ⚠ CE TEMOIN ETAIT VERT SUR LE MAUVAIS FAIT. Il ne refusait QUE `{:merge_blocked_escalated,
-      # _}` — une des DEUX formes d'escalade — pendant que la fixture, sans `_test_route`, faisait
-      # echouer la lecture du budget et rendait `{:rework_exhausted_escalated, 6}` : l'architecte
-      # etait saisi, exactement ce que le nom du test dit qui n'arrive pas. Un refus d'UNE forme ne
-      # prouve pas le fait ; le fait, c'est qu'un POD est demande.
+      # Assert an actual spawn request; rejecting only one escalation shape would miss the other.
       assert {:ok, _} = StepDispatcher.dispatch_review(pr, opts)
       assert_received {:spawned, _issue, _opts}
     end
 
     test "CI rouge : le round est COMPTE sur le ticket — sinon le budget ne borne rien" do
-      # `count_change_request_rounds` compte des reviews REQUEST_CHANGES ; un CI rouge n'en pose
-      # AUCUNE. Le budget qui s'appuie dessus laisse donc passer une suite infinie de rounds, un pod
-      # a chaque fois que le label `in_flight` retombe. Le marqueur EST le round depense.
+      # CI creates no changes-requested reviews, so it needs its own issue marker count.
       opts =
         dispatch_opts(
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
             _test_merge_result: {:error, {:http, 405, "policy"}},
-            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
-            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
-            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            # Supply a SHA so the marker describes the measured head, not a branch-ref fallback.
             _test_pull: %{
               "number" => 6,
               "state" => "open",
@@ -91,11 +72,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "CI rouge mais le producteur est OCCUPE : rien n'est lance, donc RIEN n'est facture" do
-      # LE ROUND SE PAIE A LA DEPENSE, PAS A L'INTENTION. `dispatch_rework` rend
-      # `{:skipped, :role_busy}` sans rien lancer quand le pod du producteur travaille deja. Marquer
-      # la viderait le budget de la carte sur une FILE D'ATTENTE : au tick suivant le producteur est
-      # libre, mais le frein a compte des rounds que personne n'a joues, et l'architecte est saisi
-      # pour un rework qui n'a jamais eu lieu.
+      # This post-merge path must not charge a rework marker for busy admission.
+      # It is distinct from the pre-jury PR marker written before dispatch.
       opts =
         dispatch_opts(
           spawner: StubSpawnerAlive,
@@ -126,9 +104,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "A-09 (1) on the REVIEW rail: :role_busy short-circuits WITHOUT calling the resolver" do
-      # The twin of `step_dispatcher_gate_order_test`'s A-09 (1): `prepare_dispatch` gates on the
-      # scope decision BEFORE the network resolver, on the rework path (a project-scoped producer
-      # already alive). Zero network on a busy tick, and no lock.
+      # Busy scope must avoid project resolution; this does not prove absence of all network reads.
       me = self()
 
       opts =
@@ -161,9 +137,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
             _test_merge_result: {:error, {:http, 405, "policy"}},
-            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
-            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
-            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            # Keep the marker keyed to a SHA rather than the branch-ref fallback.
             _test_pull: %{
               "number" => 6,
               "state" => "open",
@@ -184,7 +158,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
       )
 
       refute_received {:spawned, _issue, _opts}
-      # Et le round non joue n'est pas facture : on ne marque que ce qui a spawn.
+      # Check no spawn/marker; the returned escalation itself is not asserted by this test.
       refute_received {:ci_rework_marked, 42}
     end
 
@@ -194,9 +168,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
           forge_opts: [
             _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
             _test_merge_result: {:error, {:http, 405, "policy"}},
-            # `head.sha` COMME EN PRODUCTION : `head_sha/3` retombe sinon sur la REF de branche, et
-            # le marqueur porterait un nom au lieu d'un sha. Le frein compte par PRÉFIXE, donc il
-            # tiendrait quand même — mais la ligne postée sur le ticket mentirait au lecteur.
+            # Keep the marker keyed to a SHA rather than the branch-ref fallback.
             _test_pull: %{
               "number" => 6,
               "state" => "open",
@@ -220,8 +192,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "merge blocked while the CI is still PENDING → the next tick asks again, nobody is summoned" do
-      # A rail that has not finished is not a verdict. Escalating here would page a human for the
-      # duration of every CI run, and dispatching rework would ask the producer to fix nothing.
+      # Pending is not failed CI. This fixture lacks a date, so its wait can remain unbounded.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -243,14 +214,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "CI PENDANTE au-dela de la borne : l'attente s'arrete et le DIT — sinon elle est infinie" do
-      # Sous une carte `ci: ignore`, ce site est le SEUL lecteur de la CI : le gate ne s'applique
-      # pas. Un job qu'aucun runner ne reclame y attendait en silence, tick apres tick, pour
-      # toujours — « une attente ressemble a du travail », exactement la panne que le gate borne
-      # deja de son cote. Meme horloge, meme nombre, une seule doctrine.
+      # Even an ignore card cannot bypass a pending CI check imposed by forge protection.
       vieux =
         DateTime.utc_now()
-        # La borne EN DUR, jamais lue dans le sujet : `ci_gate_test` porte le temoin qui la nomme
-        # (mesure du 2026-09-07 — empruntee, elle rendait vert un passage de 45 min a 18 h).
+        # Independent fixture age must not derive from the production threshold.
         |> DateTime.add(-(45 * 60 + 60), :second)
         |> DateTime.to_iso8601()
 
@@ -310,16 +277,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "…mais une carte `ci: ignore` ne doit PAS attendre la CI, meme sur ce chemin" do
-      # DEUX CICATRICES, UN SEUL DISCRIMINANT — l'ETAT, jamais la carte.
-      #
-      # 2026-08-10 : carte `ci: ignore`, deploiement SANS runner → wait/ci eternel. Cette fixture
-      # modelisait ce monde avec `:pending` — FAUX etat : sans runner, AUCUN status n'existe et
-      # `commit_ci_state` rend `:none`. La fixture racontait un autre monde que sa propre histoire.
-      # 2026-08-18 (premier conflit reel au banc) : la protection de main exige `CI / *`
-      # (independant de la carte) ; le court-circuit par la carte a classe :policy un 405
-      # « status checks » TRANSITOIRE (runner pas encore couru sur le sha de la resolution) et
-      # immobilise un humain pour 30 secondes d'attente. Le test jumeau ci-dessous epingle ce
-      # cas-la : `:pending` = un rail COURT, on retick.
+      # On this recovery path, none differs from pending; ignore does not repeal forge protection.
+      # This assertion rejects only ci_pending and does not prove successful progress.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],
@@ -350,10 +309,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
     end
 
     test "A0.5 : un merge bloque par des status checks EN COURS retick — jamais une escalade arch" do
-      # Le 405 « Not all required status checks successful » de la protection est un etat
-      # transitoire quand un runner court (mesure au banc : 3 s apres la livraison de la
-      # resolution d'un conflit). L'escalader en :policy immobilisait un humain pour 30 s
-      # d'attente. La carte (`ci: ignore`) ne peut pas abroger le plancher de la forge.
+      # Pending status after a protection refusal waits, even when the card ignores jury CI.
       pr =
         pr(%{
           "requested_reviewers" => [%{"login" => "Qualifier"}, %{"login" => "Reviewer"}],

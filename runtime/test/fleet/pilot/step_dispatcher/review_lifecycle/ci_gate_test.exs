@@ -5,8 +5,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
-  # The forge seam, reduced to the two reads the gate makes. Both answers are driven by `forge_opts`
-  # so a test states its world in one place instead of defining a module per case.
+  # Configure PR and CI reads together; additional probes use separate injected callbacks.
   defmodule Forge do
     def get_pull(_repo, n, opts) do
       case Keyword.get(opts, :_pull, :default) do
@@ -32,8 +31,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     def iso_ago(age_sec), do: iso_now(age_sec)
   end
 
-  # A forge that must NEVER be called: the `ignore` policy has to short-circuit BEFORE any network
-  # read, otherwise "the card does not require the CI" would still cost two forge calls per tick.
+  # Ignore must avoid both PR and CI reads.
   defmodule ForbiddenForge do
     def get_pull(_repo, _n, _opts), do: raise("get_pull called under an :ignore policy")
     def commit_ci_state(_repo, _sha, _opts), do: raise("commit_ci_state called under :ignore")
@@ -57,16 +55,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   defp decide(forge_opts, policy \\ :required, forge \\ Forge),
     do: CiGate.decide(42, "lcars/issue-7-engineer", ctx(forge, forge_opts), fn -> policy end)
 
-  # The workflow probe is a SEAM on `ctx.opts`, like every other injected read on this rail: the
-  # gate must be drivable without a forge, and "does this repo declare a workflow" is exactly the
-  # kind of fact a test states rather than fetches.
   defp decide_with_lister(forge_opts, lister) do
     c = %{ctx(Forge, forge_opts) | opts: [list_dir_fun: lister]}
     CiGate.decide(42, "lcars/issue-7-engineer", c, fn -> :required end)
   end
 
-  # Le rail existe, un run existe, et rien ne l'a pris. Le TROISIEME etat de `:none`, et il se
-  # MESURE : un statut d'attente + `runner_id: 0`, avec les `labels` que le job demande.
+  # Inject job state independently from PR age and status.
   defp decide_unclaimed(forge_opts, jobs, lister \\ nil) do
     lister = lister || fn "fleet/demo", ".gitea/workflows", _ -> {:ok, ["ci.yml"]} end
 
@@ -83,29 +77,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   end
 
   describe "un job que personne ne reclame" do
-    # ⚠ `"queued"` EST LA VALEUR MESUREE, ET CE FICHIER A CRU L'INVERSE. Les fixtures ont porte
-    # `"waiting"` — le nom INTERNE de Gitea — du 2026-08-21 au 2026-08-22, en s'annoncant « MESURE ».
-    # Le code testait le meme mot, donc le temoin etait vert sur un monde que la forge ne produit
-    # pas, et le garde des cinq minutes n'a JAMAIS tire en production.
-    #
-    # DEUX FORGES, DIX-HUIT OBSERVATIONS, ZERO `"waiting"` : `/actions/runs/<id>/jobs` a rendu
-    # `queued` ou `completed`, jamais autre chose. `waiting` reste accepte par le code parce que la
-    # conversion interne de Gitea n'est pas un contrat — mais il n'a jamais ete observe, et ce
-    # commentaire le dit au lieu de laisser une fixture le suggerer.
+    # Bench responses used queued; waiting is a compatibility fixture, not an observed API guarantee.
     @queued [%{"status" => "queued", "runner_id" => 0, "labels" => ["ubuntu-latest"]}]
     @waiting [%{"status" => "waiting", "runner_id" => 0, "labels" => ["ubuntu-latest"]}]
 
     test "au-dela du delai court: escalade en NOMMANT le label, sans attendre 45 min" do
-      # MESURE DU 2026-08-22, deux forges : un job `queued`, `runner_id: 0`, avec un `runs-on:`
-      # qu'aucun runner ne servait. Indiscernable d'un job en cours, bloquant la fusion sans jamais
-      # rougir, et le gate gardait sa question pour trois quarts d'heure plus tard.
+      # A ten-minute-old PR crosses the short deadline but not the generic deadline.
       stale = Forge.iso_ago(10 * 60)
 
       assert {:escalate, {:ci_stalled, :unclaimed}, msg} =
                decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], @queued)
 
-      # Le label EST le fait actionnable : sans lui, « un runner sert-il ce label ? » demande a
-      # l'operateur de deviner lequel.
+      # Include the requested runner label so the escalation identifies what to investigate.
       assert msg =~ "ubuntu-latest"
       assert msg =~ "AUCUN RUNNER"
     end
@@ -118,9 +101,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "le nom INTERNE `waiting` est accepte aussi — une conversion n'est pas un contrat" do
-      # Il n'a jamais ete observe sur une forge. Il est reconnu quand meme : un garde qui ne
-      # connait qu'un seul des deux mots meurt en silence a la version suivante — il vient de le
-      # faire dans l'autre sens, et ca a coute quarante-cinq minutes par ticket.
       stale = Forge.iso_ago(10 * 60)
 
       assert {:escalate, {:ci_stalled, :unclaimed}, _msg} =
@@ -128,19 +108,16 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "job ASSIGNE: c'est du travail, pas une impasse — meme vieux" do
-      # Le statut seul ne suffit pas : Gitea le garde le temps d'assigner. Un job qui porte un
-      # runner a ete reclame, et l'attente bornee d'origine reprend la main.
+      # Queued status alone does not mean unclaimed when runner_id is present.
       stale = Forge.iso_ago(10 * 60)
       assigned = [%{"status" => "queued", "runner_id" => 3, "labels" => ["shell"]}]
 
-      # 10 min : au-dela du delai COURT, sous les 45 min d'origine. La patience longue reprend la
-      # main, ce qui est precisement ce que ce correctif ne doit PAS abimer.
       assert {:wait, :ci_pending} =
                decide_unclaimed([_ci: {:ok, :none}, _updated_at: stale], assigned)
     end
 
     test "aucun run lisible: on ne fabrique pas d'impasse, l'attente bornee reprend" do
-      # Meme posture que partout sur ce rail : une forge muette differe, elle ne conclut jamais.
+      # Unreadable runs retain the generic wait, which can still expire later.
       stale = Forge.iso_ago(10 * 60)
 
       c = %{
@@ -156,8 +133,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "AUCUN workflow: l'impasse d'origine passe AVANT — elle est plus precise" do
-      # Deux impasses peuvent etre vraies en meme temps ; nommer « pas de workflow » est plus
-      # actionnable que « personne ne reclame », et c'est celle qui doit sortir.
+      # Missing workflow takes precedence over probing unclaimed jobs.
       lister = fn "fleet/demo", _dir, _ -> {:error, :not_found} end
       stale = Forge.iso_ago(10 * 60)
 
@@ -172,9 +148,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
   end
 
-  # 6-140 — le meme forge, qui expose EN PLUS la lecture des contextes. Deux doublures et non une
-  # seule parce que la degradation est un contrat a part entiere : un seam qui ne connait que
-  # `commit_ci_state/3` doit continuer a marcher, et rendre une liste vide plutot que rien.
+  # Separate clients exercise report-capability presence and status-only compatibility.
   defmodule ForgeWithContexts do
     defdelegate get_pull(repo, n, opts),
       to: Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest.Forge
@@ -201,7 +175,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "un seam qui ignore la lecture des contextes garde son contrat, contextes VIDES" do
-      # Degradation honnete : le brief dira qu'il n'a pas pu les lire, jamais une liste inventee.
       assert {:proceed, %{state: :success, contexts: []}} = decide(_ci: {:ok, :success})
     end
   end
@@ -228,11 +201,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   end
 
   describe "the deadline is the point" do
-    # ⚠ LA BORNE EST ECRITE ICI, EN DUR, ET C'EST TOUT L'OBJET DE CE TEMOIN. Les fixtures ci-dessous
-    # la lisaient dans le module qu'elles testent (`CiGate.pending_deadline_sec() + 60`) : vertes
-    # POUR TOUTE VALEUR de la constante. Mesure du 2026-09-07 — la porter de 45 min a 18 h laissait
-    # les deux fichiers de temoins ET la suite entiere verts. Une fixture qui emprunte sa borne au
-    # sujet ne mesure pas la borne, elle mesure la soustraction.
+    # Keep this expected threshold independent from production so changing the constant fails the test.
     @deadline_sec 45 * 60
 
     test "l'echeance EST de 45 minutes — le seul endroit qui nomme le nombre" do
@@ -256,17 +225,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "AUCUN workflow dans le depot → impasse nommee AU PREMIER TICK, pas au bout de 45 min" do
-      # `:none` a deux causes et elles ne meritent pas la meme patience. « pas encore de statut »
-      # est une course qui n'a pas rendu ; « aucun workflow ici » est un statut qui ne viendra
-      # jamais. Mesure 2026-08-12 : un depot importe de GitHub, carte `ci: required`, trois quarts
-      # d'heure d'attente avant de demander si un runner servait le label. Le runner allait bien.
-      # Il n'y avait rien a executer, et c'etait lisible en une lecture.
+      # A readable absence of workflow names must not spend the full runner-wait interval.
       lister = fn "fleet/demo", _dir, _opts -> {:error, :not_found} end
 
       assert {:escalate, {:ci_impossible, :no_workflow}, msg} =
                decide_with_lister([_ci: {:ok, :none}], lister)
 
-      # Le message dit les DEUX sorties, parce qu'aucune n'est evidente pour qui lit le ticket.
+      # Mention both adding a workflow and choosing an explicit ignore policy.
       assert msg =~ "AUCUN WORKFLOW"
       assert msg =~ ".gitea/workflows"
       assert msg =~ "ignore"
@@ -291,8 +256,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "un repertoire sans fichier de workflow n'est pas un rail" do
-      # Le dossier existe et ne porte que du bruit : declarer l'emplacement n'est pas declarer un
-      # workflow, et rien ne s'executera.
+      # Directory presence alone is insufficient; the gate looks for YAML filenames.
       lister = fn "fleet/demo", _dir, _ -> {:ok, ["README.md", ".keep"]} end
 
       assert {:escalate, {:ci_impossible, :no_workflow}, _} =
@@ -300,8 +264,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "listing ILLISIBLE → on attend : inconnu n'est pas absent" do
-      # Meme posture que partout ailleurs sur ce rail : une forge muette differe, elle ne fabrique
-      # jamais un verdict. Escalader ici transformerait une panne reseau en impasse declaree.
+      # An unreadable listing is not evidence of missing workflows; this fixture is below the deadline.
       lister = fn "fleet/demo", _dir, _ -> {:error, {:http, 500, "boom"}} end
 
       assert {:wait, :ci_pending} = decide_with_lister([_ci: {:ok, :none}], lister)
@@ -313,25 +276,19 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "an unreadable date waits rather than escalating on a date it could not read" do
-      # L'arbitrage d'origine tient et ce test le garde : une date illisible NE DOIT PAS escalader
-      # (`{:escalate, {:ci_stalled, _}, _}` poserait `lcars-awaits-arch` et parquerait le ticket sur
-      # une date qu'on n'a pas su lire). Ce qui a change, c'est le MOTIF : sans date, l'age vaut 0 et
-      # `0 > @pending_deadline_sec` est faux A JAMAIS — l'echeance n'est pas lointaine, elle est
-      # HORS D'ATTEINTE. Le motif le dit maintenant, au lieu de se confondre avec une CI qui tourne.
+      # Preserve the choice not to escalate on an unreadable date, while naming the unbounded wait.
       assert {:wait, {:ci_deadline_unreachable, :no_pull_date}} =
                decide(_ci: {:ok, :pending}, _updated_at: "pas-une-date")
     end
 
     test "TEMOIN — une date LISIBLE et fraiche rend le motif ordinaire, pas celui-la" do
-      # Sans ce temoin, rendre `{:ci_deadline_unreachable, _}` inconditionnellement passerait le test
-      # ci-dessus : c'est lui qui prouve que les deux etats sont DISTINGUABLES.
+      # Fresh readable dates distinguish the ordinary wait from the missing-clock case.
       fresh = Forge.iso_ago(60)
       assert {:wait, :ci_pending} = decide(_ci: {:ok, :pending}, _updated_at: fresh)
     end
 
     test "le motif hors-d'atteinte porte l'etiquette de sa porte — il n'invente pas un mur" do
-      # Meme `wait/ci` que ses deux voisins : du cote du ticket c'est le meme fait (arrete a la porte
-      # CI). Un label neuf ferait croire a un nouveau mecanisme la ou il n'y a qu'un motif nomme.
+      # Distinct reasons share the existing CI wait label.
       assert Fleet.Labels.wait_for({:ci_deadline_unreachable, :no_pull_date}) ==
                Fleet.Labels.wait_for({:ci_unreadable, :timeout})
     end
@@ -352,14 +309,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
   end
 
-  # LA JOINTURE, ET ELLE N'ETAIT TENUE PAR PERSONNE. Les tests ci-dessus bouchent la policy
-  # (`fn -> :required end`) : ils prouvent que la porte GATE sur `:required`, pas qu'une carte le
-  # produise. `LoaderEnvelopeTest` prouve l'autre bout — `spec.ci` traverse `normalize/1`. Entre les
-  # deux, `issue_card_ci/2` compare a un LITTERAL, et remplacer `"required"` par `"requis"` laissait
-  # les 2443 tests verts (mesure 2026-08-08).
-  #
-  # C'est la classe « ecrivain et lecteur en desaccord d'identite » : la carte ECRIT un token, le
-  # lecteur en attend un autre, et la porte se desarme sans que rien ne rougisse.
+  # Exercise authored card → loader → policy reader, beyond tests that inject a policy atom.
   describe "issue_card_ci/2 — la carte arme reellement la porte" do
     defmodule RoutingForge do
       @moduledoc false
@@ -389,18 +339,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "une carte canon qui declare `ci: required` rend :required — bout en bout" do
-      # Le loader CANON, pas un litteral recopie : si la carte cesse de declarer `ci`, ou si le
-      # loader cesse de le porter, ce test tombe.
-      #
-      # `safe_load/2` enveloppe DEJA le retour du loader : rendre `{:ok, map}` ici produirait
-      # `{:ok, {:ok, map}}` et la clause `when is_map(map)` echouerait — un resultat par forme,
-      # pas par contenu.
-      #
-      # ET L'ABSENCE D'ALARME EST LA MOITIE DE LA PROPRIETE. Mesure : renommer le litteral
-      # `"required"` en `"requis"` dans `Roles.ci/1` laissait les 2449 tests verts, parce que la
-      # carte tombait alors dans la clause de garde — qui repond `:required` elle aussi. Le
-      # resultat seul ne peut donc pas distinguer « la carte a ete LUE » de « la carte n'a pas ete
-      # comprise et on a ferme par defaut ». Le log, lui, le peut.
+      # Use the real card loader's map, not an already-wrapped result.
+      # Assert no warning: the malformed-policy fallback also returns required and could mask a bad read.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert ReviewLifecycle.issue_card_ci(
@@ -415,11 +355,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "une carte canon qui declare `ci: ignore` rend :ignore — la derogation traverse aussi" do
-      # Le jumeau du test ci-dessus, et il n'est pas decoratif : tant que `:ignore` etait ce que
-      # rendaient AUSSI l'absence de champ, l'absence de carte et l'echec de lecture, il ne pouvait
-      # rien distinguer. Maintenant qu'il est le seul chemin vers `:ignore`, il mesure la
-      # DEROGATION — et workshop-direct est le cas ou elle est mecaniquement obligatoire (aucun runner
-      # ne sert une PR basee sur ops).
+      # An explicit ignore card must take the permissive path, unlike an undeclared policy.
       assert ReviewLifecycle.issue_card_ci(
                "lcars/issue-9-scribe",
                card_ctx(canon_loader())
@@ -427,10 +363,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "une carte qui ne declare RIEN ne prend PAS la branche permissive" do
-      # LE RENVERSEMENT. Ce test assertait `:ignore` — il epinglait le defaut qu'on vient de tuer :
-      # `spec.ci` etant desormais obligatoire au schema, une carte muette n'a pas pu passer par
-      # `Loader.load!`. Repondre `:ignore` sur ce chemin reconstruirait exactement le trou ferme :
-      # la carte non declaree prenant silencieusement la branche qui n'oppose rien.
+      # A malformed injected card bypasses schema validation; runtime must require CI and warn.
       loader = fn _ -> %{"name" => "muette", "steps" => %{}} end
 
       log =
@@ -449,18 +382,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     test "sans route gravee, la policy suit la carte du PROJET — comme le jury, enfin", %{
       tmp_dir: tmp
     } do
-      # LA DIVERGENCE QUE LE COMMENTAIRE COUVRAIT. `issue_card_ci/2` se disait « lue exactement
-      # comme son jury, par le meme fallback » ; son jumeau `issue_card_jury/2` lisait la carte du
-      # PROJET, celui-ci rendait un `:ignore` en dur. Une PR sans route gravee — PR humaine, orphelin
-      # adopte — etait donc jugee sous le jury du projet et sous AUCUNE politique CI, sur un projet
-      # dont la carte en reclame une. L'issue 8 n'a pas de route (RoutingForge rend `:none`).
+      # No engraved route must use the project's CI policy, as jury lookup does.
       proj = Path.join(tmp, "demo")
       File.mkdir_p!(proj)
 
-      # La carte EXISTE avant d'etre declaree, et la declaration dit ou elle vit : depuis 6-125 une
-      # `workflow_map` explicite que le loader ne sait pas resoudre est REFUSEE a l'ecriture. Le
-      # fixture posait sa carte apres coup — donc, a l'instant de la declaration, `gated` n'existait
-      # nulle part. L'ordre inverse n'etait pas gratuit, c'etait le trou que la fiche decrit.
+      # Write the card before declaring it: declaration validates that an explicit card is loadable.
       maps = Path.join(tmp, "maps")
       File.mkdir_p!(maps)
 
