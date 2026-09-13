@@ -322,12 +322,24 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
+  # The host resolver appends its search list to a bare name: on a network whose DNS answers
+  # every name under that suffix, a host that does not exist resolves and the wall opens.
+  # An absolute name (trailing dot) is looked up as is; an IP literal is used as is.
+  defp upstream_name(host) do
+    chars = String.to_charlist(host)
+
+    case :inet.parse_address(chars) do
+      {:ok, _} -> chars
+      _ -> String.to_charlist(String.trim_trailing(host, ".") <> ".")
+    end
+  end
+
   defp serve(client, allowed, pod_id) do
     with {:ok, line} <- :gen_tcp.recv(client, 0, @connect_timeout_ms),
          {:ok, host, port} <- decide(line, allowed),
          {:ok, upstream} <-
            :gen_tcp.connect(
-             String.to_charlist(host),
+             upstream_name(host),
              port,
              [:binary, active: false],
              @connect_timeout_ms
