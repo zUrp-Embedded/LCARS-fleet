@@ -1,10 +1,8 @@
 defmodule Fleet.API.BuildInfo do
   @moduledoc """
-  Reports the served build's SHA, dirty flag, ref and provenance.
-
-  Releases read the build-time `priv/api/build_info.txt`; source trees query
-  Git through the bounded shell authority; failure returns an explicit
-  `:unknown` result. `current/0` memoizes the result for the BEAM lifetime.
+  Reports SHA, dirty flag, ref and resolution source, memoized for the BEAM lifetime.
+  Prefers any readable priv/api/build_info.txt, then Git, then LCARS_GIT_SHA.
+  Unknown and environment-derived facts use dirty:false without proving a clean tree.
   """
 
   @persistent_key {__MODULE__, :info}
@@ -33,9 +31,9 @@ defmodule Fleet.API.BuildInfo do
   end
 
   @doc """
-  Release step that writes the build facts where `release_file_path/0` reads
-  them. Git failure is serialized as unknown facts instead of aborting the
-  release.
+  Writes build facts into the release's priv/api/build_info.txt. Git failure falls
+  back to LCARS_GIT_SHA or unknown facts; missing release metadata and file failures
+  can raise. Returns the release unchanged after writing.
   """
   @spec write_release_file(Mix.Release.t()) :: Mix.Release.t()
   def write_release_file(%Mix.Release{} = release) do
@@ -94,16 +92,8 @@ defmodule Fleet.API.BuildInfo do
     end
   end
 
-  # GIT FIRST, ENV SECOND — and the order is the point. A working tree has the truth and can also
-  # tell whether it is dirty; an env var carries only what someone chose to pass. But a container
-  # build stage has NO `.git` (deliberately: a worktree pointer is dead once the context is copied),
-  # so git ALONE makes every image report `sha: "unknown"` — `fleet status` then says
-  # "build unknown ref= (source=release)" on a container where the build is perfectly identified.
-  #
-  # The env fallback is NOT a second source of truth competing with the first: it is what the build
-  # passes when the first is unavailable BY CONSTRUCTION. `dirty` stays false there, because a build
-  # context carries no way to know — and claiming clean would be worse than saying nothing, so the
-  # ref is left nil rather than invented.
+  # Git takes precedence over LCARS_GIT_SHA, supplied by image builds without .git.
+  # The fallback does not validate the SHA and cannot measure dirty state or branch.
   defp git_facts do
     case git(["rev-parse", "--short", "HEAD"]) do
       {:ok, sha} -> {:ok, %{sha: sha, dirty: dirty?(), ref: working_tree_ref()}}
@@ -112,9 +102,7 @@ defmodule Fleet.API.BuildInfo do
   end
 
   @doc false
-  # Expose pour le test : c'est le SEUL chemin par lequel une image obtient sa revision, et il n'a
-  # pas de git pour le corroborer. Un repli non teste est un repli qu'on decouvre casse en lisant
-  # « unknown » dans un banc, six semaines apres.
+
   @spec env_facts() :: {:ok, map()} | :error
   def env_facts do
     case System.get_env("LCARS_GIT_SHA") do

@@ -1,65 +1,24 @@
 defmodule Fleet.API.SpawnAdmission do
   @moduledoc """
-  ADMISSION pipeline for `POST /api/admin/spawn` — the POLICY of the API's
-  only write, separated from the HTTP routing:
-  `Fleet.API.ControlRouter` (the write door) maps each verdict returned here onto its HTTP
-  status, this module decides WHO passes. Pure functions + catalog reads (no process).
+  Admission for POST /api/admin/spawn before asynchronous event emission.
+  The flat allowlist prevents clients supplying internal spawner opts (roots,
+  identity, project cloning or resume seams); only reconstructed opts are emitted.
 
-  ## Why a strict admission on a no-auth surface
+  Order: allowlist and pod-id/issue-id checks, effective profile resolution including
+  default modops, containment, fleet-slot check, then the shared brief-required guard.
+  Non-bwrap profiles require the literal host_native_ack:true; this acknowledgment
+  is not broadcast. It is request data, not proof of who supplied it.
 
-  `/api/admin/spawn` is no-auth (boundary = the AF_UNIX socket's `0600` mode and container
-  isolation, cf. `Fleet.API.ControlRouter`). The `PublishConsumer` THEN converts
-  `payload["opts"]` into internal spawner opts via `to_keyword/1` — without a
-  filter, privileged opts would become drivable from the API: FS roots, identity,
-  session/resume seams, and `project`, which clones an ATTACKER repo into the pod.
-  The pipeline (fixed order):
-
-    1. **DTO allowlist** (`@admin_spawn_public_fields`) — only a FLAT public
-       DTO is admitted; any unknown key (including a raw `opts`) →
-       `{:error, {:forbidden_fields, …}}` BEFORE the slightest broadcast. The
-       canonical payload rebuilt here is the ONLY thing broadcast — the API
-       builds the internal `opts` itself.
-    2. **path-safe `pod_id`** — a pod_id is interpolated into FS paths
-       (`~/pods/pod_<id>`): only the charset `[A-Za-z0-9._-]` without `..` passes
-       (authority `Fleet.Spawner.valid_pod_id?/1`, not a copied regex).
-    3. **Loadable cap-profile** — validated BEFORE the ACK: if the 202 left as
-       soon as the broadcast happened, a non-existent `cap_profile_name` would
-       be detected ONLY in `PublishConsumer` (mere warning, ZERO pod) → lying
-       202. Same loader as the consumer (single source `Fleet.CapProfile.load/1`).
-    4. **Host-native refused SAUF acquittement explicite** ([BL-6-101]) — a
-       `containment: none` cap-profile would launch a pod OUT-OF-SANDBOX on the host *as* the
-       human (the strongest power of the fleet) via this generic no-auth door: 422 at admission.
-       L'OUVERTURE NOMMÉE : `host_native_ack: true` dans le DTO — le GESTE de l'opérateur
-       (`lcars admiral`), jamais un chemin automatique (le dispatcher ne passe pas par cette
-       porte et n'a pas le champ). L'ack ne part PAS dans le payload broadcast (un fait
-       d'ADMISSION, pas un ordre de spawn). UN canon profile est host-native — `admiral`, le
-       siège machine — et l'unicité est tenue par le témoin anti-bitrot du control_router : un
-       second profil hors sandbox exige son propre arbitrage.
-    5. **Fleet-scope singleton already alive** — `role_index: 0` is the fleet-level slot: ONE per
-       fleet, by construction (the reaper spares it, its session UUID carries no project). Admitting
-       a second one costs a pod with a random UUID that nothing will ever address, and the incident
-       it eventually raises accuses the agent of never acking — the symptom, never the cause. So the
-       refusal names the pod holding the slot AND the gesture that works: the operator who typed the
-       obvious command has no other way to learn it.
-    6. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`:
-       a one-shot without `brief` would leave
-       without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
-       `Fleet.Spawner.brief_required?/1` IS the shared authority (no copied
-       rule, no possible divergence).
-
-  `broadcast/1` (the post-admission step) emits the canonical schema
-  `%Fleet.Event{source: :api}` — an out-of-registry or malformed event becomes
-  `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
+  Fleet role_index:0 is checked against a snapshot of matching live roles, without
+  reserving the slot. Admission and dispatch are not atomic and do not prove launch.
+  ControlRouter maps refusals to HTTP status; this module has no HTTP authentication.
   """
 
   alias Fleet.CapProfile
   alias Fleet.EventRouter.Bus
 
   @typedoc """
-  Admission-refusal verdicts — each mapped onto ONE HTTP status by
-  `Fleet.API.ControlRouter`: 400 for `:missing_cap_profile` (the request is malformed), 409 for
-  `{:fleet_scope_occupied, …}` (the request is well-formed and the fleet's state says no — retrying
-  it later can succeed, which is exactly what 409 means and 422 does not), 422 for the rest.
+  ControlRouter maps missing profile to 400, occupied fleet slot to 409, others to 422.
   """
   @type refusal ::
           {:forbidden_fields, [String.t()]}
@@ -81,8 +40,6 @@ defmodule Fleet.API.SpawnAdmission do
   @spec admit(term()) :: {:ok, map()} | {:error, refusal()}
   def admit(raw) do
     with {:ok, payload} <- parse_admin_spawn_dto(raw),
-         # L'ack ne fait PAS partie du payload broadcast (Map.take le jette, et c'est voulu : c'est
-         # un fait d'ADMISSION, pas un ordre de spawn) — il se lit sur le DTO brut.
          {:ok, cap} <- validate_cap_profile(payload, host_native_ack?(raw)),
          :ok <- check_fleet_scope_free(cap),
          :ok <- check_brief_required(payload, cap) do
@@ -157,24 +114,18 @@ defmodule Fleet.API.SpawnAdmission do
 
   defp valid_pod_id?(id), do: Fleet.Spawner.valid_pod_id?(id)
 
-  # Une cle d'identite PRESENTE MAIS VIDE n'est pas une identite : la garder ferait resoudre un
-  # cap-profile nomme `""`.
+  # Empty/nonbinary profile names must not shadow the role fallback.
   defp blank_identity_key?({k, v}), do: k in ["cap_profile_name", "role"] and presence(v) == nil
 
   defp presence(v) when is_binary(v) and v != "", do: v
   defp presence(_), do: nil
 
-  # `catalogued?/1` first: `role_index/1` RAISES on a profile without a valid one, and an admission
-  # gate is the wrong place to discover that a catalogue is malformed — the image refuses that at
-  # boot. Here, no valid index simply means "not the fleet-scope slot".
+  # Check catalogued? before role_index, which raises without a valid index.
   defp check_fleet_scope_free(cap) do
     name = CapProfile.name(cap)
 
     if CapProfile.catalogued?(cap) and CapProfile.role_index(cap) == 0 do
-      # `Map.get`, never dot access: `list_pods/0` is specced `[map()]` and makes no promise about
-      # the keys. A pod whose `:info` lacks `:role` then raises a KeyError THROUGH the router, and
-      # THE WHOLE SPAWN DOOR ANSWERS 500 because one unrelated pod returned a short map. A guard
-      # that can crash the door it guards is worse than the hole it closes.
+      # A pod info map may omit :role; an unrelated short map must not crash admission.
       case Enum.find(Fleet.Spawner.list_pods(), &(Map.get(&1, :role) == name)) do
         nil -> :ok
         pod -> {:error, {:fleet_scope_occupied, name, Map.get(pod, :pod_id, "unknown")}}
@@ -184,12 +135,6 @@ defmodule Fleet.API.SpawnAdmission do
     end
   end
 
-  # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none` reste REFUSÉ sur ce
-  # chemin générique — sauf si l'opérateur le dit EXPLICITEMENT (`host_native_ack: true`, posé par
-  # `lcars admiral`, jamais par un chemin auto : le dispatcher ne passe pas par cette porte et n'a
-  # pas le champ). C'est la doctrine de la fiche : *« une décision de posture, qui se rouvre en la
-  # nommant »* — on nomme le GESTE (l'acquittement), jamais un nom de rôle (rien ne se key sur une
-  # chaîne de rôle).
   defp admit_containment(cap, name, ack?) do
     cond do
       CapProfile.bwrap?(cap) -> {:ok, cap}
@@ -209,9 +154,7 @@ defmodule Fleet.API.SpawnAdmission do
           {:ok, cap} ->
             admit_containment(cap, name, ack?)
 
-          # A ReservedSeat is its OWN refusal (BL-6-45), not an "unknown cap_profile": the seat
-          # exists, the box is closed — wrapped as {:cap_profile, ...} the router would render
-          # a declared state as an unknown-name error.
+          # Preserve reserved-seat refusal separately from an unresolved profile.
           {:error, {:role_reserved, _} = reserved} ->
             {:error, reserved}
 

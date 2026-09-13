@@ -1,11 +1,9 @@
 defmodule Fleet.API.Readiness do
   @moduledoc """
-  Live operational read-model behind `/api/readiness/deep`.
-
-  Probes report `:operational`, deliberate `:inactive`, or `:degraded`.
-  Inactive subsystems do not degrade the global verdict; failed or crashing
-  probes do. This reports runtime wiring and is distinct from source-level
-  contract checks.
+  Live wiring diagnostics behind /api/readiness/deep, distinct from source contracts
+  or end-to-end execution. Only :degraded states lower the global verdict.
+  Probe exceptions become degraded results; throws, exits and malformed returned
+  shapes can escape. Injected states are not validated.
   """
 
   @doc """
@@ -71,10 +69,7 @@ defmodule Fleet.API.Readiness do
     probe("spawn.dispatch", state, detail)
   end
 
-  # ⚠ LE CONTRAT, PAS L'IDENTITE D'UN MODULE. Comparer le backend au NoOp ferait passer pour
-  # operationnel tout ce qui n'est pas le NoOp — un module INEXISTANT compris. « Ce n'est pas le
-  # repli degrade » ne dit rien sur ce que la chose sait faire, et une sonde de readiness qui se
-  # trompe dans ce sens-la fait exactement ce qu'elle existe pour empecher.
+  # Check required callbacks: merely excluding NoOp would admit nonexistent modules.
   defp shutdown_dispatcher do
     case Fleet.Admiral.Shutdown.resolved_conforming() do
       {:ok, Fleet.Admiral.Shutdown.NoOpDispatcher} ->
@@ -97,7 +92,6 @@ defmodule Fleet.API.Readiness do
   end
 
   defp launch_backend do
-    # F-C041
     case Fleet.Spawner.LaunchBackend.resolved_conforming() do
       {:error, {:launch_backend_misconfigured, mod}} ->
         probe("launch.backend", :degraded, %{

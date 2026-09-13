@@ -1,7 +1,6 @@
 defmodule Fleet.API.ControlRouterTest do
-  # async: false — the PubSub bus is global (admin.spawn broadcast + assert_receive) → serialize.
-  # ControlRouter serves POST /api/admin/spawn on the AF_UNIX socket (outside the pod's network);
-  # here we test the ROUTING + the admission mapping via Plug.Test (the real socket bind is proven elsewhere).
+  # Shared PubSub/config require serial tests. Plug.Test checks routing/admission;
+  # socket cases also exercise host transport. Neither establishes pod isolation or launch.
   use ExUnit.Case, async: false
   import Plug.Test
   import Plug.Conn
@@ -14,10 +13,7 @@ defmodule Fleet.API.ControlRouterTest do
   setup do
     Bus.subscribe()
 
-    # The spawn rail's readiness is now pre-flighted before the 202 (the 202 must not lie into
-    # a dead PublishConsumer). In :test the consumer is deliberately off (hermeticity), so inject an
-    # OPERATIONAL status by default — the routing tests below isolate the router from the consumer's
-    # presence; the degraded path has its own test that overrides this seam.
+    # Inject readiness to isolate routing from the normally absent test consumer.
     Fleet.TestEnv.put_env_restoring(
       :lcars_fleet,
       :api_spawn_dispatch_status_fun,
@@ -27,20 +23,13 @@ defmodule Fleet.API.ControlRouterTest do
     :ok
   end
 
-  # ── Integration: the REAL AF_UNIX socket (bind + rm-stale + curl --unix-socket → router) ──
-  # Locks `start_control_listener/1` end to end: this is what the pod can NOT reach
-  # (file outside its mount namespace) and what `lcars` hits host-side. Plug.Test below only
-  # covers the routing; this test covers the real transport.
+  # Host-side UNIX transport; no pod mount namespace is exercised here.
   describe "AF_UNIX socket (real bind)" do
-    # SHORT path under the system tmp_dir (the AF_UNIX sun_path is capped at 108 bytes — ExUnit's
-    # tmp_dir, with the test name, exceeds it; in prod ~/.lcars/run/api.sock fits easily).
+    # Keep paths short: Linux AF_UNIX sun_path is limited to 108 bytes.
     defp short_sock,
       do: Fleet.TestEnv.tmp_path("lc-ctl") <> ".sock"
 
-    # Embedded-tree cleanup: the TEST process is the tree's parent (start_link) — when
-    # ExUnit tears the test down (:shutdown), the tree may ALREADY be dying as this on_exit
-    # runs. An already-dying tree is a clean outcome (that death-by-parent IS the fixed
-    # behavior); we still wait for the DOWN so the ranch ref is free for the next test.
+    # Parent shutdown may already be stopping this linked tree; await DOWN either way.
     defp stop_tree(pid) do
       ref = Process.monitor(pid)
 
@@ -57,10 +46,7 @@ defmodule Fleet.API.ControlRouterTest do
       end
     end
 
-    # The curl prerequisite is resolved STRUCTURALLY (test_helper excludes :requires_curl at
-    # runtime when the binary is missing): an in-test `if curl → else IO.puts SKIP` printed a
-    # line and COUNTED GREEN — a machine's verdict silently reported as the code's. Excluded
-    # shows in the bilan; green means the end-to-end actually ran.
+    # Missing curl is excluded by test_helper via requires_curl, not counted as a pass.
     @tag :requires_curl
     test "bind + curl --unix-socket POST /api/admin/spawn → 202 (host-side reaches the door)" do
       curl = System.find_executable("curl") || raise "curl vanished between helper and test"
@@ -68,11 +54,9 @@ defmodule Fleet.API.ControlRouterTest do
       sock = short_sock()
       on_exit(fn -> File.rm(sock) end)
       {:ok, pid} = ControlRouter.start_control_listener(sock)
-      # Embedded tree: stopped via its OWNER, not `:cowboy.stop_listener` (the ref
-      # is not under the ranch application's supervisor → `{:error, :not_found}` there).
+      # Stop the embedded owner; it is not registered under ranch_sup.
       on_exit(fn -> stop_tree(pid) end)
 
-      # The file exists and is indeed a socket (the pod will not see it: outside its mount ns).
       assert File.exists?(sock)
 
       {out, code} =
@@ -110,18 +94,14 @@ defmodule Fleet.API.ControlRouterTest do
       File.write!(sock, "residue from a previous instance")
       on_exit(fn -> File.rm(sock) end)
 
-      # start_control_listener rms the stale file BEFORE the bind (AF_UNIX is not auto-removed).
       assert {:ok, pid} = ControlRouter.start_control_listener(sock)
       on_exit(fn -> stop_tree(pid) end)
       assert File.exists?(sock)
     end
 
     test "the listener tree is EMBEDDED: linked to the caller, never parked under ranch_sup" do
-      # The old `Plug.Cowboy.http` start parked the listener under the ranch APPLICATION's
-      # supervisor: the pid composed as a child had a FOREIGN parent, its shutdown exit was
-      # ignored, and every graceful stop hung until the launcher's fallback kill. The two
-      # properties below ARE the fix: the tree links to its starting supervisor and its
-      # ancestry stays in OUR tree.
+      # Regression: a listener parked under ranch_sup ignored its nominal owner's stop.
+      # Check the direct link and ancestry; this case does not trigger parent shutdown.
       sock = short_sock()
       on_exit(fn -> File.rm(sock) end)
 
@@ -150,8 +130,7 @@ defmodule Fleet.API.ControlRouterTest do
       sock = short_sock()
       on_exit(fn -> File.rm(sock) end)
 
-      # Seam: the readiness chmod FAILS → the socket bound but could not be tightened to 0600. The door
-      # must NOT be announced ready: tear down + remove the socket + surface the error.
+      # Simulate chmod failure and check returned error/path removal, not process death.
       failing_chmod = fn _path, _mode -> {:error, :eperm} end
 
       assert {:error, {:chmod_failed, :eperm}} =
@@ -163,8 +142,6 @@ defmodule Fleet.API.ControlRouterTest do
 
   describe "POST /api/admin/spawn — spawn rail readiness (the 202 must not lie)" do
     test "503 + NO broadcast when the dispatch rail is DEGRADED (PublishConsumer down)" do
-      # The 202 used to go out over the lossy Bus even with no subscriber — a lie: the operator
-      # believed a pod was queued, nothing took it, and there is no forge net for this path.
       Fleet.TestEnv.put_env_restoring(
         :lcars_fleet,
         :api_spawn_dispatch_status_fun,
@@ -177,12 +154,12 @@ defmodule Fleet.API.ControlRouterTest do
         |> ControlRouter.call(@opts)
 
       assert conn.status == 503
-      # The command was NOT broadcast into the void.
+
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
     test "202 + broadcast when the rail is operational (a live consumer will take it)" do
-      # The default setup injects operational; the broadcast goes out and the 202 is truthful.
+      # Injected operational status plus this test's subscription proves emission, not consumption.
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
         |> put_req_header("content-type", "application/json")
@@ -213,10 +190,8 @@ defmodule Fleet.API.ControlRouterTest do
     end
 
     test "409 + NO broadcast when a fleet-scope role is already running, naming the holder" do
-      # Measured on the bench: `lcars spawn starfleet` next to the running permanent was ADMITTED.
-      # A second pod went up with a random UUID, nothing was ever addressed to it, and the wake rail
-      # escalated after twelve unanswered attempts — an incident that named the symptom (the agent
-      # never acked) and never the cause.
+      # Duplicate fleet-slot pods previously received random identities and no work;
+      # refuse with the existing pod's attach command.
       {:ok, _} = start_supervised({FakePod, {"permanent-starfleet", "starfleet"}})
 
       conn =
@@ -228,14 +203,12 @@ defmodule Fleet.API.ControlRouterTest do
       body = Jason.decode!(conn.resp_body)
       assert body["error"] =~ "permanent-starfleet"
 
-      # The operator typed the obvious command; the refusal owes them the one that works.
       assert body["reason"] =~ "lcars attach permanent-starfleet"
 
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
     test "a NON fleet-scope role is unaffected by a live pod of the same role" do
-      # `engineer` is role_index 3: several are normal and the door must not invent a singleton.
       {:ok, _} = start_supervised({FakePod, {"eng-already-running", "engineer"}})
 
       conn =
@@ -262,8 +235,6 @@ defmodule Fleet.API.ControlRouterTest do
   end
 
   describe "POST /api/admin/spawn" do
-    # MA-18: the cap-profile is validated BEFORE the ACK → a REAL cap-profile (canon `engineer`)
-    # must pass (202 + broadcast).
     test "real cap-profile → broadcast admin.spawn.request + 202" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "engineer"}))
@@ -280,10 +251,6 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # MA-18 — THE finding: a well-formed slug WITHOUT a cap-profile (e.g. `lcars spawn scout`) must
-    # NOT return 202 (a lie: the PublishConsumer would just log a warning, zero pod). 422 +
-    # NO broadcast (admission is refused at the boundary, not deferred to the async consumer
-    # where the failure would be nothing but a warning without a pod).
     test "MA-18 — nonexistent cap-profile → 422, NOT 202, and NO broadcast" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{role: "scout-inexistant-xyz"}))
@@ -296,7 +263,6 @@ defmodule Fleet.API.ControlRouterTest do
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
-    # MA-18 — neither `cap_profile_name` nor `role` → 400 (malformed request), not a 202 nor a broadcast.
     test "MA-18 — neither cap_profile_name nor role → 400" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{issue_id: "issue-1"}))
@@ -307,9 +273,7 @@ defmodule Fleet.API.ControlRouterTest do
       refute_receive %Fleet.Event{type: :"admin.spawn.request"}, 200
     end
 
-    # Regression acte4 #32 — in Elixir "" is TRUTHY: `cap_profile_name:"" || role` returns ""
-    # which falls into the `:missing_cap_profile` catch-all while IGNORING the valid role provided.
-    # presence/1 treats "" ≈ absent → the fallback reaches the role.
+    # Empty strings are truthy in Elixir; they must not shadow the valid role fallback.
     test "acte4 #32: empty cap_profile_name + valid role → the role is resolved (202)" do
       conn =
         conn(
@@ -325,17 +289,8 @@ defmodule Fleet.API.ControlRouterTest do
     end
   end
 
-  # ============================================================
-  # B2b — admission DTO allowlist of /api/admin/spawn
-  # ============================================================
-  #
-  # /api/admin/spawn is no-auth. The PublishConsumer THEN converts `payload["opts"]` into internal
-  # spawner opts — without a filter, privileged opts become drivable from the API (disk roots, `human`,
-  # `project` → cloning an attacker repo into the pod, `allow_no_brief`, seams…). The allowlist REFUSES
-  # any non-public field BEFORE any broadcast: 422, and nothing reaches the consumer/spawner.
+  # Reject raw opts so API clients cannot set privileged spawner fields.
   describe "POST /api/admin/spawn — DTO allowlist (B2b)" do
-    # Each of these payloads carries an internal spawner field via `opts` (or directly): must be 422
-    # BEFORE spawn, and NO `admin.spawn.request` may leave on the bus.
     @forbidden_payloads [
       {"opts.pod_dir_root", %{"role" => "engineer", "opts" => %{"pod_dir_root" => "/tmp/evil"}}},
       {"opts.state_fs_root",
@@ -383,8 +338,6 @@ defmodule Fleet.API.ControlRouterTest do
 
       assert conn.status == 202
 
-      # The broadcast payload is the CANONICAL DTO rebuilt by the API: `brief` is passed inside `opts`
-      # (never a raw client `opts`), `issue_id` preserved.
       assert_receive %Fleet.Event{
                        source: :api,
                        type: :"admin.spawn.request",
@@ -398,7 +351,6 @@ defmodule Fleet.API.ControlRouterTest do
     end
 
     test "path-safe pod_id accepted (placed into opts), malformed pod_id → 422 before spawn" do
-      # Legitimate pod_id (path-safe charset): accepted, placed back into opts.
       ok =
         conn(
           :post,
@@ -416,7 +368,6 @@ defmodule Fleet.API.ControlRouterTest do
                      },
                      500
 
-      # pod_id with path traversal (`..`): refused BEFORE spawn (never interpolated into an FS path).
       bad =
         conn(
           :post,
@@ -431,9 +382,7 @@ defmodule Fleet.API.ControlRouterTest do
     end
 
     test "non-binary issue_id (JSON number) → 422 before spawn (F-C119, pod_id twin)" do
-      # issue_id = OPTIONAL forge/event correlation: when present → must be a string. A JSON number/bool/list
-      # would be `to_string`-ed downstream (PublishConsumer) into the correlation + logs (e.g. `to_string([1,2,3])`
-      # = control bytes). No-auth ingress → strict typing like pod_id. (Absent → OK, Bus envelope fallback.)
+      # String typing prevents downstream to_string coercion from creating odd correlations.
       bad =
         conn(
           :post,
@@ -448,22 +397,9 @@ defmodule Fleet.API.ControlRouterTest do
     end
   end
 
-  # ============================================================
-  # F — host-native forbidden via /api/admin/spawn
-  # ============================================================
-  #
-  # A `containment: none` cap-profile launched via this GENERIC no-auth spawn door = an OUT-OF-SANDBOX
-  # pod running on the host *as* the human — the strongest power in the fleet. It must NOT be reachable
-  # through this path: 422 refusal at admission, BEFORE any broadcast (no pod is born). Host-native keeps
-  # its dedicated out-of-band path (`bin/host_launch.sh`).
-  #
-  # Since the 2026-07-19 reorg made `starfleet` an ORDINARY bwrap orchestrator, NO canon profile is
-  # host-native anymore — but the guard MUST still hold for any future host-native profile. So we prove
-  # it against a FIXTURE (canon `engineer` with `containment` flipped to `none`), not a canon role.
+  # Non-bwrap profiles require explicit host_native_ack:true, regardless of role name.
   describe "POST /api/admin/spawn — host-native forbidden (F)" do
-    # Writes a schema-valid host-native profile into `dir`, derived from the canon `engineer` YAML (valid)
-    # by flipping the 3 identity/containment values. Read by priv path (independent of the `:root_dir`
-    # this describe repoints), so the fixture tracks the real schema, never a 2nd hardcoded copy.
+    # Derive a host-native profile from the bundled engineer schema in an isolated catalogue.
     defp write_hostnative_fixture(dir) do
       yaml =
         [
@@ -478,22 +414,15 @@ defmodule Fleet.API.ControlRouterTest do
         |> String.replace("name: engineer", "name: hostnative-probe")
         |> String.replace("containment: bwrap", "containment: none")
         |> String.replace("host_native: false", "host_native: true")
-        # ⚠ LE DECOR EST UN CATALOGUE ISOLE QUI NE PORTE QUE CE FICHIER. Depuis que tout profil canon
-        # declare `adresser-un-agent` dans son `modop_set.default`, la copie traine une dependance
-        # vers un overlay (`cap-profiles/modop/<nom>/profile.yaml`) que ce dossier n'a pas : la
-        # resolution echoue en `:modop_not_found` et la porte rend 422 pour une raison qui n'a RIEN a
-        # voir avec ce qu'elle teste. Mesure du 2026-08-20 : deux cas rouges le jour ou le bundle est
-        # devenu universel. On retire le modop plutot que de copier son arbre — ce temoin porte sur
-        # le containment, pas sur la composition de SP, et un decor minimal doit le rester.
+        # Remove the default modop absent from this isolated catalogue; otherwise 422
+        # could come from missing composition data rather than containment.
         |> String.replace("default: [adresser-un-agent]", "default: []")
 
       File.write!(Path.join(dir, "hostnative-probe.yaml"), yaml)
     end
 
-    # PRE-CONDITION (anti-bitrot), AMENDÉE par BL-6-101 (2026-08-19) : tout profil canon est bwrap
-    # — SAUF le siège machine `admiral`, la SEULE exception, née avec l'ouverture nommée du verrou
-    # (l'ack explicite ci-dessous). Un DEUXIÈME profil `containment: none` qui apparaîtrait ici
-    # doit re-passer par un arbitrage, pas hériter du précédent.
+    # Policy witness permits no non-bwrap profiles or only admiral. A second exception
+    # requires its own decision; this assertion does not require admiral to exist.
     test "pre-condition: every canon profile is bwrap — sauf l'unique siège admiral" do
       assert {:ok, names} = Fleet.CapProfile.list()
 
@@ -510,8 +439,8 @@ defmodule Fleet.API.ControlRouterTest do
 
     test "l'OUVERTURE NOMMÉE : host_native_ack=true admet le profil host-native — c'est le GESTE qui ouvre",
          %{} do
-      # Le même profil que le 422 ci-dessous, la même porte — plus l'acquittement explicite que
-      # seul `lcars admiral` pose. Aucun chemin automatique ne passe par cette porte avec ce champ.
+      # The same host-native fixture passes with the explicit acknowledgment.
+      # The payload pattern does not assert that host_native_ack was stripped.
       tmp = Fleet.TestEnv.tmp_path("hostnative-ack")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
@@ -536,9 +465,6 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # The nominal case (bwrap) PASSES — the guard only closes host-native, not legitimate spawn. This is
-    # the "accepted" half of the regression: removing the guard would ALSO let through the host-native
-    # below, which MUST fail; the two together prove that containment is what decides.
     test "containment bwrap (engineer) → 202 + broadcast (nominal path intact)" do
       conn =
         conn(:post, "/api/admin/spawn", Jason.encode!(%{"role" => "engineer"}))
@@ -551,11 +477,8 @@ defmodule Fleet.API.ControlRouterTest do
                      500
     end
 
-    # THE finding: a host-native cap-profile via the generic spawn door → 422, NO broadcast. Proven
-    # regression: removing the `containment == "bwrap"` branch from `validate_cap_profile` (spawn_admission.ex)
-    # turns this case into 202 + broadcast → a host pod would be born from the API. The guard IS what makes
-    # this 422 true; without it, the profile loads (`CapProfile.load` OK) and admission passed. The fixture
-    # lives in a tmp catalogue (`:root_dir` repointed, restored after) so no canon change is required.
+    # Establish fixture containment and inspect the refusal reason so an unrelated
+    # catalogue-loading error cannot satisfy the host-native refusal test.
     @tag :tmp_dir
     test "containment none (host-native fixture) → 422 BEFORE spawn, no broadcast", %{
       tmp_dir: tmp
@@ -563,7 +486,6 @@ defmodule Fleet.API.ControlRouterTest do
       write_hostnative_fixture(tmp)
       Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
-      # Sanity: the fixture really is host-native (else the guard below would test nothing).
       assert {:ok, sf} = Fleet.CapProfile.load("hostnative-probe")
       assert Fleet.CapProfile.containment(sf) == "none"
 
@@ -584,25 +506,14 @@ defmodule Fleet.API.ControlRouterTest do
     end
   end
 
-  # ============================================================
-  # flow-02 — one-shot without brief forbidden (brief-guard mirror at admission)
-  # ============================================================
-  #
-  # A one-shot cap-profile (reviewer/qualifier/consultant) launched WITHOUT `brief` would leave with
-  # no work → `Fleet.Spawner.brief_guard` refuses it (`brief_required`, ZERO pod) AFTER a 202
-  # "queued" = lying 202 (twin of the MA-18 lying cap-profile). Admission now REFUSES it
-  # at the boundary (422, no broadcast), via the shared authority `brief_required?/1`.
+  # Admission shares Spawner's brief guard to reject empty one-shot work before emission.
   describe "POST /api/admin/spawn — one-shot without brief forbidden (flow-02)" do
-    # PRE-CONDITION: canon `reviewer` is indeed one-shot + bwrap (otherwise this test proves nothing).
     test "pre-condition: reviewer = one-shot + bwrap" do
       assert {:ok, rev} = Fleet.CapProfile.load("reviewer")
       assert Fleet.CapProfile.lifetime_scope(rev) == "one-shot"
       assert Fleet.CapProfile.containment(rev) == "bwrap"
     end
 
-    # THE finding: one-shot WITHOUT brief → 422 (no more lying 202), NO broadcast. Proven
-    # regression: removing the `brief_required?` guard from the call-site turns this case back into 202 +
-    # broadcast, then the spawner refuses silently (zero pod) → lying 202.
     test "reviewer (one-shot) WITHOUT brief → 422 BEFORE spawn, no broadcast" do
       for key <- ["role", "cap_profile_name"] do
         conn =
@@ -620,8 +531,6 @@ defmodule Fleet.API.ControlRouterTest do
       end
     end
 
-    # The "accepted" half: a LEGITIMATE one-shot carries its `brief` → passes (202 + broadcast,
-    # brief placed back into opts). Proves the guard only closes the one-shot WITHOUT work.
     test "reviewer (one-shot) WITH brief → 202 + broadcast (no false rejection)" do
       conn =
         conn(

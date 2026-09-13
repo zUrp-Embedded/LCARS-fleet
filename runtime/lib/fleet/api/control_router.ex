@@ -1,39 +1,14 @@
 defmodule Fleet.API.ControlRouter do
   @moduledoc """
-  The human operator's WRITE door — `POST /api/admin/spawn`, served ONLY on the local AF_UNIX
-  control socket (`:lcars_fleet, :api_control_socket`, `~/.lcars/run/api.sock`), never over TCP.
+  Routes POST /api/admin/spawn on the configured AF_UNIX control socket.
+  There is no HTTP authentication. Mode 0600 restricts access by UID; bwrap pods
+  cannot see the default ~/.lcars/run socket when /home is masked and no bind restores
+  it. This mount isolation is independent of network isolation and does not apply
+  automatically to host-native profiles or arbitrary configured socket paths.
 
-  ## Why a UNIX socket, not TCP loopback
-
-  This is the SAME move the repo already made for the pod-facing MCP transport: a shared HTTP
-  loopback was replaced by an AF_UNIX socket because "the identity IS the channel". Here the
-  reasoning is the mirror image. `/api/admin/spawn` is the one remaining WRITE (it spawns pods);
-  its only legitimate client is `bin/lcars`, run host-side by the human. The risk it closes is the
-  confused deputy: a compromised/injected pod re-obtaining the "spawner" capability the MCP
-  tool-gating denies it, amplifying claude sessions on the human's subscription — bounded by
-  `max_pods` but self-refilling.
-
-  A UNIX socket closes that BY CONSTRUCTION, and the reason is the FILESYSTEM: the socket file
-  lives under `~/.lcars/run/`, which `--tmpfs /home` masks and no bind restores → it is simply not
-  in the pod's mount namespace. The human's `lcars` runs host-side and reaches it via
-  `curl --unix-socket`; the pod cannot.
-
-  ⚠ DEUX MURS INDEPENDANTS, ET N'ECRIRE JAMAIS L'UN COMME CONSEQUENCE DE L'AUTRE. Celui-ci est le
-  namespace de MONTAGE ; le namespace RESEAU en est un second (`bwrap_launch.sh` passe
-  `--unshare-all`, cf. `Fleet.Spawner.Pod.Egress`). Formuler la raison du montage comme une suite de
-  celle du reseau fait croire a un lecteur que RESTAURER LE RESEAU DU POD ROUVRIRAIT CETTE PORTE.
-  C'est faux — et le jour ou quelqu'un change un mur, l'autre doit encore se lire sur ses propres
-  termes.
-
-  Cette porte est **la seule surface du domaine** : le raisonnement ci-dessus n'a pas de contrepoint
-  a cote, il tient seul.
-
-  ## Contract
-
-  All the admission POLICY lives in `Fleet.API.SpawnAdmission.admit/1` (DTO allowlist, path-safe
-  pod_id, loadable cap-profile, host-native refused, fleet-scope singleton free, one-shot brief
-  required). This router only maps each verdict to an HTTP status + JSON body. A refusal = NOTHING
-  was broadcast (admission precedes emission by construction). Quiescing (shutdown drain) → 503.
+  Quiescence returns 503. SpawnAdmission checks the request before emission;
+  refusals map to 400/409/422. A dispatch-readiness check precedes broadcast.
+  A 202 acknowledges successful emission, not durable queuing or pod creation.
   """
 
   use Plug.Router
@@ -69,13 +44,7 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
-  # LES NEUF REFUS DE L'ADMISSION, chacun avec son code et sa RAISON. Ils vivaient en branches d'un
-  # `case` melange a l'envoi HTTP : le corps de la reponse et le fait de la poster sont deux
-  # choses, et les separer est ce qui rend la table des refus lisible d'un coup d'oeil.
-  #
-  # ⚠ CHAQUE `reason` EST UNE ACTION, PAS UNE PARAPHRASE DU CODE. C'est un humain qui lit cette
-  # reponse, souvent sans acces au code : « role_index 0 est le siege de flotte » ne sert a rien
-  # sans « parle a celui qui tourne, par son terminal ».
+  # Refusal reasons should help the operator act, especially when a fleet slot is occupied.
   defp admission_refusal({:forbidden_fields, fields}),
     do: {422, %{error: "unauthorized fields on /api/admin/spawn", forbidden: Enum.sort(fields)}}
 
@@ -132,21 +101,10 @@ defmodule Fleet.API.ControlRouter do
            "containment != bwrap — host-native goes through its dedicated path, not the spawn API"
        }}
 
-  # CE 202 EST ADOSSE A DEUX MECANISMES, ET LES NOMMER ICI EST CE QUI L'EMPECHE DE SE LIRE COMME UN
-  # « accepte » NU, sans moyen de savoir ce qui le rattrape.
-  #
-  #   1. AVANT la diffusion : `spawn_dispatch_status/0` refuse en 503 si le consommateur unique est
-  #      mort OU vivant-mais-non-abonne. C'est le cas « 202 dans le vide » (zero pod, zero alarme),
-  #      et il est ferme a la porte plutot que constate apres coup.
-  #   2. APRES : tout echec INTERNE du traitement (raise, exit/throw, nom absent, `spawn_pod` en
-  #      erreur) emet `spawn.failed`, route `action: incident` vers `Pilot.IncidentConsumer` — note
-  #      a la 1re occurrence, issue sysadmin a la recurrence. Le drop n'est donc pas silencieux.
-  #
-  # ⚠ CE QUI RESTE OUVERT, et c'est une seule chose : la COURSE entre la garde et le traitement. Le
-  # statut dit `:operational`, la diffusion part, et le consommateur meurt avant d'avoir traite ce
-  # message-la. Aucun evenement, aucune issue, et le 202 est deja parti. Fermer ca demande de
-  # PERSISTER la commande avant de repondre — un outbox durable des commandes admises ; il
-  # n'existe pas, et ce site ne le simule pas.
+  # Readiness reduces broadcasts to an absent/unsubscribed consumer. It cannot close
+  # the race where the consumer dies after this check: no durable command outbox exists.
+  # PublishConsumer attempts spawn.failed reporting for handled failures; that is not
+  # a delivery guarantee for every acknowledged request.
   defp do_broadcast_spawn(conn, payload) do
     case dispatch_status_fun().() do
       {:degraded, info} ->
@@ -176,11 +134,11 @@ defmodule Fleet.API.ControlRouter do
     )
   end
 
-  # ── AF_UNIX control-socket listener ──
-
   @doc """
-  Removes a stale socket, starts an embedded Ranch tree linked to the caller,
-  and commits readiness only after chmod 0600 succeeds.
+  Removes any existing path, starts a linked Ranch tree, then chmods the socket to
+  0600. Returns success only after chmod succeeds. A returned chmod error unlinks,
+  signals shutdown and attempts removal; it does not wait for termination. Directory
+  creation/removal failures are ignored; binding precedes permission tightening.
   """
   @spec start_control_listener(Path.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start_control_listener(sock, opts \\ []) when is_binary(sock) do
@@ -203,7 +161,6 @@ defmodule Fleet.API.ControlRouter do
 
     case apply(m, f, a) do
       {:ok, pid} = ok ->
-        # CI-12
         case chmod_fun.(sock, 0o600) do
           :ok ->
             Logger.info(

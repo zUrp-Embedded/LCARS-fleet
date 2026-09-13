@@ -1,7 +1,5 @@
 defmodule Fleet.API.ReadinessTest do
-  # async: false — the probes read the global Application config; some tests
-  # mutate it via put_env (then restore). Serializing avoids cross-test
-  # pollution (same reason as RestTest).
+  # Probes read shared configuration; tests restore their mutated keys and run serially.
   use ExUnit.Case, async: false
 
   alias Fleet.API.Readiness
@@ -12,8 +10,7 @@ defmodule Fleet.API.ReadinessTest do
   ]
 
   setup do
-    # Snapshot of the mutated keys to restore the exact test ambient (e.g.
-    # launch_backend=StubBackend set by config/test.exs, must NOT be deleted).
+    # Restore prior values, including configured test defaults.
     snapshot =
       Map.new(@mutated, fn {app, key} ->
         {{app, key}, Application.fetch_env(app, key)}
@@ -39,13 +36,9 @@ defmodule Fleet.API.ReadinessTest do
       assert status in ["operational", "degraded"]
       assert is_list(degraded)
 
-      # 6 subsystems: event.registry, shutdown.dispatcher, launch.backend, mcp.pod_facing,
-      # pilot.step (forge-state-machine rail), + spawn.dispatch (PublishConsumer = the sole
-      # subscriber of admin.spawn.request — the probe kills the hollow-green 202).
       assert length(subsystems) == 6
       assert is_binary(ts)
 
-      # each subsystem: id/state/detail, state within the vocabulary
       Enum.each(subsystems, fn s ->
         assert %{id: id, state: state, detail: detail} = s
         assert is_binary(id)
@@ -58,7 +51,7 @@ defmodule Fleet.API.ReadinessTest do
       result = Readiness.deep()
       any_degraded? = Enum.any?(result.subsystems, &(&1.state == :degraded))
       assert result.status == if(any_degraded?, do: "degraded", else: "operational")
-      # the degraded list names exactly the :degraded subsystems
+
       assert result.degraded ==
                result.subsystems |> Enum.filter(&(&1.state == :degraded)) |> Enum.map(& &1.id)
     end
@@ -77,11 +70,7 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "operational when real backend wired" do
-      # ⚠ CABLE SUR LE VRAI BACKEND, ET LE NOM EST ASSERTE EN PLUS DE L'ETAT : la sonde doit
-      # rapporter CE QUI TOURNE, pas seulement « pas le NoOp ». Une sonde qui ne testerait qu'une
-      # INEGALITE (`backend != NoOpDispatcher`) passerait sur n'importe quel atome — un module
-      # inexistant compris (mesure 2026-08-19 sur un `Fleet.Coord` supprime) — et un test dont le
-      # nom promet « real backend wired » ne prouverait pas ce qu'il annonce.
+      # Callback conformity and backend name are observed, not an actual shutdown.
       Application.put_env(
         :lcars_fleet,
         :admiral_shutdown_dispatcher,
@@ -95,9 +84,6 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "un module INEXISTANT ne se lit PAS comme operationnel, et le refus NOMME ce qui manque" do
-      # La contre-epreuve. Elle a ete ecrite MARQUEE `:skip` le jour ou le trou a ete vu — la sonde
-      # ne savait dire que « ce n'est pas le NoOp », donc un module absent passait pour operationnel.
-      # Elle mord depuis que la sonde verifie le CONTRAT du backend au lieu de son identite.
       Application.put_env(:lcars_fleet, :admiral_shutdown_dispatcher, Fleet.NExistePas)
 
       assert %{state: :degraded, detail: %{note: note}} =
@@ -107,8 +93,6 @@ defmodule Fleet.API.ReadinessTest do
       assert note =~ "in_flight_count"
     end
 
-    # Drift-kill: key unset → readiness reads the OWNER's canonical default
-    # (`Fleet.Admiral.Shutdown.configured_dispatcher/0` → NoOpDispatcher), not a re-declared default.
     test "missing key → shared canonical default (NoOpDispatcher) → degraded" do
       Application.delete_env(:lcars_fleet, :admiral_shutdown_dispatcher)
 
@@ -142,9 +126,6 @@ defmodule Fleet.API.ReadinessTest do
       assert %{state: :operational} = sub(Readiness.deep(), "launch.backend")
     end
 
-    # Drift-kill: key unset → readiness reads the OWNER's canonical default
-    # (`Fleet.Spawner.LaunchBackend.resolved/0` → LauncherPortBackend, which actually launches pods),
-    # hence operational, NOT a phantom `:degraded` due to a `nil` or a stale re-copied default.
     test "missing key → shared canonical default (LauncherPortBackend) → operational" do
       Application.delete_env(:lcars_fleet, :spawner_launch_backend)
 
@@ -155,8 +136,6 @@ defmodule Fleet.API.ReadinessTest do
     end
   end
 
-  # describe "pilot.dispatcher" REMOVED (②.3 / BL-050): the probe was sensing the legacy AutoDispatcher, deleted.
-
   describe "event.registry (B2 — visible escape-hatch)" do
     test "degraded when registry empty (test ambient, load_event_registry false)" do
       assert %{state: :degraded, detail: %{authorized_types: 0}} =
@@ -165,8 +144,7 @@ defmodule Fleet.API.ReadinessTest do
   end
 
   describe "mcp.pod_facing (probes the PROCESS — the socket-acceptor DynamicSupervisor)" do
-    # Per-pod socket substrate alive (booted host-side in the umbrella) + spec injected INTO pods present
-    # → operational. We set the spec (absent in ambient) to isolate this case.
+    # Presence of this synthetic MCP spec is tested, not its usability inside a pod.
     test "operational when the socket substrate runs AND mcp_server_spec present" do
       Application.put_env(:lcars_fleet, :spawner_mcp_server_spec, %{"some" => "spec"})
       on_exit(fn -> Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec) end)
@@ -175,8 +153,6 @@ defmodule Fleet.API.ReadinessTest do
                sub(Readiness.deep(), "mcp.pod_facing")
     end
 
-    # Test ambient: substrate alive BUT mcp_server_spec absent (pods not wired) → the probe degrades
-    # (anti-hollow-green: the substrate runs but nothing is injected into the pods).
     test "degraded when substrate alive but mcp_server_spec absent (pods not wired)" do
       Application.delete_env(:lcars_fleet, :spawner_mcp_server_spec)
 
@@ -216,10 +192,8 @@ defmodule Fleet.API.ReadinessTest do
   end
 
   describe "spawn.dispatch (probes the PROCESS — the sole subscriber of admin.spawn.request)" do
-    # The 202 of POST /api/admin/spawn lies when the PublishConsumer is off (lossy Bus →
-    # broadcast lost → 0 pod) while /readiness/deep says operational — this probe kills that.
+    # Consumer presence/subscription does not guarantee handling of a future broadcast.
     test "degraded when PublishConsumer absent (start_publish_consumer off — test ambient)" do
-      # config/test.exs sets start_publish_consumer=false → the consumer is never started.
       refute is_pid(Process.whereis(Fleet.Spawner.PublishConsumer))
 
       assert %{state: :degraded, detail: %{consumer: false}} =
