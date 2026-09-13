@@ -1,18 +1,12 @@
 defmodule Mix.Tasks.Lcars.SlugWitnessTest do
   @moduledoc """
-  The witness that saw nothing, for as long as it existed.
+  Synthetic directory tests for hidden-path traversal, empty scans, consecutive
+  hyphen counts and rejection of an underscore-containing basename.
 
-  `mix lcars.slug_witness` confronts `SeedStore.slugify/1` — our frozen mirror of the vendor's
-  slugification — with what the vendor ACTUALLY wrote under `<pod>/.claude/projects/<slug>`. Its
-  whole moduledoc is a careful argument about not over-claiming a green.
-
-  It found ZERO witnesses on every tree, always: `Path.wildcard/2` refuses to traverse a segment
-  starting with a dot unless `match_dot: true`, and the path it walks contains `.claude`. Measured
-  on a real tree: 0 with the default, 8 with the flag. The task then printed "0 témoins … rien ne
-  contredit le miroir" — a reassuring sentence about a directory it never opened.
-
-  These tests hold the two halves that failed together: it must SEE, and a count of zero must not
-  read as a verdict.
+  These fixtures do not establish vendor behaviour or recover original cwd values.
+  The first test calls the draining said/0 twice: its second refutation observes
+  an empty mailbox, not the original output. Empty-scan wording is tested separately.
+  The task succeeds on no witnesses; only a disputed name exits nonzero.
   """
   use ExUnit.Case, async: false
 
@@ -46,8 +40,7 @@ defmodule Mix.Tasks.Lcars.SlugWitnessTest do
   test "it SEES a witness under a dot directory — the regression that made it blind", %{
     tmp_dir: tmp
   } do
-    # Nested exactly like a real pod_dir: <root>/pods/pod_x/.claude/projects/<slug>. The `**` has to
-    # cross `pods/pod_x` AND then a literal `.claude`, which is where the default flag stopped it.
+    # Exercise both recursive pod directories and the hidden .claude segment.
     witness(tmp, "pods/pod_alpha", "-home-alpha")
 
     run(["--root", tmp])
@@ -57,8 +50,6 @@ defmodule Mix.Tasks.Lcars.SlugWitnessTest do
   end
 
   test "ZERO witnesses is NOT a verdict — it says it measured nothing", %{tmp_dir: tmp} do
-    # The failure mode: a count of zero printed in the same breath as "rien ne contredit", which
-    # reads as a measurement. An empty tree must produce the OTHER sentence, and on the error rail.
     run(["--root", tmp])
 
     out = said()
@@ -68,8 +59,7 @@ defmodule Mix.Tasks.Lcars.SlugWitnessTest do
   end
 
   test "a witness that DISCRIMINATES is counted as such", %{tmp_dir: tmp} do
-    # `--` is the trace of the frozen algorithm: it does NOT collapse consecutive dashes, where a
-    # naive slugify would. A tree of `-home-tetris` proves nothing; this one does.
+    # Consecutive hyphens exercise the task's counting predicate.
     witness(tmp, "pods/pod_beta", "-home-beta")
     witness(tmp, "pods/pod_gamma", "-tmp-x--home-y")
 
@@ -78,16 +68,14 @@ defmodule Mix.Tasks.Lcars.SlugWitnessTest do
     out = said()
     assert out =~ "2 temoin(s) d'accord"
     assert out =~ "1 exercant un cas DISCRIMINANT"
-    # Having a discriminating witness silences the "nothing distinguishes" caveat — it no longer
-    # applies, and printing it anyway would understate a real confrontation.
+
     refute out =~ "aucun temoin ne DISTINGUE"
   end
 
   test "a slug the mirror could not have produced is a DISAGREEMENT, and exits nonzero", %{
     tmp_dir: tmp
   } do
-    # The only verdict a directory NAME alone permits: it must live in `slugify/1`'s image. An
-    # underscore is outside the charset, so the vendor that wrote it ran another algorithm.
+    # This synthetic name lies outside the mirror's output charset.
     witness(tmp, "pods/pod_delta", "-home-under_score")
 
     assert catch_exit(run(["--root", tmp])) == {:shutdown, 1}

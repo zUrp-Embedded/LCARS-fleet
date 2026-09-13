@@ -1,12 +1,12 @@
 defmodule Mix.Tasks.Lcars.Test.ViewTest do
   @moduledoc """
-  The projection must be LOSSLESS, or it is a way to miss something while feeling thorough.
+  Tests tokenizer classification, preserved line numbering, static loop outlines
+  and the dotted Mix command name.
 
-  Two halves. The fixture half pins the three traps a regex-based strip falls into — a `#` inside
-  a heredoc, a `@moduledoc` heredoc, a witness declared inside a `for` — on a file written for
-  that. The suite half runs `check` on every `*_test.exs` of this tree: the code view must
-  reparse and code + prose must recompose the original, file by file. The day a construct the
-  tokenizer classifies differently enters the suite, this is where it shows.
+  The suite scan checks reparsing and textual recomposition with original non-code
+  lines. It does not compare executable ASTs or cover code lost from inline-comment
+  lines. The fixture distinguishes hashes in ordinary heredocs from doc literals
+  and actual comments.
   """
   use ExUnit.Case, async: true
 
@@ -92,8 +92,6 @@ defmodule Mix.Tasks.Lcars.Test.ViewTest do
     assert counts[:doc] == 4
   end
 
-  # THE SUITE HALF. Every witness of this tree, projected and recomposed — the only proof that the
-  # instrument can be trusted on what it will actually be used on.
   test "check is lossless on every *_test.exs of this tree" do
     files = Path.wildcard(Path.expand("../**/*_test.exs", __DIR__))
     assert files != []
@@ -107,9 +105,7 @@ defmodule Mix.Tasks.Lcars.Test.ViewTest do
     assert bad == [], "the projection is not lossless on: #{inspect(bad)}"
   end
 
-  # THE COMMAND NAME IS PART OF THE CONTRACT. Every doc says `mix lcars.test.view`; a module named
-  # `Lcars.TestView` would run as `mix lcars.test_view` and every witness calling the module directly
-  # would stay green. Only a run BY NAME pins it.
+  # Invoke by command name: direct module calls cannot detect Mix naming errors.
   @tag :tmp_dir
   test "the task answers to the name the docs give it: `mix lcars.test.view`", %{tmp_dir: tmp} do
     path = Path.join(tmp, "fixture_test.exs")
