@@ -1,88 +1,33 @@
 defmodule Fleet.Pilot.StepRunConsumer do
   @moduledoc """
-  Bus consumer for **step-run completion** (the forge IS the state machine; this module reacts to it).
-  Subscribes to `Fleet.EventRouter.Bus` (topic `fleet.events`); on each
-  `%Fleet.Event{source: :spawner, type: :"pod.completed"}` from a
-  **step-dispatch** pod (assignee-driven), translates the event into a `step_run` and delegates the
-  completion sequence to `Fleet.Pilot.StepRunCompleter`.
+  Consumes pod.completed events, derives per-run context and delegates forge completion.
+  GateEngine resolves intent; this GenServer applies verdicts, stores pending evaluations
+  and chooses synchronous vs runner execution. It also handles evaluation results and
+  architect-resolution metadata from work_item.completed.
 
-  ## Sub-modules
+  Payloads with any workflow_map_id key skip. Others need binary workspace/role and
+  nonempty binary base_sha plus a parseable issue_id; this is not filesystem or SHA validation.
+  Repository comes from the event (nested repository before bare repo), with configured
+  repo/remote fallback. Event remote overrides only when an event repo is accepted.
 
-  Each is a hardened boundary reading a NARROW `Seams` struct, never the whole `state`. The
-  decision engine returns an INTENT; acting on it is this module's job, never the engine's.
+  Gates may advance, rebound or summon an issue-keyed exception judge; undecidable
+  does not imply a gatekeeper workflow step. Evaluation context lives in gate_evals
+  with TTL/sweep. Broker metadata can reconstruct it after consumer loss, provided
+  that metadata survives and the named card still loads. Reconstruction reloads the
+  card using metadata repo/config fallback, not the resume payload's repo.
 
-  THIS module keeps: the Bus GenServer, the async-resumption state, the verdict application, the
-  sync/offload execution discipline, and the per-step-run derivation of the state.
+  CompletionOutbox writes before processing and deletes on ok, skip or escalation.
+  With offload, ok may mean only Task admission: the entry is deleted before the
+  eventual forge result. Replay is a boot message, not a periodic retry or a guarantee
+  of beating orphan reclamation. Evaluation continuations are not journaled here.
 
-  ## Gatekeeper = exception (escalation), NOT a step
-
-  The gate of the finished step decides BEFORE advancing (`Fleet.Workflow.Gates.evaluate/3`,
-  PURE):
-
-    * `:pass`                  → advances in the workflow_map (next_step).
-    * `{:fail, _}`             → bounded REBOUND to the 1st step (anti-runaway rework).
-    * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft` gate is NOT a scheduling
-      step, it is a SUMMONS of the one-shot per-project judge. The eval brief is enqueued, the
-      resume context is held in RAM, and the decision comes back ASYNC.
-
-  ⚠ The judge is **rare BY CONSTRUCTION**: the engine cannot over-summon it, because the
-  undecidable is a *runtime condition* and not a *step tag*. There is no `role: gatekeeper` step
-  and no `soft⟺gatekeeper` biconditional — the decision is forge-driven.
-
-  ## Defensive `workflow_map_id` guard
-
-  This consumer is the ONLY completion rail (no RAM engine, no dual-run). No pod is
-  spawned with `opts[:workflow_map_id]` — nothing produces it. The `workflow_map_id`
-  present → skip branch (the `{:skip, :workflow_map_pod}` clause below) remains as a
-  **defensive guard** (a residual workflow_map_name payload would not be processed by
-  mistake), never triggered in practice.
-
-    * **Step-dispatch pods** — no `workflow_map_id`, but (if they carry a
-      project) the payload embeds `workspace` + `base_sha` + `role` (enriched at the
-      source, `Fleet.Spawner.Pod.CompletedPayload`). **This consumer
-      processes them.** The event carries all the state → stateless consumer FOR THE HAPPY PATH
-      (pass/fail); pending gatekeeper escalations live in RAM (`gate_evals`)
-      as a **fast-path optimization** — but this is NOT a hard dependency:
-      the verdict is **self-descriptive** (the metadata of the eval task
-      carries the resume context → a crash of the StepRunConsumer alone, broker alive,
-      reconstructs `eval_ctx` from the metadata instead of silently discarding the verdict).
-
-  ## Event → step_run translation
-
-    * `issue_number` ← `issue_id` (`"issue-N"` → `N`)
-    * `repo` ← **the event** (`payload["repository"]["full_name"]`), per-step-run. MULTI-PROJECT:
-      the StepRunConsumer is a singleton that processes the step_runs of ALL the human's projects → the repo
-      (and the `remote` to push to) CANNOT be pinned in config; it TRAVELS in the event ("the event
-      carries all the state"). Config `:repo`/`:remote` remain a **fallback** (single-repo legacy / test
-      with a bare payload). The effective state of a step_run is derived by `step_run_state/2` on entry.
-    * `remote` ← **the event** (`payload["remote"]`, = the cloned `repo_path` = the push URL), per-step-run.
-    * `deliverable_opts` ← `{mode: :git_native, workspace, base_sha,
-      allowed_emails(role), remote, target_branch}`; the SYSTEM pushes
-      (the pod committed in its workspace, the system verifies+pushes) onto a system branch
-      `lcars/issue-N-role` (merge-to-main = elsewhere, not here).
-    * `next_assignee: nil` → **1-step terminal** (close). Multi-step
-      (lookup of the next in the workflow_map) = the workflow_map mode.
-
-  ## Config / seams
-
-    * `:repo` — `"owner/name"` — **fallback** (the per-step-run repo comes from the event)
-    * `:remote` — URL/name of the remote the system pushes to — **fallback** (per-step-run comes from the event)
-    * `:forge_opts` — passed to the ForgeClient via StepRunCompleter
-    * `:role_emails` — `fn role -> [email] end` (default `"<role>@lcars.local"`),
-      must match the git identity injected into the pod (the gate checks the committer's email)
-    * `:step_run_completer` — seam (default `Fleet.Pilot.StepRunCompleter`)
-    * `:task_queue` — brief broker for the gatekeeper escalation (default `Fleet.TaskQueue`)
-    * `:spawner` — wake of the gatekeeper after enqueue (default `Fleet.Spawner`)
-    * `:subscribe` — bool default `true` (tests: `false` + manual send)
-    * `:ops_root` — root of the ops faces (default `Fleet.Layout.ops_root/0`), where a gate verdict
-      is pinned; a seam because the real root is a hardcoded global path
-    * `:escalate_fun` — the incident rail (default `IncidentRegistry.escalate_gated/5`)
-    * `:gate_eval_ttl_ms` / `:gate_eval_sweep_ms` — the bound on the in-RAM gate contexts
-    * `:step_run_runner` — completion offload seam. Default `nil` → **SYNC** (the outcome bubbles up,
-      seams/tests unchanged). Prod (`application.ex`) injects `&offload_async/2` → the completion (git push
-      ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
-      (and a `.complete` that crashes is isolated by the supervised task). An arity-1 runner stays a
-      valid seam shape (legacy tests) — it simply carries no death-witness meta (BL-6-03 S2).
+  Seams include repo/remote, forge_client/forge_opts, role_emails (default ForgeIdentity),
+  loader, deliverable/deliverable_mode_fun, completer, task_queue, spawner and wake_recovery.
+  subscribe defaults true. ops_root affects gate-trace pinning here, not all completer calls.
+  escalate_fun reports stuck architect drains; gate_eval_ttl_ms/sweep_ms bound dated RAM contexts.
+  step_run_runner nil runs synchronously; production injects offload_async. Arity 2 carries
+  death metadata, arity 1 does not. Offload can fall back inline; gates/resolution before
+  the closure still run in the singleton.
   """
 
   use GenServer
@@ -113,12 +58,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :task_queue,
     :spawner,
     :wake_recovery,
-    # Seam d'escalade — meme forme que `:wake_recovery` : injecte par un test pour observer
-    # l'incident sans ouvrir d'issue, resolu vers `IncidentRegistry.escalate_gated/5` en prod.
     :escalate_fun,
-    # Seam of the ops root (default `Fleet.Layout.ops_root/0`), an init option here where the
-    # completer takes it per call — same reason: the real root is a hardcoded global path, and
-    # without it no test can watch a gate verdict get pinned.
     ops_root: nil,
     gate_evals: %{},
     gate_eval_ttl_ms: nil,
@@ -183,10 +123,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       forge_client: Keyword.get(opts, :forge_client),
       loader: Keyword.get(opts, :loader, Fleet.Workflow.Loader),
       deliverable: Keyword.get(opts, :deliverable),
-      # ⚠ ARITE 2, CELLE DU SEAM. `GateEngine.producer?/4` appelle `fun.(role, root)` ; le defaut etait
-      # `&default_deliverable_mode/1` — un BadArityError des qu'un work item arrive sans
-      # `deliverable_mode` dans son payload (AwaitsArchDrainTest, suite complete du 2026-09-06 : vert
-      # seul, rouge selon l'ordre — le defaut n'etait jamais appele quand le payload portait le mode).
+      # Role resolution needs both role and catalogue root when no effective mode travels in the payload.
       deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/2),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
@@ -207,24 +144,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     Process.send_after(self(), :sweep_gate_evals, state.gate_eval_sweep_ms)
 
-    # 6-127 — LA REPRISE EST POSTEE, PAS FAITE DANS `init/1`. Une completion est une suite
-    # d'ecritures forge : la jouer ici bloquerait le demarrage du rail sur du reseau, et un
-    # superviseur qui attend son enfant est un rail qui ne demarre pas. On se l'envoie a soi-meme :
-    # le GenServer est vivant, la reprise s'execute comme n'importe quel message.
-    #
-    # ⚠ ELLE DOIT PRECEDER LA RECLAMATION DU POLLER, et c'est le cas : la reclamation d'un verrou
-    # orphelin attend une grace de 2 ticks (~60 s), la reprise part au premier message apres le
-    # boot. Si elle perdait la course, le pire est un re-dispatch — l'etat d'avant 6-127.
+    # Defer replay until after init so boot does not wait on forge writes.
+    # A self-message starts replay promptly but cannot guarantee completion before poller reclamation.
     if Keyword.get(opts, :replay_outbox, true), do: send(self(), :replay_completion_outbox)
 
     {:ok, state}
   end
 
-  # 6-127 — CE QUI RESTE DANS LE JOURNAL AU DEMARRAGE EST, PAR CONSTRUCTION, UNE COMPLETION DUE :
-  # l'entree est posee avant que la chaine ne tourne et retiree quand elle a fini. On la rejoue par
-  # le MEME chemin que la premiere fois (`maybe_complete/2`), ce qui est exactement ce que le
-  # `@moduledoc` de `StepRunCompleter` promet : « recovery replays the sequence, the done steps
-  # skip ».
+  # Reprocess retained payloads; entries may already have partial or complete forge effects.
   @impl GenServer
   def handle_info(:replay_completion_outbox, state) do
     case CompletionOutbox.pending() do
@@ -245,7 +172,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @impl GenServer
   def handle_info(%Event{source: :spawner, type: :"pod.completed", payload: p}, state) do
-    # CI-02
     Fleet.Shutdown.Quiesce.busy(fn -> handle_pod_completed(p, state) end)
   end
 
@@ -302,7 +228,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   def handle_info(%Event{}, state), do: {:noreply, state}
 
-  # BL-6-03 S2
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case Fleet.Pilot.Offload.handle_down(ref, pid, reason) do
       {:handled, {:died, death_reason, %{pod_id: pod_id} = meta}}
@@ -334,16 +259,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
     :ok
   end
 
-  # 6-127 — LE RESULTAT EST POSE AVANT QUE LA CHAINE NE TOURNE, ET RETIRE QUAND ELLE A FINI.
-  #
-  # `TaskQueue` a deja marque l'item `completed` quand on arrive ici : la charge utile est la SEULE
-  # copie du travail de l'agent. Sans journal, une Task de completion qui meurt l'emporte, et le
-  # poller reclame l'orphelin puis fait REFAIRE le travail. Le journal la rend reprenable.
-  #
-  # ⚠ UNE ERREUR DE JOURNALISATION N'EST PAS FATALE, ET C'EST DELIBERE : la completion se deroule de
-  # toute facon, elle ne sera simplement pas reprenable — l'etat d'avant cette fiche. Refuser de
-  # completer parce qu'on n'a pas pu ecrire un fichier echangerait une degradation bornee contre un
-  # blocage.
+  # Journal before processing. Returned journal errors allow completion to continue;
+  # purge sees the runner's return, which may be admission rather than forge completion.
   defp handle_pod_completed(p, state) do
     _ = journalise_completion(p)
 
@@ -368,15 +285,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # RETRAIT SUR LES SEULS ETATS OU IL N'Y A PLUS RIEN A REPRENDRE. `{:error, _}` GARDE l'entree :
-  # c'est precisement le cas que la fiche vise (chaine interrompue), et la rejouer est sans effet
-  # sur les etapes deja faites.
-  #
-  # ⚠ `{:escalate, …}` RETIRE, et le trou est nomme plutot que comble a moitie : ce chemin range
-  # son contexte d'evaluation EN MEMOIRE (`state.gate_evals`), donc un redemarrage le perd de toute
-  # facon. Le rendre durable est un AUTRE mecanisme, et la preuve de sortie de 6-127 ne porte pas
-  # sur lui — ses trois points de mort (avant push, apres push avant PR, apres PR avant unlock)
-  # sont tous DANS la chaine, couverts ci-dessus.
+  # Remove on ok/skip/escalate, retain returned errors. Offload ok purges before the Task
+  # finishes; escalation also removes the original while its continuation lives in RAM/broker.
   defp purge_outbox(p, {:ok, _}), do: CompletionOutbox.delete(p)
   defp purge_outbox(p, {:skip, _}), do: CompletionOutbox.delete(p)
   defp purge_outbox(p, {:escalate, _, _}), do: CompletionOutbox.delete(p)
@@ -460,31 +370,20 @@ defmodule Fleet.Pilot.StepRunConsumer do
           )
 
         {:error, reason} ->
-          # LE POLLER NE RE-OFFRE RIEN, IL PASSE : l'etiquette reste posee, et
-          # `StepDispatcher.decide/1` SAUTE toute issue qui la porte. Le ticket quitte le pipeline
-          # pour de bon.
+          # The label still blocks worker dispatch; report the failed drain through the incident seam.
           drain_failed(repo, number, {:remove_label_failed, reason}, state)
       end
     else
-      # Meme sortie, autre cause : on ne sait meme pas QUELLE issue deverrouiller. Rien ici ne peut
-      # nommer un numero, donc rien ne peut agir sur la forge — l'incident est le seul canal qui
-      # n'exige pas de connaitre la cible.
+      # Without a valid target, only the incident path can name the failure.
       drain_failed(repo, number, {:metadata_incomplete, meta}, state)
     end
 
     :ok
   end
 
-  # UN TICKET QUI SORT DU PIPELINE NE SORT PLUS EN SILENCE. Les deux branches d'echec du drain
-  # laissent `lcars-awaits-arch` en place, et `StepDispatcher.decide/1` saute toute issue qui la
-  # porte (`{:skip, :awaits_arch}`) : le ticket est retire du pipeline DEFINITIVEMENT, et seule une
-  # intervention humaine le debloque. Un `Logger.warning` ne survit pas a la nuit ; un incident est
-  # une issue durable sur la forge, ce que la doctrine D1 exige pour tout ce qui est load-bearing.
-  #
-  # `escalate_gated/5` plutot que `escalate/5` : la signature porte le repo et le numero quand on
-  # les a, donc une resolution qui echoue en boucle sur le meme ticket ouvre UNE issue, pas une par
-  # occurrence. Sur la branche sans metadonnees, la signature retombe sur la cause seule — c'est le
-  # mieux qu'on puisse nommer, et c'est deja mieux que rien.
+  # Report a stuck drain with target-keyed gating; unknown targets share one signature.
+  # The escalation result is ignored and exceptions propagate, so no durable incident is guaranteed.
+  # Worker exclusion does not imply that ArchWake/Poller cannot re-offer the issue.
   defp drain_failed(repo, number, cause, state) do
     target = if is_binary(repo) and is_integer(number), do: "#{repo}##{number}", else: "unknown"
 
@@ -554,7 +453,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # F-037
   defp step_run_state(payload, state) do
     case GateEngine.payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->
@@ -568,7 +466,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_step_run(payload, n, state) do
     role = payload["role"]
 
-    # DR-013
     case producer?(role, payload, state) do
       {:error, reason} ->
         TerminalEscalation.escalate_terminal_error(reason, n, role, terminal_seams(state))
@@ -578,9 +475,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  # LE BROUILLON PART DANS TOUS LES CAS, l'escalade seulement pour les causes terminales : un
-  # `workflow_map` illisible doit laisser une trace lisible meme quand il ne merite pas de reveiller
-  # l'architecte.
+  # Only workflow_map_load_failed emits this draft; terminal categories also request architect action.
   defp gate_error(reason, n, role, state) do
     emit_workflow_map_failed_draft(reason, n, role)
 
@@ -653,22 +548,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   defp run_completion(state, label, fun) when is_function(fun, 0),
     do: run_completion(state, label, %{}, fun)
 
-  # BL-6-03 S2
-  #
-  # ⚠ CE POINT N'EST PAS UNE SAGA, ET LE RESULTAT DE L'AGENT EST DEJA CONSOMME QUAND ON Y ARRIVE :
-  # le work item est persiste `completed` AVANT que cette chaine ne tourne, et la chaine est une
-  # suite de mutations forge. Une erreur transitoire APRES une mutation reussie laisse donc un etat
-  # partiel, que rien ici ne rejoue.
-  #
-  # CE QUI RATTRAPE, ET CE QUI NE RATTRAPE PAS :
-  #   * le VERROU n'est pas perdu — un step_run interrompu laisse une issue dont plus aucun pod ne
-  #     possede le ref, donc reclamation d'orphelin puis re-dispatch ;
-  #   * le RESULTAT, lui, est consomme — le re-dispatch REFAIT travailler un agent, il ne reprend
-  #     pas la chaine ou elle s'est arretee.
-  #
-  # Degradation BORNEE, pas un blocage, et c'est la seule promesse tenable sans etat durable : la
-  # rendre reprenable demande une saga persistee a points de controle idempotents, qui est une
-  # question de conception a trancher ailleurs qu'au detour d'un site.
+  # A runner may return before exec completes; errors log inside the closure but do not
+  # update the outbox there. Orphan reclamation re-dispatches work, not this saved result.
   defp run_completion(state, label, meta, fun) do
     exec = fn ->
       outcome = fun.()
@@ -693,10 +574,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp run_sync(fun), do: fun.()
 
-  # ⚠ LA ROUTE ARRIVE DEJA FORMEE, ET C'EST L'APPELANT QUI LA CONNAIT. Ses cinq champs voyageaient
-  # en positionnels pour etre recomposes en map des la premiere ligne : deux d'entre eux
-  # (`next_assignee`, `next_step`) sortent d'un meme tuple chez les deux appelants, et les deux
-  # derniers etaient des defauts optionnels qu'un appel sur trois oubliait de nommer.
+  # The caller supplies a named route; execution/building is deferred together.
   defp complete_business_step_run(payload, n, role, route, state, producer?) do
     run_completion(state, "##{n}", %{pod_id: payload["pod_id"], issue: n}, fn ->
       case StepRunBuild.build(payload, n, role, route, build_seams(state), producer?) do
@@ -731,12 +609,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       )
 
   @doc false
-  # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
-  # would resolve every role in the FIRST active catalogue's image: a `dev` of `web` looked up
-  # among `fleet`'s roles, absent there, and the step fails loud on a role that exists — the wedge
-  # the boot validators cannot catch, because it only happens when a step of a second catalogue's
-  # project runs. `nil` keeps the default image, which is what a single-catalogue deployment and
-  # every test fixture want.
+  # Resolve each role in its event catalogue; nil uses the default image.
+  # An unloadable profile must not silently reclassify a producer as a judge.
   @spec default_deliverable_mode(String.t(), Path.t() | nil) ::
           {:ok, String.t()} | {:error, :cap_profile_unloadable}
   def default_deliverable_mode(role, root \\ nil) do
@@ -767,10 +641,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @doc false
-  # Le retour reste ouvert PAR CONSTRUCTION : il descend dans `apply_verdict`, qui rend soit le
-  # resultat de `close_with_trace`, soit celui de `freeze_to_arch` — les deux traversant la couture
-  # `run_completion` (`(String.t(), (-> term()) -> term())`). Le resserrer serait inventer un
-  # contrat que la couture ne tient pas.
+  # Resumption returns the completion runner's open result contract.
   @spec resume_gate(map(), map(), term()) :: term()
   def resume_gate(
         %{n: _n, role: _role, payload: _payload, workflow_map: _workflow_map, step: _step} = ctx,
@@ -779,8 +650,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       ) do
     result = Verdict.gate_result(raw_payload)
 
-    # Le SECOND chemin vers `apply_verdict`, et il doit porter le motif comme le premier : sinon la
-    # passe de correction (B4) est detaillee sur une moitie du rail et generique sur l'autre.
+    # Preserve invalid_reason on the resumed path as well as direct gate decoding.
     {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
     trace = Verdict.verdict_comment("gatekeeper (juge d'exception §L441)", decision, result)
     apply_verdict(decision, trace, Map.put(ctx, :invalid_reason, invalid_reason), state)
@@ -792,15 +662,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
          %{n: n, role: role, payload: payload, workflow_map: workflow_map, step: step} = ctx,
          state
        ) do
-    # SUMMARY + POINTER above the threshold, at the ONE site every emission path of this trace goes
-    # through. The trace is composed from the judge's `reason`/`details`/`chain`, so its length is
-    # the judge's and not ours; below ten lines `render/2` hands it back untouched and nothing is
-    # written.
-    #
-    # `gate-verdicts/`, not `verdicts/`: the deliverable review already owns the second tree for the
-    # same (issue, role) pair, and these are two different acts — one judges a DELIVERY, this one
-    # records a gate decision. Same axis the brief trees already use (`briefs/` worker order,
-    # `gate-briefs/` judge order), so the vocabulary was already there.
+    # Gate traces use gate-verdicts, separate from deliverable verdicts for the same issue/role.
+    # Pinning may summarize long traces; short ones remain inline.
     trace =
       Fleet.Workflow.Pinning.render(trace,
         work_dir: verdict_work_dir(state),
@@ -812,20 +675,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     case decision do
       "continue" ->
-        # The producer/judge split is NOT optional. If the intent were `if is_nil(next_assignee),
-        # do: :promote, else: :advance`, then on a TERMINAL step (next_assignee nil), `apply_verdict`
-        # would hardcode `:promote` regardless of the ROLE that finishes → a PRODUCER judged "continue" on a
-        # terminal would MERGE the code WITHOUT going through the PR judges. We route via the SAME
-        # `GateEngine.advance_intent/3` as the gate `:pass` path: a terminal
-        # producer → `:review` (opens the PR + requests the judges, NEVER an auto-merge of a deliverable); a terminal
-        # judge (brief-review scoper) → `:promote` (it validated the last gate of its workflow_map);
-        # a next step → `:advance`. A single source of truth for the terminal intent.
-        # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
-        # cap-profile fails-loud, never a blind terminal intent under an unknown property.
-        # RESOLVED HERE, NOT RECEIVED: `apply_verdict/4` is shared with `resume_gate/3` (a verdict
-        # resumed from the broker after a consumer restart), where no step-run fact is in scope.
-        # The one site of the rail that derives the producer fact twice, and the reason is the
-        # second door.
+        # Reclassify on this shared direct/resume path, then use the same terminal intent rule:
+        # producer -> review, nonproducer -> promote, next step -> advance.
         with {:ok, is_producer?} <- producer?(role, payload, state),
              {:ok, intent, {next_assignee, next_step}} <-
                GateEngine.advance_intent(workflow_map, step, is_producer?) do
@@ -850,34 +701,18 @@ defmodule Fleet.Pilot.StepRunConsumer do
           "**Architecte** (auteur du brief) — brief ABANDONNÉ par le juge. " <>
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
-        # THE KICK IS INSIDE THE CLOSURE, AFTER THE CLOSE SUCCEEDED — the same order
-        # `TerminalEscalation.freeze_to_arch/5` keeps (« vérifier puis annoncer »). Outside the
-        # closure it would run before the close in offload mode: `run_completion` hands the closure
-        # to the runner and returns `{:ok, :offloaded}` at once, and the architect would hear of
-        # an abandon the forge has not recorded — or never records (2026-09-05, witness with a
-        # runner that holds the closure).
+        # Notify inside the closure only after successful close, even when runner admission returns early.
         close_with_trace(n, role, arch_trace, state, fn ->
           TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
         end)
 
-      # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
-      #
-      # Le repli fail-closed porte sur la FORME : le juge a lu le livrable, il a une opinion, il l'a
-      # mal emballee — et le geler immobiliserait un humain pour un champ mal type. Une passe de
-      # correction, une seule, bornee par un marqueur forge.
-      #
-      # ⚠ LE POD EST ENCORE LA POUR LA RECEVOIR : aucune fauche n'est declenchee par la PRODUCTION
-      # d'un verdict, seulement par son INGESTION — et une enveloppe refusee n'est pas ingeree. Le
-      # juge vit donc encore, avec la lecture du livrable qui lui a coute son contexte.
-      #
-      # Auto-gate et ETEINT par defaut : au-dela de la passe, ou si elle n'est pas armee, c'est
-      # exactement le gel d'avant — en nommant pourquoi.
+      # Invalid envelope is a format failure, not an authored refusal. VerdictCorrection owns
+      # its flag/budget and attempts reuse; this point does not prove the judge pod is still alive.
       "halt_invalid" ->
         VerdictCorrection.request(
           n,
           role,
-          # Repli, jamais le cas nominal : les deux chemins qui atteignent ce point posent
-          # `:invalid_reason`. Il couvre un ctx construit ailleurs un jour.
+          # Direct and resumed decoding normally provide invalid_reason.
           Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision.json` invalide",
           trace,
           %VerdictCorrection.Seams{
@@ -891,9 +726,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         )
 
       other ->
-        # (Pas de second evenement `audit.verdict` ici : il re-dirait CE gel a une machinerie de
-        # coordination dont le terminus re-emet un evenement. Le gel ci-dessous EST le chemin :
-        # l'arch est reveille, le ticket est fige.)
+        # Freeze through the shared terminal path; avoid a second audit event for the same action.
         TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
     end
   end
@@ -924,12 +757,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp emit_workflow_map_failed_draft(_other_reason, _n, _role), do: :ok
 
-  # The project's ops worktree, or nil when there is none. A project never onboarded has
-  # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
-  # brief materialization already takes on that path.
-  # `nil` when the project has no ops face (nowhere to pin; `Pinning.render/2` leaves the body
-  # inline) or when this event carries no repo — `Layout.project_name/1` refuses a nil rather than
-  # naming a directory that is nobody's.
+  # Missing directory leaves trace inline; missing repo cannot name an ops worktree.
+  # Directory absence alone does not establish onboarding history.
   defp verdict_work_dir(%{repo: repo, ops_root: ops_root}) when is_binary(repo) do
     dir = Path.join(ops_root || Fleet.Layout.ops_root(), Fleet.Layout.project_name(repo))
     if File.dir?(dir), do: dir
@@ -953,8 +782,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       deliverable_opts: nil,
       step_run_sha: "gate-abandon",
       next_assignee: nil,
-      # Fermeture SANS livraison : rien n'a ete livre, donc `stage/retired` et non `stage/merged`.
-      # Declare ICI, ou le verdict est connu, plutot que devine plus bas a partir du `step_run_sha`.
+      # Declare retirement at the verdict site; do not infer it from a signature downstream.
       closure: :retired,
       comment_body: trace
     }
@@ -971,8 +799,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end)
   end
 
-  # The repo of the EVENT, falling back to the singleton's configured one: the card that answers an
-  # engraved name is the project's own, and this consumer serves every catalogue's projects.
+  # Reconstruction uses metadata repo, then configured fallback, to select the card catalogue.
   defp load_workflow_map(state, workflow_map_name, repo),
     do:
       Fleet.Pilot.WorkflowMapNav.safe_load(

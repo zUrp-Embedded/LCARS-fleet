@@ -1,12 +1,7 @@
 defmodule Fleet.Pilot.StepRunConsumer.GateEngineSystemOutputsTest do
   @moduledoc """
-  BL-6-59 — the gate reads the SYSTEM's facts about a step's declared `outputs`, not the pod's
-  claim about its own delivery.
-
-  This goes through `GateEngine.resolve_next/3` on purpose. A test that merged the two maps itself
-  would pin the merge order of its OWN assertion and leave the production one free to invert — the
-  exact shape of a hollow green. Here the pod lies in its `result` and the verdict comes out of the
-  rail.
+  Exercises system output derivation through GateEngine.resolve_next rather than
+  reproducing the map merge in the test. Missing/empty files must override positive pod claims.
   """
   use ExUnit.Case, async: true
 
@@ -14,14 +9,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngineSystemOutputsTest do
 
   defmodule ForgeStub do
     @moduledoc false
-    # Signing a failed run and counting the budget are the two forge reads on the FAIL path. They
-    # are stubbed to the nominal answer so the test measures the gate, not the forge.
+    # Stub the marker write and budget read; the assertions isolate workspace gate decisions.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, %{}}
     def count_signed_step_runs(_repo, _n, _opts), do: {:ok, 0}
   end
 
-  # Shape of a LOADED card (`WorkflowMapNav` reads `steps` at the top level — the loader flattens
-  # the YAML `spec:` away), reduced to the single step this test is about.
+  # Loaded cards expose steps directly; YAML spec nesting has already been removed.
   @card %{
     "max_rework_rounds" => 2,
     "steps" => %{
@@ -40,7 +33,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngineSystemOutputsTest do
   defp seams do
     %GateEngine.Seams{
       loader: fn _name -> @card end,
-      # `scribe` publishes git-natively; the value only steers the terminal intent, not the gate.
       deliverable_mode_fun: fn _role, _root -> {:ok, "git_native"} end,
       repo: "fleet/probe",
       forge_opts: [],
@@ -59,7 +51,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngineSystemOutputsTest do
     }
   end
 
-  # The pod asserting exactly what the old rule used to believe.
   @lying %{"outputs_exist" => true, "outputs_non_empty" => true}
 
   @tag :tmp_dir

@@ -5,13 +5,9 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepRunConsumer
 
-  # StepRunCompleter seam: captures the received PR-native step_run + returns a fixed outcome.
   defmodule CaptureCompleter do
     def complete_pr(step_run, opts) do
-      # `self()` = the caller: the TEST process for the direct maybe_complete tests. But when the
-      # completion runs INSIDE the consumer GenServer (the handle_info delegation test), `self()` is the
-      # consumer → invisible to the test. A registered observer (set only by that test) receives the
-      # delegation effect so it can be OBSERVED, not merely assumed from Process.alive?.
+      # Direct calls send to the test; GenServer calls need the registered observer to reach it.
       send(self(), {:step_run, step_run, opts})
 
       if obs = Process.whereis(:step_run_delegation_observer),
@@ -20,15 +16,13 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       {:ok, :captured}
     end
 
-    # BLOCKED_DEP: blocked-producer escalation → await_arch (captured for assertion).
     def await_arch(step_run, opts) do
       send(self(), {:await_arch, step_run, opts})
       {:ok, :awaiting_arch}
     end
   end
 
-  # Loader seam (A2.4): linear engineer-first workflow_map; "bad" raises (not found).
-  #   build(engineer, producer) -> spec(qualifier, judge) -> review(reviewer, terminal judge)
+  # Linear loaded card; unknown names raise.
   defmodule StubLoader do
     def load!("poc-cycle") do
       %{
@@ -41,8 +35,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       }
     end
 
-    # Producer-TERMINAL map (brief-gate style): the last step is a producer (build/engineer);
-    # there is NO `review`/`merged` step (those are PR lifecycle stages set POST-map).
+    # review/merged are lifecycle stages absent from this producer-terminal map.
     def load!("gate-terminal") do
       %{
         "name" => "gate-terminal",
@@ -53,15 +46,13 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     def load!(_), do: raise("workflow_map not found")
   end
 
-  # ForgeClient seam (②.1c): the judge resolves the producer branch via the issue's open PR
-  # (without a workflow_map). Stub = one open PR for issue 42, head = the producer's branch.
+  # One open producer PR for issue 42, independent of map position.
   defmodule StubForge do
     def list_open_pulls(_repo, _opts) do
       {:ok, [PayloadFixture.pull(number: 7, head_ref: "lcars/issue-42-engineer")]}
     end
   end
 
-  # deliverable_mode seam: engineer = git_native (producer), everything else = payload (judge).
   defp dmode,
     do: fn
       "engineer", _root -> {:ok, "git_native"}
@@ -99,9 +90,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "maybe_complete/2 — event -> PR-native step_run translation" do
     test "project-bearing engineer pod (A1 single-brick) -> producer step_run, intent :review (②.1d)" do
-      # ②.1d: without a workflow_map, the producer no longer merges directly (:promote) — it opens
-      # the PR and REQUESTS the judges (:review). The merge is then driven by the PR-state
-      # (dispatch_review).
+      # A card-less producer enters PR review; this translation does not perform promotion.
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
 
       assert_received {:step_run, step_run, opts}
@@ -136,12 +125,11 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "producer: non-string summary -> coerced safe_str (no singleton crash #8); absent -> no key" do
-      # map -> inspect (defensive coercion: an LLM may return an object)
       p = step_payload(%{"result" => %{"summary" => %{"raw" => 1}}})
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(p, state())
       assert_received {:step_run, step_run, _}
       assert step_run.eng_summary =~ "raw"
-      # without summary -> no eng_summary key (no empty voice)
+
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
       assert_received {:step_run, hop2, _}
       refute Map.has_key?(hop2, :eng_summary)
@@ -155,19 +143,17 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       assert {:ok, :awaiting_arch} = StepRunConsumer.maybe_complete(payload, state())
 
-      # human escalation, not an empty publish (which would wedge :no_deliverable_commit)
       assert_received {:await_arch, step_run, _opts}
       refute_received {:step_run, _, _}
       assert step_run.issue_number == 42
       assert step_run.role == "engineer"
       assert step_run.decision == :blocked_dep
-      # "BLOQUÉ" pins the FR user-facing comment body; the summary flows into it verbatim.
+
       assert step_run.comment_body =~ "BLOQUÉ"
       assert step_run.comment_body =~ "Manque la spec du protocole X"
     end
 
     test "blocked only for a PRODUCER (a judge with blocked goes through the normal path)" do
-      # reviewer = judge (deliverable_mode payload) → blocked ignored, normal path (step_run captured).
       payload =
         step_payload(%{"role" => "reviewer", "result" => %{"blocked" => true}})
 
@@ -181,9 +167,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     test "async step_run_runner -> completion offloaded (the singleton does not block on .complete_pr)" do
       test_pid = self()
 
-      # "Recording" runner: captures the exec without launching it (simulates the Task.Supervisor
-      # offload) -> proves .complete_pr goes through the runner, not directly (blocking) in the
-      # GenServer.
+      # Capture the deferred closure without launching a Task or measuring GenServer latency.
       recording = fn exec ->
         send(test_pid, {:offloaded, exec})
         {:ok, :offloaded}
@@ -197,7 +181,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       assert_received {:offloaded, exec}
 
-      # the captured exec, when run, does the REAL completion (CaptureCompleter -> {:step_run,...} + {:ok,:captured}).
+      # Executing the closure calls the captured completer, not a real forge completion.
       assert {:ok, :captured} = exec.()
       assert_received {:step_run, _step_run, _opts}
     end
@@ -216,14 +200,12 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
                  state(%{step_run_runner: recording})
                )
 
-      # The meta is what the death witness hands back: without it, a completion dying mid-work
-      # names no pod, and the :publishing flag waits for its blind deadline.
+      # Pod/issue metadata identifies publish loss if the offloaded task dies.
       assert_received {:offloaded, _exec, %{pod_id: "pod-abc", issue: 42}}
     end
 
     test "the death of an offloaded completion with a pod meta emits deliverable.publish_lost (BL-6-03 S2)" do
-      # Real Task.Supervisor under the consumer's global name (absent in the hermetic test env —
-      # the guard tolerates a run where something else already started it).
+      # Reuse or start the global supervisor; this test does not isolate it from concurrent callers.
       unless Process.whereis(Fleet.Pilot.StepRunTaskSupervisor) do
         start_supervised!({Task.Supervisor, name: Fleet.Pilot.StepRunTaskSupervisor})
       end
@@ -231,7 +213,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       Fleet.EventRouter.Bus.subscribe()
       test = self()
 
-      # Go-signal: the task waits before dying → the monitor is attached deterministically.
+      # The task waits for release so monitoring precedes its intentional exit.
       {:ok, :offloaded} =
         StepRunConsumer.offload_async(
           fn ->
@@ -247,8 +229,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert_receive {:task_pid, task_pid}, 1_000
       send(task_pid, :go)
 
-      # The monitor was created in THIS process (offload_async ran here) → the :DOWN lands here;
-      # feeding it to handle_info models exactly what the consumer GenServer does in prod.
+      # offload_async installed its monitor in this test process; feed DOWN to the handler directly.
       assert_receive {:DOWN, _, :process, _, :boom} = down, 1_000
 
       ExUnit.CaptureLog.capture_log(fn ->
@@ -331,7 +312,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert_received {:step_run, step_run, _opts}
       assert step_run.pr_role == :producer
       assert step_run.intent == :advance
-      # build -> spec (role qualifier)
+
       assert step_run.next_assignee == "qualifier"
       assert step_run.producer_branch == "lcars/issue-42-engineer"
     end
@@ -351,19 +332,14 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert step_run.intent == :promote
       assert step_run.next_assignee == nil
 
-      # the judge reviews the producer's PR, resolved without a workflow_map via the open PR (head=producer)
+      # Resolve the producer's branch through the open PR lookup.
       assert step_run.producer_branch == "lcars/issue-42-engineer"
-      # a judge carries no deliverable_opts (it does not push)
+
       refute Map.has_key?(step_run, :deliverable_opts)
     end
 
     test "F-E8: NO-WORKFLOW_MAP judge with inherited route (role != step's role) -> :reviewed, NEVER :promote" do
-      # Live bug PoC-7: the qualifier (no-workflow_map judge dispatched on the PR) INHERITS the
-      # issue's route (step `build`, role engineer). Without the `step_role_matches?` guard,
-      # gate_decide(build) saw it as terminal NON-producer -> :promote -> MERGE on 1 judge (quorum
-      # short-circuited). With it: role `qualifier` != step `build`'s role -> no-workflow_map
-      # resolution -> :reviewed (records the review; the merge belongs to the
-      # `dispatch_by_verdicts` quorum which waits for ALL judges).
+      # A PR judge inheriting the producer's route must not use that map step to bypass the jury.
       payload =
         step_payload(%{"role" => "qualifier", "workflow_map" => "poc-cycle", "step" => "build"})
 
@@ -379,12 +355,8 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "LIFECYCLE stage (review) inherited on a producer-terminal map -> :reviewed, NOT unknown_step" do
-      # WS2 regression: `stage/review` is set POST-map (open_deliverable_pr); get_route then returns
-      # step=`review`, which IS NOT a step of the producer-terminal map `gate-terminal`. Without the
-      # `lifecycle_stage?` guard, resolve_next fell into `next_step(map, "review")` ->
-      # {:workflow_map_nav, :unknown_step} (the PR judge looped, re-spawned forever, never merged).
-      # A lifecycle stage absent from the map -> no-workflow_map resolution -> :reviewed (the merge
-      # belongs to the dispatch_review quorum).
+      # A lifecycle review stage absent from the map uses card-less review completion,
+      # rather than navigating an unknown map step.
       payload =
         step_payload(%{
           "role" => "qualifier",
@@ -422,9 +394,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "without workflow_map context (A1 single-brick) -> producer :review, no (workflow_map) loader call" do
-      # (workflow_map) loader nil: if run_step_run called the workflow_map loader without workflow_map
-      # context, it would crash. The no-workflow_map path calls deliverable_mode_fun (dmode), not the
-      # workflow_map loader.
+      # With no card context, the nil map loader is unused; role classification still runs.
       payload = step_payload()
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
       assert_received {:step_run, step_run, _opts}
@@ -433,24 +403,20 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "without workflow_map, a JUDGE (payload role) -> :reviewed + review_event mapped from the gate-decision (②.1d)" do
-      # role "qualifier" => dmode = "payload" => judge. The pod's verdict (gate-decision) is mapped
-      # to a review event: continue->approve; EVERYTHING else->request_changes (DECISIVE
-      # fail-closed: a non-decisive COMMENT would make the judge loop, verified live #6).
+      # Only a valid continue maps to approve; other decisions request changes.
       for {decision, event} <- [
             {"continue", :approve},
             {"abandon", :request_changes},
             {"halt_wait_input", :request_changes},
             {"garbage_unparseable", :request_changes}
           ] do
-        # `reason` present (F-C161: required) → only the DECISION distinguishes the cases;
-        # `garbage_unparseable` stays halt_invalid via the enum, not via the motive.
+        # Keep reason valid so the unknown-decision case fails vocabulary validation.
         payload =
           step_payload(%{
             "role" => "qualifier",
             "result" => %{"decision" => decision, "reason" => "some reason"}
           })
 
-        # forge_client: StubForge → the judge resolves the producer branch via the open PR (no HTTP).
         assert {:ok, :captured} =
                  StepRunConsumer.maybe_complete(payload, state(%{forge_client: StubForge}))
 
@@ -464,9 +430,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "review-body robust to mistyped LLM outputs (live regression #8: non-string chain crashed)" do
-      # A judge may return reason/chain/details as nested objects/lists. A raw `#{...}` crashed the
-      # StepRunConsumer (SINGLETON) → end-of-step-run lost → lock never lifted → wedged pipe.
-      # `safe_str` must absorb without crashing and produce a string review body.
+      # Render malformed nested data safely while producing a refusing review event.
       payload =
         step_payload(%{
           "role" => "qualifier",
@@ -484,7 +448,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
       assert_received {:step_run, step_run, _opts}
       assert step_run.review_event == :request_changes
       assert is_binary(step_run.review_body)
-      # "CHANGEMENTS DEMANDÉS" pins the FR user-facing review body.
+
       assert step_run.review_body =~ "CHANGEMENTS DEMANDÉS"
     end
   end
@@ -503,29 +467,23 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "F-037 — per-step-run repo + remote (derived from the event)" do
     test "repo-bearing payload → step_run.repo + deliverable.remote come from the EVENT, not the config" do
-      # MULTI-PROJECT: the StepRunConsumer singleton handles N projects. THIS step_run's repo
-      # (forge API) and remote (push) come from the `pod.completed` (the Spawner embeds them), NOT
-      # from the config fallback.
+      # Event repository/remote must override a different configured fallback.
       payload =
         step_payload(%{
           "repository" => %{"full_name" => "alice/proj-a"},
           "remote" => "http://forge/alice/proj-a.git"
         })
 
-      # deliberately DIFFERENT config state (repo "lordzurp/lcars-test", remote "origin") → if the
-      # step_run read the config instead of the event, the assertion would break.
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(payload, state())
 
       assert_received {:step_run, step_run, _opts}
       assert step_run.repo == "alice/proj-a"
       assert step_run.deliverable_opts.remote == "http://forge/alice/proj-a.git"
-      # the system branch stays derived from the issue (repo-local, unscoped)
+
       assert step_run.producer_branch == "lcars/issue-42-engineer"
     end
 
     test "payload WITHOUT repo → config fallback (single-repo legacy / bare-payload test)" do
-      # Backward compat: a `pod.completed` that does not carry its repo → the StepRunConsumer falls
-      # back to its config repo/remote (the path of ALL pre-F-037 tests).
       assert {:ok, :captured} = StepRunConsumer.maybe_complete(step_payload(), state())
       assert_received {:step_run, step_run, _opts}
       assert step_run.repo == "lordzurp/lcars-test"
@@ -535,9 +493,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "GenServer lifecycle" do
     test "F-037: init WITHOUT :repo/:remote succeeds (per-step-run, no boot-time require anymore)" do
-      # The :repo/:remote opts are no longer mandatory (repo+remote come from the event). A
-      # multi-project boot (without a fixed repo) is legitimate; the rail's fail-loud guard lives in
-      # application.ex.
+      # Boot can omit fixed repo/remote; this test does not validate a later payload.
       name = :"HC_norepo_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -553,10 +509,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
     end
 
     test "F067: start_link wires :step_run_runner -> completion goes through the runner (init/prod path)" do
-      # RED-first: this test goes through start_link -> init (the PROD path, which step_children
-      # uses), NOT a directly built state. If init forgets to read :step_run_runner from the opts,
-      # the injected runner is ignored -> the completion runs sync (blocking) -> {:offloaded_gs}
-      # NEVER arrives -> this test fails. It is the safety net of the F067-init critique.
+      # Exercise option wiring through start_link/init, not only a manually built state.
       test_pid = self()
 
       recording = fn exec ->
@@ -584,16 +537,13 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
         Fleet.Event.new(:spawner, :"pod.completed", pod_id: "pod-abc", payload: step_payload())
       )
 
-      # init wired step_run_runner -> the completion is routed to the runner (msg to the test process).
       assert_receive {:offloaded_gs, _exec}, 1_000
     end
 
     test "handle_info pod.completed -> delegates (via real Event, subscribe: false)" do
       name = :"HC_live_#{System.unique_integer([:positive])}"
 
-      # Observe the delegation EFFECT (CaptureCompleter sends {:delegated, _} here), not just liveness —
-      # the old test only checked Process.alive? with no FIFO barrier, so it could pass BEFORE the event
-      # was even handled (it proved nothing about the "delegates" it claimed).
+      # Register an observer for the completer effect from the GenServer.
       Process.register(self(), :step_run_delegation_observer)
 
       {:ok, pid} =
@@ -611,13 +561,12 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       send(pid, event)
 
-      # FIFO barrier: :sys.get_state is handled AFTER the pod.completed message (GenServer mailbox order),
-      # so on return the delegation has run — the effect is now provably present, not racily checked.
+      # Settle after the same sender's event before checking its observed delegation.
       _ = settle(pid)
       assert_received {:delegated, step_run}
       assert step_run.issue_number == 42
 
-      # a non-spawner event is ignored without crash (barrier again → the ignore path really ran).
+      # An unrelated task-queue event is handled without killing the consumer.
       send(pid, Fleet.Event.new(:task_queue, :"work_item.completed"))
       _ = settle(pid)
       assert Process.alive?(pid)
@@ -628,15 +577,11 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
   describe "default_deliverable_mode/1 (DR-013 — unloadable role ≠ absent)" do
     test "LOADABLE role → {:ok, mode} (the cap-profile's deliverable_mode)" do
-      # engineer is a canon role → loadable → producer (git_native).
       assert {:ok, "git_native"} = StepRunConsumer.default_deliverable_mode("engineer")
     end
 
     test "DR-013: UNLOADABLE role (missing/corrupt profile) → {:error, :cap_profile_unloadable} + LOUD log" do
-      # Core of the finding: an unloadable profile is a config PROBLEM. A silent "payload" fallback
-      # → `producer?` read it as non-producer → SILENTLY reclassified as a judge (a real producer,
-      # its code never pushed). Instead: CLOSED RESULT `{:error, :cap_profile_unloadable}` → the
-      # producer/judge classification fails loud (never consumed as "judge" by default).
+      # An unresolved profile must not default to payload mode and lose a producer's publication.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, :cap_profile_unloadable} =

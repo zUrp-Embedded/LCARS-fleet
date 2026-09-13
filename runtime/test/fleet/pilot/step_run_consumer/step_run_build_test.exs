@@ -4,8 +4,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
   alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
 
-  # Two OPEN fleet PRs both claiming issue 8 — a protocol violation (one issue = one producer
-  # branch). The judge's branch resolution must refuse to pick one arbitrarily.
+  # Two matching PRs must not be resolved by arbitrarily choosing the first.
   defmodule TwoPrForge do
     def list_open_pulls(_repo, _opts) do
       {:ok,
@@ -31,9 +30,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
     def list_open_pulls(_repo, _opts), do: {:ok, []}
   end
 
-  # chantier face-projet: the step_run's base_branch used to be the LITERAL "main". Every legacy
-  # fixture says "main", so only a NON-main face can catch the literal coming back — hence ops
-  # here, and this is the test the mutation check leans on.
+  # A non-main face distinguishes payload selection from a hardcoded main default.
   describe "base_branch — the face rides the event, the PR base wins" do
     test "payload base_branch (non-main face) reaches the step_run — no literal survives" do
       route = %{intent: :review, next_assignee: nil, next_step: nil}
@@ -48,9 +45,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
 
       payload = %{
         "pod_id" => "p1",
-        # the judge's clone base: the FEATURE branch — must never become the PR base
         "base_branch" => "lcars/issue-9-scribe",
-        # the PR's own base, stamped at review dispatch
         "pr_base_branch" => "ops"
       }
 
@@ -74,9 +69,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
 
   defp reviewed_route, do: %{intent: :reviewed, next_assignee: nil, next_step: nil}
 
-  # C1 2026-08-18 — the machine payload leaves the prose at the FLATTENING POINT
-  # (maybe_put_review_event): a valid `details.findings` rides the step_run as
-  # `:review_findings` for the completer to engrave, and never inspect-dumps into the review body.
+  # Reviewed intent extracts valid findings separately from prose; no archive/push is tested.
   describe "review_findings — the machine payload at the flattening point" do
     test "valid findings → :review_findings on the step_run, and OUT of the prose body" do
       findings = %{
@@ -95,7 +88,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
 
       assert step_run.review_findings == findings
       assert step_run.review_event == :approve
-      # The prose details survive; the machine object does not leak into them as an inspect dump.
+
       assert step_run.review_body =~ "critere"
       refute step_run.review_body =~ "findings"
     end
@@ -128,18 +121,15 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
 
       refute Map.has_key?(step_run, :review_findings)
       assert log =~ "findings refused"
-      # The broken payload is NOT stripped: it reaches the review body as a visible dump —
-      # unreadable but present, which is the honest direction for a payload we refuse to persist.
+      # Keep invalid optional material visible in prose while refusing its machine field.
       assert step_run.review_body =~ "findings"
-      # And the DECISION is what the envelope says — an invalid optional payload never flips it.
+
       assert step_run.review_event == :approve
     end
   end
 
   test "ambiguous producer PR (>=2 open PRs for the issue) → NO arbitrary pick: branch nil + LOUD anomaly" do
-    # A silent "first" would send the judge to review an ARBITRARY one of the two deliverables —
-    # it could bless the wrong PR. The safe path is the same as no-PR (nil → complete_pr fail-loud
-    # :no_producer_branch downstream), with the anomaly named for the operator.
+    # The builder returns nil and logs ambiguity; downstream handling is not exercised here.
     route = %{intent: :review, next_assignee: nil, next_step: nil}
 
     {step_run, log} =
@@ -153,9 +143,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
   end
 
   describe "A0.6 — on livre là où on a repris (delivery_branch)" do
-    # Mesuré au banc 2026-08-18 : la première passe chief réelle a poussé une résolution PARFAITE
-    # sur `lcars/issue-N-chief` — une branche qu'aucune PR ne regarde — parce que le target était
-    # la formule `feature_branch(n, role)`. Le discriminant est la base de CLONE.
+    # Clone-base selection distinguishes outsider rework from a new branch under the outsider's role.
     defp git_native_seams do
       %StepRunBuild.Seams{
         repo: "fleet/demo",

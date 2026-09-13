@@ -1,11 +1,11 @@
 defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
   @moduledoc """
-  Dispatches a one-shot per-project gatekeeper for an undecidable gate. The eval brief is enqueued
-  before spawn or wake, and its metadata contains the complete resumption context. Spawn and wake
-  failures are returned to the caller.
+  Enqueues a synthesized gate evaluation, then spawns or wakes an issue-keyed gatekeeper.
 
-  This completion-triggered rail is lockless and never capacity-deferred; it is distinct from the
-  poller-driven worker dispatch rail.
+  This path takes no forge lock and has no capacity deferral/rollback. Returned spawn
+  or wake failures leave the enqueued item; unexpected results or exceptions can raise.
+  Metadata carries the original payload and named card/step for resumption, but not a
+  card snapshot or top-level repo key for the consumer's reconstruction loader.
   """
 
   require Logger
@@ -75,28 +75,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
       }
     }
 
-    # Enqueue before spawn or wake.
-    #
-    # ⚠ CET ORDRE LAISSE UN BRIEF SANS JUGE SI LE SPAWN ECHOUE, ET RIEN ICI NE LE RATTRAPE — ni
-    # `clear`, ni retry, ni ecriture durable. La branche d'echec ci-dessous est honnete sur l'instant
-    # (« brief enqueued but judge-less ») et MUETTE sur la suite, ce qui se lit comme une impasse.
-    #
-    # CE N'EN EST PAS UNE : le rattrapage existe, chez la reconciliation du poller, et il est ecrit
-    # la-bas pour CE cas precis. Un eval enfile mais JAMAIS TIRE (`:pending`) est « an admission
-    # WITHOUT an executor » et NE POSSEDE PAS le verrou de son issue — la propriete se lit sur
-    # `@pulled_states [:assigned]`, le pull etant l'ACK durable qu'un executeur a active. Donc :
-    #
-    #   spawn rate -> eval `:pending`, aucun pod -> le verrou n'est possede par personne -> suspect
-    #   -> grace de 2 ticks (~60 s) -> `reclaim_lock` -> le re-dispatch RE-ESCALADE UN EVAL FRAIS,
-    #   dont l'enqueue supersede l'eval reste. Auto-repare, borne par le budget de rework.
-    #
-    # C'est la meme reprise que pour un wake perdu, et elle est epinglee : « a gate-eval stuck
-    # `:pending` (never pulled — no executor) does NOT hold the lock: reclaimed at the 2nd tick ».
-    #
-    # Spawner le pod AVANT l'enqueue ne fermerait rien : la fenetre se deplace (le pod peut mourir
-    # entre la preuve et l'enqueue) et chaque eval couterait un spawn, y compris ceux qu'un
-    # gatekeeper deja vivant aurait servis. Le mecanisme qui la fermerait est une outbox durable
-    # des evals en attente (`gate_eval_pending`) ; il n'existe pas, et ce site ne le simule pas.
+    # Enqueue first so a live gatekeeper can pull the brief. A failed spawn leaves pending
+    # work without an executor; reconciliation's @pulled_states excludes such admissions.
+    # Reclamation still depends on liveness, reads and grace, not a fixed retry deadline.
+    # No durable pending-eval outbox exists here; pending work can disappear with the broker.
     case seams.task_queue.enqueue(pod_id, attrs) do
       {:ok, %{id: corr}} ->
         case spawn_gatekeeper(seams, pod_id, brief) do
@@ -122,11 +104,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     gk_role = Fleet.Project.Roles.gatekeeper_role()
 
     with {:ok, cap} <- Fleet.CapProfile.resolve(loader, gk_role) do
-      # transport_brief_v2 — DELIBERATELY INLINE, no `:mandate`. This is NOT a missed mount site
-      # (the third dispatch path a review flagged): the gate-eval order is SYNTHESISED here from the
-      # resume payload's `outputs`, not resolved from an authored, pinned ops doc — there is nothing
-      # content-addressed to mount and no pin to strip. It never names `~/issues/<file>`; the order
-      # travels in `brief:` in clear, which is the degraded rail the runtime contract already covers.
+      # Inline synthesized gate/outputs, not an authored ops document with a pin to mount.
+      # Profile resolution uses defaults; this path forwards no project catalogue root.
       spawn_opts = [
         pod_id: pod_id,
         repo: seams.repo,
@@ -139,9 +118,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     end
   end
 
-  # `:already_started` N'EST PAS UNE ERREUR ICI : le gatekeeper est un pod a identite stable, et le
-  # trouver vivant est le cas nominal d'une seconde escalade. Il reste a le REVEILLER — sans quoi
-  # l'escalade rendrait `:ok` sur un pod qui dort.
+  # A stable issue identity may already exist; wake it so the queued evaluation can be pulled.
   defp spawned_or_woken({:ok, _pid}, _seams, _cap, _pod_id, _spawn_opts), do: :ok
 
   defp spawned_or_woken({:error, {:already_started, _pid}}, seams, cap, pod_id, spawn_opts) do

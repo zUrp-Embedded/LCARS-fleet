@@ -1,16 +1,13 @@
 defmodule Fleet.Pilot.StepRunConsumer.GateEngineTest do
   @moduledoc """
-  `GateEngine`'s pure edges, addressed where they live: the producer fact (`producer?/4`), what a
-  step advances to (`advance_intent/3`), and the fact handed DOWN by the consumer — resolved once
-  per step-run and never re-derived here. The gate decisions themselves run end to end in
-  `step_run_consumer_gate_test`; `system_over_declared/3` in `gate_engine_system_outputs_test`.
+  Covers producer classification, terminal intent and reuse of a supplied classification.
+  Gate outcomes and filesystem facts have separate consumer-gate/system-output tests.
   """
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.StepRunConsumer.GateEngine
   alias Fleet.Pilot.StepRunConsumer.GateEngine.Seams
 
-  # A linear card: build is not terminal, seal is.
   defp card do
     %{
       "name" => "linear",

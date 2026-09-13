@@ -1,11 +1,15 @@
 defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @moduledoc """
-  Resolves the intent after a step run: advance, review, promote, bounded rework, judge verdict,
-  or gatekeeper escalation.
+  Resolves completion intent, a decoded judge verdict, or gatekeeper escalation.
 
-  A terminal producer enters review; only a terminal workflow-map judge promotes. Failed gates
-  consume a forge-backed signed-run budget before rebound. Unreadable or unwritable budget state
-  is surfaced instead of permitting an unbounded retry.
+  Terminal producers enter review; terminal nonproducers can promote on a mapped
+  pass. Lifecycle stages absent from the map and routes owned by another role use
+  the card-less path instead. Judge brief kinds decode verdicts rather than evaluate gates.
+
+  A failed worker gate posts a signed-run marker before reading the issue-wide budget:
+  step_count * (max_rework_rounds + 1). Exhaustion or unreadable/unwritable state returns
+  an error; otherwise rebound selects the first step. Posting/counting is not atomic,
+  the marker has no dedup option, and replay may spend another run.
   """
 
   require Logger
@@ -55,10 +59,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @doc """
   Resolves the next intent from the payload's workflow-map context, or as a single brick when absent.
   """
-  # `producer?` is the fact the consumer already resolved (DR-013, a closed result): handed down
-  # so this engine and the builder read it instead of deriving it again (four derivations per
-  # step-run otherwise, that could disagree). `nil` = not known (a direct caller), resolved here
-  # then. `apply_verdict/4` alone re-derives, on the resume path, and says why.
+  # Reuse the consumer's classification; nil direct callers resolve it here.
+  # The consumer's resumed-verdict path reclassifies because no earlier fact is in scope.
   @spec resolve_next(map(), pos_integer(), Seams.t(), boolean() | nil) :: decision()
   def resolve_next(payload, n, %Seams{} = seams, producer? \\ nil) do
     case {payload["workflow_map"], payload["step"]} do
@@ -71,9 +73,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # DEUX ECHAPPEES VERS LE CHEMIN SANS CARTE, et elles ne disent pas la meme chose : une etape de
-  # cycle de vie n'appartient a aucune carte, une route heritee appartient a une AUTRE. Dans les
-  # deux cas la carte chargee ne decide rien, et c'est la resolution nue qui reprend la main.
+  # Lifecycle stages are outside the map; inherited routes belong to another role.
+  # Neither should let this map promote a PR judge on the producer's terminal step.
   defp mapped_resolve(workflow_map, step, payload, n, seams, producer?) do
     cond do
       lifecycle_stage?(workflow_map, step) ->
@@ -88,12 +89,11 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   end
 
   @doc """
-  Classifies a producer from the effective deliverable mode. Falls back to role resolution only when
-  the effective mode is absent. Resolution errors remain explicit. `DR-013`.
+  Uses a supplied binary mode directly: only git_native is a producer; other strings
+  are nonproducers without vocabulary validation. Otherwise resolves a binary role
+  with its catalogue root. Returned resolver errors propagate; nonbinary roles return false.
   """
-  # The seam takes the catalogue ROOT beside the role: a role only exists in the catalogue that
-  # declares it, and this rail serves every project of every installed catalogue from ONE singleton
-  # consumer — so the root cannot be bound once at init, it arrives with the work item.
+  # The singleton serves multiple catalogues; resolve the root per event, not once at init.
   @spec producer?(
           term(),
           (String.t(), Path.t() | nil -> {:ok, String.t()} | {:error, term()}),
@@ -142,7 +142,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       not match?({:ok, _}, WorkflowMapNav.step_spec(workflow_map, step))
   end
 
-  # The fact when the consumer handed it, the resolution otherwise.
   defp producer_fact(producer?, _payload, _seams) when is_boolean(producer?), do: {:ok, producer?}
 
   defp producer_fact(nil, payload, seams),
@@ -163,14 +162,12 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   end
 
   @doc false
-  # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
-  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes. ONE reader
-  # for the whole rail (the consumer and the builder ask here).
+  # Shared event-to-catalogue reader for consumer, gate engine and builder.
   @spec catalogue_root(map()) :: Path.t() | nil
   def catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   @doc false
-  # The repo of the EVENT — the `repository` object the spawner echoes, else the bare `repo` key.
+  # Nested repository name precedes the bare repo key; no configured fallback here.
   @spec payload_repo(map()) :: String.t() | nil
   def payload_repo(payload),
     do: Payload.repository_full_name(payload) || payload["repo"]
@@ -192,7 +189,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
     result = Verdict.unwrap_worker_envelope(payload["result"] || %{})
 
-    # BL-6-20
     if judge_kind?(payload, spec) do
       judge_verdict(workflow_map, step, spec, payload, n, result)
     else
@@ -202,10 +198,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # `_with_reason` ET PAS `gate_decision/1` : le motif du refus de schema voyage jusqu'au ctx, parce
-  # que la passe de correction (B4) promet au juge de lui dire CE QUI N'ALLAIT PAS. Il journalise
-  # puis jette, il laisserait `VerdictCorrection` lire une cle que personne ne pose — donc demander
-  # au juge de deviner, ce qu'elle promet justement d'eviter.
+  # Carry schema failure detail to VerdictCorrection instead of leaving it only in logs.
   defp judge_verdict(workflow_map, step, spec, payload, n, result) do
     {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
 
@@ -222,9 +215,6 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     {:judge_verdict, decision, Verdict.verdict_comment(payload["role"], decision, result), ctx}
   end
 
-  # LES QUATRE SORTIES DE LA PORTE, une clause chacune. Elles etaient les quatre branches d'un `case`
-  # imbrique dans un `if`, lui-meme dans une fonction qui resolvait aussi le spec et depliait
-  # l'enveloppe : quatre metiers pour une seule lecture possible.
   defp gate_outcome(:pass, workflow_map, step, payload, _n, seams, producer?, _result) do
     case producer_fact(producer?, payload, seams) do
       {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
@@ -278,17 +268,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. Reading `outputs` straight from the pod's
-  # own `result` has the PRODUCER attesting that its own deliverable exists and is not empty.
-  # `StepOutputs.derive/2` answers that from the card's declared `outputs`,
-  # checked in the workspace the RUNTIME created — and the merge order is what makes it a fact
-  # rather than an opinion: system LAST, so a `result` claiming `outputs_exist: true` is overridden,
-  # not honoured.
-  #
-  # THIS IS THE ONLY CALLER of `Gates.evaluate/3` in `lib/`. Deriving here rather than inside
-  # `Gates` keeps that module PURE (its contract, and what makes it testable without a filesystem);
-  # the cost is that a SECOND rail calling `Gates.evaluate` directly would silently go back to
-  # believing the pod. There is no second rail today, and adding one means passing through here.
+  # Workspace-derived output facts override the pod's claims when derive returns data.
+  # With no derived facts (%{}), claims remain unchanged. Keep filesystem reads here
+  # so Gates.evaluate stays pure; other callers must supply system facts themselves.
   defp system_over_declared(spec, result, payload) do
     case Fleet.Workflow.StepOutputs.derive(spec, payload["workspace"]) do
       empty when empty == %{} ->
@@ -376,8 +358,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # The CARD travels with the event too, and only the ROLES did. Same repo, same reason (lot 4):
-  # an engraved route is a bare name, and the card that answers must be the project's own.
+  # Resolve the engraved card name in the event's repository catalogue.
   defp load_workflow_map(seams, workflow_map_name, payload),
     do:
       WorkflowMapNav.safe_load(

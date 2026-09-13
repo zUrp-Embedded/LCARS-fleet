@@ -1,52 +1,19 @@
 defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   @moduledoc """
-  TERMINAL escalation to the human (the "human wall") of
-  `Fleet.Pilot.StepRunConsumer`: when the end of a step_run CANNOT be resolved by
-  the machine (rework exhausted, unreadable budget, human approval required, blocked producer,
-  fail-closed verdict), we FREEZE the issue toward the arch and kick it.
+  Routes selected gate failures and blocked producers to the architect through await_arch.
 
-  ## The single net `freeze_to_arch/5`
+  freeze_to_arch delegates execution to the consumer's run_completion closure. After
+  await_arch returns ok, it offers/wakes the architect; an offload admission return
+  does not itself confirm forge writes. The awaits-arch label excludes worker dispatch,
+  and ArchWake/Poller provide further notification opportunities subject to their guards.
 
-  All terminal escalations go through THE SAME gesture (single source, never
-  re-derived by a caller):
+  kick_architect instead sends abandonment content after successful closure; a bare
+  wake fallback loses that content. Both notification helpers rescue exceptions and
+  exits, not throws. Their success is not proof the architect received or acted.
 
-    1. `await_arch` via the StepRunCompleter — comment addressed to the arch +
-       label `lcars-awaits-arch` + UNLOCK (`lcars-in-flight` removed). The unlock is
-       LOAD-BEARING: the poller no longer re-dispatches (the issue carries `lcars-awaits-arch`,
-       skipped) → the churn stops, the human decides.
-    2. `Fleet.Pilot.ArchWake.offer_then_wake/4`, INSIDE the completion closure and only after
-       step 1 returned `{:ok, _}` — a latency accelerator only: the truth (label
-       `lcars-awaits-arch` + arch-addressed comment) is already on the forge; a failed wake is
-       logged and the Poller (G4) re-offers the arch every tick as long as an issue carries the
-       label.
-
-  `kick_architect/3` is NOT part of this net: it carries CONTENT (the abandon trace) to the arch
-  pod on the `"abandon"` verdict, from `StepRunConsumer`, under the same rule — inside the closure,
-  after the close reached the forge.
-
-  Without this net (G2, the funnel), a terminal error bubbled up as log-only would make
-  the rail churn: the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step
-  → re-fail → infinite loop without ever notifying a human.
-
-  ## Family
-
-  One link of the escalation FAMILY. The register — the links ordered by the DEPTH they reach —
-  lives once, in `Fleet.Pilot`'s moduledoc; a new link is placed there by depth, never counted
-  (no count-based merge threshold).
-
-  ## Armored boundary
-
-  The module NEVER receives the consumer's state: `Seams` (narrow struct) carries the
-  5 authorized reads/effects — including `run_completion`, the consumer's execution
-  closure (SINGLE SOURCE of the sync/offload discipline: the execution policy
-  stays with the consumer, the escalation does not choose its mode).
-
-  ## Who decides what
-
-  `terminal_escalate?/1` (pure) classifies TERMINAL NON-TRANSIENT errors; the
-  consumer calls it on the `{:error, reason}` path of the gate decision. The
-  transient / self-healing errors (`:no_gatekeeper` → the one-shot gatekeeper is
-  (re)spawned on the next tick; unreadable workflow_map → IncidentRegistry, G6) bubble up unchanged.
+  terminal_escalate? selects policy categories, not proof of permanent failure:
+  unreadable budgets/profiles can be repairable. Other errors propagate to their caller.
+  This module is one member of the escalation family documented in Fleet.Pilot.
   """
 
   require Logger
@@ -92,7 +59,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def blocked_flag?(_), do: false
 
   @doc """
-  Whether a completion error requires human arbitration instead of retry or propagation.
+  Whether this error category is routed to human arbitration by the consumer.
   """
   @spec terminal_escalate?(term()) :: boolean()
   def terminal_escalate?({:rework_exhausted, _}), do: true
@@ -100,7 +67,6 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def terminal_escalate?({:gate_fail_unsigned, _}), do: true
   def terminal_escalate?({:human_approval_required, _}), do: true
 
-  # DR-013
   def terminal_escalate?(:cap_profile_unloadable), do: true
   def terminal_escalate?(_), do: false
 
@@ -127,13 +93,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     do: freeze_to_arch(n, role, :terminal_error, terminal_error_message(reason, role), seams)
 
   @doc """
-  Commits the await-architect state, then offers and wakes the architect only after success.
+  Runs await_arch then offers/wakes after its ok result, within the supplied execution closure.
+  Returns the runner's result, which may indicate offload admission rather than completion.
   """
-  # `decision` est HETEROGENE : `:blocked_dep` et `:terminal_error` sur les deux chemins nommes,
-  # une BINAIRE sur les autres (la branche `other` de `StepRunConsumer.apply_verdict`, et
-  # `VerdictCorrection.freeze/5` qui passe `"halt_invalid"`). `label/2` l'absorbe par sa clause
-  # fourre-tout et la valeur part telle quelle dans le `step_run` durable. Le spec dit l'etat, il
-  # ne le corrige pas.
+  # Decisions include atoms and verdict strings; preserve them in the completion data.
   @spec freeze_to_arch(pos_integer(), String.t(), atom() | String.t(), String.t(), Seams.t()) ::
           term()
   def freeze_to_arch(n, role, decision, comment_body, %Seams{} = seams) do
@@ -145,7 +108,6 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       comment_body: comment_body
     }
 
-    # CI-04
     seams.run_completion.(label(n, decision), fn ->
       case seams.step_run_completer.await_arch(step_run, seams.completer_opts) do
         {:ok, _} = committed ->
@@ -187,22 +149,17 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   end
 
   @doc """
-  Sends terminal verdict content to the project architect. Falls back to a bare wake when the spawner
-  does not implement notification. Failures are logged and remain non-blocking.
+  Notifies the project architect, or wakes without content if notify_pod is unavailable.
+
+  Returned notify errors log at error level; the wake fallback logs non-ok returns.
+  Exceptions and exits warn and return ok. Throws propagate; no notification replay occurs here.
   """
   @spec kick_architect(module(), String.t(), String.t()) :: :ok
   def kick_architect(spawner, repo, message) do
     pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
     if Fleet.Opts.exported?(spawner, :notify_pod, 2) do
-      # ⚠ CETTE BRANCHE NE JETTE PAS SON RESULTAT, sans quoi le `@doc` juste au-dessus — « Failures
-      # are logged » — ne serait vrai que de l'AUTRE branche. C'est le chemin d'escalade TERMINALE :
-      # le moment ou un step_run a echoue definitivement et ou l'architecte du projet doit etre
-      # prevenu. Pod absent du registre -> message perdu, et rien ne le dirait.
-      #
-      # `error` et non `warning` : `notify_pod/2` ne connait pas l'enjeu de son message et le
-      # signale au niveau du fait ; ICI on sait que ce qui vient d'etre perdu est le dernier
-      # avertissement d'un ticket mort. Doctrine des niveaux : perte reelle = `error`.
+      # Terminal notification loss merits error level; do not hide a returned notify failure.
       case spawner.notify_pod(pod_id, message) do
         {:error, reason} ->
           Logger.error(
@@ -235,8 +192,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
       Logger.warning("StepRunConsumer: notify arch raised #{inspect(e)} (non-blocking)")
       :ok
   catch
-    # Same net as `safe_offer_then_wake/2`: this runs INSIDE the completion closure after a close
-    # that succeeded; an exit here would report that close as lost.
+    # Do not let a notification exit invalidate an earlier closure.
     :exit, reason ->
       Logger.warning("StepRunConsumer: notify arch exited #{inspect(reason)} (non-blocking)")
       :ok

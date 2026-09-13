@@ -1,10 +1,15 @@
 defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   @moduledoc """
-  Builds the PR-native step-run map from a completed pod and a resolved route.
+  Builds PR completion data from a pod payload and resolved route.
 
-  Producers receive git deliverable options for their own feature branch. Judges resolve the unique
-  open Fleet PR for the issue and carry a fail-closed native review; an absent or ambiguous producer
-  branch remains `nil` for the completer to reject.
+  Producer classification can be supplied or resolved through GateEngine. Deliverable
+  publication reuses a fleet feature clone base (including an outsider's rework), otherwise
+  creates the role's issue branch. The separate producer_branch field still uses the
+  current role's formula, so it can differ from that publication target.
+
+  Judges select the sole open fleet PR for the issue; lookup errors or ambiguity give nil.
+  Base selection prefers pr_base_branch over the cloned base. Reviewed judge intent
+  decodes the native review and findings; other intents leave those fields to the completer.
   """
 
   require Logger
@@ -54,7 +59,6 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   """
   @spec build(map(), pos_integer(), String.t(), route(), Seams.t()) :: map() | {:error, term()}
   def build(payload, n, role, route, %Seams{} = seams, producer? \\ nil) do
-    # DR-013
     case classify_pr_role(payload, n, role, seams, producer?) do
       {:error, _} = err ->
         err
@@ -87,8 +91,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     |> maybe_put_eng_summary(pr_role, payload)
   end
 
-  # `producer?` handed by the consumer (resolved once per step-run) or, for a direct caller, resolved
-  # here in the project's catalogue, named by the `owner` of the repo the payload carries.
+  # Reuse classification when supplied; direct callers resolve the payload's catalogue.
   defp classify_pr_role(payload, n, role, seams, producer?) do
     fact =
       case producer? do
@@ -155,14 +158,8 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
   defp maybe_put_deliverable(step_run, :judge, _role, _payload, _n, _seams), do: step_run
 
-  # A0.6 — ON LIVRE LA OU ON A REPRIS. Cibler `feature_branch(n, role)` est juste pour un
-  # producteur (son build CREE sa branche, son rework la reprend — meme nom, la formule coincide)
-  # et FAUX pour la passe d'exception, dont le role differe : la formule pousse alors une
-  # resolution PARFAITE sur `lcars/issue-N-<autre-role>`, une branche qu'AUCUNE PR ne regarde. La
-  # PR reste conflictee, la passe est consommee (marqueur de round pose), et l'arch est immobilise
-  # au-dessus d'un travail deja fait et invisible. Le discriminant est la BASE DE CLONE : un pod qui
-  # a clone une branche de feature fleet (rework, exception) re-livre DESSUS ; un pod qui a clone
-  # une face (build) livre sur SA branche de formule, qu'il cree.
+  # An outsider must publish back onto the producer's cloned branch, not its own role's
+  # new branch that the existing PR does not watch. This checks shape, not matching issue identity.
   defp delivery_branch(role, payload, n) do
     base = payload["base_branch"]
 
@@ -183,10 +180,8 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
       target_branch: delivery_branch(role, payload, n),
       push?: true,
       local_ref: "HEAD",
-      # LE TRIPLET SLSA VOYAGE AVEC LE LIVRABLE (BL-6-43). `livrable_sha` manque ici et c'est
-      # NORMAL : il n'existe pas encore — `Deliverable.publish/1` le calcule apres la porte, et
-      # l'ajoute. Tout le reste est connu au moment ou l'on decrit la publication, donc c'est ici
-      # qu'il se declare, pas dans un second geste apres coup.
+      # Declare known provenance inputs now; publication supplies the output SHA.
+      # Visibility is sampled here, not recovered from a per-pod launch record.
       provenance: %{
         brief_sha: payload["brief_sha"],
         brief_ref: payload["brief_ref"],
@@ -204,22 +199,12 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     event = Verdict.review_event(Verdict.gate_decision(result))
     step_run = Map.put(step_run, :review_event, event)
 
-    # C1: the machine payload leaves the prose HERE, at the flattening point.
-    # `take_findings` validates `details.findings` and, when valid, hands the object over
-    # (`:review_findings` → engraved by `StepRunCompleter.record_review` next to the prose pin)
-    # while stripping it from `result` so `judge_review_body` never inspect-dumps a machine map
-    # into a human review. Invalid or absent → `result` untouched, no key: a legacy judge walks
-    # today's path byte-for-byte, and a broken optional payload never flips the verdict above.
+    # Extract schema-valid findings separately from prose after deriving the review event.
+    # Invalid/absent findings leave result unchanged; optional payload refusal does not flip it.
     {findings, result} = Verdict.take_findings(result)
     step_run = put_unless_nil(step_run, :review_findings, findings)
 
-    # DISTINGUER « rien envoyé » DE « envoyé et refusé », PARCE QUE LE COMPLETER ACCUSE. Son log
-    # d'absence dit « judge X submitted NO details.findings » — vrai quand le juge s'est tu,
-    # FAUX quand il a émis un payload que le schéma a écarté, et ce second cas est le plus frequent
-    # des deux (un JSON sérialisé, un `severity_max` hors énumération). Accuser un juge d'un silence
-    # qu'il n'a pas commis envoie corriger le mauvais bout : on cherche pourquoi il n'émet pas alors
-    # qu'il émet. `findings_offered?/1` couvre aussi la clé VOISINE (`findings_v1`, `Findings`),
-    # que `take_findings/1` a nommée dans son log : là encore le juge a parlé.
+    # Preserve missing vs offered-but-refused diagnostics, including nearby findings keys.
     step_run =
       if findings == nil and Verdict.findings_offered?(result) do
         Map.put(step_run, :review_findings_refused, true)

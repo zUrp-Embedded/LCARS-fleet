@@ -1,76 +1,33 @@
 defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @moduledoc """
-  PURE step-run verdict cluster: **decoding** (reading the gate-decision decision
-  buried in the TaskQueue/worker envelopes) + **text rendering** (readable verdict trace,
-  review body, eng voice) of `Fleet.Pilot.StepRunConsumer`.
+  Decodes completion envelopes and renders their verdict/summary text without consumer state.
+  Shared unwrapping and coercion keep rendering consistent with the decoded payload.
 
-  No function here carries `state`: they operate on the raw payload/result of an event
-  (`pod.completed` / `work_item.completed`) and return a decision string or forge text. The
-  stateful decision core (`apply_verdict`, `resume_gate`, `complete_business_step_run`… — `gate_decide`
-  lives in `GateEngine`) stays in the root module — here we do not DECIDE the route, we DECODE and RENDER.
+  GateDecision owns the compile-time vocabulary. Known decision plus nonempty reason
+  is then checked against gate-decision.json via SchemaCache. Invalid input yields
+  halt_invalid and a reason for correction; schema refusals warn. Schema loading itself
+  can raise, so this module is not purely computational.
 
-  ## A single module (decoding + rendering coupled)
-
-  Rendering and decoding are NOT independent: `eng_summary/1` (rendering of the eng voice)
-  relies on `unwrap_worker_envelope/1` (decoding of the worker envelope) to reach the
-  `summary` field. Decoding and rendering thus share the same unwrapping primitive + the `safe_str/1` coercion —
-  splitting into `Verdict.Decode`/`Verdict.Render` would create a Render→Decode dependency and separate
-  functions that manipulate the SAME wire artifact (the verdict envelope). The concern is one: reading and
-  rendering a judge's verdict.
-
-  ## Single authority of the vocabulary
-
-  `gate_decision/1` relies on `@gate_decisions = Fleet.Workflow.GateDecision.decisions()` — the
-  canon list is NOT copied: it is evaluated at compile from the single authority
-  `Fleet.Workflow.GateDecision` (this module recompiles if the canon list changes). Fail-closed:
-  absent/unknown decision → `"halt_invalid"` (never `"continue"` on a malformed verdict).
-
-  ## The wire schema is EXECUTED at this frontier
-
-  The GateBrief demands the strict JSON of `gate-decision.json`; `gate_decision/1`
-  validates the FULL envelope against it (resolved once via `Fleet.SchemaCache`,
-  boot-loaded by the rail through `load_schema!/0`). A schema-invalid verdict — e.g. a
-  mistyped `details`/`chain` — fail-closes to `halt_invalid` (refusal logged) instead of
-  crossing with a silently truncated trace. The compiled enum+reason check stays the
-  floor: the module list is the compile-time authority, the schema its wire mirror
-  (equality pinned by `GateDecisionTest`). The only side effects in this module are the
-  three refusal warnings (envelope, findings, a near-miss findings key) — no state is carried.
-
-  ## The optional machine payload (`details.findings`)
-
-  A judge MAY carry its findings machine-readable under the key
-  `details.findings` (`findings.json`, C1). The envelope stays intact:
-  a legacy judge without the key crosses exactly as before. `take_findings/1` validates
-  the payload and the failure direction is the opposite of the envelope's, on purpose:
-  an INVALID `findings` never flips the decision — the envelope was already validated,
-  and a broken OPTIONAL payload must not kill a valid verdict (absence is recorded, never
-  fabricated). Invalid → loud warning, no machine object, the raw payload stays in the
-  prose details rendering (noisy rather than silently discarded). Valid → stripped from
-  the prose (its human matter already lives in `reason`, by SP contract) and handed to
-  the completer for the git write next to the prose pinning.
+  Optional details.findings uses its own schema, independent of envelope validity.
+  Valid maps (including decoded JSON strings) are extracted and removed from prose;
+  invalid data warns and remains in details. This does not change the decision.
+  The completer archives valid findings and transports them in the review body.
+  Near-miss keys are diagnosed, not aliased; absence is never filled with invented findings.
   """
 
   require Logger
 
-  # Canon vocab = SINGLE AUTHORITY `Fleet.Workflow.GateDecision` (evaluated at compile → literal list,
-  # usable in the `in` guard below; this module recompiles if the canon list changes).
+  # Compile-time vocabulary from GateDecision, usable in guards.
   @gate_decisions Fleet.Workflow.GateDecision.decisions()
 
-  # Wire contract of the judge verdict — validated integrally on ingest (see moduledoc).
   @schema_file "gate-decision.json"
 
-  # OPTIONAL machine payload under `details` — its own key + schema so the
-  # gate-decision envelope never moves (a legacy judge stays valid byte-for-byte).
+  # Keep optional findings validation separate from the decision envelope.
   @findings_key "findings"
   @findings_schema_file "findings.json"
 
-  # ============================================================
-  # Decoding — reading the decision buried in the envelopes
-  # ============================================================
-
   @doc false
-  # Extracts the decision from the `work_item.completed` payload. TWO envelopes: (1) TaskQueue sets
-  # `:result` (atom key); (2) worker envelope `%{"status","result"}` (string keys).
+  # Read atom/string TaskQueue result keys, then unwrap the worker's string-key envelope.
   @spec gate_result(term()) :: map() | nil
   def gate_result(payload) when is_map(payload) do
     (Map.get(payload, :result) || Map.get(payload, "result"))
@@ -80,21 +37,14 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def gate_result(_), do: nil
 
   @doc false
-  # F-C161
+
   @spec gate_decision(term()) :: String.t()
   def gate_decision(result), do: result |> gate_decision_with_reason() |> elem(0)
 
   @doc """
-  La meme decision, PLUS ce qui a ete refuse.
-
-  ⚠ **RENDRE `"halt_invalid"` SEUL EST UNE CHAINE SANS MEMOIRE.** Valider l'enveloppe, journaliser
-  les violations de schema et ne rendre que la decision CONSOMME LE MOTIF DANS UN LOG. Or la passe
-  de correction du juge (`VerdictCorrection`, B4) promet de lui remettre « ce qui n'allait pas » :
-  sans ce motif elle envoie son texte de repli generique et demande au juge de DEVINER — ce qu'elle
-  promettait justement d'eviter. Un mecanisme entier peut ainsi tenir sur une cle que rien ne pose.
-
-  Rend `{decision, reason}`, `reason` valant `nil` quand il n'y a rien a dire : un verdict valide
-  n'a pas de violation a nommer, et en inventer une serait pire que de n'en pas avoir.
+  Rend {decision, reason}, avec nil pour un verdict valide. Le motif de refus voyage
+  jusqu'a la passe de correction au lieu d'etre consomme dans un log.
+  La validation complete suit le controle du vocabulaire et du reason non vide.
   """
   @spec gate_decision_with_reason(term()) :: {String.t(), String.t() | nil}
   def gate_decision_with_reason(result) when is_map(result) do
@@ -120,15 +70,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   def gate_decision_with_reason(_), do: {"halt_invalid", "aucun verdict lisible dans le resultat"}
 
-  # Les violations, en une ligne LISIBLE PAR L'AGENT : `inspect/1` du terme ExJsonSchema rend une
-  # liste de tuples que personne ne lit a froid. On garde le pointeur JSON et le message, qui sont
-  # exactement ce qu'il faut pour re-emballer.
-  #
-  # UNE SEULE CLAUSE, et pas de repli `defp describe_violations(other)` : Dialyzer prouve qu'il
-  # serait mort — `ExJsonSchema.Validator.validate/2` rend toujours une liste sur `{:error, _}`.
-  # Une clause inatteignable posee pour se rassurer est du code mort qui a l'air d'un filet. Le
-  # `inspect/1` INTERNE, lui, reste : il couvre une forme
-  # d'entree que la bibliotheque peut faire evoluer sans changer le type de retour.
+  # Give the correction agent JSON pointers and messages, capped at 600 characters.
+  # Preserve unfamiliar list-entry shapes through inspect.
   defp describe_violations(errors) when is_list(errors) do
     errors
     |> Enum.map_join(" · ", fn
@@ -138,11 +81,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     |> String.slice(0, 600)
   end
 
-  # Le cas « meme pas une enveloppe » : on nomme ce qui manque, pas « c'est invalide ».
-  #
-  # Pas de clause `_` ici non plus : l'unique appelant est deja sous `when is_map(result)`. Le
-  # « resultat qui n'est pas un objet » est traite une fonction plus haut, par la clause fourre-tout
-  # de `gate_decision_with_reason/1`, qui est le seul endroit ou ce cas peut exister.
+  # The caller already established a map; name the first missing/invalid envelope field.
   defp missing_envelope(result) when is_map(result) do
     cond do
       is_nil(result["decision"]) ->
@@ -157,27 +96,12 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
-  # C1 — the OPTIONAL machine payload, extracted AND validated in one gesture.
-  #
-  # Returns `{findings, result}` where `findings` is the valid `details.findings` map or `nil`,
-  # and `result` is the envelope WITHOUT the key when findings are valid (the prose rendering must
-  # not inspect-dump a machine object into a human review — its human matter already lives in
-  # `reason`, the SP demands it) and UNTOUCHED otherwise. The failure direction is deliberate and
-  # opposite to `gate_decision/1`'s: an invalid `findings` NEVER flips the verdict — the
-  # envelope was already validated, and a broken optional payload must not kill a valid verdict.
-  # Invalid → loud warning + `nil` + the raw payload LEFT in `details` (it reaches the review body
-  # as an inspect dump: noisy rather than silently discarded). Independent of the envelope's own
-  # validity on purpose: the findings object stands on its own schema, and coupling the two would
-  # make one optional payload's fate depend on a check it has already lost or won elsewhere.
+  # Valid findings are extracted and stripped; invalid findings stay in prose.
+  # Validate independently: this helper does not establish envelope validity.
   @spec take_findings(term()) :: {map() | nil, term()}
   def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
-    # ON DÉCODE UNE CHAÎNE AVANT DE JUGER. Un agent qui produit du JSON dans un champ hésite
-    # naturellement entre l'objet et sa sérialisation : un `findings` rendu en JSON SÉRIALISÉ
-    # (`"{\"findings\":[]}"`) est refusé par le schéma en « Expected Object but got String » —
-    # mesure juste, encodage faux, et le rail jette tout. Refuser la seconde forme ne défend RIEN
-    # (le contenu est identique une fois décodé) et coûte la mesure entière.
-    # Libéral sur la forme reçue, strict sur le fond : ce qui sort du décodage passe le MÊME
-    # schéma, et une chaîne qui ne décode pas reste un refus.
+    # Accept a serialized JSON object, then apply the same schema. Undecodable/non-map
+    # JSON stays in its original form for refusal rather than silently losing the data.
     findings = decode_if_string(findings)
 
     case ExJsonSchema.Validator.validate(resolved_schema(@findings_schema_file), findings) do
@@ -195,14 +119,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     end
   end
 
-  # THE KEY THAT ALMOST MATCHES. A judge writing `findings_v1`, `Findings` or `machine_findings`
-  # has measured and is trying to hand it over; the exact-key clause above cannot see it, and the
-  # completer would then say « submitted NO details.findings » — a judge accused of a silence it
-  # did not commit, which sends whoever reads the log to fix the wrong end (the very trap the
-  # two-sentence log in `StepRunCompleter.maybe_engrave_findings/3` exists for). So the near miss
-  # is NAMED here, once, with the key it used. Nothing is extracted and nothing is aliased: the
-  # payload stays where it is (it reaches the review body as prose), the verdict stands, and
-  # `findings_offered?/1` lets the completer say « sent, refused » instead of « silent ».
+  # Name near-miss keys without accepting them as aliases. The builder uses the same
+  # predicate to distinguish offered-but-refused from absent findings.
   def take_findings(%{"details" => details} = result) when is_map(details) do
     case near_miss_key(details) do
       nil ->
@@ -221,18 +139,14 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def take_findings(result), do: {nil, result}
 
   @doc false
-  # « Ce juge a TENTÉ de remettre une charge machine » : la clé exacte (que le schéma a pu refuser)
-  # OU une clé voisine (que `take_findings/1` a nommée). Lu par le bâtisseur de step_run pour poser
-  # `:review_findings_refused`, donc pour que le completer accuse la bonne panne.
+  # Presence of the exact or a nearby key is evidence of an offer, not schema validity.
   @spec findings_offered?(term()) :: boolean()
   def findings_offered?(%{"details" => details}) when is_map(details),
     do: Map.has_key?(details, @findings_key) or near_miss_key(details) != nil
 
   def findings_offered?(_), do: false
 
-  # A key that CONTAINS `finding` (any case: `findings_v1`, `Findings`, `machine_findings`) and is
-  # not THE key — only when the exact key is absent, so a judge that sends both is judged on the
-  # right one and not warned about the other.
+  # Exact key takes precedence; otherwise recognize string keys containing finding, ignoring case.
   defp near_miss_key(details) do
     if Map.has_key?(details, @findings_key) do
       nil
@@ -258,8 +172,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   def findings_key, do: @findings_key
 
   @doc false
-  # BOTH wire schemas resolve here, fail-loud at rail boot (`Fleet.Pilot.Application`): a broken
-  # deploy artifact refuses before the first verdict instead of crashing the consumer singleton.
+  # Resolve both schemas at boot so missing deploy artifacts can fail before verdict processing.
   @spec load_schema!() :: :ok
   def load_schema! do
     _ = resolved_schema(@schema_file)
@@ -274,58 +187,29 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
-  # Unwraps the worker envelope `%{"status","result"}`. The worker returns either directly
-  # `%{"decision"=>...}` / the outputs, or the envelope `%{"status"=>"ok","result"=>...}`.
-  # Without unwrapping: decision/outputs buried → false escalation / wrongful hard-gate.
-  # `term()` et PAS `map()` : la derniere clause de `normalize_producer/1` rend ce qu'on lui donne.
-  # Le typer `map()` est faux, et ça se voit a trois modules de la : la clause defensive de
-  # `judge_review_body/2` devient inatteignable, donc du code mort — pour une charge de pod qui
-  # n'est pas une map, cas que ce rail existe precisement pour encaisser.
+  # Unwrap one worker envelope; retain non-map terms for downstream defensive handling.
+  # A direct decision map bypasses producer normalization.
   @spec unwrap_worker_envelope(term()) :: term()
   def unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
 
-  # The outer `status` is CARRIED IN rather than dropped: it is the very field the normalization
-  # below reads, and discarding it here loses the fact one function before it can be used.
+  # Copy outer status only when inner lacks it, so normalization can retain blocking information.
   def unwrap_worker_envelope(%{"status" => status, "result" => inner}) when is_map(inner),
     do: inner |> Map.put_new("status", status) |> normalize_producer()
 
   def unwrap_worker_envelope(other), do: normalize_producer(other)
 
-  # ── One fact, one vocabulary — enforced by the SYSTEM, not by the pod's memory ──
-  #
-  # DEUX VOCABULAIRES PORTENT LE MEME FAIT, et ni l'un ni l'autre n'est negociable ici :
-  #   * le systeme lit `summary` + `blocked: true` ;
-  #   * un subagent rapporte `{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT",
-  #     "concerns": [...]}`.
-  #
-  # Sans traduction, un rapport `{"status": "BLOCKED", "concerns": [...]}` transmis tel quel en
-  # `result` donne `eng_summary` = "" et `blocked_flag?` = false : un pod qui fait passer le refus
-  # de son subagent LIVRE EN SILENCE — exactement le coin que le drapeau existe pour empecher.
-  #
-  # Traduire serait de la cognition de pod, enseignee dans aucun des deux documents, que rien ne
-  # rattrape quand elle manque et dont l'oubli coute une escalade que personne ne recoit. Le systeme
-  # traduit donc : ce dont il peut se charger quitte la tete de l'agent.
-  #
-  # It MOVES the agent's words, it never writes any. `concerns` fill the `summary` slot only when
-  # the pod left it empty — the aggregation of several subagents into one narration stays the pod's
-  # job, because choosing what matters is substance.
+  # Translate subagent BLOCKED/NEEDS_CONTEXT into the system's blocked flag.
+  # Fill an empty summary from concerns without choosing or rewriting their substance.
   @blocked_statuses ~w(blocked needs_context)
 
-  # `status` is TRANSPORT, not business data — the same call the TaskQueue already makes on
-  # `work_item_id` ("a correlator, not business data of the result"). It is read here, turned into
-  # the canonical `blocked`, and dropped: what leaves this funnel has ONE shape, and a deliverable's
-  # `outputs` are not polluted by the vocabulary that carried it.
+  # After normalization, status is transport metadata and removed; concerns remain.
   defp normalize_producer(m) when is_map(m) do
     m |> block_from_status() |> summary_from_concerns() |> Map.delete("status")
   end
 
   defp normalize_producer(other), do: other
 
-  # FAIL-SAFE direction, deliberately asymmetric: a status in the blocked family sets the flag even
-  # if the pod wrote `blocked: false`. A false positive costs a human one glance at an escalation; a
-  # miss costs a silent wedge and a brick nobody knows is stuck. Case-insensitive for the same
-  # reason — the vocabulary is uppercase in the modop, and an LLM writing `blocked` must not slip
-  # through a string comparison.
+  # Blocking status wins over explicit blocked:false; comparison ignores case and whitespace.
   defp block_from_status(m) do
     status = m |> Map.get("status") |> safe_str() |> String.downcase() |> String.trim()
 
@@ -344,15 +228,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     end
   end
 
-  # ============================================================
-  # Text rendering — verdict trace / review body / eng voice
-  # ============================================================
-
   @doc false
-  # Readable verdict trace (carried in the step_run comment → durable in the forge). `judge_label`
-  # parameterizes the ATTRIBUTION (gatekeeper, scoper, …) → honest forge traceability (the right judge named).
-  # `halt_invalid` is NOT a rendered decision: it is the internal fail-closed fallback (absent/malformed
-  # verdict) → distinct message so as not to make it look like a "halt_invalid" verdict.
+  # Name the judge in the trace; halt_invalid describes rejected input, not an authored verdict.
   @spec verdict_comment(String.t(), String.t(), term()) :: String.t()
   def verdict_comment(judge_label, "halt_invalid", _result) do
     "Verdict du **#{judge_label}** illisible ou absent (fail-closed) → escalade humaine."
@@ -384,12 +261,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     if substance == [] do
       nil
     else
-      # ⚖ TAXONOMIE (moon-shot `iec-like-rigor`, hiérarchie de vérité) : un verdict de juge est
-      # tagué JUDGED — « soft gate, jamais acceptation seule ». Il ne PEUT donc pas approuver, et
-      # écrire « APPROUVÉ » lui attribuait un acte qui n'est pas le sien : l'acceptation est
-      # l'affaire du rail (CI verte = PROVEN, puis le seal). La forge, elle, garde son mot
-      # (`APPROVED` reste l'état de la review — la branch-protection les compte, et le seal les
-      # relit) : c'est la PROSE lue par un humain qui doit dire la vérité, pas le protocole.
+      # Favorable opinion is not final acceptance; forge APPROVED remains the protocol state.
       verdict = if event == :approve, do: "AVIS FAVORABLE", else: "CHANGEMENTS DEMANDÉS"
 
       ["**#{verdict}** — verdict du juge.", reason, details, chain]

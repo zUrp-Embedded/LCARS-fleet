@@ -1,10 +1,10 @@
 defmodule Fleet.Pilot.StepRunConsumer.InflightCompletionsTest do
-  # `async: false`: the supervisor under test carries the rail's REGISTERED name.
+  # Serial: uses the registered completion Task supervisor.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepRunConsumer
 
-  # CI-02 — the graceful shutdown reads this to know whether a completion is still pushing.
+  # Counts tasks under this supervisor, not all synchronous completion work.
   test "no supervisor → 0 (nothing can be in flight)" do
     refute is_pid(Process.whereis(StepRunConsumer.task_supervisor()))
     assert StepRunConsumer.inflight_completions() == 0
