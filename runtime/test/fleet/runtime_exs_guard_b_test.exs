@@ -1,22 +1,12 @@
 defmodule Fleet.RuntimeExsGuardBTest do
-  # async: false — the guard reads the OS environment (PASSWD_DEFS, LCARS_SEAT_UID_FILE, PATH),
-  # and `System.put_env` is VM-wide: an async neighbour would read this decor as its own.
+  # Environment changes are VM-wide; keep these fixtures synchronous.
   use ExUnit.Case, async: false
 
   @moduledoc """
-  GUARD B, BEAM side (`config/runtime.exs`, R-no-uid-min / R-no-root-runtime) — the system/human
-  boundary has TWO bounds, read in `login.defs`, and no fallback on either.
-
-  `runtime.exs` is wrapped in `config_env() != :test`, so under `mix test` the guard never runs and
-  NO ExUnit witness held it (lot 15, 2026-09-05): the launcher's witness (`test/bin/fleet.bats`)
-  was the only one, on a DIFFERENT copy of the rule — which is how the BEAM came to read UID_MIN
-  alone while the protocol, the console and the launcher read both bounds. These tests evaluate the
-  REAL file, as `:prod`, through `Config.Reader.read!/2`: the guard is the first thing the file can
-  refuse on, so a controlled environment reaches it and stops there.
-
-  The runtime uid is whatever `id -u` answers: a stub on PATH makes it `nobody` (65534) or a fleet
-  human (1001) regardless of who runs the suite — a witness that reads the runner's real uid is a
-  witness about the machine. The seat is a file the decor writes (99999, an uid nobody carries).
+  Evaluates the real runtime.exs as prod with stubbed id output and temporary seat/login.defs
+  files. Exercises the upper UID bound, its missing declaration, and an in-range control.
+  The normal test boot skips this deployment branch. The control accepts later exceptions
+  without GUARD B in their message; it does not prove a complete successful boot.
   """
 
   @runtime_exs Path.expand("../../config/runtime.exs", __DIR__)
@@ -34,7 +24,7 @@ defmodule Fleet.RuntimeExsGuardBTest do
       end)
     end)
 
-    # Tool mode skips the whole deployment body, guard included: a boot, never an eval.
+    # Disable tool mode so the deployment guard runs.
     System.delete_env("LCARS_TOOL_EVAL")
     seat = Path.join(tmp, "seat.uid")
     File.write!(seat, "99999\n")
@@ -45,7 +35,7 @@ defmodule Fleet.RuntimeExsGuardBTest do
     {:ok, defs: defs}
   end
 
-  # The uid the BEAM believes it runs under: `System.cmd("id", ["-u"])` resolves `id` on PATH.
+  # System.cmd resolves id through the fixture PATH.
   defp run_as(tmp, uid) do
     bin = Path.join(tmp, "bin")
     File.mkdir_p!(bin)
@@ -67,8 +57,6 @@ defmodule Fleet.RuntimeExsGuardBTest do
 
   test "UID_MAX absent from login.defs: the boundary is NOT established — refused under the same word as UID_MIN, remedy = the file",
        %{tmp_dir: tmp, defs: defs} do
-    # One readable bound is not a boundary: with UID_MIN alone, `nobody` would boot a fleet. No
-    # 60000 is guessed — the message names the missing bound and the file to fix.
     run_as(tmp, 1001)
     File.write!(defs, "UID_MIN\t1000\n")
     err = assert_raise RuntimeError, fn -> boot() end
@@ -80,7 +68,6 @@ defmodule Fleet.RuntimeExsGuardBTest do
 
   test "control: a fleet human (1001) inside both bounds passes GUARD B — whatever the file refuses next is not this guard",
        %{tmp_dir: tmp} do
-    # Without this, the two refusals above could be measuring a guard that refuses everyone.
     run_as(tmp, 1001)
 
     try do
