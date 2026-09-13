@@ -1,16 +1,9 @@
 defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   @moduledoc """
-  Smoke/regression of the `mix lcars.contracts.check` gate: `run_checks/0` runs against the REAL repo
-  (single app `:lcars_fleet` post-collapse — no more umbrella, BND-112) and must pass, all checks
-  green. Locks that the anti-hollow-green guards (R0-EVT-012/014: absent residue-target = fail,
-  absent events.yaml = fail, malformed seam = fail) introduced no false-red, and that a future
-  contract regression breaks this test. The doc-immune `code_match?/4` (BND-111) is locked by the
-  dedicated describe below.
-
-  NB: testing the fail-on-absent paths through `run_checks/0` would require it to take a root — a
-  test-infra refactor, not done here. It is NOT what stands between this suite and those paths:
-  every check is a `check_*(root)` of its own, so a fixture tree reaches them one by one, and the
-  describes below do exactly that.
+  Runs the aggregate checks against this checkout and exercises individual checks with
+  fixture roots. Regressions cover empty/unreadable targets, nested doc declarations,
+  sibling artifact scope and selected source patterns. Doc-block filtering is tested
+  for the heredoc forms below, not all possible documentation syntax.
   """
   use ExUnit.Case, async: true
 
@@ -21,12 +14,10 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check.Support
   alias Mix.Tasks.Lcars.Contracts.Check.Types
 
-  # ─── UNE DECLARATION DERIVEE EST UNE DECLARATION (lot 0 du chantier terrain-controle) ───────────
-  #
-  # `provision-lib.sh` ecrit sa racine UNE fois (`PROV_ROOT_CANON=/opt/lcars`) et compose ses
-  # defauts dessus. Trois contrats comparaient ces defauts au litteral des autres porteurs et
-  # rougissaient sur un corpus d'accord — R7 refusait `mix release`, 60-deploy mourait sur le banc
-  # 2007 (2026-09-09). Le resolveur partage ci-dessous ferme ce faux rouge sans recopier le litteral.
+  # UNE DECLARATION DERIVEE EST UNE DECLARATION (lot 0, terrain-controle). `provision-lib.sh` ecrit
+  # sa racine UNE fois (`PROV_ROOT_CANON`) et compose ses defauts dessus ; trois contrats les
+  # comparaient au litteral des autres porteurs et rougissaient sur un corpus d'accord (2026-09-09).
+  # Le resolveur partage ferme ce faux rouge sans recopier le litteral.
   describe "Support.shell_defaults/1 + resolve_shell/2 — une declaration DERIVEE se resout" do
     test "la racine ecrite une fois (affectation nue) se propage a travers deux etages de defauts" do
       src = """
@@ -58,25 +49,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « deploy
-  # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
-  # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
-  # absent rend `[]` en silence : un `deploy/` present avec un `modules.d/` vide ou deplace donnait
-  # `offenders == []` donc `:pass`, sans avoir ouvert un seul fichier — indistinguable en sortie
-  # d'un vert gagne sur onze sourcers conformes.
-  #
-  # Le commentaire de la fonction nommait deja le risque (« a green that checked nothing ») et le
-  # depot porte deja la parade (`measured_nothing?/1` + `broken_result/2`, BL-6-70) ; ce contrat ne
-  # l'utilisait pas.
-  #
-  # Les deux tests vont par paire : sans le second, supprimer la mesure suffirait a rendre le
-  # premier vert.
+  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. La population vient de DEUX racines
+  # (`deploy/modules.d` et `etc`), une seule etait scopee, et `Path.wildcard` sur un chemin absent
+  # rend `[]` en silence : un `modules.d/` vide donnait `:pass` sans ouvrir un fichier. Parade deja
+  # au depot (`measured_nothing?/1` + `broken_result/2`, BL-6-70). Les deux tests vont par paire :
+  # sans le second, supprimer la mesure rendrait le premier vert.
   describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
-    # ⚠ LE DECOR PORTE LA TOPOLOGIE REELLE, ET CE N EST PAS UN DETAIL DE RANGEMENT. `root` est le
-    # repertoire depuis lequel le controleur tourne — `runtime/` — et `deploy/` en est le FRERE depuis
-    # la separation des deux logiciels. Un decor qui pose `root/deploy` fabrique une arborescence
-    # qui n existe sur aucune machine : le mur y trouverait ce qu il ne trouve plus en vrai, ou
-    # l inverse. Un temoin qui valide contre une topologie imaginaire ne mesure que lui-meme.
+    # Deploy must be a sibling of the fixture runtime, matching the artifact layout.
     defp fixture_root!(ctx) do
       base = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
       root = Path.join(base, "fleet")
@@ -113,15 +92,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-088 — L'ABSENCE ETAIT UNE PREUVE NOMMEE, L'ILLISIBILITE UN VERT. `residue_check/2` gardait
-  # `File.exists?/1`, vrai pour un fichier PRESENT ET ILLISIBLE : le flux partait alors dans la
-  # branche de lecture, ou l'erreur avalee devenait zero ligne, donc zero residu, donc `:pass`. Le
-  # contrat declarait l'absence de residu sur un fichier qu'il n'avait pas pu ouvrir.
-  #
-  # Le cas d'illisibilite est joue avec un REPERTOIRE a la place du fichier (`:eisdir`) et non un
-  # `chmod 000` : l'erreur ne depend alors ni de l'uid qui lance la suite (root lit un 000) ni du
-  # umask du runner. Le premier test est le temoin — sans lui, on ne saurait pas que le second
-  # echoue pour la bonne raison plutot que parce que le contrat echoue toujours.
+  # Use a directory as the unreadable target (:eisdir): unlike chmod 000, it also fails as root.
   describe "residue_check — un mur ne rend pas compte d'un fichier qu'il n'a pas lu" do
     setup do
       root = Fleet.TestEnv.tmp_path("jg088")
@@ -166,12 +137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
 
-    # Le meme defaut vivait dans `grep_lines/2`, donc sous TOUS ses appelants — dont trois murs
-    # d'absence-de-violation qui globbent des fichiers REELS (`gates.no_runtime_seam`,
-    # `listener.no_cowboy_bypass`, `gatekeeper.not_an_ordering_step`). Un fichier illisible y produisait zero
-    # preuve, c'est-a-dire la conformite. Il n'y a pas de reponse vraie a donner sur un fichier
-    # qu'on n'a pas ouvert : l'instrument s'arrete. `code_match?/4` est la porte publique qui passe
-    # par `grep_lines/2`.
+    # grep_lines must raise on read errors; returning no matches would conceal unmeasured files.
     test "grep_lines : illisible ≠ zero ligne — l'instrument refuse de repondre", %{
       root: root,
       target: target
@@ -198,17 +164,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-090 — LA POPULATION S'ARRETAIT A DEUX ESPACES. `~r/^  def\s+…/` decrit exactement
-  # l'indentation d'un `def` pose directement sous un `defmodule` de premier niveau. Un module
-  # IMBRIQUE indente de quatre : ses fonctions publiques n'etaient pas jugees non documentees,
-  # elles n'etaient jamais regardees. Mesure avant/apres sur l'arbre reel : 5 clauses `def` sur 2
-  # fichiers, dont `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — le point d'entree git
-  # system-side, c'est-a-dire le module qui portait l'echappement de sandbox.
-  #
-  # Elargir seul ne suffisait pas. L'accumulateur est indexe par NOM de fonction pour tout le
-  # fichier : des l'instant ou l'imbrication entre dans la population, un homonyme documente dans le
-  # module parent couvre celui du module imbrique. Ce test-la EST la cloture — sans lui, la fiche
-  # serait fermee par un contrat qui voit la fonction et lui attribue la doc d'une autre.
+  # Nested modules must be scanned without inheriting documentation from a parent's homonym.
   describe "docs.public_functions_documented — les modules imbriques sont dans la population" do
     setup do
       root = Fleet.TestEnv.tmp_path("jg090")
@@ -242,9 +198,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert result.evidence == ["lib/fleet/nested.ex: Inner.undocumented_here"]
     end
 
-    # L'HOMONYME. `Outer.same_name` est documente, `Inner.same_name` ne l'est pas. Avec une cle par
-    # NOM les deux se confondent et le fichier ressort vert : le contrat aurait vu la fonction et
-    # rendu le verdict d'une autre.
     test "un homonyme documente dans le module parent ne couvre pas celui du module imbrique", %{
       root: root,
       src: src
@@ -272,9 +225,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert result.evidence == ["lib/fleet/nested.ex: Inner.same_name"]
     end
 
-    # Le temoin : sans lui, elargir la population puis tout accuser rendrait les deux tests
-    # ci-dessus verts pour rien. Un `@doc` pose dans le module imbrique compte, et un `@doc` pose
-    # avant le `defmodule` imbrique ne DESCEND PAS dedans.
     test "documentee dans le module imbrique → pass ; un @doc ne franchit pas un defmodule", %{
       root: root,
       src: src
@@ -314,10 +264,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-085 — LE MUR NOMMAIT TROIS REPERTOIRES ET N'EN MESURAIT QUE TROIS SUFFIXES. `**/*.{ex,exs,sh}`
-  # ne pouvait pas voir `bin/claude_launch.egress`, qui portait le mot, dans un repertoire balaye,
-  # sans anticorps : un porteur qui echappait par son extension. `bin/` contient `.sh`, `.py`,
-  # `.egress`, `.identity` et deux lanceurs sans extension. Mesure : 253 fichiers avant, 279 apres.
+  # Include extensionless and nonstandard source suffixes in the scanned directories.
   describe "vocab.sanctuary_contained — la population, c'est le repertoire, pas trois suffixes" do
     setup do
       root = Fleet.TestEnv.tmp_path("jg085")
@@ -325,8 +272,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
       File.mkdir_p!(Path.join(root, "etc"))
 
-      # Un fichier temoin sans le mot : la population n'est jamais vide, donc un `:fail` ne peut pas
-      # venir du garde INSTRUMENT BROKEN.
+      # Keep the population nonempty so a failure identifies the residue, not the empty-tree guard.
       File.write!(Path.join([root, "lib", "fleet", "ok.ex"]), "defmodule Ok do\nend\n")
       on_exit(fn -> File.rm_rf(root) end)
       %{root: root}
@@ -354,9 +300,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert result.evidence == ["bin/fleet"]
     end
 
-    # Le pyc de `bin/__pycache__` est le cas reel : il vit dans un repertoire balaye et n'est pas de
-    # l'UTF-8. Sans le garde il fait exploser la regex ; avec une liste de suffixes il faudrait la
-    # tenir a jour a chaque outil ajoute.
+    # Non-UTF-8 build artifacts must not reach the regex.
     test "un fichier non-texte ne fait ni echouer ni planter le mur", %{root: root} do
       File.write!(Path.join([root, "bin", "bytecode.pyc"]), <<0xC3, 0x28, 0xA0, 0xA1, 0x00>>)
 
@@ -385,17 +329,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-070 — LE MUR TENAIT UN MIROIR SUR DEUX, ET C'ETAIT LE PLUS ETROIT. Les racines de face sont
-  # ecrites a la main dans DEUX langages hors d'Elixir, et le contrat n'en lisait qu'un :
-  # l'entrypoint docker. Or `provision` reconnait TROIS substrats (`docker`, `wsl`, `linux`) et le
-  # module `25-directories` — le createur commun a tous — ne les posait pas. Sur `wsl` elles
-  # existaient « par histoire du substrat », c'est-a-dire a la main un jour sur la machine de
-  # l'auteur ; sur un `linux` natif, pas du tout. Le runtime tourne sous l'humain et `/home`
-  # appartient a root : creer la zone n'est pas un geste qu'il peut rattraper.
-  #
-  # Preuve d'integration jouee sur le banc, pas seulement ici : zone supprimee → `provision doctor
-  # --only 25` la NOMME en drift → `apply` la repose en `2775 root:fleet` → `list --substrate
-  # {docker,wsl,linux}` montre le module selectionne sur les trois.
+  # Check both container and provision declarations: provisioning serves wsl/linux as well.
+  # Fixtures compare source text; they do not create directories or validate ownership/modes.
   describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
     setup do
       base = Fleet.TestEnv.tmp_path("jg070")
@@ -418,8 +353,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
-      # Lot 6 : le conteneur cree ses zones dans `services/container/init.sh` (l'init de l'instance, produit),
-      # plus dans l'entrypoint docker — la meme ancre, au nouvel endroit.
       File.write!(
         Path.join([root, "services", "container", "init.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
@@ -479,17 +412,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # JG-009 — LE DEFAUT PERMISSIF EST PORTANT, ET SA SURETE N'ETAIT TENUE PAR RIEN.
-  # `Bus.@permit_empty_default true` autorise toute emission tant que le registre est vide. Mesure
-  # avant de juger : le passer a `false` fait echouer **101 tests sur 2698**, parce que la suite
-  # hermetique tourne registre coupe par conception. La preuve de sortie de la fiche — « un registre
-  # vide fait echouer toute emission » — coute donc cela.
-  #
-  # Ce qui manquait n'etait pas la posture fail-closed, c'etait le VERROU : `Catalog.load!/0` ferme
-  # cette fenetre, il leve sur un `events.yaml` absent/invalide/vide, et il tenait sa position dans
-  # `init/1` par convention seule. Le descendre d'une ligne elargissait la fenetre a tout le boot
-  # sans que rien ne rougisse — la panne exige un evenement non declare ET un arbre de supervision
-  # reel, ce qu'aucun test hermetique ne joue. Troisieme de la famille (F8, catalogue_before_freeze).
+  # An empty event registry permits emission; catalogue loading must precede child setup.
+  # These fixtures check textual ordering, not execution of the supervision tree.
   describe "boot.event_registry_before_children — l'ordre qui rend le defaut permissif sur" do
     setup do
       root = Fleet.TestEnv.tmp_path("jg009")
@@ -552,31 +476,20 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     assert {:pass, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
 
     ids = Enum.map(checks, & &1.id)
-    # the two hardened R0-EVT-012/014 checks run
+
     assert "events.handlers.exist" in ids
-    # MIGRATION Z3 (D-19): layering.dependency_graph is REMOVED along with its raw material
-    # (in_umbrella edges of the app mix.exs files) — mechanical successor = boundary (Z4).
-    # Its verifiable replacement today: boot.order_f8 (order of the root children).
+    # Boundary now checks module layering; boot.order_f8 checks root-child ordering.
     assert "boot.order_f8" in ids
 
     fails = Enum.filter(checks, &(&1.status != :pass))
     assert fails == [], "non-green checks: #{inspect(Enum.map(fails, &{&1.id, &1.evidence}))}"
   end
 
-  # BL-6-45 / bench 2026-08-02: the check reads TWO lists outside `fleet`, and the image
-  # BUILD stage copies fleet ALONE before running this gate — a fail-closed on their
-  # absence broke the image build (measured: `forge.tf: list not readable` inside the Docker
-  # build). Absence is scoped at the TREE level: no sibling tree = out of scope, SKIPPED and
-  # NAMED in the note; the equality still runs on what the artifact does carry.
+  # Runtime-only artifacts omit deploy; sibling-list checks must report their reduced scope.
   test "sibling-tree lists: checked when the trees are here, SKIPPED-and-NAMED when they are not" do
     {status, checks} = Mix.Tasks.Lcars.Contracts.Check.run_checks()
     lock = Enum.find(checks, &(&1.id == "roles.provisioning_locked"))
 
-    # NOMMER CE QUI TOMBE, pas seulement constater que quelque chose tombe. Mesure du 2026-08-07 :
-    # ce test a rougi DANS l'image et pas ici, et son message ne disait que « :fail au lieu de
-    # :pass » — donc il a fallu reproduire l'arbre, rejouer la graine et lire la liste d'exclusions
-    # a la main pour ne rien trouver. Un assert qui constate sans nommer coute une heure la premiere
-    # fois qu'il mord dans un environnement qu'on ne peut pas ouvrir.
     failed = Enum.filter(checks, &(&1.status != :pass))
 
     assert status == :pass,
@@ -587,20 +500,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     assert lock.status == :pass
 
-    # The assertion follows the ARTIFACT: a full checkout must check all four lists; a
-    # runtime-only one (the image build stage copies fleet alone) must NAME what it
-    # could not see — the one thing that must never happen is a silent pass on absent ground.
-    # SAME derivation as the check: the runtime root, then its SIBLING tree
-    # (test/mix -> la racine Mix = `runtime/`, puis `../deploy`).
-    #
-    # ⚠ `deploy/` EST UN FRERE DE `runtime/`, PAS UN ENFANT, ET LE TEMOIN DOIT LE DERIVER COMME LE
-    # MUR. Un temoin qui deriverait `runtime/deploy` ne le trouverait pas et exigerait le
-    # `NOT CHECKED` que le mur rendrait pour la meme raison : les deux s accorderaient sur une
-    # topologie que ni l un ni l autre n a verifiee. Un temoin et son sujet qui derivent le meme
-    # chemin faux sont VERTS ensemble, et c est le seul cas ou un miroir ne reflete rien.
-    #
-    # `deploy`, not another tree name: a condition that keeps PASSING because a stale tree still
-    # exists agrees by coincidence, which is the same defect as a comment that is true by accident.
+    # Derive deploy as runtime's sibling, or check and test can agree on the same wrong topology.
     runtime_root = Path.expand("../..", __DIR__)
 
     if File.dir?(Path.expand("../deploy", runtime_root)) do
@@ -611,12 +511,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
-  # DI-09 (lot 11, chantier deploy-independance) — LA BRANCHE « SANS deploy/ » SE JOUE ICI, PAS
-  # SEULEMENT DANS L'IMAGE. Le temoin ci-dessus ne l'exerce que si le checkout n'a pas de `deploy/`,
-  # donc jamais sur un poste de dev : la branche qui protege le build de l'image restait une
-  # promesse. Le decor : un faux parent qui porte `fleet` (un lien vers le vrai runtime — les
-  # fichiers lus sont les vrais) et AUCUN `deploy` a cote. Chaque contrat a portee `../deploy`
-  # doit alors PASSER en NOMMANT ce qu'il n'a pas vu, jamais rougir, jamais passer en silence.
+  # A symlink to the real runtime under a new parent exercises the no-deploy branch on any checkout.
   describe "tree_scope — un arbre SANS deploy/ passe en NOMMANT ce qu'il ne verifie pas (DI-09)" do
     setup do
       base = Fleet.TestEnv.tmp_path("di09-sans-deploy")
@@ -659,10 +554,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "a marker present ONLY in a @moduledoc/@doc → false (no false-green)", %{
       tmp_dir: tmp
     } do
-      # The BND-111 trap: the return-value doc NAMES the `{:error, :brief_required}` tuple; if the
-      # check greps the tuple without excluding @doc blocks, a regression of the EXECUTABLE guard
-      # would stay green as long as the doc remains. We prove here that the tuple in prose ALONE does
-      # NOT satisfy the check.
+      # Documentation of a guard's tuple must not satisfy the check after the guard is removed.
       File.write!(Path.join(tmp, "prose_only.ex"), """
       defmodule ProseOnly do
         @moduledoc \"\"\"
@@ -730,8 +622,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     @tag :tmp_dir
     test "a writer that sets the brake WITHOUT releasing the lock is named", %{tmp_dir: tmp} do
-      # `awaits-arch` takes the ticket out of dispatch; the in-flight lock left behind is then
-      # reclaimed by reconciliation as orphaned, and the ticket re-dispatches into the same wall.
+      # Leaving in-flight behind lets reconciliation reclaim it as orphaned and redispatch the ticket.
       lib_file(tmp, "brake.ex", """
       defmodule Brake do
         def apply(repo, n), do: forge().add_label(repo, n, Fleet.Labels.awaits_arch(), [])
@@ -758,8 +649,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       v = verdict(tmp)
       assert v.status == :pass
-      # A count in the note, because a wall that passes on a population of zero reads exactly like
-      # a wall that passes on a compliant one.
+
       assert v.note =~ "1 writer(s) measured"
     end
 
@@ -767,10 +657,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "a file that only READS the label is NOT a writer — the false positive that shipped", %{
       tmp_dir: tmp
     } do
-      # The first version asked "does this file mention add_label AND the awaits-arch label?" and
-      # flagged the module that lists the arch's escalation inbox: it READS the label to filter
-      # issues, and adds an unrelated one. Co-occurrence in a file answers a neighbouring question,
-      # and its answer looks exactly like a finding.
+      # A label read plus an unrelated add_label call must not count as a writer.
       lib_file(tmp, "inbox.ex", """
       defmodule Inbox do
         @awaits_arch_label Fleet.Labels.awaits_arch()
@@ -779,8 +666,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      # No writer at all in this tree: the check must say it measured NOTHING rather than pass —
-      # and it must not name this file as a violator either, which is the actual regression.
       v = verdict(tmp)
       assert v.status == :fail
       assert v.note == "population empty"
@@ -790,9 +675,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     @tag :tmp_dir
     test "delegating to unlock/6 counts as releasing the lock", %{tmp_dir: tmp} do
-      # `unlock/6` removes the label AND stops the role stopwatch AND emits `step.unlocked`. A site
-      # that delegates to it clears the lock without ever naming it — reading only `remove_label`
-      # would flag the most disciplined writer of the three.
+      # Recognize delegation to unlock, which handles label removal, timing and the event.
+      # The check recognizes its call shape without inspecting that implementation.
       lib_file(tmp, "completer.ex", """
       defmodule Completer do
         def apply(repo, n) do
@@ -811,11 +695,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "un arbre SANS `deploy/` : pass, et la note DIT que les placements sont sautes", %{
       tmp_dir: tmp
     } do
-      # LE CHEMIN QUE LE GATE DE L'HOTE NE PEUT PAS PRENDRE. L'etage BUILD de l'image copie `runtime/`
-      # sans `deploy/` (COPY explicite), donc cette branche n'existe QUE la — et deux fois cette
-      # nuit c'est le build qui a attrape ce que l'hote ne pouvait pas voir : d'abord un
-      # `fail-closed` sur une recette hors perimetre, puis un `[]` nu la ou un tuple etait attendu.
-      # Ce test amene ce chemin sur l'hote.
+      # This minimal artifact exercises the skip path; the assertion permits either verdict
+      # and checks only that the task returns and reports the skipped placement defaults.
       root = Path.join(tmp, "sans-deploy")
       File.mkdir_p!(Path.join(root, "priv/catalogue/cap_profile/cap-profiles"))
       File.mkdir_p!(Path.join(root, "priv/catalogue-system/cap_profile/cap-profiles"))

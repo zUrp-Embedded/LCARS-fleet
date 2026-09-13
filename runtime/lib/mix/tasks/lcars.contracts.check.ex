@@ -1,53 +1,18 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check do
-  # Z4 — Mix task classified into the boundary of its subject (Fleet.Application).
   use Boundary, classify_to: Fleet.Application
 
-  @shortdoc "Verifies inter-module contracts at load (refuses the build if a contract is reopened)"
+  @shortdoc "Runs source and declaration contract checks"
 
   @moduledoc """
-  Runtime Contract Checker — validates inter-module contracts BEFORE
-  execution, and turns each gap into an explicit refusal (exit≠0)
-  rather than a silent runtime timeout/bug.
+  Compiles the project, runs the checks listed in `run_checks/0`, and exits with
+  status 1 if any verdict fails. Run from the runtime directory:
 
-  Each check guards a class of drift already encountered: RED as long as the
-  fix is not landed, GREEN once it is. Wired in as a permanent guardrail
-  (`contracts.check` exit 0 at boot/CI fail-loud, and `mix release` refuses to
-  build if a check is red), it promotes each invariant from a documentary
-  closure to a mechanical closure: an agent who re-derives breaks the build.
+      mix lcars.contracts.check
+      mix lcars.contracts.check --quiet
 
-  ## Usage
-
-      mix lcars.contracts.check          # YAML report + exit 0/1
-      mix lcars.contracts.check --quiet  # exit code only
-
-  ## Output
-
-  YAML `status + checks[] + evidence (file:line)`. `status: fail` if at
-  least one check is `fail`. Every check is IMPLEMENTED and grounded in the real
-  code (grep/introspection) — there is no "pending/declared-only" tier: a contract
-  either has an executable check or it is not listed.
-
-  ## Ou sont les murs
-
-  Pas ici. Ce module n'en mesure aucun : il enchaine les familles, agrege leurs verdicts, rend le
-  YAML et choisit le code de sortie. Les murs vivent dans `Check.<Famille>`, et `run_checks/0` les
-  nomme un par un — la liste d'appels EST l'autorite sur ce que le gate joue, et se lit comme une
-  table de ce que le projet garde :
-
-      Support       l'outillage partage — combinateurs, lecteurs de code, parcours de corpus
-      Runtime       les rails et les coutures que ni un type ni un test ne traversent
-      Tools         la surface d'outils : catalogue, MCP, capacites, client forge
-      SingleSource  Z7 — un fait, une source, a travers les langages
-      Catalogue     le catalogue de roles : son lecteur, et les murs qui l'interrogent
-      Events        la voie des evenements et les vocabulaires fermes
-      Artifact      ce que l'artefact contient et ce que ses arbres voisins promettent
-      Tests         le corpus de temoins lui-meme : joue, retrouvable, mordant
-      Types         les jumeaux `@spec` et `@doc` sur les fonctions publiques
-      Boot          le verrou de topologie : l'ORDRE du demarrage
-
-  ⚠ CE FICHIER NE PORTE AUCUN MUR, ET C'EST CE QUI LE GARDE COURT : un lecteur ouvre une famille sans
-  tenir les autres en tete. Le nombre de murs du jour ne se recopie pas ici : la tache le rend
-  (`mix lcars.contracts.check --quiet`).
+  The detailed report is YAML-like text with unescaped values, followed by a summary.
+  `--quiet` suppresses the detailed report, but still prints the summary.
+  Individual checks live in `Check.*`; their source/AST patterns do not prove runtime behavior.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Artifact
@@ -60,28 +25,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   alias Mix.Tasks.Lcars.Contracts.Check.Tools
   alias Mix.Tasks.Lcars.Contracts.Check.Types
 
-  # ⚠ NI `alias Support` NI `import Support` ICI, ET C'EST LE SIGNE QUE LA COUPE EST FINIE : cette
-  # tache ne mesure plus rien. Elle enchaine les familles, agrege leurs verdicts, rend le YAML et
-  # choisit le code de sortie. Le jour ou un `Support.` reapparait dans ce fichier, c'est qu'un mur
-  # y a ete ecrit au lieu d'aller dans sa famille.
-
   use Mix.Task
 
   @recursive false
-
-  # Each check: %{id, remediation, status: :pass|:fail, evidence: [..], note}
-  # (No pending tier: a declared-but-not-executable check is not listed, cf. the moduledoc. A
-  # `@pending_checks` list that is always empty and a counter that always prints "0 pending"
-  # would be inert ceremony — reintroduce the tier only the day such a check really exists.)
 
   @impl Mix.Task
   def run(args) do
     quiet? = "--quiet" in args
 
-    # Le rapport YAML est un FORMAT, pas une console : le `@moduledoc` le decrit comme tel, et
-    # `--quiet` existe justement pour l'appelant qui ne veut que le code de sortie. Le handler
-    # Logger par defaut ecrit sur le meme stdout, donc un seul `info` emis pendant un mur rendrait
-    # le document illisible pour qui le parse. Meme regle que les portes release, meme primitive.
+    # Keep Logger output separate from the report.
     Fleet.ReleaseDoor.claim_stdout!()
 
     Mix.Task.run("compile")
@@ -101,7 +53,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc """
-  Runs the compiled-source checks without printing or exiting.
+  Returns aggregate verdicts using the current directory as the runtime root.
+  Does not render the report or choose an exit code. Checks can raise, log or start
+  dependencies; an exception interrupts the remaining checks.
   """
   @spec run_checks() :: {:pass | :fail, [map()]}
   def run_checks do
@@ -187,9 +141,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Tests.check_negations_bite(root),
         Tests.check_refute_copies_agree(root),
         Types.check_public_functions_documented(root)
-        # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
-        # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
-        # nothing separate to contract.
+        # Bounded rework belongs to StepRunConsumer's forge rail (`max_rework_rounds`).
       ]
 
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
@@ -204,8 +156,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     body =
       Enum.map_join(checks, "\n", fn c ->
-        # FIELD access (c.evidence/c.note like c.id/c.status): every producer sets the
-        # 5 keys — a defaulted Map.get would mask a guaranteed shape (dead default).
         ev =
           case c.evidence do
             [] -> ""

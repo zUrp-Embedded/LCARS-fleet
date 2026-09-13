@@ -1,24 +1,8 @@
 defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
   @moduledoc """
-  Les derniers murs sans fixture rouge, prouves contre des arbres FABRIQUES.
-
-  `boot.verifier_covers_rail`, `eval_doors.transport_started`,
-  `launch.backend_containment_coherent`, `capprofile.modop_incompatible_path`,
-  `types.public_functions_spec`, `forge.shape_contained`, `site.build_inputs`,
-  `mcp.wire_inputschema`, `roles.tool_grants_resolve`.
-
-  ## Trois formes que ce fichier exerce, et qu'aucune autre tranche ne portait
-
-  1. **La couverture ORIENTEE.** `boot.verifier_covers_rail` ne compare pas deux ensembles egaux :
-     le verificateur autonome doit CONTENIR le boot, jamais l'inverse. Une garde qu'il joue en plus
-     est conservatrice ; une garde qui manque rend un vert qui precede un boot rouge.
-  2. **La residue-absence.** `launch.backend_containment_coherent` et
-     `capprofile.modop_incompatible_path` gardent qu'une chose N'EST PAS la. Zero occurrence et
-     « je n'ai pas regarde » sortent identiques, et ces deux-la n'ont pas le meme garde.
-  3. **Le hors-perimetre EXPLICITE.** `site.build_inputs` rend `pass` en le DISANT quand l'arbre du
-     site n'est pas la — un fail-closed y ferait echouer la construction de l'image sur une
-     plaquette qu'elle n'embarque pas. C'est la seule forme de vert que ce depot accepte sur du
-     terrain non mesure, et elle se distingue d'un vert muet.
+  Synthetic-tree regressions for contract checks, including directed boot/verifier
+  inclusion, missing populations and explicit artifact exclusions. Fixtures test
+  recognized source shapes; they do not execute the represented runtime behavior.
   """
   use ExUnit.Case, async: true
 
@@ -37,7 +21,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     root
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "boot.verifier_covers_rail — un vert qui precede un boot rouge" do
     defp pilot(boot, verif) do
       [
@@ -64,9 +47,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LE SENS EST ORIENTE — une garde EN PLUS chez le verificateur est CONSERVATRICE" do
-      # Une egalite stricte ferait rougir un verificateur plus severe que le boot : un rouge de
-      # trop, jamais un vert menteur. Sans ce temoin, quelqu'un « simplifierait » en egalite et
-      # rendrait le mur hostile a la seule direction qui ne coute rien.
       assert %{status: :pass, evidence: []} =
                Runtime.check_verifier_covers_rail(
                  arbre(pilot(["validate_cards!"], @gardes ++ ["validate_extra!"]))
@@ -81,7 +61,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "eval_doors.transport_started — une porte qui meurt sur `unknown registry`" do
     test "une porte qui demarre son transport → vert" do
       root =
@@ -96,9 +75,8 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "une porte qui atteint la forge SANS demarrer son pool est nommee" do
-      # Un `eval` de release CHARGE l'app sans la DEMARRER : le premier appel forge meurt sur
-      # `unknown registry: Fleet.Forge.Finch`, sous la ligne d'erreur que la porte imprime pour une
-      # forge qui n'a pas repondu — donc en accusant la forge.
+      # Release eval loads the app without starting it; a Forge call needs its Finch transport.
+      # This fixture tests recognition of startup text, not the transport itself.
       root =
         arbre([
           {"lib/fleet/porte.ex",
@@ -117,7 +95,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "launch.backend_containment_coherent — la resurrection d'un mecanisme casse" do
     test "le module absent et la config muette → vert" do
       root = arbre([{"config/runtime.exs", "import Config\n"}])
@@ -137,9 +114,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ MEME EN COMMENTAIRE — dans la config, une mention est un signal de resurrection" do
-      # Ce cote-la lit la source BRUTE, sans depouiller les commentaires, et c'est ecrit dans le
-      # mur. La regle inverse de ses voisins, et delibere : `containment: none` est servi par
-      # `host_launch.sh`, et voir le nom revenir dans la config du runtime suffit a alerter.
+      # This check deliberately scans raw config, including comments.
       root = arbre([{"config/runtime.exs", "# ancien: LaunchBackend.TmuxBackend\n"}])
 
       assert %{status: :fail, evidence: [ev]} = Runtime.check_launch_backend_containment(root)
@@ -147,7 +122,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "capprofile.modop_incompatible_path — un chemin qui n'existe pas dans le spec" do
     @deux ["lib/fleet/cap_profile.ex", "lib/fleet/cap_profile/invariants.ex"]
 
@@ -165,8 +139,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LES DEUX FICHIERS SONT SURVEILLES — le mauvais chemin peut revenir dans l'un ou l'autre" do
-      # La fonction gardee vit dans `invariants.ex`, mais elle a vecu dans `cap_profile.ex` : un
-      # mur d'un seul fichier laisserait la faute revenir la ou elle etait deja.
+      # Both the current invariants file and its former cap_profile location are scanned.
       for fautif <- @deux do
         root =
           arbre(
@@ -188,7 +161,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "types.public_functions_spec — Dialyzer n'a rien a comparer" do
     test "une fonction publique avec son `@spec` → vert" do
       root =
@@ -209,9 +181,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LES CALLBACKS DE BEHAVIOUR SONT EXEMPTES — leur contrat vit dans le behaviour" do
-      # Le restater par implementation est la duplication que ce depot refuse ailleurs. Sans cette
-      # exemption, chaque GenServer du corpus rougirait, et un mur qui accuse le nominal se
-      # desactive.
+      # These callback names are exempted by the check's fixed list.
       root =
         arbre([
           {"lib/a.ex",
@@ -228,7 +198,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "forge.shape_contained — connaitre la forme de l'API hors du domaine forge" do
     test "un module hors domaine qui n'ouvre pas la charge → vert" do
       root =
@@ -240,8 +209,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "un acces direct a la charge hors du domaine est nomme" do
-      # Une montee de version de la forge devient indetectable au gate des qu'un module hors
-      # domaine connait la forme de sa reponse.
       root =
         arbre([
           {"lib/fleet/pilot/x.ex", "defmodule X do\n  def f(p), do: p[\"head\"][\"sha\"]\nend\n"}
@@ -263,12 +230,9 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "site.build_inputs — le hors-perimetre se DIT, il ne se tait pas" do
     test "⚠ ARBRE DU SITE ABSENT → `pass` QUI L'ANNONCE, et c'est la seule forme acceptee" do
-      # Un fail-closed ici ferait echouer la construction de l'image sur une plaquette qu'elle
-      # n'embarque pas — le stage `build` ne copie que `runtime/`. Et un `pass` muet serait un vert
-      # sur du terrain non mesure. La note porte donc la difference.
+      # Runtime-only images do not carry the site; the skip must be reported.
       root = arbre([{"runtime/lib/a.ex", "defmodule A do\nend\n"}])
 
       assert %{status: :pass, note: note} =
@@ -278,8 +242,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
       assert note =~ "assets/github.io"
     end
 
-    # Une source du site qui LIT le runtime : `join(here, '..', …)` remonte depuis
-    # `assets/github.io/src/lib/` jusqu'a la racine du depot, puis redescend.
     defp source_site(cible),
       do:
         {"assets/github.io/src/lib/data.js",
@@ -305,8 +267,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ UNE SOURCE LUE HORS DU FILTRE EST NOMMEE — le site decrirait la version d'avant" do
-      # Le mode de panne est MUET DANS LA MAUVAISE DIRECTION : les gardes du build sont ecrits pour
-      # echouer plutot que servir du perime, et ils ne servent a rien quand le build NE TOURNE PAS.
+      # A missing workflow input can leave the site stale because no rebuild is triggered.
       root =
         arbre([
           source_site("'runtime', 'priv', 'catalogue.yaml'"),
@@ -321,8 +282,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ UN SEGMENT DYNAMIQUE EXIGE UN GLOB — nommer trois fichiers ne ferme pas un repertoire" do
-      # `join(dir, f)` nomme un fichier dont le dernier segment est inconnu : ce qui est lu est le
-      # REPERTOIRE. Une entree `paths:` fichier par fichier laisserait passer le quatrieme.
+      # A dynamic filename needs directory coverage, not an enumeration of known files.
       root =
         arbre([
           {"assets/github.io/src/lib/data.js",
@@ -337,9 +297,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ ARBRE PRESENT MAIS AUCUNE ENTREE DERIVEE → fail-closed, pas un vert" do
-      # Distinct du hors-perimetre : ici l'arbre EST la, donc l'instrument devait mesurer quelque
-      # chose. Zero derivee veut dire que le deriveur ne reconnait plus la forme des sources, et un
-      # filtre `paths:` ne peut pas etre declare correct contre un ensemble vide.
       root =
         arbre([
           {"assets/github.io/src/lib/data.js", "export const x = 1;\n"},
@@ -353,7 +310,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "mcp.wire_inputschema — des pods muets, des outils rejetes en silence" do
     @acceptor "lib/fleet/mcp/pod_socket_acceptor.ex"
     @temoin "test/fleet/mcp/pod_socket_test.exs"
@@ -383,14 +339,8 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LE JETON SUR UNE LIGNE DE CODE NE PROUVE RIEN — c'est la PAIRE qui est exigee" do
-      # BND-111 cote temoin, et la forme qui discrimine vraiment. Un `code_match?` sur le seul
-      # jeton est satisfait par n'importe quelle ligne de code qui le porte — un attribut, une
-      # constante, une comparaison — alors que ce qui protege la regression F1 (pods muets, outils
-      # rejetes en silence) est le COUPLE : `assert Map.has_key?(… "inputSchema")` ET
-      # `refute Map.has_key?(… "input_schema")`, chacun sur sa ligne.
-      #
-      # Ici le `refute` est bien la, mais le jeton camelCase ne vit que dans un attribut. Le mur
-      # doit rougir ; un mur relache passerait.
+      # Require both assertion patterns; an attribute carrying the token is insufficient.
+      # This does not establish that the assertions execute or inspect the projected value.
       sans_paire =
         "  @attendu \"inputSchema\"\n" <>
           "  test \"x\" do\n" <>
@@ -412,7 +362,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "template.gitea_expansion — un projet livre avec ses `${VAR}` litteraux" do
     defp face(fichiers, controle) do
       base = "priv/catalogue/project_template/main"
@@ -451,9 +400,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ L'AUTRE SENS COMPTE AUSSI — une entree listee sans variable" do
-      # Une liste qui nomme un fichier sans variable n'est pas inoffensive : elle apprend au
-      # prochain lecteur que ce fichier est expanse, et il ecrira un `${VAR}` ailleurs en croyant
-      # que la liste suit.
       root =
         arbre(
           face([{"README.md", "# ${REPO_NAME}\n"}, {"x.txt", "rien\n"}], ["README.md", "x.txt"])
@@ -464,9 +410,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ UNE FACE ABSENTE ECHOUE, elle n'est pas « hors perimetre »" do
-      # `priv/catalogue` part avec CHAQUE artefact — le stage image copie tout sauf `deploy`,
-      # `git-hooks` et `system-prompt`. Une face absente n'est donc pas un contexte, c'est une face
-      # perdue. Mesure a la pose du garde : sans lui, renommer la face rendait « 0 fail ».
+      # The template ships with runtime artifacts, so its absence is not a sibling-tree skip.
       assert %{status: :fail, evidence: [ev]} = Artifact.check_gitea_template_expansion(arbre([]))
       assert ev =~ "INSTRUMENT BROKEN"
     end
@@ -483,7 +427,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "tests.doctest_declarations_have_examples — un fichier qui a l'air couvert et ne joue rien" do
     alias Mix.Tasks.Lcars.Contracts.Check.Tests
 
@@ -514,8 +457,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ UN MODULE QUI NE RESOUT PAS N'EST PAS ACCUSE — ce serait le mur pleurant son angle mort" do
-      # La derivation nom → chemin peut simplement etre fausse pour un module qui ne suit pas la
-      # convention. L'accuser ferait rougir un contrat sain, et la note le compte a part.
       root =
         arbre([
           {"lib/fleet/slug.ex",
@@ -538,8 +479,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ AUCUN MODULE RESOLU → INSTRUMENT CASSE, meme si des declarations existent" do
-      # Le cas ou la derivation entiere est cassee : des declarations, aucune cible lue. « Zero
-      # module sans exemple » serait alors vrai et vide de sens.
       root =
         arbre([
           {"test/fleet/x_test.exs", "defmodule T do\n  doctest Fleet.Nulle.Part\nend\n"}
@@ -552,7 +491,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "declaration.max_fan_ceiling — un debit que le schema accepte et que le moteur ecrete" do
     defp plafonds(module, schema) do
       [
@@ -572,8 +510,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "une derive est nommee, avec les DEUX valeurs" do
-      # Un projet declare alors un debit que le schema ACCEPTE et que le moteur ecrete en silence :
-      # une declaration qui valide et ne s'applique pas, le pire des trois resultats possibles.
       assert %{status: :fail, evidence: [ev]} =
                Runtime.check_declaration_max_fan_ceiling(arbre(plafonds(4, 8)))
 
@@ -582,13 +518,8 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LA VALEUR SE LIT DANS LA SOURCE, PAS EN APPELANT LE MODULE" do
-      # Deux raisons, et la premiere mord : `Admission` n'est pas exporte par la boundary
-      # `Fleet.Pilot`, et elargir un export pour qu'un lint y accede est le reflexe que la boundary
-      # existe pour refuser. La seconde est la regle du fichier : un instrument de gate MESURE
-      # l'arbre, il ne joue pas le produit — un check qui exige l'app compilee ne peut rien dire
-      # d'un arbre qui ne construit pas.
-      #
-      # Le corollaire testable : l'attribut disparu est un INSTRUMENT CASSE, pas un accord.
+      # Read Admission's source attribute without widening its Pilot boundary export.
+      # The fixture checks that a missing attribute fails; no Admission function is called.
       assert %{status: :fail, evidence: [ev]} =
                Runtime.check_declaration_max_fan_ceiling(arbre(plafonds(nil, 4)))
 
@@ -605,7 +536,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "roles.tool_grants_resolve — une carte qui accorde un outil qui n'existe pas" do
     defp outils(noms) do
       {"lib/fleet/mcp/pod_tools.ex",
@@ -632,8 +562,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "un accord qui ne resout sur rien est nomme, avec le role" do
-      # Une carte qui accorde un outil inexistant ne casse rien au boot : le pod se coince sur un
-      # prompt, et le nom manquant n'apparait nulle part.
       root =
         arbre([outils(@douze), carte_outils("engineer", ["mcp__fleet__outil_disparu"])])
 
@@ -643,8 +571,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LES OUTILS HORS PREFIXE NE SONT PAS DES ACCORDS MCP" do
-      # `Bash`, `Read`, `Edit` sont des outils du vendor : les compter ferait accuser chaque carte
-      # du corpus d'accorder des outils que `pod_tools.ex` ne declare evidemment pas.
+      # Vendor tools are outside the mcp__fleet__ grant comparison.
       root = arbre([outils(@douze), carte_outils("engineer", ["Bash", "Read", "WebSearch"])])
 
       assert %{status: :fail, evidence: [ev]} = Tools.check_tool_grants_resolve(root)
@@ -665,7 +592,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "cap_profile.modop_tools_granted — un bundle qui ordonne un outil que le role n'a pas" do
     defp bundle_sp(nom, prose),
       do: {"priv/catalogue/cap_profile/modop-bundles/#{nom}/sp.md", prose}
@@ -689,8 +615,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "un outil ordonne et non accorde est nomme — le pod se COINCE sur un prompt" do
-      # Laisser l'outil hors de `allowedTools` ne le ferme pas : ca coince le pod sur une invite
-      # qu'il ne peut pas satisfaire. Le mur nomme le bundle ET le porteur.
       root =
         arbre([
           bundle_sp("brainstorming", "Utilise WebSearch pour explorer.\n"),
@@ -703,8 +627,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ SEULS LES PORTEURS SONT JUGES — un role qui n'active pas le bundle n'a rien a accorder" do
-      # Sans cette borne, tout bundle exigerait ses outils de TOUS les roles du catalogue, et le
-      # mur reclamerait des accords que personne ne veut donner.
       root =
         arbre([
           bundle_sp("brainstorming", "Utilise WebSearch pour explorer.\n"),
@@ -716,8 +638,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ AUCUN NOM D'OUTIL CITE → INSTRUMENT CASSE, jamais « rien a signaler »" do
-      # Un bundle de prose pure rend `cited_anywhere` vide : chaque comparaison porte alors sur
-      # l'ensemble vide, et « aucun outil non accorde » est vrai et sans contenu.
       root =
         arbre([
           bundle_sp("brainstorming", "reflechis posement, sans outil.\n"),
@@ -730,12 +650,8 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "reconciliation.pulled_states_declared — une dependance qui ne laisse aucune trace" do
-    # `@pulled_states` dit qu'un work-item enfile mais jamais TIRE ne possede AUCUN verrou. Des
-    # modules raisonnent sur cette regle sans jamais l'appeler : ils la CITENT. Le fournisseur
-    # ignore donc qu'il porte une garantie pour eux, et la changer casse leur raisonnement en
-    # silence. Aucune trace executable : la seule forme verifiable est que le fournisseur DECLARE.
+    # Semantic dependencies expressed by @pulled_states citations must be declared by the provider.
     defp reconciliation(dependants) do
       {"lib/fleet/pilot/poller/reconciliation.ex",
        "defmodule R do\n  @pulled_states [:a, :b]\n" <>
@@ -776,9 +692,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ LE VERIFICATEUR LIT LA REGLE, IL N'EN DEPEND PAS — et c'est une REGLE, pas une liste" do
-      # Le gate cite `@pulled_states` (il le mesure) : s'auto-compter ferait rougir le mur sur sa
-      # propre pose. L'exemption porte sur l'ARBRE du verificateur, pas sur des chemins en dur —
-      # une liste de chemins grossit a chaque coupe et rougit la fois ou on l'oublie.
+      # Checker source paths are exempt to avoid counting their own search patterns.
       root =
         arbre([
           reconciliation(["lib/fleet/pilot/x.ex"]),
@@ -797,13 +711,9 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "mcp.vitrine_single_line — une presentation publique tronquee en silence" do
-    # Le build du site lit `# vitrine:` par une regex qui capture jusqu'a la fin de la LIGNE
-    # (`assets/github.io/src/lib/tools.js`). La replier n'allonge pas le texte : elle le tronque sur
-    # la page publique, sans que rien ne le dise. C'est cette contrainte qui justifie les
-    # `credo:disable-for-next-line` sur la longueur de ces lignes-la — et un mur, pas un
-    # commentaire, est ce qui rend une exemption de lint tenue.
+    # tools.js reads vitrine text to end of line; wrapping loses public text.
+    # The corresponding credo line-length exemptions preserve this machine-readable format.
     defp outils_mcp(blocs) do
       corps =
         Enum.map_join(blocs, "\n", fn {nom, lignes} ->
@@ -832,8 +742,6 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "⚠ UNE CONTINUATION EST LE VRAI PIEGE — le texte reste entier dans le fichier" do
-      # La page n'en montre que la premiere moitie, et le fichier a l'air parfaitement correct.
-      # C'est le mode de panne MUET que ce mur existe pour fermer.
       root =
         arbre(
           outils_mcp([
@@ -849,10 +757,7 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
     end
 
     test "un commentaire ORDINAIRE apres la vitrine n'est pas une continuation… si" do
-      # ⚠ CE TEMOIN DIT UNE LIMITE ASSUMEE. Le mur ne distingue pas une continuation d'un
-      # commentaire de code qui suivrait immediatement : les deux se lisent pareil, et le doute
-      # penche du cote strict. Une ligne vide entre les deux leve l'ambiguite, et c'est ce que la
-      # remediation demande.
+      # A blank line distinguishes a following ordinary comment from a vitrine continuation.
       root =
         arbre(
           outils_mcp([

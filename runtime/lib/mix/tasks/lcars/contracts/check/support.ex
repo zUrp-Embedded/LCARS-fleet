@@ -1,31 +1,14 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
-  # Z4 — classe dans la boundary de son sujet, comme la tache qui l'utilise.
   use Boundary, classify_to: Fleet.Application
 
   @moduledoc """
-  La boite a instruments partagee des contrats — combinateurs, lecture de code et parcours de
-  corpus.
-
-  Ce module ne porte AUCUN contrat : il porte ce avec quoi on les mesure. La separation n'est pas
-  cosmetique. Un mur se lit en trois lignes de donnees (id, motif, remediation) quand son outillage
-  est ailleurs ; melange a 300 lignes de parcours de fichiers et de decoupe de commentaires, il se
-  lit en deux ecrans. Et l'outillage a ses propres invariants — un `grep_lines/2` qui avale une
-  erreur de lecture rendrait VERTS tous les murs d'absence qui s'appuient dessus, quel que soit le
-  contrat qu'ils portent.
-
-  Les trois familles de combinateurs (`presence_check/2`, `residue_check/2`, `evidence_check/2`)
-  couvrent une bonne part des murs ; le reste s'ecrit a la main et emprunte les memes lecteurs.
-
-  ⚠ Tout est public ici, `@doc false` : ces fonctions sont appelees depuis les modules de contrats,
-  pas depuis le dehors du projet. La visibilite est un fait de decoupage, pas une surface d'API.
+  Internal helpers for contract checks: verdicts, source scanning and corpus traversal.
+  Public visibility supports calls from check modules; `@doc false` functions are not an external API.
   """
 
   @typedoc """
-  Le verdict d'UN check.
-
-  `status` est ternaire dans les faits : `:pass`, `:fail`, et le `:fail` particulier de
-  `broken_result/2` — « INSTRUMENT BROKEN », quand la population mesuree est vide. Un mur qui ne
-  voit plus rien ne verdit pas, il se declare casse.
+  A check verdict. Empty-population failures use `:fail` with an INSTRUMENT BROKEN
+  diagnostic; they are not a separate status.
   """
   @type result :: %{
           id: String.t(),
@@ -35,20 +18,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
           note: String.t()
         }
 
-  # ── Combinators (3 families of data-driven checks) ───────────────────
-  # A good share of the checks are pure instantiations of these 3 families (no COUNT here:
-  # comment-counters rust — the list in `run_checks` is the truth); each migrated check is
-  # just a call carrying its DATA (id, files, patterns, messages). The evidence messages are
-  # passed as-is to the combinator: no loss of precision vs the unrolled versions they replace.
-
-  # Does a CODE line of `rel` match `pattern`? Raw grep, then
-  # confirmation on the line stripped of its comment (a comment
-  # mention does not count — anti-hollow-green, cf. strip_comment/1).
-  # `confirm`: regex OR list of regexes that must ALL match the
-  # stripped line, when the confirmation differs from the grep (e.g. require the token
-  # to live on the line of the `{:error, …}` tuple); default = `pattern` itself.
-  # Public (`@doc false`) so the anti-hollow-green property (a marker in prose does NOT count, BND-111)
-  # is unit-testable against a crafted fixture file, not only via the whole-repo smoke test.
+  # Matches and confirms on one line after heuristic comment/doc-block filtering.
+  # All confirmation regexes must match that line. Inline documentation and other strings
+  # can still satisfy the check; a match is not proof of executable behavior.
   @doc false
   @spec code_match?(String.t(), String.t(), Regex.t(), Regex.t() | [Regex.t()] | nil) :: boolean()
   def code_match?(root, rel, pattern, confirm \\ nil) do
@@ -58,10 +30,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
 
     path
     |> grep_lines(pattern)
-    # BND-111: a marker in RETURN-VALUE docs or module prose (`@doc/@moduledoc` heredocs) is NOT
-    # executable code. This checker IS the anti-hollow-green mechanism — it must not accept its own
-    # markers' documentation as proof (e.g. `{:error, :brief_required}` is BOTH in `spawner.ex`'s @doc
-    # AND at the guard; only the guard proves the invariant). Doc-block lines are dropped before matching.
     |> Enum.reject(fn {ln, _line} -> MapSet.member?(doc_lines, ln) end)
     |> Enum.any?(fn {_ln, line} ->
       stripped = strip_comment(line)
@@ -69,12 +37,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     end)
   end
 
-  # Line numbers inside `@moduledoc`/`@doc`/`@typedoc`/`@shortdoc` HEREDOC blocks (delimiters included).
-  # Line-based scan: enter on `@…doc [~sS]?"""`, exit on a lone `"""`. A heredoc cannot contain an
-  # unescaped `"""` (Elixir), so the first lone `"""` closes it. Single-line `@doc "..."` is not a
-  # heredoc — left to `strip_comment/1`'s inline-string tracking. Used by `code_match?/4` (BND-111).
-  # Un pas du balayage : dans un heredoc, la premiere ligne qui n'est QUE `"""` le ferme — Elixir
-  # interdit un `"""` non echappe a l'interieur, donc il n'y a pas d'ambiguite a lever.
+  # Recognizes double-quote doc heredocs (including ~s/~S); closes on a lone triple quote.
+  # This is a line scanner, not an Elixir parser; single-line docs are not removed.
   defp doc_block_step({line, ln}, {acc, true}) do
     if Regex.match?(~r/^\s*"""\s*$/, line),
       do: {MapSet.put(acc, ln), false},
@@ -101,9 +65,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     end
   end
 
-  # Family A — marker-presence: `file` must carry `pattern` in code
-  # (confirmed outside comments, `confirm` optional cf. code_match?/4);
-  # present = pass, absent = fail with `"<file> : <missing>"` as evidence.
+  # Presence uses code_match?/4, including its lexical limitations.
   @doc false
   @spec presence_check(String.t(), map()) :: result()
   def presence_check(root, opts) do
@@ -118,40 +80,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     }
   end
 
-  # Family B — residue-absence: 0 hit of `pattern` (confirmed outside comments
-  # by `confirm`, default `pattern`) in `files` = pass; each residual hit =
-  # a `file:line` evidence. ⚠ inherits the hollow-green trap of `grep_lines/2`
-  # (absent file = 0 hit = pass): list here only live files whose
-  # existence is guarded elsewhere — for a residue on a potentially
-  # dead file, grep a glob (cf. check_gates_no_runtime_seam).
-  # POPULATION GUARD — zero subjects and zero violations are indistinguishable at the output of an
-  # absence-of-violation wall. Every check below that answers "nothing violates X" owes its reader
-  # the count it looked at: a glob that matches nothing, a registry that loads empty, a directory
-  # that moved, all read as compliance otherwise. The probe that finds them: point the checker at an
-  # EMPTY tree and read what still returns `pass` (BL-6-70). Walls whose subject has moved out from
-  # under them are the ones it catches, and a subject moves in the same commit that adds the wall.
-  # Two clauses, and no third for integers: nothing counts before asking. A speculative clause is a
-  # branch no test can reach and no reader can trust — dialyzer named it, and it was right.
+  # Empty populations must be distinguished from populations without violations.
   @doc false
   @spec measured_nothing?(list() | MapSet.t()) :: boolean()
   def measured_nothing?(population) when is_list(population), do: population == []
   def measured_nothing?(%MapSet{} = population), do: MapSet.size(population) == 0
 
   @doc """
-  LE VERDICT D'UN MUR, dans la forme que ce fichier impose a tous : une garde de population, des
-  constats, une note.
-
-  Les trente murs du gate la recopiaient un a un — un `cond` a trois branches et un `if` dans le
-  `status`, soit deux a trois points de complexite cyclomatique par mur pour zero decision propre.
-  Recopiee, elle DERIVE : trois d'entre eux avaient perdu la garde de population, et « rien a
-  signaler » y sortait identique a « je n'ai rien regarde ».
-
-  L'ordre des clauses est l'invariant : un instrument casse se dit AVANT les constats, parce qu'un
-  scan qui n'a rien lu ne peut pas conclure a une conformite.
-
-    * `:broken` — la chaine decrivant ce que l'instrument n'a pas trouve, ou `nil` ;
-    * `:findings` — les constats, chacun deja redige ;
-    * `:remediation` et `:note` — tels quels.
+  Builds a verdict from `:findings`, `:remediation`, `:note` and optional `:broken`.
+  `:broken` must be nil or an explanation string. An explanation takes precedence over
+  findings; only nil with no findings passes. The caller supplies the population guard.
   """
   @spec measured_verdict(String.t(), map()) :: result()
   def measured_verdict(id, opts) do
@@ -164,9 +102,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
       status: if(is_nil(broken) and findings == [], do: :pass, else: :fail),
       evidence:
         cond do
-          # ⚠ MOT POUR MOT LA PHRASE DE `broken_result/2`. Deux formulations pour un meme etat, ce
-          # sont deux choses a chercher pour l'operateur — et des temoins qui epinglent l'une
-          # deviennent aveugles a l'autre.
+          # Keep the diagnostic prefix consistent with broken_result/2.
           broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
           findings != [] -> findings
           true -> []
@@ -197,23 +133,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
       Enum.flat_map(opts.files, fn rel ->
         abs = Path.join(root, rel)
 
-        # HOLLOW-GREEN GUARD (R0-EVT-012): a residue check greps FIXED file paths; a file it cannot
-        # read yields 0 residue → `:pass` FOREVER, even though the target moved/was deleted and the
-        # contract is no longer verified. A residue target the check cannot read is therefore a
-        # FAILURE, not a silent green.
-        #
-        # ONE read, and it decides both. `File.exists?/1` alone answers only the ABSENT half: it is
-        # TRUE for a file present and unreadable (permissions, I/O error, a path that became a
-        # directory), which sends the flow into the reading branch where a swallowed error becomes
-        # zero lines, i.e. compliance. A moved file trips the first half; a chmod trips the second,
-        # and nothing in the output tells them apart. Reading once also removes the window between
-        # the test and the read.
+        # Read once: missing and unreadable named targets must fail, not count as zero matches.
         residue_of_file(File.read(abs), rel, opts.pattern, confirm)
       end)
 
-    # The existing hollow-green guard below covers a NAMED file that vanished. It cannot cover a
-    # GLOB that matched nothing: the flat_map produces no evidence and the wall reports compliance
-    # about a set it never had. Same defect, one level up.
+    # An empty file list also fails. Unlike code_match?/4, residue scanning does not remove doc blocks.
     if measured_nothing?(opts.files) do
       broken_result(opts.id, "file to scan")
     else
@@ -240,9 +164,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
         "(hollow-green guard, R0-EVT-012)"
     ]
 
-  # Family C — evidence-list: `items` = [{ok?, message}], conditions evaluated at the
-  # call site (grep, File.exists?, …). All true = pass; each false
-  # condition puts its message (precise, pre-composed) into evidence.
+  # False conditions become evidence. Empty items pass; there is no population guard here.
   @doc false
   @spec evidence_check(map(), [{boolean(), String.t()}]) :: result()
   def evidence_check(meta, items) do
@@ -257,8 +179,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     }
   end
 
-  # ── Helpers ──────────────────────────────────────────────────────────
-
   @doc false
   @spec module_exists?(String.t()) :: boolean()
   def module_exists?(name) do
@@ -266,11 +186,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     Code.ensure_loaded?(mod)
   end
 
-  # Removes the end-of-line `#...` comment, outside a double-quote string
-  # (the `#` inside a "..." are code, e.g. `#{}` interpolation).
-  # Heuristic sufficient to measure code vs a comment mention.
-  # Known limit: the char literal `?#` is truncated (not handled) — not exploitable
-  # on the fixed targets (no `?#`), a tuple form `{?#, …}` being absurd.
+  # Stops at # outside double quotes, toggling on every quote without escape handling.
+  # Single quotes, sigils, heredoc state and ?# are not parsed; false positives and negatives are possible.
   @doc false
   @spec strip_comment(String.t()) :: String.t()
   def strip_comment(line) do
@@ -281,20 +198,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     |> List.to_string()
   end
 
-  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read a mirror through `code_of/1`
-  # wherever a comment could carry the value: on the RAW body, a file whose CODE carries the wrong value stays green as
-  # long as the right one appears in a COMMENT — and the context that makes it likely is the ordinary one: `# Note: was
-  # <old value>` on the very line a migration touches. Measured on three of them: code mutated + the pattern quoted in a
-  # comment → `status: pass` without the strip.
-  #
-  # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
-  # strips comments on every sweep. Same doctrine here, in the other language.
-  #
-  # `#` opens a comment in every file type these locks read (sh, ex, tf, yml), so ONE stripper
-  # serves them all; `strip_comment/1` below already honours `"` so an interpolation `#{}` or a `#`
-  # inside a string survives. Known limit, stated rather than hidden: a `#` inside SINGLE quotes is
-  # truncated — that direction is fail-CLOSED (a real code site stops matching, the lock reddens and
-  # names it), never fail-open.
+  # Applies strip_comment/1 per line; documentation blocks and strings remain.
   @doc false
   @spec code_of(String.t()) :: String.t()
   def code_of(body),
@@ -370,21 +274,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
 
   defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
 
-  # ⚠ HOLLOW-GREEN TRAP: on an ABSENT file, `grep_lines` returns `[]`
-  # — indistinguishable from "present but 0 match". A check "no residue X in
-  # file Y" that rules `pass` on `evidence == []` therefore ALWAYS passes if Y
-  # has been deleted. For a RESIDUE check, grep a glob of real files
-  # (`Path.wildcard`), not a single potentially dead file path.
-  #
-  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` answers both.
-  # Absence is a state every caller models: a presence-prover reports the missing proof and fails,
-  # a residue check reads the file itself and turns it into evidence. Unreadability is not a state
-  # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
-  # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
-  # a path that became a directory, on a permission the runner lost; never in nominal operation,
-  # which is exactly why a swallowing `_ -> []` goes unnoticed under three absence-of-violation
-  # walls (`gates.no_runtime_seam`, `listener.no_cowboy_bypass`, `gatekeeper.not_an_ordering_step`), each of
-  # which globs REAL files and would report compliance about one it could not open.
+  # Missing files return no matches; other read errors raise. Absence checks need a population guard.
+  # Matches raw lines, including documentation and strings.
   @doc false
   @spec grep_lines(String.t(), Regex.t()) :: [{pos_integer(), String.t()}]
   def grep_lines(path, regex) do
@@ -410,35 +301,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     |> Enum.map(fn {line, ln} -> {ln, line} end)
   end
 
-  # Z3: single-app project — the task always runs at the project root (Mix sets the cwd
-  # there). NO umbrella-style detection ("no `apps/` dir → go up two levels"): that case
-  # does not exist, and such a heuristic would resolve to a `../..` OUTSIDE the project.
-
-  # LES DOSSIERS DANS LESQUELS AUCUN SCAN DE CORPUS NE DESCEND. Ni sources ni temoins : des artefacts
-  # de build, des dependances vendorees, et le bac a sable des `@tmp_dir` d'ExUnit.
-  # ⚠ `.terraform` EST DANS CETTE LISTE POUR UNE RAISON MESUREE, PAS PAR SYMETRIE. `tofu init` pose
-  # sous `runtime/services/forge-recipe/.terraform/` des binaires de providers de plusieurs dizaines
-  # de Mo, gitignores, qui portent en dur les chemins de la machine ou ILS ont ete batis — un
-  # runner CI, donc `/opt/hostedtoolcache`. Sans cette entree, `check_platform_root_single_source`
-  # les lit et accuse une « seconde racine sous /opt » qui n appartient a personne ici : le gate est
-  # vert sur un poste qui n a jamais initialise tofu, et rouge sur celui qui vient de le faire.
-  # Un mur dont le verdict depend de ce que l operateur a lance la veille mesure la machine, pas le
-  # depot — et le scan par NOM de repertoire est ce qui rend cet ecart reparable en un mot.
+  # Prune before descent to avoid build/dependency/test debris. Terraform provider binaries
+  # embed foreign build paths which otherwise trigger the platform-root check.
   @corpus_skip ~w(_build deps tmp node_modules .git .terraform)
 
-  # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure sur ce
-  # depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de
-  # residus `@tmp_dir` accumulees par les runs), `_build/` et `deps/` avant qu'un `Enum.reject` ne
-  # les jette : 28 173 fichiers traverses en 4,5 s pour en retenir 1071. Elagué, le meme corpus sort
-  # en 30 ms.
-  #
-  # Ce n'est pas qu'une question de vitesse. Trois checks appellent ce scan, et le temoin qui les
-  # enchaine tous depasse le timeout de 60 s d'ExUnit des que `tmp/` a grossi — la suite passe donc
-  # au ROUGE sans qu'aucun contrat soit en cause.
-  #
-  # L'elagage est recursif PAR NOM, a toute profondeur : `runtime/tmp/` doit tomber aussi quand le
-  # scan part de la racine du depot, ce qu'un rejet applique aux seules entrees de premier niveau
-  # laisserait passer.
+  # Prunes names at every depth. Directory read errors are skipped; symlinks are followed,
+  # so this is neither a complete-read guarantee nor a containment check.
   @doc false
   @spec corpus_files(String.t()) :: [String.t()]
   def corpus_files(base), do: corpus_walk(base, [])
@@ -463,14 +331,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     end
   end
 
-  # ⚠ UN DEPOT IMBRIQUE N'EST PAS LE CORPUS DE CELUI-CI. Un worktree parque sous la racine (mesure
-  # du 2026-09-12 : dix `git worktree add .claude/mut/wN`) porte un `.git` FICHIER — l'entree `.git`
-  # est bien sautee par nom, mais ses freres `runtime/`, `deploy/`, `.claude/` sont parcourus comme
-  # s'ils etaient le depot : `tests.corpora_on_record` accusait 190 repertoires « sur aucun registre »
-  # et la suite rendait 3 rouges sur un arbre dont pas un fichier suivi n'avait change. Meme regle
-  # que `.terraform` ci-dessus : ce qu'un operateur a parque dans l'arbre est la machine, pas le
-  # depot. Un `.git` — fichier ou dossier — sous un enfant de la racine ferme cet enfant entier.
-  # La racine elle-meme n'est jamais testee : son `.git` est saute par nom, jamais par ce garde.
+  # ⚠ UN DEPOT IMBRIQUE N'EST PAS LE CORPUS DE CELUI-CI. Un worktree parque sous la racine porte un
+  # `.git` FICHIER : l'entree est sautee par nom, pas ses freres — 190 repertoires accuses « sur
+  # aucun registre », 3 rouges sur un arbre inchange (2026-09-12). Un `.git`, fichier ou dossier,
+  # sous un enfant de la racine ferme cet enfant entier ; la racine elle-meme n'est jamais testee.
   defp nested_repo?(dir), do: File.exists?(Path.join(dir, ".git"))
 
   # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
@@ -478,12 +342,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @spec tree_scope(String.t()) :: :required | :out_of_scope
   def tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
 
-  # The TREE a mirror path belongs to: its leading `..` segments plus the first real one —
-  # `services/x` -> `services`, `../deploy/lib/x` -> `../deploy`. Deciding the scope on
-  # `hd(Path.split(rel))` answered `..` for every sibling-tree mirror the day `deploy/` left
-  # `fleet/` (4583be78a): the PARENT of the runtime is always there, so a mirror the artifact does
-  # not carry was demanded, then reported missing. Measured on the image build stage (which
-  # excludes `deploy/` on purpose): four locks red, `mix release` refused, the container unbuildable.
+  # Preserve leading .. segments and the first real component: ../deploy/lib/x -> ../deploy.
+  # Testing only .. would require mirrors even when the deploy artifact is absent.
   @doc false
   @spec mirror_scope(String.t(), String.t()) :: :required | :out_of_scope
   def mirror_scope(rel, root), do: tree_scope(Path.expand(mirror_tree(rel), root))
@@ -512,23 +372,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
       " · NOT CHECKED here (tree absent from this artifact — runtime-only context): " <>
         Enum.join(labels, ", ")
 
-  # ── Lecture d'AST ────────────────────────────────────────────────────
-
   @doc false
   @spec quoted!(String.t(), String.t()) :: Macro.t()
   def quoted!(root, rel), do: root |> Path.join(rel) |> File.read!() |> Code.string_to_quoted!()
 
   @doc """
-  `lhs |> f(args)` → `f(lhs, args)`, a toute profondeur.
-
-  ⚠ L'AST D'UN TUBE GARDE LA VALEUR TUBEE DANS LE NOEUD `|>`, donc une lecture d'ARITE sur le noeud
-  d'appel seul est fausse DANS LES DEUX SENS : `n |> f()` se lit zero argument, `n |> f(o)` un seul.
-  Un mur qui compte les arguments d'un appel doit deplier AVANT de compter, sinon il rate les
-  violations tubees et accuse les appels sains.
-
-  Mesure du 2026-09-08 : `mcp.seam_surface_declared` accusait `post_comment: 3` — un appel a QUATRE
-  arguments dont le premier passait par un tube. `workflow.loader_arity` avait deja la lecon, dans
-  son coin ; elle vit ici maintenant.
+  Rewrites `lhs |> f(args)` to `f(lhs, args)` throughout the AST before counting
+  call arguments. Does not expand macros or resolve call targets.
   """
   @spec unpipe(Macro.t()) :: Macro.t()
   def unpipe(ast) do
@@ -560,20 +410,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     Enum.reverse(acc)
   end
 
-  # ── L'arbre du verificateur lui-meme ─────────────────────────────────
-
-  # UN MUR QUI GREPPE UN MOTIF LE CONTIENT, PAR CONSTRUCTION. Trois murs cherchent dans `lib/` une
-  # chose qui ne doit pas s'y trouver — un namespace de config mort, un mot a prior dominant, la
-  # citation d'une regle de propriete — et leur propre source porte ce qu'ils cherchent : ils se
-  # compteraient eux-memes comme fautifs.
-  #
-  # ⚠ PAS D'EXEMPTION PAR CHEMIN EN DUR VERS LA TACHE : une liste de chemins en dur grossit a chaque
-  # coupe, rougit la fois ou on l'oublie (un decoupage fait rougir les trois murs d'un coup), et —
-  # plus grave — peut exempter DE TRAVERS apres un renommage : un fichier reel prendrait la place de
-  # l'ancien nom et passerait exempt sans un mot.
-  #
-  # La regle remplace la liste : ce qui vit dans l'arbre du verificateur LIT ce qu'il cherche, il
-  # n'en est jamais un exemplaire. Aucune maintenance, aucune adresse a tenir a jour.
+  # Exclude checker source paths to avoid counting the searched patterns themselves.
+  # This exemption is based on location, not the meaning of a file.
   @doc false
   @spec checker_source?(String.t()) :: boolean()
   def checker_source?("lib/mix/tasks/lcars.contracts.check.ex"), do: true
