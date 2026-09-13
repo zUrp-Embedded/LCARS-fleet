@@ -31,6 +31,12 @@ defmodule Mix.Tasks.Lcars.SpGenTest do
         {:ok, v} -> Application.put_env(:lcars_fleet, :catalogue_root, v)
         :error -> Application.delete_env(:lcars_fleet, :catalogue_root)
       end
+
+      # Meme discipline que `catalogue_verify_test.exs` : rien de ce que la couche catalogue a pu
+      # publier pendant une composition sous `--catalogue` ne survit a ce fichier.
+      Fleet.CapProfile.Image.unpublish()
+      Fleet.SPBuilder.Image.unpublish()
+      Fleet.Workflow.Loader.unpublish_all_images()
     end)
 
     :ok

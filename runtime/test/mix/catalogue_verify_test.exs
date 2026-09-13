@@ -9,7 +9,8 @@ defmodule Mix.Tasks.Lcars.CatalogueVerifyTest do
 
   Decision 3 du lot E6, option B (`42-DECISIONS.md`).
 
-  async: false — `Mix.shell/1` est global au noeud.
+  async: false — `Mix.shell/1` est global au noeud, et `CatalogueVerify.verify/1` PUBLIE les images
+  du catalogue qu'il prouve dans `:persistent_term`.
   """
   use ExUnit.Case, async: false
 
@@ -20,6 +21,19 @@ defmodule Mix.Tasks.Lcars.CatalogueVerifyTest do
   setup do
     Mix.shell(Mix.Shell.Process)
     on_exit(fn -> Mix.shell(Mix.Shell.IO) end)
+
+    # ⚠ LES IMAGES PUBLIEES SONT RETIREES EN SORTANT, comme `Fleet.Application.CatalogueVerifyTest`
+    # le fait. Mesure du 2026-09-13 (seed 638244) : sans ce retrait, l'image du catalogue embarque
+    # restait dans `:persistent_term`, et `Fleet.Spawner.CanonProofTest` — qui isole sa racine
+    # par l'env et attend « EMPTY » — lisait l'IMAGE, prouvait les vrais roles sous une racine
+    # vide, et tombait sur `modop_bundle_missing`. Un temoin vert seul, rouge dans la suite, selon
+    # l'ordre : la fuite d'un etat global que ce chantier a passe une journee a chasser ailleurs.
+    on_exit(fn ->
+      Fleet.CapProfile.Image.unpublish()
+      Fleet.SPBuilder.Image.unpublish()
+      Fleet.Workflow.Loader.unpublish_all_images()
+    end)
+
     :ok
   end
 
