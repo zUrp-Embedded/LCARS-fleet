@@ -1,18 +1,8 @@
 defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   @moduledoc """
-  A card names roles, and a role only exists in the catalogue that declares it.
-
-  The boot validators walk every active catalogue's cards — that part was already true. What they
-  dropped is the ROOT: the card came from catalogue B and its jury role was resolved in catalogue
-  A's image. A `web` catalogue shipping `standard` with jury `[code-reviewer]` — coherent with
-  itself, its own role right beside it — raised `:not_found` and killed the boot. Measured on the
-  bench, image `lcars-fleet:6`.
-
-  The fixture role is named after nothing in the bundled catalogue on purpose: if the validator
-  resolves in the wrong root, the name is not there and the test fails. A role that exists in both
-  would prove nothing.
-
-  `async: false`: declaring catalogues and publishing images is GLOBAL state.
+  Checks that card, jury and identity resolution use the project's catalogue.
+  The second catalogue has names absent from the bundled one, so a wrong-root
+  lookup cannot pass accidentally. Published images require serialized tests.
   """
   use ExUnit.Case, async: false
 
@@ -45,15 +35,8 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @tag :tmp_dir
   test "un PROJET lit la carte de SON catalogue, pas celle du premier actif", %{tmp_dir: tmp} do
-    # La publication etait deja par catalogue ; la LECTURE ne l'etait pas. `published_image/0`
-    # repondait toujours depuis la premiere racine active, donc un projet servi par un autre
-    # catalogue reclamait une carte publiee sous une autre cle et s'entendait repondre qu'elle
-    # n'est pas dans l'image du tout. Mesure sur banc : `web/test2` declare `standard`, le
-    # catalogue `web` la porte, et la fleet levait `declared_card_unloadable` a chaque tick.
-    #
-    # `standard` n'existe que dans `biz` (le catalogue livre porte `standard-qa`), et son jury
-    # nomme un role qui n'existe que la : si la lecture se trompe de racine, il n'y a rien a
-    # trouver. Une carte presente des deux cotes ne prouverait rien.
+    # Both the card and its juror exist only in the second catalogue, making
+    # an accidental lookup in the bundled catalogue observable.
     code_root = Path.join(tmp, "projects")
     File.mkdir_p!(Path.join(code_root, "boutique"))
 
@@ -74,16 +57,8 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @tag :tmp_dir
   test "le rail DOC se resout dans le catalogue du projet, pas dans le premier actif" do
-    # Le rail doc se resout par une PROPRIETE (une carte portant un producteur `face: workshop`),
-    # et la propriete etait cherchee dans le catalogue par defaut quel que soit le projet. Mesure
-    # sur banc : un ticket `destination/workshop` de `web/test2` a grave `wfmap/workshop-direct` —
-    # la carte du catalogue `fleet` — dont le producteur est `scribe`, compte membre d'aucune equipe
-    # de `web`. Push et PR ont repondu `403 user must be a collaborator`, ce qui se lit comme un
-    # defaut de permission alors que les permissions etaient justes et la CARTE etrangere.
-    #
-    # `biz` ne livre aucune carte a producteur `face: workshop` : il n'a donc PAS de rail doc, et
-    # c'est la bonne reponse. Le dispatcher la refuse ensuite en nommant le fait (`refute_missing_rail`)
-    # au lieu de faire tourner un role qui n'existe pas dans cette org.
+    # The second catalogue has no workshop producer. Borrowing the bundled card
+    # would dispatch a role from the wrong organisation.
     assert Roles.workshop_workflow_map(catalogue_root: "biz/boutique") == nil
 
     # Et le catalogue par defaut garde le sien : la resolution est scopee, pas cassee.
@@ -92,13 +67,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @tag :tmp_dir
   test "le LOGIN d'un role prend le prefixe du catalogue qui le DECLARE" do
-    # La regle est "le prefixe suit le TIER", et le tier d'un role metier est LE CATALOGUE QUI LE
-    # DECLARE — pas "celui par defaut". La projection venait de `Fleet.Roster`, ou elle tournait
-    # avec UN catalogue emprunte dans `:lcars_fleet, :catalogue_root` : `Catalogue.name()` y etait le
-    # catalogue declarant, et l'interroger etait juste. Remontee dans un contexte global, ce nom
-    # n'est plus que le catalogue par defaut — mesure : `biz-dev` projetait `fleet_biz-dev` alors
-    # que son compte est `biz_biz-dev`. Une projection juste pour un catalogue et fausse en silence
-    # pour tous les autres, c'est le 404 que ce rail existe pour empecher, deplace d'un cran.
+    # Business-role logins use their declaring catalogue's prefix.
     assert {:ok, "biz_biz-dev"} = Fleet.CapProfile.forge_login("biz-dev")
     assert {:ok, "biz_" <> _} = Fleet.CapProfile.forge_login(@judge)
 
@@ -113,10 +82,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @tag :tmp_dir
   test "le ROLE d'une carte se resout dans le catalogue de cette carte" do
-    # Le dernier maillon, et il tombait apres les deux autres : la carte juste, la bonne racine, et
-    # `resolve/3` appelait `load/1`. `load/2` porte la racine depuis le lot 4 ; ce resolveur ne la
-    # passait pas, donc le producteur declare par la carte de `biz` etait cherche dans `fleet` et
-    # rendait `:not_found` — la carte etait bonne, le role existait, la bibliotheque etait fausse.
+    # Card-role resolution must forward the card's catalogue root.
     root = Fleet.Catalogue.root_for_repo("biz/boutique")
     assert is_binary(root)
 
@@ -141,8 +107,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
     assert root == Fleet.Catalogue.root_for("biz")
     assert {:ok, _mode} = Fleet.Pilot.StepRunConsumer.default_deliverable_mode(@judge, root)
 
-    # Sans la racine, le MEME role est introuvable — le wedge que ce fil ferme : une etape d'un
-    # projet du second catalogue echouait fort sur un role qui existe.
+    # Without the root, this role is absent from the default catalogue.
     ExUnit.CaptureLog.capture_log(fn ->
       assert {:error, :cap_profile_unloadable} =
                Fleet.Pilot.StepRunConsumer.default_deliverable_mode(@judge)

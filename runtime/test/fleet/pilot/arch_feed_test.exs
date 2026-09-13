@@ -1,10 +1,7 @@
 defmodule Fleet.Pilot.ArchFeedTest do
   @moduledoc """
-  The architects' PER-PROJECT activity feed (pilot side since the 2026-07-19 reorg): a milestone
-  routes on its event's repo to THAT project's architect pod (`architect-<name>`), appending ONE
-  FR line into its fleet.feed (pull side, never a wake); the `:delivered` unlock ALONE also pushes
-  an informational wake; lines NEVER name the repo (the arch has "the project"); an event with no
-  repo, or a project whose arch is not up, drops the line (lossy by doctrine); the file stays bounded.
+  Exercises selected milestone messages, title lookup, notifications and feed bounds.
+  Events are sent directly to the GenServer; Bus delivery is outside these tests.
   """
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]
@@ -60,8 +57,7 @@ defmodule Fleet.Pilot.ArchFeedTest do
     settle(pid)
 
     assert feed(tmp) =~ "pod fleet-x-engineer a fini son run (#issue-4)"
-    # L estampille porte la DATE : le feed est borne a 200 lignes et couvre plusieurs jours,
-    # donc un `09:14` seul ne dit pas lequel est d aujourd hui (cf. pod_feed.ex).
+    # Include the date because a feed can span several days.
     assert feed(tmp) =~ ~r/^\d{2}-\d{2} \d{2}:\d{2} /
     refute_received {:notified, _, _}
   end
@@ -102,7 +98,6 @@ defmodule Fleet.Pilot.ArchFeedTest do
 
     settle(pid)
 
-    # Axiom (reorg): the line never names the repo — the arch has "the project".
     assert feed(tmp) =~ "brique #12 LIVRÉE — mergée, scellée, verrou levé"
     refute feed(tmp) =~ "fleet/demo"
     assert_received {:notified, "architect-demo", "info : " <> msg}

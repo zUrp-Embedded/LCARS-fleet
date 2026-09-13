@@ -1,52 +1,21 @@
 defmodule Fleet.Pilot.ArchWake do
   @moduledoc """
-  SINGLE authority for waking a project's architect on an `lcars-awaits-arch`
-  escalation: the ORDERED offer-then-wake pair, shared by the two rails, PER-PROJECT
-  (one architect per repo, `Fleet.Project.Architect`).
+  Shared offer/ensure/wake sequence for immediate escalation and the Poller retry net.
+  Group by repository and choose its smallest issue number; groups are processed
+  sequentially, while each architect has its own queue identity.
 
-  Callers — "first kick immediate, protection BEHIND it":
+  Assigned means busy with no effects. Pending means ensure/wake the existing mandate.
+  Other queue-status responses take the fresh-offer path: enqueue before ensure and
+  wake so the pod cannot pull before content exists. An enqueue error sends no wake;
+  returned ensure errors are logged and still permit a wake attempt.
 
-    * `StepRunConsumer.TerminalEscalation.freeze_to_arch` — the IMMEDIATE rail
-      (`via: "immediate"`): fires right after the label+comment land on the forge.
-      Nominal escalation latency = seconds, not a poll window.
-    * `Poller.maybe_rekick_arch` — the SAFETY NET (`via: "net"`): re-derives a wake
-      from the persistent forge label, capped by a cooldown-since-last-kick.
+  offered/woken_pending require wake_pod to return :ok, not proof the pod consumed it.
+  Failed wake returns wake_unreached so callers can avoid a success cooldown. This
+  module does not remove the forge escalation label or own retry scheduling.
 
-  ## Per-project grouping + on-demand ensure
-
-  `awaits` may span repos → grouped BY REPO, each repo's architect addressed independently
-  (project A does not serialize behind project B — the "one mandate at a time" queue is
-  per-project). Before waking, the architect is **ensured** (`ProjectArchitect.ensure`,
-  idempotent): the arch is spawn-on-demand like the engineer — dead/never-spawned (fleet
-  reboot, crash) → respawned here, and its bootstrap kick pulls the already-enqueued
-  mandate. The ORDER stays the invariant: mandate enqueued BEFORE any wake (a wake fired
-  before the mandate exists is classified spurious by the arch's doctrine-first
-  `get_work_item` — the signal-before-content race).
-
-  Contract — per-repo outcomes, decided on that arch's LATEST work-item state:
-
-    * mandate `:assigned` → `:busy`, complete silence — the arch already
-      knows its work; waking it again is pure noise.
-    * mandate `:pending` (offered but never fetched) → ensure + wake ONLY (`:woken_pending`).
-      The signal may have been lost OR the pod died with the mandate pending — the ensure
-      covers both; the content is already enqueued, re-offering would churn it.
-    * arch free → enqueue the mandate (smallest `{repo, n}` of the repo — deterministic),
-      THEN ensure, THEN wake (`:offered`).
-
-  In the `:pending` and free cases, if the wake itself does not leave (unreachable arch)
-  the outcome is `:wake_unreached`: the mandate/label persist, NO cooldown is armed, and the
-  next tick retries — a cooldown on a signal that never left would make the escalation wait
-  for nothing.
-
-  A failed enqueue → `{:error, {:enqueue, reason}}`, logged loud, NO wake (a wake without
-  content is the race above). A failed ensure is logged and the wake still attempted
-  (belt: the pod may exist outside the registry's view). Nothing is lost either way: the
-  `lcars-awaits-arch` label persists on the forge and the net retries.
-
-  The aggregate return (multi-repo): `:offered` if ANY repo was offered, else `:woken_pending`
-  if any, else the first outcome — so the poller stamps its cooldown ONLY on a signal that
-  actually left (`:offered`/`:woken_pending`), never on `:busy` / `:wake_unreached` / an
-  enqueue error.
+  Aggregate prefers offered, then woken_pending, else the first outcome (nil for an
+  empty set). Mixed outcomes lose per-repo detail; the single result cannot identify
+  which repository's wake failed.
   """
 
   require Logger
@@ -101,10 +70,7 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  # ⚠ LE MANDAT D'ABORD, LE REVEIL ENSUITE, ET JAMAIS L'INVERSE. Un reveil sans contenu est la
-  # course au reveil parasite : le pod se leve, ne trouve rien a tirer, et repart — pendant que le
-  # label reste pose. L'enfilement rate ne reveille donc personne ; le label est intact et le filet
-  # de reconciliation reessaie.
+  # Enqueue before any bootstrap/explicit wake to avoid a signal-without-content race.
   defp offer_fresh_mandate(task_queue, spawner, repo, n, pod_id, via, ensure) do
     case enqueue_mandate(task_queue, pod_id, repo, n) do
       :ok ->
@@ -125,16 +91,9 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  # THE DELIVERABLE, MADE READABLE — or its absence, SAID. The architect's code face is a read-only
-  # bind, so its own `git fetch` dies on `.git/FETCH_HEAD` — measured from inside the pod. What
-  # that costs is not the missing diff: the arch arbitrates anyway and invents an explanation for
-  # what it cannot see (an agent confabulating an authority), because nothing in its mandate tells
-  # it the deliverable is out of reach. A pod that does not know what it is missing fills the gap.
-  #
-  # So the fetch is host-side (serialized by `WorktreeSync`, which already owns one-git-at-a-time on
-  # that worktree) and the mandate states the OUTCOME either way. Best-effort by construction: an
-  # unreachable forge must not hold an escalation, and the arch can still arbitrate on the judges'
-  # reports — knowingly.
+  # Fetch host-side through WorktreeSync: the architect's read-only code face cannot
+  # write FETCH_HEAD itself. Include success/absence/failure in the mandate so arbitration
+  # does not mistake a judge's description for direct access to the deliverable.
   defp deliverable_section(repo, n) do
     case fetch_refs().(repo, n) do
       {:ok, []} ->
@@ -162,13 +121,8 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  # Seam: the sync GenServer is a named singleton in prod, injectable in test.
-  #
-  # TOTAL BY OBLIGATION, like the readiness probes: this runs on the escalation path, which is the
-  # rail a human is waiting on. A dead or unstarted `WorktreeSync` must degrade into "the
-  # deliverable could not be made readable" — a sentence the mandate already knows how to carry —
-  # never into an exit that takes the escalation down with it. The rail that reports a problem is
-  # the last one allowed to fail because of its own instrument.
+  # Default fetch catches WorktreeSync call exits. Overrides bypass that wrapper;
+  # exceptions/throws are not normalized here.
   defp fetch_refs do
     Application.get_env(:lcars_fleet, :pilot_arch_deliverable_fetch, &total_fetch/2)
   end
@@ -179,8 +133,7 @@ defmodule Fleet.Pilot.ArchWake do
     :exit, reason -> {:error, {:sync_unavailable, reason}}
   end
 
-  # Aggregate multi-repo outcomes onto the historical single-atom contract (the poller's net
-  # stamps its cooldown on any SENT signal).
+  # Collapse outcomes for the historical cooldown interface; any successful wake wins.
   defp aggregate([outcome]), do: outcome
 
   defp aggregate(outcomes) do
@@ -191,8 +144,7 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  # On-demand ensure — best-effort: a dead/never-spawned arch comes back here (fleet reboot,
-  # crash); alive → cheap no-op. A failed ensure is LOGGED, the wake still attempted (belt).
+  # Returned ensure errors do not prevent a wake attempt; callback exceptions still propagate.
   defp ensure_arch(ensure, repo, spawner, via) do
     case ensure.(repo, spawner: spawner) do
       {:ok, _pod_id} ->
@@ -211,8 +163,7 @@ defmodule Fleet.Pilot.ArchWake do
   defp enqueue_mandate(task_queue, pod_id, repo, n) do
     attrs = %{
       issue_id: "issue-#{n}",
-      # Same source as the ensure (`ProjectArchitect`): the delegate is resolved by capability, so a
-      # mandate is never enqueued for a role the catalogue no longer carries.
+      # Resolve the mandate role from the same capability authority as architect ensure.
       role: Fleet.Project.Roles.project_delegate_role(),
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`escalation_list` / " <>
@@ -234,9 +185,7 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  # Returns the EFFECTIVE verdict: `:ok` only if the signal actually left. A caller that stamps a
-  # cooldown on "signal sent" must not be told `:ok` for a wake that never reached — that is what
-  # made an unreached escalation wait a full cooldown before the next attempt.
+  # Only wake_pod's :ok permits a success outcome; it is not an end-to-end delivery acknowledgment.
   defp wake(spawner, pod_id, via, context) do
     case spawner.wake_pod(pod_id) do
       :ok ->

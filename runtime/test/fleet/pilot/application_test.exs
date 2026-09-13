@@ -44,10 +44,7 @@ defmodule Fleet.Pilot.ApplicationTest do
     test "a PRODUCER sitting on its own card's jury raises — it would review its own PR", %{
       tmp_dir: tmp
     } do
-      # The card names both halves and nothing compared them. `engineer` produces AND sits on the
-      # jury whose approvals gate the seal: it reviews the PR it opened, and its approval counts.
-      # Every mechanism involved works exactly as written, so the pipeline reports a normal review
-      # — there is no downstream signal that could tell this apart from a real one.
+      # A worker in both steps and jury would review its own work.
       File.write!(Path.join(tmp, "self-judge.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -77,11 +74,8 @@ defmodule Fleet.Pilot.ApplicationTest do
     test "a JUDGE role that is also a step is LEGITIMATE — gk-smoke ships exactly that", %{
       tmp_dir: tmp
     } do
-      # The guard keys on `brief_kind`, not on the step's position, and this is why. `gk-smoke`
-      # runs a `reviewer` step with a soft gate AND carries `reviewer` in its jury: two different
-      # acts on two different objects. A guard written on "the role appears as a step" would refuse
-      # a shipped canon card at boot — a wall that fires on a correct configuration is worse than
-      # the hole it closes, because the next person widens it until it stops firing.
+      # Judge roles may also be steps on different objects; appearance in steps
+      # alone must not disqualify a juror.
       File.write!(Path.join(tmp, "judge-step.yaml"), """
       kind: WorkflowMap
       metadata:
@@ -105,11 +99,8 @@ defmodule Fleet.Pilot.ApplicationTest do
     end
   end
 
-  # `validate_default_card_loads!/1` is the ONLY boot check that LOADS the catalogue's default card.
-  # `Catalogue.verify!` checks the NAME is among the cards (`card in cards`); it never loads it. It
-  # used to ALSO assert the default's `applicable_intensity` covered the undeclared level — that
-  # level is gone (crit_quarantine): the card alone carries the gate, so what remains to guard at
-  # boot is the load itself, the guarantee the name-check never gave.
+  # Catalogue membership proves only the default's name. This guard explicitly
+  # checks that the named card loads.
   describe "validate_default_card_loads!/1 — le default_card du catalogue doit CHARGER au boot" do
     test "le catalogue livre passe" do
       assert :ok = Application.validate_default_card_loads!()
@@ -117,9 +108,7 @@ defmodule Fleet.Pilot.ApplicationTest do
 
     @tag :tmp_dir
     test "un default_card qui ne CHARGE pas REFUSE le boot", %{tmp_dir: tmp} do
-      # Le seul `Loader.load!(carte-defaut)` du boot. Une carte PRESENTE mais schema-invalide passe
-      # le check de NOM de `Catalogue.verify!` et casserait au premier dispatch d'un projet non
-      # declare — ici elle refuse le boot, pres du defaut de deploiement.
+      # An existing but schema-invalid card passes a name-only membership check.
       File.write!(Path.join(tmp, "cassee.yaml"), """
       kind: WorkflowMap
       metadata:

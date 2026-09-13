@@ -16,12 +16,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     :ok
   end
 
-  # F-027 + F-037: with `step_dispatch?: true` + incomplete config, a `step_children` returning `[]`
-  # in SILENCE would boot the pilot app "green" without Poller/StepRunConsumer (forge rail dead, zero
-  # log). Instead: the operator ASKED for step mode → incomplete config = broken deploy → raise at
-  # boot. F-037 re-targeted the guard: it is not `:poll_repo` (the poller DISCOVERS via
-  # org-membership, WS3) nor a frozen remote (per-step-run), but the forge `base_url` — without it,
-  # neither discovery (`list_org_repos`) nor push (per-step-run remote) work.
+  # Step mode requires a forge base_url. Repositories are discovered and remotes
+  # resolved per run, so neither needs a fixed boot setting.
 
   test "F-037: step_dispatch? true without forge base_url (:forge absent) → raise (dead rail avoided)" do
     Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
@@ -42,23 +38,19 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   end
 
   test "F-037: :poll_repo is NOT required anymore (org-membership discovery) — no raise on its absence alone" do
-    # The guard no longer depends on :poll_repo. With a forge base_url present, a missing :poll_repo
-    # triggers NOTHING (we verify via step_children! that no "base_url" RuntimeError is raised).
     Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
     Application.put_env(:lcars_fleet, :pilot_forge, base_url: "http://forge.local")
     Application.delete_env(:lcars_fleet, :pilot_poll_repo)
 
-    # We exercise child-spec resolution (without starting the supervisor, which would register the
-    # singletons under their global names and conflict). `:poll_repo` absent → no raise.
+    # Resolve specs without starting globally named supervisor children.
     children = Fleet.Pilot.Application.step_children_for_test()
     assert Enum.any?(children, &match?({Fleet.Pilot.Poller, _}, &1))
     assert Enum.any?(children, &match?({Fleet.Pilot.StepRunConsumer, _}, &1))
   end
 
   test "step_status probes EXACTLY the rail step_children! starts (no hollow-green drift)" do
-    # The readiness rail (step_rail_processes) must equal the processes actually started (step_children!):
-    # a started-but-unprobed process reads operational while dead; a probed-but-unstarted one reads
-    # degraded forever. A new rail child added to step_children! without step_rail_processes fails HERE.
+    # Started and probed names must match: missing probes hide dead children;
+    # extra probes report permanent degradation.
     Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
     Application.put_env(:lcars_fleet, :pilot_forge, base_url: "http://forge.local")
 
@@ -82,10 +74,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   defp child_name({mod, _opts}) when is_atom(mod), do: mod
   defp child_name(mod) when is_atom(mod), do: mod
 
-  # F-C061 Vector 2, re-seated on the CARDS: the jury lives in each workflow map
-  # (spec.jury — no engine config). The schema guards the shape, the boot guard the
-  # CONTENT: every jury role of every canon card must resolve to a judge cap-profile —
-  # else the card would lay a non-judging reviewer on PRs and wedge at dispatch.
+  # Beyond schema shape, every card juror must resolve to a judge profile.
   @moduletag :tmp_dir
 
   defp canon_with_jury(tmp, jury) do
@@ -105,10 +94,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     Application.put_env(:lcars_fleet, :workflow_workflow_maps_root, tmp)
   end
 
-  # A missing/empty workflow catalogue used to enumerate to `[]`, turning both card
-  # guards into vacuous truths: the rail booted green with zero loadable card and the
-  # first route raised far from the deploy fault. The boot now refuses both states —
-  # and step mode OFF keeps its zero-card-by-design semantics (no enumeration at all).
+  # Missing or empty catalogues must fail boot instead of passing vacuous guards.
+  # Disabled step mode does not enumerate cards.
 
   test "step rail boot: MISSING workflow maps root → raise (no vacuous green)", %{tmp_dir: tmp} do
     Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
@@ -195,13 +182,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   test "DEUX cartes revendiquant le rail atelier : le publish refuse, et il les NOMME", %{
     tmp_dir: tmp
   } do
-    # Ici et pas dans application_test.exs : ce test pose `:lcars_fleet, :workflow_workflow_maps_root`,
-    # une cle GLOBALE, et ce fichier est `async: false` pour exactement cette raison. Pose dans un
-    # fichier async, il faisait tomber un voisin qui cherchait sa propre carte — mesure.
-    #
-    # Ce que le garde tient : le rail doc se resout par PROPRIETE (un producteur sur `face:
-    # workshop`), donc deux revendiquants n'ont pas de reponse. Sans lui, `Enum.find` rendrait la
-    # premiere par ordre alphabetique — un rail choisi par un tri, ce que personne n'a decide.
+    # This fixture changes global configuration, hence this serialized test file.
+    # Two workshop producers are ambiguous; alphabetical order must not choose one.
     for name <- ~w(atelier-un atelier-deux) do
       File.write!(Path.join(tmp, "#{name}.yaml"), """
       kind: WorkflowMap
@@ -230,17 +212,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
     assert err.message =~ "One card per catalogue"
   end
 
-  # ─── LE GARDE DES SIGNATAIRES A CHANGE DE NATURE SANS CHANGER DE LIGNE ─────────────────────────
-  #
-  # « pas de jeton de signataire » voulait dire UNE chose tant que le jeton etait un fichier local :
-  # le provisionnement n'a pas tourne, le conteneur est mal deploye, il ne demarre pas.
-  #
-  # Depuis que le jeton se DEMANDE au service d'autorite, la meme absence recouvre aussi « le
-  # service ne repond pas encore » et « la forge est injoignable » — deux etats TRANSITOIRES. Le
-  # garde inchange aurait tue le boot sur un hoquet de reseau, en accusant `provision-role-tokens.sh`.
-  #
-  # Ces deux temoins sont un COUPLE : chacun seul se satisferait d'un garde degenere. Sans le
-  # premier, un garde qui ne leve jamais passe ; sans le second, un garde qui leve toujours passe.
+  # Pair fatal provisioning failure with authority unavailability: either case
+  # alone would accept a guard that always raises or never raises.
   describe "signataires de merge : la cause decide, pas l'absence" do
     @tag :tmp_dir
     test "provisionnement manquant (no_role_token) → RAISE : le conteneur ne demarre pas", %{
@@ -270,11 +243,8 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
           assert [_ | _] = Fleet.Pilot.Application.step_children_for_test()
         end)
 
-      # ⚠ « PAS DE RAISE » NE SUFFIT PAS, ET C'EST LA MOITIE QUI COMPTE. Un rail qui demarre vert
-      # sur un conteneur structurellement incapable de sceller est exactement le succes muet que ce
-      # chantier retire ailleurs. Le journal doit dire QUELLE porte ne repond pas, et dire que ce
-      # n'est PAS un defaut de provisionnement — sinon l'operateur relance un `provision apply` qui
-      # n'a aucune chance d'y changer quoi que ce soit.
+      # Continuing boot must still log the unavailable authority, so the operator
+      # does not mistake it for missing provisioning.
       assert log =~ "forge_unreachable"
       assert log =~ "PAS un defaut de provisionnement"
       assert log =~ "TOUT SCELLEMENT ECHOUERA"

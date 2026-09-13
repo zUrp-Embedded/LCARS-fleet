@@ -10,25 +10,9 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     :ok
   end
 
-  # LE NETTOYAGE ATTEND LA MORT, il ne la demande pas. `Process.exit/2` est asynchrone : le NOM
-  # n'est libere que lorsque le processus meurt REELLEMENT. Un `on_exit` qui rend la main aussitot
-  # laisse le test suivant appeler `Process.register` sur un nom encore pris — et l'erreur accuse
-  # trois causes a la fois (« not alive, name already taken, or already given another name »), dont
-  # aucune n'est le vrai probleme.
-  # Mesure du 2026-08-07 : rouge intermittent sur ce fichier, un run sur plusieurs, `async: false`
-  # deja pose — parce que la course n'etait pas entre fichiers mais entre DEUX TESTS DU MEME, et
-  # que rien ne les separait qu'un ordonnancement. Un monitor rend l'attente deterministe.
-  # ⚠ ET LE REMPLACANT REPOND. `step_status/0` ne se contente pas de `Process.whereis` : il demande
-  # aussi sa sante a `Fleet.Pilot.PollerTelemetry`, deux fois (`stats/0`, `cycle_stats/0`). Un
-  # remplacant qui dort a l'infini sous ce nom-la fait expirer les deux appels au defaut de cinq
-  # secondes — mesure du 2026-09-07 : DIX SECONDES pour chacun des deux temoins qui montent le rail
-  # entier, sur une suite dont le mur total est de trois minutes. Le `catch :exit` de la sonde rend
-  # alors `:unavailable`, que ces temoins acceptent : le prix etait paye pour rien.
-  #
-  # `:no_data` est une reponse LEGITIME de l'instrument (cf. le temoin « `:no_data` et
-  # `:unavailable` sont sains »), donc repondre ne change aucun verdict — ca les rend immediats.
-  # Meme lecon que le `holder_loop/0` de `pool_slot_test` : une doublure muette n'est pas un stub
-  # bon marche, c'est un timeout pour tout ce qui l'interroge.
+  # Process.exit is asynchronous: await DOWN before another test reuses the name.
+  # The telemetry double replies :no_data to avoid two five-second call timeouts;
+  # that response has the same healthy classification as :unavailable.
   defp spawn_named(name) do
     pid = spawn(&repondeur/0)
     Process.register(pid, name)
@@ -41,13 +25,8 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
         receive do
           {:DOWN, ^ref, :process, ^pid, _} -> :ok
         after
-          # ⚠ 1 000 ms ETAIT TROP SERRE, ET SON ECHEC NE RESTE PAS CHEZ LUI. Mesure du 2026-08-14
-          # 02:11 : la boite swappait (plusieurs `mix gate` empiles), le `receive` a expire, le nom
-          # `Fleet.Pilot.ArchFeed` est reste ENREGISTRE — et c'est `ArchFeedTest`, un autre fichier,
-          # qui est tombe ensuite sur un `:sys.get_state` en timeout contre ma doublure zombie.
-          # Un nettoyage trop court ne casse pas seulement son propre test : il empoisonne un nom
-          # pour la suite du run. Sur une machine saine le `receive` rend la main immediatement,
-          # donc allonger ne coute rien et supprime la contamination.
+          # Allow loaded CI time to release global names; a cleanup timeout can affect
+          # subsequent files as well as this test.
           5_000 -> flunk("le processus #{inspect(name)} n'est pas mort — le nom reste pris")
         end
       end
@@ -67,9 +46,6 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     end
   end
 
-  # F-010: readiness probes the step rail through this function. Without a health-check, a runtime
-  # death would pass as hollow-green. Now: inactive (off) / operational (alive) / degraded.
-
   test "inactive when :step_dispatch? off" do
     Application.put_env(:lcars_fleet, :pilot_step_dispatch?, false)
     assert {:inactive, _} = PilotApp.step_status()
@@ -85,21 +61,8 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     assert detail.incident_registry and detail.worktree_sync and detail.arch_feed
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
-  # JG-100 — LA SANTE DES POLLS ETAIT DANS LE DETAIL ET HORS DU VERDICT.
-  #
-  # Le predicat portait une LISTE D'EXCLUSION (`key in [:repo_poll, :poll_cycle] or up?`) : forge
-  # injoignable, DNS mort, jeton expire — toute cause qui fait echouer 100 % des polls sans tuer un
-  # processus — se lisait `operational` pendant qu'aucun ticket n'avancait.
-  #
-  # ⚠ Et retirer la liste n'aurait RIEN change : les trois valeurs possibles (une map, `:no_data`,
-  # `:unavailable`) sont toutes truthy. C'est pourquoi ces tests portent sur une CLASSIFICATION.
-  # ─── UNE FLOTTE QUI NE PEUT RIEN PRODUIRE DISAIT `operational` ─────────────────────────────────
-  #
-  # Mesure sur banc, 2026-09-05 : deux heures, 268 cycles, zero erreur, readiness verte, et le seul
-  # depot de l'org ecarte a chaque tour (`NOT ONBOARDED … step rail skipped`). Un depot ecarte rend
-  # le meme tally vide qu'un depot servi sans travail : l'etat « rien ne PEUT avancer » n'existait
-  # nulle part, sauf dans un warning emis une fois par depot et par vie du process.
+  # Live processes can still fail every poll. Classify telemetry values rather
+  # than their truthiness, and distinguish unserved repositories from idle ones.
   describe "serving? — des depots decouverts et AUCUN servi" do
     test "des depots, aucun servi → le rail est degrade" do
       assert PilotApp.serving?(%{last_repos: 1, last_served: 0}) == false
@@ -107,9 +70,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     end
 
     test "au moins un servi → sain, MEME si les autres ne le sont pas (la borne est « aucun »)" do
-      # Un depot non onboarde a cote d'autres qui le sont est un etat normal : l'humain onboarde
-      # quand il veut. Une sonde qui crierait la ferait un bruit qu'on apprend a ignorer, et c'est
-      # exactement ce que la borne « aucun » evite.
+      # Partial onboarding is allowed; only zero served repositories degrades.
       assert PilotApp.serving?(%{last_repos: 12, last_served: 1}) == true
       assert PilotApp.serving?(%{last_repos: 1, last_served: 1}) == true
     end
@@ -137,14 +98,12 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
     end
 
     test "un echec PARTIEL, meme large, reste operationnel — c'est une limite ECRITE" do
-      # Un depot sur douze casse en permanence est un fait de depot, pas de rail. Sans ce temoin,
-      # un predicat « au moins une erreur » passerait le test du blackout en disant autre chose.
+      # Partial errors must not be classified as a complete blackout.
       assert PilotApp.polls_healthy?(%{errors: %{repo_list: 99}, window: 100}) == true
     end
 
     test "le plancher de fenetre : un seul echec total ne fait pas basculer la sonde" do
-      # Une sonde de sante est ce qu'un operateur consulte quand ca va mal. Une sonde qui clignote sur un 500
-      # passager est une sonde qu'il apprend a ignorer.
+      # A single failed poll is below the blackout window.
       assert PilotApp.polls_healthy?(%{errors: 1, window: 1}) == true
       assert PilotApp.polls_healthy?(%{errors: 3, window: 3}) == false
     end
@@ -180,8 +139,7 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
 
       assert {:degraded, detail} = PilotApp.step_status()
 
-      # CE QUI FAIT LE DEGRADE : aucun processus n'est mort. Sans cette assertion, le test passerait
-      # aussi bien avec un rail incomplet, et ne prouverait rien du blackout.
+      # Confirm degradation comes from telemetry, with all processes alive.
       assert Enum.all?(detail, fn {key, v} -> key in [:repo_poll, :poll_cycle] or v == true end)
       assert detail.poll_cycle.errors == 3
     end

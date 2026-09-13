@@ -1,102 +1,40 @@
 defmodule Fleet.Pilot do
   @moduledoc """
-  Facade of the pilot domain — the DRIVER of the forge-state-machine. This is the
-  fleet's entire business process; everything else in the runtime is machinery.
-  Reactive: Poller tick + Bus consumers — nobody calls "into" pilot except the api
-  (`step_status`, onboarding) and the operator (delegates below).
+  Pilot coordinates forge-driven dispatch, completion and review. Application owns
+  boot/readiness; facade delegates expose status, an operator poll and project onboarding.
 
-  ## The transverse narrative — the 5 phases of a cycle (THE reading entry point)
+  Reading map for the cycle:
+    * Poller discovers catalogue-org repositories and admits issues/PRs; Admission,
+      Lease and Reconciliation reconcile locks, live pods and TaskQueue mandates.
+    * StepDispatcher resolves route/project and Spawn orders lock, pod, brief and wake.
+    * MCP work-item pull/submit reaches TaskQueue; Spawner enriches completion events.
+    * StepRunConsumer/Completer handle results through GateEngine and forge effects.
+    * ReviewLifecycle and MergeAndPromote drive review/merge; WorktreeSync aligns local faces.
+  chain_integration_test.exs illustrates synchronous wiring with simulated forge and
+  delivery/spawn seams, not full transport or failure/replay guarantees.
 
-  The forge IS the state machine; pilot reacts to its transitions. A fact is never
-  carried by RAM alone: forge label (lock), signed comment (proof), TaskQueue
-  (mandate), Bus (latency). The executable specimen of this narrative is
-  `test/fleet/pilot/chain_integration_test.exs` (real modules against a simulated
-  forge, synchronous) — read it FIRST to follow a full chain.
+  Escalation destinations differ by origin and depth:
+    * GatekeeperEscalation invokes internal arbitration.
+    * ArchEscalation handles PR-originated problems for the architect.
+    * TerminalEscalation decides when a step cannot conclude; Completer.await_arch
+      performs the architect handoff.
+    * IncidentConsumer.default_brake handles recurring incidents with awaits-arch.
+    * IncidentRegistry.Escalation opens a separate human/sysadmin issue.
+  Similar awaits-arch writes do not make their source lifecycles interchangeable.
+  labels.awaits_arch_clears_in_flight checks that those writers release the lock;
+  leaving it can trigger reclamation/redispatch under an active brake.
 
-  **A — Detection** (`Poller`, tick ~30 s): discovers repos by org-membership,
-  lists issues+PRs, reconciles the 3 encodings of "in flight" (label `lcars-in-flight` /
-  live pod / TaskQueue mandate — `Poller.Reconciliation`, 2-tick grace), admits under the
-  per-human ceiling on each repo (`Poller.Admission.max_fan/2`, played by `Poller.Lease`) and
-  delegates.
-
-  **B — Dispatch** (`StepDispatcher`): `decide/1` (PURE gate over the labels) →
-  project/route resolution (the `stage/*` label carries the workflow_map position) →
-  `Spawn.spawn_step` (SINGLE AUTHORITY of both flows, canonical order: lock label
-  BEFORE pod → enqueue brief → wake).
-
-  **C — Execution**: the pod (forge-blind) pulls its mandate via MCP
-  (`get_work_item`/`submit_result` → TaskQueue); completion comes back over the Bus
-  (`work_item.completed` → the Pod enriches → `pod.completed`).
-
-  **D — Completion** (`StepRunConsumer` → `StepRunCompleter`): step gate
-  (`GateEngine`, PURE — pass/bounce/gatekeeper escalation), then the IDEMPOTENT
-  forge sequence (deliverable→push, signed comment `[step_run:role:sha]` deduplicated,
-  next assignee OR close, lock lifted LAST — a crash leaves the lock,
-  the replay is safe).
-
-  **E — Review & merge** (next tick: `dispatch_review` → `ReviewLifecycle`):
-  commit-scoped verdicts → judges/rework → promotion via `MergeAndPromote`
-  (SINGLE AUTHORITY of the signed merge) → `WorktreeSync` → unlock.
-
-  Transverse rail: every `action: incident` event of the routing table (seven types) goes to
-  `IncidentConsumer`→`IncidentRegistry` (WAL + forge sync), blast-radius isolated
-  from the completion rail. SINGLE forge HTTP exit: `Fleet.Forge.Client` (+ `Transport`).
-
-  ## The escalation FAMILY — links of ONE chain, ordered by the DEPTH they reach
-
-  Escalation is not five comparable objects. It is one chain, and each site is a LINK at a
-  different depth: the question a reader needs answered is never "how many escalate?" but **how far
-  did this one have to go before something absorbed it?**
-
-  | Link | Depth reached | Absorbed by | Gesture |
-  |---|---|---|---|
-  | `StepRunConsumer.GatekeeperEscalation` | **internal** — never leaves the machine | a gatekeeper pod | summons on the PR |
-  | `StepDispatcher.ArchEscalation` | **agent** | the architect | comment + `lcars-awaits-arch` on the issue (PR-originated) |
-  | `StepRunConsumer.TerminalEscalation` | **agent** | the architect | DECIDES; the gesture is `StepRunCompleter.await_arch/2` (step_run that cannot conclude) |
-  | `IncidentConsumer.default_brake/3` | **agent** | the architect | `lcars-awaits-arch`, out of dispatch (recurrence brake) |
-  | `IncidentRegistry.Escalation` | **LAST LINK** — leaves the product | a human sysadmin | issue in a separate repo |
-
-  **The user is the last link, and reaching them is not a failure — never reaching them is the sign
-  the work was good.** It can be the legitimate exit, but then it has to be PROVEN the right one.
-  Which sets the metric, and it is not a population count: what matters is **the rate at which the
-  last link is reached**. An `awaits-arch` the architect resolves is the system succeeding; a
-  system error opened toward the human is the opposite. Today the two are indistinguishable in any
-  tally, and that is the gap this table names rather than closes.
-
-  Three links land identically — `lcars-awaits-arch` on an ISSUE, absorbed by the architect — and
-  they are NOT redundant: they differ by ORIGIN (a PR that cannot advance, a step_run that cannot
-  conclude, a recurring incident). Merging them would fuse three lifecycles into one.
-
-  ⚠ A link DECIDES; it does not always execute. `TerminalEscalation` is the decision
-  (`terminal_escalate?/1`) and `StepRunCompleter.await_arch/2` is the gesture — looking for the
-  label write inside the escalation module finds nothing, which is why the three files the wall
-  below measures are the completer, `ArchEscalation` and `IncidentConsumer`.
-
-  They do not differ by effect: ALL THREE clear `lcars-in-flight`. Writing here that only one of
-  them does would make the entry claiming to be the family's single source point at the OPPOSITE of
-  the code — and it is not a convention anyone must remember anyway:
-  `labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` refuses a writer that sets
-  the brake without releasing the lock. The reason is in that check's `@doc` — a lock left on a
-  ticket nobody can advance is reclaimed by reconciliation and re-dispatched, so the brake is on
-  and the wheel keeps turning.
-
-  ⚠ **NO COUNT-BASED MERGE THRESHOLD HERE, and a population is the wrong dimension to count.** How
-  many modules appear says nothing about a chain whose links sit at DIFFERENT DEPTHS: the link that
-  appears last is the one that leaves the product, so merging on a count fuses an internal link with
-  the sysadmin one. The merge is not decided; what decides placement is the axis above. Whoever adds
-  a link places it in this table **by the depth it reaches**, which is the only thing that makes it
-  comparable to the others.
+  IncidentConsumer/Registry isolate incident work from completion, using WAL and
+  forge synchronization. Bus events accelerate observation; durable/retry behavior
+  belongs to each mechanism. Forge owns HTTP. Project owns imperative lifecycle.
+  Count of escalation modules is not an escalation-rate metric; the table above
+  does not measure how often work reaches the human destination.
   """
 
-  # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
-  # MEASURED cross-domain surface: an entry gets in by being an observed, reviewed violation,
-  # never by anticipation. The compiler refuses any violation — no discipline required. Shrinking
-  # it is a deliberate API gesture.
+  # Boundary declares cross-domain dependencies and the exported Application surface.
   use Boundary,
     deps: [
-      # Le vocabulaire d'une demande d'outillage. FONDATION, partagee avec Fleet.MCP : le
-      # reconciliateur applique ce qu'un humain a merge, l'outil MCP rend ce que le pod a tape, et
-      # MCP est SOUS ce domaine — donc la piece commune ne peut vivre dans ni l'un ni l'autre.
+      # Shared with MCP; tooling vocabulary belongs below both domains.
       Fleet.Toolchain,
       Fleet.Slug,
       Fleet.PodId,
@@ -109,8 +47,7 @@ defmodule Fleet.Pilot do
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.Conflict,
-      # C2 — the judge's machine verdict is appended to the review body it posts (the gate reads it
-      # back out of the same object, cf. Fleet.FindingsWire).
+      # Review bodies carry the same machine findings the gate reads.
       Fleet.FindingsWire,
       Fleet.EventRouter,
       Fleet.Workflow,
@@ -118,22 +55,14 @@ defmodule Fleet.Pilot do
       Fleet.Credentials,
       Fleet.CapProfile,
       Fleet.TaskQueue,
-      # Foundation drain flag (CI-01): `StepDispatcher` refuses to open a new producer while the
-      # daemon quiesces. Every gesture that STARTS work reads it, each on its own side — this is
-      # this domain's.
+      # Dispatch consults the shared quiesce flag before starting work.
       Fleet.Shutdown.Quiesce,
       Fleet.Grace,
       Fleet.Publish.InFlight,
-      # BL-6-31: the adoption gate of import_external scans instruction material through the
-      # reception filter — foundation, shared with SPBuilder's RepoSections door.
       Fleet.ReceptionFilter,
-      # The forge is a DOMAIN, not a corner of this one. Declaring `Req`/`Req.Response` here
-      # instead would put the HTTP library in a BUSINESS domain's deps, making "one HTTP exit" a
-      # convention rather than something compiled.
+      # Keep the HTTP client in Forge, outside this coordination domain.
       Fleet.Forge,
-      # The project's LIFECYCLE (onboarding, card, roles, architect, worktrees) is its own domain:
-      # imperative, called from outside on demand — the opposite nature of this reactive rail, and
-      # a facade over both would describe only one of the two.
+      # Project owns on-demand lifecycle operations separately from reactive coordination.
       Fleet.Project
     ],
     exports: [Application]

@@ -1,15 +1,8 @@
 defmodule Fleet.Pilot.AwaitsArchDrainTest do
   @moduledoc """
-  JG-064 — un ticket qui sort du pipeline ne sort plus en silence.
-
-  Quand une escalade d'architecte se resout, `StepRunConsumer` retire l'etiquette
-  `lcars-awaits-arch`. Si ce retrait n'a pas lieu — metadonnees sans `repo`/`number`, ou
-  `remove_label` en erreur — l'etiquette RESTE, et `StepDispatcher.decide/1` saute toute issue qui
-  la porte (`{:skip, :awaits_arch}`). Le ticket quitte le pipeline definitivement et seule une
-  intervention humaine le debloque.
-
-  Le code ne disait que `Logger.warning`, et le commentaire de la branche d'erreur affirmait
-  « poller may re-offer (no loss) » — ce que le dispatcher contredit : il ne re-offre pas, il passe.
+  Tests awaits-arch completion and its incident hook when label removal fails or
+  metadata cannot identify the target. A remaining label blocks normal dispatch;
+  subsequent architect offers and recovery are outside these tests.
   """
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]

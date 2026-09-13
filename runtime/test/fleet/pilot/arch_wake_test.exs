@@ -1,10 +1,5 @@
 defmodule Fleet.Pilot.ArchWakeTest do
-  # ⚠ `async: false` : ce fichier ECRIT `:pilot_arch_deliverable_fetch` en env d'APPLICATION, qui est
-  # globale au node. Pendant la fenetre — restauration `on_exit` comprise — tout test concurrent qui
-  # lit cette cle lit la valeur de celui-ci. Mesure du 2026-08-17 : la meme forme a tue
-  # `Pilot.ApplicationTest` sur une racine de catalogue temporaire qui ne lui appartenait pas, dans
-  # le build d'image et pas sur la machine de dev — la collision depend du nombre de coeurs et de
-  # l'ordre du seed, donc elle mord la ou ca coute le plus cher.
+  # Serialized because the deliverable-fetch override is global application state.
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.ArchWake
@@ -47,10 +42,8 @@ defmodule Fleet.Pilot.ArchWakeTest do
   end
 
   describe "the mandate SAYS whether the deliverable can be read" do
-    # THE HALF THAT ACTUALLY CLOSES M1. Making the branches readable is not enough: the pod that
-    # could not see them arbitrated ANYWAY and invented an explanation for the code it was missing.
-    # Nothing in its mandate told it the deliverable was out of reach, so it filled the gap. These
-    # three cases are three different sentences, and collapsing any two re-opens the defect.
+    # The mandate must distinguish available, absent and unreadable deliverables;
+    # otherwise the architect may arbitrate without knowing what it could not read.
     defp mandate(fetch_result) do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_arch_deliverable_fetch, fn _repo, _n ->
         fetch_result
@@ -70,14 +63,8 @@ defmodule Fleet.Pilot.ArchWakeTest do
     end
 
     test "the mandate says WHAT RESOLVES — commenting is speaking, submit_result is deciding" do
-      # Only `submit_result` on this work item drains `lcars-awaits-arch`
-      # (`StepRunConsumer.drain_awaits_arch/2`, keyed on the mandate's own metadata). `issue_comment`
-      # posts on the thread and changes NOTHING about the escalation state.
-      #
-      # The mandate used to read "puis réponds (`issue_comment`)" — presenting a comment as THE
-      # answer. An arch that comments and stops has, from its own point of view, replied; the label
-      # stays, and the poller re-kicks it about a ticket it believes it already handled. The fleet
-      # then looks like it is not listening, which is the reading that costs the most.
+      # Work-item completion drains awaits-arch using the mandate's metadata.
+      # An issue_comment alone leaves escalation state unchanged.
       brief = mandate({:ok, []})
 
       assert brief =~ "`submit_result`"
@@ -111,14 +98,8 @@ defmodule Fleet.Pilot.ArchWakeTest do
     end
 
     test "an ABSENT sync process degrades into the failure sentence — no exit on the escalation rail" do
-      # Totality by obligation: this runs on the rail a human is waiting on, so the instrument that
-      # reports a problem is the last one allowed to take the report down with it.
-      #
-      # NO SEAM OVERRIDE HERE, and that is the whole test. Injecting a function that exits would
-      # replace `total_fetch/2` — the very thing whose try/catch is under test — and the assertion
-      # would prove the stub exits, which nobody doubted. The default path is exercised instead:
-      # `WorktreeSync` is not started in the test env, so the real call exits `:noproc` and the
-      # catch has to hold.
+      # Exercise the default fetch: an override would bypass its exit handler.
+      # WorktreeSync is absent here, so the real call exits :noproc.
       assert :offered =
                ArchWake.offer_then_wake(
                  CapturingQueue,
@@ -136,8 +117,8 @@ defmodule Fleet.Pilot.ArchWakeTest do
 
   describe "the returned outcome reflects whether a signal actually left" do
     test "free arch, mandate enqueued, but wake unreached → :wake_unreached (never :offered)" do
-      # The mandate is durable; only the wake failed. Reporting :offered would make the poller arm
-      # a 5-minute cooldown on a signal that never left — the escalation would wait for nothing.
+      # A failed wake must not report success and arm the poller's cooldown.
+      # Queue durability is outside this stubbed test.
       assert :wake_unreached = offer(FreeTaskQueue, UnreachableSpawner)
     end
 
