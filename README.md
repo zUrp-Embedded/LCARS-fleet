@@ -44,8 +44,9 @@ Dans ce système (une distribution WSL 2, ou une machine Linux dédiée déclar�
 curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --workstation --bench
 ```
 
-`install.sh` mesure la machine, affiche ce qui sera installé, puis délègue. Il ne demande jamais
-`sudo` lui-même ; le mode `--workstation` le fait, une fois. Relancer est toujours sûr : l'état est
+`install.sh` mesure la machine, affiche ce qui sera installé, attend une confirmation (Entrée
+pour continuer, Ctrl+C pour annuler), puis délègue. Sans terminal, il continue en le disant. Il
+ne demande jamais `sudo` lui-même ; le mode `--workstation` le fait, une fois. Relancer est toujours sûr : l'état est
 celui du système, mesuré à chaque passage.
 
 | Option | Effet |
@@ -250,8 +251,9 @@ Into this system (a WSL 2 distribution, or a dedicated Linux machine declared wi
 curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --workstation --bench
 ```
 
-`install.sh` measures the machine, shows what will be installed, then delegates. It never asks
-for `sudo` itself; `--workstation` mode does, once. Re-running is always safe: the state is the
+`install.sh` measures the machine, shows what will be installed, waits for a confirmation (Enter
+to continue, Ctrl+C to cancel), then delegates. Without a terminal it goes on and says so. It
+never asks for `sudo` itself; `--workstation` mode does, once. Re-running is always safe: the state is the
 system's, measured on every run.
 
 | Option | Effect |

@@ -1,7 +1,7 @@
 # deploy — l'installeur de LCARS-fleet
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-09-12 (chantier installeur : un pipeline, trois couches de témoins, les workflows de CI et de publication partis)
+**Dernière révision** : 2026-09-13 (chantier installeur : un pipeline, trois couches de témoins, les workflows de CI et de publication partis ; `provision update` retiré, exécuter et qualifier séparés dans la lib)
 **Statut** : en service
 **Référencé par** : `deploy/tests/README.md`, `deploy/tests/provision.bats` (la table des modules)
 
