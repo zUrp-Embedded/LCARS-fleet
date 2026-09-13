@@ -122,7 +122,7 @@ if config_env() != :test and not tool_mode? do
     uid when uid == sysadmin_uid ->
       raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
               "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
-              "pods, the exact inverse of the sandbox. The seat fixes the box; a fleet human " <>
+              "pods, the exact inverse of the sandbox. The seat administers the machine; a fleet human " <>
               "runs the fleet (bin/fleet under a worker account)."
 
     {:unreadable, why} ->

@@ -166,7 +166,7 @@ force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
   local account="$1" admin_tok pw
   admin_tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null)" || return 1
   [[ -n "$admin_tok" ]] || return 1
-  # MUR I4 (deploy/tests/idiom_walls) : la source est bornee EN TETE, la longueur par `cut`, qui
+  # MUR I4 (runtime/test/services/idiom_walls.bats) : la source est bornee EN TETE, la longueur par `cut`, qui
   # lit tout et ne ferme rien — un `head -c` en aval peut fermer le tuyau avant le dernier write.
   pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
   printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \

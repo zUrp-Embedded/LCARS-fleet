@@ -36,6 +36,39 @@ code() { grep -vE '^\s*#' "$1"; }
   grep -qE 'curl -s -m 15 -K -' "$SERVICES/human-converger.sh"
 }
 
+# ─── MUR I4 : TOUTE LECTURE DE /dev/urandom EST BORNEE EN TETE DE PIPELINE ────────────────────
+#
+# `tr -dc … < /dev/urandom | head -c N` lit une source infinie et compte sur `head` pour fermer le
+# tuyau : sous `pipefail`, le SIGPIPE du lecteur rend le pipeline non nul, et un `head -c` en aval
+# peut fermer avant le dernier write. La forme sure borne la SOURCE (`head -c N /dev/urandom | …`) et
+# coupe la longueur par un outil qui lit tout (`cut`). JUMEAU du MUR I4 de `deploy/tests/idiom_walls.bats` :
+# celui-la lit deploy/, celui-ci le shell du produit — services/ et bin/.
+@test "MUR I4 (produit) : toute lecture de /dev/urandom est BORNEE par un head -c en tete de pipeline" {
+  local root f l hits=0 lectures=0
+  root="$(cd "$SERVICES/../.." && pwd)"
+  local -a bin_sh=()
+  mapfile -t bin_sh < <(grep -lE '^#!.*(bash|[^a-z]sh)([[:space:]]|$)' "$root"/runtime/bin/* 2>/dev/null || true)
+  [ "${#bin_sh[@]}" -ge 5 ] || { echo "runtime/bin : ${#bin_sh[@]} script(s) shell — le perimetre du mur n'est plus le bon" >&2; return 1; }
+  for f in "${SOURCES[@]}" "${bin_sh[@]}"; do
+    while IFS= read -r l; do
+      lectures=$((lectures + 1))
+      grep -qE 'head -c [0-9]+ /dev/urandom' <<<"$l" || { echo "MUR I4 rompu — ${f#"$root"/} : source non bornee : $l" >&2; hits=$((hits + 1)); }
+      grep -qE '\|[[:space:]]*head -c' <<<"$l" && { echo "MUR I4 rompu — ${f#"$root"/} : head -c en aval : $l" >&2; hits=$((hits + 1)); }
+    done < <(code "$f" | grep -E '(^|[[:space:]<])/dev/urandom' || true)   # une LECTURE, pas un commentaire qui la cite
+  done
+  [ "$hits" -eq 0 ]
+  # GARDE D'INSTRUMENT : le mur voit au moins la lecture du minteur de jetons. A zero lecture, il
+  # balaierait un corpus qu'il ne sait plus lire et serait vert par cecite.
+  [ "$lectures" -ge 1 ] || { echo "instrument casse : aucune lecture de /dev/urandom vue dans le produit" >&2; return 1; }
+  # Le mur mord : la lecture non bornee est vue comme telle, la coupe en aval aussi…
+  grep -qE '(^|[[:space:]<])/dev/urandom' <<<'  pw="$(tr -dc A-Za-z0-9 < /dev/urandom | head -c 20)"'
+  refute grep -qE 'head -c [0-9]+ /dev/urandom' <<<'  pw="$(tr -dc A-Za-z0-9 < /dev/urandom | head -c 20)"'
+  grep -qE '\|[[:space:]]*head -c' <<<'  head -c 200 /dev/urandom | tr -dc A-Z | head -c 10'
+  # … et la forme sure passe les deux.
+  grep -qE 'head -c [0-9]+ /dev/urandom' <<<'  pw="$(head -c 18 /dev/urandom | base64 | cut -c1-20)"'
+  refute grep -qE '\|[[:space:]]*head -c' <<<'  pw="$(head -c 18 /dev/urandom | base64 | cut -c1-20)"'
+}
+
 # ─── MUR I18 : AUCUN LITTERAL 1000 / 60000 COMME REPLI DE BORNE D'UID ──────────────────────────
 #
 # ⚖ user 2026-09-05 (lot 14, solution A + C + E) : la frontiere systeme/humain est celle que
@@ -92,38 +125,41 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 
 # ─── MUR I20 : LE RAIL S'APPELLE `container` — PLUS AUCUN box / boite / boîte COTE PRODUIT ──────
 #
-# ⚖ user 2026-09-05 (chantier release, lot 1) : « workstation est bien nommé pour désigner une
-# install directe sur un système, mais le rail box/boîte n'est pas explicite pour une install
-# docker » → `container`, « un seul mot partout ». Le couple dit OU LCARS vit : `--workstation`
-# (dans ce système) / `--container` (dans un conteneur). `docker` reste le mot du SUBSTRAT et de
-# la dependance : le mur ne le regarde pas.
+# Le couple dit OU LCARS vit : `--workstation` (dans ce système) / le conteneur. `docker` reste le
+# mot du SUBSTRAT et de la dependance : le mur ne le regarde pas.
 #
 # JUMEAU de `deploy/tests/idiom_walls.bats` (MUR I20) : celui-la lit deploy/ et install.sh, celui-ci
-# lit le PRODUIT — runtime/services, runtime/bin, runtime/test/services — code ET prose (un README
-# qui dit « box up » est un manuel faux). Chaque cote grep SES fichiers ; aucun mur ne traverse la
-# couture. Il s'ecarte lui-meme : ses formes de garde portent le mot.
+# lit le PRODUIT — runtime/services, runtime/bin, runtime/lib, runtime/priv, runtime/config,
+# runtime/etc, runtime/test/services — code ET prose (un README qui dit « box up » est un manuel
+# faux, un prompt d'agent qui dit « la boite » aussi). Chaque cote grep SES fichiers ; aucun mur ne
+# traverse la couture. Il s'ecarte lui-meme : ses formes de garde portent le mot.
 #
 # Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
-#   - « boite de reception » (l'inbox d'admiral, skill system-issues) et « boite aux lettres »
-#     (la branche d'outillage, ops-branch) ;
+#   - « boite de reception » (l'inbox d'admiral, skill system-issues), « boite aux lettres »
+#     (la branche d'outillage, ops-branch) et « ta boîte » (les tickets d'un agent, vitrine MCP) ;
+#   - la boite FERMEE du siege reserve vulcan (« the box is closed », « closed box », « the box
+#     opens », « opening the box », « la boîte s'ouvre », « on ouvrira sa boite ») ;
 #   - `box-sizing` / `border-box` / `box-shadow` (le CSS du deck, dans console-deck.py) ;
 #   - « mail-in-a-box » et « out of the box » (idiomes), et les cadres ASCII `_box_*` de l'installeur.
 # `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
 I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
-I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad'
+I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad|ta bo[iîÎ]te|box is closed|closed box|box opens|opening the box|bo[iîÎ]te s.ouvre|ouvrira sa bo[iîÎ]te'
+I20_PERIMETRE=(runtime/services runtime/bin runtime/lib runtime/priv runtime/config runtime/etc runtime/test/services)
 
 i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
   grep -rnIiE --exclude=idiom_walls.bats "$I20_RE" "$@" 2>/dev/null | grep -viE "$I20_EXCL" || true
 }
 
-@test "MUR I20 (produit) : plus aucun box / boite / boîte dans runtime/services, runtime/bin, runtime/test/services — le rail s'appelle container" {
+@test "MUR I20 (produit) : plus aucun box / boite / boîte dans le code et la prose du produit — le rail s'appelle container" {
   local root d trouve
+  local -a chemins=()
   root="$(cd "$SERVICES/../.." && pwd)"
-  for d in runtime/services runtime/bin runtime/test/services; do
+  for d in "${I20_PERIMETRE[@]}"; do
     [ -d "$root/$d" ] || { echo "$d absent sous $root — le perimetre du mur n'est plus le bon" >&2; return 1; }
     case "$d" in deploy/*) echo "MUR I20 (produit) lit deploy/ : $d — c'est l'affaire du jumeau" >&2; return 1 ;; esac
+    chemins+=("$root/$d")
   done
-  trouve="$(i20_hits "$root/runtime/services" "$root/runtime/bin" "$root/runtime/test/services")"
+  trouve="$(i20_hits "${chemins[@]}")"
   [ -z "$trouve" ] || { echo "MUR I20 rompu — le mot du rail est container, pas box/boîte :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
   # GARDE D'INSTRUMENT : le mur voit une occurrence plantee dans un decor — un chemin, de la prose
   # accentuee, une variable, un tag, une majuscule — quatre LIGNES, grep -n compte des lignes.
@@ -134,7 +170,7 @@ i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs 
   printf 'LCARS_MODULE_TAG=box-init ; say "[box-boot]"\n' > "$decor/d"
   [ "$(i20_hits "$decor" | wc -l)" -eq 4 ] || { echo "instrument casse : le mur ne voit pas le decor" >&2; i20_hits "$decor" >&2; return 1; }
   # … et ne voit PAS ce qui garde le mot a dessein.
-  printf 'sandbox bwrap mailbox checkbox toolbox SANDBOX\n* { box-sizing:border-box } box-shadow: 0\nla boîte de réception et la boite aux lettres, Boite de reception\nmail-in-a-box\nlivrer out of the box\n_box_emit "x"; _prov_box_pad\n' > "$decor/e.txt"
+  printf 'sandbox bwrap mailbox checkbox toolbox SANDBOX\n* { box-sizing:border-box } box-shadow: 0\nla boîte de réception et la boite aux lettres, Boite de reception\nmail-in-a-box\nlivrer out of the box\n_box_emit "x"; _prov_box_pad\npas seulement ta boîte\n# vulcan: the box is closed, (closed box), the box opens. Opening the box\nLE JOUR OÙ LA BOÎTE S'"'"'OUVRE, quand on ouvrira sa boite\n' > "$decor/e.txt"
   trouve="$(i20_hits "$decor/e.txt")"
   [ -z "$trouve" ] || { echo "instrument casse : le mur mord sur une exclusion :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
 }

@@ -20,7 +20,7 @@ metadata:
   # ⚖ ARBITRAGE USER 2026-09-05, et le critere est nomme : PEU DE FRICTION POUR L'HUMAIN. Une liste
   # d'hotes ne supprime pas la friction, elle la deplace — un hote manquant fait echouer le pod en
   # SILENCE, et c'est l'humain qui doit lire un warning pour decouvrir lequel, puis revenir. Sur une
-  # boite auto-hebergee ou ce siege ne sert qu'une personne, l'arbitrage est de retirer le mur
+  # machine auto-hebergee ou ce siege ne sert qu'une personne, l'arbitrage est de retirer le mur
   # d'hotes plutot que d'entretenir une liste que personne ne peut finir.
   #
   # Ce que ca NE retire PAS : le pod reste scelle (aucun namespace reseau), sort par son proxy
