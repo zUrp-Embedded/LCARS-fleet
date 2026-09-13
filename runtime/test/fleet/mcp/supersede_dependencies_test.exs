@@ -1,13 +1,9 @@
 defmodule Fleet.MCP.SupersedeDependenciesTest do
   @moduledoc """
-  A supersede must CARRY the dependency edges to the replacement, and must do it BEFORE closing.
-
-  Why the order is the contract, not a preference: a Gitea dependency links two issue_ids, and
-  `supersedes` is not a forge primitive — it is an LCARS convention (comment + close). The forge
-  therefore sees no replacement: it sees one issue die and another appear, and the edges stay on
-  the dead one. Closing first RELEASES everything the old ticket blocked (a closed blocker counts
-  as satisfied) while the work has moved and is not delivered — and a dispatch can slip into that
-  window. Measured on the bench 2026-08-04.
+  Supersede copies both dependency directions before closing the old issue.
+  Closing first would release dependents before the replacement holds their edges.
+  Recorded positions check this ordering; selective receives in other cases only
+  check call presence, including the live-PR case.
   """
   use ExUnit.Case, async: false
 
@@ -58,7 +54,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     end
   end
 
-  # An edge already present on the replacement (replay) is NOMINAL, not a failure.
+  # HTTP 409 models replay success; this test does not verify whether an edge actually exists.
   defmodule ConflictForge do
     def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
@@ -99,17 +95,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     test "the close comes AFTER the edges — a release before the rewiring is the defect itself" do
       retire(OrderForge)
 
-      # ⚠ CE TEMOIN PORTAIT LE NOM DE L'ORDRE ET NE TESTAIT QUE LA PRESENCE. `assert_received`
-      # balaie la boite aux lettres pour CHAQUE motif INDEPENDAMMENT : quatre motifs disjoints
-      # reussissent quel que soit l'ordre d'arrivee. Le commentaire d'avant — « the mailbox order
-      # IS the write order » — disait vrai de la BOITE, pas des assertions qui la lisent.
-      # Mutation jouee le 2026-09-07 : fermer le ticket AVANT de recabler les dependances laissait
-      # ce temoin ET son voisin verts, alors que la fenetre de dispatch ainsi ouverte est le defaut
-      # que `do_retire/5` documente en toutes lettres.
-      #
-      # Meme lecon, meme forme que `retire_issue_test` (mesure du 2026-08-08) : on VIDE la boite —
-      # elle EST la trace de l'ordre d'appel, meme processus, envois synchrones — et on compare des
-      # POSITIONS.
+      # Compare trace positions; disjoint selective receive patterns would pass after an order reversal.
       trace = drain_mailbox()
 
       aretes = for {m, i} <- Enum.with_index(trace), match?({:edge, _, _}, m), do: i
@@ -140,11 +126,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     end
   end
 
-  # ─── La PR vivante meurt avec son ticket ────────────────────────────────────────────────────
-  # Le rail des pulls est INDÉPENDANT (`dispatch_review` scrute les pulls, hors bail) : une PR
-  # laissée ouverte sur un ticket retiré continue d'être jugée puis mergée. L'ancien refus
-  # (`supersedes_target_in_flight`) protégeait de ça en interdisant le geste — c'était un
-  # contournement du fait que rien ne savait fermer une PR.
+  # Pull processing is independent; retiring a ticket must also close its live PR.
   defmodule PrForge do
     def close_pr(_repo, pr, _opts) do
       send(self(), {:pr_closed, pr})
@@ -203,8 +185,7 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     end
   end
 
-  # La boite aux lettres videe DANS L'ORDRE : la seule facon de juger un ordre d'ecriture avec des
-  # motifs disjoints (cf. le temoin ci-dessus). Jumeau de `retire_issue_test`.
+  # Drain same-process sends in order to compare call positions.
   defp drain_mailbox(acc \\ []) do
     receive do
       msg -> drain_mailbox([msg | acc])

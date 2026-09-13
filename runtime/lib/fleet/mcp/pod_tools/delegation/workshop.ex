@@ -1,24 +1,14 @@
 defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   @moduledoc """
-  Where a project's drafting matter lives on disk — the `workshop` face, and the per-project
-  workspace inside it.
-
-  UNE clef pour la racine, tous ses lecteurs. Deux clefs seraient deux facons de brancher une
-  moitie du rail et pas l'autre ; un chemin de lot recalcule dans le rail scratchpad
-  (`Path.join(workshop_root(), Layout.project_name(repo))`) serait une seconde copie du meme chemin,
-  dont une seule suivrait un changement de layout.
+  Shared workshop root/workspace resolution for lots and scratchpad, using
+  :mcp_workshop_root or Layout's default. One override keeps both readers aligned.
   """
 
-  # The lot is sourced from the WORKSHOP face — a layout fact, not a privilege of the calling role:
-  # `workshop` is where a project's drafting matter lives (`Fleet.Layout`), which is what a lot is
-  # made of. The root is overridable the same way the brief's ops root is, for tests that own a
-  # temporary clone.
+  # Resolve the project's basename under workshop; this is a layout rule, not an authorization check.
   @doc false
   @spec lot_workspace(String.t()) :: String.t()
   def lot_workspace(repo), do: Path.join(root(), Fleet.Layout.project_name(repo))
 
-  # UNE clef pour la racine des faces atelier, deux lecteurs. Deux clefs seraient deux facons de
-  # brancher une moitie et pas l'autre.
   @doc false
   @spec root() :: String.t()
   def root,

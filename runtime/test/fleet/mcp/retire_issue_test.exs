@@ -1,17 +1,9 @@
 defmodule Fleet.MCP.RetireIssueTest do
   @moduledoc """
-  Retiring a ticket is a GESTURE, not a side effect of creating another one.
-
-  Everything this tool does already existed inside `create_issue(supersedes:)`. The cost, measured
-  on the bench 2026-08-04: to retire a ticket the architect had to create one, which then went out
-  to dispatch and landed on a producer with nothing to produce.
-
-  What is genuinely new is the edges. A supersede MOVES them onto the replacement; a retirement has
-  no replacement and must LIFT them. Leaving them is the silent failure: a closed blocker counts as
-  satisfied on the forge, so every dependent becomes closable as if the work had landed.
-
-  The order assertions are the point of most of these tests. `assert_received` reads the mailbox in
-  arrival order, so the sequence of writes IS observable — and the sequence is the contract.
+  Direct retirement keeps the reason and refuses to invent a replacement ticket.
+  Dependency cases check announcements, closure and cleanup using a recorded call
+  trace. Selective assert_received patterns elsewhere establish presence, not order.
+  Stubs simulate returned failures; no live forge, pod shutdown or ambiguous write is tested.
   """
   use ExUnit.Case, async: false
 
@@ -19,13 +11,10 @@ defmodule Fleet.MCP.RetireIssueTest do
   alias Fleet.MCP.PodTools
   alias Fleet.TestEnv
 
-  # ONE stub, scripted from the test process dictionary, rather than seven modules differing by a
-  # single clause. The delegation runs in the calling process, so `Process.put` in a test reaches
-  # the stub. Seven near-identical modules would hide which clause each case actually turns on.
+  # Synchronous calls share the test process dictionary for configured outcomes.
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     @impl true
@@ -46,8 +35,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     @impl true
     def post_comment(_repo, n, body, _opts) do
       send(self(), {:comment, n, body})
-      # Reglable comme `:lift_result` : l'annonce aux dependants passe par ici, et son echec est
-      # desormais un cas de contrat (abandon AVANT le point de non-retour).
+      # Configure announcement failure before closure.
       Process.get(:comment_result, {:ok, :posted})
     end
 
@@ -156,17 +144,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
 
     test "each is TOLD before its edge is lifted — a silent unblock is the defect" do
-      # CE TEST PORTAIT LE NOM DE L'ORDRE ET NE TESTAIT QUE LA PRESENCE. `assert_received` balaie la
-      # boite aux lettres pour CHAQUE motif independamment : sur deux motifs disjoints
-      # (`{:comment, 8, _}` et `{:lift, 8, 42}`) il reussit quel que soit l'ordre d'arrivee. Mesure
-      # du 2026-08-08 : intervertir les deux appels (alors dans `release_dependents/4`, morte depuis
-      # JG-046) laissait la suite
-      # entiere verte — 2440 tests — alors que le contrat d'ordre de `retire_issue/3` nomme le
-      # defaut correspondant : « l'ordre inverse debloquerait silencieusement un ticket sans rien
-      # dire ».
-      #
-      # La boite aux lettres EST la trace de l'ordre d'appel (meme processus, envois synchrones) :
-      # on la vide et on compare des POSITIONS.
+      # Drain the mailbox and compare positions: selective receives alone accept either call order.
       result = retire() |> decoded()
       trace = drain_mailbox()
 
@@ -189,18 +167,8 @@ defmodule Fleet.MCP.RetireIssueTest do
       assert result["released"] == [8, 9]
     end
 
-    # ⚠ CE TEST EPINGLAIT `lift < close` — L'ORDRE INVERSE, et avec une raison qui n'etait juste
-    # qu'a moitie (JG-046). Il gardait la fenetre « ferme mais rien dit », vraie ; il laissait
-    # ouverte celle que le `@doc` de `retire_issue/3` declare pire que tout : « Any failure ABORTS
-    # before the close: closing RELEASES, so a half-executed retirement is worse than none » — or
-    # lever les aretes AVANT le close, c'est LIBERER avant le point de non-retour. Un echec du
-    # commentaire ou de la fermeture laissait les dependants liberes et le bloqueur ouvert, sans
-    # limite de duree.
-    #
-    # MESURE QUI TRANCHE : `Lease.open_blockers/2` filtre `state == "open"`. Le CLOSE libere ; la
-    # levee d'arete ne fait que dire la verite au read-model. Le deblocage silencieux est donc
-    # ferme par l'ANNONCE, pas par la levee — et l'annonce peut, elle, passer avant le close sans
-    # rien liberer.
+    # Closing releases admission blockers; announcements must precede it and removals
+    # follow it, so a failed pre-close step cannot leave edges removed under an open blocker.
     test "personne n'est LIBERE avant d'avoir ete prevenu, et rien n'est libere avant le close" do
       retire()
       trace = drain_mailbox()
@@ -226,7 +194,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
 
     test "l'ANNONCE qui echoue ABANDONNE : rien n'est ferme, rien n'est leve, rien n'est libere" do
-      # Avant le point de non-retour, l'abandon est gratuit — l'etat est exactement celui d'avant.
+      # This fixture fails the first announcement; no closure or edge removal should follow.
       Process.put(:comment_result, {:error, {:http, 500, "boom"}})
 
       assert {:error, {:retire_aborted, 42, {:dependent_not_announced, 8, _}}, _} = retire()
@@ -235,9 +203,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
 
     test "une levee qui echoue APRES le close est SIGNALEE, pas transformee en abandon" do
-      # Le ticket EST ferme et les dependants SONT liberes (l'admission ne compte que les bloqueurs
-      # ouverts) et annonces. Rendre `{:error, :retire_aborted}` ici serait un mensonge : le retrait
-      # a eu lieu. Ce qui reste est une arete perimee vers un ticket ferme, et elle se DIT.
+      # The closed ticket is retired despite removal failures, which must remain visible in the result.
       Process.put(:lift_result, {:error, {:http, 500, "boom"}})
 
       result = retire() |> decoded()
@@ -292,9 +258,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
   end
 
-  # Vide la boite aux lettres du test dans une LISTE ordonnee. Le stub `Forge` s'envoie ses appels a
-  # lui-meme, donc l'ordre d'arrivee est l'ordre d'appel — mais `assert_received` ne le lit pas :
-  # il cherche un motif n'importe ou dans la file. Comparer des index le lit.
+  # Same-process sends form the call trace; draining preserves order unlike selective receives.
   defp drain_mailbox(acc \\ []) do
     receive do
       msg -> drain_mailbox([msg | acc])

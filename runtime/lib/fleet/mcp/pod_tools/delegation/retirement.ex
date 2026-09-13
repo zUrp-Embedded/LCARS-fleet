@@ -1,29 +1,17 @@
 defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   @moduledoc """
-  Taking a delegated ticket OUT: retired, superseded by a replacement, or swept away with the
-  whole project in an emergency stop.
-
-  A retirement touches four things that can each fail on their own — the live PR, the dependency
-  edges, the pods still running on the ticket, and the ticket itself. The order is the invariant:
-  the PR is closed BEFORE the edges are lifted, because an edge lifted under a live PR leaves the
-  forge advertising a merge nobody is waiting for.
+  Retires issues directly, through supersede, or in a project sweep.
+  PR closure precedes dependency work because pull processing can outlive the issue.
+  These are ordered effects, not transactions: errors can leave a closed PR, copied
+  edges or posted comments. Reaper results are ignored and callback exceptions propagate.
   """
 
   require Logger
 
   alias Fleet.MCP.PodTools.Delegation.{DependencyForge, Gate, IssuePR}
 
-  # Carries BOTH directions over to the replacement. A failure PROPAGATES (the `with` above will not
-  # go on to close): a half-rewired supersede that closes anyway is exactly the hole this plugs — the
-  # old ticket stays open, the warning says so, and a human arbitrates. Noisy rather than false.
-  #
-  # The replacement may already carry an edge (replay): the forge then answers with an error on that
-  # duplicate, and it is a NOMINAL state — not counted as a carry failure.
-  #
-  # SEAM CONFORMANCE, load-bearing side. This runs INSIDE the retirement, AFTER the live PR has been
-  # closed: a missing callback raising here would leave the old ticket closed by a crash, edges
-  # dropped — and closing RELEASES everything it blocked. The guard turns that into the same refusal
-  # as any other carry failure, which the caller already knows not to close through.
+  # Copy both dependency directions before closing the old ticket. Failure stops closure,
+  # but prior copies and PR closure remain. Validate the resolved seam before copying.
   defp carry_dependencies(forge, repo, old_n, new_n) do
     with {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
@@ -40,8 +28,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     Enum.reduce_while(issues, :ok, &copy_one_edge(&1, &2, write_fun))
   end
 
-  # UNE ARETE SANS NUMERO ARRETE LA COPIE : la porter « au mieux » laisserait le nouveau ticket avec
-  # une dependance en moins, sans que rien ne le dise.
+  # Halt on an unaddressable edge rather than silently dropping a dependency.
   defp copy_one_edge(issue, :ok, write_fun) do
     case Map.get(issue, "number") do
       n when is_integer(n) -> edge_written(write_fun.(n))
@@ -50,37 +37,20 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   end
 
   defp edge_written({:ok, _}), do: {:cont, :ok}
-  # Already written (replay): the target carries the edge, which is what we wanted.
+  # Treat every HTTP 409 as already present without readback.
   defp edge_written({:error, {:http, 409, _}}), do: {:cont, :ok}
   defp edge_written({:error, _} = err), do: {:halt, err}
 
   @doc """
-  Stops everything in flight, fleet-wide: a brake, not a kill.
+  Sweeps issues in projects whose reported state is open, behind the onboarder gate.
+  Onboard.list_stoppable_issues supplies human-scoped tickets and excludes parked
+  markers, whose closure would unpark a project. Unknown/parked projects are skipped.
 
-  It CLOSES tickets, it does not kill pods, and the difference is the whole design. Killing pods
-  resets nothing — the tickets stay open, the poller re-dispatches on the next tick, and the runaway
-  resumes with fresh pods. Closing is what actually stops it: a closed ticket leaves the poller by
-  construction (every inbox lists open only) and the reaper collects its pods on its own.
-
-  So this is `issue_retire` applied in bulk, with the same two gestures per ticket: the live PR
-  closes first (the pulls rail is independent and would otherwise judge and merge into a dead
-  ticket), then `closure: :retired` — the trace says nothing was delivered, because nothing was.
-
-  ONE SEMANTIC DIFFERENCE from the unit gesture, and it inverts its rule. A single retirement ABORTS
-  on the first failure: a half-retired ticket is worse than an open one. A brake does not get to
-  stop halfway because one ticket resisted — leaving the rest running is the failure mode it exists
-  to prevent. So the sweep CONTINUES and every failure is NAMED in the result. Re-running finishes
-  the job: what was retired is closed and no longer listed.
-
-  Two exclusions, both load-bearing:
-
-    * PARKED projects are skipped. They have nothing in flight by definition, and their state IS an
-      open marker issue assigned to the same human — sweeping it would CLOSE the marker, which means
-      UNPARK. An emergency stop that reopens a deliberately closed project is the opposite of a stop.
-    * the parked marker is excluded by title as well, for the project being closed while this runs.
-
-  Scope is what the poller itself dispatches: the open issues assigned to the human owner. A ticket
-  outside that scope is not something this fleet was going to act on.
+  Uses retirement, including the pod reaper, and continues after returned per-ticket
+  errors; callback exceptions still abort. Global project-list errors propagate;
+  a project's ticket-list failure counts as one entry, not a count of affected tickets.
+  Re-running skips closed
+  issues, so it does not guarantee repair of cleanup left after closure.
   """
   @spec emergency_stop(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def emergency_stop(reason, state) when is_binary(reason) and reason != "" do
@@ -137,62 +107,21 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end
   end
 
-  # ❌ AUCUN OUTIL N'OUVRE `ops/` A L'ECRITURE, ET IL N'Y A PAS DE SOUS-ARBRE D'EXCEPTION. C'est le
-  # registre de ce qu'on a demande a un agent et de ce qu'on a juge de son travail : une porte
-  # dedans, fut-elle « du materiau d'auteur que rien ne lit comme preuve », est une porte dans le
-  # seul arbre qui doit rester en lecture seule pour tout le monde.
-  #
-  # La MATIERE, elle, a une destination : une note de conception est de la DOC. Elle vit sur la face
-  # `workshop`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
-  # reste de la documentation avec l'humain.
-
   @doc """
-  Retires a ticket WITHOUT inventing a replacement.
+  Retires a bound-project ticket without creating a replacement. Requires a nonempty
+  reason; closure records retirement rather than delivery.
 
-  Every piece of this gesture — closing the live PR, lifting the pods, `stage/retired`, the
-  comment — also runs as a SIDE EFFECT of `create_issue(supersedes:)`. Without this door the
-  architect retires a ticket by creating another one, which goes out to dispatch and lands on a
-  producer with nothing to produce (measured on the bench).
+  Order: close live PR, read/address dependents, announce their release, comment on
+  the target, close it, then attempt each edge removal and reap its pods. Closing
+  releases admission blockers because Lease counts only open issues; removing edges
+  afterwards cleans the graph. Announcements explain that necessary work must be requested again.
 
-  Where it DIVERGES from the supersede, and why: a supersede moves the edges onto the replacement.
-  A retirement has no replacement, so it LIFTS them. Leaving them would be worse than either — a
-  closed blocker counts as satisfied on the forge, so every dependent would silently become closable
-  as if the work had landed, while nothing was delivered.
-
-  Order is the contract, three times over:
-
-    * the live PR dies FIRST. The pulls rail is INDEPENDENT of the issues rail (`dispatch_review`
-      polls pulls outside the lease and never reads the issue state), so a PR left open on a retired
-      ticket goes on being judged and merged.
-    * every dependent is TOLD before anything releases it. A silent unblock is the defect this
-      order exists to prevent, and the announcement is what prevents it — not the lifting of the
-      edge.
-    * the edges are lifted AFTER the close, because the CLOSE is the point of no return.
-
-  ⚠ LES ARETES SE LEVENT APRES LE CLOSE, JAMAIS AVANT. Levees avant, un echec du commentaire ou
-  de la fermeture abandonne la sequence avec les dependants DEJA liberes et le bloqueur TOUJOURS
-  OUVERT — l'etat exact que la regle ci-dessous (« a half-executed retirement is worse than none »)
-  declare pire que rien.
-
-  MESURE QUI DECIDE DE L'ORDRE : `Lease.open_blockers/2` filtre `state == "open"`. Une arete
-  residuelle vers un ticket FERME ne bloque donc rien — c'est le CLOSE qui libere, la levee d'arete
-  ne fait que dire la verite au read-model (la brique ne sera jamais livree). Les deux gestes n'ont
-  pas le meme poids, et l'ordre suit ce poids :
-
-    * echec AVANT le close → rien n'est libere, le bloqueur reste ouvert, les aretes sont intactes.
-      Coherent, et reparable par un simple re-emission.
-    * echec de la levee APRES le close → les dependants sont liberes (par le close) et TOUS
-      annonces ; il reste une arete perimee vers un ticket ferme, que l'admission ignore. Le retrait
-      est SIGNALE incomplet dans son resultat, jamais avale.
-
-  L'annonce prealable est ce qui rend cet ordre acceptable : au moment ou le close libere, chaque
-  dependant porte deja le commentaire qui le lui dit. Un dependant dont le numero n'est pas
-  adressable HALTE avant tout ecrit — une arete qu'on ne sait pas adresser est une arete qu'on ne
-  saura pas lever, et on ne ferme pas un bloqueur en la laissant derriere soi.
-
-  Any failure before the close ABORTS: closing RELEASES, so a half-executed retirement is worse than
-  none. An already-closed target is a no-op success, not an error — the stdio bridge times out a
-  mutation at 30s while the forge call continues, and the agent re-emits.
+  A returned failure before closure aborts remaining steps but does not undo earlier
+  effects. Edge-removal failures after closure are returned in edges_not_lifted;
+  released lists successful removals, not every dependent unblocked by closure.
+  An already-closed target is a no-op and does not retry edge cleanup or reaping.
+  Concurrent forge changes and ambiguous write failures can invalidate the logged
+  claim that an aborted target is still open.
   """
   @spec retire_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def retire_issue(number, reason, state)
@@ -225,15 +154,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
          :ok <- announce_release(forge, repo, n, numbers),
          {:ok, _} <- forge.post_comment(repo, n, retire_comment(reason), []),
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # ══ POINT DE NON-RETOUR FRANCHI ══ Le close a LIBERE les dependants (`open_blockers/2` ne
-      # compte que les bloqueurs ouverts) et chacun porte deja son annonce. La levee des aretes qui
-      # suit dit la verite au read-model ; son echec laisse une arete perimee vers un ticket ferme,
-      # que l'admission ignore. Ce n'est plus un motif d'abandon — le ticket EST ferme — mais ce
-      # n'est pas non plus un silence : ca voyage dans le resultat.
+      # Closure already released admission blockers; report stale edges that could not be removed.
       {released, unlifted} = lift_edges(forge, repo, n, numbers)
 
-      # A retired ticket is a DEAD ticket: its pods die with it, same arbitrage and same seam as the
-      # supersede path.
+      # Request immediate reaping after closure; the returned outcome is ignored.
       _ = pod_reaper().reap_issue(repo, n)
 
       result = %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}
@@ -250,8 +174,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end
   end
 
-  # Une arete qu'on ne sait pas ADRESSER est une arete qu'on ne saura pas lever. On l'apprend AVANT
-  # le premier ecrit, parce qu'apres le close il serait trop tard pour renoncer.
+  # Validate dependent numbers before their announcements/target closure, but after PR closure.
   defp addressable_dependents(dependents) do
     Enum.reduce_while(dependents, {:ok, []}, fn dep, {:ok, acc} ->
       case Map.get(dep, "number") do
@@ -261,10 +184,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end)
   end
 
-  # L'ANNONCE PRECEDE LA LIBERATION, et c'est elle qui rend l'ordre acceptable. Au moment ou le
-  # close libere, chaque dependant porte deja le commentaire qui le lui dit — le « deblocage
-  # silencieux » que cet ordre existe pour empecher est ferme ICI, pas par la levee de l'arete.
-  # Un echec ABANDONNE : rien n'est encore libere, le bloqueur est ouvert, les aretes sont intactes.
+  # Announce before closure releases blockers. A failed announcement stops remaining
+  # steps; earlier announcements are not rolled back and may repeat on retry.
   defp announce_release(forge, repo, n, numbers) do
     Enum.reduce_while(numbers, :ok, fn d, :ok ->
       case forge.post_comment(repo, d, released_comment(n), []) do
@@ -274,9 +195,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end)
   end
 
-  # Apres le point de non-retour : on leve ce qu'on peut et on RAPPORTE ce qu'on n'a pas pu. Pas de
-  # `reduce_while` ici — s'arreter au premier echec laisserait des aretes levables en place sans
-  # raison, et le ticket est deja ferme.
+  # After closure, attempt every removal and report failures rather than stopping at the first.
   defp lift_edges(forge, repo, n, numbers) do
     Enum.reduce(numbers, {[], []}, fn d, {ok, ko} ->
       case forge.remove_issue_dependency(repo, d, n, []) do
@@ -307,15 +226,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
       "Si ce travail restait nécessaire, il doit être redemandé — le retrait n'a rien livré."
   end
 
-  # Retirement of the replaced ticket — SYSTEM identity (default token: the system executes,
-  # the arch only expressed the intent), comment BEFORE close (chronology readable on the forge,
-  # same stance as the gatekeeper seal). The awaits-arch label is left as historical trace: a
-  # CLOSED issue leaves the poller and the escalation inbox by itself (both list open only).
-  # A retirement failure NEVER unwinds the created ticket (it exists): the result says so
-  # honestly (`supersede_warning`) and the human closes by hand — loud, no half-lie.
-  # PUBLIC (@doc false) so the edge carry-over is testable ON ITS ORDER: the property that matters
-  # here is not "the edges exist" but "they are written BEFORE the close", and that is only
-  # observable from the caller.
+  # Supersede uses system-authored comment/closure and leaves the replacement intact
+  # on failure, returning supersede_warning. Public so tests can observe copy-before-close order.
+  # The awaits-arch label remains historical; closed issues leave open-only inboxes.
   @doc false
   @spec retire_superseded(module(), String.t(), term(), term(), map()) :: map()
   def retire_superseded(_forge, _repo, nil, _target_state, result), do: result
@@ -323,12 +236,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   def retire_superseded(_forge, _repo, n, :closed, result),
     do: Map.put(result, "supersedes", n)
 
-  # Target with NO live PR: the nominal path.
   def retire_superseded(forge, repo, n, :open, result), do: do_retire(forge, repo, n, nil, result)
 
-  # Target WITH a live PR: the PR is closed in the SAME gesture. The order binds here as it does for
-  # the edges — the PR first: while it lives, the pulls rail can judge and merge it, and that rail
-  # never reads the issue's state.
   def retire_superseded(forge, repo, n, {:open, pr}, result),
     do: do_retire(forge, repo, n, pr, result)
 
@@ -338,27 +247,15 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     comment =
       "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
 
-    # THE DEPENDENCY EDGES ARE CARRIED BEFORE THE CLOSE, AND THE ORDER IS BINDING.
-    # A Gitea dependency links two issue_ids; `supersedes` is NOT a forge primitive,
-    # it is an LCARS convention (comment + close). So the forge does not see a
-    # replacement: it sees one issue die and another appear, and the edges stay attached to the
-    # dead one. Both directions hurt, and the first one is silent:
-    #   * what the old ticket BLOCKED is released the instant it closes (a CLOSED blocker counts as
-    #     satisfied) — while the work has moved and is not delivered;
-    #   * what the old ticket DEPENDED ON vanishes: the replacement is born without its precondition.
-    # Measured (A blocks B, supersede A -> A': `B dependencies` still returns A, closed, and A'
-    # carries no edge at all).
-    # Closing first would release the blocked ones BEFORE the rewiring, and a dispatch can slip into
-    # that window. We write onto the replacement, THEN we close.
+    # Supersedes is an LCARS convention, not a forge graph operation. Copy what the old
+    # issue waits on and what waits on it before closure; otherwise dependents can be
+    # admitted in the gap or the replacement can lose its own prerequisites.
     with :ok <- IssuePR.close_live_pr(forge, repo, pr),
          :ok <- carry_dependencies(forge, repo, n, new_number),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
-         # `closure: :retired` — a supersede delivers NOTHING: the work moved onto the replacement
-         # (its edges were carried there just above). The ticket has to SAY it.
+         # Work moved to the replacement; retiring the old issue claims no delivery.
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # A superseded ticket is a DEAD ticket: its pods die with it (⚖ user —
-      # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
-      # Pilot, same rule and same shape as `:forge_client`.
+      # Request reaping after closure; callback failure does not undo forge effects.
       _ = pod_reaper().reap_issue(repo, n)
       Map.put(result, "supersedes", n)
     else
@@ -377,9 +274,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end
   end
 
-  # Channel identity supplies role and project binding; missing or unbound identity is refused.
-  # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a
-  # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
+  # Upward reaper seam: keep the module in an attribute rather than a forbidden remote Pilot call.
   @default_pod_reaper Fleet.Pilot.PodReaper
   defp pod_reaper, do: Application.get_env(:lcars_fleet, :mcp_pod_reaper, @default_pod_reaper)
 end
