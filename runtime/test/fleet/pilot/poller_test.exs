@@ -1,21 +1,11 @@
 defmodule Fleet.Pilot.PollerTest do
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: a describe here flips the GLOBAL `:lcars_fleet, :pilot_require_onboarded`, which
-  # every dispatch path reads. Async peers running in that window were refused with
-  # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
-  # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
-  # after the test, and wrong DURING it for everyone else.
+  # Serialized because this file changes global onboarding, lease and fixture settings.
+  # Restoring them after a test does not isolate readers during it.
 
   alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller
-
-  # Legacy rail (poll_once/4 → Routing → Dispatcher → RAM Executor) REMOVED (②.3 / BL-050). Its
-  # tests (`describe "poll_once/4"`, `StubForge`/`StubInvoker` stubs) left with it. Only step mode
-  # remains below (+ the GenServer lifecycle, shared).
-
-  # G6: workflow_map_loader that RAISES (map removed/renamed from the catalog) →
-  # load_workflow_map_or_nil rescues.
 
   import Fleet.Pilot.PollerBench
 
@@ -36,10 +26,8 @@ defmodule Fleet.Pilot.PollerTest do
     test "workflow_map load RAISES during classify → incident_fun called (lease held BUT visible)" do
       parent = self()
 
-      # Issue #42 routed BEYOND the 1st step ("deploy") → classify_issue loads the "ghostmap"
-      # workflow_map → the loader RAISES (map removed from the catalog). `start_entry_poller` =
-      # proven harness (discovery + repo admission OK); we inject the raising loader + a stub
-      # incident_fun.
+      # An advanced route requires a card lookup; inject a raising loader while
+      # keeping discovery/admission valid.
       {name, pid} =
         start_entry_poller(
           {:ok,
@@ -61,9 +49,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       Poller.force_poll(name)
 
-      # A missing map with the issue ENGAGED (lease held) would block the repo FOREVER with no
-      # signal. Instead: the load failure ESCALATES (IncidentRegistry dedup → note then sysadmin
-      # issue).
+      # Verify the incident callback; this stub does not prove a sysadmin issue was opened.
       assert_received {:incident, "workflow_map_load", "ghostmap",
                        {:workflow_map_load_failed, _msg}}
 
@@ -71,19 +57,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
   end
 
-  # task_queue stubs for the arch-offer tests: implement the 4 reads the poll tick does
-  # (reconciliation `list_active`/`pod_active_issue_id`/`pod_status` + my arch-offer
-  # `pod_status`/`enqueue`) → avoid touching the REAL broker in test. The arch's `pod_status` =
-  # the "free vs busy" lever.
-  #
-  # ⚠ ET `enqueue/2` ANNONCE SON APPEL. Ces doublures etaient MUETTES, donc les temoins ci-dessous
-  # ne pouvaient juger que le LOG : « le mandat a ete mis en file » etait prouve par la phrase qui
-  # le dit, pas par la mise en file. Mutation jouee le 2026-09-07 — sauter `enqueue_mandate` en
-  # gardant le log laissait le temoin FREE vert, et l'ajouter dans la branche BUSY laissait le
-  # temoin BUSY vert. Un stub qui se tait ne peut pas etre pris en flagrant delit.
-  #
-  # Le pid du test voyage par l'env applicatif (`:_test_arch_pid`), comme `:_test_web_pid` le fait
-  # deja : la doublure est appelee DANS le process du Poller, donc `self()` n'y est pas le test.
+  # Queue doubles report enqueue calls so assertions observe effects, not only logs.
+  # The test PID travels through global config because calls run inside the poller.
   defmodule ArchFreeTQ do
     def list_active, do: []
     def pod_active_issue_id(_pod_id), do: {:ok, nil}
@@ -124,9 +99,7 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "G4 — awaits_rekick?/3 (arch net cooldown)" do
-    # Design 2026-07-19: the net fires on the FIRST eligible tick (nil = never kicked) and
-    # then caps itself by a cooldown SINCE THE LAST SENT KICK — never a sampling grid (a grid
-    # made even a fresh escalation draw a 0-5 min latency lottery).
+    # The first eligible tick is immediate; cooldown follows the last successful net wake.
     test "issue waits AND never kicked (nil) → fire on the first tick" do
       assert Poller.awaits_rekick?(1, nil, 0)
       assert Poller.awaits_rekick?(3, nil, 999)
@@ -149,10 +122,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "PROD WIRING (spawner nil): the re-kick runs with the REAL default Fleet.Spawner" do
-      # False-green regression: in prod the :spawner seam is NOT injected (nil), and an old
-      # `when not is_nil(spawner)` guard made maybe_rekick_arch fall into a MUTE no-op → the
-      # anti-"awaits-arch issue stuck forever" rail NEVER ran. This test exercises the nil path
-      # (= prod) that the other setups (spawner: StepStubSpawner) do not cover.
+      # Exercise nil → production default; a nil guard would silently disable the net.
       issue =
         PayloadFixture.issue(
           number: 42,
@@ -161,8 +131,7 @@ defmodule Fleet.Pilot.PollerTest do
           assignee_logins: ["lordzurp"]
         )
 
-      # FREE arch (busy → deliberate silence since the offer-then-wake coupling): the wiring
-      # under test is the nil-spawner path, exercised on the path that still wakes.
+      # Use the free path so the test reaches wake, rather than deliberately skipping it.
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, spawner: nil, task_queue: ArchFreeTQ)
 
       # Cooldown semantics: the net fires on the FIRST tick (last_arch_rekick_at nil).
@@ -171,9 +140,8 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      # nil spawner → the re-kick uses the REAL Fleet.Spawner: wake_pod(arch) on an unspawned arch
-      # returns {:error, :not_found}, the tick does not crash, and ArchWake logs the UNREACHED
-      # warning. No signal left → NO cooldown is armed (arming one would delay the retry for nothing).
+      # The real spawner cannot wake this absent architect. Expect failure without
+      # a cooldown stamp, so subsequent eligible ticks can retry.
       assert log =~ "ArchWake: [net]"
       assert log =~ "UNREACHED"
       refute log =~ "cooldown"
@@ -181,19 +149,8 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    # Regression acte4 A-10 — the re-kick lived INSIDE the per-repo loop with a loop-invariant
-    # poll_count: R repos in awaits-arch = R wakes of the SAME arch (single pod) within the same
-    # throttle tick, + R lines each claiming "throttle". The hoist into do_poll (cross-repo union,
-    # decision ONCE) makes the trace honest. This case was NOT covered (the wiring test only
-    # exercises ONE repo → the multiplication was invisible).
-    # JG-067 — UN DEPOT QUI LEVE EMPORTAIT TOUS CEUX QUI LE SUIVAIENT. `safe_poll/2` capture bien,
-    # mais AU-DESSUS du fold des depots : les depots situes apres celui qui a leve n'etaient pas
-    # traites du tout pendant ce cycle. Et la cause est deterministe — le meme PR, le meme fichier,
-    # le meme conflit pathologique — donc elle se represente a chaque tick : un seul depot malade
-    # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
-    #
-    # Le filet descend d'un cran, par depot. Il ne remplace pas celui du dessus : une levee HORS du
-    # fold reste un echec de tick avec son `err_streak` et son repli.
+    # A raising repository must not prevent later repositories from being attempted.
+    # The escalation stub succeeds; failure of that handler is outside this case.
     defmodule RaisingForge do
       # Depot du milieu : il leve. Les deux autres se comportent normalement.
       def list_open_issues("fleet/repo-b", _opts), do: raise("conflit pathologique sur repo-b")
@@ -250,11 +207,8 @@ defmodule Fleet.Pilot.PollerTest do
           assignee_logins: ["lordzurp"]
         )
 
-      # `forge_opts` replaced wholesale (Keyword.merge): same stub issues + 2-repo discovery.
-      # The default spawner (StepStubSpawner.wake_pod → :ok) is kept — its wake REACHES, so the
-      # re-kick fires and arms the fleet-global cooldown, which is what caps the 10 polls below to
-      # ONE net line. (A nil/real spawner would fail wake_pod on the unspawned arch →
-      # :wake_unreached → no cooldown → the throttle under test would never engage.)
+      # Replace forge_opts with a two-repo fixture. Stub wakes return :ok so the
+      # fleet-wide cooldown engages; a real absent architect would not arm it.
       {name, pid} =
         start_entry_poller({:ok, [issue]}, %{},
           task_queue: ArchFreeTQ,
@@ -265,8 +219,7 @@ defmodule Fleet.Pilot.PollerTest do
           ]
         )
 
-      # 10 polls: the 1st fires (nil stamp), the cooldown blocks the other 9 → EXACTLY 1
-      # fleet-global net line (the per-repo regression would have produced 2 on the 1st tick).
+      # Count one aggregate net log; this does not assert one actual wake across two repos.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           for _ <- 1..10, do: Poller.force_poll(name)
@@ -284,9 +237,7 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    # Serialize-via-forge: the arch is a context-long/unique worker (like the eng) → the forge is
-    # its queue. If the arch is FREE, the poller ENQUEUES the arbitration mandate to it
-    # (get_work_item stops returning {done:true} — probe #4).
+    # A free architect receives an arbitration work item derived from the forge backlog.
     test "FREE arch + awaits-arch issue → the poller ENQUEUES an arbitration mandate to the arch" do
       issue =
         PayloadFixture.issue(
@@ -304,18 +255,14 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      # LE MANDAT EST MIS EN FILE, pas seulement annonce. Sauter `enqueue_mandate` en gardant le
-      # log laissait ce temoin vert (mutation jouee le 2026-09-07) : le log disait le geste, rien
-      # ne le mesurait.
+      # Observe the queue call as well as its log.
       assert_received {:arch_enqueue, _pod_id, _attrs}
       assert log =~ "mandate lordzurp/lcars-test#42 enqueued (arch was free)"
 
       GenServer.stop(pid)
     end
 
-    # NEW state (2026-07-19): a PENDING mandate (offered but never fetched — the immediate
-    # kick's wake was lost) → the net RE-WAKES without re-offering (re-enqueue would churn the
-    # pending item). Closes the lost-wake liveness hole: pending no longer silences the net.
+    # Pending work needs another wake without re-enqueueing the same mandate.
     test "PENDING arch mandate (never fetched) → re-wake ONLY, no new enqueue" do
       issue =
         PayloadFixture.issue(
@@ -333,8 +280,7 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
-      # « no new enqueue » se mesure sur la FILE, pas sur l'absence d'une phrase : une mise en file
-      # silencieuse aurait laisse les deux `refute` de log verts.
+      # A silent enqueue would evade log-only assertions; check the queue spy.
       refute_received {:arch_enqueue, _, _}
       assert log =~ "pending mandate never fetched → re-wake only"
       refute log =~ "enqueued (arch was free)"
@@ -342,10 +288,7 @@ defmodule Fleet.Pilot.PollerTest do
       GenServer.stop(pid)
     end
 
-    # Symmetric: the arch BUSY (an active work-item) serializes via the forge — NO new enqueue
-    # AND NO wake (a busy arch already knows its mandate; re-waking it every throttle tick was
-    # pure noise, observed live 2026-07-18). The backlog stays on the forge, re-offered + woken
-    # next tick once the arch submits and the label drains.
+    # Assigned work suppresses both enqueue and wake; the forge retains awaiting tickets.
     test "BUSY arch (active work-item) → NO enqueue, NO wake (it already knows its mandate)" do
       issue =
         PayloadFixture.issue(
@@ -363,14 +306,11 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..10, do: Poller.force_poll(name)
         end)
 
-      # « NO enqueue » est la moitie du nom, et elle n'etait tenue par rien : ajouter un
-      # `enqueue_mandate` dans la branche BUSY laissait ce temoin vert, les deux `refute` ne
-      # portant que sur des lignes de log que cette branche n'ecrit pas.
+      # Assert the absence of the queue effect, not merely a missing log.
       refute_received {:arch_enqueue, _, _}
 
-      # Bleed-proof (`capture_log` is GLOBAL — it catches a CONCURRENT test's ArchWake on ANOTHER repo):
-      # scope to an ArchWake line naming THIS test's repo (`lcars-test`), not the bare shared token. A real
-      # regression (this busy arch wrongly woken) logs `ArchWake … lcars-test`; another repo's net does not.
+      # Scope captured logs to this repository to avoid unrelated writers.
+      # The wake assertion remains log-based; enqueue has a direct spy.
       refute log =~ ~r/ArchWake.*lcars-test/
       refute log =~ "(fleet-wide) → net"
 
@@ -380,9 +320,8 @@ defmodule Fleet.Pilot.PollerTest do
 
   describe "GenServer init / lifecycle" do
     test "F-037: init WITHOUT :repo succeeds (topic discovery, no fixed repo required anymore)" do
-      # The poller no longer scans a hardcoded repo — it DISCOVERS its projects by topic. `:repo`
-      # is therefore no longer required; the `my_human` scoping is (via :human here, otherwise
-      # `Human.current!()`).
+      # Organisation discovery replaces a fixed repo. Human scope remains required;
+      # the historical test title still says topic discovery.
       name = :"P_no_repo_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -420,13 +359,8 @@ defmodule Fleet.Pilot.PollerTest do
   # STEP mode — assignee-driven (DN forge-state-machine)
   # ============================================================
 
-  # Forge stub for step mode: list (filter already applied on the real API side, here we return
-  # as-is) + the write-ops touched by StepDispatcher.dispatch_issue (add_label / post_comment).
-
   describe "architect keeper — `forever` has to be someone's job" do
-    # The arch was ensured on project-open and before an escalation wake, both EVENTS. A fleet
-    # restart between them left the project with no arbiter and nothing said so — and the human,
-    # who cannot be scheduled around, is exactly who finds an empty terminal in that window.
+    # Regular ticks check the registered architect between lifecycle events.
     test "a regular tick keeps the architect of a LIVE project" do
       issues = [PayloadFixture.issue(number: 7, body: "x", label_names: [], assignee_login: "l")]
       me = self()
@@ -437,11 +371,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "a PARKED project gets NO architect — a stopped fleet needs no arbiter" do
-      # And the site is chosen for it: here the marker has just been read in the listing this pass
-      # already made, so the fact costs nothing. Any earlier site would have to buy it with a call.
-      # Title built from the PROTOCOL's own prefix, never re-typed: a hand-copied marker still
-      # parks in this test the day the prefix moves, and the test would keep passing on a fleet
-      # that no longer parks at all.
+      # The parked marker is already in the listing. Use the protocol's constructor
+      # so fixture spelling follows production.
       parked = [
         PayloadFixture.issue(
           number: 1,
@@ -481,26 +412,19 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "admission — discovery is not admission" do
-    # The gate is OFF in the hermetic baseline (`config/test.exs`): the suite drives fictional
-    # repos that exist nowhere on disk. Here it is turned back ON, which is the only way this
-    # behaviour is pinned rather than assumed.
+    # Enable the gate disabled by the test baseline for fictional repositories.
     setup do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
       :ok
     end
 
-    # JG-059 — LE SUBSTRAT EST DECLARE PRESENT, et ce n'est pas une commodite de test. Ces cas
-    # pinent le garde PAR DEPOT (« ce projet-la n'est pas onboarde »), pas la disparition de la
-    # racine (« le sol a disparu, tous les depots sautent »). Les deux rendaient la meme phrase
-    # avant JG-059 ; les separer exige de dire lequel des deux on exerce. La racine `ops` est un
-    # LITTERAL de `Fleet.Layout` — un fait, une source — donc un test ne peut pas la deplacer et ne
-    # doit pas ecrire dans `/home` : le seam est la seule facon de le dire.
+    # Declare the root present to isolate a missing project from missing substrate.
+    # Do not provision the real layout just to exercise this branch.
     defp substrate_present, do: [substrate_present_fun: fn -> true end]
 
     test "a repo with no project directory is SKIPPED — and costs not one forge call" do
-      # The check is local and runs BEFORE the listing, so an unserved repo also stops paying two
-      # API calls per tick. Asserting the ABSENCE of the forge call is what pins the ORDER;
-      # asserting only "no spawn" would pass with the check placed anywhere downstream.
+      # Check that issue listing is absent as well as spawn: this distinguishes
+      # a pre-list guard from a later dispatch-only guard. Discovery still runs.
       issues = [
         PayloadFixture.issue(number: 7, body: "x", label_names: [], assignee_login: "lordzurp")
       ]
@@ -532,46 +456,16 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "the gate names the REAL ops path — the composition, not a stub of itself" do
-      # THIS TEST USED TO MKDIR INTO `/home/`. It created the project directory under the real
-      # `ops_root` so the positive case could go through, then removed it — on whatever machine ran
-      # `mix test`. Two things were wrong with that, and only the second is about tidiness.
-      #
-      # It was a GREEN WITH TWO DIFFERENT CAUSES. On a container the root exists because the entrypoint
-      # provisioned it; on a workstation it existed because that machine happened to have one from
-      # an older layout. The same line passed for reasons that have nothing to do with each other,
-      # and the day the layout was renamed it failed here for a reason that was not a defect — the
-      # parent simply is not creatable under `/home` without root. Which is how a rename lured a
-      # developer into provisioning the workstation to make a test pass.
-      #
-      # And the runtime NEVER runs on this machine. Nothing here serves a pod, so a test that needs
-      # the real filesystem to be a runtime's filesystem is not measuring the runtime — it is
-      # measuring the history of whoever's disk it landed on. That belongs on the bench.
-      #
-      # What stays here is the half that is genuinely hermetic: the gate's path is COMPOSED from
-      # the layout authority, not hardcoded and not stubbed. `Fleet.Layout` is a compile-time
-      # constant, so asserting the composition proves the same thing the mkdir was reaching for,
-      # without a single write outside the repo.
+      # Check layout composition without creating real runtime directories.
+      # This expression does not exercise Poller's positive filesystem admission.
       assert Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name("lordzurp/lcars-test")) ==
                Path.join(Fleet.Layout.ops_root(), "lcars-test")
 
       assert String.starts_with?(Fleet.Layout.ops_root(), "/home/projects")
     end
 
-    # JG-059 — « JAMAIS ONBOARDE » ET « LE SOL A DISPARU » RENDAIENT LA MEME PHRASE. Un projet absent
-    # sous une racine PRESENTE est un fait ordinaire, qu'un humain resoudra. La RACINE elle-meme
-    # absente — un montage tombe, une permission perdue — saute le rail d'etapes pour TOUS les
-    # depots : la flotte tourne a vide, les cycles se succedent, la telemetrie rapporte des comptes
-    # nuls, et rien ne distingue « aucun travail a faire » de « le substrat n'est plus la ».
-    # JG-060 — LE JUMEAU ETAIT EFFACE, CELUI-CI NON. `:parked_logged` est supprime des qu'un depot
-    # sort du parking ; `:not_onboarded_logged` ne l'etait NULLE PART. Une memoire d'affichage — « ne
-    # crie qu'une fois » — devenait donc une memoire DEFINITIVE : un depot qui repassait en « non
-    # onboarde » apres en etre sorti se taisait pour toute la vie du process, et la seconde
-    # disparition de son arborescence ne laissait aucune trace.
-    #
-    # Le scenario de la fiche est « disparaitre, reapparaitre, redisparaitre ». Il se joue ici sur
-    # `:pilot_require_onboarded` plutot que sur le systeme de fichiers : la racine est un litteral et
-    # un test n'ecrit pas dans `/home`. Le fait exerce est le meme — le depot sort du garde, puis y
-    # revient.
+    # Toggle the gate to exercise disappearance/recovery/disappearance logging
+    # without modifying the real ops tree. This tests display-state reset, not mounts.
     test "JG-060 : un depot qui repasse en « non onboarde » est journalise A NOUVEAU" do
       {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
 
@@ -636,11 +530,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "NOT ONBOARDED is the gate's own verdict, and it needs no filesystem to be proven" do
-      # The negative case carries the behaviour: the directory is absent (no test creates it any
-      # more), the gate refuses, and it says what to do about it. What is NOT covered here, and is
-      # named rather than left to be discovered: the POSITIVE case — an existing directory letting
-      # the repo through — is a runtime fact and is proven on the BENCH, where a project is really
-      # onboarded and the poller really dispatches.
+      # Covers a missing project only. Existing-directory admission requires a runtime
+      # fixture outside this test; no positive filesystem behavior is proved here.
       {name, pid} = start_step_poller({:ok, []}, {:ok, []}, substrate_present())
 
       log = ExUnit.CaptureLog.capture_log(fn -> Poller.force_poll(name) end)
@@ -665,10 +556,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       {name, pid} = start_step_poller({:ok, issues})
 
-      # #5.2 D2 — nil route → the poller ONBOARDS (records the default brief-gate workflow_map via
-      # the Loader) then DEFERS → skip (the next tick sees it routed → dispatch). The routed
-      # dispatch is tested in the "recorded route" describe + step_dispatcher_test. At the Poller
-      # level, the contract = the tally.
+      # Verify deferred routing via the tally; role spawning is tested separately.
       assert %{dispatched: 0, skipped: 1, errors: 0} = Poller.force_poll(name)
       refute_received {:spawned, _, _}
 
@@ -732,9 +620,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "D1 — the poller SCOPES the lists by assigned_by=my_human (forge-side, issues AND PRs)" do
-      # The multi-user scoping lives in the LISTING (forge-side): the poller passes ITS human to
-      # BOTH endpoints (/issues?type=issues AND ?type=pulls). decide/dispatch_review no longer
-      # re-verify ownership.
+      # Verify assigned_by on both listing calls. Stubs do not implement forge-side filtering.
       {name, pid} = start_step_poller({:ok, []}, {:ok, []})
 
       Poller.force_poll(name)
@@ -746,9 +632,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "F-037: per-repo LIST error → tally error BUT no backoff (err_streak 0, forge up)" do
-      # A repo that lists badly (500) does NOT backoff the whole fleet: the DISCOVERY succeeded
-      # (forge up), so err_streak/error_count stay at 0 (reserved for discovery failure). The
-      # per-item error lives in the TALLY (errors:1) + `last_tally_errors`.
+      # Per-repo list failures affect tally, not fleet backoff after successful discovery.
       {name, pid} = start_step_poller({:error, {:http, 500, "boom"}})
 
       assert %{dispatched: 0, skipped: 0, errors: 1} = Poller.force_poll(name)
@@ -758,9 +642,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "DECOUVERTE MULTI-ORG : une org illisible fait echouer le tick, jamais une liste partielle" do
-      # L'org est le nom du catalogue, il y en a une par catalogue actif, et le poller les balaie
-      # TOUTES. Une decouverte partielle ne se distingue pas de « pas de travail » pour les projets
-      # de l'org manquante : elle ne casse rien, elle rend muet. D'ou le refus net.
+      # An unreadable organisation makes discovery incomplete and fails the pass.
       defmodule DemiForge do
         def list_org_repos("bonne", _opts), do: {:ok, [%{"full_name" => "bonne/p"}]}
         def list_org_repos("cassee", _opts), do: {:error, :boom}
@@ -783,11 +665,8 @@ defmodule Fleet.Pilot.PollerTest do
       assert stats.orgs == ["bonne", "cassee"]
     end
 
-    # LE JUMEAU DU TEMOIN CI-DESSUS, et la difference EST le sujet. Une org illisible cache
-    # peut-etre des depots ; une org qui n'existe pas n'en porte aucun, donc la retirer ne rend rien
-    # muet — la raison du fail-closed ne s'applique pas au 404. Mesure du 2026-08-15 au banc :
-    # `enable web` sur une forge sans org `web` faisait tomber `fleet` AVEC lui (dispatch, filet
-    # arch et recheck des protections compris), puis le backoff saturait a 300 s pour toujours.
+    # HTTP 404 is treated as absent, so other organisations remain serviceable.
+    # This differs from an unreadable organisation that may conceal work.
     defmodule ForgeSansWeb do
       def list_org_repos("fleet", _opts), do: {:ok, ["fleet/p"]}
       def list_org_repos("web", _opts), do: {:error, {:http, 404, %{"message" => "GetOrgByName"}}}
@@ -816,9 +695,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       stats = Poller.stats(pid)
 
-      # `poll_count` est la preuve que le CORPS de la passe a tourne : la branche d'erreur ne
-      # l'incremente pas. Sans lui, `err_streak == 0` passerait au vert sur une passe qui n'a rien
-      # fait — l'assertion mesurerait son propre point de depart.
+      # Check that the pass advanced, rather than merely retaining an initial zero streak.
       assert stats.poll_count == 1, "la passe doit aller au bout malgre l'org absente"
       assert stats.err_streak == 0, "une org absente n'est pas un echec de tick"
       assert stats.error_count == 0
@@ -849,8 +726,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "F-037: DISCOVERY failure (list_org_repos) → backoff (err_streak + error_count +1)" do
-      # The forge is DOWN — the discovery itself fails. This is the ONLY case that backoffs
-      # (handle_poll_error).
+      # Discovery failure increments the streak; outer poll crashes do so too.
       name = :"P_discover_err_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
@@ -872,8 +748,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "F-037: multi-repo discovery → EACH repo scanned, tally aggregated over all" do
-      # Heart of the effort: 2 repos discovered → the poller scans BOTH, tally summed. Routeless
-      # assigned issue in each repo → onboarded then deferred (skip) ⇒ skipped:2 (1 per repo).
+      # Aggregate both discovered repositories' tallies.
       issue =
         PayloadFixture.issue(number: 1, body: "x", label_names: [], assignee_logins: ["lordzurp"])
 
@@ -901,10 +776,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "ROUTED issue (route-comment) + assignee → starts → dispatches the step's role (workflow_map_role)" do
-      # #8 coherence: the routing comes from the ROUTE-COMMENT (recorded by create_issue), no
-      # longer the label. #10 routed qa-build:build (1st step = queued), human-assigned, free
-      # lease → STARTS → the poller dispatches the current step's role (build → engineer via
-      # workflow_map_role).
+      # Seed qa-build/build through scoped labels; despite the historical title,
+      # this case does not use a route comment.
       issues = [
         PayloadFixture.issue(
           number: 10,
@@ -925,8 +798,7 @@ defmodule Fleet.Pilot.PollerTest do
           protection_reconciler: fn _repo, _opts -> :ok end,
           step_dispatch?: true,
           forge_client: StepStubForge,
-          # La route est PORTEE par les labels de l'issue (BL-6-40 Phase 2) — ce site construit ses
-          # opts en direct, donc il projette lui-meme au lieu de passer par le harnais.
+          # This direct setup projects route labels instead of using the shared harness.
           forge_opts: [
             _test_issues:
               {:ok,
@@ -961,11 +833,8 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "webhook kick — a hint arms no second tick chain" do
-    # `extra_opts` overrides the opts (Keyword.merge last): injects a seam (`wake_recovery`) or
-    # replaces a default (`workflow_map_loader`) without duplicating the harness.
-    # A forge whose DISCOVERY is slow — the seam that makes the tick take longer than its own
-    # interval. Everything else delegates to StepStubForge (generated, so this stays correct if the
-    # stub gains a function; a hand-written mirror would rot the day someone adds one).
+    # Slow discovery makes the poll longer than the nominal configured interval.
+    # Delegate other stub functions automatically to avoid an incomplete mirror.
     defmodule SlowForge do
       @slow_ms 60
 
@@ -984,21 +853,9 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "a webhook hint NEVER arms a second tick chain (R3 parallel-chain, BL-6-44)" do
-      # THE most expensive finding of its list by its proof: two generations of agents wrote the
-      # same falsehood about this file, and one assertion would have killed it.
-      #
-      # ⚠ The falsehood was "the ticks stack up", and the FIRST version of this test tried to pin
-      # its negation by asserting a small mailbox — which was itself hollow. Measured: with the
-      # fault deliberately introduced (`schedule/1` moved BEFORE `safe_poll`), it stayed GREEN.
-      # `Process.send_after` arms exactly ONE timer per handler pass, so the chain is single-in-
-      # flight whatever the order; the order only shifts the effective period by the poll duration.
-      # Nothing stacks, and no assertion on the tick order can show otherwise.
-      #
-      # What IS load-bearing, and what the code names two lines below the tick handler, is that a
-      # SECOND chain must never be armed: injecting `:poll` from the webhook path "would create a
-      # permanent PARALLEL CHAIN", which is why the hint uses a DEDICATED `:gitea_kick`. That is
-      # the real property, and it is falsifiable — a `:poll` there re-enters the recurring handler
-      # and the poller ticks forever from a hint.
+      # A webhook must not start a recurring tick chain. Timer-before-work versus
+      # timer-after-work changes cadence, but does not itself create another chain;
+      # mailbox size was therefore the wrong assertion.
       parent = self()
 
       {_name, pid} =
@@ -1020,14 +877,8 @@ defmodule Fleet.Pilot.PollerTest do
       # The debounced kick polls ONCE (1 s coalescence window + the slow poll).
       assert_receive :poll_started, 3_000
 
-      # And then nothing: the kick consumed no clock and started none. A `:poll` in place of
-      # `:gitea_kick` lands in the recurring handler and arms the chain, so a single webhook would
-      # make the poller tick forever.
-      #
-      # The window is 2.5 s and that number is not padding: `Backoff.jitter/1` clamps every delay to
-      # a 1 s FLOOR ("no accidental busy-poll on a small interval"), so `interval_ms: 30` really
-      # means ~1 s. A shorter window cannot see the fault — measured, the first version of this
-      # assertion used 500 ms and stayed GREEN with `:gitea_kick` deliberately replaced by `:poll`.
+      # Backoff clamps delays to at least one second even with interval_ms: 30.
+      # Wait beyond that floor to detect an accidental recurring chain.
       refute_receive :poll_started, 2_500
 
       GenServer.stop(pid)
@@ -1035,20 +886,15 @@ defmodule Fleet.Pilot.PollerTest do
   end
 
   describe "step mode — max_fan (serial IS this ceiling at 1)" do
-    # These tests describe SERIALIZATION, so they must now DECLARE it: the `:repo_serialized_lease`
-    # boolean they used to inherit is gone, and `max_fan` defaults to 5. Reading them at the default
-    # would be reading a serialization story on a fan-out fleet — five reddened here saying exactly
-    # that, which is the item working, not the item breaking.
+    # Set max_fan to 1 explicitly: the default fan-out does not serialize tickets.
     setup do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
       :ok
     end
 
     test "an ENGAGED pipeline (advanced route) holds the lease and blocks a QUEUED issue" do
-      # #8: the lease is read from the ROUTE (state-machine), no longer state:*. #11 routed
-      # qa-2:deploy (2nd step ≠ 1st = ADVANCED pipeline between two step_runs) → ENGAGED → holds
-      # the lease AND its current step is dispatched (continues the step_run). #12 routed
-      # qa-build:build (1st step = QUEUED) → lease held → waits.
+      # An advanced route holds a lease while continuing its current step;
+      # a queued first step must wait under max_fan 1.
       issues = [
         PayloadFixture.issue(
           number: 11,
@@ -1100,10 +946,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "a ticket in its JURY phase HOLDS the lease — a QUEUED one does not start beside it" do
-      # The hole this repairs, and it was open in SERIAL, not revealed by the fan-out: the lease
-      # counted only what it saw on its own rail (ENGAGED issues). A ticket that reached its jury
-      # leaves the issues side — it is dispatched through the pulls — so it held nothing, and a
-      # repo serialized to ONE workflow_run happily started a second.
+      # A ticket in jury still occupies a workflow-run lease even though the PR path
+      # now advances it. Otherwise serial admission could start a second ticket.
       issues = [
         # #21 is in its jury phase: an open fleet PR carries it. Skipped on the issues rail (the
         # pulls rail advances it), but it IS in flight.
@@ -1166,18 +1010,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "failed wake on the 1st issue TAKES the lease intra-tick → the 2nd does NOT start (a single pipeline)" do
-      # Regression: the canonical spawn order is lock → pod → enqueue → WAKE (wake LAST). So
-      # `{:error, {:wake_unreached, …}}` = pipeline STARTED (lock + pod + brief set), only the
-      # tmux wake failed. The pipeline MUST hold the repo-serialized lease. Two issues of the SAME
-      # repo QUEUED in the same tick; the 1st one's wake fails (FailingWakeRecovery). The 1st
-      # pipeline is started → lease TAKEN → the 2nd issue is SKIPPED (a single pipeline starts).
-      # The failed wake is NOT swallowed: it stays counted in `errors` (and feeds
-      # err_streak/telemetry).
-      #
-      # Proven regression: go back to the old `step_do_dispatch` (wake_unreached → errors WITHOUT
-      # taking the lease) + a `start_pipeline` that only takes the lease when `dispatched`
-      # increases → the lease stays free → the 2nd issue STARTS a 2nd pipeline → the tally becomes
-      # `skipped:0, errors:2` (two concurrent feature-branches), the `skipped:1` assert fails.
+      # Wake happens after lock, pod and enqueue. Failure still occupies the lease,
+      # so another queued issue cannot start. Count it as an item error, not backoff.
       issues = [
         PayloadFixture.issue(
           number: 16,
@@ -1200,31 +1034,18 @@ defmodule Fleet.Pilot.PollerTest do
           wake_recovery: &FailingWakeRecovery.wake/3
         )
 
-      # 1st issue: pipeline started but wake unreachable → errors:1, lease TAKEN. 2nd issue: lease
-      # held → skipped:1. A SINGLE pipeline starts. The failed wake is SURFACED (errors), not
-      # swallowed.
+      # One started-but-unwoken run plus one blocked entry gives one error and one skip.
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
-      # The failed wake is NOT swallowed: it surfaces in the per-item anomaly signal
-      # `last_tally_errors` (the streak/backoff is reserved for DISCOVERY failure in the
-      # multi-repo architecture — the forge is up here).
+      # Wake failure remains visible in last_tally_errors.
       assert %{last_tally_errors: 1} = Poller.stats(name)
 
       GenServer.stop(pid)
     end
 
     test "routed-advanced pipeline with NIL workflow_map holds the lease (a transient workflow_map failure does not release the lease)" do
-      # Regression: the lease is read from the ROUTE (append-only, robust), NEVER from the
-      # workflow_map load's success. #18 routed qa-2:deploy (2nd step ≠ 1st = ADVANCED pipeline =
-      # ENGAGED) but its workflow_map TRANSIENTLY fails to load (NilWorkflowMapForQa2Loader raises
-      # on qa-2). The pipeline stays ENGAGED (fail-closed) → holds the lease. #19 routed
-      # qa-build:build (1st step = QUEUED, qa-build workflow_map loads OK), same repo → lease held
-      # → SKIPPED. No 2nd pipeline starts despite the nil workflow_map.
-      #
-      # Proven regression: go back to `engaged = not is_nil(workflow_map) and not
-      # first_step?(...)` → #18's nil workflow_map classifies it `engaged=false` → it leaves the
-      # lease set → #19 sees the lease FREE → STARTS a 2nd pipeline → the tally becomes
-      # `dispatched:1` (instead of `dispatched:0, skipped:1`), the assert fails.
+      # A failed workflow lookup must not release an advanced route's lease.
+      # Otherwise the queued sibling could start alongside already-engaged work.
       issues = [
         PayloadFixture.issue(
           number: 18,
@@ -1247,44 +1068,26 @@ defmodule Fleet.Pilot.PollerTest do
           workflow_map_loader: NilWorkflowMapForQa2Loader
         )
 
-      # #18 engaged (nil workflow_map but advanced route → fail-closed) holds the lease: its step
-      # is dispatched but fail-loud (workflow_map missing on the StepDispatcher side → errors:1),
-      # the lease stays HELD. #19 → lease held → skipped:1. No 2nd pipeline started (dispatched:0).
+      # The advanced issue reports a dispatch error while retaining its lease;
+      # the queued sibling is skipped.
       assert %{dispatched: 0, skipped: 1, errors: 1} = Poller.force_poll(name)
 
       GenServer.stop(pid)
     end
 
-    # ❌ TEST SUPPRIME le 2026-08-03 (BL-6-40 Phase 2, `[R2]`) — et il faut savoir pourquoi, sinon
-    # quelqu'un le reecrira.
-    #
-    # Il epinglait le fail-CLOSED de `classify_issue` quand `get_route` rendait une ERREUR
-    # TRANSITOIRE : on garde le bail plutot que de risquer de perdre celui d'un workflow_run
-    # avance. C'etait un vrai canari, avec sa regression prouvee.
-    #
-    # La route se DERIVE desormais des labels que `list_open_issues` rend deja
-    # (`route_from_labels/1`, pure) : il n'y a plus d'appel reseau dans ce chemin, donc plus de
-    # panne transitoire a couvrir. La branche `{:error, _}` n'existe plus — pas « n'arrive plus » :
-    # `route_from_labels/1` ne rend que `{:ok, …}` ou `:none`.
-    #
-    # Le garder aurait produit un ECHEC (mesure : `dispatched:1` au lieu de `0`, l'issue #18 aux
-    # labels vides devenant QUEUED donc dispatchable), pas un faux vert. La propriete qu'il tenait
-    # n'est pas perdue : elle est devenue sans objet avec l'I/O qui la causait.
-    #
-    # Ce qui RESTE couvert, et qu'il ne faut pas confondre : le fail-closed sur workflow_map nil
-    # d'un cote (le test juste au-dessus), et le meme fail-closed pour les appelants de
-    # `get_route/3` — qui, eux, lisent encore le reseau.
+    # Route classification now reads listed labels without network I/O, so a
+    # transient get_route failure is outside this path. Workflow-load failure
+    # remains covered above; callers of network get_route need their own tests.
   end
 
   # ============================================================
   # PR-driven path: the judges are dispatched via the requested_reviewers.
   # ============================================================
   describe "step mode — PR-driven judge dispatch" do
-    # BL-6-48 pas 3, moitie PR — le `wait/*` vit sur l'ISSUE, et le chemin PR ne l'a pas en main.
-    # La map `issue → wait/*` est threadee depuis les issues deja listees, jumelle d'`awaits_arch_ids`.
+    # Forward the issue's wait label to the PR path without another read.
     test "chemin PR : une issue qui AWAITS-ARCH ne patiente plus — son wait/* est RETIRE" do
-      # Cas reellement atteignable, et semantiquement juste : `lcars-awaits-arch` porte deja
-      # l'attente. Laisser `wait/role` a cote serait deux verites pour un fait — et un etat perime.
+      # This fixture has wait/role but no awaits-arch label, despite the title.
+      # It checks the target of wait-label removal, not an awaits-arch transition.
       issues = [
         PayloadFixture.issue(
           number: 21,
@@ -1334,8 +1137,7 @@ defmodule Fleet.Pilot.PollerTest do
 
       Poller.force_poll(name)
 
-      # Son head ne parse pas en feature-branch → aucun numero d'issue → aucune ecriture. Etiqueter
-      # une PR etrangere reviendrait a ecrire sur le depot de quelqu'un d'autre.
+      # An unrecognized branch has no parent issue for wait-label writes.
       refute_received {:add_label, _, _}
       refute_received {:remove_label, _, _}
     end
@@ -1359,8 +1161,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "issue with an open fleet PR -> producer SKIPPED on the issue side (no re-spawn)" do
-      # #99 assigned engineer BUT its PR is open -> judge phase: the issue path SKIPS (otherwise
-      # re-spawn of the already-finished producer); the judge is dispatched by the pulls path.
+      # An open fleet PR keeps its issue off producer dispatch while its judge runs.
       issues = [
         PayloadFixture.issue(
           number: 99,
@@ -1389,10 +1190,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "PR without a requested judge -> ADOPTION (the system sets the judges → dispatched)" do
-      # empty requested_reviewers = PR not set up by the pipeline (human/fork, or an agent that
-      # lost its reviewers). Agent-agnostic gate → adoption: we SET the judges instead of
-      # skipping. Counted `dispatched` (return `{:ok, {:adopted, ...}}`); the judges spawn on the
-      # next tick.
+      # This fixture exercises adoption and its tally; it does not establish why
+      # the requested-reviewer list became empty.
       pulls = [
         %{
           "number" => 8,
@@ -1464,11 +1263,8 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "a live pod #8/repoB does NOT mask orphan #8/repoA (reclaimed) AND does NOT get #8/repoB reclaimed" do
-      # Illegal state before MA-02: the live repoB pod's (non-repo-qualified) ref `{:issue, 8}`
-      # "owned" the GLOBAL 8 → the repoA#8 orphan looked owned → NEVER reclaimed (wedge); and the
-      # 2-tick grace contaminated cross-repo. With the `{repo, :issue, 8}` key: repoA#8 is an
-      # orphan (no repoA pod), repoB#8 is owned (live repoB pod) → only repoA#8 is reclaimed after
-      # the grace.
+      # The same number in another repository must neither mask an orphan nor
+      # authorize reclaiming its live neighbor. Preserve repository-qualified keys.
       issue8 = fn ->
         PayloadFixture.issue(number: 8, body: "x", label_names: ["lcars-in-flight"])
       end
@@ -1498,8 +1294,7 @@ defmodule Fleet.Pilot.PollerTest do
           task_queue: ActiveTaskQueue2
         )
 
-      # 1st tick: repoA#8 AND repoB#8 become suspects (grace) — repoB#8 will be filtered (live
-      # pod) but is reclaimed NEITHER at the 1st NOR the 2nd tick. Nothing reclaimed at the 1st.
+      # First observation seeds grace; no lock should be removed yet.
       Poller.force_poll(name)
       refute_received {:remove_label, _, 8, _}
 
@@ -1518,10 +1313,7 @@ defmodule Fleet.Pilot.PollerTest do
 
   describe "MA-01 (bug B) — poller threads awaits_arch_ids to the pulls" do
     test "issue 42 awaits-arch + PR head lcars/issue-42-engineer with reviewer -> judge NOT dispatched (skip)" do
-      # Without the fix: the escalation sets `lcars-awaits-arch` on ISSUE 42, but `dispatch_review`
-      # only reads the PR's labels → the requested reviewer re-spawns the judge EVERY tick (churn).
-      # With the fix: the poller computes the awaits-arch SET (issue 42, already listed → zero I/O)
-      # and threads it to the pulls → dispatch_review skips → the judge is NOT dispatched.
+      # Issue awaits-arch must reach PR dispatch even when the PR's own labels lack it.
       issues = [
         PayloadFixture.issue(
           number: 42,
@@ -1565,9 +1357,7 @@ defmodule Fleet.Pilot.PollerTest do
       Poller.force_poll(name)
       Poller.force_poll(name)
 
-      # First tick reconciles (boot-time reconciliation IS the feature); the second tick is
-      # inside the period → throttled, no second pass. The old runtime had NO pass at all —
-      # the rule projected at onboarding was never compared to the current jury again.
+      # The second immediate tick must not repeat a successful protection check.
       assert_received {:protection_reconciled, repo}
       refute_received {:protection_reconciled, ^repo}
 
@@ -1651,14 +1441,8 @@ defmodule Fleet.Pilot.PollerTest do
           loader: fn -> %{} end
         )
 
-      # No `Process.alive?` probe: this poller is LINKED to the test process, so by the time
-      # `on_exit` runs — in another process, after the test process died — it is already gone and
-      # the probe answers `false`, making the whole teardown a no-op. When the death is still in
-      # flight the probe answers `true` instead and `GenServer.stop` exits `:noproc` IN the
-      # teardown, which marks a PASSED test FAILED (measured 2026-09-07: red in the full suite on
-      # a loaded machine, green alone, same toolchain — an original flake, not a bump regression).
-      # Same race as in `pool_slot_test.exs`. Nothing is bookkept here, so we do not probe: we
-      # stop, and we tolerate a subject that has already left.
+      # The linked poller may already be gone when on_exit runs. Stop directly and
+      # tolerate exits; an alive? check would leave a check/stop race.
       on_exit(fn ->
         try do
           GenServer.stop(pid)
