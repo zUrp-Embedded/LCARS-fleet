@@ -8,11 +8,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation.ConflictLadderT
   describe "tier0_decision (pure routing)" do
     test "all-semantic -> :chief — the producer is skipped ON EVIDENCE, the chief is not" do
       totals = %{trivial: 0, complex: 2, total: 2, all_trivial?: false, none_trivial?: true}
-      # It used to answer `:escalate` and hand the case straight to the arch, jumping tiers 2 AND
-      # 3 to immobilize a human. Skipping the PRODUCER is the point of the deterministic
-      # pre-filter — the engine has just proven there is nothing shallow to fix, so a producer
-      # round would burn a full run to rediscover it. Skipping the CHIEF was not: composing two
-      # intentions that both passed their jury, on a branch the outsider did not write, IS its case.
+
+      # The pure router skips the producer but preserves the outsider stage; no dispatch is exercised.
       assert ConflictLadder.tier0_decision(diag(totals)) == :chief
     end
 
@@ -31,11 +28,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation.ConflictLadderT
     end
 
     test "all-trivial but NOT all-writable -> :fall_through, not :apply" do
-      # The distinction the write gate exists for: whitespace-only / reorder-only / competing
-      # insertions are SHALLOW (a producer fixes them in one round) but not machine-writable, because
-      # writing them needs a format assumption this engine refuses to make. Routing them to :apply
-      # would spend a throwaway worktree and a merge to discover the engine declines — an outcome
-      # known before the step runs. The producer HAS the context; it gets the round.
+      # Trivial classification alone does not authorize machine writes; this tests only routing.
       totals = %{
         trivial: 2,
         complex: 0,

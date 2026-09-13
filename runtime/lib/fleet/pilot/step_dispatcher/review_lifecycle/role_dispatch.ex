@@ -1,69 +1,39 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   @moduledoc """
-  EXECUTION leaf of the review flow (`ReviewLifecycle`): prepares and spawns
-  ONE role on a PR — judge (`:judge`) or producer in rework (`:rework`).
+  Shared execution for PR judges, producer rework and outsider conflict resolution.
+  Keeping spawn mechanics here avoids a routing/remediation dependency cycle.
 
-  ## Why this cut (and not one per declared cluster)
+  Pods start from the producer's feature branch. Rework identity follows the profile's
+  slot scope; judges use PR identity. Scope guards also apply to long-lived instance
+  pods. The forge lock targets the PR, while labels and queued work identify the parent issue.
 
-  The three clusters of `ReviewLifecycle` (routing / rework-conflict / promotion)
-  ALL converge on the same PR-role spawn mechanics: splitting routing↔rework into
-  two modules would create a cycle (rework calls back the producer spawn). By
-  extracting the shared LEAF, the graph becomes a strict DAG:
-  routing → remediation → HERE → `Spawn` (global leaf). The decision stays upstream,
-  this module EXECUTES (read-only resolutions then spawn, never a policy choice).
-
-  ## Invariants carried here
-
-    * **clone-base = the FEATURE-BRANCH**: the review/rework pod clones `base_branch: head`
-      (the judge must see the DIFF, the rework resumes ITS work) — never `main`.
-    * **resolutions BEFORE any forge write** (project + route read-only): a failure
-      never leaves an orphan lock.
-    * **pod identity by scope**: rework = the PRODUCER (`slot_scope` project → `for_repo`,
-      SAME identity as the issue flow; instance → `for_issue`); the JUDGE keys on the PR
-      (`for_pr`, fan-out by review).
-    * **serialization gate**: a busy project-scoped producer → `{:skipped,
-      :role_busy}` (retry on the next tick), never re-brief-while-busy.
-
-  Receives the review flow's `%Ctx{}` (built at the single site
-  `StepDispatcher.dispatch_review/2`) and re-builds `Spawn.Seams` at the call site of
-  the global leaf (narrow boundary preserved).
+  Resolution precedes the spawn lock, but role failures may record incidents and
+  reprovisioning/base refresh precede brief construction. These steps are not a transaction.
   """
 
   require Logger
 
-  # Authority over the brief FORMAT (worker/judge/rework/conflict): the caller CHOOSES the `kind`,
-  # BriefBuilder SHAPES the brief.
   alias Fleet.Pilot.BriefBuilder
 
-  # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
   alias Fleet.Opts
 
-  # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation); its naming
-  # helpers (maybe_put_route / resolve_repo_id) are shared with the issue flow.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
   @typedoc """
-  Nature of the PR dispatch. `:conflict_rework` and `:conflict_rework_exception` share the SAME
-  mechanics (clone the feature branch, resolve, system pushes, jury re-judges) and differ ONLY in
-  the brief's voice — the producer resumes ITS OWN approved work, the exception pass arrives on
-  someone else's. A single kind for both makes that pass read a brief saying "ton brief est
-  INCHANGÉ" about a brief it never had.
-
-  `_exception` and not `_gatekeeper`: the distinction this kind carries is OWNER vs OUTSIDER, and it
-  survives the role moving between capability holders. Naming it after whoever happens to hold the
-  `conflict_resolver` capability is what makes it look removable — and removing it re-merges two
-  voices that differ for a reason having nothing to do with the role.
+  PR dispatch intent. Conflict kinds share mechanics but select owner vs outsider brief
+  voices. Keep that distinction independent of the role holding the conflict-resolver
+  capability: the outsider has no original producer brief to resume.
   """
   @type kind :: :judge | :rework | :conflict_rework | :conflict_rework_exception
 
   @doc """
-  Prepares and spawns the `role` role on PR `pr_number` (head = the producer's
-  feature-branch). Resolves the brick (`parse_feature_branch_or_skip/1`) + the cap-profile,
-  then executes. `{:skipped, _}` (non-fleet branch / unknown role / role_busy) bubbles
-  up to the poller (retry on the next tick); `{:error, {phase, _}}` = resolution failed
-  (no forge write laid).
+  Resolves the fleet branch and capability profile, prepares the project and dispatches the role.
+
+  Returns skips or phase-tagged errors from supported paths. A conflict refresh returning
+  `{:skipped, :stale_base_unrefreshed}` is not covered by the execution `with`'s
+  `else` clauses and raises; this function does not normalize all dependency failures.
   """
   @spec dispatch(kind(), integer(), String.t(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
@@ -92,13 +62,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # An EMPTY role is a step with no judge — a legitimate, frequent configuration. It stays silent:
-  # saying it every tick would train an operator to skip the very line the clause below emits.
+  # Empty means no judge configured; resolution failures below additionally record an incident.
   defp load_role_or_skip(%Ctx{}, ""), do: {:skipped, :no_role}
 
   defp load_role_or_skip(%Ctx{} = ctx, role) do
-    # `resolve` (not bare `load`): composes the role's modops so the structural overlay is applied
-    # on the review/rework pod like every other launch site (catalogue L1a — no divergence).
+    # Compose role modops with resolve's defaults; no repository catalogue root is forwarded here.
     case Fleet.CapProfile.resolve(ctx.loader, role) do
       {:ok, _} = ok ->
         ok
@@ -109,20 +77,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # A jury role that does not RESOLVE is a durable config defect, never a transient: the same card is
-  # re-read on every tick, so the same skip repeats forever while the PR keeps displaying "judge at
-  # work". Returning a bare `{:skipped, :no_role}` makes a TYPO in a card indistinguishable from a
-  # step that legitimately has no judge — and because the second case is ordinary, nobody goes
-  # looking. One missing letter freezes a brick, in silence, indefinitely.
-  #
-  # It goes on the INCIDENT rail rather than through a bare Logger, and that choice is load-bearing:
-  # a warning every 30 s per PR drowns the very trace it exists to raise, whereas the registry notes
-  # the first occurrence and ESCALATES the recurrence into a sysadmin issue under its own cooldown.
-  # A durable config error is precisely the shape that rail was built for.
-  #
-  # The subject is the ROLE, not the PR: one typo seen on ten PRs is ONE incident. Keying on the PR
-  # would open ten issues for one missing line in one card — the self-amplification the registry's
-  # own moduledoc warns about.
+  # Key incidents on the role, not the PR, so one resolution defect across PRs aggregates.
+  # Keep the repository in the detail. A returned load error alone does not prove permanence.
   defp note_unresolvable_role(%Ctx{} = ctx, role, reason) do
     incident =
       Keyword.get(ctx.opts, :incident_fun, &Fleet.Pilot.IncidentRegistry.record_or_escalate/4)
@@ -133,9 +89,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
           reason_detail: "#{ctx.repo}: #{inspect(reason)}"
         )
       catch
-        # An incident that cannot be recorded must never break the dispatch (never-stall). The skip
-        # itself stays correct — only its trace is lost, and that loss is said out loud rather than
-        # swallowed a second time.
+        # Exceptions, throws and exits only warn; returned incident errors are ignored.
         kind, why ->
           Logger.warning(
             "StepDispatcher: incident rail unavailable for unresolvable role #{inspect(role)} " <>
@@ -147,25 +101,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   end
 
   defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, %Ctx{} = ctx) do
-    # Spawner/task_queue are not read here directly: they transit via `ctx` to `spawn_step`.
     %Ctx{repo: repo, forge: forge, forge_opts: forge_opts, opts: opts} = ctx
 
-    # The review pod (judge) OR rework pod (producer) clones the FEATURE-BRANCH (`head.ref`), NOT
-    # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
-    # the rework resumes ITS own work. Read-only on the code via the workspace provisioned by the
-    # system (the pod has no forge token). `base_branch: head` → the pod CLONES and starts from the
-    # feature-branch tip. (Merge conflicts: `:conflict_rework` — the PRODUCER resolves locally,
-    # bounded, cf. `Remediation.conflict_rework`; the arch only receives the exhausted case.)
+    # Use the feature branch for both judging the diff and resuming work; this is a branch
+    # reference, not a snapshot shared atomically with later forge reads.
     review_opts = Keyword.put(opts, :base_branch, head)
 
     with {:ok, %{route: route, pod_id: pod_id, decision: decision, project: project}} <-
            prepare_dispatch(kind, pr_number, issue_n, role, profile, ctx, review_opts),
          :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work"),
-         # A0.5 — conflict kinds only: the base MOVED (that is what a conflict is), and a live
-         # re-briefed-in-place pod keeps everything from its last provisioning, its stale
-         # `refs/lcars/base` included. Non-conflict kinds keep today's path byte-for-byte.
+         # A pod rebriefed in place may retain a stale lcars/base ref; conflict kinds refresh it.
          :ok <- maybe_refresh_conflict_base(kind, decision, ctx.spawner, pod_id, project) do
-      # :judge -> GateBrief defused; :rework -> brief to the PRODUCER (fix + push).
       case review_brief(kind, ctx, profile, role, issue_n, route, pr_number, review_opts) do
         {:ok, brief, brief_kind, mandate} ->
           project_slug = Fleet.Layout.project_slug(repo)
@@ -175,25 +121,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
               brief: brief,
               brief_kind: brief_kind,
               pod_id: pod_id,
-              # The PAIR, built together (cf. `Fleet.Layout.pod_label/3`). The label carries the
-              # ISSUE number even on a PR-driven dispatch: the human tracks a ticket, not a PR.
+              # Human labels follow the parent issue even when the dispatch is driven by a PR.
               rc_name: Fleet.Layout.pod_label(project_slug, role, issue_n),
               project_slug: project_slug
             ]
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
-            # THE PR-DRIVEN JUDGE GETS ITS MANDATE MOUNT TOO: the judge's order references its
-            # mounted criterion (`~/issues/criteria.md`), so the spawner MUST materialize it, and
-            # dropping it here leaves the order pointing at a file the pod does not have.
-            # `build_brief` surfaces it — same resolution that rendered the brief, same name the
-            # order points at.
+            # Carry the mandate from the same build that generated its mounted path in the brief.
             |> Opts.maybe_put(:mandate, mandate)
 
-          # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).
-          # Lock keyed on the PR (pr_number); issue_id + enqueue keyed on the ISSUE (issue_n — the
-          # pipeline-state stays there). We build the seams struct at this site from `ctx` (the 6
-          # seams, not the whole `ctx` — hardened boundary).
+          # Lock on the PR; queue against the parent issue where pipeline state lives.
           log_ctx = "review pr=#{repo}##{pr_number} issue=##{issue_n}"
 
           Spawn.spawn_step(
@@ -211,19 +149,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
               profile: profile,
               brief: brief,
               spawn_opts: spawn_opts,
-              # ⚠ RAIL DE REVUE : on VERROUILLE LA PR et on ENFILE SUR L'ISSUE. Les deux etaient
-              # des entiers voisins en position ; nommes, l'inversion ne se compile plus.
               lock_target: pr_number,
               issue_number: issue_n,
               log_ctx: log_ctx
             }
           )
 
-        # The DELIVERABLE-judge's criterion (issue body) could not be READ from the forge
-        # (transient/unreachable). We REFUSE to spawn a criterion-less judge (the diff without a
-        # criterion → blind approval = false GREEN) → we DEFER; the lock lives in `BriefBuilder`.
-        # The judge is instance-scoped (the scope gate returned `:proceed` WITHOUT taking a lock)
-        # → nothing to release; the poller re-dispatches on the next tick (read-error ≠ absence).
+        # An unreadable deliverable criterion skips before the spawn lock; reprovisioning may
+        # already have happened. This does not prove that all earlier work was read-only.
         {:error, {:criterion_unavailable, reason}} ->
           Logger.warning(
             "StepDispatcher: judge criterion unavailable role=#{role} pr=#{repo}##{pr_number} → " <>
@@ -245,21 +178,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # THE READ-ONLY PRE-LOCK PHASE, a function so that « every resolution BEFORE any forge write »
-  # is a frontier and not an order of clauses an addition can break. CHEAP GATES FIRST (SAME
-  # rule/order as dispatch_issue, lockstep): route (light forge GET on the issue) → pod identity →
-  # LOCAL scope gate → project resolver (the heavy network call, 1-2× ls-remote) on the passing
-  # path only. Nothing here writes; the forge LOCK comes after, in `spawn_step`.
-  # No captures — Spawn.route_for/Opts.tag_err taken at the source (shared with the issue flow).
+  # Read route, derive identity, check scope, then resolve the project on the passing path.
+  # The spawn lock is acquired later.
   defp prepare_dispatch(kind, pr_number, issue_n, role, profile, %Ctx{} = ctx, review_opts) do
     %Ctx{repo: repo, forge: forge, resolver: resolver, forge_opts: forge_opts} = ctx
 
     with {:ok, route} <-
            Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution),
-         # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
-         # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
-         # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
-         # changing the pod identity loses no context.
+         # Rework preserves the producer's scope-based identity; judges fan out by PR.
          pod_id =
            (case kind do
               k when k in [:rework, :conflict_rework, :conflict_rework_exception] ->
@@ -268,10 +194,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
               _ ->
                 Fleet.PodId.for_pr(repo, pr_number, role)
             end),
-         # Scope DECISION (SAME rule as dispatch_issue): a project-scoped producer already alive
-         # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
-         # instance rework → `:proceed` (never gated). `{:skipped, :role_busy}` bubbles up to the
-         # poller (which handles `{:skipped, _}` → retry on the next tick).
+         # Long-lived scopes consult readiness before reuse; instance scope is not a blanket bypass.
          decision =
            Spawn.project_scope_decision(
              Fleet.CapProfile.lifetime_scope(profile),
@@ -281,10 +204,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
            ),
          :ok <- Spawn.gate_scope_decision(decision),
          {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution) do
-      # The PR's own base rides the project map to `pod.completed` (face-projet): a
-      # review/rework pod clones the FEATURE branch, so its `base_branch` cannot say which face
-      # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
-      # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).
+      # Completion needs the target face separately from the cloned feature branch.
       {:ok,
        %{
          route: route,
@@ -295,18 +215,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # Brief of a PR dispatch: :judge -> GateBrief defused (via build_brief, the pod
-  # judges the issue); :rework -> rework brief to the PRODUCER (fixes per the review, re-pushes).
-  # PR-judge path — no workflow_map step here (PR-driven judges) → `step_spec = %{}`:
-  # build_brief falls back to the profile's `brief_kind` (judge for qualifier/reviewer) AND to the
-  # default `judge_target` (deliverable) → build_judge_brief (judges the deliverable/PR).
-  # `{:ok, brief, kind} | {:error, {:criterion_unavailable, _}}` — the error is reachable ONLY on the
-  # deliverable-judge path (a forge read-error on the criterion DEFERS, never a criterion-less
-  # judge). rework builds unconditionally (feedback in hand) → always `{:ok, _, "worker"}` (a rework
-  # brief is EXECUTABLE, addressed to the producer — it lands under `briefs/`, not `gate-briefs/`).
-  # Stamps the PR base (set by `dispatch_review`, threaded in opts) into the project map — the
-  # vehicle `CompletedPayload` already reads. `nil` project (resolver skip: no forge) stays nil:
-  # a pod with no project emits a bare payload, nothing downstream reads a face from it.
+  # Carry a nonempty PR target base into CompletedPayload; a nil project stays nil.
   defp stamp_pr_base(nil, _opts), do: nil
 
   defp stamp_pr_base(project, opts) when is_map(project) do
@@ -316,10 +225,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     end
   end
 
-  # `review_opts` reaches the JUDGE clause alone, and it carries exactly one thing the builder
-  # cannot read for itself: the CI fact the GATE has already measured (`CiGate`). Re-reading it in
-  # the builder would create a SECOND truth — two forge calls, two shas, two possible answers on
-  # one dispatch. The gate decides, the brief quotes it.
+  # With no step override, the profile selects brief_kind and judge_target defaults.
+  # Forward options including measured CI facts, gray-zone data and the builder's ops root.
   defp review_brief(:judge, %Ctx{} = ctx, profile, role, issue_n, route, _pr, opts),
     do:
       BriefBuilder.build_brief(
@@ -338,9 +245,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
       {:ok, BriefBuilder.rework_brief(role, ctx.forge, ctx.repo, pr, ctx.forge_opts, route),
        "worker", nil}
 
-  # Conflict-rework (tier 1 — Remediation.conflict_rework): the SAME producer rework, with the
-  # merge-conflict section leading the brief instead of judge feedback (there is none: the jury
-  # APPROVED — main simply moved under the branch).
+  # Producer voice resumes its own work; the PR's actual target base is required.
   defp review_brief(:conflict_rework, %Ctx{} = ctx, _profile, role, _issue_n, route, pr, opts),
     do:
       {:ok,
@@ -349,8 +254,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
          base_branch: Keyword.fetch!(opts, :pr_base_branch)
        ), "worker", nil}
 
-  # Conflict-rework EXCEPTION pass (tier 2 — Remediation.dispatch_exception_rework): same dispatch,
-  # outsider voice. It is not resuming its own work and has no brief of its own to preserve.
+  # Outsider voice must not imply ownership of the producer's original brief.
   defp review_brief(
          :conflict_rework_exception,
          %Ctx{} = ctx,

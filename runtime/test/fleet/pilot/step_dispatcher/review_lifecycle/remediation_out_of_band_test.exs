@@ -1,10 +1,7 @@
 defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationOutOfBandTest do
   @moduledoc """
-  The `:merged` classification of a merge failure is no longer a bare no-op: an
-  out-of-band merged PR engraves its terminal guards (stage/merged + explicit close) so
-  the reconciliation can never reclaim and re-dispatch an already-merged brick. The
-  gatekeeper seal comment is NOT posted — this path did not merge; claiming the
-  ceremony would be an attribution lie.
+  An already-merged PR requests terminal stage/close without claiming a gatekeeper seal.
+  Covers successful calls and a persistent close error, not durable reconciliation behavior.
   """
   use ExUnit.Case, async: true
 

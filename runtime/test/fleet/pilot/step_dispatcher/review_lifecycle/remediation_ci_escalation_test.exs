@@ -4,10 +4,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationCiEscalationTest
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation
 
-  # 2026-09-05 — `escalate_ci/5` handed the literal `:ci` to `ArchEscalation` instead of the gate's
-  # class: `{:ci_stalled, :unclaimed}` (the one that names the runner label), `{:ci_impossible,
-  # :no_workflow}` and `:ci_red_loop` all reached the architect as « échec de merge non classifié ».
-  # The clause per class existed; only one door used it. This pins the OTHER door.
+  # Preserve the CI failure class through the remediation entry point into escalation prose.
+  # These assertions check class wording, not the runner label named by the test title.
   defmodule CaptureForge do
     def post_comment(_repo, n, body, _opts) do
       send(self(), {:escalation_body, n, body})

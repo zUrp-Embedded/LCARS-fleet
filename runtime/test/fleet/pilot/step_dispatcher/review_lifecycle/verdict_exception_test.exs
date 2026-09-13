@@ -26,8 +26,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
 
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
 
-    # Le dispatch réel du juge va plus loin que ce que ce test épingle ; ces deux-là suffisent à
-    # l'y laisser aller sans exploser avant d'avoir posé le marqueur, qui est l'objet du test.
+    # Enough forge methods to reach marker publication; later judge execution is not proved.
     def get_route(_repo, _n, _opts), do: :none
     def get_pull(_repo, _n, _opts), do: {:ok, %{"number" => 7}}
   end
@@ -52,22 +51,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
 
   describe "le drapeau — une passe non armée s'annonce comme telle" do
     test "le DÉFAUT est désormais ARMÉ — la condition de bascule est remplie" do
-      # Ce test était l'inverse jusqu'au 2026-08-19, et son retournement est le fait qu'il épingle :
-      # `pilot_verdict_exception_pass?` valait `false` en attendant qu'une zone grise soit arbitrée
-      # de bout en bout sur un vrai projet. PR71/72 l'a fait. Le drapeau ne disparaît pas pour
-      # autant (un exploitant doit pouvoir désarmer un barreau qui convoque un pod), mais un
-      # déploiement neuf convoque maintenant au lieu d'escalader.
-      #
-      # On épingle le DÉFAUT DE CONFIG, pas le dispatch : la descente réelle traverse tout le
-      # constructeur de brief, et c'est déjà couvert plus bas.
+      # Only checks that the loaded config value is not false (nil also passes).
+      # This neither proves dispatch nor tests the code-level default.
       refute Application.get_env(:lcars_fleet, :pilot_verdict_exception_pass?) == false,
              "le défaut est repassé à OFF — si c'est voulu, la condition écrite dans config.exs " <>
                "doit être réécrite avec"
     end
 
     test "OFF (explicite) : aucune convocation, escalade qui NOMME le barreau non armé" do
-      # La distinction que l'arch doit pouvoir faire en lisant le gel : « la passe a échoué » et
-      # « la passe n'existe pas sur ce conteneur » demandent deux gestes différents de sa part.
+      # Disabled and failed passes need distinct escalation messages.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, false)
 
       assert {:skipped, {:merge_blocked_escalated, 7}} =
@@ -76,34 +68,16 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
       refute_received {:comment, _, _, "[verdict-gatekeeper:pr-7:round-1]"}
       assert_received {:label, "lcars-awaits-arch"}
 
-      # Le motif traverse jusqu'au texte que l'humain lira : « non armée », pas « échec de merge ».
       assert_received {:comment, 4, body, "[merge-blocked-escalation:pr-7]"}
       assert body =~ "n'est PAS armée"
     end
 
-    # Le nom ne promet plus un ordre que ce témoin ne mesure pas : le paragraphe ci-dessous explique
-    # pourquoi l'ordre n'a pas besoin d'un test (dépendance de données, pas séquence), et ce que
-    # celui-ci épingle réellement. Un nom qui promet plus que le corps est la moitié du défaut ;
-    # l'autre moitié était le corps, et elle était déjà traitée.
     test "ON : le marqueur de budget porte la bonne signature, le bon seuil, et dit que PERSONNE ne s'oppose" do
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, true)
 
-      # ⚠ CE TEST N'ÉPINGLE PAS L'ORDRE, et son commentaire le prétendait (revue 2026-08-19). Il
-      # observe qu'un marqueur est dans la boîte à la fin — inverser `post_comment` et le dispatch
-      # le laisserait vert.
-      #
-      # L'ordre n'a pas besoin d'un test parce qu'il n'est pas une séquence d'instructions : le
-      # dispatch vit DANS la branche `{:ok, _}` du post (`summon/5`). Pas de marqueur, pas
-      # d'appelant — c'est une dépendance de données, qu'aucune permutation ne contourne. Et sa
-      # CONSÉQUENCE est mesurée par « marqueur NON posté » plus bas : un post en échec rend
-      # `{:skipped, {:verdict_marker_unposted, _}}`, ce qu'une inversion ferait immédiatement
-      # tomber. Ce test-ci prouve autre chose, et c'est utile aussi : le marqueur porte la bonne
-      # signature, le bon seuil, et dit que PERSONNE ne s'oppose.
-      #
-      # Le dispatch réel descend ensuite dans tout le constructeur de brief (couture forge complète,
-      # catalogue de rôles, worktrees) : le laisser échouer là est DÉLIBÉRÉ. Stubber cette descente
-      # ferait de ce fichier une seconde implémentation de la forge, dont la dérive serait
-      # silencieuse — et l'ordre qu'on mesure est déjà tranché avant elle.
+      # Checks marker signature/content after the call; selective receive does not prove ordering.
+      # Downstream exceptions are deliberately rescued, so successful judge dispatch is unproved.
+      # The failed-post case below checks the return, without a separate dispatch spy.
       try do
         VerdictException.dispatch(7, "lcars/issue-4-engineer", findings(), policy(), ctx())
       rescue
@@ -135,7 +109,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
 
       refute_received {:comment, _, _, "[verdict-gatekeeper:pr-7:round-1]"}
 
-      # L'escalade, elle, PARLE — et elle dit lequel des trois chemins a mené là.
       assert_received {:comment, 4, body, "[merge-blocked-escalation:pr-7]"}
       assert body =~ "déjà été dépensée"
       assert body =~ "Aucun conflit git"
@@ -162,8 +135,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
     end
 
     test "marqueur NON posté → aucune convocation" do
-      # Le marqueur EST le budget : convoquer sans lui, c'est convoquer sans borne. On préfère ne
-      # pas arbitrer du tout — la PR reste grise et le tick suivant réessaiera proprement.
+      # Checks the failed-post result. It does not observe a subsequent poll or spy on dispatch.
       assert {:skipped, {:verdict_marker_unposted, :boom}} =
                VerdictException.dispatch(
                  7,
