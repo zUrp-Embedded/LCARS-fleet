@@ -1,42 +1,14 @@
 defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
   @moduledoc """
-  Les quatre murs qui gardent la FORME du corpus de temoins, prouves contre des arbres FABRIQUES.
-
-  `tests.witness_naming`, `tests.negations_bite`, `tests.refute_copies_agree`,
-  `tests.dirs_mirror_source`. Aucun n'avait de temoin : ils n'etaient tenus que par le garde
-  universel « aucun mur ne passe sur rien », qui mesure une POPULATION, pas une morsure.
-
-  ⚖ Un mur sur la suite de tests que la suite de tests ne mesure pas est le cas le plus exposé du
-  dépôt : il se corrige comme n'importe quel code, et rien ne dit qu'il mord encore.
-
-  ## Pourquoi des arbres fabriques, et pas le vrai depot
-
-  Le depot est PROPRE — c'est le travail de ces murs. Joue sur lui, chaque mur rend `:pass` et ne
-  peut donc prouver ni qu'il attrape sa violation, ni qu'il epargne les formes qu'il exempte
-  volontairement. Un comportement qu'aucun temoin ne rougit est un comportement que le prochain
-  lecteur supprimera en croyant simplifier.
-
-  Chaque mur a ici trois temoins : sa VIOLATION est nommee, son EXEMPTION passe, et son garde
-  d'instrument se declenche sur un arbre vide.
+  Synthetic-tree regressions for witness naming, negation patterns, refute-copy agreement
+  and test-directory correspondence. They exercise accepted and rejected source forms;
+  shell fixtures are not run and normalized text agreement is not behavioral equivalence.
   """
   use ExUnit.Case, async: true
 
-  # ⚠ LA PHRASE DE L'INSTRUMENT CASSE EST EN ANGLAIS, ET C'EST UNE CORRECTION. Ce fichier de murs
-  # ecrivait « INSTRUMENT CASSE » la ou tous les autres ecrivent « INSTRUMENT BROKEN » — deux
-  # formulations pour un meme etat, donc deux choses a chercher pour l'operateur, et des temoins
-  # qui epinglent l'une deviennent aveugles a l'autre. Le combinateur `Support.measured_verdict/2`
-  # n'en porte plus qu'une.
-
   alias Mix.Tasks.Lcars.Contracts.Check.Tests
 
-  # ⚠ LA FORME DU DECOR EST IMPOSEE PAR LES MURS EUX-MEMES, et pas par confort. Trois d'entre eux
-  # lisent DEUX arbres freres — `test/` sous la racine Mix, et `../deploy/tests` a cote — et
-  # `Support.mirror_scope/2` decide de sauter le second s'il n'existe pas. Un decor qui n'aurait
-  # qu'un arbre ferait donc mesurer autre chose que le sujet : `refute_copies_agree` dirait
-  # « INSTRUMENT CASSE » et `dirs_mirror_source` compterait un arbre absent.
-  #
-  #   <tmp>/runtime/       ← la racine passee au mur
-  #   <tmp>/deploy/tests/  ← l'arbre frere, vu comme `../deploy/tests`
+  # Both runtime/test and sibling deploy/tests exist so checks compare both trees.
   defp depot(opts) do
     root = Fleet.TestEnv.tmp_path("murs_corpus")
     on_exit(fn -> File.rm_rf!(root) end)
@@ -54,18 +26,12 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     runtime
   end
 
-  # Le corps de `refute.bash`, identique des deux cotes sauf sur ce que le mur ignore EXPRES : les
-  # commentaires. C'est la distinction que le mur porte — le comportement, pas le fichier.
+  # SOURCE comments differ between independently packaged copies and are excluded from comparison.
   defp refute_bash(entete),
     do: "# SOURCE: #{entete}\nrefute() {\n  ! \"$@\"\n}\n"
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "tests.witness_naming — un temoin mal nomme n'est pas ramasse, et ne le dit pas" do
     test "un `.exs` sans suffixe `_test` est NOMME" do
-      # ⚠ LE COUT EST ASYMETRIQUE, et c'est ce qui justifie un mur. `mix test` ramasse `*_test.exs`
-      # par defaut : la faute est une lettre, la consequence est un fichier qui figure dans l'arbre
-      # et n'a jamais tourne. Rien ne le signale — pas meme un compte de tests, qui n'a pas de
-      # reference.
       root = depot(fichiers: [{"runtime/test/fleet/truc.exs", "defmodule T do\nend\n"}])
 
       assert %{status: :fail, evidence: [ev]} = Tests.check_witness_naming(root)
@@ -74,8 +40,6 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "un `.py` a la mode pytest (`test_x.py`) est NOMME — l'habitude d'a cote n'est pas la regle" do
-      # Trois langages cohabitent, et l'extension ne parle que pour `.bats`. Un `test_foo.py` pose a
-      # cote d'un `foo_test.py` enseigne DEUX regles pour un meme dossier.
       root = depot(fichiers: [{"deploy/tests/test_installeur.py", "def test_x(): pass\n"}])
 
       assert %{status: :fail, evidence: [ev]} = Tests.check_witness_naming(root)
@@ -83,9 +47,6 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "`.bats` suffit, et les zones sans temoins sont epargnees" do
-      # ⚠ LES QUATRE EXEMPTIONS SONT LE SUJET DE CE TEMOIN. Sans lui, un durcissement du mur
-      # (« tout fichier doit finir par `_test` ») serait vert sur le depot reel jusqu'au jour ou
-      # quelqu'un ajoute un helper — et le rouge accuserait alors le helper, pas le mur.
       root =
         depot(
           fichiers: [
@@ -108,12 +69,9 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "tests.negations_bite — `! cmd` sous bats est INERTE partout sauf en fin de bloc" do
-    # POSIX exempte d'`errexit` toute commande niee par `!` : la ligne s'execute, rend 1, et bats
-    # passe a la suivante. Elle ne mord QUE si elle est la derniere de son bloc, ou si un `||`
-    # rattrape son echec. Partout ailleurs elle est verte au moment PRECIS ou ce qu'elle interdit
-    # arrive — deux temoins de securite ont menti des semaines sous cette forme.
+    # A nonterminal negation suppresses errexit. These fixtures test the check's lexical
+    # terminal/|| exemptions, not shell execution.
     test "une negation SUIVIE d'autre chose est nommee, avec sa ligne" do
       root =
         depot(
@@ -158,11 +116,8 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "tests.refute_copies_agree — deux corpus qui croient utiliser le meme outil" do
     test "deux corps DIFFERENTS sont nommes, chacun avec son empreinte" do
-      # Une correction posee d'un seul cote ne casse aucun test : elle rend un corpus plus
-      # PERMISSIF que l'autre, et rien ne le dit.
       root =
         depot(
           fichiers: [
@@ -179,9 +134,6 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "meme CODE, commentaires differents → accord : c'est le comportement qui est compare" do
-      # ⚠ LES DEUX COPIES NE PEUVENT PAS ETRE IDENTIQUES : `# SOURCE:` porte le chemin du fichier
-      # par convention du depot. Un `cmp` serait rouge pour toujours, et un mur toujours rouge
-      # apprend a lire « rouge » comme « normal ».
       root =
         depot(
           fichiers: [
@@ -194,10 +146,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "⚠ UNE SEULE COPIE VUE POUR DEUX ARBRES → INSTRUMENT BROKEN, pas un accord" do
-      # C'EST LE DEFAUT QUE CE MUR A DEJA EU (relecture hostile du 2026-09-04). Un wildcard qui ne
-      # lisait qu'un arbre rendait `distinct == 1`, donc `<= 1`, donc vert — et le mur imprimait
-      # lui-meme sa preuve : « 1 copie(s), 1 corps distinct(s) ». Une copie seule s'accorde toujours
-      # avec elle-meme.
+      # One observed copy cannot establish agreement across two present trees.
       root =
         depot(fichiers: [{"runtime/test/refute.bash", refute_bash("runtime/test/refute.bash")}])
 
@@ -207,12 +156,8 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "tests.dirs_mirror_source — un chemin de temoin qui ne reflete rien se lit comme un trou" do
     test "un dossier de temoins sans source en face est NOMME" do
-      # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit,
-      # le chemin faux SE LIT COMME UNE REPONSE — qui cherche les temoins de `lib/fleet/projet.ex`
-      # sous `test/fleet/` n'y trouve rien et en conclut une couverture absente qui est fausse.
       root =
         depot(
           fichiers: [
@@ -242,11 +187,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "⚠ UN ARBRE DECLARE MAIS ABSENT SE NOMME, IL NE SE COMPTE PAS ZERO" do
-      # LA PANNE LA PLUS CHERE, celle qui se presente comme un succes : `Path.wildcard` sur un
-      # chemin inexistant rend `[]`, `strays` reste vide, et le total d'un AUTRE arbre garde le
-      # verdict positif. Le mur ne dit alors plus « rien a signaler » mais « je n'ai pas regarde ».
-      #
-      # Ici l'arbre frere `deploy/` EXISTE (donc n'est pas hors artefact) mais `deploy/tests` non.
+      # Deploy exists but deploy/tests does not; a populated runtime must not conceal that absence.
       root = Fleet.TestEnv.tmp_path("murs_corpus_sans_deploy")
       on_exit(fn -> File.rm_rf!(root) end)
       runtime = Path.join(root, "runtime")
@@ -263,9 +204,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
     end
 
     test "un arbre frere HORS ARTEFACT se saute, et le dit dans la note" do
-      # ⚠ HORS ARTEFACT N'EST PAS DISPARU. Le stage `build` de l'image exclut `deploy/` a dessein :
-      # un `absents` sur ce cas rendait `mix release` impossible DANS l'image. La distinction est
-      # l'existence de l'arbre frere lui-meme, pas celle de son sous-dossier de temoins.
+      # Scope depends on deploy itself, not its test subdirectory; runtime-only images omit it.
       root = Fleet.TestEnv.tmp_path("murs_corpus_hors_artefact")
       on_exit(fn -> File.rm_rf!(root) end)
       runtime = Path.join(root, "runtime")
