@@ -1,8 +1,8 @@
 defmodule Fleet.Pilot.MergeOutcome do
   @moduledoc """
-  Total structural classification of merge failures from fresh forge PR fields,
-  never version-specific error strings. Draft precedes `mergeable: false` because
-  drafts also report non-mergeable.
+  Classifies supplied PR fields for merge recovery, without inspecting error strings
+  or fetching freshness. Draft precedes mergeable:false because drafts can be
+  non-mergeable. Categories guide routing; they do not establish the failure's cause.
   """
 
   alias Fleet.Forge.Payload
@@ -10,7 +10,9 @@ defmodule Fleet.Pilot.MergeOutcome do
   @type class :: :merged | :closed | :draft | :conflict | :policy | :unknown
 
   @doc """
-  Classifies a fresh raw forge pull-request object.
+  Classifies a raw string-keyed PR map in precedence order: merged, closed, draft,
+  conflict, policy, unknown. Unexpected mergeable values fall through to unknown;
+  non-map input has no clause.
   """
   @spec classify(map()) :: class()
   def classify(pull) when is_map(pull) do

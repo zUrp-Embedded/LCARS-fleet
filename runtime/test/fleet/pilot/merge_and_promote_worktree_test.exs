@@ -1,10 +1,9 @@
 defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
   @moduledoc """
-  Wiring: `merge_and_promote` TRIGGERS the deliverable projection onto the local clone after a
-  successful merge, and NEVER after a failed merge (nothing was merged → nothing to project). The
-  `:worktree_sync` seam points to a spy; `merge_and_promote` runs in THIS process (direct call, no
-  GenServer) → the spy's `send(self(), …)` does reach the test. async: false (seams are global
-  configs, set/restored).
+  Checks sync requests with a same-process spy and temporary role tokens.
+  A returned merge failure without positive readback does not trigger sync; close
+  or decision-token failure after merge does. This does not run synchronization
+  or prove disk convergence. Global seams require synchronous tests.
   """
   use ExUnit.Case, async: false
 
@@ -15,18 +14,12 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
   @moduletag :tmp_dir
 
   defmodule SpySync do
-    # Called synchronously from merge_and_promote (same process as the test) → self() = the test.
     def sync(repo, branch), do: send(self(), {:worktree_sync, repo, branch})
   end
 
   setup %{tmp_dir: tmp} do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_worktree_sync, SpySync)
 
-    # `merge_and_promote` signs INTERNALLY (les deux jetons de rail → RoleToken) and is FAIL-CLOSED
-    # (soft-default #3: no system fallback). We place a resolvable gatekeeper token in a hermetic tmp
-    # (never the runner's real `/opt/lcars/var/tokens`) → the seal proceeds; this test verifies the worktree
-    # projection, not the token.
-    # Les DEUX rails du sceau depuis le 2026-08-20 : `chief` fusionne, `gatekeeper` promeut.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
     TestEnv.put_role_token!("chief", "tok-chief")
@@ -59,23 +52,8 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
   end
 
   test "soft-default #3 — jeton du rail MERGE absent → refus AVANT toute tentative, rien a projeter" do
-    # ⚠ CE TEST S'APPELAIT « gatekeeper token ABSENT → seal REFUSES » ET IL PASSAIT POUR LA MAUVAISE
-    # RAISON (revue 2026-08-20). Il vidait le repertoire de jetons ENTIER : depuis la separation des
-    # rails, c'est le jeton CHIEF qui manque en premier et c'est LUI qui provoque le refus. Le test
-    # decrivait donc l'ancien contrat — « sans jeton gatekeeper, le sceau ne fusionne pas » — tout en
-    # mesurant autre chose.
-    #
-    # ⚠ LE RENOMMER NE SUFFISAIT PAS, ET C'EST LA CORRECTION DU 2026-09-08. Un decor qui retire LES
-    # DEUX jetons ne peut pas dire LEQUEL des deux rails a refuse : intervertir l'ordre de resolution
-    # dans `merge_and_promote` rendait exactement le meme `{:error, :role_token_unavailable}`, et le
-    # temoin restait vert en nommant le mauvais rail. On ne retire donc plus que le jeton du rail
-    # MERGE ; celui du rail decision reste en place, et c'est ce qui rend l'observable discriminant.
-    #
-    # Le temoin suivant fait l'inverse (jeton de decision retire, jeton merge en place) et attend
-    # `{:close_after_merge, _}` : les deux ensemble epinglent QUEL rail refuse a QUEL moment.
-    #
-    # Fail-closed intact, et c'est ce qu'on epingle ici : sans le jeton du rail merge, AUCUNE
-    # tentative, jamais de repli sur le compte systeme ni sur l'autre rail.
+    # Remove only the merge token. The paired test removes only the decision token:
+    # clearing both could not distinguish which identity caused the refusal.
     TestEnv.delete_role_token!("chief")
 
     assert {:error, :role_token_unavailable} =
@@ -83,27 +61,14 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
                base_branch: "main"
              )
 
-    # ⚠ LA MOITIE QUI NOMME LE RAIL. Sans elle, le refus pourrait venir du rail decision — c'est
-    # exactement ce que l'ancien decor rendait indiscernable. Aucune ecriture forge du tout : le
-    # sceau s'arrete avant la premiere.
     refute_received {:merge, _, _, _}
     refute_received {:comment, _, _, _, _}
     refute_received {:worktree_sync, _, _}
   end
 
   test "jeton du rail DECISION absent APRES un merge reussi → close_after_merge, et la projection a lieu" do
-    # LE CAS QUE LA SEPARATION DES RAILS A CREE, ET QUE RIEN NE COUVRAIT (revue 2026-08-20). Le
-    # `@doc` le promet — « or the decision rail had no token » — et aucun test ne le mesurait.
-    #
-    # LA MUTATION QU'IL TUE : remplacer `as_role(forge_opts, gatekeeper_role())` par `forge_opts`
-    # dans `converge_postconditions` ferait partir le commentaire et la fermeture sous le compte
-    # SYSTEME — exactement le mensonge d'attribution que ce lot existe pour supprimer — et la suite
-    # serait restee verte.
-    #
-    # Ce qui doit se produire : le merge A LIEU (le rail merge a son jeton), puis la promotion ne
-    # peut pas etre signee. Ni commentaire ni fermeture, retour honnete `{:close_after_merge, _}` —
-    # et la projection se fait quand meme, parce que la brique EST fusionnee : c'est la forge qui
-    # fait foi, pas la ceremonie.
+    # The remaining merge token permits the merge request; the missing decision token
+    # must not fall back to system credentials for promotion or close.
     TestEnv.delete_role_token!("gatekeeper")
 
     assert {:error, {:close_after_merge, :role_token_unavailable}} =
@@ -111,11 +76,8 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
                base_branch: "main"
              )
 
-    # ⚠ ON CIBLE LA SIGNATURE, PAS « un commentaire ». La note de mur de provenance est elle aussi un
-    # commentaire, et elle DOIT partir : signée SYSTÈME, elle dit un fait mécanique, pas une
-    # promotion. Un `refute_received {:comment, ...}` nu échouait dessus — il aurait interdit un
-    # message qu'on veut voir. (`refute_received` n'accepte pas `opts[...]` en garde : on vide la
-    # boîte et on filtre en code.)
+    # Filter the promotion signature: a system provenance note may still be posted.
+    # This case asserts sync and forbidden promotion/close, not the merge message itself.
     msgs = drain_mailbox()
 
     refute Enum.any?(msgs, fn
@@ -131,9 +93,6 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
            "la brique EST fusionnée : la projection a lieu quoi qu'il arrive à la cérémonie"
   end
 
-  # Vide la boîte du test et rend les messages dans l'ordre. Nécessaire dès qu'on doit RAISONNER sur
-  # l'ensemble des messages plutôt que d'en attendre un : les gardes de `refute_received` ne peuvent
-  # pas lire une keyword list.
   defp drain_mailbox(acc \\ []) do
     receive do
       msg -> drain_mailbox([msg | acc])
@@ -143,11 +102,6 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
   end
 
   test "F-C066 — merge OK but close FAILS (persistent) → seal {:error, {:close_after_merge, _}} + LOUD log, projection anyway" do
-    # A discarded `_ = close_issue` → failed close → seal returning `:ok` → MERGED brick stays OPEN →
-    # re-dispatched every tick, in SILENCE (the RETURN lied). F-C066: HONEST return (the merge
-    # succeeded but the close did not) after bounded retry + LOUD log. The caller then skips the
-    # unlock (issue keeps lcars-in-flight) and `decide/1` skips `stage/merged` → never re-dispatched.
-    # Token placed by the setup.
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:error, {:close_after_merge, _}} =
@@ -164,8 +118,6 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
 
     assert log =~ "close FAILED"
 
-    # The merge did happen → the worktree projection IS triggered (the failed close does not
-    # invalidate the merge).
     assert_received {:worktree_sync, "fleet/myproj", "main"}
   end
 end

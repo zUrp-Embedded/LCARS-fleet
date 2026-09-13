@@ -1,18 +1,9 @@
 defmodule Fleet.Pilot.MergeAndPromoteReapTest do
   @moduledoc """
-  TICKET-LIVE (2026-08-03) — the ticket-scoped producer is reaped AT THE SEAL, and nowhere else.
-
-  Why the hook is the seal and not `pod.completed`: a completion ends a ROUND, not the ticket. The
-  whole point of `slot_scope: instance` is that the producer keeps its context across its rework
-  rounds (measured in production: a rejected deliverable came back to the engineer WITH a `/clear`,
-  and it re-read everything cold). The merge is the ticket's end, so it is the producer's end.
-
-  Why a reaper is needed at all: a context-long pod does NOT die on its own — `Pod`'s
-  post-completion branch says it plainly ("Release only on external kill_pod or deadline timeout")
-  and `PodWarden` only sweeps the SUBSTRATE of already-dead pods. Without this call, pods pile up
-  to `max_pods` and the fleet wedges on a SILENT `:at_capacity`.
-
-  async: false — the `:spawner` seam is a global config (set/restored by TestEnv).
+  Checks reaping requests after nominal/out-of-band merge, scope exclusion and
+  not_found handling. Round completion must retain ticket-producer rework context;
+  terminal reaping requests its removal. These spies do not prove capacity release, pod death
+  or exclusivity of the reaping hook. Global pilot_spawner config requires async:false.
   """
   use ExUnit.Case, async: false
 
@@ -35,7 +26,6 @@ defmodule Fleet.Pilot.MergeAndPromoteReapTest do
   end
 
   defmodule DeadPodSpawner do
-    # The NOMINAL replay case: the pod is already gone. Must stay silent, never an error path.
     def kill_pod(pod_id) do
       send(self(), {:kill_attempted, pod_id})
       {:error, :not_found}
@@ -45,8 +35,7 @@ defmodule Fleet.Pilot.MergeAndPromoteReapTest do
   setup %{tmp_dir: tmp} do
     TestEnv.put_env_restoring(:lcars_fleet, :pilot_worktree_sync, SpySync)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
-    # Les DEUX rails du sceau : `chief` fusionne, `gatekeeper` promeut (séparation 2026-08-20).
-    # Le boot les exige tous les deux ; un fixture qui n'en pose qu'un décrit le monde d'avant.
+
     TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
     TestEnv.put_role_token!("chief", "tok-chief")
     :ok
@@ -60,7 +49,7 @@ defmodule Fleet.Pilot.MergeAndPromoteReapTest do
                base_branch: "main"
              )
 
-    # The id is the one the DISPATCHER builds — keyed on the issue, not the PR, not the repo.
+    # Compare against the dispatch identity keyed by repo, issue and role.
     expected = Fleet.PodId.for_issue("fleet/myproj", 42, "engineer")
     assert_received {:killed, ^expected}
   end
