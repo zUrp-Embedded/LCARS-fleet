@@ -1,58 +1,20 @@
 defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   @moduledoc """
-  IMPURE cluster "arch escalation" (forge write) of `Fleet.Pilot.StepDispatcher`.
+  Writes PR-side escalations selected by review, publish and merge policy callers.
+  Posts an explanatory decision-role comment, adds awaits-arch on the parent issue,
+  then removes its in-flight label. Comment failures are logged; returned label errors
+  become :escalation_incomplete. Unexpected exceptions can interrupt this sequence.
 
-  When `StepDispatcher`'s decision core has ruled that a PR can no longer advance on its own —
-  non-convergent rework (rounds budget exhausted, MA-06) or a merge blocked and not auto-resolvable (real
-  git conflict / unclassified failure, cf. `Fleet.Pilot.MergeOutcome`) — it DELEGATES here the write of
-  the escalation to the only human channel (the architect):
+  Missing role credentials skip the comment without using system identity in its place;
+  labels still use the supplied forge options. There is no separate comment-repair job.
+  Once awaits-arch is visible to the poller, it suppresses this PR path, including a
+  possible retry after in-flight removal failed. An error return alone schedules no retry.
 
-    1. a DEDUPLICATED gatekeeper comment (signed via `as_role`, `dedup_signature`) on the ISSUE;
-    2. the `lcars-awaits-arch` lock set on the ISSUE → the poller SKIPS it (`decide/1`,
-       `dispatch_review`), no more re-dispatch → end of the churn.
-
-  This module DECIDES NOTHING: the rework budget (`count_change_request_rounds`/forge) and the
-  classification of the merge failure (`Fleet.Pilot.MergeOutcome`) stay the core's SINGLE-AUTHORITY
-  (`dispatch_rework`/`route_merge_failure`). This module ONLY WRITES — a single forge write point
-  shared by the two escalations (`escalate_to_arch`, private), no fork of signature/label.
-
-  ## Family
-
-  One link of the escalation FAMILY. The register — the links ordered by the DEPTH they reach —
-  lives once, in `Fleet.Pilot`'s moduledoc; a new link is placed there by depth, never counted
-  (no count-based merge threshold).
-
-  ## Boundary: explicit seams struct (not the whole `ctx`)
-
-  The cluster reads ONLY 3 seams of the dispatch (`forge`, `repo`, `forge_opts`). We do NOT pass the
-  whole `ctx`/`opts` — that would be a boundary leak. The caller builds a `%Seams{}`
-  (narrow, TYPED contract): `@enforce_keys` forces the 3 fields at the call, and an access
-  `seams.<other_field>` does not compile (static KeyError) — a bare map would let
-  `Map.get(seams, :spawner)` pass silently.
-
-  ## Naming
-
-  The public API is `escalate_rework/4` + `escalate_merge_blocked/5` (not `escalate_rework_to_arch`:
-  the `_to_arch` suffix is carried by the module name — `ArchEscalation.escalate_rework`
-  reads without redundancy). `seams` is the 1st argument (the caller builds the contract, THEN
-  describes the escalation).
-
-  ## Two freeze rails, ONE invariant discipline (CI-04) — deliberate, NOT merged
-
-  This PR-side freeze and the issue-side `StepRunCompleter.await_arch` share the SAME shape —
-  dedup comment addressed to the arch → `lcars-awaits-arch` throttle (load-bearing) → `lcars-in-flight`
-  removal (invariant maintenance) — and the SAME integrity discipline: the throttle is verified and
-  surfaces on failure (C-02), the in-flight retrait is verified and surfaces on failure (CI-04, `escalate_to_arch`
-  below). They stay SEPARATE functions on purpose: the SIGNATORY differs (gatekeeper here — a ruling on
-  rework/merge — vs the JUDGE on `await_arch`, whose comment IS the verdict record), and so does the
-  comment's WEIGHT (explanatory here, load-bearing verdict there). Folding both into one primitive
-  parameterized by signatory/text/weight/return would relocate the divergence into a parameter soup, not
-  remove it. The convergence that matters is the shared invariant discipline, enforced identically on both
-  rails — not a physical merge.
+  Keep this separate from StepRunCompleter.await_arch: that issue-side comment is the
+  judge's verdict record, whereas this decision-role comment is explanatory. Both paths
+  must report label failures. Fleet.Pilot documents the escalation layers.
   """
 
-  # Protocol vocabulary = single source Fleet.Labels (compile-time constant, as in
-  # StepDispatcher which keeps ITS @awaits_arch_label for `decide/1` — same source, not a fork).
   require Logger
 
   @awaits_arch_label Fleet.Labels.awaits_arch()
@@ -66,25 +28,18 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     defstruct [:forge, :repo, :forge_opts]
 
     @type t :: %__MODULE__{
-            # Injected forge client (seam `:forge_client`, prod default `Fleet.Forge.Client`).
             forge: module(),
-            # The repo's `owner/name` (the escalation writes on this repo's ISSUE).
             repo: String.t(),
-            # Forge opts (base_url/token…); gatekeeper `as_role` + dedup are added to it.
+            # Transport options; decision-role signing and dedup options are added for the comment.
             forge_opts: keyword()
           }
   end
 
   @doc """
-  PR rework exhausted (rounds > budget, or unreadable budget) → the arch rules. Symmetric to
-  `escalate_merge_blocked/5`: deduplicated gatekeeper comment + `lcars-awaits-arch` lock on
-  the ISSUE (the poller SKIPS it, no more re-dispatch). `detail` (map `%{rounds, budget}` or
-  `{:budget_unreadable, reason}`) goes INTO the comment, not into the dedup key.
-
-  Returns `{:skipped, {:rework_exhausted_escalated, pr_number}}` when the throttle label took (form
-  handled by the poller), or `{:error, {:escalation_incomplete, pr_number, reason}}` when it did NOT
-  (C-02: honest error tally, not a lying skip — the poller re-attempts next tick). Non-fleet head
-  (anomaly: the caller already parsed the producer upstream) → `{:skipped, :not_fleet_branch}` (defensive).
+  Escalates exhausted or unreadable rework budget supplied by the caller.
+  Detail appears in the comment, not the dedup marker. Returns a rework-exhausted
+  skip after successful label operations, :escalation_incomplete on returned label
+  errors, or :not_fleet_branch when the parent issue cannot be parsed.
   """
   @spec escalate_rework(Seams.t(), integer(), String.t(), term()) ::
           {:skipped, term()} | {:error, term()}
@@ -106,13 +61,9 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   @doc """
-  Publish brake tripped (frein-publish): the producer's deliverable REPEATEDLY failed to
-  publish on the same gate base — the work never reaches the forge, the judges never re-judge, and
-  without this brake the rework loop burns a real producer session per tick with `max_rework_rounds`
-  frozen (it counts VERDICTS, and a failed publish produces none — measured on the faceproof
-  bench, 5 identical rounds). Own signature: a publish brake and a rework-exhausted are different
-  failure modes and each deserves its own trace. Same mechanism as every escalation: dedup comment
-  + `lcars-awaits-arch` on the ISSUE — the label IS the throttle.
+  Escalates repeated publish failures with a separate marker from exhausted review
+  rounds: failed publication creates no new judge verdict and cannot advance that budget.
+  Uses the same comment and label sequence as the other escalations.
   """
   @spec escalate_publish_failures(Seams.t(), integer(), String.t(), map()) ::
           {:skipped, term()} | {:error, term()}
@@ -136,19 +87,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   @doc """
-  Merge blocked and NOT auto-resolvable by the system (real git conflict, or unclassified failure) → the arch
-  rules. `class` (`:conflict` | other) comes from `Fleet.Pilot.MergeOutcome`: the message states the REAL
-  cause, never "after a rebase attempt" (the system does NOT rebase — forge-blind barrier,
-  mechanical resolution = later increment). Deduplicated gatekeeper comment + `lcars-awaits-arch`
-  lock on the ISSUE → the poller SKIPS it (out-of-dispatch, no more retry; the label IS the
-  throttle). `reason` (forge detail of the failed merge) goes INTO the comment.
-
-  Returns `{:skipped, {:merge_blocked_escalated, pr_number}}` when the throttle label took, or
-  `{:error, {:escalation_incomplete, pr_number, reason}}` when it did NOT (C-02: honest tally,
-  re-attempted next tick). Both forms are HANDLED by the poller (`step_process_pulls` folds
-  `:skipped`/`:error`) → no crash. An `{:escalated, _}` would be in NO clause of the `case do_poll`
-  → CaseClauseError: a dispatch return MUST be `{:ok|:skipped|:error}`, never a 4th form. Non-fleet
-  head → `{:skipped, :not_fleet_branch}`.
+  Escalates the supplied merge, CI, provenance or arbitration cause on the parent issue.
+  Reason text must preserve the caller's diagnosis without inventing a resolution attempt.
+  Returns a merge-blocked skip after successful label operations, an incomplete-escalation
+  error on returned label failures, or :not_fleet_branch. Keep these standard dispatch
+  result shapes: the poller has no separate :escalated result branch.
   """
   @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom() | tuple(), term()) ::
           {:skipped, term()} | {:error, term()}
@@ -156,9 +99,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
       signature = "[merge-blocked-escalation:pr-#{pr_number}]"
 
-      # Cause, then the gesture THAT CAUSE calls for: a CI without a runner or a lying provenance
-      # is not rebased, and a body that ends every cause with « rebase la PR » sends the
-      # architect to the wrong tool.
+      # Match the suggested action to the cause; CI and provenance failures need no rebase.
       body =
         "**Architecte** — ⚠ Merge bloqué sur la PR ##{pr_number} (issue ##{issue_n}) — " <>
           merge_blocked_cause(class, reason) <>
@@ -172,13 +113,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     end
   end
 
-  # HONEST cause per the REAL class (MergeOutcome) — never "after a rebase attempt" that we did
-  # NOT do (the mechanical resolution is a later increment; here we ESCALATE, we claim nothing).
-  # The conflict ladder's own reasons (`Remediation`): each rung that could not be played says
-  # WHY, and the architect reads that rather than a cause that claims more than the rail knows.
-  # `detail` is the chief rung's own verdict (`:exception_pass_disabled`, `:exception_pass_spent`,
-  # `{:exception_pass_undispatchable, why, _}`): the architect must tell « the pass failed » from
-  # « the pass is not armed on this container ».
+  # Preserve conflict budget/marker failures and distinguish an unavailable exception pass
+  # from one that ran without convergence.
   defp merge_blocked_cause(:conflict, {:conflict_rework_exhausted, rounds, detail}),
     do:
       "conflit git, et le producteur a dépensé ses #{rounds} passe(s) de rework-conflit sans " <>
@@ -210,12 +146,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     do:
       "blocage de branch-protection non levable mécaniquement (commits signés requis, ou une approbation manquante hors re-request) → à débloquer manuellement."
 
-  # C3 — ET CETTE CLASSE N'EST PAS UN ÉCHEC DE MERGE, ce qui est la raison même d'avoir sa clause :
-  # tombée dans le fourre-tout `_unknown`, une zone grise se serait annoncée à l'architecte comme un
-  # « échec de merge non classifié », et il aurait cherché un conflit git qui n'existe pas. Ici rien
-  # n'a échoué : le jury a rendu un AVIS FAVORABLE, et la carte refuse sur les mesures de ces
-  # mêmes juges — personne n'a encore ACCEPTÉ quoi que ce soit. Ce qui
-  # manque est un ARBITRAGE, et le sous-motif dit lequel des trois chemins y a mené.
+  # A favorable jury with policy-rejected findings needs arbitration, not an invented Git conflict.
   defp merge_blocked_cause(:verdict_gray_zone, reason),
     do:
       "zone grise du verdict — le jury a rendu un AVIS FAVORABLE, la courbe de tolérance de la " <>
@@ -223,10 +154,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         "les findings rendus par ces mêmes juges, et #{gray_zone_detail(reason)} Aucun conflit " <>
         "git, aucun refus de juge : c'est un arbitrage qui manque, et il te revient."
 
-  # ⚠ SA PROPRE CLAUSE, POUR LA MEME RAISON QUE `:verdict_gray_zone` : dans le fourre-tout, une CI
-  # pendante s'annoncerait comme un « échec de merge non classifié » et l'architecte chercherait un
-  # conflit git qui n'existe pas. Ici rien n'a échoué et rien n'est en désaccord — un job attend un
-  # runner qui ne vient pas, et le geste est côté infrastructure, pas côté code.
+  # Pending CI is an infrastructure diagnosis, not a failed merge or disputed verdict.
   defp merge_blocked_cause(:ci_stalled, reason),
     do:
       "la CI est PENDANTE au-delà de la borne (#{reason}) → aucun verdict ne viendra tant qu'un " <>
@@ -254,9 +182,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
       "la CI est ROUGE sur deux têtes successives — #{message} Le producteur n'arrive pas à la " <>
         "remettre au vert : reprends le rail ou re-cadre le ticket. Rien à rebaser."
 
-  # The deterministic wall's refusal (`MergeAndPromote.verify_provenance_wall`): a TERMINAL state
-  # — the statement lies about the brick and no tick will change that — so it is escalated rather
-  # than retried every tick without a label (2026-09-05).
+  # Provenance refusal requires intervention rather than repeating the same failed seal.
   defp merge_blocked_cause(:provenance_incoherent, reason),
     do:
       "la PROVENANCE de la brique est INCOHÉRENTE (`#{inspect(reason)}`) → le mur déterministe " <>
@@ -268,10 +194,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     do:
       "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
 
-  # Only the two classes where a git gesture is the answer name one; every other cause names its
-  # own gesture above, and « rien à rebaser » must not be followed by « rebase la PR ».
-  # The blind-barrier sentence (« no credentials to rebase ») belongs to the two git causes; on
-  # every other cause the word « rebaser » is the wrong tool named to a human.
+  # Only conflict and protection causes receive their specific Git/protection instruction.
   defp merge_blocked_gesture(:conflict),
     do:
       " Le système n'y touche PAS (barrière forge-aveugle : le pod n'a pas de credentials pour " <>
@@ -295,25 +218,11 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   defp gray_zone_detail(other), do: "l'arbitrage n'a pas abouti (`#{inspect(other)}`)."
 
-  # CORE of arch escalation (factored — conflict AND exhausted rework): DEDUPLICATED gatekeeper comment
-  # (signed via `as_role`) + `lcars-awaits-arch` lock on the ISSUE → the poller SKIPS it
-  # (out-of-dispatch). We surface to the human channel (the arch), we do not mask: the LABEL is the
-  # load-bearing effect (its failure is logged error below), the comment is explanatory only. A single
-  # forge write point for all PR arch escalations (no fork of signature/label).
+  # The explanatory comment is best-effort; returned label errors determine the escalation result.
   defp escalate_to_arch(%Seams{} = seams, issue_n, signature, body) do
-    # Signé par le rail DÉCISION, et il le reste sur les DEUX rails : une escalade est un jugement,
-    # pas une résolution — le chief ne signe que là où il a agi.
-    #
-    # ⚠ `Forge.Client.as_role/2` DIRECTEMENT, jamais via un adaptateur de credential loge dans le
-    # module du sceau : un tel adaptateur n'a de sens que si le nom de ce module le suggere, ce qui
-    # fait dependre une resolution d'identite d'un choix de nommage. `as_role/2` est l'autorite
-    # unique — on l'appelle, on ne la relaie pas.
-    #
-    # Fail-CLOSED sur le jeton : indisponible → on SAUTE le commentaire (jamais sous le compte
-    # système) mais on pose quand même le label porteur `lcars-awaits-arch` (système, le throttle du
-    # poller) — l'effet de l'escalade tient sans son explication. Un post raté ou sauté est
-    # JOURNALISÉ et jamais retenté (le label posé fait sauter `decide/1`, il n'existe aucun chemin
-    # de re-post) : sinon l'arch verrait le throttle sans savoir pourquoi.
+    # Decision role signs the escalation; the exception role signs its own resolution work.
+    # Missing credentials skip the comment, never substitute system authorship.
+    # A posted throttle can prevent this path from retrying a failed or skipped comment.
     case Fleet.Forge.Client.as_role(
            seams.forge_opts,
            Fleet.Project.Roles.gatekeeper_role()
@@ -340,12 +249,8 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         )
     end
 
-    # `lcars-awaits-arch` IS the throttle (`decide/1` / `dispatch_review` skip on it). A failed label →
-    # the PR is re-dispatched every tick (the exact churn this escalation exists to STOP). We SURFACE it
-    # (C-02): return `{:error, ...}` so the caller reports an error tally,
-    # NOT a lying `{:skipped, _escalated}` (the escalation did NOT durably take). The poller folds this as
-    # `tally.errors` (`step_process_pulls`, F-037: telemetry only, never a backoff) and re-attempts next
-    # tick (idempotent: dedup comment + idempotent add_label). LOG LOUD stays — the operator sees the churn.
+    # Adding awaits-arch throttles dispatch once the poller sees it. A returned error
+    # surfaces in the tally; this function itself schedules no retry.
     case seams.forge.add_label(seams.repo, issue_n, @awaits_arch_label, seams.forge_opts) do
       {:error, reason} ->
         Logger.error(
@@ -353,22 +258,12 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
             "NOT added (#{inspect(reason)}) — the PR will re-dispatch (churn) until the label sticks"
         )
 
-        # The throttle did NOT take → we KEEP `lcars-in-flight` (do NOT remove it here): removing it now
-        # would leave the object with NEITHER lock → a pod could grab it AND the poller would re-dispatch
-        # (worse than the churn). in-flight holds the object until a later tick re-adds awaits-arch.
+        # Leave in-flight intact if awaits-arch was not confirmed; do not remove both guards.
         {:error, {:awaits_arch_label_failed, reason}}
 
       _ ->
-        # INVARIANT: awaits-arch ⇒ NO `lcars-in-flight` on the issue — "parked, nobody works" and
-        # "someone works" are contradictory, and a stale in-flight also shields the brick's pods
-        # from the quiesced-pod reap for the whole (human-timescale) park. The throttle took, so the
-        # invariant is maintained here: remove in-flight, VERIFIED and never a silent `_ =` (CI-04 —
-        # removing in-flight without verifying the removal, under a comment that ASSERTS the
-        # invariant). Same standard as `StepRunCompleter.await_arch` (which verifies its remove in
-        # the
-        # `with`). `remove_label` is idempotent (`{:ok, :already_absent}`); on failure we SURFACE — both
-        # labels present contradicts the invariant AND the stale in-flight leaks the reap-shield — so the
-        # poller re-attempts next tick (idempotent add+remove), same honest tally as the throttle failure.
+        # After awaits-arch, remove stale in-flight. Failure leaves contradictory labels
+        # and returns an error, but the new throttle can prevent retry through this PR path.
         case seams.forge.remove_label(seams.repo, issue_n, @in_flight_label, seams.forge_opts) do
           {:error, reason} ->
             Logger.error(
@@ -385,11 +280,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     end
   end
 
-  # Extracts the parent ISSUE number from the feature-branch (`lcars/issue-<n>-<role>`) via the
-  # UNIQUE parser `Fleet.Forge.Protocol.parse_feature_branch/1` (not a homemade re-parse). Local
-  # adapter `{:ok, issue_n} | {:skipped, :not_fleet_branch}` — the producer does not interest
-  # the escalation (it writes on the issue), hence a narrower return than
-  # `RoleDispatch.parse_feature_branch_or_skip` (which returns the full `{n, role}` tuple for the review dispatch).
+  # Use the shared feature-branch parser; escalation needs only the parent issue number.
   defp issue_of_branch_or_skip(head) do
     case Fleet.Forge.Protocol.parse_feature_branch(head) do
       {:ok, {issue_n, _producer}} -> {:ok, issue_n}

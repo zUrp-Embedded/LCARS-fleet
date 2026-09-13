@@ -4,8 +4,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolverTest do
   alias Fleet.Pilot.StepDispatcher.ProjectResolver
 
   describe "parse_ls_remote_out/1 (the pinned base_sha must BE a sha)" do
-    # The first column becomes base_sha — reset target, provenance input, gate base. A malformed
-    # line must surface typed, never flow downstream as a "sha" the workspace is then reset onto.
+    # Reject malformed pins before they become reset, provenance or gate inputs.
 
     test "nominal ls-remote line → the 40-hex sha" do
       sha = String.duplicate("a", 40)
@@ -39,8 +38,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolverTest do
 
   describe "single-default-site doctrine (chantier face-projet)" do
     test ":base_branch missing → RAISES naming the doctrine, never a silent `main`" do
-      # This used to default to "main": when the face decision did not reach the resolver, it
-      # silently pinned the code face — the exact substituting-default the inventory (§D) killed.
+      # A missing face decision must not silently select the code face.
       err =
         assert_raise ArgumentError, fn ->
           ProjectResolver.default_project_resolver("fleet/x",

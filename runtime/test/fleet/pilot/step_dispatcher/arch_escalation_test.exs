@@ -1,12 +1,7 @@
 defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   @moduledoc """
-  B-#3 / C-02 — arch escalation sets the `lcars-awaits-arch` lock (THE throttle: `decide/1`/
-  `dispatch_review` skip on it). If `add_label` FAILS, the lock does not take → the PR is re-dispatched
-  every tick (the EXACT churn the escalation exists to stop). C-02: the
-  return must NOT stay a lying `{:skipped, _escalated}` — it becomes `{:error, {:escalation_incomplete,
-  pr, reason}}` so the poller folds an HONEST `tally.errors` and re-attempts next tick, AND we log LOUD.
-
-  We test the PUBLIC API (`escalate_rework/4`) directly with a forge whose `add_label` fails.
+  Exercises returned label failures and escalation text through the public API.
+  Stateless forge doubles observe neither persisted labels nor subsequent poller retries.
   """
   use ExUnit.Case, async: true
   import ExUnit.CaptureLog
@@ -15,8 +10,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   alias Fleet.Pilot.StepDispatcher.ArchEscalation.Seams
 
   defmodule LabelFailForge do
-    # EXPLANATORY comment OK (not load-bearing — the label is); add_label FAILS → the
-    # throttle never takes.
+    # Comment succeeds but throttle write fails.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "label boom"}}
     def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
@@ -31,8 +25,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
   end
 
   defmodule RemoveFailForge do
-    # awaits-arch ADD succeeds (throttle takes), but the in-flight retrait FAILS → CI-04: the retrait
-    # is verified and SURFACES (both labels present would contradict awaits-arch⇒¬in-flight).
+    # Throttle succeeds but stale in-flight removal fails.
     def post_comment(_repo, _n, _body, _opts), do: {:ok, :posted}
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
     def remove_label(_repo, _n, _label, _opts), do: {:error, {:http, 500, "remove boom"}}
@@ -52,10 +45,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
                  })
       end)
 
-    # ARCH-SPECIFIC token (`ArchEscalation:` + the unique fragment of the message): under `async` +
-    # `capture_log`, a shared string like "NOT added" bleeds from a concurrent
-    # IncidentRegistry.Escalation test (same word). We assert on what ONLY this module emits → no
-    # false positive from bleed.
+    # Use module-specific text to reduce false positives from concurrent captured logs.
     assert log =~ "ArchEscalation:"
     assert log =~ "until the label sticks"
   end
@@ -67,9 +57,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
                  ArchEscalation.escalate_rework(seams(OkForge), 5, @head, %{rounds: 4, budget: 3})
       end)
 
-    # `ArchEscalation:` (log prefix unique to this module; arch only logs on failure) instead of the
-    # SHARED string "NOT added": robust to async bleed from a concurrent IncidentRegistry.Escalation
-    # log (flaky fix).
+    # Avoid shared failure text from other modules; concurrent calls to this module can still overlap.
     refute log =~ "ArchEscalation:"
   end
 
@@ -83,16 +71,14 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
                  })
       end)
 
-    # Module-unique prefix + the retrait-specific fragment (robust to async bleed).
+    # Require both the module prefix and removal-specific text.
     assert log =~ "ArchEscalation:"
     assert log =~ "NOT removed"
     assert log =~ "invariant awaits-arch⇒¬in-flight violated"
   end
 
   describe "escalate_merge_blocked/5 — the architect reads the CAUSE, not the catch-all" do
-    # 2026-09-05: `Remediation.escalate_ci/5` passed the literal `:ci` as class, so every CI
-    # escalation read « échec de merge non classifié » and sent the architect looking for a git
-    # conflict. No witness ever asserted the BODY of a CI escalation.
+    # CI causes must not fall through to an invented unclassified Git failure.
     defmodule CaptureForge do
       def post_comment(_repo, n, body, _opts) do
         send(self(), {:escalation_body, n, body})
@@ -158,8 +144,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
           ] do
         body = body_for(class, reason)
 
-        # « Rien à rebaser » is the cause's own sentence; what must not follow is an INSTRUCTION
-        # to rebase, or the blind-barrier sentence that only makes sense before one.
+        # Non-Git causes must not also instruct a rebase.
         refute body =~ ~r/rebase la PR|pour rebaser/,
                "#{inspect(class)}: a cause with nothing to rebase names a rebase"
       end
