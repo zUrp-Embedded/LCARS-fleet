@@ -1,14 +1,8 @@
 defmodule Fleet.Pilot.ConflictReportTest do
   @moduledoc """
-  The engine's reasoning reaches a reader.
-
-  `Fleet.Conflict` names the DecisionTrace its durable value — "the REFUSAL is documented as much as
-  the acceptance" — and produced one per hunk, on every conflict, for a router that read the totals
-  and nothing else. A machine's worth of reasoning, published as a count.
-
-  It matters most where the machine WRITES: an auto-resolution pushes to a producer's branch, and
-  the only trace was a commit by the runtime identity. A human seeing an unexpected line asks why,
-  and the answer existed in memory and was dropped one function before it could be posted.
+  Checks rendered trace summaries, outcome attribution and selected missing-data
+  fallbacks. Rendering claims are tested as text, not proof of a push or jury rerun;
+  these cases do not establish totality over malformed nested values.
   """
   use ExUnit.Case, async: true
 
@@ -88,8 +82,7 @@ defmodule Fleet.Pilot.ConflictReportTest do
 
       assert body =~ "résolu automatiquement"
       assert body =~ "juges re-jugent"
-      # The attribution is the whole point of the item: the pen and the responsibility are two
-      # different facts, and both are true.
+
       assert body =~ "system_starfleet"
       assert body =~ "posté par le chief"
     end

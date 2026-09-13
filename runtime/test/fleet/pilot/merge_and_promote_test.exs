@@ -1,10 +1,8 @@
 defmodule Fleet.Pilot.MergeAndPromoteTest do
   @moduledoc """
-  SINGLE merge seal (F-arch-MCP): signed merge THEN signed gatekeeper comment. The merge is the
-  source of truth — NEVER a "merged" claim before reality (F-MERGE-CLAIM-BEFORE-REALITY). The
-  gatekeeper signature is applied INTERNALLY by `merge_and_promote` (les deux jetons de rail → RoleToken): the
-  gatekeeper account token comes from a controlled tmp_dir (never the runner's real
-  `/opt/lcars/var/tokens`). async: false (mutates the global `:role_tokens_dir` config).
+  Exercises merge/promotion through forge stubs and local Git provenance fixtures.
+  Role credentials come from tmp_dir; synchronous execution protects shared config.
+  Mailbox assertions observe requested calls, not durable forge state or feed order.
   """
   use ExUnit.Case, async: false
 
@@ -15,16 +13,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp} do
-    # ⚖ DEUX JETONS, ET C'EST LE CHANGEMENT DE 2026-08-20. Le sceau ne signe plus tout avec un seul
-    # rôle : le rail MERGE (`chief`) fusionne, pousse et supprime la branche ; le rail DÉCISION
-    # (`gatekeeper`) commente la promotion et ferme. Un `setup` qui ne posait que le gatekeeper
-    # décrivait le monde d'avant — et le faisait passer pour le monde tout court.
-    #
-    # Les deux sont résolus EN TÊTE et fail-closed ensemble : la contrepartie assumée est qu'un
-    # merge propre dépend désormais du jeton du chief, alors qu'il ne le touchait pas avant. C'est
-    # tenable parce que le boot les exige déjà tous les deux
-    # (`Pilot.Application.require_signer_tokens!`) — ici, une absence est une PERTE en vol, pas un
-    # trou de provisioning.
+    # Both role tokens are available; merge resolves its token before the attempt,
+    # decision resolves its token only after merge.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
     TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
@@ -33,9 +23,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   end
 
   defmodule CommentFailForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def get_route(_r, _n, _o), do: :none
@@ -54,11 +41,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     def close_issue(_r, _n, _o), do: {:ok, :closed}
   end
 
-  # F-C066 — FLAKY close: fails 2×, succeeds the 3rd (process-dict counter) → proves self-heal via retry.
   defmodule CloseFlakyForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -76,12 +59,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
   end
 
-  # CI-06 — FLAKY stage/merged: fails 2×, succeeds the 3rd → proves the load-bearing projection self-heals
-  # via its retry (mirror of the close retry). merge/comment/close all OK.
   defmodule StageFlakyForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -100,14 +78,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   end
 
   test "DEUX RAILS : le merge signe chief, le commentaire et la fermeture signent gatekeeper" do
-    # RAW forge_opts (system token): les deux signatures sont appliquées EN INTERNE par
-    # `merge_and_promote` — les jetons de rôle ÉCRASENT celui du système, et il y en a deux.
-    #
-    # ⚖ CE TEST A ÉTÉ RETOURNÉ (user, 2026-08-20). Il épinglait « merge, commentaire et fermeture
-    # portent TOUS le jeton gatekeeper », ce qui était vrai et faux à la fois : vrai du code,
-    # faux du modèle. Fusionner est une EXÉCUTION, et le gatekeeper déclare `brief_kind: judge`
-    # — « never execute what you judge », propriété de sécurité que le schéma exige de déclarer.
-    # Le rail qui juge signait donc l'écriture git sur 90 % des PR.
     forge_opts = [token: "system-token"]
 
     assert :ok =
@@ -115,9 +85,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                base_branch: "main"
              )
 
-    # RAIL MERGE — la fusion (et, avec elle, la poussée sur main et la suppression de branche que
-    # Gitea attribue au même compte : un seul appel, un seul doer, aucun paramètre d'acteur sur
-    # l'endpoint — mesuré sur 1.26.1).
     assert_received {:merge, "fleet/p", 7, m_opts}
     assert m_opts[:token] == "CHIEF-TOKEN"
 
@@ -126,40 +93,20 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert body =~ "`engineer`"
     assert body =~ "[merge:pr-7]"
 
-    # RAIL DÉCISION — le commentaire de promotion, + dedup author-agnostic (sinon double-post au
-    # retry, et la raison est plus forte qu'avant : DEUX comptes écrivent maintenant sur ce ticket).
     assert c_opts[:token] == "GK-TOKEN"
     assert c_opts[:dedup_signature] == "[merge:pr-7]"
     assert c_opts[:dedup_any_author] == true
 
-    # RAIL DÉCISION — la fermeture. C'est la promotion qui ferme, pas la fusion.
     assert_received {:close_issue, "fleet/p", 42, close_opts}
     assert close_opts[:token] == "GK-TOKEN"
 
-    # SYSTÈME — et c'est le troisième acteur, celui qu'on oublie. Le label `stage/merged` ne porte
-    # AUCUN jeton de rôle : ni chief, ni gatekeeper. WS1 (tous les `stage/*` sont système), et ce
-    # n'est pas une préférence de style — le chemin dégradé `converge_out_of_band_merge` n'a aucun
-    # jeton de rôle disponible et doit pourtant pouvoir poser ce label, qui est la garde
-    # anti-redispatch d'une brique fusionnée.
-    #
-    # Sans cette assertion, substituer `merge_opts` à `forge_opts` sur cet appel violait WS1 en
-    # silence, suite verte (mutation nommée par la revue du 2026-08-20).
+    # WS1: stage/merged uses raw system options, including on the out-of-band path.
     assert_received {:set_stage, "fleet/p", 42, _stage, stage_opts}
     assert stage_opts[:token] == "system-token"
   end
 
-  # ⚠ MESURE DU BANC, 2026-08-20 — `fleet/chifoumi` ticket #4, `merged_by: system_chief` à la forge,
-  # et LE MÊME COMMENTAIRE annonçant trois lignes plus bas « puis le `gatekeeper` (habilité au merge)
-  # scelle ». La note interim avait survécu à la séparation des rails.
-  #
-  # POURQUOI RIEN NE L'AVAIT ATTRAPÉE, et c'est la seule chose utile à retenir : le lot D a corrigé
-  # tout ce qui NOMMAIT un signataire — `signer_line`, `validation_line`, les logs. Cette note-là ne
-  # nomme pas un signataire, elle décrit une HABILITATION, donc aucune relecture pilotée par
-  # « qui signe » ne pouvait la voir. Et le test ci-dessus épingle les JETONS, pas la prose : une
-  # suite verte ne lit pas le texte qu'elle produit.
-  #
-  # D'où ce test, qui épingle la prose elle-même. Il est plus sévère que la note : il refuse au
-  # commentaire ENTIER d'attribuer la fusion au rail décision, où que ce soit.
+  # Token assertions do not check prose: the interim note once assigned merge capability
+  # to gatekeeper despite chief's actual merge token. Check the generated text too.
   test "la PROSE du sceau n'attribue jamais la fusion au gatekeeper — le banc l'a prise en défaut" do
     forge_opts = [token: "system-token"]
 
@@ -170,12 +117,9 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
     assert_received {:comment, "fleet/p", 42, body, _opts}
 
-    # Ce que le texte DOIT dire : chaque rail à son acte.
     assert body =~ "rail merge"
     assert body =~ "rail décision"
 
-    # Ce qu'il ne doit JAMAIS dire. Fusionner est une exécution, et le gatekeeper déclare
-    # `brief_kind: judge` — « never execute what you judge ».
     refute body =~ "habilité au merge"
 
     for phrase <- ["gatekeeper` (habilité", "gatekeeper fusionne", "gatekeeper` fusionne"] do
@@ -189,19 +133,11 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                base_branch: "main"
              )
 
-    # THE crucial point (F-MERGE-CLAIM-BEFORE-REALITY): failed merge → we did NOT claim "delivered
-    # and merged".
     refute_received {:comment, _, _, _, _}
   end
 
-  # The merge POST times out — but the SERVER committed the merge before the reply was cut.
-  # The old seal skipped every postcondition on any merge error: the merged brick kept no
-  # stage/merged, stayed open with an orphaned lock, and the reconciliation re-dispatched an
-  # already-merged brick (double-delivery).
+  # Simulate an errored merge response followed by a readback reporting merged.
   defmodule TimeoutButMergedForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -226,12 +162,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
   end
 
-  # Same timeout, but the readback says the PR is NOT merged → the error must propagate
-  # untouched (fail-closed), and nothing may post.
   defmodule TimeoutNotMergedForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
     def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
 
     def pr_review_state(_repo, _n, _opts),
@@ -266,8 +197,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                  )
       end)
 
-    # The full postcondition queue ran from the readback proof: seal comment, stage/merged,
-    # explicit close — the merged brick can neither stay open nor be re-dispatched.
+    # These messages establish that comment, stage and close were requested.
     assert_received {:comment, "fleet/p", 42, body, _}
     assert body =~ "[merge:pr-7]"
     assert_received {:set_stage, "fleet/p", 42, _, _}
@@ -290,10 +220,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     refute_received {:comment, _, _, _, _}
   end
 
-  # The merge is the act that counts; the comment is a POST-merge trace, best-effort: a failed seal
-  # comment does NOT block the seal (the merge stays authoritative), but it is LOGGED loud — nothing
-  # re-posts it (the dedup only guards against replays), so the loss is visible in the log, never
-  # silent. Only the human-readable trace is lost, never the merge.
   test "comment KO AFTER merge → :ok anyway (the merge counts, the lost trace is LOGGED, not silent)" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -314,15 +240,11 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   end
 
   test "F-C066: merge OK but close failed (persistent) → {:error, {:close_after_merge, _}}, NEVER a lying :ok" do
-    # Core of the finding: returning `:ok` even when `close_issue` fails (log-loud then `:ok`) →
-    # the caller believed the brick sealed while the issue stayed OPEN → re-dispatch →
-    # double-delivery. Instead: HONEST typed return (the merge succeeded, but the close did not).
     assert {:error, {:close_after_merge, {:http, 500, "close boom"}}} =
              MergeAndPromote.merge_and_promote(CloseFailForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
              )
 
-    # BOUNDED retry: 3 close attempts before giving up (then honest return).
     assert_received {:close_attempt, 42}
     assert_received {:close_attempt, 42}
     assert_received {:close_attempt, 42}
@@ -330,9 +252,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   end
 
   test "CI-06: FLAKY stage/merged (fails 2×) → self-heals via retry, the load-bearing label lands, seal :ok" do
-    # Pre-CI-06 the set_stage failure was discarded UN-retried → the load-bearing `stage/merged` label
-    # was lost on a transient blip → Delegation read `closed_without_merge` forever (arch waits on a
-    # merged brick). Now retried (mirror of the close retry): a transient failure self-heals.
     assert :ok =
              MergeAndPromote.merge_and_promote(StageFlakyForge, "fleet/p", 7, 42, "engineer", [],
                base_branch: "main"
@@ -355,9 +274,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert_received {:close_attempt, 42, 3}
   end
 
-  # ── Provenance wall (Phase 2) — systematic, card-independent ──────────────
-  # Harness and forge shared with the completer and dispatcher witnesses
-  # (`Fleet.Test.ProvenanceWallHarness`, test/support/pilot/).
+  # Shared local Git fixtures: test/support/pilot/provenance_wall_harness.ex.
   alias Fleet.Test.ProvenanceWallHarness, as: Wall
   alias Fleet.Test.ProvenanceWallHarness.WallForge
 
@@ -382,7 +299,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                Keyword.put(wall_opts(tmp, head), :base_branch, "main")
              )
 
-    # THE point: nothing merged; the wall's user-facing trace is on the PR.
     refute_received {:merge, _}
     assert_received {:comment, 4, body, "[provenance-wall:pr-4]"}
     assert body =~ "Provenance incohérente"
@@ -410,33 +326,22 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   @tag :requires_git
   test "provenance wall: une preuve pour un AUTRE sha ne peut plus etre confondue avec la preuve de la brique (BL-6-43)",
        %{tmp_dir: tmp} do
-    # LE CAS 4 NE PEUT PLUS EXISTER, et ce test le prouve par CONSTRUCTION plutot que par detection.
-    # Avant : le fichier d'attestation portait un nom DERIVE de la tete, donc une tete qui bougeait
-    # apres la gravure faisait chercher un nom que personne n'avait ecrit — et une preuve pour un
-    # autre commit, posee a cote, se lisait exactement comme une absence.
-    #
-    # Maintenant la ref EST le sha. On grave pour `alien`, on scelle `head` : la preuve d'`alien`
-    # existe, elle est intacte, et elle n'est simplement PAS la preuve de `head`. Aucune confusion
-    # possible, aucun nom a calculer.
+    # This test checks SHA-keyed proof lookup only; it does not call the seal or
+    # establish that a PR head cannot change between verification and merge.
     %{head: head, base: base, alien: alien} = wall_harness(tmp)
     :ok = wall_statement(tmp, 9, alien, base)
 
     proj = Path.join([tmp, "p", "demo"])
 
-    # La preuve d'alien est bien la, lisible, sous SON sha.
     assert {:ok, _} = Fleet.Workflow.Git.read_provenance(proj, alien)
-    # Et il n'y en a aucune sous celui qu'on scelle — la question ne se pose meme pas.
+
     assert {:error, :no_provenance_ref} = Fleet.Workflow.Git.read_provenance(proj, head)
   end
 
   @tag :requires_git
   test "provenance wall SAUTÉ : le merge passe, ET la PR le DIT (BL-6-47.4)", %{tmp_dir: tmp} do
-    # L'asymétrie fermée ici : les deux branches voisines loguaient, une seule écrivait SUR LA
-    # FORGE. Une PR mergée avait donc exactement la même apparence, que le mur l'ait vérifiée ou
-    # qu'il n'ait jamais tourné — « mergée » suggérait une provenance contrôlée. Le log ne rattrape
-    # pas ça : la PR est l'artefact qu'un humain relit six mois plus tard, pas les journaux du BEAM.
     %{head: head} = wall_harness(tmp)
-    # PAS de `wall_statement/4` → `{:skip, {:no_statement, ref}}`.
+    # No proof is written, so the wall skips with no_statement.
 
     assert :ok =
              MergeAndPromote.merge_and_promote(
@@ -449,19 +354,14 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                Keyword.put(wall_opts(tmp, head), :base_branch, "main")
              )
 
-    # Le merge n'est PAS bloqué — le chemin reste délibérément non-bloquant, le fix rend la
-    # décision lisible, il ne la renverse pas.
     assert_received {:merge, 4}
 
-    # Et la trace existe, sous une signature DISTINCTE de celle du refus : confondre les deux
-    # ferait qu'une note « non vérifiée » dédupliquerait un vrai refus, ou l'inverse.
+    # Skipped and refused wall notes need distinct dedup signatures.
     assert_received {:comment, 4, body, "[provenance-wall-skipped:pr-4]"}
     assert body =~ "Provenance NON vérifiée"
     assert body =~ "no_statement"
     refute body =~ "Provenance incohérente"
   end
-
-  # ─── A0 — conflict signal → merge METHOD ────────────────────────────────────────────────────────
 
   defmodule ConflictForge do
     @moduledoc "A PR that went through a conflict: the chief round marker is on it."
@@ -514,14 +414,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
 
     test "un marqueur de conflit → méthode \"merge\", et le TEXTE le dit — la signature, elle, ne change pas" do
-      # ⚖ CE TEST A ÉTÉ RETOURNÉ (user, 2026-08-20), et c'est le piège de la séparation des rails.
-      # Il épinglait « conflit résolu ⟹ SIGNÉ CHIEF », c'est-à-dire une signature CONDITIONNELLE au
-      # fait qu'un conflit ait eu lieu. Le chief signe désormais TOUS les merges — donc la signature
-      # ne discrimine plus rien, et ce qui reste conditionnel est la MÉTHODE.
-      #
-      # Collapser les deux ensemble aurait dé-résolu tous les conflits : `Do: rebase` DROPPE le
-      # commit de fusion qui porte la résolution. C'est la seule moitié de l'ancienne conditionnelle
-      # qui devait survivre, et ce test est ce qui l'empêche de partir avec l'autre.
+      # The token is chief on both paths; only the method changes for conflict markers.
+      # Rebase could discard the merge commit carrying the resolution.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
 
       assert :ok =
@@ -533,22 +427,12 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       assert Keyword.get(opts, :method) == "merge"
       assert Keyword.get(opts, :token) == "CHIEF-TOKEN"
 
-      # Le fait « conflit » vit maintenant dans la MÉTHODE, jamais dans la signature — et le texte
-      # le déduit de ce qui a réellement été employé.
       assert_received {:comment, "fleet/p", 42, body, _opts}
       assert body =~ "conflit résolu"
       refute body =~ "historique linéaire"
     end
 
     test "jeton du rail MERGE manquant → refus fail-closed, jamais un repli sur l'autre rail" do
-      # Le jeton de l'AUTRE rail est disponible (le `setup` pose les deux, on retire celui-ci) —
-      # s'y replier ferait signer une exécution par le rail qui juge. La PR reste non fusionnée et
-      # rien n'est écrit.
-      #
-      # ⚠ Ce test couvre désormais TOUTES les PR, pas seulement les conflictuelles : depuis que le
-      # chief fusionne à tous les coups, un merge propre dépend lui aussi de son jeton. C'est la
-      # contrepartie assumée de la séparation, et le boot l'exige déjà des deux
-      # (`require_signer_tokens!`) — une absence ici est une PERTE en vol.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
       TestEnv.delete_role_token!("chief")
 
@@ -582,16 +466,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
   end
 
-  # ═══ A5 — LA VÉRIFICATION POST-HOC DE LA SONDE ═══
-  #
-  # Arbitrage Q1 : la sonde est TIRÉE par le juge, donc rien ne peut le forcer à l'appeler au moment
-  # où il rend son verdict. Ce qui devient mécanique, c'est le CONSTAT — la forge tient le registre
-  # des runs par `head_sha`. Politique : ANNOTER, jamais rejeter. Rejeter referait de la sonde une
-  # précondition par la porte de derrière, et le doc 14 pose qu'elle est un gain.
+  # Probe evidence annotates the eventual comment; it is not a merge precondition.
   describe "A5 — le sceau constate si la tête a été sondée, et n'en fait jamais un mur" do
-    # `OkForge` décrit un dépôt SANS jury, et l'absence de sonde n'y veut rien dire. Il fallait donc
-    # un stub qui porte de vrais avis favorables : c'est la seule forme où « rendu sans mesure » est
-    # une phrase qui a un sens.
     defmodule JuryForge do
       @moduledoc false
       defdelegate count_comments_marked(r, n, p, o), to: OkForge
@@ -612,9 +488,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
            }}
     end
 
-    # Les trois stubs SIGNALENT leur appel : c'est ce qui rend les `refute` ci-dessous
-    # discriminants. Sans ce signal, « aucune mention » est vrai pour `:probed`, pour `:unknown`,
-    # et pour tout chemin qui n'a jamais interrogé la sonde — trois faits opposés, une assertion.
+    # Signaled reads distinguish probed/unknown outcomes from paths that never queried.
     defmodule Probed do
       @moduledoc false
       def probed?(repo, sha, _opts) do
@@ -656,25 +530,15 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
       assert body =~ "Aucune sonde n'a tourné sur cette tête"
 
-      # ⚠ LA MOITIÉ QUI COMPTE. Le verdict reste valable et la brique est fusionnée : la mention
-      # documente une base plus étroite, elle ne refuse rien.
       assert_received {:merge, "fleet/p", 7, _}
       assert body =~ "livrée et fusionnée"
     end
 
-    # ⚠ CES DEUX TESTS ÉTAIENT NON-DISCRIMINANTS, ET UNE RELECTURE ADVERSARIALE L'A DIT. Ils
-    # vérifiaient l'ABSENCE d'une mention — or `:probed` ET `:unknown` produisent tous deux `""`,
-    # donc chacun passait aussi pour la mauvaise raison : un `pr_refs` cassé, un `forge_actions`
-    # non installé, n'importe quel court-circuit du `with` dans `probe_state/4`.
-    #
-    # On mesure donc maintenant CE QUE LA SONDE A RÉPONDU, pas seulement ce que le texte ne dit
-    # pas : chaque stub SIGNALE son appel, et le test exige que le chemin ait été traversé.
     test "tête SONDÉE → la lecture a bien eu lieu, ET aucune ligne n'est écrite" do
       body = seal_body(Probed)
 
-      # Le chemin est traversé — sans ça, l'assertion suivante serait vraie pour dix raisons.
       assert_received {:probed_asked, "fleet/p", "deadbeef"}
-      # Une ligne qui dit la même chose sur chaque ticket cesse d'être lue au troisième.
+
       refute body =~ "Aucune sonde"
     end
 
@@ -683,22 +547,11 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
       assert_received {:probed_asked, "fleet/p", "deadbeef"}
 
-      # `:unknown` est distinct de « personne n'a mesuré ». Les confondre écrirait sur le ticket un
-      # fait produit par une forge injoignable.
       refute body =~ "Aucune sonde"
     end
 
     test "zéro juge → rien n'est annoté, et la lecture de sonde n'est pas dépensée" do
-      # ⚠ CE TEST A ETE TAUTOLOGIQUE, PUIS FAUX, ET C'EST LA MEME LIGNE QUI L'A CORRIGE DEUX FOIS.
-      # Il installait `Unprobed` alors que `probe_note([], _)` court-circuite APRES la lecture : le
-      # remplacant n'etait jamais consulte (tautologie), et la promesse « la sonde n'est meme pas
-      # interrogee » etait fausse contre le code (mesure du 2026-09-07 : `{:probed_asked, …}`
-      # arrivait bel et bien). Le sceau depensait deux lectures forge dont il jetait le resultat.
-      #
-      # Depuis la separation des deux etats du jury (`{:ok, logins}` / `:unreadable`), la sonde
-      # n'est lue QUE si sa reponse peut etre ecrite. `Unprobed` reste installe EXPRES : il signale
-      # son appel, donc le `refute` ci-dessous distingue « pas interrogee » de « interrogee et
-      # muette ». Sans ce signal, l'assertion serait vraie pour n'importe quel court-circuit.
+      # Keep the signaling stub installed so refute distinguishes no read from a silent result.
       TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
 
       assert :ok =
@@ -708,23 +561,13 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
       refute_received {:probed_asked, _repo, _sha}
 
-      # Ce qui reste vrai et qui compte : sans jury, aucun verdict n'a ete rendu, donc l'absence de
-      # sonde ne dit rien sur ce ticket, et RIEN n'est annote.
       assert_received {:comment, "fleet/p", 42, body, _}
       refute body =~ "Aucune sonde"
     end
   end
 
-  # ═══ LE JURY ILLISIBLE N'EST PAS UN ZERO-JURE ═══
-  #
-  # `approving_judges/4` repliait tout echec de lecture sur `[]`, et `[]` a deja un sens ECRIT sur
-  # le ticket : « la carte ne pose aucun juge (chemin zero-juge, nominal) ». Une forge qui tousse
-  # pendant le sceau faisait donc ecrire, dans la seule piece qui atteste la legitimite d'un merge,
-  # une affirmation fausse presentee comme normale — sur un ticket qui a un jury.
-  #
-  # Le defaut etait INVISIBLE depuis le temoin du rendu (`merge_and_promote_comment_test`), qui
-  # appelle `promote_comment(…, [], …)` en dur : les deux etats sont indiscernables A L'ENTREE de la
-  # fonction testee. Il fallait le mesurer d'ici, depuis la lecture forge.
+  # Unlike direct rendering tests, these exercise a failed forge review read.
+  # Its :unreadable result must not become the empty-approval zero-judge sentence.
   describe "jury ILLISIBLE — le sceau ne l'ecrit pas comme un zero-jure" do
     defmodule BlindJuryForge do
       @moduledoc false
@@ -735,11 +578,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       defdelegate close_issue(r, n, o), to: OkForge
       def get_route(_r, _n, _o), do: :none
 
-      # LA LECTURE DU JURY ECHOUE — tout l'objet de ce temoin. Le reste de la forge repond.
       def pr_review_state(_repo, _n, _opts), do: {:error, {:http, 503, "forge down"}}
 
-      # Espionne : la sonde commence par lire la tete de la PR. Sans avis lisible au-dessus, cette
-      # lecture n'a plus rien a annoter, et le sceau ne doit pas la depenser.
       def pr_refs(repo, pr, opts) do
         send(self(), {:pr_refs_asked, repo, pr, opts})
         {:ok, %{head_sha: "deadbeef", head_ref: "feat", base_sha: "cafe", base_ref: "main"}}
@@ -771,27 +611,19 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       assert body =~ "NON LU"
       assert body =~ "n'a pas pu être obtenu de la forge"
 
-      # LA MOITIE QUI COMPTE : c'est l'affirmation fausse qui etait le defaut, pas l'absence de
-      # phrase. Ces deux refute sont le texte exact que le repli sur `[]` faisait ecrire.
       refute body =~ "aucun juge"
       refute body =~ "nominal"
       refute body =~ "**Avis de**"
     end
 
     test "le mur de provenance est rapporte a part, avec sa raison" do
-      # Le mur est une lecture INDEPENDANTE du jury : un operateur doit pouvoir distinguer « je
-      # n'ai pas su lire le jury » de « aucun controle n'a tourne ». Sur ce banc le mur ne tourne
-      # pas (`:no_head_branch` — il lui faut un worktree, cf. `merge_and_promote_worktree_test`),
-      # donc c'est la clause « mur non joue » qui est exercee ici ; la clause « mur franchi » l'est
-      # au niveau du rendu, dans `merge_and_promote_comment_test`.
+      # This fixture skips the wall for no_head_branch. The renderer tests the passed
+      # variant separately; the two observations must remain distinguishable.
       {body, _log} = seal_with_blind_jury()
 
       assert body =~ "le mur de provenance **n'a PAS tourné**"
       assert body =~ ":no_head_branch"
 
-      # ⚠ L'ASSERTION QUI DISCRIMINE. Le zero-jure AVEC mur non joue produit une phrase voisine et
-      # de sens oppose — « ni jury, ni provenance » AFFIRME l'absence de jury. C'est exactement ce
-      # que le repli sur `[]` faisait ecrire ici.
       refute body =~ "ni jury, ni provenance"
       assert body =~ "Rien n'atteste ce merge dans ce commentaire"
     end
@@ -811,8 +643,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
 
     test "la lecture ratee n'empeche RIEN — la brique est fusionnee et le ticket ferme" do
-      # Aucune reponse de ce chemin post-merge ne doit bloquer la promotion d'une brique deja
-      # fusionnee. Sans ce temoin, un futur durcissement du jury pourrait faire du sceau un mur.
       {_body, _log} = seal_with_blind_jury()
 
       assert_received {:merge, "fleet/p", 7, _}

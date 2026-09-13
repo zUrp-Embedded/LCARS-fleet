@@ -287,7 +287,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation.ConflictLadder 
 
     case ctx.forge.post_comment(ctx.repo, pr_number, body, comment_opts) do
       {:ok, _} ->
-        # Resolver and merge signatory are separate capabilities; changing one must not move the other.
+        # Resolver and promotion signatory are separate capabilities; changing one must not move the other.
         RoleDispatch.dispatch(
           :conflict_rework_exception,
           pr_number,

@@ -6,19 +6,9 @@ defmodule Fleet.Pilot.ConflictProbeTest do
   defp trivial_content, do: "<<<<<<< ours\nb\n||||||| base\na\n=======\nb\n>>>>>>> theirs"
   defp complex_content, do: "<<<<<<< ours\nb\n||||||| base\na\n=======\nc\n>>>>>>> theirs"
 
-  # JG-111 — POURQUOI LA GARDE SUR LE CODE RETOUR DE `git merge-file` EXISTE. Le probe acceptait
-  # `{:ok, {out, _code}}` pour TOUS les codes, et `Shell.git/2` fusionne stderr dans stdout : sur
-  # une erreur de l'outil (`rc=255`), `out` n'est pas un merge rate, c'est le TEXTE D'ERREUR DE GIT,
-  # envoye au classifieur comme s'il etait le contenu fusionne.
-  #
-  # Ce test epingle la CONSEQUENCE que la garde empeche, sur le classifieur pur : un texte sans
-  # marqueur se classe en rapport a ZERO hunk, donc en fichier qui a fusionne proprement. C'est ce
-  # que les totaux de routage tier-0 comptaient sur une panne d'outil.
-  #
-  # ⚠ IL DISAIT AUSSI « forcer un rc=255 demanderait un git casse ». C'EST FAUX CONTRE L'OUTIL, et
-  # la garde est exercee pour de vrai plus bas (« la garde ELLE-MEME »). Mesure du 2026-09-08,
-  # git 2.53.0 : un contenu BINAIRE fait sortir `git merge-file` en 255. Ce n'est pas un git casse,
-  # c'est une PNG dans une PR — l'evenement le plus banal qui soit.
+  # JG-111: Git stderr is merged with stdout. Error text sent to the classifier
+  # looks clean because it contains no markers. Binary fixtures below reach the
+  # actual merge-file exit-code guard; this first pair only shows the consequence.
   describe "JG-111 — une sortie d'erreur lue comme du contenu se compte en fichier propre" do
     test "du texte d'erreur git ne porte aucun marqueur → zero conflit, zero residuel" do
       diag = ConflictProbe.diagnose(%{"f.ex" => "fatal: unable to read file\n"})
@@ -31,7 +21,6 @@ defmodule Fleet.Pilot.ConflictProbeTest do
     end
 
     test "TEMOIN — un vrai contenu conflictuel, lui, se compte" do
-      # Sans ce temoin, `total == 0` pourrait venir d'un `diagnose` qui ne compte jamais rien.
       diag = ConflictProbe.diagnose(%{"f.ex" => complex_content()})
       assert diag.totals.total == 1 and diag.totals.complex == 1
     end
@@ -50,14 +39,11 @@ defmodule Fleet.Pilot.ConflictProbeTest do
           refute diag.totals.all_trivial?
         end)
 
-      # La trace n'est pas decorative : le rapport conservateur est indistinguable d'un vrai
-      # add/delete, et seul le log dit LEQUEL des trois faits a produit ce verdict.
+      # The warning distinguishes unclosed markers from other synthetic residual causes.
       assert log =~ "NON REFERMES"
     end
 
     test "TEMOIN — un fichier reellement propre reste a zero" do
-      # Sans lui, le rail conservateur pourrait tout attraper et le test ci-dessus serait vert sur
-      # un probe qui declare un residuel pour n'importe quel contenu.
       diag = ConflictProbe.diagnose(%{"f.ex" => "aucun marqueur ici\n"})
       assert diag.totals.total == 0
     end
@@ -106,12 +92,8 @@ defmodule Fleet.Pilot.ConflictProbeTest do
   end
 
   describe "probe/3 (fetch layer) — la sonde juge la base d'AUJOURD'HUI" do
-    # MESURE (banc vanille, probe-rails PR#30, 2026-08-18) : la sonde ne fetchait QUE la feature
-    # ref et jugeait le merge contre le `origin/main` que le clone avait vu en dernier. Une brique
-    # soeur posee sur main APRES ce fetch → la forge dit CONFLIT, la sonde fusionne PROPRE contre
-    # la base d'hier (0 hunks), et le tier 0 degrade en round producteur — sans une ligne de log.
-    # Meme maladie d'entrees dissymetriques que la note diff3 de ConflictApply : le diagnostic et
-    # l'ecriture doivent lire les MEMES entrees, et apply fait deja un `fetch origin` complet.
+    # The local clone predates a base-branch change. Fetching only the feature would
+    # miss the conflict; the probe must also refresh origin/main.
     @tag :tmp_dir
     test "une brique soeur posee sur main apres le dernier fetch du clone est VUE", %{
       tmp_dir: dir
@@ -139,12 +121,9 @@ defmodule Fleet.Pilot.ConflictProbeTest do
       git.(work, ["remote", "add", "origin", remote])
       git.(work, ["push", "-q", "origin", "main"])
 
-      # Le clone du pilote fetch ICI — c'est la derniere fois qu'il voit main.
       {_, 0} = System.cmd("git", ["clone", "-q", remote, clone], stderr_to_stdout: true)
 
-      # La feature : ligne 5 relue. La soeur, posee sur main APRES le clone : ligne 6 relue.
-      # Lignes adjacentes → git conflicte, et la base prouve les regions disjointes
-      # (non_overlapping, ecrivable) — mais seulement pour qui lit le main d'aujourd'hui.
+      # Adjacent feature/base edits give a writable non_overlapping conflict.
       git.(work, ["checkout", "-qb", "feature"])
 
       File.write!(
@@ -173,8 +152,6 @@ defmodule Fleet.Pilot.ConflictProbeTest do
           auth: false
         )
 
-      # Sur l'ancienne sonde : origin/main perime = la base elle-meme → merge propre → total 0,
-      # et le routage tier-0 conclut « rien a ecrire ici » sur un conflit que la forge voit.
       assert diag.totals.total == 1,
              "la sonde a juge contre une base perimee : le conflit que la forge voit n'existe pas chez elle"
 
@@ -219,16 +196,8 @@ defmodule Fleet.Pilot.ConflictProbeTest do
       refute diag.totals.none_trivial?
     end
 
-    # ── JG-111, LA GARDE ELLE-MEME ────────────────────────────────────────────────────────────
-    #
-    # `diagnose_refs/4` est publique EXPRES (« isolated so it can be tested against a plain local
-    # repo ») : c'est par la que la garde privee de `merge_file/3` s'atteint, sans couture et sans
-    # doublure. Il ne manquait que l'entree qui la declenche.
-    #
-    # ⚠ ET ELLE EST BANALE. `git merge-file` sort en 255 sur un contenu BINAIRE (mesure du
-    # 2026-09-08, git 2.53.0) — une image, un binaire compile, une fixture opaque, modifies des deux
-    # cotes. Le code retour hors [0, 127] n'est donc pas reserve a une panne d'outil : c'est le
-    # regime NORMAL d'un fichier non textuel, et le rail de conflit en croise a chaque PR d'assets.
+    # JG-111: real binary blobs reach the private merge-file guard through diagnose_refs.
+    # Observed with Git 2.53.0: binary input exits 255.
     @tag :tmp_dir
     test "un fichier BINAIRE en conflit atteint la garde (`rc=255`) et sort en RESIDUEL, jamais propre",
          %{tmp_dir: dir} do
@@ -238,7 +207,6 @@ defmodule Fleet.Pilot.ConflictProbeTest do
       git.(["config", "user.email", "t@example.test"])
       git.(["config", "user.name", "Test"])
 
-      # Un NUL au milieu : c'est ce qui fait declarer le fichier binaire par git.
       File.write!(Path.join(dir, "logo.png"), <<0x89, "PNG", 0, 0, "base">>)
       git.(["add", "."])
       git.(["commit", "-q", "-m", "base"])
@@ -258,27 +226,19 @@ defmodule Fleet.Pilot.ConflictProbeTest do
         ExUnit.CaptureLog.capture_log(fn ->
           {:ok, diag} = ConflictProbe.diagnose_refs(dir, base, "ours", "theirs")
 
-          # LE VERDICT QUE LA GARDE PRODUIT : un residuel conservateur. Sans elle, le texte d'erreur
-          # de git partait au classifieur, n'y portait aucun marqueur, et ce fichier se comptait
-          # `total: 0` — un merge propre, sur un binaire que personne ne peut fusionner.
           assert diag.totals.total == 1
           assert diag.totals.complex == 1
           assert diag.totals.writable == 0
           refute diag.totals.all_trivial?
         end)
 
-      # ⚠ L'ASSERTION QUI DISTINGUE LES DEUX CHEMINS VERS `residual_report/0`. Un add/delete rend
-      # exactement les memes totaux, et ce temoin serait vert si `show/3` echouait pour une tout
-      # autre raison. Seul le log dit que c'est bien `merge-file` qui a rendu la main hors garde.
+      # The log distinguishes merge-file failure from a blob-read residual with identical totals.
       assert log =~ "`git merge-file` FAILED"
       assert log =~ "residuel"
     end
 
-    # La borne HAUTE de la garde est un contrat de l'outil, pas un choix : `git merge-file` plafonne
-    # son code retour a 127 quand il compte plus de 127 conflits (mesure du 2026-09-08 : 200 hunks
-    # → rc=127). Un fichier tres conflictuel doit donc passer la garde et se faire CLASSER, pas
-    # jeter en residuel — sinon la borne transformerait « beaucoup de conflits » en « panne
-    # d'outil », et le rail conservateur avalerait le cas le plus interessant du tier 0.
+    # Git 2.53.0 capped the exit count at 127 for this 200-hunk fixture.
+    # The guard must accept the output and classify all hunks, not synthesize one residual.
     @tag :tmp_dir
     test "127 conflits ou plus n'est PAS une panne : le fichier passe la garde et se classe",
          %{tmp_dir: dir} do
@@ -317,16 +277,11 @@ defmodule Fleet.Pilot.ConflictProbeTest do
         ExUnit.CaptureLog.capture_log(fn ->
           {:ok, diag} = ConflictProbe.diagnose_refs(dir, base, "ours", "theirs")
 
-          # ⚠ 200, ET C'EST LE NOMBRE QUI DISCRIMINE. Les totaux comptent des HUNKS, pas des
-          # fichiers : le contenu fusionne a bien ete PARSE, hunk par hunk. Un residuel, lui, rend
-          # exactement `total: 1` — c'est ce qu'on lirait ici si la borne haute rejetait rc=127.
           assert diag.totals.total == 200
           assert diag.totals.complex == 200
           assert diag.totals.trivial == 0
         end)
 
-      # Le contraire du temoin precedent, et c'est ce couple qui rend la borne mesuree plutot que
-      # recopiee : ici la garde LAISSE PASSER, donc rien ne doit etre journalise.
       refute log =~ "`git merge-file` FAILED"
     end
   end

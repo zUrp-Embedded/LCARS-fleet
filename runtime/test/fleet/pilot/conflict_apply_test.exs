@@ -54,9 +54,7 @@ defmodule Fleet.Pilot.ConflictApplyTest do
 
   @tag :tmp_dir
   test "auto-resolves a WRITABLE conflict (non_overlapping) and pushes", %{tmp_dir: base} do
-    # Adjacent-line edits: git conflicts (shared context) but the base proves the two sides touch
-    # disjoint regions, so composing them is sound in ANY language. This is the only shape the write
-    # path may take on its own, and it was validated live against the laptop forge.
+    # Adjacent edits conflict in Git context but affect disjoint base regions.
     clone =
       setup_remote(
         base,
@@ -68,10 +66,9 @@ defmodule Fleet.Pilot.ConflictApplyTest do
     assert {:ok, :auto_resolved} =
              ConflictApply.apply_in(clone, "feature", base_branch: "origin/main", auth: false)
 
-    # The pushed feature now contains main -> the PR is mergeable.
+    # This fixture's pushed feature contains the fetched main commit.
     assert main_is_ancestor_of_feature?(clone)
 
-    # And BOTH contributions survived — an auto-resolution that drops a side is the failure mode.
     sh(clone, ["fetch", "-q", "origin"])
     {blob, 0} = sh(clone, ["show", "origin/feature:f.txt"])
     assert blob =~ "DEUX-feature"
@@ -82,10 +79,8 @@ defmodule Fleet.Pilot.ConflictApplyTest do
   test "a WHITESPACE conflict is NOT auto-pushed — the format assumption stops here", %{
     tmp_dir: base
   } do
-    # This fixture used to be the write path's happy case. Measured on the deployed build: it wrote
-    # at :high, which in Python changes a block's indentation and in YAML changes which key owns the
-    # value. The engine is format-blind by design; it must therefore hand this to the producer, who
-    # has the context to know whether the indentation mattered.
+    # Whitespace can change Python blocks or YAML ownership; format-blind resolution
+    # must not auto-push this fixture.
     clone = setup_remote(base, "  a = 1\n", "    a = 1\n")
 
     assert {:error, _} =
@@ -108,15 +103,8 @@ defmodule Fleet.Pilot.ConflictApplyTest do
   @tag :tmp_dir
   test "un marqueur ORPHELIN dans le contenu abandonne le merge — il ne pousse pas un fichier ampute",
        %{tmp_dir: base} do
-    # C'EST LE FIXTURE DU CAS HEUREUX, PLUS UNE LIGNE DE CONTENU LEGITIME. Le conflit reel est le
-    # meme `non_overlapping` que le premier test resout et pousse ; s'y ajoute une ligne commencant
-    # par `<<<<<<< `, qui est du CONTENU (la doc de git en contient, les fixtures de merge aussi).
-    #
-    # Le parseur ne fermait ce second marqueur nulle part et jetait ce qu'il avait accumule. Le
-    # premier hunk restait resolu, `all_resolved?` restait vrai, donc `merged` etait un binaire :
-    # `File.write/2` ecrivait le fichier AMPUTE de la ligne orpheline et de tout ce qui la suit, puis
-    # `git add` + push l'envoyaient sur la forge. Une auto-resolution qui SUPPRIME du contenu, sans
-    # un mot, sur la branche d'un humain.
+    # An otherwise writable conflict includes a legitimate orphan marker in file content.
+    # Regression: the parser discarded that marker and its suffix before an unsafe push.
     doc = "<<<<<<< exemple tire de la doc git\ncinq\n"
 
     clone =
@@ -132,8 +120,6 @@ defmodule Fleet.Pilot.ConflictApplyTest do
 
     refute main_is_ancestor_of_feature?(clone)
 
-    # Et la preuve de ce qui etait en jeu : la branche distante porte toujours les lignes que le
-    # merge ampute aurait effacees.
     sh(clone, ["fetch", "-q", "origin"])
     {blob, 0} = sh(clone, ["show", "origin/feature:f.txt"])
     assert blob =~ "exemple tire de la doc git"

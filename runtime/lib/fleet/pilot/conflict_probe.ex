@@ -1,8 +1,9 @@
 defmodule Fleet.Pilot.ConflictProbe do
   @moduledoc """
-  Impure tier-0 conflict probe. It preserves raw blob bytes and nonzero
-  `merge-file` output, operates only on object-store refs and temporary files,
-  and returns an error on any uncertainty so remediation can fall back safely.
+  Tier-0 diagnosis using fetched refs, raw blobs and temporary merge files.
+  Blob/merge/parser failures become conservative residual reports; fetch and diff
+  errors propagate. Temporary-file operations can raise. This is a same-path probe,
+  not a complete prediction of Git's repository-level merge result.
   """
 
   require Logger
@@ -27,9 +28,7 @@ defmodule Fleet.Pilot.ConflictProbe do
         }
   @type diagnosis :: %{files: %{String.t() => Report.t()}, totals: totals()}
 
-  # ── pure aggregation (decision-relevant core) ─────────────
-
-  @doc "Aggregates a `path => Report` map into totals + the two routing predicates."
+  @doc "Sums a `path => Report` map into counts and three nonempty routing predicates."
   @spec aggregate(%{String.t() => Report.t()}) :: totals()
   def aggregate(reports) do
     {trivial, complex, total, writable} =
@@ -38,11 +37,7 @@ defmodule Fleet.Pilot.ConflictProbe do
          wr + Map.get(r.stats, :writable, 0)}
       end)
 
-    # `all_trivial?` says "shallow"; `all_writable?` says "the machine may do it itself". They are
-    # NOT the same question: a whitespace-only or reorder-only conflict is shallow (a producer fixes
-    # it in one round) yet not machine-writable, because writing it needs a format assumption this
-    # engine refuses to make. Routing the write on `all_trivial?` would spend a throwaway worktree
-    # and a merge to discover the engine declines -- a step whose outcome is known before it runs.
+    # Trivial does not imply writable: whitespace and reorder assumptions depend on format.
     %{
       trivial: trivial,
       complex: complex,
@@ -61,16 +56,11 @@ defmodule Fleet.Pilot.ConflictProbe do
     %{files: reports, totals: aggregate(reports)}
   end
 
-  # ── git-backed diagnosis ──────────────────────────────────
-
   @doc """
-  Fetches `feature_ref` into a throwaway ref, then diagnoses the merge against `:base_branch`.
-
-  `:base_branch` AND `:dir` are REQUIRED, with no default: defaulting to `"origin/main"` in the
-  CODE-face worktree makes BOTH halves silently wrong on an ops PR — wrong merge target, wrong
-  repository. The caller reads the PR's own base and derives the face worktree; a caller that cannot
-  say either has skipped the face decision.
-  Returns `{:ok, diagnosis}` or `{:error, reason}` (fail-safe).
+  Fetches the base and `feature_ref`, then diagnoses their merge. Requires `:dir`
+  and `:base_branch` for the PR's face; `:auth` defaults to true. `repo` is unused.
+  The clone check requires a `.git` directory. Fetches are separate snapshots;
+  the sanitized probe ref is shared by concurrent calls for the same ref.
   """
   @spec probe(String.t(), String.t(), keyword()) :: {:ok, diagnosis()} | {:error, term()}
   def probe(_repo, feature_ref, opts) do
@@ -80,15 +70,8 @@ defmodule Fleet.Pilot.ConflictProbe do
     probe_ref = "refs/lcars/conflict-probe/" <> sanitize(feature_ref)
 
     if File.dir?(Path.join(dir, ".git")) do
-      # TWO fetches, and the FIRST one is what keeps the diagnosis honest. Fetching ONLY the feature
-      # ref judges the merge against whatever `origin/<base>` this clone last saw: let a sister
-      # brick land on the base AFTER that fetch, and the forge says CONFLICT while the probe merges
-      # clean against yesterday's base (0 hunks) — tier 0 then degrades silently to a producer
-      # round. Same input-skew disease ConflictApply's
-      # diff3 note documents: the diagnosis and the write must read the SAME inputs — and apply
-      # already runs a full `fetch origin` before writing. Two commands, not one refspec list: an
-      # explicit refspec on `git fetch` REPLACES the default refspec, so a single call would update
-      # the probe ref and once again skip `origin/<base>`.
+      # Fetch origin separately: an explicit feature refspec replaces the default refspec
+      # and would leave origin/<base> stale.
       result =
         with :ok <- GitOps.run(["-C", dir, "fetch", "origin"], auth: auth),
              :ok <-
@@ -99,7 +82,7 @@ defmodule Fleet.Pilot.ConflictProbe do
           diagnose_refs(dir, base, base_branch, probe_ref)
         end
 
-      # Best-effort cleanup of the throwaway ref, whatever the outcome.
+      # Cleanup is attempted after returned results, but exceptions bypass it.
       _ = GitOps.run(["-C", dir, "update-ref", "-d", probe_ref], auth: false)
       result
     else
@@ -125,7 +108,7 @@ defmodule Fleet.Pilot.ConflictProbe do
     end
   end
 
-  # Files changed on BOTH sides -- the only ones that can conflict.
+  # Only paths changed on both sides are examined; rename/directory conflicts can escape.
   defp candidate_files(dir, base, ours, theirs) do
     with {:ok, fo} <- GitOps.read(["-C", dir, "diff", "--name-only", base, ours]),
          {:ok, ft} <- GitOps.read(["-C", dir, "diff", "--name-only", base, theirs]) do
@@ -143,7 +126,7 @@ defmodule Fleet.Pilot.ConflictProbe do
           :error -> residual_report()
         end
 
-      # One side is missing the file -> add/delete conflict: a residual, not trivially resolvable.
+      # Any failed blob read becomes residual; missing content is only one possible cause.
       _ ->
         residual_report()
     end
@@ -157,27 +140,8 @@ defmodule Fleet.Pilot.ConflictProbe do
     end
   end
 
-  # 3-way `git merge-file` on temp blobs -> diff3-marked content.
-  #
-  # ⚠ « hard failure -> `:error` » NE TIENT QUE SI LA CLAUSE LIT LE CODE : un motif
-  # `{:ok, {out, _code}}` accepte TOUS les codes retour, echecs compris.
-  #
-  # Le contrat de `git merge-file` fait la difference qu'un `_code` efface : **0** = fusion
-  # propre, **1..127** = NOMBRE de conflits — deux REPONSES — et **au-dela** (typiquement 255) une
-  # ERREUR de l'outil. Ce sont trois choses, et deux seulement sont du contenu.
-  #
-  # ⚠ AGGRAVANT, ET C'EST LUI QUI REND LE DEFAUT CONCRET : `Shell.git/2` fusionne stderr dans stdout
-  # (« `output` = stdout+stderr merged, like every git site in the codebase »). Sur `rc=255`, `out`
-  # ne contient donc pas un merge rate — il contient le TEXTE D'ERREUR DE GIT, qui part au
-  # classifieur comme s'il etait le contenu fusionne. Sans marqueur de conflit dedans, `Conflict`
-  # rend un rapport a ZERO hunk : une panne de l'outil de merge se lit « fichier sans conflit »,
-  # et les totaux de routage tier-0 comptent un fichier propre qui n'a jamais ete fusionne.
-  #
-  # La soeur `show/3`, plus haut dans ce fichier, filtre `{:ok, {out, 0}}` — meme posture, sur
-  # l'autre lecture.
-  #
-  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant sait
-  # quoi en faire, encore faut-il que la clause qui y mene soit atteignable.
+  # Accept 0 (clean) and 1..127 (conflict counts). Shell combines stderr with stdout:
+  # treating tool errors as content would classify their unmarked text as a clean file.
   defp merge_file(base, ours, theirs) do
     tmp = Path.join(System.tmp_dir!(), "lcars-cprobe-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -225,12 +189,8 @@ defmodule Fleet.Pilot.ConflictProbe do
     end
   end
 
-  # The conservative verdict: one residual hunk, nothing writable. Reached by three DIFFERENT
-  # facts that share one consequence -- a genuine add/delete conflict, a `git merge-file` tool
-  # failure, and content whose markers do not close. None of them is trivially resolvable, and
-  # none may be reported as a clean file; the caller reads the shape, not the cause. Hence a name
-  # that says the VERDICT and not one of the three causes: `add_delete_report` would assert a cause
-  # that is wrong at two of its three call sites.
+  # Synthetic residual for unreadable blobs, merge-file failure or unclosed markers;
+  # totals record one non-writable conflict, without inventing a hunk or a cause.
   defp residual_report,
     do: %Report{merged: nil, hunks: [], stats: %{trivial: 0, complex: 1, total: 1}}
 

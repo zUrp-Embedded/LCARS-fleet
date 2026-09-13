@@ -1,11 +1,7 @@
 defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
   @moduledoc """
-  The closing comment of a merge is the trace an operator reads months later. It must state what
-  HAPPENED, not what the nominal path usually does.
-
-  Measured 2026-08-04 on the bench (`hello-world#4`): a PR with ZERO review carried "the judges
-  APPROVED the PR (native reviews)", under a line claiming "nothing is faked". The card
-  (`workshop-direct`) declares no jury on purpose — the seal was correct, the sentence was not.
+  Rendering tests with supplied approvers and provenance status. They do not read
+  forge reviews, establish a card's jury, or exercise provenance verification.
   """
   use ExUnit.Case, async: true
 
@@ -18,8 +14,7 @@ defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
       refute body =~ "APPROUVÉ"
       refute body =~ "APPROVED"
       assert body =~ "aucun juge"
-      # The floor that DID run is named — an operator must not read "nobody validated" as
-      # "nothing checked it".
+
       assert body =~ "provenance"
     end
 
@@ -30,15 +25,8 @@ defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
   end
 
   describe "jury ILLISIBLE — la lecture forge a echoue, et ce n'est PAS un zero-juge" do
-    # LE DEFAUT QUE CES DEUX TEMOINS FERMENT. `approving_judges/4` repliait tout echec de
-    # `pr_review_state/3` sur `[]` — la meme valeur que « la carte ne pose aucun juge ». Une forge
-    # qui tousse pendant le sceau faisait donc ecrire sur un ticket QUI A UN JURY que la carte n'en
-    # pose aucun, et que c'est nominal, dans la seule piece qui atteste pourquoi ce merge etait
-    # legitime.
-    #
-    # Aucun temoin ne pouvait le voir : ceux du zero-juge passent `[]` EN DUR, donc ils mesurent le
-    # rendu, jamais la resolution. Les deux etats etaient indiscernables a l'entree de la fonction
-    # testee.
+    # Passing :unreadable directly tests rendering; the companion integration test
+    # exercises the failed review read that must produce this distinct value.
     test "n'affirme AUCUN juge, garde ce qui est etabli, et nomme l'action possible" do
       body = MergeAndPromote.promote_comment(4, 5, "scribe", :unreadable)
 
@@ -49,9 +37,9 @@ defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
 
       assert body =~ "NON LU"
       assert body =~ "n'a pas pu être obtenu de la forge"
-      # Ce qui EST etabli reste dit : le mur est une lecture independante.
+
       assert body =~ "provenance"
-      # L'action possible, nommee — c'est la seule.
+
       assert body =~ "allez les lire sur la PR"
     end
 
@@ -97,13 +85,7 @@ defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
     end
   end
 
-  # JG-068 — « IL A ETE FRANCHI » ETAIT INCONDITIONNEL. Sur le chemin zero-juge, cette phrase est
-  # TOUT ce qui atteste la legitimite du merge : la carte ne pose aucun juge, donc le plancher
-  # mecanique est le dernier etage. Elle s'imprimait a l'identique que le mur ait tourne ou non.
-  #
-  # Le pire n'etait pas le silence mais la CONTRADICTION : la note « Provenance NON verifiee » posee
-  # juste apres (BL-6-47.4) dit l'inverse, sur le meme ticket. Un operateur y trouvait deux phrases
-  # opposees et aucune raison de preferer l'une.
+  # JG-068: skipped provenance must not render as a passed wall on the zero-judge path.
   describe "JG-068 — la ligne de validation dit ce que le mur a fait" do
     test "mur SAUTE + zero juge → « n'a PAS tourne », jamais « franchi »" do
       body =

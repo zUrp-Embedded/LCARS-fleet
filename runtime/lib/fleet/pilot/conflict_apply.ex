@@ -1,28 +1,22 @@
 defmodule Fleet.Pilot.ConflictApply do
   @moduledoc """
-  Tier-0 conflict write path. It rechecks every file in an isolated worktree,
-  aborts on any residual, and pushes only a complete deterministic resolution.
-  The normal jury then re-judges the new head.
+  Tier-0 conflict writer: merges the requested base into a temporary feature worktree,
+  resolves unmerged files, and pushes only after all resolutions and the commit succeed.
+  Review of the resulting head is the caller's responsibility.
   """
   alias Fleet.Conflict
   alias Fleet.Project.GitOps
 
-  # A2 — the runtime's ONE identity (`ForgeIdentity.system_identity/0`), not a locally-minted one.
-  # A locally-minted author maps to NO forge account: a grey author, no avatar, no link — while
-  # every other runtime write (onboard, template sync) maps to the system account. ONE AUTHOR PER
-  # SUBSTRATE is the signature matrix, and the mechanical substrate's author is the system.
   defp author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @doc """
-  Auto-resolves and pushes `feature_ref` if the merge with `:base_branch` (default `"origin/main"`)
-  is entirely trivially resolvable. `{:ok, :auto_resolved}` on success; `{:error, reason}` otherwise
-  (the caller then routes to the producer). `opts`: `:base_branch`, `:dir`, `:auth` (default true),
-  `:fetch` (default true).
+  Merges and pushes `feature_ref`; requires `:dir` and `:base_branch` for the PR's face.
+  `:auth` and `:fetch` default to true. Returns `{:ok, :auto_resolved}` or a returned
+  Git/file/resolution error. Missing required options raise. The clone check requires
+  a `.git` directory, so linked worktrees are rejected. `repo` is unused.
   """
   @spec apply(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
   def apply(_repo, feature_ref, opts \\ []) do
-    # REQUIRED (face-projet): the face worktree — an ops PR resolves in the OPS worktree,
-    # and a defaulted code-face dir here would silently operate on the wrong repository.
     dir = Keyword.fetch!(opts, :dir)
 
     if File.dir?(Path.join(dir, ".git")) do
@@ -32,11 +26,13 @@ defmodule Fleet.Pilot.ConflictApply do
     end
   end
 
-  @doc "Core flow against an explicit clone `dir` (isolated for testing with a local remote)."
+  @doc """
+  Runs against an explicit clone, requiring `:base_branch`. Uses a unique worktree
+  directory but a shared sanitized branch name; concurrent calls are not isolated.
+  Cleanup errors are ignored and exceptions bypass cleanup.
+  """
   @spec apply_in(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
   def apply_in(dir, feature_ref, opts \\ []) do
-    # REQUIRED (face-projet): the merge target is the PR's own base — a defaulted
-    # `origin/main` would merge the CODE face into an ops branch and report :auto_resolved.
     base_branch = Keyword.fetch!(opts, :base_branch)
     auth = Keyword.get(opts, :auth, true)
     fetch? = Keyword.get(opts, :fetch, true)
@@ -69,26 +65,14 @@ defmodule Fleet.Pilot.ConflictApply do
   defp maybe_fetch(_dir, false, _auth), do: :ok
   defp maybe_fetch(dir, true, auth), do: GitOps.run(["-C", dir, "fetch", "origin"], auth: auth)
 
-  # Merge base_branch into the feature worktree; resolve every conflicted file deterministically.
-  # A clean merge is already committed by git. A residual (any file we cannot fully resolve) aborts
-  # the whole apply -- never a partial write.
-  #
-  # `merge.conflictStyle=diff3` is LOAD-BEARING, not cosmetic. Three of the four auto-writable
-  # patterns prove their correctness AGAINST THE BASE (`one_side_change`: only one side moved;
-  # `delete_no_change`: the deletion is unilateral; `non_overlapping`: the two changes touch disjoint
-  # regions). Git's DEFAULT style emits diff2 -- ours and theirs, no base -- so on that input those
-  # three cannot fire at all, and the only patterns left able to resolve are the format-assuming
-  # ones this engine refuses to write. MEASURED, not deduced: the probe diagnoses `non_overlapping`
-  # (it feeds `merge-file` the base blob explicitly) while this path sees the SAME conflict as
-  # unresolvable — the diagnosis that authorizes the write and the write itself then read different
-  # inputs. Asking git for the base makes them agree.
+  # diff3 supplies the base needed by one_side_change, delete_no_change and
+  # non_overlapping. Without it the write path cannot reproduce those probe classifications.
   defp merge_and_resolve(wt, base_branch) do
     case GitOps.run(
            ["-C", wt, "-c", "merge.conflictStyle=diff3", "merge", "--no-edit", base_branch],
            author: author()
          ) do
       :ok ->
-        # Clean merge -- git already made the merge commit.
         :ok
 
       {:error, {:git_failed, _, _code, _}} ->
@@ -99,9 +83,7 @@ defmodule Fleet.Pilot.ConflictApply do
     end
   end
 
-  # UN MERGE QUI ECHOUE SANS LAISSER DE FICHIER EN CONFLIT N'EST PAS UN CONFLIT : c'est un echec
-  # git d'une autre nature, et rien ici ne sait le resoudre. On avorte plutot que de commiter un
-  # arbre qu'on n'a pas compris.
+  # A failed merge without unmerged files is not a conflict this engine can resolve.
   defp resolve_unmerged(wt, {:ok, []}) do
     _ = GitOps.run(["-C", wt, "merge", "--abort"])
     {:error, :merge_failed}
@@ -133,11 +115,6 @@ defmodule Fleet.Pilot.ConflictApply do
            :ok <- GitOps.run(["-C", wt, "add", "--", file]) do
         {:cont, :ok}
       else
-        # TOTAL over what the `with` can produce, and no catch-all: `Conflict.resolve/1` only ever
-        # returns `{:ok, %Report{}}`, so the sole non-binary `merged` reaching here is `nil`, and
-        # every other step returns `{:error, _}`. A third, defensive clause is unreachable and
-        # Dialyzer says so — a branch that cannot run defends nothing and hides the day the union
-        # genuinely widens (which the strict flags will then say out loud, right here).
         {:ok, %{merged: nil}} -> {:halt, {:error, {:residual, file}}}
         {:error, _} = err -> {:halt, err}
       end

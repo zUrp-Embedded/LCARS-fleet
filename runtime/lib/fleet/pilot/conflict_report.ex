@@ -1,34 +1,14 @@
 defmodule Fleet.Pilot.ConflictReport do
   @moduledoc """
-  Renders a conflict diagnosis into a report a human can read on the PR.
-
-  `Fleet.Conflict` names the `DecisionTrace` its durable value — "every evaluated pattern is
-  recorded; the REFUSAL is documented as much as the acceptance; the durable audit artifact". It is
-  produced per hunk, carried by each `Report`, and `Remediation` reads the TOTALS and nothing else.
-  Without this render the artifact is computed on every conflict and reaches no reader: a machine's
-  worth of reasoning, published as a count.
-
-  That matters most on the path where the machine WRITES. An auto-resolution pushes to a producer's
-  branch, and its only other trace is a commit authored by the runtime (`system_starfleet`, A2). A
-  human seeing an unexpected line asks "why did the machine touch this", and the answer exists, in
-  memory, one function away from being posted.
-
-  ## Two audiences, one render
-
-  On an auto-resolution the report answers "what did the machine do to my branch, and why was it
-  allowed to". On an all-semantic hand-off it answers "why did nothing get resolved" — which is the
-  brief the chief would otherwise have to reconstruct by re-running the diagnosis in its head.
-
-  Pure: `render/2` takes the diagnosis and returns a string. No forge, no I/O — the posting is the
-  caller's, and this stays testable without a git repo.
+  Renders per-hunk classification and trace summaries for auto-resolution or
+  semantic hand-off reports. This exposes reasons that routing totals omit.
+  Posting belongs to the caller; the auto-resolution footer reads the runtime identity.
   """
 
   @doc """
-  Renders `diagnosis` (`%{files: %{path => Report.t()}, totals: …}`) for `outcome`.
-
-  `outcome` is `:auto_resolved` (the machine wrote) or `:all_semantic` (nothing was trivial), and it
-  only changes the opening sentence: the same evidence answers both questions, and rendering two
-  shapes would let the two drift.
+  Renders `%{files: %{path => Report.t()}, totals: map}` for `:auto_resolved`
+  or `:all_semantic`, which select the headline and footer. Missing sections and
+  non-map diagnoses have fallbacks; malformed nested values can still raise.
   """
   @spec render(map(), :auto_resolved | :all_semantic) :: String.t()
   def render(diagnosis, outcome) when is_map(diagnosis) do
@@ -37,10 +17,6 @@ defmodule Fleet.Pilot.ConflictReport do
     do_render(files, totals, outcome)
   end
 
-  # TOTAL, and deliberately so: this render feeds a BEST-EFFORT report. A diagnosis of an unexpected
-  # shape must produce a thinner report, never a `FunctionClauseError` that would kill the
-  # auto-resolution or the hand-off the report only describes. An explanation is not allowed to
-  # break the act it explains.
   def render(_diagnosis, outcome), do: do_render(%{}, %{}, outcome)
 
   defp do_render(files, totals, outcome) do
@@ -78,9 +54,6 @@ defmodule Fleet.Pilot.ConflictReport do
       "#{Map.get(totals, :writable, 0)} que la machine s'autorise à écrire."
   end
 
-  # No per-file detail means the diagnosis reached us without its `files` — the totals still route
-  # correctly, so the report says what it has and NAMES what it lacks. A section silently omitted
-  # reads as "there was nothing there".
   defp files_section(files) when files == %{},
     do: "_(pas de détail par fichier dans ce diagnostic — seuls les totaux étaient disponibles)_"
 
@@ -94,14 +67,8 @@ defmodule Fleet.Pilot.ConflictReport do
   defp file_section({path, _no_hunks}),
     do: "### `#{path}`\n\n- _(rapport sans hunks — rien à détailler)_"
 
-  # One line per hunk: what it was classified as, how sure, and the trace's own summary — the
-  # sentence the classifier wrote when it decided, not one re-derived here.
-  #
-  # Read by FIELD, never by matching `%Fleet.Conflict.Hunk{}`, and for two converging reasons. The
-  # boundary exports `Conflict.Report` alone, so naming the inner struct from `Pilot` would mean
-  # widening a domain's declared API to render a comment. And the match would be actively wrong
-  # here: this render is best-effort by contract, so a `FunctionClauseError` on an odd element would
-  # kill the auto-resolution it merely describes. Total access, total fallbacks.
+  # Read fields rather than matching the private Hunk struct: the domain exports Report.
+  # Use the classifier's trace summary before its generic explanation.
   defp hunk_line(h) when is_map(h) do
     "- ligne #{Map.get(h, :start_line, "?")} — `#{Map.get(h, :type, :unknown)}` " <>
       "(confiance `#{confidence_label(h)}`) : #{trace_summary(h)}"
@@ -115,8 +82,6 @@ defmodule Fleet.Pilot.ConflictReport do
   defp trace_summary(%{trace: %{summary: s}}) when is_binary(s) and s != "", do: s
   defp trace_summary(%{explanation: e}) when is_binary(e) and e != "", do: e
 
-  # Neither present is a defect of the ENGINE, not of this render: a hunk reached a router with no
-  # recorded reason. Said, never blanked — an empty bullet reads as "nothing to say".
   defp trace_summary(_), do: "_(aucune trace enregistrée pour ce hunk — anomalie du classifieur)_"
 
   defp footer(:auto_resolved),
