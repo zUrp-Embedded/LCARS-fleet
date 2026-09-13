@@ -1,19 +1,17 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
-  # Z4 — classe dans la boundary de son sujet, comme la tache qui l'utilise.
   use Boundary, classify_to: Fleet.Application
 
   @moduledoc """
-  La lecture du catalogue de roles — l'artefact que plusieurs familles de murs interrogent.
+  Catalogue checks and a shared reader for provisioning and tool-scope checks.
 
-  Le catalogue est la source des roles : leur nom, leur identite forge, leur place dans le
-  deploiement. Deux familles le lisent pour des raisons differentes — celle qui verifie que les
-  listes de provisionnement s'accordent, celle qui verifie que la surface d'outils est accordee aux
-  bons roles. Elles partagent donc le LECTEUR, jamais le contrat.
+  The reader scans top-level YAML profiles in both business and system trees.
+  It excludes underscore basenames and silently drops undecodable/non-map YAML;
+  it does not perform schema validation or collapse catalogue overrides.
+  Missing metadata names fall back to filenames; forge_identity defaults to true.
 
-  ⚠ LES DEUX ARBRES, TOUJOURS. Les listes de provisionnement couvrent le deploiement entier — un
-  role de mecanisme a besoin de son compte forge autant qu'un producteur — et ne lire que l'arbre
-  metier declarerait « en trop » les roles systeme dans chaque liste, rendant rouge un deploiement
-  correct.
+  Checks comparing shell/Terraform defaults inspect source patterns, not a running
+  deployment. Some checks are explicitly skipped when the sibling deploy tree
+  is absent; a passing result must be read with its coverage note.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Support
@@ -23,9 +21,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec scan_catalogue_roles(String.t()) :: [map()]
   def scan_catalogue_roles(root) do
-    # BOTH catalogues. The provisioning lists cover the whole deployment — a mechanism role needs
-    # its forge account exactly as much as a producer does — so scanning the business tree alone
-    # would declare four roles "extra" in every list and turn a correct deployment red.
     [
       "priv/catalogue/cap_profile/cap-profiles/*.yaml",
       "priv/catalogue-system/cap_profile/cap-profiles/*.yaml"
@@ -54,11 +49,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end)
   end
 
-  # `Fleet.SPBuilder.filter_skills/2` must fail (fail-loud) if a whitelisted PLAIN skill is absent from
-  # disk — otherwise a silent filtering would let a pod claim a nonexistent skill. BND-111: confirm the
-  # EXECUTABLE tuple `{:error, {:skills_missing, ...}}` on its line (the @doc/@comment name the same tuple
-  # in prose; `code_match?` excludes doc blocks, and the tuple-shape confirm excludes an inline mention).
-  # Red if absent.
+  # Require the error tuple's source shape, beyond a mention of :skills_missing.
   @doc false
   @spec check_skills_declared_present(String.t()) :: Support.result()
   def check_skills_declared_present(root) do
@@ -75,69 +66,35 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     })
   end
 
-  # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
-  # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
-  # runtime/services/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
-  # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
-  # a fresh deploy; measured: eng_doc missing there while present in the three others = the
-  # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
-  # a canon role dropped from any provisioning list looped the fleet in role_token_unavailable
-  # (scoper 07-31, eng_doc 08-02 — one diagnosis session each).
-  # The rule: {canon roles with forge_identity} == tf == sh == lib, STRICT EQUALITY, every
-  # delta named with its own remediation. The asymmetry lives in the DATA, never in this
-  # control: starfleet declares `forge_identity: false` (its forge writes go through the
-  # system), a ReservedSeat (vulcan) counts as a seat = an account + a token, both inert.
-  # Boundary can NEVER see any of this: three of the four lists are outside the BEAM.
+  # Compare forge-identity logins in both directions, including ReservedSeats.
+  # PROV_ROLES overrides the token minter's default during provisioning.
   @doc false
   @spec check_roles_provisioning_locked(String.t()) :: Support.result()
   def check_roles_provisioning_locked(root) do
-    # Decoded reads (kind/forge_identity are yaml fields, not greppable shapes) — the task
-    # context does not start :yaml_elixir by itself; same explicit start as lcars.sp.gen.
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
     catalogue = scan_catalogue_roles(root)
 
-    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent. Le
-    # verrou ne change pas de nature — il reste l'egalite stricte des quatre — mais il compare les
-    # memes objets. Meme regle que la derivation runtime : le prefixe suit le TIER, donc ou le nom
-    # est declare en premier, et non le fichier qui gagne la superposition (un catalogue metier peut
-    # livrer son propre `architect.yaml` sans que le compte cesse d'etre `system_architect`).
+    # A name declared in the system tree keeps its system_ login even with a business override.
     canon =
       catalogue
       |> Enum.filter(& &1.forge_identity)
       |> Enum.map(&role_login(root, &1.name))
       |> Enum.sort()
 
-    # Lot 6 (2026-09-04), correcting lot 1: the minter is a FORGE GESTURE of the product — the container
-    # plays it at instance init — so it lives in `services/`, in this tree, always present.
     sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
-    # The tofu recipe lives under `services/forge-recipe/`, the provisioning lib in the SIBLING
-    # tree `deploy/` — this check reads across trees, so a move of either is what it catches first.
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
     lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
 
-    # The two SIBLING-TREE lists are outside `fleet`, and one legitimate context does not
-    # carry them: the image BUILD stage copies `fleet` ALONE (Dockerfile), then runs this
-    # gate — a runtime-only artifact cannot prove anything about a provisioning list it does not
-    # ship. So absence is read at the TREE level: no sibling tree at all = out of scope, SKIPPED
-    # and named in the note (never a silent pass on unmeasured ground); tree present but file or
-    # pattern unreadable = the real defect (partial checkout, renamed variable) = FAIL. The
-    # `.sh` lives inside `services/` and is always present (lot 6 brought it back in-tree).
+    # Absence of deploy skips both Terraform and deploy lists, even though forge.tf is in-tree.
+    # A present tree with unreadable anchors fails; the token-minter list is always required.
     lists =
       [
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        # `variable "roles"`, not a `local`: a VARIABLE lets a deployment supply the roster of the
-        # catalogue it brings. The DEFAULT is what this check measures, and that is the right target — it is the value
-        # a deployment gets when it supplies nothing, so it is the one that must equal the canon.
-        # Anchored on the variable NAME, not on a bare `default = [...]`: the recipe has other
-        # list variables now, and an unanchored pattern would lock the canon against whichever
-        # one happens to appear first.
-        # L'UNION des deux listes : `roles` porte le metier de ce catalogue, `system_roles` l'autorite
-        # d'instance partagee. Le canon ne connait pas cette coupure — il connait les comptes — donc
-        # c'est ici qu'on recolle, sans quoi le verrou declarerait trois roles « manquants ».
+        # Compare the named variable defaults, joining business roles with system_roles.
         {"forge.tf var.roles + var.system_roles defaults",
          tree_scope(Path.expand("../deploy", root)),
          merge_lists(
@@ -165,15 +122,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         {ev ++ ev2, rem ++ rem2}
       end)
 
-    # LES TROIS LISTES DE PLACEMENT SONT DANS LE VERROU, meme defaut un cran plus bas que les quatre
-    # listes : `writers`/`judges`/`externals` sont des defauts tenus A LA MAIN pendant que la
-    # derivation (`Fleet.Roster.tfvars/1`) produit deja la reponse. Sans comparaison, rien n'empeche
-    # la divergence qui a coute `chief` — present dans `roles`, absent de `writers`, compte sans
-    # droit d'ecriture, trouve a l'oeil sur une forge.
-    #
-    # La comparaison consomme la DERIVATION, pas une seconde implementation de la regle de placement
-    # (siege -> externals, juge sans capacite -> judges, le reste -> writers) : la redire ici serait
-    # exactement la duplication que ce verrou existe pour interdire.
+    # Compare placement defaults with Fleet.Roster.tfvars, without reimplementing its rules.
     {placement, placement_note} = check_placement_defaults(root, tf_path)
     evidence = evidence ++ placement
 
@@ -192,26 +141,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     })
   end
 
-  # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
-  # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
-  # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
-  # ── sp.adresser_un_agent ───────────────────────────────────────────────────────────────────────
-  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR. La regle doit atteindre TOUS les roles, et elle ne peut
-  # pas passer par un bloc partage : l'audit impose UNE source par role, et les roles a draft sont
-  # justement les premiers concernes. Recopier le paragraphe en ferait deux exemplaires de prose —
-  # et deux proses divergent en restant plausibles. Elle passe donc par l'ENVELOPPE, que chaque
-  # carte NOMME.
-  #
-  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX : un role dont la carte oublie la
-  # ligne ne recoit rien, et rien ne le dit. Un drapeau peut manquer, une prose peut mentir — l'un
-  # se detecte, l'autre non, et c'est tout ce que ce mur achete.
-  #
-  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE : aucun appelant de production n'active un
-  # bundle `optional`, donc un role qui declarerait celui-ci ainsi passerait un controle naif en ne
-  # recevant RIEN. Le second volet lit `incompatible:` pour la meme raison — l'y nommer retirerait
-  # legalement le bundle, et ce n'est pas un mode commutable.
-  #
-  # Les sieges reserves sont hors perimetre : sans `spec`, pas de SP a garnir.
+  # Require the bundle in each CapabilityProfile's defaults, never incompatible.
+  # ReservedSeats are excluded; only file presence is checked for the bundle's prose.
   @adresser_bundle "adresser-un-agent"
   @doc false
   @spec check_sp_adresser_un_agent(String.t()) :: Support.result()
@@ -229,14 +160,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       |> Enum.map(& &1.name)
       |> Enum.sort()
 
-    # `incompatible` est une liste de PAIRES : le bundle ne doit apparaitre dans aucune.
-    #
-    # ⚠ ET ON ACCEPTE AUSSI L'ENTREE PLATE, QUI EST UNE MALFORMATION. `incompatible:
-    # [adresser-un-agent]` (des chaines au lieu de paires) fait echouer le `is_list(pair)` : chaque
-    # element est une chaine, aucun n'est signale, et le mur passe au VERT sur un
-    # profil qui retire pourtant le bundle. Le schema doit refuser cette forme en amont — mais un
-    # mur qui ne tient que si un AUTRE controle a fait son travail ne tient rien par lui-meme, et
-    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire.
+    # Reject both incompatible pairs and malformed flat entries naming the bundle.
     excluded =
       profiles
       |> Enum.filter(fn p ->
@@ -287,6 +211,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   @doc false
+  # Shared UUID slots can collide in pod kill patterns. Check integer entries, seats included;
+  # missing indices and their allowed range remain schema concerns.
   @spec check_roles_role_index_unique(String.t()) :: Support.result()
   def check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
@@ -318,30 +244,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime
-  # cannot create it: the fleet runs as the human, `/home` belongs to root. Two creators write it,
-  # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
-  # that drifts without a word.
-  #
-  # TWO SITES, AND THE NARROWER ONE IS THE EASY MISS. Reading the docker entrypoint alone is green
-  # on a rail that recognises THREE substrates (`docker`, `wsl`, `linux`) while creating the zones
-  # on one. On `wsl` the zones would exist "by history of the substrate" — by hand, one day, on the
-  # author's machine — and on a native `linux`, not at all. Same failure as the `doc` face below,
-  # on the path a single-site check does not cover.
-  #
-  # Measured on a fresh bench: the `doc` face was in the code AND in the image's `build`
-  # stage (added so the gate could run), and NOT in the entrypoint. The container came up healthy, the
-  # fleet started, and the first `project_create` died on `could not make directory (with -p)
-  # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
-  #
-  # FAIL-CLOSED ON THE ANCHOR: if the `install -d` line cannot be found, this check FAILS instead of
-  # passing on an empty read. A renamed line would otherwise turn the guard off in silence, which is
-  # worse than the drift it watches.
+  # Face zones need privileged creation before runtime onboarding.
+  # Check container init and native provisioning mirrors; no deploy tree skips the whole check.
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    # Lot 6 (2026-09-04) : the container creates its zones in `container/init.sh` (the product's instance init),
-    # no longer in the docker entrypoint — the anchor line kept its exact shape.
     entrypoint = Path.expand("services/container/init.sh", root)
     module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
@@ -414,21 +321,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # The face roots, READ from `Fleet.Layout`'s source rather than called. This task references no
-  # Fleet module at runtime — by design: a contract checker that CALLED the code would be measuring
-  # the code with the code, and `Fleet.Application` (which classifies this task, Z4) does not carry
-  # an edge to Layout. Same shape as `read_list/3` above: cross-language facts are read, and the
-  # authority stays where it is.
-  #
-  # `face_root/1` has one clause per face; the body is an attribute (today) or could be the literal
-  # itself. BOTH are read, and a body that is NEITHER makes the whole read nil.
-  #
-  # That last part is the point, found by a surviving mutation: a reader matching only `do: @attr`
-  # makes an inlined clause literal invisible, and the check then declares a 2-face population
-  # fully provisioned — green, with a smaller subject than it names.
-  # The mutation was semantically harmless, the READER was not: any face whose body it cannot parse
-  # would vanish the same way, including one whose root is genuinely missing from the machine.
-  # A guard that silently narrows its population is the exact defect this check exists to close.
+  # Read literal or attribute bodies of the matched single-line face_root clauses.
+  # Unknown matched bodies fail; clauses outside the regex shape are invisible.
   defp read_face_roots(layout_path) do
     with {:ok, src} <- File.read(layout_path),
          [_ | _] = clauses <- Regex.scan(~r/^\s*def face_root\("([a-z]+)"\), do: (.+)$/m, src) do
@@ -455,9 +349,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   defp nonempty_abs_path("/" <> _ = p), do: p
   defp nonempty_abs_path(_), do: nil
 
-  # The paths of the entrypoint's zone-creating line. Absolute tokens only — the flags (`-d`,
-  # `-m 2775`, `-g fleet`) are not paths, and matching them as such would make a missing face
-  # indistinguishable from a changed mode.
+  # The anchor requires mode 2775 and group fleet; only absolute tail tokens count as paths.
   defp read_install_zone_paths(path) do
     with {:ok, content} <- File.read(path),
          [_, tail] <- Regex.run(~r/^\s*install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
@@ -467,17 +359,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # The face zones of the PROVISION module — the substrate-agnostic creator. Read from its table
-  # (`"<path> <mode> <owner>"`, one entry per line), and only the `2775` rows: the module also
-  # provisions `/local` and the token dir, which are not faces.
-  #
-  # WHY THERE ARE TWO MIRRORS AND WHY BOTH ARE HELD HERE. The docker entrypoint creates these zones
-  # too, and that is not a forgotten duplicate: it clones the source into `/home/projects/LCARS`
-  # long BEFORE it calls `provision apply`, so the zones must exist earlier than the module runs.
-  # Boot ordering is the reason for the second mirror. What must never happen is the two drifting
-  # from `Fleet.Layout`, or from each other — so the check compares BOTH against the code, and its
-  # evidence says which mirror is short. A wall holding one of two mirrors is green on a fleet
-  # whose `wsl` and `linux` substrates create no zone at all.
+  # Container init needs zones before provisioning runs; native provisioning carries its own table.
+  # Read only mode-2775 rows, excluding other provisioned directories.
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
          [_ | _] = rows <- Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
@@ -487,9 +370,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # One provisioning list, read fail-closed: nil when the file or its anchor pattern is absent
-  # (partial checkout / renamed variable — the caller renders the named fail, never a silent
-  # empty list that would flag every canon role as missing with the wrong message).
+  # nil means unreadable file/anchor, distinct from a readable empty list.
   defp read_list(path, regex, format) do
     with {:ok, content} <- File.read(path),
          [_, inner] <- Regex.run(regex, content) do
@@ -504,9 +385,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   defp split_list(inner, :quoted),
     do: ~r/"([^"]+)"/ |> Regex.scan(inner) |> Enum.map(fn [_, s] -> s end) |> Enum.sort()
 
-  # UNE LISTE DE PROVISIONING CONFRONTEE AU CANON, dans les deux sens. `nil` = fail-closed : la
-  # liste n'a pas ete lue, ce qui n'est pas « elle est vide » — une liste vide accuserait chaque
-  # role du canon avec le mauvais message.
   defp compare_provisioning_list({label, nil, remediation}, _canon),
     do: {["#{label}: list not readable — fail-closed (partial checkout?)"], [remediation]}
 
@@ -521,8 +399,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     {ev, if(ev == [], do: [], else: [remediation])}
   end
 
-  # UN DEFAUT DE PLACEMENT CONFRONTE A LA DERIVATION. `nil` est fail-closed pour la meme raison que
-  # ci-dessus : ne pas savoir lire n'est pas un accord.
   defp placement_gap(key, tf_path, derived) do
     rx = ~r/variable\s+"#{key}"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s
     hard = read_list(tf_path, rx, :quoted)
@@ -540,13 +416,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # The canon catalogue read ONCE for both role checks: name (metadata.name, basename fallback),
-  # kind, forge_identity (absent = true), role_index. Underscore basenames = overlay fragments
-  # (a `_` basename is not a role), excluded like name_index does; undecodable yaml = entry
-  # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
-  # Rendue muette quand le catalogue bundle n'est pas la (etape BUILD de l'image, fixture de test) :
-  # meme regle que les listes de l'arbre frere — l'absence d'un arbre est hors-perimetre, jamais un
-  # vert silencieux sur du terrain non mesure.
   defp merge_lists(nil, _), do: nil
   defp merge_lists(_, nil), do: nil
   defp merge_lists(a, b), do: Enum.sort(a ++ b)
@@ -556,11 +425,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   defp check_placement_defaults(root, tf_path) do
     catalogue = Path.join(root, "priv/catalogue")
 
-    # HORS-PERIMETRE quand l'arbre `deploy/` n'est pas la — MEME regle que les listes de l'arbre
-    # frere juste au-dessus. L'etage BUILD de l'image copie `runtime/` SANS `deploy/` (COPY
-    # explicite, par choix) : un fail-closed ici rendrait « not readable » dans l'image pendant que
-    # les autres listes se skippent proprement — un gate vert sur l'hote et rouge dans l'image, sur
-    # un artefact qui n'a jamais fait partie du perimetre.
+    # Runtime-only build artifacts can omit deploy; scope is checked at tree level.
     if File.dir?(Path.expand("../deploy", root)) and File.dir?(catalogue) do
       case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->
@@ -573,8 +438,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
            @placement_checked}
       end
     else
-      # PAS un vert silencieux : la note le DIT. Une verification qui borne sa couverture sans le
-      # dire se lit comme une couverture complete — et c'est ainsi qu'un mur devient decoratif.
       {[], " (placement defaults SKIPPED: no `deploy` tree)"}
     end
   end
@@ -607,32 +470,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # ── Catalogue install paths: ONE fact, THREE languages ───────────────────
-  # `Fleet.Layout` says where the installed catalogues sit and where the image's seeds sit.
-  # `bin/lcars` reads both and `deploy/lib/provision-lib.sh` WRITES one of them, and neither can
-  # call Elixir — so the same paths exist three times, in languages that have no way to agree by
-  # construction.
-  #
-  # What a divergence costs is worse than a crash, and the provisioning half is the expensive one:
-  # `50-catalogues` would converge a directory the runtime never reads. Every boot would clone the
-  # installed catalogues, report them converged, and the fleet would run on the bundled one alone
-  # while announcing three. Nothing errors and nothing is logged. The CLI half is milder but hits
-  # at the worst moment — degraded `catalogue list` (no release reachable) prints the material of a
-  # cache nobody runs on, which is exactly when the operator has no second source to check it
-  # against.
-  #
-  # Same family as the four provisioning lists locked above, and the same fix — the shells' DEFAULTS
-  # are read out of the scripts and compared to what the module derives.
-  #
-  # The env overrides (`LCARS_CATALOGUES_*`, `PROV_CATALOGUES_DIR`) are deliberately not checked: an
-  # operator pointing them elsewhere is answering for both halves themselves. What must agree is
-  # what happens when nobody sets anything, which is every deployment.
-  #
-  # ⚠ THE PROVISIONING HALF IS A SIBLING TREE, AND ONE LEGITIMATE CONTEXT DOES NOT CARRY IT: the
-  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured — adding
-  # the third source turned the image build red on a file it cannot have. Absence is read at the
-  # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
-  # NAMED in the note; tree present and the default gone = the real defect, FAIL.
+  # Compare Layout literals with CLI and provisioning shell defaults, excluding env overrides.
+  # No deploy tree skips its mirror; a present tree with a missing anchor fails.
   @doc false
   @spec check_catalogue_paths_locked(String.t()) :: Support.result()
   def check_catalogue_paths_locked(root) do
@@ -643,10 +482,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     cli_src = read_or_empty(root, cli)
     lib_src = read_or_empty(root, lib)
 
-    # Read from the SOURCE, not by calling the module: this check is classified into
-    # `Fleet.Application`, which may not reference foundation's `Fleet.Layout` — and a boundary is
-    # not widened to let a lint reach across it. Reading both files is also the truer comparison:
-    # the fact under test is what the two SOURCES say, and a runtime value could agree with neither.
+    # Read declared path literals so this comparison does not depend on loaded runtime values.
     attrs =
       Map.new(
         ~w(platform_root catalogues_dirname installed_catalogues_root),
@@ -663,9 +499,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         }
       end
 
-    # `${VAR:=default}` in the lib, `${VAR:-default}` in the CLI — two different shell operators for
-    # the same fact. `shell_default/2` reads both, because the difference is about who ASSIGNS, not
-    # about what the default IS.
+    # Shell assignment (:=) and fallback (:-) carry the same default value.
     deploy? = File.dir?(Path.expand("../deploy", root))
 
     sources =
@@ -694,9 +528,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         if(is_nil(expected),
           do: "#{layout}: a catalogue path attribute is gone or renamed"
         ),
-      # ⚠ DEUX PANNES OPPOSEES, ET ELLES SE DISENT SEPAREMENT. « cette moitie ne porte plus le
-      # chemin » et « elle en porte un autre » envoient le lecteur a des endroits differents ; les
-      # fondre lui ferait chercher une divergence de valeur la ou il n'y a plus de valeur.
       findings:
         if(missing == [],
           do: Enum.sort(mismatches),
@@ -715,8 +546,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     })
   end
 
-  # The provisioning lib carries ONE of the two paths — the installed cache, which `50-catalogues`
-  # writes. It has no business with the image's seeds: it never reads them.
+  # Provisioning writes the installed cache, not the image's seed catalogue.
   defp lib_expected(nil), do: %{}
   defp lib_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
 
@@ -725,7 +555,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     if File.regular?(path), do: File.read!(path), else: ""
   end
 
-  # `@name "value"` — the literal as the module declares it.
   defp module_attribute(source, name) do
     case Regex.run(~r/^\s*@#{name}\s+"([^"]*)"/m, source) do
       [_, value] -> value
@@ -733,9 +562,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # `VAR="${VAR:-<default>}"` — the DEFAULT only, never the override. An operator pointing the env
-  # elsewhere is answering for both halves themselves; what must agree is what happens when nobody
-  # sets anything, which is every deployment.
   defp shell_default(source, var) do
     case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
       [_, default] -> default

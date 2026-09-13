@@ -1,34 +1,24 @@
 defmodule Mix.Tasks.Lcars.Sp.Gen do
   alias Fleet.SPBuilder.Blocks
 
-  # Z4 — Mix task classified into the boundary of its subject (Fleet.SPBuilder).
   use Boundary, classify_to: Fleet.SPBuilder
 
   @shortdoc "Compose per-role SPs: sp_builder/sp_blocks/ -> sp_builder/sp_drafts/agent-<role>-base.md"
   @moduledoc """
-  Generates committed per-role system prompts through `Fleet.SPBuilder.Blocks`.
+  Writes per-role system prompt drafts through Fleet.SPBuilder.Blocks.
 
-      mix lcars.sp.gen
-      mix lcars.sp.gen --catalogue /path/to/my-catalogue
+    mix lcars.sp.gen
+    mix lcars.sp.gen --catalogue /path/to/my-catalogue
 
-  Without `--catalogue` it composes the bundled reference. With it, ANY catalogue root — which is
-  what turns the composer into a tool FOR the operator instead of a tool of this repository. A
-  deployment rewriting the SP package in another language then has seven `core/` blocks to
-  translate rather than eight SPs each carrying its own copy of the substrate.
-
-  The composition is preceded by an AUDIT of the whole catalogue (`Blocks.audit!/2`): every role
-  owes exactly one source for its SP — a block list or a draft, never both, never neither. Missing
-  roles or blocks fail hard; drift of the generated flats is tested.
+  The default composes the bundled reference; --catalogue selects a root and
+  requests confined generation. Blocks.audit!/2 checks prompt sources for the
+  forge roster, including ReservedSeats. An absent map permits handwritten drafts.
+  Generated files still need to be committed by the caller.
   """
   use Mix.Task
 
-  # BOTH ends are catalogue trees, resolved through `Fleet.Catalogue` rather than by a relative
-  # `Path.expand` from this file. `core/` lives in the system catalogue as a supersedable default,
-  # so the two halves are read by ONE search path — which no hardcoded pair of paths can express.
-  #
-  # These resolve under `_build`, and the writes still land in the SOURCE tree: Mix symlinks
-  # `_build/<env>/lib/<app>/priv` to it. That symlink is what makes a generator addressing the
-  # app_dir correct rather than a way to write into a build artifact nobody commits.
+  # Fleet.Catalogue resolves system core defaults and target drafts.
+  # In a Mix checkout, the priv symlink makes app_dir writes reach source files.
   @impl Mix.Task
   def run(argv) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
@@ -51,10 +41,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     end
   end
 
-  # Points the WHOLE catalogue layer at `root` for the duration, and restores what was there — the
-  # same discipline as `Fleet.Application.CatalogueVerify.verify/1`, and for the same reason: the
-  # root is global state, so a task that leaves it moved poisons everything after it in the same VM
-  # (an `iex -S mix` session, a chained alias).
+  # Restore catalogue_root for callers that reuse the VM.
   defp with_root(root, fun) do
     root = Path.expand(root)
 
@@ -75,9 +62,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     end
   end
 
-  # `confined?` is what `--catalogue` MEANS: compose THAT catalogue, and write nothing outside it.
-  # Without the flag we are composing the bundled reference, whose map legitimately generates the
-  # two mechanism drafts that ship in the system catalogue.
+  # Bundled generation may write system mechanism drafts; --catalogue requests confinement.
   defp compose(confined?) do
     blocks = Fleet.Catalogue.sp_blocks_root()
     map = read_map(blocks)
@@ -97,10 +82,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     end
   end
 
-  # An ABSENT map is a legitimate catalogue, not an error: one that ships hand-written drafts owes
-  # no blocks. `Blocks.role_map/1` stays fail-loud for the callers that require a map to exist (the
-  # no-drift test would otherwise compare nothing against nothing); the choice belongs here, where
-  # the absence is a shape rather than a fault.
+  # Handwritten catalogues need no map; callers requiring one use Blocks.role_map/1.
   defp read_map(blocks) do
     if blocks |> Path.join("sp-map.yaml") |> File.regular?() do
       Blocks.role_map(blocks)
@@ -109,9 +91,7 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
     end
   end
 
-  # Seats INCLUDED: a ReservedSeat is not spawnable but still owns an SP when the catalogue
-  # composes one for it (`vulcan` does), so leaving them out would let a map entry for a seat go
-  # unaudited.
+  # Seats can own generated prompts even though they cannot spawn.
   defp catalogue_roles! do
     case Fleet.CapProfile.forge_roster() do
       {:ok, roster} -> Enum.map(roster, & &1.name)

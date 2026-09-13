@@ -1,19 +1,9 @@
 defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
   @moduledoc """
-  Le mur `catalogue.enumerates_no_tools`, prouvé contre des arbres FABRIQUÉS.
+  Tests catalogue tool-enumeration checks on synthetic trees.
 
-  ⚖ user, 2026-08-22 : *« les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
-  pour voir ce qui existe, on n'a pas besoin de refaire une liste qui mentira. »*
-
-  ## Pourquoi ces témoins-ci, et pas la porte
-
-  La porte tourne sur l'arbre RÉEL, qui est propre depuis le nettoyage : elle ne peut prouver ni que
-  la SÉQUENCE reste autorisée, ni qu'un garde d'instrument tire. Un comportement qu'aucun témoin ne
-  rougit est un comportement que le prochain lecteur supprimera en croyant simplifier.
-
-  Le témoin de la séquence est le plus important du fichier : il tient la moitié PERMISSIVE de la
-  règle. Sans lui, resserrer le mur en « aucun deux noms sur une ligne » passerait la porte au vert
-  tout en arrachant sa boucle au protocole worker.
+  Comma/slash inventories are rejected while ordered worker sequences remain
+  allowed. Empty inputs and missing catalogue trees exercise coverage guards.
   """
   use ExUnit.Case, async: true
 
@@ -31,8 +21,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
     "defmodule PodTools do\n#{filler}\n#{tools}\nend\n"
   end
 
-  # `content` atterrit dans le catalogue METIER ; le catalogue SYSTEME existe et reste muet, pour
-  # que les deux arbres soient la (le mur refuse d'en scanner un seul).
+  # Put content in the business tree while keeping the system tree present.
   defp tree(content, opts) do
     root = Fleet.TestEnv.tmp_path("cat_enum")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp"))
@@ -61,7 +50,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
     end
 
     test "UN SEUL des deux arbres : INSTRUMENT BROKEN, jamais un vert propre" do
-      # N'en scanner qu'un rendrait exactement le meme vert que n'en scanner aucun.
       assert %{status: :fail, evidence: [ev]} = check("rien", trees: ["priv/catalogue"])
       assert ev =~ "INSTRUMENT BROKEN"
       assert ev =~ "1 of 2"
@@ -90,8 +78,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
     end
 
     test "le refus NOMME le fichier, la ligne et les deux outils" do
-      # Un refus qui dirait seulement « une enumeration existe » laisse le lecteur la chercher dans
-      # cent-huit fichiers.
       assert %{status: :fail, evidence: [ev], remediation: rem} =
                check("ligne un\nligne deux\ntes skills (`project_create`, `project_list`)")
 
@@ -102,11 +88,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
 
   describe "la SEQUENCE est autorisee — c'est l'ordre des gestes, pas un catalogue" do
     test "deux noms joints par une FLECHE passent" do
-      # ⚠ LE TEMOIN QUI TIENT LA MOITIE PERMISSIVE. `runtime-contract.md` et le protocole worker
-      # nomment les deux bouts de la boucle ; ce n'est pas un doublon de `tools/list`, ca ne peut pas
-      # devenir faux par omission — ca n'a jamais pretendu etre complet. Un mur resserre en « jamais
-      # deux noms sur une ligne » passerait la porte au vert en arrachant cette boucle, et une
-      # CELLULE DE TABLE markdown ne se coupe meme pas en deux lignes.
+      # Worker protocols may name ordered actions without duplicating tools/list.
       assert %{status: :pass} = check("le cycle : `get_work_item` → traite → `submit_result`")
       assert %{status: :pass} = check("direct execution (get_work_item -> work -> submit_result)")
     end

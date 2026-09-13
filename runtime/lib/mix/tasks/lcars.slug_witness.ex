@@ -1,38 +1,23 @@
 defmodule Mix.Tasks.Lcars.SlugWitness do
-  # Classified with the domain that owns the mirrored algorithm.
   use Boundary, classify_to: Fleet.Spawner
   use Mix.Task
 
-  @shortdoc "Confronte le miroir `SeedStore.slugify` a ce que le vendor a REELLEMENT ecrit sur disque"
+  @shortdoc "Checks observed session directory names against the slug mirror's output charset"
 
   @moduledoc """
-  La seconde moitie du contrat vendor (BL-6-44), celle que la sonde des drapeaux ne couvre pas.
+  Checks directory basenames under **/.claude/projects/ against SeedStore.slugify/1.
 
-  `Fleet.Spawner.SeedStore.slugify/1` reproduit BIT POUR BIT l'algorithme de slugification de
-  Claude Code, gele contre la v2.1.183. C'est lui qui permet de retrouver
-  `~/.claude/projects/<slug>/<uuid>.jsonl` au resume. Si le vendor change son algorithme, RIEN NE
-  CASSE VISIBLEMENT : le resume pointe vers un repertoire vide, donc un pod repart sans sa memoire
-  au lieu d'echouer. C'est la moitie qui fait le plus mal, exactement parce qu'elle est muette.
+    mix lcars.slug_witness
+    mix lcars.slug_witness --root /home
 
-  ## Why a WITNESS and not a test
+  A changed slug algorithm can make resume miss stored sessions. This check only
+  tests whether each observed basename is a fixed point of the mirror: it cannot
+  recover the original cwd or establish who created the directory. It does not
+  compare slugify(cwd) with a vendor result.
 
-  Un test unitaire de `slugify/1` verifie que la fonction fait ce qu'on a ECRIT — il re-affirme
-  notre lecture de l'algo vendor, il ne la CONFRONTE a rien. Le seul juge est ce que le binaire a
-  reellement pose sur le disque. Cette tache va le lire : pour chaque pod dont on connait le `cwd`,
-  le repertoire `<pod>/.claude/projects/<X>` existant EST la reponse du vendor, et `slugify(cwd)`
-  est notre prediction. Deux sources, une confrontation.
-
-      mix lcars.slug_witness                 # sous le home de l'humain courant
-      mix lcars.slug_witness --root /home    # ailleurs (un conteneur, un banc)
-
-  ## Ce qu'un vert signifie EXACTEMENT
-
-  « Aucun temoin trouve ne contredit le miroir », et rien de plus. Les `cwd` d'une fleet reelle
-  sont des chemins sages (`/home/tetris`, `/home/projects`) qui n'exercent ni `_`, ni `.`, ni deux
-  `-` consecutifs — precisement les cas ou l'algo gele se distingue d'une slugification naive. Un
-  vert ici ne dit donc pas « l'algo est identique », il dit « il ne diverge pas sur ce qu'on a vu
-  tourner ». La tache le compte et le dit ; c'est la difference entre une preuve et un sondage, et
-  la taire ferait de ce vert la meme promesse creuse que la sonde des drapeaux a failli devenir.
+  Basenames are deduplicated; the discriminating count only counts names with
+  consecutive hyphens. Disputed names exit 1. No witnesses emits a diagnostic
+  but still succeeds; neither success case proves algorithm equivalence.
   """
 
   @impl Mix.Task
@@ -41,11 +26,7 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
 
     witnesses =
       [root]
-      # `match_dot: true` OU AUCUN TEMOIN, JAMAIS. Sans lui, `Path.wildcard/2` refuse de traverser
-      # un segment commencant par un point — et le chemin cherche en contient un (`.claude`). Mesure
-      # sur un vrai arbre : 0 avec le defaut, 8 avec. Sans ce drapeau la tache rend un VERT SUR RIEN
-      # a chaque execution, en disant « rien ne contredit le miroir » — la promesse creuse contre
-      # laquelle son propre @moduledoc met en garde.
+      # Traverse hidden .claude directories; the default wildcard would skip them.
       |> Enum.flat_map(
         &Path.wildcard(Path.join([&1, "**", ".claude", "projects", "*"]), match_dot: true)
       )
@@ -69,10 +50,6 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
         "— dont #{exercising} exercant un cas DISCRIMINANT (`_`, `.`, ou `-` consecutifs)"
     )
 
-    # ZERO TEMOIN N'EST PAS UN VERDICT. Un compte nul rendu dans la meme phrase que « rien ne
-    # contredit » se lit comme une mesure RASSURANTE alors que rien n'a ete regarde. Les deux etats
-    # se disent donc separement : « je n'ai rien mesure » et « j'ai mesure, et ca ne discrimine
-    # pas » sont des reponses DIFFERENTES.
     cond do
       agreed == [] and disputed == [] ->
         Mix.shell().error(
@@ -94,15 +71,9 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
     if disputed != [], do: exit({:shutdown, 1})
   end
 
-  # The only verdict a directory name alone permits: it must contain ONLY the charset `slugify/1`
-  # can produce. A slug cannot be inverted back to the `cwd` (the projection is destructive — `/a_b`
-  # and `/a-b` yield the same result), so we check the function's IMAGE rather than its application.
-  # A name outside the charset proves a different algorithm with no inversion needed.
+  # Slugs cannot be inverted to a unique cwd; this only tests the mirror's image.
   defp consistent?(slug), do: slug == Fleet.Spawner.SeedStore.slugify(slug)
 
-  # A witness only DISCRIMINATES if it carries a trace of the cases where the frozen algorithm
-  # differs: no `-` collapsing, and every out-of-charset character becomes a `-`. A `-home-tetris`
-  # is compatible with just about any slugification.
   defp discriminating?(slug), do: String.contains?(slug, "--")
 
   defp parse_root(args) do

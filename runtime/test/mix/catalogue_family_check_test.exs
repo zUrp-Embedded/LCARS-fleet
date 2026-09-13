@@ -1,17 +1,10 @@
 defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
   @moduledoc """
-  Les quatre murs de la famille `catalogue`, prouves contre des arbres FABRIQUES.
+  Synthetic-tree tests for role-index collisions, skill-error source shape,
+  required addressing bundles and catalogue path defaults.
 
-  `roles.role_index_unique`, `skills.declared_present`, `sp.adresser_un_agent`,
-  `catalogue.install_paths_locked`.
-
-  ## Ce que garde cette famille
-
-  Le code porte la mecanique, le metier est une donnee de catalogue. Ces murs sont donc les seuls
-  controles mecaniques sur des faits qui vivent en YAML, hors de portee du compilateur, de dialyzer
-  et de boundary — et deux d'entre eux gardent une propriete que le systeme paie CHER si elle
-  glisse : un slot `role_index` est une classe de kill (`pkill` atteint les deux roles qui le
-  partagent), et un bundle de prose absent des cartes donne aux pods un nom qui ne compose rien.
+  The checks inspect source/YAML fixtures; they do not exercise pod termination,
+  prompt composition or provisioning on a machine.
   """
   use ExUnit.Case, async: true
 
@@ -53,14 +46,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     {"runtime/priv/#{arbre}/cap_profile/cap-profiles/#{nom}.yaml", yaml}
   end
 
-  # La prose du bundle : sa source unique. Sans elle, le mur `sp.adresser_un_agent` s'arrete avant
-  # de regarder les cartes — un nom sans prose ne compose rien.
+  # The bundle-presence check requires a regular file before inspecting profiles.
   defp bundle,
     do:
       {"runtime/priv/catalogue-system/cap_profile/modop-bundles/adresser-un-agent/sp.md",
        "# comment adresser un agent\n"}
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "roles.role_index_unique — un slot est une CLASSE DE KILL" do
     test "des index distincts → vert" do
       root = depot([profil("engineer", role_index: 3), profil("scribe", role_index: 5)])
@@ -69,8 +60,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "deux cartes sur le meme slot sont nommees, avec les deux noms" do
-      # `pkill` sur un slot atteint les DEUX roles qui le partagent : ce n'est pas une collision
-      # d'identifiant, c'est un pod tue par la fin de vie d'un autre.
       root = depot([profil("engineer", role_index: 3), profil("scribe", role_index: 3)])
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_roles_role_index_unique(root)
@@ -80,8 +69,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ LES DEUX ARBRES SONT LUS — metier ET systeme partagent l'espace des slots" do
-      # Scanner le seul arbre metier laisserait une collision entre un role metier et un role
-      # mecanique parfaitement invisible, alors que les deux tournent sur la meme machine.
       root =
         depot([
           profil("engineer", role_index: 3),
@@ -100,7 +87,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "skills.declared_present — un pod qui reclame une skill inexistante" do
     test "le refus fail-loud present → vert" do
       root =
@@ -116,9 +102,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ LE JETON EN PROSE NE SUFFIT PAS — la confirmation exige la FORME du tuple" do
-      # BND-111 plus une confirmation de forme : le `@doc` du builder nomme le meme atome. Un mur
-      # satisfait par la prose atteste la documentation de ce qu'il verifie, et un filtrage
-      # silencieux laisserait un pod reclamer une skill qui n'existe pas.
+      # A prose mention of the error atom must not satisfy the tuple-shape check.
       root =
         depot([
           {"runtime/lib/fleet/sp_builder.ex",
@@ -132,7 +116,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "sp.adresser_un_agent — un nom par carte, une seule source de prose" do
     test "toutes les cartes nomment le bundle → vert" do
       root = depot([bundle(), profil("engineer", []), profil("scribe", [])])
@@ -149,10 +132,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ L'ENTREE PLATE DANS `incompatible:` EST UNE MALFORMATION, ET ELLE COMPTE" do
-      # `incompatible: [adresser-un-agent]` — des chaines au lieu de paires — fait echouer un
-      # `is_list(pair)` : chaque element est une chaine, aucun n'est signale, et le mur passerait
-      # au VERT sur un profil qui retire pourtant le bundle. Le schema doit refuser cette forme en
-      # amont, mais un mur qui ne tient que si un AUTRE controle a fait son travail ne tient rien.
+      # Exercise malformed flat entries as well as the canonical pair form.
       root =
         depot([
           bundle(),
@@ -178,8 +158,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ LA PROSE ABSENTE ARRETE LE MUR AVANT LES CARTES" do
-      # Toutes les cartes peuvent nommer le bundle : si sa prose n'existe pas, les pods recoivent
-      # un nom qui ne compose rien. Le defaut est en amont des cartes, et le message le dit.
       root = depot([profil("engineer", []), profil("scribe", [])])
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_sp_adresser_un_agent(root)
@@ -198,7 +176,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
   end
 
-  # ══════════════════════════════════════════════════════════════════════════════════════════════
   describe "catalogue.install_paths_locked — provisionner un dossier que le runtime ne lit pas" do
     @layout """
     defmodule Fleet.Layout do
@@ -234,8 +211,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ L'INSTALLEUR EST LU AUSSI — c'est LUI qui converge le dossier" do
-      # Provisionner un dossier que le runtime ne lit pas rapporte tous les catalogues installes et
-      # n'en sert aucun. Le miroir `deploy/` est la moitie qui CREE, celle du CLI celle qui LIT.
       root = depot(installe(@dir, @shipped, "/opt/lcars/autre"))
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)
@@ -244,9 +219,6 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
 
     test "⚠ UN DEFAUT SHELL ABSENT SE DISTINGUE D'UN DEFAUT QUI A DERIVE" do
-      # Deux pannes opposees : « cette moitie ne porte plus le chemin » et « elle en porte un
-      # autre ». Les confondre enverrait le lecteur chercher une divergence de valeur la ou il n'y
-      # a plus de valeur du tout.
       root =
         depot([
           {"runtime/lib/fleet/layout.ex", @layout},

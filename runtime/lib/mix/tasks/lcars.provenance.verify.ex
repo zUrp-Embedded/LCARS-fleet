@@ -1,15 +1,15 @@
 defmodule Mix.Tasks.Lcars.Provenance.Verify do
-  # Z4 — Mix task classified into the boundary of its subject (Fleet.Workflow).
   use Boundary, classify_to: Fleet.Workflow
-  @shortdoc "Verify every provenance statement of a project (deterministic, non-LLM)"
+  @shortdoc "Verifies local provenance JSON files against code commits"
   @moduledoc """
-  Deterministic manual/CI face of `Fleet.Workflow.Provenance.Verifier`.
+  Verifies local ops `provenance/*.json` files against the project's code repository.
 
-      mix lcars.provenance.verify <project-name>
-      mix lcars.provenance.verify <project-name> --ops-root /path --code-root /path
+    mix lcars.provenance.verify <project-name>
+    mix lcars.provenance.verify <project-name> --ops-root /path --code-root /path
 
-  It checks every ops provenance statement against code commits and exits
-  nonzero on incoherence. No statement is reported but remains valid.
+  Both project directories must exist. Verification failures exit nonzero;
+  no JSON files is reported and succeeds. Git provenance refs are not enumerated
+  or fetched, so an empty scan does not establish that no attestations exist.
   """
   use Mix.Task
 

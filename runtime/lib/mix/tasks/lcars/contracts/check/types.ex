@@ -1,50 +1,26 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
-  # Z4 — classe dans la boundary de son sujet, comme la tache qui l'utilise.
   use Boundary, classify_to: Fleet.Application
 
   @moduledoc """
-  Les deux jumeaux : toute fonction publique porte un `@spec`, et toute fonction publique porte un
-  `@doc`.
+  Checks spec and documentation coverage under lib/.
 
-  Ils gardent le meme fait par deux bouts. Sans `@spec`, une fonction n'est pas « moins finie » :
-  elle est HORS DE PORTEE de l'instrument le plus strict du gate — `:extra_return` et
-  `:missing_return` comparent le DECLARE a l'INFERE, et ils sont inertes quand il n'y a rien de
-  declare. La fonction est analysee, avec le contrat le plus permissif que l'inference veuille bien
-  lui accorder, et elle fait verdir la chaine.
+  The spec check reads AST definitions per module and arity, including delegates
+  and macros. One spec within a default-argument arity range covers that unit.
+  It excludes selected callback names and definitions marked by its @impl scan.
 
-  `@impl` est EXCLU des deux cotes, pour le meme motif : le contrat d'un callback vit dans son
-  behaviour, et le restater par implementation est la duplication que ce depot refuse ailleurs.
+  The documentation check is a line/indentation heuristic keyed by module and
+  function name, not arity. It accepts @doc false and excludes @impl and its
+  own OTP-name list, including start_link and child_spec. It does not parse
+  heredoc contents or check documentation quality; delegates are not counted.
 
-  ⚠ LES DEUX MURS LISENT L'AST, PAS LES LIGNES. Une machine a phases ligne a ligne dont la bascule
-  de heredoc ne bascule pas sur `@moduledoc \"\"\"` — cette ligne ne COMMENCE pas par les trois
-  guillemets — rend invisible tout ce qui suit un moduledoc, et annonce 100 % sur une fraction du
-  reel. Un compteur qui se trompe de phase ne se rapiece pas : il se refait sur la seule structure
-  qui ne ment pas.
+  These are coverage checks, not proof that a spec or doc matches implementation.
+  The documentation scan counts found files even when File.read fails.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Support
 
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
-  # ⚠ UNE FONCTION SANS `@spec` FAIT VERDIR DIALYZER SANS ETRE ANALYSEE PAR LUI. Ses drapeaux les
-  # plus stricts comparent le DECLARE a l'INFERE : sans declaration, ils sont INERTES et la fonction
-  # est hors de portee de l'instrument le plus severe du gate — tout en le faisant passer.
-  #
-  # ⚖ Arbitrage user : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est le dernier
-  # kilometre ». Sans ce mur la fuite s'ELARGIT toute seule : chaque check ajoute ici ajoute une
-  # fonction publique sans spec.
-  #
-  # `@impl` EXCLU : le contrat d'un callback vit dans son behaviour, et le restater par
-  # implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP NOMMES ne sont
-  # PAS exclus — ils portent un contrat propre a chaque module.
-  #
-  # ## Preuve (mesure et mutation)
-  # Pose a 540/540. Retirer un `@spec` -> ECHEC, fonction et fichier nommes. Et l'exercice s'est
-  # auto-verifie pendant qu'on le faisait : QUATRE specs ecrits de bonne foi etaient FAUX, et
-  # Dialyzer les a nommes un par un — `paginate/3` (une chaine de requete prise pour un keyword,
-  # 75 avertissements en cascade), `forge_bot_login/2` et `login_of/1` (un tuple pris pour une
-  # chaine), `maybe_complete/2` (deux formes de retour sur quatre). Aucun n'aurait pu passer en
-  # silence : c'est la propriete qui rend ce mur sur a poser.
   @doc false
   @spec check_public_functions_spec(String.t()) :: Support.result()
   def check_public_functions_spec(root) do
@@ -69,31 +45,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     })
   end
 
-  # Les callbacks dont le contrat vit dans leur BEHAVIOUR — meme exclusion que le jumeau
-  # `docs.public_functions_documented`, et pour le meme motif : le restater par implementation est
-  # la duplication que ce depot refuse ailleurs. Beaucoup ne portent pas `@impl` dans cet arbre, et
-  # c'est une AUTRE dette : les exclure par nom ferme le trou du spec sans masquer celui-la.
-  # `start_link` et `child_spec` N'Y SONT PAS : leur contrat est propre a chaque module.
+  # Spec exemptions by name also apply without @impl; start_link and child_spec remain checked.
   @behaviour_callbacks ~w(init handle_call handle_cast handle_info handle_continue terminate
                           code_change handle_event)a
 
-  # Les unites publiques d'UN fichier qui n'ont pas de `@spec`, par NOM ET ARITE.
-  #
-  # ⚠ LECTURE SUR L'AST, PAS LIGNE A LIGNE, et la mesure dit pourquoi : une machine a phases dont la
-  # bascule de heredoc (`String.starts_with?(trimmed, ~s("""))`) ne bascule PAS sur `@moduledoc """`
-  # — cette ligne ne COMMENCE pas par les trois guillemets, seule la fermeture bascule — rend
-  # invisible tout ce qui suit un moduledoc : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de
-  # plus de la moitie, onze fichiers vus a ZERO, et un mur qui annonce 100 % sur 92,8 % de reel. Un
-  # compteur qui se trompe de phase ne se rapiece pas, il se refait sur la seule structure qui ne
-  # ment pas.
-  #
-  # TROIS choses qu'une lecture ligne a ligne ne peut pas faire :
-  #   * `defdelegate` — la regex `^def\s+` ne le matche pas (pas d'espace) ; 22 delegations
-  #     publiques hors de portee, dont `Pilot.onboard` et `IncidentRegistry.escalate` ;
-  #   * l'ARITE — des `@spec` indexes par nom seul laissent passer au vert un `in_flight/1` ajoute a
-  #     cote d'un `in_flight/0` spec'e ;
-  #   * les ARGS PAR DEFAUT — `def f(a, b \\ 1)` definit deux arites et un seul `@spec` les couvre.
-  #     Une unite porte donc son intervalle, et un spec dedans suffit.
   defp unspecced_public_units(src) do
     src
     |> Code.string_to_quoted!()
@@ -103,13 +58,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     |> Enum.sort()
   end
 
-  # Les corps de module, UN PAR MODULE. Deux pieges mesures a la pose :
-  #   * un corps a UN SEUL statement n'est pas un `__block__` — sans cette clause, un module d'une
-  #     fonction est entierement invisible ;
-  #   * les statements d'un module IMBRIQUE sont aussi des statements du parent. Melanger les deux
-  #     fait fuir les `@spec` et les `@impl` d'un module vers son voisin du meme fichier :
-  #     quatre modules dans `conflict/types.ex`, quatre dans `admiral/shutdown.ex`, et le spec de
-  #     l'un couvrait la fonction homonyme de l'autre. Chaque module est donc son propre monde.
+  # Keep single-statement and nested modules in separate scopes; specs must not leak between them.
   defp module_bodies(ast) do
     collect(ast, fn
       {:defmodule, _, [_name, [do: body]]} -> stmts_of(body)
@@ -134,9 +83,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     |> Enum.map(fn {name, _lo, hi, _} -> "#{name}/#{hi}" end)
   end
 
-  # UN PAS DU BALAYAGE D'UNE PORTEE : l'accumulateur porte les definitions vues, les specs vues, et
-  # le drapeau « le `@impl` juste au-dessus ». Ce drapeau est la raison de la reduction — un `@impl`
-  # ne s'attache pas a la definition dans l'AST, il la PRECEDE.
+  # @impl is a preceding AST statement; intervening statements can clear this flag.
   defp scope_step({:defmodule, _, _}, {{ds, ss}, _impl?}), do: {{ds, ss}, false}
   defp scope_step({:@, _, [{:impl, _, _}]}, {{ds, ss}, _impl?}), do: {{ds, ss}, true}
 
@@ -149,7 +96,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
   defp scope_step(_stmt, {{ds, ss}, _impl?}), do: {{ds, ss}, false}
 
-  # `{nom, arite_min, arite_max}` — l'intervalle vient des arguments a valeur par defaut.
   defp def_unit({:when, _, [inner | _]}, acc, impl?), do: def_unit(inner, acc, impl?)
 
   defp def_unit({name, _, args}, acc, impl?) when is_atom(name) and is_list(args) do
@@ -171,25 +117,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   defp spec_unit(_, acc), do: acc
 
   @doc false
-  # A PUBLIC FUNCTION WITH NO `@doc` IS A HOLE IN THE SSoT. The repo's contract rule is that a
-  # module's `@moduledoc` carries the domain contract and each public function carries its own
-  # `@doc` — machine-visible through `h`/ExDoc. A public function without one answers `h` with
-  # nothing, and the caller reads the body instead: the source becomes the contract, and every
-  # detail of it becomes load-bearing by accident.
-  #
-  # WHAT THIS DOES NOT CHECK, and the distinction is the whole reliability of it. It does NOT
-  # require the `@moduledoc` to enumerate the public functions — measured on this tree, that rule
-  # accuses 157 modules out of 194 (80%), starting with `Fleet.Layout`, whose moduledoc explains a
-  # LAYOUT and is right not to be an index. A wall that fires on 80% of correct code is not a wall,
-  # it is a nag, and the next person widens it until it stops firing.
-  #
-  # `@impl` callbacks are EXCLUDED: their contract lives in the behaviour, and restating it per
-  # implementation is the duplication this repo refuses elsewhere. OTP callbacks likewise.
-  #
-  # Calibrated by measurement, in this order: the naive rule accused 80%, "no `@doc`" accused 33
-  # modules — dominated by behaviour implementations — and excluding `@impl` left 9 modules and 12
-  # functions, four of which were verified BY HAND before anything shipped. Those twelve were
-  # documented; the check then starts green, which is the only state a wall may be born in.
+
   @spec check_public_functions_documented(String.t()) :: Support.result()
   def check_public_functions_documented(root) do
     undocumented =
@@ -212,26 +140,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     })
   end
 
-  # NESTING IS THE POPULATION, NOT A DETAIL OF IT. Matching `^  def` — EXACTLY two spaces, the
-  # indentation of a `def` sitting directly under a top-level `defmodule` — never looks at a nested
-  # module's functions (indented by four): they are not judged undocumented, they are unseen. The
-  # blind spot measured five `def` clauses over two files, and one of them is
-  # `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — the system-side git entry point, i.e. the
-  # module that carried the sandbox escape this repo fixed by composing `git_safe_config_args/0`.
-  # A wall that starts green because its subject is out of frame is the failure class this whole
-  # file exists to prevent, one level up: not a hollow green over an empty tree, a hollow green over
-  # a tree it declined to enter.
+  # Indentation associates nested definitions with their module; this is not an AST parser.
   @def_re ~r/^(\s+)def\s+([a-z_][a-zA-Z0-9_?!]*)/
   @defp_re ~r/^\s+defp?\s/
   @defmodule_re ~r/^(\s*)defmodule\s+([A-Z][A-Za-z0-9_.]*)/
 
-  # `@doc false` COUNTS AS DOCUMENTED, deliberately: it is an explicit statement that the function is
-  # public for a mechanical reason and not as an API. Treating it as a miss would push its authors to
-  # write a hollow `@doc` instead, which is worse — a sentence nobody meant, in the place a reader
-  # trusts most.
-  # UN FICHIER ILLISIBLE N'ACCUSE PERSONNE, et il ne se compte pas non plus : `scanned` compte les
-  # fichiers TROUVES, pas les fichiers LUS — c'est la garde d'instrument juste en dessous qui tient
-  # le cas ou le balayage entier ne voit rien.
   defp undocumented_entry(path, root) do
     with {:ok, src} <- File.read(path),
          [_ | _] = names <- undocumented_public_functions(src) do
@@ -273,9 +186,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
             match?([_, _, _], Regex.run(@defmodule_re, line)) ->
               [_, indent, mod] = Regex.run(@defmodule_re, line)
               depth = String.length(indent)
-              # A pending `@doc` does not cross a `defmodule`: it belonged to whatever was being
-              # written before, and letting it through would credit the nested module's first
-              # function with someone else's documentation.
+              # A pending annotation must not cross into a nested module.
               %{st | mods: [{depth, mod} | pop_to(st.mods, depth)], doc?: false, impl?: false}
 
             match?([_, _, _], Regex.run(@def_re, line)) ->
@@ -300,13 +211,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     end)
   end
 
-  # The enclosing module of a `def` = the innermost one indented LESS than it. Closing `end`s are
-  # never parsed: popping by indentation does it, because a sibling that follows a nested module is
-  # written back at the shallower depth. `nil` for the file's outermost module, so its functions
-  # keep printing as bare names — a qualified name means "this one is nested", which is precisely
-  # what a reader needs to find it.
-  # Une definition PUBLIQUE rencontree : elle rejoint la surface, et consomme le `@doc`/`@impl` en
-  # attente. Un callback OTP n'entre pas dans la surface — son contrat vit dans son behaviour.
+  # Infer nesting from indentation; outermost functions print without a module prefix.
   defp note_public(st, [_, indent, name], otp) do
     key = {enclosing_module(st.mods, String.length(indent)), name}
     st = if st.impl?, do: %{st | impls: MapSet.put(st.impls, key)}, else: st

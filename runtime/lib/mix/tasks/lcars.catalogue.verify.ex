@@ -1,18 +1,18 @@
 defmodule Mix.Tasks.Lcars.Catalogue.Verify do
-  # Z4 — Mix task classified into the boundary of its subject (Fleet.Application): the orchestrator
-  # `Fleet.Application.CatalogueVerify` is a sub-module of that boundary, so this task reaches it.
   use Boundary, classify_to: Fleet.Application
 
-  @shortdoc "Proves a catalogue root the way the boot would — off the supervision path"
+  @shortdoc "Runs the boot's catalogue checks without starting the fleet"
 
   @moduledoc """
-  Proves a catalogue directory with the daemon's own boot checks without starting a fleet.
+  Runs the catalogue checks used at boot without starting the fleet.
 
-      mix lcars.catalogue.verify <root>     # human report + exit 0/1
-      mix lcars.catalogue.verify <root> -q  # exit code only
+    mix lcars.catalogue.verify <root>
+    mix lcars.catalogue.verify <root> -q  # suppress this task's report
 
-  The root is read whole. Deployment credentials and fine per-tree overrides are
-  intentionally outside this proof and are printed as assumptions.
+  Failures exit 1. Quiet mode does not suppress the verifier's logs.
+  Deployment credentials and per-tree overrides remain printed assumptions.
+  The verifier publishes global images; see Fleet.Application.CatalogueVerify
+  before reusing the VM. Success does not prove the entire boot will succeed.
   """
 
   use Mix.Task
@@ -48,11 +48,7 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
     unless quiet? do
       print_assumptions(assumptions)
 
-      # LA MEME PHRASE VIT A DEUX ENDROITS — ici et sur la porte release — donc corriger l'un sans
-      # l'autre laisse le mensonge sur le chemin `mix`, celui que l'operateur lance A LA MAIN
-      # (6-008). Elle ne dit PAS « every check the boot runs passed » : il suffit que le rail de
-      # boot joue une garde `validate_*!` de plus que ce verificateur pour qu'un vert d'ici precede
-      # un boot rouge.
+      # Keep the coverage claim aligned with the release verifier.
       Mix.shell().info(
         "catalogue OK — les controles catalogue du boot passent (cf. hypotheses ci-dessus)."
       )
@@ -60,7 +56,6 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
   end
 
   defp report({:error, %{findings: findings, assumptions: assumptions}}, quiet?) do
-    # `_ =` — the `unless` value (the comprehension's list) is discarded; the exit below is the point.
     _ =
       unless quiet? do
         print_assumptions(assumptions)

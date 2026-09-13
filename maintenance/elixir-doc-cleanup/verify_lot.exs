@@ -4,7 +4,7 @@ defmodule LotCheck do
   def normalize(ast) do
     Macro.prewalk(ast, fn
       {:@, _, [{kind, _, [value]}]}
-      when kind in [:doc, :moduledoc, :typedoc] and is_binary(value) ->
+      when kind in [:doc, :moduledoc, :typedoc, :shortdoc] and is_binary(value) ->
         {:documentation, [], [kind]}
 
       # ~S docs are literal text. Preserve the sigil and modifiers; do not normalize other sigils.

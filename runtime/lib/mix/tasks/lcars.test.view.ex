@@ -1,47 +1,30 @@
 defmodule Mix.Tasks.Lcars.Test.View do
-  # A reading instrument for the test tree, not a domain: classified with the OTP root like the
-  # other gate tools (`lcars.topology`, `lcars.contracts.check`).
-  #
-  # The module name IS the command name: `Mix.Tasks.Lcars.Test.View` runs as `mix lcars.test.view`.
-  # A first version named `Lcars.TestView` ran as `mix lcars.test_view` while every doc said
-  # `lcars.test.view` — a command that did not exist, and a witness that called the module directly
-  # could not see it. `test_view_test.exs` now goes through `Mix.Task.run/2` for that reason.
+  # The dotted module name defines lcars.test.view; direct run/1 calls cannot test it.
   use Boundary, classify_to: Fleet.Application
   use Mix.Task
 
-  @shortdoc "Projects a test file without its prose: code only, plan, or prose only (lossless)"
+  @shortdoc "Projects test-file reading views and checks textual recomposition"
 
   @moduledoc """
-  Three lossless projections of an ExUnit file, so the suite can be READ and GREPPED without its
-  prose — and its prose read without the code.
+  Provides line-based reading views and a static ExUnit outline.
 
-      mix lcars.test.view code  test/fleet/layout_test.exs    # comment and doc lines blanked, numbering kept
-      mix lcars.test.view plan  test/fleet/layout_test.exs    # describe / test / property with their line
-      mix lcars.test.view prose test/fleet/layout_test.exs    # every comment, attached to the nearest witness
-      mix lcars.test.view check test/**/*_test.exs            # the code view reparses, code + prose recompose the file
-      mix lcars.test.view stats test/**/*_test.exs            # per-file counts (code, comment, doc, blank, witnesses)
+    mix lcars.test.view code  test/fleet/layout_test.exs
+    mix lcars.test.view plan  test/fleet/layout_test.exs
+    mix lcars.test.view prose test/fleet/layout_test.exs
+    mix lcars.test.view check test/**/*_test.exs
+    mix lcars.test.view stats test/**/*_test.exs
 
-  ## Why the tokenizer, never a regex
+  Comments come from the tokenizer, so hashes inside strings are not comments.
+  Doc classification recognises binary literal doc attributes, not interpolated
+  or sigil documentation. A line with an inline comment is classified entirely
+  as comment, including its code; the code view blanks that whole line.
 
-  Measured on this suite: one comment block in four is one to three lines long, and they cut the
-  code every few lines. A `grep` for `refute` hits 130 comment lines out of 1460; a `grep` for
-  `async: false` hits 80 out of 218. A naive `^\\s*#` strip is wrong on 66 lines (a `#` inside a
-  heredoc is not a comment). `Code.string_to_quoted_with_comments/2` is the language's own authority
-  on what a comment is, and every comment it returns carries its line. Doc attributes are found in
-  the AST with their delimiter, so a `@moduledoc` heredoc is prose too.
+  The prose view lists token comments only. Check reparses the code view and
+  recomposes it with original non-code lines, not with the prose view. This proves
+  textual reconstruction, not executable AST equivalence.
 
-  ## What `check` proves
-
-  For every file: the code view still parses (no code line was blanked), and putting the prose
-  lines back yields the original byte for byte (nothing was invented). A file that fails either is
-  listed and the task exits non-zero — the projection is only trustworthy while this stays green
-  on the whole tree.
-
-  ## What `plan` reads that a grep cannot
-
-  Witnesses declared inside a `for` are marked `[for]`: the static count of `test "` lines
-  under-counts them (measured: 13 loop sites in 10 files expand to 62 extra executed names). The
-  executed manifest stays the only truth for counting; `plan` says where the loops are.
+  Plan marks declarations inside for loops without expanding macros; its counts
+  are static declarations, not executed test counts.
   """
 
   @impl Mix.Task
@@ -106,8 +89,6 @@ defmodule Mix.Tasks.Lcars.Test.View do
   def run(_),
     do: Mix.raise("usage: mix lcars.test.view code|plan|prose <file> | check|stats <file>...")
 
-  # ---- line classification --------------------------------------------------------------------
-
   @typedoc "What a line of the file is, as the tokenizer and the AST see it."
   @type kind :: :code | :comment | :doc | :blank
 
@@ -151,8 +132,7 @@ defmodule Mix.Tasks.Lcars.Test.View do
     {kinds, lines, length(lines)}
   end
 
-  # Lines covered by a `@moduledoc` / `@doc` / `@typedoc` / `@shortdoc` literal. A heredoc spans
-  # from its opening line to its closing delimiter; a plain string is one line.
+  # Recognises binary literals only; heredoc span is estimated from decoded text.
   defp doc_lines(ast) do
     {_, acc} =
       Macro.prewalk(ast, [], fn
@@ -174,9 +154,7 @@ defmodule Mix.Tasks.Lcars.Test.View do
     acc
   end
 
-  # ---- code view --------------------------------------------------------------------------------
-
-  @doc "The file with every comment and doc line replaced by an empty line (numbering preserved)."
+  @doc "Keeps only lines classified as code; inline-comment lines are blanked too."
   @spec code(String.t()) :: String.t()
   def code(src) do
     {kinds, lines, _n} = classify(src)
@@ -185,8 +163,6 @@ defmodule Mix.Tasks.Lcars.Test.View do
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {text, i} -> if kinds[i] == :code, do: text, else: "" end)
   end
-
-  # ---- plan view --------------------------------------------------------------------------------
 
   @typedoc "A witness or a describe: `{line, depth, kind, name, declared_inside_a_for?}`."
   @type entry ::
@@ -237,8 +213,6 @@ defmodule Mix.Tasks.Lcars.Test.View do
 
   defp name_of(other), do: Macro.to_string(other)
 
-  # ---- prose view -------------------------------------------------------------------------------
-
   @doc "Every comment of `src` with the nearest witness or describe declared above it (`nil` = header)."
   @spec prose(String.t()) :: [{pos_integer(), entry() | nil, String.t()}]
   def prose(src) do
@@ -251,9 +225,7 @@ defmodule Mix.Tasks.Lcars.Test.View do
     end)
   end
 
-  # ---- check ------------------------------------------------------------------------------------
-
-  @doc "Proves the projection lossless on one file: the code view reparses, code + prose recompose it."
+  @doc "Checks parsing and recomposition with original non-code lines, not AST equivalence."
   @spec check(Path.t()) :: %{
           path: Path.t(),
           lines: non_neg_integer(),
