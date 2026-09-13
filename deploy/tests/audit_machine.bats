@@ -120,8 +120,10 @@ STUB
   [[ "$output" == *"deux instantanés"* ]]
 }
 
-@test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {
-  grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|audit\)' "$RUNNER"
+@test "un verbe inconnu est refusé avant toute lecture" {
+  run bash "$RUNNER" inconnu --before "$AVANT" --after "$APRES"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"commande inconnue"* ]]
 }
 
 @test "un joker en TETE (person <human>) ne couvre PAS l'univers — deux chemins bidon sortent" {

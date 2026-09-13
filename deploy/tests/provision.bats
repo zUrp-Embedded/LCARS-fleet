@@ -91,11 +91,8 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   grep -q "61-imagestub:apply" "$RUN_LOG"
 }
 
-@test "update est refusé sous docker ; doctor et list y restent" {
+@test "doctor et list se jouent sous docker" {
   stub_module 60-deploystub "wsl linux" any human
-  run "$SANDBOX/provision" update --substrate docker
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"ne se joue pas sous docker"* ]]
   run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-deploystub:check" "$RUN_LOG"

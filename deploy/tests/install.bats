@@ -61,9 +61,9 @@ _arbre() { # _arbre [nom=valeur…] -> un arbre « kit » (sans .git) avec dél�
   printf '%s' "$a"
 }
 
-porte() { # porte <arbre> [args…] — sans TTY
+porte() { # porte <arbre> [args…] — sans terminal : une session à part, stdin fermé
   local a="$1"; shift
-  run bash "$a/install.sh" "$@" < /dev/null
+  run setsid -w bash "$a/install.sh" "$@" < /dev/null
 }
 
 
@@ -457,12 +457,21 @@ porte() { # porte <arbre> [args…] — sans TTY
   [[ "$output" != *"déclarée dédiée"* ]]
 }
 
+@test "la pause avant l'exec : annoncée, et sans terminal l'installation continue en le disant" {
+  local a; a="$(_arbre)"
+  porte "$a" --workstation --bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Entrée pour continuer"*"Ctrl+C pour annuler"*"Pas de terminal : l'installation continue."*"WORKSTATION:up"* ]]
+  porte "$a" --workstation --bench --dry-run
+  [[ "$output" != *"Entrée pour continuer"* ]]
+}
+
 @test "la question au terminal : vide ou o continue, n et Ctrl-D arrêtent, une réponse inconnue arrête" {
   command -v script >/dev/null || skip "script (util-linux) absent"
   local a rep; a="$(_arbre comptes_humains=temoin,alice)"
   # script prête un terminal : ce qui entre sur son stdin ressort sur /dev/tty du script joué
   for rep in "" o n q; do
-    run bash -c "printf '%s\n' '$rep' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
+    run bash -c "printf '%s\n\n' '$rep' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
     case "$rep" in
       ""|o) [[ "$output" == *"Continuer ? [O/n]"*"WORKSTATION:up"* ]] || { echo "réponse « $rep » : $output" >&2; return 1; } ;;
       n)    [[ "$output" == *"Rien n'a été fait"* ]] || { echo "réponse « n » : $output" >&2; return 1; }

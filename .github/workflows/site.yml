@@ -77,13 +77,18 @@ jobs:
         working-directory: assets/github.io
     steps:
       - uses: actions/checkout@v4
+      - id: pages
+        uses: actions/configure-pages@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: assets/github.io/package-lock.json
       - run: npm ci
+      # la base du site est celle de Pages : « / » pour un site d'organisation, « /<repo>/ » pour un site de projet
       - run: npm run build
+        env:
+          LCARS_SITE_BASE: ${{ steps.pages.outputs.base_path }}/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: assets/github.io/dist

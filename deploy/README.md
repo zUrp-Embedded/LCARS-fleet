@@ -18,7 +18,7 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 | `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit détaré sous `~/.lcars/kits/<nom>/`, puis `accept` ; `doctor` sonde sans escalader |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/` |
 | `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : gate, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace), le tiroir `dist/<tag>/` les reprend par liens durs avec l'installeur de la version, l'image reste dans le daemon ; `--publish` pousse l'image sur le registre, puis le kit et l'installeur sur la release de la forge |
-| `deploy/provision apply \| doctor \| update \| list \| audit` | le runner des modules, joué par `workstation` et par la construction de l'image |
+| `deploy/provision apply \| doctor \| list \| audit` | le runner des modules, joué par `workstation` et par la construction de l'image |
 | `deploy/accept` | l'acceptation d'une installation : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows d'un projet demandent, la fleet démarre sous l'humain de fleet |
 
 ## Le pipeline

@@ -2,19 +2,17 @@
 # SOURCE: deploy/provision
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: le runner du provisionnement — apply, doctor, update, list, audit sur modules.d/
+# STATUS: le runner du provisionnement — apply, doctor, list, audit sur modules.d/
 #
 # USAGE
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision doctor (mêmes options) [--porcelain]
-#   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
 #
 #   apply    converge la machine : chaque module joue check, fix, re-check
 #   doctor   sonde seule — le même check que l'apply
-#   update   pull --ff-only du checkout, remote vérifié contre PROV_EXPECTED_REPO, puis apply
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
 #            « find / … > avant ; install ; find / … > après » (une ligne par objet :
@@ -97,8 +95,7 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|update|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
-[[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est toujours un converge complet — pas de --only (apply --only pour un module isolé)"
+case "$CMD" in apply|doctor|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
 
 if [[ -n "$ENV_FILE" ]]; then
   [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
@@ -128,11 +125,6 @@ _journal_params
 
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
-case "$CMD" in
-  update) [[ "$SUBSTRATE" != "docker" ]] || die "« $CMD » ne se joue pas sous docker : une image ne se converge pas.
-  Elle se bâtit par deploy/pack.sh et se vérifie au build (provision doctor --substrate docker) ;
-  une instance se remplace : « deploy/container status » · « deploy/container down »." ;;
-esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
 # L'uid du siège se dérive ici, du compte qui a lancé le runner — jamais de PROV_HUMAN, que le
@@ -151,49 +143,6 @@ unset _seat_login _seat_uid
 # shellcheck disable=SC2119 # l'argument de prov_source_rev est optionnel : l'appel nu est le cas nominal
 PROV_SOURCE_REV="$(prov_source_rev)"
 export PROV_SOURCE_REV
-
-# ─── update : pull vérifié du checkout, puis re-exec du runner pullé en apply ───────────────────
-if [[ "$CMD" == "update" ]]; then
-  [[ "$EUID" -eq 0 ]] || die "update exige root (il enchaîne sur apply) — relancer : sudo $SELF update"
-  ROOT="$(repo_root)"
-  git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
-
-  [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — l'autorité complète doit être déclarée, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars), via --env ou l'environnement ; sans elle, aucun pull"
-  case "$PROV_EXPECTED_REPO" in
-    */*/*) ;;
-    *) die "update: PROV_EXPECTED_REPO=« $PROV_EXPECTED_REPO » n'a pas d'hôte — une autorité sans hôte autorise n'importe quelle forge. Forme attendue : « <hôte>/<owner>/<repo> » (ex: forge.example.org/fleet/lcars)" ;;
-  esac
-  REMOTE_URL="$(git -C "$ROOT" remote get-url "$PROV_UPDATE_REMOTE" 2>/dev/null || true)"
-  [[ -n "$REMOTE_URL" ]] || die "update: remote « $PROV_UPDATE_REMOTE » absent du checkout $ROOT"
-  REMOTE_ID="$(prov_parse_remote "$REMOTE_URL")" \
-    || die "update: remote « $REMOTE_URL » non analysable (forme inconnue, userinfo, ou chemin qui n'est pas <owner>/<repo>) — pull refusé"
-  [[ "$REMOTE_ID" == "$PROV_EXPECTED_REPO" ]] \
-    || die "update: remote « $REMOTE_URL » → « $REMOTE_ID » ≠ autorité déclarée « $PROV_EXPECTED_REPO » — pull refusé"
-
-  # le pull s'exécute comme l'owner du checkout, jamais root
-  OWNER="$(stat -c '%U' "$ROOT")"
-  [[ "$OWNER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "update: owner du checkout invalide: « $OWNER »"
-  BEFORE="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
-
-  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply/update refusé"
-  exec 9>"$LOCK"
-  flock -n 9 || die "un autre apply/update est en cours (lock: $LOCK)"
-  runuser -u "$OWNER" -- git -C "$ROOT" pull --ff-only "$PROV_UPDATE_REMOTE" \
-    || die "update: pull --ff-only en échec (divergence ? réseau ?) — rien n'a été appliqué"
-  AFTER="$(git -C "$ROOT" rev-parse --short=8 HEAD)"
-  if [[ "$BEFORE" == "$AFTER" ]]; then
-    echo "provision update: déjà à jour ($AFTER) — re-converge quand même (idempotent)"
-  else
-    echo "provision update: $BEFORE → $AFTER"
-    git -C "$ROOT" --no-pager log --oneline "$BEFORE..$AFTER" | sed 's/^/  /'
-  fi
-  flock -u 9
-
-  # c'est le code fraîchement pullé qui s'applique, pas celui chargé avant le pull
-  REEXEC=(--substrate "$SUBSTRATE" --human "$PROV_HUMAN")
-  [[ -n "$ENV_FILE" ]] && REEXEC+=(--env "$ENV_FILE")
-  exec "$SELF" apply "${REEXEC[@]}"
-fi
 
 # ─── Découverte et sélection ────────────────────────────────────────────────────────────────────
 module_field() {

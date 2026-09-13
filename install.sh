@@ -531,6 +531,14 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 echo "  ${G}$RAPPEL${N}"
 echo ""
+echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
+echo ""
+if { exec 3< /dev/tty; } 2>/dev/null; then
+  read -r _ <&3 || true
+  exec 3<&-
+else
+  echo "  Pas de terminal : l'installation continue."
+fi
 rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
 [[ "${#PRE[@]}" -eq 0 ]] || "${PRE[@]}" || exit 1
 exec "${CMD[@]}"

@@ -71,8 +71,6 @@ PROV_FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL%/}"
 : "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 : "${PROV_DUMP_LINES:=40}"
-: "${PROV_UPDATE_REMOTE:=origin}"
-: "${PROV_EXPECTED_REPO:=}"
 : "${PROV_ELIXIR_OTP_MAJOR:=27}"
 : "${PROV_ELIXIR_MIN:=1.20}"
 : "${PROV_ELIXIR_PIN:=1.20.4}"
@@ -236,41 +234,6 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…> — un code listé rend 
   done
   [[ "$rc" -eq 0 ]] || { p_fail "commande en échec (rc=$rc) : $label"; prov_dump_last; }
   return "$rc"
-}
-
-prov_parse_remote() {
-  local url="$1" rest host path owner repo
-
-  case "$url" in
-    *://*)
-      rest="${url#*://}"
-      ;;
-    *:*/*)
-      rest="${url%%:*}/${url#*:}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-
-  case "${rest%%/*}" in
-    *:*@*) return 1 ;;
-  esac
-  rest="${rest#*@}"
-
-  host="${rest%%/*}"
-  path="${rest#*/}"
-  host="${host%%:*}"       # port ignore : il ne change pas QUI l'on contacte
-  host="${host,,}"         # les hotes sont insensibles a la casse, les chemins non
-  path="${path%.git}"
-  path="${path%/}"
-
-  [[ -n "$host" && "$path" == */* ]] || return 1
-  owner="${path%%/*}"
-  repo="${path#*/}"
-  [[ -n "$owner" && -n "$repo" && "$repo" != */* ]] || return 1
-
-  printf '%s/%s/%s\n' "$host" "$owner" "$repo"
 }
 
 prov_lock_path() {
