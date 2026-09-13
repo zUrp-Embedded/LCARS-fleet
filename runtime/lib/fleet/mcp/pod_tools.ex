@@ -1,68 +1,24 @@
 defmodule Fleet.MCP.PodTools do
   @moduledoc """
-  Pod-facing MCP TOOL layer — the RPCs the pod (Claude MCP client) calls to
-  talk to the fleet, without scraping or keyboard injection. THIS module is the
-  **routing table**: the `deftool` schemas + the `handle_tool_call/3` dispatch
-  (argument guards, typed refusals, MCP content format `json`/`text`).
+  Pod-facing MCP schemas and dispatch. `deftool` registers the schema table in this
+  module; handlers delegate to WorkItems, Delegation, Probe and Toolchain.
+  ExMCP supplies the schema macros; PodSocketAcceptor owns the per-pod AF_UNIX transport.
 
-  Schema SDK vs transport (swappable): the `deftool` schemas come from the `ExMCP`
-  SDK, but the pod-facing TRANSPORT is NOT ExMCP's — it is our own per-pod AF_UNIX
-  `:gen_tcp` socket (`Fleet.MCP.PodSocketAcceptor`; ExMCP offers no per-pod socket).
-  So the schema SDK is swappable (e.g. Hermes) without touching the transport or the
-  tool consumers.
+  The acceptor supplies `state.pod_id` and checks tool admission and wire schemas.
+  Direct calls to these handlers bypass those transport checks. Domain gates resolve
+  role from channel identity. Project-bound architect operations also resolve the repo
+  from that binding; portfolio operations accept an explicit target repository.
+  WorkItems owns correlation and TaskQueue owns completion broadcasts.
 
-  The domain logic lives in two sub-modules with DISJOINT consumers:
+  Keep tool enumeration in `deftool`. The AST contracts check gating, effects, input
+  schemas, seam declarations and real-backend requirements (`mcp.tools_gated`,
+  `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
+  `mcp.required_for_real_backend`).
 
-    * work-item drive (every pod) — the IN channel by which a pod PULLS its brief, and the OUT
-      channel by which it PUSHES its deliverable against a mandatory correlator.
-    * forge delegation (architect only, server-side gate) — creating and steering projects,
-      tickets, dependencies, escalations, and the external publish surface.
-
-  ⚠ N'ENUMERE PAS LES OUTILS ICI — une liste posee dans ce paragraphe a deja derive DEUX fois.
-  ## ⚠ La ligne `# vitrine:` est un FORMAT DE LIGNE UNIQUE, pas de la prose libre
-
-  Le build du site la lit par une regex qui capture jusqu'a la fin de la ligne
-  (`assets/github.io/src/lib/tools.js`, `extractVitrine/1`) et FAIT ECHOUER le build quand un
-  `deftool` n'en porte pas. La replier sur deux lignes n'allongerait pas le texte : elle le
-  TRONQUERAIT en silence sur la page publique.
-
-  C'est pourquoi ces lignes-la, et elles seules, portent un `credo:disable-for-next-line` sur la
-  longueur maximale — une contrainte externe mesuree, pas un lint qui derange. Le mur
-  `mcp.vitrine_single_line` tient la propriete du cote runtime : le build du site est une AUTRE
-  porte, et `site.build_inputs` existe justement parce que ses gardes ne tournent pas quand ce
-  build ne se declenche pas.
-
-  L'AUTORITE est l'ensemble des `deftool`, juste en dessous, et un mur la lit PAR L'AST : il refuse
-  tout outil qui n'est ni pod-scope ni role-gated, et toute clause de dispatch sans schema. Un outil
-  absent d'une prose est un commentaire perime ; un outil absent de ce mur n'existe pas.
-
-  Server-side mediation: the pod never touches the TaskQueue nor the forge directly
-  (the queue, its schema, its storage stay invisible to the pod); everything goes through
-  these tools. Identity (which pod) is the CHANNEL: `state.pod_id` is carried by the socket
-  acceptor (one pod = one socket), never read from the wire — the clauses here check its
-  presence (`:pod_id_required`, fail-closed), the architect gate lives in `Delegation`.
-
-  ## Pourquoi ce fichier est GROS, et pourquoi il le reste
-
-  Sa forme, pas une impression : deux tiers de `deftool` (32 declarations de schema wire), le
-  reste en clauses de `handle_tool_call/3` (une soixantaine), `@moduledoc` et attributs. Il ne
-  porte que TROIS fonctions publiques et trois privees.
-
-  Il n'est donc pas decomposable, et ce n'est pas une preference :
-
-    * `deftool` ENREGISTRE dans le module ou la macro est appelee. Deplacer des declarations
-      ailleurs les sortirait de la table que cinq murs lisent comme autorite unique
-      (`mcp.tools_gated`, `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
-      `mcp.required_for_real_backend`) — et cette table EST le contrat du serveur.
-    * les clauses de dispatch sont les clauses d'UNE fonction. Elixir exige qu'elles vivent dans
-      un seul module ; les repartir n'est pas un arbitrage, c'est impossible.
-
-  Chaque clause fait en moyenne sept lignes et delegue : le metier vit dans `Delegation.*` et
-  `Probe`. Ce fichier est une TABLE, et une table longue n'est pas un objet-dieu.
-
-  The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
-  `fleet.events` — this module emits NO event of its own (the broker is the single
-  emitter of the completion lifecycle).
+  Each `# vitrine:` line is machine input: `assets/github.io/src/lib/tools.js`
+  reads only that line. Preserve it and its line-length directive together.
+  `mcp.vitrine_single_line` checks the runtime side; `site.build_inputs` covers
+  site build inputs when that separate build does not run.
   """
 
   use ExMCP.Server
@@ -71,45 +27,16 @@ defmodule Fleet.MCP.PodTools do
   alias Fleet.MCP.PodTools.Probe
   alias Fleet.MCP.PodTools.WorkItems
 
-  # F-C138
   @base_tool_names ["get_work_item", "submit_result"]
 
   @doc "The universal pod-interface tool names (task-worker base), exposed to every role."
   @spec base_tool_names() :: [String.t()]
   def base_tool_names, do: @base_tool_names
 
-  # L'EFFET DE CHAQUE OUTIL SUR LE MONDE, DECLARE ICI ET NULLE PART AILLEURS (6-106).
-  #
-  # ⚠ PAS UNE LISTE AILLEURS. Des noms d'outils poses en mots nus dans un sigil, chez l'acceptor,
-  # ne ressemblent a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
-  # `mcp__fleet__`, ni prose) : un renommage objet-d'abord les manque EN SILENCE, et le dedup
-  # single-flight cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas comme les autres
-  # est une liste qu'un renommage rate.
-  #
-  # Ici, elle vit A COTE des definitions — donc un renommage la traverse — et son exhaustivite
-  # est MECANIQUE : `mix lcars.contracts.check` lit les `deftool` par l'AST et refuse un outil sans
-  # effet declare, ou un effet declare pour un outil qui n'existe pas. C'est la seule forme qui
-  # empeche d'ajouter un mutateur et de l'oublier ; une liste, meme bien rangee, ne le peut pas.
-  #
-  # TROIS effets, parce qu'il y a trois natures et que les confondre est ce qui a coute la fiche :
-  #
-  #   * `:mutation` — l'appel change le MONDE (forge, disque, projets). Deux appels identiques
-  #     concurrents doivent s'effondrer en un : c'est le retry MCP, le double-clic logique, la
-  #     re-emission apres le timeout de 30 s du pont stdio.
-  #   * `:protocol` — le canal IN/OUT du pod (`get_work_item`, `submit_result`). Il mute bien la
-  #     FILE, mais sa re-emission est un comportement CONCU, pas un accident : le pull est l'ACK
-  #     durable du wake, et un re-submit rejoue honnetement tant que la diffusion n'a pas ete
-  #     confirmee (c'est ce qui repare une completion perdue). La `TaskQueue` est deja l'autorite de
-  #     ces semantiques ; poser un second arbitre devant donnerait deux proprietaires a un seul
-  #     mecanisme.
-  #   * `:read` — ne change rien ; rien a arbitrer.
-  #
-  # ⚠ Et le motif que l'action prescrite invoque pour tout idempotencer NE TIENT PAS sur ce
-  # mecanisme, verifie dans son code : `Fleet.MCP.Idempotency` est un single-flight, il ne met
-  # JAMAIS en cache un resultat abouti (`handle_cast({:publish, …})` supprime l'entree, et son
-  # moduledoc le dit : « completed results are never cached, so later intentions run against the
-  # current world »). Un resultat en echec promeut exactement un attendant, qui retente. Etendre
-  # cette protection ne supprime donc aucun rejeu — ce qui la borne est ci-dessus, pas un cache.
+  # `mcp.tool_effects` checks this map against every deftool declaration.
+  # :mutation coalesces concurrent identical calls; completed results are not cached,
+  # and failure promotes a waiter to retry. :protocol leaves retry/ack semantics to
+  # TaskQueue, including re-broadcasting unconfirmed completions. :read bypasses arbitration.
   @tool_effects %{
     "get_work_item" => :protocol,
     "submit_result" => :protocol,
@@ -142,11 +69,7 @@ defmodule Fleet.MCP.PodTools do
     "forge_list" => :read,
     "forge_link" => :mutation,
     "toolchain_request" => :mutation,
-    # ⚠ `:mutation` ET PAS `:read`, malgre un nom qui sonne comme une lecture. Un dispatch FAIT
-    # TOURNER UN RUNNER : deux appels identiques concurrents jouent la sonde deux fois — observable,
-    # facture, et sans autre effet que de doubler l'attente du juge. Le single-flight de l'acceptor
-    # est exactement le bon arbitre. Ce qu'elle ne change pas, c'est l'etat du PROJET : la sonde ne
-    # pousse rien, ne commente rien, ne decide rien.
+    # Dispatch runs a billable runner, so concurrent identical probes must coalesce.
     "run_probe" => :mutation
   }
 
@@ -186,17 +109,8 @@ defmodule Fleet.MCP.PodTools do
       )
     end
 
-    # ⚠ UN `object` NU ICI, ET LA CHARGE MACHINE DES JUGES SE PERD. Mesuré au banc sur deux juges
-    # indépendants (probe-rails PR#34 puis PR#37) : trois verdicts rendus, trois gravures en prose,
-    # ZÉRO `details.findings`. La consigne existe pourtant — `core/judge-verdict` la compose
-    # dans le SP de chaque juge — mais elle vit dans un bloc de prose lu au démarrage, à des
-    # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en
-    # agissant, c'est ce schéma : un `object` nu dit « un objet », et un objet est tout ce qu'il rend.
-    #
-    # Le schéma reste PERMISSIF (aucun `required` ajouté, aucun `additionalProperties: false`) :
-    # `submit_result` sert tous les rôles, et la forme d'un livrable de producteur n'est pas celle
-    # d'un verdict de juge. On ne contraint pas, on NOMME — la description est le seul endroit qui
-    # atteint l'agent au bon instant.
+    # Payload descriptions put judge findings guidance at the point of the tool call.
+    # Keep business fields permissive: producer deliverables and judge verdicts differ.
     input_schema(%{
       "type" => "object",
       "properties" => %{
@@ -217,28 +131,10 @@ defmodule Fleet.MCP.PodTools do
             "OBLIGATOIRE : l'identifiant reçu de get_work_item, rappelé ICI, au premier niveau."
         }
       },
-      # `work_item_id` IS MANDATORY AND IS NOT IN `required`. Both are true, and the second follows
-      # from a measured failure, not from tolerance:
-      #
-      #   * e2e regression (`result_event_test`, « NESTED in the payload »): a judge put its
-      #     `work_item_id` INSIDE the verdict payload. Refused with the bare `:work_item_id_required`,
-      #     it retried the same call forever, the review step_run timed out, escalated, and the
-      #     PIPELINE FROZE. The id is a correlator — transport, not business data — so the handler
-      #     now reads it top-level OR inside `payload` (`WorkItems.effective_work_item_id/2`), and
-      #     refuses only when it is in NEITHER (the impersonation lever, « the pod's latest active »,
-      #     stays closed). Same doctrine as `Verdict.normalize_producer/1`: what the SYSTEM can carry
-      #     leaves the agent's head.
-      #   * Since 2026-09-05 the socket ENFORCES this schema before dispatch. A `required` naming
-      #     `work_item_id` would refuse on the wire, with « property not present », a call whose id
-      #     IS present one level down — the exact call that froze the pipeline, refused again with a
-      #     message the agent cannot act on. An `anyOf` (top-level OR in payload) would state the
-      #     handler's rule exactly, but ExJsonSchema renders its failure as « none of the schemata
-      #     matched », naming no key: an opaque refusal where the handler's typed one names the fault.
-      #
-      # So the schema states what the wire ENFORCES (`payload`), the description states what the
-      # agent must DO (the id, here), and the handler's typed refusal names the fault when it does
-      # neither. Making this `required` again is a behaviour change on the pod side; it needs a
-      # measurement stronger than the frozen pipeline above.
+      # Correlation is mandatory, but WorkItems accepts the id here or inside payload.
+      # Requiring it at the root would reject supported nested calls before dispatch.
+      # An anyOf failure hides the missing key; the handler gives a typed refusal.
+      # Never fall back to the pod's latest active item.
       "required" => ["payload"]
     })
   end
@@ -1268,30 +1164,20 @@ defmodule Fleet.MCP.PodTools do
     })
   end
 
-  # ============================================================
-  # Dispatch — work-item drive (WorkItems)
-  # ============================================================
-
   @impl true
   def handle_tool_call("get_work_item", _arguments, %{pod_id: pod_id} = state)
       when is_binary(pod_id) and pod_id != "" do
-    # Identity = the channel: `pod_id` comes from the socket acceptor (one pod = one socket), never from the wire.
-    # So we do NOT read any identity from the arguments — there is nothing to prove, the socket discriminates.
     {:ok, %{content: [json(WorkItems.get_work_item(pod_id))]}, state}
   end
 
   def handle_tool_call("get_work_item", _arguments, state) do
-    # `pod_id` absent from the state = acceptor anomaly (it MUST always carry it). Typed error, not a
-    # brief-exhaustion masked as done:true (otherwise the pod would stop believing it had finished). Fail-closed.
+    # Missing identity is an error, not an exhausted queue.
     {:error, :pod_id_required, state}
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload} = args, %{pod_id: pod_id} = state)
       when is_map(payload) and is_binary(pod_id) and pod_id != "" do
-    # Identity = the channel (`state.pod_id`, carried by the acceptor). The correlation contract
-    # (`work_item_id` MANDATORY, looked up top-level then in payload) and the mapping of the typed refusals
-    # (:no_active_work_item, :work_item_id_mismatch, :broadcast_failed — never a failure masked as a
-    # success) live in `WorkItems.submit_result/3`.
+    # WorkItems owns correlation and typed submission refusals.
     case WorkItems.submit_result(pod_id, args, payload) do
       {:ok, message} -> {:ok, %{content: [text(message)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -1299,8 +1185,6 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("submit_result", %{"payload" => payload}, state) when is_map(payload) do
-    # Valid payload but `pod_id` absent from the state = acceptor anomaly → typed refusal, never an
-    # anonymous fallback (a deliverable with no identified pod has nowhere to go).
     {:error, :pod_id_required, state}
   end
 
@@ -1308,13 +1192,7 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # ============================================================
-  # Dispatch — mesure demandee par un juge (Probe)
-  # ============================================================
-
-  # POD-SCOPE, comme `get_work_item`/`submit_result` et pour la meme raison : le SUJET de l'appel
-  # (depot, PR, SHAs) est derive du canal, jamais du fil. Le seul parametre du juge est le NOM de la
-  # sonde — et un nom inconnu est refuse en enumerant ceux qui existent.
+  # Probe derives repository, PR and SHAs from the channel; arguments select the probe and inputs.
   def handle_tool_call("run_probe", %{"probe" => probe} = args, %{pod_id: pod_id} = state)
       when is_binary(probe) and is_binary(pod_id) and pod_id != "" do
     inputs = Map.get(args, "inputs", %{})
@@ -1327,8 +1205,6 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("run_probe", %{"probe" => probe}, state) when is_binary(probe) do
-    # `pod_id` absent de l'etat = anomalie d'acceptor. Refus type : une mesure sans pod identifie
-    # n'a pas de sujet, et en inventer un serait sonder le depot de quelqu'un d'autre.
     {:error, :pod_id_required, state}
   end
 
@@ -1336,19 +1212,11 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # ============================================================
-  # Dispatch — architect forge delegation (Delegation)
-  # ============================================================
-
-  # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
-  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. There is
-  # NO `project` wire param on the delegation tools: the arch has "the project", the system knows
-  # which — a param to refuse would itself leak that other repos exist.
+  # Delegation gates project-bound issue operations using the resolved role and repo.
 
   def handle_tool_call("issue_create", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
-    # Pointer args are a PAIR: one without the other, or an out-of-scheme value, is a
-    # STRUCTURAL REFUSAL — never a ticket with a half-pointer.
+    # Reject incomplete or malformed pointer pairs before creating an issue.
     if valid_brief_pointer_args?(args) do
       summary =
         case args["summary"] do
@@ -1442,10 +1310,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("toolchain_request", args, %{pod_id: pod_id} = state)
       when is_map(args) and is_binary(pod_id) and pod_id != "" do
-    # Identity = the channel. `pod_id` comes from the socket acceptor (one pod = one socket) and
-    # the work item is DERIVED from it — nothing in the arguments names a ticket, so there is
-    # nothing to prove: the socket discriminates. That is also what stops a pod requesting on
-    # another's behalf.
+    # Toolchain derives the work item from the channel identity.
     case Delegation.Toolchain.request_toolchain(args, pod_id) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
@@ -1453,9 +1318,6 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("toolchain_request", _args, state) do
-    # `pod_id` absent = acceptor anomaly (it MUST always carry it). Typed refusal rather than a
-    # request nobody could attach to a ticket — a manifest whose origin is unknown is one no human
-    # can judge and no merge can be traced back to.
     {:error, :pod_id_required, state}
   end
 
@@ -1618,7 +1480,6 @@ defmodule Fleet.MCP.PodTools do
     {:error, :invalid_arguments, state}
   end
 
-  # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
   def handle_tool_call("scratch", %{"note" => note}, state) when is_binary(note) do
     case Delegation.Scratchpad.scratch(state, note) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
@@ -1746,9 +1607,7 @@ defmodule Fleet.MCP.PodTools do
     {:error, :unknown_tool, state}
   end
 
-  # A forge repo ref is a gitea `owner/name` full-name (R2-03): exactly one `/`, both sides non-empty and
-  # whitespace-free. A guardrail that rejects a manifestly-broken ref EARLY with a clear error (before the
-  # forge call fails obscurely) — NOT the full gitea naming authority, same spirit as `Fleet.GitRef`.
+  # Early owner/name shape check, not the full forge naming authority.
   defp valid_repo_ref?(ref) when is_binary(ref) do
     case String.split(ref, "/") do
       [owner, name] -> owner != "" and name != "" and not String.match?(ref, ~r/\s/)
@@ -1756,8 +1615,7 @@ defmodule Fleet.MCP.PodTools do
     end
   end
 
-  # Both absent → inline brief (fine). Both present and well-formed → pointer. Anything
-  # else → refusal (cf. the create_issue handler). The ref/sha SHAPES come from the Layout truth.
+  # Both absent means inline; otherwise require a Layout ref and a 40-character lowercase hex SHA.
   defp valid_brief_pointer_args?(args) do
     case {Map.get(args, "brief_ref"), Map.get(args, "brief_sha")} do
       {nil, nil} ->

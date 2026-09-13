@@ -1,13 +1,9 @@
 defmodule Fleet.MCP.PodToolsTest do
   @moduledoc """
-  Pod-facing MCP tool layer (`Fleet.MCP.PodTools`) round-trip with the **real broker**
-  `Fleet.TaskQueue`.
-
-  PURE Elixir: calls `handle_tool_call/3` directly (no transport, no claude).
-  The pod identity comes from the `state` (`%{pod_id: pod}`) — carried by the socket
-  acceptor in prod (one pod = one socket, the identity IS the channel), NEVER from the
-  arguments. The privileged tools (`issue_create`/`project_create`/`issue_status`)
-  resolve the ROLE from the pod_id via the `:pod_resolver` seam (models the Spawner registry).
+  Direct PodTools handler tests with the real TaskQueue and injected forge/onboarding
+  callbacks. These calls bypass socket admission and wire-schema validation.
+  State supplies pod identity; `:mcp_pod_resolver` supplies its role and repo.
+  Brief fixtures use local Git; publish/forge fixtures use unique home-directory paths.
   """
   use ExUnit.Case, async: false
 
@@ -38,16 +34,12 @@ defmodule Fleet.MCP.PodToolsTest do
     test "scratch se decrit comme un REFLEXE et nomme le critere qui evite le jugement" do
       desc = tool_description("scratch")
 
-      # Le critere est la NATURE de l'echange, jamais l'importance percue : un jugement
-      # d'importance, en fin de contexte, repond toujours « pas assez » — c'est le meme biais que
-      # « il ne reste rien ». La description doit le dire, parce que c'est ce que l'agent lit au
-      # moment ou il hesite a garer une note.
+      # Assert call-time guidance distinguishes conversation notes from perceived importance.
       assert desc =~ "REFLEX"
       assert desc =~ "NATURE"
       assert desc =~ "never how important it feels"
 
-      # Et elle doit dire POURQUOI, sinon le geste est une corvee sans cause : le L0 est mange par
-      # la compaction et la memoire du vendor est coupee sur tous les pods.
+      # The description explains why notes must survive compaction.
       assert desc =~ "compaction"
       assert desc =~ "OFF for every pod"
 
@@ -195,19 +187,14 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Forge stub (`:forge_client` seam): records create_issue + add_label, returns the number.
-  # Adopts the seam's behaviour-contract → the compiler checks conformance (anti lying-stub).
+  # Forge callbacks record selected writes; baseline reads return open issues without PRs.
   defmodule StubForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -215,10 +202,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -245,9 +230,6 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def list_open_issues(_repo, _opts), do: {:ok, []}
 
-    # Finding D1 (incomplete stub): these two contract callbacks were missing — a test whose
-    # `list_pulls` returned a PR would have crashed UndefinedFunctionError instead of showing
-    # stub behavior. Completed minimal-honest: no fleet feature-branch, no verdicts.
     @impl true
     def parse_feature_branch(_head), do: :error
     @impl true
@@ -274,20 +256,15 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # The LIVE Gitea 1.26.4 post-merge shape (2026-07-19): issue delivered (closed + stage/merged),
-  # its PR merged with `head.ref` REWRITTEN to `refs/pull/6/head` (branch deleted) → the branch
-  # scan CANNOT match; the `[merge:pr-6]` seal marker resolves it (merged_pr_of_issue).
+  # Observed post-merge shape: head.ref becomes refs/pull/6/head after branch deletion.
+  # The stub supplies merged_pr_of_issue's fallback result; it does not parse the seal marker.
   defmodule MergedMarkerForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -295,10 +272,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -356,9 +331,7 @@ defmodule Fleet.MCP.PodToolsTest do
          %{
            verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
            reviewers: ["qualifier", "reviewer"],
-           # The two approvals differ ONLY here — same verdict, incomparable substance and 58
-           # seconds apart. That difference is the reason `records` exists, and a stub that
-           # returned two identical records would prove nothing about rendering it.
+           # Different bodies and timestamps keep the review records distinguishable.
            records: [
              %{
                "login" => "qualifier",
@@ -393,8 +366,6 @@ defmodule Fleet.MCP.PodToolsTest do
   # CI-06: a closed issue WITHOUT `stage/merged` (the seal's projection was lost) but WITH a merged fleet
   # PR — delivery derived from the AUTHORITATIVE PR, not the label. Same as MergedMarkerForge minus the label.
   defmodule MergedNoStageLabelForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
@@ -403,10 +374,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -443,19 +412,14 @@ defmodule Fleet.MCP.PodToolsTest do
     defdelegate close_issue(repo, n, opts), to: MergedMarkerForge
   end
 
-  # Supersede pre-flight stub: issue 5 is OPEN with a LIVE fleet PR (head `lcars/issue-5-engineer`)
-  # → `supersedes: 5` must be REFUSED (never decapitate an in-flight brick), and NOTHING written.
+  # Open target with a live PR: superseding retires both the PR and the old issue.
   defmodule InFlightSupersedeForge do
-    # Une PR vivante ne REFUSE plus le retrait : elle se ferme AVEC le ticket (le rail des pulls
-    # est independant, une PR laissee ouverte serait jugee puis mergee dans un ticket retire).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -463,10 +427,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -504,8 +466,6 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
-    # Le remplacant se cree normalement : une PR vivante n'interdit plus le geste, elle est fermee
-    # avec le ticket qu'elle porte.
     @impl true
     def create_issue(repo, title, body, opts) do
       send(self(), {:create_issue, repo, title, body, opts})
@@ -534,16 +494,12 @@ defmodule Fleet.MCP.PodToolsTest do
   # Supersede pre-flight stub: issue 5 is already CLOSED → filiation only, NO retirement write
   # (a re-take of an abandoned brick is legitimate).
   defmodule ClosedTargetForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -551,10 +507,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -598,9 +552,8 @@ defmodule Fleet.MCP.PodToolsTest do
       do: raise("ClosedTargetForge: close_issue must NOT be reached (target already closed)")
   end
 
-  # Onboarding stub (`:project_onboard` seam): touches NEITHER forge NOR disk — returns a fictitious
-  # repo. Serves to prove that the architect gate lets `project_create` through without executing the
-  # real sequence.
+  # Onboarding callbacks return fixtures without running actual creation.
+  # These tests check gates and forwarding, not downstream card validation.
   defmodule StubOnboard do
     @behaviour Fleet.MCP.PodTools.Delegation.ProjectOnboard
 
@@ -688,8 +641,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     @impl true
-    # The READ half of the project surface: a stub that could destroy but not enumerate is exactly
-    # the shape this tool was added to close.
+
     def list_projects(_opts),
       do: {:ok, [%{"name" => "demo", "repo" => "fleet/demo", "state" => "open"}]}
 
@@ -756,21 +708,15 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # Forge stub that CAPTURES the repo queried by get_issue_status (proof that the repo comes from the
-  # `project` passed as argument, not from a global memory). The issue state returned is tunable via
-  # `:test_issue_state`. Read-ONLY by design: the contract's write callbacks raise fail-loud — a test
-  # writing to the forge through this stub must blow up, not pass silently.
+  # Records the repository resolved from the pod binding; issue state/labels are configurable.
+  # Selected unexpected writes raise; other callbacks below record calls or return fixed results.
   defmodule RecordingForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -778,10 +724,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -792,9 +736,7 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
 
-      # F-C047 — tunable labels (`:test_issue_labels`, list of names): `delivered` requires
-      # `stage/merged`, no longer `closed` alone. Default [] → a closed issue WITHOUT merge proof =
-      # not delivered.
+      # With no PR returned by this fixture, stage/merged distinguishes delivered from merely closed.
       {:ok,
        PayloadFixture.issue(
          title: "Brique de test",
@@ -836,21 +778,15 @@ defmodule Fleet.MCP.PodToolsTest do
       do: raise("RecordingForge is read-only — unexpected close_issue in these tests")
   end
 
-  # Idempotency — a STATEFUL forge (state in the caller's process dict; the stub runs INLINE in
-  # the test process, like the others). `issue_create` records the numbered issue WITH its
-  # marker-bearing body; `list_open_issues` replays them. A second create with the SAME inputs must
-  # find the first by its `lcars-op` marker and reuse it (create_issue called ONCE across two calls).
+  # Caller-process state records marker-bearing issues for sequential readback.
+  # Repeated creation must reuse the recorded issue; this does not simulate process restart.
   defmodule IdempotencyForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -858,10 +794,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -975,7 +909,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  pod_state(pod)
                )
 
-      # Extra args are inert: the forge read went to the BOUND repo, never the wire value.
+      # The stale project argument cannot override the binding.
       assert_received {:get_issue, "fleet/bound", 42}
     end
 
@@ -999,9 +933,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "F-C047: issue CLOSED WITHOUT `stage/merged` (non-delivery close: onboarding/manual) → `outcome: closed_without_merge`" do
-      # The heart of the finding: `closed` alone conflated delivery-by-merge and close-without-delivery
-      # (onboarding marker / manual close) → a false delivery signal → the arch chained N+1 on an
-      # ABANDONED brick. Closed but without merge proof = NOT delivered (the arch waits, safe direction).
+      # Closing an issue can mean abandonment; it is not sufficient evidence of delivery.
       Application.put_env(:lcars_fleet, :mcp_test_issue_state, "closed")
       Application.put_env(:lcars_fleet, :mcp_test_issue_labels, ["lcars-onboarded"])
       pod = uniq("pod-arch")
@@ -1040,9 +972,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "CI-06: closed WITHOUT stage/merged but a MERGED fleet PR → outcome merged (derived from the authoritative PR)" do
-      # The seal's `stage/merged` projection can be lost (transient forge failure). Pre-CI-06 this read as
-      # `closed_without_merge` → the arch waited FOREVER on a delivered brick. Now the merged PR ITSELF
-      # proves delivery, label or not (never a false-positive: a merged fleet PR IS a delivery).
+      # A merged PR still proves delivery if the stage label projection was lost.
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, MergedNoStageLabelForge)
       pod = uniq("pod-arch")
 
@@ -1070,7 +1000,6 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default)" do
-      # Stale spawn path / forged state: the delegation gate refuses rather than guessing a project.
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
 
       pod = uniq("pod-arch")
@@ -1126,7 +1055,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert_received {:create_issue, "fleet/demo", "Brique v2", body, _opts}
       assert body =~ "Remplace : #5"
 
-      # Retirement: SYSTEM comment (pointing at the successor) THEN close — on the OLD ticket.
+      # Check retirement writes on the old issue; selective receives do not assert their order.
       assert_received {:post_comment, "fleet/demo", 5, comment, _opts}
       assert comment =~ "#77"
       assert_received {:close_issue, "fleet/demo", 5, _opts}
@@ -1138,11 +1067,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "supersedes: target with a LIVE fleet PR → la PR est FERMEE avec le ticket, plus de refus" do
-      # L'ancien refus (`supersedes_target_in_flight`) se lisait comme une politique (« laisse-la
-      # atterrir ») ; c'etait le contournement d'une capacite absente — RIEN ne savait fermer une
-      # PR. Retirer un ticket sans sa PR la laissait sur un rail INDEPENDANT, jugee puis mergee
-      # dans un ticket mort. L'intention d'un retrait (arreter la machine, borner le cout) ne
-      # depend pas de l'existence d'une PR : on complete le geste au lieu de l'interdire.
+      # Retiring only the issue would leave its PR on the independent pull-processing path.
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, InFlightSupersedeForge)
 
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
@@ -1157,7 +1082,7 @@ defmodule Fleet.MCP.PodToolsTest do
                  pod_state(uniq("pod-arch"))
                )
 
-      # La PR d'abord : tant qu'elle vit, le rail des pulls peut la merger.
+      # Check that the PR is closed too; these receives do not establish call order.
       assert_received {:close_pr, "fleet/demo", 9, _}
       assert_received {:post_comment, "fleet/demo", 5, _, _}
       assert_received {:close_issue, "fleet/demo", 5, _}
@@ -1224,7 +1149,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "inline brief is ALWAYS materialized: doc committed in ops, ticket = dedicated summary + pinned pointer",
          %{tmp_dir: tmp} do
-      # Seam: ops_root → tmp; the project's ops is a real git dir (physicalize commits there).
+      # Nominal materialization path: a real local Git repository. Degradation is tested separately.
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -1256,10 +1181,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "criteria are a SECOND artefact: brief under briefs/, criteria under gate-briefs/, two pins",
          %{tmp_dir: tmp} do
-      # The split at its root: the arch authors a procedural brief AND a declarative criteria, and
-      # they land in DIFFERENT trees, each pinned. The judge resolves the criteria pointer, not the
-      # brief — which is the whole reason "does the code respect the doc" stops being asked of a
-      # judge that was never handed the doc.
+      # Brief and criteria are separate pinned artifacts; the judge receives the criteria.
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -1285,9 +1207,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert String.starts_with?(brief_ref, "briefs/")
       assert String.starts_with?(crit_ref, "gate-briefs/")
 
-      # transport_brief_v2 (#3.3) — the two docs derive from the SAME title but their BASENAMES must
-      # differ, so a human reading a bare filename is not trapped by the folder-only distinction. The
-      # criteria carries `--criteria`. Mutation-verified: dropping the suffix collides the basenames.
+      # The --criteria suffix distinguishes even bare filenames, without relying on parent directories.
       assert Path.basename(brief_ref) != Path.basename(crit_ref)
       assert String.ends_with?(crit_ref, "--criteria.md")
 
@@ -1328,8 +1248,7 @@ defmodule Fleet.MCP.PodToolsTest do
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
 
-      # No destination = the deliverable ships and is judged; without criteria the judge would fall
-      # back to the producer's brief — the very bench bug. Refused at authoring.
+      # Code tickets require criteria at authoring so producer instructions are not the judging standard.
       assert {:error, {:criteria_required_for_code, _}, _} =
                PodTools.handle_tool_call(
                  "issue_create",
@@ -1340,8 +1259,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     test "a criteria that EMBEDS a pointer (delegates) is refused — self-contained or nothing",
          %{tmp_dir: tmp} do
-      # The judge mounts nothing but its criterion; a criterion that points at another committed doc
-      # points at a tree the judge never reads. The non-ambiguous form is refused at authoring.
+      # This canonical embedded pointer is rejected: the criterion must carry the judging content itself.
       work_dir = Path.join(tmp, "demo")
       File.mkdir_p!(work_dir)
       {_, 0} = System.cmd("git", ["init", "-q"], cd: work_dir)
@@ -1388,8 +1306,8 @@ defmodule Fleet.MCP.PodToolsTest do
     test "degraded materialization (no ops) → full inline body, the legacy behavior", %{
       tmp_dir: tmp
     } do
-      # ops_root points at an existing dir but the PROJECT dir is absent → physicalize degrades LOUD.
-      # (The binding repo is fleet/demo but tmp/demo was NOT created in this test → degraded path.)
+      # The project subdirectory is absent, so materialization falls back to inline content.
+      # The log assertion below checks only that something was logged.
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_brief_ops_root, tmp)
 
       log =
@@ -1447,10 +1365,6 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "destination `workshop` → the routing label rides the CREATE, and the visual type FOLLOWS it" do
-      # The branch that had no test until 2026-08-03, and could not have one: `repo_label_id` was
-      # missing from the seam contract, so every stub raised UndefinedFunctionError here. What
-      # shipped in that blind spot: a documentary ticket wearing `type:feature` — the interface
-      # telling every human who scanned the list the opposite of what the burn was about to do.
       pod = uniq("pod-arch")
 
       assert {:ok, _, _} =
@@ -1486,13 +1400,12 @@ defmodule Fleet.MCP.PodToolsTest do
                  pod_state(pod)
                )
 
-      # Extra args are inert: the issue landed in the BOUND repo, never the wire value.
+      # The stale project argument cannot override the binding.
       assert_received {:create_issue, "fleet/demo", "T", body, _opts}
       assert String.starts_with?(body, "fais X")
     end
 
     test "an architect pod WITHOUT a repo binding → :repo_unbound (fail-closed, no default routing)" do
-      # Stale spawn path / forged state: the gate refuses rather than guessing a project.
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "architect"}} end)
 
       pod = uniq("pod-arch")
@@ -1518,7 +1431,7 @@ defmodule Fleet.MCP.PodToolsTest do
     setup %{tmp_dir: tmp} do
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, StubForge)
 
-      # :pod_resolver is set BY EACH TEST (it is the binding under test) — restore only.
+      # Each test configures :mcp_pod_resolver; restore its previous value on exit.
       TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_pod_resolver)
 
       # `architect` token on disk (legitimate case). Tests that want to prove a REFUSAL do it on the
@@ -1768,18 +1681,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @tag :tmp_dir
     test "l'offre suit l'ordre de BALAYAGE, pas son inverse", %{tmp_dir: tmp} do
-      # ⚠ MUTATION SILENCIEUSE, relevee par relecture independante le 2026-08-22 : `Enum.reduce`
-      # empile en TETE, donc `Enum.reverse` est ce qui rend l'ordre de balayage. Le retirer inversait
-      # la liste presentee a l'humain sans qu'aucun temoin bouge — tous les autres portent zero ou
-      # une carte, et le temoin nominal indexe par nom, ce qui est commutatif.
-      #
-      # L'ordre n'est pas cosmetique : `canon_names!/1` trie (`Enum.sort` sur les basenames du
-      # disque), donc l'offre est stable et deux lectures d'un meme catalogue donnent la meme suite.
-      # Un ordre qui s'inverse au refactor donnerait deux presentations d'une meme offre.
-      #
-      # FIXTURE CONTROLEE plutot que l'arbre reel : epingler « la premiere carte s'appelle X » lierait
-      # ce temoin au contenu du catalogue livre, et la prochaine carte ajoutee le casserait pour une
-      # raison qui n'est pas la sienne.
+      # A name-indexed map cannot detect reversed order. Three controlled fixtures test the
+      # stable basename order without coupling it to the shipped catalogue's contents.
       for n <- ~w(a-carte b-carte c-carte) do
         File.write!(Path.join(tmp, "#{n}.yaml"), """
         kind: WorkflowMap
@@ -1805,10 +1708,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert Enum.map(cards, & &1["name"]) == ~w(a-carte b-carte c-carte)
     end
 
-    # ⚠ LES TROIS AUTRES ROUTES VERS UNE OFFRE VIDE. Le temoin plus haut tenait la promesse du
-    # `@doc` (« an ERROR, never an empty listing ») sur UN chemin — celui ou `canon_names!/1` leve.
-    # Les trois suivants rendaient `{:ok, %{"cards" => []}}` : un succes avec zero choix, servi a
-    # l'architecte au moment precis ou on lui demande de choisir. Mesure du 2026-08-22.
+    # Distinguish no card scopes, unreadable cards, and only technical cards: all yield an empty offer.
 
     @tag :tmp_dir
     test "AUCUN catalogue ne porte de cartes : refus de DEPLOIEMENT, pas de catalogue vide",
@@ -1956,21 +1856,14 @@ defmodule Fleet.MCP.PodToolsTest do
       # que la liste est construite ailleurs que sur `installed_roots/0`.
       refute Map.has_key?(by_name, "system")
 
-      # ⚠ L'ABSENCE DE LA CLE EST LA REPONSE, et sans ce refute la permutation des deux dernieres
-      # clauses du `case` passait EN SILENCE (trouvee par relecture independante le 2026-08-22) :
-      # `{offer, bad}` filtre aussi `bad == []`, donc l'inversion posait `"unreadable" => []` dans la
-      # reponse nominale. Une enveloppe qui porte une cle vide et une qui ne la porte pas ne disent
-      # pas la meme chose — c'est la regle que `put_present` tient un cran plus haut.
+      # An absent unreadable key differs from an empty list; clause order must preserve that shape.
       refute Map.has_key?(decoded, "unreadable")
     end
 
     @tag :tmp_dir
     test "`bundled` se lit sur la RACINE : un depot qui declare le nom livre ne l'usurpe pas",
          %{tmp_dir: tmp} do
-      # ⚠ LE TEMOIN DU BON OBJET. `installed_dirs/0` ecarte le catalogue livre sur le `Path.basename`
-      # de son repertoire, PAS sur le nom que son manifeste declare : un dossier nomme autrement qui
-      # se declare `fleet` traverse donc le filtre. Tant que `bundled` etait calcule sur le NOM, il
-      # ressortait marque livre — deux entrees pretendant vivre dans un release qui n'en porte qu'une.
+      # Bundled status follows the installed root, not a manifest claiming the bundled name.
       install_catalogue!(tmp, "pas-fleet", "api_version: 1\nname: fleet\n")
       TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
 
@@ -1986,11 +1879,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @tag :tmp_dir
     test "un catalogue installe SANS CARTE est liste — exactement ce que la derivation ne peut pas dire",
          %{tmp_dir: tmp} do
-      # ⚠ LE TEMOIN QUI JUSTIFIE L'OUTIL. Faute de verbe, un agent a repondu « quels catalogues ? »
-      # en derivant `card_list`, qui nomme le catalogue de chaque carte. La derivation est juste tant
-      # que chaque catalogue installe porte au moins une carte — et courte, avec aplomb, des qu'un
-      # n'en porte aucune. Les deux moities du temoin sont necessaires : sans la seconde, il ne
-      # mesure qu'un listage qui marche, pas la difference qui l'a fait ecrire.
+      # Include installed catalogues without cards; deriving this list from card_list cannot.
       install_catalogue!(tmp, "muet", "api_version: 1\nname: muet\n")
       TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
 
@@ -2018,9 +1907,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @tag :tmp_dir
     test "un materiel dont le manifeste ne DECLARE aucun nom est nomme, jamais escamote",
          %{tmp_dir: tmp} do
-      # `Catalogue.verify!/0` ne tourne au boot que sur la racine LIVREE : le materiel converge est
-      # verifie par un geste d'operateur, jamais par le demarrage. Un manifeste sans `name:` vit donc
-      # sur le disque, n'est servi par rien, et `installed_catalogues/0` le laisse tomber EN SILENCE.
+      # An installed manifest without a name is omitted by installed_catalogues/0.
       install_catalogue!(tmp, "sans-nom", "api_version: 1\n")
       TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
 
@@ -2033,23 +1920,15 @@ defmodule Fleet.MCP.PodToolsTest do
           refute "sans-nom" in Enum.map(cats, & &1["name"])
         end)
 
-      # ⚠ LA TRACE SERVEUR EST UN CANAL A PART, et sans ce temoin elle n'en est pas un : si l'agent
-      # ne rend pas la reponse, la racine morte ne laisse rien derriere elle. `list_workflow_cards/1`
-      # crie deja chaque carte qui ne charge pas et son temoin l'epingle de la meme facon — un
-      # comportement qu'aucun temoin ne rougit est un comportement que le prochain lecteur supprime.
+      # A failed root must also leave a server-side log when the caller never displays the error.
       assert log =~ "sans-nom"
       assert log =~ "served by NOTHING"
     end
 
     @tag :tmp_dir
     test "une offre VIDE est une ERREUR, et le refus PORTE les racines ecartees", %{tmp_dir: tmp} do
-      # « Aucun catalogue n'existe » est le mensonge vide : ce conteneur en sert toujours au moins un.
-      #
-      # ⚠ LE REFUS EMPORTE CE QU'IL A VU, et la premiere version le jetait (relecture independante du
-      # 2026-08-22). « Rien d'installe » et « tout installe, tout casse » appellent deux gestes
-      # differents ; un refus qui les confond envoie l'operateur chercher le mauvais objet. Ici la
-      # racine livree est detournee vers un arbre vide ET du materiel casse est present : c'est le
-      # seul etat ou la liste des ecartees est la seule information disponible.
+      # With the bundled root empty and installed material broken, retain rejected entries
+      # so the operator can distinguish absence from invalid installations.
       install_catalogue!(tmp, "casse", "api_version: 1\n")
       TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, Path.join(tmp, "vide"))
       # La surcharge est EXPLICITE et pas heritee du defaut : un temoin de vacuite qui laisserait
@@ -2068,7 +1947,7 @@ defmodule Fleet.MCP.PodToolsTest do
   describe "onboarding + delegation gates (two heads, two ROLES)" do
     @describetag :tmp_dir
 
-    # Privileged tools split along the two gates. VALID business args so ONLY the role decides.
+    # Inputs reach the respective gates; stubs bypass downstream business validation.
     @onboarding_tools [
       # `catalogue` est REQUIS depuis 2026-08-17 (l'org d'un projet est fixee pour sa vie et ne se
       # deduit pas). Ces deux temoins mesurent la PORTE (qui a le droit d'appeler), pas la
@@ -2111,13 +1990,7 @@ defmodule Fleet.MCP.PodToolsTest do
     ]
     @privileged_tools @onboarding_tools ++ @delegation_tools
 
-    # `nil` models a pod without an engraved role (incomplete binding) — refused too (fail-closed,
-    # never access through an absent role).
-    #
-    # `architect` is on THIS list, and that is the whole point of the split: it is the delegation
-    # head and NOT an onboarder. It used to declare the capability while carrying none of the tools
-    # the capability gates — a permission that granted nothing, and that made every reader (this
-    # file included) describe the arch as having "two heads".
+    # Missing role is refused. Architect is the delegation head, not an onboarder.
     @non_onboarder_roles ["engineer", "reviewer", "scout", "architect", nil]
     # Symmetrically: starfleet IS an onboarder but NOT the delegation head → refused on delegation.
     @non_architect_roles ["engineer", "reviewer", "starfleet", "scout", nil]
@@ -2126,13 +1999,10 @@ defmodule Fleet.MCP.PodToolsTest do
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, StubForge)
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_project_onboard, StubOnboard)
 
-      # `project_delete` is DISARMED by deployment (default false) and its switch is checked before
-      # the gate. These tests are about the GATE, so they arm it: otherwise every delete case would
-      # short-circuit on the switch and the role checks below would silently stop covering it —
-      # green, and testing nothing. The disarmed behaviour has its own tests.
+      # The deployment switch runs before the role gate; arm it here to exercise authorization.
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_allow_delete_project, true)
 
-      # :pod_resolver is set BY EACH TEST (role under test) — restore only.
+      # Each test configures :mcp_pod_resolver; restore its previous value on exit.
       TestEnv.restore_env_on_exit(:lcars_fleet, :mcp_pod_resolver)
 
       TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
@@ -2194,14 +2064,7 @@ defmodule Fleet.MCP.PodToolsTest do
       end
     end
 
-    # ONE KEY PER FACE ON THE WIRE, and the third was missing while the runtime already produced
-    # it: `onboard_result/3` has carried `doc_dir` since the three-face chantier, and every
-    # delegation site pattern-matched `%{repo, project_dir, work_dir}` and emitted those three
-    # alone. A caller was told about two of the three trees the call had just created, so it could
-    # not name the doc face at all. Nothing was red: no test asserted the emitted keys ANYWHERE.
-    #
-    # The four verbs that CREATE or REATTACH faces are checked; `project_delete` is not — it
-    # reports what it removed, a different shape with its own keys.
+    # Check face paths for the four listed create/reattach verbs. Deletion has a separate result shape.
     test "the wire carries one dir per FACE — doc included, on every verb that lands faces" do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
         {:ok, %{role: "starfleet"}}
@@ -2403,7 +2266,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert_received {:reset_ci_rail, "fleet/demo-proj", opts}
       assert opts[:justification] == "le rail est casse, aucune PR ne merge"
-      # `reset_by` = l'identite du canal, jamais un champ du fil — meme regle que `revised_by`.
+
+      # Check forwarding of channel identity as reset_by; the current Card.reset backend ignores it.
       assert opts[:reset_by] == "starfleet"
 
       assert {:ok, result} = Jason.decode(txt)
@@ -2553,10 +2417,8 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # RICH forge stub for the return channel: the BOUND repo (fleet/alpha) carries one awaits-arch
-  # (#4 + verdict comment) + a normal issue (#5, to be ignored). DR-012: the escalation contract is a
-  # DECLARED behaviour (`Delegation.EscalationForge`) → the stub ADOPTS it (compile-checked, anti
-  # lying-stub, like StubForge). (No list_org_repos: the org-wide scan died with the per-project reorg.)
+  # Bound-repo fixture with one escalation and one ordinary issue.
+  # Declares EscalationForge callbacks; behaviour checks do not validate return values.
   defmodule EscalationForge do
     # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
     # l'ancien contrat sous le nouveau nom.
@@ -2615,10 +2477,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # A forge that REMEMBERS what was posted — the only kind that can witness convergence. The static
-  # stub above cannot: it answers the same list whatever happened, so a re-post looks like a first one.
-  # Same process as the caller (handle_tool_call is synchronous) → the process dictionary IS the forge
-  # state.
+  # Sequential reply tests keep posted comments in the caller process dictionary for readback.
   defmodule RecordingEscalationForge do
     # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
     # l'ancien contrat sous le nouveau nom.
@@ -2714,11 +2573,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "escalation_list: the verdict is the ESCALATION comment, not the thread's last one" do
-      # Le nom de ce test portait le defaut : « verdict = last comment ». C'est ce que le code
-      # faisait, et c'est faux — des que l'arch avait repondu, son inbox lui rendait SA PROPRE
-      # REPONSE comme etant la question a trancher, sous une description d'outil qui promet
-      # « the worker's escalation comment — the reasoning ». Le stub pose donc un commentaire de
-      # route AVANT et une reponse d'arch APRES le commentaire marque : seul le marque doit sortir.
+      # A marked escalation followed by an unmarked reply must yield the escalation, not the last comment.
       assert {:ok, %{content: [%{"text" => txt}]}, _} =
                PodTools.handle_tool_call("escalation_list", %{}, pod_state(uniq("pod-arch")))
 
@@ -2766,11 +2621,8 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "comment_issue: the SAME reply re-emitted posts ONCE — convergent by durable readback" do
-      # The duplicate this closes: the stdio bridge times the call out at 30s while the forge POST
-      # completes, so the agent re-emits and a bare re-post lands a second identical comment on a
-      # ticket in flight. The in-memory memoize cannot cover it — it is volatile (a runner dying
-      # after the POST releases its key) and time-boxed. The marker lives IN the artifact, so the
-      # readback answers the only durable question: did this act already land?
+      # After a bridge timeout, a completed POST may be retried. Artifact marker readback
+      # covers sequential retries; concurrent arbitration is not a completed-result cache.
       TestEnv.put_env_restoring(:lcars_fleet, :mcp_forge_client, RecordingEscalationForge)
       args = %{"number" => 4, "body" => "vu, je re-cadre le brief"}
 
@@ -2814,9 +2666,7 @@ defmodule Fleet.MCP.PodToolsTest do
       refute Map.has_key?(decoded, "idempotent")
       assert [_first, _second] = Process.get({:comments, 4})
 
-      # TEMOIN de JG-045 : ici la relecture a REUSSI (et n'a rien trouve). Sans ce refus, marquer
-      # toutes les creations passerait le test d'a cote et ne prouverait rien. Present = doute,
-      # absent = mesure.
+      # Successful empty readback must not report dedup uncertainty.
       refute Map.has_key?(decoded, "dedup_unverified"),
              "une relecture reussie est marquee comme non verifiee — la marque ne distingue plus rien"
     end
@@ -2837,10 +2687,7 @@ defmodule Fleet.MCP.PodToolsTest do
       refute Map.has_key?(decoded, "idempotent")
       assert_received {:post_comment, "fleet/alpha", 4, _body, _opts}
 
-      # JG-045 — LE DOUTE VOYAGE JUSQU'A L'APPELANT. Poster reste le bon geste, mais le retour
-      # etait rigoureusement le meme que celui d'une relecture REUSSIE ET VIDE : l'agent ne pouvait
-      # pas savoir que son doublon etait possible. Or c'est lui qui reessaie, et la relecture
-      # echoue precisement quand la forge va mal — c'est-a-dire au moment ou il va rejouer.
+      # Failed readback still posts, but reports dedup_unverified so the caller knows a duplicate is possible.
       assert Map.has_key?(decoded, "dedup_unverified"),
              "une relecture d'idempotence IMPOSSIBLE rend le meme resultat qu'une relecture " <>
                "reussie et vide — « peut-etre un doublon » est indistinguable de « pas de doublon »"
@@ -2873,23 +2720,15 @@ defmodule Fleet.MCP.PodToolsTest do
     end
   end
 
-  # READ-channel stub (BL-6-28): the arch's board + thread reads span BOTH seam surfaces
-  # (ForgeClient.get_issue + EscalationForge.list_comments/list_open_issues) resolved on ONE
-  # module. It ADOPTS the delegation `ForgeClient` behaviour (compile-checked); `list_comments`
-  # is a PLAIN def — a second `@behaviour` would trip the conflicting-callbacks warning (both
-  # contracts declare list_open_issues/post_comment), and the escalation guard checks EXPORTS.
-  # Degradations are driven by the process dictionary (the seam runs in the caller's process).
+  # Shared ForgeClient/EscalationForge fixture. Only ForgeClient is declared because the
+  # behaviours overlap on callbacks; escalation checks exports. Process state drives failures.
   defmodule ReadChannelForge do
-    # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
-    # dans un ticket mort (le rail des pulls est independant).
     @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
     end
 
-    # Le supersede reporte les aretes de dependance AVANT de fermer : un stub sans ces trois
-    # lectures/ecritures ne peut pas voir ce report, et laisserait repasser le trou.
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -2897,10 +2736,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
-    # Genre label resolution (seam contract 2026-08-03): a label rides the CREATE call as an id.
     @impl true
     def repo_label_id(_repo, name, _opts), do: {:ok, :erlang.phash2(name, 10_000)}
 
@@ -3113,15 +2950,8 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "sans `catalogue` : REFUS, et il nomme ce qui est installe" do
-      # ⚖ user, 2026-08-17, troisieme passe sur le meme sujet : « donc tu as encore un rail qui
-      # teste un truc, que tu supprimerais en posant le catalogue obligatoire ». Les deux versions
-      # precedentes DEVINAIENT — le premier catalogue installe, puis « celui que la carte
-      # determine » — et toutes deux liaient un projet a une org POUR SA VIE sur une deduction.
-      #
-      # Mon argument pour l'inference etait faux : « friction pour zero information ». L'information
-      # est dans l'objet que l'appelant vient de lire (`card_list` rend chaque carte AVEC
-      # son catalogue). Ce qu'elle achetait, en echange de rien : un comportement qui change quand un
-      # TIERS installe un catalogue portant le meme nom de carte.
+      # Catalogue is an explicit choice: inferring it from a card name becomes ambiguous
+      # when another installed catalogue supplies the same name.
       assert {:error, {:catalogue_required, orgs}} =
                Gate.resolve_org(%{"workflow_map" => "standard"})
 
@@ -3129,9 +2959,7 @@ defmodule Fleet.MCP.PodToolsTest do
     end
 
     test "meme sur un conteneur ou UN SEUL catalogue peut repondre — pas de rail d'exception" do
-      # Le piege des deux versions precedentes : une branche qui ne s'execute que dans une certaine
-      # POPULATION est une branche que personne n'exerce jamais dans l'autre. Ici il n'y en a plus
-      # qu'une, donc elle est prise partout.
+      # A single installed catalogue does not remove the explicit-choice requirement.
       TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
       assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
 
