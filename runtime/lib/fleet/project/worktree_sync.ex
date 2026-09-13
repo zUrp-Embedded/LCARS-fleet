@@ -1,10 +1,16 @@
 defmodule Fleet.Project.WorktreeSync do
   @moduledoc """
-  Serializes post-merge projection onto the local face clones. The code face is a MIRROR — nobody
-  writes it locally — so it resets hard to the forge. The two WRITER faces, `ops` and `workshop`,
-  rebase with autostash: something holds a live pen on them (the runtime on `ops`, the architect and
-  the human on `workshop`), and a reset would erase work that exists nowhere else. Async requests converge on
-  the latest remote state and failures remain retryable.
+  Serializes face alignment and issue-ref fetches through one GenServer instance.
+  Code alignment fetches then refuses visible dirty state before resetting to
+  origin/main. Ops and workshop rebase with autostash to preserve local commits.
+
+  This is not a lock against humans, OpsObjectSync or other server instances.
+  Status checks and Git mutations can race with external writers. A clean code
+  tree can still contain local commits that reset removes from the current branch.
+  Ignored files and changes hidden by Git settings are not protected by porcelain status.
+
+  Requests do not schedule retries or guarantee convergence. Cast results are
+  discarded after logging; calls return operation results subject to their timeout.
   """
 
   use GenServer
@@ -22,7 +28,9 @@ defmodule Fleet.Project.WorktreeSync do
   end
 
   @doc """
-  Requests serialized alignment of the repository worktree selected by `branch`.
+  Casts an alignment request; :ok acknowledges sending, not successful alignment.
+  Unknown face branches return an internal error; clones without a .git directory
+  are skipped (including linked worktrees whose .git is a file).
   """
   @spec sync(GenServer.server(), String.t(), String.t()) :: :ok
   def sync(server \\ __MODULE__, repo, branch), do: GenServer.cast(server, {:sync, repo, branch})
@@ -33,24 +41,14 @@ defmodule Fleet.Project.WorktreeSync do
     do: GenServer.call(server, {:sync, repo, branch}, 60_000)
 
   @doc """
-  Makes the feature branches of issue `n` READABLE in the project's code worktree, under
-  `refs/lcars/pr/<n>/<role>`. Returns the refs that landed.
+  Fetches matching lcars/issue-<n>-* branches into refs/lcars/pr/<n>/* in the code clone.
+  Host-side fetching lets a read-only architect mount inspect deliverables without
+  writing FETCH_HEAD. Named refs survive unrelated fetches; --force permits rewrites.
 
-  WHY THE RUNTIME DOES THIS AND NOT THE POD. The architect arbitrates on deliverables and its code
-  face is a read-only bind, so its own `git fetch` dies on `.git/FETCH_HEAD` — measured from inside
-  the pod. What that costs is not the missing diff: it arbitrates ANYWAY and invents an explanation
-  for what it cannot see. The fetch happens host-side, in the worktree this GenServer already
-  serializes, and the pod only READS the result through its bind.
-
-  A NAMED ref per role, not `FETCH_HEAD`. `FETCH_HEAD` is overwritten by the next fetch and does not
-  say what it is the head OF — measured, a pod declares its code face "frozen" while that file is
-  two minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next
-  fetch.
-
-  A WILDCARD refspec, so no forge read is needed to learn the producer's role: every branch of the
-  ticket lands, whichever role opened it, and an escalation covering several of them gets all of
-  them. `--force` because a re-push moves the branch and the local ref would refuse a non-fast-
-  forward — this mirror has no history worth protecting.
+  Returns locally enumerated refs after fetch, without pruning deleted remote branches:
+  stale refs can remain in the list. No .git directory returns :no_local_clone.
+  The call timeout is 60 seconds and does not cancel server work; issue_n is interpolated
+  without a runtime positivity/type guard.
   """
   @spec fetch_issue_refs(GenServer.server(), String.t(), pos_integer()) ::
           {:ok, [String.t()]} | {:error, term()}
@@ -86,10 +84,7 @@ defmodule Fleet.Project.WorktreeSync do
   defp do_sync(repo, branch, state) do
     name = Layout.project_name(repo)
 
-    # One clause per face and NO catch-all: the day `@face_branches` names a third one, this case
-    # raises with the face in the message instead of quietly routing it to a worktree that is not
-    # its own. A crash that names the missing branch is a two-minute fix; a doc deliverable
-    # realigned into the code worktree is a corruption nobody attributes.
+    # Explicit face routing prevents a new face from silently using the code aligner.
     {dir, aligner} =
       case Layout.face_of(branch) do
         "code" ->
@@ -126,23 +121,8 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
-  # CODE face: `fetch` (network, forge token) then `reset --hard` — convergence dure vers l'origine.
-  #
-  # ⚠ « CETTE VITRINE EST EN LECTURE SEULE » N'EST GARANTI PAR RIEN. La racine de cette face est
-  # `Fleet.Layout.code_root/0` = **`/home/projects`** — le repertoire de travail par defaut de
-  # l'humain, pas un dossier de la flotte. Les pods travaillent bien dans leurs clones ephemeres,
-  # mais rien n'empeche un humain (ou un agent lance a la main) d'y avoir un fichier modifie non
-  # commite. `reset --hard` le detruit sans copie, sans message, sans recuperation possible.
-  #
-  # La soeur `align_writer/2` tient deja la posture : sur une divergence,
-  # elle ABANDONNE et propage fort — « that divergence is a human's call ». Meme regle ici : un
-  # arbre SALE n'est pas aligne, il est REFUSE, bruyamment et avec la sortie de `status` pour que
-  # l'humain voie ce qui l'a bloque.
-  #
-  # ⚠ POURQUOI PAS `--autostash` COMME LA SOEUR : sur une face que personne ne relit, une pile de
-  # stashes s'accumulerait en silence — on aurait echange une destruction visible contre une perte
-  # differee que personne ne va chercher. Le refus, lui, se voit au tick suivant et la vitrine
-  # reste simplement perimee : elle n'est load-bearing pour rien (les pods clonent depuis la forge).
+  # The human's code directory can contain uncommitted work. Refuse visible dirt
+  # rather than accumulating implicit stashes; callers must serialize external writers.
   defp align_code(dir) do
     with :ok <-
            GitOps.run(["-C", dir, "fetch", "origin", Layout.code_branch()], auth: true),
@@ -153,9 +133,8 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
-  # `status --porcelain` rend une sortie VIDE sur un arbre propre : c'est le seul etat ou un
-  # `reset --hard` ne peut rien detruire. Une lecture qui echoue n'est pas un arbre propre — on
-  # refuse aussi, plutot que de reset sur une ignorance.
+  # A failed status read is not evidence of cleanliness. Empty output is only
+  # the current porcelain observation, not a guarantee that reset cannot lose data.
   defp refuse_if_dirty(dir) do
     case GitOps.read(["-C", dir, "status", "--porcelain"], auth: false) do
       {:ok, ""} ->
@@ -182,17 +161,10 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
-  # WRITER faces (`ops` and `workshop`): the clone is a WRITER — rebase local commits on top of the
-  # merged remote tip, never reset (§C). The two share this because they share the property that
-  # decides it: something holds a live pen on that clone — the runtime on `ops`, the architect and
-  # the human on `workshop` — so a reset would erase work that exists nowhere else. `code` is the only
-  # face where nobody writes locally, which is why it is the only one that may reset.
-  #
-  # `FETCH_HEAD` (not `origin/<branch>`): a `--single-branch` clone's refspec may not maintain the
-  # remote-tracking ref, FETCH_HEAD is exact by construction. `--autostash` carries uncommitted
-  # edits across. A conflicted rebase is ABORTED so the clone stays usable (a half-applied rebase
-  # would wedge every object written after it), and the error propagates loud: that divergence is a
-  # human's call.
+  # Writer faces keep local commits through rebase. FETCH_HEAD works even when a
+  # single-branch clone does not maintain origin/<branch>. Autostash is not a guarantee
+  # of conflict-free restoration. Any rebase error is tagged rebase_conflict; abort
+  # is attempted but its result is ignored.
   defp align_writer(dir, branch) do
     with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true) do
       case GitOps.run(["-C", dir, "rebase", "--autostash", "FETCH_HEAD"], auth: false) do

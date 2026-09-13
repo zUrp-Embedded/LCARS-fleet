@@ -1,45 +1,27 @@
 defmodule Fleet.Project.Roles do
   @moduledoc """
-  **Roles of the single-brick model** — accessors for the workshop's roles (producer, judges,
-  gatekeeper). This module is the SINGLE accessor (without it the resolution would be rewritten in
-  each caller). Override per project/test via the opts.
+  Shared accessors for structural roles and card-derived jury, CI and verdict policy.
+  Structural resolution uses capabilities rather than role-name defaults. Truthy
+  option overrides precede application overrides and bypass capability lookup;
+  their types and declared capabilities are not validated here.
 
-  The three roles live HERE: producer (`producer_role/1`), jury (`jury/2`) and gatekeeper
-  (`gatekeeper_role/1`). `Fleet.Project.Onboard` and `Fleet.Pilot.MergeAndPromote` delegate here
-  (never an `engineer`/`gatekeeper` literal rewritten at the caller).
+  Boot requires at least one producer and resolves three singletons: exception_judge,
+  conflict_resolver and project_delegate. Multiple producers are valid because cards
+  name their producer per step; producer_role/1 requires a singleton only when its
+  last-resort lookup is needed. Singleton overrides also bypass uniqueness checks.
 
-  ## The structural roles are RESOLVED, not defaulted
-
-  `producer_role/1` and `gatekeeper_role/1` carry **no literal default**. A default here would be
-  a requirement that gave up on being verified: a catalogue naming no producer would boot green and
-  fail at the first spawn, far from the deploy fault — what `Fleet.Spawner.CanonProof` prevents
-  everywhere else.
-
-  They resolve by CAPABILITY (`spec.capabilities`, the B-03 mechanism): `producer` for the one that
-  codes the brick, `exception_judge` for the one that signs the merge. Substituting a role is a
-  cap-profile edit, and there is no name the code falls back to when the catalogue is silent.
-
-  Resolution is **fail-loud on zero AND on several**: for a structural role, an ambiguity is a broken
-  catalogue, not a choice to arbitrate at random. `Fleet.Pilot.Application.validate_structural_roles!/0`
-  runs it at boot, so a catalogue that cannot name its producer refuses readiness instead of dying at
-  the first dispatch.
+  Gatekeeper judges; the conflict-resolver role executes the merge rail. Their
+  capability keys remain distinct even if a fixture assigns both to one profile.
   """
 
   require Logger
 
   alias Fleet.Workflow.Loader
 
-  # The capability each structural role is resolved BY. Not a role name: the point of B-03 is that a
-  # gate resolves a responsibility, never a magic name.
+  # Resolve responsibilities by capability rather than hardcoded role names.
   @producer_capability :producer
   @gatekeeper_capability :exception_judge
-  # SEPARATE from `:exception_judge` on purpose, and the separation is the point. Whether one role
-  # or two carry them is the CATALOGUE's call — a small shop puts both on its lead, a larger one
-  # splits them. Resolving both through ONE key would take that call away and freeze it: "who
-  # resolves an exhausted conflict" and "who signs the merge" would become the same decision
-  # forever, so moving the first would silently move the second — and the seal's signatory is not
-  # something a remediation policy gets to change as a side effect. Two keys cost nothing when a
-  # catalogue puts them on the same role, and are the only way to ever put them on two.
+  # Execution and judgment have separate configuration keys.
   @conflict_resolver_capability :conflict_resolver
   @delegate_capability :project_delegate
 
@@ -49,18 +31,10 @@ defmodule Fleet.Project.Roles do
   @delegate_uniqueness "single addressee of a project escalation, ensured per repo and named by no card"
 
   @doc """
-  Producer role of LAST RESORT. Override by the opt `:producer_role` (project/test), then config
-  `:lcars_fleet, :pilot_producer_role`; otherwise RESOLVED from the catalogue by the `producer` capability.
-
-  ⚠ **This is NOT who produces.** The CARD names its producer per step (`steps.<name>.role`,
-  schema-required), and the run carries it in the feature branch `lcars/issue-N-<producer>`. This
-  accessor is the fallback of a single call site — `StepRunCompleter.producer_stop_role/2`, when the
-  branch is absent or unparseable and a stopwatch stop still needs a real tokened identity.
-
-  So SEVERAL producers is a legitimate catalogue: `eng_hw` and `eng_sw` both carry the capability,
-  and every card says which one it dispatches. It raises only when this fallback is actually reached
-  on such a catalogue — because there, genuinely, no answer exists, and signing as the wrong producer
-  is worse than saying so.
+  Returns the truthy :producer_role option, then :pilot_producer_role application
+  setting, otherwise the sole role with producer capability (raising on zero/multiple).
+  StepRunCompleter uses this last resort when it cannot recover the producer from
+  the run branch; normal dispatch uses the card's step role.
   """
   @spec producer_role(keyword()) :: String.t()
   def producer_role(opts \\ []) do
@@ -102,8 +76,7 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  The boot guard: every structural role resolves, or the rail does not start. `:ok`, or the raise
-  `resolve_structural_roles!/1` carries.
+  Runs resolve_structural_roles!/1 with default options and returns :ok, or raises.
   """
   @spec validate_structural_roles!() :: :ok
   def validate_structural_roles! do
@@ -112,24 +85,11 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Boot check of the capabilities the fleet cannot work without. Called at rail boot
-  (`Fleet.Pilot.Application`), and the demands DIFFER because the concepts do:
-
-    * `producer` — **at least one**. Several is a legitimate catalogue (`eng_hw` + `eng_sw`): the
-      card names which one it dispatches, per step. Refusing readiness for a specialised fleet would
-      be the guard inventing a policy nobody asked for.
-    * `exception_judge` — **exactly one**. `Fleet.Pilot.MergeAndPromote` is the sole writer of the
-      signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
-    * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
-    * `project_delegate` — **exactly one**, and it is the easiest of the three to leave out. Unlike
-      the
-      producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. Unchecked
-      here, a catalogue carrying two of them boots green and breaks at the first `project_create`
-      (`Fleet.Project.Architect`) or the first escalation (`Fleet.Pilot.ArchWake`) — hours after the
-      deploy, on the operator's first real run, which is exactly the distance this module exists to
-      remove.
-
-  Returns the resolved singletons and the producer set for the caller.
+  Returns producers plus resolved gatekeeper, conflict_resolver and project_delegate.
+  Producer enumeration requires at least one and ignores producer_role overrides.
+  Other roles use their normal option/config precedence; without overrides each
+  must have exactly one capability holder. Delegate uniqueness gives project
+  escalations a single addressee when no card selects one.
   """
   @spec resolve_structural_roles!(keyword()) :: %{
           producers: [String.t()],
@@ -163,10 +123,7 @@ defmodule Fleet.Project.Roles do
     end
   end
 
-  # The `why` is the SINGLETON's own reason, passed in by the caller rather than written once here:
-  # the three roles are unique for three different reasons, and a single sentence covering them
-  # could only be true of one ("single writer of the signed merge" fits the gatekeeper alone) — and
-  # it is the sentence an operator reads when the boot refuses their catalogue.
+  # Keep the role-specific uniqueness reason in the refusal diagnostic.
   defp resolve_structural!(capability, label, why) do
     case Fleet.CapProfile.roles_with_capability(capability) do
       {:ok, [role]} ->
@@ -190,8 +147,9 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the card jury, or the injected `:reviewer_roles`. A `nil` card loads the delegation
-  default.
+  Returns list-valued :reviewer_roles immediately, otherwise the card's list-valued
+  jury. A nil card loads the delegation default with workflow_maps_root/catalogue_root
+  options. Non-list overrides or malformed card shapes can raise; entries are not validated.
   """
   @spec jury(map() | nil, keyword()) :: [String.t()]
   def jury(workflow_map, opts \\ []) do
@@ -212,10 +170,9 @@ defmodule Fleet.Project.Roles do
       )["jury"]
 
   @doc """
-  Returns the jury of the project's declared card, checking `:reviewer_roles` first.
-
-  An unloadable declaration logs, records an incident, and falls back to the delegation card. An
-  empty card jury remains valid.
+  Returns :reviewer_roles when it is a list, otherwise loads the project's card
+  and returns its jury (including []). A failed declared-card load logs, attempts
+  an incident and loads the delegation default; failure of that fallback can raise.
   """
   @spec project_jury(String.t(), keyword()) :: [String.t()]
   def project_jury(repo, opts \\ []) when is_binary(repo) do
@@ -226,20 +183,8 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the card's CI policy as the atom `CiGate` decides on.
-
-  THE ONLY SITE THAT KNOWS THE TOKENS. The schema enum and this function are the two ends of one
-  contract, and while the comparison lived at the call site it could drift from the schema without
-  anything going red: swapping `"required"` for `"requis"` in a reader placed at the call site
-  leaves the whole suite GREEN. One site, one clause per enum member, and a mutation has nowhere
-  to hide.
-
-  THE LAST CLAUSE IS NOT A DEFAULT, IT IS AN ALARM. `spec.ci` is mandatory, so a card reaching here
-  without a readable policy did not come through `Loader.load!`. Answering `:ignore` would rebuild
-  the very hole the mandatory field closed — the un-declared card silently taking the permissive
-  branch. It answers `:required` for the same reason `CiGate` treats an unreadable CI state as
-  pending: unknown is not green, and the two costs are not symmetric. Being wrong here costs one
-  status read; being wrong the other way costs a jury spent on code nobody built.
+  Maps required/ignore string policies to atoms. Any other card or value logs and
+  returns :required: missing mandatory CI policy must not silently disable the gate.
   """
   @spec ci(map() | nil) :: :required | :ignore
   def ci(%{"ci" => "required"}), do: :required
@@ -259,17 +204,9 @@ defmodule Fleet.Project.Roles do
   defp get_card_name(_), do: nil
 
   @doc """
-  The card's VERDICT POLICY — its tolerance curve, or `nil` when it declares none.
-
-  Single site that knows the field, exactly as `ci/1` is the single site that knows that enum: a
-  rename must have one place to fail. `nil` is a VALUE here ("this card declares no curve"), never
-  a default invented on absence — `Jury.review_outcome/4` given `nil` is indistinguishable from the
-  boolean aggregation, which is what lets the canon migrate one card at a time.
-
-  NO WARNING ON ABSENCE, and that is the difference with `ci/1`: `spec.ci` is mandatory to the
-  schema, so a card without it bypassed validation and deserves to be shouted at. `verdict_policy`
-  is optional by design — most cards will never carry one, and a line of log per verdict for a
-  field nobody promised would train a reader to skip the logs that matter.
+  Returns a map-valued verdict_policy, otherwise nil without logging.
+  This field is optional, unlike ci; nil keeps Jury's boolean aggregation.
+  Policy contents are not validated by this accessor.
   """
   @spec verdict_policy(map() | any()) :: map() | nil
   def verdict_policy(%{"verdict_policy" => %{} = policy}), do: policy
@@ -281,22 +218,14 @@ defmodule Fleet.Project.Roles do
     do: verdict_policy(load_project_card(repo, opts))
 
   @doc """
-  The verdict policy that applies to a PR, resolved from the ISSUE's engraved card when a route
-  exists and from the PROJECT's declared card otherwise.
+  Uses the issue route's card when get_route succeeds and the card loads as a map.
+  A routed card with no policy returns nil directly. Returned route/load errors
+  fall back to the project's declared card, which may have a policy of its own.
 
-  ⚠ UNE SEULE FONCTION, PARCE QUE DEUX LECTEURS EN DÉPENDENT ET QU'ILS DOIVENT DIRE LA MÊME CHOSE.
-  `Jury.review_outcome` est décrit dans son propre @doc comme « the SINGLE truth of where a jury
-  stands », partagé par le gate de merge et la lecture de statut de l'arch, « factored so the status
-  surface can NEVER drift from what the gate actually does ». Une politique résolue deux fois —
-  une par appelant — rendrait cette phrase fausse le jour où les deux copies divergent, et la
-  divergence serait invisible : le gate refuserait, l'arch lirait « approuvé ».
-
-  Elle prend le client forge en ARGUMENT plutôt que de le nommer : ses deux appelants vivent dans
-  des domaines qui ne se voient pas (le pilote et la surface pod), et c'est le seul détail qui les
-  sépare. Le reste — route, chargement, repli — est ici, une fois.
-
-  Fail-safe : toute panne de lecture rend `nil`, c'est-à-dire l'agrégation booléenne. Une carte
-  illisible ne doit pas pouvoir DURCIR un rail par accident ; elle le laisse où il était.
+  :forge_opts goes to the forge call; routed-card loading uses repo catalogue options,
+  not caller workflow_maps_root overrides. Loader exceptions on that route are caught,
+  but forge exceptions and failures of project fallback are not universally rescued.
+  Merge decisions and status readers share this resolution to avoid policy drift.
   """
   @spec verdict_policy_for(module(), String.t(), integer(), keyword()) :: map() | nil
   def verdict_policy_for(forge, repo, issue_number, opts \\ [])
@@ -311,10 +240,7 @@ defmodule Fleet.Project.Roles do
     end
   end
 
-  # `load!` raises on an unloadable card; here a raise would take down a gate tick over a curve that
-  # is optional in the first place. Rescued into the same `nil` every other failure yields — the
-  # project card fallback right above stays the interesting path, and an unreadable engraved card
-  # is reported by the routing that OWNS that failure, not invented a second time here.
+  # Convert routed-card load exceptions to the project fallback signal.
   defp safe_load_card(map_name, repo) do
     {:ok, Loader.load!(map_name, Loader.card_opts_for_repo(repo))}
   rescue
@@ -322,14 +248,8 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the CI policy of the project's declared card — the twin of `project_jury/2`, and it has to
-  exist for the two to BE twins.
-
-  A CI fallback answering a hardcoded `:ignore`, beside a jury fallback that reads the PROJECT's
-  declared card, makes a PR with no engraved route — a human PR, an adopted orphan — judged under
-  the project's jury and under NO CI policy, on a project whose card demands one. That is the shape
-  `ReviewLifecycle.issue_card_ci/2` would take under a comment claiming to fall back "exactly like
-  its jury".
+  Returns CI policy from the same project-card loading path used by project_jury/2.
+  Human/routeless PRs must retain the project's CI choice as well as its jury.
   """
   @spec project_ci(String.t(), keyword()) :: :required | :ignore
   def project_ci(repo, opts \\ []) when is_binary(repo), do: ci(load_project_card(repo, opts))
@@ -338,16 +258,7 @@ defmodule Fleet.Project.Roles do
     name = Fleet.Project.Declaration.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
-    # THE PROJECT'S OWN CATALOGUE, and it must be consulted. Naming the card and letting the loader
-    # answer from the default root — the BUNDLED catalogue — makes a project belonging to any other
-    # one ask for a card the loader published under another key, and be told it does not exist.
-    # Measured: `web/test2` declares `standard`, the `web` catalogue carries it, and the
-    # fleet raised `declared_card_unloadable` on every tick while falling back to a card the human
-    # never chose. Falling back to another catalogue's default is worse than failing: the project
-    # runs, quietly, under a criticality nobody declared for it.
-    #
-    # The org names the catalogue (that is the point of naming it so), and an unclaimed org keeps
-    # the default — an explicit `:workflow_maps_root` still wins, it is the fixture's own door.
+    # Use the repo's card directory unless an explicit workflow_maps_root key was supplied.
     loader_opts =
       case {loader_opts, Loader.card_root_for_repo(repo)} do
         {[], dir} when is_binary(dir) -> [catalogue_root: dir]
@@ -383,12 +294,9 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  The card a project takes when it declares none — DECLARED by the catalogue, not defaulted here.
-
-  A literal here — `"brief-gate"`, one catalogue's card — makes every catalogue shipping its own
-  cards silently inherit a default naming a card it does not have. Unlike the doc rail, no property
-  distinguishes this card from its siblings, so it is a choice and it is declared — the manifest
-  says it, and `Fleet.Catalogue.verify!/0` refuses a catalogue that ships cards without naming one.
+  Returns truthy :delegation_workflow_map or Catalogue.default_card().
+  This accessor does not take a repo or forward directory options to Catalogue;
+  a project-specific loader root does not itself change this fallback card name.
   """
   @spec delegation_workflow_map(keyword()) :: String.t() | nil
   def delegation_workflow_map(opts \\ []) do
@@ -396,13 +304,12 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  The workflow map serving routeless `destination/workshop` issues — the catalogue's doc rail.
+  Returns truthy :workshop_workflow_map or finds a workshop card by capability-like
+  step fields via Loader. No matching card returns nil.
 
-  ⚠ NO DEFAULT NAME, whatever a `@doc` may be tempted to claim (`"workshop-direct"` is one
-  catalogue's card). The rail resolves by a PROPERTY (a card carrying a `face: workshop` producer),
-  so
-  each catalogue answers with ITS own card and a catalogue shipping none answers `nil` — which the
-  boot warns about by name. A default here would hand one catalogue's card to every other.
+  Here a binary :catalogue_root means a repo identifier, not a directory: it is
+  translated through Loader.card_opts_for_repo/1 and other options are discarded.
+  Without it, options pass through to Loader.workshop_card_name/1.
   """
   @spec workshop_workflow_map(keyword()) :: String.t() | nil
   def workshop_workflow_map(opts \\ []) do
@@ -410,12 +317,7 @@ defmodule Fleet.Project.Roles do
       Loader.workshop_card_name(workshop_scope(opts))
   end
 
-  # `catalogue_root: <repo>` is accepted as a REPO here and resolved to that project's cards. The
-  # doc rail is resolved by a PROPERTY (a card carrying a `face: workshop` producer), and the
-  # property searched in the default catalogue whatever the project makes a `web` ticket burn the
-  # `fleet` catalogue's rail, whose producer is `scribe` — an account that is a member of no `web`
-  # team. The push and the PR both answer `403 user must be a collaborator`, which reads as a
-  # permissions defect and is a card coming from the wrong catalogue.
+  # This API's catalogue_root is a repo, unlike Loader's same-named directory option.
   defp workshop_scope(opts) do
     case Keyword.get(opts, :catalogue_root) do
       repo when is_binary(repo) -> Loader.card_opts_for_repo(repo)
@@ -434,34 +336,14 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  THE MERGE RAIL — the role that writes on git for the pipeline: it resolves a tier-2 conflict the
-  producer could not close, AND it signs every merge, its push, and the head-branch delete.
+  Returns truthy :conflict_resolver_role, then :pilot_conflict_resolver_role,
+  otherwise resolves a unique conflict_resolver capability holder.
 
-  Override by the opt `:conflict_resolver_role` (project/test), then config
-  `:lcars_fleet, :pilot_conflict_resolver_role`; otherwise RESOLVED from the catalogue by the
-  `conflict_resolver` capability. Raises on zero and on several, like every structural role.
-
-  ## ⚠ The capability key says `conflict_resolver`, and it now names a SUBSET of the job
-
-  ⚖ user: the rails are separated by DOMAIN — this one merges, the gatekeeper decides — so this
-  role signs EVERY merge, not only the conflicted ones. Its key and its cap-profile header describe
-  a narrower job, the one it was created for.
-
-  The key is DELIBERATELY not renamed here, and the reason is the one this codebase keeps paying
-  for: a capability key is a catalogue contract. Renaming it in `lib/` alone would leave every
-  cap-profile declaring a capability nothing resolves, and the boot validator would refuse to start —
-  loudly, but for a reason nobody would connect to a doc edit. The rename belongs to a catalogue
-  pass (key + profiles + structural-role validator + the chief's SP), taken whole or not at all.
-
-  Until then this docstring IS the correction: the key is historical, the job is the merge rail.
-
-  ## Why it is its own capability, NOT `exception_judge`
-
-  The two responsibilities live on separate roles, and the reason is a SECURITY property the schema
-  requires declared: their briefs carry opposite `brief_kind` values — `judge` ("never execute what
-  you judge") and `worker` ("execute it") — and one role cannot declare both. Merging is an
-  execution. Sharing one key would let a catalogue edit move the write capability onto the JUDGING
-  role, in silence.
+  The historical key names only part of the role: it executes conflict resolution
+  and the merge rail, while exception_judge decides. Keep the keys separate so
+  changing an executor does not change the judge. Renaming this capability requires
+  a coordinated catalogue/profile/validator/prompt migration, not a local doc edit.
+  These accessors do not themselves enforce worker/judge profile separation.
   """
   @spec conflict_resolver_role(keyword()) :: String.t()
   def conflict_resolver_role(opts \\ []) do
@@ -474,6 +356,5 @@ defmodule Fleet.Project.Roles do
       )
   end
 
-  # No singleton "permanent-architect" accessor here: the architect is PER-PROJECT, and its pod id
-  # derives from the repo through the single authority `Fleet.Project.Architect.pod_id_for/1`.
+  # Project pod IDs belong to Architect.pod_id_for/1, not a fleet permanent accessor.
 end

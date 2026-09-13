@@ -1,14 +1,10 @@
 defmodule Fleet.Project.RolesTest do
   @moduledoc """
-  Locks the single AUTHORITY for workshop roles (`Fleet.Project.Roles`): capability RESOLUTION +
-  opts overrides. `ProjectOnboard` and `MergeAndPromote` delegate here (no literal rewritten elsewhere).
+  Exercises role resolution, overrides and project-card fallback.
+  Incident stubs observe callback arguments, not durable storage; catalogue
+  assertions describe the bundled profiles used by these tests.
   """
-  # `async: false` : ce fichier tient `:lcars_fleet, :pilot_producer_role` — une clé GLOBALE que le code de
-  # production lit — pendant la durée d'un test. Il la nettoie bien (`on_exit` + `delete_env`), donc
-  # il ne fuit pas ; mais tant qu'il la tient, `Roles.producer_role()` REND « engineer » au lieu de
-  # LEVER, et n'importe quel test async concurrent qui traverse ce chemin voit l'autre réponse.
-  # Même famille que la course `:pod_resolver` prouvée le 2026-08-06 : un app-env global ne se mute
-  # pas depuis la phase concurrente.
+  # Mutates global pilot_producer_role; cleanup does not isolate concurrent readers.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -17,11 +13,7 @@ defmodule Fleet.Project.RolesTest do
   alias Fleet.Project.Roles
 
   test "producer_role: RESOLU par capability, jamais un litteral — et l'opt garde la main" do
-    # Le catalogue declare DEUX producers depuis scribe (chantier face-projet 2026-08-02) : le
-    # LAST-RESORT sans carte ni branche n'a plus de reponse honnete, et resolve_producer! REFUSE
-    # par design (« a catalogue with eng_hw and eng_sw ») plutot que d'elire un producer au hasard.
-    # Ce test epinglait `engineer` quand il etait seul ; il epingle desormais le refus — ET que le
-    # message nomme les candidats, parce que c'est lui que l'operateur lira.
+    # The bundled catalogue has multiple producers; the unconfigured last resort must refuse.
     err = assert_raise RuntimeError, fn -> Roles.producer_role() end
     assert err.message =~ "scribe"
     assert err.message =~ "engineer"
@@ -95,17 +87,8 @@ defmodule Fleet.Project.RolesTest do
       proj = Path.join(tmp, "broken")
       File.mkdir_p!(proj)
 
-      # ⚠ CE TEST ECRIVAIT UNE CARTE INCONNUE A LA DECLARATION, en enoncant la politique
-      # d'alors : « creation is never walled on a card typo — the fallback happens LOUD at read
-      # time ». Cette politique tenait a une condition qui n'etait vraie qu'a MOITIE : elle
-      # supposait que tout lecteur se rabat. `Roles` se rabat ; `StepDispatcher` charge en direct
-      # et refuse d'onboarder, donc une issue sans route echouait a chaque tick, indefiniment,
-      # sur un projet rendu `ready` (6-125). Un nom qu'on ne peut pas bruler est desormais REFUSE
-      # a la declaration, et le refus nomme les cartes disponibles.
-      #
-      # L'etat teste ici reste donc REEL, et c'est le seul qui subsiste : la carte chargeait quand
-      # elle a ete declaree, le catalogue l'a perdue depuis. On le fabrique en editant la
-      # declaration ecrite, ce qui la garde schema-valide par construction.
+      # Simulate a declaration whose card has since disappeared. write/2 now rejects
+      # unknown explicit names, so this read-side fixture edits the saved record directly.
       :ok =
         Declaration.write(proj,
           justification: "card lost by the catalogue since",
@@ -142,9 +125,8 @@ defmodule Fleet.Project.RolesTest do
           workflow_map: "standard-qa"
         )
 
-      # A tmp catalogue holding ONLY the fallback card: the DECLARED one (standard-qa) no
-      # longer loads, the never-stall fallback swaps the judgment layer — the swap must
-      # land in the incident rail (the fallback card itself still loads: never-stall held).
+      # Keep only the fallback card. The callback records the substitution attempt,
+      # without running the durable incident consumer.
       maps = Path.join(tmp, "maps")
       File.mkdir_p!(maps)
 
@@ -193,25 +175,13 @@ defmodule Fleet.Project.RolesTest do
 
   describe "conflict_resolver_role/1 — its OWN capability, so the seal keeps its signatory" do
     test "the two responsibilities are held by DIFFERENT roles — and the test says the property" do
-      # This asserted `== "gatekeeper"` while the two costumes shared a role. That was a CATALOGUE
-      # fact and the assertion pinned it as if it were a law, so it reddened the day the catalogue
-      # moved — which is exactly what the split was built to allow.
-      #
-      # What is worth pinning is that the two keys resolve INDEPENDENTLY. The incumbents are read
-      # from the catalogue, not restated here.
+      # This compares current bundled holders; independent option resolution is tested below.
       refute Roles.conflict_resolver_role() == Roles.gatekeeper_role()
     end
 
-    # Substitution through the OPT, never `Application.put_env`. The env is a NODE-WIDE table: in an
-    # async file, posting `:gatekeeper_role` there is read by every concurrent test that seals a PR,
-    # which then resolves a role whose forge token does not exist — `:role_token_unavailable`, on a
-    # test that touched none of this. Measured, at the cost of a diagnosis: 0/4/5/7 failures
-    # depending on the run, in two other files. The opt is process-local and proves the same thing,
-    # which is why it is the accessor's FIRST precedence level.
+    # Use options to avoid changing the global role seen by other consumers.
     test "MOVING the tier-2 resolver does NOT move the seal's signatory" do
-      # THE property of the item. Under one shared key, substituting the role that resolves an
-      # exhausted conflict would also have substituted the role that SIGNS the merge — silently,
-      # because nothing would have said the two decisions were the same decision.
+      # Separate keys let the conflict executor change without changing the gatekeeper judge.
       signatory = Roles.gatekeeper_role()
 
       assert Roles.conflict_resolver_role(conflict_resolver_role: "engineer") == "engineer"
@@ -228,7 +198,7 @@ defmodule Fleet.Project.RolesTest do
   end
 
   test "the arch pod id is PER-PROJECT — the single authority is ProjectArchitect.pod_id_for/1" do
-    # Reorg 2026-07-19: Roles.architect_pod_id (the "permanent-architect" singleton accessor) is GONE.
+    # The removed fleet singleton accessor must not replace project-specific pod IDs.
     refute function_exported?(Roles, :architect_pod_id, 1)
     assert Fleet.Project.Architect.pod_id_for("fleet/demo") == "architect-demo"
     assert Fleet.Project.Architect.pod_id_for("demo") == "architect-demo"

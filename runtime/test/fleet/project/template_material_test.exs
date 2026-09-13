@@ -1,30 +1,16 @@
 defmodule Fleet.Project.TemplateMaterialTest do
   @moduledoc """
-  Le MATERIEL des `project_template/` livres — pas leur resolution, deja temoignee ailleurs.
-
-  ## Le defaut que ce fichier garde, et il a ete rendu VIVANT par un correctif
-
-  `catalogues/web-demo/project_template/` portait des placeholders en PROSE (`# <nom du projet>`,
-  `**Date** : a remplir`) sans fichier de controle `.gitea/template`. Tant que la resolution etait
-  globale, ce materiel etait du poids mort : tout projet partait de `fleet/project-template`,
-  correctement cable. Le jour ou la resolution est devenue per-catalogue (2026-08-16), les projets
-  `web-demo/*` se sont mis a en partir — et a naitre avec `# <nom du projet>` grave, pour toujours,
-  puisque rien ne demande a personne de le remplir. Trouve par l'audit croise, verifie ici.
-
-  Un placeholder est soit une VARIABLE que la forge expanse (`${REPO_NAME}`…, declaree dans
-  `.gitea/template`), soit il n'est pas.
+  Scans shipped template text for known prose placeholders and undeclared files
+  using the five listed template variables. The checks do not create a project or
+  execute forge expansion. Missing sibling catalogue seeds are reported as unmeasured.
   """
   use ExUnit.Case, async: true
 
-  # Les CINQ variables a nous. Les `${GITHUB_*}` d'un ci.yml sont celles du JOB de CI, pas les
-  # notres : les lister dans `.gitea/template` tendrait a Gitea des noms qu'il ne connait pas.
+  # Project template variables are distinct from GITHUB_* values used by CI jobs.
   @our_variables ~w(REPO_NAME REPO_DESCRIPTION YEAR MONTH DAY)
 
-  # La prose qui a mordu, et ses formes voisines. La forme du defaut est le SLOT DE VALEUR rempli
-  # de prose (`**Date** : à remplir`), pas la locution : le premier jet de cette liste portait
-  # « à remplir » nu et a mordu la REFERENCE sur deux phrases legitimes — une consigne au lecteur
-  # (« les sections naissent vides et sont à remplir ») et une cicatrice qui CITE l'ancien en-tete
-  # fautif. Un motif qui interdit la phrase interdirait d'ecrire la regle.
+  # Match value-slot placeholders rather than every occurrence of 'a remplir':
+  # instructions and historical examples can legitimately contain those words.
   @prose_placeholders [
     "<nom du projet>",
     ": à remplir",
@@ -32,10 +18,8 @@ defmodule Fleet.Project.TemplateMaterialTest do
     "TO BE FILLED"
   ]
 
-  # Les racines livrees : le catalogue de reference (priv) et les graines du depot (../catalogues).
-  # La seconde est un ARBRE FRERE : le stage de build d'image copie `fleet` seul, donc son absence
-  # est un contexte legitime — SAUTEE ET NOMMEE, jamais un vert silencieux sur un terrain non
-  # mesure (meme idiome que les verrous de listes de provisionnement).
+  # Build artifacts may contain runtime alone; absent sibling seeds are explicitly reported.
+  # Globs cover the listed extensions and do not measure every hidden/template file.
   defp shipped_template_roots do
     priv = Path.join(Fleet.Catalogue.root(), "project_template")
 
@@ -108,8 +92,8 @@ defmodule Fleet.Project.TemplateMaterialTest do
   end
 
   test "TEMOIN de non-vacuite : la graine web-demo est bien mesuree quand l'arbre est la" do
-    # Sans lui, un chemin de glob casse rendrait les deux tests verts sur zero fichier — la
-    # couverture annoncee sans la mesure.
+    # When seeds are found, require web-demo and a known variable-bearing file.
+    # A glob returning no seeds still takes the allowed skipped branch.
     case elem(shipped_template_roots(), 1) do
       {:ok, dirs} ->
         assert Enum.any?(dirs, &String.contains?(&1, "web-demo"))

@@ -1,10 +1,8 @@
 defmodule Fleet.Project.WorktreeSyncTest do
   @moduledoc """
-  `WorktreeSync` REALLY aligns the local clone on `origin/main` — real git (local bare origin +
-  clone + advancement), not a stub. This is the anti-hollow-green of the fix: without alignment, the
-  delivered file never appears on disk (the original bug). `origin` is a local path → no network, no
-  token (the `fetch auth:true` goes through `ForgeAuth.git_env() == []` in test, inert on a local
-  remote).
+  Exercises alignment and issue-ref fetching with local bare origins and real Git.
+  Isolated server names allow concurrent tests. This does not test network credentials,
+  linked worktrees, external concurrent writers or every rebase/autostash failure.
   """
   use ExUnit.Case, async: true
 
@@ -28,8 +26,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
     proj = Path.join(root, "myproj")
     git!(["clone", origin, proj])
 
-    # the DOC face: an orphan branch on the same origin, cloned into its own root. Its clone is a
-    # WRITER (the architect and the human author in it), which is the property the alignment turns on.
+    # Workshop uses a separate branch and clone so local writer commits can be exercised.
     workshop_root = Path.join(tmp, "projects.doc")
     File.mkdir_p!(workshop_root)
     git_in!(seed, ["checkout", "-q", "--orphan", "workshop"])
@@ -65,13 +62,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert head(proj) == head(seed)
   end
 
-  # JG-119 — « THE WORKTREE IS A READ-ONLY SHOWCASE » N'ETAIT GARANTI PAR RIEN. La racine de la face
-  # code est `Fleet.Layout.code_root/0` = `/home/projects`, le repertoire de travail par defaut de
-  # l'humain. Les pods travaillent bien dans leurs clones ephemeres, mais rien n'empeche un fichier
-  # modifie non commite d'etre la — et `reset --hard` le detruisait sans copie ni message.
-  #
-  # La soeur `align_writer/2` tient deja la posture sur une divergence : elle ABANDONNE et propage
-  # fort (« that divergence is a human's call »).
+  # JG-119: the human's code directory can contain uncommitted work despite its mirror role.
   test "JG-119: un arbre SALE n'est pas aligne — le travail non commite survit", %{
     seed: seed,
     proj: proj,
@@ -106,7 +97,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
     proj: proj,
     sync: sync
   } do
-    # Sans ce temoin, refuser TOUJOURS passerait le test ci-dessus et gelerait la vitrine pour de bon.
+    # Positive control: refusing every alignment must not pass.
     commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
     File.write!(Path.join(proj, "README.md"), "sale\n")
 
@@ -146,16 +137,8 @@ defmodule Fleet.Project.WorktreeSyncTest do
     doc: doc,
     sync: sync
   } do
-    # THE DESTRUCTIVE MUTATION, and nothing caught it: aligning `doc` with the code face's
-    # `reset --hard` left the whole suite green (measured 2026-08-08). It would have to — every
-    # other fixture here is on `main`, where reset IS right because nobody writes locally.
-    #
-    # On `doc` somebody does: the architect and the human author in that clone, and a merge landing
-    # on the forge would then silently erase whatever they had committed but not yet pushed. A reset
-    # does not fail on the work it destroys; it reports `:ok`.
-    #
-    # The discriminator is a local commit that the remote has never seen. Reset drops it. Rebase
-    # replays it on top of the merged tip — both survive, which is what this asserts.
+    # An unpushed workshop commit distinguishes rebase from reset: both local and
+    # remotely merged files must survive. This does not exercise autostash conflicts.
     git_in!(doc, ["config", "user.email", "t@lcars"])
     File.write!(Path.join(doc, "local-note.md"), "written by the arch, not yet pushed\n")
     git_in!(doc, ["add", "-A"])
@@ -182,10 +165,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
     proj: proj,
     sync: sync
   } do
-    # WHY THIS EXISTS. The architect's code face is a read-only bind, so its own `git fetch` dies on
-    # `.git/FETCH_HEAD` — and what that cost was NOT the missing diff: it arbitrated anyway and
-    # invented an explanation for code it could not see. The fetch runs host-side, here, in the
-    # worktree this GenServer already serializes; the pod only reads the result.
+    # Fetch host-side so a read-only architect mount can inspect issue branches.
     git_in!(seed, ["checkout", "-q", "-b", "lcars/issue-7-engineer"])
     File.write!(Path.join(seed, "delivered.ex"), "def hello, do: :world\n")
     git_in!(seed, ["add", "-A"])
@@ -196,13 +176,11 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert {:ok, ["refs/lcars/pr/7/engineer"]} =
              WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 7)
 
-    # NAMED, not `FETCH_HEAD`: the next fetch overwrites that file and it never says what it is the
-    # head OF. This ref is stable, self-describing, and readable by the pod through its RO bind.
+    # Named refs survive unrelated FETCH_HEAD updates.
     assert {_sha, 0} =
              System.cmd("git", ["-C", proj, "rev-parse", "--verify", "refs/lcars/pr/7/engineer"])
 
-    # And the CONTENT is there — a ref that resolves to nothing would satisfy the assertion above
-    # while leaving the arch exactly as blind.
+    # Verify the expected file contents, beyond merely resolving a ref name.
     {show, 0} = System.cmd("git", ["-C", proj, "show", "refs/lcars/pr/7/engineer:delivered.ex"])
     assert show =~ "def hello"
   end
@@ -213,14 +191,8 @@ defmodule Fleet.Project.WorktreeSyncTest do
          proj: proj,
          sync: sync
        } do
-    # THE `--force`, and nothing held it: dropping it left the whole suite green (measured
-    # 2026-08-08), because the other fixture pushes its branch exactly once.
-    #
-    # A producer that REWORKS force-pushes: amend, rebase, squash — the branch moves
-    # non-fast-forward. Without `--force` the local ref REFUSES the update, and the fetch reports
-    # nothing wrong. The arch then reads the PREVIOUS deliverable under a ref that names the
-    # current ticket, and arbitrates on code that no longer exists — the exact failure this whole
-    # gesture exists to end, re-created one layer down.
+    # Re-fetch after an amended branch and check updated content. This fixture
+    # checks the result, not whether removing --force would fail for this ref namespace.
     git_in!(seed, ["checkout", "-q", "-b", "lcars/issue-8-engineer"])
     File.write!(Path.join(seed, "d.ex"), "first attempt\n")
     git_in!(seed, ["add", "-A"])
@@ -252,9 +224,8 @@ defmodule Fleet.Project.WorktreeSyncTest do
   test "fetch_issue_refs: a ticket with NO branch answers an empty list, never an error", %{
     sync: sync
   } do
-    # The distinction the mandate renders differently: "nothing to read, the escalation is about
-    # something else" is not "the deliverable could not be made readable". Collapsing the two would
-    # make the arch defer on a ticket that never had code.
+    # Empty issue refs and failure to read a local clone are different results.
+    # This fixture starts with no stale refs for the issue.
     assert {:ok, []} = WorktreeSync.fetch_issue_refs(sync, "fleet/myproj", 99)
   end
 
@@ -267,11 +238,7 @@ defmodule Fleet.Project.WorktreeSyncTest do
 
   test "a branch that is NOT a face aligns NOTHING and says so — never the code worktree by default",
        %{proj: proj, sync: sync} do
-    # THE FALL-THROUGH IS THE DANGEROUS CLAUSE, and nothing held it: replacing the explicit
-    # non-face branch with a catch-all onto the code worktree left the whole suite green (measured
-    # 2026-08-08). A feature branch handed here would then have been silently reset onto a face it
-    # does not belong to — the alignment is `reset --hard` on the code side, so the wrong guess
-    # does not fail, it DESTROYS, and it reports `:ok`.
+    # A non-face branch must not route to the default code aligner.
     before = head(proj)
 
     assert {:error, {:not_a_face, "lcars/issue-3-scribe"}} =

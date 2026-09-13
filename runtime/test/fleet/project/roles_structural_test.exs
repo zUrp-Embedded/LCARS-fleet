@@ -1,33 +1,22 @@
 defmodule Fleet.Project.RolesStructuralTest do
   @moduledoc """
-  Resolution des roles STRUCTURELS par capability, et son refus des deux cotes.
-
-  `async: false` — DELIBERE et load-bearing. Ces tests repointent `:lcars_fleet, :cap_profile_root_dir` et
-  depublient l'image : deux etats GLOBAUX. En async ils ont fait tomber trois suites voisines
-  (StepDispatcher, StepRunCompleter, StepRunConsumerGate) qui resolvent le producteur pendant ce
-  temps-la. C'est la raison pour laquelle ce fichier est separe de `roles_test.exs`, qui est
-  `async: false` pour sa propre cle globale (`:pilot_producer_role`) et pour rien d'autre.
+  Resolution par capability sur des profils temporaires derives du canon.
+  async:false : le setup remplace les racines de catalogue et depublie l'image,
+  deux etats globaux que la restauration seule n'isole pas des lecteurs concurrents.
   """
   use ExUnit.Case, async: false
 
   alias Fleet.CapProfile.Image
   alias Fleet.Project.Roles
 
-  # Un defaut est une exigence qui a renonce a etre verifiee : avant, un catalogue sans producteur
-  # bootait VERT et mourait au premier dispatch. Ces deux tests sont la seule raison pour laquelle
-  # le litteral a ete retire.
+  # Exercer les refus sans fournir d'override de role.
   setup do
     tmp = Fleet.TestEnv.tmp_path("roles-cat")
     File.mkdir_p!(tmp)
-    # LES DEUX racines vers la fixture : ce bloc mesure des catalogues qu'il ecrit lui-meme, et la
-    # racine systeme y apporterait quatre roles que le test n'a pas declares — « 2 roles declarent
-    # exception_judge » sur une fixture qui en ecrit un.
+    # Isoler aussi la racine systeme pour ne pas ajouter des roles hors fixture.
     Fleet.Test.CatalogueIsolation.isolate!(tmp)
 
-    # L'image publiee court-circuiterait le disque : on la retire pour ce bloc. Elle est REPUBLIEE
-    # a la sortie — sans ca, la depublication survit au fichier et tout le reste du run resout ses
-    # roles par le disque au lieu de l'image. Le `root_dir`, lui, etait deja restaure : c'est
-    # l'asymetrie entre les deux etats globaux du meme setup qui l'a rendue invisible.
+    # Retirer l'image pour mesurer le disque et restaurer l'image precedente a la sortie.
     published_before = Image.published()
 
     on_exit(fn ->
@@ -43,9 +32,8 @@ defmodule Fleet.Project.RolesStructuralTest do
     {:ok, dir: tmp}
   end
 
-  # Les fixtures DERIVENT d'un profil canon reel : `load/1` valide contre le schema, donc un YAML
-  # minimal echouerait a charger et `roles_with_capability` — fail-closed par contrat — le compterait
-  # comme ne declarant rien. Le test mesurerait alors le mauvais refus.
+  # Un profil canon garde la fixture schema-valide : un profil invalide mesurerait
+  # un echec de chargement au lieu de l'ambiguite de capability voulue.
   @canon_dir Path.join(File.cwd!(), "priv/catalogue/cap_profile/cap-profiles")
 
   defp write_role!(dir, name, caps) do
@@ -71,14 +59,11 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "PLUSIEURS producteurs est un catalogue legitime — le boot l'accepte", %{dir: dir} do
-    # Le cas `eng_hw` + `eng_sw`. La carte nomme son producteur par step (`role`, schema-required)
-    # et le run le porte dans la branche `lcars/issue-N-<producer>` : exiger un singleton fleet-wide
-    # refuserait la readiness a une fleet specialisee, pour une politique que personne n'a demandee.
+    # Plusieurs producteurs sont valides au boot puisque la carte choisit par step.
     write_role!(dir, "eng-hw", ["producer"])
     write_role!(dir, "eng-sw", ["producer"])
-    # Two capabilities on one role, which is the canon shape: the sealer signs the merge AND takes
-    # the tier-2 conflict today. They are two KEYS, so a catalogue may split them across two roles
-    # without the seal noticing.
+    # La fixture met deux capabilities sur un profil ; ce resolveur ne verifie
+    # pas la separation worker/judge des consommateurs.
     write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
     write_role!(dir, "arbitre", ["project_delegate"])
 
@@ -91,8 +76,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "un catalogue SANS delegue est refuse au BOOT, plus au premier create_project", %{dir: dir} do
-    # La mesure qui justifie le geste : avant, ce catalogue bootait vert et cassait des heures plus
-    # tard, chez l'operateur, au premier `project_create` ou a la premiere escalade.
+    # Le resolveur de boot doit detecter l'absence du delegue avant un appel d'onboarding.
     write_role!(dir, "eng", ["producer"])
     write_role!(dir, "sealer", ["exception_judge", "conflict_resolver"])
 
@@ -115,9 +99,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "le motif d'unicite est celui du role, pas celui du scelleur recopie", %{dir: dir} do
-    # Une phrase unique couvrant les trois singletons ne pouvait etre vraie que d'un seul : elle
-    # disait « single writer of the signed merge » pour le delegue aussi. C'est le message que
-    # l'operateur lit quand son catalogue est refuse.
+    # Le motif d'unicite du delegue doit parler d'escalade, pas du signataire du merge.
     write_role!(dir, "arch-hw", ["project_delegate"])
     write_role!(dir, "arch-sw", ["project_delegate"])
 
@@ -127,9 +109,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "…mais le repli de DERNIER RECOURS refuse de deviner lequel", %{dir: dir} do
-    # `producer_role/0` n'est pas « qui produit » : c'est le repli d'un seul appelant, quand la
-    # branche du run est illisible. La, avec deux producteurs, aucune reponse n'existe — et signer
-    # sous le mauvais producteur est pire que le dire.
+    # Le repli sans carte ni branche ne peut pas choisir parmi plusieurs producteurs.
     write_role!(dir, "eng-hw", ["producer"])
     write_role!(dir, "eng-sw", ["producer"])
 
@@ -143,20 +123,9 @@ defmodule Fleet.Project.RolesStructuralTest do
     assert_raise RuntimeError, ~r/unique BY DESIGN/, fn -> Roles.gatekeeper_role() end
   end
 
-  # JG-025 — LES DEUX BRANCHES DE `roles_with_capability/1` NE FILTRAIENT PAS PAREIL. Sans image
-  # publiee elle passe par `Catalog.list/1`, qui ecarte les `ReservedSeat` (BL-6-45) ; avec image,
-  # elle balayait l'index brut sans ce filtre.
-  #
-  # ⚠ MESURE QUI CHANGE LA CONCLUSION : la divergence est INATTEIGNABLE aujourd'hui, et ce n'est pas
-  # `roles_with_capability/1` qui la ferme. Le schema `reserved-seat.json` est
-  # `additionalProperties: false` et ne declare AUCUN `spec` — un siege ne peut donc pas porter de
-  # capability, et un fichier qui essaierait ne validerait pas. `Image.publish!/0` LEVE sur un
-  # profil invalide (« proven-good image at boot, or do not boot »), donc un tel siege n'entre meme
-  # pas dans l'index.
-  #
-  # Le filtre ajoute cote image ne repare donc pas un bug OBSERVABLE : il rend l'accord des deux
-  # branches LOCAL au lieu de l'emprunter a un schema voisin. Ces deux tests epinglent les deux
-  # moities de ce raisonnement — l'accord, et l'invariant qui le rendait deja vrai.
+  # JG-025 : comparer disque et image avec un ReservedSeat effectivement indexe.
+  # Le schema interdit deja spec sur ce type ; son filtre d'image rend l'exclusion
+  # locale sans dependre uniquement de cet invariant voisin.
   test "JG-025: les deux regimes rendent la MEME reponse sur un catalogue portant un siege", %{
     dir: dir
   } do
@@ -171,8 +140,7 @@ defmodule Fleet.Project.RolesStructuralTest do
     disque = Fleet.CapProfile.roles_with_capability(:exception_judge)
     assert {:ok, ["alpha"]} == disque
 
-    # Regime IMAGE — le siege est INDEXE (pas de pourriture derriere l'exclusion), donc c'est bien
-    # la branche qui le voit passer.
+    # Verifier que le siege est indexe avant d'observer son exclusion de la resolution.
     Image.publish!()
     on_exit(fn -> Image.unpublish() end)
 
@@ -190,8 +158,7 @@ defmodule Fleet.Project.RolesStructuralTest do
        %{
          dir: dir
        } do
-    # C'est CE refus qui rend la divergence inatteignable, et il vit dans un autre fichier que la
-    # fiche ne cite pas. S'il tombe, le filtre ajoute cote image devient load-bearing.
+    # Temoin du schema qui empechait deja un siege de porter une capability.
     seat_with_spec = %{
       "kind" => "ReservedSeat",
       "metadata" => %{"name" => "vulcan", "role_index" => 8},
@@ -205,12 +172,8 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "une capability legitimement multiple n'est PAS une erreur", %{dir: dir} do
-    # L'unicite est une propriete du concept APPELANT (le role structurel), pas du catalogue.
-    # `onboarder` n'a pas d'appelant qui resout : c'est un PREDICAT sur un pod (`require_onboarder`
-    # repond oui/non a celui qui frappe), jamais une recherche « qui est l'onboarder ». Rien n'a
-    # donc a departager deux porteurs. Ce test tenait auparavant sur un tout autre motif — « le
-    # canon en porte deux » — qui n'est plus vrai depuis que l'architect a rendu la capacite, et
-    # qui n'aurait de toute facon decrit qu'un inventaire.
+    # L'unicite appartient au resolveur structurel, pas a toute capability.
+    # onboarder est utilise comme predicat sur le pod appelant.
     write_role!(dir, "alpha", ["onboarder"])
     write_role!(dir, "beta", ["onboarder"])
 
@@ -218,16 +181,13 @@ defmodule Fleet.Project.RolesStructuralTest do
   end
 
   test "le delegue per-projet est resolu par capability, exactement un", %{dir: dir} do
-    # Les deux sites qui le nommaient — l'ensure de ProjectArchitect et le mandat d'escalade
-    # d'ArchWake — lisent maintenant la meme source que la garde de Delegation (B-03), qui gatait
-    # deja sur la capability et non sur `role == "architect"`.
+    # Delegate resolution shares the authority used by Architect and escalation callers.
     write_role!(dir, "arbitre", ["project_delegate"])
     assert "arbitre" == Roles.project_delegate_role()
   end
 
   test "deux delegues : ambiguite sur QUI arbitre, pas une specialisation", %{dir: dir} do
-    # Contrairement au producteur, rien ne SELECTIONNE un delegue : il est ensure par repo, aucune
-    # carte ne le nomme. Deux porteurs = personne ne sait a qui l'escalade s'adresse.
+    # No step card selects a project delegate to disambiguate two holders.
     write_role!(dir, "arch-hw", ["project_delegate"])
     write_role!(dir, "arch-sw", ["project_delegate"])
 
