@@ -1,9 +1,8 @@
 defmodule Fleet.Pilot.StepDispatcher.SpawnConflictBaseRefreshTest do
   @moduledoc """
-  A0.5 — a conflict rework's `refs/lcars/base` follows the moved base (measured hole, bench
-  2026-08-18: a live instance-scoped pod, re-briefed in place BY DESIGN, kept the base of its
-  build and merged it into itself — "Already up to date", twice, budget burned, arch escalated
-  over a conflict the pod was never shown).
+  Checks base refresh for conflict rework without resetting ticket context.
+  A reused pod must not repeatedly merge a stale base and consume its rework budget.
+  The Git fixture verifies the refreshed ref and one unchanged worktree file.
   """
   use ExUnit.Case, async: true
 
@@ -63,7 +62,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnConflictBaseRefreshTest do
              })
   end
 
-  # ── the git gesture itself, on a real repo: the ref moves, the working tree does not ──
+  # Real Git fixture distinguishes a moved base ref from unchanged file content.
   @tag :tmp_dir
   test "Phase.Clone.refresh_work_base moves refs/lcars/base to the CURRENT origin tip", %{
     tmp_dir: dir
@@ -98,7 +97,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnConflictBaseRefreshTest do
     {now, 0} = System.cmd("git", ["-C", ws, "rev-parse", "refs/lcars/base"], [])
     assert String.trim(now) == String.trim(tip)
     refute String.trim(now) == String.trim(stale)
-    # the working tree did NOT move — only the ref did (context preserved)
+    # Check this file remains at the old version; this is not a full worktree/context comparison.
     assert File.read!(Path.join(ws, "f.txt")) == "v1"
   end
 

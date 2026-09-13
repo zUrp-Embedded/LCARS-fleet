@@ -1,14 +1,8 @@
 defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   @moduledoc """
-  Locks the COLD-CODE-TABLE condition of `Spawn.repo_id/3`.
-
-  `function_exported?/3` does not load a module: on a freshly booted BEAM it answers "no such
-  function" about a module that has one and is simply not loaded yet. That made the FIRST project
-  onboarded after a fleet start lose its architect, under a log that blamed the forge — measured on
-  a cold node, where `:erlang.module_loaded(Fleet.Forge.Client)` was false while the same call
-  succeeded a minute later.
-
-  `async: false` — these tests mutate the global code table (delete/purge).
+  An available but unloaded forge module must still resolve repository ids.
+  function_exported?/3 alone does not load it. Serialized because purge/delete changes
+  the global code table; ColdForgeStub must be reloadable from disk.
   """
   use ExUnit.Case, async: false
 
@@ -26,11 +20,8 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
     :ok
   end
 
-  # LOAD first, deliberately. `:code.delete/1` returns false when the module has no CURRENT
-  # version — which includes "never loaded", and an `alias` loads nothing. Asserting its return
-  # made this helper depend on whether an earlier test in this file had happened to load the stub,
-  # i.e. on the ExUnit seed. Starting from a known state removes the order dependency, and the
-  # postcondition below is what the tests actually need anyway.
+  # Establish a loaded baseline before purge/delete; aliases do not load modules.
+  # Assert the unloaded postcondition rather than depend on previous test order.
   defp unload!(mod) do
     {:module, ^mod} = Code.ensure_loaded(mod)
     :code.purge(mod)
@@ -42,8 +33,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   test "an UNLOADED forge client still resolves — the guard loads before it asks" do
     unload!(ColdForgeStub)
 
-    # The precondition of the whole bug, asserted rather than assumed: with the module out of the
-    # code table, the bare guard lies about a function that exists.
+    # Demonstrate the bare export check cannot see the unloaded module's function.
     refute function_exported?(ColdForgeStub, :repo_id, 2)
 
     assert {:ok, id} = Fleet.Forge.repo_id(ColdForgeStub, "fleet/demo", [])
@@ -53,9 +43,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   test "the nil-flattening twin resolves it too (the three optional call sites)" do
     unload!(ColdForgeStub)
 
-    # `resolve_repo_id/3` feeds `Opts.maybe_put`: a nil here silently drops `:repo_id` from the
-    # spawn opts, and SessionMint then raises for a project-bound role. Same cold table, same trap,
-    # louder blast radius.
+    # A nil result would drop repo_id from spawn options and later fail project-bound minting.
     assert Spawn.resolve_repo_id(ColdForgeStub, "fleet/demo", []) == ColdForgeStub.expected_id()
   end
 

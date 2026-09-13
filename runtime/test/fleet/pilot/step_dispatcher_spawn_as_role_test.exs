@@ -1,10 +1,8 @@
 defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   @moduledoc """
-  Stopwatch attribution: `Spawn.spawn_step` must start the stopwatch IN THE NAME OF THE dispatched
-  ROLE (`as_role`), not the system account — otherwise Gitea attributes all tracked time to
-  `system_starfleet`, never to the real worker. The label stays system-signed (protocol), only the
-  stopwatch (attributable data) is role-signed. async: false (mutates the global `:role_tokens_dir`
-  config).
+  Checks the stopwatch receives the dispatched role token.
+  Serialized because the test changes :credentials_role_tokens_dir globally.
+  Label identity is not observed by this fixture; its add_label spy discards options.
   """
   use ExUnit.Case, async: false
 
@@ -85,10 +83,9 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
     assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
              StepDispatcher.dispatch_issue(payload, dispatch_opts())
 
-    # The label stays system-signed (state protocol, established doctrine): token UNCHANGED.
+    # Observe label addition; this spy does not capture its signing token.
     assert_received {:add_label, "lcars-in-flight"}
 
-    # The stopwatch, however, is role-signed: the system token is OVERWRITTEN by the engineer token.
     assert_received {:start_stopwatch, "lordzurp/lcars-test", 42, sw_opts}
     assert sw_opts[:token] == "ENG-TOKEN"
   end

@@ -1,12 +1,8 @@
 defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
   @moduledoc """
-  Regression acte4 A-09 — dispatch gate ordering: the cheap LOCAL gates (route/role/busy)
-  short-circuit BEFORE the ProjectResolver (the only NETWORK call on the path, 1-2×
-  `git ls-remote` ~15-30s). Without the fix, a recurring `:role_busy` tick re-paid the resolver
-  every tick just to discard the result — and under a degraded forge blocked the whole sequential
-  poll tick. The decision/action split (`project_scope_decision` pre-resolver,
-  `maybe_reprovision` post-resolver) preserves the F-C059 fail-closed gate (uncertain pipe →
-  defer, never a destructive reset).
+  Checks that busy scope admission avoids project resolution and locking.
+  Resolution can require slow Git reads; route/card reads may themselves involve I/O.
+  Separate helper tests check reset arguments and preservation of ticket context.
   """
   use ExUnit.Case, async: true
 
@@ -27,7 +23,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     def get_route(_repo, _n, opts), do: Keyword.get(opts, :_test_route, :none)
   end
 
-  # slot_scope PROJECT + one-shot lifetime (default without invocation) → the busy rule applies.
+  # Pipe profile uses project scope and requires readiness information before reuse.
   defmodule ProjectScopedLoader do
     def load("engineer"),
       do:
@@ -39,7 +35,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
          }}
   end
 
-  # slot_scope INSTANCE → never gated.
+  # One-shot profile bypasses the scope gate; instance scope alone is not sufficient.
   defmodule InstanceScopedLoader do
     def load("engineer"),
       do:
@@ -103,7 +99,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
       {:ok, nil}
     end
 
-    # project-scoped one-shot + ALIVE pod → busy BEFORE the resolver.
+    # Partial pipe information conservatively defers before resolution.
     assert {:skipped, :role_busy} =
              StepDispatcher.dispatch_issue(
                payload(),
@@ -145,14 +141,9 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     assert_received :resolver_called
   end
 
-  # (2) :ready path → the project is resolved THEN the reprovision consumes project["base_sha"].
-  # Tested at the Spawn gate level (the :ready pipe requires the pod_info conditions/publishing
-  # machinery — dedicated stub): decision pre-resolver, action post-resolver.
+  # Compare ready-state decisions for instance and project scope.
   test "TICKET-LIVE: a context-long producer keyed on the ISSUE is re-briefed, never cleared" do
-    # The defect this pins, measured in production 2026-08-03: a rejected deliverable came back to
-    # the engineer WITH a `/clear` — it re-read everything cold while the reviews faulted decisions
-    # it no longer remembered making. `:ready` means two OPPOSITE things depending on the keying,
-    # and reading it as one thing destroyed the context of every rework round.
+    # Ticket rework must preserve its context; switching a shared pod to another ticket needs reset.
     defmodule TicketLiveSpawner do
       def pod_info(_pod_id), do: {:ok, %{conditions: [], has_active_task: false}}
 
@@ -213,13 +204,11 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
       end
     end
 
-    # 1. the DECISION requires no project (it is taken before the resolver). `"project"` spelled
-    # out: the reprovision verdict only exists under project keying, and the argument used to be
-    # defaulted — the test read as if the keying did not matter to the answer.
+    # Explicit project scope requests reprovision; the decision does not need a resolved project.
     assert :ready_needs_reprovision =
              Spawn.project_scope_decision("pipe", ReadyPipeSpawner, "pod-pipe", "project")
 
-    # 2. the ACTION consumes the resolved project (base_sha) — post-resolver
+    # Supply the resolved pin directly to the action; this test does not invoke a resolver.
     assert :ok =
              Spawn.maybe_reprovision(
                :ready_needs_reprovision,
@@ -232,9 +221,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     assert_received {:reprovisioned, "pod-pipe", "abc123", "slug-x"}
   end
 
-  # (5) the decision BOTH rails gate on before their resolver (`RoleDispatch` calls this same
-  # function for the review flow). F-C059: a pipe of UNKNOWN state (pod_info raises) → :role_busy
-  # (defers), never a destructive reset.
+  # Both flows use this helper; a raised pipe probe must yield a visible deferral.
   test "A-09 (5): F-C059 preserved — uncertain pipe (pod_info RAISES) → :role_busy, no reset" do
     defmodule RaisingSpawnerA09 do
       def pod_info(_pod_id), do: raise("broker down")
@@ -246,9 +233,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
                  Spawn.project_scope_decision("pipe", RaisingSpawnerA09, "pod-x", "project")
       end)
 
-    # VISIBLE fail-closed (safe_pod_info's warning), never :proceed (destructive reset). The old
-    # `assert log != "" or true` was TAUTOLOGICAL (`… or true` can never fail) — it proved nothing about
-    # the claimed visibility. Assert the warning's actual content: the raise is caught AND surfaced.
+    # Assert the specific warning, not merely that capture_log returned some text.
     assert log =~ "safe_pod_info"
     assert log =~ "pod_info RAISED"
     assert log =~ "fail-closed"

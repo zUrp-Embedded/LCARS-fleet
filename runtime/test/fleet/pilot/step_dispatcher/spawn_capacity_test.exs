@@ -1,19 +1,12 @@
 defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   @moduledoc """
-  Regression acte4 A-11 — PRE-FLIGHT capacity gate (before the forge lock). At saturation
-  (`max_pods`), taking the lock first would discover `:max_children` at spawn, then compensate
-  (unlock) EVERY tick: ~4 forge writes/issue/30s polluting the timeline, and "full" tallied as an
-  ERROR (poller backoff as if the forge were failing). The pre-flight gate defers WITHOUT any
-  write (`{:skipped, :at_capacity}`); the residual TOCTOU stays covered by `max_children` + the
-  compensation (now the rare exception).
+  Checks capacity preflight, materialized orders and compensation calls.
+  Role-bucket saturation is a skip; global :max_children remains an error.
+  Spies observe calls and payloads, not persisted forge state or actual pod cleanup.
   """
   use ExUnit.Case, async: false
 
-  # SYNC on purpose: a describe here flips the GLOBAL `:lcars_fleet, :pilot_require_onboarded`, which
-  # every dispatch path reads. Async peers running in that window were refused with
-  # `{:work_dir_missing, _}` — a flake that fires by timing, not by order, so a seed does not
-  # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
-  # after the test, and wrong DURING it for everyone else.
+  # Serialized because these tests change global :pilot_require_onboarded during dispatch.
 
   alias Fleet.Pilot.StepDispatcher.Spawn
   alias Fleet.Pilot.StubTaskQueue
@@ -45,8 +38,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
          }}
   end
 
-  # Room, no live pod, and it RECORDS what the spawn was handed: the nominal materialized branch
-  # asserts on the ORDER, not on a refusal.
+  # Capture fresh-spawn options on the materialized-order path.
   defmodule RecordingSpawner do
     def has_capacity?, do: true
     def has_free_slot?(_role, _repo, _scope), do: true
@@ -61,8 +53,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
-  # Global room, but the ROLE's bucket is full — the ceiling `PoolSlot.allocate/3` will enforce.
-  # The two pre-flights are independent: passing the global one proves nothing about the seat.
+  # Full role bucket; this fixture does not model a separate global preflight.
   defmodule FullRoleSpawner do
     def has_free_slot?(_role, _repo, _slot_scope), do: false
     def pod_info(_pod_id), do: {:error, :not_found}
@@ -71,8 +62,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
-  # Same, but it RECORDS the bucket it was asked about: a pre-flight that interrogates a different
-  # bucket than the wall is worse than none, so the arguments are what this pins.
+  # Observe the exact bucket identity used by preflight.
   defmodule BucketRecordingSpawner do
     def has_free_slot?(role, repo, slot_scope) do
       send(self(), {:bucket, role, repo, slot_scope})
@@ -85,8 +75,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
-  # Room available and no live pod: the spawn WOULD proceed — so a refusal in these tests can only
-  # come from the order materialization, never from capacity.
+  # Missing capacity capability permits reaching the materialization refusal.
   defmodule FreshSpawner do
     def pod_info(_pod_id), do: {:error, :not_found}
 
@@ -97,7 +86,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
-  # Saturated + ALIVE pod: the re-brief creates no child → must NOT be gated.
+  # Live pod fixture; its legacy has_capacity?/0 is not read by Spawn.
   defmodule FullAliveSpawner do
     def has_capacity?, do: false
     def pod_info(_pod_id), do: {:ok, %{phase: :monitoring}}
@@ -106,7 +95,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     def kill_pod(_pod_id), do: :ok
   end
 
-  # TOCTOU: the free slot at check time is stolen before the spawn → :max_children at real spawn.
+  # Missing role preflight capability allows reaching the injected global max_children error.
   defmodule ToctouSpawner do
     def pod_info(_pod_id), do: {:error, :not_found}
     def spawn_pod(_p, _i, _o), do: {:error, :max_children}
@@ -132,16 +121,13 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
 
   describe "order materialization — the delivery breaks, it does not degrade" do
     setup do
-      # The gate the hermetic baseline keeps open (fictional repos have no ops on disk). Same
-      # single lever as the poller's admission gate: one policy, two depths.
+      # Enable the shared onboarding policy normally disabled for fictional test repos.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
       :ok
     end
 
     test "an un-onboarded project REFUSES the dispatch — and takes no lock doing it" do
-      # The refusal happens before `add_label`, which is what makes it free: no compensation, no
-      # forge write, the ticket simply is not dispatched this tick. Asserting the absence of the
-      # label is what pins that ORDER; asserting only the error would pass with the check anywhere.
+      # Absence of label calls proves refusal precedes locking; error-only assertions would not.
       assert {:error, {:order_not_materialized, {:work_dir_missing, _}}} =
                Spawn.spawn_step(
                  seams(FreshSpawner),
@@ -184,15 +170,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   @tag :tmp_dir
   test "NOMINAL: the order is materialized, and what travels is its CONTENT at the pinned version",
        %{tmp_dir: tmp} do
-    # THE nominal branch, and it had NO coverage: measured before writing, zero test in the
-    # dispatcher suite materializes a brief — all of them run with the work_dir absent, i.e. on the
-    # DEGRADED rail. That is how the order's delivery could carry a self-referential instruction
-    # ("read the pin if the file changed", which requires the pin to evaluate) for a whole chantier
-    # without a test noticing.
-    #
-    # It needed a SEAM: `materialize/3` had `:ops_root`, but the dispatcher never threaded it, so
-    # the real hardcoded global root was the only reachable one. Same seam, same reason, as
-    # `StepRunCompleter`'s.
+    # Inject an existing ops repository to exercise actual Git materialization, not missing-worktree fallback.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
@@ -220,45 +198,30 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
     sha = Keyword.fetch!(spawn_opts, :brief_sha)
     ref = Keyword.fetch!(spawn_opts, :brief_ref)
 
-    # The ORDER travels through the QUEUE, and only there — measured while writing this: the
-    # dispatcher's spawn_opts carry `brief_ref`/`brief_sha` but no `:brief`. The pod pulls it with
-    # the MCP `get_work_item`.
+    # Queue carries content; spawn options carry the pin.
     assert_received {:enqueued, "pod-x", attrs}
     payload = attrs.brief
 
-    # LE CONTENU, ET IL EST CELUI DU PIN. Ce test epinglait le POINTEUR jusqu'au 2026-08-08 :
-    # `git -C $LCARS_PROJECT_OPS show <sha>:<ref>`. C'etait une adresse correcte vers un arbre que
-    # le pod devait monter ENTIER — tous les briefs, tous les verdicts — pour lire un objet. Le
-    # contenu voyage maintenant par la file, l'adresse a cote, et le pod n'a plus de chemin vers
-    # l'arbre d'operations.
+    # Deliver committed content through the queue without an instruction to mount the entire ops tree.
     assert payload =~ order
 
-    # L'ADRESSE VOYAGE QUAND MEME : c'est elle que le pod cite, et elle rend le geste auditable par
-    # un tiers depuis la forge. Le contenu sans adresse serait un ordre que personne ne peut situer.
+    # Runtime provenance retains the pin; the pod is not asked to cite it.
     assert is_binary(sha) and byte_size(sha) >= 7
     assert Fleet.Layout.valid_brief_ref?(ref)
 
-    # ET AUCUN CHEMIN VERS L'ARBRE : c'est l'invariant du sevrage, pas un detail de redaction. Un
-    # payload qui nomme `$LCARS_PROJECT_OPS` re-cree le besoin de monter ops.
+    # Do not reintroduce an ops-tree mount through the payload's instructions.
     refute payload =~ "LCARS_PROJECT_OPS"
     refute payload =~ "git -C"
 
-    # Et le doc existe VRAIMENT a ce pin, avec ce contenu — le champ `brief` n'est pas une copie
-    # parallele, c'est l'objet commite.
+    # Verify content at the returned local Git pin, without claiming it was pushed remotely.
     {content, 0} = System.cmd("git", ["show", "#{sha}:#{ref}"], cd: work_dir)
     assert content =~ order
   end
 
   @tag :tmp_dir
   test "NOMINAL: no copy of the order text reaches the pod's spawn opts", %{tmp_dir: tmp} do
-    # The wall the IPC report asked for was "default_brief/1 never contains opts[:brief]". It cannot
-    # be written that way — interpolating `opts[:brief]` is that function's whole job. Measured, the
-    # property is one layer up and stronger: on the step rail the dispatcher puts NO `:brief` in the
-    # spawn opts at all, so `Pod.Brief.default_brief/1` has nothing to interpolate and the pod's
-    # `issues/<id>.md` cannot hold a copy. The order reaches the pod through the queue, as a pointer.
-    #
-    # This is what makes the committed doc the single source in fact and not only in intent: there
-    # is no second place for the text to be.
+    # This fixture starts without :brief and proves Spawn does not add it.
+    # The following fixture starts with :brief to test removing the caller's copy.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
@@ -288,9 +251,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
            "the dispatcher put the order in the spawn opts — the pod would write it to " <>
              "issues/<id>.md, a second copy of a text whose single source is the committed doc"
 
-    # La file porte l'ordre — c'est le canal, et le seul. Ce qui compte ici est que les OPTS DE
-    # SPAWN n'en portent pas de copie : le pod ecrirait son `issues/<id>.md` avec une version qui
-    # ne bouge plus, pendant que le pointeur, lui, suit les rounds de rework.
+    # Queue content remains available when the spawn copy is absent.
     assert_received {:enqueued, "pod-x", attrs}
     assert attrs.brief =~ order
   end
@@ -298,13 +259,8 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   @tag :tmp_dir
   test "NOMINAL: the copy the DISPATCHER puts in the opts is dropped once the pointer exists",
        %{tmp_dir: tmp} do
-    # The twin above passes opts WITHOUT `:brief`, so it proves `Spawn` does not ADD one — never
-    # that it REMOVES the one the real caller puts there. And the real caller does put one:
-    # `StepDispatcher` builds `spawn_opts = [brief: brief, …]`. That copy survived the merge (which
-    # only carries `brief_sha`/`brief_ref`), landed in `~/issues/<id>.md`, and was NEVER rewritten —
-    # `maybe_spawn` does not respawn a live pod. On an engineer crossing three rework rounds the
-    # file held order v1 while the pointer moved from sha to sha, and its content depended on the
-    # pod's LIVENESS rather than on the ticket's state.
+    # Start with the real caller's inline copy to prove it is removed after materialization.
+    # A live pod would otherwise retain its initial file while queued rework changes.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, true)
 
     work_dir = Path.join(tmp, "lcars-test")
@@ -321,7 +277,6 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
                  role: "engineer",
                  profile: profile(),
                  brief: order,
-                 # EXACTLY what the dispatcher builds: the order text under `:brief`.
                  spawn_opts: [repo_id: 7, ops_root: tmp, brief: order],
                  lock_target: 42,
                  issue_number: 42,
@@ -335,7 +290,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
            "the caller's copy survived materialisation — the pod would write a text that never " <>
              "gets rewritten next to a pointer that keeps moving"
 
-    # And what replaces it is an ADDRESS: `Pod.Brief` names the pinned doc instead of holding it.
+    # The address remains in spawn metadata.
     assert is_binary(spawn_opts[:brief_ref])
     assert is_binary(spawn_opts[:brief_sha])
   end
@@ -343,9 +298,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   @tag :tmp_dir
   test "DEGRADED (no pointer): the copy STAYS — there is no address to name in its place",
        %{tmp_dir: tmp} do
-    # Fail-closed is not fail-always. With no work_dir there is no committed doc, so nothing can
-    # replace the text; dropping it here would leave the pod's file saying it was asked nothing,
-    # and the drift this fix targets does not exist on this rail — nothing moves beside the file.
+    # With onboarding checks disabled and no committed replacement, retain the caller's inline copy.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_require_onboarded, false)
 
     order = "Ordre inline, rail degrade."
@@ -371,10 +324,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   end
 
   test "a role DECLARING no forge identity is not a provisioning hole — no as_role, no warning" do
-    # `forge_identity: false` had no runtime reader: only `mix lcars.contracts.check` consulted it.
-    # So the dispatch could not tell "declares none" from "token MISSING" and warned identically —
-    # telling the operator to check a provisioning that works as declared. That made the flag
-    # unusable for any role the dispatch reaches, which is why choosing it was never a real choice.
+    # Declaring no forge identity is distinct from missing a required token; it should not warn.
     no_identity =
       put_in(profile().metadata, Map.put(profile().metadata, "forge_identity", false))
 
@@ -401,13 +351,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   end
 
   test "a role that DOES hold an identity still warns when its token is missing" do
-    # The other half, and the reason the warning exists: an absent token for a role that claims one
-    # IS a provisioning defect, and its only forge-visible symptom is "the worker never shows up on
-    # the ticket" — measured twice, one diagnosis session each.
-    #
-    # `scribe` and not `engineer`: the test fixture holds a token for engineer, so it would take the
-    # succeeding path and the assertion would measure nothing. (Checked rather than assumed — the
-    # first version of this test asserted on engineer and passed nothing.)
+    # Use scribe because engineer has a fixture token; otherwise this would test the success path.
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:ok, {:spawned, _, _}} =
@@ -430,10 +374,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   end
 
   test "role bucket FULL + fresh spawn → {:skipped, :role_at_capacity}, NO forge write (no lock)" do
-    # The wall is `PoolSlot.allocate/3`, INSIDE the spawn — i.e. past the forge lock. Without this
-    # pre-flight, saturation of one role means a lock/unlock cycle per issue per tick and "full"
-    # tallied as an error. `has_free_slot?/3` had existed since the seat work and had NO caller:
-    # the pre-flight was written and never wired.
+    # Preflight must avoid the forge lock/unlock churn of discovering saturation only during spawn.
     assert {:skipped, :role_at_capacity} =
              Spawn.spawn_step(
                seams(FullRoleSpawner),
@@ -468,14 +409,12 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
       }
     )
 
-    # `(role, repo_id, slot_scope)` — the three arguments `PoolSlot.allocate/3` takes. The scope
-    # comes from the cap-profile's own accessor (pipe ⟹ project), never from a second opinion.
+    # Match allocation's role/repo/scope bucket; scope comes from the profile accessor.
     assert_received {:bucket, "engineer", 7, "project"}
   end
 
   test "a LIVE pod is not gated by the role bucket — re-briefing it starts no child" do
-    # Load-bearing: gating a live pipe pod at saturation would starve the very pipe holding the
-    # seat. The spawner says the bucket is full and the dispatch goes through anyway.
+    # Reuse must bypass a full role bucket or it could starve the pod already holding the slot.
     defmodule LivePodFullRoleSpawner do
       def has_free_slot?(_role, _repo, _scope), do: false
       def pod_info(_pod_id), do: {:ok, %{phase: :monitoring}}
@@ -502,11 +441,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   end
 
   test "saturation reached AT THE WALL is a WAIT, not an error (the residual TOCTOU)" do
-    # The pre-flight said room, the last seat went between the check and the spawn. The
-    # compensation undoes everything (lock removed, pod killed) — so NOTHING started, which is the
-    # definition of a skip. Returned as an error, this ticket was tallied as a failure AND left
-    # unlabelled (an error says nothing about what a ticket waits for), so it was silently not
-    # dispatched. The two saturation paths now say the same thing.
+    # Optimistic preflight followed by role-capacity refusal must return a skip after compensation attempts.
     defmodule WallRefusesSpawner do
       # The pre-flight is optimistic — this is the TOCTOU, so it must answer yes.
       def has_free_slot?(_role, _repo, _scope), do: true
@@ -531,7 +466,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
                }
              )
 
-    # The lock WAS taken (we got past the pre-flight) and the compensation removed it.
+    # Observe both label calls; these spies do not prove their persistence.
     assert_received {:add_label, "lcars-in-flight"}
     assert_received {:remove_label, "lcars-in-flight"}
   end
@@ -577,7 +512,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
                }
              )
 
-    # the lock IS taken (the pod is working the issue), no kill/compensation
+    # Reuse reaches label addition without removal; wake receipt is not observed.
     assert_received {:add_label, "lcars-in-flight"}
     refute_received {:remove_label, _}
   end
@@ -598,7 +533,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
                }
              )
 
-    # the lock was taken THEN compensated (remove_label) — the TOCTOU net holds
+    # Observe label addition/removal on global capacity failure; result stays an error.
     assert_received {:add_label, "lcars-in-flight"}
     assert_received {:remove_label, "lcars-in-flight"}
   end
