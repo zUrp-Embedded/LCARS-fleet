@@ -1,50 +1,27 @@
 defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
-  # Z4 — classe dans la boundary de son sujet, comme la tache qui l'utilise.
   use Boundary, classify_to: Fleet.Application
 
   @moduledoc """
-  Ce que l'artefact contient, et ce que ses arbres voisins promettent.
+  Inspects source artifacts and selected sibling trees without executing their
+  shell, site-build or template behaviour. Most checks recognise specific text
+  or AST shapes; their notes describe the measured population.
 
-  Ces murs lisent des arbres que le runtime N'EXECUTE PAS : modules shell d'installation, entrees de
-  construction du site, gabarits gitea, manifeste d'image, corpus de prompts. Rien de tout cela n'a
-  de type, de test unitaire ni de trace d'appel — la seule chose qui les relie au code est une
-  promesse ecrite quelque part, et la seule facon de la tenir est de la relire mecaniquement.
-
-  ⚠ PLUSIEURS D'ENTRE EUX PEUVENT LEGITIMEMENT N'AVOIR RIEN A MESURER, et c'est ce qui les rend
-  delicats. Le stage `build` de l'image exclut `deploy/` a dessein ; un mur dont le sujet est absent
-  ne doit alors ni rougir (il ferait echouer une construction CORRECTE) ni verdir en silence (il
-  annoncerait une conformite qu'il n'a pas verifiee). Il PASSE EN LE DISANT, sa note nomme ce qu'il
-  n'a pas vu, et `no_check_passes_on_nothing_test.exs` tient la liste de ces abstentions par ID —
-  jamais par la formule de leur note, qu'il suffirait d'ecrire pour s'exempter.
+  Missing optional trees can return pass with a scope note. These exemptions
+  are enumerated by ID in no_check_passes_on_nothing_test.exs; a pass may therefore
+  mean that an artifact was not checked.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Support
 
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
-  # ⚠ A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER. From bats-core
-  # 1.11, a description goes through `eval`: everything a double-quoted string expands, a test NAME
-  # expands — a backtick pair RUNS a command, `$(…)` runs a command, `$VAR` interpolates.
-  #
-  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose, nobody reviews it
-  # as code, and the danger scales with how ORDINARY the quoted words look. Nothing ran on bats
-  # 1.10, so an estate can carry this for months and discover it the day one machine upgrades —
-  # with reported failures naming assertions that were fine, the eval's stderr having leaked into
-  # `$output`.
-  #
-  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT: an escaped backtick survives the eval and renders
-  # as a plain one. This wall does not ban quoting code in a test name, it requires the one
-  # backslash that makes the name inert.
+  # Detect shell-expansion tokens on column-zero @test lines; this is not a shell parser.
+  # Names passed through shell evaluation need escaping to remain literal.
   @doc false
   @spec check_bats_descriptions_inert(String.t()) :: Support.result()
   def check_bats_descriptions_inert(root) do
-    # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Un check qui nommerait `test/` et `deploy/tests/`
-    # raterait les suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement les
-    # repertoires qu'on oublie. Un mur qui enumere ses arbres ne protege que ceux qu'on a en tete le
-    # jour ou on l'ecrit — et le suivant qu'on cree n'est protege par rien.
-    #
-    # `_build`, `deps` et `tmp` sont exclus : ce sont des COPIES ou des artefacts, et un doublon
-    # signale la ligne deux fois sous un chemin que personne ne peut editer.
+    # Scan runtime and sibling .claude; other sibling suites are outside this scan.
+    # Exclude generated/dependency copies to avoid duplicate findings.
     files =
       [root, Path.join(Path.expand("..", root), ".claude")]
       |> Enum.filter(&File.dir?/1)
@@ -100,10 +77,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # Ce que l'eval de bats ferait de cette ligne, ou nil si elle est inerte. Un caractere precede d'un
-  # nombre IMPAIR de contre-obliques est echappe ; sinon il est vivant. `$VAR` est inclus : il
-  # n'execute rien mais il rend le nom du test dependant de l'environnement, ce qui le fait varier
-  # d'une machine a l'autre — la meme faute, en plus silencieuse.
+  # Odd backslash counts escape a token; $VAR also makes names environment-dependent.
+  # The regex examines the whole matched line, not just a parsed test description.
   defp evaluable_description_reason(line) do
     cond do
       Regex.match?(~r/(?<!\\)(?:\\\\)*`/, line) ->
@@ -120,18 +95,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # ⚠ LE FILTRE `paths:` DU WORKFLOW DECIDE SI LES GARDES EXISTENT. Le site vitrine lit le runtime
-  # pour l'enumerer, donc chaque fichier que son build ouvre est une ENTREE ; une entree hors du
-  # filtre est un changement qui ne redeclenche RIEN, et le site reste en ligne en decrivant la
-  # version d'avant.
-  #
-  # Le mode de panne est MUET DANS LA MAUVAISE DIRECTION : les `throw` des sources du site sont
-  # ecrits pour echouer plutot que servir du perime, et ils ne servent a rien quand le build NE
-  # TOURNE PAS. D'ou un contrat plutot qu'une relecture.
-  #
-  # LIMITE ASSUMEE : on resout les `join()` litteraux des sources. Un segment NON litteral ne se
-  # resout pas — on rend alors le prefixe connu comme un REPERTOIRE, qui exige une couverture large.
-  # Volontairement conservateur : mieux vaut exiger trop que certifier close une liste qui ne l'est pas.
+  # Compare recognised site join expressions with workflow list entries.
+  # Dynamic expressions require broad directory coverage; this is not a complete JS/YAML parser.
   @doc false
   @spec check_site_build_inputs(String.t()) :: Support.result()
   def check_site_build_inputs(root) do
@@ -139,14 +104,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     wf = Path.join(repo, ".github/workflows/site.yml")
     lib = Path.join(repo, "assets/github.io/src/lib")
 
-    # ⚠ L'ARBRE `assets/` EST UN VOISIN, ET UN CONTEXTE LEGITIME NE LE PORTE PAS. Le stage `build`
-    # de l'image copie `fleet` SEUL puis joue ce gate : un artefact runtime ne peut rien prouver sur
-    # une plaquette qu'il n'embarque pas. Un fail-closed sur « 0 entree derivee » rend FAIL la, et
-    # fait echouer la construction de l'image sur une plaquette absente (mesure).
-    #
-    # L'absence se lit au niveau de L'ARBRE, comme pour les listes de provisioning : pas d'arbre du
-    # tout = hors perimetre, on passe EN LE DISANT (jamais un vert muet sur du terrain non mesure).
-    # Arbre present mais workflow illisible = le vrai defaut, et il reste rouge.
+    # Absence of src/lib skips the site check, including sibling component/layout inputs.
     if File.dir?(lib) do
       check_site_build_inputs_measured(wf, lib, repo)
     else
@@ -168,12 +126,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     listed =
       case File.read(wf) do
         {:ok, y} ->
-          # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Un motif borne a
-          # l'apostrophe simple tiendrait tant que le workflow n'emploie qu'elle — mais passer une
-          # entree en double-quote ou en nu la rendrait invisible a `listed`,
-          # donc tous les chemins qu'elle couvre sont declares NON couverts. Un FAUX ROUGE sur un
-          # filtre correct, et l'operateur cherche le defaut dans le filtre. Un
-          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine.
+          # Accept quoted or bare list entries; the scan is not restricted to the paths key.
           ~r/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s#'"][^\s#]*))\s*$/m
           |> Regex.scan(y, capture: :all_but_first)
           |> List.flatten()
@@ -199,9 +152,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
         "ajouter les chemins manquants au `paths:` de .github/workflows/site.yml — le build du " <>
           "site LIT ces fichiers, donc un changement qui ne les declenche pas laisse la plaquette " <>
           "decrire la version d'avant, en silence",
-      # ⚠ LES DEUX GARDES DISENT « fail-closed », ET LE MOT COMPTE : ici l'arbre du site EST la, donc
-      # l'instrument devait mesurer quelque chose. C'est distinct du hors-perimetre, qui passe au
-      # vert en le disant (cf. `check_site_build_inputs/1`, juste au-dessus).
       broken:
         cond do
           not File.exists?(wf) -> ".github/workflows/site.yml INTROUVABLE — fail-closed"
@@ -215,28 +165,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     })
   end
 
-  # Les chemins repo-relatifs que le build du site ouvre, en {chemin, :file | :dir}.
-  #
-  # ⚠ UN REPERTOIRE QUI N'EST QU'UN PREFIXE N'EST PAS UNE ENTREE. `const PRIV = join(ROOT, 'fleet',
-  # 'priv')` est un `join()` comme un autre pour l'extracteur, mais personne ne LIT `runtime/priv` :
-  # c'est le point de depart de `runtime/priv/catalogue/…`. Les garder exigeait du filtre qu'il couvre
-  # `runtime/priv` entier — c'est-a-dire tout le catalogue, tous les schemas, tout `priv/` — pour une
-  # ligne qui ne lit rien.
-  #
-  # La lecture DYNAMIQUE echappe a cette regle et c'est le fond de l'affaire : `join(BIN, name)` ne
-  # dit pas quel fichier, donc `runtime/bin` est bien l'entree, meme si un autre site en lit un fichier
-  # nomme. Un prefixe rendu par une lecture dynamique reste une entree ; le meme prefixe rendu par
-  # une definition de constante disparait.
-  # ⚠ `src/lib/*.js` N'EST PAS TOUT CE QUI LIT L'ARBRE. `src/components/Seat.astro:14` fait
-  # `existsSync(join(here, '..','..','..','avatars', …))` — une lecture de `assets/avatars/` AU
-  # BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Un scan borne a `src/lib` rend un FAUX
-  # VERT : mesure a la pose, restreindre `paths:` de `assets/**` a `assets/github.io/**` laissait
-  # un contrat borne a `src/lib` repondre `pass` alors qu'ajouter un avatar de role ne rebatit plus
-  # la vitrine qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer.
-  #
-  # ⚠ UNE FAUTE DE PERIMETRE, PAS DE REGLE : la regle est juste, c'est l'instrument qui lirait a
-  # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
-  # dit « pass ».
+  # Remove literal path prefixes when deeper inputs exist, but retain dynamic directory inputs.
+  # Include Astro components/layouts/pages as well as JS libraries (e.g. avatar reads).
   @site_sources [
     "src/lib/*.js",
     "src/components/*.astro",
@@ -263,13 +193,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   defp site_inputs_of_file(file, repo) do
     src = File.read!(file)
 
-    # LE REPERTOIRE DU FICHIER, RELATIF A LA RACINE. C'est de LUI que les `..` remontent — pas d'une
-    # profondeur supposee. Deux fichiers a la meme profondeur peuvent ecrire un nombre DIFFERENT de
-    # `..`, et une profondeur supposee rendrait `avatars` la ou la cible est `assets/avatars`.
+    # Resolve here relative to the source file, not an assumed fixed depth.
     here_dir = file |> Path.dirname() |> Path.relative_to(repo)
 
-    # 1. Les constantes : `const NAME = join(<base>, 'a', 'b')`.
-    #    Deux passes suffisent : ces fichiers ne chainent jamais plus loin.
+    # Resolve at most two passes of literal join-based constants.
     consts =
       Enum.reduce(1..2, %{}, fn _, acc ->
         ~r/const\s+(\w+)\s*=\s*join\(\s*(\w+)\s*,([^)]*)\)/
@@ -277,15 +204,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
         |> Enum.reduce(acc, &record_const(&1, &2, here_dir))
       end)
 
-    # 2. Les usages : tout `join(<base>, …)` dont la base est `here` ou une constante connue.
     ~r/join\(\s*(\w+)\s*,([^)]*)\)/
     |> Regex.scan(src)
     |> Enum.flat_map(&site_input(&1, consts, here_dir))
     |> Enum.uniq()
   end
 
-  # Un segment non litteral : on ne sait pas QUEL fichier, on sait dans quel repertoire — et c'est
-  # l'exigence la plus forte, un repertoire ouvert reclamant un glob.
   defp site_input([_, base, rest], consts, here_dir) do
     case site_resolve(base, rest, consts, here_dir) do
       {:dynamic, p} -> [{p, :dir}]
@@ -294,19 +218,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # ⚠ UNE CONSTANTE DYNAMIQUE N'EST PAS UN PREFIXE, ET LA RECORDER MENTIRAIT. `const path =
-  # join(dir, f)` nomme un FICHIER dont le dernier segment est inconnu ; ranger `dir` sous le nom
-  # `path` ferait resoudre un futur `join(path, 'x')` vers un chemin qui n'existe pas, et le
-  # contrat conclurait sur une lecture imaginaire.
-  #
-  # Ne rien retenir ne perd rien : la passe des USAGES voit le meme `join` et rend `{dir, :dir}`,
-  # c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un glob, et nommer trois
-  # fichiers ne le ferme pas.
-  #
-  # ⚠ LES DEUX CLAUSES DE REJET SONT OBLIGATOIRES, et leur absence n'est pas inerte : `site_resolve`
-  # rend TROIS formes, et un filtrage qui n'en connait que deux tombe par FunctionClauseError sur la
-  # premiere constante dynamique du site — un contrat qui CRASHE ne dit rien, ni pass ni fail
-  # (`assets/github.io/src/lib/catalogue.js:81`).
+  # Do not record a dynamic result as a constant path; its join still yields a directory input.
   defp record_const([_, name, base, rest], m, here_dir) do
     case site_resolve(base, rest, m, here_dir) do
       {:ok, p} -> Map.put(m, name, p)
@@ -315,15 +227,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # base + segments -> chemin repo-relatif. `here` = racine (les quatre `..` l'y ramenent).
-  # ⚠ LES `..` SE COMPTENT, ILS NE « S'ANNULENT » PAS. Supposer que `here` vaut la RACINE du depot et
-  # que les `..` disparaissent est vrai par coincidence pour `src/lib/*.js`, qui est a quatre crans
-  # et n'ecrit jamais que quatre `..`. `src/components/Seat.astro` en ecrit TROIS depuis la meme
-  # profondeur : la vraie cible est `assets/avatars`, et cette regle rendrait `avatars` — un chemin
-  # qui n'existe pas, donc jamais couvert, donc un `fail` inexplicable.
-  #
-  # On resout donc pour de vrai : depuis le repertoire du FICHIER, `..` par `..`, puis on rend le
-  # chemin relatif a la racine. `here_depth` est le nombre de crans du fichier sous la racine.
+  # Limited join model: count .. segments for here; constant bases do not apply those ascents.
+  # Segment ordering and general JavaScript path expressions are not evaluated.
   defp site_resolve(base, rest, consts, here_dir) do
     prefix =
       case base do
@@ -342,7 +247,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
       path =
         case pre do
-          # Depuis `here` : on REMONTE reellement, `..` par `..`, depuis le repertoire du fichier.
           :here ->
             here_dir
             |> String.split("/", trim: true)
@@ -351,7 +255,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
             |> Enum.reject(&(&1 == ""))
             |> Enum.join("/")
 
-          # Depuis une constante : elle est deja relative a la racine.
           p ->
             Enum.join(Enum.reject([p | parts], &(&1 == "")), "/")
         end
@@ -360,8 +263,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # Un chemin est couvert si le filtre le nomme, ou si un glob `X/**` le contient. Une lecture
-  # DYNAMIQUE (`:dir`) exige le glob : nommer trois fichiers ne ferme pas un repertoire ouvert.
+  # Only exact paths and suffix /** globs are recognised; dynamic inputs require a glob.
   defp site_path_covered?(path, kind, listed) do
     globs =
       listed
@@ -376,16 +278,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # ⚠ DEUX MECANISMES D'EXPANSION POUR UN MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN. La face
-  # `main` est generee par la forge depuis le repo-modele, ou l'expansion est pilotee par une LISTE
-  # de chemins ; les autres faces sont ecrites par le scaffold, qui expanse tout ce qu'il copie.
-  # Ajouter un placeholder a un fichier de `main` sans l'inscrire dans cette liste ne casse rien
-  # ICI : ca casse dans le projet livre, des mois plus tard, dans un fichier que la fleet relit a
-  # chaque spawn.
-  #
-  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN `${...}` » : un workflow CI
-  # porte les siennes, et les inscrire ici confierait a la forge des noms qu'elle ne connait pas —
-  # le jour ou elle expanserait l'inconnu en vide, le script partirait en morceaux.
+  # Gitea expands listed main-face files; Scaffold expands the writer faces.
+  # Match only known template variables, leaving unrelated shell/CI variables alone.
   @doc false
   @spec check_gitea_template_expansion(String.t()) :: Support.result()
   def check_gitea_template_expansion(root) do
@@ -403,19 +297,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
           MapSet.new()
       end
 
-    # ⚠ GARDE D'INSTRUMENT. `bearing` vient d'un `Path.wildcard` — repertoire absent rend l'ensemble
-    # VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les deux vides
-    # rendent les deux differences vides, donc `:pass`. Prouve par mutation : sans ce garde, renommer
-    # `priv/catalogue/project_template/main/` en `main_mv/` rend `pass — 0 fail, 58 pass`. Cinq
-    # autres contrats passent sur perimetre vide EN LE DISANT ; celui-ci ECHOUE (voir plus bas).
-    #
-    # ⚠ LES CHECKS DE CE FICHIER SONT `def`, PAS `defp`. `no_check_passes_on_nothing_test` enumere
-    # les checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` echappe a
-    # la garantie « aucun check ne passe sur rien », qui ne couvre alors que ce qui est visible.
-    #
-    # ICI ON ECHOUE, on ne declare pas « hors perimetre » : `priv/catalogue` part avec CHAQUE
-    # artefact — le stage `build` de l'image copie `fleet` en entier moins `deploy`, `git-hooks` et
-    # `system-prompt`. Une face absente n'est donc pas un contexte, c'est une face perdue.
+    # Missing main face/control list is an artifact defect, not an optional-tree exemption.
+    # Public checks remain discoverable by the empty-population test.
     files =
       face
       |> Path.join("**")
@@ -445,8 +328,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
           "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
           "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
       broken: broken,
-      # LES DEUX SENS : un porteur hors liste sort avec ses litteraux, une entree listee sans
-      # variable apprend au lecteur que ce fichier est expanse alors qu'il ne l'est pas.
       findings:
         Enum.map(missing, &"porteur NON liste: #{&1}") ++
           Enum.map(extra, &"liste mais sans variable: #{&1}"),
@@ -456,19 +337,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     })
   end
 
-  # WHAT THE PROVEN-IMAGE REGIME IS ACTUALLY WORTH, AND THE ONE SWITCH THAT VOIDS IT. `SPBuilder`
-  # renders its templates with `EEx.eval_string/2` — EEx evaluates arbitrary Elixir at render time,
-  # in the DAEMON's process, with the whole fleet's rights and not a confined pod's. Two regimes
-  # decide which bytes get evaluated:
-  #
-  #   * image PUBLISHED (the default, frozen at boot AFTER `Catalogue.verify!()`, sha256-fingerprinted,
-  #     served from `:persistent_term`) -- a mid-life disk mutation changes nothing until a restart;
-  #   * NO image -> live disk at every render, re-read each time, verified by nothing.
-  #
-  # The second regime exists on purpose (the suites' hermetic default, tooling) and its twin says so
-  # in `CapProfile.Catalog.read_role/2`. What has no legitimate reason to exist is that switch being
-  # flipped ANYWHERE ELSE than `config/test.exs`: it silently moves a production daemon onto
-  # evaluate-whatever-is-on-disk, and nothing in the code would look different.
+  # Published prompt images freeze template bytes; live-disk EEx evaluates with daemon rights.
+  # This check only recognises literal false values in config :lcars_fleet keyword calls.
+  # Dynamic settings and later environment changes are outside its coverage.
   @doc false
   @spec check_proven_image_regime(String.t()) :: Support.result()
   def check_proven_image_regime(root) do
@@ -485,8 +356,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
       measured_nothing?(files) ->
         broken_result("boot.proven_image_regime", "file under config/")
 
-      # `config/test.exs` disables BOTH images by design. Finding none means the reader stopped
-      # seeing the switch -- and a wall that cannot see its subject passes everything.
+      # At least one disabling switch must be observed; this does not require both image keys.
       measured_nothing?(disabling) ->
         broken_result("boot.proven_image_regime", "publish_image switch in config/")
 
@@ -508,8 +378,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # `config :lcars_fleet, <key>: false` for either image key, read from the AST: a key named in a
-  # comment must not be able to redden this, and one hidden in a keyword list must not escape it.
   defp disabled_image_keys(ast) do
     ast
     |> collect(fn
@@ -525,30 +393,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   end
 
   @doc false
-  # BL-6-05 — LE MUR D'EXHAUSTIVITE DE LA MIGRATION DE NAMESPACE, et il est ne AVANT elle.
-  #
-  # Les 15 atoms `:fleet_<dom>` sont LEGACY-VALIDES (D-07) : ils fonctionnent, la config ETS etant
-  # keyee par atom. Ce qu'ils coutent est a l'ENTREE — dix messages de Mix a chaque
-  # `mix test`, disant a qui decouvre le depot que sa configuration est fausse.
-  #
-  # ⚠ CE CHECK EXISTE PARCE QUE LE MODE DE DEFAILLANCE EST SILENCIEUX. Un site oublie appelle
-  # `Application.get_env(:fleet_x, :k)` sur un namespace vide : il recoit le DEFAUT, pas
-  # une erreur. La config cesse de s'appliquer sans que rien ne le dise, et un test qui n'exerce pas
-  # ce knob reste vert. Une migration de 535 sites ne peut pas se verifier a la relecture.
-  #
-  # Deux classes ont echappe au balayage textuel de la migration, et elles sont la raison d'etre de
-  # ce mur : la forme PIPE (`:fleet_pilot |> Application.get_env(:max_fan, …)`, ou l'atome precede
-  # l'appel) et les cles DYNAMIQUES (une variable, un attribut de module). La premiere est attrapee
-  # ici ; la seconde ne peut l'etre par personne — d'ou la regle posee au meme moment : une cle de
-  # config se lit EN TOUTES LETTRES a son point d'usage, jamais assemblee.
+  # Residual legacy app atoms can silently read defaults after namespace migration.
+  # Scan raw source text (including pipes, docs and strings); dynamic atoms are invisible.
   @spec check_no_legacy_config_namespace(String.t()) :: Support.result()
   def check_no_legacy_config_namespace(root) do
     scanned =
       ["lib", "test", "config"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs}"])) end)
-      # meme correction qu'aux scans globaux : sur le chemin RELATIF, sinon un depot pose sous
-      # un dossier `tmp` ou `_build` voit son corpus entier rejete (cf. le motif en tete de
-      # `check_platform_root_single_source`).
+      # Filter relative paths so an ancestor named tmp does not exclude the checkout.
       |> Enum.reject(&("/" <> Path.relative_to(&1, root) =~ ~r{/(_build|tmp)/}))
 
     offenders =
@@ -581,35 +433,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # The word "sanctuaire"/"sanctuary" carries a dominant NL prior — sacred, untouchable — and its
-  # only antibody is PROSE ("Aucun code n'est sacre", CLAUDE.md; "THIS FILE is NOT the sanctuary",
-  # bwrap_launch.sh). Yet prose is the first thing a context compression drops: the word remains,
-  # the correction does not. The symptom is measured — an agent refusing to edit the launcher
-  # because it read it as sacred.
-  #
-  # This lock RENAMES nothing (that would be a vocabulary arbitration, not a fix): it stops the word
-  # from SPREADING. Three files use it today, each next to its antibody; a fourth would do so
-  # without one, and that is exactly how a prior settles in. A lint does not repair a prior, it
-  # bounds its surface (BL-6-44).
-  # The check's own file is on the list by NECESSITY: it must name the word in order to forbid it.
-  # That is the one exemption needing no antibody — a lock does not trap itself.
-  #
-  # WHAT IT DOES NOT REACH, and the sentence above must not be read past it: THE SOURCE TREE ONLY.
-  # The word also lives in the SP corpus (`priv/catalogue*/sp_builder/**`), which is not scanned
-  # here — and that is the population where the prior does its work, since those texts are injected
-  # into the agents' own context. Measured: the block `core/pod-sanctuary`, composed into
-  # SIX roles, opens on the heading "## Ton monde (sanctuaire)" with NO antibody anywhere in it.
-  # Extending the scan there is not a lint change but a change to authored prompt material, whose
-  # calibration belongs to its author — the finding is on record, the edit is not this wall's to
-  # make.
-  #
-  # A WHITELIST ENTRY THAT PROTECTS NOTHING IS A PRE-AUTHORIZED SLOT. An entry that outlives its
-  # subject (a file the word has left) would carry the word exempt and unremarked the day it comes
-  # back. An allowlist is audited by re-measuring, never by reading it.
-  # ⚠ L'ARBRE DU VERIFICATEUR N'EST PAS DANS CETTE LISTE, il est exclu par `checker_source?/1`. Une
-  # entree en dur ici rougit au premier demenagement du verificateur, et elle est pire qu'ailleurs
-  # — cette liste est une ALLOWLIST, et une entree qui survit a son sujet devient un creneau
-  # pre-autorise, exactement ce que le paragraphe ci-dessus refuse.
+  # Bound vocabulary that has led agents to treat editable code as untouchable.
+  # This scan excludes prompt corpora and checker sources. The allowlist exempts files;
+  # this function does not verify a corrective explanation or audit stale entries.
   @sanctuary_allowed ~w(
     bin/bwrap_launch.sh
     lib/fleet/cap_profile/invariants.ex
@@ -618,13 +444,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   @doc false
   @spec check_sanctuary_contained(String.t()) :: Support.result()
   def check_sanctuary_contained(root) do
-    # EVERY FILE OF THE THREE TREES, not the three source extensions. `**/*.{ex,exs,sh}` could not
-    # see `bin/claude_launch.egress`, which carried the word, in a scanned directory, with no
-    # antibody — a carrier that escaped by file extension alone. `bin/` holds `.sh`, `.py`,
-    # `.egress`, `.identity` and two extensionless launchers; a wall that names a directory and
-    # measures three suffixes of it says more than it checks. Non-text files (the `__pycache__`
-    # bytecode) drop out on `String.valid?/1` rather than on a suffix list that would have to be
-    # kept in step with them.
+    # Inspect text regardless of extension; invalid UTF-8 and unreadable files are skipped.
     scanned =
       ["lib", "bin", "etc"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**"])) end)
@@ -663,34 +483,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
-  # `provision-lib.sh` is SOURCED, so it inherits its caller's shell flags — it sets none of its
-  # own, which is correct for a library (a sourced file imposing `set -e` on its caller changes the
-  # caller's error semantics behind its back). The consequence is that its safety belongs to every
-  # SOURCER: without `set -u`, an undefined variable expands to the empty string and the recipe
-  # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
-  # `[object Object]`).
-  #
-  # Measured (2026-09-04): all 24 sourcers set `-euo pipefail`. Without this hold the next one could
-  # omit it and no one would learn until a provisioning run did the wrong thing quietly. Named-file evidence, so a
-  # failure says WHICH sourcer, not "some file".
+  # Sourced libraries inherit caller shell flags; require a textual set -u in matching modules.
   @doc false
   @spec check_sourcers_set_strict(String.t()) :: Support.result()
   def check_sourcers_set_strict(root) do
-    # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
-    # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
-    # run, which is the worst of the three outcomes: a green that checked nothing.
-    # ⚠ LE PERIMETRE SE DIT PAR RACINE, POUR UNE POPULATION QUI VIT SOUS DEUX. `etc/` porte DEUX
-    # sourcers (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY
-    # runtime/etc`, et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Un
-    # perimetre decide sur `deploy/` seul declarerait « NOT CHECKED » dans l'artefact sur deux
-    # fichiers qu'il tient dans la main.
-    #
-    # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
-    # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
-    # Q3 (2026-09-04) : `etc/` no longer carries a sourcer — its two install-time tools moved to
-    # `deploy/lib`, next to the library they were (only) COMMENTING on: neither sources it. The
-    # population is the installer's modules alone. NOT `deploy/lib`: the library itself lives
-    # there, names itself, and correctly sets no flags — it would be the one offender.
+    # Only sibling deploy/modules.d is scoped, excluding the library itself.
     roots = [
       {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")}
     ]
@@ -711,13 +508,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
         }
 
       _ ->
-        # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
-        # guards the PERIMETER — is `deploy/` part of this artifact. The population is a different
-        # question: these are TWO roots, only one of them is scoped, and `Path.wildcard` on a path
-        # that does not exist returns `[]` in silence. A `deploy/` present with an empty or moved
-        # `modules.d/` would yield `offenders == []` and a `:pass` that had not opened a single file
-        # — indistinguishable, in the output, from a green earned on conforming sourcers.
-        # Guarding the scope and not the population is "a green that checked nothing".
+        # A present but empty modules.d fails; an absent modules.d is skipped even if deploy exists.
         sourcers =
           present
           |> Enum.flat_map(fn {_label, d} -> Path.wildcard(Path.join(d, "*.sh")) end)
@@ -734,8 +525,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     offenders =
       sourcers
       |> Enum.filter(fn f ->
-        # `File.read/1`, not the bang: a broken symlink in one of these dirs would crash the
-        # whole contracts run, turning a shell-hygiene check into a gate outage.
+        # Unreadable entries are ignored, although they remain in the scanned file count.
         case File.read(f) do
           {:ok, content} ->
             String.contains?(content, "provision-lib.sh") and
