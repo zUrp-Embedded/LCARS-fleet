@@ -182,7 +182,11 @@ check() {
   fi
 
   # ─── La forge : fournie, ou montée par l'installeur ───────────────────────────────────────────
-  if [[ -n "${FORGE_BASE_URL:-}" ]]; then
+  if [[ -n "${FORGE_BASE_URL:-}" && "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
+    p_fact forge_fournie ""
+    p_fact forge_joignable sans-objet
+    p_warn "FORGE_BASE_URL ($FORGE_BASE_URL) est ignorée : la forge est montée par l'installeur (--bench), tous les modules s'adressent à celle du poste"
+  elif [[ -n "${FORGE_BASE_URL:-}" ]]; then
     p_fact forge_fournie "$FORGE_BASE_URL"
     if curl -fsS -m 5 -o /dev/null "${FORGE_BASE_URL%/}/api/v1/version" 2>/dev/null; then
       p_fact forge_joignable oui

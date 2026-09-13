@@ -1450,6 +1450,23 @@ ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL 
   [ "$output" = "pris" ]
 }
 
+@test "forge montée (PROV_FORGE_MONTEE=1) : l'adresse est celle du poste, un FORGE_BASE_URL résiduel ne la remplace pas" {
+  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
+  PROV_TOKENS_DIR="$d" PROV_FORGE_MONTEE=1 PROV_FORGE_HOST_PORT=21055 FORGE_BASE_URL=http://ancienne-forge:9999 \
+    module_sh 'echo "$PROV_FORGE_URL"'
+  [ "$output" = "http://127.0.0.1:21055" ]
+}
+
+@test "forge fournie : l'adresse annoncée est FORGE_PUBLIC_URL, sinon FORGE_BASE_URL — jamais un forge.public.url écrit pour une autre forge" {
+  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://10.0.0.5:21000" > "$d/forge.public.url"
+  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=https://forge.ext module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "https://forge.ext" ]
+  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=https://forge.ext FORGE_PUBLIC_URL=https://forge.lan module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "https://forge.lan" ]
+  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
+  [ "$output" = "http://10.0.0.5:21000" ]
+}
+
 @test "PROV_FORGE_URL : l'environnement prime sur forge.url, et une chaîne vide explicite lit le fichier" {
   local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
   PROV_TOKENS_DIR="$d" FORGE_BASE_URL=http://depuis-l-env:9999 module_sh 'echo "$PROV_FORGE_URL"'

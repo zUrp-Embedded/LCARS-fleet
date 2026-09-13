@@ -93,6 +93,13 @@ mod() {
   [[ "$output" != *"http://localhost:21000"* ]]
 }
 
+@test "une forge fournie s'annonce à FORGE_PUBLIC_URL quand elle est donnée, jamais à l'adresse du poste" {
+  rm -f "$BIN/docker"
+  FORGE_BASE_URL="http://gitea:3000" FORGE_PUBLIC_URL="https://forge.lan/" mod apply
+  [ "$(cat "$PROV_TOKENS_DIR/forge.public.url")" = "https://forge.lan" ]
+  refute grep -q "21000" "$PROV_TOKENS_DIR/forge.public.url"
+}
+
 @test "une forge fournie est consommée : son URL sans slash final, docker non requis, rien monté" {
   rm -f "$BIN/docker"
   FORGE_BASE_URL="http://forge.example:3000/" mod apply
@@ -100,6 +107,7 @@ mod() {
   [[ "$output" == *"forge fournie (http://forge.example:3000) — rien à monter"*"DRIFT"*"forge fournie sans autorité"* ]]
   refute grep -q 'compose .* up\|user create' "$CALLS"
   [ "$(cat "$PROV_TOKENS_DIR/forge.url")" = "http://forge.example:3000" ]
+  [ "$(cat "$PROV_TOKENS_DIR/forge.public.url")" = "http://forge.example:3000" ]
   printf 'tok-donne\n' > "$PROV_TOKENS_DIR/forge-master.token"
   FORGE_BASE_URL="http://forge.example:3000/" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

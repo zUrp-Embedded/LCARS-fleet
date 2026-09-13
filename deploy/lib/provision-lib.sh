@@ -47,12 +47,27 @@ fi
 : "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
-: "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
-: "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
-: "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
 : "${PROV_DECK_PORT:=20999}"
 : "${PROV_SSH_PORT:=2222}"
 : "${PROV_FORGE_HOST_PORT:=21000}"
+# une seule résolution des deux adresses, pour tous les modules : la forge montée (--bench) est celle
+# du poste, un FORGE_BASE_URL résiduel ne la remplace pas ; une forge fournie s'annonce à sa propre
+# adresse (FORGE_PUBLIC_URL, sinon la même), jamais à celle du poste
+if [[ "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
+  PROV_FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
+  : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
+  : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
+else
+  : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
+  if [[ -n "${FORGE_BASE_URL:-}" ]]; then
+    : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$PROV_FORGE_URL}}"
+  else
+    : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
+    : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
+  fi
+fi
+PROV_FORGE_URL="${PROV_FORGE_URL%/}"
+PROV_FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL%/}"
 : "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 : "${PROV_DUMP_LINES:=40}"

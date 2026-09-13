@@ -33,17 +33,16 @@ COMPOSE_FILE="$(repo_root)/deploy/docker/forge-compose.yml"
 FORGE_SERVICE="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$COMPOSE_FILE" 2>/dev/null | head -n1 || true)"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-${FORGE_SERVICE}-1"
 
-if [[ "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
+# le mode et les adresses sont résolus par la lib, une fois pour tous les modules ; ici seulement : sans drapeau ni forge fournie, la forge du poste se monte
+if [[ "${PROV_FORGE_MONTEE:-}" == "1" || -z "${FORGE_BASE_URL:-}" ]]; then
   FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
   FORGE_MONTEE=1
-elif [[ -n "${FORGE_BASE_URL:-}" ]]; then
-  FORGE_URL="${FORGE_BASE_URL%/}"
-  FORGE_MONTEE=0
+  PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 else
-  FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
-  FORGE_MONTEE=1
+  FORGE_URL="$PROV_FORGE_URL"
+  FORGE_MONTEE=0
+  PUBLIC_URL="$PROV_FORGE_PUBLIC_URL"
 fi
-PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 
 d() { "$PROV_DOCKER_BIN" "$@"; }
 forge_up() { curl -fsS -m 5 -o /dev/null "$FORGE_URL/api/v1/version" 2>/dev/null; }

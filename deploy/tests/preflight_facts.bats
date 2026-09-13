@@ -128,6 +128,13 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [[ "$(fact groupes)" == *"$(id -gn)"* ]]
 }
 
+@test "forge : avec --bench, un FORGE_BASE_URL résiduel est ignoré et dit — le fait forge_fournie reste vide" {
+  preflight docker PROV_FORGE_MONTEE=1 FORGE_BASE_URL=http://ancienne-forge:9999
+  [ -z "$(fact forge_fournie)" ]
+  [ "$(fact forge_joignable)" = sans-objet ]
+  [[ "$output" == *"WARN  00-preflight: FORGE_BASE_URL (http://ancienne-forge:9999) est ignorée"* ]]
+}
+
 @test "systemd : le fait suit le répertoire de systemd — absent, « non »" {
   preflight docker LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR/pas-de-systemd"
   [ "$(fact systemd)" = non ]
