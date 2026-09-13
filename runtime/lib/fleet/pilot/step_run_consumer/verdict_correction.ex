@@ -1,44 +1,18 @@
 defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   @moduledoc """
-  UNE passe de correction pour un juge dont l'ENVELOPPE est invalide — avant de figer le ticket.
+  Demande au juge de re-emballer une enveloppe refusee, sans refaire son analyse.
+  Le motif de validation doit voyager dans le brief ; halt_invalid ne prouve ni que
+  le juge a compris le livrable ni qu'il est encore vivant.
 
-  Jumeau structurel de `ReviewLifecycle.VerdictException` (l'arbitrage de zone grise), et
-  délibérément : même marqueur forge-natif qui borne à une passe, même drapeau d'auto-gating, même
-  remise à l'architecte quand le barreau ne peut pas être gravi. Les deux échelles répondent à des
-  questions différentes — « qui tranche une contradiction » contre « qui répare une sortie
-  malformée » — et partagent leur FORME, ce qui rend chacune lisible à qui a appris l'autre.
+  Le drapeau pilot_verdict_correction_pass? est eteint par defaut. Le marqueur forge
+  [verdict-correction:issue-N borne l'admission par ticket, tous roles confondus,
+  et survit aux redemarrages. Il precede l'enqueue : une passe peut etre comptee
+  sans avoir tourne. Lecture, post et enqueue ne sont pas atomiques ; la dedup du
+  commentaire ne garantit pas l'unicite des demandes concurrentes.
 
-  ## Ce que ça répare, et ce que ça ne répare PAS
-
-  Le contrat de sortie d'un juge est schema-validé, fail-closed : un champ mal typé rend
-  `"halt_invalid"` (`Verdict.gate_decision/1`) et le ticket est gelé vers l'architecte. C'est la
-  bonne direction — jamais un `"continue"` sur un verdict malformé — mais c'est un couperet posé
-  sur **la forme**, pas sur le fond.
-
-  Le juge a lu le livrable, il a une opinion, et il l'a mal emballée. Le geler immobilise un humain
-  pour un `details` qui est une chaîne au lieu d'un objet. Alors : une passe, une seule, où le juge
-  reçoit **ce qui n'allait pas** et ré-emballe.
-
-  ⚠ **Ce n'est PAS un rattrapage de fond.** Un juge qui n'a pas compris le livrable ne le
-  comprendra pas mieux à la deuxième passe, et rien ici ne le lui redemande : la correction porte
-  sur l'ENVELOPPE, et le brief de correction le dit.
-
-  ## Pourquoi une passe et pas deux
-
-  Le marqueur EST le budget, et il vit SUR LA FORGE (`[verdict-correction:issue-N`) plutôt que dans
-  la mémoire du pilote : un redémarrage ne doit pas acheter une seconde passe, et un humain doit
-  pouvoir voir sur le ticket que ce barreau a été dépensé. Au-delà, l'architecte — une sortie qui
-  reste malformée après qu'on a dit exactement ce qui clochait n'est plus un problème de forme.
-
-  ## Pourquoi le pod est encore là pour la recevoir
-
-  Parce qu'**aucune fauche n'est déclenchée par la PRODUCTION d'un verdict, seulement par son
-  INGESTION** — et une enveloppe refusée n'est pas ingérée. Le juge vit donc encore, avec le
-  contexte que lui a coûté sa lecture du livrable, et c'est exactement ce que cette passe dépense.
-
-  La règle vaut pour les deux familles de juges, et par deux chemins différents : un juge de PR
-  serait fauché par `StepRunCompleter` à la pose de sa revue — qui n'a pas lieu ici ; un juge de
-  GATE (scoper, gatekeeper) arrive par `apply_verdict` et n'a aucune faucheuse sur ce chemin.
+  La correction cible un PodId.for_issue, sans verifier sa presence ni le recreer.
+  Un verdict toujours malforme conduit a l'architecte par politique de budget,
+  pas parce qu'une seconde erreur etablirait une incomprehension de fond.
   """
 
   require Logger
@@ -47,10 +21,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
 
   defmodule Seams do
     @moduledoc """
-    Les six coutures dont cette passe a besoin, et pas le `state` entier.
-
-    `@enforce_keys` sur les six : une couture oubliee doit refuser a la construction, pas rendre
-    `nil` a l'appel — c'est le meme durcissement que `ReviewLifecycle.Ctx`.
+    Dependances de correction. enforce_keys impose leur presence, pas une valeur non-nil.
     """
     @enforce_keys [:repo, :forge, :forge_opts, :task_queue, :spawner, :terminal]
     defstruct [:repo, :forge, :forge_opts, :task_queue, :spawner, :terminal]
@@ -67,18 +38,15 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   end
 
   @doc """
-  Demande UNE correction d'enveloppe au juge, ou escalade.
+  Transmet reason au juge apres post du marqueur, ou delegue le gel a l'architecte.
 
-  `reason` est ce que la validation a refusé — il voyage jusqu'au juge, parce qu'une demande de
-  correction qui ne dit pas ce qui clochait est une demande de deviner.
+  Apres enqueue reussi, rend correction_requested meme si le wake manque, rend une
+  erreur ou leve une exception (rescue). Throws et exits peuvent encore propager.
+  Aucun accuse de reception du juge ni continuation gate_eval n'est ajoute ici.
   """
   @spec request(pos_integer(), String.t(), term(), String.t(), Seams.t()) :: term()
   def request(n, role, reason, trace, %Seams{} = seams) do
-    # AUTO-GATÉ, ET ÉTEINT PAR DÉFAUT — même raison que le barreau d'arbitrage : un mécanisme qui
-    # n'a jamais tourné de bout en bout sur un banc est une hypothèse, pas un rail. Le chemin
-    # désactivé n'est PAS un no-op silencieux : il NOMME le barreau non armé dans l'escalade, pour
-    # qu'un architecte lisant le gel puisse distinguer « la passe a échoué » de « la passe n'est
-    # pas armée sur ce conteneur ».
+    # Distinguer passe desarmee et passe epuisee dans le motif du gel.
     if enabled?() do
       do_request(n, role, reason, trace, seams)
     else
@@ -98,9 +66,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   end
 
   @doc false
-  # PORTE PURE : une correction, puis l'architecte. Un compte ILLISIBLE escalade au lieu de
-  # corriger — même direction que les deux autres échelles, et pour la même raison : ne pas savoir
-  # combien de passes ont été dépensées ne doit JAMAIS en acheter une de plus.
+  # Compte illisible et passe epuisee partagent le meme motif d'escalade.
   @spec decision({:ok, integer()} | {:error, term()}) :: :correct | :escalate
   def decision({:ok, spent}) when is_integer(spent) and spent < 1, do: :correct
   def decision(_), do: :escalate
@@ -125,9 +91,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
         enqueue_correction(n, role, reason, trace, seams)
 
       {:error, why} ->
-        # LE MARQUEUR EST LE BUDGET. Ne pas réussir à le poser et corriger quand même achèterait un
-        # nombre illimité de passes : chaque tick lirait zéro marqueur et redemanderait. Même
-        # leçon, mot pour mot, que le barreau d'arbitrage.
+        # Ne pas enfiler une passe que le compteur ne pourra pas voir.
         Logger.warning(
           "VerdictCorrection: #{seams.repo}##{n} marker NOT posted (#{inspect(why)}) — no " <>
             "correction requested (an unrecorded pass is an unbounded one)"
@@ -137,8 +101,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
     end
   end
 
-  # Le brief part au pod QUI EST DÉJÀ LÀ — c'est tout l'intérêt de la passe. `PodId.for_issue/3` :
-  # ce juge-là a été minté sur le ticket (gate d'étape), pas sur une PR.
+  # Identite de juge de gate par ticket ; ce calcul ne prouve pas sa vivacite.
   defp enqueue_correction(n, role, reason, trace, %Seams{} = seams) do
     pod_id = Fleet.PodId.for_issue(seams.repo, n, role)
 
@@ -161,9 +124,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
         {:ok, :correction_requested}
 
       {:error, why} ->
-        # Le marqueur est POSÉ et le brief n'est pas parti : la passe est comptée sans avoir été
-        # jouée. On gèle plutôt que de réessayer — réessayer lirait le marqueur et escaladerait,
-        # avec un motif qui dirait « déjà dépensée » là où rien n'a été demandé.
+        # Enqueue refuse apres marqueur : geler avec le motif d'admission ratee, pas de passe executee.
         Logger.warning(
           "VerdictCorrection: #{seams.repo}##{n} marker posted but brief NOT enqueued " <>
             "(#{inspect(why)}) — freezing rather than reporting a pass that never ran"
@@ -201,8 +162,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   defp describe(reason), do: inspect(reason)
 
   defp freeze(n, role, trace, why, %Seams{} = seams) do
-    # Le gel dit POURQUOI la passe n'a pas eu lieu, jamais seulement qu'elle n'a pas eu lieu : un
-    # architecte doit pouvoir distinguer un barreau non armé d'un barreau dépensé.
+    # Conserver la cause de non-correction avec la trace du verdict pour l'architecte.
     TerminalEscalation.freeze_to_arch(
       n,
       role,

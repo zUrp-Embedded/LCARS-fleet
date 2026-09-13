@@ -1,14 +1,8 @@
 defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   @moduledoc """
-  Q2 DRAFT producers — `StepRunConsumer` feeds the incident rail:
-
-  - `workflow_map.failed` — emitted on a workflow_map LOAD failure (`:workflow_map_load_failed`).
-
-  Both are emitted with source `:workflow` (invariant anti-spoof du registre : la route exige sa source) via `safe_emit`:
-  an emission failure is logged warning by the producer and never blocks the carrying escalation
-  (the Bus is the lossy fast-path; durable truth stays on the forge rail).
-  We subscribe to the REAL Bus (that is the point of the test: prove the emission) → `async: false`
-  (shared global Bus state) + unique names/issues for hermeticity.
+  Exercises workflow_map.failed delivery through the real Bus, plus classification and
+  architect-escalation seams. Serial for shared bus state; no durable incident consumer
+  or forge persistence is verified. Emission failure handling is outside these cases.
   """
   use ExUnit.Case, async: false
 
@@ -16,7 +10,6 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
   alias Fleet.Pilot.StepRunConsumer
   alias Fleet.Pilot.StepRunConsumer.GateEngine
 
-  # Loader: "bad-q2" raises (not found → :workflow_map_load_failed); "judgemap-q2" = 1 JUDGE step.
   defmodule Loader do
     def load!("judgemap-q2") do
       %{
@@ -35,7 +28,6 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
     def load!(_), do: raise("workflow_map not found")
   end
 
-  # Completer: captures complete_pr + await_arch (freeze_to_arch → await_arch).
   defmodule CaptureCompleter do
     def complete_pr(step_run, opts) do
       send(self(), {:step_run, step_run, opts})
@@ -107,18 +99,14 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
                      },
                      500
 
-      # Targeted rail: one failure, one event — nothing else broadcast.
+      # Refutes incident.escalated specifically, not every possible additional event.
       refute_received %Fleet.Event{type: :"incident.escalated"}
     end
   end
 
   describe "DR-013 — unreadable cap-profile at completion → escalation, never a silent judge" do
     test "deliverable_mode_fun {:error, :cap_profile_unloadable} → arch freeze (await_arch), NO silent completion" do
-      # A role whose cap-profile has vanished/corrupted since the spawn: the producer/judge mode is
-      # UNKNOWN. A "payload" fallback → producer? false → SILENTLY reclassified as a judge
-      # (a real producer, its code never pushed). DR-013 instead: {:error} → fail-loud + escalate to
-      # the arch (freeze_to_arch: never bubble → the reaper would re-dispatch a broken profile
-      # forever, G2 churn).
+      # A failed classification must escalate instead of treating a possible producer as a judge.
       st = %{
         state()
         | deliverable_mode_fun: fn _role, _root -> {:error, :cap_profile_unloadable} end
@@ -136,7 +124,6 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
       StepRunConsumer.maybe_complete(payload, st)
 
-      # Human escalation (freeze_to_arch → await_arch), NEVER a silent completion as a judge.
       assert_receive {:await_arch, _step_run, _opts}, 500
       refute_received {:step_run, _, _}
     end
@@ -144,9 +131,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
   describe "the effective deliverable_mode travels, it is not re-derived from the base role" do
     test "producer?/3 prefers the payload's effective mode → the base-role seam is NOT consulted" do
-      # The pod ran a RESOLVED profile whose deliverable_mode is carried in the pod.completed payload.
-      # The completion consumes THAT — a since-vanished/edited base profile (the DR-013 trigger) is
-      # irrelevant when the effective fact already travelled. The seam MUST NOT be called.
+      # Explicit effective mode must bypass a potentially changed/unavailable base-role resolver.
       raising = fn _role, _root ->
         raise "deliverable_mode_fun must not be consulted when the payload carries the mode"
       end
@@ -156,8 +141,7 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
     end
 
     test "producer?/3 with nil effective mode falls back to the seam (DR-013 fail-loud preserved)" do
-      # Bare/legacy payload (no `deliverable_mode`) → re-derive from the base role via the seam, keeping
-      # the DR-013 closed classification: {:ok, _} resolves, {:error, _} fails loud (never a silent judge).
+      # Without effective mode, retain the resolver's explicit success/error result.
       assert {:ok, true} =
                GateEngine.producer?("engineer", fn _, _ -> {:ok, "git_native"} end, nil)
 

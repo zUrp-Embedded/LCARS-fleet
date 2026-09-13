@@ -3,7 +3,6 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
 
   alias Fleet.Pilot.WorkflowMapNav
 
-  # Linear poc-cycle-style WorkflowMap (Loader format: steps map keyed-by-name, string keys)
   defp poc_cycle do
     %{
       "name" => "poc-cycle",
@@ -83,7 +82,6 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
     end
 
     test "same role on 2 steps — the NAME disambiguates (the DN §8 wrinkle)" do
-      # standard-qa: architect on brainstorm AND plan
       workflow_map = %{
         "steps" => %{
           "brainstorm" => %{"role" => "architect", "needs" => []},
@@ -91,7 +89,6 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
         }
       }
 
-      # by name: unambiguous
       assert {:ok, {"plan", "architect"}} = WorkflowMapNav.next_step(workflow_map, "brainstorm")
       assert :terminal = WorkflowMapNav.next_step(workflow_map, "plan")
     end
@@ -102,15 +99,11 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
     end
   end
 
-  # B (§L441) — the `validate_explicit_step/1` tests are REMOVED with the function: a soft gate on
-  # a business step is legitimate (gatekeeper escalation), not a malformed workflow_map.
-  # cf. step_run_consumer_gate_test (escalation B).
+  # Soft business gates are valid; their escalation is exercised in step_run_consumer_gate_test.
 
   describe "safe_load/3 — the opts say WHICH catalogue answers (characterisation)" do
-    # The seam's three arity branches, pinned. The rule that every PRODUCTION default is binary
-    # is a wall (`workflow.loader_arity`, `mix lcars.contracts.check`), read at the AST; the
-    # witnesses that a PR reads its OWN catalogue's card live with the rails
-    # (`step_dispatcher_test`, `step_run_completer_test`, « catalogue de la carte »).
+    # Exercise function/module arities. Catalogue selection at production call sites has
+    # separate rail tests and the workflow.loader_arity contract.
     defmodule BinaryLoader do
       def load!(name, opts), do: %{"name" => name, "opts" => opts}
     end

@@ -1,13 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumerDefaultSeamTest do
-  # SOURCE: runtime/test/fleet/pilot/step_run_consumer_default_seam_test.exs
-  # AUTHOR: bob
-  # STARDATE: 2026-09-06
-  # STATUS: PROTO-V2 — le DEFAUT du seam `deliverable_mode_fun` a l'arite du seam
-  #
-  # Le seam est `(role, root)` : `GateEngine.producer?/4` l'appelle avec DEUX arguments des que le
-  # payload ne porte pas de `deliverable_mode`. Le defaut du consumer etait `&default_deliverable_mode/1`
-  # — jamais appele tant que chaque fixture passait sa propre fonction ou un mode explicite, donc
-  # vert par accident ; rouge le jour ou l'ordre des tests l'a fait appeler (2026-09-06).
+  # Le defaut doit accepter (role, root). Un mode explicite ou une fonction injectee
+  # masquerait une mauvaise arite du defaut.
   use ExUnit.Case, async: true
 
   alias Fleet.Pilot.StepRunConsumer

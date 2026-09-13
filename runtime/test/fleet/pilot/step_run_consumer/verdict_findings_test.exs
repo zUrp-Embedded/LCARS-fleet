@@ -5,12 +5,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
 
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
-  # C1 2026-08-18 — the OPTIONAL machine payload `details.findings` (findings.json).
-  # The contract under test has two load-bearing halves:
-  #   1. the gate-decision ENVELOPE never moves — a legacy judge without the key walks
-  #      today's path byte-for-byte;
-  #   2. the failure DIRECTION is the opposite of the envelope's — an invalid findings
-  #      never flips a valid verdict (loud log + no machine object, never halt_invalid).
+  # Optional findings failure preserves the decision while refusing its machine payload.
 
   defp envelope(details) do
     %{"decision" => "continue", "reason" => "criterion ok", "details" => details}
@@ -41,8 +36,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     no_details = %{"decision" => "continue", "reason" => "ok"}
     assert {nil, ^no_details} = Verdict.take_findings(no_details)
 
-    # A garbage `details` (envelope-invalid elsewhere) does not crash the extraction either —
-    # gate_decision/1 already owns THAT refusal; this function only answers "is the key here".
+    # Findings extraction does not validate the decision envelope.
     garbage = %{"decision" => "continue", "reason" => "ok", "details" => "oops"}
     assert {nil, ^garbage} = Verdict.take_findings(garbage)
   end
@@ -56,8 +50,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     assert stripped["decision"] == "continue"
     assert stripped["reason"] == "criterion ok"
 
-    # And the prose body built from the stripped envelope carries NO machine dump: the human
-    # matter of the findings lives in `reason` (SP contract), not in an inspect() of a map.
+    # Valid machine findings leave prose details; this does not verify their substance is in reason.
     body = Verdict.judge_review_body(:approve, stripped)
     refute body =~ "findings"
   end
@@ -72,15 +65,11 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
 
   test "invalid → {nil, result} UNTOUCHED + loud log; gate_decision still crosses (the verdict NEVER flips)" do
     invalid = [
-      # not a list
       %{"findings" => "oops"},
-      # a third vocabulary — the schema reconciles two, it does not accept inventions
+      # Unknown severity must fail schema validation.
       %{"findings" => [%{"severity" => "blocker", "description" => "x"}]},
-      # description missing on an item
       %{"findings" => [%{"severity" => "minor"}]},
-      # off the 0-10 grid
       %{"findings" => [], "score" => 11},
-      # the one required top-level field, absent
       %{"score" => 5}
     ]
 
@@ -89,11 +78,10 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
 
       {took, log} = ExUnit.CaptureLog.with_log(fn -> Verdict.take_findings(result) end)
       assert {nil, ^result} = took
-      # The refusal names the schema on the operator rail — same discipline as the envelope's.
+
       assert log =~ "findings refused"
 
-      # THE failure direction, pinned: the envelope was already validated, so a broken OPTIONAL
-      # payload never turns a valid `continue` into halt_invalid.
+      # Independently validate that the containing envelope still yields continue.
       assert "continue" == Verdict.gate_decision(result)
     end
   end
@@ -103,14 +91,13 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
       result = envelope(%{"critere" => "ok", key => valid_findings()})
 
       {took, log} = ExUnit.CaptureLog.with_log(fn -> Verdict.take_findings(result) end)
-      # Untouched: the payload stays in the prose (noisy rather than lost), nothing is extracted.
+
       assert {nil, ^result} = took
       assert log =~ "details.#{key} ignored"
       assert log =~ "the machine payload key is `findings`"
       assert "continue" == Verdict.gate_decision(result)
 
-      # And the builder can tell « sent under the wrong key » from « silent »: the completer
-      # then says REFUSED upstream instead of accusing the judge of a silence it did not commit.
+      # Near-miss keys count as offered so diagnostics distinguish refusal from silence.
       assert Verdict.findings_offered?(result)
     end
   end
@@ -128,21 +115,12 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     assert {findings, stripped} = took
     assert findings == valid_findings()
     assert stripped["details"] == %{"findings_v1" => "old"}
-    # ⚠ L'AIGUILLE EST ANCREE SUR L'EMETTEUR, ET C'EST LA CORRECTION. `capture_log` capte le
-    # logger GLOBAL : sous `async: true`, tout module qui logge pendant cette fenetre atterrit dans
-    # `log`. Le mot « ignored » seul est emis par 21 modules de `lib/` (mesure du 2026-09-06), et
-    # ce temoin est tombe sur la ligne d'un voisin — `Fleet.SystemConfig: … carries unknown key(s)
-    # … — ignored.` Un refute ne vaut que si son aiguille ne peut venir que du sujet.
+    # capture_log observes global logs; anchor the negative assertion to the emitter/shape
+    # rather than the generic word ignored, which concurrent modules can also emit.
     refute log =~ ~r/StepRunConsumer: details\.\S+ ignored/
   end
 
-  # CE TEMOIN PROUVE L'ANCRAGE, PAS LE SUJET — et il existe parce que la course, elle, ne se rejoue
-  # pas a la demande. Le refute ci-dessus a ete pris en flagrant delit dans un `mix gate` complet
-  # (drdree, 2026-09-06) sur la ligne d'un VOISIN, reproduite ici mot pour mot. Sept passages de la
-  # suite sur ma machine, dont trois a `--max-cases 24` sur le code d'AVANT, ne l'ont jamais
-  # redeclenchee : une fenetre de quelques microsecondes ne s'invoque pas, elle se ferme.
-  #
-  # Ce qui se prouve donc ici est la PROPRIETE qui la ferme : l'aiguille ne peut venir que du sujet.
+  # A synthetic neighbor line tests the regex's discrimination, not a replay of the original race.
   test "l'aiguille du refute ne peut venir que du sujet — la ligne d'un voisin ne la declenche pas" do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -151,11 +129,8 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
         )
       end)
 
-    # Le mot nu EST dans la capture : `capture_log` capte le logger global, et c'est exactement ce
-    # qui faisait tomber un refute qui cherchait ce mot-la.
     assert log =~ "ignored"
 
-    # L'aiguille ancree sur l'emetteur et sur la forme ne voit que ce que `Verdict` emet.
     refute log =~ ~r/StepRunConsumer: details\.\S+ ignored/
   end
 end

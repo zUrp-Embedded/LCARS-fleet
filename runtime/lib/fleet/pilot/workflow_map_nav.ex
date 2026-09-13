@@ -1,10 +1,11 @@
 defmodule Fleet.Pilot.WorkflowMapNav do
   @moduledoc """
-  Navigates a loaded workflow map by step name, never by role.
+  Navigates loaded maps by step name, allowing repeated roles on distinct steps.
 
-  The supported graph is linear: exactly one root and at most one successor per step. Parallel entry
-  or successors fail explicitly. A soft gate on a business step is valid and does not imply a
-  gatekeeper-named step.
+  Intended for linear workflows: first_step rejects multiple roots and next_step
+  rejects multiple immediate successors. These local checks do not validate the whole
+  graph for cycles, joins or disconnected components. Missing role can return nil.
+  A soft gate on a business step is valid and does not require a gatekeeper-named step.
   """
 
   @type workflow_map :: %{required(String.t()) => any()}
@@ -76,20 +77,13 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   defp role(spec), do: Map.get(spec, "role")
 
   @doc """
-  Loads through a module or function and normalizes exceptions into
-  `{:error, {:workflow_map_load_failed, name, message}}`.
+  Calls a module/function loader and wraps its return in ok without validating its shape.
+  Exceptions become {:error, {:workflow_map_load_failed, name, message}}; throws/exits propagate.
 
-  `opts` carries WHICH CATALOGUE answers, and the arity of the seam is what leaves room for the
-  question. An engraved route is a bare NAME (`wfmap/standard`), and two catalogues may each declare
-  a card by that name — the card that must answer is the one of the project's own catalogue. A
-  reader going through a UNARY seam has nowhere to ask it: the name resolves in the DEFAULT image,
-  always. A project then gets the doc rail of another catalogue, whose producer's
-  forge account is a member of none of its teams — the push and the PR both answer
-  `403 user must be a collaborator`, AND THE DIAGNOSIS READS AS A FORGE PERMISSION PROBLEM when the
-  permissions are right and the CARD is foreign.
-
-  A unary seam still works and is left alone: that is every test stub, and a stub answers for the
-  one catalogue it fabricates.
+  Binary functions or load!/2 receive opts so the same card name can resolve in the
+  project's catalogue. Unary loaders remain supported but drop opts, so they cannot
+  receive catalogue selection through this call. Wrong-catalogue cards can surface later
+  as forge permission failures under the wrong role identity.
   """
   @spec safe_load(
           module() | (String.t() -> map()) | (String.t(), keyword() -> map()),
@@ -110,9 +104,7 @@ defmodule Fleet.Pilot.WorkflowMapNav do
     e -> {:error, {:workflow_map_load_failed, name, Exception.message(e)}}
   end
 
-  # A module seam may export either arity, and the unary ones are the test stubs. Asking the module
-  # rather than assuming is what keeps a fixture from having to grow an option it has no use for —
-  # the same tolerance the function branches already give.
+  # Prefer load!/2 when exported; preserve unary fixtures that intentionally ignore options.
   defp module_takes_opts?(mod),
     do: Fleet.Opts.exported?(mod, :load!, 2)
 end

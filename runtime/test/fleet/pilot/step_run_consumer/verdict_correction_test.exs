@@ -4,12 +4,10 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
   alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
 
   @moduledoc """
-  B4 — UNE passe de correction d'enveloppe, et une seule.
-
-  `async: false` : le drapeau d'auto-gating (`:pilot_verdict_correction_pass?`) est global au nœud.
+  Verifie admission/refus d'une correction et transmission du motif.
+  Serial : flag global et compteur persistent_term. Les stubs ne prouvent ni vivacite
+  du pod, ni persistance/dedup forge, ni livraison d'un verdict corrige.
   """
-
-  # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
 
   defmodule Forge do
     @moduledoc false
@@ -104,8 +102,6 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
         seams || seams()
       )
 
-  # ── La porte, pure ─────────────────────────────────────────────────────────────────────────────
-
   describe "decision/1 — une passe, puis l'architecte" do
     test "zéro dépensée → on corrige ; une → on escalade" do
       assert VerdictCorrection.decision({:ok, 0}) == :correct
@@ -114,15 +110,10 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
     end
 
     test "compte ILLISIBLE → escalade, jamais une passe de plus" do
-      # ⚠ LA DIRECTION EST LE POINT. Ne pas savoir combien de passes ont été dépensées ne doit
-      # jamais en acheter une : c'est le choix qu'ont déjà fait les deux autres échelles, et c'est
-      # ce qui empêche une forge muette de rendre la boucle illimitée.
       assert VerdictCorrection.decision({:error, :unreachable}) == :escalate
       assert VerdictCorrection.decision(:n_importe_quoi) == :escalate
     end
   end
-
-  # ── Le chemin nominal ──────────────────────────────────────────────────────────────────────────
 
   describe "la passe" do
     test "marqueur POSÉ, brief au pod VIVANT, réveil — et le motif voyage" do
@@ -131,17 +122,15 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
       assert_received {:counted, "[verdict-correction:issue-42"}
       assert_received {:marker, 42, body, "[verdict-correction:issue-42:round-1]"}
 
-      # Une demande de correction qui ne dit pas ce qui clochait est une demande de deviner.
+      # Le motif detaille doit atteindre le commentaire et le brief.
       assert body =~ "#/details: expected Object"
 
-      # LE POD EST CELUI QUI EST DÉJÀ LÀ, et l'id se construit comme au dispatch — un juge d'étape
-      # est minté sur le TICKET, pas sur une PR.
+      # Verifie l'identite cible par ticket, pas l'existence d'un pod a cette adresse.
       assert_received {:enqueued, pod_id, attrs}
       assert pod_id == Fleet.PodId.for_issue("fleet/proj", 42, "qualifier")
       assert attrs.metadata["verdict_correction"] == "round-1"
       assert attrs.brief =~ "#/details: expected Object"
 
-      # Ce que le brief interdit explicitement : refaire l'analyse.
       assert attrs.brief =~ "Ne refais pas ton analyse"
 
       assert_received {:woken, ^pod_id}
@@ -155,18 +144,14 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
       refute_received {:enqueued, _, _}
       assert_received {:frozen, body}
       assert body =~ "correction_pass_spent"
-      # La trace du verdict n'est pas perdue en route : l'architecte lit les deux.
+
       assert body =~ "trace du verdict"
     end
   end
 
-  # ── Les échecs, et leur direction ──────────────────────────────────────────────────────────────
-
   describe "ce qui ne doit JAMAIS acheter une passe de plus" do
     test "marqueur NON posé → aucune correction : une passe non enregistrée est illimitée" do
-      # ⚠ LE MARQUEUR EST LE BUDGET. Corriger sans avoir réussi à l'écrire ferait lire zéro marqueur
-      # au tick suivant, donc redemander, indéfiniment. Même leçon, mot pour mot, que le barreau
-      # d'arbitrage de la zone grise.
+      # Un echec de post interdit l'enqueue d'une passe non comptabilisee.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, :awaiting} = request(seams(ForgeMarkerFails))
@@ -186,9 +171,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
     end
 
     test "marqueur posé mais brief NON parti → gel, et le motif ne ment pas sur ce qui s'est passé" do
-      # Une passe comptée sans avoir été jouée. Réessayer plus tard lirait le marqueur et
-      # escaladerait en disant « déjà dépensée » là où rien n'avait été demandé — donc on gèle tout
-      # de suite, avec le vrai motif.
+      # Conserver un motif distinct pour le marqueur poste suivi d'un enqueue refuse.
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, :awaiting} = request(seams(Forge, QueueFails))
@@ -200,13 +183,9 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
     end
   end
 
-  # ── L'auto-gating ──────────────────────────────────────────────────────────────────────────────
-
   describe "le barreau est ÉTEINT par défaut" do
     test "désarmé → gel, et l'escalade NOMME le barreau non armé" do
-      # ⚠ CE N'EST PAS UN NO-OP SILENCIEUX, et la distinction sert un humain : un architecte qui lit
-      # le gel doit pouvoir dire « la passe a échoué » de « la passe n'est pas armée sur ce
-      # conteneur ». Un mécanisme jamais joué de bout en bout sur un banc est une hypothèse.
+      # Le gel doit nommer la desactivation plutot qu'une tentative ratee.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_correction_pass?, false)
 
       assert {:ok, :awaiting} = request()
