@@ -15,9 +15,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       with {:ok, %{sha: sha}} <- branch_commit(full, branch, opts), do: {:ok, sha}
     end
 
-    # Par defaut TOUT proprietaire est une org : les temoins anterieurs a D1 decrivent des stores
-    # legitimes, et les faire tous declarer une carte d'orgs noierait ce qu'ils tiennent. Le temoin
-    # D1 passe `orgs:` explicitement.
+    # Default org:true; personal/unreachable cases override it.
     def org_exists?(owner, opts) do
       case Keyword.get(opts, :orgs, :all) do
         :all ->
@@ -31,9 +29,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       end
     end
 
-    # LE MESSAGE FAIT PARTIE DE LA REPONSE, et la doublure le porte : c'est lui qui dit quelle
-    # source le store projette. Une doublure qui ne rendrait que le sha ferait passer tous les
-    # temoins d'`updatable` sur une comparaison que le vrai code ne fait plus.
+    # Source-Commit in the stub message drives freshness, not the store's own SHA.
     def branch_commit(full, branch, opts) do
       case Keyword.get(opts, :shas, %{}) |> Map.fetch({full, branch}) do
         {:ok, :unreadable} ->
@@ -50,11 +46,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
   end
 
-  # ⚠ UN STORE PORTE SON MANIFESTE, ET C'EST CE QUI LE DESIGNE COMME STORE depuis 2026-08-21
-  # (`owner == manifest.name`). Ce n'est pas une commodite de doublure : le store est une PROJECTION
-  # de l'arbre du depot, donc il porte le `catalogue.yaml` de ce depot, avec le meme `name:`. Une
-  # doublure qui l'omet decrit un store que la forge ne produit pas — et fait passer un temoin sur
-  # une absence de manifeste au lieu du garde qu'il pretend tenir.
+  # Stores need the matching manifest; otherwise missing-manifest exclusion masks owner checks.
   defmodule FakeFiles do
     def get_file(full, "catalogue.yaml", opts) do
       case Keyword.get(opts, :manifests, %{}) |> Map.fetch(full) do
@@ -99,11 +91,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   end
 
   test "le store PROJETTE le depot courant : installe, et PAS updatable" do
-    # ⚠ LES DEUX SHA DE COMMIT SONT DIFFERENTS ICI, ET C'EST LE POINT. Le store est un commit FRAIS
-    # qui reflete l'arbre du depot ; deux commits de contenu identique ne partagent jamais de sha.
-    # La premiere version comparait ces deux tetes et repondait donc « updatable » TOUJOURS —
-    # mesure sur banc du 2026-08-16, `web-demo` installe trente secondes plus tot s'affichait
-    # « MAJ DISPO ». Ce qui les relie est le trailer que la projection porte.
+    # Distinct projection/source commits can carry identical trees; compare the recorded source.
     assert {:ok, s} =
              states(
                [repo("alice/web"), repo("web/_catalogue")],
@@ -134,8 +122,6 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   end
 
   test "un store SANS trailer de source : installe, fraicheur INCONNUE — jamais `false`" do
-    # Un store pousse par une version anterieure du geste. On ne peut pas comparer, donc on ne dit
-    # pas « a jour » : ce serait annoncer frais un catalogue dont on ignore l'etat.
     assert {:ok, s} =
              states(
                [repo("alice/web"), repo("web/_catalogue")],
@@ -151,8 +137,6 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   end
 
   test "store SANS depot : installe, et la fraicheur est INCONNUE — jamais `false`" do
-    # `nil` et `false` sont deux reponses differentes : « on ne peut pas savoir » et « c'est a
-    # jour ». Les confondre annoncerait comme frais un catalogue dont la source a disparu.
     assert {:ok, s} =
              states([repo("web/_catalogue")], %{"web/_catalogue" => "name: web\n"}, %{
                {"web/_catalogue", "main"} => "s"
@@ -172,16 +156,12 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   end
 
   test "`fleet` est INSTALLE par construction, meme sur une forge qui n'en sait rien" do
-    # Il vit dans le release. Repondre « available » pour lui serait mentir sur le SEUL catalogue
-    # qui marche toujours, y compris quand la forge ne porte rien.
     assert {:ok, s} = states([])
     assert %{state: :installed, store: nil} = s["fleet"]
   end
 
   test "un depot d'utilisateur NOMME `catalogue` sort AVAILABLE, avec son adresse" do
-    # ⚠ DE BOUT EN BOUT : c'est la ligne que `lcars catalogue list` imprime, pas seulement l'etat
-    # interne. Avant le 2026-08-21, `bob` ne voyait AUCUNE ligne — la reservation du nom l'ecartait
-    # en silence, et il n'avait aucun moyen d'apprendre pourquoi.
+    # Checks states plus line rendering, not the CLI process or actual stdout.
     assert {:ok, s} =
              states([repo("bob/catalogue")], %{"bob/catalogue" => "name: mobile\n"}, %{
                {"bob/catalogue", "main"} => "s"
@@ -205,8 +185,6 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
   end
 
   test "le store d'un catalogue n'est jamais compte comme un depot de lui-meme" do
-    # Sinon un catalogue installe serait AUSSI disponible depuis son propre store, donc toujours
-    # « a jour » par construction — une comparaison d'un objet avec lui-meme.
     assert {:ok, s} =
              states([repo("web/_catalogue")], %{"web/_catalogue" => "name: web\n"}, %{
                {"web/_catalogue", "main"} => "s"
@@ -217,17 +195,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
   describe "D1 — signer une installation demande une ORG, pas seulement une identite" do
     test "un depot qui se declare a son propre nom, dans un espace PERSO, ne signe RIEN" do
-      # ⚠ LE TROU QUE LE TROISIEME REGARD A TROUVE, apres que deux auto-audits l'ont rate : orgs et
-      # comptes perso partagent l'espace de noms Gitea, et rien ne verifiait le TYPE du
-      # proprietaire. `alice` poussait un depot public `catalogue` chez elle -> `alice` sortait
-      # INSTALLE, le convergeur clonait son materiel, le mint derivait son roster. Le gate admin
-      # contourne par un push.
-      #
-      # ⚠ LE MANIFESTE DIT `name: alice`, ET C'EST DELIBERE. Depuis que le garde est
-      # `owner == manifest.name`, un depot sans manifeste n'est plus un candidat store du tout : le
-      # laisser vide ferait passer ce temoin sur l'absence de manifeste, en ayant l'air de tenir le
-      # type du proprietaire. Ici l'identite est SATISFAITE et la SEULE chose qui refuse est
-      # `org_exists?` — ce que ce temoin pretend mesurer.
+      # Match owner and manifest name so only the personal-owner check rejects store status.
       assert {:ok, s} =
                states(
                  [repo("alice/_catalogue")],
@@ -237,16 +205,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
                  %{"alice" => false}
                )
 
-      # ⚠ IL NE SIGNE RIEN, ET IL NE DISPARAIT PAS NON PLUS. La premiere version de ce garde le
-      # rangeait en candidat store sur son identite, puis `org_exists?` le recalait — et le recale
-      # tombait dans un trou : ni magasin, ni depot, aucun log, aucune ligne. Mot pour mot le defaut
-      # que ce chantier ferme, avec une geometrie differente ; trouve par relecture independante le
-      # 2026-08-21.
-      #
-      # Ce qu'il EST est un depot : `alice` a pousse un catalogue chez elle. Il ne s'installera
-      # jamais — l'org `alice` entrerait en collision avec le compte `alice` — et ce refus-la
-      # appartient a `catalogue install`, au moment ou un admin le demande. Un refus a un moment reel
-      # vaut mieux qu'une disparition a un moment invisible.
+      # Preserve the personal repository as available instead of dropping it after classification.
       assert %{state: :available, store: nil, deposit: %{repo: "alice/_catalogue"}} = s["alice"]
       refute s["alice"].state == :installed
     end
@@ -265,9 +224,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
 
     test "type de proprietaire ILLISIBLE : le store est GARDE — on ne retrograde pas sur un hoquet" do
-      # `{:error, _}` n'est pas « pas une org ». L'autre lecture retrograderait un catalogue
-      # installe en disponible pendant une panne — le mensonge inverse de D1, plus cher que le cout
-      # transitoire accepte (un depot perso frais annonce installe le temps du hoquet).
+      # Owner-type errors favor installed, accepting possible temporary misclassification of a deposit.
       assert {:ok, s} =
                states(
                  [repo("web/_catalogue")],
@@ -283,10 +240,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
   describe "lines/1 — ce que `lcars catalogue list` imprime" do
     test "AVAILABLE porte le DEPOT, donc son proprietaire en premier segment" do
-      # ⚖ user, 2026-08-16 : « il peut afficher de quel user vient les catalogues available ? ».
-      # C'est LA question d'un admin avant d'installer : le materiel de QUI est-ce que je m'apprete
-      # a servir a tout le monde. L'owner est le premier segment du `full_name` — la convention de
-      # la forge elle-meme, pas un second rendu du meme fait.
+      # Available lines identify whose material installation would consume.
       assert {:ok, s} =
                states([repo("bob/mob")], %{"bob/mob" => "name: mobile\n"}, %{
                  {"bob/mob", "main"} => "d1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4"
@@ -296,9 +250,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
 
     test "INSTALLED ne porte PAS le depot — ce n'est plus la source que le conteneur suit" do
-      # ⚖ user : « une fois installe, osef de l'origine ». Et ce n'est pas qu'une question de bruit :
-      # ce que le conteneur suit desormais est `<nom>/_catalogue`, le store. Imprimer le depot la nomme
-      # quelque chose qui n'est plus la source, dans la colonne qu'un operateur lit COMME la source.
+      # Installed lines hide the old deposit; the installed source is the store.
       assert {:ok, s} =
                states(
                  [repo("alice/web"), repo("web/_catalogue")],
@@ -314,7 +266,6 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
 
     test "UPDATABLE le REPREND — c'est de la que la mise a jour viendrait" do
-      # Meme regle, pas une exception : le depot redevient ce que le prochain `install` tirerait.
       assert {:ok, s} =
                states(
                  [repo("alice/web"), repo("web/_catalogue")],
@@ -332,13 +283,8 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
 
   describe "les portes eval — ce que les doublures ne pouvaient pas voir" do
     test "les fonctions que les DOUBLURES remplacent existent sur le vrai module" do
-      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A EU LIEU LE 2026-08-16 : `branch_sha/3` a ete
-      # supprime de `Fleet.Forge.Client.Repo` (c'etait un doublon de `branch_head/3`, ajoute sans
-      # avoir cherche s'il existait deja). Le compilateur n'a rien dit — l'appel passe par une
-      # VARIABLE (`repo_mod.branch_sha(...)`), donc il est invisible a l'analyse — et toute la
-      # suite restait verte, parce que les doublures, elles, definissaient encore le nom.
-      #
-      # Une doublure ne prouve rien sur le module qu'elle remplace. Celui-ci le verifie.
+      # Dynamic calls can survive a removed real function when stubs retain its old name.
+      # Check exports as well; this does not validate transport or response semantics.
       for {m, f, a} <- [
             {Fleet.Forge.Client.Repo, :search_repos, 1},
             {Fleet.Forge.Client.Repo, :branch_head, 3},
@@ -354,26 +300,14 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
     end
 
     test "les deux portes demarrent le transport avant d'appeler la forge" do
-      # ⚠ LE DEFAUT QUE CE TEMOIN GARDE, ET IL A ETE MESURE SUR BANC LE 2026-08-16 :
-      # `lcars catalogue list` rendait `** (ArgumentError) unknown registry: Fleet.Forge.Finch`
-      # sous la ligne « la forge n'a pas repondu ». Une porte `eval` saute le corps de config de
-      # deploiement (c'est le but de `LCARS_TOOL_EVAL`), donc l'app n'est pas demarree et le pool
-      # Finch de `Fleet.Forge` n'existe pas.
-      #
-      # AUCUN TEMOIN NE POUVAIT L'ATTRAPER : tous ceux d'au-dessus injectent `forge_repo` et
-      # `forge_files`, donc le chemin qui a besoin du pool n'etait pris par personne. Celui-ci lit
-      # la SOURCE et exige l'appel — la seule facon de tenir un demarrage depuis un test qui tourne
-      # deja dans une VM ou tout est demarre.
+      # Fresh tool eval needs req/Finch startup. Stubs bypass that need, so this test
+      # checks source structure, not a release process actually starting transport.
       src = File.read!("lib/fleet/application/catalogue_lifecycle.ex")
 
       assert src =~ "defp with_transport",
              "le demarrage du transport a disparu — les portes eval rendront une ArgumentError"
 
-      # ⚠ LE NOM NE SUFFIT PAS, ET LA MUTATION L'A PROUVE. Vider `with_transport` en `fun.()`
-      # garde le nom, garde les deux appels ci-dessous, et laisse la SUITE ENTIERE verte — le pool
-      # Finch n'existe plus, l'`ArgumentError: unknown registry` revient, et rien ne rougit
-      # (mutation jouee contre les 3576 temoins le 2026-09-07). On epingle donc ce que la fonction
-      # FAIT, pas seulement qu'elle existe : demarrer `:req` et poser le pool de `Fleet.Forge`.
+      # Emptying with_transport to fun.() kept its name; check startup call text in its body.
       corps_transport =
         src
         |> String.split("defp with_transport", parts: 2)
@@ -387,11 +321,7 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       assert corps_transport =~ "finch_spec",
              "with_transport ne pose plus le pool Finch — `unknown registry` revient"
 
-      # ⚠ CE TEMOIN MESURAIT UNE DISTANCE EN CARACTERES (`String.slice(corps, 0, 200)`), et une
-      # distance n'est pas une structure : ajouter un commentaire en tete d'une porte — un geste
-      # qui ne touche a aucun appel — poussait `with_transport` hors de la fenetre et rendait le
-      # temoin rouge. Un test qui casse sur de la prose apprend a le contourner. La borne est
-      # desormais la FIN DE LA FONCTION : la definition suivante au meme niveau d'indentation.
+      # Bound the search by the next function, not an arbitrary character count affected by prose.
       for porte <- ["def eval_main do", "def eval_source(name) when is_binary(name) do"] do
         [_, apres] = String.split(src, porte, parts: 2)
         corps = apres |> String.split(~r/\n  defp? /, parts: 2) |> hd()

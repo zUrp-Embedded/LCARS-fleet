@@ -1,44 +1,16 @@
 defmodule Fleet.Application.CatalogueLifecycle do
   @moduledoc """
-  The state of every catalogue this forge knows about — `available`, `installed`, `updatable`.
+  Reports available/installed catalogue states from visible forge deposits and stores.
+  updatable is an installed qualifier, never an automatic update: installation is
+  an explicit admin action. No per-human activation state is represented.
 
-  ## Two states, and a qualifier on one of them
+  A store, not merely an org or a repository name, determines installed; Deposits
+  classifies owner/name and org status, treating an unreadable owner type as store.
+  This does not prove local material is installed or usable. The bundled catalogue
+  is always reported installed after a successful listing.
 
-  ⚖ user. A catalogue is INSTALLED (the forge carries its source, everyone is served
-  by it) or AVAILABLE (somebody deposited it, nobody installed it). There is no third state and no
-  per-human declaration: activation was a display filter that decided what the fleet worked on, and
-  it is gone.
-
-  `updatable` is not a third state — it is `installed` plus a FACT: the deposit has moved since the
-  install. It never acts on its own. ⚖ user, in capitals: **never an automatic update**; the fact
-  is displayed, and `lcars catalogue install` is the only thing that changes anything.
-
-  ## What signs an installation
-
-  A repo that DECLARES the name of the org it sits in — the source WE pushed into the catalogue's own
-  org. Not "the org exists": an org without its source is an interrupted install, and no container can
-  serve a catalogue whose material is nowhere. Signing on the org alone would report such a catalogue
-  as ready and let a boot discover the hole. The store is the narrower signature and it is the one
-  that matters.
-
-  It sits at `<org>/_catalogue`, and that is an ADDRESS, not the signature. What signs is
-  `owner == manifest.name` (`CatalogueDeposits.split/2`) TOGETHER WITH the owner being an ORG —
-  complementary conditions, neither covering the other. Signing on the repo NAME would reserve the
-  most natural repo name in every user's namespace, and would do it in silence.
-
-  ## The reference catalogue is installed by construction
-
-  `fleet` ships inside the release. The container can serve it without asking anybody, so its state
-  is not a forge question — and answering "available" for it, on a forge that carries no
-  `fleet/_catalogue`, would be a lie about the only catalogue that always works.
-
-  ## An installed catalogue whose deposit vanished
-
-  It stays INSTALLED. Its source is in its org and the fleet serves it; what is lost is the ability
-  to say whether it is up to date, because the thing to compare against is gone — deleted, renamed,
-  or turned private. `updatable?` is `nil` there, and `nil` is not `false`: one means "we cannot
-  know", the other means "it is current", and collapsing them would announce a stale catalogue as
-  fresh.
+  Missing deposit, missing source trailer or unreadable store head yields nil
+  freshness, not false. A missing/unreadable manifest can omit the store upstream.
   """
 
   alias Fleet.Application.CatalogueDeposits
@@ -56,11 +28,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
         }
 
   @doc """
-  Every catalogue the forge knows, by name, with its state.
-
-  ONE `/repos/search` feeds both halves: reading twice could straddle a push and describe a state
-  nobody ever had. A duplicate deposit propagates its refusal — a listing that silently dropped one
-  of two claimants would be exactly the guess we refuse to make.
+  Combines a single repo search and classification with subsequent store-head reads.
+  Search/duplicate errors propagate; sequential reads can straddle changes.
   """
   @spec states(keyword()) :: {:ok, %{String.t() => entry()}} | {:error, term()}
   def states(opts \\ []) do
@@ -68,51 +37,23 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
     with {:ok, repos} <- repo_mod.search_repos(opts),
          {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
-      # `candidates` EST la liste des magasins : `split/2` tranche l'identite ET le type du
-      # proprietaire, donc aucun second jugement ici — un candidat recale par un second lecteur
-      # tomberait dans un trou (cf. `split/2`).
       stores = candidates
 
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
 
-      # ⚠ `entry/5` NE PEUT PAS ECHOUER (une branche d'erreur ici serait morte, le compilateur le
-      # dit), et c'est delibere : une lecture de tete de store qui echoue rend « installe, fraicheur
-      # inconnue », parce qu'un store illisible n'est pas un catalogue non installe. Ce qui peut
-      # echouer est en amont (la forge, le doublon), et ces deux-la remontent.
       {:ok, Map.new(names, &{&1, entry(&1, deposits[&1], stores[&1], repo_mod, opts)})}
     end
   end
 
   @doc """
-  `eval` door for `lcars catalogue list` — one `<STATE> <name> <deposit>` line per catalogue.
-
-  The CLI has NO forge access by design, and every one of these states is a forge fact. It asks the
-  release through the same door `catalogue verify` already uses. The door speaks WORDS, not a
-  formatted table: a column added later must not have to agree across two languages.
-
-  ## The third field is the DEPOSIT, and it is deliberately empty for an installed catalogue
-
-  ⚖ user : *"can `catalogue list` show which user an available catalogue comes from?
-  Once installed, its origin does not matter — at install time it is useful."*
-
-  It is the `<owner>/<repo>` of the deposit, so the owner is its first segment — the forge's own
-  convention, not a second rendering of the same fact. That is exactly the question an admin has
-  before installing: WHOSE material am I about to serve to everyone.
-
-  Once installed it is dropped, and not only because nobody reads it. What the container follows from
-  then on is `<name>/_catalogue`, the store — printing the deposit there names something that is no
-  longer the source, in the column an operator reads AS the source.
-
-  `UPDATABLE` keeps it, and that is the same rule rather than an exception: the deposit is once
-  again what the next `install` would pull from.
+  Prints <STATE> <name> <deposit> lines for the CLI. Available/updatable lines name
+  the deposit (material a future install would pull); installed lines print -.
+  Redirects Logger away from stdout before transport/listing. Exits 0 on success,
+  3 for duplicate deposits and 2 for other returned errors.
   """
   @spec eval_main() :: no_return()
   def eval_main do
-    # ⚠ `cat_states` (bin/lcars) PARSE cette sortie mot par mot, et son `case` ne connait que
-    # INSTALLED / UPDATABLE / AVAILABLE : une ligne de log sur stdout n'y produit AUCUNE ligne de
-    # tableau — un catalogue qui disparait de la liste sans un mot. Ce chemin loggue (deux
-    # `Logger.warning` sous `states/1`). Le pourquoi et la mesure vivent dans `Fleet.ReleaseDoor`.
     Fleet.ReleaseDoor.claim_stdout!()
 
     case with_transport(fn -> states([]) end) do
@@ -133,16 +74,9 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
-  # ON NE COMPARE PAS DEUX SHA DE COMMIT DE PART ET D'AUTRE D'UNE PROJECTION. Le store est un commit
-  # FRAIS qui reflete l'arbre du depot : deux commits de contenu identique ne partagent JAMAIS de
-  # sha, donc une telle comparaison repond « commit different », ce qui est toujours vrai. Le
-  # symptome est un catalogue installe trente secondes plus tot qui sort UPDATABLE, avec pour seul
-  # geste offert de le reinstaller pour rien.
-  #
-  # La projection porte donc SA SOURCE (`Source-Commit:`, ecrit par `push_store`), et c'est elle
-  # qu'on compare. Pas de trailer = `nil`, « on ne peut pas savoir » : un store pousse par une
-  # version anterieure du geste ne doit pas etre annonce a jour, ni updatable, sur une comparaison
-  # qu'on n'a pas pu faire.
+  # Store projection commits can differ from source commits with the same content.
+  # Compare the Source-Commit trailer, accepting a 7..40 lowercase-hex prefix;
+  # no matching trailer means unknown. This is not a tree or ancestry comparison.
   @source_rx ~r/^Source-Commit:\s*([0-9a-f]{7,40})\s*$/m
 
   defp updatable?(nil, _head), do: nil
@@ -155,33 +89,11 @@ defmodule Fleet.Application.CatalogueLifecycle do
   end
 
   @doc """
-  `eval` door for `catalogue install` — resolves ONE name to the deposit that carries it.
-
-  Prints `<repo> <branch> <sha>` on stdout, and nothing else: the caller feeds it to `git clone`,
-  so a line of politeness would become part of a URL.
-
-  ⚠ ET RIEN NE TIENT CETTE PHRASE SANS `claim_stdout!/0`, qui renvoie le handler Logger vers
-  stderr. Ses quatre soeurs l'appellent (`eval_main/0` juste au-dessus, les deux portes d'`Onboard`,
-  `CatalogueVerify`) ; son absence dort tant qu'aucun log ne sort sur ce chemin, et se reveille au
-  premier — par exemple une candidature de depot ecartee, que `CatalogueDeposits` DIT deliberement
-  plutot que d'ecarter en silence.
-
-  Ce que ca coute (mesure) : la porte rend une ligne vide, puis le log, puis la reponse. `read -r
-  repo branch sha` lit la PREMIERE ligne, les trois champs sortent VIDES, l'URL est construite sur
-  du neant, et git repond `fatal: repository 'http://.../.git/' not found` — l'outil a qui on vient
-  de passer du vide se fait accuser.
-
-  The three refusals it owes the caller, each with its own exit code, because they call for three
-  different gestures:
-
-    * `2` — nobody deposited that name. Push it to your own space on the forge first.
-    * `3` — TWO deposits claim it. ⚖ user: we do not guess. Both owners are named; they settle it.
-    * `4` — it is already the STORE of an installed catalogue, not a deposit. Nothing to install
-      from itself.
-
-  `#{"fleet"}` is refused too, and not because it is precious: it ships INSIDE the release, so
-  there is no deposit to install from and no version to move to. Installing it would be a gesture
-  with no object.
+  Resolves a visible deposit to <repo> <branch> <sha> on stdout for shell cloning.
+  Claim stdout before calls that may log, or a log can be parsed as the clone URL.
+  Exits 0 for a source, 2 if absent (including store-only names), 3 for duplicate
+  deposits and 1 for other returned errors. The bundled #{"fleet"} clause exits 4.
+  Refusal of a store-only name does not have a separate exit code.
   """
   @spec eval_source(String.t()) :: no_return()
   def eval_source(@bundled) do
@@ -193,13 +105,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
     System.halt(4)
   end
 
-  # ⚠ DEUX CLAUSES, PAS UN `cond` AVEC UN HELPER PRIVE. Dialyzer refuse le second : toutes ses
-  # branches appellent `System.halt`, donc il n'a pas de retour local, et un `@spec no_return()` sur
-  # un prive serait une annotation pour taire un outil. La forme a deux clauses dit la meme chose
-  # sans rien annoter.
   def eval_source(name) when is_binary(name) do
-    # AVANT TOUT APPEL QUI PEUT LOGGUER — `list/1` en emet au moins deux (le depot du catalogue
-    # livre, un manifeste illisible), et un log emis avant ce geste part sur stdout.
     Fleet.ReleaseDoor.claim_stdout!()
 
     case with_transport(fn -> CatalogueDeposits.list([]) end) do
@@ -227,20 +133,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
-  # LE TRANSPORT N'EST PAS DEMARRE SOUS `LCARS_TOOL_EVAL=1`, ET AUCUN TEMOIN NE PEUT LE VOIR.
-  # Une porte `eval` saute tout le corps de config de deploiement — c'est le but du drapeau — donc
-  # l'app n'est pas demarree et le pool Finch de `Fleet.Forge` n'existe pas. Or les deux portes
-  # d'ici appellent la forge : sans le demarrage ci-dessous, `lcars catalogue list` rend
-  # `** (ArgumentError) unknown registry: Fleet.Forge.Finch` sous la ligne « la forge n'a pas
-  # repondu », c'est-a-dire UN DIAGNOSTIC DE RESEAU POUR UNE PANNE DE DEMARRAGE.
-  #
-  # ⚠ ET LES TEMOINS NE PEUVENT PAS L'ATTRAPER : ils injectent des doublures de `forge_repo` et
-  # `forge_files`, donc le chemin qui a besoin du pool n'est pris par personne.
-  # `Fleet.Project.Onboard.eval_migrate/2` porte deja ce demarrage et dit pourquoi — c'est la meme
-  # raison, a la meme frontiere.
-  #
-  # `Application.ensure_all_started(:req)` puis le superviseur local : le pool est DECLARE par
-  # `Fleet.Forge.finch_spec/0`, sa propre autorite, jamais recompose ici.
+  # Tool eval does not start the fleet, so initialize req and Forge's Finch pool here.
+  # Stub-based listing tests cannot prove this transport path works in a fresh release.
   defp with_transport(fun) do
     with {:ok, _} <- Application.ensure_all_started(:req),
          {:ok, _} <- Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one) do
@@ -251,11 +145,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
   end
 
   @doc """
-  The `eval_main/0` output, as a list of lines — the same rendering, without the exit.
-
-  It exists to be witnessed. `eval_main/0` ends in `System.halt/1`, so nothing can assert on what it
-  printed from inside the VM that runs the assertion; a private formatter would then be covered only
-  by a bench run — and a column an operator reads is not a place to discover a rendering defect.
+  Renders state lines without halting the VM. Installed entries hide the deposit
+  unless updatable is true; nil freshness is not distinguished in the text output.
   """
   @spec lines(%{String.t() => entry()}) :: [String.t()]
   def lines(entries), do: Enum.map(entries, fn {name, e} -> line(name, e) end)
@@ -268,8 +159,6 @@ defmodule Fleet.Application.CatalogueLifecycle do
   defp line(name, %{state: :available, deposit: d}),
     do: "AVAILABLE #{name} #{d.repo}"
 
-  # The bundled reference: installed by construction, and never comparable to a deposit — the
-  # release carries its material, so nothing on the forge decides its state.
   defp entry(@bundled, _deposit, _store, _repo_mod, _opts),
     do: %{name: @bundled, state: :installed, updatable?: nil, deposit: nil, store: nil}
 
@@ -285,16 +174,12 @@ defmodule Fleet.Application.CatalogueLifecycle do
         %{
           name: name,
           state: :installed,
-          # `nil` when there is nothing to compare against — cf. the moduledoc: not knowing is not
-          # the same answer as being current.
           updatable?: updatable?(deposit, head),
           deposit: deposit,
           store: full
         }
 
       {:error, reason} ->
-        # An unreadable store is NOT "not installed": the source is right there and the fleet serves
-        # it. What we lose is the comparison, so we say installed and unknown rather than invent one.
         require Logger
 
         Logger.warning(
@@ -306,8 +191,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
-  # A store with no deposit is still an installed catalogue — this clause only exists because the
-  # one above requires `is_map(store)` and the compiler cannot see they are exhaustive together.
+  # Fallback for no usable deposit/store; a store without a deposit matches the prior clause.
   defp entry(name, _deposit, _store, _repo_mod, _opts),
     do: %{name: name, state: :available, updatable?: nil, deposit: nil, store: nil}
 end

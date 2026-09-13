@@ -1,17 +1,9 @@
 defmodule Fleet.Admiral.ToolchainReconcilerTest do
   @moduledoc """
-  Le déclencheur est une COMPARAISON, et ces cas défendent les endroits où elle peut mentir.
-
-  Trois mensonges possibles, tous silencieux : conclure « à jour » quand la forge est injoignable,
-  conclure « à jour » sur un conteneur qui n'a jamais rien appliqué (LE CAS DU REBUILD — le marqueur
-  meurt avec le conteneur, c'est voulu), et noter un SHA que le convergeur n'a pas réussi à poser.
-  Les trois rendraient un état approuvé mais non appliqué — précisément ce que le rail entier
-  existe pour supprimer.
-
-  FORME : les témoins pilotent `check_now/1` — le hook `PeriodicCheck` qui REJOUE le chemin
-  complet du tick sans re-armer. Une v1 exposait `reconcile/1` à la main « pour la testabilité »,
-  la forme que `04` §6 condamne : des témoins qui passeraient inchangés prouveraient que la
-  migration n'a pas eu lieu.
+  Exercises manual passes with forge/convergence stubs and a temporary marker.
+  Socket cases use a fake privileged service. Checks marker/result protocol, not
+  package installation, container rebuild mounts, protected-branch policy or timers.
+  rc=2 freeze cases inject converger_failed; the default socket uses converger_refused.
   """
   use ExUnit.Case, async: false
 
@@ -23,7 +15,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     def branch_head(_repo, _branch, _opts),
       do: {:ok, :persistent_term.get({__MODULE__, :head}, "sha-1")}
 
-    # La 2e passe (drain) : PRs scriptees, issue au verrou scriptable, gestes ENREGISTRES.
     def list_pulls_for_base(_repo, _base, _opts),
       do: {:ok, :persistent_term.get({__MODULE__, :prs}, [])}
 
@@ -63,8 +54,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     prev_conv = Application.get_env(:lcars_fleet, :toolchain_converger)
     Application.put_env(:lcars_fleet, :admiral_forge_client, ForgeUp)
 
-    # Le convergeur par défaut appellerait `sudo`. Ici il ENREGISTRE, parce que ce qu'on teste est
-    # la décision de l'appeler et l'ordre dans lequel le SHA est noté — pas ce que root fait.
+    # Record calls instead of invoking the privileged socket service.
     test = self()
 
     Application.put_env(:lcars_fleet, :toolchain_converger, fn head, _opts ->
@@ -76,8 +66,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       end
     end)
 
-    # Le GenServer REEL, nom unique, intervalle d'une heure : aucun tick ne tire pendant le test,
-    # tout passe par `check_now` — le chemin du timer, rejoué à la demande.
+    # Long interval keeps these cases on the manual path, not periodic re-arming.
     name = :"recon_#{System.unique_integer([:positive])}"
     pid = start_supervised!({R, name: name, interval_ms: 3_600_000})
 
@@ -107,9 +96,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   describe "la comparaison" do
     test "conteneur neuf (ou REBUILDÉ) : AUCUN SHA appliqué ⇒ il converge, même si la branche n'a pas bougé",
          %{server: server} do
-      # LE CAS DU REBUILD, et c'est pour lui que `nil` ≠ « à jour » ET que le marqueur vit avec le
-      # conteneur : /usr est revenu à la baseline de l'image pendant que la branche, elle, n'a pas
-      # changé d'un octet.
+      # An absent marker simulates the comparison input after rebuild; no rebuild occurs.
       assert R.applied_sha() == nil
       assert {:ok, :converged, "sha-1"} = R.check_now(server)
       assert_received {:converged, "sha-1"}
@@ -118,8 +105,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "le SHA noté, la passe suivante ne fait RIEN", %{server: server} do
       {:ok, :converged, _} = R.check_now(server)
       assert R.applied_sha() == "sha-1"
-      # On CONSOMME le message de la première passe : sans ça le `refute` ci-dessous attraperait
-      # celle-là et le témoin passerait pour une raison qui n'est pas la sienne.
+      # Consume the first call before asserting that the second pass does not repeat it.
       assert_received {:converged, "sha-1"}
 
       assert {:ok, :up_to_date} = R.check_now(server)
@@ -139,8 +125,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "forge injoignable : ce n'est PAS « à jour »", %{server: server} do
       Application.put_env(:lcars_fleet, :admiral_forge_client, ForgeDown)
 
-      # Rendre `:up_to_date` ici ferait qu'une panne réseau se lise comme « rien à faire » — et sur
-      # un rebuild le conteneur resterait sans outillage en annonçant que tout va bien.
       assert {:error, {:branch_unreadable, :econnrefused}} = R.check_now(server)
       assert R.applied_sha() == nil
       refute_received {:converged, _}
@@ -151,8 +135,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
       assert {:error, :boom} = R.check_now(server)
 
-      # Noter avant d'appliquer ferait d'un convergeur mort en route un conteneur qui se croit à jour :
-      # la passe suivante verrait « pas d'écart » et l'état approuvé resterait non appliqué.
       assert R.applied_sha() == nil
 
       converger_result(:ok)
@@ -173,8 +155,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "convergé quand même, mais le SHA n'a nulle part où vivre — et ça se DIT", %{
       server: server
     } do
-      # Un CHEMIN qui ne peut pas exister (fichier en travers) : mkdir_p et write échouent tous
-      # les deux — le cas « répertoire non posé par le provisioning », sans toucher au FS réel.
+      # A temporary file blocks parent-directory creation and marker writing.
       blocker =
         Fleet.TestEnv.tmp_path("lcars-recon-block")
 
@@ -187,8 +168,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
           assert {:ok, :converged, "sha-1"} = R.check_now(server)
         end)
 
-      # Sans mémoire, la passe suivante reconvergera. C'est correct (la convergence est idempotente)
-      # et ça doit être visible plutôt que d'être pris pour un cycle normal.
       assert R.applied_sha() == nil
       assert log =~ "INÉCRIVABLE"
     end
@@ -196,12 +175,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
   describe "la plomberie est à PeriodicCheck, pas ici" do
     test "le module ne porte AUCUN timer maison" do
-      # ⚠ INTERDIRE DES NOMS SE CONTOURNE PAR UN AUTRE NOM. Les deux `refute` d'avant nommaient
-      # `Process.send_after` et `defp schedule` : reintroduire un timer sous `:timer.send_interval`,
-      # `:erlang.send_after` ou `defp replanifier` les laissait verts, et la plomberie que ce
-      # describe existe pour tenir revenait en silence. On interdit la FORME, pas deux ecritures :
-      # tout ce qui arme un reveil, et toute clause qui recoit un message periodique en dehors de
-      # ce que `PeriodicCheck` route.
+      # Textual guard against several timer APIs, not an AST or behavior check.
       src = File.read!("lib/fleet/admiral/toolchain_reconciler.ex")
 
       code =
@@ -221,8 +195,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
              "un timer maison est revenu dans ce module — la plomberie appartient a " <>
                "`PeriodicCheck` :\n" <> Enum.join(armes, "\n")
 
-      # ET LE POSITIF : c'est bien `PeriodicCheck` qui planifie ici. Sans lui, les `refute`
-      # ci-dessus seraient verts sur un module qui ne planifie plus RIEN du tout.
+      # This only checks that PeriodicCheck occurs in source, not that it schedules.
       assert src =~ "PeriodicCheck",
              "plus aucune planification : le reconciliateur ne tourne plus, et l'absence de timer " <>
                "maison n'est plus une bonne nouvelle"
@@ -230,9 +203,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   describe "la seconde passe — le drain (une PR fermee ne fait pas bouger la branche)" do
-    # La forme complete vient de la capture reelle ; ce fichier n'enonce que les FAITS dont il
-    # depend. Un champ qu'il ne nomme pas garde sa valeur reelle au lieu d'etre absent — un garde
-    # qui le lirait ne retombe donc plus sur son repli sans le dire.
+    # Extend the captured forge payload with the facts needed by this scenario.
     defp pr(faits \\ []) do
       PayloadFixture.pull(
         [
@@ -257,7 +228,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "PR MERGEE mais branche NON appliquee (convergeur en echec) => PAS de drain", %{
       server: server
     } do
-      # Re-dispatcher un work-item AVANT que sa toolchain soit posee le renverrait au mur.
       converger_result({:error, :boom})
       :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
 
@@ -266,7 +236,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     end
 
     test "PR FERMEE SANS MERGE => drain SANS condition, avec le refus commente", %{server: server} do
-      # Il n'y a rien a attendre : la branche n'a pas bouge et ne bougera pas pour cette PR.
       converger_result({:error, :boom})
       :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
 
@@ -314,12 +283,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       assert {:error, {:converger_failed, 2, _}} = R.check_now(server)
       assert_received {:converged, "sha-1"}
 
-      # Même head : GELÉ — sans ce gel, le rail reboucle toutes les 60 s sur une faute qu'aucun
-      # rejeu ne répare (en re-téléchargeant l'installeur à chaque tour — audit 2026-08-19).
       assert {:error, {:manifest_rejected, "sha-1"}} = R.check_now(server)
       refute_received {:converged, _}
 
-      # La branche bouge : le gel se PURGE, le nouveau document a droit à sa chance.
       converger_result(:ok)
       :persistent_term.put({ForgeUp, :head}, "sha-2")
       assert {:ok, :converged, "sha-2"} = R.check_now(server)
@@ -337,16 +303,9 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     end
   end
 
-  # ─── LE SUDO A DISPARU, ET AVEC LUI L'ARGUMENT ────────────────────────────────────────────────
-  #
-  # Le geste était `sudo -n /usr/local/bin/lcars-toolchain-converge <sha>`, autorisé par
-  # `%fleet ALL=(root) NOPASSWD:` — un chemin `groupe → root` DIRECT, sur un groupe que le
-  # convergeur d'humains repeuple depuis la forge toutes les 30 s. Il passe par `toolchain.sock`,
-  # et le service y résout LUI-MÊME la tête de la branche protégée : ce module ne dit plus QUOI
-  # appliquer, il dit « converge ».
+  # Default transport connects without sending a SHA; the service chooses what to apply.
 
-  # `nil` ferme SANS ecrire : c'est la doublure du service qui accepte puis raccroche, et le rail
-  # doit distinguer ce silence d'une reponse vide.
+  # nil closes without a line, exercising a different result from an empty line.
   defp answer_once({:ok, conn}, reply) do
     if reply, do: :gen_tcp.send(conn, reply <> "\n")
     :gen_tcp.close(conn)
@@ -354,7 +313,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
   defp answer_once(_accept_failed, _reply), do: :ok
 
-  # Un serveur de socket unix qui rend UNE ligne puis ferme. `nil` = il ferme sans rien écrire.
   defp fake_privileged(reply) do
     path = Path.join(System.tmp_dir!(), "tc-#{System.unique_integer([:positive])}.sock")
 
@@ -376,11 +334,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   describe "le SHA noté est celui qui a été APPLIQUÉ" do
-    # ⚠ SANS CE TÉMOIN, LA PANNE EST MUETTE ET DÉFINITIVE. Entre notre lecture de la tête et la
-    # résolution que le service fait de son côté, la branche peut avancer — le rail EXISTE pour que
-    # des PR y atterrissent. Noter NOTRE tête ferait croire le conteneur à jour sur un état qu'il n'a
-    # pas appliqué, et le tick suivant ne verrait AUCUN écart : plus jamais de convergence, et rien
-    # ne le dirait.
+    # The fake service reports a different SHA; the marker must preserve its response.
     test "la branche a avancé pendant la convergence → c'est l'état APPLIQUÉ qui est noté", %{
       server: server
     } do
@@ -390,8 +344,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       assert R.applied_sha() == "sha-plus-recent"
     end
 
-    # LE TÉMOIN DU TÉMOIN : sans lui, un module qui noterait n'importe quoi passerait le test
-    # ci-dessus, et le cas nominal ne serait couvert par personne.
     test "cas nominal : le service rend la tête qu'on avait lue, elle est notée telle quelle", %{
       server: server
     } do
@@ -403,9 +355,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   describe "la porte fermée et la porte gardée ne se disent pas pareil" do
-    # ⚠ UNE SOCKET ABSENTE EST UN FAIT SYSTÈME, PAS UN REFUS. Les confondre envoie l'opérateur
-    # chercher une autorisation manquante alors qu'il lui manque une unité qui tourne. Même
-    # séparation que `Fleet.Credentials.Authority` tient côté credentials.
     test "socket absente → :privileged_unreachable, jamais un refus du convergeur", %{
       server: server
     } do
@@ -419,10 +368,6 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute R.applied_sha() == "sha-1"
     end
 
-    # ⚠ ET UNE LIGNE VIDE N'EST PAS UN SUCCÈS. Un service qui ferme avant de répondre rend une
-    # chaîne vide ; la lire comme « appliqué » noterait un SHA jamais posé — exactement le succès
-    # muet que tout ce rail refuse. Le chantier voisin a mesuré la même chose sur `socat`, qui rend
-    # ZÉRO avec une sortie VIDE.
     test "le service ferme sans répondre → :converger_mute, jamais « appliqué »", %{
       server: server
     } do
@@ -439,14 +384,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute R.applied_sha() == "sha-1"
     end
 
-    # ⚠ CE TÉMOIN A ÉTÉ AJOUTÉ PARCE QU'UNE MUTATION EST PASSÉE MUETTE, ET LA LEÇON VAUT PLUS QUE
-    # LE CAS. Je croyais couvrir « réponse illisible » avec le service qui ferme sans écrire — mais
-    # une socket fermée rend `{:error, :closed}`, PAS une ligne vide. Les deux situations empruntent
-    # deux branches différentes, et seule la première était exercée : rendre `{:ok, _}` sur une
-    # réponse inintelligible ne faisait rougir personne.
-    #
-    # C'est exactement le succès muet que ce rail refuse ailleurs : un service d'un autre lot, ou un
-    # relais qui s'intercale, répondrait autre chose — et le conteneur noterait un SHA jamais appliqué.
+    # Closed socket, unrecognized line and empty line traverse distinct failure branches.
     test "une réponse INCOMPRÉHENSIBLE n'est pas un succès", %{server: server} do
       path = fake_privileged("bonjour")
 
@@ -461,9 +399,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       refute R.applied_sha() == "sha-1"
     end
 
-    # ⚠ ET `OK:` SANS SHA NON PLUS. La garde `byte_size(sha) > 0` existe pour ça : un service qui
-    # répond `OK:` tout court ferait écrire un marqueur VIDE, et `applied_sha/0` lit alors « aucun
-    # SHA appliqué » — donc une reconvergence à chaque tick, indéfiniment, sans qu'une ligne le dise.
+    # OK without a SHA must not create an empty marker and force endless reconvergence.
     test "« OK: » sans SHA n'est pas un succès", %{server: server} do
       path = fake_privileged("OK:")
 
