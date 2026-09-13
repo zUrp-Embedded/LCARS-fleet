@@ -1,15 +1,11 @@
 defmodule Fleet.Project.OnboardMigrateTest do
   @moduledoc """
-  Migration of a project from one catalogue to another, SUCCESS path.
+  Migration repoints real local Git origins after a stubbed forge transfer.
+  It reports absent faces without testing forge metadata, redirects or rollback.
+  Despite the migration group's title, the operation is not atomic.
 
-  The forge half is Gitea's (one transfer call, everything survives, the old URL 301s) and is
-  measured on the bench. What belongs to LCARS is the other half: the three local faces must end up
-  pointing at the new URL, and a face that was never opened here must NOT turn the migration into a
-  failure — the transfer has already happened, and refusing afterwards would leave the two halves in
-  disagreement.
-
-  `async: false`: activating a second catalogue writes GLOBAL app env. An async file doing that
-  leaks into whatever runs beside it.
+  Deposit tests cover candidate naming/visibility and refusal paths, not successful copying.
+  Synchronous because catalogue discovery uses global app configuration.
   """
   use ExUnit.Case, async: false
 
@@ -18,10 +14,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
   @old_url "http://forge.test/fleet/vitrine.git"
 
   defmodule RefuseUsers do
-    # Refuse l'org, et ENREGISTRE celle sur laquelle on l'a interroge — c'est le fait mesure. Le
-    # stub portait `user_exists?`/`team_member?` : le preflight HUMAIN est mort le 2026-08-17, la
-    # garde forge qui suit l'admission locale demande desormais `org_exists?`. Ce que le temoin
-    # mesure n'a pas bouge d'un pouce — SUR QUELLE ORG la garde suivante est interrogee.
+    # Record the org queried so a wrong first-catalogue default is observable.
     def org_exists?(org, _fc), do: {:ok, put_org(org)}
 
     defp put_org(org),
@@ -35,10 +28,9 @@ defmodule Fleet.Project.OnboardMigrateTest do
   end
 
   defmodule TransferOk do
-    # The seam stands where the network would be: `migrate` is called with the OLD name and must
-    # thread the target catalogue as the new owner.
+    # Match both source and target at the transfer seam.
     def transfer_repo("fleet/vitrine", "web", _fc), do: {:ok, "web/vitrine"}
-    # A deposit is public unless a test says otherwise: the private case has its own stub below.
+
     def private?(_repo, _fc), do: {:ok, false}
   end
 
@@ -54,8 +46,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
     home = Path.join(tmp, "operator")
     File.mkdir_p!(Path.join(home, "catalogues"))
 
-    # `fleet` resolves to the BUNDLED root, manifest included; only the second one is a fixture.
-    # The name comes from the manifest, never from the directory: a catalogue carries its identity.
+    # The bundled catalogue already has its manifest; the second fixture needs one for discovery.
     web = Path.join([home, "catalogues", "web"])
     File.mkdir_p!(Path.join(web, Fleet.Catalogue.rel(:cap_profiles)))
     File.write!(Path.join(web, "catalogue.yaml"), "api_version: 1\nname: web\n")
@@ -67,7 +58,6 @@ defmodule Fleet.Project.OnboardMigrateTest do
     %{tmp: tmp}
   end
 
-  # A face as it exists on a container: a real repo whose `origin` still names the OLD owner.
   defp face(tmp, kind) do
     dir = Path.join([tmp, kind, "vitrine"])
     File.mkdir_p!(dir)
@@ -81,11 +71,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
     String.trim(url)
   end
 
-  # ⚠ AUCUNE DE CES CIBLES N'EST UN MAGASIN DE CATALOGUE, ET IL FAUT LE DIRE. Depuis le 2026-08-21
-  # `import/2` et `migrate/3` demandent a leur cible « quel catalogue declares-tu ? » avant d'agir,
-  # et une lecture qui ECHOUE est un refus (`:store_check_unreadable`), pas un `:ok`. Sans cette
-  # doublure, la vraie cliente forge repond `{:config, {:missing, :base_url}}` et ces temoins
-  # mesureraient ce refus-la en croyant mesurer le leur.
+  # Admit the fixtures as non-stores so tests reach their intended guards instead of a real API read.
   defmodule NotCatalogues do
     def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
   end
@@ -102,7 +88,6 @@ defmodule Fleet.Project.OnboardMigrateTest do
   end
 
   defmodule TwoOrgs do
-    # `fleet` already carries `vitrine`; `web` is empty. The human has three personal repos.
     def list_user_repos("lordzurp", _fc),
       do: {:ok, ["lordzurp/vitrine", "lordzurp/mon-projet", "lordzurp/chifoumi"]}
 
@@ -127,24 +112,20 @@ defmodule Fleet.Project.OnboardMigrateTest do
       assert {:ok, candidats} =
                ProjectOnboard.deposit_candidates("lordzurp", forge_repo: TwoOrgs)
 
-      # `vitrine` exists in the `fleet` org. Importing takes a COPY and leaves the original with
-      # its owner, so without this filter the same repo would be offered on every pass.
+      # Source copies remain personal: suppress already-enrolled basenames to avoid repeated offers.
       assert Enum.map(candidats, & &1["source"]) == ["lordzurp/chifoumi", "lordzurp/mon-projet"]
       assert Enum.all?(candidats, & &1["admissible"])
     end
 
     @tag :tmp_dir
     test "an unreachable org REFUSES instead of returning a list that is too wide" do
-      # A list too wide would offer to import what is already in — fail-loud, never fail-open.
       assert {:error, {:enrolled_scan_failed, "web", _}} =
                ProjectOnboard.deposit_candidates("lordzurp", forge_repo: OrgDown)
     end
 
     @tag :tmp_dir
     test "a name the import would refuse is LISTED with its reason, not silently dropped" do
-      # The import is too late to learn the rule: the human has already pushed everything. And
-      # dropping the candidate would be worse than refusing it — a repo that is simply absent from
-      # the list looks like a repo the fleet cannot see, which sends the human debugging the forge.
+      # Keep inadmissible candidates visible with a reason; omission would look like a discovery failure.
       assert {:ok, [candidat]} =
                ProjectOnboard.deposit_candidates("lordzurp", forge_repo: BadName)
 
@@ -157,8 +138,6 @@ defmodule Fleet.Project.OnboardMigrateTest do
   describe "import_deposit : les refus d'admission, avant tout effet de bord" do
     @tag :tmp_dir
     test "un depot DEJA dans une org de catalogue n'est pas un depot", %{tmp: tmp} do
-      # Le reprendre par cette porte le clonerait puis le recreerait ailleurs, alors que les verbes
-      # justes existent : import/2 pour l'adopter, migrate/3 pour le changer de catalogue.
       assert {:error, {:source_already_enrolled, "fleet/vitrine", "fleet"}} =
                ProjectOnboard.import_deposit("fleet/vitrine", "web", opts(tmp))
     end
@@ -179,10 +158,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "a PRIVATE deposit is refused by name, never cloned", %{tmp: tmp} do
-      # There is no config lever forcing public repos (`DEFAULT_PRIVATE` does not exist in the
-      # Gitea we run), so the door is the only place this can be stopped. And it must be ASKED:
-      # this runtime's git carries the system token, so the clone of a private source would
-      # SUCCEED and its content would land in a public org repo with nothing said.
+      # Authenticated cloning can succeed on private sources; visibility must be checked explicitly.
       assert {:error, {:deposit_not_public, "lordzurp/secret"}} =
                ProjectOnboard.import_deposit(
                  "lordzurp/secret",
@@ -205,12 +181,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
   describe "import : l'org vient du DEPOT, pas du premier catalogue installe" do
     @tag :tmp_dir
     test "un depot du SECOND catalogue passe les gardes d'org", %{tmp: tmp} do
-      # Avant : `org = opts[:org] || default_org()` rendait `fleet`, donc `web/vitrine` etait refuse
-      # en {:not_in_org, "web/vitrine", "fleet"} — un depot d'un catalogue installe, refuse parce qu'il
-      # n'etait pas dans le PREMIER. Et l'humain etait verifie contre l'org d'un autre catalogue.
-      #
-      # Ce test n'attend pas un succes : l'import va plus loin (forge, faces). Il epingle ce qui
-      # doit NE PLUS arriver.
+      # Import must query the source owner's catalogue, even when it is not the first installed one.
       result =
         ProjectOnboard.import("web/vitrine",
           forge_users: RefuseUsers,
@@ -223,9 +194,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
       refute match?({:error, {:not_in_org, _, _}}, result)
 
-      # La garde suivante est l'existence de l'org SUR LA FORGE, et elle est interrogee sur l'org DU
-      # DEPOT. Meme atome que le refus local (`catalogue_not_installed`) : c'est le meme FAIT mesure
-      # a sa source, la moitie forge d'un install au lieu de la moitie locale.
+      # The subsequent forge refusal records which org was queried.
       assert {:error, {:catalogue_not_installed, _, _}} = result
       assert RefuseUsers.last_org() == "web"
     end
@@ -249,7 +218,6 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "une face jamais ouverte ICI ne fait pas echouer une migration deja faite", %{tmp: tmp} do
-      # Only the code face exists: the two others were never opened on this container.
       code = face(tmp, "code")
 
       assert {:ok, %{repo: "web/vitrine", faces: faces, absent: absent}} =
@@ -257,9 +225,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
       assert origin(code) == "http://forge.test/web/vitrine.git"
 
-      # Le compte rendu dit ce qui a ETE fait, pas ce qui etait vise. Mesure sur banc le
-      # 2026-08-11 : la porte annoncait trois faces repointees sur un conteneur ou les trois etaient
-      # absentes — la moitie forge etait juste, et le rapport mentait.
+      # Report actual repoints rather than claiming all three intended faces were changed.
       assert faces == [code]
       assert length(absent) == 2
       refute code in absent
