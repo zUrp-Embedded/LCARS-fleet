@@ -54,7 +54,7 @@ EOF
   cat > "$RACINE/runtime/services/forge-gestures.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "GESTE $*" >> "$CALLS"
-{ env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE|LCARS_BUILTIN_HUMAN)=' | sort
+{ env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE|LCARS_BUILTIN_HUMAN|LCARS_FORGE_ORG|LCARS_CATALOGUES_WORK|LCARS_MASTER_TOKEN_FILE|LCARS_FORGE_SEED_FILE)=' | sort
   echo "recette: $(ls -A "$LCARS_RECIPE_DIR" | sort | tr '\n' ' ')"
   echo "instance: $(ls -A "$LCARS_RECIPE_DIR/instance" | sort | tr '\n' ' ')"
 } > "$GESTE_ENV"
@@ -121,6 +121,17 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucune release exécutable posée ($PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy n'a pas abouti"* ]]
   [ ! -s "$CALLS" ]
+}
+
+@test "apply : le geste reçoit l'organisation, le dossier de travail tofu et les fichiers d'autorité que l'installeur a posés" {
+  export PROV_FORGE_ORG=flotte-temoin PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/travail-tofu"
+  export PROV_FORGE_SEED_FILE="$PROV_TOKENS_DIR/semence-temoin.pass"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qxF "LCARS_FORGE_ORG=flotte-temoin" "$GESTE_ENV"
+  grep -qxF "LCARS_CATALOGUES_WORK=$BATS_TEST_TMPDIR/travail-tofu" "$GESTE_ENV"
+  grep -qxF "LCARS_MASTER_TOKEN_FILE=$PROV_MASTER_TOKEN_FILE" "$GESTE_ENV"
+  grep -qxF "LCARS_FORGE_SEED_FILE=$PROV_TOKENS_DIR/semence-temoin.pass" "$GESTE_ENV"
 }
 
 @test "apply : le roster est dérivé de la release sous l'humain en mode outil, déposé dans une copie de la recette initialisée hors-ligne, le geste reçoit la forge et l'autorité, les copies partent, la pose est comptée" {

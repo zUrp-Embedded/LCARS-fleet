@@ -298,7 +298,7 @@ case "$SUBSTRATE" in
   docker) TERRAIN="dans un conteneur" ;;
 esac
 SYSTEMD="systemd actif"; [[ "$(fait systemd)" == "oui" ]] || SYSTEMD="sans systemd"
-GROUPES="$(fait groupes | tr ',' '\n' | grep -xE 'sudo|docker|fleet' | paste -sd, - | sed 's/,/, /g')"   # ceux qui comptent ici
+GROUPES="$(fait groupes | tr ',' '\n' | { grep -xE 'sudo|docker|fleet' || true; } | paste -sd, - | sed 's/,/, /g')"
 [[ -n "$GROUPES" ]] || GROUPES="ni sudo, ni docker, ni fleet"
 
 echo "  ${W}Source${N}     $SOURCE_LIGNE"

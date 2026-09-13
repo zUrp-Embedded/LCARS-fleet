@@ -72,7 +72,7 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/services/forge-recipe}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
 # que le verrou d'apply y vit — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
-CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
+CATALOGUE_WORK="${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}"
 # Le nom vit ici parce que ce fichier est ce qui ECRIT le magasin : une adresse appartient a celui
 # qui pose. Rien ne se DECIDE en la lisant. Le `_` initial est de l'UX (⚖ user) : il separe a l'oeil
 # ce que la fleet pose de ce qu'un humain depose.
@@ -145,9 +145,9 @@ put_secret() { # $1=chemin  $2=valeur
   mv -f "$tmp" "$1"
 }
 
-read_stdin_secret() {
+read_stdin_secret() { # un secret arrive par un tube ; un terminal n'en porte pas, et une ligne tapée n'en est pas un
   local v=""
-  IFS= read -r v || true
+  [[ -t 0 ]] || { IFS= read -r v || true; }
   printf '%s' "$v"
 }
 

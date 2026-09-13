@@ -210,6 +210,13 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"Outils     git, curl, sudo présents"* ]]
 }
 
+@test "un utilisateur hors de sudo, docker et fleet voit le bilan, et le bilan le dit" {
+  local a; a="$(_arbre groupes=temoin,users)"
+  porte "$a" --bench --check
+  [[ "$output" == *"utilisateur temoin · groupes ni sudo, ni docker, ni fleet"* ]]
+  [[ "$output" == *"Outils"* ]]
+}
+
 @test "un fait absent s'affiche comme inconnu, jamais comme une mesure" {
   local a; a="$(_arbre ram_mb= arch=)"
   porte "$a" --bench --check

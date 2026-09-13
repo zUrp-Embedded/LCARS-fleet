@@ -118,6 +118,8 @@ services_env_body() {
   echo "LCARS_CONSOLE_GROUP=$PROV_CONSOLE_GROUP"
   echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"
   echo "LCARS_ROLES=\"$PROV_ROLES\""
+  echo "LCARS_CATALOGUES_WORK=$PROV_CATALOGUES_WORK"
+  echo "TF_CLI_CONFIG_FILE=${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}/tofurc"
 }
 
 # pas de User= : la landing se dépose elle-même (setpriv) et garde ainsi le groupe lcars-console qui traverse les sockets

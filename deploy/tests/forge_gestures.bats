@@ -75,7 +75,7 @@ FAKE
   # Le verrou d'apply vit dans le tmpdir du test : `/run/lock` n'est pas ecrivable par le temoin,
   # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
   export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu"
+  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu"
   # Le CACHE local du materiel. Pointe dans le tmpdir : sans ca le temoin ecrirait dans
   # `/home/catalogues`, c'est-a-dire dans le conteneur de celui qui lance la suite.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
@@ -219,6 +219,16 @@ FAKE
   [ "$(cat "$PRIV/forge-master.token")" = "TOK-CONTENEUR" ]
 }
 
+@test "apply depuis un terminal : il n'attend aucune ligne tapée" {
+  command -v script >/dev/null || skip "script (util-linux) absent"
+  printf 'TOK-FICHIER\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  # un terminal ouvert qui ne tape rien : sans la garde, le geste attendrait jusqu'au timeout (124)
+  run bash -c "(sleep 30) | timeout 15 script -qec \"'$SCRIPT' apply\" /dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$TOFU_LOG")" = "init $RECIPE/instance" ]
+}
+
 @test "apply: DEUX applys concurrents — le second REFUSE, il n'attend pas" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
@@ -334,7 +344,7 @@ FAKE
   [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
   [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
   [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
-  grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
+  grep -q "$LCARS_CATALOGUES_WORK/cat" "$TOFU_LOG"
   grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 
@@ -371,23 +381,23 @@ FAKE
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate.backup" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/.terraform" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/instance/terraform.tfstate" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate.backup" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/.terraform" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/instance/terraform.tfstate" ]
   # TEMOIN DE NON-VACUITE : la recette ELLE-MEME est bien arrivee.
-  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+  [ -f "$LCARS_CATALOGUES_WORK/cat/roles.auto.tfvars.json" ]
 }
 
 @test "install: l'etat DE CE CATALOGUE-CI survit au rejeu — sinon tout se re-importe a chaque fois" {
   setup_install
   printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
-  mkdir -p "$LCARS_CATALOGUE_WORK/cat"
-  printf 'ETAT-DE-CAT\n' > "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+  mkdir -p "$LCARS_CATALOGUES_WORK/cat"
+  printf 'ETAT-DE-CAT\n' > "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  run cat "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+  run cat "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate"
   [ "$output" = "ETAT-DE-CAT" ]
 }
 
@@ -395,7 +405,7 @@ FAKE
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+  [ -f "$LCARS_CATALOGUES_WORK/cat/roles.auto.tfvars.json" ]
   [ ! -f "$RECIPE/roles.auto.tfvars.json" ]
 }
 
@@ -531,15 +541,15 @@ FAKE
 
 @test "le verrou vit dans le repertoire de travail, pas dans /run/lock" {
   unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work"
-  mkdir -p "$LCARS_CATALOGUE_WORK"
+  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-work"
+  mkdir -p "$LCARS_CATALOGUES_WORK"
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
 
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
 
-  LOCK="$LCARS_CATALOGUE_WORK/.apply.lock"
+  LOCK="$LCARS_CATALOGUES_WORK/.apply.lock"
   [ -e "$LOCK" ]
   run bash -c "sed 's/#.*//' '$SCRIPT' | grep -c '/run/lock' || true"
   [ "$output" -eq 0 ]
@@ -547,16 +557,16 @@ FAKE
 
 @test "un verrou DEJA pose garde son mode — un durcissement d'operateur n'est pas contredit" {
   unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work2"
-  mkdir -p "$LCARS_CATALOGUE_WORK"
-  : > "$LCARS_CATALOGUE_WORK/.apply.lock"
-  chmod 0600 "$LCARS_CATALOGUE_WORK/.apply.lock"
+  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-work2"
+  mkdir -p "$LCARS_CATALOGUES_WORK"
+  : > "$LCARS_CATALOGUES_WORK/.apply.lock"
+  chmod 0600 "$LCARS_CATALOGUES_WORK/.apply.lock"
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
 
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
-  [ "$(stat -c '%a' "$LCARS_CATALOGUE_WORK/.apply.lock")" = "600" ]
+  [ "$(stat -c '%a' "$LCARS_CATALOGUES_WORK/.apply.lock")" = "600" ]
 }
 
 

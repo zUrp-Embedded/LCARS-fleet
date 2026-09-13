@@ -111,6 +111,20 @@ stub_impersonation() { echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-li
   [[ "$output" != *"converger : sudo"* ]]
 }
 
+@test "un module ne lit jamais l'entrée du lanceur : une ligne tapée n'atteint aucun module" {
+  cat > "$SANDBOX/modules.d/10-lecteur.sh" <<'EOF'
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+ligne=""; IFS= read -r ligne || true
+echo "10-lecteur:$1:[$ligne]" >> "$RUN_LOG"
+EOF
+  run bash -c "printf 'jeton-tapé\n' | '$SANDBOX/provision' apply --substrate docker --human '$(id -un)'"
+  [ "$status" -eq 0 ]
+  grep -qxF "10-lecteur:apply:[]" "$RUN_LOG"
+}
+
 @test "apply sur son substrat joue l'apply" {
   stub_module 60-deploystub "wsl linux" any human
   run "$SANDBOX/provision" apply --substrate wsl

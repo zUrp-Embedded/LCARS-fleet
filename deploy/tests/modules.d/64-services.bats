@@ -106,6 +106,13 @@ mod() { run bash "$MOD" "$1"; }
   refute grep -q "^PROV_" "$LCARS_SERVICES_ENV"
 }
 
+@test "l'exécuteur de catalogue reçoit le dossier de travail tofu et le miroir de providers que 25 et 46 posent" {
+  export PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/opt/lcars/var/tofu" LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/lcars/tofu"
+  mod apply
+  grep -qxF "LCARS_CATALOGUES_WORK=$BATS_TEST_TMPDIR/opt/lcars/var/tofu" "$LCARS_SERVICES_ENV"
+  grep -qxF "TF_CLI_CONFIG_FILE=$BATS_TEST_TMPDIR/opt/lcars/tofu/tofurc" "$LCARS_SERVICES_ENV"
+}
+
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
   export LCARS_SYSADMIN_UID=1007
   mod apply
