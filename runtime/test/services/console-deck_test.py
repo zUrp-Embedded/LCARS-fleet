@@ -98,24 +98,11 @@ def silent_port():
     return port, s
 
 
-# LE SUJET DE CE TEST N'EST PAS DANS TOUS LES ARBRES OU CE TEST TOURNE. `console-deck.py` vit sous
-# `deploy/`, et l'etage `build` de l'image exclut cet arbre par construction (le layer resterait
-# invalide a chaque edition de compose, pour un gate de ~10 min). Le fichier partait donc en
-# `FileNotFoundError` a l'import : exit 1 SANS une seule ligne `FAIL:`, donc un gate rouge dont le
-# decompte disait `PASS=14 FAIL=0` — un rouge qui n'explique pas de quoi il est fait.
-#
-# Meme forme que GO-7 dans `shell_gate.sh`, et le discriminant est un FAIT, pas une devinette : un
-# depot porte une entree `.git`, l'artefact n'en a aucune. Sujet absent HORS depot = perimetre
-# declare ; sujet absent DANS un depot = ECHEC DUR — la, le fichier devrait etre la, et un saut
-# silencieux ferait disparaitre ce garde le jour ou quelqu'un supprime son sujet.
+# Un sujet absent est un ECHEC NOMME, pas un `FileNotFoundError` a l'import : celui-la sortirait 1
+# sans une seule ligne `FAIL:`, un rouge qui n'explique pas de quoi il est fait.
 if not os.path.isfile(DECK):
-    if os.path.exists(os.path.join(HERE, "..", "..", "..", ".git")):
-        print("FAIL: console-deck.py introuvable DANS un depot (%s) — sujet manquant, pas perimetre"
-              % DECK)
-        sys.exit(1)
-    print("--- perimetre : console-deck.py absent de cet artefact (`deploy/` hors du stage de"
-          " build) — contexte hors-depot, ce test NE MESURE RIEN ici. ---")
-    sys.exit(0)
+    print("FAIL: console-deck.py introuvable (%s) — sujet manquant" % DECK)
+    sys.exit(1)
 
 deck = load_deck()
 check(hasattr(deck, "fleet_pods"), "console-deck.py se charge et expose fleet_pods")

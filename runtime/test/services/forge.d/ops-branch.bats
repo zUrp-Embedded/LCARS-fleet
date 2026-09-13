@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/forge.d/ops-branch.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
-# STATUS: bats tests for 65-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »
+# STATUS: bats tests for forge.d/ops-branch.sh — la boite aux lettres, et la difference entre « pas encore » et « en panne »
 #
 # CE QUE CE MODULE POSE. Une branche ORPHELINE sur le depot ops : la boite aux lettres ou un pod
 # depose sa demande d'outillage et ou un humain signe. Aucune API Gitea ne sait creer un commit sans

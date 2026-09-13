@@ -34,10 +34,7 @@ setup() {
 
   # The real lib, plus the single override. Appended rather than edited: what the module calls is
   # the shipped code, and the diff between it and what runs here is these three lines.
-  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
-  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
-  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur : le module la sourcait
-  # et son hote reel ne la posait pas. Le decor recopie le protocole pour y surcharger `human_home`.
+  # Le decor recopie le protocole pour y surcharger `human_home`.
   cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
   cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
   cat >> "$SANDBOX/lib/human-protocol.sh" <<EOF

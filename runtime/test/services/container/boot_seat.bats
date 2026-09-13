@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/container/boot_seat.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
-# STATUS: bats tests for entrypoint.sh — le SIEGE du conteneur est le #1 de la forge, et il le DERIVE
+# STATUS: bats tests for container/boot.sh — le SIEGE du conteneur est le #1 de la forge, et il le DERIVE
 #
 # ─── LA REGLE QUE CES TEMOINS GARDENT ───────────────────────────────────────────────────────────
 #
@@ -12,7 +12,7 @@
 #
 # ⚠ AUCUN RAIL NE PART DE RIEN, et c'est ce qui interdit d'inventer un nom. Le poste a son systeme
 # avant LCARS, le conteneur vise une forge qui tourne deja. Le seul cas from-scratch est `--bench`, qui
-# cree tout — et il PASSE le nom lui-meme (`bench-up.sh:353`). Un defaut `admiral` ne sert donc aucun
+# cree tout — et il PASSE le nom lui-meme (`LCARS_ADMIRAL`, dans `bench-up.sh`). Un defaut `admiral` ne sert donc aucun
 # appelant, et il nuit : c'est exactement la coincidence que ce code retire. D'ou le REFUS en
 # derniere branche, la ou l'ancienne ecriture nommait.
 #

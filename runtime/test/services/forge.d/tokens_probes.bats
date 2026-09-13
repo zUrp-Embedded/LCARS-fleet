@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/forge.d/tokens_probes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
-# STATUS: bats tests for 63-forge-tokens — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat
+# STATUS: bats tests for forge.d/tokens.sh — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat
 #
 # POURQUOI CE FICHIER. `63-forge-tokens` porte deux sondes qui ne mutent rien : elles lisent un reglage que
 # LCARS livre par defaut, qu'un admin peut changer chez lui, et elles lui disent ce que son choix

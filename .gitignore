@@ -19,9 +19,6 @@
 # la retirer en local ne tenait pas. Le settings.json versionne reste la couche partagee.
 .claude/settings.local.json
 
-# Generated fleet blueprint (system + profile merge)
-fleet/fleet.yaml
-
 # Work directory — ephemeral plans, side quests (per-instance, not versioned)
 work/
 # Python / pytest caches
@@ -39,5 +36,4 @@ fleet-audit-report/
 .bench-seed.pass
 **/.bench-seed.pass
 
-# Les paquets de `pack.sh` — un artefact ne se versionne pas dans le dépôt qui le produit.
 dist/

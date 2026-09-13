@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/container/boot_humans.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population
+# STATUS: bats tests for container/boot.sh — le premier tour synchrone, et le verdict de population
 #
 # CE QUE CES TEMOINS FERMENT. Le conteneur rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le

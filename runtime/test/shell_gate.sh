@@ -15,10 +15,10 @@
 #                                     qui passe est l'anti-pattern precis a tuer).
 #   - shellcheck ABSENT            → ECHEC (meme regle que python3 : un plancher qu'on peut sauter
 #                                     en silence n'est pas un plancher).
-#   - shellcheck plancher          → `-S warning` sur TOUT le shell suivi, deploy/ compris : un
-#                                     signalement de severite >= warning = exit != 0, meme barreau
-#                                     que `--warnings-as-errors`. Le plancher est a ZERO (mesure du
-#                                     2026-09-01) et mord au premier warning. L'audit complet, toutes
+#   - shellcheck plancher          → `-S warning` sur tout le shell suivi hors deploy/ (qui joue le
+#                                     sien dans deploy/gate.sh) : un signalement de severite >= warning
+#                                     = exit != 0, meme barreau que `--warnings-as-errors`. Le plancher
+#                                     est a ZERO et mord au premier warning. L'audit complet, toutes
 #                                     severites, est opt-in (`LCARS_SHELL_LINT=1`, informatif) — un
 #                                     pas qu'on sait toujours rouge apprend a lire « rouge » comme
 #                                     « normal » (⚖ USER 2026-08-29), cf. §5.
@@ -399,7 +399,7 @@ fi
 # ne mesure pas, et le reste se lit a la demande.
 #
 # LA LISTE EST CELLE DE GIT, PAS D'UN `find`, et ce n'est pas une commodite : les entrees sans
-# extension (`deploy/provision`, `deploy/container`, `bin/lcars`, les hooks) ne se reconnaissent qu'a
+# extension (`bin/lcars`, `bin/fleet`, les hooks) ne se reconnaissent qu'a
 # leur shebang, et `runtime/tmp/` porte des scripts fabriques par les suites ExUnit — les auditer
 # reviendrait a auditer la sortie des tests.
 #
@@ -426,20 +426,13 @@ SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
 SC_VERSION=""
 command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | sed -n 's/^version: //p')"
 
-# LE PLANCHER PORTE SUR LE SHELL SUIVI HORS deploy/ — ET CE N EST PAS L EXCLUSION D AVANT. Une
-# exclusion nommee a vecu ici, qui soustrayait deploy/ au plancher « le temps d un chantier » ; elle
-# a ete retiree quand ce chantier a ferme, parce qu un arbre soustrait a un plancher sans que
-# personne d autre ne le lise n est pas protege, il est oublie.
-#
-# ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « l installeur est independant, chacun
-# joue son gate, on les split ». deploy/ sort d ici parce que `deploy/gate.sh` joue DESORMAIS le
-# meme plancher (-x --source-path=SCRIPTDIR -S warning) sur son propre arbre, et ses en-tetes GO-7
-# avec. La difference avec l exclusion d avant est la seule qui compte : quelqu un lit cet arbre, et
-# le compte affiche ci-dessous nomme ce qu il ne lit pas.
+# LE PLANCHER PORTE SUR LE SHELL SUIVI HORS deploy/ : `deploy/gate.sh` joue le meme plancher
+# (-x --source-path=SCRIPTDIR -S warning) sur son propre arbre, et ses en-tetes GO-7 avec. Un arbre
+# soustrait a un plancher sans que personne d autre ne le lise ne serait pas protege, il serait
+# oublie ; le compte affiche ci-dessous nomme ce que celui-ci ne lit pas.
 #
 # L instrument reste `-x --source-path=SCRIPTDIR` : il suit les `source`, donc il voit les lectures
-# qu un shellcheck nu ne relie pas (sans `-x`, trois SC2034 apparaissent dans deploy/docker/
-# entrypoint.sh sur des PROV_* que provision-lib lit apres le `.`, et ces trois-la n existent pas).
+# qu un shellcheck nu ne relie pas (une variable posee avant un `.` et lue par le fichier source).
 SHELL_FILES_FLOOR=("${SHELL_FILES[@]}")
 FLOOR_COUNT="${#SHELL_FILES_FLOOR[@]}"
 

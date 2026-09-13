@@ -29,7 +29,7 @@
 #   0 conforme · 1 drift · 2 erreur-de-sonde
 #
 # Language: comments EN (source prose), emitted strings FR WITHOUT ACCENTS (the output is grepped
-# from a source tree, cf. the shell-CLI rule in fleet/CLAUDE.md).
+# from a source tree, cf. the language rule in runtime/CLAUDE.md).
 
 set -uo pipefail   # NO -e: a probe that fails must EMIT its failure, not abort the run.
 
