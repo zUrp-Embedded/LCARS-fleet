@@ -1,21 +1,20 @@
 defmodule Fleet.Admiral.BootOrchestrator do
   @moduledoc """
-  One-shot permanent-pod orchestration invoked after root readiness. It optionally
-  runs `Fleet.Spawner.PermanentBoot`, then logs and broadcasts exactly one
-  `fleet.boot_complete`, `fleet.boot_partial`, or `fleet.boot_failed` outcome.
+  One-shot permanent-pod orchestration called after root startup. Attempts one
+  complete/partial/failed lifecycle emission, which is observational and may be lost.
+  Pod registry state is in memory; PermanentWarden owns subsequent recovery.
 
-  Exceptions, exits, and throws become a failed outcome; `run/1` always returns
-  `:ok`, which means the orchestration finished, not that every pod started. Event
-  delivery is observability-only and may be unavailable early in boot; the spawner
-  registry is the durable state, and `PermanentWarden` owns later recovery.
+  Exceptions, throws and exits inside the injected boot function become failed
+  outcomes. Configuration and emission outside that wrapper can still fail.
   """
 
   require Logger
   alias Fleet.EventRouter.Bus
 
   @doc """
-  Runs one orchestration with injectable boot seams. Returns `:ok` after recording
-  any complete, partial, or failed outcome.
+  Invokes the boot seam unless disabled; partitions list results into successes
+  and partial failures. Returns :ok after attempting the outcome event, regardless
+  of pod success or returned emission failure.
   """
   @spec run(keyword()) :: :ok
   def run(opts \\ []) do

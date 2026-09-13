@@ -1,14 +1,8 @@
 defmodule Fleet.Admiral.Shutdown.Dispatcher do
   @moduledoc """
-  Dispatcher backend behaviour consumed by `Fleet.Admiral.Shutdown`.
-
-  **This behaviour IS the drain abstraction** (user decision): a global
-  `Fleet.Dispatcher` god-module does not and must NOT exist. The
-  `:shutdown_dispatcher` seam replaces that contract. Two implementations:
-
-    * `NoOpDispatcher` — test/fallback default (0 in-flight, immediate drain)
-    * `AggregateDispatcher` — canonical **prod** backend (wired in `runtime.exs`),
-      aggregates the real in-flight + activates quiescence
+  Shutdown backend abstraction: refuse_new_jobs/1 and in_flight_count/0.
+  NoOp is the unwired default; runtime configuration selects AggregateDispatcher.
+  This seam avoids a global Fleet.Dispatcher module.
   """
   @callback refuse_new_jobs(opts :: keyword()) :: :ok
   @callback in_flight_count() :: non_neg_integer()
@@ -30,83 +24,37 @@ end
 
 defmodule Fleet.Admiral.Shutdown.AggregateDispatcher do
   @moduledoc """
-  **Real** backend of the `:shutdown_dispatcher` seam — aggregates the in-flight
-  and activates quiescence. User decision: **no** `Fleet.Dispatcher`
-  god-module; the `:shutdown_dispatcher` seam IS the abstraction.
+  Activates shared quiescence and sums broker-active items, completion offloads
+  and synchronous Quiesce.busy leases. Idle resident pods are not work; counting
+  pods would prevent shutdown while an idle project architect remains alive.
 
-  ## `refuse_new_jobs/1`
+  Broker presence is sampled via TaskQueue.Server. Absence counts as zero, including
+  a restart gap; present-but-unreadable counts as one. The completion fun similarly
+  uses one for unknown, invalid or raised/exited results; throws are not caught.
+  Counts are separate observations and can overlap or miss handoffs.
 
-  Activates `Fleet.Shutdown.Quiesce` → the points that OPEN new work refuse it: the admin write door
-  (`POST /api/admin/spawn` on the AF_UNIX control socket, `Fleet.API.ControlRouter`), the permanent
-  respawn (`Fleet.Spawner.PermanentWarden`),
-  AND the producer-spawn point (`Fleet.Pilot.StepDispatcher.dispatch_issue`, CI-01 — a fresh issue or the
-  next step of an engaged run). The FINALIZATION of an in-flight step_run (completion/review/merge) is NOT
-  gated (cf. `Fleet.Shutdown.Quiesce` for the full reader list + the finish-vs-open rationale).
-
-  ## `in_flight_count/0` — the WORK to finish (CI-02)
-
-  In-flight = the broker's ACTIVE work-items + the in-flight COMPLETION offloads. Read from the
-  living truth (the broker + the supervisors), NEVER from an in-memory run table: RAM state can lie
-  (it drifts on a crash/restart).
-
-    * `Fleet.TaskQueue.list_active/0` — the `@active_states` work-items (`:pending` queued +
-      `:assigned` being worked). This IS the real forge work, and it EXCLUDES the idle
-      residents by construction: a project architect (`architect-<name>`, `forever` but NOT
-      `permanent-` prefixed) or a `pipe` engineer between briefs has NO active work-item → not counted.
-      ⚠ COUNTING PODS INSTEAD keeps them in, so ONE OPEN PROJECT ⇒ `in_flight > 0` FOREVER ⇒ every
-      stop times out. An arch mid-arbitration DOES have a work-item and IS counted, correctly.
-    * the **completion offloads** via the `:completion_inflight_fun` seam — after `pod.completed`, the
-      business completion (push + PR + forge writes, ≤30s) runs in `Fleet.Pilot.StepRunConsumer`'s
-      `Task.Supervisor`: neither a pod nor a work-item (the item is already `:completed`), so a
-      count without it cuts it mid-push. See `## Boundary` for why it is a seam and not a call.
-
-  **Fail-CLOSED on the broker**: broker PRESENT but unreachable (restart mid-quiesce) → sentinel
-  `> 0` (`@count_unavailable`) → the drain waits its timeout, never concludes "empty" on an unknown
-  (a `0` would be fail-open: under-count ⇒ stop WHILE work is in flight). Broker GENUINELY absent
-  (isolated test) → honest `0`, decided on the live PROCESS (`Process.whereis`), not the code path.
-
-  **ASYMMETRY on the completion seam** — ONLY for a genuinely DOWN supervisor: its Tasks are already
-  dead WITH it (the work is already lost, independent of the drain) → the seam returns an honest `0`,
-  NOT the broker's `> 0` sentinel (a `> 0` there would make every stop time out whenever step is off).
-  But a supervisor PRESENT whose count FAILS is `:unknown` → the fail-CLOSED sentinel, same as the
-  broker: we never fake a `0` we could not measure.
-
-  ## Boundary — why the completion count is a runtime seam
-
-  `Fleet.Admiral` does NOT depend on `Fleet.Pilot` (and must not — siblings). So the completion
-  Task.Supervisor (a Pilot concern) cannot be referenced here at compile time. `:completion_inflight_fun`
-  (`Application.get_env`, wired in `runtime.exs` to `&Fleet.Pilot.StepRunConsumer.inflight_completions/0`)
-  crosses that boundary as a runtime fun, never a compile reference — same shape as `:shutdown_dispatcher`
-  / `:coord_backend`. Default (no wiring / test) = `fn -> 0 end`. The broker count stays a direct call
-  (`Fleet.TaskQueue` IS a declared downward dep), through the `:task_queue_mod` test seam.
+  :admiral_completion_inflight_fun crosses the Admiral/Pilot boundary at runtime;
+  the default fun returns zero. Runtime wiring distinguishes a down completion
+  supervisor from one whose count is unreadable. :admiral_task_queue_mod injects
+  the list_active reader but does not replace the live broker-presence check.
   """
   @behaviour Fleet.Admiral.Shutdown.Dispatcher
 
   require Logger
 
-  # Sentinel "broker count unavailable". `do_wait_drain` concludes "empty" only on a STABLE `in_flight
-  # == 0` → any value > 0 prevents concluding and forces the drain to wait out its timeout (the
-  # safeguard). 1 = minimal "not empty". Returned when the BROKER count fails (present but unreachable):
-  # fail-CLOSED, the opposite of the fail-open `0` that would cut during work.
+  # Positive sentinel prevents an unknown count from being treated as drained.
   @count_unavailable 1
 
-  # Broker module — direct call to the real `Fleet.TaskQueue` (declared downward dep). App-env seam
-  # ONLY to inject a stub in test (induce a `list_active` that raises/exits); prod never sets it.
   @task_queue_default Fleet.TaskQueue
 
   @impl true
   def refuse_new_jobs(_opts), do: Fleet.Shutdown.Quiesce.refuse!()
 
   @impl true
-  # + the synchronous finalizers inside `Quiesce.busy/1` (poller tick review/merge work,
-  # completion handlers pre-offload) — invisible to the broker and the offload counts,
-  # yet exactly the work a stop must not cut between a merge and its terminal projection.
+  # Busy leases cover synchronous finalizers invisible to broker/offload counts.
   def in_flight_count,
     do: broker_active() + completion_phases() + Fleet.Shutdown.Quiesce.busy_count()
 
-  # The broker's ACTIVE work-items (queued + being worked) — the real forge work, minus the idle
-  # residents (no work-item). Fail-CLOSED: broker present-but-unreachable → sentinel > 0; genuinely
-  # absent → honest 0 (decided on the live process, not the code path).
   defp broker_active do
     if task_queue_running?() do
       case safe_count_active() do
@@ -168,30 +116,19 @@ end
 
 defmodule Fleet.Admiral.Shutdown do
   @moduledoc """
-  Coordinated shutdown server. `fleet stop` sends SIGTERM; OTP invokes
-  `Fleet.Application.prep_stop/1`, which calls `begin/1` before supervisors stop.
+  Synchronous shutdown server used by Fleet.Application.prep_stop before teardown.
+  begin refuses new work, then polls until consecutive zero counts or grace expiry.
+  Both outcomes reply :ok; only server state distinguishes drained from timeout.
 
-  `begin/1` refuses new jobs, then synchronously polls the configured dispatcher
-  until it observes zero in-flight work on consecutive reads or reaches its grace
-  deadline. Synchronous handling is required so teardown cannot proceed before the
-  drain replies.
-
-  ⚠ THE LAUNCHER'S OUTER FALLBACK IS DERIVED FROM THIS DEADLINE, NOT SET BESIDE IT: `bin/fleet`
-  waits `grace + margin`, so it cannot hand back on a fleet that is still draining. An independent
-  literal there would be a second number for one fact — cf. `grace_ms/0`.
-
-  `drain_in_flight/1` runs the same bounded loop without refusing work and exists
-  for tests. `NoOpDispatcher` is the unwired default; production config selects
-  `AggregateDispatcher`.
+  The deadline is checked between callbacks and sleeps, not enforced around them:
+  a blocking backend can exceed grace. Default NoOp does not activate quiescence.
+  The launcher's outer fallback must allow configured grace plus its stop margin.
   """
 
   use GenServer
   require Logger
 
-  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE (BL-6-52) : le BEAM possede la deadline, `bin/fleet`
-  # la LIT (`LCARS_SHUTDOWN_GRACE_MS`, meme defaut) et y ajoute sa marge. Un litteral pose la-bas
-  # ferait deux nombres pour un seul fait : le drain passe a 120 s, le launcher rend la main a 90,
-  # et l'operateur voit un stop « fini » sur une fleet qui draine encore.
+  # Keep launcher grace + margin aligned with the runtime drain configuration.
   @default_grace_ms 45_000
 
   @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet`."
@@ -201,45 +138,14 @@ defmodule Fleet.Admiral.Shutdown do
 
   @default_poll_ms 500
 
-  # CI-02 debounce: `in_flight` must read 0 on N CONSECUTIVE polls before concluding `:drained`. It
-  # MITIGATES the `pod.completed` → offload HANDOFF window — the work-item is already `:completed` but
-  # the completion `Task` has not started yet, so the work-item/Task aggregate momentarily reads 0.
-  # Without it, a single racy 0-read would conclude the drain mid-handoff and `:init.stop()` would cut
-  # the completion. Default 3 × 500ms ≈ 1.5s of stable 0.
-  #
-  # IT DOES NOT COVER THE WINDOW — and the count was never sized to. `3` answers "not a SINGLE racy
-  # 0-read" (it is clamped to ≥1 because 0 would be fail-open); it is not a duration derived from the
-  # window's length. The window contains `GateEngine.resolve_next/3`, which can issue a SYNCHRONOUS
-  # forge read (`count_step_runs` → `count_signed_step_runs`) before the offload, bounded by the
-  # transport's `receive_timeout: 10_000`. So a legitimate handoff can reach ~10s against 1.5s of
-  # debounce, and on a slow forge the drain concludes `:drained` and cuts a completion mid-push.
-  # The window is real: `submit_result` broadcasts then COMMITS `:completed` (broadcast-before-commit),
-  # so the item leaves `list_active` before this consumer has even decided, let alone offloaded.
-  # Raising the count would buy the same instrument, slower, at the price of every clean shutdown.
-  #
-  # THE LEASE IS WHAT CLOSES IT (BL-6-43.1), and it is already taken: `in_flight_count/0` adds
-  # `Quiesce.busy_count()`, and `StepRunConsumer` wraps its whole `pod.completed` handoff in
-  # `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
-  # counted: the drain cannot conclude while it runs.
-  #
-  # WHAT REMAINS UNCOVERED, precisely, because "closed" said flatly would be the next lie: the Bus
-  # message in flight between `submit_result`'s broadcast and the consumer's `handle_info` entry.
-  # There, the item is `:completed` and the lease is not yet taken. That gap is a local PubSub
-  # delivery — microseconds — against 1.5s of CONTINUOUS zero required by the debounce, five
-  # orders of magnitude. And it cannot widen under load: a backed-up consumer mailbox means the
-  # previous message is being handled, so the lease is already held and the count is not zero.
-  #
-  # The debounce therefore keeps its own job — not a SINGLE racy 0-read — and carries no window it
-  # was never sized for. Raising the count buys nothing.
+  # Consecutive zero samples mitigate handoff gaps; they do not prove continuous zero.
+  # Three default samples are about 1 s apart end-to-end (two 500 ms sleeps).
+  # Quiesce.busy covers the consumer's synchronous completion handling, including
+  # potentially slow forge reads, but starts only on handler entry. A queued Bus
+  # message before that lease remains uncounted; there is no timing guarantee.
   @default_drain_confirmations 3
 
-  # Canonical default of the dispatcher backend: NoOp (inert drain) for the case where the real
-  # prod backend `AggregateDispatcher` is NOT wired — it IS wired in `runtime.exs` outside `:test`,
-  # so this default only serves tests and boots without runtime config. Set HERE once only — see
-  # `configured_dispatcher/0`.
   @default_dispatcher Fleet.Admiral.Shutdown.NoOpDispatcher
-
-  # --- API ---
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -248,11 +154,8 @@ defmodule Fleet.Admiral.Shutdown do
   end
 
   @doc """
-  Dispatcher backend resolved from config (`:lcars_fleet, :admiral_shutdown_dispatcher`),
-  default `NoOpDispatcher`. SINGLE SOURCE of the default: this process reads it at `init` and
-  readiness (the anti-hollow-green probe) reads it too — neither re-declares the default,
-  so no drift between the real drain and what readiness believes is wired. (The test
-  override `opts[:dispatcher]` stays handled locally by `init`, outside config.)
+  Returns configured admiral_shutdown_dispatcher or NoOpDispatcher. Shared by
+  initialization and readiness; an instance's opts[:dispatcher] override is separate.
   """
   @spec configured_dispatcher() :: module()
   def configured_dispatcher do
@@ -260,12 +163,8 @@ defmodule Fleet.Admiral.Shutdown do
   end
 
   @doc """
-  Le dispatcher configure ET son CONTRAT, verifies ensemble.
-
-  Le resolveur seul rend un module ; il ne dit pas si ce module existe, ni s'il tient le behaviour.
-  Une sonde qui compare le resultat au NoOp lit donc `Fleet.NExistePas` comme operationnel — un
-  module absent n'est pas le NoOp. Meme forme que `Spawner.LaunchBackend.resolved_conforming/0`, et
-  meme motif : ce qui n'est pas verifie ne se declare pas.
+  Checks that the configured module exports both backend callbacks. This does not
+  execute them or validate their return types; invalid non-module config can raise.
   """
   @spec resolved_conforming() ::
           {:ok, module()} | {:error, {:shutdown_dispatcher_misconfigured, module(), [atom()]}}
@@ -283,14 +182,14 @@ defmodule Fleet.Admiral.Shutdown do
       else: {:error, {:shutdown_dispatcher_misconfigured, mod, manquants}}
   end
 
-  @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet stop)."
+  @doc "Refuses work and synchronously drains; replies :ok even on grace expiry. Calls can exit."
   @spec begin(keyword()) :: :ok
   def begin(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, grace_ms())
     GenServer.call(server(opts), {:begin, grace_ms}, grace_ms + 5_000)
   end
 
-  @doc "TEST-ONLY seam: same drain as `begin/1` WITHOUT the refuse step (exercise wait_drain in isolation). No prod caller."
+  @doc "Test seam: same drain without refusing work. Actual reply is :ok, despite the integer spec."
   @spec drain_in_flight(keyword()) :: non_neg_integer()
   def drain_in_flight(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, grace_ms())

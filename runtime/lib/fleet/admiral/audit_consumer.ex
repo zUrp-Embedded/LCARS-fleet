@@ -1,37 +1,14 @@
 defmodule Fleet.Admiral.AuditConsumer do
   @moduledoc """
-  Audit consumer — events lifecycle + security.
+  Subscribes in init and logs selected lifecycle events; subscribe:false disables it
+  for direct-message tests. Failed subscription prevents startup. No downstream work
+  should depend on this lossy observer having received an event.
 
-  Subscribes to the `Fleet.EventRouter.Bus` topic `fleet.events` and logs, at audit grade, the
-  lifecycle of pods, of the boot, and of the task queue. Which types exactly is the clause list
-  below — a second copy here would be one more thing to keep in step with it.
-
-  ## HALF OF THIS SURVIVES A RESTART, AND IT IS NOT THE HALF YOU WOULD ASSUME
-
-  "Audit-grade" describes the CONTENT of these lines, never their durability. The split is by
-  Logger level, and `Fleet.DurableLog` writes `warning` and above:
-
-    * ANOMALIES are durable — `pod.failed`, `work_item.failed`, `boot_partial`, `boot_failed`.
-    * THE NOMINAL TIMELINE IS NOT — `work_item.enqueued` / `assigned` / `completed` / `cleared` and
-      `fleet.boot_complete` are `:info`, so they live in the daemon's console and die with it.
-
-  The consequence, stated because it bites exactly when it is needed: after a restart a durable
-  `pod.failed` cannot be tied back to the `work_item.assigned` that produced it. Anomalies are
-  reconstructible; the story that led to them is not.
-
-  Raising these to `warning` is NOT the fix and must not be done as one: `info` is the level this
-  codebase assigns to a lifecycle milestone, `warning` the level at which something DEGRADED, and
-  moving them would both lie about severity and bury the durable trace under routine passes — the
-  reason `DurableLog` names for excluding `info` in the first place.
-
-  A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not in
-  a level bump: widening it is a DECISION with a schema behind it, not a patch.
-
-  NO RUNTIME SIDE EFFECT BEYOND THE LOG — forensics, plus whatever separate subscriber a dashboard
-  runs. Nothing downstream may be made to depend on this consumer having seen an event.
-
-  Test-seam: `start_link(opts)` accepts `:subscribe` (default true) → tests instantiate without the
-  global subscribe.
+  DurableLog's warning-and-above policy excludes the nominal info timeline. Anomalies
+  are eligible for persistence, not guaranteed delivered or written; after restart,
+  their preceding assignments may be unavailable. Do not raise nominal severity to
+  obtain persistence: a durable timeline needs a structured ledger.
+  events_count includes all task_queue events, even types that produce no log.
   """
 
   use GenServer
@@ -52,18 +29,13 @@ defmodule Fleet.Admiral.AuditConsumer do
     {:ok, %{events_count: 0}}
   end
 
-  # ⚠ CANONICAL `%Fleet.Event{}` ONLY, no tuple-format clause: every Bus producer emits the struct,
-  # and a tolerant clause here would let a producer ship a shape nothing else on the Bus accepts.
   @impl true
   def handle_info(%Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # ⚠ PAS DE HANDLER SANS EMETTEUR ICI (6-016). Quand un producteur part — la veille de derive du
-  # SDK est passee en CI, cf. BL-6-44 — sa clause de consommation reste et SE LIT COMME UN RAIL
-  # D'AUDIT VIVANT : une clause qu'aucun evenement n'atteint ne se distingue pas d'une clause qui
-  # marche.
+  # Keep audited families tied to live producers; retired producers leave misleading handlers.
   def handle_info(
         %Event{source: :admiral, type: :"mcp.server_crashed", payload: p},
         state
@@ -127,9 +99,6 @@ defmodule Fleet.Admiral.AuditConsumer do
     )
   end
 
-  # (Pas de clause `:"state.corrupt"` : le broker n'a pas de rail de persistance (BL-6-113), rien
-  # ne peut emettre ce type et le registre d'evenements ne l'autorise pas. UNE CLAUSE QUE RIEN
-  # N'ATTEINT DECRIT UN FLUX.)
   defp log_task_queue_event(_other, _event), do: :ok
 
   defp log_boot_event(:"fleet.boot_complete", payload) do

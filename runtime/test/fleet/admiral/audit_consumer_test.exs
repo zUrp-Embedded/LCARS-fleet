@@ -1,10 +1,7 @@
 defmodule Fleet.Admiral.AuditConsumerTest do
   @moduledoc """
-  B10/#583 — AuditConsumer as pure send/handle, no global subscribe
-  (test-seam `:subscribe`). async.
-
-  The legacy tuple format `{atom, map}` is GONE (0 producers) — tests speak the canonical
-  `%Fleet.Event{}` schema, like the real Bus.
+  Direct canonical-event injection with subscribe:false. Checks counting/ignoring
+  and continued process life, not log contents, persistence or Bus delivery.
   """
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]
@@ -25,7 +22,6 @@ defmodule Fleet.Admiral.AuditConsumerTest do
     {pid, _} = start_consumer()
     send(pid, canon(:admiral, :"fleet.boot_complete", payload: %{"x" => 1}))
 
-    # Mi14: :sys.get_state/1 synchronizes (FIFO — the send is processed first) → no arbitrary sleep.
     assert %{events_count: 1} = settle(pid)
   end
 

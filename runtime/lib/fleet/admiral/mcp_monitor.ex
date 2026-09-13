@@ -1,44 +1,17 @@
 defmodule Fleet.Admiral.MCPMonitor do
   @moduledoc """
-  Passive health check of the **pod-facing MCP substrate** (the DynamicSupervisor
-  of per-pod sockets, `Fleet.MCP.PodSocketSupervisor`).
+  Samples pod-facing MCP supervisor presence through PeriodicCheck, without testing
+  socket or tool usability. Default target is
+  {:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}; atom targets
+  use Process.whereis. A supervised child counts as ok when its record has a PID,
+  without a separate Process.alive? check.
 
-  ## Mechanics
+  Only ok→crashed attempts mcp.server_crashed emission; initial absence and repeated
+  absence are quiet. Recovery logs without a dedicated event. Payload keys are strings.
+  :check_now checks immediately; periodic re-arming belongs to PeriodicCheck.
 
-  GenServer + recursive `Process.send_after/3` — the plumbing (named start_link, tick + re-arming,
-  test hook `:check_now`) lives in `Fleet.PeriodicCheck` (foundation); this module keeps its state, its
-  `do_check/1` and the shape of its reply (`{:ok, status}`). On each tick, checks the target's
-  liveness:
-
-    * target alive → status `:ok`
-    * absent / dead → status `:crashed`
-
-  Detects the `:ok → :crashed` transition (NOT `:unknown → :crashed` at boot,
-  NOT `:crashed → :crashed` so as not to spam) and broadcasts a canonical event.
-  The `:crashed → :ok` return just logs — silent recovery, with no dedicated event.
-
-  ## Target
-
-  The pod-facing substrate (`get_work_item`/`submit_result`) is served by a per-pod
-  AF_UNIX socket, fanned out by the DynamicSupervisor `Fleet.MCP.PodSocketSupervisor`.
-  We check its liveness via the **supervision tree**: target
-  `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}` →
-  `Supervisor.which_children/1` looks up the child and tests that its pid is alive.
-  Robust (pure OTP) and semantically correct: substrate absent → silent `:crashed`
-  (no broadcast from `:unknown`, nothing to monitor). An **atom** target stays
-  supported (`Process.whereis`, for tests + any named process).
-
-  ## Event broadcast
-
-  Canonical schema `%Fleet.Event{source: :admiral, type: :"mcp.server_crashed",
-  payload: %{previous_status, new_status, target}, correlation_id: nil}`.
-
-  ## Configuration
-
-    * `:lcars_fleet, :admiral_mcp_monitor_check_interval_ms` — default `60_000` (1 min)
-    * `:lcars_fleet, :admiral_mcp_monitor_target` — target (default
-      `{:supervised, Fleet.MCP.Supervisor, Fleet.MCP.PodSocketSupervisor}`). Accepts an
-      atom (named process) OR `{:supervised, sup, child_id}`. Tests inject a fake target.
+  Options :target/:interval_ms override admiral_mcp_monitor_target and
+  admiral_mcp_monitor_check_interval_ms (default 60_000). Unsupported targets can raise.
   """
 
   use GenServer

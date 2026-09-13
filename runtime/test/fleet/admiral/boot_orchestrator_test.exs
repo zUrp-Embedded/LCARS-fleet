@@ -1,8 +1,7 @@
 defmodule Fleet.Admiral.BootOrchestratorTest do
   @moduledoc """
-  B10/#583 — BootOrchestrator as a pure function (run/1 testable outside a Task).
-  `async: false`: subscribes to the global singleton Bus. boot_permanent_pods
-  mocked via opt → proves correct dispatch per outcome.
+  Calls run directly with boot stubs and observes the real Bus. Checks outcome
+  classification, not actual pod launches, daemon readiness or Task supervision.
   """
   use ExUnit.Case, async: false
 
@@ -27,9 +26,7 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
   end
 
   test "R2-14: boot_fn that EXITs → boot_failed (Task :transient NOT crashed → no reboot loop)" do
-    # a boot_fn that exits (e.g. GenServer.call to a dead process) would escape the `rescue`
-    # (exceptions only) → abnormal exit of the :transient Task → restart → reboot loop. The `catch`
-    # classifies it :failed.
+    # rescue alone misses exits; the boot wrapper must catch them as failed outcomes.
     assert :ok = BootOrchestrator.run(boot_permanent_pods: fn -> exit(:simulated_boot_crash) end)
 
     assert_receive %Fleet.Event{source: :admiral, type: :"fleet.boot_failed"}, 1_000

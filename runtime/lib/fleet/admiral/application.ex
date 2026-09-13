@@ -1,35 +1,12 @@
 defmodule Fleet.Admiral.Application do
   @moduledoc """
-  Supervisor of the admiral domain. The name `Application` is the supervisor's, not an OTP app's —
-  this tree is started by `Fleet.Application`, the one OTP callback.
+  Supervisor started by Fleet.Application, not a separate OTP application.
+  Each child has a strict boolean admiral_start_* setting, default true.
+  Event atom registration belongs to EventRouter.Catalog.
 
-  ⚠ NOTHING IS PRE-REGISTERED HERE, and no schema is pre-loaded either. A reader chasing the
-  atom-leak mitigation must go to `Fleet.EventRouter.Catalog`, which holds it and says so: "this
-  function is the ONLY source of pre-registered event atoms". The atoms come from `events.yaml`
-  through it.
-
-  What it starts is the opt-in children of `init/1`, each behind its own
-  `:lcars_fleet, :admiral_start_*` boolean (default `true`, `false` in test — hermeticity; a test
-  that needs one starts it with `start_supervised/1`). The list is the code below, and the domain's
-  map names what each child is for.
-
-  ⚠ `Shutdown` is one of them, and its absence is not inert: `bin/fleet stop` RPCs
-  `Shutdown.begin` before `:init.stop()`, so a container that disabled it stops WITHOUT draining.
-
-  `BootOrchestrator` is NOT a child here: as a mid-boot Task it could
-  spawn permanent pods (real claude spend) BEFORE the later domains (pilot/api) are up —
-  "post-readiness" would be a promise, not a mechanism. It is TRIGGERED by
-  `Fleet.Application` AFTER the root `Supervisor.start_link` returns `{:ok, _}` (the whole
-  fleet is provably up), still gated by `:start_boot_orchestrator` (read via `boot_enabled?/2`).
-
-  ⚠ `:admiral_start_boot_orchestrator` EXISTS but is NOT read here: the ROOT reads it, post-boot.
-  A knob named like the four above, honoured by another module, is the one an operator will look
-  for in this tree.
-
-  ## Strategy
-
-  `:one_for_one` — each child is independent. The restart window is deliberately WIDER than OTP's
-  default: these children tolerate blips, and a stricter window would take the domain down for one.
+  BootOrchestrator is triggered separately through Admiral.boot_orchestrate after
+  root startup, gated by admiral_start_boot_orchestrator. Disabling Shutdown removes
+  the coordinated drain server; this topology alone does not establish readiness.
   """
 
   use Supervisor
@@ -41,12 +18,10 @@ defmodule Fleet.Admiral.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # NO UPSTREAM-VERSION WATCH HERE (BL-6-44). Polling a package registry is not a control plane's
-    # job — no online consumer, one more network egress from the daemon, and nothing a cron does
-    # not do better — and a watch shipped OFF by default does not exist while inviting someone to
-    # switch it on. MCPMonitor stays ON:
-    # purely local (Process.whereis),
-    # zero network I/O, consistent with AuditConsumer).
+    # NO UPSTREAM-VERSION WATCH HERE (BL-6-44): polling a package registry is not a control
+    # plane's job — no online consumer, one more network egress, and nothing a cron does better.
+    # MCPMonitor checks local process presence (Process.whereis) without polling an external
+    # service.
     children =
       [] ++
         if boot_enabled?(:admiral_start_shutdown, true) do
