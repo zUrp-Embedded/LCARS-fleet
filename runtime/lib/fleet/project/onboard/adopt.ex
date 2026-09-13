@@ -1,11 +1,9 @@
 defmodule Fleet.Project.Onboard.Adopt do
   @moduledoc """
-  ADOPTER un arbre local que la fleet n'a pas cree : le depot n'existe pas encore sur la forge,
-  mais les faces, elles, peuvent deja etre la — en tout ou en partie.
+  Publishes an existing local project to a new forge repository.
 
-  D'ou le classement par FACE avant d'ecrire quoi que ce soit : une face qu'on a posee se defait,
-  une face qui appartenait deja a l'humain se GARDE. Confondre les deux, c'est soit laisser un
-  residu, soit supprimer le travail de quelqu'un d'autre.
+  Classify writer faces before mutation so compensation can retain pre-existing
+  directories. It does not undo changes to their origins, files or commits.
   """
 
   alias Fleet.Forge.WriteSpacing
@@ -20,12 +18,15 @@ defmodule Fleet.Project.Onboard.Adopt do
   require Logger
 
   @doc """
-  Publishes a disk-only project to a new empty forge repository. `BL-6-32`
+  Publishes local main, ops and workshop histories; missing writer faces are created.
+  Seeds labels, adds missing declaration/CI files, protects main and ensures the architect.
 
-  The local `main` and any valid local `ops` history are preserved. The call seeds protocol
-  labels, ensures the project declaration, publishes both faces, protects `main`, and ensures the
-  architect. It refuses conflicting origins, existing forge state and malformed local faces.
-  Compensation removes only the forge repository and a `ops` directory created by this call.
+  Admission checks that named branch refs resolve, not that those branches are checked out.
+  A conflicting parsed main origin is refused; origin read errors are accepted.
+
+  On a returned finish error, attempts to delete the new forge repo and writer directories
+  classified absent before the call. Cleanup failures are logged; the original error returns.
+  Exceptions bypass this compensation. The local main directory is retained.
   """
   @spec adopt_project(String.t(), keyword()) :: {:ok, Onboard.result()} | {:error, term()}
   def adopt_project(name, opts \\ []) when is_binary(name) do
@@ -71,9 +72,7 @@ defmodule Fleet.Project.Onboard.Adopt do
     end
   end
 
-  # Per WRITER face: absent (we build it), already a git dir on that face's branch (we adopt it),
-  # or a directory that is something else — which is a refusal, never a thing to overwrite. The
-  # directory belongs to the user; adopt publishes what is there, it does not replace it.
+  # A resolving branch ref admits an existing writer face; this does not check HEAD or its origin.
   defp classify_adopt_face(dir, branch) do
     cond do
       not File.exists?(dir) ->
@@ -164,9 +163,8 @@ defmodule Fleet.Project.Onboard.Adopt do
         {:error, e} -> {:delete_failed, e}
       end
 
-    # A face we BUILT is removed; a face that was already the user's is KEPT. The distinction is
-    # per-face because the states are: adopting a project with a ops of its own and no
-    # workshop must not delete the former while cleaning up the latter.
+    # Cleanup is per initial face state: never remove a pre-existing writer directory.
+    # The log's 'untouched' refers to retention, not restoration of its earlier contents.
     undo = fn state, dir ->
       if state == :absent, do: Faces.compensate_dir(dir), else: :kept_preexisting
     end

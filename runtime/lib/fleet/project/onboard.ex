@@ -1,68 +1,25 @@
 defmodule Fleet.Project.Onboard do
   @moduledoc """
-  Onboarding of a project: "idea → the project exists".
+  Project lifecycle facade: one forge repository and three local repositories.
 
-  Replicates the multi-face architecture of LCARS itself (one forge repo, **three local repos**):
+  * `main`: deliverables, including shipped documentation.
+  * `ops`: runtime records (briefs, verdicts, provenance).
+  * `workshop`: planning and working material that does not ship.
 
-    * `/home/projects/<name>`       → clone, branch `main`       (the deliverable, push origin)
-    * `/home/projects.ops/<name>`  → STANDALONE repo, branch `ops` (orphan) — the RECORD:
-      briefs, gate-briefs, verdicts, provenance. Written by the RUNTIME; no pod writes here.
-      Qui le monte, et en quel mode, est declare dans les `mounts:` des cap-profiles.
-    * `/home/projects.workshop/<name>`   → STANDALONE repo, branch `workshop` (orphan) — the WORKSHOP:
-      plans, backlog, scratchpad, specs in progress. Written by a PRODUCER, ships with nothing.
+  Writer faces own their gitdir: linked worktrees would require writes under a
+  parent repository mounted read-only by pods. Mount access is set by cap-profiles.
 
-  Each writer face is STANDALONE and not a linked worktree, and the reason is the same for both:
-  its ENTIRE gitdir must live on its own side (F-24). A linked worktree keeps its gitdir under the
-  parent repo, which a pod mounting that parent read-only could then not commit into
-  (`add_work_ops` carries the full rationale).
+  The implementations live in the Onboard submodules; their public docs describe
+  creation, import, convergence and compensation. Scaffold commits use the system
+  author and runtime Git committer configuration, which does not identify the requester.
 
-  ⚠ The documentation that SHIPS is none of the above two: it lives in `docs/` on `main`, is
-  written by a producer working the code face, and is judged like any other deliverable. The
-  criterion separating the workshop from it is the DESTINATION, never the nature of the artefact.
-
-  It is a **mechanical rail** (structural compliance): starfleet (the fleet-master) *triggers* via the
-  MCP tool `project_create`, the SYSTEM *executes* this deterministic sequence — the caller never types
-  git. Onboarding also spawns the project's per-project architect (`maybe_open_architect`).
-
-  Sequence (FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
-  scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
-  clearly if the local folder already exists):
-
-    1. `Fleet.Forge.Client.Repo.create_repo` (the catalogue's org, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
-    2. `git clone --branch main` → `/home/projects/<name>`
-    3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, CI) — PAS de spec : la matiere de
-       cadrage vit sur `workshop`, la seule face dont l architecte ait la plume avant la 1re livraison
-    4. commit (author=`system_starfleet`, committer=git config runtime = the human) + push `main`
-    5. the two WRITER faces, same shape each (`build_writer_face/7`): `git init -b <branch>` +
-       `remote add origin` → standalone clone, scaffold its template subtree, commit, push `-u`
-       * `ops` → `/home/projects.ops/<name>` — the RECORD the runtime keeps (README only:
-         briefs, gate-briefs, verdicts and provenance are written there BY the runtime, never by a pod)
-       * `workshop` → `/home/projects.workshop/<name>` — the project's WORKSHOP (CLAUDE.md, backlog.md,
-         scratchpad.md, plans/), the material the project is built FROM and that never ships with it
-
-  THREE faces, not two, and the third is not a variation on the second: `ops` is written by the
-  runtime and `workshop` by a producer. Reading the planning material as living on the ops face
-  puts a pod's workspace on the tree that records how that pod was judged.
-
-  Identity (onboarding is an act of system INFRA, not creative work):
-  `author=system_starfleet` (the SYSTEM generates the scaffold from templates; the arch writes no file,
-  it **relays** `name`+`pitch` — it is transparent in the git attribution, its trace lives in the request),
-  `committer`=the human (git config runtime = **the user who initiated the project → traced**),
-  `pusher`=`system_starfleet` (`ForgeAuth.git_env`, fleet-wide owner). All avatared (emails → Gitea accounts).
-  No GenServer (Iron Law — I/O orchestration without shared state).
-
-  ⚠ CROSS CONTRACT (`Fleet.MCP` seam): `onboard/2` is the REAL impl (default) of the behaviour
-  `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. It CANNOT be adopted as `@behaviour`:
-  `Fleet.Project` does not depend on `Fleet.MCP` (MCP sits above it) and the compile reference
-  would be a Boundary violation.
-  Duck-typed impl — any evolution of the signature/of the
-  `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
+  This is the default implementation of `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
+  Keep its callbacks and result types aligned. Project cannot adopt that behaviour
+  directly because the compile dependency on MCP would violate the domain boundary.
   """
 
   alias Fleet.Project.Roles
 
-  # Content + writing of the scaffold (pure templates, one subtree per face) — extracted:
-  # no dependency on the orchestration, onboard calls it at the right moments of its sequence.
   alias Fleet.Project.Onboard.Adopt
   alias Fleet.Project.Onboard.Card
   alias Fleet.Project.Onboard.Create
@@ -79,24 +36,15 @@ defmodule Fleet.Project.Onboard do
           :project_dir => Path.t(),
           :work_dir => Path.t(),
           :doc_dir => Path.t(),
-          # Per-project architect ensure outcome — reported, never dropped:
-          # %{status: "up", pod_id: _} | %{status: "failed", reason: _}.
+          # Architect callback outcome: up, deferred or failed.
           :architect => map(),
-          # LA RE-EMISSION CONVERGENTE SE DIT DANS LE RESULTAT, donc ce type la declare.
-          # `refute_existing_or_converge` pose cette cle quand l'etat de fin est deja realise : le
-          # verbe rend alors `{:ok, result}` sans rien avoir cree. Absente de la declaration, elle
-          # rend `%{idempotent: true}` formellement INATTEIGNABLE — un appelant qui distingue
-          # « importe » de « deja la » ecrivait un motif que Dialyzer refusait, sur une valeur que
-          # le code produit vraiment.
+          # Present when existing state passes the convergence checks; architect ensure still runs.
           optional(:idempotent) => true,
           # Posée par `import_deposit/3` seul : la source personnelle (`<login>/<name>`) d'où la
           # copie a été prise — le dépôt d'origine n'est pas consommé, et le fil rend `from`.
           optional(:from) => String.t()
         }
 
-  # THE FOUR OTHER LIFECYCLE VERBS, TYPED THE SAME WAY as `delete_result/0` and for the same reason:
-  # `{:ok, map()}` on both sides of the seam is a shape nobody can be held to. Each type is the
-  # union of what the verb's clauses actually build (2026-09-05).
   @type close_result :: %{
           :repo => String.t(),
           :outcome => :closed | :already_closed,
@@ -124,12 +72,7 @@ defmodule Fleet.Project.Onboard do
           optional(:protection) => String.t()
         }
 
-  # The shape `delete_project/2` returns — ONE declaration, read by `Lifecycle`'s `@spec` AND by the
-  # MCP behaviour's `@callback` (`Fleet.MCP.PodTools.Delegation.ProjectOnboard`). It lives HERE and
-  # not on the behaviour because this module cannot depend on `Fleet.MCP` (Boundary, MCP sits
-  # above), while MCP already names this module as its default. `{:ok, map()}` on both sides let
-  # `workers_killed` be computed, tested, and never relayed on the wire (2026-09-04): a key the
-  # type does not name is a key the readers cannot be held to.
+  # Result types are shared with the MCP behaviour; keep all returned wire fields explicit.
   @type delete_result :: %{
           :repo => String.t(),
           # `:deleted` | `:absent` (the forge had no such repo — the local proof still runs).
@@ -147,27 +90,8 @@ defmodule Fleet.Project.Onboard do
           :local => %{project: atom(), ops: atom(), workshop: atom()}
         }
 
-  # ── LA SURFACE DU SEAM, RE-EXPORTEE ─────────────────────────────────
-  # ⚠ CES TREIZE VERBES SONT LE CONTRAT, PAS DU CONFORT. Le behaviour
-  # `Fleet.MCP.PodTools.Delegation.ProjectOnboard` designe CE module comme son implementation par
-  # defaut, et `Gate.conforming/2` verifie par `function_exported?/3` que chacun de ses `@callback`
-  # est exporte ICI. Un verbe descendu dans un sous-module sans etre re-exporte ne casse pas la
-  # compilation : il rend `{:seam_misconfigured, Fleet.Project.Onboard, [...]}` a la premiere
-  # delegation reelle. Le meme trou a coute `put_file/4` sur `Fleet.Forge.Client`, deux fois de
-  # suite, a un architecte qui tirait une toolchain.
-  #
-  # Le CONTRAT de chaque verbe vit dans son `@doc`, a cote de son code, dans le module qui
-  # l'implemente. Ici ne restent que la signature et l'adresse.
-  #
-  # ⚠ LA REGLE DE RE-EXPORT, pour qu'une absence se lise comme un CHOIX et pas comme un oubli : un
-  # verbe est re-exporte ICI quand quelque chose HORS de la famille le nomme a CETTE adresse — un
-  # `@callback` de behaviour, un seam d'un autre domaine, une porte `eval` d'un script shell. Rien
-  # d'autre. `migrate/3`, `reconcile/2`, `refute_store/2` et `refute_store_address/2` ne sont donc
-  # PAS ici : leurs seuls appelants sont leurs temoins, qui vont a l'adresse reelle.
-  #
-  # Le cas des portes `eval` est celui qui a mordu, et il est le moins visible : un script SHELL
-  # nomme un module dans une chaine que ni le compilateur ni dialyzer ne lisent. C'est
-  # `runtime.eval_doors_resolve` qui tient cette moitie-la.
+  # Re-export entry points named outside this family: MCP callbacks, domain seams and shell evals.
+  # Missing delegates can compile but fail Gate.conforming at runtime. Helper-only APIs stay local.
 
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   defdelegate onboard(name, opts \\ []), to: Create
@@ -202,22 +126,14 @@ defmodule Fleet.Project.Onboard do
   @spec import_deposit(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   defdelegate import_deposit(source, catalogue, opts \\ []), to: Import
 
-  # ⚠ RE-EXPORTEES PARCE QU'UN SCRIPT LES NOMME. `bin/lcars project migrate` et
-  # `lcars project reconcile` executent `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"` :
-  # une chaine de SHELL, que ni le compilateur ni dialyzer ne lisent. Descendues dans
-  # `Onboard.Migration` sans re-export, les deux verbes du CLI levent un `UndefinedFunctionError`
-  # et le provisioning d'une machine fraiche echoue a l'etape `lcars project reconcile` — huit
-  # etapes de gate, zero signal. C'est le mur `runtime.eval_doors_resolve` qui le tient.
+  # Shell eval strings bypass compiler checks; runtime.eval_doors_resolve guards these addresses.
   @spec eval_migrate(String.t(), String.t()) :: no_return()
   defdelegate eval_migrate(full_name, catalogue), to: Fleet.Project.Onboard.Migration
 
   @spec eval_reconcile(atom()) :: no_return()
   defdelegate eval_reconcile(mode), to: Fleet.Project.Onboard.Migration
 
-  # ⚠ RE-EXPORTE POUR NE PAS ELARGIR LA FRONTIERE. `Fleet.Pilot` cable cette fonction comme defaut
-  # de son seam de reconvergence, et `Fleet.Project` n'exporte pas `Onboard.Migration` — l'ajouter
-  # aux `exports:` serait un changement d'API du domaine pour un besoin qui n'en demande aucun.
-  # Le verbe reste a son adresse d'origine ; seule son implementation a demenage.
+  # Pilot's seam uses this address; re-exporting avoids exposing the Migration submodule.
   @spec reconcile_main_protection(String.t(), keyword()) :: :ok | {:error, term()}
   defdelegate reconcile_main_protection(repo, opts \\ []), to: Fleet.Project.Onboard.Migration
 
@@ -239,12 +155,8 @@ defmodule Fleet.Project.Onboard do
     }
   end
 
-  # TROIS ISSUES, ET LA TROISIEME N'EST NI UN SUCCES NI UN ECHEC. Un appelant qui n'a pas de fleet
-  # sous la main — la porte de reconvergence tourne dans un `eval`, donc dans une VM qui a CHARGE
-  # l'app sans la demarrer — ne peut pas assurer d'architecte : il n'y a aucun superviseur a qui le
-  # demander. Le dire « failed » accuserait le projet d'un defaut qu'il n'a pas ; le dire « up »
-  # serait un mensonge sur un pod qui n'existe pas. `deferred` dit ce qui est vrai, et qui prend la
-  # suite : le poller de la fleet assure l'architecte de chaque projet qu'il sert.
+  # Deferred is reported only when the callback returns it (e.g. eval without supervisors).
+  # This function neither schedules a retry nor catches callback exceptions.
   @doc false
   @spec ensure_architect(String.t(), keyword()) :: map()
   def ensure_architect(repo, opts) do
@@ -258,39 +170,16 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
-  The forge orgs a project can be onboarded into — one per INSTALLED catalogue, and the org IS the
-  catalogue's name.
+  Installed catalogue names, used as project forge orgs.
 
-  Lives here rather than being read from `Fleet.Catalogue` by every caller: "where can a project
-  live" is an onboarding question, and the MCP surface reaches this domain but not the catalogue —
-  the graph says so, and widening it to answer a project question would be widening it for the
-  wrong reason.
+  Exposed through Project so MCP callers need not depend on Catalogue.
   """
   @spec installed_orgs() :: [String.t()]
   def installed_orgs, do: Fleet.Catalogue.installed_names()
 
   @doc false
-  # ─── L'ADMISSION, UNE FOIS, POUR LES CINQ VERBES QUI FONT ENTRER UN PROJET ─────────────────────
-  #
-  # ⚠ DES RAILS PARALLELES NE DIVERGENT PAS D'UN COUP, ILS DIVERGENT D'UNE LIGNE — et la ligne
-  # manquante ne ressemble a rien. Cinq preambules qui posent les memes questions chacun a sa facon
-  # finissent avec UN SEUL qui ne verifie pas que la carte est declarable : un depot importe avec
-  # une carte d'atelier ou une faute de frappe y passe, la ou les quatre autres refusent. D'ou un
-  # preambule partage.
-  #
-  # L'ORG N'EST PAS DANS LE FILTRE, seule chose qui differe legitimement : certains verbes la
-  # RECOIVENT declaree — creer une chose neuve n'a pas de source d'ou la tirer — et d'autres la
-  # LISENT de leur source. Chaque verbe resout donc la sienne, puis passe par ici.
-  #
-  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME : y glisser un controle qui APPELLE LA
-  # FORGE ferait payer un aller-retour a une entree refusee jusque-la sans toucher au monde. La loi
-  # est donc en trois temps — cette admission locale, les gardes PURES du verbe, puis le monde.
-  #
-  # ⚠ LA CLE DE VOUTE, A CHERCHER ICI AVANT D'AJOUTER UNE GARDE : aucun de ces verbes ne verifie que
-  # l'humain qui les joue est legitime, et ce n'est PAS un trou. Le BEAM refuse de demarrer sous un
-  # uid systeme et herite de cet uid pour lui comme pour ses pods, donc quiconque atteint ce code
-  # EST un humain de la fleet, par construction. Une garde par verbe ne mesurerait que le uid qui
-  # l'execute, c'est-a-dire l'INSTRUMENT.
+  # Shared local admission: installed catalogue, name and explicit card validation.
+  # Each entry point resolves its org before calling this; forge I/O belongs after admission.
   @spec admit(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def admit(org, name, opts) when is_binary(org) and is_binary(name) do
     with :ok <- require_installed(org),
@@ -299,9 +188,7 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # L'ORG EST UNE DECLARATION, PAS UNE DEDUCTION. Les verbes de creation la recoivent ou refusent en
-  # nommant ce qui est installe — le meme refus que le guichet, pour que les deux portes disent la
-  # meme chose. Les verbes qui ont une SOURCE (un depot, un catalogue nomme) la lisent d'elle.
+  # Creation requires an explicit org; source-based verbs derive it from their source.
   @doc false
   @spec required_org(keyword()) :: {:ok, String.t()} | {:error, term()}
   def required_org(opts) do
@@ -312,20 +199,10 @@ defmodule Fleet.Project.Onboard do
   end
 
   @doc """
-  The single not-installed refusal — ONE atom, ONE payload shape, for every caller inside and
-  outside this module.
+  Shared catalogue refusal for local guards and MCP callers.
 
-  ## Why the payload is a SENTENCE and not the installed list
-
-  Two sites answering the same atom with different third elements — a LIST of installed names from
-  the local guards, a gestures STRING from the forge preflight — leave a caller holding
-  `{:catalogue_not_installed, name, x}` unable to know which it has: an ambiguity moved down one
-  level instead of removed. ⚖ The ACTION is identical in both cases (a
-  forge admin installs it), and an inventory is only worth printing inside a sentence that says
-  what to do with it. The sentence carries the inventory.
-
-  Public so the MCP delegation door cannot grow a second wording of it: two phrasings of one
-  refusal is how the vocabulary split in the first place.
+  The third tuple element is a guidance string containing the installed inventory,
+  consistently a string rather than a list at some call sites.
   """
   @spec catalogue_not_installed(String.t()) ::
           {:error, {:catalogue_not_installed, String.t(), String.t()}}
@@ -346,10 +223,8 @@ defmodule Fleet.Project.Onboard do
     if name in installed_orgs(), do: :ok, else: catalogue_not_installed(name)
   end
 
-  # LE DEPOT N'EST PAS A NOUS, et c'est ce qui change tout par rapport aux deux autres verbes :
-  # `adopt` et `import_external` CREENT le repo, donc leur compensation le supprime en entier.
-  # Ici il preexiste, on ne peut donc defaire QUE ce qu'on a soi-meme pousse — d'ou l'inventaire
-  # remonte par `ensure_writer_faces/5`.
+  # Import retains the pre-existing repository. Compensation tracks newly published writer
+  # branches only; it does not restore arbitrary remote state such as protection rules.
   @doc false
   @spec finish_import(String.t(), map(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
@@ -428,11 +303,8 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # A present declaration is LEFT AS-IS (the burn validates loudly; adopt does not overwrite the
-  # user's engraving) — an absent one is written from the relayed declaration (or the honest undeclared
-  # default) and committed, BEFORE the single main push (v2-1 of the 6-16/6-31 plan: pushed
-  # AFTER, it would never reach the forge and both lock_main reads would fall back to the
-  # default-card jury in silence).
+  # Existing declarations are kept without validation here. Missing ones are written and
+  # committed before the caller's main push, so the forge receives the card with the project.
   @doc false
   @spec ensure_declaration(String.t(), String.t(), keyword(), String.t()) ::
           :ok | {:error, term()}
@@ -451,22 +323,8 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # ─── LE DEPOT SE NOMME, IL NE SE DEDUIT PAS ─────────────────────────────────────────────────────
-  #
-  # ⚠ L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. L'ecriture d'une declaration resout la
-  # carte dans le catalogue DU PROJET, qu'elle apprend par les opts. Sans lui, elle la cherche dans
-  # le catalogue RACINE : le guichet presente les cartes d'un catalogue, l'agent en choisit une, et
-  # le refus enumere celles d'un AUTRE. Une porte qui valide puis ecrit ne peut pas poser la
-  # question a deux catalogues.
-  #
-  # POURQUOI UN POSITIONNEL ET PAS UNE CLE : une cle optionnelle s'oublie, et son oubli est
-  # SILENCIEUX — litteralement le defaut qu'on ferme ici. L'appele ne peut pas l'exiger de son cote,
-  # ayant des appelants legitimes qui prennent le catalogue racine a bon droit ; ce module, lui, le
-  # peut, parce qu'ICI l'ignorer est toujours un defaut. Le compilateur devient le garde.
-  #
-  # ⚠ LA FUSION SE FAIT ICI ET APRES, jamais dans l'appelant : `revision_write_opts/2` reconstruit
-  # une liste NEUVE et jetterait un `repo:` pose en amont. Fusionne au dernier moment, il survit a
-  # tout ce que les appelants font de leurs options.
+  # Require the repository positionally so declaration lookup uses the project's catalogue.
+  # Merge repo last: revision_write_opts rebuilds options and would discard an earlier insertion.
   @doc false
   @spec write_declaration(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def write_declaration(proj_dir, full_name, opts) do
@@ -479,12 +337,7 @@ defmodule Fleet.Project.Onboard do
     if File.dir?(proj_dir), do: :ok, else: {:error, {:not_on_machine, full_name}}
   end
 
-  # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
-  # projet sur disque repose sur elle : `Fleet.Layout.project_slug/1` n'est pas injective, et ce qui
-  # rend la collision inatteignable est que cette charte est STRICTEMENT INCLUSE dans ce que le slug
-  # preserve. Un temoin qui epinglerait cette inclusion contre SA PROPRE COPIE du motif ne tiendrait
-  # rien : elargir la charte ici ne le ferait pas rougir. Une source, lue des deux cotes —
-  # `Fleet.LayoutTest` lit celle-ci.
+  # LayoutTest reads this same admission pattern to check slug preservation.
   @name_re ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
 
   @doc false

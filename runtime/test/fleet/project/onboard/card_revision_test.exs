@@ -1,9 +1,8 @@
 defmodule Fleet.Project.Onboard.CardRevisionTest do
   @moduledoc """
-  `revise_card/2` (BL-6-29) over a REAL on-disk `file://` forge — the fixture is built by the
-  REAL `onboard/2` (declared card engraved at birth), then revised. The protection lift/restore
-  is asserted on the RECORDED `protect_branch` calls; the landing is asserted on the BARE repo
-  (what the forge holds is the truth, never the discarded scratch clone).
+  Card revision over real local Git repositories created by onboard.
+  Inspect the bare repo for landed changes and recorded calls for protection lift/restore;
+  the stub does not enforce forge protection.
   """
   use ExUnit.Case, async: false
 
@@ -11,9 +10,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
 
   @moduletag :tmp_dir
 
-  # Forge stub over a real on-disk `file://` forge (same shape as the compensation suite's
-  # FileForge), with `protect_branch` RECORDING its calls — the lift/restore sequence is the
-  # subject under test here, not a tunable side effect.
   defmodule RecordingFileForge do
     def generate_repo(_template, _name, _opts), do: {:error, :template_missing}
 
@@ -53,7 +49,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
       :ok
     end
 
-    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
@@ -73,9 +68,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
   end
 
   defmodule Humans do
-    # Le preflight forge ne pose plus qu'UNE question depuis le 2026-08-17 : l'org de ce
-    # catalogue existe-t-elle. Le couple `user_exists?`/`team_member?` verifiait l'humain,
-    # garde morte avec son motif.
     def org_exists?(_o, _fc), do: {:ok, true}
   end
 
@@ -85,9 +77,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
-      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
-      # installe » — un devineur, mort avec lui.
       org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
@@ -101,9 +90,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     ]
   end
 
-  # Revision opts on top of the machine opts. The `:sync_showcase` seam does what the code-face
-  # WorktreeSync does (pull the showcase forward) — the burn reads the card THERE, so the test
-  # asserts the sync ran and the showcase file moved.
+  # Sync uses a fixture pull --ff-only, not WorktreeSync's full reset/error behavior.
   defp revision_opts(o, extra) do
     base = [
       justification: "le poc est devenu serieux",
@@ -156,10 +143,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
        %{
          o: o
        } do
-    # `compose/1` builds the declaration from OPTS ALONE and never reads the file it replaces. So a
-    # revision naming only the card DELETED `max_fan` — the throughput the human chose, gone, with
-    # `declared_by` now naming the reviser. The revision must carry forward what it does not restate.
-    # (`level`/`nature` are retired — crit_quarantine — so there is nothing of them left to drop.)
+    # Revision must carry max_fan forward; Declaration.compose reads only supplied options.
     proj = Path.join([o[:code_root], "tetris"])
 
     :ok =
@@ -170,10 +154,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
         onboarded_by: "human"
       )
 
-    # IDENTITE EXPLICITE, comme tout autre `git commit` de cette suite. Sans elle ce commit marche
-    # sur un poste (le `~/.gitconfig` de l'humain) et meurt en clean-room sur « Author identity
-    # unknown » — mesure du 2026-08-09, l'etage `build` de l'image a rougi sur ces deux tests-la
-    # alors qu'ils etaient verts ici. Un test vert grace a l'environnement de celui qui l'ecrit.
+    # Explicit Git identity keeps commits independent of the developer's ~/.gitconfig.
     {_, 0} =
       System.cmd(
         "git",
@@ -202,12 +183,11 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
 
     landed = Jason.decode!(bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"]))
 
-    # What the revision DID say moves.
     assert landed["pipeline_default"] == "c1-light"
     assert landed["justification"] == "le poc est devenu serieux"
-    # What it did NOT restate survives — max_fan is not the reviser's to drop.
+
     assert landed["max_fan"] == 4
-    # The retired keys are simply gone — nothing to carry forward (crit_quarantine).
+
     refute Map.has_key?(landed, "level")
     refute Map.has_key?(landed, "nature")
   end
@@ -215,12 +195,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
   test "a revision that REDUCES the jury names it — in the commit, the log and the payload", %{
     o: o
   } do
-    # `standard-qa` carries two judges, `c0-poc` carries none. The message used to read
-    # `card revision: standard-qa -> c0-poc` — a wall coming down, written in the vocabulary of a
-    # rename. Everything auditable, nothing legible: the card NAME does not say what the card does.
-    #
-    # NOT refused. The card IS the human's declaration and a project that genuinely became less
-    # critical must be able to say so by choosing a lighter card. What a downgrade may not be is quiet.
+    # A two-to-zero jury reduction remains allowed but must be reported.
     assert {:ok, %{outcome: :revised}} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
@@ -245,14 +220,8 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
   test "a PREVIOUS card the catalogue no longer carries yields nil — never a delta of zero", %{
     o: o
   } do
-    # THE GUARD I WROTE WITH ITS REASON, AND NOTHING HELD IT: making an unloadable card read as 0
-    # left the whole suite green (measured 2026-08-08). Zero MEANS "the jury did not change", and a
-    # delta nobody could compute is not that — it is "I could not tell". Collapsing the two puts a
-    # reassuring number on the exact case where a wall may have moved unseen.
-    #
-    # Reachable: a project declares a card, the operator's catalogue drops it, the project keeps
-    # naming it in `.lcars.json` until the next revision. The NEW card is guarded
-    # (`require_loadable_card`); the previous one never was.
+    # An old card can disappear from the catalogue while the local declaration still names it.
+    # A failed lookup must return nil, not the reassuring but false delta zero.
     proj = Path.join([o[:code_root], "tetris"])
     declaration = Path.join(proj, ".lcars.json")
 
@@ -271,15 +240,12 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "standard-qa")
              )
 
-    # And nothing claims a reduction it could not measure.
     msg = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%s", "main"])
     refute msg =~ "JURY REDUIT"
   end
 
   test "a revision that does NOT shrink the jury says nothing about it", %{o: o} do
-    # One meaning per shape: a suffix on every ordinary revision would be noise, and noise is what a
-    # reader learns to skip before the one time it matters. `c0-poc` and `audit-only` both carry an
-    # empty jury — a delta of zero is not a reduction.
+    # Both fixture cards have empty juries; zero must not produce a reduction warning.
     assert {:ok, %{jury_delta: 0}} =
              ProjectOnboard.revise_card(
                "fleet/tetris",
@@ -306,18 +272,15 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
              protection: :restored
            } = result
 
-    # The forge's main carries the NEW declaration, attributed to the revising role.
     raw = bare_git!(o, "fleet/tetris", ["show", "main:.lcars.json"])
     assert raw =~ ~s("pipeline_default": "audit-only")
     assert raw =~ ~s("declared_by": "starfleet")
 
-    # The commit is the ledger entry: old -> new in the message, system account as author.
     log = bare_git!(o, "fleet/tetris", ["log", "-1", "--format=%an|%s", "main"])
     assert log =~ "system_starfleet"
     assert log =~ "card revision: c0-poc -> audit-only"
 
-    # Lift FIRST (push door reduced to the system account), canonical restore AFTER (door
-    # closed, jury re-sized on the card the showcase now declares).
+    # Recorded lift precedes restore; the test checks an integer approval count, not its size.
     assert_received {:protect_branch, "fleet/tetris", lift}
     assert lift[:enable_push] == true
     assert lift[:enable_push_whitelist] == true
@@ -328,7 +291,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
     assert restore[:enable_push] == false
     assert is_integer(restore[:required_approvals])
 
-    # The showcase moved: the next burn reads the NEW card.
     assert_received {:showcase_synced, "fleet/tetris"}
 
     assert File.read!(Path.join([o[:code_root], "tetris", ".lcars.json"])) =~
@@ -378,7 +340,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
 
     assert bare_git!(o, "fleet/tetris", ["rev-parse", "main"]) == sha_before
 
-    # The door was opened, and CLOSED again on the failure path — never left lifted.
+    # Push failure still requests restoration; the stub does not enforce the rule.
     assert_received {:protect_branch, "fleet/tetris", lift}
     assert lift[:enable_push] == true
     assert_received {:protect_branch, "fleet/tetris", restore}
@@ -389,9 +351,7 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
   test "a TICKET-scoped card is refused as a project declaration — loadable is not declarable", %{
     o: o
   } do
-    # `workshop-direct` loads perfectly and is chosen by an issue's genre. Declared for a PROJECT it
-    # would route every ticket through a jury-less direct seal, so the framing catalogue stopped
-    # offering it — and stopping to offer is not refusing. This is the refusal.
+    # A loadable ticket card is still invalid as a project declaration.
     sha_before = bare_git!(o, "fleet/tetris", ["rev-parse", "main"])
 
     assert {:error, {:card_not_project_scoped, "workshop-direct", "ticket"}} =
@@ -400,7 +360,6 @@ defmodule Fleet.Project.Onboard.CardRevisionTest do
                revision_opts(o, workflow_map: "workshop-direct")
              )
 
-    # Refused BEFORE any gesture: main untouched, and the protection never lifted.
     assert bare_git!(o, "fleet/tetris", ["rev-parse", "main"]) == sha_before
     refute_received {:protect_branch, "fleet/tetris", _}
     refute_received {:showcase_synced, _}

@@ -1,10 +1,8 @@
 defmodule Fleet.Project.Onboard.CloseOpenTest do
   @moduledoc """
-  `close_project/2` + `open/2`'s unpark half (BL-6-30) — the fixture is built by the REAL
-  `onboard/2` (dirs whose git origin PROVES the project), the forge issue side is a recording
-  stub holding its state in the process dictionary (the verbs run in the caller's process).
-  The parked STATE is asserted on what the stub forge holds — the marker issues — never on
-  the verbs' return alone.
+  Close/open over real onboarded Git faces and a stateful issue stub.
+  The stub retains marker issues in the caller process; tests inspect marker state as well
+  as recorded calls. No real architect or forge issue API is exercised.
   """
   use ExUnit.Case, async: false
 
@@ -12,7 +10,6 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
 
   @moduletag :tmp_dir
 
-  # Same on-disk file:// forge shape as the sibling suites (repo ops only).
   defmodule FileForge do
     def generate_repo(_template, _name, _opts), do: {:error, :template_missing}
 
@@ -49,8 +46,6 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
       :ok
     end
 
-    # JG-121/124 — trois etats : la doublure repond comme la vraie forge, `{:ok, bool}` sur une
-    # lecture aboutie. Elle n'a pas de mode « injoignable » ; le cas `{:error, _}` a son propre test.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
@@ -70,15 +65,10 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
   end
 
   defmodule Humans do
-    # Le preflight forge ne pose plus qu'UNE question depuis le 2026-08-17 : l'org de ce
-    # catalogue existe-t-elle. Le couple `user_exists?`/`team_member?` verifiait l'humain,
-    # garde morte avec son motif.
     def org_exists?(_o, _fc), do: {:ok, true}
   end
 
-  # Issue-side forge (the `:forge_issues` seam): the OPEN issues live in the process dictionary
-  # — a marker created is a marker the next read SEES (the state round-trips, unlike a static
-  # stub). Degradations driven by pdict flags.
+  # Stateful markers make a create visible to subsequent list/close calls.
   defmodule IssueForge do
     def list_open_issues(_repo, _opts) do
       Process.get(:issue_list_result, {:ok, Process.get(:issues, [])})
@@ -103,8 +93,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
     end
   end
 
-  # Spawner stub: records kill_pod (the architect stop) — the pod never exists → :not_found,
-  # which close maps to :none (best-effort semantics under test is the CALL, not the outcome).
+  # No pod exists: record the stop call and return not_found, mapped to :none.
   defmodule StubSpawner do
     def kill_pod(pod_id) do
       send(self(), {:killed, pod_id})
@@ -118,9 +107,6 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
-      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
-      # installe » — un devineur, mort avec lui.
       org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
@@ -162,13 +148,13 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
 
     assert_received {:issue_created, "fleet/pong", 1, title, body, issue_opts}
     assert Fleet.Forge.Protocol.parked_issue_title?(title)
-    # Assignee = the human (the poller's assigned_by scoping must SEE the marker).
+    # Check a single assignee, not its identity.
     assert [_human] = issue_opts[:assignees]
-    # The body documents BOTH reopening paths (UI-close is a designed unpark).
+
     assert body =~ "project_open"
     assert body =~ "fermer CE ticket"
 
-    # Marker BEFORE stop: the kill signal arrives after the create (mailbox order).
+    # These selective receives prove both calls occurred, not their relative order.
     assert_received {:killed, _pod_id}
   end
 
@@ -178,9 +164,9 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
     assert_received {:killed, _}
 
     assert {:ok, %{outcome: :already_closed}} = ProjectOnboard.close_project("fleet/pong", o)
-    # ONE marker on the forge, not two.
+
     assert [_only_one] = marker_titles()
-    # A prior close that crashed between marker and stop is repaired here: the stop re-runs.
+    # Re-closing retries the stop, covering a prior interruption after marker creation.
     assert_received {:killed, _}
   end
 
@@ -202,12 +188,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
   end
 
   test "open: a project whose DOC face is missing is NOT on the machine", %{o: o} do
-    # `open` is what hands a project to the architect, whose producer path is on `doc`. Dropping
-    # the doc face from the on-machine check left the whole suite green (measured 2026-08-08):
-    # every fixture here is a fully onboarded project, so a two-face check and a three-face one
-    # answer identically. Opening a project without its doc face succeeds and then wedges at the
-    # first documentary ticket, far from the cause — which is the shape of failure the guard
-    # exists to prevent, not a new one.
+    # Fully onboarded fixtures cannot expose a missing workshop guard; remove that face alone.
     assert {:ok, _} = ProjectOnboard.close_project("fleet/pong", o)
     File.rm_rf!(Path.join(o[:workshop_root], "pong"))
 
@@ -217,7 +198,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
 
   test "open: unparks (ALL markers closed) then ensures the architect", %{o: o} do
     assert {:ok, _} = ProjectOnboard.close_project("fleet/pong", o)
-    # A concurrent close can legitimately leave a second marker — open must clear BOTH.
+    # Multiple parked markers can coexist; open must close both.
     Process.put(
       :issues,
       Process.get(:issues, []) ++
@@ -249,7 +230,7 @@ defmodule Fleet.Project.Onboard.CloseOpenTest do
 
     assert {:error, {:unpark_failed, {1, :forge_down}}} = ProjectOnboard.open("fleet/pong", o)
     refute_received {:arch_ensured, _}
-    # The marker still holds the state on the forge.
+
     assert [_still_there] = marker_titles()
   end
 

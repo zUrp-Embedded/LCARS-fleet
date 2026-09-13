@@ -1,9 +1,7 @@
 defmodule Fleet.Project.Onboard.AdoptTest do
   @moduledoc """
-  `adopt_project/2` (BL-6-32 — the disk→forge inverse of import). The fixture is the measured
-  wedge itself: a real local git pair that NO other verb could handle. The landing is asserted
-  on the BARE forge repo (what the forge holds is the truth), the refusals on the untouched
-  local state.
+  Adoption with real local Git histories and a bare file:// forge.
+  Assertions inspect published content; protection and architect calls are recorded stubs.
   """
   use ExUnit.Case, async: false
 
@@ -11,8 +9,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
 
   @moduletag :tmp_dir
 
-  # Adopt-shaped forge: `create_repo` makes an EMPTY bare (auto_init: false is the adopt
-  # contract — a seeded main would break the local fast-forward push, so the stub PINS it).
+  # Require an empty bare repo: a seeded remote main would conflict with the local history.
   defmodule AdoptForge do
     def generate_repo(_template, _name, _opts), do: {:error, :template_missing}
 
@@ -53,7 +50,6 @@ defmodule Fleet.Project.Onboard.AdoptTest do
       :ok
     end
 
-    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
     def branch_exists?(full_name, branch, _fc) do
       path = bare_path(full_name)
 
@@ -73,9 +69,6 @@ defmodule Fleet.Project.Onboard.AdoptTest do
   end
 
   defmodule Humans do
-    # Le preflight forge ne pose plus qu'UNE question depuis le 2026-08-17 : l'org de ce
-    # catalogue existe-t-elle. Le couple `user_exists?`/`team_member?` verifiait l'humain,
-    # garde morte avec son motif.
     def org_exists?(_o, _fc), do: {:ok, true}
   end
 
@@ -85,9 +78,6 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
-      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
-      # installe » — un devineur, mort avec lui.
       org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
@@ -107,8 +97,6 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     ]
   end
 
-  # The measured wedge: a LOCAL project that exists nowhere else — a git repo on main with
-  # real content, no origin, no forge repo.
   defp build_local_main(o, name) do
     dir = Path.join(o[:code_root], name)
     File.mkdir_p!(dir)
@@ -136,17 +124,14 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     assert {:ok, %{repo: "fleet/garage", architect: %{status: "up"}}} =
              ProjectOnboard.adopt_project("garage", o)
 
-    # The forge main IS the local content (never scaffolded over) + the declaration
-    # this call committed (absent locally → written + committed before the single push).
+    # Check original content and the newly written declaration on remote main.
     assert bare_git!(o, "fleet/garage", ["show", "main:code.txt"]) =~ "the user's real content"
     assert bare_git!(o, "fleet/garage", ["show", "main:.lcars.json"]) =~ "pipeline_default"
 
-    # The bare-create lesson (BL-6-33) applies to adopt too.
     assert_received {:labels_seeded, "fleet/garage"}
 
-    # The ops face exists on the forge; the protection landed; the arch is up.
-    # `== {:ok, true}` et non une simple verite : depuis JG-121 la fonction rend un triplet d'etats,
-    # et `assert` seul passerait aussi sur `{:ok, false}`.
+    # Check ops publication explicitly: {:ok, false} would also pass a truthiness assertion.
+    # Protection and architect assertions below prove calls, not their real-world effects.
     assert AdoptForge.branch_exists?("fleet/garage", "ops", []) == {:ok, true}
     assert_received {:protect_branch, "fleet/garage", _rule}
     assert_received {:arch_ensured, "fleet/garage"}
@@ -174,17 +159,14 @@ defmodule Fleet.Project.Onboard.AdoptTest do
   test "refusals name the right verb, nothing touched", %{tmp_dir: tmp} do
     o = opts(tmp)
 
-    # No local main → nothing to adopt.
     assert {:error, {:not_adoptable, {:no_local_main, _}}} =
              ProjectOnboard.adopt_project("ghost", o)
 
-    # Origin naming ANOTHER repo → identity conflict.
     dir = build_local_main(o, "stolen")
     {_, 0} = System.cmd("git", ["-C", dir, "remote", "add", "origin", "http://x/other/repo.git"])
 
     assert {:error, {:origin_conflict, "other/repo"}} = ProjectOnboard.adopt_project("stolen", o)
 
-    # Repo already on the forge → that project wants import/open, not adopt.
     build_local_main(o, "taken")
     AdoptForge.create_repo("taken", auto_init: false)
     bare = Path.join([tmp, "forge", "fleet", "taken.git"])
@@ -216,7 +198,7 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     assert {:error, {:protocol_labels, :forge_down}} = ProjectOnboard.adopt_project("garage", o)
 
     assert_received {:forge_deleted, "fleet/garage"}
-    # The user's local content is sacred — untouched through the unwind.
+    # This label-seeding failure precedes local mutation; only existence is checked here.
     assert File.exists?(Path.join(proj, "code.txt"))
     refute File.exists?(Path.join(o[:ops_root], "garage"))
   end

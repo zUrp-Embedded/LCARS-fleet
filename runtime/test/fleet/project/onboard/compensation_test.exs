@@ -1,11 +1,9 @@
 defmodule Fleet.Project.OnboardCompensationTest do
   @moduledoc """
-  Compensation of a FAILED onboard/import — the mid-sequence failure must not leave half-created
-  state that wedges the retry (repo 409 + dir-exists walls, host rm the only way out — seen LIVE).
-
-  E2E against a REAL `file://` forge: the stubbed `:forge_repo` creates an actual bare repo on
-  disk (create), fails `protect_branch` (the LAST step — everything is built when the failure
-  lands), and records `delete_repo`. Git (clone/scaffold/commit/push) runs for real.
+  Onboard/import compensation over real file:// Git repositories.
+  Forge API stubs inject returned errors and exceptions; branch deletions mutate the bare repo.
+  Checks cover successful cleanup/retry, retained pre-existing branches and reported cleanup
+  failures. Protection calls are stubbed, so this is not a full remote-state rollback proof.
   """
   use ExUnit.Case, async: false
 
@@ -13,8 +11,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
   @moduletag :tmp_dir
 
-  # Forge stub over a real on-disk `file://` forge. Runs IN the test process (onboard is plain
-  # function calls) → coordination via the process dictionary + self-messages.
+  # Calls run in the test process; failure injection uses its dictionary and messages.
   defmodule FileForge do
     def generate_repo(_template, _name, _opts), do: {:error, :template_missing}
 
@@ -40,8 +37,6 @@ defmodule Fleet.Project.OnboardCompensationTest do
       {:ok, "fleet/#{name}"}
     end
 
-    # `:raise` is a THIRD outcome, and it is the point of one of the tests below: an onboard can
-    # die by exception, not only by `{:error, _}`, and the compensation must cover both exits.
     def protect_branch(_repo, _rule, _fc) do
       case Process.get(:protect_result, {:ok, :created}) do
         :raise ->
@@ -62,15 +57,8 @@ defmodule Fleet.Project.OnboardCompensationTest do
       :ok
     end
 
-    # Answered from the bare repo this forge actually holds. Hardcoded `false`, it sent the
-    # import RETRY into re-pushing a freshly recreated orphan `ops` — a no-op only while
-    # the new commit lands on the same SHA, i.e. within the same SECOND (git timestamps are
-    # second-granular). Under load the second flips, the SHA differs, and the push is refused
-    # non-fast-forward: a test whose verdict came from the clock. Answering truthfully also
-    # exercises the `ops` idempotence `import/2` promises, instead of bypassing it.
-    # JG-121/124 — trois etats : `{:ok, bool}` sur une lecture aboutie, comme la vraie forge.
-    # `:branch_exists_error` fait tomber la lecture d'UNE face nommee : c'est ainsi qu'on met
-    # `workshop` en echec APRES que `ops` a ete publiee, le scenario exact de 6-124.
+    # Read actual refs: hardcoded absence caused retry success to depend on same-second commit SHAs.
+    # A named branch error can fail workshop after ops has already published.
     def branch_exists?(full_name, branch, _fc) do
       if Process.get(:branch_exists_error) == branch do
         {:error, {:http, 503, "down"}}
@@ -90,9 +78,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
       end
     end
 
-    # 6-124 — la suppression est REELLE sur le depot nu, pour que l'etat distant final soit
-    # observable et pas seulement declare. `:delete_branch_result` fait echouer la compensation
-    # elle-meme, qui est le seul cas ou l'appelant ne doit PAS croire a un retry propre.
+    # Delete real bare refs so cleanup assertions observe remote state; allow deletion failure.
     def delete_branch(full_name, branch, _fc) do
       case Process.get(:delete_branch_result) do
         nil ->
@@ -116,17 +102,11 @@ defmodule Fleet.Project.OnboardCompensationTest do
   end
 
   defmodule Humans do
-    # Le preflight forge ne pose plus qu'UNE question depuis le 2026-08-17 : l'org de ce
-    # catalogue existe-t-elle. Le couple `user_exists?`/`team_member?` verifiait l'humain,
-    # garde morte avec son motif.
     def org_exists?(_o, _fc), do: {:ok, true}
   end
 
-  # ⚠ CES DEPOTS NE SONT PAS DES CATALOGUES, ET IL FAUT LE DIRE. Depuis le 2026-08-21 les portes
-  # explicites demandent a leur cible « quel catalogue declares-tu ? » avant d'y poser trois faces,
-  # et une lecture qui ECHOUE est un refus (`:store_check_unreadable`) et non un `:ok` : importer un
-  # magasin est cher et se defend tout seul ensuite, reessayer un import est gratuit. Sans cette
-  # doublure, ces temoins mesuraient ce refus-la en croyant mesurer leur compensation.
+  # Explicitly report these targets as non-catalogues; unreadable store checks would refuse
+  # before reaching the compensation paths under test.
   defmodule Files do
     def get_file(_repo, "catalogue.yaml", _fc), do: {:error, :not_found}
   end
@@ -137,9 +117,6 @@ defmodule Fleet.Project.OnboardCompensationTest do
     Process.put(:file_forge_root, forge_root)
 
     [
-      # ⚖ L'ORG EST OBLIGATOIRE DEPUIS LE 2026-08-17 : elle fixe le catalogue d'un projet POUR SA
-      # VIE, donc elle s'enonce. Ces fixtures s'appuyaient sur le defaut « premier catalogue
-      # installe » — un devineur, mort avec lui.
       org: "fleet",
       code_root: Path.join(tmp, "projects"),
       ops_root: Path.join(tmp, "work"),
@@ -159,9 +136,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
   test "BL-6-33: the BARE fallback SEEDS the protocol labels (a workable repo, not a decorative one)",
        %{tmp_dir: tmp} do
-    # FileForge.generate_repo → :template_missing → the bare path. The generate path inherits
-    # the labels from the template; the fallback must seed them itself or the first genre/doc
-    # ticket dies on {:genre_label_unresolved, _} (measured on a real bench).
+    # Bare creation must seed protocol labels; it does not inherit them from a template.
     o = opts(tmp)
 
     assert {:ok, %{repo: "fleet/labelled"}} = ProjectOnboard.onboard("labelled", o)
@@ -178,8 +153,6 @@ defmodule Fleet.Project.OnboardCompensationTest do
     assert {:error, {:protocol_labels, {:labels_missing_after_ensure, ["destination/workshop"]}}} =
              ProjectOnboard.onboard("nolabel", o)
 
-    # Inside the compensated window: the forge repo this call created is unwound, dirs absent —
-    # the retry hits no wall (409 / refute_existing).
     assert_received {:forge_deleted, "fleet/nolabel"}
     refute File.exists?(Path.join(o[:code_root], "nolabel"))
     refute File.exists?(Path.join(o[:ops_root], "nolabel"))
@@ -188,10 +161,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
   test "6-125: an unknown workflow_map refuses BEFORE anything is created — no forge, no dirs",
        %{tmp_dir: tmp} do
-    # La preuve de sortie de la fiche : « creation avec nom inconnu ne mute ni disque ni Forge ».
-    # La regle est appliquee chez l'ecrivain (`Declaration.write/2`), donc aucune porte ne peut la
-    # contourner — mais elle y tomberait APRES la creation du depot, et il faudrait compenser.
-    # D'ou le meme preflight que le controle humain, dans le meme `with`, avant toute mutation.
+    # Unknown card refusal must precede repository creation, not rely on later compensation.
     o = opts(tmp)
 
     assert {:error, {:unknown_card, "wfmap/ghost"}} =
@@ -211,14 +181,11 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
     assert {:error, {:protect_main, _}} = ProjectOnboard.onboard("phoenix", o)
 
-    # The unwind: the forge repo THIS call created is deleted, both dirs are gone — nothing left to
-    # wedge a retry on the refute_existing / create_repo-409 walls.
     assert_received {:forge_deleted, "fleet/phoenix"}
     refute File.exists?(Path.join(o[:code_root], "phoenix"))
     refute File.exists?(Path.join(o[:ops_root], "phoenix"))
     refute File.exists?(Path.join(o[:workshop_root], "phoenix"))
 
-    # The RETRY of the same onboard now goes through cleanly (fresh create, full sequence).
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/phoenix"}} = ProjectOnboard.onboard("phoenix", o)
     assert File.dir?(Path.join(o[:code_root], "phoenix"))
@@ -227,21 +194,18 @@ defmodule Fleet.Project.OnboardCompensationTest do
   end
 
   test "an onboard that RAISES compensates too — and the crash stays a crash", %{tmp_dir: tmp} do
-    # The exit compensation did not cover, found on a bench: /home/projects.workshop absent →
-    # `mkdir_p!` raised → the forge repo, the code face and the ops face all survived a failed
-    # onboard, and the caller saw only `tool_crashed`. The stub raises the very same exception.
+    # Inject File.Error during protection: the same exception class as the observed mkdir failure,
+    # but a later injection point after the local faces have been built.
     o = opts(tmp)
     Process.put(:protect_result, :raise)
 
     assert_raise File.Error, fn -> ProjectOnboard.onboard("vulcan", o) end
 
-    # RE-RAISED, so the caller still sees a crash — and the machine is clean anyway.
     assert_received {:forge_deleted, "fleet/vulcan"}
     refute File.exists?(Path.join(o[:code_root], "vulcan"))
     refute File.exists?(Path.join(o[:ops_root], "vulcan"))
     refute File.exists?(Path.join(o[:workshop_root], "vulcan"))
 
-    # And the retry is possible — which is the whole reason compensation exists.
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/vulcan"}} = ProjectOnboard.onboard("vulcan", o)
     assert File.dir?(Path.join(o[:workshop_root], "vulcan"))
@@ -263,40 +227,32 @@ defmodule Fleet.Project.OnboardCompensationTest do
   test "a LATE import failure compensates the DIRS and the branches it pushed — the pre-existing repo is NEVER deleted",
        %{tmp_dir: tmp} do
     o = opts(tmp)
-    # The repo pre-exists on the forge (created out-of-band, as an import target is).
+
     {:ok, "fleet/heritage"} = FileForge.create_repo("heritage", [])
     Process.put(:protect_result, {:error, {:http, 500, "boom"}})
 
     assert {:error, {:protect_main, _}} = ProjectOnboard.import("fleet/heritage", o)
 
-    # Dirs unwound; the repo was NOT ours to delete.
     refute_received {:forge_deleted, _}
     refute File.exists?(Path.join(o[:code_root], "heritage"))
     refute File.exists?(Path.join(o[:ops_root], "heritage"))
     assert File.dir?(Path.join([tmp, "forge", "fleet", "heritage.git"]))
 
-    # ⚠ 6-124 — CE TEST EPINGLAIT LE DEFAUT. Il assertait ici `ops` TOUJOURS SUR LA FORGE apres
-    # l'echec, en expliquant que le retry devait la voir et sauter le re-push. C'est precisement le
-    # residu que la fiche decrit : les deux faces ont ete poussees par CETTE tentative, sur un depot
-    # tiers, et l'appel a repondu « repo untouched ». Elles sont desormais retirees, et l'etat
-    # distant final egale l'etat initial : `main` seule, celle que le depot avait.
+    # Both newly published writer branches must disappear while pre-existing main remains.
+    # Local assertions above cover code and ops, not workshop.
     assert FileForge.branch_exists?("fleet/heritage", "ops", []) == {:ok, false}
     assert FileForge.branch_exists?("fleet/heritage", "workshop", []) == {:ok, false}
     assert FileForge.branch_exists?("fleet/heritage", "main", []) == {:ok, true}
     assert_received {:branch_deleted, "fleet/heritage", "ops"}
     assert_received {:branch_deleted, "fleet/heritage", "workshop"}
 
-    # Retry clean — sur une forge revenue a son etat initial, donc un vrai chemin de creation et
-    # non un re-push dont le succes dependrait de la seconde ou il tombe.
     Process.put(:protect_result, {:ok, :created})
     assert {:ok, %{repo: "fleet/heritage"}} = ProjectOnboard.import("fleet/heritage", o)
   end
 
   test "6-124: ops pushed then workshop fails → ops is removed, and the return keeps its clean retry",
        %{tmp_dir: tmp} do
-    # Le scenario LITTERAL de la fiche : les faces sont posees en sequence, donc `ops` est deja
-    # sur la forge quand `workshop` tombe. C'est le seul point du programme ou une mutation
-    # partielle d'un depot tiers existe.
+    # Fail the workshop probe after ops publication to exercise partial remote cleanup.
     o = opts(tmp)
     {:ok, "fleet/legacy"} = FileForge.create_repo("legacy", [])
     Process.put(:branch_exists_error, "workshop")
@@ -308,15 +264,12 @@ defmodule Fleet.Project.OnboardCompensationTest do
     assert FileForge.branch_exists?("fleet/legacy", "ops", []) == {:ok, false}
     assert FileForge.branch_exists?("fleet/legacy", "main", []) == {:ok, true}
 
-    # L'erreur passe INTACTE : la compensation a abouti, donc « a clean retry is possible » est
-    # redevenu vrai et il n'y a rien de plus a dire a l'appelant.
     Process.delete(:branch_exists_error)
     assert {:ok, %{repo: "fleet/legacy"}} = ProjectOnboard.import("fleet/legacy", o)
   end
 
   test "6-124: a writer branch that was ALREADY the repo's is never deleted", %{tmp_dir: tmp} do
-    # L'autre moitie de la preuve, et la plus chere a rater : une compensation qui supprime ce
-    # qu'elle n'a pas cree detruit le travail d'un tiers sur un chemin d'erreur.
+    # Pre-existing branches must survive compensation of a later error.
     o = opts(tmp)
     {:ok, "fleet/tenant"} = FileForge.create_repo("tenant", [])
     bare = Path.join([tmp, "forge", "fleet", "tenant.git"])
@@ -327,8 +280,6 @@ defmodule Fleet.Project.OnboardCompensationTest do
     assert {:error, {:branch_unreadable, "workshop", _}} =
              ProjectOnboard.import("fleet/tenant", o)
 
-    # `ops` a ete CLONEE, pas publiee — elle n'entre donc pas dans l'inventaire, et aucune
-    # suppression n'est meme tentee.
     refute_received {:branch_deleted, _, _}
     assert FileForge.branch_exists?("fleet/tenant", "ops", []) == {:ok, true}
   end
@@ -336,9 +287,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
   test "6-124: a compensation that FAILS is named in the RETURN, not only in a log", %{
     tmp_dir: tmp
   } do
-    # La condition de la fiche : « si la compensation echoue, le signaler dans le resultat, pas
-    # seulement dans un log ». L'appelant deduit du RETOUR qu'il peut retenter proprement ; c'est
-    # cette deduction-la qui doit casser, pas une ligne qu'il ne lit pas.
+    # Branch deletion failure must be visible in the return, not just the log.
     o = opts(tmp)
     {:ok, "fleet/stuck"} = FileForge.create_repo("stuck", [])
     Process.put(:protect_result, {:error, {:http, 500, "boom"}})
@@ -358,10 +307,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
   end
 
   describe "convergent re-emit — a mutation whose effect landed answers with it, never a refusal" do
-    # The 30s stdio bridge times a mutation out while the effect completes; the agent re-emits the
-    # SAME call. Before this, the retry of an onboard that FULLY SUCCEEDED died on refute_existing:
-    # an operation reported FAILED to the caller with its whole effect in place. That lie is what the
-    # in-memory memoize was papering over.
+    # A caller can time out after creation has completed and then repeat the request.
 
     defp landed_onboard(tmp) do
       o = opts(tmp)
@@ -376,7 +322,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
       assert {:ok, %{repo: "fleet/apollo", idempotent: true, project_dir: ^proj, work_dir: ^work}} =
                ProjectOnboard.onboard("apollo", o)
 
-      # Nothing re-created, nothing re-scaffolded, no second repo.
+      # HEAD-file equality checks symbolic refs, not commit IDs; it cannot prove no new commits.
       refute_received {:forge_deleted, _}
       assert File.read!(Path.join([proj, ".git", "HEAD"])) == before_head
       assert File.dir?(Path.join([tmp, "forge", "fleet", "apollo.git"]))
@@ -394,8 +340,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     test "dirs of a HOMONYM project → still REFUSED (converging on existence would adopt it)", %{
       tmp_dir: tmp
     } do
-      # The reason the bar is higher than `open/2`'s: converging on mere EXISTENCE would let a create
-      # silently adopt a same-basename project of another owner. Far worse than the bug being fixed.
+      # Existing directories alone cannot distinguish an unrelated owner's same-basename project.
       {o, proj, _work} = landed_onboard(tmp)
 
       {_, 0} =
@@ -418,9 +363,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     test "a HALF onboard (ops never published) → still REFUSED, never answered 'done'", %{
       tmp_dir: tmp
     } do
-      # `ops` is the LAST step of the sequence, so it standing is what proves the whole sequence
-      # ran. Missing, the residue is a half-onboard and answering success would be the same lie in
-      # the other direction — a caller told 'created' over a project that has no ops.
+      # Missing ops must refuse convergence; its presence alone does not prove full onboarding.
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
       {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/ops"])
@@ -441,11 +384,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     test "the DOC face alone on disk is enough to refuse — the door counts every face", %{
       tmp_dir: tmp
     } do
-      # `refute_existing/1` is what stops an onboard from writing over a residue. Dropping the doc
-      # face from the paths it checks left the whole suite green (measured 2026-08-08): every
-      # existing case here happens to leave a code or ops dir behind too, so no fixture could tell
-      # a two-face check from a three-face one. A doc dir alone is exactly the residue a compensated
-      # onboard can leave — the face is built LAST.
+      # Isolate workshop residue: fixtures also containing code/ops cannot catch its omitted guard.
       o = opts(tmp)
       doc_dir = Path.join(o[:workshop_root], "apollo")
       File.mkdir_p!(doc_dir)
@@ -456,9 +395,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     test "a landed onboard whose DOC branch vanished is NOT satisfied — no idempotent 'done'", %{
       tmp_dir: tmp
     } do
-      # The twin of the ops case above, and it has to be stated per face: convergence answers
-      # "already realized" and creates nothing, so a face missing from what it verifies is a face
-      # that never gets built while the caller is told the project is ready.
+      # Check the remote workshop branch separately from local directory presence.
       {o, _proj, _work} = landed_onboard(tmp)
       bare = Path.join([tmp, "forge", "fleet", "apollo.git"])
       {_, 0} = System.cmd("git", ["-C", bare, "update-ref", "-d", "refs/heads/workshop"])
@@ -468,12 +405,8 @@ defmodule Fleet.Project.OnboardCompensationTest do
     end
   end
 
-  # ⚠ TROIS ISSUES POUR L'ARCHITECTE, ET CELLE-CI EST NEE D'UNE MORT AU BANC (2026-08-17). La porte
-  # de reconvergence tourne dans un `eval` : l'app est CHARGEE, pas demarree, donc
-  # `GenServer.call(Fleet.Spawner.Supervisor, …)` rend `** (EXIT) no process`. L'import posait ses
-  # trois faces puis mourait a la derniere jambe, sans compensation. Un appelant sans fleet dit
-  # donc `:deferred`, et le resultat le PORTE : « failed » accuserait le projet d'un defaut qu'il
-  # n'a pas, « up » mentirait sur un pod qui n'existe pas.
+  # An eval caller without running supervisors can return deferred explicitly.
+  # This test injects that callback result; it does not simulate missing supervisors.
   test "un appelant SANS fleet differe l'architecte — ni up, ni failed", %{tmp_dir: tmp} do
     o =
       Keyword.put(opts(tmp), :ensure_architect, fn _repo, _o ->
@@ -487,17 +420,8 @@ defmodule Fleet.Project.OnboardCompensationTest do
   end
 
   describe "le MODE des faces d'ecriture" do
-    # ⚠ CE N'EST PAS UN REGLAGE COSMETIQUE. Les trois faces vivent sous des racines PARTAGEES
-    # (`2775 root:fleet`) : le projet ouvert par un humain est vu par les autres. `workshop` est la
-    # SEULE face qu'un architecte monte en `rw` (`Fleet.Project.Architect`), et elle heritait `2755`
-    # de l'umask — donc un second humain, membre du groupe `fleet` et sans le bit d'ecriture, voyait
-    # ses pods mourir a la premiere ecriture sur une erreur qui accuse bwrap.
-    #
-    # ⚠ LES DEUX ASSERTIONS SONT LE TEMOIN, PAS UNE SEULE. Sans le `chmod`, les deux faces heritent
-    # du MEME mode — celui de l'umask du processus — et une seule des deux valeurs attendues peut
-    # alors coincider par accident : `umask 002` rend `2775` (ops tombe), `umask 022` rend `2755`
-    # (workshop tombe). Garder la paire est ce qui rend le temoin independant de l'environnement ;
-    # en supprimer une moitie le rendrait vert sur la machine ou l'umask est complaisant.
+    # Shared-group workshop writes require 2775 while ops stays 2755. Assert both root modes:
+    # without chmod one expected value could pass by coinciding with the process umask.
     defp face_mode(dir), do: Bitwise.band(File.stat!(dir).mode, 0o7777)
 
     test "creees : workshop est g+w, ops ne l'est pas", %{tmp_dir: tmp} do
@@ -511,10 +435,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
     end
 
     test "CLONEES : le mode est pose sur l'autre branche aussi", %{tmp_dir: tmp} do
-      # Le chemin qui manquait le plus : quand la forge porte deja les deux branches, les faces sont
-      # CLONEES et non initialisees. C'est le cas exact du second humain qui rejoint un projet — le
-      # seul ou le bit manquant se paie — donc un `chmod` pose dans la seule branche de creation
-      # n'aurait jamais touche personne.
+      # Existing branches exercise clone-path chmod as well as creation-path chmod.
       o = opts(tmp)
       {:ok, "fleet/rejoint"} = FileForge.create_repo("rejoint", [])
       bare = Path.join([tmp, "forge", "fleet", "rejoint.git"])
