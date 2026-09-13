@@ -39,7 +39,7 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 BRANCH="tool_request"
 
 [[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }
-[[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorite absent ($AUTHORITY_ASK) — « provision apply » le pose" >&2; exit 1; }
+[[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorité absent ($AUTHORITY_ASK) — sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte" >&2; exit 1; }
 
 # La cause du refus est deja imprimee en francais par le client, sur stderr. La reformuler ici la
 # remplacerait par une plus vague : ce script sait qu'il n'a pas de jeton, il ne sait pas pourquoi.

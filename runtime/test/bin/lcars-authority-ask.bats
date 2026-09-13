@@ -140,7 +140,7 @@ PY
   ask system_starfleet
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [[ "$stderr" == *"Aucun reessai"* ]]
+  [[ "$stderr" == *"Aucun réessai"* ]]
   [[ "$stderr" != *"le geste se reessaie"* ]]
 }
 
@@ -158,7 +158,8 @@ PY
   ask system_starfleet
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [[ "$stderr" == *"provision apply"* ]]
+  [[ "$stderr" == *"deploy/workstation up"* ]]
+  [[ "$stderr" == *"deploy/container up"* ]]
 }
 
 # ⚠ LE CAS QUI SEPARE UN CLIENT D'UN TUYAU. Une cause que ce client ne connait pas vient d'un

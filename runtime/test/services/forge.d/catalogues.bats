@@ -370,10 +370,10 @@ json_one() {
 
 # ─── LE ROSTER DERIVE ───────────────────────────────────────────────────────────────────────────
 
-@test "FORGE INCONNUE : sans catalogue installe, c est un WARN — l ordre des rangs est normal" {
+@test "FORGE INCONNUE : sans catalogue installe, c est un WARN — il n y a rien a comparer" {
   FORGE_BASE_URL="" run bash "$MOD" check
   [ "$status" -eq 0 ] || { echo "un WARN ne doit pas colorer le verdict : $output"; return 1; }
-  [[ "$output" == *"AUCUN catalogue installe"* ]]
+  [[ "$output" == *"AUCUN catalogue installé"* ]]
 }
 
 @test "FORGE INCONNUE : avec du materiel LOCAL, c est un DRIFT — un etat-cible cesse d etre tenu" {
@@ -383,14 +383,15 @@ json_one() {
   # echec ; `verdict_apply` l inverse — un apply qui n a pas converge est un ECHEC, un check qui
   # constate un ecart ne l est pas. Les deux temoins voisins le montrent en s opposant.
   [ "$status" -eq 1 ] || { echo "le drift n a pas colore le verdict (rc=$status) : $output"; return 1; }
-  [[ "$output" == *"1 catalogue(s) sont deja installes"* ]]
-  # et le refus NOMME la sortie : c est un rail, pas un constat
-  [[ "$output" == *"48-forge-host"* ]]
+  [[ "$output" == *"1 catalogue(s) sont déjà installés"* ]]
+  # et le refus NOMME la sortie, pour chacun des deux hotes du geste
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container config"* ]]
 }
 
 @test "FORGE INCONNUE : l apply distingue les deux cas comme le check — meme fonction" {
   mkdir -p "$LCARS_CATALOGUES_DIR/web-demo"
   FORGE_BASE_URL="" run bash "$MOD" apply
   [ "$status" -eq 2 ]
-  [[ "$output" == *"deja installes"* ]]
+  [[ "$output" == *"déjà installés"* ]]
 }

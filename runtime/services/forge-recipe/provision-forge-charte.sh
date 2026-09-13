@@ -153,7 +153,7 @@ FORGE="${FORGE%/}"
 # AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
 # installation degradee : servir des identicons en silence rendrait vert un deploiement a moitie
 # fait, et personne ne relierait jamais l'avatar generique a la cause.
-[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR — l'installation ne les a pas poses (COPY assets/avatars du Dockerfile, ou LCARS_MEDIA_ROOT mal cable)" >&2; exit 1; }
+[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR — l'installation ne les a pas posés (module 44-media : sur un poste, « deploy/workstation up » les pose ; dans un conteneur, c'est l'image qui les porte), ou LCARS_MEDIA_ROOT est mal câblé" >&2; exit 1; }
 
 # Le master-token n'est requis qu'en mode POSE (le --check lit des champs publics).
 if [[ -n "$ADMIN_TOKEN_FILE" ]]; then

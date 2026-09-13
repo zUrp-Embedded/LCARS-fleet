@@ -109,7 +109,7 @@ seat_established() { # pose SEAT_UID — 0 si le siege se lit ; 1 sinon, dit une
   [[ -n "$SEAT_UID" ]] && return 0
   if [[ -z "$_SEAT_SAID" ]]; then
     _SEAT_SAID=1
-    p_warn "le siege n'est pas declare (${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid} illisible, LCARS_SYSADMIN_UID non pose) — sans lui la frontiere n'est pas etablie : cette machine n'est pas provisionnee, joue « deploy/provision apply »"
+    p_warn "le siège n'est pas déclaré (${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid} illisible, LCARS_SYSADMIN_UID non posé) — sans lui la frontière n'est pas établie : cette machine n'est pas installée. Sur un poste, « deploy/workstation up » le pose ; dans un conteneur, l'init du démarrage le pose, et s'il ne peut pas le déterminer : « deploy/container config » depuis l'hôte, puis « deploy/container up »"
   fi
   return 1
 }

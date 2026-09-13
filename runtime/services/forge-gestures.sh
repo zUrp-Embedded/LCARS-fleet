@@ -77,18 +77,6 @@ CATALOGUE_WORK="${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}"
 # qui pose. Rien ne se DECIDE en la lisant. Le `_` initial est de l'UX (⚖ user) : il separe a l'oeil
 # ce que la fleet pose de ce qu'un humain depose.
 STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
-# L'entrypoint porte les portes outil du release. IL N'Y A RIEN A COPIER : le fichier est deja pose,
-# sous un autre chemin, d'ou les deux dispositions cherchees ci-dessous. Une troisieme copie serait
-# la mauvaise reponse a une absence qui n'en est pas une.
-#
-# ⚠ `-r` ET PAS `-x`, ET `bash` PLUTOT QUE L'EXECUTION DIRECTE : `entrypoint.sh` est `100644` dans le
-# depot, seule l'image le passe en `0755`. Un test sur `-x` echouerait APRES avoir trouve le bon
-# chemin — un garde qui rejette exactement ce qu'il cherchait.
-# LES PORTES OUTIL DU RELEASE SONT DANS LA CLI DU PRODUIT (`lcars tool …`, lot 6 — 2026-09-04).
-# Elles vivaient dans le PID 1 de l'image, et ce script devinait le chemin de l'entrypoint pour les
-# atteindre — un geste du produit qui execute l'entrypoint de l'image pour evaluer une fonction du
-# release. `lcars` est pose sur les deux rails (`/usr/local/bin`) ; a defaut, le voisin de ce
-# fichier dans l'arbre (`../bin/lcars`). « LCARS_CLI=<chemin> » force la resolution.
 _lcars_cli() {
   local here
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
@@ -313,11 +301,11 @@ cmd_apply() {
   seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
 
   local manque=""
-  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> deploy/container up"
-  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> deploy/container config"
-  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> deploy/container config"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> pour un conteneur : FORGE_BASE_URL=<url> deploy/container config, puis deploy/container up"
+  [[ -n "$tok" ]]                || manque="$manque\n  l'autorité          -> pour un conteneur : FORGE_ADMIN_TOKEN=<jeton master> deploy/container config"
+  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> pour un conteneur : FORGE_SEED_PASSWORD=<mot de passe> deploy/container config"
   if [[ -n "$manque" ]]; then
-    printf 'forge-gestures: le conteneur ne detient pas ce qu il faut :%b\n' "$manque" >&2
+    printf "forge-gestures: cette machine ne détient pas ce qu'il faut :%b\n  sur un poste, « deploy/workstation up » pose les trois\n" "$manque" >&2
     exit 1
   fi
 
@@ -458,7 +446,7 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   need_forge_url
   [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/container config »"
+  [[ -n "$tok" ]] || die "pas d'autorité — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
 
   # ⚠ LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` : cette ligne en est une
   # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Rendu reglable ICI seulement, il
@@ -490,7 +478,7 @@ cmd_runner_token() {
   local tok
   tok="$(read_stdin_secret)"
   [[ -n "$tok" ]] || tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/container config »"
+  [[ -n "$tok" ]] || die "pas d'autorité — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
 
   local body
   body="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -521,9 +509,9 @@ cmd_install() {
   need_cli
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/container config »"
+  [[ -n "$tok" ]] || die "install: pas d'autorité — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
-  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> deploy/container config »"
+  [[ -n "$seed" ]] || die "install: pas de seed — sur un poste, « deploy/workstation up » le pose ; pour un conteneur, « FORGE_SEED_PASSWORD=<mot de passe> deploy/container config » depuis l'hôte"
 
   # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
   #    avec son code — on ne traduit pas, on relaie.
@@ -538,7 +526,7 @@ cmd_install() {
   # proprietaire et root, un argv l'est par tout le monde.
   local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
   [[ -r "$sys_token" ]] \
-    || die "install: $sys_token illisible — le conteneur n'a pas encore de jeton systeme (« provision apply » le minte)"
+    || die "install: $sys_token illisible — cette machine n'a pas encore de jeton système : sur un poste, « deploy/workstation up » le minte ; dans un conteneur, le démarrage le minte (« deploy/container up » depuis l'hôte)"
   local sys_tok_value; sys_tok_value="$(tr -d '[:space:]' < "$sys_token")"
   [[ -n "$sys_tok_value" ]] \
     || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
@@ -662,7 +650,7 @@ cmd_install() {
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
   else
     echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
-    echo "  le conteneur ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
+    echo "  il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »" >&2
     echo "  son squelette de projet n'est donc pas lisible : ses projets naitront de celui du catalogue livre" >&2
   fi
 }
@@ -735,9 +723,8 @@ case "${1:-}" in
   toolchain-protection) shift; cmd_toolchain_protection "$@" ;;
   # ⚠ CE VERBE EXISTE POUR QU'AUCUN APPELANT N'AIT A RECOPIER LE DEFAUT. Le nom du compte integre a
   # UN auteur — la ligne `TF_VAR_builtin_human` ci-dessus — et un second litteral ailleurs ne reste
-  # d'accord avec elle que jusqu'au jour ou l'un des deux bouge. `48-forge-host` doit poser un mot de
-  # passe sur ce compte : sans porte pour DEMANDER son nom, il ne pourrait le faire que quand
-  # l'operateur l'a nomme lui-meme, c'est-a-dire jamais dans le cas nominal.
+  # d'accord avec elle que jusqu'au jour ou l'un des deux bouge. `25-directories` et `deploy/accept`
+  # le DEMANDENT ici.
   builtin-human) printf "%s\n" "$BUILTIN_HUMAN" ;;
   *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection|builtin-human)" >&2; exit 1 ;;
 esac

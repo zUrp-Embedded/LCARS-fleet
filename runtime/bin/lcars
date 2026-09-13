@@ -293,7 +293,7 @@ _authority_token_file() { # <compte> <dir>
   local compte=$1 dir=$2 ask f
   ask="$(_authority_ask_bin)"
   [[ -x "$ask" ]] \
-    || die "client d'autorite absent ($ask) — « provision apply » le pose ; sans lui aucun jeton de forge n'est obtenable"
+    || die "client d'autorité absent ($ask) — sans lui aucun jeton de forge n'est obtenable. Sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte"
   f="$dir/.forge-token"
   ( umask 077; "$ask" "$compte" > "$f" ) || { rm -f "$f"; return 1; }
   printf '%s\n' "$f"
@@ -409,12 +409,14 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   SUIVANTE — il n'y a plus rien a projeter, ni session a rouvrir. Ce n'est PAS une histoire de
   sudo : personne n'est root ici." ;;
     no_authority)
-      die "catalogue install: ce CONTENEUR n'a pas d'autorite utilisable sur sa forge.
-  Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
-  machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
-  quantite de reessais ne le repose — c'est un geste d'admin, une fois :
-    FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/container config
-  « journalctl -u lcars-catalogue » dit lequel des quatre cas c'est." ;;
+      die "catalogue install: cette machine n'a pas d'autorité utilisable sur sa forge.
+  Ce n'est ni un refus qui concerne ce compte, ni une panne de la forge : le jeton d'administration
+  de cette machine est absent, illisible, vide, ou la forge vient de le REFUSER (révoqué ou expiré).
+  Aucune quantité de réessais ne le repose — c'est un geste d'admin, une fois :
+    sur un poste      deploy/workstation up
+    pour un conteneur FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/container config   (depuis l'hôte)
+  Le journal de l'exécuteur dit lequel des quatre cas c'est : « journalctl -u lcars-catalogue »
+  sur un poste, /var/log/lcars-catalogue.log dans le conteneur." ;;
     forge_unreachable)
       die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.
   Ce n'est pas un refus — c'est une absence de reponse, et on ne la lit jamais comme un oui. La
@@ -460,9 +462,10 @@ cmd_catalogue_install() {
 
   [[ -S "$_CATALOGUE_SOCKET" ]] || _die_executor_absent
   _catalogue_transport >/dev/null \
-    || die "catalogue install: ni « socat » ni « nc » sur ce conteneur — aucun des deux ne peut donc
-  parler a « $_CATALOGUE_SOCKET », et bash n'ouvre pas de socket unix tout seul. « provision apply »
-  les pose ; c'est un geste systeme."
+    || die "catalogue install: ni « socat » ni « nc » sur cette machine — aucun des deux ne peut donc
+  parler à « $_CATALOGUE_SOCKET », et bash n'ouvre pas de socket unix tout seul. C'est un geste
+  système : sur un poste, « deploy/workstation up » les pose ; dans un conteneur, c'est l'image
+  qui les porte."
 
   # ⚠ ON NE FAIT PAS CONFIANCE AU CODE DE SORTIE DU TRANSPORT, ET C'EST MESURE. `socat` rend ZERO
   # avec une sortie VIDE quand il ferme avant la reponse. Le verdict est la SEULE preuve qu'un geste
@@ -547,7 +550,7 @@ cmd_project() {
 # `LCARS_TOOL_EVAL=1` est le seam du release pour un OUTIL : `runtime.exs` ne monte pas de fleet.
 _tool_run() { # _tool_run <expression elixir>
   local bin; bin="$(_release_bin)"
-  [[ -x "$bin" ]] || die "tool: release introuvable ($bin) — « provision apply » (poste) ou l'image la pose"
+  [[ -x "$bin" ]] || die "tool: release introuvable ($bin) — sur un poste, « deploy/workstation up » la pose ; dans un conteneur, c'est l'image qui la porte"
   if [[ "$(id -u)" -eq 0 ]]; then
     exec setpriv --reuid 65534 --regid 2000 --clear-groups \
       env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \

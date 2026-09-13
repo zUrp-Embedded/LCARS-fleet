@@ -246,7 +246,7 @@ apply() {
         '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,
           redirect_uris:($uris|split(" "))}' > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $LCARS_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte ; « provision apply --only 21-service-accounts » le pose)"
+  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $LCARS_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte : sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte)"
   mv -f "$tmp" "$LCARS_DECK_OIDC_FILE"
   LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "client OAuth2 « $APP_NAME » posé → $LCARS_DECK_OIDC_FILE (retours : $uris)"

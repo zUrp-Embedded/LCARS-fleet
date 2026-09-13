@@ -9,24 +9,19 @@
 # AFTER: 48-forge-host 50-catalogues 61-forge-structure
 
 set -euo pipefail
-# shellcheck source=../lib/provision-lib.sh
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur a l'init
-# de son instance et par l'installeur a l'install (63-forge-tokens, un appelant mince).
+# Ce geste est joue par le boot du conteneur et, sur un poste, par 63-forge-tokens (un appelant
+# mince) : un remede qu'il emet doit valoir sur les deux.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 : "${LCARS_LOGIN:=}"
 
 : "${LCARS_PASSWORDS_FILE:=$LCARS_PRIVATE_DIR/forge-role-passwords.json}"
-# Lot 6 (2026-09-04) — CORRECTION au lot 1 : le minteur n'est PAS « install seulement ». Le poste le
-# joue ici, a l'install ; le CONTENEUR le joue a l'init de son instance, qui est du PRODUIT (Q1). Un
-# geste joue en prod est du produit : il vit avec les gestes de forge, et l'installeur l'APPELLE —
-# le sens permis (60 appelle deploy-release, 61 appelle forge-gestures).
 # Le minteur est le VOISIN de ce dossier — un geste de forge du produit, comme celui-ci.
 A4_SCRIPT="${LCARS_ROLE_TOKENS_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/provision-role-tokens.sh}"
 # LE ROSTER DU MINT SE DERIVE DU RELEASE, PAS D'UNE LISTE ECRITE ICI : les roles du catalogue
 # embarque (« lcars tool roles-tfvars » sans argument), plus ceux de chaque catalogue installe, plus
 # le plancher que l'appelant apporte (`LCARS_ROLES` — l'installeur en a un ; le conteneur n'en a pas
-# besoin, la release porte le sien). C'etait `prov_roles` dans la lib de l'installeur.
+# besoin, la release porte le sien).
 _lcars_cli() {
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
   if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
@@ -46,8 +41,7 @@ roles_of_machine() {
   fi
   printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
-# LE ROSTER EST DERIVE, PAS DECLARE — `prov_roles` (provision-lib) lit ce que les catalogues
-# INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
+# Le roster est resolu UNE fois ici et non a chaque usage : entre
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
 # deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
 ROLES="$(roles_of_machine)"
@@ -111,7 +105,7 @@ check_master_authority() {
   if [[ -r "$LCARS_MASTER_TOKEN_FILE" ]]; then
     p_ok "autorité de création présente ($LCARS_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
   else
-    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — le conteneur tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/container config » la pose"
+    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — LCARS tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
   fi
 }
 
@@ -180,7 +174,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$LCARS_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/container config » le pose (ou complète $LCARS_PASSWORDS_FILE), puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — sur un poste, « deploy/workstation up » le pose ; pour un conteneur, « FORGE_SEED_PASSWORD=<seed> deploy/container config » depuis l'hôte, puis « deploy/container up » (ou compléter $LCARS_PASSWORDS_FILE)"
     return 1
   fi
   local seed tmp rc=0
@@ -259,7 +253,7 @@ check_members_visible() {
     p_ok "adhésions org visibles (comptes machine)"
   else
     # shellcheck disable=SC2086 # meme liste, meme rendu
-    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « deploy/container forge-apply » (il les publicise juste après la structure)"
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est celui de la structure, qui les publicise juste après elle : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
   fi
 
   # ⚠ CES DEUX ETATS NE SONT PAS DES DRIFTS, ET C'EST LE CANON DU 2026-08-30 QUI LE DIT. Le rail pose
@@ -304,7 +298,7 @@ check_ci_runner() {
 
   n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
   if [[ "${n:-0}" -eq 0 ]]; then
-    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`49-forge-runner\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
+    p_drift "AUCUN runner CI enregistré sur cette forge — tout job reste en attente, aucune PR ne fusionne, et la livraison est morte avant son premier ticket. Sur un poste, « deploy/workstation up » l'enrôle (module 49-forge-runner, sa sortie dira ce qui a bloqué) ; pour un conteneur, « deploy/container runner-token » depuis l'hôte rend le jeton qui enregistre un runner"
   else
     labels="$(printf '%s' "$body" \
       | jq -r '[.runners[]? | .name + " [" + ([.labels[]?.name] | join(",")) + "]"] | join(" · ")' 2>/dev/null || true)"
@@ -334,7 +328,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « deploy/container forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte (« deploy/container forge-check » énonce le contrat)"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -376,7 +370,7 @@ check_human_onboardable() {
   local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
   [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
   if ! account_exists "$LCARS_LOGIN"; then
-    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$LCARS_LOGIN … « deploy/container forge-apply »"
+    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : la personne crée son compte sur la page d'inscription de la forge, puis un propriétaire d'org l'ajoute à la team humans"
     return 0
   fi
   p_ok "compte forge de l'humain ($LCARS_LOGIN)"
@@ -395,7 +389,7 @@ check_human_onboardable() {
     # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
     # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
     # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
-    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/container forge-apply »). L'onboarding projet le refusera d'ici là" ;;
+    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans. L'onboarding projet le refusera d'ici là" ;;
     *)   p_warn "appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
   esac
 }
@@ -413,7 +407,7 @@ apply() {
        verdict_apply ;;
   esac
 
-  # DANS L'APPLY : le boot joue `provision apply` (entrypoint.sh), jamais `check`. Une sonde qui ne
+  # DANS L'APPLY : le boot du conteneur et l'installeur du poste jouent `apply`, jamais `check`. Une sonde qui ne
   # vivrait que dans le check ne parlerait a personne au demarrage, c'est-a-dire au seul moment ou
   # l'operateur peut encore enroler un runner AVANT que la fleet ne depense un producteur.
   #
@@ -429,7 +423,7 @@ apply() {
   local miss
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — « deploy/container forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte, qui exige le jeton master et le seed (« deploy/container forge-check » énonce le contrat)"
     verdict_apply
   fi
 

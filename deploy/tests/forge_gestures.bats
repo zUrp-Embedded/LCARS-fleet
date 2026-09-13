@@ -174,8 +174,10 @@ FAKE
   run env -u FORGE_BASE_URL bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
   [[ "$output" == *"l'URL de la forge"* ]]
-  [[ "$output" == *"l'autorite"* ]]
+  [[ "$output" == *"l'autorité"* ]]
   [[ "$output" == *"le seed des comptes"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container config"* ]]
 }
 
 @test "apply: avec l'URL mais rien d'autre, il ne nomme QUE ce qui manque" {
@@ -184,7 +186,7 @@ FAKE
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
   [[ "$output" != *"l'URL de la forge"* ]]
-  [[ "$output" == *"l'autorite"* ]]
+  [[ "$output" == *"l'autorité"* ]]
 }
 
 @test "apply: l'ORDRE des deux modules est instance PUIS catalogue" {
@@ -303,7 +305,8 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
   [[ "$output" == *"system_starfleet.gitea_token"* ]]
-  [[ "$output" == *"provision apply"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container up"* ]]
   [ ! -s "$ENTRY_LOG" ]
 }
 
@@ -368,7 +371,8 @@ FAKE
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [[ "$output" == *"INSTALLE sur la forge"* ]]
-  [[ "$output" == *"redemarrage"* ]]
+  [[ "$output" == *"prochain démarrage du conteneur"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
   grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
 

@@ -161,9 +161,10 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [[ "$output" == *"NON-zoe"* ]]
   [[ "$output" == *"NON-admiral"* ]]
   refute_out 'OUI-' <<<"$output"
-  [ "$(grep -c "le siege n'est pas declare" <<<"$output")" -eq 1 ]
+  [ "$(grep -c "le siège n'est pas déclaré" <<<"$output")" -eq 1 ]
   [[ "$output" == *"$LCARS_SEAT_UID_FILE"* ]]
-  [[ "$output" == *"provision apply"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container config"* ]]
 }
 
 @test "siege declare par LCARS_SYSADMIN_UID seul (fichier absent) : la regle s'applique, sans message" {
@@ -171,5 +172,5 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [ "$status" -eq 0 ]
   [[ "$output" == *"OUI-zoe"* ]]
   [[ "$output" == *"NON-admiral"* ]]
-  refute_out 'siege' <<<"$output"
+  refute_out 'siège' <<<"$output"
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.248
+# STARDATE: 2026.256
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -211,7 +211,7 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   # peut pas y suppleer, sinon le garde lit sa politique dans l'environnement du processus qu'il garde.
   rm -f "$LCARS_SEAT_UID_FILE"
   run bash -c "export LCARS_SYSADMIN_UID=99999; source '$SCRIPT'; cmd_start"
-  [[ "$output" == *"siege non declare"* ]]
+  [[ "$output" == *"siège non déclaré"* ]]
   [ "$status" -ne 0 ]
 }
 

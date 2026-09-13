@@ -80,7 +80,8 @@ if config_env() != :test and not tool_mode? do
       _ ->
         raise "R-no-seat: the seat UID could not be established (#{seat_uid_path} missing or not " <>
                 "an integer) — GUARD B refuses a boot it cannot verify. This machine is not " <>
-                "provisioned: run `sudo deploy/provision apply`."
+                "installed: on a workstation, `deploy/workstation up` sets it; in a container, the boot " <>
+                "init sets it (`deploy/container config` from the host, then `deploy/container up`)."
     end
 
   # Read both UID_MIN and UID_MAX from login.defs, like bin/fleet, console/human convergence

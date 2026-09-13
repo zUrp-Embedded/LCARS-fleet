@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/forge-recipe/provision-forge-charte.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
-# STATUS: bats tests for deps/provision-forge-charte.sh — 6-115 + la fuite argv jumelle
+# STATUS: bats tests for services/forge-recipe/provision-forge-charte.sh — 6-115 + la fuite argv jumelle
 #
 # CE SCRIPT N'AVAIT AUCUN TEST, et il porte le jeton SITE-ADMIN de la forge — celui qui, avec un
 # header `Sudo:`, agit au nom de n'importe quel compte.
@@ -117,7 +117,8 @@ run_avatars() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"dossier avatars introuvable"* ]]
   [[ "$output" == *"nulle-part/avatars"* ]]
-  [[ "$output" == *"COPY assets/avatars"* ]]
+  [[ "$output" == *"44-media"* ]]
+  [[ "$output" == *"LCARS_MEDIA_ROOT"* ]]
 }
 
 @test "6-141bis: le jeton SITE-ADMIN n'apparait JAMAIS dans argv" {

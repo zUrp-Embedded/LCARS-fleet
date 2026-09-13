@@ -6,7 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 25-directories
+# AFTER: 25-directories 48-forge-host
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
 # la lecture et le clone se font en anonyme. Un conteneur qui n'a jamais recu `container config`
@@ -14,8 +14,8 @@
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
-# et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
+# Ce geste est joue par le boot du conteneur et, sur un poste, par 50-catalogues (un appelant
+# mince) ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier du protocole.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
@@ -154,28 +154,19 @@ say_leftover() {
 
 # ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE DEJA ───────────────────────────
 #
-# ⚠ LA CAUSE EST UNE INVERSION DE RANG QUI NE PEUT PAS SE DECLARER. `FORGE_BASE_URL` se derive de
-# `FORGE_BASE_URL` ou de `$LCARS_PRIVATE_DIR/forge.url` (`lib/provision-lib.sh:79`), et ce fichier n'a
-# QU'UN poseur : `48-forge-host.sh:312`, TROIS RANGS PLUS LOIN. `provision:315` ordonne les modules
-# par leur rang et `provision:327` refuse un `AFTER` qui ne precede pas — la dependance est REELLE
-# et non declarable. La nommer ici est tout ce qu'on peut en faire.
-#
-# ⚠ ET ELLE NE MORD PAS OU L'ON CROIT. Sur une PREMIERE passe, a l'heure du rang 45, aucun catalogue
-# n'est installe sur une forge qui n'existe pas encore : il n'y a rien a cloner. C'est une absence de
-# travail, pas du travail tu — et la fleet tourne alors sur le catalogue embarque du release.
-#
-# Elle mord sur une RE-PROVISION dont les jetons ont disparu alors que le volume de la forge a
-# survecu : il y a du materiel LOCAL, et plus d'autorite a qui le comparer. Le premier cas est un
-# WARN (on ne sait pas, et ca ne coute rien) ; le second un DRIFT (un etat-cible cesse d'etre tenu,
-# et `p_warn` n'incremente ni LCARS_DRIFT ni LCARS_FAILED — le bilan resterait vert).
+# L'adresse vient de `FORGE_BASE_URL` ou de `$LCARS_PRIVATE_DIR/forge.url`. Sans elle, deux cas.
+# Aucun catalogue installe : il n'y a rien a cloner ni a comparer, et la fleet tourne sur le
+# catalogue embarque de la release — un WARN (on ne sait pas, et ca ne coute rien). Du materiel
+# LOCAL et plus d'adresse (jetons disparus, cache survivant) : un etat-cible cesse d'etre tenu — un
+# DRIFT, parce que `p_warn` n'incremente ni LCARS_DRIFT ni LCARS_FAILED et que le bilan resterait vert.
 forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, selon ce qui est deja la
   local n=0
   [[ -d "$LCARS_CATALOGUES_DIR" ]] \
     && n="$(find "$LCARS_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
   if [[ "$n" -gt 0 ]]; then
-    p_drift "adresse de forge inconnue alors que $n catalogue(s) sont deja installes ici ($LCARS_CATALOGUES_DIR) — leur autorite est injoignable, rien ne peut etre compare ni converge. Pose FORGE_BASE_URL, ou rejoue « 48-forge-host » qui ecrit $LCARS_PRIVATE_DIR/forge.url"
+    p_drift "adresse de forge inconnue alors que $n catalogue(s) sont déjà installés ici ($LCARS_CATALOGUES_DIR) — leur autorité est injoignable, rien ne peut être comparé ni convergé. Sur un poste, « deploy/workstation up » écrit $LCARS_PRIVATE_DIR/forge.url ; pour un conteneur, « FORGE_BASE_URL=<url> deploy/container config » depuis l'hôte, puis « deploy/container up »"
   else
-    p_warn "adresse de forge inconnue, et AUCUN catalogue installe ici — rien a comparer. Sur une premiere passe c'est l'ordre normal : « 48-forge-host » ecrit cette adresse trois rangs plus loin"
+    p_warn "adresse de forge inconnue, et AUCUN catalogue installé ici — rien à comparer : la fleet tourne sur le catalogue embarqué de la release"
   fi
 }
 

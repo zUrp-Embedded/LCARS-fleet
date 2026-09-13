@@ -178,7 +178,7 @@ apply_start_flags() {
 seat_uid() {
   local f v
   f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  [[ -r "$f" ]] || die "siege non declare ($f absent ou illisible) — cette machine n'est pas provisionnee, et GUARD B refuse un lancement qu'il ne peut pas verifier. « sudo deploy/provision apply » le pose."
+  [[ -r "$f" ]] || die "siège non déclaré ($f absent ou illisible) — cette machine n'est pas installée, et le lancement est refusé tant qu'il ne peut pas être vérifié. Sur un poste, « deploy/workstation up » le pose ; dans un conteneur, l'init du démarrage le pose (« deploy/container config » depuis l'hôte s'il ne peut pas le déterminer, puis « deploy/container up »)."
   v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
   # ⚠ LE NON-NUMERIQUE SE REFUSE, IL NE SE REMPLACE PAS : `(( x == abc ))` lit `abc` comme un NOM de
   # variable en contexte arithmetique, donc `unbound variable` sous `set -u` — la garde MEURT au lieu
