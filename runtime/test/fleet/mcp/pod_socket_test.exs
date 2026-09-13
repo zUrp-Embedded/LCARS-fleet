@@ -1,19 +1,13 @@
 defmodule Fleet.MCP.PodSocketTest.RaisingTools do
   @moduledoc false
-  # Tool handler that CRASHES — injected via `:lcars_fleet, :mcp_tool_handler` to prove the SOC-RES-001
-  # rescue (a raising tool → isError result, NOT a dropped connection).
+  # Inject a handler exception to exercise conversion into an MCP error result.
   def handle_tool_call(_tool, _args, _state), do: raise("simulated tool crash (SOC-RES-001)")
 end
 
 defmodule Fleet.MCP.PodSocketTest.RecordingMutationTools do
   @moduledoc false
-  # Records + GATES create_issue to prove the acceptor's single-flight over the MUTATION surface: the
-  # first invocation signals the coordinator and BLOCKS until released; a concurrent duplicate (the
-  # retry that overran the stdio bridge timeout) must be deduped by `Fleet.MCP.Idempotency` and never
-  # reach this handler a second time. `:idem_dup_count` counts the real invocations.
-  # 6-106 — `issue_retire` REPOND ICI AUSSI, et c'est le point : il ne figurait pas dans la liste de
-  # cinq mots nus que ce site protegeait, alors qu'il ferme un ticket et sa PR. Le meme corps sert
-  # les deux outils pour que la seule difference mesuree soit la COUVERTURE, jamais le stub.
+  # Block both issue_create and issue_retire through the same handler to test effect classification.
+  # The coordinator releases the runner while a duplicate waits; count real handler invocations.
   def handle_tool_call(tool, _args, _state) when tool in ["issue_create", "issue_retire"] do
     if pid = Process.whereis(:idem_dup_listener), do: send(pid, {:handling, self()})
 
@@ -32,20 +26,11 @@ end
 
 defmodule Fleet.MCP.PodSocketTest do
   @moduledoc """
-  Pod-facing per-pod AF_UNIX transport (`Fleet.MCP.PodSocketAcceptor` /
-  `Fleet.MCP.PodSocketSupervisor`) round-trip against the **real broker**
-  `Fleet.TaskQueue`.
-
-  A `:gen_tcp {:local}` client (instead of the stdio bridge + claude) talks to
-  the pod's socket in newline-framed JSON-RPC. PURE Elixir (BEAM client + server).
-
-  The heart of R9: the identity IS the channel. The `pod_id` comes from the
-  socket name (carried by the acceptor), NEVER from the wire — a fake
-  `_lcars_pod_id` in the arguments is ignored. The capability is gone (nothing
-  left to present).
-
-  `:sock_base` is set on a SHORT tmp dir (the AF_UNIX path is bounded to 108
-  bytes — `sun_path`; the per-pod dir + `sock` fits with room to spare).
+  Real AF_UNIX JSON-RPC round trips through the socket acceptor and TaskQueue,
+  using a BEAM client rather than the stdio bridge or vendor CLI.
+  Wire spoofing tests verify startup-owned pod identity, not peer authentication or sandbox
+  mount isolation. Short mcp_sock_base paths stay within the 107-byte socket-path limit.
+  Global handler/config seams require synchronous execution.
   """
   use ExUnit.Case, async: false
 
@@ -68,16 +53,14 @@ defmodule Fleet.MCP.PodSocketTest do
 
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
-    # The file MUST exist on return (the bwrap bind would fail otherwise).
+    # Readiness must precede the sandbox bind.
     assert File.exists?(path)
 
-    # IN channel over the socket wire.
     assert {:ok, %{"done" => false, "work_item" => %{"brief" => ^nonce, "work_item_id" => tid}}} =
              content(call(path, 1, "get_work_item", %{}))
 
     assert is_binary(tid)
 
-    # OUT channel over the socket wire (work_item_id REQUIRED = the one handed out).
     assert %{"result" => %{"content" => [%{"type" => "text"}]}} =
              call(path, 2, "submit_result", %{
                "payload" => %{"answer" => nonce},
@@ -86,17 +69,11 @@ defmodule Fleet.MCP.PodSocketTest do
 
     assert {:ok, :completed} = TaskQueue.pod_status(pod)
 
-    # No more active brief → done.
     assert {:ok, %{"done" => true}} = content(call(path, 3, "get_work_item", %{}))
   end
 
-  # THE ACCEPTOR IS THE ONLY WITNESS OF THIS FACT, AND IT USED TO THROW IT AWAY. `:timer.tc` around
-  # every tools/call produced a timestamp per call and kept only the slow ones, in a log line. The
-  # liveness watchdog three domains away was meanwhile inferring the pod's activity from a growing
-  # file, cpu jiffies and a repainting screen — proxies, while the proof passed through here.
-  #
-  # The marker's mtime IS that timestamp. Written as a file because the reader (`Pod.Liveness`) sits
-  # in a domain that may not call into MCP.
+  # Persist call activity for Pod.Liveness across the domain boundary; this test checks marker
+  # existence, not mtime refresh or watchdog behavior.
   test "a COMPLETED tools/call marks the pod's MCP activity — the only PROOF of liveness we hold" do
     pod = uniq("p")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
@@ -110,8 +87,7 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "a FAILING tools/call marks too — the pod spoke, which is what the signal measures" do
-    # It measures that the pod ACTED, not that it succeeded. A pod whose every call errors is a pod
-    # in trouble and very much alive; letting the watchdog kill it would destroy the evidence.
+    # A refused call still indicates activity. Here missing payload is rejected by the schema.
     pod = uniq("p")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -123,7 +99,6 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "F-C138: tools/list served by the socket = base + threaded role tools (schemas from the deftools)" do
-    # delegator role: the spawner threads create_issue + import_project (derived from canon allowedTools).
     pod = uniq("arch")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create", "project_install"])
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -131,20 +106,13 @@ defmodule Fleet.MCP.PodSocketTest do
     assert %{"result" => %{"tools" => tools}} = rpc(path, 10, "tools/list")
     names = tools |> Enum.map(& &1["name"]) |> Enum.sort()
 
-    # universal base ALWAYS + the threaded role tools; schemas from the deftools (single source),
-    # import_project INCLUDED (invisible before F-C138). A non-threaded tool (create_project) is NOT served.
     assert "get_work_item" in names and "submit_result" in names
     assert "issue_create" in names and "project_install" in names
     refute "project_create" in names
 
-    # real tool objects coming from the deftools (single source `PodTools.get_tools`) — not bare names.
     assert Enum.all?(tools, &(is_map(&1) and Map.has_key?(&1, "name")))
 
-    # F1 — THIS `tools/list` IS the MCP wire (the stdio bridge forwards it VERBATIM to claude) → it MUST
-    # carry `inputSchema` (MCP camel), NEVER `input_schema` (snake, ExMCP's INTERNAL shape). A snake
-    # `input_schema` = claude does not parse the schema → tool REJECTED ("No such tool available").
-    # F-C138 regression (forwarding the central catalogue instead of the bridge's local camelCase
-    # catalogue), caught in e2e while the gate only covered the NAMES — locked HERE.
+    # The bridge forwards this wire schema: MCP requires inputSchema, not ExMCP's input_schema.
     ci = Enum.find(tools, &(&1["name"] == "issue_create"))
     assert Map.has_key?(ci, "inputSchema"), "tools/list wire MUST carry inputSchema (MCP camel)"
 
@@ -163,18 +131,7 @@ defmodule Fleet.MCP.PodSocketTest do
     assert Enum.map(tools, & &1["name"]) |> Enum.sort() == ["get_work_item", "submit_result"]
   end
 
-  # JG-099 — LA PRESENTATION ET L'EXECUTION NE S'APPUYAIENT PAS SUR LA MEME AUTORITE. `tools/list`
-  # filtrait la surface, `tools/call` dispatchait n'importe quoi : un pod qui connaissait un nom
-  # hors liste l'appelait quand meme, et la seule barriere reelle etait le gate de role, PAR outil.
-  #
-  # Deux consequences, et la seconde n'avait aucun contournement : une omission dans un profil
-  # masquait un outil a la decouverte sans en empecher l'usage, et deux variantes du MEME role ne
-  # pouvaient pas avoir des surfaces MCP differentes — le gate de role ne sait pas les distinguer.
-  #
-  # MESURE FAITE AVANT D'ARMER, parce qu'un mur se prouve sur ce qu'il doit LAISSER PASSER : les 8
-  # roles worker ne nomment dans leur SP que les deux outils de base ; `architect` et `starfleet`
-  # declarent chacun un SUR-ENSEMBLE STRICT de ce que leur SP nomme. Aucun role ne perd un outil
-  # qu'il utilise.
+  # Listing alone cannot restrict a profile: off-list calls must also refuse before dispatch.
   describe "JG-099 — la liste AUTORISE, elle n'affiche plus seulement" do
     test "un outil hors profil est refuse AVANT le handler" do
       pod = uniq("worker")
@@ -189,16 +146,12 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "TEMOIN — DECLARE, le meme outil franchit la surface et atteint son gate de role" do
-      # C'est la moitie qui prouve que le mur discrimine. Sans elle, un refus systematique passerait
-      # le test precedent. Et c'est aussi la verification que la fiche demande separement : le gate
-      # `require_architect` reste DEVANT et refuse toujours — la surface s'ajoute, elle ne remplace
-      # rien.
+      # Positive control excludes surface/schema refusal; the assertion does not pin a specific role error.
       pod = uniq("arch")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-      # Schema-valid arguments (`title` + `brief`), so the refusal measured is the ROLE gate's and
-      # not the schema's — the point is to reach the handler.
+      # Valid title and brief reach the handler rather than failing schema validation.
       assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
                call(path, 1, "issue_create", %{"title" => "t", "brief" => "b"})
 
@@ -209,8 +162,7 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "TEMOIN — des arguments hors schema sont refuses AVANT le handler, en nommant la violation" do
-      # The inputSchema served by tools/list is ENFORCED by tools/call (2026-09-05): a required key
-      # missing or a wrong type never reaches a handler. The refusal names the tool and the path.
+      # Check missing required data and wrong types against the advertised schema.
       pod = uniq("arch")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create", "issue_get"])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -227,9 +179,7 @@ defmodule Fleet.MCP.PodSocketTest do
       assert text =~ "invalid_arguments"
       assert text =~ "number"
 
-      # And the schema is not stricter than the rail: `submit_result` without a top-level
-      # `work_item_id` crosses the schema and is refused by the HANDLER's typed guard, because the
-      # handler also reads the id inside `payload` (measured, `WorkItems.effective_work_item_id/2`).
+      # Top-level work_item_id is optional because the handler can also read it from payload.
       assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
                call(path, 3, "submit_result", %{"payload" => %{"x" => 1}})
 
@@ -237,8 +187,6 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "TEMOIN — les deux outils universels marchent sans rien declarer" do
-      # La base ne se declare pas : un profil vide doit rester un pod fonctionnel, sinon le mur
-      # ferme la fleet entiere.
       pod = uniq("base")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -248,8 +196,7 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "un outil DECLARE ailleurs mais pas ici reste refuse — la surface est par pod" do
-      # Le cas que le gate de role ne sait pas exprimer : `project_install` existe, un autre profil
-      # le porte, celui-ci non.
+      # Same-role profiles can expose different tools; role checks alone cannot express this.
       pod = uniq("arch2")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -261,9 +208,7 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "un nom inconnu est refuse par la SURFACE, pas par le handler" do
-      # Avant, un nom inconnu descendait jusqu'au dispatch pour y mourir. Le refuser ici n'est pas
-      # cosmetique : c'est la difference entre « ce pod n'a pas le droit » et « cet outil n'existe
-      # pas », et seule la premiere est vraie du point de vue du pod.
+      # An unknown, unthreaded name is rejected by the surface.
       pod = uniq("unk")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, [])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -275,8 +220,7 @@ defmodule Fleet.MCP.PodSocketTest do
     end
 
     test "tools/list et tools/call disent maintenant LA MEME chose" do
-      # L'invariant que la fiche reclamait : ce qui est annonce est ce qui est appelable, et
-      # reciproquement. Les deux moities sont mesurees sur le MEME pod.
+      # Check listing and surface admission on the same pod; handler success is not required.
       pod = uniq("iso")
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -284,11 +228,7 @@ defmodule Fleet.MCP.PodSocketTest do
       assert %{"result" => %{"tools" => tools}} = rpc(path, 20, "tools/list")
       annonces = tools |> Enum.map(& &1["name"]) |> MapSet.new()
 
-      # ⚠ UNE BOUCLE QUI NE PARCOURT RIEN EST VERTE. La moitie « annonce ⇒ appelable » ci-dessous
-      # est un `for` sur `annonces` : servir une liste VIDE — ou ne servir que les outils de base en
-      # ignorant le profil — la rendait verte sans rien mesurer. Le pod est ouvert avec
-      # `["issue_create"]`, donc l'annonce DOIT au moins le porter, et la population doit etre non
-      # vide avant qu'on la parcoure.
+      # Guard the loop against an empty/base-only list that would miss the threaded tool.
       assert MapSet.size(annonces) > 0,
              "tools/list n'annonce RIEN — la boucle ci-dessous ne mesurerait aucun outil"
 
@@ -323,7 +263,7 @@ defmodule Fleet.MCP.PodSocketTest do
        %{
          base: base
        } do
-    # base MUST exist for the `..` traversal to resolve (otherwise ENOENT masks the vuln = false green).
+    # Create base so .. traversal resolves; ENOENT would otherwise hide an escaping deletion.
     File.mkdir_p!(base)
     evil_pod = "../" <> Path.basename(base) <> "-evil"
     victim = Path.join([Path.dirname(base), Path.basename(base) <> "-evil", "sock"])
@@ -336,12 +276,7 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "the socket is created 0600 — the door carries its own lock, whatever the umask" do
-    # `:gen_tcp.listen` creates the AF_UNIX node at the process UMASK, so nothing guarantees it is
-    # closed. This was the only door of its family with no lock set here: the control socket makes
-    # `chmod 0600` a readiness condition, the tmux sock-dir is 0700, this one leaned on the home's
-    # permissions. A group-readable home is then enough for one human's pod channel to be reachable
-    # by another — and that socket IS the pod's identity channel (`pod_id` is acceptor state, never
-    # read off the wire).
+    # Check final socket mode independent of umask; this does not attempt a cross-UID connection.
     pod = uniq("perms")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -353,14 +288,8 @@ defmodule Fleet.MCP.PodSocketTest do
            "socket mode 0#{Integer.to_string(perms, 8)} — group and other must not reach a pod's MCP channel"
   end
 
-  # JG-042 — LE `0600` DE LA SOCKET ARRIVE UN SYSCALL TROP TARD. `:gen_tcp.listen` cree le noeud au
-  # UMASK (mesure sur cette flotte : `0002` -> `0775`, bit d'ecriture groupe donc `connect(2)`
-  # autorise), et `restrict/2` ne le referme qu'ensuite. Une connexion etablie dans cette fenetre
-  # RESTE ouverte apres le chmod : les droits d'une socket Unix ne sont verifies qu'a la connexion.
-  #
-  # Le BEAM ne sait pas creer un noeud AF_UNIX avec un mode. Ce qui se ferme, c'est la TRAVERSEE :
-  # le parent en `0700` rend le chemin inatteignable pour un autre compte pendant toute la fenetre.
-  # C'est le mode que son jumeau tmux a deja (`bin/bwrap_launch.sh` : `install -d -m 0700`).
+  # Private parent traversal covers the interval before socket chmod. This test checks final
+  # parent mode only, not creation ordering or privileged/same-UID access.
   test "le repertoire du pod est 0700 — la fenetre du listen n'est traversable par personne" do
     pod = uniq("dirperms")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
@@ -375,9 +304,7 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "un repertoire pre-existant TROP OUVERT est referme, pas accepte tel quel" do
-    # Le cas reel : `~/.lcars/run/mcp` mesure a `drwxrwxr-x` sur cette machine. Un `mkdir_p` sur un
-    # repertoire existant ne change aucun mode — sans le chmod, la fenetre restait ouverte sur tout
-    # conteneur deja en service.
+    # mkdir_p leaves pre-existing directory modes unchanged; ensure must tighten them.
     pod = uniq("preopen")
     path = PodSocketSupervisor.socket_path(pod)
     File.mkdir_p!(Path.dirname(path))
@@ -396,15 +323,13 @@ defmodule Fleet.MCP.PodSocketTest do
     pod = uniq("stuck")
     path = PodSocketSupervisor.socket_path(pod)
 
-    # Make the socket "file" a DIRECTORY → File.rm fails (:eperm/:eisdir): the removal cannot succeed.
     File.mkdir_p!(path)
     on_exit(fn -> File.rm_rf(Path.dirname(path)) end)
 
-    # This once returned a blind :ok; now the removal failure is OWNED (surfaced), not forgotten.
     assert {:error, {:release_incomplete, detail}} = PodSocketSupervisor.release_pod_socket(pod)
     assert match?({:error, _}, detail.socket_file)
 
-    # the suspect remains on disk for the SocketWarden / cold-boot sweep to reap — never silently lost
+    # The directory-shaped residue remains; this test does not prove a later sweeper can remove it.
     assert File.exists?(path)
   end
 
@@ -415,27 +340,18 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Connection A: open and MUTE — the acceptor enters `recv` on it. In SEQUENTIAL mode (the old
-    # inline `serve`), it would stay stuck there and NEVER re-`accept`. We only close A at the end of
-    # the test (on_exit), otherwise we prove nothing.
+    # Keep A mute and open while B calls, exposing a regression to inline sequential service.
     {:ok, mute} =
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
 
     on_exit(fn -> :gen_tcp.close(mute) end)
 
-    # Connection B: normal call WHILE A is open-mute. Sequential → B stays in the kernel backlog,
-    # never served → `recv` timeout (the `call` helper would raise at 5 s). Concurrent → B is served
-    # in its own Task and answers. This is the direct proof of the fix (the forensics `serial.py`, in
-    # ExUnit): this test FAILS if the acceptor becomes inline again, it PASSES with one Task per
-    # connection.
     assert {:ok, %{"work_item" => %{"brief" => ^nonce}}} =
              content(call(path, 1, "get_work_item", %{}))
   end
 
   test "many simultaneous connections all round-trip: the ownership handshake holds under concurrency" do
-    # Each accepted connection's worker parks until the acceptor transfers socket ownership and sends
-    # `:go` (spawn_conn), so recv never races controlling_process. Hammer the setup path concurrently:
-    # every connection must serve its tools/list, none dropped/hung by a mis-ordered transfer.
+    # Exercise six concurrent ownership transfers below the per-pod cap.
     pod = uniq("race")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -467,8 +383,7 @@ defmodule Fleet.MCP.PodSocketTest do
       PodSocketSupervisor.release_pod_socket(victim)
     end)
 
-    # The attacker POSTs the victim's pod_id in the arguments — but its socket remains ITS socket. The
-    # central NEVER reads the pod_id from the wire → it serves the acceptor's brief (attacker), not victim's.
+    # Wire arguments must not redirect this connection to the victim's queue.
     assert {:ok, %{"done" => false, "work_item" => %{"brief" => "le-brief-de-attacker"}}} =
              content(call(apath, 1, "get_work_item", %{"_lcars_pod_id" => victim}))
   end
@@ -502,10 +417,10 @@ defmodule Fleet.MCP.PodSocketTest do
     assert File.exists?(path1)
 
     assert :ok = PodSocketSupervisor.release_pod_socket(pod)
-    # The close frees the FD, the release removes the FILE (leak otherwise).
+
+    # Assert path removal; this does not check whether previously handed-off connections are closed.
     refute File.exists?(path1)
 
-    # Idempotent: re-releasing an already released pod breaks nothing.
     assert :ok = PodSocketSupervisor.release_pod_socket(pod)
   end
 
@@ -515,8 +430,7 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # Activate the brief then submit WITHOUT work_item_id → :work_item_id_required → `result` frame with
-    # isError:true (a tool error is an MCP result, not a protocol error).
+    # Missing work_item_id reaches the handler's typed refusal after activating a brief.
     _ = call(path, 1, "get_work_item", %{})
 
     assert %{"result" => %{"isError" => true, "content" => [%{"text" => txt}]}} =
@@ -530,11 +444,8 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # ~8 KB payload: without `{:buffer, _}` in @socket_opts, `packet: :line` delivered the line
-    # TRUNCATED as invalid JSON fragments, swallowed silently -> hang until the bridge timeout
-    # (briefs/summaries > 1.4 KB all lost). The tool is unknown ON PURPOSE: we test the FRAMING
-    # (one big line -> one response), not the business — `isError:true` is enough to prove the
-    # round-trip.
+    # An 8 KB frame exposed the default line-buffer regression. An unknown tool is sufficient:
+    # assert framing and an error response without depending on business behavior.
     blob = String.duplicate("x", 8_000)
 
     assert %{"id" => 42, "result" => %{"isError" => true}} =
@@ -550,7 +461,7 @@ defmodule Fleet.MCP.PodSocketTest do
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
 
     :ok = :gen_tcp.send(sock, "{broken json, not decodable\n")
-    # The old `_ -> nil` swallowed the line without answering: this recv stayed mute for 5 s.
+
     {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
     :gen_tcp.close(sock)
 
@@ -558,9 +469,7 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "SOC-RES-001: a CRASHING tool → isError result, the connection is NOT dropped (pod not hung)" do
-    # raising tool handler injected → without the acceptor's rescue, the connection Task would die →
-    # socket closed → the `call` below would see recv `{:error, :closed}` (the pod would wait out its
-    # timeout).
+    # A handler exception must return a frame; this does not test malformed params or schema crashes.
     Fleet.TestEnv.put_env_restoring(
       :lcars_fleet,
       :mcp_tool_handler,
@@ -576,17 +485,11 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "SOC-IDEM: a concurrent duplicate create_issue is deduped by single-flight — the handler runs ONCE" do
-    # The stdio bridge times a slow mutation's response out at 30s while central's effect completes;
-    # the agent re-emits the SAME create_issue. Two connections carrying the same call must resolve to
-    # ONE forge effect: the core-owned single-flight makes the duplicate wait on the in-flight run and
-    # replay its result, never invoking the handler twice.
-    # self() carries the coordination; the registered name auto-clears when this test process ends.
+    # Simulate overlapping retries with identical pod/tool/arguments; observe one handler invocation.
+    # No actual forge mutation or bridge timeout is exercised.
     Process.register(self(), :idem_dup_listener)
 
-    # ⚠ MEME NOM DANS DEUX TESTS : `start_link` lie l'agent au test, mais sa mort est ASYNCHRONE,
-    # donc le second test peut trouver `:idem_dup_count` encore pris (banc run 99, autre fichier,
-    # meme piege). `start_supervised!` arrete ET ATTEND avant le test suivant — plus de course, et
-    # plus d'`on_exit` a ecrire.
+    # Supervised teardown waits for the globally named counter to stop before the next test.
     start_supervised!(%{
       id: :idem_dup_count,
       start: {Agent, :start_link, [fn -> 0 end, [name: :idem_dup_count]]}
@@ -604,7 +507,6 @@ defmodule Fleet.MCP.PodSocketTest do
 
     args = %{"title" => "T", "brief" => "b"}
 
-    # A: fires create_issue; its handler blocks in-flight (holds the single-flight claim).
     ta = Task.async(fn -> call(path, 1, "issue_create", args) end)
 
     handler =
@@ -614,25 +516,20 @@ defmodule Fleet.MCP.PodSocketTest do
         3_000 -> flunk("the first create_issue never reached the handler")
       end
 
-    # B: a concurrent duplicate (same args, same pod → same key). It must WAIT on A, not reach the handler.
     tb = Task.async(fn -> call(path, 2, "issue_create", args) end)
     refute_receive {:handling, _}, 500
 
-    # Release A → it completes; B then replays A's memoized result without a second run.
+    # Release the runner; the in-flight duplicate receives its result without a second run.
     send(handler, :proceed)
     assert %{"result" => %{"content" => _}} = Task.await(ta, 3_000)
     assert %{"result" => %{"content" => _}} = Task.await(tb, 3_000)
 
-    # Exactly ONE forge-facing invocation across the two concurrent calls.
     assert Agent.get(:idem_dup_count, & &1) == 1
   end
 
   test "6-106: un mutateur ABSENT de l'ancienne liste est desormais protege lui aussi" do
-    # `issue_retire` ferme un ticket ET sa PR vivante. Il n'etait pas dans les cinq mots nus que ce
-    # site protegeait : deux appels concurrents identiques le jouaient DEUX fois. Le test est le
-    # jumeau exact du precedent — meme stub, meme scenario — pour que la seule variable soit la
-    # couverture. La classification vit maintenant chez `PodTools` et le gate en prouve
-    # l'exhaustivite ; ceci prouve qu'elle est bien LUE ici.
+    # Retire was missing from the old hand-maintained mutation list; exercise the same stub
+    # to check PodTools' effect classification is consumed by the acceptor.
     Process.register(self(), :idem_dup_listener)
 
     # ⚠ MEME NOM DANS DEUX TESTS : `start_link` lie l'agent au test, mais sa mort est ASYNCHRONE,
@@ -676,15 +573,11 @@ defmodule Fleet.MCP.PodSocketTest do
   end
 
   test "6-106: le canal IN/OUT du pod n'est PAS arbitre ici — sa re-emission est concue" do
-    # `submit_result` mute la FILE, et sa re-emission apres le timeout de 30 s du pont stdio est un
-    # comportement CONCU : un re-submit rejoue honnetement tant que la diffusion n'a pas ete
-    # confirmee, et c'est ce qui repare une completion perdue. La `TaskQueue` est deja l'autorite de
-    # ces semantiques — poser un second arbitre devant donnerait deux proprietaires a un mecanisme.
+    # Queue protocol retries belong to TaskQueue, without a second single-flight coordinator.
+    # These assertions check classification only, not resubmission behavior.
     assert PodTools.tool_effect("submit_result") == :protocol
     assert PodTools.tool_effect("get_work_item") == :protocol
 
-    # Et la direction sure pour ce qu'on ne connait pas : un outil non declare est traite comme une
-    # mutation, jamais dispatche nu.
     assert PodTools.tool_effect("outil_qui_n_existe_pas") == :unknown
   end
 
@@ -694,32 +587,23 @@ defmodule Fleet.MCP.PodSocketTest do
     {:ok, _path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
-    # residual dir WITHOUT sock (half-done provisioning / release that removed the sock but not the
-    # dir): must NOT be counted as a socket-file (otherwise socket_files > acceptors → false
-    # 'orphaned/deaf').
+    # A directory without sock must not inflate readiness's socket-file count.
     File.mkdir_p!(Path.join(base, "stray-no-sock"))
 
     assert {:operational, _} = Fleet.MCP.Supervisor.pod_facing_status()
   end
 
   test "SOC-CONTRACT-001: PodSocketSupervisor exports the mcp_socket_provisioner seam contract (duck-typed)" do
-    # The seam is DUCK-TYPED: fleet_mcp cannot adopt fleet_spawner's `@behaviour` (UPWARD compile edge
-    # forbidden) → the compiler does NOT check conformance. This test locks the IMPL side:
-    # PodSocketSupervisor MUST export the callbacks the consumer (Pod.McpProvision, R1-23 guard) calls.
-    # A drifting signature breaks THIS test, not a pod in prod. Contract = Fleet.Spawner.McpSocketProvisioner.
+    # Duck typing crosses the boundary without importing the consumer behaviour; pin exported arities.
     assert function_exported?(PodSocketSupervisor, :ensure_pod_socket, 1)
-    # /2 is the CONTRACT arity (pod_id + threaded role tools) — /1 alone was a stale lock: the
-    # behaviour callback is /2 and the spawner calls it with the tools list.
+    # The consumer calls /2 with the tool list; /1 alone does not establish conformance.
     assert function_exported?(PodSocketSupervisor, :ensure_pod_socket, 2)
     assert function_exported?(PodSocketSupervisor, :release_pod_socket, 1)
   end
 
   test "a pod opening MUTE connections does NOT starve the fleet (per-pod cap + idle timeout)" do
-    # The pod is adversarial by doctrine everywhere else. The Task pool that SERVES the connections is
-    # FLEET-WIDE (max_children of the shared Task.Supervisor): without a per-pod cap, a single pod
-    # opening enough mute connections exhausted the pool → the tools of ALL the other pods
-    # (get_work_item/submit_result) dead as long as the offender lived.
-    # Here: the offending pod hits ITS cap; another pod keeps being served.
+    # Check that one pod's mute connections leave another served. This does not wait out the
+    # idle timeout or assert the number of accepted workers.
     noisy = uniq("noisy")
     victim = uniq("victim")
 
@@ -731,9 +615,6 @@ defmodule Fleet.MCP.PodSocketTest do
       PodSocketSupervisor.release_pod_socket(victim)
     end)
 
-    # The offender opens MANY more connections than its cap (8) and NEVER sends a line — each would
-    # stay stuck in recv without a deadline. Connections beyond the cap are refused (closed by the
-    # acceptor): the shared pool is not consumed.
     mutes =
       for _ <- 1..40 do
         {:ok, sock} =
@@ -744,19 +625,14 @@ defmodule Fleet.MCP.PodSocketTest do
 
     on_exit(fn -> Enum.each(mutes, &:gen_tcp.close/1) end)
 
-    # The victim is served normally — that is THE invariant: a pod's fault costs IT,
-    # never the fleet.
     {:ok, _} = TaskQueue.enqueue(victim, %{brief: "still served"})
     resp = call(victim_path, 1, "get_work_item", %{})
     assert {:ok, %{"work_item" => %{"brief" => "still served"}}} = content(resp)
   end
 
   test "SOC-LEAK-001: opening/CLOSING serially BEYOND the cap does not lock the pod (slot freed)" do
-    # Each `call` = one connection SERVED THEN CLOSED. The per-pod slot MUST be freed on close,
-    # otherwise a LONG-LIVED pod (permanent-architect) reaches the cap (8) on already DEAD connections
-    # and gets refused FOR LIFE (seen e2e: 0 real connections, 8 counted, arch locked). Cause: the
-    # {:continue,:accept} loop starved handle_info({:DOWN}) → the counter never decreased. Here we
-    # chain 3× the cap; without the release (reap_down), connections ≥ 9 get refused and `call` breaks.
+    # Serial connections beyond the cap expose stale slot counts: blocking accept continuations
+    # used to starve DOWN handling. The accept path must reap completed workers.
     pod = uniq("longlived")
     {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod)
     on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
@@ -771,7 +647,6 @@ defmodule Fleet.MCP.PodSocketTest do
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
-  # One JSON-RPC tools/call on the socket: connect, send one line, read the response, close.
   defp call(path, id, tool, args) do
     {:ok, sock} =
       :gen_tcp.connect({:local, path}, 0, [:binary, {:packet, :line}, {:active, false}])
@@ -790,9 +665,7 @@ defmodule Fleet.MCP.PodSocketTest do
     Jason.decode!(line)
   end
 
-  # Sends a RAW JSON-RPC method (without the tools/call wrapper) — for tools/list (F-C138). 1 MiB
-  # buffer client-side: the tools/list response (N schemas) exceeds the inet default ~1460 B →
-  # truncated otherwise (`{:packet, :line}`), same symptom as the acceptor-side buffer guard.
+  # Large tools/list schemas need a client line buffer as well as the server's buffer.
   defp rpc(path, id, method) do
     {:ok, sock} =
       :gen_tcp.connect({:local, path}, 0, [
@@ -809,29 +682,22 @@ defmodule Fleet.MCP.PodSocketTest do
     Jason.decode!(line)
   end
 
-  # Decodes the JSON of the first text block of a tool result (the get_work_item/submit_result payload).
   defp content(%{"result" => %{"content" => [%{"text" => t} | _]}}), do: Jason.decode(t)
 
   describe "socket dir refused (the errno alone accuses the wrong directory)" do
     test "the failure names the missing level and whether its parent is writable", %{base: base} do
-      # `File.mkdir_p/1` drops the error of each intermediate level and reports only the leaf, so an
-      # unreachable base surfaces as a bare `:enoent` — which reads as "absent parent" while the
-      # parent is right there. A broken link reproduces it for any uid, root included.
+      # A dangling symlink reproduces a misleading leaf mkdir error without relying on caller UID.
       broken = Path.join(base, "broken")
       File.mkdir_p!(base)
       File.ln_s!("/nowhere/absent", broken)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, Path.join(broken, "mcp"))
 
-      # The errno of a broken link is `:enoent` up to Elixir 1.18 and `:enotdir` from 1.20 (measured
-      # on both binaries, absent from the changelog). The blame below does not read the errno, so
-      # neither does this witness: what it pins is the LEVEL, not the OS's word for it.
+      # Accept both observed errno variants; the assertion of interest identifies the failing path.
       assert {:error, {:socket_init_failed, {:mkdir, errno, blame}}} =
                PodSocketSupervisor.ensure_pod_socket(uniq("p"))
 
       assert errno in [:enoent, :enotdir]
 
-      # What the bare errno could not say: WHICH level is missing, and that its parent is fine —
-      # so this is a broken path, not a permission we lack.
       assert blame.first_missing == broken
       assert blame.under == base
       assert blame.under_writable?
@@ -840,20 +706,16 @@ defmodule Fleet.MCP.PodSocketTest do
 
   describe "sweep_stale_sockets/0 (cold-boot — kill -9 residue)" do
     test "erases a one-shot pod's residue → no more false deaf-pod degraded", %{base: base} do
-      # Residue of a previous instance killed by kill -9 (terminate/3 skipped): the socket file
-      # survives on the tmpfs, no acceptor behind it.
+      # A regular-file fixture models a stale socket pathname; no live listener exists.
       leaked = Path.join([base, "pod-oneshot-#{System.unique_integer([:positive])}", "sock"])
       File.mkdir_p!(Path.dirname(leaked))
       File.write!(leaked, "")
 
-      # BEFORE the sweep: the residue reads as deaf-pod degraded (the INVERTED false-green — degraded
-      # for life).
       assert {:degraded, %{note: note}} = Fleet.MCP.Supervisor.pod_facing_status()
       assert note =~ "deaf"
 
       assert :ok = PodSocketSupervisor.sweep_stale_sockets()
 
-      # AFTER: file + per-pod dir erased, operational status.
       refute File.exists?(leaked)
       refute File.dir?(Path.dirname(leaked))
       assert {:operational, %{sockets: 0}} = Fleet.MCP.Supervisor.pod_facing_status()

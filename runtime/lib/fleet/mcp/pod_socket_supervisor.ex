@@ -1,11 +1,11 @@
 defmodule Fleet.MCP.PodSocketSupervisor do
   @moduledoc """
-  Lifecycle owner for per-pod AF_UNIX acceptors. Ensure and release are
-  idempotent; release also owns socket-file removal. `SocketWarden` reconciles
-  runtime orphans and the cold-boot sweep removes residue from a dead node.
+  Owns per-pod AF_UNIX acceptors and socket-path cleanup.
+  Repeated ensure finds the registered acceptor without updating its tool list.
+  SocketWarden and the startup sweep provide separate residue cleanup paths.
 
-  This module duck-types the spawner's `McpSocketProvisioner` seam because the
-  boundary forbids importing that consumer-side behaviour.
+  Duck-types the spawner's McpSocketProvisioner seam: its consumer-side behaviour
+  cannot be imported across this boundary.
   """
 
   use DynamicSupervisor
@@ -37,7 +37,6 @@ defmodule Fleet.MCP.PodSocketSupervisor do
     if safe_pod_id?(pod_id) do
       path = socket_path(pod_id)
 
-      # F-C138
       spec = {PodSocketAcceptor, pod_id: pod_id, socket_path: path, tools: tools}
 
       case DynamicSupervisor.start_child(__MODULE__, spec) do
@@ -51,8 +50,10 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   @doc """
-  Stops a pod acceptor and removes its socket file and directory. Removal
-  failures are returned as `{:error, {:release_incomplete, detail}}`.
+  Requests acceptor termination and removes its socket file.
+  Socket-file removal failures return release_incomplete; termination and parent-directory
+  removal results are ignored. It does not terminate connection Tasks already handed off.
+  Unsafe pod IDs are logged and return ok without filesystem action.
   """
   @spec release_pod_socket(String.t()) :: :ok | {:error, term()}
   def release_pod_socket(pod_id) when is_binary(pod_id) and pod_id != "" do
@@ -103,7 +104,7 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   @doc """
-  Host path of a pod's socket file.
+  Builds a socket path without validating the pod ID; ensure/release perform that check.
   """
   @spec socket_path(String.t()) :: Path.t()
   def socket_path(pod_id) when is_binary(pod_id) do
@@ -125,7 +126,9 @@ defmodule Fleet.MCP.PodSocketSupervisor do
   end
 
   @doc """
-  Removes residual socket files before acceptors start on a cold boot.
+  Attempts to remove */sock paths and their parent directories.
+  Call before starting acceptors: it does not distinguish live sockets from residue.
+  Removal errors are ignored; rescued exceptions are logged and still return ok.
   """
   @spec sweep_stale_sockets() :: :ok
   def sweep_stale_sockets do

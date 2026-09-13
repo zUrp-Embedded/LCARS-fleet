@@ -24,11 +24,8 @@ defmodule Fleet.MCP.IdempotencyTest do
   end
 
   test "a LATE duplicate re-runs — a finished result is never replayed", %{server: s, counter: c} do
-    # The removed memoize: it replayed a completed result for 10 minutes, so a legitimate
-    # create X / delete X / recreate X inside that window got the FIRST create's success back and
-    # the recreate never happened. Correctness moved to the effects (they converge on the world);
-    # this layer only collapses CONCURRENT duplicates, so a call arriving after the flight ended
-    # runs for itself.
+    # Caching completed results broke create/delete/recreate within its TTL. Only concurrent
+    # duplicates share results; later calls must observe the current world.
     fun = counting_fun(c, {:ok, :r})
     assert {:ok, :r} = Idempotency.run(:k, fun, server: s)
     assert {:ok, :r} = Idempotency.run(:k, fun, server: s)
@@ -57,7 +54,7 @@ defmodule Fleet.MCP.IdempotencyTest do
        %{server: s} do
     test = self()
 
-    # fun signals when it starts, then blocks until told to proceed — so both callers overlap in time.
+    # Block the runner so the calls can overlap.
     fun = fn ->
       send(test, {:started, self()})
 
@@ -72,11 +69,9 @@ defmodule Fleet.MCP.IdempotencyTest do
     spawn(fn -> send(test, {:a, Idempotency.run(:k, fun, server: s)}) end)
     assert_receive {:started, a_fun}, 1_000
 
-    # B is a concurrent duplicate: it must BLOCK on A, not start a second run.
     spawn(fn -> send(test, {:b, Idempotency.run(:k, fun, server: s)}) end)
     refute_receive {:started, _}, 200
 
-    # Let A's run finish; B must then receive A's result WITHOUT ever running fun.
     send(a_fun, :proceed)
     assert_receive {:a, {:ok, :the_result}}, 1_000
     assert_receive {:b, {:ok, :the_result}}, 1_000
@@ -85,17 +80,13 @@ defmodule Fleet.MCP.IdempotencyTest do
   end
 
   test "no monotonic growth, and no sweep needed: a key dies with its flight", %{server: s} do
-    # DPF-15 was "expired entries are never reclaimed", and the answer then was a periodic sweep.
-    # With no completed-result state there is nothing to expire: the entry is deleted at publish or
-    # release, so the map cannot exceed the number of IN-FLIGHT mutations. The invariant became
-    # structural instead of maintained — asserted here so a re-introduced cache cannot pass silently.
+    # Assert entries disappear after both publication and rejection; no completed-result TTL remains.
     for i <- 1..5 do
       assert {:ok, :r} = Idempotency.run(:"k#{i}", fn -> {:ok, :r} end, server: s)
     end
 
     assert map_size(settle(s).entries) == 0
 
-    # A rejected result takes the release path — also leaves nothing behind.
     assert {:error, :no} =
              Idempotency.run(:rejected, fn -> {:error, :no} end,
                server: s,
@@ -123,7 +114,8 @@ defmodule Fleet.MCP.IdempotencyTest do
     end
 
     spawn(fn -> send(test, {:b, Idempotency.run(:k, b_fun, server: s)}) end)
-    # B is now waiting behind A. Killing A must release the key and PROMOTE B (not wedge it).
+
+    # There is no barrier proving B claimed before A dies; this also permits a fresh claim after death.
     Process.exit(a, :kill)
 
     assert_receive :b_ran, 1_000

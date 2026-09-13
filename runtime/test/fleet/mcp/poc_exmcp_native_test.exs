@@ -1,21 +1,12 @@
 defmodule Fleet.MCP.PoCExMCPNativeTest do
   @moduledoc """
-  PoC (DN ring4/fleet_mcp.md §"SDK choice — empirical validation criterion").
+  ExMCP native-transport smoke test with a local BEAM service and a 100 ms threshold.
+  Service uses ExMCP.Service's mcp_request handler; ExMCP.Server's tool DSL has a different
+  dispatch shape. This does not measure the production AF_UNIX/stdio path.
 
-  Decisive DN criterion: functional MCP round-trip + latency < 100 ms via the
-  native BEAM transport. Validates the ExMCP (azmaveth) choice; if KO → switch
-  to Hermes (the SDK wrap lives in `Fleet.MCP.PodTools` `use ExMCP.Server`,
-  tools `get_work_item`/`submit_result` unchanged; F049 — `Fleet.MCP.Server`
-  is only a boot guard now).
-
-  Canonical native pattern (deps/ex_mcp/lib/ex_mcp/service.ex §Usage):
-  `use ExMCP.Service, name: <atom>` — auto-registers `ExMCP.Native` in init/1,
-  generates `handle_call({:mcp_request, %{"method"=>_,"params"=>_}}, ...)` which
-  routes to the `handle_mcp_request/3` callback. `use ExMCP.Server` was the
-  wrong mixin (HTTP/stdio transport, deftool DSL → `{:handle_tool_call,...}`,
-  never `{:mcp_request,...}` → GenServer.call without a clause → 5 s timeout).
-  Round-trip measured with `call/4` + `notify/3` via `:timer.tc`. D-LS-6 proof
-  (real e2e measurement, not a claim).
+  Call timing includes the reply. Notify timing covers lookup and asynchronous cast only,
+  not notification processing or delivery. The original SDK-choice criterion is documented
+  in ring4/fleet_mcp.md; these single samples are not a latency distribution.
   """
   use ExUnit.Case, async: false
 
@@ -56,8 +47,7 @@ defmodule Fleet.MCP.PoCExMCPNativeTest do
 
   setup_all do
     {:ok, _} = Application.ensure_all_started(:ex_mcp)
-    # use ExMCP.Service: register_service is called in init/1 (synchronous);
-    # start_supervised! only returns after init → service already registered.
+    # Service registration runs synchronously in init before start_supervised returns.
     start_supervised!(PoCService)
     :ok
   end

@@ -1,38 +1,21 @@
 defmodule Fleet.MCP.PodSocketAcceptor do
   @moduledoc """
-  AF_UNIX socket acceptor for ONE pod: the pod's identity IS the channel.
+  Per-pod AF_UNIX acceptor with startup-owned pod identity, never supplied by wire arguments.
+  Identity relies on controlled socket access and sandbox mounts; no peer credential check
+  distinguishes processes sharing the owner UID. Parent directory mode is checked as 0700
+  before listening, then the socket is chmod 0600.
 
-  Each pod has ITS own socket, mounted into its sole sandbox. So every line
-  received on THIS socket necessarily comes from THIS pod: the `pod_id` is the
-  acceptor's immutable state (carried at startup, from the socket name), never
-  read off the wire. There is nothing left to prove — no secret presented, no
-  `pod_id` to compare: the channel discriminates (a SHARED transport would make
-  the pod_id guessable; the per-pod socket closes that hole by construction).
+  Owns one listening socket and hands connections to supervised Tasks, allowing slow calls
+  on one connection without serializing all connections. Per-pod and shared pool limits
+  bound accepted workers; the idle deadline applies between frames, not during tool execution.
 
-  One acceptor = one process = one socket: there is a genuine runtime reason (a
-  socket is I/O state that persists across lines). It owns the listen socket,
-  loops on `accept`, and hands each accepted connection to a dedicated Task
-  (`Fleet.MCP.ConnectionTaskSupervisor`) — the loop re-`accept`s
-  immediately; a slow handler blocks only ITS connection, never the following
-  ones nor the other pods (each has its own acceptor). Supervised by
-  `Fleet.MCP.PodSocketSupervisor` (DynamicSupervisor); named in the Registry
-  `Fleet.MCP.PodSocketRegistry` (key = `pod_id`) for idempotent resolution.
+  Newline-framed JSON-RPC serves tools/list and tools/call; the stdio bridge handles initialize.
+  Calls check base/threaded tool names, then the available input schema, then the handler's
+  own role/subject gates. Schemas are sourced from PodTools for both listing and validation.
 
-  ## Protocol
-
-  JSON-RPC newline-framed (`{:packet, :line}`), one message = one line.
-  `tools/call` AND `tools/list` are both served here (`tools/list` per F-C138 — the
-  `deftool` schemas filtered to this pod's role-gated surface, see `list_tools/1`); only
-  `initialize` is answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). A
-  `tools/call` crosses two checks before dispatch: the pod's declared surface (`authorized?/2`,
-  JG-099) and the tool's own `inputSchema` (`validate_arguments/2`, 2026-09-05 — the schema served
-  by `tools/list` is the one enforced, not a promise). The response frame reuses
-  `PodTools.handle_tool_call/3`:
-
-    * `{:ok, content, _}`  → `result` = that `content` (already in MCP format);
-    * `{:error, reason, _}` → `result` = `%{"content" => [text], "isError" => true}`
-      (MCP convention: a tool error is a result with `isError`, not a protocol
-      error — the pod reads it as tool text).
+  Handler success returns its MCP content; handled errors become result.content with isError,
+  not protocol errors. Malformed params or schema-resolution failures outside dispatch's
+  rescue can still terminate a connection.
   """
 
   use GenServer
@@ -50,28 +33,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     {:buffer, 1_048_576}
   ]
 
-  # Mute connections eventually release shared Task capacity (D-07 config namespace).
-  #
-  # ⚠ FIGE A LA COMPILATION, ET C'EST LE SEUL ENDROIT QUI LE DIT. `compile_env` grave la valeur dans
-  # le module : un `Application.put_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, …)` a l'execution
-  # est IGNORE, en silence. Tout le reste de ce sous-systeme lit par `get_env` (15 occurrences dans
-  # `lib/fleet/mcp/`), donc ces deux plafonds RESSEMBLENT a des molettes et n'en sont pas.
-  #
-  # L'ecart est defendu, pas subi : `compile_env` est ce qui autorise l'usage en ATTRIBUT DE MODULE
-  # (une garde de fonction ne peut pas appeler `get_env`), et une release refuse de demarrer si la
-  # config de boot diverge de celle de la compilation — une protection qu'un `get_env` n'a pas. Les
-  # basculer en `get_env` echangerait ces deux proprietes contre une molette que personne n'a
-  # demandee : MESURE, aucune de ces deux cles n'apparait dans `config/`, `bin/`, `deploy/` ni
-  # `test/`, et aucune variable d'environnement ne les expose.
+  # Compile-time limits: runtime put_env does not change these attributes. The idle timeout
+  # releases mute connections; the per-pod cap below reserves room in the shared Task pool.
   @idle_timeout_ms Application.compile_env(:lcars_fleet, :mcp_socket_idle_timeout_ms, 300_000)
 
-  # Connection service is isolated from the accept loop.
   @conn_sup Fleet.MCP.ConnectionTaskSupervisor
 
-  # Per-pod ceiling protects the fleet-wide connection pool.
-  # Meme nature figee que `@idle_timeout_ms` ci-dessus, et pour les memes raisons — ces deux-la sont
-  # les SEULS `compile_env` de tout `lib/`, ce qui rend leur exception d'autant plus facile a lire
-  # comme un oubli si personne ne l'ecrit.
   @max_conns_per_pod Application.compile_env(:lcars_fleet, :mcp_max_conns_per_pod, 8)
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -86,14 +53,13 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   def init(opts) do
     pod_id = Keyword.fetch!(opts, :pod_id)
     path = Keyword.fetch!(opts, :socket_path)
-    # F-C138: spawner threads the role-gated tool surface.
+
     tools = Keyword.get(opts, :tools, [])
 
     with :ok <- ensure_parent_dir(path),
          :ok <- rm_stale(path),
          {:ok, lsock} <- :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | @socket_opts]),
          :ok <- restrict(path, lsock) do
-      # Monitored live Tasks back the per-pod ceiling.
       {:ok, %{pod_id: pod_id, socket_path: path, lsock: lsock, tools: tools, conns: %{}},
        {:continue, :accept}}
     else
@@ -101,18 +67,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # LA SOCKET EST UNE PORTE, SES PERMISSIONS EN SONT LA SERRURE.
-  #
-  # `:gen_tcp.listen` cree le noeud AF_UNIX au UMASK du processus : rien ne garantit qu'il soit
-  # ferme. Sans ce chmod, c'est la seule porte de la famille sans serrure posee ici — le socket de
-  # controle fait du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est cree
-  # `install -d -m 0700` — et celle-ci s'en remet aux permissions du home. Un home lisible par le
-  # groupe suffit alors a rendre la socket MCP d'un pod joignable par un autre humain du conteneur,
-  # et cette socket EST le canal d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le
-  # fil).
-  #
-  # Fail-closed, comme son jumeau : une socket ouverte dont on n'a pas pu poser la serrure ne
-  # demarre pas, et on la referme au lieu de laisser une porte sans verrou derriere soi.
+  # Require socket chmod before readiness; on failure close the listener and attempt removal.
+  # The private parent directory must already cover the listen-to-chmod interval.
   defp restrict(path, lsock) do
     case File.chmod(path, 0o600) do
       :ok ->
@@ -128,7 +84,6 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   @impl GenServer
   def handle_info(:retry_accept, state), do: {:noreply, state, {:continue, :accept}}
 
-  # Any connection termination frees its live slot.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
     {:noreply, %{state | conns: Map.delete(state.conns, ref)}}
   end
@@ -142,7 +97,6 @@ defmodule Fleet.MCP.PodSocketAcceptor do
         # Blocking continue loop drains pending DOWNs before enforcing live capacity.
         state = reap_down(state)
 
-        # Refuse per-pod excess before consuming shared pool capacity.
         if live_conns(state) >= @max_conns_per_pod do
           Logger.warning(
             "PodSocketAcceptor: pod=#{pod_id} connection REFUSED — #{@max_conns_per_pod} " <>
@@ -201,7 +155,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
         end
 
       {:error, reason} ->
-        # Per-pod excess was already refused; this is fleet-wide saturation.
+        # Task start failures are logged as saturation, though other supervisor errors can reach here.
         Logger.warning(
           "PodSocketAcceptor: pod=#{pod_id} connection REFUSED (#{inspect(reason)}) — " <>
             "fleet-wide connection pool saturated"
@@ -251,42 +205,19 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Decode the JSON-RPC line. Only `tools/call` is dispatched to PodTools. A
-  # notification with no `id` is ignored (nothing to answer, JSON-RPC contract). An
-  # INVALID JSON (truncated/broken line) -> -32700 response + warning: NEVER swallowed
-  # silently — swallowing turns every invalid line into a 30 s timeout
-  # indistinguishable on the bridge side, zero BEAM trace. Another `method`
-  # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled here) -> -32601.
+  # Invalid JSON gets -32700 instead of a silent bridge timeout; unknown methods with non-nil IDs
+  # get -32601. Decoded unmatched values are ignored, not fully validated as JSON-RPC requests.
   defp handle_line(line, pod_id, tools) do
-    # THE POD IS UP, AND THIS IS THE ONLY IN-BAND PROOF THAT EXISTS DURING A COLD START. A line on
-    # this socket means the pod's MCP client is connected — which happens at TUI init, before the
-    # agent takes any turn, so LONG before the work-item poll that everything else waits on. The
-    # kick loop consumes it: keys typed into a REPL that is not up yet are not lost, tmux buffers
-    # them and the TUI replays each as its own submission — measured: a scribe took 7 `engage` in
-    # its REPL, one per kick fired during the cold start.
-    # Marked on EVERY line, not only the first: it is a cast into a `Map.put_new`, and marking on
-    # `tools/list` alone would miss a pod that reconnects mid-life (fleet restart) without
-    # re-listing.
+    # Mark connection activity on every line, even invalid JSON, before decoding. This is a
+    # TaskQueue startup hint for kick pacing, not proof that a TUI or agent is ready.
     Fleet.TaskQueue.mark_connected(pod_id)
 
     case Jason.decode(line) do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id, tools)})
 
-      # SOURCE UNIQUE des schemas : un catalogue ecrit en dur cote pont DERIVERAIT de l'autorite des
-      # outils. La liste servie est la base universelle, plus ce qui a ete file au spawn.
-      #
-      # ⚠ DECOUVERTE *ET* AUTORISATION, LA MEME LISTE SERVANT LES DEUX : l'appel refuse tout nom
-      # hors liste AVANT dispatch. Le pont, lui, relaie aveuglement — le refus se fait ICI.
-      #
-      # ⚠ LA BARRIERE PAR OUTIL RESTE LA PREMIERE : chaque outil est role-gated ou pod-scope, ceux
-      # qui derivent leur sujet du canal ne le lisant JAMAIS du fil. C'est un invariant tenu par un
-      # mur. Cette liste est une SECONDE barriere, pas un remplacement — elle achete ce que le role
-      # gate ne peut pas exprimer : deux variantes d'un meme role avec des surfaces differentes.
-      #
-      # ⚠ A LIRE COMME LA SURFACE QU'UN PROFIL PEUT RESTREINDRE, JAMAIS COMME LA SURFACE QU'UN ROLE
-      # A : elle est vide pour la plupart des profils, et les agents travaillent depuis leur prompt,
-      # qui nomme des outils que ce filtre ne connait pas.
+      # Serve schemas from PodTools. The same base/threaded names authorize calls;
+      # handler role gates remain an additional check, after surface/schema validation.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
@@ -319,23 +250,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Slow-call trace uses channel-owned identity, never a wire argument.
   @slow_tool_warn_ms 5_000
 
-  # THE LIST AUTHORIZES, IT DOES NOT ONLY DISPLAY (6-099). A `tools/list` that filters the surface
-  # while `tools/call` dispatches anything lets a pod that knows an off-list name call it, with the
-  # per-tool role gate as the only real barrier — an omission in a profile then hides a tool from
-  # discovery without preventing its use, and two variants of the SAME role cannot be given
-  # different MCP surfaces at all.
-  #
-  # ⚠ CE N'EST PAS UN RENVERSEMENT DE LA SEMANTIQUE GRAVEE de `scope.allowedTools`. Celle-ci
-  # ("allowedTools is an INTENT, disallowedTools is a WALL") est MESUREE sur le CLI vendor, qui est
-  # l'autre consommateur du meme champ et dont on ne controle pas le comportement. Ici on parle du
-  # sous-ensemble `mcp__fleet__` servi par CETTE socket, qui est notre code : un champ, deux
-  # consommateurs, et c'est dit aux deux bouts plutot que laisse a deviner.
-  #
-  # MESURE AVANT D'ARMER (le mur se prouve sur ce qu'il doit LAISSER PASSER) : les 8 roles worker
-  # ne nomment dans leur SP que les deux outils de base ; `architect` et `starfleet` declarent
-  # chacun un SUR-ENSEMBLE STRICT de ce que leur SP nomme. Aucun role ne perd un outil qu'il
-  # utilise. Les gates de role (`require_architect`/`require_onboarder`) restent DEVANT, intacts :
-  # ce contrôle s'ajoute, il ne remplace rien.
+  # Enforce this socket's MCP subset even if a client knows an off-list tool name.
+  # This is distinct from the vendor CLI's interpretation of scope.allowedTools.
   defp call_tool(params, pod_id, threaded) do
     tool = params["name"]
     tool_args = params["arguments"] || %{}
@@ -366,8 +282,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
           "pod's declared MCP surface (base + scope.allowedTools)"
       )
 
-      # Compte comme activite : un pod qui se fait refuser a AGI. Ne pas le compter ferait passer
-      # pour mort un pod qui frappe a une porte fermee.
+      # Refusals count as activity: the client acted even though dispatch did not occur.
       mark_activity(pod_id)
 
       %{
@@ -382,16 +297,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp authorized?(_tool, _threaded), do: false
 
-  # THE SCHEMA IS ENFORCED WHERE IT IS SERVED. `tools/list` hands each `deftool`'s `inputSchema`
-  # to the CLI, and until 2026-09-05 nobody on this side read it back: the handlers pick their keys
-  # by hand, ExMCP validates prompt arguments only. So `required` and every `type` were a promise
-  # to the agent with no one holding the rail to it — a half-done rename (the property moved, the
-  # list did not) or a number sent as a string reached a handler that answered with a crash or a
-  # `nil`. Validated AFTER the surface check (an off-profile tool is refused as such, its arguments
-  # unread) and BEFORE dispatch, so a handler only ever sees what its schema describes. The
-  # resolved schema is cached per tool (`Fleet.SchemaCache`, persistent_term): 32 tiny schemas,
-  # resolved once. A tool without a schema (none today) validates nothing rather than refusing —
-  # the wall `mcp.tools_gated` already refuses a dispatched tool without a `deftool`.
+  # Validate the advertised schema after surface admission and before dispatch.
+  # Cache per tool via SchemaCache; no schema means no validation. Extra keys depend on the
+  # schema, and required/type validation does not replace semantic guards in the handler.
   defp validate_arguments(tool, tool_args) do
     case PodTools.get_tools()[tool] do
       %{input_schema: schema} when is_map(schema) ->
@@ -438,20 +346,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # A COMPLETED tools/call is the only liveness signal that PROVES the pod acted, and the acceptor
-  # is the only one holding it (`:timer.tc` above measures every call). The mtime of this marker is
-  # that timestamp, made durable for a reader in another domain (`Pod.Liveness`) that cannot call
-  # into MCP.
-  #
-  # Marked AFTER the call returns, deliberately: a mark posed on entry would keep re-arming the
-  # deadline of a pod stuck INSIDE a tool, which is precisely the death the watchdog exists to
-  # catch. Only completion is evidence.
-  #
-  # A failed touch is swallowed: a liveness HINT must never break the call it observes, and its
-  # absence already reads as "no signal" downstream, never as silence.
-  # No nil-guarded twin clause: `pod_id` is channel-owned and always a binary here, and dialyzer
-  # says so. A defensive clause that can never fire is not a safety net, it is a claim that the
-  # value might be something it cannot be.
+  # Persist completion/refusal time for Pod.Liveness, which cannot call MCP across the boundary.
+  # Do not touch on dispatch entry: a stuck handler must not look recently completed.
+  # Ignore File.touch errors because this hint must not turn an observed call into a failure.
   defp mark_activity(pod_id) do
     marker =
       pod_id
@@ -462,21 +359,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     :ok
   end
 
-  # Forge mutations converge durably; single-flight only collapses concurrent retries.
-  #
-  # ⚠ PAS DE LISTE DE MOTS NUS DANS UN SIGIL ICI (6-106). Des noms d'outils poses ainsi ne
-  # ressemblent a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
-  # prose), donc un renommage objet-d'abord les manque EN SILENCE. Une liste qui ne s'ecrit pas
-  # comme les autres est une liste qu'un renommage rate — et posee LOIN des definitions qu'elle
-  # pretend couvrir, elle porte l'autre moitie du probleme.
-  #
-  # L'effet vit A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate. Ici on ne
-  # fait que LIRE une decision prise la-bas.
-  #
-  # `:unknown` (un outil que `PodTools` ne declare pas) est traite comme une MUTATION : c'est la
-  # direction sure — un mutateur non declare est protege en attendant que le gate le dise, plutot
-  # que dispatche nu. Le cout d'une erreur dans ce sens est une latence sur des appels concurrents
-  # identiques ; dans l'autre, c'est un effet forge duplique.
+  # Read effect classification beside the tool definitions rather than maintaining a remote name list.
+  # Mutation and unknown effects share concurrent retries; completed results are not cached.
+  # Durable repeat safety remains the handler's responsibility.
   @single_flight_effects [:mutation, :unknown]
 
   # SOC-RES-001: tool crashes become MCP error results instead of dropped connections.
@@ -500,7 +385,6 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp error_text(reason), do: inspect(reason)
 
-  # F-C138: static schemas filtered to the universal and role-gated surface.
   defp list_tools(threaded) do
     allowed = PodTools.base_tool_names() ++ threaded
     PodTools.get_tools() |> Map.take(allowed) |> Map.values() |> Enum.map(&to_mcp_wire/1)
@@ -514,34 +398,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   defp encode(map), do: Jason.encode!(map) <> "\n"
 
-  # `File.mkdir_p/1` DISCARDS the error of every intermediate level and reports only the LEAF: it
-  # recurses on the parent, drops that result, then calls make_dir on the child. A refusal two
-  # levels up therefore surfaces as a bare `:enoent` on the child — an errno that reads as "absent
-  # parent" while the parent is present and merely closed. MEASURED: mkdir_p("/run/lcars/mcp/pod_x")
-  # under a root-owned `/run` yields `:enoent`, not `:eacces`, and points the operator at a
-  # directory that was never the problem.
-  #
-  # So the errno alone cannot name the fault: carry the first component that does NOT exist plus
-  # the writability of its parent. That pair separates the two cases the bare errno merges — a
-  # level nobody created, versus a level we are not allowed to create under.
-  # ⚠ LE REPERTOIRE EST LA SERRURE QUE LA SOCKET N'A PAS ENCORE. L'ecoute cree le noeud AF_UNIX au
-  # UMASK du processus et le `chmod` le referme ENSUITE : entre les deux, le noeud porte les droits
-  # de l'umask — et une connexion etablie dans cette fenetre RESTE OUVERTE apres le chmod, les
-  # droits d'une socket Unix n'etant verifies qu'a la connexion. Le connecte tient alors le canal
-  # d'outils du pod sans etre ce pod.
-  #
-  # ⚠ ET LA FENETRE NE SE FERME PAS LA OU ON LA VOIT : le BEAM ne sait pas creer un noeud AF_UNIX
-  # avec un mode, il n'existe pas d'ecoute atomique en `0600`. Ce qui ferme est la TRAVERSEE — un
-  # parent en `0700` rend le chemin inatteignable a tout autre compte, quel que soit le mode
-  # transitoire du noeud. Le mode final de la socket est la SECONDE serrure, pas la premiere.
-  #
-  # Le jumeau shell, lui, cree son repertoire de socket ATOMIQUEMENT (`install -d -m 0700`) : c'est
-  # son mode qui arrive ici, pas une regle nouvelle.
-  #
-  # `mkdir_p` puis `chmod` n'est pas atomique non plus, mais dans CETTE fenetre-la la socket
-  # n'existe pas encore. Ce qui reste est VERIFIE plutot que suppose : on relit le mode avant de
-  # servir, et un repertoire qu'on n'a pas pu fermer devient un refus de demarrage, jamais une
-  # porte ouverte.
+  # A leaf mkdir error can hide the failing ancestor; report the first missing path and
+  # whether its parent appears writable, rather than inferring the cause from errno alone.
+  # Set and verify parent 0700 before listen: socket chmod comes after creation, too late
+  # to prevent a different UID connecting during a permissive-umask interval.
+  # These path-based checks are not atomic against concurrent replacement.
   defp ensure_parent_dir(path) do
     dir = Path.dirname(path)
 
@@ -558,8 +419,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # Fail-closed, comme `restrict/2` sur la socket : un `chmod` refuse signifie que le repertoire ne
-  # nous appartient pas, et c'est deja la reponse.
+  # A chmod error refuses startup; its errno alone does not establish directory ownership.
   defp close_dir(dir) do
     case File.chmod(dir, 0o700) do
       :ok -> :ok
@@ -567,9 +427,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     end
   end
 
-  # On RELIT ce qu'on vient de poser. Un repertoire pre-existant appartenant a un autre compte fait
-  # echouer le `chmod` au-dessus ; celui-ci attrape ce que le premier ne voit pas — un mode qui n'est
-  # pas celui demande, quelle qu'en soit la cause.
+  # Read back permission bits after chmod; this does not verify owner or resolve races.
   defp verify_private(dir) do
     case File.stat(dir) do
       {:ok, %File.Stat{mode: mode}} ->
@@ -592,7 +450,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       |> Enum.find(&(not File.exists?(&1)))
 
     case missing do
-      # Every level exists: the refusal is on `dir` itself (mode, read-only mount, quota).
+      # Existing paths can still fail mutation; report the target when none is missing.
       nil ->
         %{dir: dir, first_missing: nil, under: dir, under_writable?: writable?(dir)}
 

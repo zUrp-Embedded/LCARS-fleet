@@ -1,20 +1,10 @@
 defmodule Fleet.MCP.EmergencyStopTest do
   @moduledoc """
-  A brake, not a kill — and the difference is the whole design.
-
-  Killing pods resets nothing: the tickets stay open, the poller re-dispatches on the next tick, and
-  the runaway resumes with fresh pods. Closing is what stops it — a closed ticket leaves the poller
-  by construction, and the reaper collects its pods on its own.
-
-  Two properties get most of the lines here, because both invert a rule that holds elsewhere:
-
-    * the sweep does NOT abort on a failure. A unit retirement aborts because a half-retired ticket
-      is worse than an open one; a brake that stops halfway leaves the rest running, which is the
-      failure mode it exists to prevent.
-    * the PARKED MARKER must survive. It is an open issue assigned to the same human, and closing it
-      means UNPARKING the project — a stop that reopens a deliberately closed project does the
-      opposite of stopping. The exclusion lives pilot-side, with the vocabulary; here we prove the
-      composition honours it.
+  Emergency-stop composition over recorded forge calls.
+  Retiring issues prevents later dispatch; these tests do not run the poller or pod reaper.
+  The sweep continues after returned failures and skips parked/unknown projects.
+  Marker exclusion belongs to Project.list_stoppable_issues; the stub supplies already-filtered
+  numbers, so this suite does not exercise marker filtering within an open project.
   """
   use ExUnit.Case, async: false
 
@@ -24,7 +14,6 @@ defmodule Fleet.MCP.EmergencyStopTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
     @impl true
@@ -72,8 +61,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
   defmodule Onboard do
     def list_projects(_opts), do: {:ok, Process.get(:projects, [])}
 
-    # Mirrors the real one: the parked marker is ALREADY excluded here, pilot-side, where the
-    # vocabulary lives. A stub that returned it would be testing a composition that cannot happen.
+    # Supply already-filtered issue numbers, as Project's listing contract requires.
     def list_stoppable_issues(repo, _opts),
       do: {:ok, Map.get(Process.get(:issues, %{}), repo, [])}
 
