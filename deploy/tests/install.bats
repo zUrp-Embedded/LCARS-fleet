@@ -600,7 +600,7 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   _release
   pipee
   [ "$status" -eq 1 ]
-  [[ "$output" == *"curl --proto '=https' --tlsv1.2 -fsSL <install.sh> | bash -s -- --bench"* ]]
+  [[ "$output" == *"curl -fsSL <install.sh> | bash -s -- --bench"* ]]
   [[ "$output" != *"bash bash"* ]]
   pipee --workstation
   [[ "$output" == *"| bash -s -- --workstation --bench"* ]]
@@ -674,7 +674,7 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   [ "$status" -ne 0 ]
   [[ "$output" == *"n'est pas https"* ]]
   [ ! -s "$SERVEUR_LOG" ]
-  grep -q -- "curl --proto \"\$proto\" --tlsv1.2 -fsSL" "$SRC"
+  grep -q -- "curl --proto \"\$proto\" -fsSL" "$SRC"
 }
 
 @test "minisign : une signature invalide refuse et efface ; une clé sans .minisig refuse ; minisign absent se dit" {

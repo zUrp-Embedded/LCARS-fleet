@@ -42,10 +42,15 @@ fp_urlenc() {
   printf '%s' "$out"
 }
 
-fp_release_body() {
-  local dist="$1" target="$2" f
-  printf 'Source : %s\n\nPoser (poste, Debian/Ubuntu) :\n\n    curl --proto '"'"'=https'"'"' --tlsv1.2 -fsSL <base>/install.sh | bash -s -- --workstation\n\nsha256 :\n\n' "$target"
-  for f in "$dist"/*.sha256; do [[ -f "$f" ]] || continue; printf '    %s\n' "$(head -1 "$f")"; done
+fp_release_body() { # fp_release_body <tiroir> <sha du commit> <base des assets> [<image>] — le corps de la release, en Markdown : les commandes à copier, avec leur vraie adresse
+  local dist="$1" target="$2" base="$3" image="${4:-}" f
+  printf 'Source : `%s`\n' "$target"
+  [[ -z "$image" ]] || printf 'Image : `%s`\n' "$image"
+  printf '\n**En conteneur** (docker), avec la forge et le runner montés par l'"'"'installeur :\n\n```bash\ncurl -fsSL %s/install.sh | bash -s -- --bench\n```\n\n' "$base"
+  printf '**Dans ce système** (WSL 2, ou Linux dédié avec `LCARS_ALLOW_ANY_HOST=1`) :\n\n```bash\ncurl -fsSL %s/install.sh | bash -s -- --workstation --bench\n```\n\n' "$base"
+  printf 'Sans `--bench`, une forge existante est requise (`FORGE_BASE_URL`). `--check` mesure sans rien poser, `--dry-run` dit la commande.\n\nsha256 :\n\n```\n'
+  for f in "$dist"/*.sha256; do [[ -f "$f" ]] || continue; printf '%s\n' "$(head -1 "$f")"; done
+  printf '```\n'
 }
 
 fp_dialect() {
@@ -102,7 +107,7 @@ fp_publish_dist() {
     *) echo "fp: REFUS (${code:-vide}) — la forge ne dit pas si le commit $target est là ($(fp_err "$body"))" >&2; return 1 ;;
   esac
 
-  local json; json="$(jq -cn --arg t "$tag" --arg n "lcars $tag" --arg b "$(fp_release_body "$dist" "$target")" --arg c "$target" \
+  local json; json="$(jq -cn --arg t "$tag" --arg n "lcars $tag" --arg b "$(fp_release_body "$dist" "$target" "$forge/$owner/$repo/releases/download/$tag" "${FP_IMAGE:-}")" --arg c "$target" \
                       '{tag_name:$t, name:$n, body:$b, draft:true, prerelease:false, target_commitish:$c}')"
   code="$(fp_curl "$body" -X POST -H 'Content-Type: application/json' --data-binary "$json" "$api/releases")"
   case "$code" in

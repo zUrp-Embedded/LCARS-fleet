@@ -60,7 +60,7 @@ if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   PORTE_CMD="bash ${BASH_SOURCE[0]}"
 else
   SCRIPT_DIR=""
-  PORTE_CMD="curl --proto '=https' --tlsv1.2 -fsSL <install.sh> | bash -s --"
+  PORTE_CMD="curl -fsSL <install.sh> | bash -s --"
 fi
 
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
@@ -141,7 +141,7 @@ sortie_dite() { # sortie_dite <argv…> — ce que --dry-run rend à la place d'
 }
 fetch() { # fetch <url> <fichier>
   local proto='=https'; [[ -z "${LCARS_DOOR_INSECURE_HTTP:-}" ]] || proto='=http,https'
-  curl --proto "$proto" --tlsv1.2 -fsSL "$1" -o "$2"
+  curl --proto "$proto" -fsSL "$1" -o "$2"
 }
 sum_of() { local s n; while read -r s n; do [[ "$n" == "$1" ]] && { echo "$s"; return 0; }; done < <(sums); return 1; }
 assets_for() { # assets_for <arch> -> le kit de cette version pour cette arch, par convention de nom

@@ -7,7 +7,7 @@
 #         deploy/pack.sh --publish  … puis la release de la forge (tout le tiroir) et l'image au registre
 #         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit)
 # ENV   : LCARS_PACK_DIR      le tiroir des paquets (défaut : lcars-packs à côté du checkout)
-#         LCARS_PACK_TAG      le tag de la version (défaut : le tag git de HEAD, sinon <MM-DD_HH-MM>-<sha>)
+#         LCARS_PACK_TAG      le tag de la version (défaut : le tag git de HEAD, sinon <AAAA-MM-JJ>-<sha>)
 #         LCARS_PACK_IMAGE    le nom local de l'image (défaut lcars-fleet : tags <tag> et local)
 #         LCARS_PACK_REGISTRY le registre du --publish (défaut : l'hôte de la forge, ou ghcr.io chez GitHub)
 #         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge du --publish quand origin n'est pas http
@@ -37,7 +37,7 @@ die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 git diff --quiet HEAD -- 2>/dev/null || die "arbre modifié — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes différents dans un même paquet. À commiter (ou remiser) d'abord."
 
 SHA="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)"
-VERSION="$(date +%m-%d_%H-%M)"
+VERSION="$(date +%Y-%m-%d)"
 TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
@@ -183,6 +183,6 @@ if [[ "$IMAGE" -eq 1 ]]; then
   say "image publiée : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
-FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
+FP_TOKEN="$TOKEN" FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
   || die "publication interrompue — voir ci-dessus"
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

@@ -55,27 +55,30 @@ provisionnement en mode `--workstation`).
 
 ### Depuis une release
 
-Chaque release publie son propre `install.sh`, lié aux artefacts de cette version :
+La dernière version publiée s'installe en une commande, en conteneur :
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://<forge>/<owner>/lcars-fleet/releases/download/<version>/install.sh | bash -s -- --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --bench
 ```
+
+ou dans ce système :
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://<forge>/<owner>/lcars-fleet/releases/download/<version>/install.sh | bash -s -- --workstation --bench
+curl -fsSL https://github.com/zurp-embedded/LCARS-temp/releases/latest/download/install.sh | bash -s -- --workstation --bench
 ```
 
-Le kit est téléchargé dans `~/.lcars/kits/<version>/` et vérifié contre les sommes sha256
-inscrites dans l'installeur ; un écart supprime le fichier et interrompt l'installation. La
-signature minisign est vérifiée si `minisign` est installé ; sinon l'absence de vérification est
-signalée. `install.sh.sha256`, publié à côté, permet de vérifier l'installeur lui-même avant de le
-jouer. En mode conteneur, l'image de la version est tirée depuis le registre de la forge
-(`ghcr.io/<owner>/lcars-fleet:<version>` sur GitHub) quand elle n'est pas déjà sur le daemon.
+Chaque release publie son propre `install.sh`, lié aux artefacts de cette version : une version
+précise se prend par `releases/download/<version>/install.sh`, et `install.sh.sha256`, publié à
+côté, permet de vérifier l'installeur avant de le jouer. Le kit est téléchargé dans
+`~/.lcars/kits/<version>/` et vérifié contre les sommes sha256 inscrites dans l'installeur ; un
+écart supprime le fichier et interrompt l'installation. La signature minisign est vérifiée si
+`minisign` est installé ; sinon l'absence de vérification est signalée. En mode conteneur, l'image
+de la version est tirée depuis `ghcr.io` quand elle n'est pas déjà sur le daemon.
 
 ### Depuis les sources
 
 ```bash
-git clone --branch <version> https://<forge>/<owner>/lcars-fleet.git
+git clone --branch <version> https://github.com/zurp-embedded/LCARS-temp.git lcars-fleet
 cd lcars-fleet
 bash install.sh --workstation --bench     # ou : bash install.sh --bench
 ```

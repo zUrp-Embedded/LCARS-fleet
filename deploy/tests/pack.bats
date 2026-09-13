@@ -106,12 +106,12 @@ pack() { run bash "$R/deploy/pack.sh" "$@"; }
   [[ "$output" == *"pack: --no-image : pas d'image"*"pack: sans --publish : le tar et l'installeur restent dans $dist"* ]]
 }
 
-@test "sans tag, la version est <MM-DD_HH-MM>-<sha> et le kit se nomme d'elle" {
+@test "sans tag, la version est <AAAA-MM-JJ>-<sha> et le kit se nomme d'elle" {
   pack --no-image
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local tars; tars="$(find "$LCARS_PACK_DIR" -maxdepth 1 -name "lcars-fleet-*-$HEAD_SHA-otp27-$ARCH.tar.gz")"
   [ -n "$tars" ]
-  [[ "$(basename "$tars")" =~ ^lcars-fleet-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-$HEAD_SHA-otp27-$ARCH\.tar\.gz$ ]]
+  [[ "$(basename "$tars")" =~ ^lcars-fleet-[0-9]{4}-[0-9]{2}-[0-9]{2}-$HEAD_SHA-otp27-$ARCH\.tar\.gz$ ]]
   [ -d "$LCARS_PACK_DIR/dist/$(basename "$tars" | sed "s/^lcars-fleet-//; s/-otp27-$ARCH.tar.gz$//")" ]
 }
 

@@ -110,7 +110,7 @@ runner), `forge-runner.sh` (l'enrôlement d'un runner, joué par 49 et par le ba
 ## Publier une version
 
 `deploy/pack.sh --publish` se joue depuis le poste, après le gate local, sur un arbre commité :
-le tag est celui de git quand HEAD en porte un, sinon `<MM-JJ_HH-MM>-<sha>` (`LCARS_PACK_TAG` le
+le tag est celui de git quand HEAD en porte un, sinon `<AAAA-MM-JJ>-<sha>` (`LCARS_PACK_TAG` le
 pose) ; l'installeur généré nomme l'image de la version (`<registre>/<owner>/<repo>:<tag>`) et la
 tire avant `container up` quand elle manque au daemon ; la forge, le propriétaire et le dépôt se dérivent d'`origin` (`LCARS_PACK_FORGE`,
 `LCARS_PACK_OWNER`, `LCARS_PACK_REPO` sinon) ; le jeton vient de `LCARS_PACK_TOKEN` ou de

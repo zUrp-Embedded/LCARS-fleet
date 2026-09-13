@@ -44,7 +44,20 @@ SH
   export FAKE_TRACE="$TRACE" FAKE_STDIN="$STDIN" FAKE_ARGV="$ARGV" PATH="$BIN:$PATH" FP_TOKEN="jeton-secret-0123456789"
 }
 
+load ../refute
+
 _pub() { run bash -c ". '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0.1-abc '$DIST' deadbeefcafe"; }
+
+@test "le corps nomme l'image de la version quand FP_IMAGE la donne" {
+  cat > "$BIN/curl" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null; prev=""; for a in "$@"; do [[ "$prev" == --data-binary ]] && printf '%s\n' "$a" >> "${FAKE_TRACE}.json"; [[ "$prev" == -o ]] && out="$a"; prev="$a"; done
+case "$*" in *"-X POST"*"/releases"*) printf '{"id":42}' > "$out"; printf 201 ;; *"-X PATCH"*) printf 200 ;; *"/releases/tags/"*) printf 404 ;; *"/git/commits/"*) printf 200 ;; *) printf 200 ;; esac
+SH
+  run bash -c "export FP_IMAGE=ghcr.io/fleet/lcars:0.1-abc; . '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0.1-abc '$DIST' deadbeefcafe"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r '.body' < <(sed -n 1p "$TRACE.json"))" == *'Image : `ghcr.io/fleet/lcars:0.1-abc`'* ]]
+}
 
 @test "le jeton passe par la config -K - sur stdin, JAMAIS en argv — et chaque appel le porte" {
   _pub; [ "$status" -eq 0 ]
@@ -76,7 +89,13 @@ SH
   [ "$(jq -r '.draft' <<<"$j")" = "true" ]
   [ "$(jq -r '.tag_name' <<<"$j")" = "0.1-abc" ]
   [ "$(jq -r '.target_commitish' <<<"$j")" = "deadbeefcafe" ]
-  [[ "$(jq -r '.body' <<<"$j")" == *"Source : deadbeefcafe"*"bbbb  install.sh"*"aaaa  lcars-0.1-abc.tar.gz"* ]]  # le glob trie : install.sh avant lcars-
+  local corps; corps="$(jq -r '.body' <<<"$j")"
+  [[ "$corps" == *'Source : `deadbeefcafe`'*"bbbb  install.sh"*"aaaa  lcars-0.1-abc.tar.gz"* ]]  # le glob trie : install.sh avant lcars-
+  # les commandes à copier portent la vraie adresse de la release, les deux modes, jamais un gabarit
+  [[ "$corps" == *"curl -fsSL http://forge.test/fleet/lcars/releases/download/0.1-abc/install.sh | bash -s -- --bench"* ]]
+  [[ "$corps" == *"http://forge.test/fleet/lcars/releases/download/0.1-abc/install.sh | bash -s -- --workstation --bench"* ]]
+  refute_out '<base>' <<<"$corps"
+  refute_out 'Image :' <<<"$corps"
   [ "$(sed -n 2p "$TRACE.json")" = '{"draft":false}' ]
 }
 
