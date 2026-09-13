@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/racine_prefixe.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: mur — le prefixe d'install RO a UNE valeur, et onze sites la disent
 
 load refute

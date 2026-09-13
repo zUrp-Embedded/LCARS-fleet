@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/services_dir.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-25
 # STATUS: bats tests for runtime/services — un repertoire par ROLE, et il doit le rester
 
 # ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :

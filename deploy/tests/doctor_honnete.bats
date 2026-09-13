@@ -2,7 +2,7 @@
 # bats file_tags=unit
 # SOURCE: deploy/tests/doctor_honnete.bats
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-09-01
 # STATUS: bats tests — UN VERDICT QUI NE PEUT PAS ETRE VRAI EST PIRE QU'UN VERDICT ABSENT
 
 # shellcheck disable=SC2030,SC2031

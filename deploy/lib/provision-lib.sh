@@ -767,7 +767,7 @@ fleet_humans() {
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
 product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
-PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
+PROV_SOURCE_STAMP=.source-revision
 
 PROV_HELPERS_STAMP="${LCARS_HELPERS_STAMP:-.helpers-revision}"
 

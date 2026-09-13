@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/docker/enroll_catalogue.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-18
 # STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la derivation du roster ne demande pas de
 
 load ../refute

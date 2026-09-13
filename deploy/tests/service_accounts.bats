@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/service_accounts.bats
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-09-01
 # STATUS: bats tests for modules.d/21-service-accounts.sh — le GROUPE PRIMAIRE des comptes de service
 
 # ⚠ SC2030/SC2031 : chaque `@test` de bats est un sous-shell, et c'est l'isolation qu'on veut.

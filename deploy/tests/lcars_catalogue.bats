@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/lcars_catalogue.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-12
 # STATUS: bats tests for bin/lcars — l'etat d'un catalogue vient de la FORGE, et de nulle part ailleurs
 
 # shellcheck disable=SC2016

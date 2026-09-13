@@ -99,6 +99,26 @@ path_sans() { # path_sans <outil> → un dossier
   [[ "$output" == *"OK"* ]]
 }
 
+@test "l'installeur à la racine du dépôt est dans le plancher shellcheck de la porte" {
+  command -v shellcheck >/dev/null || skip "shellcheck absent"
+  temoin x.bats unit '@test "a" { true; }'
+  printf '#!/usr/bin/env bash\n# SOURCE: install.sh\nset -eu\ninutile=1\n' > "$BATS_TEST_TMPDIR/install.sh"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"install.sh"*"SC2034"* ]]
+}
+
+@test "l'installeur à la racine du dépôt doit porter son en-tête" {
+  command -v shellcheck >/dev/null || skip "shellcheck absent"
+  temoin x.bats unit '@test "a" { true; }'
+  printf '#!/usr/bin/env bash\nset -eu\necho ok\n' > "$BATS_TEST_TMPDIR/install.sh"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GO-7"*"install.sh"* ]]
+}
+
 @test "le compte de cas est réel, pas le nombre de fichiers" {
   temoin x.bats unit $'@test "a" { true; }\n@test "b" { true; }'
   temoin y.bats unit '@test "c" { true; }'

@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/heredocs_prose.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: mur — aucun accent grave dans le corps d'un heredoc NON quote
 #
 # ⚠ LE DEFAUT QUE CE MUR FERME S'EST PRODUIT DOUZE FOIS DANS CE DEPOT. Ce depot ecrit sa prose avec

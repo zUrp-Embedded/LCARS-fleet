@@ -1,6 +1,6 @@
 # SOURCE: deploy/system.manifest
 # STARDATE: 2026-09-13
-# STATUS: data, not code — ce que le provisionnement a le droit de poser sur une machine ; lu par 21 (GID), 25 (sa table), audit
+# STATUS: data, not code — ce que le provisionnement a le droit de poser sur une machine ; lu par provision (audit), la lib (GID des groupes, mode et propriétaire du canal), 25, 44, 46 et kit-verify
 #
 #   <classe>[:<trait>]  <objet>  <mode>  <propriétaire>  <substrat>
 #

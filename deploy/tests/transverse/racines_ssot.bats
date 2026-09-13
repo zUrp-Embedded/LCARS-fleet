@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/transverse/racines_ssot.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: bats tests — une racine se DEMANDE, elle ne se recopie pas
 
 # ⚠ SC2016 : ce temoin LIT DU CODE, ses motifs doivent atteindre `grep` tels quels.

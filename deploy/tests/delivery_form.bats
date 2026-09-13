@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/delivery_form.bats
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-09-01
 # STATUS: bats tests for prov_delivery + 15-toolchain + 16-node — LA FORME DE LA LIVRAISON
 
 # shellcheck disable=SC2030,SC2031
@@ -53,12 +53,10 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   [ "$output" = source ]
 }
 
-@test "DISCRIMINANT : le nom du tampon a UNE source, et elle se surcharge" {
-  # `PROV_SOURCE_STAMP` est la SSoT du nom de fichier. Un module qui ecrirait « .source-revision »
-  # en dur ne suivrait pas une machine qui l'a deplace.
+@test "DISCRIMINANT : le nom du tampon ne se surcharge pas — pack, kit-verify, deploy-release et l'installeur écrivent tous .source-revision" {
   printf 'x\n' > "$RACINE/.autre-tampon"
   LCARS_SOURCE_STAMP=.autre-tampon run lib 'prov_delivery'
-  [ "$output" = binary ]
+  [ "$output" = source ]
 }
 
 @test "NODE : livraison binaire — la doc est EXIGEE, node n'est pas posé" {

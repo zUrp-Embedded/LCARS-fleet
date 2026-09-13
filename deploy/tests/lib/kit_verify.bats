@@ -82,18 +82,46 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
 @test "KIT : un auxiliaire que 62-runtime-helpers EMBARQUE et qui manque est vu, et NOMME" {
   local premier
   premier="$(bash -c ". '$LIB'; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" | head -1)"
-  [ -n "$premier" ] || skip "HELPERS est vide"
+  [ -n "$premier" ]
   rm -f "$K/runtime/services/$premier"
   verifie
   [ "$status" -ne 0 ] || { echo "un auxiliaire declare et absent est accepte"; return 1; }
   [[ "$output" == *"$premier"* ]] || { echo "l'auxiliaire manquant n'est pas nomme : $output"; return 1; }
 }
 
-@test "KIT : une ancre de la table dont la source manque est vue" {
+@test "KIT : une donnée que 62-runtime-helpers embarque et qui manque est vue, et nommée" {
   rm -f "$K/runtime/services/lcars.bashrc"
   verifie
-  [ "$status" -ne 0 ] || { echo "une ancre sans source est acceptee"; return 1; }
-  [[ "$output" == *"lcars.bashrc"* ]] || { echo "l'ancre n'est pas nommee : $output"; return 1; }
+  [ "$status" -ne 0 ] || { echo "une donnée sans source est acceptee"; return 1; }
+  [[ "$output" == *"la donnée lcars.bashrc"* ]] || { echo "la donnée n'est pas nommée : $output"; return 1; }
+}
+
+@test "KIT : un binaire que 62 pose hors de ses listes et qui manque est vu" {
+  rm -f "$K/runtime/bin/lcars-authority-ask"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"lcars-authority-ask"* ]]
+}
+
+@test "KIT : une liste de 62 renommée ne se lit plus, et c'est un refus nommé, pas un kit accepté" {
+  sed -i 's/^HELPERS=(/AUXILIAIRES=(/' "$K/deploy/modules.d/62-runtime-helpers.sh"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"la liste HELPERS ne se lit pas"* ]]
+}
+
+@test "KIT : une liste de 62 qui cite une variable que personne ne pose est un refus nommé" {
+  sed -i 's/^DATA=(/DATA=(\n  "$VARIABLE_JAMAIS_POSEE"/' "$K/deploy/modules.d/62-runtime-helpers.sh"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"la liste DATA ne se lit pas"* ]]
+}
+
+@test "kv_tableau : une liste sur une ligne se lit seule, le code qui la suit n'est pas exécuté" {
+  printf 'HELPERS=(a b)\necho EFFET-DE-BORD\nDATA=(\n  "c d"\n)\n' > "$BATS_TEST_TMPDIR/mod.sh"
+  run bash -c ". '$LIB'; kv_tableau '$BATS_TEST_TMPDIR/mod.sh' HELPERS"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'a\nb')" ]
 }
 
 @test "KIT : un arbre de 44-media absent est vu — il ne se batit nulle part" {

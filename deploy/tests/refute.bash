@@ -1,6 +1,6 @@
 # SOURCE: deploy/tests/refute.bash
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-26
 # STATUS: helper bats — une assertion NEGATIVE qui echoue vraiment
 #
 # `! cmd` N'EST PAS UNE ASSERTION SOUS BATS : POSIX exempte d'`errexit` toute commande niee par `!`.

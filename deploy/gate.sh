@@ -87,7 +87,7 @@ fi
 # la liste vient d'un find, pas de git : la porte se joue aussi sur un kit détaré sans .git ; les
 # entrées sans extension se reconnaissent à leur shebang, et chaque .bats a le sien (vérifié ci-dessus)
 mapfile -t SHELL_FILES < <(
-  find "$HERE" -type f 2>/dev/null | sort | while IFS= read -r f; do
+  { find "$HERE" -type f 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort | while IFS= read -r f; do
     IFS= read -r first < "$f" || true
     case "$f" in
       *.bats|*.sh|*.bash) printf '%s\n' "$f"; continue ;;
@@ -140,7 +140,7 @@ while IFS= read -r f; do
     md) go7_md_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
     sh|py) go7_source_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
   esac
-done < <(find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | sort)
+done < <({ find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort)
 if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
   echo "ÉCHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
   printf '   %s\n' "${GO7_BAD[@]}" >&2

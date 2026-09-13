@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/docker/bench_swap_creds.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-18
 # STATUS: bats tests for bench-swap-image.sh — la sonde des credentials ne fait pas descendre le secret
 
 # shellcheck disable=SC2016

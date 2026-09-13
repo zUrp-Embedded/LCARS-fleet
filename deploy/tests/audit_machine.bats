@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/audit_machine.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: bats tests — `provision audit` : la TABLE opposee a la MACHINE
 
 # shellcheck disable=SC2016

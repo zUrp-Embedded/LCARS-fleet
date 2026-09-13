@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/racine_jetons.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: bats tests — les HUIT defauts de la racine des jetons s'accordent, dans trois langages
 
 # shellcheck disable=SC2016

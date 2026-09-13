@@ -2,7 +2,7 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/poseurs.bats
 # AUTHOR: bob
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-09-01
 # STATUS: bats tests — CE QUE LES POSEURS LAISSENT DERRIERE EUX
 
 # shellcheck disable=SC2030,SC2031

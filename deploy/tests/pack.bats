@@ -219,6 +219,19 @@ publier() { # publier [VAR=val…] — une publication complète vers une forge 
   grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
 }
 
+@test "le tiroir produit par pack, servi, est retrouvé par son propre installeur : kit nommé, téléchargé, sha256 vérifié" {
+  mkdir -p "$LCARS_PACK_DIR/dist"
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  python3 -m http.server --bind 127.0.0.1 "$port" --directory "$LCARS_PACK_DIR/dist" >/dev/null 2>&1 3>&- &
+  local srv=$!
+  LCARS_DOOR_BASE="http://127.0.0.1:$port/v9.9" LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ] || { kill "$srv"; echo "$output"; return 1; }
+  run env HOME="$BATS_TEST_TMPDIR/home" LCARS_DOOR_INSECURE_HTTP=1 PATH=/usr/bin:/bin \
+    bash -c "cat '$LCARS_PACK_DIR/dist/v9.9/install.sh' | bash -s -- --workstation"
+  kill "$srv" 2>/dev/null || true
+  [[ "$output" == *"lcars-fleet-v9.9-otp27-$ARCH.tar.gz : téléchargé, sha256 vérifié"* ]]
+}
+
 @test "une option inconnue est refusée en se nommant" {
   pack --no-push
   [ "$status" -eq 1 ]

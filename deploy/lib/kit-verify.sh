@@ -2,19 +2,21 @@
 # SOURCE: deploy/lib/kit-verify.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-08
-# STATUS: ce qu'un kit doit porter, contre les listes (system.manifest, release.manifest, 62), vérifié avant que le tar ne ferme
+# STATUS: ce qu'un kit doit porter, contre release.manifest et les listes de 62, vérifié avant que le tar ne ferme
 # USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
 
 [[ -n "${LCARS_KIT_VERIFY_LOADED:-}" ]] && return 0
 LCARS_KIT_VERIFY_LOADED=1
 
-kv_tableau() {
-  local f="$1" n="$2" blk
-  blk="$(sed -n "/^$n=(/,/^)/p" "$f")"
-  [[ -n "$blk" ]] || blk="$(grep -E "^$n=\(.*\)\$" "$f" || true)"
+kv_tableau() { # kv_tableau <fichier> <nom> → les éléments du tableau ; rc 1 si la liste ne se lit pas ou est vide
+  local f="$1" n="$2" blk out
+  blk="$(grep -E "^$n=\(.*\)\$" "$f" || true)"
+  [[ -n "$blk" ]] || blk="$(sed -n "/^$n=(/,/^)/p" "$f")"
   [[ -n "$blk" ]] || return 1
-  ( HELPERS_DIR=/opt/lcars; LCARS_BASHRC=/etc/lcars/lcars.bashrc; export HELPERS_DIR LCARS_BASHRC
-    eval "$blk"; eval 'printf "%s\n" "${'"$n"'[@]}"' )
+  out="$( set -u; HELPERS_DIR=/opt/lcars; LCARS_BASHRC=/etc/lcars/lcars.bashrc; export HELPERS_DIR LCARS_BASHRC
+          eval "$blk" && eval 'printf "%s\n" "${'"$n"'[@]}"' )" || return 1
+  [[ -n "$out" ]] || return 1
+  printf '%s\n' "$out"
 }
 
 kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si complet ; sinon 1, manques NOMMÉS
@@ -48,23 +50,27 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
   [[ -r "$stage/runtime/etc/fleet.env.template" ]] \
     || manques+=("runtime/etc/fleet.env.template absent — le provisionnement en dérive l'environnement")
 
-  if [[ -r "$mod62" ]]; then
+  local liste
+  if liste="$(kv_tableau "$mod62" HELPERS)"; then
     while read -r h; do
-      [[ -n "$h" ]] || continue
       [[ -r "$stage/runtime/services/$h" ]] \
         || manques+=("62-runtime-helpers nomme l'auxiliaire $h, absent du kit")
-    done < <(kv_tableau "$mod62" HELPERS || true)
+    done <<<"$liste"
+  else
+    manques+=("62-runtime-helpers : la liste HELPERS ne se lit pas — rien de ce qu'il embarque n'est vérifié")
+  fi
+  if liste="$(kv_tableau "$mod62" DATA)"; then
     while read -r d_src _; do
-      [[ -n "$d_src" ]] || continue
       [[ -r "$stage/runtime/services/$d_src" ]] \
         || manques+=("62-runtime-helpers nomme la donnée $d_src, absente du kit")
-    done < <(kv_tableau "$mod62" DATA || true)
+    done <<<"$liste"
+  else
+    manques+=("62-runtime-helpers : la liste DATA ne se lit pas — rien de ce qu'il embarque n'est vérifié")
   fi
 
   local src
-  for src in runtime/bin/lcars-toolchain-converge runtime/bin/lcars-authority-ask \
-             runtime/services/lcars.bashrc; do
-    [[ -r "$stage/$src" ]] || manques+=("la table déclare une ancre dont la source manque : $src")
+  for src in runtime/bin/lcars-toolchain-converge runtime/bin/lcars-authority-ask; do
+    [[ -r "$stage/$src" ]] || manques+=("62-runtime-helpers pose $src hors de ses listes, et le kit ne le porte pas")
   done
 
   local t

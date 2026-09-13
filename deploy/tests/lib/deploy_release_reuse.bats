@@ -2,7 +2,7 @@
 # bats file_tags=unit
 # SOURCE: deploy/tests/lib/deploy_release_reuse.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: bats tests for deploy/lib/deploy-release.sh — une release n'est reutilisee que si elle ATTESTE la source
 #
 
