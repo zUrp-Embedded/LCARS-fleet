@@ -140,7 +140,9 @@ ensure_secrets() {
   done
   export LCARS_CONTAINER_SECRETS="$CONF_SECRETS"
 }
-compose() { ensure_secrets; "${COMPOSE[@]}" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
+# lire l'instance ne prépare rien sur l'hôte : l'override des secrets et leurs fichiers ne servent qu'à la pose
+compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
+compose_pose() { ensure_secrets; "${COMPOSE[@]}" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
 load_conf
 
 # ─── Les gardes du projet ───────────────────────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ cmd_up() {
     _p="${_bind##*:}"; _h="${_bind%:*}"; [[ "$_h" == "0.0.0.0" || "$_h" == "$_bind" ]] && _h=127.0.0.1
     export LCARS_DECK_ORIGINS="http://$_h:$_p,http://localhost:$_p"
   fi
-  compose up -d --no-build "$@"
+  compose_pose up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up (projet $PROJECT, image $img). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet start"

@@ -112,10 +112,16 @@ EOS
   [[ "$output" == *"image depuis-fichier:1"* ]]
 }
 
-@test "compose : l'override des secrets est passe a CHAQUE compose, et les fichiers existent (vides = rien)" {
+@test "status et down ne préparent rien sur l'hôte ; up passe l'override des secrets, et ses fichiers existent (vides = rien)" {
+  run bash "$SRC" status
+  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
   run bash "$SRC" down
   [ "$status" -eq 0 ]
-  grep -q -- '-f .*docker-compose.secrets.yml -p lcars-fleet down' "$CALLS"
+  refute grep -q 'docker-compose.secrets.yml' "$CALLS"
+  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
+  LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  [ "$status" -eq 0 ]
+  grep -q -- '-f .*docker-compose.secrets.yml -p lcars-fleet up' "$CALLS"
   [ -e "$SECRETS/forge-master.token" ]
   [ ! -s "$SECRETS/forge-master.token" ]
   [ -e "$SECRETS/forge-seed.pass" ]

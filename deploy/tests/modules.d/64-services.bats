@@ -199,6 +199,20 @@ mod() { run bash "$MOD" "$1"; }
   grep -q -- "systemctl enable --now lcars-converger.service" "$CALLS"
 }
 
+@test "un services.env changé relance les unités debout, même sans unité réécrite ; inchangé, rien n'est relancé" {
+  mod apply
+  : > "$CALLS"
+  PROV_HUMANS_TEAM=equipage mod apply
+  [ "$status" -eq 0 ]
+  grep -q "LCARS_HUMANS_TEAM=equipage" "$LCARS_SERVICES_ENV"
+  grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
+  grep -q -- "systemctl try-restart lcars-converger.service" "$CALLS"
+  [[ "$output" == *"relancé sur l'unité ou l'environnement réécrit"* ]]
+  : > "$CALLS"
+  PROV_HUMANS_TEAM=equipage mod apply
+  refute grep -q "try-restart" "$CALLS"
+}
+
 @test "une unité réécrite sous un service debout est relancée ; une unité neuve ou identique ne l'est pas" {
   mod apply
   refute grep -q "try-restart" "$CALLS"
@@ -208,7 +222,7 @@ mod() { run bash "$MOD" "$1"; }
   [ "$status" -eq 0 ]
   grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
   [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
-  [[ "$output" == *"POSÉ  64-services: lcars-landing.service relancé sur l'unité réécrite"* ]]
+  [[ "$output" == *"POSÉ  64-services: lcars-landing.service relancé sur l'unité ou l'environnement réécrit"* ]]
   echo 1 > "$ACTIVE"
   printf '[Unit]\nDescription=ancienne\n' > "$LCARS_SYSTEMD_DIR/lcars-converger.service"
   : > "$CALLS"

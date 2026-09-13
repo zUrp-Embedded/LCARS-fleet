@@ -77,6 +77,7 @@ MODE=container
 FROM_RELEASE=0; DRY_RUN=0; DOCTOR_MODE=0; WITH_BENCH=0; REPO_DONNE=0
 FORCED_SUBSTRATE=""
 declare -a PASSTHRU=()       # au délégué du mode --workstation, tel quel
+declare -a MESURE=()         # au préflight initial : ce qui change la mesure
 declare -a PROJET_PORTS=()   # au préflight et au délégué : le projet et les ports
 
 while [[ $# -gt 0 ]]; do
@@ -92,7 +93,9 @@ while [[ $# -gt 0 ]]; do
     --port-forge|--port-deck|--port-ssh)
                       PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
     --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
-    --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+    # --env et --human pèsent sur la mesure (forge, déclaration, humain) : le préflight les reçoit aussi ; --only ne concerne que l'apply
+    --env|--human)    PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); MESURE+=("$1" "$2"); shift 2 ;;
+    --only)           PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     # les drapeaux retirés font rater, ils ne sont pas ignorés
     --source|--branch)
       echo "  $1 est retiré : un développeur clone lui-même ; une évaluation prend le kit (--from-release)." >&2; exit 1 ;;
@@ -273,7 +276,7 @@ trap '[[ -n "${FACTS_FILE:-}" ]] && rm -f "$FACTS_FILE"' EXIT
 : > "$FACTS_FILE"
 PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
   "$PROVISION" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
-  ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} 2>&1)" || true
+  ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || true
 
 SUBSTRATE="$(fait substrat)"; [[ -n "$SUBSTRATE" ]] || SUBSTRATE="${FORCED_SUBSTRATE:-linux}"
 case "$SUBSTRATE" in

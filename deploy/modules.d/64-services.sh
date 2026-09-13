@@ -303,9 +303,11 @@ apply() {
   }
   # le siège et l'environnement se posent avant la porte systemd : au premier apply d'un WSL vierge, systemd n'est pas encore l'init
   ensure_dir "$(dirname "$SERVICES_ENV")" 0755 "$SERVICES_OWNER" || verdict_apply
-  local env_body
+  local env_body env_avant env_change=0
   env_body="$(services_env_body)" \
     || { p_fail "environnement des services non calculable — l'écriture est abandonnée, pas tronquée"; verdict_apply; }
+  env_avant="$(cat "$SERVICES_ENV" 2>/dev/null || true)"
+  [[ "$env_avant" == "$env_body" ]] || env_change=1
   write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" <<<"$env_body" \
     || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
@@ -318,7 +320,11 @@ apply() {
   local reload=0 body
   local -a reecrites=()
   for u in "${UNITS[@]}"; do
-    unit_current "$u" && continue
+    # un daemon debout garde l'environnement de son démarrage : un services.env changé le relance aussi
+    if unit_current "$u"; then
+      [[ "$env_change" -eq 1 ]] && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null && reecrites+=("$u")
+      continue
+    fi
     body="$(unit_body "$u")" \
       || { p_fail "unité inconnue: $u — aucun fichier écrit"; verdict_apply; }
     if [[ -f "$(unit_path "$u")" ]] && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then reecrites+=("$u"); fi
@@ -336,7 +342,7 @@ apply() {
   done
   for u in "${reecrites[@]}"; do
     if "$SYSTEMCTL" try-restart "$u.service" >/dev/null 2>&1 && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
-      p_chg "$u.service relancé sur l'unité réécrite"
+      p_chg "$u.service relancé sur l'unité ou l'environnement réécrit"
     else
       p_warn "$u.service : relance sur l'unité réécrite sans service debout derrière — le verdict ci-dessous le mesure"
     fi

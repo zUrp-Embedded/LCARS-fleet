@@ -478,6 +478,16 @@ porte() { # porte <arbre> [args…] — sans TTY
 }
 
 
+@test "--env et --human atteignent le préflight initial, --only n'y va pas ; le délégué reçoit les trois" {
+  local a; a="$(_arbre)"
+  printf 'FORGE_BASE_URL=http://forge.env:3000\n' > "$BATS_TEST_TMPDIR/env"
+  run bash "$a/install.sh" --workstation --bench --env "$BATS_TEST_TMPDIR/env" --human zoe --only 60 --dry-run
+  [ "$status" -eq 0 ]
+  grep -qE "^PROVISION:doctor --only 00-preflight .*--env $BATS_TEST_TMPDIR/env --human zoe" "$BATS_TEST_TMPDIR/provision.calls"
+  refute grep -qE "^PROVISION:doctor .*--only 60" "$BATS_TEST_TMPDIR/provision.calls"
+  [[ "$output" == *"--env $BATS_TEST_TMPDIR/env --human zoe --only 60"* ]]
+}
+
 _dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un kit avec un préflight qui dicte ses faits
   local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
   rm -rf "$d" "$st"; mkdir -p "$d" "$st/lcars_install/deploy/docker/bench"

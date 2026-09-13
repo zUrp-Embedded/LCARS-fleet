@@ -392,7 +392,7 @@ prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un reperto
   [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
   return 0
 }
-prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — l'ancien final est renommé, le nouveau basculé, l'ancien effacé : à aucun moment le final manque
+prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — l'ancien est renommé, le nouveau basculé, l'ancien effacé : l'ancienne génération survit jusqu'à la bascule, mais le final manque entre les deux renommages
   local from="$1" to="$2" old
   [[ -d "$from" ]] || { p_fail "prov_promote_dir : échafaudage absent : $from"; return 1; }
   [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir : destination vide ou racine"; return 1; }
