@@ -67,6 +67,23 @@ landing_tient() { # landing_tient <processus nommé par port_process> → 0 si c
   [[ "$1" =~ \(pid\ ([0-9]+) && "${BASH_REMATCH[1]}" == "$pid" ]]
 }
 
+# Dans le conteneur, le deck de l'instance tourne sous le compte système et root n'a pas CAP_SYS_PTRACE :
+# /proc/<pid>/fd lui est fermé, ni ss ni rien ne nomme le processus. La table des sockets du noyau porte
+# l'uid de chaque écoute, lisible sans privilège, et le réseau d'un conteneur n'appartient qu'à lui : une
+# écoute du port du deck sous le compte système est le deck de cette instance.
+deck_de_l_instance() { # deck_de_l_instance <port> → 0 si, sous docker, une écoute de ce port appartient au compte système
+  local uid hex f
+  local -a tables=()
+  [[ "$PROV_SUBSTRATE" == docker ]] || return 1
+  uid="$(awk -F: -v n="$PROV_SYSTEM_USER" '$1 == n {print $3; exit}' "$(prov_decor /etc/passwd)" 2>/dev/null)" || return 1
+  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  for f in /proc/net/tcp /proc/net/tcp6; do [[ ! -r "$(prov_decor "$f")" ]] || tables+=("$(prov_decor "$f")"); done
+  [[ "${#tables[@]}" -gt 0 ]] || return 1
+  printf -v hex '%04X' "$1"
+  # colonnes : sl, adresse locale, distante, état (0A : LISTEN), files, minuterie, retransmissions, uid
+  awk -v p=":$hex" -v u="$uid" '$4 == "0A" && substr($2, length($2) - 4) == p && $8 == u { t = 1 } END { exit !t }' "${tables[@]}"
+}
+
 MIENS=("$PROV_FORGE_PROJECT" "$PROV_FORGE_BASE-fleet" "$PROV_RUNNER_PROJECT")
 DOCKER_REPOND=0
 
@@ -158,6 +175,9 @@ mesure_sans_privilege() {
     [[ "$PROV_DOCKER_DENIED" != "1" ]] || docker=refuse
     if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
       p_fail "$PROV_DOCKER_WHY — sans docker la forge de LCARS n'a aucune forme : 63-forge-tokens et 66-deck-oidc ne convergeront pas"
+    elif [[ "$PROV_SUBSTRATE" == "docker" ]]; then
+      # l'image ne porte pas de CLI docker : la forge, le runner et l'instance se pilotent depuis l'hôte
+      p_ok "docker ne sert pas dans ce conteneur ($PROV_DOCKER_WHY) — la norme : forge, runner et instance se pilotent depuis l'hôte"
     else
       p_warn "$PROV_DOCKER_WHY"
     fi
@@ -275,6 +295,10 @@ ETAT_VERIFIE=""
 verifier_port() { # verifier_port <nom> <port> → ETAT_VERIFIE ; un FAIL si un autre que ce projet tient le port
   local nom="$1" port="$2" tenant
   ETAT_VERIFIE="$(port_state "$port" "${MIENS[@]}")"
+  if [[ "$nom" == deck && "$ETAT_VERIFIE" == pris* ]] && deck_de_l_instance "$port"; then
+    ETAT_VERIFIE="nous deck de l'instance (compte $PROV_SYSTEM_USER)"
+    return 0
+  fi
   case "$ETAT_VERIFIE" in
     libre|nous*) return 0 ;;
     pris)

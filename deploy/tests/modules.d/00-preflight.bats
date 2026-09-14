@@ -558,6 +558,47 @@ landing_pid() { double systemctl "[[ \"\$*\" == 'show -p MainPID --value lcars-l
   refute_out 'distribution' <<<"$output"
 }
 
+table_tcp() { # table_tcp <port> <uid> — /proc/net/tcp du décor : une écoute de ce port sous cet uid, comme le noyau l'écrit
+  local hex; printf -v hex '%04X' "$1"
+  mkdir -p "$LCARS_DECOR_ROOT/proc/net"
+  printf '%s\n' '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode' \
+    "   1: 00000000:$hex 00000000:0000 0A 00000000:00000000 00:00000000 00000000   $2        0 3601481" \
+    "   2: 0100007F:8AD4 0100007F:$hex 06 00000000:00000000 03:000000FE 00000000     0        0 0" > "$LCARS_DECOR_ROOT/proc/net/tcp"
+}
+
+@test "dans le conteneur, le deck écouté sous le compte système est celui de l'instance : ni refus ni sonde en erreur ; un autre compte, ou un poste, reste un refus" {
+  # mesuré dans le conteneur : ni ss, ni /proc/<pid>/fd pour root sans CAP_SYS_PTRACE ; la table du noyau porte l'uid de l'écoute
+  local p; p="$(free_port)"
+  double ss 'exit 0'
+  printf 'lcars-system:x:995:2003::/home/lcars-system:/usr/sbin/nologin\n' >> "$LCARS_DECOR_ROOT/etc/passwd"
+  table_tcp "$p" 995
+  listen_on "$p"
+  preflight docker PROV_PHASE=entier PROV_DECK_PORT="$p"
+  [ "$status" -eq 0 ] || { kill "$LISTENER"; echo "$output"; return 1; }
+  [ "$(fact port_deck)" = "$p nous deck de l'instance (compte lcars-system)" ]
+  refute_out "port $p" <<<"$output"
+  # une écoute d'un autre compte du conteneur n'est pas le deck
+  table_tcp "$p" 1000
+  preflight docker PROV_PHASE=entier PROV_DECK_PORT="$p"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: port $p (deck) écouté sans processus visible, même pour root"* ]]
+  # sur un poste, la même écoute reste un port étranger
+  table_tcp "$p" 995
+  preflight linux PROV_PHASE=root PROV_DECK_PORT="$p" LCARS_ALLOW_ANY_HOST=1
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: port $p (deck) écouté sans processus visible, même pour root"* ]]
+}
+
+@test "dans le conteneur, l'absence de docker est la norme : un OK, aucun WARN ; sur un poste, elle se signale" {
+  preflight docker PROV_PHASE=entier
+  [[ "$output" == *"OK    00-preflight: docker ne sert pas dans ce conteneur"*"la norme"* ]]
+  refute_out 'WARN  00-preflight: .*docker' <<<"$output"
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  grep -qE "^WARN  00-preflight: .*docker" <<<"$output"
+  refute_out 'docker ne sert pas' <<<"$output"
+}
+
 @test "en root, chaque port de ce projet se vérifie sans rien reprendre d'avant sudo : le deck, la forge du poste ; ni la forge fournie ni le port SSH" {
   local p; p="$(free_port)"
   ss_nomme "$p" 4243
