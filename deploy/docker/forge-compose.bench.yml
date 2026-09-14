@@ -1,0 +1,20 @@
+# SOURCE: deploy/docker/forge-compose.bench.yml
+# AUTHOR: bob
+# STARDATE: 2026-09-14
+# STATUS: surcouche de banc de forge-compose.yml — la forge jetable et ses volumes portent le marqueur du banc, empilée par bench-up.sh
+#
+# Le marqueur vit ici et non dans forge-compose.yml : un label, même vide, entre dans l'empreinte de
+# configuration que compose compare, et la forge d'un poste reprise à la main serait recréée.
+
+services:
+  gitea:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent — la base du banc, posée par lib/bench.sh}"
+
+volumes:
+  data:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"
+  config:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"

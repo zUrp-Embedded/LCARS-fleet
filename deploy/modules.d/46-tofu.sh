@@ -48,11 +48,13 @@ recette_copie() { # recette_copie → pose WORK, la copie de la recette
   rm -rf "$WORK/.terraform" "$WORK/instance/.terraform"
 }
 
-# un init hors-ligne qui passe dans les deux modules de la copie prouve que le miroir couvre la recette
+# un init hors-ligne qui passe dans les deux modules de la copie prouve que le miroir couvre la recette ;
+# chaque init recopie les providers sous TMPDIR, souvent en mémoire : la copie d'un module part avant l'init du suivant
 init_hors_ligne() {
   local m
   for m in "$WORK/instance" "$WORK"; do
     TF_CLI_CONFIG_FILE="$(tofu_rc)" env -C "$m" "$TOFU_BIN" init -input=false -no-color >/dev/null 2>&1 || return 1
+    rm -rf "$m/.terraform"
   done
 }
 
@@ -71,7 +73,9 @@ check() {
   local WORK=""
   if [[ ! -s "$(tofu_rc)" || ! -x "$TOFU_BIN" ]]; then
     p_drift "miroir de providers absent ($TOFU_DIR) — tofu irait les chercher sur le réseau, ou échouerait"
-  elif recette_copie && init_hors_ligne; then
+  elif ! recette_copie; then
+    :   # recette_copie a dit l'échec : le miroir n'est pas mesurable sans recette
+  elif init_hors_ligne; then
     p_ok "miroir de providers hors-ligne posé ($TOFU_DIR/providers) — il couvre la recette (init hors-ligne OK)"
   else
     p_drift "miroir de providers incomplet ($TOFU_DIR/providers) — l'init hors-ligne de la recette échoue ; l'apply le refait"

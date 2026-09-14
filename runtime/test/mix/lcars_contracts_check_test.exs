@@ -317,36 +317,83 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       %{root: root}
     end
 
-    defp write_mirrors!(root, entrypoint_zones, module_zones) do
+    # 25-directories lists paths only; modes and owners live in deploy/system.manifest.
+    defp write_mirrors!(root, entrypoint_zones, module_zones, manifest_rows \\ nil) do
       File.write!(
         Path.join([root, "services", "container", "init.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
-      rows =
-        Enum.map_join(
-          module_zones,
-          " \\\n",
-          &~s|    "$(prov_decor #{&1}) 2775 root:$PROV_FLEET_GROUP"|
-        )
+      rows = Enum.map_join(module_zones, " \\\n", &~s|    "$(prov_decor #{&1})"|)
 
       File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
-      prov_dirs() {
+      prov_dirs_durables() {
         printf '%s\\n' \\
-          "$PROV_ROOT 0755 root:root" \\
-          "$(prov_decor /etc/lcars) 0755 root:root" \\
+          "$PROV_ROOT" \\
+          "$(prov_decor '/run/lcars/console/<human>')" \\
       #{rows}
       }
       """)
+
+      manifest_rows =
+        manifest_rows ||
+          Enum.map(
+            Enum.uniq(entrypoint_zones ++ module_zones),
+            &"dir       #{&1}                               2775  root:fleet          any"
+          )
+
+      File.write!(Path.join([root, "..", "deploy", "system.manifest"]), """
+      # <classe>[:<trait>]  <objet>  <mode>  <propriétaire>  <substrat>
+      dir       /opt/lcars                                   0755  root:root           any
+      #{Enum.join(manifest_rows, "\n")}
+      """)
     end
 
-    test "les deux miroirs complets → pass", %{root: root} do
+    test "les deux miroirs complets, déclarés 2775 root:fleet → pass", %{root: root} do
       zones = ["/home/projects", "/home/projects.ops"]
       write_mirrors!(root, zones, zones)
 
       result = Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "une racine de face déclarée avec un mode faux, ou sans ligne, dans le manifeste → fail",
+         %{
+           root: root
+         } do
+      zones = ["/home/projects", "/home/projects.ops"]
+
+      write_mirrors!(root, zones, zones, [
+        "dir       /home/projects      0755  root:fleet   any",
+        "dir       /home/projects.ops  2775  root:root    any"
+      ])
+
+      result = Catalogue.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+
+      assert result.evidence == [
+               "/home/projects: 0755 root:fleet dans deploy/system.manifest, attendu 2775 root:fleet",
+               "/home/projects.ops: 2775 root:root dans deploy/system.manifest, attendu 2775 root:fleet"
+             ]
+
+      write_mirrors!(root, zones, zones, ["dir       /home/projects  2775  root:fleet  any"])
+
+      assert Catalogue.check_face_roots_provisioned(root).evidence == [
+               "/home/projects.ops: aucune ligne dir dans deploy/system.manifest"
+             ]
+    end
+
+    test "manifeste sans ligne dir lisible → fail-closed", %{root: root} do
+      zones = ["/home/projects", "/home/projects.ops"]
+      write_mirrors!(root, zones, zones)
+      File.write!(Path.join([root, "..", "deploy", "system.manifest"]), "# vide\n")
+
+      result = Catalogue.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+      assert result.note =~ "deploy/system.manifest has no readable `dir` row"
     end
 
     test "face absente du MODULE provision → fail nommant wsl et linux", %{root: root} do

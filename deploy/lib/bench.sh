@@ -86,11 +86,19 @@ bench_etrangers() { # bench_etrangers <objets> → ceux qui ne portent pas la ba
   done <<<"$1"
 }
 
-bench_refus_etrangers() { # bench_refus_etrangers <étrangers> <remède> — l'arrêt en 1 qui les nomme
+bench_refus_etrangers() { # bench_refus_etrangers <étrangers> <remède> — l'arrêt en 1 qui les nomme, avec le geste qui retire chaque projet
+  local p
   {
     say "refus : ces objets portent un nom du banc « $PROJECT » sans son marqueur (label lcars.bench=$PROJECT) :"
     sed "s/^/[$BENCH_NOM]   /" <<<"$1"
     say "  $2"
+    say "  Ce qui retire un projet refusé, s'il ne sert plus (volumes compris) :"
+    for p in "$CONTAINER_PROJECT" "$FORGE_PROJECT" "$RUNNER_PROJECT"; do
+      [[ "$1" == *"(projet $p)"* ]] || continue
+      if [[ "$p" == "$CONTAINER_PROJECT" ]]; then say "    deploy/container -p $p reset"
+      else say "    docker compose -p $p down -v"
+      fi
+    done
   } >&2
   exit 1
 }

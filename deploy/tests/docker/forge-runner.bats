@@ -33,7 +33,7 @@ setup() {
   local vrai="$BATS_TEST_DIRNAME/../.."
   ARBRE="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$ARBRE/deploy/docker" "$ARBRE/deploy/lib"
-  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-network.yml" "$ARBRE/deploy/docker/"
+  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-compose.bench.yml" "$vrai/docker/runner-network.yml" "$ARBRE/deploy/docker/"
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$ARBRE/deploy/lib/"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS)=' "$vrai/installer-constants.env"
@@ -162,6 +162,19 @@ run_runner() {
   [ "$(jq -c '.networks.default | [.name, .external]' "$RENDU")" = '["bt-forge_default",true]' ]
   [ "$(jq -r '.services.act.environment.CONFIG_FILE // "absent"' "$RENDU")" = absent ]
   refute grep -q '^DOCKER:cp ' "$CALLS"
+}
+
+@test "--bench : la surcouche de banc marque le runner et ses volumes ; sans lui, aucun label, même sous un LCARS_BENCH_BASE de l'environnement" {
+  routes_nominales
+  run_runner --bench bt
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '[.services.act.labels["lcars.bench"]] + [.volumes[].labels["lcars.bench"]]' "$RENDU")" = '["bt","bt","bt"]' ] || { cat "$RENDU"; return 1; }
+  grep -q '^DOCKER:compose .* -f [^ ]*/runner-compose.bench.yml -p bt-runner down -v$' "$CALLS"
+  : > "$CALLS"
+  LCARS_BENCH_BASE=bt run_runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '[.services.act.labels, (.volumes[] | .labels)] | map(select(. != null))' "$RENDU")" = '[]' ] || { cat "$RENDU"; return 1; }
+  refute grep -q 'runner-compose.bench.yml' "$CALLS"
 }
 
 @test "sans --labels, compose rend les labels des constantes, et un LCARS_RUNNER_LABELS de l'environnement ne les remplace pas" {

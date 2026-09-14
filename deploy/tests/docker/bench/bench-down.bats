@@ -150,7 +150,8 @@ BANC="bt-fleet-lcars-1:c:bt bt-runner-act-1:c:bt bt-forge-gitea-1:c:bt"
   OBJETS="bt-forge-gitea-1:c: bt-forge_data:v: bt-runner-act-1:c:bt" run_down
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"conteneur bt-forge-gitea-1 (projet bt-forge)"*"volume bt-forge_data (projet bt-forge)"* ]]
+  [[ "$output" == *"conteneur bt-forge-gitea-1 (projet bt-forge)"*"volume bt-forge_data (projet bt-forge)"*"docker compose -p bt-forge down -v"* ]]
+  [[ "$output" != *"reset"* ]]
   refute grep -q -- "down -v" "$CALLS"
   refute grep -q -- "volume rm" "$CALLS"
 }

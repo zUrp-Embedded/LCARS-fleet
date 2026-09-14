@@ -25,7 +25,7 @@ setup() {
   cat > "$DECOR_BIN/docker" <<EOF
 #!/usr/bin/env bash
 echo "DOCKER:\$*" >> "$CALLS"
-env | grep '^LCARS_DEVFORGE_\|^PW=' | sort >> "$CALLS"
+env | grep '^LCARS_DEVFORGE_\|^LCARS_BENCH_BASE=\|^PW=' | sort >> "$CALLS"
 case "\$*" in
   *"user create"*)  [[ -z "\${STUB_CREATE_ERR:-}" ]] || echo "\$STUB_CREATE_ERR" >&2; exit "\${STUB_CREATE_RC:-0}" ;;
   *"generate-access-token"*) printf '%s\n' "\${STUB_TOKEN-tok-123}"; exit 0 ;;
@@ -56,6 +56,14 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   grep -qx 'LCARS_DEVFORGE_BIND=0.0.0.0' "$CALLS"
   grep -qx 'LCARS_DEVFORGE_PORT=20090' "$CALLS"
   grep -qx 'LCARS_DEVFORGE_ROOT_URL=http://localhost:20090/' "$CALLS"
+  grep -qx 'LCARS_BENCH_BASE=' "$CALLS"
+}
+
+@test "forge_mount d'un banc : la surcouche marquée s'empile sur le compose, avec la base du banc" {
+  lib 'forge_mount docker /x/forge-compose.yml bt-forge 20090 0.0.0.0 http://localhost:20090 bt'
+  [ "$status" -eq 0 ]
+  grep -qx 'DOCKER:compose -f /x/forge-compose.yml -f /x/forge-compose.bench.yml -p bt-forge up -d' "$CALLS"
+  grep -qx 'LCARS_BENCH_BASE=bt' "$CALLS"
 }
 
 @test "forge_wait : réessaie jusqu'à ce que /api/v1/version réponde" {

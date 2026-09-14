@@ -88,4 +88,4 @@ apply() {
   verdict_apply
 }
 
-"$1"
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

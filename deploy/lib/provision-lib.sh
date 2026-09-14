@@ -723,18 +723,16 @@ prov_product_env() { # prov_product_env → PROV_PRODUCT_ENV, un « NOM=valeur �
 }
 
 # prov_geste <geste> <check|apply> [NOM=valeur…] — joue runtime/services/forge.d/<geste>.sh sous le protocole du
-# produit et sort de son code. Le geste est sourcé sous un piège EXIT qui marque une sortie venue de verdict_* ou
-# de p_die ; toute autre sortie (set -e) laisse la garde du module rendre 3.
+# produit et sort de son code. Le geste source le protocole intermédiaire geste-protocol.sh, qui marque une sortie
+# venue de verdict_* ou de p_die ; toute autre sortie (set -e) laisse la garde du module rendre 3.
 prov_geste() {
   local geste="$1" verbe="$2" rc=0; shift 2
   prov_product_env
   PROV_GESTE_RENDU="$(mktemp "${TMPDIR:-/tmp}/prov-geste.XXXXXX")"
-  # shellcheck disable=SC2016 # le texte se développe dans le bash du geste
   env "${PROV_PRODUCT_ENV[@]}" "$@" \
-    LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
-    PROV_GESTE_RENDU="$PROV_GESTE_RENDU" \
-    bash -c 'trap '\''case " ${FUNCNAME[*]} " in *" verdict_"*|*" p_die "*) echo rendu > "$PROV_GESTE_RENDU" ;; esac'\'' EXIT; . "$0" "$@"' \
-      "$(product_tree)/services/forge.d/$geste.sh" "$verbe" || rc=$?
+    LCARS_MODULE_PROTOCOL="$_PROV_LIB_DIR/geste-protocol.sh" LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
+    PROV_GESTE_PROTOCOLE="$(product_tree)/services/lib/module-protocol.sh" PROV_GESTE_RENDU="$PROV_GESTE_RENDU" \
+    bash "$(product_tree)/services/forge.d/$geste.sh" "$verbe" || rc=$?
   [[ ! -s "$PROV_GESTE_RENDU" ]] || PROV_VERDICT_RENDERED=1
   rm -f "$PROV_GESTE_RENDU"
   exit "$rc"

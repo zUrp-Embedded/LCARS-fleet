@@ -14,10 +14,12 @@
 bench_admiral_password() { printf '%s\n' "$LCARS_BENCH_ADMIRAL_PW"; }
 bench_human_password()   { printf '%s\n' "$LCARS_BENCH_HUMAN_PW"; }
 
-forge_mount() { # forge_mount <docker> <compose> <projet> <port> <bind> <url publique>
-  local docker="$1" compose="$2" projet="$3" port="$4" bind="$5" root="$6"
-  LCARS_DEVFORGE_PORT="$port" LCARS_DEVFORGE_BIND="$bind" LCARS_DEVFORGE_ROOT_URL="${root%/}/" \
-    "$docker" compose -f "$compose" -p "$projet" up -d
+forge_mount() { # forge_mount <docker> <compose> <projet> <port> <bind> <url publique> [<base du banc>] — le banc empile sa surcouche marquée
+  local docker="$1" compose="$2" projet="$3" port="$4" bind="$5" root="$6" banc="${7:-}"
+  local -a fichiers=(-f "$compose")
+  [[ -z "$banc" ]] || fichiers+=(-f "${compose%.yml}.bench.yml")
+  LCARS_DEVFORGE_PORT="$port" LCARS_DEVFORGE_BIND="$bind" LCARS_DEVFORGE_ROOT_URL="${root%/}/" LCARS_BENCH_BASE="$banc" \
+    "$docker" compose "${fichiers[@]}" -p "$projet" up -d
 }
 
 forge_wait() { # forge_wait <url> [essais] → 0 quand /api/v1/version répond

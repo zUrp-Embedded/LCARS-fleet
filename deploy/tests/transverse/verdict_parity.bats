@@ -56,3 +56,17 @@ verdict_product()   { bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1; LCARS_FAILE
   grep -qE 'p_drift\(\).*LCARS_DRIFT=\$\(\(LCARS_DRIFT \+ 1\)\)' "$PRODUCT"
   grep -qE 'p_fail\(\).*LCARS_FAILED=\$\(\(LCARS_FAILED \+ 1\)\)' "$PRODUCT"
 }
+
+@test "un mode inconnu est refusé par chaque module qui porte son dispatch, en FATAL avant toute mesure : jamais une fonction de la lib jouée sous son nom" {
+  local m
+  for m in "$REPO"/deploy/modules.d/*.sh; do
+    # les appelants de prov_geste confient le verbe au lanceur de la lib
+    ! grep -q '^prov_geste ' "$m" || continue
+    m="$(basename "$m" .sh)"
+    run env LCARS_DECOR_ROOT="$BATS_TEST_TMPDIR/decor" PROVISION_LIB="$INSTALLER" PROVISION_MODULE="$m" PROVISION_RUN=1 \
+        PROV_SUBSTRATE=linux bash "$REPO/deploy/modules.d/$m.sh" p_ok
+    [ "$status" -eq 1 ] || { echo "$m : rc=$status — $output" >&2; return 1; }
+    [[ "$output" == *"mode inconnu"* ]] || { echo "$m : $output" >&2; return 1; }
+    [[ "$output" != *"OK    "* ]] || { echo "$m a mesuré avant de refuser : $output" >&2; return 1; }
+  done
+}

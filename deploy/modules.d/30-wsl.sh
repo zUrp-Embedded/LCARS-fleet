@@ -74,6 +74,9 @@ wsl_conf_cible() { # le contenu de wsl.conf avec l'état-cible posé sur le fich
 c_drive_open() { # → 0 ouvert · 1 fermé · 2 non sondé, as_human a dit pourquoi
   local c; c="$(prov_decor /mnt/c)"
   [[ -d "$c" ]] || return 1
+  local home; home="$(human_home)"
+  [[ -z "$home" || -d "$home" ]] \
+    || { p_warn "C: non sondé — le home de $PROV_HUMAN ($home) n'existe pas, et la sonde se joue sous son compte"; return 2; }
   as_human true || return 2
   local probe="$c/.lcars-lockdown-probe.$$"
   if as_human touch "$probe" 2>/dev/null; then
@@ -190,4 +193,4 @@ apply() {
   verdict_apply
 }
 
-"$1"
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

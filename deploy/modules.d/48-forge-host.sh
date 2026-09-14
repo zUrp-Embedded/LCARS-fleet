@@ -278,7 +278,11 @@ apply() {
     amorcer_forge
   fi
   # le mot de passe d'une forge fournie est à qui la tient : aucun conteneur ici ne le porte
-  [[ "$PROV_FORGE_DU_POSTE" -eq 0 ]] || reposer_mot_de_passe
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
+    reposer_mot_de_passe
+  elif [[ -n "${PROV_FORGE_ADMIN_RESET:-}" ]]; then
+    p_warn "PROV_FORGE_ADMIN_RESET ignoré : la forge est fournie ($PROV_FORGE_URL), son mot de passe d'administration est à qui la tient"
+  fi
 
   case "$(forge_admin_state "$PROV_FORGE_ADMIN")" in
     admin)

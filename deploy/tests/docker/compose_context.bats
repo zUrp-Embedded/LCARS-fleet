@@ -88,6 +88,9 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -c '[.volumes["lcars-home"].name, .volumes["lcars-var"].name]' <<<"$output")" = '["p_lcars-home","p_lcars-var"]' ]
+  # compose remplit toujours le nom du projet (mesuré : -p "", variable vide, fichier d'env) ; un compose qui ne le
+  # remplirait pas rendrait « _lcars-home », un /home vide : l'écriture du nom refuse le vide
+  [ "$(grep -cE '^    name: "\$\{COMPOSE_PROJECT_NAME:\?[^}]+\}_lcars-(home|var)"$' "$CF")" -eq 2 ]
   # la même instance, clés renommées dans une copie : le volume monté sur /home ne change pas de nom
   local copie="$BATS_TEST_TMPDIR/docker-compose.yml"
   sed -E 's/^(  |      - )lcars-home:/\1maisons:/; s/^(  |      - )lcars-var:/\1etat:/' "$CF" > "$copie"
@@ -113,17 +116,21 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   [ "$(jq -c '.networks.devforge | [.name, .external]' <<<"$j")" = '["bt-forge_default",true]' ]
 }
 
-@test "la forge et le runner portent la base du banc qui les monte, et un marqueur vide hors banc" {
+@test "la forge et le runner d'un poste ne portent aucun label ; leur surcouche de banc marque service et volumes, et exige la base" {
   local f svc j
-  for f in forge-compose.yml:gitea runner-compose.yml:act; do
+  for f in forge-compose:gitea runner-compose:act; do
     svc="${f#*:}"; f="${f%:*}"
-    run rendu LCARS_BENCH_BASE=bt docker compose --env-file "$CONST" -f "$DOCKER/$f" -p x config --format json
+    # un label, même vide, entre dans l'empreinte que compose compare : la forge d'un poste reprise à la main serait recréée
+    run rendu LCARS_BENCH_BASE=bt docker compose --env-file "$CONST" -f "$DOCKER/$f.yml" -p x config --format json
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(jq -c --arg s "$svc" '[.services[$s].labels, (.volumes[] | .labels)] | map(select(. != null))' <<<"$output")" = '[]' ]
+    run rendu docker compose --env-file "$CONST" -f "$DOCKER/$f.yml" -f "$DOCKER/$f.bench.yml" -p x config -q
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"LCARS_BENCH_BASE absent"* ]]
+    run rendu LCARS_BENCH_BASE=bt docker compose --env-file "$CONST" -f "$DOCKER/$f.yml" -f "$DOCKER/$f.bench.yml" -p x config --format json
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
     j="$output"
-    [ "$(jq -c --arg s "$svc" '[.services[$s].labels["lcars.bench"]] + [.volumes[].labels["lcars.bench"]] | unique' <<<"$j")" = '["bt"]' ]
-    run rendu docker compose --env-file "$CONST" -f "$DOCKER/$f" -p x config --format json
-    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    [ "$(jq -r --arg s "$svc" '.services[$s].labels["lcars.bench"]' <<<"$output")" = "" ]
+    [ "$(jq -c --arg s "$svc" '[.services[$s].labels["lcars.bench"]] + [.volumes[].labels["lcars.bench"]]' <<<"$j")" = '["bt","bt","bt"]' ]
   done
 }
 

@@ -7,8 +7,10 @@
 # USAGE : forge-runner.sh --forge-api <url-api avec /api/v1> --admin-token-file <chemin>
 #                         --network <réseau compose de la forge> --project <projet compose du runner>
 #                         [--instance-url <adresse de la forge vue du runner>] [--reg-token-file <chemin>] [--labels <liste>]
+#                         [--bench <base>]
 #   --instance-url   défaut : l'adresse interne de la forge, PROV_FORGE_INTERNAL_URL
 #   --labels         défaut : PROV_RUNNER_LABELS ; chaque image docker:// nommée est vérifiée, puis semée
+#   --bench          le runner d'un banc : lui et ses volumes portent le marqueur lcars.bench=<base> (runner-compose.bench.yml)
 # EXIT  : 0 runner enregistré · 1 arguments, ou label dont l'image est introuvable · 2 la forge ne rend pas
 #         de jeton d'enregistrement · 3 le runner ne se monte pas, son daemon embarqué ne répond pas, une
 #         image n'y est pas semée, ou la forge ne le liste pas
@@ -24,7 +26,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # réseau et projet n'ont pas de défaut : un défaut qui viserait un autre déploiement enrôlerait le
 # runner à côté de sa forge, et la CI resterait muette sans une ligne pour le dire
 FORGE_API="" ; TOKEN_FILE="" ; REG_FILE="" ; INSTANCE_URL="$PROV_FORGE_INTERNAL_URL" ; NETWORK=""
-PROJECT="" ; LABELS="$PROV_RUNNER_LABELS" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
+PROJECT="" ; LABELS="$PROV_RUNNER_LABELS" ; DOCKER_BIN="${DOCKER_BIN:-docker}" ; BENCH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --network)      NETWORK="${2:?}"; shift 2 ;;
     --project)      PROJECT="${2:?}"; shift 2 ;;
     --labels)       LABELS="${2:?}"; shift 2 ;;
+    --bench)        BENCH="${2:?}"; shift 2 ;;
     *) echo "forge-runner : option inconnue : $1" >&2; exit 1 ;;
   esac
 done
@@ -86,9 +89,15 @@ fi
 }
 say "jeton d'enregistrement prêt (${#REG} caractères)"
 
-compose_runner() { "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$HERE/runner-compose.yml" -f "$HERE/runner-network.yml" -p "$PROJECT" "$@"; }
+COMPOSE_FICHIERS=(-f "$HERE/runner-compose.yml" -f "$HERE/runner-network.yml")
+[[ -z "$BENCH" ]] || COMPOSE_FICHIERS+=(-f "$HERE/runner-compose.bench.yml")
+compose_runner() { LCARS_BENCH_BASE="$BENCH" "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" "${COMPOSE_FICHIERS[@]}" -p "$PROJECT" "$@"; }
 
 LCARS_RUNNER_NETWORK="$NETWORK" compose_runner down -v >/dev/null 2>&1 || true
+# le jeton d'enregistrement passe par l'environnement de compose, par exception à la règle de la lib :
+# l'image le lit dans son environnement au premier démarrage, compose le recopie dans le Config.Env
+# du conteneur, lisible de qui parle au daemon — qui tient déjà la forge et le runner ; un fichier
+# monté à la place devrait survivre à la pose pour chaque redémarrage du conteneur
 LCARS_RUNNER_NETWORK="$NETWORK" LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_LABELS="$LABELS" \
   compose_runner up -d \
   || { say "ÉCHEC : le runner ne se monte pas (sortie de compose au-dessus)"; exit 3; }

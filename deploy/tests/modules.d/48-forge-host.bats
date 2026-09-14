@@ -300,12 +300,13 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
 }
 
 
-@test "PROV_FORGE_ADMIN_RESET sur une forge fournie : aucun conteneur visé, rien n'échoue — le mot de passe est à qui la tient" {
+@test "PROV_FORGE_ADMIN_RESET sur une forge fournie : aucun conteneur visé, rien n'échoue, et l'ignoré est dit — le mot de passe est à qui la tient" {
   rm -f "$DECOR_BIN/docker"
   printf 'tok-donne\n' > "$TOKENS/forge-master.token"
   FORGE_BASE_URL="$FORGE_DOUBLE_URL" PROV_FORGE_ADMIN_RESET=1 mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   refute_out '^FAIL|repose du mot de passe' <<<"$output"
+  [[ "$output" == *"WARN  48-forge-host: PROV_FORGE_ADMIN_RESET ignoré : la forge est fournie ($FORGE_DOUBLE_URL)"* ]]
 }
 
 @test "le conteneur de la forge se lit par son projet, pas par un nom de service recopié" {

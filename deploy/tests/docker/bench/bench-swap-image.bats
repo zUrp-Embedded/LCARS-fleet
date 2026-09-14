@@ -117,7 +117,8 @@ run_swap() { run bash "$SUT" --image lcars-fleet:neuve --advertise 10.0.0.9 "$@"
 @test "la forge d'un poste homonyme (sans marqueur) : refus en 1, le conteneur du poste n'est pas détruit" {
   OBJETS="lcars-forge-gitea-1:c: lcars-forge_data:v: lcars-fleet-lcars-1:c:" run_swap --forge-project lcars
   [ "$status" -eq 1 ]
-  [[ "$output" == *"sans son marqueur"*"conteneur lcars-forge-gitea-1 (projet lcars-forge)"* ]]
+  [[ "$output" == *"sans son marqueur"*"conteneur lcars-forge-gitea-1 (projet lcars-forge)"*"deploy/container -p lcars-fleet reset"*"docker compose -p lcars-forge down -v"* ]]
+  [[ "$output" != *"container -p lcars-forge"* ]]
   refute grep -q '^DOCKER:rm' "$CALLS"
   refute grep -q '^DOCKER:compose' "$CALLS"
 }

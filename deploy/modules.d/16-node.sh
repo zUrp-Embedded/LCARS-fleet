@@ -78,8 +78,8 @@ apply() {
   for b in "${NODE_BINS[@]}"; do
     ensure_symlink "$PROV_LINK_DIR/$b" "$NODE_HOME/bin/$b" || verdict_apply
   done
-  p_chg "node $NODE_VERSION posé ($NODE_HOME)"
+  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "node $NODE_VERSION posé ($NODE_HOME)"
   verdict_apply
 }
 
-"$1"
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

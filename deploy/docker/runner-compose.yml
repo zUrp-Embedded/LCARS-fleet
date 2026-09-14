@@ -37,14 +37,7 @@ services:
     tmpfs:
       - /var/lib/docker
     restart: unless-stopped
-    # la base du banc qui l'a enrôlé, vide pour le runner d'un poste
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"
 
 volumes:
   data:
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"
   dind:
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"

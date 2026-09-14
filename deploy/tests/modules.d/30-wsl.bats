@@ -108,6 +108,16 @@ desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "
   refute_out 'C: fermé' <<<"$output"
 }
 
+@test "C: sondé pour un humain sans home : non sondé, et dit — jamais muet, jamais « C: fermé »" {
+  mkdir -p "$C_DRIVE"
+  rm -rf "$HOME_DIR"
+  mod check
+  [[ "$output" == *"WARN  30-wsl: C: non sondé — le home de root ($HOME_DIR) n'existe pas"* ]] || { echo "$output"; return 1; }
+  refute_out 'C: fermé|C: OUVERT' <<<"$output"
+  mod apply
+  [[ "$output" == *"WARN  30-wsl: C: non sondé"* ]]
+}
+
 @test "apply : sans wsl.conf, le fichier naît sous le décor avec son en-tête et les six clés, en 0644 root" {
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

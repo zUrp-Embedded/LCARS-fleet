@@ -45,7 +45,7 @@ ancetre_existant() { # ancetre_existant <chemin> → le chemin s'il existe, sino
   printf '%s\n' "$p"
 }
 
-# sous apply, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à l'installeur ne se calcule pas
+# hors de l'installeur, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à lui ne se calcule pas
 faits_attendus() { [[ -n "${PROV_FACTS_FILE:-}" ]]; }
 
 check() {
@@ -79,15 +79,12 @@ check() {
   if echange="$(mktemp -d "$sous/.prov-echange.XXXXXX" 2>/dev/null)"; then
     mkdir "$echange/a" "$echange/b"
     if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
-      p_fact mv_exchange oui
       p_ok "« mv --exchange » joué sous $sous : les bascules de dossiers ont une forme atomique"
     else
-      p_fact mv_exchange non
       p_fail "« mv --exchange » refusé sous $sous (coreutils 9.5, sur un système de fichiers qui sait échanger) — les bascules de dossiers n'ont pas de forme atomique"
     fi
     rm -rf -- "$echange"
   else
-    p_fact mv_exchange non-mesure
     p_warn "« mv --exchange » non sondé : $sous n'est pas inscriptible par $(id -un) — la sonde se joue sous root"
   fi
 
@@ -139,10 +136,11 @@ check() {
     p_fact consent sans-objet
   fi
 
-  # sysctl vient de procps, que 10-packages pose après ce module : la clé se lit dans /proc
-  local knob
-  knob="$(cat "$(prov_decor /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" 2>/dev/null || echo absent)"
-  p_fact userns_knob "$knob"
+  local noyau_wsl=""
+  [[ "$PROV_SUBSTRATE" != wsl ]] || noyau_wsl="$(cat "$(prov_decor /proc/version)" 2>/dev/null || true)"
+  if [[ -n "$noyau_wsl" && ! "${noyau_wsl,,}" =~ wsl2|microsoft-standard ]]; then
+    p_drift "WSL1 ($(uname -r)) — bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"
+  fi
 
   # ─── Docker, sur tout substrat ────────────────────────────────────────────────────────────────
   # Le fait est mesuré partout ; le refus ne vaut que sous WSL, où la forge n'a pas d'autre forme.
@@ -268,5 +266,4 @@ check() {
 }
 
 # le préflight ne pose rien : les deux verbes sondent, chacun rend le verdict de son contrat
-check
-"verdict_$1"
+case "${1:-}" in check|apply) check; "verdict_$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

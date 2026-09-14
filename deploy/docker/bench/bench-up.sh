@@ -106,7 +106,7 @@ fi
 
 # ─── La forge ───────────────────────────────────────────────────────────────────────────────────
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
-quiet forge_mount "$DOCKER_BIN" "$DOCKER_DIR/forge-compose.yml" "$FORGE_PROJECT" "$FORGE_PORT" "$BIND" "$FORGE_URL" \
+quiet forge_mount "$DOCKER_BIN" "$DOCKER_DIR/forge-compose.yml" "$FORGE_PROJECT" "$FORGE_PORT" "$BIND" "$FORGE_URL" "$PROJECT" \
   || die "la forge ne monte pas" 2
 forge_wait "$FORGE_LOCAL_URL" || die "la forge ne répond pas sur $FORGE_LOCAL_URL" 2
 say "forge up"
@@ -257,7 +257,7 @@ else
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
        --instance-url "http://${JOB_HOST}:${FORGE_PORT}" --network "$FORGE_NET" \
-       --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
+       --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then
     RUNNER_SERT=1
     RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"
     rm -f "$RUNNER_LOG"

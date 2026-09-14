@@ -101,6 +101,22 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   [[ "$output" == *"il couvre la recette (init hors-ligne OK)"* ]]
 }
 
+@test "check : les providers d'un module partent avant l'init du suivant ; une recette absente se dit une fois" {
+  tofu_double
+  # l'init doublé pose sa copie de providers et note s'il en trouve déjà une dans la copie de la recette
+  sed -i 's|^  init) |  init) [[ -z "$(find "${PWD%/instance}" -name .terraform -print -quit)" ]] \|\| echo "COPIE-DEJA-LA $PWD" >> "$CALLS"; mkdir -p .terraform; |' "$TOFU_BIN"
+  mkdir -p "$TOFU_DIR/providers"; printf 'x\n' > "$TOFU_DIR/tofurc"; touch "$STUB_STATE/mirrored"
+  chmod 0755 "$TOFU_DIR" "$TOFU_DIR/providers"
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c ' init ' "$CALLS")" -eq 2 ]
+  refute grep -q 'COPIE-DEJA-LA' "$CALLS"
+  LCARS_FORGE_RECIPE="$BATS_TEST_TMPDIR/nulle-part" mod check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  46-tofu: recette absente : $BATS_TEST_TMPDIR/nulle-part"* ]]
+  [[ "$output" != *"miroir de providers incomplet"* ]]
+}
+
 @test "check : un tofu posé qui ne rend aucune version est un drift dit, pas une mort avant verdict" {
   mkdir -p "$(dirname "$TOFU_BIN")"
   printf '#!/usr/bin/env bash\nexit 139\n' > "$TOFU_BIN"; chmod 0755 "$TOFU_BIN"

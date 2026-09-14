@@ -58,6 +58,11 @@ setup() {
 echo "systemctl \$*" >> "$CALLS"
 u="\${@: -1}"; u="\${u%.service}"
 [[ "\$1" == "is-active" ]] && { [[ -e "$ENABLED/\$u" ]] || exit 3; exit "\$(cat "$ACTIVE")"; }
+# STARTED_EPOCH : le démarrage rendu comme systemd l'écrit, dans le fuseau de l'appelant (Asia/Shanghai, « CST », hors TZ=UTC)
+[[ "\$1" == "show" && "\$*" == *ActiveEnterTimestamp* && -s "$STARTED.epoch" ]] && {
+  if [[ "\${TZ:-}" == UTC ]]; then date -u -d "@\$(cat "$STARTED.epoch")" '+%a %Y-%m-%d %H:%M:%S UTC'
+  else TZ=Asia/Shanghai date -d "@\$(cat "$STARTED.epoch")" '+%a %Y-%m-%d %H:%M:%S CST'; fi
+  exit 0; }
 [[ "\$1" == "show" && "\$*" == *ActiveEnterTimestamp* ]] && { cat "$STARTED" 2>/dev/null || echo; exit 0; }
 [[ "\$1" == "show" && -f "$SPIN" ]] && { f="$RESTARTS/\$u"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
 [[ "\$1" == "show" ]] && { cat "$RESTARTS/\$u" 2>/dev/null || echo 0; exit 0; }
@@ -339,7 +344,7 @@ EOF
   refute grep -q "try-restart" "$CALLS"
 }
 
-@test "un auxiliaire reposé par 62 après le démarrage des daemons les relance ; posé avant, rien n'est relancé" {
+@test "un auxiliaire reposé par 62 après le démarrage d'un daemon qui le charge le relance ; posé avant, rien n'est relancé" {
   mkdir -p "$HELPERS"; printf '#!/bin/sh\n' > "$HELPERS/console-landing.sh"
   mod apply
   echo "Mon 2100-01-04 10:00:00 UTC" > "$STARTED"
@@ -350,7 +355,36 @@ EOF
   mod apply
   [ "$status" -eq 0 ]
   grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
-  grep -q -- "systemctl try-restart lcars-catalogue.service" "$CALLS"
+  [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
+}
+
+@test "chaque daemon est relancé sur ce qu'il charge : le protocole sourcé relance le convergeur seul, un README rien" {
+  mkdir -p "$HELPERS/services/lib"
+  printf '# notes\n' > "$HELPERS/services/README.md"
+  printf '# protocole\n' > "$HELPERS/services/lib/human-protocol.sh"
+  find "$HELPERS/services" -exec touch -d '@1' {} +
+  mod apply
+  printf '%s\n' "$(( $(date +%s) - 3600 ))" > "$STARTED.epoch"
+  : > "$CALLS"
+  touch "$HELPERS/services/README.md"
+  mod apply
+  refute grep -q "try-restart" "$CALLS"
+  printf '# protocole reposé\n' > "$HELPERS/services/lib/human-protocol.sh"
+  mod apply
+  [ "$status" -eq 0 ]
+  grep -q -- "systemctl try-restart lcars-converger.service" "$CALLS"
+  [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
+}
+
+@test "le démarrage d'un daemon se lit en UTC : sous un fuseau ambigu (CST de Shanghai), une pose d'une heure après le démarrage relance" {
+  mkdir -p "$HELPERS"
+  mod apply
+  printf '%s\n' "$(( $(date +%s) - 3600 ))" > "$STARTED.epoch"
+  printf '#!/bin/sh\n' > "$HELPERS/console-landing.sh"
+  : > "$CALLS"
+  TZ=Asia/Shanghai mod apply
+  [ "$status" -eq 0 ]
+  grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
 }
 
 @test "une relance qui ne laisse pas le service debout est dite, pas annoncée comme faite" {

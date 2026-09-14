@@ -181,6 +181,17 @@ seed_project() {
   refute grep -q 'volume rm' "$CALLS"
 }
 
+@test "reset : un volume que compose down -v laisse (monté ailleurs) est relu et nommé, jamais « reset fait »" {
+  seed_project "$CF"
+  # compose rend 0 et laisse le volume : la relecture après le down le voit encore
+  export STUB_VOLUMES="lcars-a-moi_lcars-home"
+  run script -qec "bash '$SRC' -p lcars-a-moi reset" /dev/null <<<yes
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"encore là après compose down -v : lcars-a-moi_lcars-home"*"docker volume rm"* ]]
+  [[ "$output" != *"reset fait"* ]]
+  [ "$(grep -c '^volume ls' "$CALLS")" -eq 2 ]
+}
+
 @test "LCARS_PROJECT is read, and -p overrides it" {
   seed_project "$CF"
 
@@ -304,4 +315,17 @@ arbre_container() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"image « ghcr.io/"*" » absente"*"deploy/container pull"*"deploy/container build"* ]]
   refute grep -qE "compose .* up|build" "$CALLS"
+}
+
+@test "up et pull sans image lisible (compose ne rend pas celle du compose) : refus qui nomme LCARS_IMAGE, jamais une image vide" {
+  seed_project "$CF"
+  printf '#!/usr/bin/env bash\necho "$*" >> %q\n[[ "$*" == *" config --images" ]] && exit 1\n[[ "$1 $2" == "image inspect" ]] && exit 1\nexit 0\n' "$CALLS" > "$BINDIR/docker"
+  local verbe
+  for verbe in up pull; do
+    run bash "$SRC" "$verbe"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$verbe: aucune image nommée"*"LCARS_IMAGE=<registre/image:tag> deploy/container $verbe"* ]]
+    [[ "$output" != *"« »"* ]]
+  done
+  refute grep -qE "compose .* up|^pull" "$CALLS"
 }

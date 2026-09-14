@@ -45,7 +45,7 @@ MAGASIN="$(grep -xF -f <(store_volume_names) <<<"$VOLUMES" || true)"
   || die "aucun conteneur ni volume du banc « $PROJECT » ($CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT, magasin) — rien à détruire" 2
 ETRANGERS="$(bench_etrangers "$OBJETS")"
 [[ -z "$ETRANGERS" ]] \
-  || bench_refus_etrangers "$ETRANGERS" "Rien n'est détruit. Une instance posée par install.sh ou deploy/container se retire par : deploy/container -p $CONTAINER_PROJECT reset"
+  || bench_refus_etrangers "$ETRANGERS" "Rien n'est détruit."
 if [[ -z "$OBJETS" ]]; then
   {
     say "refus : le magasin de « $CONTAINER_PROJECT » est là sans aucun objet du banc « $PROJECT » — ce n'est pas un banc."

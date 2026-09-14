@@ -6,8 +6,8 @@
 #
 # USAGE : deploy/container [-p <projet>] [--forge-project <nom>] [--port-deck N] [--port-ssh N] [--bench [--port-forge N]] <commande>
 #   up               démarre l'instance (détachée) depuis l'image LCARS_IMAGE, attend le verdict de son
-#                    démarrage et le rend comme status ; avec --bench, monte d'abord une forge jetable
-#                    et son runner CI (deploy/docker/bench/bench-up.sh)
+#                    démarrage et montre status ; avec --bench, monte d'abord une forge jetable et son
+#                    runner CI (deploy/docker/bench/bench-up.sh), dont il rend les codes
 #   pull             tire l'image LCARS_IMAGE depuis son registre — « up » ne tire jamais
 #   build            bâtit l'image sur ce poste (deploy/pack.sh : gate, kit, image)
 #   status           l'état de l'instance vu de l'hôte
@@ -21,7 +21,7 @@
 #   forge-check      vérifie depuis cet hôte la forge fournie que la conf du projet nomme : adresses,
 #                    réponse, jeton master site-admin, seed ; un geste par manque, sans docker
 #   forge-apply      pose la structure sur la forge fournie (OpenTofu tourne dans le conteneur)
-#   runner-token     un jeton d'enregistrement pour un runner CI (usage unique)
+#   runner-token     le jeton d'enregistrement d'un runner CI
 #   source-push [DIR] copie un clone LCARS dans le conteneur (/home/projects/LCARS)
 #   help             cette aide
 #
@@ -53,7 +53,9 @@
 #                              « forge-apply » ; transmis par stdin, jamais par argv
 #   FORGE_SEED_PASSWORD        mot de passe posé sur les comptes à leur création — « config » seul
 #
-# EXIT : 0 succès · 1 erreur ou commande inconnue · up et status : 0 sain · 1 dégradé · 2 panne
+# EXIT : 0 succès · 1 erreur ou commande inconnue · status : 0 sain · 1 dégradé · 2 panne
+#        · up : 0 démarrée · 1 en attente de configuration, ou aucun verdict dans l'attente · 2 conteneur arrêté, init ou geste de forge
+#        en échec ; humains, deck et santé ne comptent que pour status · up --bench : les codes de bench-up.sh
 #        · forge-check : 0 la forge tient le contrat · 1 un manque au moins
 
 set -euo pipefail
@@ -70,7 +72,7 @@ declare -a PORTS=()   # ce que --bench transmet au banc
 # shellcheck source=lib/store.sh
 . "$SCRIPT_DIR/deploy/lib/store.sh"
 
-usage() { sed -n '/^# USAGE :/,/^# EXIT :/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE :/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -194,11 +196,18 @@ cmd_forge_check() {
   elif [[ -z "$url" ]]; then
     ok "jeton master posé — non vérifié, la forge ne répond pas"
   else
+    local hote="${url#http://}"; hote="${hote%%/*}"; hote="${hote%:*}"
+    if [[ "$url" == http://* && "$hote" != localhost && "$hote" != 127.* && "$hote" != "[::1]" ]]; then
+      printf '  note     le jeton master part en clair vers %s — une adresse https le protège\n' "$url"
+    fi
     rc=0; code="$(forge_api GET "$url/api/v1/admin/users?limit=1" /dev/null --token-file "$CONF_MASTER_TOKEN" -m 10)" || rc=$?
     case "$rc:$code" in
       0:*)       ok "jeton master accepté, site-admin" ;;
+      3:*)       manque "l'appel admin est redirigé (HTTP $code) — la forge ne se sert pas à l'adresse $url" \
+                   "l'adresse que la forge sert (https, ou son chemin) : FORGE_PUBLIC_URL=<adresse> $conf" ;;
       4:401)     manque "la forge refuse le jeton master (HTTP 401)" "un jeton valide : FORGE_ADMIN_TOKEN=<jeton> $conf" ;;
-      4:403)     manque "le jeton master n'est pas site-admin (HTTP 403)" "le jeton d'un compte site-admin, scope « all » : FORGE_ADMIN_TOKEN=<jeton> $conf" ;;
+      4:403)     manque "le jeton master n'a pas la portée admin, ou son compte n'est pas site-admin (HTTP 403)" \
+                   "le jeton d'un compte site-admin, scope « all » : FORGE_ADMIN_TOKEN=<jeton> $conf" ;;
       *)         manque "le jeton master n'est pas vérifiable (HTTP $code)" "relancer forge-check quand la forge répond à /api/v1/admin/users" ;;
     esac
   fi
@@ -216,7 +225,7 @@ cmd_forge_check() {
   return 1
 }
 
-if [[ "$1" == forge-check ]]; then cmd_forge_check; exit 0; fi
+if [[ "$1" == forge-check ]]; then cmd_forge_check; exit $?; fi
 
 # ─── Le daemon et compose ───────────────────────────────────────────────────────────────────────
 docker_endpoint || fail "$PROV_DOCKER_WHY" \
@@ -235,8 +244,8 @@ compose_pose() { ensure_secrets; "${COMPOSE[@]}" --env-file "$PROV_CONSTANTS_FIL
 lire_run() { compose exec -T lcars cat "$1" 2>/dev/null | tr -d '[:space:]' || true; }   # lire_run <fichier du conteneur>
 
 # ─── Les gardes du projet ───────────────────────────────────────────────────────────────────────
-project_volumes() {
-  "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort || true
+project_volumes() { # → les volumes que docker déclare au projet ; le code de docker
+  "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort
 }
 project_config_files() {
   local ids
@@ -316,13 +325,17 @@ cmd_up() {
   local s; s="$(lire_run /run/lcars-seat.login)"
   echo ""
   echo "container up ($PROJECT) : image $img · ssh ${s:-<siège>}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}"
-  cmd_status
+  cmd_status || true
+  return "$VERDICT_UP"
 }
 
-# le verdict des gestes de forge, ou un boot qui s'arrête de lui-même ; au-delà de quinze minutes, status dit « en cours »
+# le verdict des gestes de forge, un boot qui s'arrête de lui-même, ou un conteneur qui ne tourne plus ;
+# au-delà de quinze minutes, status dit « en cours »
 attendre_verdict() {
-  local etat
+  local id etat
+  id="$(compose ps -q lcars 2>/dev/null | head -n1)"
   for _ in $(seq 1 180); do
+    [[ -n "$id" && "$("$DOCKER" inspect -f '{{.State.Status}}' "$id" 2>/dev/null)" == running ]] || return 0
     [[ -z "$(lire_run /run/lcars-forge.rc)" ]] || return 0
     etat="$(lire_run /run/lcars-boot.state)"
     [[ "$etat" != awaiting-config && "$etat" != init-failed ]] || return 0
@@ -409,7 +422,8 @@ cmd_runner_token() {
 
 # ─── status ─────────────────────────────────────────────────────────────────────────────────────
 cmd_status() {
-  local id state health boot prov hum rev tampon rc=0
+  local id state health boot prov hum rev tampon rc
+  VERDICT_UP=2
   id="$(compose ps -q lcars 2>/dev/null | head -n1)"
   [[ -n "$id" ]] || { echo "container status ($PROJECT) : aucun conteneur lcars — « deploy/container up »"; return 2; }
   state="$("$DOCKER" inspect -f '{{.State.Status}}' "$id" 2>/dev/null || echo inconnu)"
@@ -458,11 +472,16 @@ cmd_status() {
   else
     echo "  image       : sans tampon de vérification (stage verify absent, ou conteneur pas prêt)"
   fi
-  [[ "$state" == running ]] || rc=2
-  [[ "$boot" == init-failed || "$health" == unhealthy ]] && rc=2
-  [[ -n "$prov" && "$prov" != 0 && "$prov" != 2 ]] && rc=2
+  # le verdict d'up : ce qui empêche l'instance de servir, pas ce qu'un démarrage neuf n'a pas encore
+  # (humains inscrits plus tard, santé dans sa période de grâce, deck publié après le verdict des gestes) ;
+  # un boot qui n'a rendu aucun verdict dans l'attente d'up n'est pas une installation confirmée
+  VERDICT_UP=0
+  [[ "$boot" != awaiting-config && ( -n "$prov" || -n "$boot" ) ]] || VERDICT_UP=1
+  [[ "$state" == running && "$boot" != init-failed && "${prov:-0}" =~ ^[02]$ ]] || VERDICT_UP=2
+  rc="$VERDICT_UP"
+  [[ "$health" != unhealthy ]] || rc=2
   if [[ "$rc" -eq 0 ]]; then
-    [[ "$boot" == awaiting-config || -z "$boot$prov" || "$prov" == 2 || "$health" == starting ]] && rc=1
+    [[ -z "$boot$prov" || "$prov" == 2 || "$health" == starting ]] && rc=1
     [[ -n "$hum" && "$hum" != 0 ]] && rc=1
     [[ "$deck_http" == 409 || "$deck_http" == 000 ]] && rc=1
   fi
@@ -479,7 +498,7 @@ cmd_down() {
 
 cmd_reset() {
   assert_project_ours reset
-  local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//')"
+  local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//' || true)"
   echo "container: reset du projet « $PROJECT » — conteneur et volume(s) ${_vols:-<aucun>}."
   echo "           La forge n'est pas concernée : elle vit dans son propre déploiement, le travail poussé y survit."
   echo ""
@@ -487,6 +506,12 @@ cmd_reset() {
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "container: annulé."; exit 1; }
   compose down -v
+  # compose rend 0 quand un volume encore monté ailleurs refuse de partir
+  local restes
+  restes="$(project_volumes)" || fail "reset: docker ne rend pas les volumes du projet — le retrait n'est pas vérifié" \
+    "docker volume ls --filter label=com.docker.compose.project=$PROJECT"
+  [[ -z "$restes" ]] || fail "reset: volume(s) du projet encore là après compose down -v : ${restes//$'\n'/ }" \
+    "un conteneur les monte encore : docker ps -a --filter volume=<volume>, le retirer, puis docker volume rm <volume>"
   echo "container: reset fait. « deploy/container up » pour repartir de zéro."
 }
 
@@ -529,6 +554,10 @@ image_defaut() {
 }
 : "${LCARS_IMAGE:=$(image_defaut)}"
 export LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE
+case "$1:$LCARS_IMAGE" in
+  up:|pull:) fail "$1: aucune image nommée — ni lcars-fleet:local sur ce daemon, ni celle du compose (« compose config --images » ne la rend pas)" \
+               "LCARS_IMAGE=<registre/image:tag> deploy/container $1" ;;
+esac
 
 case "$1" in
   build)  shift; cmd_build "$@" ;;

@@ -237,7 +237,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 }
 
 
-@test "le runner reçoit la forge, les deux jetons par fichier, le réseau, le projet et les labels des constantes" {
+@test "le runner reçoit la forge, les deux jetons par fichier, le réseau, le projet, les labels des constantes et la base du banc" {
   run_bench
   [ "$status" -eq 0 ]
   local ligne; ligne="$(grep '^RUNNER:' "$CALLS")"
@@ -245,7 +245,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$ligne" != *MASTER* && "$ligne" != *REG-TOKEN-TEMOIN* ]]
   grep -qE '^RUNNER-FILE:--admin-token-file=MASTER mode=600 dossier=700 ' "$CALLS"
   grep -qE '^RUNNER-FILE:--reg-token-file=REG-TOKEN-TEMOIN mode=600 dossier=700 ' "$CALLS"
-  [[ "$ligne" == *" --labels shell:docker://alpine:temoin,dood:docker://docker:temoin" ]]
+  [[ "$ligne" == *" --labels shell:docker://alpine:temoin,dood:docker://docker:temoin --bench bt" ]]
   [[ "$output" == *"runner    : enregistré — labels : shell:docker://alpine:temoin,dood:docker://docker:temoin"* ]]
 }
 
@@ -323,7 +323,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "la forge monte avec port, bind et URL racine, puis admiral est créé avec le mot de passe du contrat, unix et forge" {
   run_bench --no-runner --advertise 10.0.0.9
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "DOCKER:compose -f .*forge-compose.yml -p bt-forge up -d" "$CALLS"
+  grep -q "DOCKER:compose -f .*forge-compose.yml -f .*forge-compose.bench.yml -p bt-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$BF" "$CALLS"
   grep -q "DOCKER:exec -i -u root bt-fleet-lcars-1 chpasswd <<< admiral:toto123456" "$CALLS"
   grep -q 'DOCKER:exec -e PW -u git bt-forge-gitea-1 sh -c gitea admin user create .* _ admiral$' "$CALLS"
@@ -492,7 +492,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "sans drapeau, projet et ports du banc viennent des constantes" {
   run bash "$REAL" --image lcars-fleet:9 --no-runner < /dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "DOCKER:compose -f .*forge-compose.yml -p banc-temoin-forge up -d" "$CALLS"
+  grep -qx "DOCKER:compose -f $DOCKER_D/forge-compose.yml -f $DOCKER_D/forge-compose.bench.yml -p banc-temoin-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$DF" "$CALLS"
   grep -qx "LCARS_SSH_PORT=0.0.0.0:$DS" "$CALLS"
   grep -qx "LCARS_LANDING_PORT_BIND=0.0.0.0:$DD" "$CALLS"
@@ -545,7 +545,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   export OBJETS="bt-forge-gitea-1:c: bt-forge_data:v:"
   run_bench --no-runner
   [ "$status" -eq 1 ]
-  [[ "$output" == *"sans son marqueur"*"conteneur bt-forge-gitea-1 (projet bt-forge)"*"volume bt-forge_data (projet bt-forge)"* ]]
+  [[ "$output" == *"sans son marqueur"*"conteneur bt-forge-gitea-1 (projet bt-forge)"*"volume bt-forge_data (projet bt-forge)"*"docker compose -p bt-forge down -v"* ]]
+  [[ "$output" != *"reset"* ]]
   refute grep -q 'forge-compose.yml' "$CALLS"
   refute grep -q 'change-password' "$CALLS"
 }
@@ -554,8 +555,17 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   export OBJETS="bt-runner-act-1:c:"
   run_bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"conteneur bt-runner-act-1 (projet bt-runner)"* ]]
+  [[ "$output" == *"conteneur bt-runner-act-1 (projet bt-runner)"*"docker compose -p bt-runner down -v"* ]]
+  [[ "$output" != *"-p bt-forge"* && "$output" != *"reset"* ]]
   refute grep -q '^RUNNER:' "$CALLS"
+}
+
+@test "un banc posé avant le marqueur : chaque projet refusé vient avec son geste — reset pour le conteneur, down -v pour la forge et le runner" {
+  export OBJETS="bt-fleet-lcars-1:c: bt-forge-gitea-1:c: bt-runner-act-1:c:"
+  run_bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"deploy/container -p bt-fleet reset"*"docker compose -p bt-forge down -v"*"docker compose -p bt-runner down -v"* ]]
+  [[ "$output" != *"container -p bt-forge"* && "$output" != *"container -p bt-runner"* ]]
 }
 
 @test "un banc déjà monté sous cette base est refusé : il se détruit d'abord" {

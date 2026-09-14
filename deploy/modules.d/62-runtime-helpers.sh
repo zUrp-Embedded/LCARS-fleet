@@ -227,14 +227,18 @@ poser_donnee() { # poser_donnee <source> <destination> — 0644 ; la redirection
   write_atomic "$2" 0644 < "$1"
 }
 
+arbre_forme() { ( cd "$1" && find . -printf '%P %y %m\n' | LC_ALL=C sort ); }   # chemins, types et modes : diff ne compare que les contenus
+
 embarquer() { # embarquer <source> <destination> [--exclude…] — l'arbre copié par tar (exclusions à la source) ; basculé et compté s'il diffère de ce qui est posé
   local src="$1" dst="$2"; shift 2
   rm -rf "${dst:?}.new"
   prov_scaffold_dir "$dst.new" 0755 "$HELPERS_OWNER" || return 1
-  ( cd "$src" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "$@" . ) | ( cd "$dst.new" && tar --no-same-owner -xf - ) \
+  # --touch : l'arbre basculé porte la date de sa pose, que 64 compare au démarrage des daemons
+  ( cd "$src" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "$@" . ) | ( cd "$dst.new" && tar --no-same-owner --touch -xf - ) \
     || { p_fail "copie ratée : $src"; return 1; }
   chmod -R g-s,go-w "$dst.new" || { p_fail "modes de la copie non posés : $dst"; return 1; }
-  if [[ -d "$dst" && -z "$(tree_hors_contrat "$dst")" ]] && diff -rq --no-dereference "$dst.new" "$dst" >/dev/null 2>&1; then
+  if [[ -d "$dst" && -z "$(tree_hors_contrat "$dst")" && "$(arbre_forme "$dst.new")" == "$(arbre_forme "$dst")" ]] \
+     && diff -rq --no-dereference "$dst.new" "$dst" >/dev/null 2>&1; then
     rm -rf "$dst.new"
     return 0
   fi

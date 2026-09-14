@@ -181,6 +181,19 @@ cle_du_pin() {
   refute grep -q '^APT' "$TRACE"
 }
 
+@test "dépôt docker : une clé déjà posée qui n'est pas celle du pin se retélécharge, et la clé du pin la remplace" {
+  socket_pose
+  os_release ubuntu resolute
+  mkdir -p "$(dirname "$KEY")"; echo "VIEILLE-CLE" > "$KEY"
+  # la clé téléchargée porte le sha du pin, la vieille garde le sien
+  printf '#!/usr/bin/env bash\nif grep -qx CLE-TELECHARGEE "$1" 2>/dev/null; then printf "%%s  %%s\\n" "%s" "$1"; else exec /usr/bin/sha256sum "$@"; fi\n' "$PIN" > "$DECOR_BIN/sha256sum"
+  chmod 0755 "$DECOR_BIN/sha256sum"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^CURL .*/gpg$' "$TRACE"
+  [ "$(cat "$KEY")" = CLE-TELECHARGEE ]
+}
+
 @test "dépôt docker : un « apt-get update » qui refuse la source la retire avec sa clé, sans paquet" {
   os_release debian suite-qui-nexiste-pas
   cle_du_pin

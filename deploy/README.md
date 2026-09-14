@@ -73,7 +73,7 @@ checkout) ou `kit` ; un canal ne se pose pas sur un autre.
 | 61-forge-structure | wsl linux | wsl linux | la structure de la forge (organisations, comptes de rôle, équipes, dépôt modèle) : roster dérivé de la release posée, recette tofu copiée, initialisée hors-ligne et jouée par `forge-gestures.sh apply` avec le tofu épinglé |
 | 62-runtime-helpers | wsl linux docker | any | les auxiliaires du runtime sur la machine : services, binaires du PATH, arbres embarqués à plat sous `/opt/lcars`, client de terminal épinglé, réglage de shell (`/etc/skel/.bashrc`, PATH `~/.local/bin` dans `/etc/bash.bashrc`) |
 | 63-forge-tokens | wsl linux | wsl linux | les jetons de rôle — un appelant mince de `runtime/services/forge.d/tokens.sh` |
-| 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (un service debout est relancé quand son unité, l'environnement ou un auxiliaire de 62 a changé depuis son démarrage) et une passe du convergeur d'humains tant que son daemon ne tourne pas ; en conteneur, le superviseur et ses programmes sont sondés à la place |
+| 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (un service debout est relancé quand son unité, l'environnement, ou ce qu'il charge et que 62 a posé, a changé depuis son démarrage) et une passe du convergeur d'humains tant que son daemon ne tourne pas ; en conteneur, le superviseur et ses programmes sont sondés à la place |
 | 65-ops-branch | wsl linux | wsl linux | la branche d'outillage sur le dépôt ops — un appelant mince de `runtime/services/forge.d/ops-branch.sh` |
 | 66-deck-oidc | wsl linux | wsl linux | le client OAuth2 du deck et `/etc/lcars/deck-oidc.json` — un appelant mince de `runtime/services/forge.d/deck-oidc.sh` |
 
@@ -87,6 +87,7 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 | fichier | rôle |
 |---|---|
 | `provision-lib.sh` | le protocole des modules : verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), verrou, apt, `as_human`, les défauts `PROV_*`, la table de traduction vers les noms `LCARS_*` du produit et `prov_geste`, le lanceur des gestes de `runtime/services/forge.d` (50, 63, 65, 66) |
+| `geste-protocol.sh` | le protocole que `prov_geste` donne à un geste : celui du produit, dont les sorties de verdict se marquent |
 | `docker-endpoint.sh` | le substrat et le daemon docker : une CLI du PATH, une socket, un verdict qui nomme le geste manquant |
 | `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, basculée sous le préfixe ; liens, modes et élagage par `60-deploy` |
 | `kit-verify.sh` | ce qu'un kit doit porter, contre `system.manifest`, `release.manifest` et les listes que 62 pose (`PROV_HELPERS`, `PROV_HELPERS_DATA`, `PROV_SHELL_RC` des constantes) |
@@ -103,7 +104,8 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 `docker-compose.yml` (l'instance livrée), `docker-compose.bench.yml` (le réseau partagé avec la
 forge du banc) et `docker-compose.secrets.yml` (les secrets posés par `container config`, montés
 sous `/run/secrets`), `forge-compose.yml` et `runner-compose.yml` (la forge jetable et son
-runner), `forge-runner.sh` (l'enrôlement d'un runner, joué par 49 et par le banc),
+runner), leurs surcouches `forge-compose.bench.yml` et `runner-compose.bench.yml` (le marqueur du
+banc, empilé par le banc seul), `forge-runner.sh` (l'enrôlement d'un runner, joué par 49 et par le banc),
 `lcars-hardened-seccomp.json` (le profil du conteneur), et `bench/` : `bench-up.sh`,
 `bench-down.sh --project <nom> --yes`, `bench-swap-image.sh`.
 

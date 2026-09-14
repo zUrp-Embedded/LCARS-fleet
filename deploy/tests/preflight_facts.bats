@@ -29,7 +29,7 @@ setup() {
   mkdir -p "$(dirname "$APT_HISTORY")"
   printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\n' > "$LCARS_DECOR_ROOT/etc/passwd"
   printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
-  mkdir -p "$LCARS_DECOR_ROOT/proc/sys/kernel"
+  mkdir -p "$LCARS_DECOR_ROOT/proc"
   printf 'MemTotal:       8388608 kB\n' > "$LCARS_DECOR_ROOT/proc/meminfo"
 }
 
@@ -288,20 +288,19 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ -z "$(fact docker_flavor)" ]
 }
 
-@test "mv --exchange refusé : échec dit et fait posé, rien ne reste de la sonde" {
+@test "mv --exchange refusé : échec dit, rien ne reste de la sonde" {
   double mv '[[ "$*" != *--exchange* ]] || { echo "mv: unrecognized option" >&2; exit 1; }
 exec /bin/mv "$@"'
   preflight docker
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  00-preflight: « mv --exchange » refusé sous $LCARS_DECOR_ROOT/opt/lcars"* ]]
-  [ "$(fact mv_exchange)" = non ]
   [ -z "$(ls -Ad "$LCARS_DECOR_ROOT"/opt/lcars/.prov-echange.* 2>/dev/null)" ]
 }
 
 @test "mv --exchange se sonde sur le système de fichiers des bascules, sous PROV_ROOT — pas dans TMPDIR" {
   double mv "echo \"\$*\" >> '$BATS_TEST_TMPDIR/mv.args'; exec /bin/mv \"\$@\""
   preflight docker
-  [ "$(fact mv_exchange)" = oui ]
+  [[ "$output" == *"OK    00-preflight: « mv --exchange » joué sous $LCARS_DECOR_ROOT/opt/lcars"* ]]
   grep -q -- "--exchange -T -- $LCARS_DECOR_ROOT/opt/lcars/.prov-echange\." "$BATS_TEST_TMPDIR/mv.args"
 }
 
@@ -309,8 +308,19 @@ exec /bin/mv "$@"'
   chmod 0555 "$LCARS_DECOR_ROOT/opt/lcars"
   preflight docker
   chmod 0755 "$LCARS_DECOR_ROOT/opt/lcars"
-  [ "$(fact mv_exchange)" = non-mesure ]
   [[ "$output" == *"WARN  00-preflight: « mv --exchange » non sondé : $LCARS_DECOR_ROOT/opt/lcars n'est pas inscriptible"* ]]
+}
+
+@test "WSL1 : un noyau WSL sans WSL2 est une dérive qui nomme le geste ; un noyau WSL2 n'en dit rien" {
+  printf 'Linux version 4.4.0-19041-Microsoft (Microsoft@Microsoft.com) (gcc version 5.4.0 (GCC) )\n' > "$LCARS_DECOR_ROOT/proc/version"
+  preflight wsl
+  [ "$status" -ne 3 ]
+  [[ "$output" == *"DRIFT 00-preflight: WSL1 ("*"bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"* ]]
+  printf 'Linux version 6.6.114.1-microsoft-standard-WSL2 (root@machine) (gcc) #1 SMP\n' > "$LCARS_DECOR_ROOT/proc/version"
+  preflight wsl
+  [[ "$output" != *"WSL1"* ]]
+  preflight docker
+  [[ "$output" != *"WSL1"* ]]
 }
 
 @test "disque : mesuré sur l'ancêtre existant de PROV_ROOT, jamais sur / par défaut" {
@@ -360,15 +370,6 @@ exec $(command -v uname) \"\$@\""
   preflight docker PATH="$BIN:$(path_sans dpkg)"
   [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT 00-preflight: OS hors famille Debian"* ]]
-}
-
-@test "userns : la clé se lit dans /proc, même sans sysctl — une clé posée n'est jamais « absent »" {
-  printf '1\n' > "$LCARS_DECOR_ROOT/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
-  preflight docker PATH="$BIN:$(path_sans sysctl)"
-  [ "$(fact userns_knob)" = 1 ]
-  rm "$LCARS_DECOR_ROOT/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
-  preflight docker
-  [ "$(fact userns_knob)" = absent ]
 }
 
 

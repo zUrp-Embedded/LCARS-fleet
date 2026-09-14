@@ -190,6 +190,7 @@ apply() {
   ! prov_delivery_is_binary || etape="pose de la release depuis le kit"
   run_step "$etape" -- as_human env LCARS_RUNTIME_DIR="$RUNTIME_DIR" bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" \
     || { p_warn "$PROV_PREFIX reste déverrouillé pour inspection"; verdict_apply; }
+  release_present || { p_fail "deploy-release.sh a rendu 0 sans release ($PREFIX_REL/bin/lcars_fleet) — $PROV_PREFIX reste déverrouillé pour inspection"; verdict_apply; }
   clore_la_pose
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + $PROV_LINK_DIR câblé"

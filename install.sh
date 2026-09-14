@@ -329,7 +329,7 @@ GROUPES="$(fait groupes | tr ',' '\n' | { grep -xE 'sudo|docker|fleet' || true; 
 echo "  ${W}Source${N}     $SOURCE_LIGNE"
 echo ""
 echo "  ${W}Système${N}    $(ou "$(fait distro)") $(fait distro_version) $TERRAIN · noyau $(ou "$(fait noyau)") · $SYSTEMD"
-echo "             $(ou "$(fait arch)") · $(ou "$(fait cpu)") cœurs · $(go "$(fait ram_mb)") Go de RAM · $(go "$(fait disque_mb)") Go libres sur /"
+echo "             $(ou "$(fait arch)") · $(ou "$(fait cpu)") cœurs · $(go "$(fait ram_mb)") Go de RAM · $(go "$(fait disque_mb)") Go libres pour $RACINE"
 echo "             utilisateur $(ou "$(fait utilisateur)") · groupes ${GROUPES:-?}"
 
 DOCKER_OK=0
@@ -419,11 +419,11 @@ if [[ "$DOCKER_OK" -eq 0 ]]; then
   fi
 else
   # le daemon qui a répondu au préflight, pas un DOCKER_HOST de l'environnement qu'il a écarté
-  DOCKER_HOST_VU="$(fait docker_host)"
-  if [[ -n "$DOCKER_HOST_VU" ]]; then export DOCKER_HOST="$DOCKER_HOST_VU"; else unset DOCKER_HOST; fi
+  DOCKER_HOST="$(fait docker_host)"
+  export DOCKER_HOST
 fi
 # l'installation dans ce système est ce que le préflight juge : un plancher en dérive (OS, arch, RAM,
-# disque) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
+# disque, WSL1) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
 if [[ "$MODE" == "workstation" && "$PREFLIGHT_RC" -ne 0 ]]; then
   stop "${R}Le préflight refuse ce terrain pour l'installation dans ce système.${N} Ce qu'il constate :" \
        "$(printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /')"

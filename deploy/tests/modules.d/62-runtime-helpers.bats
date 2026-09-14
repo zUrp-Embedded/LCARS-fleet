@@ -168,6 +168,28 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   cmp -s "$src/runtime/services/console.tmux.conf" "$HELPERS/services/console.tmux.conf"
 }
 
+@test "un arbre rebasculé porte la date de sa pose, pas celle de la source : un protocole sourcé changé se voit plus récent que les daemons" {
+  local src avant; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  printf '# retouche\n' >> "$src/runtime/services/lib/human-protocol.sh"
+  touch -d '2001-01-01 00:00:00' "$src/runtime/services/lib/human-protocol.sh"
+  avant="$(date +%s)"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]]
+  cmp -s "$src/runtime/services/lib/human-protocol.sh" "$HELPERS/services/lib/human-protocol.sh"
+  [ "$(stat -c %Y "$HELPERS/services/lib/human-protocol.sh")" -ge "$avant" ]
+}
+
+@test "un changement de mode seul, contenu identique, rebascule l'arbre" {
+  local src; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  [ ! -x "$HELPERS/services/forge-recipe/charte.tf" ]
+  chmod +x "$src/runtime/services/forge-recipe/charte.tf"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]] || { echo "$output"; return 1; }
+  [ -x "$HELPERS/services/forge-recipe/charte.tf" ]
+}
+
 @test "les données sont posées à leur destination en 0644, identiques à la source, non exécutables" {
   mod apply
   cmp -s "$SRC_DIR/console.tmux.conf" "$HELPERS/console.tmux.conf"

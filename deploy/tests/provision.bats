@@ -526,6 +526,25 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "la base de projet donne un hostname : un bord « _ » ou « - », ou plus de 63 caractères, est refusé avant tout module — drapeau ou --env" {
+  terrain wsl
+  lib_module 10-pose 'echo pose >> "$RUN_LOG"; p_ok "ok"'
+  local base
+  for base in bob_ bob- "$(printf 'a%.0s' {1..64})"; do
+    : > "$RUN_LOG"
+    run "$SANDBOX/provision" apply --forge-project "$base"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--forge-project : « $base » n'est pas une base de projet"* ]] || { echo "$output"; return 1; }
+    printf 'PROV_FORGE_BASE=%s\n' "$base" > "$BATS_TEST_TMPDIR/base.env"
+    run "$SANDBOX/provision" apply --env "$BATS_TEST_TMPDIR/base.env"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"PROV_FORGE_BASE : « $base » n'est pas une base de projet"* ]] || { echo "$output"; return 1; }
+    [ ! -s "$RUN_LOG" ]
+  done
+  run "$SANDBOX/provision" apply --forge-project "b_$(printf 'a%.0s' {1..61})"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 @test "les ports atteignent les modules, et une passe suivante les relit dans le journal" {
   terrain wsl
   lib_module 50-ports 'echo "deck=$PROV_DECK_PORT" >> "$RUN_LOG"; p_ok "ok"'

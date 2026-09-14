@@ -29,7 +29,7 @@ setup() {
 
 # shellcheck disable=SC2054  # les virgules sont dans les valeurs (groupes, comptes), pas entre les éléments
 _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker docker_host=unix:///var/run/docker.sock
-  docker_server=29.0.0 "docker_flavor=Docker Engine" docker_why= compose=oui substrat=wsl wsl2=oui consent=sans-objet
+  docker_server=29.0.0 "docker_flavor=Docker Engine" docker_why= compose=oui substrat=wsl consent=sans-objet
   distro=Ubuntu distro_version=26.04 noyau=6.6.0 arch=x86_64 cpu=4 ram_mb=8192 disque_mb=102400 systemd=oui
   utilisateur=temoin groupes=temoin,sudo,docker forge_fournie= forge_joignable=sans-objet
   "port_forge=21000 libre" "port_deck=20999 libre" "port_ssh=2222 libre" projet=lcars projet_pris=
@@ -251,7 +251,8 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"version $(bash "$SRC" --version)"* ]]
   [[ "$output" == *"Source     archive (kit) · révision cafe1234"* ]]
   [[ "$output" == *"Système    Ubuntu 26.04 sous WSL2 · noyau 6.6.0 · systemd actif"* ]]
-  [[ "$output" == *"x86_64 · 4 cœurs · 8 Go de RAM · 100 Go libres sur /"* ]]
+  # le disque se mesure sous la racine des bascules (00-preflight), pas sur /
+  [[ "$output" == *"x86_64 · 4 cœurs · 8 Go de RAM · 100 Go libres pour $(sed -n 's/^PROV_ROOT=//p' "$a/deploy/installer-constants.env")"* ]]
   [[ "$output" == *"utilisateur temoin · groupes sudo, docker"* ]]
   [[ "$output" == *"Outils     git, curl présents"* ]]   # sudo n'est requis que par --workstation, jq que par le banc en conteneur
   [[ "$output" == *"Forge      aucune"* ]]
@@ -349,11 +350,6 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   DOCKER_HOST=unix:///mort.sock porte "$a" --bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"CONTAINER:--bench up"*"DOCKER_HOST=[unix:///var/run/docker.sock]"* ]]
-  a="$(_arbre docker_host=)"
-  printf '#!/usr/bin/env bash\necho "CONTAINER:$*"; echo "DOCKER_HOST=[${DOCKER_HOST:-}]"\n' > "$a/deploy/container"
-  DOCKER_HOST=unix:///mort.sock porte "$a" --bench
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"DOCKER_HOST=[]"* ]]
 }
 
 @test "Linux natif : --workstation exige LCARS_ALLOW_ANY_HOST, mesuré par le préflight" {

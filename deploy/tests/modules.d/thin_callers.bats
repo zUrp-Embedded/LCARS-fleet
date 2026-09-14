@@ -70,6 +70,13 @@ joue() { # joue <racine> <module> <verbe>
   refute_out 'mort avant' <<<"$output"
 }
 
+@test "seules les sorties du protocole marquent un verdict : un exit dans une fonction du geste nommée verdict_… n'en est pas un (3)" {
+  racine_doublee 'verdict_resume() { p_drift "sonde partielle"; exit 0; }; verdict_resume'
+  joue "$ROOT" 50-catalogues check
+  [ "$status" -eq 3 ] || { echo "rc=$status — $output" >&2; return 1; }
+  [[ "$output" == *"ERREUR 50-catalogues: mort avant de rendre son verdict (rc=0)"* ]]
+}
+
 @test "les noms du produit portent les valeurs de l'installeur, les mêmes pour les quatre gestes" {
   racine_doublee 'env | grep -E "^(LCARS|FORGE)_" | sort; verdict_check'
   local c systeme
@@ -88,4 +95,10 @@ joue() { # joue <racine> <module> <verbe>
   done
   joue "$ROOT" 63-forge-tokens check
   grep -qx "LCARS_CLI=$LCARS_DECOR_ROOT/usr/local/bin/lcars" <<<"$output"
+  # 66 annonce l'adresse du deck : celle qu'advertise_addr mesure dans le même environnement
+  local annonce
+  annonce="$(env -u PROVISION_RUN bash -c '. "$1"; advertise_addr; printf "%s" "$PROV_ADVERTISE"' _ "$ROOT/deploy/lib/provision-lib.sh")"
+  [ -n "$annonce" ]
+  joue "$ROOT" 66-deck-oidc check
+  grep -qx "LCARS_ADVERTISE=$annonce" <<<"$output"
 }

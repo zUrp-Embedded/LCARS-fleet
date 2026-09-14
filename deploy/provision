@@ -73,9 +73,11 @@ valid_port() {
   (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous son compte de service, ne peut pas binder)"
 }
 
+# la base nomme les projets compose et, « _ » devenu « - », le hostname de l'instance (30-wsl) : une étiquette DNS
 valid_project() {
-  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
-    || die "$2 : « $1 » n'est pas un nom de projet compose — minuscules, chiffres, « _ » et « - », et le premier caractère n'est ni l'un ni l'autre"
+  local etiquette="${1//_/-}"
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ && "$etiquette" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
+    || die "$2 : « $1 » n'est pas une base de projet — minuscules, chiffres, « _ » et « - », ni « _ » ni « - » aux bords, 63 caractères au plus"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -128,6 +130,7 @@ _journal_params() {
   done
 }
 _journal_params
+[[ -z "${PROV_FORGE_BASE:-}" ]] || valid_project "$PROV_FORGE_BASE" PROV_FORGE_BASE
 
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"

@@ -46,14 +46,7 @@ services:
       start_period: 30s
       retries: 3
     restart: unless-stopped
-    # la base du banc qui l'a montée, vide pour la forge d'un poste : les scripts de banc ne touchent qu'une forge qui porte la leur
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"
 
 volumes:
   data:
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"
   config:
-    labels:
-      lcars.bench: "${LCARS_BENCH_BASE:-}"

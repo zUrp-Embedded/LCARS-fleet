@@ -247,19 +247,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Face zones need privileged creation before runtime onboarding.
-  # Check container init and native provisioning mirrors; no deploy tree skips the whole check.
+  # Check container init and native provisioning mirrors, and the mode and owner the manifest gives
+  # the native mirror (25-directories lists paths only); no deploy tree skips the whole check.
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("services/container/init.sh", root)
-    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
-    expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
-
-    remediation =
-      "add the face root to the `install -d` line of runtime/services/container/init.sh — a face declared " <>
-        "in Fleet.Layout with no zone on the machine makes the container look healthy and kills the " <>
-        "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
-
     case tree_scope(Path.expand("../deploy", root)) do
       :out_of_scope ->
         %{
@@ -271,56 +263,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         }
 
       :required ->
-        case {expected, read_install_zone_paths(entrypoint), read_provision_zone_paths(module)} do
-          {nil, _, _} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: ["lib/fleet/layout.ex"],
-              note: "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"
-            }
+        face_roots_measured(root)
+    end
+  end
 
-          {_, nil, _} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: [Path.relative_to(entrypoint, root)],
-              note: "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"
-            }
+  @face_root_mode "2775"
+  @face_root_owner "root:fleet"
 
-          {_, _, nil} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: [Path.relative_to(module, root)],
-              note:
-                "the provision module's directory list is unreadable — guard fail-closed " <>
-                  "(25-directories is the creator on every substrate; container/init.sh only " <>
-                  "covers the container volumes)"
-            }
+  defp face_roots_measured(root) do
+    entrypoint = Path.expand("services/container/init.sh", root)
+    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
+    manifest = Path.expand("../deploy/system.manifest", root)
 
-          {expected, at_boot, on_every_substrate} ->
-            missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (conteneur)") ++
-                Enum.map(
-                  expected -- on_every_substrate,
-                  &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
-                )
+    remediation =
+      "add the face root to the `install -d` line of runtime/services/container/init.sh, to the " <>
+        "directory list of deploy/modules.d/25-directories.sh, and declare it `dir <root> " <>
+        "#{@face_root_mode} #{@face_root_owner}` in deploy/system.manifest — a face declared in " <>
+        "Fleet.Layout with no zone on the machine makes the container look healthy and kills the " <>
+        "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: if(missing == [], do: :pass, else: :fail),
-              evidence: missing,
-              note:
-                "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
-                  "miroirs — le module 25-directories (tout substrat) et container/init.sh (les " <>
-                  "volumes du conteneur, au boot) : #{Enum.join(expected, ", ")}"
-            }
-        end
+    readings = [
+      {read_face_roots(Path.expand("lib/fleet/layout.ex", root)), "lib/fleet/layout.ex",
+       "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"},
+      {read_install_zone_paths(entrypoint), Path.relative_to(entrypoint, root),
+       "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"},
+      {read_provision_zone_paths(module), Path.relative_to(module, root),
+       "the provision module's directory list is unreadable — guard fail-closed " <>
+         "(25-directories is the creator on every substrate; container/init.sh only " <>
+         "covers the container volumes)"},
+      {read_manifest_dirs(manifest), Path.relative_to(manifest, root),
+       "deploy/system.manifest has no readable `dir` row — guard fail-closed (the mode and " <>
+         "owner of the native mirror live there)"}
+    ]
+
+    case Enum.find(readings, fn {value, _, _} -> is_nil(value) end) do
+      {nil, unreadable, note} ->
+        %{
+          id: "layout.face_roots_provisioned",
+          remediation: remediation,
+          status: :fail,
+          evidence: [unreadable],
+          note: note
+        }
+
+      nil ->
+        [expected, at_boot, on_every_substrate, declared] =
+          Enum.map(readings, fn {value, _, _} -> value end)
+
+        missing =
+          Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (conteneur)") ++
+            Enum.map(
+              expected -- on_every_substrate,
+              &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
+            ) ++ Enum.flat_map(expected, &manifest_mismatch(&1, Map.get(declared, &1)))
+
+        %{
+          id: "layout.face_roots_provisioned",
+          remediation: remediation,
+          status: if(missing == [], do: :pass, else: :fail),
+          evidence: missing,
+          note:
+            "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
+              "miroirs — le module 25-directories (tout substrat) et container/init.sh (les " <>
+              "volumes du conteneur, au boot) — et déclarées #{@face_root_mode} " <>
+              "#{@face_root_owner} dans deploy/system.manifest : #{Enum.join(expected, ", ")}"
+        }
+    end
+  end
+
+  defp manifest_mismatch(_face_root, {@face_root_mode, @face_root_owner}), do: []
+
+  defp manifest_mismatch(face_root, nil),
+    do: ["#{face_root}: aucune ligne dir dans deploy/system.manifest"]
+
+  defp manifest_mismatch(face_root, {mode, owner}),
+    do: [
+      "#{face_root}: #{mode} #{owner} dans deploy/system.manifest, attendu " <>
+        "#{@face_root_mode} #{@face_root_owner}"
+    ]
+
+  # A `dir` row (trait included) names a path, its mode and its owner; nil when no row reads.
+  defp read_manifest_dirs(path) do
+    with {:ok, content} <- File.read(path),
+         [_ | _] = rows <- Regex.scan(~r/^dir(?::\S+)?\s+(\/\S+)\s+(\S+)\s+(\S+)/m, content) do
+      Map.new(rows, fn [_, dir, mode, owner] -> {dir, {mode, owner}} end)
+    else
+      _ -> nil
     end
   end
 

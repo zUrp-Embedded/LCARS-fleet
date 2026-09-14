@@ -91,6 +91,19 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [[ "$output" != *"POSÉ"* ]]
 }
 
+@test "apply : une mise à jour des médias est posée et dite, l'arbre voisin inchangé ne l'est pas ; un fichier en plus sous le posé ne compte pas" {
+  site_git
+  mod apply; [ "$status" -eq 0 ]
+  [[ "$output" == *"POSÉ  44-media: médias posés ($SHARE/avatars)"*"POSÉ  44-media: médias posés ($SHARE/favicon)"* ]]
+  printf 'png v2' > "$LCARS_MEDIA_SRC_ROOT/avatars/admiral.png"
+  printf 'posé à la main' > "$SHARE/favicon/local.ico"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"POSÉ  44-media: médias posés ($SHARE/avatars)"* ]]
+  [[ "$output" != *"médias posés ($SHARE/favicon)"* ]]
+  [ "$(cat "$SHARE/avatars/admiral.png")" = "png v2" ]
+}
+
 @test "apply : une autre base, ou un fichier nouveau dans les sources du site, rebâtit la doc" {
   site_git
   mod apply; [ "$status" -eq 0 ]

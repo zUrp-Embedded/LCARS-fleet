@@ -252,11 +252,11 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   [ "$(grep -c 'cat /run/lcars-boot.state' "$CALLS")" -eq 2 ]
 }
 
-@test "up attend le verdict des gestes de forge, puis rend celui de status : drift dégradé (1), geste en échec panne (2)" {
+@test "up attend le verdict des gestes de forge et montre status : un drift se dit et rend 0, un geste en échec rend 2" {
   sain
   export STUB_PROV=2
   run bash "$SRC" up
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
   [[ "$output" == *"container up (lcars-fleet)"*"container status (lcars-fleet)"*"drift résiduel"* ]]
   export STUB_PROV=1
   run bash "$SRC" up
@@ -268,7 +268,27 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   [[ "$output" == *"gestes convergés"* ]]
 }
 
-@test "up sans verdict dans le délai : le conteneur tourne, status le dit en cours, dégradé (1)" {
+@test "up d'une instance neuve : personne d'inscrit, santé en période de grâce, deck pas encore publié — up rend 0, status dégradé" {
+  export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=1 STUB_HEALTH=starting
+  run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"santé : starting"*"aucun humain de fleet"*"deck        : rien ne répond"* ]]
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+}
+
+@test "up sur un conteneur qui ne tourne plus : l'attente s'arrête dès l'état lu, panne (2)" {
+  sain
+  unset STUB_PROV
+  export STUB_STATE=exited
+  run bash "$SRC" up
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"conteneur   : exited"* ]]
+  # status lit le verdict une fois ; l'attente ne l'a pas lu
+  [ "$(grep -c 'cat /run/lcars-forge.rc' "$CALLS")" -eq 1 ]
+}
+
+@test "up sans verdict dans le délai : le conteneur tourne, status le dit en cours, up rend 1 — rien ne confirme l'installation" {
   sain
   unset STUB_PROV
   run bash "$SRC" up
@@ -428,8 +448,35 @@ forge_fournie() {
   forge_fournie "$FORGE_DOUBLE_URL"
   run bash "$SRC" forge-check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"manque   le jeton master n'est pas site-admin (HTTP 403)"* ]]
+  [[ "$output" == *"manque   le jeton master n'a pas la portée admin, ou son compte n'est pas site-admin (HTTP 403)"* ]]
   run bash "$SRC" forge-check
   [ "$status" -eq 1 ]
   [[ "$output" == *"manque   la forge refuse le jeton master (HTTP 401)"* ]]
+}
+
+@test "forge-check : un appel admin redirigé est un manque qui mène à l'adresse servie" {
+  forge_double_start
+  forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
+  forge_route GET '/api/v1/admin/users*' 301 -
+  forge_fournie "$FORGE_DOUBLE_URL"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"manque   l'appel admin est redirigé (HTTP 301)"*"FORGE_PUBLIC_URL=<adresse> deploy/container -p lcars-fleet config"* ]]
+}
+
+@test "forge-check : le jeton qui part en http hors de la loopback le dit ; sur la loopback, rien" {
+  forge_double_start
+  forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
+  forge_route GET '/api/v1/admin/users*' 200 '[]'
+  forge_fournie "$FORGE_DOUBLE_URL"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"en clair"* ]]
+  # la forge doublée répond sous un nom qui n'est pas la loopback
+  local port="${FORGE_DOUBLE_URL##*:}" vrai_curl; vrai_curl="$(command -v curl)"
+  printf '#!/usr/bin/env bash\nexec %q --resolve forge.exemple:%s:127.0.0.1 "$@"\n' "$vrai_curl" "$port" > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"
+  printf 'FORGE_BASE_URL=http://forge.exemple:%s\nFORGE_PUBLIC_URL=http://forge.exemple:%s\n' "$port" "$port" > "$ENV_FILE"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"note     le jeton master part en clair vers http://forge.exemple:$port"*"ok       jeton master accepté, site-admin"* ]]
 }

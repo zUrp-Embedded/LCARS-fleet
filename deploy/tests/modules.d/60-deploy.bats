@@ -194,6 +194,15 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ ! -e "$CHANNEL" ]
 }
 
+@test "apply : deploy-release.sh vert sans release posée — échec nommé, jamais POSÉ, le canal n'est pas écrit" {
+  printf '# modif\n' >> "$RACINE/runtime/mix.exs"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  60-deploy: deploy-release.sh a rendu 0 sans release ($PREFIX/rel/lcars_fleet/bin/lcars_fleet)"* ]] || { echo "$output"; return 1; }
+  refute_out 'POSÉ  60-deploy: runtime déployé' <<<"$output"
+  [ ! -e "$CHANNEL" ]
+}
+
 @test "apply : livraison binaire — mix n'est pas requis, la release du kit est posée, le canal dit kit" {
   release_posee 0000000; verrouille
   rm -f "$BIN/mix"

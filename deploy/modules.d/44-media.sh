@@ -146,14 +146,22 @@ media_modes() { # media_modes <racine> — l'arbre profond en 755/644, sans bits
   return "$rc"
 }
 
+medias_a_poser() { # medias_a_poser <source> <posé> → 0 si un fichier de la source manque sous le posé, ou y diffère ; ce que le posé porte en plus ne compte pas
+  local ecarts
+  ecarts="$(diff -rq "$1" "$2" 2>&1)" && return 1
+  grep -qvF "Only in $2" <<<"$ecarts"
+}
+
 apply() {
   local t src
   for t in "${MEDIA_TREES[@]}"; do
     src="$(media_src "$t")"
     [[ -d "$src" ]] || { p_fail "source absente : $src"; verdict_apply; }
     ensure_dir "$MEDIA_ROOT/$t" "$(media_mode "$t")" "$MEDIA_OWNER" || verdict_apply
+    medias_a_poser "$src" "$MEDIA_ROOT/$t" || continue
     find -H "$src" -mindepth 1 -maxdepth 1 -exec cp -a -t "$MEDIA_ROOT/$t/" {} + \
       || { p_fail "médias non copiables ($src → $MEDIA_ROOT/$t)"; verdict_apply; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "médias posés ($MEDIA_ROOT/$t)"
   done
   build_doc
 

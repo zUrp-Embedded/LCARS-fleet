@@ -152,16 +152,26 @@ unit_current() { # unit_current <unité> → 0 si l'unité posée est identique 
   diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
 }
 
-# auxiliaires_reposes_depuis <unité> → 0 si 62 a reposé sous HELPERS_DIR un objet plus récent que le démarrage de l'unité
-auxiliaires_reposes_depuis() {
+# ce qu'un daemon garde de son démarrage, sous HELPERS_DIR : son programme et ce qu'il source ou importe ;
+# ce qu'il lance à chaque tour (console.sh, forge-gestures.sh, human.d) se relit sans relance
+unit_charge() { # unit_charge <unité>
+  case "$1" in
+    lcars-landing)    echo console-landing.sh console-deck.py ;;
+    lcars-converger)  echo human-converger.sh services/lib ;;
+    lcars-catalogue)  echo catalogue-executor.py lcars_socket.py ;;
+    lcars-privileged) echo privileged-executor.py lcars_socket.py ;;
+  esac
+}
+
+# charge_reposee_depuis <unité> → 0 si 62 a posé, après le démarrage de l'unité, un objet qu'elle charge (62 date ses poses)
+charge_reposee_depuis() {
   local debut n
-  local -a poses
-  debut="$(systemctl show -p ActiveEnterTimestamp --value "$1.service" 2>/dev/null)" || return 1
+  # en UTC : un fuseau local se relit mal (CST, HKT, WIB) et aucune relance n'aurait lieu
+  debut="$(TZ=UTC systemctl show -p ActiveEnterTimestamp --value "$1.service" 2>/dev/null)" || return 1
   # un horodatage vide se lirait « aujourd'hui à minuit »
-  [[ -n "$debut" ]] && debut="$(date -d "$debut" +%s 2>/dev/null)" || return 1
-  read -ra poses <<<"$PROV_HELPERS $PROV_HELPERS_DATA $PROV_EMBEDDED $PROV_EMBEDDED_ROOT"
-  for n in "${poses[@]}"; do
-    [[ "$(stat -c %Y "$HELPERS_DIR/$n" 2>/dev/null || echo 0)" -le "$debut" ]] || return 0
+  [[ -n "$debut" ]] && debut="$(TZ=UTC date -d "$debut" +%s 2>/dev/null)" || return 1
+  for n in $(unit_charge "$1"); do
+    [[ -z "$(find "$HELPERS_DIR/$n" -newermt "@$debut" -print -quit 2>/dev/null)" ]] || return 0
   done
   return 1
 }
@@ -275,7 +285,7 @@ apply() {
   for u in "${UNITS[@]}"; do
     if systemctl is-active --quiet "$u.service" 2>/dev/null; then
       # un daemon debout garde l'unité, l'environnement et le code de son démarrage
-      if ! unit_current "$u" || [[ "$env_change" -eq 1 ]] || auxiliaires_reposes_depuis "$u"; then relancer+=("$u"); fi
+      if ! unit_current "$u" || [[ "$env_change" -eq 1 ]] || charge_reposee_depuis "$u"; then relancer+=("$u"); fi
     fi
     unit_current "$u" && continue
     write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" <<<"$(unit_body "$u")" || verdict_apply
