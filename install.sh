@@ -87,7 +87,7 @@ if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   PORTE_BASH="bash ${BASH_SOURCE[0]}"
 else
   SCRIPT_DIR=""
-  PORTE_TIRAGE="curl -fsSL <install.sh> | "
+  PORTE_TIRAGE="curl -fsSL <install.sh> | "   # l'adresse de la porte, écrite une fois la base de la release connue
   PORTE_BASH="bash -s --"
 fi
 
@@ -225,7 +225,7 @@ signature() { # signature <artefact> — minisign si l'outil est là ; sinon le 
 obtenir() { # obtenir <artefact> <sha256> — dans KITS_DIR, vérifié ; rc 2 s'il était déjà là
   local a="$1" want="$2" f="$KITS_DIR/$1" got deja=0
   if [[ -f "$f" && "$(sha256sum "$f" | cut -d' ' -f1)" == "$want" ]]; then
-    echo "  $a : déjà là, sha256 vérifié"; deja=1
+    echo "  $a : déjà là, sha256 vérifié, rien n'est téléchargé"; deja=1
   else
     fetch "$BASE/$a" "$f" || { rm -f "$f"; echo "  ${R}$BASE/$a : téléchargement en échec — rien n'est posé.${N}"; return 1; }
     got="$(sha256sum "$f" | cut -d' ' -f1)"
@@ -287,7 +287,7 @@ source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vér
       echo "  La commande serait : $(delegue_dit)"
       exit 0
     fi
-    echo "  kit déjà posé, rien n'est téléchargé"
+    # un kit déjà posé se dit une fois, par obtenir, qui revérifie son archive
   else
     command -v curl >/dev/null 2>&1 || { echo "  ${R}curl est absent — apt install curl${N}"; exit 1; }
     mkdir -p "$KITS_DIR"
@@ -428,6 +428,12 @@ EOF
 # ─── 2. la source : l'arbre d'où tout se joue ─────────────────────────────────────────────────
 if [[ "$REPO_DONNE" -eq 0 && -n "$DOOR_BASE" ]]; then BASE="$DOOR_BASE"
 else BASE="${REPO_URL%.git}/releases/download/$LCARS_DOOR_VERSION"
+fi
+# pipée, une commande proposée retire la porte à l'adresse d'où elle vient : celle de sa release
+if [[ -n "$PORTE_TIRAGE" ]]; then
+  if [[ -n "$LCARS_DOOR_VERSION" ]]; then PORTE_TIRAGE="curl -fsSL $BASE/install.sh | "
+  else PORTE_TIRAGE="curl -fsSL ${REPO_URL%.git}/releases/latest/download/install.sh | "
+  fi
 fi
 KITS_DIR=""; PROVENANCE=""
 if [[ "$FROM_RELEASE" -eq 1 || -z "$SCRIPT_DIR" || ! -e "$SCRIPT_DIR/deploy/provision" ]]; then
@@ -577,7 +583,7 @@ if [[ "$DOCKER_OK" -eq 0 ]]; then
   elif [[ "$SUBSTRATE" == "wsl" ]]; then
     stop "${R}Docker est absent.${N} Les deux installations en ont besoin : la forge est un conteneur." \
          "Sous WSL, activer l'intégration WSL de Docker Desktop pour cette distribution, puis relancer."
-  elif [[ "$MODE" == "container" && "$SUBSTRATE" == "linux" ]]; then
+  elif [[ "$MODE" == "container" && "$SUBSTRATE" == "linux" && ( "$(fait channel)" == aucun || "$(fait channel)" == "$(fait channel_tree)" ) ]]; then
     stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas : l'installer, puis relancer." \
          "Ou donner la machine à l'installation dans le système, qui le pose :  $(relance workstation)"
   elif [[ "$MODE" == "container" ]]; then
@@ -641,22 +647,43 @@ if [[ "$MODE" == "workstation" ]]; then
 fi
 
 # ─── 6. le mode, et sa grille ─────────────────────────────────────────────────────────────────
+# une release en conteneur nomme son image ; absente du daemon, elle est tirée avant le up, qui ne tire jamais
+IMAGE_ETAT=inconnue
+if [[ "$MODE" == "container" && "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]]; then
+  if "$(fait docker_bin)" image inspect "$DOOR_IMAGE" >/dev/null 2>&1; then IMAGE_ETAT=presente; else IMAGE_ETAT=a_tirer; fi
+fi
 if [[ "$MODE" == "container" ]]; then
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     RETOUR="deploy/docker/bench/bench-down.sh --project $BASE_PROJET --yes : le conteneur, la forge, le runner et le magasin"
   else
     RETOUR="deploy/container -p $BASE_PROJET-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"
   fi
+  # mesuré sur .63 (docker natif, beta2) : banc 93 à 107 s image présente, 125 s tirage compris ; instance
+  # seule 7 s image présente ; le tirage anonyme de l'image, 16 à 31 s
+  if [[ "$WITH_BENCH" -eq 1 ]]; then DUREE_LA="~1 min 30"; DUREE_TIRER="~2 min"
+  else DUREE_LA="moins d'une minute"; DUREE_TIRER="~1 min"
+  fi
+  case "$IMAGE_ETAT" in
+    presente) DUREE="durée $DUREE_LA, l'image est sur ce daemon" ;;
+    a_tirer)  DUREE="durée $DUREE_TIRER, tirage de l'image compris" ;;
+    *)        DUREE="durée $DUREE_LA image présente, $DUREE_TIRER à tirer" ;;
+  esac
   cat <<EOF
   ${W}Installation en conteneur${N} — LCARS tourne dans Docker, la distribution
   n'est pas modifiée : aucun paquet, aucun compte, rien dans /etc ni /usr.
     Modifie    Docker : un conteneur et deux volumes au projet $BASE_PROJET-fleet, le magasin $BASE_PROJET-fleet-*
     Requiert   docker · la forge (ci-dessus)
-    Espace     ~3 Go · durée ~15 min · ports $(ou "$PORT_DECK") (deck), $(ou "$PORT_SSH") (ssh)
+    Espace     ~3 Go · $DUREE · ports $(ou "$PORT_DECK") (deck), $(ou "$PORT_SSH") (ssh)
+    Statut     deploy/container -p $BASE_PROJET-fleet status
     Retour     $RETOUR
-  Pour installer dans ce système à la place :  $(relance workstation)
-
 EOF
+  # l'installation dans ce système n'est proposée qu'à une machine que ce canal peut poser
+  case "$(fait channel)" in
+    aucun|"$(fait channel_tree)") echo "  Pour installer dans ce système à la place :  $(relance workstation)" ;;
+    invalide) ;;
+    *) echo "  Dans ce système : cette machine est posée par le canal « $(fait channel) » et cet arbre poserait « $(fait channel_tree) » — un canal ne se pose pas sur un autre." ;;
+  esac
+  echo ""
 else
   if [[ "$SUBSTRATE" == "wsl" ]]; then
     MODIFIE="/etc/wsl.conf, $RACINE, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"
@@ -747,11 +774,11 @@ else
     CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)
     RAPPEL="Installation en conteneur — deploy/container up"
   fi
-  # une release en conteneur nomme son image ; absente du daemon, elle est tirée avant le up, qui ne tire jamais
-  if [[ "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]]; then
+  if [[ "$IMAGE_ETAT" != inconnue ]]; then
     export LCARS_IMAGE="$DOOR_IMAGE"
-    if ! "$(fait docker_bin)" image inspect "$DOOR_IMAGE" >/dev/null 2>&1; then
-      PRE=("$DELEGUE" pull)
+    if [[ "$IMAGE_ETAT" == a_tirer ]]; then
+      # le projet visé : pull ne dit une suite qu'à une instance déjà posée, celle de ce projet
+      PRE=("$DELEGUE" --forge-project "$BASE_PROJET" pull)
       echo "  l'image de cette version n'est pas sur ce daemon : elle sera tirée d'abord ($DOOR_IMAGE)"
     fi
   fi

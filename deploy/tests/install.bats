@@ -904,7 +904,7 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   pipee --bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"n'est pas sur ce daemon : elle sera tirée d'abord (ghcr.io/o/r:$TAG)"* ]]
-  [[ "$output" == *"CONTAINER:pull"*"CONTAINER:--bench up"* ]]
+  [[ "$output" == *"CONTAINER:--forge-project lcars pull"*"CONTAINER:--bench up"* ]]
   [[ "$output" == *"IMAGE:ghcr.io/o/r:$TAG"* ]]
 }
 
@@ -934,7 +934,7 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   [ "$status" -eq 0 ]
   pipee --bench --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--dry-run : d'abord"*"container pull"*"La commande serait"* ]]
+  [[ "$output" == *"--dry-run : d'abord"*"container --forge-project lcars pull"*"La commande serait"* ]]
   refute_out "CONTAINER:" <<<"$output"
 }
 
@@ -968,11 +968,12 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   _release
   pipee
   [ "$status" -eq 1 ]
-  [[ "$output" == *"curl -fsSL <install.sh> | bash -s -- --bench"* ]]
+  [[ "$output" == *"curl -fsSL $SERVEUR_URL/install.sh | bash -s -- --bench"* ]]
+  refute_out "<install.sh>" <<<"$output"
   [[ "$output" != *"bash bash"* ]]
   pipee --workstation
   [[ "$output" == *"| bash -s -- --workstation --bench"* ]]
-  [[ "$output" == *"curl -fsSL <install.sh> | FORGE_BASE_URL=https://… bash -s -- --workstation" ]]
+  [[ "$output" == *"curl -fsSL $SERVEUR_URL/install.sh | FORGE_BASE_URL=https://… bash -s -- --workstation" ]]
 }
 
 suivre_remedes() { # suivre_remedes <commande> — la joue, puis le premier remède de chaque refus, tel qu'imprimé, jusqu'à un passage
@@ -984,8 +985,8 @@ suivre_remedes() { # suivre_remedes <commande> — la joue, puis le premier rem�
     cmd="$(sed -n 's/^.* : \{2,\}//p' <<<"$output" | head -1)"
     [ -n "$cmd" ] || { echo "refus sans remède, après : $SUITE"; echo "$output"; return 1; }
     SUITE+=" → $cmd"
-    # pipé, la porte est servie à la place de <install.sh>
-    cmd="${cmd/curl -fsSL <install.sh>/$tirage}"
+    # pipé, la porte est servie à la place de son adresse
+    cmd="${cmd/curl -fsSL ${SERVEUR_URL:-<aucune>}\/install.sh/$tirage}"
   done
   echo "les remèdes ne mènent à aucun passage : $SUITE"; return 1
 }
@@ -1113,7 +1114,7 @@ EOF
     pipee --workstation --bench "$drapeau"
     [ "$status" -eq 0 ] || { echo "$drapeau : $output"; return 1; }
     [[ "$output" == *"$drapeau : rien n'est téléchargé. Le préflight vit dans le kit, qui n'est pas là, ou dont l'archive ne porte plus sa somme."* ]]
-    refute_out 'kit déjà posé' <<<"$output"
+    refute_out 'déjà là' <<<"$output"
   done
   [ ! -s "$SERVEUR_LOG" ]
   [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
@@ -1125,6 +1126,51 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "${lines[-1]}" == "CONTAINER:--forge-project bob_10 up" ]]
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
+}
+
+@test "la grille du conteneur donne sa commande de statut, et sa durée mesurée selon le banc et l'image de la version" {
+  _daemon_avec_image non
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
+  pipee --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pipee --bench --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Espace     ~3 Go · durée ~2 min, tirage de l'image compris · ports"* ]]
+  [[ "$output" == *"Statut     deploy/container -p lcars-fleet status"$'\n'"    Retour     deploy/docker/bench/bench-down.sh --project lcars --yes"* ]]
+  refute_out '15 min' <<<"$output"
+  _daemon_avec_image oui
+  pipee --bench --check
+  [[ "$output" == *"durée ~1 min 30, l'image est sur ce daemon"* ]]
+  # hors release, l'image n'est pas nommée : les deux durées
+  local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
+  porte "$a" --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"durée moins d'une minute image présente, ~1 min à tirer"* ]]
+}
+
+@test "une commande proposée par la porte pipée porte l'adresse de sa release ; l'installation dans ce système n'est proposée qu'à une machine que ce canal peut poser" {
+  _release
+  pipee --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pipee --bench --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Pour installer dans ce système à la place :  curl -fsSL $SERVEUR_URL/install.sh | bash -s -- --workstation --bench --check"* ]]
+  refute_out '<install.sh>' <<<"$output"
+  # .63 : posée par un checkout, le kit d'une release y serait refusé par le préflight
+  local a; a="$(_arbre channel=source channel_tree=kit)"
+  porte "$a" --bench --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Dans ce système : cette machine est posée par le canal « source » et cet arbre poserait « kit » — un canal ne se pose pas sur un autre."* ]]
+  refute_out 'Pour installer dans ce système' <<<"$output"
+}
+
+@test "un kit déjà posé s'annonce en une ligne" {
+  _release
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pipee --workstation --bench --check
+  [ "$(grep -cE 'déjà (là|posé)' <<<"$output")" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"lcars-fleet-$TAG-otp27-x86_64.tar.gz : déjà là, sha256 vérifié, rien n'est téléchargé"* ]]
 }
 
 @test "sha256 faux dans la table : refus qui nomme attendu et obtenu, fichier effacé, rien de détaré" {
@@ -1210,7 +1256,7 @@ EOF
   pipee --workstation --bench
   [ "$status" -eq 0 ]
   pipee --workstation --bench --dry-run
-  [[ "$output" == *"kit déjà posé"*"Depuis le kit vérifié, dont root retire la copie à la sortie :"*"La commande serait :"$'\n'"    deploy/workstation up --bench" ]]
+  [[ "$output" == *"déjà là, sha256 vérifié, rien n'est téléchargé"*"Depuis le kit vérifié, dont root retire la copie à la sortie :"*"La commande serait :"$'\n'"    deploy/workstation up --bench" ]]
   refute_out 'lcars-kit\.|--faits' <<<"$output"
 }
 
