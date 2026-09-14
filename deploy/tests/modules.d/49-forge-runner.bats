@@ -111,13 +111,16 @@ mod() { run bash "$MODULE" "$1"; }
   [ "$(forge_requests 'select(.method == "DELETE") | .path' | jq -r .)" = /api/v1/admin/actions/runners/3 ]
 }
 
-@test "jeton master absent : dit, et ce n'est pas un échec d'apply" {
+@test "jeton master absent : dit au check comme à l'apply, sans dérive ni échec" {
   forge_runners 200 '{"runners":[],"total_count":0}'
   stub_delegue 0
   rm -f "$MASTER"
+  mod check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable (jeton master absent, API muette ou réponse illisible)"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"WARN  49-forge-runner: runner CI non enrôlable : aucun jeton master lisible ($MASTER)"* ]]
+  [[ "$output" == *"WARN  49-forge-runner: runner CI non enrôlable : aucun jeton master ($MASTER)"* ]]
   [ ! -e "$ARGV" ]
 }
 

@@ -777,24 +777,6 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, les choi
   printf '%s\n' "${out# }"
 }
 
-prov_file_state() { # prov_file_state <chemin> -> present | unreadable | absent | unmeasurable
-  local p="$1" d
-  if [[ -e "$p" ]]; then
-    [[ -r "$p" ]] && { printf 'present\n'; return 0; }
-    printf 'unreadable\n'; return 0
-  fi
-  d="$(dirname "$p")"
-  while [[ "$d" != "/" && ! -e "$d" ]]; do d="$(dirname "$d")"; done
-  if [[ -x "$d" ]]; then printf 'absent\n'; else printf 'unmeasurable\n'; fi
-}
-
-prov_state_why() { # prov_state_why <etat> <chemin>
-  case "$1" in
-    unreadable)   printf 'présent, mais illisible pour %s — rien n'"'"'est conclu sur son contenu (à relancer sous sudo pour le mesurer)\n' "$(id -un 2>/dev/null || echo "ce compte")" ;;
-    unmeasurable) printf 'NON MESURABLE ici : un répertoire du chemin (%s) n'"'"'est pas traversable par %s — ni présent ni absent, on ne sait pas\n' "$(dirname "$2")" "$(id -un 2>/dev/null || echo "ce compte")" ;;
-  esac
-}
-
 prov_delivery() { # prov_delivery [racine] -> `binary` | `source`
   local root="${1:-$(repo_root)}"
   if [[ -f "$root/$PROV_SOURCE_STAMP" ]]; then printf 'binary\n'; else printf 'source\n'; fi

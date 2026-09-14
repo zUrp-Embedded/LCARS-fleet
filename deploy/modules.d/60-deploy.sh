@@ -28,7 +28,7 @@ release_present() { [[ -x "$PREFIX_REL/bin/lcars_fleet" ]]; }
 
 intrus_bin() { # intrus_bin → les entrées de $PROV_PREFIX/bin que le manifeste ne nomme pas
   local e
-  [[ -d "$PROV_PREFIX/bin" && -x "$PROV_PREFIX/bin" ]] || return 0
+  [[ -d "$PROV_PREFIX/bin" ]] || return 0
   for e in "$PROV_PREFIX"/bin/*; do
     [[ -e "$e" || -L "$e" ]] || continue
     mf_names_has "${e##*/}" || printf '%s\n' "$e"
@@ -36,7 +36,7 @@ intrus_bin() { # intrus_bin → les entrées de $PROV_PREFIX/bin que le manifest
 }
 intrus_links() { # intrus_links → les symlinks de $PROV_LINK_DIR qui visent un intrus de $PROV_PREFIX/bin
   local e t
-  [[ -d "$PROV_LINK_DIR" && -x "$PROV_LINK_DIR" ]] || return 0
+  [[ -d "$PROV_LINK_DIR" ]] || return 0
   for e in "$PROV_LINK_DIR"/*; do
     [[ -L "$e" ]] || continue
     t="$(readlink "$e")"
@@ -104,12 +104,8 @@ clore_la_pose() {
 
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
-  local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
-  elif [[ "$_pfx" != "present" && "$_pfx" != "absent" ]]; then
-    p_warn "release non mesurable — $PROV_PREFIX $(prov_state_why "$_pfx" "$PROV_PREFIX")"
-    verdict_check
   else
     p_drift "release absente sous $PROV_PREFIX"
     verdict_check
@@ -123,11 +119,8 @@ check() {
   while read -r name mode is_link; do
     if [[ "$mode" == "exec" && ! -x "$PROV_PREFIX/bin/$name" ]]; then
       p_drift "bin/$name absent/non exécutable sous $PROV_PREFIX/bin"
-    elif [[ "$mode" == "noexec" && ! -r "$PROV_PREFIX/bin/$name" ]]; then
-      case "$(prov_file_state "$PROV_PREFIX/bin/$name")" in
-        absent) p_drift "bin/$name absent sous $PROV_PREFIX/bin — l'apply le pose" ;;
-        *)      p_warn  "bin/$name $(prov_state_why "$(prov_file_state "$PROV_PREFIX/bin/$name")" "$PROV_PREFIX/bin/$name")" ;;
-      esac
+    elif [[ "$mode" == "noexec" && ! -e "$PROV_PREFIX/bin/$name" ]]; then
+      p_drift "bin/$name absent sous $PROV_PREFIX/bin — l'apply le pose"
     else
       p_ok "bin/$name"
     fi

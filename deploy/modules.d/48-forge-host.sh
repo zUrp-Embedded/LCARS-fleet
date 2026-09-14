@@ -88,12 +88,9 @@ seat_binding_report() { # seat_binding_report <check|apply>
     p_drift "siège : « $PROV_FORGE_ADMIN » côté unix, « $PROV_SEAT_LOGIN » côté $PROV_SEAT_SOURCE — deux acteurs pour un rôle, le lien n'est pas enregistré tant qu'ils ne s'accordent pas"
     return 0
   fi
-  local _carte _uid; _carte="$(prov_file_state "$PROV_UID_MAP_FILE")"
-  _uid="$(id -u -- "$PROV_SEAT_LOGIN" 2>/dev/null || true)"
+  local _uid; _uid="$(id -u -- "$PROV_SEAT_LOGIN" 2>/dev/null || true)"
   if [[ -n "$(prov_seat_from_map)" ]]; then
     p_ok "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
-  elif [[ "$_carte" != "present" && "$_carte" != "absent" ]]; then
-    p_warn "siège : carte des uid $(prov_state_why "$_carte" "$PROV_UID_MAP_FILE") — rien n'est conclu sur l'enregistrement de « $PROV_SEAT_LOGIN »"
   elif [[ ! "$_uid" =~ ^[0-9]+$ ]]; then
     p_drift "siège : « $PROV_SEAT_LOGIN » n'a pas de compte sur cette machine — la carte des uid ne l'enregistre pas sans uid ; créer ce compte, ou désigner un compte existant par PROV_FORGE_ADMIN"
   elif [[ "$mode" != "apply" ]]; then
@@ -121,20 +118,15 @@ preconditions() { # preconditions <check|apply> — ce qui empêche de sonder ou
 }
 
 fichier_pose() { # fichier_pose <fichier> <libellé> [valeur attendue] — sans valeur, un fichier non vide suffit
-  local etat lu; etat="$(prov_file_state "$1")"
-  case "$etat" in
-    absent) p_drift "$1 absent ($2) — l'apply le pose" ;;
-    present|unreadable)
-      if [[ $# -eq 2 ]]; then
-        if [[ -s "$1" ]]; then p_ok "$2 : $1"; else p_drift "$1 vide ($2) — l'apply le pose"; fi
-      elif [[ "$etat" == unreadable ]]; then
-        p_warn "$2 : $1 $(prov_state_why "$etat" "$1")"
-      else
-        lu="$(head -n1 "$1" | tr -d '[:space:]')"
-        if [[ "$lu" == "$3" ]]; then p_ok "$2 : $3 ($1)"; else p_drift "$1 porte « $lu », attendu « $3 » ($2) — l'apply le repose"; fi
-      fi ;;
-    *) p_warn "$2 : $1 $(prov_state_why "$etat" "$1")" ;;
-  esac
+  local lu
+  if [[ ! -e "$1" ]]; then
+    p_drift "$1 absent ($2) — l'apply le pose"
+  elif [[ $# -eq 2 ]]; then
+    if [[ -s "$1" ]]; then p_ok "$2 : $1"; else p_drift "$1 vide ($2) — l'apply le pose"; fi
+  else
+    lu="$(head -n1 "$1" | tr -d '[:space:]')"
+    if [[ "$lu" == "$3" ]]; then p_ok "$2 : $3 ($1)"; else p_drift "$1 porte « $lu », attendu « $3 » ($2) — l'apply le repose"; fi
+  fi
 }
 
 check() {

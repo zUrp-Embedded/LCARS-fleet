@@ -10,8 +10,8 @@
 #
 # Sous WSL le daemon vient de Docker Desktop, dans le conteneur on est déjà dedans : ce module ne
 # vit que sur le substrat linux. Il pose docker-ce une fois. Un daemon qui répond est
-# conforme ; un daemon qui refuse l'utilisateur, ou un moteur posé (docker-ce ou docker.io) dont le
-# service est arrêté, se disent sans que rien ne soit reposé.
+# conforme ; un moteur posé (docker-ce ou docker.io) dont le service est arrêté se dit sans que
+# rien ne soit reposé.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -67,15 +67,13 @@ EOF
   fi
 }
 
-# etat_daemon — pose ETAT (repond | refuse | arrete | absent) et ETAT_WHY ; des globales, pas une
+# etat_daemon — pose ETAT (repond | arrete | absent) et ETAT_WHY ; des globales, pas une
 # sortie : la sonde pose elle-même des globales qu'un sous-shell perdrait
 etat_daemon() {
   local moteur
   ETAT=""; ETAT_WHY=""
   if docker_endpoint; then
     ETAT=repond
-  elif [[ "$PROV_DOCKER_DENIED" == "1" ]]; then
-    ETAT=refuse; ETAT_WHY="$PROV_DOCKER_WHY"
   elif moteur="$(moteur_pose)"; then
     ETAT=arrete; ETAT_WHY="$moteur est posé mais aucun daemon ne répond — démarrer le service : systemctl start docker"
   else
@@ -87,7 +85,6 @@ check() {
   etat_daemon
   case "$ETAT" in
     repond) p_ok "un daemon docker répond ($PROV_DOCKER_HOST)" ;;
-    refuse) p_drift "un daemon docker répond mais refuse cet utilisateur : $ETAT_WHY" ;;
     arrete) p_drift "$ETAT_WHY" ;;
     absent) p_drift "aucun daemon docker — docker-ce sera posé depuis download.docker.com" ;;
   esac
@@ -98,7 +95,6 @@ apply() {
   etat_daemon
   case "$ETAT" in
     repond) p_ok "un daemon docker répond ($PROV_DOCKER_HOST) — rien à poser"; verdict_apply ;;
-    refuse) p_fail "un daemon docker répond mais refuse cet utilisateur : $ETAT_WHY — rien n'est posé"; verdict_apply ;;
     arrete) p_fail "$ETAT_WHY — rien n'est reposé"; verdict_apply ;;
   esac
   ensure_docker_repo || verdict_apply

@@ -19,7 +19,7 @@ JOB_URL="$(job_forge_url "$PROV_FORGE_HOST_PORT" "$PROV_ADVERTISE")" || JOB_URL=
 SANS_ADRESSE="aucune adresse de cette machine ne joint la forge depuis un job CI (${PROV_ADVERTISE_WHY:-adresse annoncée : $PROV_ADVERTISE}) — le runner n'est pas enrôlé sur une adresse de loopback, qui désigne le conteneur du job lui-même"
 
 RUNNERS=""
-lire_runners() { # lire_runners → RUNNERS, la liste des runners de la forge en JSON ; rc 1 sans jeton lisible, sans réponse ou sans liste
+lire_runners() { # lire_runners → RUNNERS, la liste des runners de la forge en JSON ; rc 1 sans jeton, sans réponse ou sans liste
   local body rc=0
   RUNNERS=""
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] || return 1
@@ -64,7 +64,7 @@ retirer_perimes() {
 converge_ci_runner() {
   [[ -n "$JOB_URL" ]] || { p_drift "$SANS_ADRESSE"; return 0; }
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] \
-    || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"; return 0; }
+    || { p_warn "runner CI non enrôlable : aucun jeton master ($PROV_MASTER_TOKEN_FILE)"; return 0; }
   # une liste illisible n'est pas une liste vide : forge-runner.sh remplacerait le runner existant
   lire_runners \
     || { p_warn "runner CI non mesurable (API muette ou réponse illisible) — rien n'est enrôlé sur une liste inconnue"; return 0; }
@@ -109,7 +109,7 @@ check() {
   fi
   [[ -n "$JOB_URL" ]] || { p_drift "$SANS_ADRESSE"; verdict_check; }
   if ! lire_runners; then
-    p_warn "runner CI non mesurable (jeton master illisible ou API muette) — la CI peut être sans machine ; relancer sous sudo pour conclure"
+    p_warn "runner CI non mesurable (jeton master absent, API muette ou réponse illisible) — la CI peut être sans machine"
     verdict_check
   fi
   local n ecart perime

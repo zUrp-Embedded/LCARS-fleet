@@ -712,17 +712,6 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   [ "$output" = "http://forge.test:3000" ]
 }
 
-@test "check : un services.env illisible ne rend pas « aucun LCARS_SYSADMIN_UID » — non sondable, dit sans drift" {
-  # joué par un compte qui ne lit pas un 0000
-  [ "$(id -u)" -ne 0 ]
-  mod apply
-  chmod 0000 "$ENVF"
-  mod check
-  chmod 0640 "$ENVF"
-  [[ "$output" == *"WARN  64-services: LCARS_SYSADMIN_UID non sondable — $ENVF"* ]]
-  [[ "$output" != *"aucun LCARS_SYSADMIN_UID"* ]]
-}
-
 @test "probe_seat_uid : services.env ABSENT est une derive DITE, pas une mort de sed sous pipefail" {
   run bash -c 'set -euo pipefail; export PROVISION_MODULE=64-services; source "$PROVISION_LIB"
     SERVICES_ENV="$1"; SEAT_UID_FILE=/nonexistent/seat.uid

@@ -21,64 +21,6 @@ setup() {
   [ -f "$LIB" ]
   [ -f "$RUNNER" ]
   export PROVISION_LIB="$LIB"
-  export FERME="$BATS_TEST_TMPDIR/ferme"
-}
-
-# Joue une fonction de la lib, sans rien d'autre.
-lib() { bash -c '. "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$LIB" "$@"; }
-
-teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
-
-
-@test "ETAT : un fichier lisible est « present »" {
-  echo x > "$BATS_TEST_TMPDIR/f"
-  run lib 'prov_file_state "$BATS_TEST_TMPDIR/f"'
-  [ "$output" = present ]
-}
-
-@test "ETAT : un fichier qui n'est pas la est « absent » — et l'absence se MERITE" {
-  run lib 'prov_file_state "$BATS_TEST_TMPDIR/pas-la"'
-  [ "$output" = absent ]
-}
-
-@test "ETAT : un fichier PRESENT mais non lisible n'est pas « absent »" {
-  echo x > "$BATS_TEST_TMPDIR/secret"
-  chmod 0000 "$BATS_TEST_TMPDIR/secret"
-  run lib 'prov_file_state "$BATS_TEST_TMPDIR/secret"'
-  chmod 0644 "$BATS_TEST_TMPDIR/secret"
-  [ "$output" = unreadable ]
-}
-
-@test "ETAT : sous un repertoire NON TRAVERSABLE, rien n'est conclu" {
-  # Un `-e` faux ne prouve l'absence que si l'on peut traverser le parent. Sous un repertoire ferme
-  # TOUT parait absent — c'est la facon la plus economique de fabriquer un inventaire faux.
-  mkdir -p "$FERME/dedans"
-  chmod 0000 "$FERME"
-  run lib 'prov_file_state "$FERME/dedans/x"'
-  chmod 0755 "$FERME"
-  [ "$output" = unmeasurable ]
-}
-
-@test "ETAT : les deux etats non concluants DISENT POURQUOI" {
-  # « non mesurable » sans le motif est un troisieme verdict aussi opaque que les deux qu'il
-  # remplace : l'operateur sait qu'il ne sait pas, et rien de plus.
-  echo x > "$BATS_TEST_TMPDIR/secret"; chmod 0000 "$BATS_TEST_TMPDIR/secret"
-  run lib 'prov_state_why unreadable "$BATS_TEST_TMPDIR/secret"'
-  chmod 0644 "$BATS_TEST_TMPDIR/secret"
-  [[ "$output" == *"illisible"* ]]
-  [[ "$output" == *"sudo"* ]]                       # et il dit le geste qui leve l'ignorance
-
-  run lib 'prov_state_why unmeasurable /a/b/c'
-  [[ "$output" == *"NON MESURABLE"* ]]
-  [[ "$output" == *"/a/b"* ]]                       # et il NOMME le repertoire qui bloque
-}
-
-@test "ETAT : un chemin dont un ANCETRE lointain est ferme n'est pas dit absent" {
-  mkdir -p "$FERME"
-  chmod 0000 "$FERME"
-  run lib 'prov_file_state "$FERME/a/b/c/d"'
-  chmod 0755 "$FERME"
-  [ "$output" = unmeasurable ]
 }
 
 

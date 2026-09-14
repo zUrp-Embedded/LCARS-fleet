@@ -65,14 +65,13 @@ fn() { run bash -c "set -uo pipefail; source <(sed '\$d' '$MOD') >/dev/null 2>&1
   [[ "$output" != *"verrou"* ]]
 }
 
-@test "check : un prefix non traversable ne rend pas « release absente » — rien n'est conclu, et le pourquoi est dit" {
-  # joué hors de l'espace de noms, par un compte qui ne traverse pas un 0000
-  [ "$(id -u)" -ne 0 ]
-  release_posee; chmod 0000 "$PREFIX"
-  fn check
-  chmod 0750 "$PREFIX"
-  [[ "$output" == *"WARN  60-deploy: release non mesurable — $PREFIX"* ]]
-  [[ "$output" != *"release absente"* ]]
+@test "check : une entrée noexec du manifeste absente de bin/ est un drift nommé" {
+  local n; n="$(awk '$2 == "noexec" { print $1; exit }' "$MANIFEST")"
+  [ -n "$n" ]
+  release_posee; verrouille; rm -f "$PREFIX/bin/$n"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 60-deploy: bin/$n absent sous $PREFIX/bin — l'apply le pose"* ]]
 }
 
 @test "check : release posée, prefix non verrouillé — drift qui dit le mode attendu" {

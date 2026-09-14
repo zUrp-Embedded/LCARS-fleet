@@ -51,9 +51,9 @@ EOS
 
 mod() { run bash "$SRC" "$1"; }
 
-socket_pose() { # socket_pose [mode] — une vraie socket unix à l'emplacement du daemon, sous le décor
+socket_pose() { # socket_pose — une vraie socket unix à l'emplacement du daemon, sous le décor
   python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' "$SOCK"
-  chmod "${1:-0660}" "$SOCK"
+  chmod 0660 "$SOCK"
 }
 
 # os_release <ID> <VERSION_CODENAME> — la distribution du décor
@@ -78,14 +78,6 @@ cle_du_pin() {
   [[ "$output" == *"DRIFT"*"docker-ce sera posé"* ]]
 }
 
-@test "check : un daemon qui refuse l'utilisateur est dit tel quel, pas « absent »" {
-  socket_pose 0000
-  mod check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT"*"refuse cet utilisateur"* ]]
-  [[ "$output" != *"sera posé"* ]]
-}
-
 @test "check : un moteur posé dont le service est arrêté est nommé, docker-ce comme docker.io, avec le geste" {
   local p
   for p in docker-ce docker.io; do
@@ -102,14 +94,6 @@ cle_du_pin() {
   mod apply
   [ "$status" -eq 0 ]
   [ ! -e "$TRACE" ]
-}
-
-@test "apply : un daemon qui refuse l'utilisateur est un échec nommé, sans dépôt ni paquet" {
-  socket_pose 0000
-  mod apply
-  [ "$status" -eq 1 ]
-  [ ! -e "$TRACE" ]
-  [[ "$output" == *"FAIL"*"refuse cet utilisateur"* ]]
 }
 
 @test "apply : docker.io posé et arrêté est un échec nommé — docker-ce n'est pas posé à côté" {

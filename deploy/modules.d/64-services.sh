@@ -188,11 +188,6 @@ probe_seat_uid() {
   local declared name
   declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -z "$declared" ]]; then
-    local _st; _st="$(prov_file_state "$SERVICES_ENV")"
-    if [[ "$_st" != "present" && "$_st" != "absent" ]]; then
-      p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
-      return 0
-    fi
     p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — sans siège déclaré, is_fleet_human répond non à tout le monde et le convergeur refuse de démarrer (la garde du siège, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
     return 0
   fi
