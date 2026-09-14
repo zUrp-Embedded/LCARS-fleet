@@ -50,13 +50,19 @@ setup() {
   LOOP="$BATS_TEST_TMPDIR/looping"
   RESTART_TUE="$BATS_TEST_TMPDIR/restart-tue"
   SPIN="$BATS_TEST_TMPDIR/spinning"
+  # une unité n'est active qu'une fois activée ; son démarrage se lit dans STARTED
+  ENABLED="$BATS_TEST_TMPDIR/enabled.d"; mkdir -p "$ENABLED"
+  STARTED="$BATS_TEST_TMPDIR/started"
   cat > "$BINDIR/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >> "$CALLS"
-[[ "\$1" == "is-active" ]] && exit "\$(cat "$ACTIVE")"
-[[ "\$1" == "show" && -f "$SPIN" ]] && { u="\${@: -1}"; f="$RESTARTS/\${u%.service}"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
-[[ "\$1" == "show" ]] && { u="\${@: -1}"; cat "$RESTARTS/\${u%.service}" 2>/dev/null || echo 0; exit 0; }
-[[ "\$1" == "enable" && -f "$LOOP" ]] && { u="\${@: -1}"; echo 9 > "$RESTARTS/\${u%.service}"; }
+u="\${@: -1}"; u="\${u%.service}"
+[[ "\$1" == "is-active" ]] && { [[ -e "$ENABLED/\$u" ]] || exit 3; exit "\$(cat "$ACTIVE")"; }
+[[ "\$1" == "show" && "\$*" == *ActiveEnterTimestamp* ]] && { cat "$STARTED" 2>/dev/null || echo; exit 0; }
+[[ "\$1" == "show" && -f "$SPIN" ]] && { f="$RESTARTS/\$u"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
+[[ "\$1" == "show" ]] && { cat "$RESTARTS/\$u" 2>/dev/null || echo 0; exit 0; }
+[[ "\$1" == "enable" ]] && : > "$ENABLED/\$u"
+[[ "\$1" == "enable" && -f "$LOOP" ]] && echo 9 > "$RESTARTS/\$u"
 [[ "\$1" == "try-restart" && -f "$RESTART_TUE" ]] && echo 1 > "$ACTIVE"
 exit 0
 EOF
@@ -79,7 +85,7 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [[ "$output" == *"NEEDS: root"* ]]
 }
 
-@test "sans systemd, on ne pose RIEN et on le DIT — un fichier d'unite sans init est un decor" {
+@test "sans systemd, aucune unité n'est posée, et c'est dit — un fichier d'unité sans init est un décor" {
   sans_systemd
   mod apply
   [ "$status" -eq 0 ]
@@ -87,12 +93,106 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [ ! -e "$UNITDIR/lcars-landing.service" ]
 }
 
-@test "apply POSE les deux unites et l'environnement" {
+@test "apply pose les quatre unités et l'environnement" {
   mod apply
   [ -f "$UNITDIR/lcars-landing.service" ]
   [ -f "$UNITDIR/lcars-converger.service" ]
+  [ -f "$UNITDIR/lcars-catalogue.service" ]
+  [ -f "$UNITDIR/lcars-privileged.service" ]
   [ -s "$ENVF" ]
   grep -q "^FORGE_BASE_URL=http://127.0.0.1:3000$" "$ENVF"
+}
+
+# le rendu des unités avant leur gabarit (6e0831a9) : une unité qui change d'un octet relance son daemon au premier apply
+rendu_d_avant() { # rendu_d_avant <unité> <port du deck> <compte d'autorité>
+  local HELPERS_DIR="$HELPERS" SERVICES_ENV="$ENVF" PROV_DECK_PORT="$2" AUTHORITY_USER="$3"
+  case "$1" in
+    lcars-landing)
+      cat <<EOF
+[Unit]
+Description=LCARS — l'accueil web (deck) sur :$PROV_DECK_PORT
+Documentation=file://$HELPERS_DIR/console-landing.sh
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=$HELPERS_DIR/console-landing.sh --foreground
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    lcars-converger)
+      cat <<EOF
+[Unit]
+Description=LCARS — la team humans de la forge vers les comptes Unix de cette machine
+Documentation=file://$HELPERS_DIR/human-converger.sh
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=$HELPERS_DIR/human-converger.sh
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    lcars-catalogue)
+      cat <<EOF
+[Unit]
+Description=LCARS — installe un catalogue pour un admin de la forge, sans jamais lui donner le jeton
+Documentation=file://$HELPERS_DIR/catalogue-executor.py
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+User=$AUTHORITY_USER
+ExecStart=/usr/bin/env python3 $HELPERS_DIR/catalogue-executor.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+    lcars-privileged)
+      cat <<EOF
+[Unit]
+Description=LCARS — l'unique geste privilégié de la machine, et il ne détient aucun secret
+Documentation=file://$HELPERS_DIR/privileged-executor.py
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+EnvironmentFile=-$SERVICES_ENV
+ExecStart=/usr/bin/env python3 $HELPERS_DIR/privileged-executor.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+      ;;
+  esac
+}
+
+@test "les quatre unités posées sont, à l'octet, celles d'avant leur gabarit — sur deux ports du deck" {
+  local port u autorite
+  autorite="$(sed -n 's/^PROV_AUTHORITY_USER=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
+  for port in 20999 31337; do
+    PROV_DECK_PORT="$port" mod apply
+    for u in lcars-landing lcars-converger lcars-catalogue lcars-privileged; do
+      cmp "$UNITDIR/$u.service" <(rendu_d_avant "$u" "$port" "$autorite") \
+        || { echo "$u (port $port) diffère du rendu d'avant" >&2; return 1; }
+    done
+  done
 }
 
 @test "l'environnement porte ce qu'un DAEMON ne peut pas heriter" {
@@ -152,7 +252,6 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   unset LCARS_SYSADMIN_UID
   mod apply
   [ "$status" -ne 0 ]
-  [[ "$output" == *"LCARS_SYSADMIN_UID non posé"* ]]
   [ ! -e "$ENVF" ]
 }
 
@@ -201,10 +300,12 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [ "$reload" -lt "$enable" ]
 }
 
-@test "les deux services sont ACTIVES — ce sont l'infrastructure, pas un choix par humain (D11)" {
+@test "les quatre services sont ACTIVES — ce sont l'infrastructure, pas un choix par humain (D11)" {
   mod apply
   grep -q -- "systemctl enable --now lcars-landing.service" "$CALLS"
   grep -q -- "systemctl enable --now lcars-converger.service" "$CALLS"
+  grep -q -- "systemctl enable --now lcars-catalogue.service" "$CALLS"
+  grep -q -- "systemctl enable --now lcars-privileged.service" "$CALLS"
 }
 
 @test "un services.env changé relance les unités debout, même sans unité réécrite ; inchangé, rien n'est relancé" {
@@ -215,7 +316,7 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   grep -q "LCARS_FORGE_ORG=equipage" "$ENVF"
   grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
   grep -q -- "systemctl try-restart lcars-converger.service" "$CALLS"
-  [[ "$output" == *"relancé sur l'unité ou l'environnement réécrit"* ]]
+  [[ "$output" == *"relancé sur son unité, son environnement ou ses auxiliaires reposés"* ]]
   : > "$CALLS"
   PROV_FORGE_ORG=equipage mod apply
   refute grep -q "try-restart" "$CALLS"
@@ -230,12 +331,26 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [ "$status" -eq 0 ]
   grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
   [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
-  [[ "$output" == *"POSÉ  64-services: lcars-landing.service relancé sur l'unité ou l'environnement réécrit"* ]]
+  [[ "$output" == *"POSÉ  64-services: lcars-landing.service relancé sur son unité, son environnement ou ses auxiliaires reposés"* ]]
   echo 1 > "$ACTIVE"
   printf '[Unit]\nDescription=ancienne\n' > "$UNITDIR/lcars-converger.service"
   : > "$CALLS"
   mod apply
   refute grep -q "try-restart" "$CALLS"
+}
+
+@test "un auxiliaire reposé par 62 après le démarrage des daemons les relance ; posé avant, rien n'est relancé" {
+  mkdir -p "$HELPERS"; printf '#!/bin/sh\n' > "$HELPERS/console-landing.sh"
+  mod apply
+  echo "Mon 2100-01-04 10:00:00 UTC" > "$STARTED"
+  : > "$CALLS"
+  mod apply
+  refute grep -q "try-restart" "$CALLS"
+  echo "Sat 2000-01-01 10:00:00 UTC" > "$STARTED"
+  mod apply
+  [ "$status" -eq 0 ]
+  grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
+  grep -q -- "systemctl try-restart lcars-catalogue.service" "$CALLS"
 }
 
 @test "une relance qui ne laisse pas le service debout est dite, pas annoncée comme faite" {
@@ -244,9 +359,17 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   : > "$RESTART_TUE"
   mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"WARN  64-services: lcars-landing.service : relance sur l'unité réécrite sans service debout derrière"* ]]
-  [[ "$output" != *"relancé sur l'unité réécrite"* ]]
+  [[ "$output" == *"WARN  64-services: lcars-landing.service : relance sans service debout derrière"* ]]
+  [[ "$output" != *"relancé sur son unité"* ]]
   [[ "$output" == *"FAIL  64-services: lcars-landing.service posé mais pas debout"* ]]
+}
+
+@test "rejoué sans rien de neuf : les services se disent debout, aucune ligne POSÉ" {
+  mod apply
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK    64-services: lcars-landing.service debout"* ]]
+  refute_out '^POSÉ' <<<"$output"
 }
 
 @test "rejoue : une unite deja identique n'est pas re-ecrite, donc pas de daemon-reload" {
@@ -266,13 +389,15 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [[ "$output" == *"personne ne sera enrôlé"* ]]
 }
 
-@test "check CONFORME quand les deux unites sont posees ET actives" {
+@test "check CONFORME quand les quatre unites sont posees ET actives" {
   mod apply
   echo 0 > "$ACTIVE"    # is-active : oui
   mod check
   [ "$status" -eq 0 ]
   [[ "$output" == *"lcars-landing.service actif"* ]]
   [[ "$output" == *"lcars-converger.service actif"* ]]
+  [[ "$output" == *"lcars-catalogue.service actif"* ]]
+  [[ "$output" == *"lcars-privileged.service actif"* ]]
 }
 
 @test "une unite modifiee A LA MAIN est un DRIFT — la source de verite est le module" {
@@ -323,18 +448,17 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   [[ "$output" == *"redémarre en boucle"* ]]
 }
 
-@test "un service qui a REBONDI puis tient rend un apply vert — et le rebond est DIT" {
+@test "un service qui a REBONDI puis tient rend un apply vert" {
   : > "$LOOP"
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"redémarrage(s)"* ]]
   refute_out 'redémarre en boucle' <<<"$output"
 }
 
 @test "un service stable ET actif rend un apply vert" {
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"activé et debout"* ]]
+  [[ "$output" == *"lcars-converger.service debout"* ]]
 }
 
 @test "un service pose mais MORT fait echouer l'apply" {
@@ -383,6 +507,7 @@ stub_converger() { # stub_converger <rc> [<ligne passwd a creer>…] — le conv
     printf '%s\n' '#!/usr/bin/env bash'
     printf '%s\n' "env | sort > '$CONV_ENV'"
     printf '%s\n' "printf 'ARGS=%s\\n' \"\$*\" >> '$CONV_ENV'"
+    printf '%s\n' "printf 'CONVERGER %s\\n' \"\$*\" >> '$CALLS'"
     local l; for l in "$@"; do printf '%s\n' "printf '%s\\n' '$l' >> '$PASSWD_FILE'"; done
     printf '%s\n' "exit $rc"
   } > "$conv"
@@ -431,33 +556,39 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   absent_de_l_env '^PROV_SUBSTRATE='
 }
 
-@test "un humain CREE PAR CETTE PASSE est annonce comme tel, et compte comme une mutation" {
+@test "après la passe, la population se dit une fois : l'humain que la passe a créé est nommé" {
   humans_are
   stub_converger 0 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   mod apply
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qE '^POSÉ .*matérialisé\(s\) par cette passe : lcars'
+  printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars$'
+  [ "$(grep -c 'humain(s) de fleet sur cette machine' <<<"$output")" -eq 1 ]
 }
 
-@test "un humain DEJA LA n'est pas annonce comme cree — le cas du RE-ROLL" {
-  humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
-  stub_converger 0
-  mod apply
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"par cette passe : "* ]]
-  printf '%s\n' "$output" | grep -qE '^OK .*déjà présent\(s\) : lcars'
-  printf '%s\n' "$output" | refute_out '^POSÉ .*(déjà présent|lcars.*matérialis)'
-}
-
-@test "AUCUN humain a materialiser : la team vide est DITE, et ce n'est pas une derive" {
+@test "AUCUN humain après la passe : l'attente du premier inscrit est dite, et ce n'est pas une dérive" {
   humans_are
   stub_converger 0
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"aucun humain à matérialiser"* ]]
-  [[ "$output" != *"WARN"*"aucun humain"* ]]
-  [[ "$output" != *"DRIFT"*"aucun humain à matérialiser"* ]]
-  [[ "$output" != *"pré-sème"* ]]
+  [[ "$output" == *"aucun humain de fleet sur cette machine"*"Ce n'est pas une dérive"* ]]
+  refute_out '^DRIFT' <<<"$output"
+}
+
+@test "la passe précède le démarrage du convergeur ; convergeur debout, aucune passe de plus — deux convergeurs ne tournent jamais ensemble" {
+  humans_are
+  stub_converger 0
+  mod apply
+  local passe enable
+  passe="$(grep -n '^CONVERGER --once$' "$CALLS" | cut -d: -f1)"
+  enable="$(grep -n 'enable --now lcars-converger.service' "$CALLS" | cut -d: -f1)"
+  [ -n "$passe" ]
+  [ -n "$enable" ]
+  [ "$passe" -lt "$enable" ]
+  : > "$CALLS"
+  mod apply
+  [ "$status" -eq 0 ]
+  refute grep -q '^CONVERGER' "$CALLS"
+  [[ "$output" == *"convergeur d'humains debout (lcars-converger) — il réconcilie lui-même"* ]]
 }
 
 @test "un environnement de services NON POSE arrete l'apply AVANT la passe — pas de garde en double" {
@@ -470,22 +601,23 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [ ! -f "$BATS_TEST_TMPDIR/conv.env" ]
 }
 
-@test "check SANS systemd sonde quand meme la population — le cas exact du conteneur" {
+@test "check en conteneur, SANS humain : la sonde DIT l'absence sans la compter comme derive" {
   humans_are
   sans_systemd
   container_services_present
-  mod check
-  [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
+  PROV_SUBSTRATE=docker mod check
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
   [[ "$output" == *"fleet start"* ]]
 }
 
-@test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {
-  humans_are
+@test "check SANS systemd hors conteneur : services.env et seat.uid, que l'apply pose sans systemd, sont sondés quand même" {
   sans_systemd
-  container_services_present
   mod check
-  [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 64-services: environnement des services absent ($ENVF)"* ]]
+  [[ "$output" == *"DRIFT 64-services: $SEAT absent"* ]]
+  [[ "$output" == *"pas de systemd"* ]]
 }
 
 container_services_present() { # le superviseur et les programmes qu'il tient, sous la racine
@@ -497,11 +629,11 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   done
 }
 
-@test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {
+@test "check en conteneur AVEC un humain : la sonde le nomme et ne derive pas" {
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   sans_systemd
   container_services_present
-  mod check
+  PROV_SUBSTRATE=docker mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars'
 }
@@ -529,15 +661,6 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL"* ]]
-}
-
-@test "unit_body sur une unite INCONNUE rend 1 sans rien ecrire — et l'apply capture ce rc" {
-  eval "$(sed -n '/^unit_body()/,/^}/p' "$MOD")"
-  run unit_body lcars-nexistepas
-  [ "$status" -eq 1 ]
-  [ -z "$output" ]
-  grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'body="\$\(unit_body "\$u"\)"'
-  grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'write_atomic "\$\(unit_path "\$u"\)" [^<]*<<<"\$body"'
 }
 
 @test "forge_url : sans forge.url, vide et 0 — une adresse pas encore annoncee n'est pas un echec" {

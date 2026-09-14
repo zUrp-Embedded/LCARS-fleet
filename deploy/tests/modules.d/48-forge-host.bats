@@ -40,9 +40,9 @@ case "\$*" in
   version*)                       echo "29.0.0"; exit 0 ;;
   "compose version"*)             echo "v2"; exit 0 ;;
   compose*" up -d"*)              echo 'GET /api/v1/version 200 {"version":"1.24.0"}' >> "$FORGE_DOUBLE_DIR/routes"; exit 0 ;;
-  "ps --format {{.ID}}")          echo abc123; exit 0 ;;
   ps*"--format {{.Ports}}")       [[ -z "\${STUB_PORTS:-}" ]] || echo "\$STUB_PORTS"; exit 0 ;;
   ps*publish=*)                   [[ -z "\${STUB_PUBLISH:-}" ]] || echo "\$STUB_PUBLISH"; exit 0 ;;
+  ps*"--format {{.Names}}")       echo "\${STUB_NAME-bob_9-forge-gitea-1}"; exit 0 ;;
   inspect*)                       echo "\${STUB_INSPECT_PROJECT:-autre}"; exit 0 ;;
   "exec "*"printf lcars-stream-ok") printf 'lcars-stream-ok'; exit 0 ;;
   *"user create"*)                [[ -z "\${STUB_CREATE_ERR:-}" ]] || echo "\$STUB_CREATE_ERR" >&2; exit "\${STUB_CREATE_RC:-0}" ;;
@@ -299,6 +299,43 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   grep -q "$ME	" "$PROV_ANNOUNCE_FILE"
 }
 
+
+@test "PROV_FORGE_ADMIN_RESET sur une forge fournie : aucun conteneur visé, rien n'échoue — le mot de passe est à qui la tient" {
+  rm -f "$DECOR_BIN/docker"
+  printf 'tok-donne\n' > "$TOKENS/forge-master.token"
+  FORGE_BASE_URL="$FORGE_DOUBLE_URL" PROV_FORGE_ADMIN_RESET=1 mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out '^FAIL|repose du mot de passe' <<<"$output"
+}
+
+@test "le conteneur de la forge se lit par son projet, pas par un nom de service recopié" {
+  UP=0 routes
+  STUB_PORTS="" STUB_PUBLISH=bob_9-forge-gitea-1 STUB_INSPECT_PROJECT=bob_9-forge STUB_NAME=forge-renommee-1 mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^DOCKER:exec -e PW -u git forge-renommee-1 ' "$CALLS"
+  grep -q '^DOCKER:exec -u git forge-renommee-1 gitea admin user generate-access-token' "$CALLS"
+}
+
+@test "check : seed perdu et adresses absentes sont des drifts, avant qu'un apply ne régénère le seed" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  rm -f "$TOKENS/forge-seed.pass" "$TOKENS/forge.url"
+  printf 'http://ailleurs:1\n' > "$TOKENS/forge.public.url"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 48-forge-host: $TOKENS/forge-seed.pass absent (seed des comptes)"* ]]
+  [[ "$output" == *"DRIFT 48-forge-host: $TOKENS/forge.url absent (adresse de la forge)"* ]]
+  [[ "$output" == *"DRIFT 48-forge-host: $TOKENS/forge.public.url porte « http://ailleurs:1 », attendu « http://10.9.9.9:$PORT » (adresse publique de la forge)"* ]]
+}
+
+@test "sans jq pour lire la réponse, l'adminité est non mesurable : un administrateur n'est pas repromu à chaque passe" {
+  mod apply; [ "$status" -eq 0 ]
+  printf '#!/bin/sh\nexit 127\n' > "$DECOR_BIN/jq"; chmod 0755 "$DECOR_BIN/jq"
+  : > "$FORGE_DOUBLE_DIR/requests.jsonl"
+  mod apply
+  [[ "$output" == *"WARN"*"adminité de « $ME » non mesurable"* ]]
+  [ -z "$(forge_requests 'select(.method == "PATCH")')" ]
+}
 
 @test "l'adminité se lit avec le jeton : un compte admin est dit, rien n'est promu" {
   mod apply

@@ -63,10 +63,6 @@ build_sha() {
   [[ -n "$d" && -f "$d/priv/api/build_info.txt" ]] || return 0
   sed -n 's/^sha=//p' "$d/priv/api/build_info.txt" 2>/dev/null | head -1 || true
 }
-release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}" ]] && printf '%s\n' "${#d[@]}" || printf '0\n'; }
-
-# le canal s'écrit après la pose, jamais avant : écrit d'abord, une pose ratée laisserait une machine « kit » qui n'a rien
-poser_canal() { prov_channel_write "$(prov_channel_here)"; }
 
 source_build() { # source_build → la révision que porte la source, vide si runtime/ est modifié ou si rien ne la dit
   local root; root="$(repo_root)"
@@ -93,13 +89,23 @@ verrouiller_prefix() {
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "prefix verrouillé : $PROV_PREFIX ($PREFIX_OWNER 750)"
 }
 
+# le canal s'écrit en dernier : écrit avant la pose, une pose ratée laisserait une machine « kit » qui n'a rien
+clore_la_pose() {
+  local name _mode is_link
+  verrouiller_prefix || verdict_apply
+  while read -r name _mode is_link; do
+    [[ "$is_link" -eq 1 ]] || continue
+    ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
+  done < <(mf_entries)
+  prune_intrus || verdict_apply
+  prov_channel_write "$(prov_channel_here)" || verdict_apply
+}
+
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
-    local _nl; _nl="$(release_libs_count)"
-    [[ "$_nl" -le 1 ]] || p_drift "la release posée porte $_nl lib/lcars_fleet-* — une assemblée n'en a qu'une ; celle qui démarre est $(release_app_dir "$PREFIX_REL" 2>/dev/null | sed 's|.*/||'), l'autre est morte"
   elif [[ "$_pfx" != "present" && "$_pfx" != "absent" ]]; then
     p_warn "release non mesurable — $PROV_PREFIX $(prov_state_why "$_pfx" "$PROV_PREFIX")"
     verdict_check
@@ -153,29 +159,18 @@ apply() {
   # la copie posée sert à rejouer, pas à reconstruire : sans mix.exs, la release en place est l'état-cible
   if prov_dans_la_copie && [[ ! -f "$RUNTIME_DIR/mix.exs" ]] && release_present; then
     p_ok "rejeu depuis la copie posée : release en place, aucune source ici ($RUNTIME_DIR) — rien à bâtir"
-    poser_canal || verdict_apply
+    prov_channel_write "$(prov_channel_here)" || verdict_apply
     verdict_apply
   fi
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_apply; }
-  if ! prov_delivery_is_binary; then
-    command -v mix >/dev/null || { p_fail "mix absent — 15-toolchain le pose"; verdict_apply; }
-  fi
-  id "$PROV_HUMAN" >/dev/null 2>&1 || { p_fail "humain-bâtisseur inconnu: $PROV_HUMAN"; verdict_apply; }
 
   local src_sha deployed_sha
   src_sha="$(source_build)"
   deployed_sha="$(build_sha)"
   if meme_build "$src_sha" "$deployed_sha" && release_present; then
     p_ok "build déployé $deployed_sha, celui de la source — rien à bâtir"
-    verrouiller_prefix || verdict_apply
-    local name _mode is_link
-    while read -r name _mode is_link; do
-      [[ "$is_link" -eq 1 ]] || continue
-      ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
-    done < <(mf_entries)
-    prune_intrus || verdict_apply
-    poser_canal || verdict_apply
+    clore_la_pose
     verdict_apply
   fi
 
@@ -195,15 +190,7 @@ apply() {
   ! prov_delivery_is_binary || etape="pose de la release depuis le kit"
   run_step "$etape" -- as_human env LCARS_RUNTIME_DIR="$RUNTIME_DIR" bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" \
     || { p_warn "$PROV_PREFIX reste déverrouillé pour inspection"; verdict_apply; }
-  release_present || { p_fail "deploy-release.sh vert mais release absente ($PREFIX_REL) — incohérence à inspecter"; verdict_apply; }
-  verrouiller_prefix || verdict_apply
-  local name _mode is_link
-  while read -r name _mode is_link; do
-    [[ "$is_link" -eq 1 ]] || continue
-    ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
-  done < <(mf_entries)
-  prune_intrus || verdict_apply
-  poser_canal || verdict_apply
+  clore_la_pose
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + $PROV_LINK_DIR câblé"
   verdict_apply

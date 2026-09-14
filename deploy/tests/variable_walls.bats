@@ -559,9 +559,9 @@ PYX
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
     | grep -qF -- '-g "$1" -- "$1"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/deploy/modules.d/66-deck-oidc.sh" \
-    | grep -qE 'LCARS_SYSTEM_GROUP="\$\{PROV_SYSTEM_USER:-\}"' || {
-      echo "MUR 13 rompu — 66-deck-oidc ne transmet plus le compte comme groupe" >&2; rompu=1; }
+  sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
+    | grep -qE '^[[:space:]]+LCARS_SYSTEM_GROUP=PROV_SYSTEM_USER$' || {
+      echo "MUR 13 rompu — la table de traduction de la lib ne transmet plus le compte comme groupe" >&2; rompu=1; }
   sed 's/#.*//' "$REPO/runtime/services/forge.d/deck-oidc.sh" \
     | grep -qE 'LCARS_SYSTEM_GROUP:-\$\{LCARS_SYSTEM_USER:-'"$nom"'\}' || {
       echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }

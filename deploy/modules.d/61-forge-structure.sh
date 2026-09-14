@@ -13,44 +13,24 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 RELEASE_BIN="$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-TOFU_RC="$PROV_TOFU_DIR/tofurc"
 
-# la conformité de la structure se sonde compte par compte dans 63-forge-tokens ; ici, les préconditions du geste
+# la structure se sonde compte par compte dans 63-forge-tokens ; release et tofu, dans 60 et 46
 check() {
   if ! forge_up; then
     p_drift "forge muette ($PROV_FORGE_URL) — rien à structurer tant que 48-forge-host ne l'a pas relevée"
-    verdict_check
-  fi
-  p_ok "forge vivante ($PROV_FORGE_URL)"
-  if [[ -s "$PROV_MASTER_TOKEN_FILE" ]]; then
-    p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)"
+  elif [[ -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+    p_ok "forge vivante ($PROV_FORGE_URL), autorité de création présente ($PROV_MASTER_TOKEN_FILE)"
   else
     p_drift "aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"
   fi
-  if [[ -x "$RELEASE_BIN" ]]; then
-    p_ok "release posée ($RELEASE_BIN) — le roster s'en dérive"
-  else
-    p_drift "release absente ($RELEASE_BIN) — 60-deploy ne l'a pas posée, le roster ne peut pas se dériver"
-  fi
-  if [[ -x "$PROV_TOFU_BIN" ]]; then
-    p_ok "tofu présent ($PROV_TOFU_BIN)"
-  else
-    p_drift "tofu absent ($PROV_TOFU_BIN) — 46-tofu le pose"
-  fi
-  p_ok "la structure elle-même est sondée compte par compte par 63-forge-tokens"
   verdict_check
 }
 
 apply() {
   forge_up || { p_fail "forge muette ($PROV_FORGE_URL) — 48-forge-host la monte ou la relève, ce module la structure"; verdict_apply; }
-  [[ -s "$PROV_MASTER_TOKEN_FILE" ]] \
-    || { p_fail "aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"; verdict_apply; }
+  [[ -s "$PROV_MASTER_TOKEN_FILE" ]] || { p_fail "aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"; verdict_apply; }
   [[ -x "$PROV_TOFU_BIN" ]] || { p_fail "tofu absent ($PROV_TOFU_BIN) — 46-tofu le pose"; verdict_apply; }
-  [[ -x "$RELEASE_BIN" ]] || {
-    p_fail "aucune release exécutable posée ($RELEASE_BIN) — 60-deploy n'a pas abouti"
-    p_fail "  le roster du catalogue s'en dérive — sans elle, la structure serait posée sans comptes"
-    verdict_apply
-  }
+  [[ -x "$RELEASE_BIN" ]] || { p_fail "aucune release exécutable posée ($RELEASE_BIN) — 60-deploy n'a pas abouti, et le roster s'en dérive"; verdict_apply; }
 
   # la release refuse de s'évaluer sous le siège (GUARD B) : le roster se dérive sous l'humain, en mode outil
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
@@ -68,38 +48,29 @@ apply() {
   cp "$enroll/roles.auto.tfvars.json" "$recipe/roles.auto.tfvars.json" \
     || { p_fail "roster non déposé dans la recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
   rm -rf "$recipe/.terraform" "$recipe/instance/.terraform"
-  local m
-  for m in instance .; do
-    TF_CLI_CONFIG_FILE="$TOFU_RC" run_capture env -C "$recipe/$m" "$PROV_TOFU_BIN" init -input=false -no-color \
-      || { p_fail "recette non initialisable ($m) — le miroir de providers de 46-tofu ne couvre pas cette recette"; prov_dump_last; rm -rf "$recipe" "$enroll"; verdict_apply; }
-  done
 
   local rc=0 tf_out
   tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
   p_step "structure de la forge"
-  env \
-    LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
-    LCARS_MASTER_TOKEN_FILE="$PROV_MASTER_TOKEN_FILE" \
-    LCARS_FORGE_SEED_FILE="$PROV_FORGE_SEED_FILE" \
-    LCARS_FORGE_ORG="$PROV_FORGE_ORG" \
-    LCARS_CATALOGUES_WORK="$PROV_CATALOGUES_WORK" \
-    LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
-    FORGE_BASE_URL="$PROV_FORGE_URL" \
+  prov_product_env
+  # le geste initialise la recette avec le tofu de son PATH, et lit un jeton sur son entrée
+  env "${PROV_PRODUCT_ENV[@]}" \
+    PATH="$(dirname "$PROV_TOFU_BIN"):$PATH" \
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
-    TF_CLI_CONFIG_FILE="$TOFU_RC" \
-    bash "$(product_tree)/services/forge-gestures.sh" apply >"$tf_out" 2>&1 || rc=$?
+    TF_CLI_CONFIG_FILE="$PROV_TOFU_DIR/tofurc" \
+    bash "$(product_tree)/services/forge-gestures.sh" apply >"$tf_out" 2>&1 </dev/null || rc=$?
   rm -rf "$recipe" "$enroll"
   if [[ "$rc" -ne 0 ]]; then
     p_fail "structure non posée (rc=$rc) — la sortie ci-dessous dit pourquoi"
-    { printf '───── sortie : %s dernières lignes ─────\n' "$PROV_DUMP_LINES"; tail -n "$PROV_DUMP_LINES" "$tf_out"; printf '───── sortie complète conservée : %s ─────\n' "$tf_out"; } >&2
+    PROV_LAST_OUT="$tf_out"; prov_dump_last
     verdict_apply
   fi
   # la recette est idempotente et rend 0 dans les deux cas : seule la sortie de tofu dit ce qui a bougé
   local moved
-  moved="$(grep -c -E 'Apply complete!.*Resources: [1-9][0-9]* (added|changed|destroyed)|, [1-9][0-9]* (changed|destroyed)' "$tf_out" 2>/dev/null || true)"
+  moved="$(grep -c -E 'Apply complete!.*Resources: [1-9][0-9]* (added|changed|destroyed)|, [1-9][0-9]* (changed|destroyed)' "$tf_out" || true)"
   rm -f "$tf_out"
-  if [[ "${moved:-0}" -gt 0 ]]; then
+  if [[ "$moved" -gt 0 ]]; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "structure de la forge posée — 63-forge-tokens peut minter les jetons de rôle"
   else

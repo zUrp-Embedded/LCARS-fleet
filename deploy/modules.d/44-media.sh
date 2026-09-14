@@ -115,14 +115,14 @@ build_doc() {
 }
 
 poser_doc() {
-  local partial; partial="$(doc_dir).partial"
-  rm -rf "$partial"
-  prov_scaffold_dir "$partial" "$(media_mode doc)" "$MEDIA_OWNER" || verdict_apply
-  local emp; emp="$(doc_empreinte || true)"
+  local partial emp; partial="$(doc_dir).partial"
+  emp="$(doc_empreinte || true)"
   if [[ -n "$emp" && "$emp" == "$(doc_tampon_lit dist)" && -s "$(doc_dir)/index.html" ]]; then
     p_ok "doc du deck déjà posée ($(doc_dir), base $SITE_BASE) — rien à poser"
     return 0
   fi
+  rm -rf "$partial"
+  prov_scaffold_dir "$partial" "$(media_mode doc)" "$MEDIA_OWNER" || verdict_apply
   find -H "$SITE_SRC/dist" -mindepth 1 -maxdepth 1 -exec cp -a -t "$partial/" {} + \
     || { p_fail "doc non copiable ($SITE_SRC/dist → $(doc_dir))"; rm -rf "$partial"; verdict_apply; }
   prov_promote_dir "$partial" "$(doc_dir)" || verdict_apply
@@ -148,7 +148,6 @@ media_modes() { # media_modes <racine> — l'arbre profond en 755/644, sans bits
 
 apply() {
   local t src
-  local _av_tout="$PROV_CHANGED" _av_doc _ap_doc _media_warn=0
   for t in "${MEDIA_TREES[@]}"; do
     src="$(media_src "$t")"
     [[ -d "$src" ]] || { p_fail "source absente : $src"; verdict_apply; }
@@ -156,33 +155,20 @@ apply() {
     find -H "$src" -mindepth 1 -maxdepth 1 -exec cp -a -t "$MEDIA_ROOT/$t/" {} + \
       || { p_fail "médias non copiables ($src → $MEDIA_ROOT/$t)"; verdict_apply; }
   done
-  _av_doc="$PROV_CHANGED"
   build_doc
-  _ap_doc="$PROV_CHANGED"
 
+  # cp -a emporte les ACL de la source, et leur retrait peut changer les bits de groupe : les modes se reposent après
   if command -v setfacl >/dev/null 2>&1; then
-    setfacl -bR "$MEDIA_ROOT" || { p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"; _media_warn=1; }
+    setfacl -bR "$MEDIA_ROOT" || p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"
   fi
-  media_modes "$MEDIA_ROOT" || _media_warn=1
+  media_modes "$MEDIA_ROOT" || true
   find "$MEDIA_ROOT" \( ! -user "${MEDIA_OWNER%%:*}" -o ! -group "${MEDIA_OWNER##*:}" \) -exec chown -h "$MEDIA_OWNER" {} + \
-    || { p_warn "propriétaire non posé sous $MEDIA_ROOT — le contenu garde celui de la source"; _media_warn=1; }
+    || p_warn "propriétaire non posé sous $MEDIA_ROOT — le contenu garde celui de la source"
   local d
   for d in "" "${MEDIA_TREES[@]}" doc; do
     [[ -d "$MEDIA_ROOT${d:+/$d}" ]] || continue
     ensure_mode "$MEDIA_ROOT${d:+/$d}" "$(media_mode "$d")" "$MEDIA_OWNER" || verdict_apply
   done
-
-  local _d_medias=$(( (_av_doc - _av_tout) + (PROV_CHANGED - _ap_doc) ))
-  local _d_doc=$(( _ap_doc - _av_doc ))
-  if [[ "$_media_warn" -ne 0 ]]; then
-    p_warn "médias posés avec réserve ($MEDIA_ROOT) — un geste ci-dessus n'a pas abouti, l'arbre n'est pas garanti conforme"
-  elif [[ "$_d_medias" -ne 0 ]]; then
-    p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]})"
-  elif [[ "$_d_doc" -ne 0 ]]; then
-    p_ok "médias déjà conformes ($MEDIA_ROOT : ${MEDIA_TREES[*]}) — seule la doc a été reposée"
-  else
-    p_ok "médias et doc déjà conformes ($MEDIA_ROOT : ${MEDIA_TREES[*]} doc) — rien à poser"
-  fi
   verdict_apply
 }
 

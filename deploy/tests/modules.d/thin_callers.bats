@@ -2,72 +2,90 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/thin_callers.bats
 # AUTHOR: bob
-# STARDATE: 2026-09-04
-# STATUS: bats tests for the thin callers 45/63/65/66 — ce que l'installeur transmet au produit est GARDE
+# STARDATE: 2026-09-14
+# STATUS: témoins des appelants des gestes de forge 50, 63, 65, 66 — le lanceur de la lib, ses codes, ses noms traduits
 
 load ../refute
+load ../support/decor
 
 setup() {
-  MODS="$BATS_TEST_DIRNAME/../../modules.d"
-  CALLERS=(50-catalogues 63-forge-tokens 65-ops-branch 66-deck-oidc)
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
+  DEPLOY="$BATS_TEST_DIRNAME/../.."
+  CALLERS=(50-catalogues:catalogues 63-forge-tokens:tokens 65-ops-branch:ops-branch 66-deck-oidc:deck-oidc)
+  decor_pose
+  export PROV_SUBSTRATE=linux PROV_HUMAN=humain-du-poste PROVISION_RUN=1
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"
+  # aucun service n'écoute sur le port 1 : chaque geste réel lit une forge injoignable
+  export PROV_FORGE_HOST_PORT=1
 }
 
-@test "les quatre appelants sont MINCES : un exec env vers services/forge.d, et rien d'autre a executer" {
-  local m code
-  for m in "${CALLERS[@]}"; do
-    code="$(grep -vE '^\s*#|^\s*$' "$MODS/$m.sh")"
-    grep -qE '^exec env' <<<"$code" || { echo "$m : pas d'exec env" >&2; return 1; }
-    grep -qE 'services/forge\.d/[a-z-]+\.sh" "\$\{?1' <<<"$code" || { echo "$m : n'appelle pas un geste de forge.d" >&2; return 1; }
-    # aucune sonde, aucun verdict, aucun p_* : le geste rend le verdict, l'appelant relaie
-    refute grep -qE '\bp_(ok|drift|fail|chg|warn)\b|verdict_(apply|check)' <<<"$code"
+# une racine de dépôt dont les gestes sont des doublures ; lib, modules et protocole sont les vrais
+racine_doublee() { # racine_doublee <corps du geste>
+  ROOT="$BATS_TEST_TMPDIR/racine"
+  mkdir -p "$ROOT/deploy" "$ROOT/runtime/services/forge.d" "$ROOT/runtime/services/lib"
+  cp -a "$DEPLOY/lib" "$DEPLOY/modules.d" "$DEPLOY/installer-constants.env" "$DEPLOY/system.manifest" "$ROOT/deploy/"
+  cp "$DEPLOY/../runtime/services/lib/module-protocol.sh" "$ROOT/runtime/services/lib/"
+  local c
+  for c in "${CALLERS[@]}"; do
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n. "$LCARS_MODULE_PROTOCOL"\n%s\n' "$1" > "$ROOT/runtime/services/forge.d/${c#*:}.sh"
   done
 }
-
-@test "toute valeur transmise depuis un PROV_ est GARDEE — jamais un « unbound » a la place du verdict" {
-  local m line bad=0
-  for m in "${CALLERS[@]}"; do
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^[[:space:]]+(LCARS|FORGE)_[A-Z_]+=\"\$\{?PROV_[A-Z_]+\}?\" ]]; then
-        echo "$m : transmis sans garde → $line" >&2; bad=1
-      fi
-    done < <(grep -E '^\s+(LCARS|FORGE)_[A-Z_]+=' "$MODS/$m.sh")
-  done
-  [ "$bad" -eq 0 ]
+joue() { # joue <racine> <module> <verbe>
+  run env PROVISION_MODULE="$2" PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/deploy/modules.d/$2.sh" "$3"
 }
 
-@test "la garde est MESUREE, pas supposee : un appelant joue sans AUCUN PROV_ pose et meurt sur le geste, pas sur lui-meme" {
-  # decor : une lib minimale (repo_root) et un geste doublure qui dit ce qu'il a recu
-  local lib="$BATS_TEST_TMPDIR/lib.sh" root="$BATS_TEST_TMPDIR/root" m
-  mkdir -p "$root/runtime/services/forge.d" "$root/runtime/services/lib"
-  printf '%s\n' "repo_root() { printf '%s' '$root'; }" "product_tree() { printf '%s' '$root/runtime'; }" "advertise_addr() { :; }" > "$lib"
-  : > "$root/runtime/services/lib/module-protocol.sh"
-  for g in catalogues tokens ops-branch deck-oidc; do
-    printf '%s\n' '#!/usr/bin/env bash' 'echo "geste:$(basename "$0") verbe:${1:-} login:${LCARS_LOGIN-<absent>}"' > "$root/runtime/services/forge.d/$g.sh"
-  done
-  for m in "${CALLERS[@]}"; do
-    # AUCUN PROV_ pose, PROV_MODULE_TAG compris : sa garde `${PROV_MODULE_TAG:-}` est mesuree aussi
-    run env -i PATH="$PATH" PROVISION_LIB="$lib" bash "$MODS/$m.sh" check
-    [ "$status" -eq 0 ] || { echo "$m : rc=$status — $output" >&2; return 1; }
-    [[ "$output" == *"geste:"*"verbe:check"* ]] || { echo "$m : $output" >&2; return 1; }
-    [[ "$output" != *"unbound"* ]]
+@test "chaque appelant joue son geste réel : forge injoignable, le drift du geste est le code du module, en check comme en apply" {
+  local c
+  for c in "${CALLERS[@]}"; do
+    joue "$DEPLOY/.." "${c%%:*}" check
+    [ "$status" -eq 1 ] || { echo "${c%%:*} check : rc=$status — $output" >&2; return 1; }
+    [[ "$output" == *"DRIFT ${c%%:*}: "* ]]
+    joue "$DEPLOY/.." "${c%%:*}" apply
+    [ "$status" -eq 2 ] || { echo "${c%%:*} apply : rc=$status — $output" >&2; return 1; }
+    [[ "$output" == *"DRIFT ${c%%:*}: "* ]]
   done
 }
 
-@test "le groupe du deck est le compte système, et les injections retirées (bind, mots de passe, catalogues d'héritage) n'atteignent plus le geste" {
-  local lib="$BATS_TEST_TMPDIR/lib.sh" root="$BATS_TEST_TMPDIR/root" g m
-  mkdir -p "$root/runtime/services/forge.d" "$root/runtime/services/lib"
-  printf '%s\n' "repo_root() { printf '%s' '$root'; }" "product_tree() { printf '%s' '$root/runtime'; }" "advertise_addr() { :; }" > "$lib"
-  : > "$root/runtime/services/lib/module-protocol.sh"
-  for g in catalogues tokens deck-oidc; do
-    printf '%s\n' '#!/usr/bin/env bash' 'env | grep "^LCARS_" | sort' > "$root/runtime/services/forge.d/$g.sh"
+@test "un geste mort sous set -e avant son verdict rend 3, et la garde du module nomme le code brut" {
+  racine_doublee 'p_drift "sonde partielle"; grep -q introuvable /dev/null; verdict_check'
+  local c
+  for c in "${CALLERS[@]}"; do
+    joue "$ROOT" "${c%%:*}" check
+    # sans la garde, le 1 de grep se lirait comme un drift
+    [ "$status" -eq 3 ] || { echo "${c%%:*} : rc=$status — $output" >&2; return 1; }
+    [[ "$output" == *"ERREUR ${c%%:*}: mort avant de rendre son verdict (rc=1)"* ]]
   done
-  for m in 50-catalogues 63-forge-tokens 66-deck-oidc; do
-    run env -i PATH="$PATH" PROVISION_LIB="$lib" PROV_SYSTEM_USER=compte-sys PROV_SYSTEM_GROUP=groupe-injecte \
-      PROV_DECK_BIND=10.9.9.9 PROV_PASSWORDS_FILE=/injecte/passwords.json PROV_LEGACY_CATALOGUES_DIR=/injecte/catalogues \
-      bash "$MODS/$m.sh" check
-    [ "$status" -eq 0 ]
-    refute_out '^LCARS_(DECK_BIND|PASSWORDS_FILE|LEGACY_CATALOGUES_DIR)=|injecte' <<<"$output"
+}
+
+@test "les sorties du protocole sont des verdicts : verdict_apply et p_die relaient leur code, sans erreur de garde" {
+  racine_doublee 'case "$1" in apply) p_fail "geste raté"; verdict_apply ;; *) p_die "verbe refusé" ;; esac'
+  joue "$ROOT" 66-deck-oidc apply
+  [ "$status" -eq 1 ]
+  refute_out 'mort avant' <<<"$output"
+  joue "$ROOT" 65-ops-branch check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FATAL 65-ops-branch: verbe refusé"* ]]
+  refute_out 'mort avant' <<<"$output"
+}
+
+@test "les noms du produit portent les valeurs de l'installeur, les mêmes pour les quatre gestes" {
+  racine_doublee 'env | grep -E "^(LCARS|FORGE)_" | sort; verdict_check'
+  local c systeme
+  systeme="$(sed -n 's/^PROV_SYSTEM_USER=//p' "$DEPLOY/installer-constants.env")"
+  export PROV_DECK_BIND=10.9.9.9
+  for c in "${CALLERS[@]}"; do
+    joue "$ROOT" "${c%%:*}" check
+    [ "$status" -eq 0 ] || { echo "${c%%:*} : rc=$status — $output" >&2; return 1; }
+    grep -qx "LCARS_MODULE_TAG=${c%%:*}" <<<"$output"
+    grep -qx 'LCARS_LOGIN=humain-du-poste' <<<"$output"
+    grep -qx 'FORGE_BASE_URL=http://127.0.0.1:1' <<<"$output"
+    grep -qx "LCARS_SYSTEM_GROUP=$systeme" <<<"$output"
+    grep -qx "LCARS_MASTER_TOKEN_FILE=$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token" <<<"$output"
+    # un réglage retiré n'a pas de traduction
+    refute_out '^LCARS_DECK_BIND=' <<<"$output"
   done
-  # la sortie qui reste est celle de 66, le dernier appelant joué
-  grep -qx 'LCARS_SYSTEM_GROUP=compte-sys' <<<"$output"
+  joue "$ROOT" 63-forge-tokens check
+  grep -qx "LCARS_CLI=$LCARS_DECOR_ROOT/usr/local/bin/lcars" <<<"$output"
 }

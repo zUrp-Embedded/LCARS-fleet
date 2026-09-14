@@ -21,20 +21,11 @@ setup() {
   [ -d "$SERVICES" ]
 }
 
-# La liste des auxiliaires, EXTRAITE du module — jamais recopiee : un instrument qui mesure une copie
-# de la source ne mesure pas la source, il est vert au moment precis ou ca derive.
-helpers() {
-  sed -n '/^HELPERS=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d ' \t' | grep -v '^$'
-}
-# Les DONNEES de 62 (`DATA`, « nom destination mode ») declarent leur fichier par leur premier champ —
-# `console.tmux.conf` en vient, et il n'est plus nomme par un COPY de l'image depuis le 2026-09-11.
-data() {
-  sed -n '/^DATA=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d '"' | awk 'NF { print $1 }'
-}
-
-bulk_poste() { # `services` est-il dans le TABLEAU EMBEDDED, et pas dans un commentaire voisin ?
-  grep -E '^EMBEDDED=\(' "$MOD" | sed 's/#.*//' | tr ' ()"' '\n\n\n\n' | grep -qx 'services'
-}
+# les listes que 62 pose, lues dans les constantes de l'installeur — jamais recopiees
+constante() { sed -n "s/^$1=//p" "$REPO/deploy/installer-constants.env" | tr ' ' '\n'; }
+helpers() { constante PROV_HELPERS; }
+data() { constante PROV_HELPERS_DATA; constante PROV_SHELL_RC | sed 's|.*/||'; }
+bulk_poste() { constante PROV_EMBEDDED | grep -qx 'services'; }
 declare_couvre() {
   local p="$1" liste; liste="$(helpers; data)"
   while :; do

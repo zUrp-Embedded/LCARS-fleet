@@ -20,7 +20,8 @@ setup() {
   MASTER="$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token"
   printf 'MASTERTOK' > "$MASTER"
   forge_double_start
-  export FORGE_BASE_URL="$FORGE_DOUBLE_URL"
+  # la forge du poste écoute sur la loopback au port choisi : celui de la forge locale
+  export PROV_FORGE_HOST_PORT="${FORGE_DOUBLE_URL##*:}"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   # un daemon répond par le DOCKER_HOST hérité : la doublure rend 0 à « version »
   printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/docker"; chmod +x "$DECOR_BIN/docker"
@@ -53,7 +54,7 @@ EOF
 mod() { run bash "$MODULE" "$1"; }
 
 @test "forge éteinte : l'enrôlement est reporté, ce n'est pas un échec ; le check n'y voit pas de dérive" {
-  export FORGE_BASE_URL=http://127.0.0.1:9
+  export PROV_FORGE_HOST_PORT=9
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN  49-forge-runner: forge du poste éteinte — enrôlement du runner reporté (48 la monte)"* ]]
@@ -124,7 +125,7 @@ mod() { run bash "$MODULE" "$1"; }
   [[ "$output" == *"REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : alpine:3.20,docker:cli,catthehacker/ubuntu:act-latest"* ]]
 }
 
-@test "API muette : rien n'est conclu au check, et l'apply tente l'enrôlement" {
+@test "API muette : rien n'est conclu, ni au check ni à l'apply — un compte inconnu n'enrôle pas un runner qui remplacerait l'existant" {
   forge_runners 500 '{"message":"panne"}'
   stub_delegue 0
   mod check
@@ -132,7 +133,21 @@ mod() { run bash "$MODULE" "$1"; }
   [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [ -s "$ARGV" ]
+  [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable (API muette ou réponse illisible) — rien n'est enrôlé"* ]]
+  [ ! -e "$ARGV" ]
+}
+
+@test "forge fournie : son runner est à qui la tient — rien n'est compté ni enrôlé, au check comme à l'apply" {
+  forge_runners 200 '{"runners":[],"total_count":0}'
+  stub_delegue 0
+  export FORGE_BASE_URL="$FORGE_DOUBLE_URL"
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK    49-forge-runner: forge fournie ($FORGE_DOUBLE_URL) — son runner CI est à qui la tient"* ]]
+  [ ! -e "$ARGV" ]
+  mod check
+  [ "$status" -eq 0 ]
+  [ -z "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners")')" ]
 }
 
 @test "aucun runner et forge vivante : le check le dit en drift" {

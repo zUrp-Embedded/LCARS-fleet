@@ -689,6 +689,57 @@ fleet_humans() {
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
 product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
+# la traduction unique : le nom que lit le produit (runtime/services), puis le nom de l'installeur
+PROV_PRODUCT_NAMES=(
+  FORGE_BASE_URL=PROV_FORGE_URL
+  FORGE_PUBLIC_URL=PROV_FORGE_PUBLIC_URL
+  LCARS_PRIVATE_DIR=PROV_TOKENS_DIR
+  LCARS_MASTER_TOKEN_FILE=PROV_MASTER_TOKEN_FILE
+  LCARS_FORGE_SEED_FILE=PROV_FORGE_SEED_FILE
+  LCARS_SYSTEM_ACCOUNT=PROV_SYSTEM_ACCOUNT
+  LCARS_SYSTEM_TOKEN_FILE=PROV_SYSTEM_TOKEN_FILE
+  LCARS_SYSTEM_USER=PROV_SYSTEM_USER
+  LCARS_SYSTEM_GROUP=PROV_SYSTEM_USER
+  LCARS_AUTHORITY_USER=PROV_AUTHORITY_USER
+  LCARS_FORGE_ORG=PROV_FORGE_ORG
+  LCARS_ROLES=PROV_ROLES
+  LCARS_LOGIN=PROV_HUMAN
+  LCARS_CATALOGUES_DIR=PROV_CATALOGUES_DIR
+  LCARS_CATALOGUES_WORK=PROV_CATALOGUES_WORK
+  LCARS_LANDING_PORT=PROV_DECK_PORT
+  LCARS_DECK_ORIGINS=PROV_DECK_ORIGINS
+  LCARS_DECK_OIDC_FILE=PROV_DECK_OIDC_FILE
+  LCARS_ADVERTISE=PROV_ADVERTISE
+  LCARS_ADVERTISE_WHY=PROV_ADVERTISE_WHY
+)
+
+prov_product_env() { # prov_product_env → PROV_PRODUCT_ENV, un « NOM=valeur » par ligne de la table, prêt pour env
+  local p src
+  PROV_PRODUCT_ENV=()
+  for p in "${PROV_PRODUCT_NAMES[@]}"; do
+    src="${p#*=}"
+    PROV_PRODUCT_ENV+=("${p%%=*}=${!src}")
+  done
+}
+
+# prov_geste <geste> <check|apply> [NOM=valeur…] — joue runtime/services/forge.d/<geste>.sh sous le protocole du
+# produit et sort de son code. Le geste est sourcé sous un piège EXIT qui marque une sortie venue de verdict_* ou
+# de p_die ; toute autre sortie (set -e) laisse la garde du module rendre 3.
+prov_geste() {
+  local geste="$1" verbe="$2" rc=0; shift 2
+  prov_product_env
+  PROV_GESTE_RENDU="$(mktemp "${TMPDIR:-/tmp}/prov-geste.XXXXXX")"
+  # shellcheck disable=SC2016 # le texte se développe dans le bash du geste
+  env "${PROV_PRODUCT_ENV[@]}" "$@" \
+    LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
+    PROV_GESTE_RENDU="$PROV_GESTE_RENDU" \
+    bash -c 'trap '\''case " ${FUNCNAME[*]} " in *" verdict_"*|*" p_die "*) echo rendu > "$PROV_GESTE_RENDU" ;; esac'\'' EXIT; . "$0" "$@"' \
+      "$(product_tree)/services/forge.d/$geste.sh" "$verbe" || rc=$?
+  [[ ! -s "$PROV_GESTE_RENDU" ]] || PROV_VERDICT_RENDERED=1
+  rm -f "$PROV_GESTE_RENDU"
+  exit "$rc"
+}
+
 prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou « inconnue »
   local root="${1:-$(repo_root)}" rev
   if rev="$(git -C "$root" rev-parse --short=8 HEAD 2>/dev/null)" && [[ -n "$rev" ]]; then

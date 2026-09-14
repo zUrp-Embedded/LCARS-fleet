@@ -53,13 +53,19 @@ echo "ENROLL $* TOOL_EVAL=${LCARS_TOOL_EVAL:-}" >> "$CALLS"
 while [[ $# -gt 0 ]]; do [[ "$1" == --tofu-dir ]] && dir="$2"; shift; done
 [[ "${STUB_ROSTER:-}" == vide ]] || printf '{"roles":{"admiral":{}}}\n' > "$dir/roles.auto.tfvars.json"
 EOF
+  # la doublure tient le contrat du vrai geste : un jeton lu sur l'entrée, la recette initialisée par le tofu du PATH
   cat > "$RACINE/runtime/services/forge-gestures.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "GESTE $*" >> "$CALLS"
+IFS= read -r jeton_tape || true
 { env | grep -E '^(FORGE_BASE_URL|LCARS_PRIVATE_DIR|LCARS_RECIPE_DIR|LCARS_DEMO_CATALOGUE|LCARS_AUTHORITY_USER|TF_CLI_CONFIG_FILE|LCARS_BUILTIN_HUMAN|LCARS_FORGE_ORG|LCARS_CATALOGUES_WORK|LCARS_MASTER_TOKEN_FILE|LCARS_FORGE_SEED_FILE)=' | sort
   echo "recette: $(ls -A "$LCARS_RECIPE_DIR" | sort | tr '\n' ' ')"
   echo "instance: $(ls -A "$LCARS_RECIPE_DIR/instance" | sort | tr '\n' ' ')"
+  echo "stdin: [$jeton_tape]"
 } > "$GESTE_ENV"
+for m in instance .; do
+  ( cd "$LCARS_RECIPE_DIR/$m" && tofu init -input=false -no-color ) || { echo "forge-gestures: init $m en echec" >&2; exit 1; }
+done
 case "${STUB_GESTE:-pose}" in
   pose)   echo "Apply complete! Resources: 3 added, 0 changed, 0 destroyed." ;;
   rien)   echo "Apply complete! Resources: 0 added, 0 changed, 0 destroyed." ;;
@@ -81,19 +87,18 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   [[ "$output" != *"release"* ]]
 }
 
-@test "check : forge vivante sans autorité, sans release, sans tofu — trois drifts qui nomment leur poseur" {
+@test "check : forge vivante sans autorité — un seul drift, qui nomme 48 ; release et tofu restent aux modules qui les posent" {
   rm -f "$MASTER" "$PREFIX/rel/lcars_fleet/bin/lcars_fleet" "$TOFU_BIN"
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucune autorité de création ($MASTER) — 48-forge-host la minte"* ]]
-  [[ "$output" == *"release absente ($PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy ne l'a pas posée"* ]]
-  [[ "$output" == *"tofu absent ($TOFU_BIN) — 46-tofu le pose"* ]]
+  [ "$(grep -c '^DRIFT' <<<"$output")" -eq 1 ]
 }
 
-@test "check : tout en place — conforme, et la structure elle-même est renvoyée à 63" {
+@test "check : forge vivante et autorité présente — conforme" {
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"forge vivante ($POSTE)"*"autorité de création présente"*"release posée"*"tofu présent"*"sondée compte par compte par 63-forge-tokens"* ]]
+  [[ "$output" == *"forge vivante ($POSTE), autorité de création présente ($MASTER)"* ]]
 }
 
 @test "apply : forge muette — échec, aucun geste" {
@@ -137,9 +142,10 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   grep -qxF "LCARS_FORGE_SEED_FILE=$TOKENS/forge-seed.pass" "$GESTE_ENV"
 }
 
-@test "apply : le roster est déposé dans une copie de la recette initialisée hors-ligne, le geste reçoit la forge et l'autorité, les copies partent, la pose est comptée" {
+@test "apply : le roster est déposé dans une copie de la recette que le geste initialise avec le tofu épinglé, il reçoit la forge et l'autorité, les copies partent, la pose est comptée" {
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # le tofu du PATH est un piège : le geste trouve l'épinglé de 46 en tête du sien
   [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/ ]* init -input=false -no-color$" "$CALLS")" -eq 1 ]
   [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/]*/instance init -input=false -no-color$" "$CALLS")" -eq 1 ]
   grep -q '^GESTE apply$' "$CALLS"
@@ -190,10 +196,15 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   [ -z "$(copies_restantes)" ]
 }
 
-@test "apply : une recette non initialisable hors-ligne est un échec qui nomme 46-tofu, le geste n'est pas joué" {
+@test "apply : une recette non initialisable hors-ligne est un échec qui montre la sortie du geste, les copies partent" {
   STUB_INIT_KO=1 mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"recette non initialisable (instance) — le miroir de providers de 46-tofu"* ]]
-  refute grep -q '^GESTE' "$CALLS"
-  [ -z "$(copies_restantes)" ]
+  [[ "$output" == *"FAIL  61-forge-structure: structure non posée (rc=1)"*"provider introuvable dans le miroir"* ]]
+  [ -z "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enroll.*' -o -name 'prov-recipe.*' \))" ]
+}
+
+@test "apply : une ligne sur l'entrée du module n'atteint pas le geste, qui la prendrait pour le jeton master" {
+  run bash "$MOD" apply <<<"ligne-tapee"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'stdin: \[\]' "$GESTE_ENV"
 }

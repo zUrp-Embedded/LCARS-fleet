@@ -41,14 +41,25 @@ skill() { echo "$SIEGE_HOME/.claude/skills/system-issues"; }
 @test "check : skill absent chez le siège — drift qui dit la conséquence" {
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues absent ou incomplet chez $PROV_HUMAN — la boîte de réception"* ]]
+  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues absent, incomplet ou différent de sa source ($LCARS_ADMIRAL_SKILLS_SRC/system-issues) chez $PROV_HUMAN — la boîte de réception"* ]]
 }
 
 @test "check : un skill sans son SKILL.md est incomplet, pas posé" {
-  mkdir -p "$(skill)"; printf '#!/usr/bin/env bash\n' > "$(skill)/list.sh"; chmod 0755 "$(skill)/list.sh"
+  mkdir -p "$(skill)"; cp "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh" "$(skill)/list.sh"; chmod 0755 "$(skill)/list.sh"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"absent ou incomplet chez $PROV_HUMAN"* ]]
+  [[ "$output" == *"absent, incomplet ou différent de sa source"* ]]
+}
+
+@test "check : un skill posé mais périmé — différent de sa source — est un drift, que l'apply résout" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf '# skill de la version précédente\n' > "$(skill)/SKILL.md"
+  mod check
+  [ "$status" -eq 1 ]
+  mod apply
+  mod check
+  [ "$status" -eq 0 ]
 }
 
 @test "apply : SKILL.md et list.sh exécutable posés dans le ~/.claude du siège, le check passe au vert, le second apply ne repose rien" {

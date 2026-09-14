@@ -17,6 +17,9 @@ setup() {
   [ -f "$PORTE" ]
 }
 
+embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' | grep -qx "$2"; }   # embarque <liste des constantes> <arbre>
+
+
 
 @test "C1 : --bench est CABLE sur le rail poste — il n'est plus avale" {
   grep -q 'export LCARS_BENCH=1 PROV_FORGE_MONTEE=1' "$PORTE"
@@ -77,15 +80,14 @@ setup() {
 
 
 @test "C6 : la copie embarquee emporte services/ — le module en depend LUI-MEME" {
-  local mod="$MODS/62-runtime-helpers.sh"
-  grep -qE '^EMBEDDED=\(.*services' "$mod"
+  embarque PROV_EMBEDDED services
   # et l'arbre que le module LIT est bien celui-la
-  grep -q 'services' "$mod"
+  grep -q 'services' "$MODS/62-runtime-helpers.sh"
 }
 
 @test "C6 : le second lecteur de l'arbre est servi lui aussi" {
   grep -q 'product_tree)/services/forge-gestures.sh' "$MODS/25-directories.sh"
-  grep -qE '^EMBEDDED=\(.*services' "$MODS/62-runtime-helpers.sh"
+  embarque PROV_EMBEDDED services
 }
 
 
@@ -94,7 +96,7 @@ setup() {
     | sed 's|repo_root)/||' | sort -u | grep -vE '^(fleet|runtime)$')"
   local n
   for n in $lus; do
-    grep -qE "^EMBEDDED_ROOT=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" \
+    embarque PROV_EMBEDDED_ROOT "$n" \
       || { echo "lu sous repo_root mais PAS embarque : $n"; return 1; }
   done
 }
@@ -108,7 +110,7 @@ setup() {
     # `_build` est l arbre de BUILD : il ne s embarque pas, il se consomme la ou il est bati.
     # `prov_release_bin` le cherche dans le PAQUET, jamais dans la copie posee.
     [ "$n" = "_build" ] && continue
-    grep -qE "^EMBEDDED=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" || manquants="$manquants $n"
+    embarque PROV_EMBEDDED "$n" || manquants="$manquants $n"
   done
   [ -z "$manquants" ] \
     || { echo "lu sous product_tree mais PAS dans EMBEDDED :$manquants"; return 1; }

@@ -25,15 +25,19 @@ ci_runner_count() { # ci_runner_count → le nombre de runners enregistrés, ou 
   return "$rc"
 }
 
+forge_fournie() { p_ok "forge fournie ($PROV_FORGE_URL) — son runner CI est à qui la tient ; cette installation n'en enrôle aucun"; }
+
 converge_ci_runner() {
   local n
-  n="$(ci_runner_count || true)"
-  if [[ "${n:-0}" -gt 0 ]]; then
+  [[ -s "$PROV_MASTER_TOKEN_FILE" ]] \
+    || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"; return 0; }
+  # un compte illisible n'est pas zéro : forge-runner.sh remplacerait le runner existant
+  n="$(ci_runner_count)" \
+    || { p_warn "runner CI non mesurable (API muette ou réponse illisible) — rien n'est enrôlé sur un compte inconnu"; return 0; }
+  if [[ "$n" -gt 0 ]]; then
     p_ok "$n runner(s) CI déjà enregistré(s) — la CI de cette forge a une machine"
     return 0
   fi
-  [[ -s "$PROV_MASTER_TOKEN_FILE" && -r "$PROV_MASTER_TOKEN_FILE" ]] \
-    || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"; return 0; }
   if ! docker_endpoint; then
     p_warn "runner CI non enrôlable : $PROV_DOCKER_WHY"
     return 0
@@ -55,6 +59,7 @@ converge_ci_runner() {
 }
 
 check() {
+  [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]] || { forge_fournie; verdict_check; }
   if ! forge_up; then
     p_ok "forge du poste éteinte — le runner n'est pas mesurable, et son absence n'est pas une dérive"
     verdict_check
@@ -71,6 +76,7 @@ check() {
 }
 
 apply() {
+  [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]] || { forge_fournie; verdict_apply; }
   if ! forge_up; then
     p_warn "forge du poste éteinte — enrôlement du runner reporté (48 la monte)"
     verdict_apply

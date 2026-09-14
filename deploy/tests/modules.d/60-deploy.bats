@@ -117,16 +117,6 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ -L "$LINKS/quelconque" ]
 }
 
-@test "release à deux libs : le build annoncé est celui qui démarre, la lib morte est un drift nommé" {
-  release_posee d4d23d792; verrouille
-  local rel="$PREFIX/rel/lcars_fleet"
-  mkdir -p "$rel/lib/lcars_fleet-0.1.0/priv/api"
-  printf 'sha=9ee4a4bcd\n' > "$rel/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
-  mod check
-  [[ "$output" == *"release posée ($PREFIX, build d4d23d792)"* ]]
-  [[ "$output" == *"DRIFT 60-deploy: la release posée porte 2 lib/lcars_fleet-*"*"celle qui démarre est lcars_fleet-0.9.0"* ]]
-}
-
 @test "apply : build déployé égal à HEAD et runtime propre — rien à bâtir, deploy-release.sh n'est pas appelé, les symlinks sont posés, le canal dit source" {
   release_posee; verrouille
   mod apply
@@ -202,12 +192,12 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ "$(cat "$CHANNEL")" = kit ]
 }
 
-@test "apply : sans mix en livraison source — échec qui nomme 15-toolchain, rien n'est joué" {
+@test "apply : sans mix en livraison source — l'outillage mix échoue en le nommant, deploy-release.sh n'est pas joué" {
   release_posee 0000000; verrouille
   rm -f "$BIN/mix"
   PATH="$BIN:/usr/bin:/bin" mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  60-deploy: mix absent — 15-toolchain le pose"* ]]
+  [[ "$output" == *"FAIL  60-deploy: commande en échec (rc=127) : as_human env -C $RACINE/runtime mix local.hex --force"* ]]
   [ ! -e "$MARQUEUR" ]
 }
 

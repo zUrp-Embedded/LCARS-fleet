@@ -16,32 +16,16 @@ HELPERS_DIR="$PROV_ROOT"
 TOOLCHAIN_BIN="$PROV_LINK_DIR/lcars-toolchain-converge"
 AUTHORITY_ASK_BIN="$PROV_LINK_DIR/lcars-authority-ask"
 HELPERS_OWNER="$(prov_owner root:root)"
+OWN=(-o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}")
 SRC_DIR="$(product_tree)/services"
 BIN_SRC_DIR="$(product_tree)/bin"
-owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
-
-HELPERS=(
-  console.sh
-  console-humans.sh
-  console-status.sh
-  console-landing.sh
-  console-deck.py
-  console-pod.sh
-  human-converger.sh
-  forge-gestures.sh
-  provision-role-tokens.sh
-  catalogue-executor.py
-  lcars_socket.py
-  privileged-executor.py
-  supervise.sh
-)
+read -ra HELPERS <<<"$PROV_HELPERS"
+read -ra HELPERS_DATA <<<"$PROV_HELPERS_DATA"
+# les arbres embarqués à plat sous HELPERS_DIR : la copie sert à rejouer le provisionnement (repo_root y mène) et aux lecteurs du produit
+read -ra EMBEDDED <<<"$PROV_EMBEDDED"
+read -ra EMBEDDED_ROOT <<<"$PROV_EMBEDDED_ROOT"
 SKEL_FILE="$(prov_decor /etc/skel/.bashrc)"
 BASH_BASHRC="$(prov_decor /etc/bash.bashrc)"
-LCARS_BASHRC="$(prov_decor /etc/lcars/lcars.bashrc)"
-DATA=(
-  "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
-  "lcars.bashrc $LCARS_BASHRC 0644"
-)
 
 XTERM_VERSION=5.5.0
 XTERM_FIT_VERSION=0.10.0
@@ -56,10 +40,6 @@ deck_static_table() {
     addon-fit.js "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@${XTERM_FIT_VERSION}/lib/addon-fit.js" "$XTERM_FIT_SHA256"
 }
 
-# les arbres embarqués à plat sous $HELPERS_DIR : la copie sert à rejouer le provisionnement (repo_root y mène) et aux lecteurs du produit
-EMBEDDED_FLEET="$HELPERS_DIR"
-EMBEDDED=(etc services bin vendor)
-EMBEDDED_ROOT=(assets catalogues deploy)
 # ce que la copie n'emporte pas : le cache de providers tofu, l'état et les variables de la recette (jetons), node_modules
 EMBEDDED_EXCLUDE=(
   --exclude=.terraform
@@ -70,14 +50,13 @@ EMBEDDED_EXCLUDE=(
   --exclude=crash.log
 )
 # le tampon des auxiliaires n'est pas .source-revision, le discriminant de livraison que prov_delivery lit à la même racine
-helpers_stamp() { echo "$EMBEDDED_FLEET/$PROV_HELPERS_STAMP"; }
-copie_delivery_stamp() { echo "$EMBEDDED_FLEET/$PROV_SOURCE_STAMP"; }
+helpers_stamp() { echo "$HELPERS_DIR/$PROV_HELPERS_STAMP"; }
+copie_delivery_stamp() { echo "$HELPERS_DIR/$PROV_SOURCE_STAMP"; }
 posed_rev() { # posed_rev → la révision d'où sort ce qui est posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
 }
 
-helper_current() { cmp -s "$SRC_DIR/$1" "$HELPERS_DIR/$1"; }
 sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 
 _PERMS_OK=0
@@ -90,39 +69,40 @@ check_perm() { # check_perm <chemin> <mode> [owner] — relit ce qui est là con
   if [[ "$cur" == "$want" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
   p_drift "$path : $cur ≠ $want — l'apply le repose"
 }
-check_tree_perms() { # check_tree_perms <racine> — HELPERS_OWNER partout, ni setgid ni écriture groupe/autres ; ce que la copie n'emporte pas n'est pas jugé
-  local root="$1" bad n first x
-  [[ -d "$root" ]] || return 0
+tree_hors_contrat() { # tree_hors_contrat <racine> → les objets qui ne sont pas à HELPERS_OWNER, ou setgid, ou inscriptibles par le groupe ou les autres ; ce que la copie n'emporte pas n'est pas jugé
+  local x
   local -a skip=()
   for x in "${EMBEDDED_EXCLUDE[@]}"; do skip+=(-name "${x#--exclude=}" -o); done
-  bad="$(find "$root" \( "${skip[@]}" -type l \) -prune -o \
-             \( ! -user "${HELPERS_OWNER%%:*}" -o ! -group "${HELPERS_OWNER##*:}" -o -perm /2022 \) -print 2>/dev/null || true)"
+  find "$1" \( "${skip[@]}" -type l \) -prune -o \
+       \( ! -user "${HELPERS_OWNER%%:*}" -o ! -group "${HELPERS_OWNER##*:}" -o -perm /2022 \) -print 2>/dev/null || true
+}
+check_tree_perms() { # check_tree_perms <racine>
+  local root="$1" bad n first
+  [[ -d "$root" ]] || return 0
+  bad="$(tree_hors_contrat "$root")"
   if [[ -z "$bad" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
   n="$(wc -l <<<"$bad")"; first="${bad%%$'\n'*}"
   p_drift "$root : $n objet(s) hors contrat (premier : $first, $(perm_of "$first")) — propriétaire $HELPERS_OWNER, ni setgid ni écriture groupe/autres ; l'apply repose l'arbre"
 }
 check_perms() {
-  local n spec d_src d_dst d_mode name _u _s _r
+  local n name _u _s _r
   _PERMS_OK=0
   for n in "${HELPERS[@]}"; do check_perm "$HELPERS_DIR/$n" 0755 "$HELPERS_OWNER"; done
-  for spec in "${DATA[@]}"; do
-    read -r d_src d_dst d_mode <<<"$spec"
-    check_perm "$d_dst" "$d_mode" "$HELPERS_OWNER"
-  done
+  for n in "${HELPERS_DATA[@]}"; do check_perm "$HELPERS_DIR/$n" 0644 "$HELPERS_OWNER"; done
+  check_perm "$PROV_SHELL_RC" 0644 "$HELPERS_OWNER"
   check_perm "$TOOLCHAIN_BIN" 0755 "$HELPERS_OWNER"
   check_perm "$AUTHORITY_ASK_BIN" 0755 "$HELPERS_OWNER"
   check_perm "$(helpers_stamp)" 0644 "$HELPERS_OWNER"
   check_perm "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER"
   check_perm "$(deck_static_dir)" 0755 "$HELPERS_OWNER"
   while IFS=$'\t' read -r name _u _s; do check_perm "$(deck_static_dir)/$name" 0644 "$HELPERS_OWNER"; done < <(deck_static_table)
-  for _r in "${EMBEDDED[@]}"; do check_tree_perms "$EMBEDDED_FLEET/$_r"; done
-  for _r in "${EMBEDDED_ROOT[@]}"; do check_tree_perms "$HELPERS_DIR/$_r"; done
+  for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do check_tree_perms "$HELPERS_DIR/$_r"; done
   [[ "$_PERMS_OK" -eq 0 ]] || p_ok "modes et propriétaires relus : $_PERMS_OK objet(s)/arbre(s) conformes à ce que l'apply pose"
   return 0
 }
 
 # les deux fichiers appartiennent à la distribution : un bloc géré, jamais un remplacement, et un raccord qui teste avant de sourcer
-BLOC_SKEL="if [ -r $LCARS_BASHRC ]; then . $LCARS_BASHRC; fi"
+BLOC_SKEL="if [ -r $PROV_SHELL_RC ]; then . $PROV_SHELL_RC; fi"
 # /etc/skel ne sert qu'à la création d'un compte : le PATH de tout shell interactif se règle dans bash.bashrc
 BLOC_PATH='case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
@@ -155,7 +135,7 @@ check() {
   else
     local rc=0; prov_rev_is_behind "$src" "$posed" || rc=$?
     case "$rc" in
-      0) p_fail "la source est en retard : posé depuis $posed, cet arbre est $src, qui en est un ancêtre — un apply remplacerait du code par du code plus ancien" ;;
+      0) p_drift "retour en arrière : posé depuis $posed, cet arbre est $src, qui en est un ancêtre — l'apply remplacerait du code par du code plus ancien" ;;
       1) p_drift "auxiliaires posés depuis $posed, cet arbre est $src — l'apply les mettra à jour" ;;
       *) p_warn "auxiliaires posés depuis $posed, cet arbre est $src — parenté indéterminable (pas de git, ou révision inconnue de ce clone)" ;;
     esac
@@ -163,7 +143,7 @@ check() {
   if command -v ttyd >/dev/null; then
     p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
   else
-    p_drift "ttyd absent — la console web n'a aucun serveur derrière sa socket (page noire)"
+    p_drift "ttyd absent — la console web n'a aucun serveur derrière sa socket (page noire) ; 10-packages le pose"
   fi
   for n in "${HELPERS[@]}"; do
     if [[ ! -e "$HELPERS_DIR/$n" ]]; then
@@ -174,7 +154,7 @@ check() {
       stale=1
     elif [[ ! -r "$SRC_DIR/$n" ]]; then
       p_warn "$HELPERS_DIR/$n : rien n'est conclu — la source est absente ou illisible ici ($SRC_DIR/$n)"
-    elif ! helper_current "$n"; then
+    elif ! cmp -s "$SRC_DIR/$n" "$HELPERS_DIR/$n"; then
       p_drift "$HELPERS_DIR/$n diverge de la source ($SRC_DIR/$n)"
       stale=1
     fi
@@ -224,23 +204,42 @@ check() {
     p_drift "$BASH_BASHRC sans le bloc PATH attendu — « claude » (~/.local/bin) est invisible d'un shell interactif"
   fi
   if bloc_conforme "$SKEL_FILE" skel "$BLOC_SKEL"; then
-    p_ok "squelette des humains raccordé ($SKEL_FILE → $LCARS_BASHRC)"
+    p_ok "squelette des humains raccordé ($SKEL_FILE → $PROV_SHELL_RC)"
   else
-    p_drift "$SKEL_FILE sans le raccord attendu vers $LCARS_BASHRC — les nouveaux comptes n'auraient pas le réglage de shell"
+    p_drift "$SKEL_FILE sans le raccord attendu vers $PROV_SHELL_RC — les nouveaux comptes n'auraient pas le réglage de shell"
   fi
   check_perms
   verdict_check
 }
 
-embarquer() { # embarquer <source> <destination> [--exclude…] — l'arbre copié par tar (exclusions à la source), possédé par HELPERS_OWNER, sans setgid ni écriture groupe
+poser_executable() { # poser_executable <source> <destination> — une copie qui diffère est reposée et comptée, une copie identique garde son contenu
+  [[ -f "$1" ]] || { p_fail "source absente : $1 (arbre incomplet)"; return 1; }
+  if cmp -s "$1" "$2"; then
+    ensure_mode "$2" 0755 "$HELPERS_OWNER"
+    return
+  fi
+  install -m 0755 "${OWN[@]}" "$1" "$2" || { p_fail "pose ratée : $2"; return 1; }
+  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$2"
+}
+
+poser_donnee() { # poser_donnee <source> <destination> — 0644 ; la redirection d'une source absente ne compterait aucun échec
+  [[ -f "$1" ]] || { p_fail "source absente : $1 (arbre incomplet)"; return 1; }
+  write_atomic "$2" 0644 < "$1"
+}
+
+embarquer() { # embarquer <source> <destination> [--exclude…] — l'arbre copié par tar (exclusions à la source) ; basculé et compté s'il diffère de ce qui est posé
   local src="$1" dst="$2"; shift 2
   rm -rf "${dst:?}.new"
   prov_scaffold_dir "$dst.new" 0755 "$HELPERS_OWNER" || return 1
-  ( cd "$src" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "$@" . ) | ( cd "$dst.new" && tar -xf - ) \
-    || { p_fail "copie ratée: $src"; return 1; }
-  chown -R "$HELPERS_OWNER" "$dst.new" 2>/dev/null || true
-  chmod -R g-s,go-w "$dst.new" || { p_fail "modes de la copie non posés: $dst"; return 1; }
-  prov_promote_dir "$dst.new" "$dst" || { p_fail "bascule ratée: $dst"; return 1; }
+  ( cd "$src" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "$@" . ) | ( cd "$dst.new" && tar --no-same-owner -xf - ) \
+    || { p_fail "copie ratée : $src"; return 1; }
+  chmod -R g-s,go-w "$dst.new" || { p_fail "modes de la copie non posés : $dst"; return 1; }
+  if [[ -d "$dst" && -z "$(tree_hors_contrat "$dst")" ]] && diff -rq --no-dereference "$dst.new" "$dst" >/dev/null 2>&1; then
+    rm -rf "$dst.new"
+    return 0
+  fi
+  prov_promote_dir "$dst.new" "$dst" || return 1
+  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "arbre embarqué $dst"
 }
 
 apply() {
@@ -251,67 +250,37 @@ apply() {
   if prov_rev_is_behind "$src" "$posed"; then
     p_warn "retour en arrière : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ancêtre — ce qui suit remplace du code par du code plus ancien, convergeur d'humains compris"
   fi
-  if command -v ttyd >/dev/null; then
-    p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
-  else
-    p_fail "ttyd absent — la console web n'aurait aucun serveur derrière sa socket (page noire) ; 10-packages le pose"
-    verdict_apply
-  fi
 
-  local -a own; mapfile -t own < <(owner_args)
-  ensure_dir "$HELPERS_DIR" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${HELPERS[@]}"; do
-    [[ -f "$SRC_DIR/$n" ]] || { p_fail "source absente: $SRC_DIR/$n (arbre incomplet)"; verdict_apply; }
-    if helper_current "$n"; then
-      ensure_mode "$HELPERS_DIR/$n" 0755 "$HELPERS_OWNER" || verdict_apply
-      continue
-    fi
-    install -m 0755 "${own[@]}" "$SRC_DIR/$n" "$HELPERS_DIR/$n" \
-      || { p_fail "pose ratée: $HELPERS_DIR/$n"; verdict_apply; }
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$HELPERS_DIR/$n"
+    poser_executable "$SRC_DIR/$n" "$HELPERS_DIR/$n" || verdict_apply
   done
-  local spec d_src d_dst d_mode
-  for spec in "${DATA[@]}"; do
-    read -r d_src d_dst d_mode <<<"$spec"
-    [[ -f "$SRC_DIR/$d_src" ]] || { p_fail "source absente: $SRC_DIR/$d_src (arbre incomplet)"; verdict_apply; }
-    ensure_dir "$(dirname "$d_dst")" 0755 || verdict_apply
-    write_atomic "$d_dst" "$d_mode" < "$SRC_DIR/$d_src" \
-      || { p_fail "pose ratée: $d_dst"; verdict_apply; }
+  for n in "${HELPERS_DATA[@]}"; do
+    poser_donnee "$SRC_DIR/$n" "$HELPERS_DIR/$n" || verdict_apply
   done
+  poser_donnee "$SRC_DIR/${PROV_SHELL_RC##*/}" "$PROV_SHELL_RC" || verdict_apply
 
-  ensure_dir "$(dirname "$SKEL_FILE")" 0755 || verdict_apply
-  ensure_managed_block "$SKEL_FILE" skel 0644 <<<"$BLOC_SKEL" || { p_fail "raccord du squelette non posé ($SKEL_FILE)"; verdict_apply; }
-  ensure_dir "$(dirname "$BASH_BASHRC")" 0755 || verdict_apply
-  ensure_managed_block "$BASH_BASHRC" path 0644 <<<"$BLOC_PATH" || { p_fail "bloc PATH non posé ($BASH_BASHRC)"; verdict_apply; }
+  ensure_managed_block "$SKEL_FILE" skel 0644 <<<"$BLOC_SKEL" || verdict_apply
+  ensure_managed_block "$BASH_BASHRC" path 0644 <<<"$BLOC_PATH" || verdict_apply
 
-  ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
-  install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN" \
-    || { p_fail "pose ratée: $TOOLCHAIN_BIN"; verdict_apply; }
-  ensure_dir "$(dirname "$AUTHORITY_ASK_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
-  install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-authority-ask" "$AUTHORITY_ASK_BIN" \
-    || { p_fail "pose ratée: $AUTHORITY_ASK_BIN"; verdict_apply; }
+  poser_executable "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN" || verdict_apply
+  poser_executable "$BIN_SRC_DIR/lcars-authority-ask" "$AUTHORITY_ASK_BIN" || verdict_apply
 
-  ensure_dir "$EMBEDDED_FLEET" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${EMBEDDED[@]}"; do
-    [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente: $(product_tree)/$n"; verdict_apply; }
-    embarquer "$(product_tree)/$n" "$EMBEDDED_FLEET/$n" || verdict_apply
+    [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente : $(product_tree)/$n"; verdict_apply; }
+    embarquer "$(product_tree)/$n" "$HELPERS_DIR/$n" || verdict_apply
   done
-  p_chg "arbres du runtime embarqués ($HELPERS_DIR/{${EMBEDDED[*]}})"
   local -a _only
   for n in "${EMBEDDED_ROOT[@]}"; do
-    [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
+    [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente : $(repo_root)/$n"; verdict_apply; }
     _only=(); [[ "$n" == deploy ]] && _only=(--exclude=./tests)
     embarquer "$(repo_root)/$n" "$HELPERS_DIR/$n" "${_only[@]}" || verdict_apply
   done
-  p_chg "arbres de la racine embarqués ($HELPERS_DIR/{${EMBEDDED_ROOT[*]}}, sans node_modules)"
 
   # le tampon s'écrit après la pose : il atteste ce qui est là
-  write_atomic "$(helpers_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" \
-    || { p_fail "révision de source non tamponnée ($(helpers_stamp)) — la prochaine passe ne saura pas d'où sort ce qui est ici"; verdict_apply; }
+  write_atomic "$(helpers_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" || verdict_apply
   # la forme de la livraison se propage dans la copie, dans les deux sens : un rejeu depuis la copie la lit à sa racine
   if prov_delivery_is_binary; then
-    write_atomic "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER" <<<"$(prov_source_rev)" \
-      || { p_fail "forme de livraison non propagée ($(copie_delivery_stamp)) — un apply rejoué depuis $HELPERS_DIR se croirait en livraison source et réclamerait un toolchain"; verdict_apply; }
+    write_atomic "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" || verdict_apply
   elif [[ -e "$(copie_delivery_stamp)" ]]; then
     rm -f "$(copie_delivery_stamp)" \
       || { p_fail "discriminant de livraison périmé non retiré ($(copie_delivery_stamp)) — cette machine se déclarerait binaire alors qu'elle bâtit"; verdict_apply; }

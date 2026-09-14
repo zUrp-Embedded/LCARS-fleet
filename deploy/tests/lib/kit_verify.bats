@@ -15,11 +15,10 @@ setup() {
   STAMP="$(sed -n 's/^PROV_SOURCE_STAMP=//p' "$D/installer-constants.env")"
   [ -n "$STAMP" ]
   K="$BATS_TEST_TMPDIR/kit"
-  mkdir -p "$K/deploy/modules.d" "$K/runtime/etc" "$K/runtime/bin" "$K/runtime/services" \
+  mkdir -p "$K/deploy" "$K/runtime/etc" "$K/runtime/bin" "$K/runtime/services" \
            "$K/runtime/_build/prod/rel/lcars_fleet/bin" "$K/assets/github.io/dist" \
            "$K/assets/avatars" "$K/assets/favicon"
   cp "$D/system.manifest" "$D/installer-constants.env" "$K/deploy/"
-  cp "$D/modules.d/62-runtime-helpers.sh" "$K/deploy/modules.d/"
   cp "$D/../runtime/etc/release.manifest" "$K/runtime/etc/release.manifest"
   cp "$D/../runtime/etc/fleet.env.template" "$K/runtime/etc/fleet.env.template"
   echo deadbeef > "$K/$STAMP"
@@ -29,13 +28,12 @@ setup() {
   local n
   while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/bin/$n"; done \
     < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$K/runtime/etc/release.manifest")
-  while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \
-    < <(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" || true)
-  while read -r n _; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \
-    < <(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' DATA" || true)
+  for n in $(constante PROV_HELPERS) $(constante PROV_HELPERS_DATA); do : > "$K/runtime/services/$n"; done
   : > "$K/runtime/bin/lcars-toolchain-converge"; : > "$K/runtime/bin/lcars-authority-ask"
   : > "$K/runtime/services/lcars.bashrc"
 }
+
+constante() { sed -n "s/^$1=//p" "$BATS_TEST_DIRNAME/../../installer-constants.env"; }
 
 REL_KIT=runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet
 verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
@@ -105,7 +103,7 @@ verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
 
 @test "KIT : un auxiliaire que 62-runtime-helpers EMBARQUE et qui manque est vu, et NOMME" {
   local premier
-  premier="$(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" | head -1)"
+  premier="$(constante PROV_HELPERS | cut -d' ' -f1)"
   [ -n "$premier" ]
   rm -f "$K/runtime/services/$premier"
   verifie
@@ -117,7 +115,7 @@ verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
   rm -f "$K/runtime/services/lcars.bashrc"
   verifie
   [ "$status" -ne 0 ] || { echo "une donnée sans source est acceptee"; return 1; }
-  [[ "$output" == *"la donnée lcars.bashrc"* ]] || { echo "la donnée n'est pas nommée : $output"; return 1; }
+  [[ "$output" == *"PROV_SHELL_RC nomme lcars.bashrc, absent du kit"* ]] || { echo "la donnée n'est pas nommée : $output"; return 1; }
 }
 
 @test "KIT : un binaire que 62 pose hors de ses listes et qui manque est vu" {
@@ -127,25 +125,20 @@ verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
   [[ "$output" == *"lcars-authority-ask"* ]]
 }
 
-@test "KIT : une liste de 62 renommée ne se lit plus, et c'est un refus nommé, pas un kit accepté" {
-  sed -i 's/^HELPERS=(/AUXILIAIRES=(/' "$K/deploy/modules.d/62-runtime-helpers.sh"
+@test "KIT : des constantes sans la liste des auxiliaires sont un refus nommé, pas un kit accepté" {
+  grep -v '^PROV_HELPERS=' "$BATS_TEST_DIRNAME/../../installer-constants.env" > "$K/deploy/installer-constants.env"
   verifie
   [ "$status" -ne 0 ]
-  [[ "$output" == *"la liste HELPERS ne se lit pas"* ]]
+  [[ "$output" == *"ne déclare pas PROV_HELPERS — ce que 62-runtime-helpers en pose n'est pas vérifié"* ]]
 }
 
-@test "KIT : une liste de 62 qui cite une variable que personne ne pose est un refus nommé" {
-  sed -i 's/^DATA=(/DATA=(\n  "$VARIABLE_JAMAIS_POSEE"/' "$K/deploy/modules.d/62-runtime-helpers.sh"
+@test "KIT : une liste se lit comme une donnée — une substitution écrite dedans n'est pas exécutée, elle est un nom absent" {
+  { grep -v '^PROV_HELPERS_DATA=' "$BATS_TEST_DIRNAME/../../installer-constants.env"
+    printf 'PROV_HELPERS_DATA=$(touch %s/effet)\n' "$BATS_TEST_TMPDIR"; } > "$K/deploy/installer-constants.env"
   verifie
   [ "$status" -ne 0 ]
-  [[ "$output" == *"la liste DATA ne se lit pas"* ]]
-}
-
-@test "kv_tableau : une liste sur une ligne se lit seule, le code qui la suit n'est pas exécuté" {
-  printf 'HELPERS=(a b)\necho EFFET-DE-BORD\nDATA=(\n  "c d"\n)\n' > "$BATS_TEST_TMPDIR/mod.sh"
-  run bash -c "$LIBS; kv_tableau '$BATS_TEST_TMPDIR/mod.sh' HELPERS"
-  [ "$status" -eq 0 ]
-  [ "$output" = "$(printf 'a\nb')" ]
+  [ ! -e "$BATS_TEST_TMPDIR/effet" ]
+  [[ "$output" == *"PROV_HELPERS_DATA nomme "* ]]
 }
 
 @test "KIT : un arbre de 44-media absent est vu — il ne se batit nulle part" {

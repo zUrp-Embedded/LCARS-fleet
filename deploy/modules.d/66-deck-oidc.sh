@@ -13,17 +13,4 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 advertise_addr
-exec env \
-  LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \
-  LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \
-  FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
-  FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL:-}" \
-  LCARS_SYSTEM_TOKEN_FILE="${PROV_SYSTEM_TOKEN_FILE:-}" \
-  LCARS_SYSTEM_USER="${PROV_SYSTEM_USER:-}" \
-  LCARS_SYSTEM_GROUP="${PROV_SYSTEM_USER:-}" \
-  LCARS_LANDING_PORT="${PROV_DECK_PORT:-}" \
-  LCARS_DECK_ORIGINS="${PROV_DECK_ORIGINS:-}" \
-  LCARS_DECK_OIDC_FILE="${PROV_DECK_OIDC_FILE:-}" \
-  LCARS_ADVERTISE="${PROV_ADVERTISE:-}" \
-  LCARS_ADVERTISE_WHY="${PROV_ADVERTISE_WHY:-}" \
-  bash "$(product_tree)/services/forge.d/deck-oidc.sh" "${1:?usage: 66-deck-oidc.sh <check|apply>}"
+prov_geste deck-oidc "${1:?usage: 66-deck-oidc.sh <check|apply>}"

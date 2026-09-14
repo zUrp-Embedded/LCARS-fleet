@@ -74,7 +74,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ ! -e "$SHARE/doc/.doc-revision" ]
   [ ! -e "$SHARE/doc.partial" ]
   [ "$(stat -c '%a %U' "$SHARE/avatars")" = "755 $(id -un)" ]
-  [[ "$output" == *"POSÉ  44-media: doc du deck posée ($SHARE/doc, base /doc/)"*"POSÉ  44-media: médias posés ($SHARE : avatars favicon)"* ]]
+  [[ "$output" == *"POSÉ  44-media: doc du deck posée ($SHARE/doc, base /doc/)"* ]]
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"avatars posé (2 fichiers)"*"doc posée (2 fichiers)"* ]]
@@ -88,7 +88,6 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ ! -s "$NPM_TRACE" ]
   [[ "$output" == *"doc du deck à jour ($SHARE/doc, révision abc12345) — rien à rebâtir"* ]]
-  [[ "$output" == *"OK    44-media: médias et doc déjà conformes"* ]]
   [[ "$output" != *"POSÉ"* ]]
 }
 
@@ -191,10 +190,13 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
 @test "pose de la doc sous un décor, au compte qui joue : la seconde pose du même dist ne compte rien, un dist qui a changé est reposé" {
   mkdir -p "$SHARE" "$LCARS_SITE_SRC/dist"; printf 'v1' > "$LCARS_SITE_SRC/dist/index.html"
   fn "PROV_CHANGED=0; poser_doc; echo \"c1=\$PROV_CHANGED\"; PROV_CHANGED=0; poser_doc; echo \"c2=\$PROV_CHANGED\"
+      [ -e '$SHARE/doc.partial' ] && echo 'partiel-laissé'
       printf v2 > '$LCARS_SITE_SRC/dist/index.html'; PROV_CHANGED=0; poser_doc; echo \"c3=\$PROV_CHANGED\""
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" =~ c1=[1-9] ]]
   [[ "$output" == *"c2=0"* ]]
+  # un dossier doc.partial laissé par la pose « déjà posée » serait un objet que le manifeste ne déclare pas
+  [[ "$output" != *"partiel-laissé"* ]]
   [[ "$output" =~ c3=[1-9] ]]
   [[ "$output" == *"doc du deck déjà posée"* ]]
   [ "$(cat "$SHARE/doc/index.html")" = v2 ]

@@ -23,6 +23,8 @@ setup() {
   TOOLCHAIN_BIN="$LCARS_DECOR_ROOT/usr/local/bin/lcars-toolchain-converge"
   ASK_BIN="$LCARS_DECOR_ROOT/usr/local/bin/lcars-authority-ask"
   SKEL="$LCARS_DECOR_ROOT/etc/skel/.bashrc"
+  # /etc/skel est dans toute image ; le décor le porte comme elle
+  mkdir -p "$(dirname "$SKEL")"
   BASH_BASHRC="$LCARS_DECOR_ROOT/etc/bash.bashrc"
   BASHRC_LCARS="$LCARS_DECOR_ROOT/etc/lcars/lcars.bashrc"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
@@ -41,7 +43,7 @@ printf '%s' '$1' > "\$dest"
 EOF
   chmod 0755 "$BINDIR/curl"
 }
-helpers() { sed -n '/^HELPERS=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d ' \t' | grep -v '^$'; }
+helpers() { sed -n 's/^PROV_HELPERS=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env" | tr ' ' '\n'; }
 # le corpus se joue depuis un checkout (le kit ne l'emporte pas) : ces cas lisent la révision du dépôt
 need_git_checkout() { git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1; }
 racine_paquet() { # racine_paquet → une racine de source qui se déclare paquet ; lib et modules copiés, le reste lié
@@ -121,14 +123,14 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"$ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues"* ]]
 }
 
-@test "apply pose le provisionnement en forme de dépôt, sans ses témoins, et les arbres etc, bin et vendor" {
+@test "apply pose le provisionnement en forme de dépôt, sans ses témoins, et les arbres etc et bin ; vendor, sans lecteur, reste dans le dépôt" {
   mod apply
   [ -x "$HELPERS/deploy/provision" ]
   [ -d "$HELPERS/deploy/modules.d" ]
   [ ! -d "$HELPERS/deploy/tests" ]
   [ -d "$HELPERS/etc" ]
   [ -d "$HELPERS/bin" ]
-  [ -f "$HELPERS/vendor/token_saver/lcars_hook.py" ]
+  [ ! -e "$HELPERS/vendor" ]
   [ -d "$HELPERS/assets/avatars" ]
   [ -d "$HELPERS/catalogues" ]
   mod check
@@ -147,6 +149,23 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   local before; before="$(stat -c %Y "$HELPERS/console.sh")"
   mod apply
   [ "$(stat -c %Y "$HELPERS/console.sh")" = "$before" ]
+}
+
+@test "rejoué sans rien de neuf : aucune ligne POSÉ, ni pour les arbres embarqués ni pour les binaires du PATH" {
+  mod apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/deploy"* ]]
+  mod apply
+  refute_out '^POSÉ' <<<"$output"
+}
+
+@test "un arbre dont la source a changé est seul rebasculé, et compté" {
+  local src; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  printf '# retouche\n' >> "$src/runtime/services/console.tmux.conf"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]]
+  [ "$(grep -c '^POSÉ  62-runtime-helpers: arbre embarqué' <<<"$output")" -eq 1 ]
+  cmp -s "$src/runtime/services/console.tmux.conf" "$HELPERS/services/console.tmux.conf"
 }
 
 @test "les données sont posées à leur destination en 0644, identiques à la source, non exécutables" {
@@ -221,7 +240,7 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"impossible de dire de quelle révision"* ]]
 }
 
-@test "une source en retard sur ce qui est posé est un échec au check, et l'apply l'annonce avant d'écrire" {
+@test "une source en retard sur ce qui est posé : le check dit le retour en arrière que l'apply fera, l'apply l'annonce et le fait" {
   need_git_checkout
   # un ancêtre réel du dépôt
   git -C "$BATS_TEST_DIRNAME" rev-parse --verify -q HEAD~1 >/dev/null
@@ -231,8 +250,9 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
   echo "$head" > "$HELPERS/.helpers-revision"
   PROV_SOURCE_REV="$prev" mod check
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  62-runtime-helpers: la source est en retard : posé depuis $head, cet arbre est $prev, qui en est un ancêtre"* ]]
+  # un FAIL au check serait un état que l'apply ne refuse pas
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 62-runtime-helpers: retour en arrière : posé depuis $head, cet arbre est $prev, qui en est un ancêtre"* ]]
   rm -f "$HELPERS/console.sh"
   PROV_SOURCE_REV="$prev" mod apply
   [[ "$output" == *"WARN  62-runtime-helpers: retour en arrière : $HELPERS sort de $head, cet arbre est $prev"* ]]
@@ -289,11 +309,11 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"PATH des shells interactifs"*"squelette des humains raccordé"* ]]
 }
 
-@test "check : un arbre embarqué du runtime absent (vendor, bin, etc, services) est un drift" {
+@test "check : un arbre embarqué du runtime absent (bin, etc, services) est un drift" {
   mod apply
-  rm -rf "${HELPERS:?}/vendor" "${HELPERS:?}/bin"
+  rm -rf "${HELPERS:?}/bin"
   mod check
-  [[ "$output" == *"arbre embarqué absent ($HELPERS/bin)"*"arbre embarqué absent ($HELPERS/vendor)"* ]]
+  [[ "$output" == *"arbre embarqué absent ($HELPERS/bin)"* ]]
   [[ "$output" == *"arbre embarqué $HELPERS/etc"*"arbre embarqué $HELPERS/services"* ]]
 }
 

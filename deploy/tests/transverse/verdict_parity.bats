@@ -42,6 +42,14 @@ verdict_product()   { bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1; LCARS_FAILE
   [ "$(verdict_product check 1 1)" = 2 ]
 }
 
+@test "3 n'est le verdict d'aucun dialecte : la garde de l'installeur le rend à une mort sous set -e, le protocole seul rend le code brut" {
+  run env PROVISION_RUN=1 bash -c "set -e; . '$INSTALLER' >/dev/null 2>&1; false"
+  [ "$status" -eq 3 ]
+  # le protocole ne pose aucune garde : le lanceur de gestes (prov_geste) la pose pour lui
+  run bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; false"
+  [ "$status" -eq 1 ]
+}
+
 @test "les compteurs sont bien ceux que p_drift et p_fail incrementent, dans les deux dialectes" {
   grep -qE 'p_drift\(\).*PROV_DRIFT=\$\(\(PROV_DRIFT \+ 1\)\)' "$INSTALLER"
   grep -qE 'p_fail\(\).*PROV_FAILED=\$\(\(PROV_FAILED \+ 1\)\)' "$INSTALLER"

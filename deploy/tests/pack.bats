@@ -19,13 +19,12 @@ setup() {
   cp "$SRC" "$R/deploy/pack.sh"
   cp "$RACINE_REELLE"/deploy/lib/*.sh "$R/deploy/lib/"
   cp "$RACINE_REELLE/deploy/system.manifest" "$RACINE_REELLE/deploy/installer-constants.env" "$R/deploy/"
-  cp "$RACINE_REELLE/deploy/modules.d/62-runtime-helpers.sh" "$R/deploy/modules.d/"
   cp "$RACINE_REELLE/install.sh" "$R/install.sh"
   cp "$RACINE_REELLE/runtime/etc/release.manifest" "$RACINE_REELLE/runtime/etc/fleet.env.template" "$R/runtime/etc/"
   local n
   while read -r n _; do [[ -n "$n" && "$n" != \#* ]] || continue; cp "$RACINE_REELLE/runtime/bin/$n" "$R/runtime/bin/"; done < "$R/runtime/etc/release.manifest"
   cp "$RACINE_REELLE"/runtime/bin/lcars-toolchain-converge "$RACINE_REELLE"/runtime/bin/lcars-authority-ask "$R/runtime/bin/"
-  for n in $(sed -n '/^HELPERS=(/,/^)/p' "$R/deploy/modules.d/62-runtime-helpers.sh" | sed '1d;$d' | tr -d ' ') console.tmux.conf lcars.bashrc; do
+  for n in $(sed -n 's/^PROV_HELPERS\(_DATA\)\{0,1\}=//p' "$R/deploy/installer-constants.env") lcars.bashrc; do
     cp "$RACINE_REELLE/runtime/services/$n" "$R/runtime/services/"
   done
   printf 'png' > "$R/assets/avatars/a.png"; printf 'ico' > "$R/assets/favicon/f.ico"

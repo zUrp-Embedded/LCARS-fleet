@@ -64,16 +64,16 @@ checkout) ou `kit` ; un canal ne se pose pas sur un autre.
 | 25-directories | any | any | l'arborescence système : `/opt/lcars` et ses zones, les zones de face sous `/home`, les dossiers de `/run` et leur déclaration tmpfiles ; le substrat de chaque entrée se lit dans `system.manifest` |
 | 30-wsl | wsl | wsl | `/etc/wsl.conf` clé par clé (lecteurs Windows fermés, interop coupée, systemd, nom d'hôte), écrit en dernier ; snapd purgé ; gpg-agent masqué |
 | 44-media | wsl linux docker | any | les médias partagés (avatars, favicon) et la doc du deck, bâtie depuis les sources ou posée depuis le kit ; modes et propriétaire relus contre `system.manifest` |
-| 45-seat-skill | wsl linux | wsl linux | le skill `system-issues` dans le `~/.claude` du siège (uid 1000), et de lui seul |
+| 45-seat-skill | wsl linux | wsl linux | le skill `system-issues` dans le `~/.claude` du siège (l'uid `LCARS_SYSADMIN_UID`), et de lui seul ; le check le compare à sa source |
 | 46-tofu | wsl linux docker | any | OpenTofu épinglé (sha256) et son miroir de providers hors-ligne, refait quand un `init` hors-ligne échoue |
-| 48-forge-host | wsl linux | wsl linux | la forge du poste : conteneur Gitea, compte admin, jeton master, graine et structure ; sans elle, 63 et 66 restent en dérive |
-| 49-forge-runner | wsl linux | wsl linux | le runner CI de la forge du poste, enrôlé par `docker/forge-runner.sh` quand la forge n'en a aucun |
+| 48-forge-host | wsl linux | wsl linux | la forge du poste (conteneur Gitea) ou la forge fournie : adresses, compte admin, jeton master et seed ; sans elle, 63 et 66 restent en dérive |
+| 49-forge-runner | wsl linux | wsl linux | le runner CI de la forge du poste, enrôlé par `docker/forge-runner.sh` quand la forge n'en a aucun ; rien sur une forge fournie, ni sur un compte de runners illisible |
 | 50-catalogues | any | any | le matériel des catalogues installés, convergé depuis la forge — un appelant mince de `runtime/services/forge.d/catalogues.sh` |
 | 60-deploy | wsl linux docker | any | la release du runtime : bâtie (ou reprise du kit) par `lib/deploy-release.sh` sous l'humain, verrouillée root:fleet 0750, câblée sur `/usr/local/bin` ; les intrus hors `release.manifest` sont retirés ; le canal s'écrit après la pose |
-| 61-forge-structure | wsl linux | wsl linux | la structure de la forge (organisations, comptes de rôle, équipes, dépôt modèle) : roster dérivé de la release posée, recette tofu copiée, initialisée hors-ligne et jouée par `forge-gestures.sh apply` |
+| 61-forge-structure | wsl linux | wsl linux | la structure de la forge (organisations, comptes de rôle, équipes, dépôt modèle) : roster dérivé de la release posée, recette tofu copiée, initialisée hors-ligne et jouée par `forge-gestures.sh apply` avec le tofu épinglé |
 | 62-runtime-helpers | wsl linux docker | any | les auxiliaires du runtime sur la machine : services, binaires du PATH, arbres embarqués à plat sous `/opt/lcars`, client de terminal épinglé, réglage de shell (`/etc/skel/.bashrc`, PATH `~/.local/bin` dans `/etc/bash.bashrc`) |
 | 63-forge-tokens | wsl linux | wsl linux | les jetons de rôle — un appelant mince de `runtime/services/forge.d/tokens.sh` |
-| 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (relancées si réécrites sous un service debout) et une passe du convergeur d'humains ; en conteneur, le superviseur et ses programmes sont sondés à la place |
+| 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (un service debout est relancé quand son unité, l'environnement ou un auxiliaire de 62 a changé depuis son démarrage) et une passe du convergeur d'humains tant que son daemon ne tourne pas ; en conteneur, le superviseur et ses programmes sont sondés à la place |
 | 65-ops-branch | wsl linux | wsl linux | la branche d'outillage sur le dépôt ops — un appelant mince de `runtime/services/forge.d/ops-branch.sh` |
 | 66-deck-oidc | wsl linux | wsl linux | le client OAuth2 du deck et `/etc/lcars/deck-oidc.json` — un appelant mince de `runtime/services/forge.d/deck-oidc.sh` |
 
@@ -86,10 +86,10 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 
 | fichier | rôle |
 |---|---|
-| `provision-lib.sh` | le protocole des modules : verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), verrou, apt, `as_human`, les défauts `PROV_*` |
+| `provision-lib.sh` | le protocole des modules : verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), verrou, apt, `as_human`, les défauts `PROV_*`, la table de traduction vers les noms `LCARS_*` du produit et `prov_geste`, le lanceur des gestes de `runtime/services/forge.d` (50, 63, 65, 66) |
 | `docker-endpoint.sh` | le substrat et le daemon docker : une CLI du PATH, une socket, un verdict qui nomme le geste manquant |
 | `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, basculée sous le préfixe ; liens, modes et élagage par `60-deploy` |
-| `kit-verify.sh` | ce qu'un kit doit porter, contre `system.manifest`, `release.manifest` et les listes de 62 |
+| `kit-verify.sh` | ce qu'un kit doit porter, contre `system.manifest`, `release.manifest` et les listes que 62 pose (`PROV_HELPERS`, `PROV_HELPERS_DATA`, `PROV_SHELL_RC` des constantes) |
 | `door-gen.sh` | l'installeur d'une version : le gabarit `install.sh` avec sa base, sa clé et sa table de sommes |
 | `forge-publish.sh` | la release sur la forge : brouillon sur le commit, assets, publication ; une release existante est un refus |
 | `forge-bootstrap.sh` | l'amorçage d'une forge Gitea : admin, jeton master, graine |

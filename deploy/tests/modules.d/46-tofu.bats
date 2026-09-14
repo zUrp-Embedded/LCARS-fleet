@@ -82,8 +82,31 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   [[ "$output" == *"$TOFU_DIR/providers : 700 $me ≠ 755 $me"* ]]
   [[ "$output" == *"$TOFU_DIR 755 $me (table)"* ]]
   chmod 0755 "$TOFU_BIN" "$TOFU_DIR/providers"
+  touch "$STUB_STATE/mirrored"
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "check : un tofurc et un providers/ vide ne sont pas un miroir — l'init hors-ligne de la recette le mesure, sur une copie qui part" {
+  tofu_double
+  mkdir -p "$TOFU_DIR/providers"; printf 'x\n' > "$TOFU_DIR/tofurc"
+  chmod 0755 "$TOFU_DIR" "$TOFU_DIR/providers"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 46-tofu: miroir de providers incomplet ($TOFU_DIR/providers) — l'init hors-ligne de la recette échoue"* ]]
+  [ -z "$(copies_restantes)" ]
+  touch "$STUB_STATE/mirrored"
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"il couvre la recette (init hors-ligne OK)"* ]]
+}
+
+@test "check : un tofu posé qui ne rend aucune version est un drift dit, pas une mort avant verdict" {
+  mkdir -p "$(dirname "$TOFU_BIN")"
+  printf '#!/usr/bin/env bash\nexit 139\n' > "$TOFU_BIN"; chmod 0755 "$TOFU_BIN"
+  PROVISION_RUN=1 mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 46-tofu: tofu sans version lisible ≠ version épinglée"* ]]
 }
 
 @test "apply : au premier passage l'init hors-ligne échoue, le miroir est posé pour les deux modules de la recette et l'init rejoué ; au second, rien ne se refait" {
@@ -91,7 +114,9 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(grep -c ' providers mirror -platform=linux_amd64 ' "$CALLS")" -eq 2 ]
-  [ "$(grep -c ' init -input=false' "$CALLS")" -eq 4 ]
+  # l'init d'essai s'arrête au premier module qui échoue ; après le miroir, les deux modules s'initialisent
+  [ "$(grep -c ' init -input=false' "$CALLS")" -eq 3 ]
+  [ "$(grep -c "/instance init -input=false" "$CALLS")" -eq 2 ]
   grep -q "^ *path *= \"$TOFU_DIR/providers\"" "$TOFU_DIR/tofurc"
   [ -d "$TOFU_DIR/providers/registry.opentofu.org" ]
   [[ "$output" == *"POSÉ  46-tofu: miroir de providers hors-ligne ($TOFU_DIR/providers)"* ]]
