@@ -14,11 +14,11 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 
 | commande | rôle |
 |---|---|
-| `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et délègue ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration. En mode conteneur, jq est demandé sur l'hôte (le banc lit l'API de sa forge, `container forge-apply` dérive le roster d'une forge fournie), et une instance déjà posée est refusée avec sa mise à jour. Le reste : `install.sh --help` |
-| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` mesure, arrête avant `sudo` un terrain que le préflight refuse, escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel), puis `accept` ; `doctor` sonde sans escalader et rend les codes de `provision doctor` |
+| `install.sh` (racine) | l'installeur : il mesure la machine sans privilège (`provision mesure`), montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et agit ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur, sans root ; `--workstation` l'installe dans le système : après la pause, un seul `sudo` relance l'installeur sur son fichier (pipé, celui du kit), qui mesure ce que root seul lit puis exec `workstation up --faits` sur ces faits ; les choix de l'opérateur et ce que la mesure sans privilège a vu passent à `sudo` en options. `--bench` monte aussi la forge, son runner CI et un compte de démonstration. En mode conteneur, jq est demandé sur l'hôte (le banc lit l'API de sa forge, `container forge-apply` dérive le roster d'une forge fournie), et une instance déjà posée est refusée avec sa mise à jour. Le reste : `install.sh --help` |
+| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste, en root : `up` sans root mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que root pose et se relance une fois par `sudo` ; en root, il mesure ce que root seul lit (ou reçoit ces faits d'`install.sh` par `--faits`), joue `provision apply` sur ces faits depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel), puis `accept`. `doctor` sans root se relance par `sudo` ; en root, il rend les codes de `provision doctor` |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/`. Codes de sortie et variables : `deploy/container help` |
 | `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : les deux gates, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace) ; le tiroir `dist/<tag>/` les reprend par liens durs, avec le compose de l'instance, son profil seccomp, les constantes de l'installeur et l'installeur de la version ; l'image reste dans le daemon. Prérequis et codes de sortie : `deploy/pack.sh --help` ; `--publish` : « Publier une version », plus bas |
-| `deploy/provision apply \| doctor \| list \| audit` | le runner des modules, joué par `workstation`, par le préflight de l'installeur et par la construction de l'image ; `apply` se joue en root. Options et codes de sortie : `deploy/provision --help` |
+| `deploy/provision apply \| doctor \| mesure \| list \| audit` | le runner des modules, joué par `workstation`, par l'installeur et par la construction de l'image ; `apply` et `doctor` se jouent en root ; `mesure` joue le préflight seul pour un lanceur, sans root ce qui se lit sans privilège, en root ce que root seul lit, et écrit ses faits dans `--faits`. Options et codes de sortie : `deploy/provision --help` |
 | `deploy/accept` | l'acceptation d'une installation dans le système : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows du modèle de projet demandent, la fleet démarre sous un humain de fleet de la machine (sur un banc, sous l'humain de démonstration) |
 
 ## Le pipeline
@@ -31,7 +31,12 @@ inférieur). Le substrat se mesure —
 `docker` dans un conteneur, `wsl` sous un noyau Microsoft, `linux` sinon — et un `--substrate` qui
 contredit la mesure est refusé. Le préflight (`00-preflight`) est la barrière de l'apply : tout
 verdict autre que conforme arrête la passe avant le module suivant, et `--only` le joue quand
-même. En apply, un module retenu par `CHECK-ON` mais hors `APPLY-ON` est joué en check, et son
+même ; un apply qui reçoit `--faits`, la mesure root conforme de la même invocation, ne le rejoue
+pas. Le préflight a deux phases, que `provision mesure` choisit par l'identité : sans privilège
+(système, docker, forge, ports, traces, canal ; un port tenu par un processus invisible y est
+« tenu », jamais un refus) et root (écriture et `mv --exchange` sous l'ancêtre de la racine,
+propriétaire des ports tenus par `ss -ltnp` : seul ce projet tient ses ports) ; apply et doctor les
+jouent à la suite. En apply, un module retenu par `CHECK-ON` mais hors `APPLY-ON` est joué en check, et son
 drift est un échec : rien sur place ne peut converger.
 
 Le doctor joue le check de chaque module, le même que celui qui encadre son apply. Un module sonde
@@ -58,7 +63,7 @@ et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de
 
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|
-| 00-preflight | any | any | les planchers (famille Debian, `mv --exchange` sous la racine, architecture, mémoire, disque, WSL2 plutôt que WSL1, déclaration d'un Linux dédié, docker sous WSL, canal lisible) et les faits d'entrée de l'installeur ; aucune mutation |
+| 00-preflight | any | any | les planchers (famille Debian, `mv --exchange` sous la racine, architecture, mémoire, disque, WSL2 plutôt que WSL1, déclaration d'un Linux dédié, docker sous WSL, canal lisible et non mélangé, ports de ce projet tenus par lui seul) et les faits d'entrée de l'installeur, en deux phases (sans privilège, root) ; aucune mutation |
 | 10-packages | wsl linux docker | any | les paquets apt du runtime et des pods (la liste `PACKAGES` du module), et une sandbox bwrap réellement lancée sous l'humain ; au build de l'image, cette sonde se reporte au boot |
 | 12-docker-engine | linux | linux | docker-ce depuis le dépôt upstream, posé si aucun moteur n'est là ; un daemon qui répond est conforme, un moteur posé et arrêté (docker-ce ou docker.io) ou un daemon qui refuse l'utilisateur se disent sans que rien ne soit reposé. Sous WSL, le daemon vient de Docker Desktop |
 | 15-toolchain | wsl linux docker | wsl linux docker | Erlang par apt, à la majeure OTP du zip d'Elixir, et Elixir précompilé épinglé (version et sha256) sous `/opt`, avec le retrait des arbres d'une autre version que ce module a marqués ; sur une livraison source seulement, un kit embarque son ERTS |
@@ -185,7 +190,8 @@ avec son geste, et la sortie est 0 quand le contrat tient, 1 sinon. `deploy/cont
 pose ensuite la structure (OpenTofu tourne dans le conteneur), rejouable.
 
 Une installation dans le système reçoit `FORGE_BASE_URL` et `FORGE_PUBLIC_URL` de l'environnement
-ou d'un `--env FICHIER`. `48-forge-host` y génère le seed ; le jeton master s'écrit à la main dans
+ou d'un `--env FICHIER` ; `install.sh` et `workstation` les passent à `sudo` en options (`--forge`,
+`--forge-publique`), qui ne transmet aucune variable. `48-forge-host` y génère le seed ; le jeton master s'écrit à la main dans
 le fichier que son drift nomme (`PROV_MASTER_TOKEN_FILE`, 0600, au compte d'autorité), puis la passe
 se relance et `61-forge-structure` pose la structure.
 

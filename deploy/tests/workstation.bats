@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/workstation.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-14
-# STATUS: témoins du délégué du poste — escalade, canal, kit, provisionnement, acceptation, sortie
+# STATUS: témoins du délégué du poste — mesure sans privilège, sudo une fois, mesure root, provisionnement sur ses faits, acceptation, kit, sortie
 
 load refute
 load support/decor
@@ -26,17 +26,32 @@ deploy_copie() { # deploy_copie <dossier deploy> — le délégué, sa lib et le
   cp "$BATS_TEST_DIRNAME/../installer-constants.env" "$BATS_TEST_DIRNAME/../system.manifest" "$1/"
 }
 
-arbre() { # arbre <faits…> — le deploy/ factice ; provision doctor rend ces faits, la ligne DOCTOR_LIGNE et le code DOCTOR_RC
+# provision de décor : « mesure » écrit les faits donnés, la phase que l'identité dit et son verdict
+# (DOCTOR_LIGNE, DOCTOR_RC) ; « apply » et « doctor » notent les choix de l'opérateur qu'ils reçoivent
+faux_provision() { # faux_provision <fichier> <étiquette> <faits…>
+  local f="$1" tag="$2"; shift 2
+  { echo '#!/usr/bin/env bash'
+    echo "echo \"$tag:\$*\" >> \"\${TRACE:?}\""
+    echo 'if [[ "$1" != mesure ]]; then'
+    echo '  env | grep -E "^(FORGE_|LCARS_ALLOW|LCARS_BENCH|LCARS_BUILTIN|PROV_FORGE_|DOCKER_HOST|SUDO_USER)" | sort | sed "s/^/ENV:/" >> "$TRACE"'
+    echo '  [[ "$1" != apply ]] || exit "${PROVISION_RC:-0}"; exit 0'
+    echo 'fi'
+    echo 'while [[ "$1" != --faits ]]; do shift; done; faits="$2"'
+    echo 'phase=sans-privilege; [[ "$EUID" -ne 0 ]] || phase=root'
+    echo 'printf "phase=%s\n" "$phase" > "$faits"'
+    echo 'cat >> "$faits" <<FACTS'; printf '%s\n' "$@"; echo 'FACTS'
+    echo 'echo "OK    00-preflight: décor"; [[ -z "${DOCTOR_LIGNE:-}" ]] || echo "$DOCTOR_LIGNE"'
+    echo 'rc="${DOCTOR_RC:-0}"; if [[ "$rc" -eq 0 ]]; then echo preflight=conforme; else echo preflight=refuse; fi >> "$faits"'
+    echo 'exit "$rc"'
+  } > "$f"
+  chmod 0755 "$f"
+}
+
+arbre() { # arbre <faits…> — le deploy/ factice, un sudo de décor qui joue la suite en root de namespace
   local d="$BATS_TEST_TMPDIR/arbre/deploy"; rm -rf "$BATS_TEST_TMPDIR/arbre"; mkdir -p "$d"
   deploy_copie "$d"
-  { echo '#!/usr/bin/env bash'
-    echo 'echo "PROVISION:$*" >> "${TRACE:?}"'
-    echo '[[ "$1" != apply ]] || exit "${PROVISION_RC:-0}"'
-    echo '[[ -n "${PROV_FACTS_FILE:-}" ]] || exit 0'
-    echo 'cat > "$PROV_FACTS_FILE" <<FACTS'; printf '%s\n' "$@"; echo 'FACTS'
-    echo 'echo "OK    00-preflight: décor"; [[ -z "${DOCTOR_LIGNE:-}" ]] || echo "$DOCTOR_LIGNE"'
-    echo 'exit "${DOCTOR_RC:-0}"'
-  } > "$d/provision"
+  faux_provision "$d/provision" PROVISION substrat=wsl docker=oui docker_host=unix:///var/run/docker.sock racine=/opt/lcars \
+    "port_deck=20999 libre" "port_forge=21000 libre" "$@"
   { echo '#!/usr/bin/env bash'
     echo 'echo "ACCEPT:$*" >> "${TRACE:?}"'
     echo 'echo "  OUI   décor : acceptation jouée"'
@@ -45,8 +60,17 @@ arbre() { # arbre <faits…> — le deploy/ factice ; provision doctor rend ces 
     echo 'exit "${ACCEPT_RC:-0}"'
   } > "$d/accept"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
-  printf '#!/usr/bin/env bash\necho "SUDO:$*" >> "${TRACE:?}"\nexit 0\n' > "$BINDIR/sudo"
-  chmod 0755 "$d/provision" "$d/accept" "$d/workstation" "$BINDIR/sudo"
+  # sudo note son argv et l'environnement qu'on lui tend, puis joue la suite comme le vrai : root, un
+  # environnement remis à zéro, SUDO_USER posé — seuls le décor et la trace du témoin passent
+  cat > "$BINDIR/sudo" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" != -n ]] || { echo "SUDO-N:$*" >> "$TRACE"; exit "${SUDO_N_RC:-0}"; }
+echo "SUDO:$*" >> "$TRACE"
+env | sort > "$TRACE.sudo-env"
+exec unshare -Ur env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" TRACE="$TRACE" LCARS_DECOR_ROOT="$LCARS_DECOR_ROOT" \
+  SUDO_USER="$(id -un)" "$@"
+EOF
+  chmod 0755 "$d/accept" "$d/workstation" "$BINDIR/sudo"
   export TRACE="$BATS_TEST_TMPDIR/trace"; : > "$TRACE"
   export PATH="$BINDIR:$PATH"
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
@@ -60,11 +84,8 @@ kit() { # kit <nom> [--sans-sha256|--sha256-faux] — un kit.tar.gz (lcars_insta
   mkdir -p "$st/lcars_install/deploy"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
   deploy_copie "$st/lcars_install/deploy"
-  { echo '#!/usr/bin/env bash'
-    echo 'echo "KIT-PROVISION:$*" >> "${TRACE:?}"'
-    echo '[[ -z "${PROV_FACTS_FILE:-}" ]] || printf "%s\n" docker=oui > "$PROV_FACTS_FILE"'
-  } > "$st/lcars_install/deploy/provision"
-  chmod 0755 "$st/lcars_install/deploy/provision" "$st/lcars_install/deploy/workstation"
+  faux_provision "$st/lcars_install/deploy/provision" KIT-PROVISION substrat=wsl docker=absent racine=/opt/lcars
+  cp "$BATS_TEST_TMPDIR/arbre/deploy/accept" "$st/lcars_install/deploy/"
   mkdir -p "$BATS_TEST_TMPDIR/kits"
   tar -czf "$BATS_TEST_TMPDIR/kits/$nom.tar.gz" -C "$st" lcars_install
   case "$mode" in
@@ -75,12 +96,13 @@ kit() { # kit <nom> [--sans-sha256|--sha256-faux] — un kit.tar.gz (lcars_insta
   printf '%s\n' "$BATS_TEST_TMPDIR/kits/$nom.tar.gz"
 }
 
-ws()   { run bash "$WS" up "$@"; }
+ws()   { run setsid -w bash "$WS" up "$@" < /dev/null; }
 root() {
   unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
   run unshare -Ur bash "$WS" up "$@"
 }
 sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
+sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
 
 # ─── structure ──────────────────────────────────────────────────────────────────────────────────
 
@@ -91,32 +113,6 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   [[ "$output" == 100755* ]]
 }
 
-@test "chaque variable de la liste nommée que l'appelant porte traverse le sudo, dans l'ordre de la liste — affichage, déclaration, forge, banc" {
-  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  arbre docker=absent docker_host=
-  PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 PROV_DUMP_LINES=7 LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_ADMIN_RESET=1 \
-    PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test FORGE_PUBLIC_URL=http://forge.public.test ws
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 PROV_DUMP_LINES=7 LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_ADMIN_RESET=1 PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test FORGE_PUBLIC_URL=http://forge.public.test bash $WS up" ]
-}
-
-@test "toute FORGE_ que la lib lit dans l'environnement traverse le sudo" {
-  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" lues v i=0 sudo_ligne
-  lues="$(grep -ohE '\$\{FORGE_[A-Z_]+' "$lib" | tr -d '${' | sort -u)"
-  [ -n "$lues" ]
-  arbre docker=absent docker_host=
-  for v in $lues; do i=$((i + 1)); export "$v=http://forge-$i.test"; done
-  ws
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  sudo_ligne="$(sed -n 's/^SUDO://p' "$TRACE")"
-  i=0
-  for v in $lues; do
-    i=$((i + 1))
-    [[ " $sudo_ligne " == *" $v=http://forge-$i.test "* ]] || { echo "$v lue par la lib et perdue au sudo : $sudo_ligne"; return 1; }
-  done
-}
-
 # ─── l'entrée ───────────────────────────────────────────────────────────────────────────────────
 
 @test "l'aide marche sans root et sans rien d'autre" {
@@ -124,7 +120,7 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"workstation <commande>"*"up "*"--from <kit.tar.gz>"*"doctor "*"EXIT"* ]]
   [[ "$output" == *"EXIT  up      0 convergé"*"doctor  les codes de « provision doctor »"*"un verbe inconnu sort en 1"* ]]
-  [[ "$output" == *"ne se pose pas sur un autre"* ]]
+  [[ "$output" == *"ne se pose pas sur un autre"*"--ports-tenus"*"--docker-host"*"--linux-dedie"*"--forge URL"* ]]
   refute_out '\.deb' <<<"$output"
 }
 
@@ -134,50 +130,160 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   [[ "$output" == *"verbe inconnu : zzz"* ]]
 }
 
-@test "doctor n'escalade pas et passe ses options à provision" {
-  arbre
-  run bash "$WS" doctor --port-deck 20991
-  [ "$status" -eq 0 ]
-  grep -qx "PROVISION:doctor --port-deck 20991" "$TRACE"
-  refute grep -q '^SUDO:' "$TRACE"
-}
+# ─── sans root : la mesure, puis sudo une fois ──────────────────────────────────────────────────
 
-# ─── l'escalade ─────────────────────────────────────────────────────────────────────────────────
-
-@test "sans root, sudo reçoit la liste nommée telle que l'appelant la porte, et le DOCKER_HOST que le préflight a vu répondre" {
+@test "up sans root : mesure sans privilège, dit ce que root pose, puis sudo sur ce fichier, les choix en options et aucune variable" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  arbre docker=oui docker_host=unix:///run/user/1000/docker.sock
-  LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_MONTEE=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test \
-    FORGE_ADMIN_TOKEN=tres-secret PROV_VERBOSE='' DOCKER_HOST=unix:///mort.sock ws --port-deck 20991
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"[sudo] Privilèges root requis"* ]]
-  # ni PROV_COLOR ni PROV_DUMP_LINES, que la lib pose et que l'appelant ne portait pas ; aucun jeton
-  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_MONTEE=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test DOCKER_HOST=unix:///run/user/1000/docker.sock bash $WS up --port-deck 20991" ]
-  refute grep -q 'apply' "$TRACE"
+  arbre docker_host=unix:///run/user/1000/docker.sock "port_deck=20999 tenu"
+  LCARS_ALLOW_ANY_HOST=1 FORGE_BASE_URL=http://forge.test FORGE_PUBLIC_URL=http://forge.public.test \
+    LCARS_BUILTIN_HUMAN=demo PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret DOCKER_HOST=unix:///mort.sock \
+    ws --port-deck 20991 --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$(sed -n 1p "$TRACE")" =~ ^PROVISION:mesure\ --faits\ [^\ ]+\ --port-deck\ 20991$ ]]
+  [[ "$output" == *"La suite se joue en root, par sudo : provision apply pose /etc, /opt/lcars"* ]]
+  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --bench --linux-dedie --forge http://forge.test --forge-publique http://forge.public.test --humain-demo demo --forge-admin-reset --docker-host unix:///run/user/1000/docker.sock --ports-tenus deck" ]
+  # sudo remet l'environnement à zéro : la suite en root reçoit chaque choix par son option, le jeton nulle part
+  grep -qx 'ENV:FORGE_BASE_URL=http://forge.test' "$TRACE"
+  grep -qx 'ENV:FORGE_PUBLIC_URL=http://forge.public.test' "$TRACE"
+  grep -qx 'ENV:LCARS_ALLOW_ANY_HOST=1' "$TRACE"
+  grep -qx 'ENV:LCARS_BENCH=1' "$TRACE"
+  grep -qx 'ENV:PROV_FORGE_MONTEE=1' "$TRACE"
+  grep -qx 'ENV:LCARS_BUILTIN_HUMAN=demo' "$TRACE"
+  grep -qx 'ENV:PROV_FORGE_ADMIN_RESET=1' "$TRACE"
+  grep -qx 'ENV:DOCKER_HOST=unix:///run/user/1000/docker.sock' "$TRACE"
+  grep -qx "ENV:SUDO_USER=$(id -un)" "$TRACE"
+  refute grep -q 'tres-secret' "$TRACE"
+  refute grep -qE '^SUDO:.* [A-Z_]+=' "$TRACE"
   sans_faits_restants
 }
 
-@test "sans docker mesuré, aucun DOCKER_HOST ne traverse le sudo" {
+@test "la suite en root mesure ce que root seul lit sur les ports tenus, puis l'apply reçoit ces faits sans remesure, et les retire" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  arbre docker=absent docker_host=
-  DOCKER_HOST=unix:///mort.sock ws
-  [ "$status" -eq 0 ]
-  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:bash $WS up" ]
+  arbre "port_deck=20999 tenu"
+  ws --only 60
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local faits
+  faits="$(sed -n 's/^PROVISION:apply --faits \([^ ]*\) .*/\1/p' "$TRACE")"
+  [ -n "$faits" ]
+  [ "$(grep -c '^PROVISION:mesure ' "$TRACE")" -eq 2 ]
+  grep -qx "PROVISION:mesure --faits [^ ]* --ports-tenus deck" "$TRACE"
+  grep -qx "PROVISION:apply --faits $faits --only 60" "$TRACE"
+  grep -q '^ACCEPT:--announce-file ' "$TRACE"
+  [ ! -e "$faits" ]
+  sans_faits_restants
 }
 
-@test "sans sudo, le refus est propre et nommé" {
+@test "une mesure root qui refuse le terrain arrête avant l'apply, en citant son constat" {
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
+  arbre
+  DOCTOR_RC=2 DOCTOR_LIGNE='FAIL  00-preflight: port 20999 (deck) pris par "python3",pid=4243' root --ports-tenus deck
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le préflight refuse ce terrain"*"port 20999 (deck) pris par"* ]]
+  refute grep -q '^PROVISION:apply' "$TRACE"
+  sans_faits_restants
+}
+
+@test "reçus d'install.sh, les faits root vont à l'apply sans aucune mesure, et sont retirés à la sortie" {
+  arbre
+  local faits="$TMPDIR/lcars-facts.recus"
+  printf 'phase=root\npreflight=conforme\n' > "$faits"
+  root --faits "$faits" --port-deck 20991 --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q '^PROVISION:mesure' "$TRACE"
+  grep -qx "PROVISION:apply --faits $faits --port-deck 20991" "$TRACE"
+  grep -qx 'ENV:LCARS_BENCH=1' "$TRACE"
+  [ ! -e "$faits" ]
+}
+
+@test "lancé en root sans la suite, l'apply joue le préflight entier : aucune mesure ni faits" {
+  arbre
+  root --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -qE '^(SUDO|PROVISION:mesure)' "$TRACE"
+  [ "$(grep '^PROVISION:' "$TRACE")" = "PROVISION:apply --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice" ]
+  grep -q '^ACCEPT:--announce-file ' "$TRACE"
+  [[ "$output" == *"provisionnement terminé"* ]]
+  [[ "$output" != *"creds claude"* ]]
+}
+
+@test "--faits et --ports-tenus sans root sont refusés : ils appartiennent à la suite en root" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre
+  ws --ports-tenus deck
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"appartiennent à la suite en root"* ]]
+  ws --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 1 ]
+  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+}
+
+@test "sans sudo, le refus tient en une phrase, après la mesure et sans rien poser" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
   local nu="$BATS_TEST_TMPDIR/nu" t; mkdir -p "$nu"
-  for t in bash sed tail cat mktemp env readlink dirname basename id getent cut grep tr head sort awk rm; do
+  for t in bash sed tail cat mktemp env readlink dirname basename id getent cut grep tr head sort awk rm setsid; do
     ln -sf "$(command -v "$t")" "$nu/$t"
   done
   PATH="$nu" ws
   [ "$status" -eq 1 ]
   [[ "$output" == *"root requis et sudo absent"*"installer sudo"* ]]
+  refute grep -q '^PROVISION:apply' "$TRACE"
 }
 
-@test "la mesure et sudo s'enchaînent sur le vrai provision : ses options atteignent le préflight, ses faits reviennent" {
+@test "sans terminal, un sudo qui demande un mot de passe (sudo -n refusé) est un refus en une phrase ; accepté, la suite part" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre
+  SUDO_N_RC=1 ws
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé"* ]]
+  grep -qx 'SUDO-N:-n true' "$TRACE"
+  refute grep -q '^SUDO:' "$TRACE"
+  : > "$TRACE"
+  ws
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^SUDO:bash ' "$TRACE"
+}
+
+@test "sans docker mesuré, aucun --docker-host ne part à sudo" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre docker=absent docker_host=
+  DOCKER_HOST=unix:///mort.sock ws
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $WS up --ports-tenus " ]
+}
+
+@test "un port tenu par un processus visible et étranger arrête avant sudo ; la forge ne compte que sous --bench" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre "port_deck=20999 pris par autre-fleet-lcars-1 (projet autre-fleet)"
+  ws
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le port 20999 (deck) est pris par autre-fleet-lcars-1"*"--port-deck"* ]]
+  refute grep -q '^SUDO' "$TRACE"
+  arbre "port_forge=21000 tenu"
+  ws
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$(sudo_ligne)" == *"--ports-tenus " ]]
+  : > "$TRACE"
+  ws --bench
+  [[ "$(sudo_ligne)" == *"--ports-tenus forge" ]]
+}
+
+@test "un préflight qui refuse le terrain (Linux non déclaré, plancher en dérive) sort avant sudo en citant son constat" {
+  local cas
+  for cas in "2|FAIL  00-preflight: Linux natif sans déclaration|substrat=linux consent=none" \
+             "1|DRIFT 00-preflight: RAM 512 Mo < 1536 Mo|substrat=wsl consent=sans-objet"; do
+    # shellcheck disable=SC2086 # les faits sont des mots, un par ligne
+    arbre ${cas##*|}
+    DOCTOR_RC="${cas%%|*}" DOCTOR_LIGNE="$(cut -d'|' -f2 <<<"$cas")" ws
+    [ "$status" -eq 1 ] || { echo "$cas : $output"; return 1; }
+    [[ "$output" == *"le préflight refuse ce terrain"*"$(cut -d'|' -f2 <<<"$cas")"* ]]
+    refute_out 'OK    00-preflight: décor' <<<"$output"
+    refute grep -qE '^SUDO|^PROVISION:apply' "$TRACE"
+    sans_faits_restants
+  done
+}
+
+@test "la mesure sur le vrai provision : ses options atteignent le préflight, un --substrate contredit sort avant sudo avec ce qu'il a dit" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
   local d; d="$(dirname "$WS")"
@@ -190,82 +296,22 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
 # NEEDS: root
 set -euo pipefail
 . "${PROVISION_LIB:?}"
-echo "PREFLIGHT:$1 deck=$PROV_DECK_PORT base=$PROV_FORGE_BASE" >> "$TRACE"
-p_fact channel aucun
+echo "PREFLIGHT:$1 phase=$PROV_PHASE deck=$PROV_DECK_PORT base=$PROV_FORGE_BASE" >> "$TRACE"
 p_fact docker oui
 p_fact docker_host unix:///decor.sock
+p_fact port_deck "$PROV_DECK_PORT tenu"
 p_ok "décor"
 verdict_check
 EOF
   ws --port-deck 20991 --forge-project bob_9 --only 60
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "PREFLIGHT:check deck=20991 base=bob_9" "$TRACE"
-  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:DOCKER_HOST=unix:///decor.sock bash $WS up --port-deck 20991 --forge-project bob_9 --only 60" ]
-}
-
-# ─── le canal ───────────────────────────────────────────────────────────────────────────────────
-
-canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # canal <contenu> — le fichier de canal de la machine du décor
-
-@test "sans --from, une machine installée par kit refuse le checkout et nomme le geste, avant toute mesure et tout sudo" {
-  arbre
-  canal kit
-  ws
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « kit »"*"poserait « source »"*"--from <kit.tar.gz>"*"refaire le terrain"* ]]
-  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
-  sans_faits_restants
-}
-
-@test "le canal se lit sur la machine, sous root aussi : un checkout lancé en root sur une machine installée par kit est refusé avant l'apply" {
-  arbre
-  canal kit
-  root
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « kit »"*"poserait « source »"* ]]
-  refute grep -q '^PROVISION:' "$TRACE"
-}
-
-@test "un canal illisible est un refus qui nomme le fichier" {
-  arbre
-  canal snap
-  ws
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"illisible"*"/channel"* ]]
-  refute grep -q '^SUDO:' "$TRACE"
-  sans_faits_restants
-}
-
-# ─── les refus que la mesure porte déjà : avant l'escalade ──────────────────────────────────────
-
-@test "un préflight qui refuse le terrain (Linux non déclaré, plancher en dérive) sort avant sudo en citant son constat" {
-  local cas
-  for cas in "2|FAIL  00-preflight: Linux natif sans déclaration|substrat=linux consent=none" \
-             "1|DRIFT 00-preflight: RAM 512 Mo < 1536 Mo|substrat=wsl consent=sans-objet"; do
-    # shellcheck disable=SC2086 # les faits sont des mots, un par ligne
-    arbre docker=oui ${cas##*|}
-    DOCTOR_RC="${cas%%|*}" DOCTOR_LIGNE="$(cut -d'|' -f2 <<<"$cas")" ws
-    [ "$status" -eq 1 ] || { echo "$cas : $output"; return 1; }
-    [[ "$output" == *"le préflight refuse ce terrain"*"$(cut -d'|' -f2 <<<"$cas")"* ]]
-    refute_out 'OK    00-preflight: décor' <<<"$output"
-    refute grep -qE '^SUDO:|^PROVISION:apply' "$TRACE"
-    [[ "$output" != *"Privilèges root requis"* ]]
-    sans_faits_restants
-  done
-}
-
-@test "un --substrate que la mesure contredit sort avant sudo, sur le vrai provision, avec ce qu'il a dit" {
-  arbre
-  local d; d="$(dirname "$WS")"
-  cp "$BATS_TEST_DIRNAME/../provision" "$d/provision"
-  mkdir -p "$d/modules.d"
-  printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: root\n. "${PROVISION_LIB:?}"\np_fact channel aucun\nverdict_check\n' > "$d/modules.d/00-preflight.sh"
+  grep -qx "PREFLIGHT:check phase=sans-privilege deck=20991 base=bob_9" "$TRACE"
+  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --forge-project bob_9 --only 60 --docker-host unix:///decor.sock --ports-tenus deck" ]
+  : > "$TRACE"
   # le décor ne porte ni /.dockerenv ni noyau Microsoft : ce système se mesure linux
   ws --substrate docker
   [ "$status" -eq 1 ]
   [[ "$output" == *"la mesure n'a rendu aucun fait"*"--substrate docker : ce système se mesure « linux »"* ]]
-  refute grep -q '^SUDO:' "$TRACE"
-  [[ "$output" != *"Privilèges root requis"* ]]
+  refute grep -q '^SUDO' "$TRACE"
   sans_faits_restants
 }
 
@@ -277,33 +323,16 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
   refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
 }
 
-# ─── le chemin root : provisionnement, acceptation, sortie ──────────────────────────────────────
-
-@test "root : le préflight ne se rejoue pas hors de l'apply, qui reçoit toutes les options ; l'acceptation suit, la sortie est 0" {
-  arbre
-  root --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  refute grep -q '^SUDO:' "$TRACE"
-  [ "$(grep '^PROVISION:' "$TRACE")" = "PROVISION:apply --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice" ]
-  grep -q '^ACCEPT:--announce-file ' "$TRACE"
-  [[ "$output" == *"provisionnement terminé"* ]]
-  [[ "$output" != *"creds claude"* ]]
-}
-
-@test "avant sudo, docker absent sur un linux déclaré s'annonce en une ligne" {
+@test "avant sudo, docker absent sur un linux s'annonce en une ligne" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   local decor
-  # consent=none ne passe pas le préflight ; mesuré tel quel, il n'annonce rien pour autant
-  for decor in "substrat=linux docker=absent consent=env" \
-               "substrat=linux docker=oui consent=env" \
-               "substrat=linux docker=absent consent=none" \
-               "substrat=wsl docker=absent consent=sans-objet"; do
+  for decor in "substrat=linux docker=absent" "substrat=linux docker=oui" "substrat=wsl docker=absent"; do
     # shellcheck disable=SC2086 # les faits sont des mots, un par ligne
     arbre $decor
     ws
     [ "$status" -eq 0 ] || { echo "$decor : $output"; return 1; }
     grep -q '^SUDO:' "$TRACE"
-    if [[ "$decor" == "substrat=linux docker=absent consent=env" ]]; then
+    if [[ "$decor" == "substrat=linux docker=absent" ]]; then
       [ "$(grep -c 'docker est absent : le provisionnement pose docker-ce' <<<"$output")" -eq 1 ]
     else
       refute_out 'docker est absent' <<<"$output"
@@ -311,8 +340,32 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
   done
 }
 
+# ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
+
+@test "doctor sans root : sudo sur ce fichier, les choix en options ; en root, la sonde complète reçoit ses options" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre
+  FORGE_BASE_URL=http://forge.test DOCKER_HOST=unix:///run/user/1000/docker.sock run setsid -w bash "$WS" doctor --port-deck 20991 < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $WS doctor --port-deck 20991 --forge http://forge.test --docker-host unix:///run/user/1000/docker.sock" ]
+  grep -qx "PROVISION:doctor --port-deck 20991" "$TRACE"
+  grep -qx 'ENV:FORGE_BASE_URL=http://forge.test' "$TRACE"
+  grep -qx 'ENV:DOCKER_HOST=unix:///run/user/1000/docker.sock' "$TRACE"
+  refute grep -q '^PROVISION:mesure' "$TRACE"
+}
+
+@test "doctor refuse --faits et --ports-tenus : ils appartiennent à up" {
+  arbre
+  run bash "$WS" doctor --ports-tenus deck
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"appartiennent à up"* ]]
+  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+}
+
+# ─── le chemin root : provisionnement, acceptation, sortie ──────────────────────────────────────
+
 @test "root : sur un TERM reçu après l'acceptation, les identifiants sont imprimés avant que leur fichier parte" {
-  arbre substrat=wsl
+  arbre
   ACCEPT_KILL=1 root
   [ "$status" -ne 0 ]
   [[ "$output" == *"SECRET-DE-DECOR"* ]]
@@ -321,7 +374,7 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
 }
 
 @test "root : un drift résiduel de provision laisse jouer l'acceptation, la sortie est 2" {
-  arbre substrat=wsl
+  arbre
   PROVISION_RC=2 root
   [ "$status" -eq 2 ]
   grep -q '^ACCEPT:' "$TRACE"
@@ -329,7 +382,7 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
 }
 
 @test "root : un échec de provision arrête tout avant l'acceptation, la sortie est 1" {
-  arbre substrat=wsl
+  arbre
   PROVISION_RC=1 root
   [ "$status" -eq 1 ]
   refute grep -q '^ACCEPT:' "$TRACE"
@@ -338,14 +391,14 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
 }
 
 @test "root : une acceptation en échec rend 1 même quand provision a convergé" {
-  arbre substrat=wsl
+  arbre
   ACCEPT_RC=1 root
   [ "$status" -eq 1 ]
   [[ "$output" == *"provisionnement terminé"* ]]
 }
 
 @test "root : les identifiants annoncés sont imprimés en dernier, après le bandeau, et leur fichier ne reste pas" {
-  arbre substrat=wsl
+  arbre
   root
   [ "$status" -eq 0 ]
   [[ "$output" == *"provisionnement terminé"*"IDENTIFIANTS"*"SECRET-DE-DECOR"* ]]
@@ -392,9 +445,9 @@ EOF
 }
 
 @test "root, banc : l'humain reçoit ses mots de passe unix et forge, l'adminité, son jeton opérateur, et l'absence de creds est dite" {
-  arbre substrat=wsl
+  arbre
   banc
-  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root SUDO_USER=root root
+  SUDO_USER=root root --bench --humain-demo root
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx 'root:toto32toto32' "$TRACE"
   [ "$(forge_requests 'select(.method == "PATCH") | .auth')" = '"token tok-master"' ]
@@ -409,7 +462,7 @@ EOF
 }
 
 @test "root, banc, lancé en root sans sudo : l'absence du compte d'origine est dite, l'acceptation se joue, la sortie est 0" {
-  arbre substrat=wsl
+  arbre
   banc
   LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -418,7 +471,7 @@ EOF
 }
 
 @test "root, banc : un humain pas encore matérialisé est dit, rien n'est posé ; un refus de la forge est dit" {
-  arbre substrat=wsl
+  arbre
   banc
   printf '#!/usr/bin/env bash\nexit 2\n' > "$BINDIR/getent"
   LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
@@ -433,7 +486,7 @@ EOF
 }
 
 @test "root, hors banc : l'humain de démonstration n'est pas semé même s'il est nommé" {
-  arbre substrat=wsl
+  arbre
   banc
   LCARS_BUILTIN_HUMAN=root root
   [ "$status" -eq 0 ]
@@ -444,7 +497,7 @@ EOF
 
 # ─── le kit ─────────────────────────────────────────────────────────────────────────────────────
 
-@test "--from <kit.tar.gz> : sha256 vérifié, détaré sous l'utilisateur, puis tout se joue depuis le kit" {
+@test "--from <kit.tar.gz> : sha256 vérifié, détaré sous l'utilisateur, puis la mesure et sudo se jouent depuis le kit" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
   local k; k="$(kit lcars-fleet-1.0-abc)"
@@ -455,10 +508,11 @@ EOF
   [ -x "$racine/deploy/provision" ]
   [ -f "$racine/.source-revision" ]
   [[ "$output" == *"kit : $racine"*"depuis ce kit"* ]]
-  grep -q '^KIT-PROVISION:doctor --only 00-preflight --port-deck 20991' "$TRACE"
-  grep -q "^SUDO:.*bash $racine/deploy/workstation up --from $racine --port-deck 20991$" "$TRACE"
+  grep -q '^KIT-PROVISION:mesure --faits [^ ]* --port-deck 20991$' "$TRACE"
+  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up --port-deck 20991 --ports-tenus " ]
+  grep -q '^KIT-PROVISION:apply --faits ' "$TRACE"
+  refute grep -qE '^PROVISION:' "$TRACE"
   refute grep -qE '^(SUDO|KIT-PROVISION):.*\.tar\.gz' "$TRACE"
-  refute grep -q 'PROVISION:apply' "$TRACE"
   sans_faits_restants
 }
 
@@ -488,7 +542,7 @@ EOF
   local racine="$BATS_TEST_TMPDIR/detare/lcars_install"
   ws --from "$racine"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "^SUDO:.*bash $racine/deploy/workstation up --from $racine$" "$TRACE"
+  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up --ports-tenus " ]
   rm -f "$racine/.source-revision"
   ws --from "$racine"
   [ "$status" -eq 1 ]
@@ -545,15 +599,9 @@ EOF
   refute grep -qE '^(SUDO|KIT-PROVISION|PROVISION):' "$TRACE"
 }
 
-@test "--from : le refus de mélange vient avant le détarage, et un kit ne se détare pas sous root" {
+@test "--from : un kit ne se détare pas sous root" {
   arbre
-  canal source
   local k; k="$(kit k5)"
-  ws --from "$k"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « source »"*"poserait « kit »"* ]]
-  [ ! -d "$HOME/.lcars/kits/k5" ]
-  rm "$LCARS_DECOR_ROOT/etc/lcars/channel"
   root --from "$k"
   [ "$status" -eq 1 ]
   [[ "$output" == *"se lance sans sudo"* ]]

@@ -628,9 +628,13 @@ port_holder() {
       return 0
     fi
   fi
+  port_process "$port"
+}
+
+port_process() { # port_process <port> → le processus que ss nomme sur ce port (« "nom",pid=N »), ou rien ; rc 0
   command -v ss >/dev/null 2>&1 || return 0
   ss -ltnp 2>/dev/null \
-    | awk -v p=":$port\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
+    | awk -v p=":$1\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
     | sed -e 's/users:((//' -e 's/))$//' -e 's/,fd=[0-9]*//' | head -1
   return 0
 }

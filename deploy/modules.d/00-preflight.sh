@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/modules.d/00-preflight.sh
 # AUTHOR: DrDree
-# STARDATE: 2026-07-05
+# STARDATE: 2026-09-14
 # STATUS: le préflight des deux terrains : système, substrat, docker, forge, ports, instance
 # APPLY-ON: any
 # CHECK-ON: any
@@ -10,6 +10,10 @@
 # Ce module mesure et ne pose rien. Il parle deux fois : des lignes OK/WARN/DRIFT/FAIL pour un humain,
 # et des faits `nom=valeur` (`p_fact`, dans PROV_FACTS_FILE) pour l'installeur, qui décide dessus.
 # Chaque fait se pose au point de mesure, jamais dans un récapitulatif.
+#
+# Deux phases, que « provision mesure » choisit (PROV_PHASE) : sans-privilege, ce que le compte de
+# l'opérateur lit, avant sudo ; root, ce que root seul lit, sur les ports que la première a trouvés
+# tenus (PROV_PORTS_TENUS). Joué par apply ou doctor, le préflight prend les deux phases à la suite.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -48,17 +52,22 @@ ancetre_existant() { # ancetre_existant <chemin> → le chemin s'il existe, sino
 # hors de l'installeur, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à lui ne se calcule pas
 faits_attendus() { [[ -n "${PROV_FACTS_FILE:-}" ]]; }
 
-# Sans root, ss ne nomme pas le processus d'un autre compte, mais il nomme le cgroup de la socket. Sous WSL
-# la hiérarchie des cgroups est partagée entre distributions : seul le cgroup que ce systemd rend dit « ici ».
-landing_tient() { # landing_tient <port> → 0 si la socket qui écoute sur ce port est dans le cgroup de lcars-landing en marche sur cette machine
-  local cg sockets
-  cg="$(systemctl show -p ControlGroup --value lcars-landing.service 2>/dev/null)" || return 1
-  [[ -n "$cg" ]] || return 1
-  sockets="$(ss -ltnH --cgroup "sport = :$1" 2>/dev/null)" || return 1
-  [[ " ${sockets//$'\n'/ } " == *" cgroup:$cg "* ]]
+port_de() { # port_de <deck|forge|ssh> → le port que ce projet publie sous ce nom
+  case "$1" in deck) echo "$PROV_DECK_PORT" ;; forge) echo "$PROV_FORGE_HOST_PORT" ;; ssh) echo "$PROV_SSH_PORT" ;; esac
 }
 
-check() {
+# le processus principal que ce systemd donne à lcars-landing : sous WSL, un processus d'une autre
+# distribution n'est pas nommé par ss, et un pid de cette machine ne le confond pas
+landing_tient() { # landing_tient <processus nommé par ss> → 0 si c'est le processus principal de lcars-landing
+  local pid
+  pid="$(systemctl show -p MainPID --value lcars-landing.service 2>/dev/null)" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  grep -qx "pid=$pid" < <(grep -oE 'pid=[0-9]+' <<<"$1")
+}
+
+PROJETS_PRIS=""
+
+mesure_sans_privilege() {
   # ─── Le système ───────────────────────────────────────────────────────────────────────────────
   if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
     p_ok "OS de la famille Debian (dpkg et apt présents)"
@@ -83,21 +92,6 @@ check() {
     if command -v "$tool" >/dev/null; then p_fact "$tool" oui; else p_fact "$tool" absent; fi
   done
 
-  # les bascules de dossiers ont lieu sous PROV_ROOT : échange et espace se mesurent sur son système de fichiers
-  local sous echange
-  sous="$(ancetre_existant "$PROV_ROOT")"
-  if echange="$(mktemp -d "$sous/.prov-echange.XXXXXX" 2>/dev/null)"; then
-    mkdir "$echange/a" "$echange/b"
-    if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
-      p_ok "« mv --exchange » joué sous $sous : les bascules de dossiers ont une forme atomique"
-    else
-      p_fail "« mv --exchange » refusé sous $sous (coreutils 9.5, sur un système de fichiers qui sait échanger) — les bascules de dossiers n'ont pas de forme atomique"
-    fi
-    rm -rf -- "$echange"
-  else
-    p_warn "« mv --exchange » non sondé : $sous n'est pas inscriptible par $(id -un) — la sonde se joue sous root"
-  fi
-
   local arch; arch="$(uname -m)"
   p_fact arch "$arch"
   case "$arch" in
@@ -116,7 +110,9 @@ check() {
     p_ok "RAM ${ram_mb} Mo"
   fi
 
-  local disk_mb
+  # la racine se pose sur le système de fichiers de son ancêtre existant : l'espace se mesure là
+  local sous disk_mb
+  sous="$(ancetre_existant "$PROV_ROOT")"
   disk_mb="$(df -Pm "$sous" | awk 'NR==2 {print $4}')"
   p_fact racine "$(prov_canon "$PROV_ROOT")"
   p_fact disque_mb "$disk_mb"
@@ -128,13 +124,9 @@ check() {
     p_ok "disque ${disk_mb} Mo libres ($sous)"
   fi
 
+  # les groupes que la base donne à l'humain servi : c'est root qui travaille, pas la session qui mesure
   p_fact utilisateur "$PROV_HUMAN"
-  # pour la session qui mesure, ses groupes ; un groupe ajouté depuis sa connexion ne lui sert pas encore
-  if [[ "$PROV_HUMAN" == "$(id -un)" ]]; then
-    p_fact groupes "$(id -Gn | tr ' ' ',')"
-  else
-    p_fact groupes "$(id -Gn "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
-  fi
+  p_fact groupes "$(id -Gn -- "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
 
   # ─── Le substrat ──────────────────────────────────────────────────────────────────────────────
   p_fact substrat "$PROV_SUBSTRATE"
@@ -222,34 +214,28 @@ check() {
   fi
 
   # ─── Les ports et le projet compose ───────────────────────────────────────────────────────────
+  # sans privilège, ss ne nomme pas le processus d'un autre compte : ce port est tenu, son propriétaire attend root
   local base="$PROV_FORGE_BASE" nom port etat
   local -a miens=("$PROV_FORGE_PROJECT" "$base-fleet" "$PROV_RUNNER_PROJECT")
-  for nom in forge:"$PROV_FORGE_HOST_PORT" deck:"$PROV_DECK_PORT" ssh:"$PROV_SSH_PORT"; do
-    port="${nom#*:}"
+  for nom in forge deck ssh; do
+    port="$(port_de "$nom")"
     etat="$(port_state "$port" "${miens[@]}")"
-    if [[ "$etat" == pris* && "$nom" == deck:* ]] && landing_tient "$port"; then etat="nous lcars-landing (service)"; fi
-    p_fact "port_${nom%%:*}" "$port $etat"
-    [[ "$etat" != pris* ]] || p_warn "port $port (${nom%%:*}) $etat"
+    if [[ "$PROV_PHASE" == sans-privilege && "$etat" == pris ]]; then
+      etat=tenu
+    elif [[ "$PROV_PHASE" == entier && "$etat" == pris* ]] && port_du_projet "$nom"; then
+      proprietaire_verifie "$nom" "$port" "$etat"; etat="$ETAT_VERIFIE"
+    elif [[ "$etat" == pris* ]]; then
+      p_warn "port $port ($nom) $etat"
+    fi
+    p_fact "port_$nom" "$port $etat"
   done
   p_fact projet "$base"
-  local pris=""
   if [[ "$docker" == oui ]]; then
     for nom in "${miens[@]}"; do
-      [[ -z "$("$docker_bin" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || pris="${pris:+$pris,}$nom"
+      [[ -z "$("$docker_bin" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || PROJETS_PRIS="${PROJETS_PRIS:+$PROJETS_PRIS,}$nom"
     done
   fi
-  p_fact projet_pris "$pris"
-  # la forge et le runner que 48 et 49 ont montés pour ce poste ne sont pas ceux d'un autre déploiement
-  local etrangers=""
-  for nom in ${pris//,/ }; do
-    [[ "$(head -n1 "$PROV_FORGE_MODE_FILE" 2>/dev/null)" == poste \
-       && ( "$nom" == "$PROV_FORGE_PROJECT" || "$nom" == "$PROV_RUNNER_PROJECT" ) ]] || etrangers="${etrangers:+$etrangers,}$nom"
-  done
-  if [[ -n "$etrangers" ]]; then
-    p_warn "projet compose déjà présent sur ce daemon : $etrangers"
-  elif [[ -n "$pris" ]]; then
-    p_ok "projet compose de la forge de ce poste présent : $pris"
-  fi
+  p_fact projet_pris "$PROJETS_PRIS"
 
   # ─── L'instance : ce qu'elle porte déjà ───────────────────────────────────────────────────────
   if [[ "$PROV_SUBSTRATE" == "docker" ]]; then
@@ -279,17 +265,83 @@ check() {
   fi
 
   # ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ───────────────────────────
-  p_fact channel_tree "$(prov_channel_here)"
+  # le fichier de canal est 0644 dans /etc/lcars 0755 (system.manifest) : le compte de l'opérateur le lit
+  local ici; ici="$(prov_channel_here)"
+  p_fact channel_tree "$ici"
   p_fact revision "$PROV_SOURCE_REV"
   # appel nu : le p_fail d'un canal illisible doit compter dans le verdict
   local canal=invalide
   if prov_channel >/dev/null; then canal="$PROV_CHANNEL"; fi
   p_fact channel "$canal"
-  if [[ "$canal" == aucun ]]; then
-    p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $(prov_channel_here) »"
-  elif [[ "$canal" != invalide ]]; then
-    p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
+  case "$canal" in
+    aucun)    p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $ici »" ;;
+    "$ici")   p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE)" ;;
+    invalide) ;;
+    *)        p_fail "cette machine est installée par « $canal », et cet arbre poserait « $ici » — un canal ne se pose pas sur un autre : mise à jour par le même canal ($([[ "$canal" == kit ]] && echo "deploy/workstation up --from <kit.tar.gz>" || echo "deploy/workstation up, depuis un checkout")), ou refaire le terrain, il est jetable" ;;
+  esac
+}
+
+# le deck est toujours à ce projet, la forge quand elle est celle du poste ; le port SSH n'est publié que par le conteneur
+port_du_projet() { [[ "$1" == deck || ( "$1" == forge && "$PROV_FORGE_DU_POSTE" -eq 1 ) ]]; }
+
+# en root, seul ce projet tient ses ports : le deck par la landing de cette machine, la forge du poste
+# par ses conteneurs, que docker dit « nous » avant cette vérification
+ETAT_VERIFIE=""
+proprietaire_verifie() { # proprietaire_verifie <nom> <port> <état tenu> → ETAT_VERIFIE ; un FAIL si un autre que ce projet tient le port
+  local nom="$1" port="$2"
+  ETAT_VERIFIE="$3"
+  if [[ "$nom" == deck ]] && landing_tient "$ETAT_VERIFIE"; then
+    ETAT_VERIFIE="nous lcars-landing (service)"
+    return 0
   fi
+  p_fail "port $port ($nom) $ETAT_VERIFIE : ce projet le publie — le libérer, ou relancer avec --port-$nom <autre port>"
+}
+
+mesure_root() {
+  # les bascules de dossiers ont lieu sous PROV_ROOT : root y écrit, et y échange deux dossiers
+  local sous echange=""
+  sous="$(ancetre_existant "$PROV_ROOT")"
+  if ! echange="$(mktemp -d "$sous/.prov-echange.XXXXXX" 2>/dev/null)"; then
+    p_fact echange "$sous non-inscriptible"
+    p_fail "$sous n'est pas inscriptible par root — la racine de LCARS ne s'y pose pas (système de fichiers en lecture seule ?)"
+  elif mkdir "$echange/a" "$echange/b" && mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
+    p_fact echange "$sous oui"
+    p_ok "« mv --exchange » joué sous $sous : les bascules de dossiers ont une forme atomique"
+  else
+    p_fact echange "$sous non"
+    p_fail "« mv --exchange » refusé sous $sous (coreutils 9.5, sur un système de fichiers qui sait échanger) — les bascules de dossiers n'ont pas de forme atomique"
+  fi
+  [[ -z "$echange" ]] || rm -rf -- "$echange"
+
+  # la forge et le runner que 48 et 49 ont montés pour ce poste ne sont pas ceux d'un autre déploiement ;
+  # le mode de la forge vit sous le dossier des jetons, que root seul traverse
+  local nom etrangers=""
+  for nom in ${PROJETS_PRIS//,/ }; do
+    [[ "$(head -n1 "$PROV_FORGE_MODE_FILE" 2>/dev/null)" == poste \
+       && ( "$nom" == "$PROV_FORGE_PROJECT" || "$nom" == "$PROV_RUNNER_PROJECT" ) ]] || etrangers="${etrangers:+$etrangers,}$nom"
+  done
+  if [[ -n "$etrangers" ]]; then
+    p_warn "projet compose déjà présent sur ce daemon : $etrangers"
+  elif [[ -n "$PROJETS_PRIS" ]]; then
+    p_ok "projet compose de la forge de ce poste présent : $PROJETS_PRIS"
+  fi
+
+  # la phase root seule vérifie les ports que la mesure sans privilège a laissés tenus
+  [[ "$PROV_PHASE" == root ]] || return 0
+  local port processus tenus="${PROV_PORTS_TENUS:-}"
+  for nom in ${tenus//,/ }; do
+    port="$(port_de "$nom")"
+    processus="$(port_process "$port")"
+    proprietaire_verifie "$nom" "$port" "pris${processus:+ par $processus}"
+    p_fact "port_$nom" "$port $ETAT_VERIFIE"
+  done
+}
+
+check() {
+  PROV_PHASE="${PROV_PHASE:-entier}"
+  p_fact phase "$PROV_PHASE"
+  [[ "$PROV_PHASE" == root ]] || mesure_sans_privilege
+  [[ "$PROV_PHASE" == sans-privilege ]] || mesure_root
 }
 
 # le préflight ne pose rien : les deux verbes sondent, chacun rend le verdict de son contrat

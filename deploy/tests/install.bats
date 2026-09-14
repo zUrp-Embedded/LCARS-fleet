@@ -2,8 +2,8 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/install.bats
 # AUTHOR: DrDree
-# STARDATE: 2026-09-12
-# STATUS: témoins d'install.sh — ce qu'il mesure, ce qu'il montre, ce qu'il refuse, où il délègue
+# STARDATE: 2026-09-14
+# STATUS: témoins d'install.sh — ce qu'il mesure sans privilège, ce qu'il montre, ce qu'il refuse, la relance en root par sudo, où il délègue
 
 # shellcheck disable=SC2016
 bats_require_minimum_version 1.5.0
@@ -17,15 +17,23 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SRC="$REPO/install.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
-  # un sudo et un docker qui rougissent s'ils sont appelés : l'installeur n'escalade jamais et ne sonde pas lui-même
-  local t
-  for t in sudo docker; do
-    printf '#!/usr/bin/env bash\necho %s-APPELE >&2; exit 97\n' "${t^^}" > "$BINDIR/$t"; chmod 0755 "$BINDIR/$t"
-  done
+  # un docker qui rougit s'il est appelé : l'installeur ne sonde pas lui-même
+  printf '#!/usr/bin/env bash\necho DOCKER-APPELE >&2; exit 97\n' > "$BINDIR/docker"
+  # sudo note son argv, puis joue la suite comme le vrai : root, un environnement remis à zéro,
+  # SUDO_USER posé ; seuls le PATH des doublures, le HOME, TMPDIR et le décor du témoin passent
+  cat > "$BINDIR/sudo" <<EOF
+#!/usr/bin/env bash
+[[ "\$1" != -n ]] || { echo "SUDO-N:\$*" >> '$BATS_TEST_TMPDIR/sudo.calls'; exit "\${SUDO_N_RC:-0}"; }
+echo "SUDO:\$*" >> '$BATS_TEST_TMPDIR/sudo.calls'
+exec unshare -Ur env -i PATH="\$PATH" HOME="\$HOME" \${TMPDIR:+TMPDIR="\$TMPDIR"} \${LCARS_DECOR_ROOT:+LCARS_DECOR_ROOT="\$LCARS_DECOR_ROOT"} \
+  SUDO_USER="\$(id -un)" "\$@"
+EOF
+  chmod 0755 "$BINDIR/docker" "$BINDIR/sudo"
   export PATH="$BINDIR:$PATH"
   TAG="9.9.9-test"
 }
 
+sudo_ligne() { sed -n 's/^SUDO://p' "$BATS_TEST_TMPDIR/sudo.calls" 2>/dev/null; }
 
 # shellcheck disable=SC2054  # les virgules sont dans les valeurs (groupes, comptes), pas entre les éléments
 _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker docker_host=unix:///var/run/docker.sock
@@ -35,18 +43,33 @@ _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker do
   "port_forge=21000 libre" "port_deck=20999 libre" "port_ssh=2222 libre" projet=lcars projet_pris=
   apt_installs= comptes_humains=temoin channel=aucun channel_tree=source jq=oui racine=/opt/lcars revision=cafe1234)
 
-_faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écrit ces faits ; FAUX_PREFLIGHT_REFUS : sa ligne de refus, et le verdict qui va avec
+# provision de décor : « mesure » sans root écrit ces faits et son verdict (FAUX_PREFLIGHT_REFUS : sa ligne de
+# refus) ; en root, l'écriture sous la racine et les ports tenus, qu'il rend à la landing, ou à un processus
+# étranger quand le fichier refus-root existe
+_faux_provision() { # _faux_provision <arbre> [nom=valeur…]
   local arbre="$1"; shift
   mkdir -p "$arbre/deploy"
   { echo '#!/usr/bin/env bash'
     echo "echo \"PROVISION:\$*\" >> '$BATS_TEST_TMPDIR/provision.calls'"
-    echo '[[ -n "${PROV_FACTS_FILE:-}" ]] || exit 0'
-    echo 'cat > "$PROV_FACTS_FILE" <<'"'"'FACTS'"'"''
-    printf '%s\n' "$@"
+    echo '[[ "$1" == mesure ]] || exit 0'
+    echo 'while [[ "$1" != --faits ]]; do shift; done; faits="$2"; shift 2'
+    echo 'tenus=""; while [[ $# -gt 0 ]]; do [[ "$1" != --ports-tenus ]] || tenus="$2"; shift; done'
+    echo 'if [[ "$EUID" -eq 0 ]]; then'
+    echo '  printf "phase=root\nechange=/opt oui\n" > "$faits"'
+    echo "  if [[ -e '$BATS_TEST_TMPDIR/refus-root' ]]; then"
+    echo '    printf "port_deck=20999 pris par \"python3\",pid=4243\npreflight=refuse\n" >> "$faits"'
+    echo '    echo "FAIL  00-preflight: port 20999 (deck) pris par \"python3\",pid=4243"; exit 2'
+    echo '  fi'
+    echo '  for p in ${tenus//,/ }; do printf "port_%s=20999 nous lcars-landing (service)\n" "$p" >> "$faits"; done'
+    echo '  echo preflight=conforme >> "$faits"; exit 0'
+    echo 'fi'
+    echo 'cat > "$faits" <<'"'"'FACTS'"'"''
+    printf '%s\n' phase=sans-privilege "$@"
     echo 'FACTS'
     # la déclaration d'un Linux dédié se lit dans l'environnement du préflight, comme le vrai
-    echo '[[ "${LCARS_ALLOW_ANY_HOST:-}" != 1 ]] || echo consent=env >> "$PROV_FACTS_FILE"'
-    echo '[[ -z "${FAUX_PREFLIGHT_REFUS:-}" ]] || { echo "OK    00-preflight: décor"; echo "$FAUX_PREFLIGHT_REFUS"; exit 1; }'
+    echo '[[ "${LCARS_ALLOW_ANY_HOST:-}" != 1 ]] || echo consent=env >> "$faits"'
+    echo '[[ -z "${FAUX_PREFLIGHT_REFUS:-}" ]] || { echo "OK    00-preflight: décor"; echo "$FAUX_PREFLIGHT_REFUS"; echo preflight=refuse >> "$faits"; exit 1; }'
+    echo 'echo preflight=conforme >> "$faits"'
   } > "$arbre/deploy/provision"
   chmod 0755 "$arbre/deploy/provision"
 }
@@ -58,7 +81,7 @@ _arbre() { # _arbre [nom=valeur…] -> un arbre « kit » (sans .git) avec dél�
   cp "$REPO/deploy/installer-constants.env" "$a/deploy/"
   printf 'cafe1234\n' > "$a/.source-revision"
   _faux_provision "$a" "${_faits_sains[@]}" "$@"
-  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"; env | grep -E "^(PROV_FORGE_MONTEE|LCARS_BUILTIN_HUMAN)=" | sort\n' > "$a/deploy/workstation"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"; env | grep -E "^(FORGE_BASE_URL|FORGE_PUBLIC_URL|LCARS_ALLOW_ANY_HOST|LCARS_BUILTIN_HUMAN|PROV_FORGE_ADMIN_RESET|DOCKER_HOST|SUDO_USER)=" | sort | sed "s/^/ENV:/"\n' > "$a/deploy/workstation"
   printf '#!/usr/bin/env bash\necho "CONTAINER:$*"\n' > "$a/deploy/container"
   printf '#!/usr/bin/env bash\necho "BENCHUP:$*"; echo "DOCKER_BIN=${DOCKER_BIN:-}"\n' > "$a/deploy/docker/bench/bench-up.sh"
   chmod 0755 "$a/deploy/workstation" "$a/deploy/container" "$a/deploy/docker/bench/bench-up.sh"
@@ -71,18 +94,26 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 }
 
 
-@test "root est refusé avant tout parsing : ni l'aide, ni la version, ni une option inconnue ne passent" {
-  # le vrai unshare, hors des doublures du décor : root y est l'uid 0
-  local us; us="$(PATH="${PATH#"$BINDIR:"}" command -v unshare || true)"
+@test "root sans la relance que l'installeur se donne est refusé ; le mode conteneur ne se joue jamais en root" {
+  local us; us="$(command -v unshare || true)"
   [[ -n "$us" ]] || skip "unshare absent de ce poste : root ne se joue pas ici"
   "$us" -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
-  local a
-  for a in --help --version --zzz; do
-    run "$us" -Ur bash "$SRC" "$a" < /dev/null
-    [ "$status" -eq 1 ] || { echo "$a : rc=$status — $output"; return 1; }
-    [[ "$output" == *"Cet installeur ne se lance pas en root."* ]] || { echo "$a : $output"; return 1; }
-    refute_out 'Option inconnue|non publiée|install.sh —' <<<"$output"
+  local a cas; a="$(_arbre)"
+  for cas in "--workstation --bench" "--bench --ports-tenus deck"; do
+    # shellcheck disable=SC2086 # les options sont des mots
+    run "$us" -Ur bash "$a/install.sh" $cas < /dev/null
+    [ "$status" -eq 1 ] || { echo "$cas : rc=$status — $output"; return 1; }
+    [[ "$output" == *"Cet installeur se lance sans root."* ]] || { echo "$cas : $output"; return 1; }
   done
+  [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+}
+
+@test "--ports-tenus sans root est refusé : il appartient à la relance en root" {
+  local a; a="$(_arbre)"
+  porte "$a" --workstation --bench --ports-tenus deck
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--ports-tenus appartient à la relance en root"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
 }
 
 # bats test_tags=structure
@@ -131,6 +162,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local drapeaux f
   drapeaux="$(sed -n '/^while \[\[ \$# -gt 0 \]\]; do$/,/^done$/p' "$SRC" | grep -oE '^ *-[-a-z|]+\)' | tr -d ' )' | tr '|' '\n')"
   grep -qx -- '--workstation' <<<"$drapeaux"
+  grep -qx -- '--ports-tenus' <<<"$drapeaux"
   grep -qx -- '-h' <<<"$drapeaux"
   run bash "$SRC" --help
   [ "$status" -eq 0 ]
@@ -167,14 +199,14 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 }
 
 
-@test "le bilan lit les faits du préflight et rien d'autre — ni docker ni sudo ne sont appelés" {
+@test "le bilan du conteneur lit les faits de la mesure et rien d'autre — ni docker ni sudo ne sont appelés" {
   # docker=oui dans les faits alors que le docker du décor rougit s'il est appelé : le bilan le dit oui
   local a; a="$(_arbre)"
   porte "$a" --bench --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"Docker     serveur 29.0.0 · Docker Engine · unix:///var/run/docker.sock"* ]]
-  refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"
-  grep -vE '^\s*#' "$SRC" | refute_out 'docker_endpoint|detect_substrate'
+  refute grep -q 'DOCKER-APPELE' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
 @test "--port-forge sans --bench est refusé au parsing, dans les deux modes : la forge fournie n'a pas de port à nous" {
@@ -200,22 +232,22 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
-@test "le préflight reçoit le substrat, le projet et les ports demandés" {
+@test "la mesure reçoit le substrat, le projet et les ports demandés, dans son fichier de faits" {
   local a; a="$(_arbre)"
   porte "$a" --check --bench --substrate wsl --forge-project bob_9 --port-forge 20090 --port-deck 20091 --port-ssh 20092
-  grep -q -- 'PROVISION:doctor --only 00-preflight --substrate wsl --forge-project bob_9 --port-forge 20090 --port-deck 20091 --port-ssh 20092' "$BATS_TEST_TMPDIR/provision.calls"
+  grep -qx -- "PROVISION:mesure --faits [^ ]* --substrate wsl --forge-project bob_9 --port-forge 20090 --port-deck 20091 --port-ssh 20092" "$BATS_TEST_TMPDIR/provision.calls"
 }
 
 @test "sans fait rendu, l'installeur s'arrête et montre le rapport du préflight" {
   local a="$BATS_TEST_TMPDIR/arbre"; rm -rf "$a"; mkdir -p "$a/deploy"
   cp "$SRC" "$a/install.sh"
   cp "$REPO/deploy/installer-constants.env" "$a/deploy/"
-  printf '#!/usr/bin/env bash\necho "le doctor est mort"; exit 3\n' > "$a/deploy/provision"
+  printf '#!/usr/bin/env bash\necho "le préflight est mort"; exit 3\n' > "$a/deploy/provision"
   printf '#!/usr/bin/env bash\necho "CONTAINER:$*"\n' > "$a/deploy/container"
   chmod 0755 "$a/deploy/provision" "$a/deploy/container"
   porte "$a" --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"aucun fait"*"le doctor est mort"* ]]
+  [[ "$output" == *"aucun fait"*"le préflight est mort"* ]]
 }
 
 @test "un substrat que provision refuse : aucun fait, et l'installeur cite ce refus au lieu de dire que provision n'a pas tourné" {
@@ -327,6 +359,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   porte "$a" --bench
   [ "$status" -eq 1 ]
   [[ "$output" == *"refuse cet utilisateur"*"root:docker"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
 @test "sur Linux dédié, docker absent arrête le conteneur et passe pour le système, qui le posera" {
@@ -335,7 +368,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ "$status" -eq 1 ]
   [[ "$output" == *"Docker est absent"*"LCARS_ALLOW_ANY_HOST=1"* ]]
   porte "$a" --bench --workstation --check
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Docker     absent · sera posé par l'installation"* ]]
   [[ "$output" == *"docker-ce si aucun daemon ne répond"* ]]
 }
@@ -351,7 +384,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ "$status" -eq 0 ]
 }
 
-@test "le délégué reçoit le DOCKER_HOST que le préflight a vu répondre, pas celui de l'environnement" {
+@test "le délégué du conteneur reçoit le DOCKER_HOST que la mesure a vu répondre, pas celui de l'environnement" {
   local a; a="$(_arbre docker_host=unix:///var/run/docker.sock)"
   printf '#!/usr/bin/env bash\necho "CONTAINER:$*"; echo "DOCKER_HOST=[${DOCKER_HOST:-}]"\n' > "$a/deploy/container"
   DOCKER_HOST=unix:///mort.sock porte "$a" --bench
@@ -382,22 +415,47 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"ne s'installe que dans une distribution WSL2 ou sur une machine Linux dédiée"* ]]
 }
 
-@test "un préflight qui refuse le terrain arrête l'installation dans ce système avant la grille, en citant son constat ; le conteneur continue" {
+@test "un préflight qui refuse le terrain arrête l'installation dans ce système avant la grille et avant sudo, en citant son constat ; le conteneur continue" {
   local a; a="$(_arbre)"
-  FAUX_PREFLIGHT_REFUS="DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo — la release ne se construira pas" porte "$a" --workstation --bench
+  FAUX_PREFLIGHT_REFUS="FAIL  00-preflight: cette machine est installée par « kit », et cet arbre poserait « source »" porte "$a" --workstation --bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Le préflight refuse ce terrain pour l'installation dans ce système"*"DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo"* ]]
+  [[ "$output" == *"Le préflight refuse ce terrain pour l'installation dans ce système"*"installée par « kit », et cet arbre poserait « source »"* ]]
   refute_out 'OK    00-preflight|Modifie|WORKSTATION:' <<<"$output"
-  FAUX_PREFLIGHT_REFUS="FAIL  00-preflight: Linux natif sans déclaration" porte "$a" --bench
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
+  FAUX_PREFLIGHT_REFUS="DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo" porte "$a" --bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"CONTAINER:--bench up"* ]]
 }
 
-@test "un port demandé déjà tenu arrête et nomme les drapeaux qui déplacent" {
+@test "un port demandé déjà tenu par un autre, visible sans privilège, arrête et nomme les drapeaux qui déplacent" {
   local a; a="$(_arbre "port_ssh=2222 pris par vanille_1-fleet-lcars-1 (projet vanille_1-fleet)")"
   porte "$a" --bench
   [ "$status" -eq 1 ]
   [[ "$output" == *"déjà tenu : ssh 2222 pris par vanille_1-fleet-lcars-1"*"--port-ssh"* ]]
+}
+
+@test "un port tenu par un processus que la mesure sans privilège ne voit pas : dit, jamais un refus dans ce système, vérifié après sudo ; en conteneur, un arrêt" {
+  local a; a="$(_arbre "port_deck=20999 tenu")"
+  porte "$a" --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"20999 (deck) tenu, propriétaire vérifié après sudo"* ]]
+  [[ "$(sudo_ligne)" == *" --ports-tenus deck "* ]]
+  grep -qx "PROVISION:mesure --faits [^ ]* --ports-tenus deck" "$BATS_TEST_TMPDIR/provision.calls"
+  [[ "$output" == *"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"WORKSTATION:up"* ]]
+  a="$(_arbre "port_deck=20999 tenu" forge_fournie=https://forge.example.net forge_joignable=oui)"
+  porte "$a"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"déjà tenu : deck 20999 tenu par un processus que ce compte ne voit pas"* ]]
+}
+
+@test "en root, un port tenu par un autre que ce projet est un refus : le délégué ne part pas" {
+  local a; a="$(_arbre "port_deck=20999 tenu")"
+  : > "$BATS_TEST_TMPDIR/refus-root"
+  porte "$a" --workstation --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"port 20999 (deck) TENU par \"python3\",pid=4243 — un autre que ce projet"* ]]
+  [[ "$output" == *"La mesure en root refuse ce terrain"*"FAIL  00-preflight: port 20999 (deck)"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
 }
 
 @test "une instance déjà posée n'est pas réinstallée : le refus nomme sa mise à jour, volumes gardés, jamais sa destruction" {
@@ -436,11 +494,32 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ "$status" -eq 0 ]
 }
 
-@test "outils manquants : arrêt qui les nomme" {
+@test "outils manquants : arrêt qui les nomme ; sans sudo, l'installation dans ce système s'arrête avant la grille" {
   local a; a="$(_arbre git=absent)"
   porte "$a" --bench
   [ "$status" -eq 1 ]
   [[ "$output" == *"Outils manquants : git"* ]]
+  a="$(_arbre sudo=absent)"
+  porte "$a" --bench --workstation
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Outils manquants : sudo."* ]]
+  refute_out 'Modifie|Entrée pour continuer' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
+}
+
+@test "sans terminal, un sudo qui demande un mot de passe arrête l'installation dans ce système avant la grille, en une phrase" {
+  local a; a="$(_arbre)"
+  SUDO_N_RC=1 porte "$a" --bench --workstation
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé"* ]]
+  refute_out 'Modifie|Entrée pour continuer|WORKSTATION:' <<<"$output"
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.calls")" = "SUDO-N:-n true" ]
+  # le conteneur ne demande jamais root : ni sonde, ni sudo
+  a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
+  rm -f "$BATS_TEST_TMPDIR/sudo.calls"
+  SUDO_N_RC=1 porte "$a"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
 @test "jq absent : arrête le conteneur, banc ou forge fournie, avant la confirmation en le nommant ; laisse passer le système, qui le pose" {
@@ -457,42 +536,38 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
-vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib dans l'arbre, sous un décor ; sudo note son argv
+vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib dans l'arbre, une acceptation de décor, sous un décor
   cp "$REPO/deploy/workstation" "$1/deploy/workstation"
   cp -a "$REPO/deploy/lib" "$1/deploy/lib"
   cp "$REPO/deploy/system.manifest" "$1/deploy/"
-  printf '#!/usr/bin/env bash\necho "SUDO:$*" >> "%s"\n' "$BATS_TEST_TMPDIR/sudo.calls" > "$BINDIR/sudo"
+  printf '#!/usr/bin/env bash\necho "ACCEPT:$*"\n' > "$1/deploy/accept"
   export LCARS_DECOR_ROOT="$BATS_TEST_TMPDIR/decor"; mkdir -p "$LCARS_DECOR_ROOT/etc/lcars"
 }
 
-@test "l'argv que l'installeur émet est lu par le vrai délégué du poste, jusqu'au sudo" {
+@test "la chaîne entière : l'argv de la relance en root est lu par le vrai délégué, qui passe les faits root à l'apply sans remesure" {
   local a; a="$(_arbre)"
   vrai_poste "$a"
   porte "$a" --workstation --bench --human alice --port-deck 20091 --only 60
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q '^PROVISION:doctor --only 00-preflight --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls"
-  [[ "$(cat "$BATS_TEST_TMPDIR/sudo.calls")" == "SUDO:"*"PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars DOCKER_HOST=unix:///var/run/docker.sock bash $a/deploy/workstation up --human alice --only 60 --port-deck 20091" ]]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --human alice --port-deck 20091 --only 60 --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  local faits
+  faits="$(sed -n 's/^PROVISION:apply --faits \([^ ]*\) .*/\1/p' "$BATS_TEST_TMPDIR/provision.calls")"
+  [ -n "$faits" ]
+  [ "$(grep -c '^PROVISION:mesure ' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
+  grep -qx "PROVISION:apply --faits $faits --human alice --only 60 --port-deck 20091" "$BATS_TEST_TMPDIR/provision.calls"
+  [[ "$output" == *"ACCEPT:--announce-file"* ]]
+  [ ! -e "$faits" ]
 }
 
-@test "le canal : le mélange est refusé par le délégué, avant tout sudo ; un canal illisible arrête avec le préflight ; le conteneur ne lit pas le canal" {
-  # l'arbre du décor porte le tampon d'un kit ; la machine a été posée depuis un checkout
-  local a; a="$(_arbre channel=source channel_tree=kit)"
-  vrai_poste "$a"
-  printf 'source\n' > "$LCARS_DECOR_ROOT/etc/lcars/channel"
-  porte "$a" --bench --workstation
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « source »"*"poserait « kit »"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
-  a="$(_arbre channel=invalide)"
-  FAUX_PREFLIGHT_REFUS="FAIL  00-preflight: canal d'installation illisible" porte "$a" --bench --workstation
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Le préflight refuse ce terrain"*"canal d'installation illisible"* ]]
-  a="$(_arbre channel=inconnu)"
-  porte "$a" --bench --workstation --check
-  [ "$status" -eq 0 ]
-  a="$(_arbre channel=kit channel_tree=source)"
-  porte "$a" --bench --check
-  [ "$status" -eq 0 ]
+@test "les choix de l'opérateur passent à sudo en options, aucune variable ne le traverse, et le délégué en root les reçoit" {
+  local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
+  FORGE_BASE_URL=https://forge.example.net FORGE_PUBLIC_URL=https://forge.public.example LCARS_BUILTIN_HUMAN=demo \
+    PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret porte "$a" --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --ports-tenus  --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
+  refute grep -qE '^SUDO:.* [A-Z_]+=' "$BATS_TEST_TMPDIR/sudo.calls"
+  [[ "$output" == *"ENV:DOCKER_HOST=unix:///var/run/docker.sock"*"ENV:FORGE_BASE_URL=https://forge.example.net"*"ENV:FORGE_PUBLIC_URL=https://forge.public.example"*"ENV:LCARS_BUILTIN_HUMAN=demo"*"ENV:PROV_FORGE_ADMIN_RESET=1"*"ENV:SUDO_USER=$(id -un)"* ]]
+  refute_out 'tres-secret' <<<"$output"
 }
 
 
@@ -530,10 +605,10 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   refute_out 'down -v' <<<"$output"
 }
 
-@test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux — et rien de ce que fait le conteneur" {
+@test "--workstation : sa grille, root par sudo après la pause, /etc/wsl.conf sous WSL et la machine sur Linux — et rien de ce que fait le conteneur" {
   local a; a="$(_arbre)"
   porte "$a" --bench --workstation --check
-  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
+  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"*"Requiert   root, par sudo, une fois après la pause"*"wsl --unregister"* ]]
   [[ "$output" == *"Pour installer en conteneur à la place :"* ]]
   sed -n '/Installation dans ce système/,/Pour installer en conteneur/p' <<<"$output" | refute_out 'runner CI|humain de d|deploy/container'
   a="$(_arbre substrat=linux consent=env)"
@@ -541,34 +616,49 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" == *"Modifie    /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.claude de l'utilisateur, docker-ce"*"la machine se réinstalle"* ]]
 }
 
-@test "--check s'arrête après la grille, rien n'est appelé" {
+@test "--check du conteneur s'arrête après la grille, sans sudo, rien n'est appelé" {
   local a; a="$(_arbre)"
   porte "$a" --bench --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"--check : rien n'est fait"* ]]
   refute grep -q 'BENCHUP:\|CONTAINER:\|WORKSTATION:' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
-@test "--dry-run dit la commande exacte, mot à mot, sans l'exécuter" {
+@test "--check dans ce système : grille, sudo, la mesure root complète la grille, rien n'est posé" {
+  local a; a="$(_arbre "port_deck=20999 tenu")"
+  porte "$a" --bench --workstation --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Requiert   root"*"--check : la mesure se complète en root, par sudo"*"En root    /opt : écriture et « mv --exchange » joués par root"*"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"--check : rien n'est fait"* ]]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --ports-tenus deck --docker-host unix:///var/run/docker.sock" ]
+  refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
+  [ "$(grep -c "Système    " <<<"$output")" -eq 1 ]
+}
+
+@test "--dry-run dit la commande exacte, mot à mot, sans l'exécuter ; dans ce système, après sudo et la mesure root" {
   local a; a="$(_arbre)"
   porte "$a" --bench --dry-run --forge-project bob_10 --port-deck 20101
   [ "$status" -eq 0 ]
   [[ "$output" == *"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/container --forge-project bob_10 --port-deck 20101 --bench up"* ]]
   refute grep -q 'CONTAINER:' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
   porte "$a" --workstation --bench --dry-run --substrate wsl --only 10-packages
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"$a/deploy/workstation up --substrate wsl --only 10-packages"* ]]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"--dry-run : la commande se dit après la mesure en root, par sudo"*"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/workstation up --faits "*" --substrate wsl --only 10-packages --bench"* ]]
+  grep -q '^SUDO:' "$BATS_TEST_TMPDIR/sudo.calls"
+  refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
 }
 
 
-@test "mode conteneur : exec deploy/container avec le projet et les ports, puis up" {
+@test "mode conteneur : exec deploy/container avec le projet et les ports, puis up, sans sudo" {
   local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   porte "$a" --forge-project bob_10 --port-deck 20101 --port-ssh 20102
   [ "$status" -eq 0 ]
   [[ "$output" == *"Installation en conteneur — deploy/container up"* ]]
   [[ "${lines[-1]}" == "CONTAINER:--forge-project bob_10 --port-deck 20101 --port-ssh 20102 up" ]]
-  refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"
+  refute grep -q 'DOCKER-APPELE' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
   # le fichier de faits ne survit pas à l'exec
   [ -z "$(ls "$TMPDIR")" ]
 }
@@ -579,19 +669,23 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [ "$status" -eq 0 ]
   [[ "$output" == *"Installation en conteneur, avec le banc — deploy/container --bench up"* ]]
   [[ "${lines[-1]}" == "CONTAINER:--forge-project bob_10 --port-forge 20100 --bench up" ]]
-  refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
-@test "mode système : exec deploy/workstation up avec le substrat et les drapeaux du provisionnement" {
+@test "mode système : la pause, un sudo sur ce fichier, puis en root exec deploy/workstation up sur les faits root, avec le substrat et les drapeaux" {
   local a; a="$(_arbre)"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   porte "$a" --workstation --bench --substrate wsl --human alice --port-deck 20091
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Installation dans ce système — deploy/workstation up"* ]]
-  [[ "$output" == *"WORKSTATION:up --substrate wsl --human alice --port-deck 20091"* ]]
-  # --bench sur ce mode : la forge montée et le compte de démonstration, transmis par l'environnement
-  [[ "$output" == *"LCARS_BUILTIN_HUMAN=lcars"* ]]
-  [[ "$output" == *"PROV_FORGE_MONTEE=1"* ]]
-  refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"   # sudo est l'affaire du délégué
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Installation dans ce système — la suite demande root : sudo, puis deploy/workstation up"*"Entrée pour continuer"* ]]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --substrate wsl --human alice --port-deck 20091 --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [[ "$output" == *"WORKSTATION:up --faits $TMPDIR/lcars-facts."*" --substrate wsl --human alice --port-deck 20091 --bench"* ]]
+  # une seule mesure par phase, jamais rejouée
+  [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 1 ]
+  [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091 --ports-tenus $' "$BATS_TEST_TMPDIR/provision.calls")" -eq 1 ]
+  # le bandeau se dit une fois
+  [ "$(grep -c 'FEDERATION DATABASE' <<<"$output")" -eq 1 ]
+  refute grep -q 'DOCKER-APPELE' <<<"$output"
   porte "$a" --workstation
   [ "$status" -eq 1 ]   # sans forge : arrêt, pas de montée silencieuse
 }
@@ -629,7 +723,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" != *"déclarée dédiée"* ]]
 }
 
-@test "la pause avant l'exec : annoncée, et sans terminal l'installation continue en le disant" {
+@test "la pause avant sudo : annoncée, et sans terminal l'installation continue en le disant" {
   local a; a="$(_arbre)"
   porte "$a" --workstation --bench
   [ "$status" -eq 0 ]
@@ -642,13 +736,14 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   local a rep; a="$(_arbre comptes_humains=temoin,alice)"
   # script prête un terminal : ce qui entre sur son stdin ressort sur /dev/tty du script joué
   for rep in "" o n q; do
+    rm -f "$BATS_TEST_TMPDIR/sudo.calls"
     run bash -c "printf '%s\n\n' '$rep' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
     case "$rep" in
       ""|o) [[ "$output" == *"Continuer ? [O/n]"*"WORKSTATION:up"* ]] || { echo "réponse « $rep » : $output" >&2; return 1; } ;;
       n)    [[ "$output" == *"Rien n'a été fait"* ]] || { echo "réponse « n » : $output" >&2; return 1; }
-            [[ "$output" != *"WORKSTATION:up"* ]] || { echo "réponse « n » a lancé l'installation" >&2; return 1; } ;;
+            [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ] || { echo "réponse « n » a demandé sudo" >&2; return 1; } ;;
       q)    [[ "$output" == *"non comprise"* ]] || { echo "réponse « q » : $output" >&2; return 1; }
-            [[ "$output" != *"WORKSTATION:up"* ]] || { echo "réponse « q » a lancé l'installation" >&2; return 1; } ;;
+            [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ] || { echo "réponse « q » a demandé sudo" >&2; return 1; } ;;
     esac
   done
   # Ctrl-D : un terminal sans réponse est un abandon, pas une absence de terminal
@@ -657,34 +752,39 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
-@test "la pause se joue même quand « Continuer ? » a répondu : Entrée part, Ctrl-D à la pause arrête" {
+@test "la pause se joue même quand « Continuer ? » a répondu : Entrée part, Ctrl-D à la pause arrête avant sudo" {
   local a; a="$(_arbre comptes_humains=temoin,alice)"
   run bash -c "printf 'o\n\n' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
   [[ "$output" == *"Continuer ? [O/n]"*"Entrée pour continuer"*"WORKSTATION:up"* ]]
+  rm -f "$BATS_TEST_TMPDIR/sudo.calls"
   run bash -c "{ printf 'o\n'; sleep 3; } | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
   [[ "$output" == *"Continuer ? [O/n]"*"Entrée pour continuer"*"Rien n'a été fait"* ]]
   [[ "$output" != *"WORKSTATION:up"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
-@test "à la pause, un terminal sans réponse (Ctrl-D) est un abandon : le délégué ne part pas" {
+@test "à la pause, un terminal sans réponse (Ctrl-D) est un abandon : sudo n'est pas demandé" {
   local a; a="$(_arbre)"
   run bash -c "script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null < /dev/null"
   [[ "$output" == *"Entrée pour continuer"*"Rien n'a été fait"* ]]
   [[ "$output" != *"WORKSTATION:up"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
-@test "--env atteint le préflight initial, --human et --only n'y vont pas ; le délégué reçoit les trois" {
+@test "--env atteint la mesure, --human et --only n'y vont pas ; le délégué reçoit les trois" {
   local a; a="$(_arbre)"
   printf 'FORGE_BASE_URL=http://forge.env:3000\n' > "$BATS_TEST_TMPDIR/env"
   run bash "$a/install.sh" --workstation --bench --env "$BATS_TEST_TMPDIR/env" --human zoe --only 60 --dry-run
-  [ "$status" -eq 0 ]
-  grep -qx "PROVISION:doctor --only 00-preflight --env $BATS_TEST_TMPDIR/env" "$BATS_TEST_TMPDIR/provision.calls"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "PROVISION:mesure --faits [^ ]* --env $BATS_TEST_TMPDIR/env" "$BATS_TEST_TMPDIR/provision.calls"
+  grep -qx "PROVISION:mesure --faits [^ ]* --env $BATS_TEST_TMPDIR/env --ports-tenus " "$BATS_TEST_TMPDIR/provision.calls"
   [[ "$output" == *"--env $BATS_TEST_TMPDIR/env --human zoe --only 60"* ]]
 }
 
-_dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un kit avec un préflight qui dicte ses faits
+_dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un kit, son installeur de gabarit et une mesure qui dicte ses faits
   local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
   rm -rf "$d" "$st"; mkdir -p "$d" "$st/lcars_install/deploy/docker/bench"
+  cp "$SRC" "$st/lcars_install/install.sh"
   cp "$REPO/deploy/installer-constants.env" "$st/lcars_install/deploy/"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
   _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
@@ -769,7 +869,7 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   _daemon_avec_image non
   IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker"
   pipee --workstation --bench
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   refute_out "pull" <<<"$output"
 }
 
@@ -836,11 +936,11 @@ suivre_remedes() { # suivre_remedes <commande> — la joue, puis le premier rem�
   local depart
   for depart in "bash '$a/install.sh' --forge-project bob_9 --port-ssh 20092" "bash '$a/install.sh' --bench --forge-project bob_9"; do
     suivre_remedes "$depart" || return 1
-    [[ "$output" == *"WORKSTATION:up --forge-project bob_9"* ]] || { echo "$SUITE"; echo "$output"; return 1; }
+    [[ "$output" == *"WORKSTATION:up --faits "*" --forge-project bob_9"* ]] || { echo "$SUITE"; echo "$output"; return 1; }
   done
 }
 
-@test "--check pipée ne télécharge rien : le préflight vit dans le kit, et il le dit" {
+@test "--check pipée ne télécharge rien : la mesure vit dans le kit, et il le dit" {
   _release
   pipee --bench --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -876,16 +976,18 @@ EOF
   rm "$BINDIR/tar"
   pipee --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"déjà là, sha256 vérifié"*"WORKSTATION:up --from $KITS/lcars_install"* ]]
+  [[ "$output" == *"déjà là, sha256 vérifié"*"WORKSTATION:up --faits "* ]]
+  [[ "$(sudo_ligne)" == "bash $KITS/lcars_install/install.sh "* ]]
 }
 
-@test "pipée : le kit de la version est téléchargé, vérifié, détaré, et le délégué part du kit" {
+@test "pipée : le kit de la version est téléchargé, vérifié, détaré, et sudo relance l'installeur du kit, jamais l'entrée du tube" {
   _release
   pipee --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"téléchargé, sha256 vérifié"* ]]
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
-  [[ "$output" == *"WORKSTATION:up --from $KITS/lcars_install"* ]]
+  [ "$(sudo_ligne)" = "bash $KITS/lcars_install/install.sh --workstation --bench --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [[ "$output" == *"WORKSTATION:up --faits "*" --bench"* ]]
   # sans clé : la porte le dit, et continue
   [[ "$output" == *"provenance non vérifiée (sha256 seul)"* ]]
   # relancée : déjà là, vérifié, rien de retéléchargé
@@ -966,7 +1068,7 @@ EOF
   done
   [ ! -e "$sans/minisign" ]
   run env PATH="$sans" bash -c "cat '$PORTE' | bash -s -- --workstation --bench"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"minisign absent : provenance non vérifiée"* ]]
 }
 
@@ -976,14 +1078,14 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local a="lcars-fleet-$TAG-otp27-x86_64.tar.gz"
   [[ "$output" == *"$a "*"sha256 $(sha256sum "$DIST/$a" | cut -d' ' -f1)"* ]]
-  [[ "$output" == *"rien n'est téléchargé"*"deploy/workstation up --from <kit>"* ]]
+  [[ "$output" == *"rien n'est téléchargé"*"sudo bash <kit>/install.sh, puis deploy/workstation up"* ]]
   [ ! -s "$SERVEUR_LOG" ]
   [ ! -d "$HOME/.lcars" ]
-  # une fois le kit posé, --dry-run dit la commande exacte, --from compris
+  # une fois le kit posé, --dry-run dit la commande exacte, après sudo sur l'installeur du kit
   pipee --workstation --bench
   [ "$status" -eq 0 ]
   pipee --workstation --bench --dry-run
-  [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_install"* ]]
+  [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --faits "*" --bench"* ]]
 }
 
 @test "le script du dépôt, pipé avec --dry-run, dit l'installeur de la dernière release qu'il rejouerait, sans rien télécharger" {
@@ -1007,6 +1109,8 @@ EOF
   [[ "$output" == *"dernière release de $SERVEUR_URL/o/r — installeur vérifié par sa somme"* ]]
   [[ "$output" == *"Source     release $TAG"* ]]
   [ -x "$HOME/.lcars/kits/$TAG/lcars_install/deploy/provision" ]
+  # la relance en root ne retélécharge rien : --from-release et --repo ne la suivent pas
+  [ "$(sudo_ligne)" = "bash $HOME/.lcars/kits/$TAG/lcars_install/install.sh --workstation --bench --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
 }
 
 @test "--from-release depuis un clone : un installeur qui ne correspond pas à sa somme n'est pas rejoué" {

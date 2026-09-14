@@ -2,17 +2,22 @@
 # SOURCE: deploy/provision
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: le runner du provisionnement — apply, doctor, list, audit sur modules.d/
+# STATUS: le runner du provisionnement — apply, doctor, mesure, list, audit sur modules.d/
 #
 # USAGE
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
-#   provision doctor (mêmes options) [--porcelain]
+#                    [--faits F]
+#   provision doctor (mêmes options, sans --faits) [--porcelain]
+#   provision mesure --faits F [--ports-tenus NOMS] [--substrate S] [--human USER] [--env FILE]
+#                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
 #
 #   apply    converge la machine, en root : chaque module joue check, fix, re-check
-#   doctor   sonde seule — le même check que l'apply
+#   doctor   sonde seule, en root — le même check que l'apply
+#   mesure   le préflight seul, pour un lanceur qui décide avant d'agir : sans root, ce qui se lit
+#            sans privilège ; en root, ce que root seul lit. Ses faits vont dans --faits
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
 #            « find / … > avant ; install ; find / … > après » (une ligne par objet :
@@ -22,12 +27,13 @@
 #   doit être vrai), NEEDS: root et AFTER (les modules dont il emploie le travail, que « list »
 #   affiche). Il est joué en processus séparé, dans l'ordre du préfixe, seul ordre du runner. Le
 #   préflight (00) est la barrière de l'apply : un terrain qu'il ne déclare pas conforme ne reçoit
-#   aucun autre module.
+#   aucun autre module. Un apply qui reçoit --faits, la mesure root rendue conforme dans la même
+#   invocation, ne le rejoue pas.
 #
 #   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
 #          runner apply  0 convergé · 1 échec, ou terrain refusé par le préflight · 2 drift résiduel
-#          runner doctor 0 conforme · 1 drift · 2 erreur
+#          runner doctor, mesure  0 conforme · 1 drift · 2 erreur
 #          runner audit  0 rien de non déclaré · 1 au moins un objet non déclaré, ou instantané illisible
 #          un refus avant tout module (commande ou option inconnue, valeur absente ou invalide, --env
 #          illisible, substrat contredit) sort en 1, sous chaque commande
@@ -45,6 +51,11 @@
 #   --port-ssh N
 #   --forge-project NOM   la base des projets compose (NOM-forge, NOM-runner) et du nom d'hôte
 #                    WSL ; une étiquette DNS, retenue dans le journal
+#   --faits F        mesure : le fichier où le préflight écrit ses faits `nom=valeur`, et son
+#                    verdict (preflight=conforme|refuse) ; apply : ce fichier, écrit par une mesure
+#                    root conforme, à la place du préflight
+#   --ports-tenus NOMS   (mesure en root) deck, forge : les ports que la mesure sans privilège a
+#                    trouvés tenus par un processus qu'elle ne voit pas, séparés par des virgules
 #   --verbose, -v
 #   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
 #
@@ -71,6 +82,7 @@ PORCELAIN=0
 ENV_FILE=""
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
+FAITS="" TENUS_DONNE=0
 declare -a ONLY=()
 
 # les validations ne rendent rien : dans une substitution `X="$(valid_port …)"`, le die ne tuerait
@@ -101,6 +113,8 @@ while [[ $# -gt 0 ]]; do
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
+    --faits)     FAITS="${2:?--faits attend un fichier}"; shift 2 ;;
+    --ports-tenus) export PROV_PORTS_TENUS="${2?--ports-tenus attend une liste}"; TENUS_DONNE=1; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
@@ -109,8 +123,25 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|mesure|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
 [[ "$PORCELAIN" -eq 0 || "$CMD" == doctor ]] || die "--porcelain ne vaut que pour doctor : $CMD écrit son verdict et son journal en clair"
+[[ -z "$FAITS" || "$CMD" == mesure || "$CMD" == apply ]] || die "--faits ne vaut que pour mesure, qui l'écrit, et apply, qui le reçoit"
+[[ -n "$FAITS" || "$CMD" != mesure ]] || die "mesure écrit ses faits dans --faits FICHIER : sans lui, rien ne serait rendu"
+[[ "$TENUS_DONNE" -eq 0 || "$CMD" == mesure ]] || die "--ports-tenus ne vaut que pour mesure"
+[[ "${#ONLY[@]}" -eq 0 || "$CMD" != mesure ]] || die "--only ne vaut pas pour mesure : elle joue le préflight seul"
+# sous un décor de témoin, le runner ne tourne jamais en root (refus plus haut) : apply et doctor s'y jouent sans privilège
+[[ "$EUID" -eq 0 || -n "${LCARS_DECOR_ROOT:-}" || ( "$CMD" != apply && "$CMD" != doctor ) ]] \
+  || die "$CMD exige root : un fichier que ce compte ne lit pas passerait pour absent — relancer : sudo $SELF $CMD${ONLY[0]:+ --only ${ONLY[*]}}"
+if [[ "$CMD" == mesure ]]; then
+  : 2>/dev/null > "$FAITS" || die "--faits $FAITS : non inscriptible — la mesure y écrit ses faits"
+  PROV_PHASE=sans-privilege; [[ "$EUID" -ne 0 ]] || PROV_PHASE=root
+  export PROV_FACTS_FILE="$FAITS" PROV_PHASE
+else
+  # hors mesure, le préflight se joue entier et n'écrit aucun fait
+  unset PROV_FACTS_FILE PROV_PHASE
+  [[ -z "$FAITS" || "$(sed -n 's/^phase=//p' "$FAITS" 2>/dev/null)|$(sed -n 's/^preflight=//p' "$FAITS" 2>/dev/null)" == "root|conforme" ]] \
+    || die "--faits $FAITS : ce n'est pas une mesure root conforme (phase=root, preflight=conforme) — apply refusé avant tout module"
+fi
 
 if [[ -n "$ENV_FILE" ]]; then
   [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
@@ -177,13 +208,16 @@ declare -a SELECTED=() EFFECTIVE=()
 for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
   name="$(basename "$mod" .sh)"
-  if [[ "${#ONLY[@]}" -gt 0 ]]; then
+  if [[ "$CMD" == mesure ]]; then
+    [[ "$name" == 00-* ]] || continue
+  elif [[ "${#ONLY[@]}" -gt 0 ]]; then
     keep=0
     for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
     # le préflight est la barrière de tout apply : --only choisit ce qui mute, pas ce qui garde
     [[ "$CMD" == apply && "$name" == 00-* ]] && keep=1
     [[ "$keep" -eq 1 ]] || continue
   fi
+  [[ -z "$FAITS" || "$CMD" != apply || "$name" != 00-* ]] || continue
   substrate_in "$(module_field "$mod" CHECK-ON)" || continue
   SELECTED+=("$mod")
   if [[ "$CMD" == "apply" ]] && substrate_in "$(module_field "$mod" APPLY-ON)"; then
@@ -203,11 +237,8 @@ if [[ "$CMD" == "list" ]]; then
   exit 0
 fi
 
-# ─── Garde de privilège et verrou (apply) ───────────────────────────────────────────────────────
-# sous un décor de témoin, le runner ne tourne jamais en root (refus plus haut) : l'apply s'y joue sans privilège
+# ─── Verrou (apply) ─────────────────────────────────────────────────────────────────────────────
 if [[ "$CMD" == "apply" ]]; then
-  [[ "$EUID" -eq 0 || -n "${LCARS_DECOR_ROOT:-}" ]] \
-    || die "apply exige root — relancer : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
   LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply refusé"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
@@ -249,6 +280,9 @@ for i in "${!SELECTED[@]}"; do
   fi
   rc=0
   run_module "$mod" "$name" "$eff" || rc=$?
+  if [[ "$CMD" == mesure ]]; then
+    if [[ "$rc" -eq 0 ]]; then echo preflight=conforme; else echo preflight=refuse; fi >> "$FAITS"
+  fi
   # tout verdict du préflight autre que « convergé » refuse le terrain, un plancher en dérive compris
   if [[ "$CMD" == apply && "$name" == 00-* && "$rc" -ne 0 ]]; then
     failed=$((failed + 1)); REPORT+=("$name=FAIL"); REFUS=1
@@ -264,9 +298,9 @@ for i in "${!SELECTED[@]}"; do
   fi
   case "$CMD:$eff:$rc" in
     *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
-    doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
-    doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    doctor:check:*)
+    doctor:check:0|mesure:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    doctor:check:1|mesure:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    doctor:check:*|mesure:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
@@ -342,6 +376,6 @@ else
     echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
   fi
 fi
-[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
-[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 1 || echo 2)"
+[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "apply" ]] && echo 1 || echo 2)"
+[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "apply" ]] && echo 2 || echo 1)"
 exit 0

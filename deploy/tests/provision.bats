@@ -187,17 +187,106 @@ EOF
 
 # ─── l'identité ─────────────────────────────────────────────────────────────────────────────────
 
-@test "hors décor, sans root : doctor se joue, apply est refusé avant tout module" {
+@test "hors décor, sans root : apply et doctor sont refusés avant tout module, mesure se joue" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  # un module qui se déclarerait « human » ne rouvre pas l'apply sans privilège : le runner ne change pas d'identité
+  # un module qui se déclarerait « human » ne rouvre ni l'apply ni le doctor sans privilège : le runner ne change pas d'identité
   printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: human\necho "20-humain:$1" >> "$RUN_LOG"\n' > "$SANDBOX/modules.d/20-humain.sh"
+  stub_module 00-preflight any any
   run env -u LCARS_DECOR_ROOT "$SANDBOX/provision" doctor
-  [ "$status" -eq 0 ]
-  grep -qx "20-humain:check" "$RUN_LOG"
-  : > "$RUN_LOG"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"doctor exige root"*"relancer : sudo $SANDBOX/provision doctor"* ]]
   run env -u LCARS_DECOR_ROOT "$SANDBOX/provision" apply --only 20
   [ "$status" -eq 1 ]
-  [[ "$output" == *"apply exige root — relancer : sudo $SANDBOX/provision apply --only 20"* ]]
+  [[ "$output" == *"apply exige root"*"relancer : sudo $SANDBOX/provision apply --only 20"* ]]
+  [ ! -s "$RUN_LOG" ]
+  run env -u LCARS_DECOR_ROOT "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check" ]
+}
+
+phase_module() { # phase_module <rc> — un préflight qui note la phase et les ports tenus que le runner lui donne, et un fait
+  cat > "$SANDBOX/modules.d/00-preflight.sh" <<EOF
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: root
+. "\${PROVISION_LIB:?}"
+echo "00-preflight:\$1 phase=\${PROV_PHASE:-} tenus=\${PROV_PORTS_TENUS:-}" >> "\$RUN_LOG"
+p_fact phase "\${PROV_PHASE:-entier}"
+[[ "$1" -eq 0 ]] || p_fail "décor : refus"
+verdict_check
+EOF
+}
+
+@test "mesure joue le préflight seul, en phase sans privilège, et écrit ses faits suivis de son verdict" {
+  terrain wsl
+  phase_module 0
+  stub_module 20-suivant any any
+  run "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=sans-privilege tenus=" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/faits")" = "$(printf 'phase=sans-privilege\npreflight=conforme')" ]
+  phase_module 1
+  run "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 2 ]
+  [ "$(tail -1 "$BATS_TEST_TMPDIR/faits")" = "preflight=refuse" ]
+}
+
+@test "mesure en root joue la phase root sur les ports tenus qu'elle reçoit" {
+  # sans décor : le runner refuse root sous LCARS_DECOR_ROOT ; le module de décor ne lit rien de la machine
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
+  phase_module 0
+  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --ports-tenus deck,forge
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=root tenus=deck,forge" ]
+  grep -qx 'phase=root' "$BATS_TEST_TMPDIR/faits"
+}
+
+@test "mesure refuse ce qu'elle n'honore pas : sans --faits, avec --only ; --faits hors mesure et apply, --ports-tenus hors mesure" {
+  terrain wsl
+  phase_module 0
+  run "$SANDBOX/provision" mesure
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mesure écrit ses faits dans --faits FICHIER"* ]]
+  run "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --only 00
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--only ne vaut pas pour mesure"* ]]
+  run "$SANDBOX/provision" doctor --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--faits ne vaut que pour mesure"* ]]
+  run "$SANDBOX/provision" apply --ports-tenus deck
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--ports-tenus ne vaut que pour mesure"* ]]
+  [ ! -s "$RUN_LOG" ]
+}
+
+@test "apply --faits reçoit une mesure root conforme et ne rejoue pas le préflight ; appelé seul, il le joue" {
+  terrain wsl
+  phase_module 0
+  stub_module 20-suivant any any
+  printf 'phase=root\nport_deck=20999 nous lcars-landing (service)\npreflight=conforme\n' > "$BATS_TEST_TMPDIR/faits"
+  run "$SANDBOX/provision" apply --faits "$BATS_TEST_TMPDIR/faits"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$RUN_LOG")" = "20-suivant:apply" ]
+  : > "$RUN_LOG"
+  run "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  [ "$(cat "$RUN_LOG")" = "$(printf '00-preflight:apply phase= tenus=\n20-suivant:apply')" ]
+}
+
+@test "apply --faits refuse, avant tout module, des faits qui ne sont pas une mesure root conforme" {
+  terrain wsl
+  phase_module 0
+  stub_module 20-suivant any any
+  local faits="$BATS_TEST_TMPDIR/faits" contenu
+  for contenu in 'phase=root\npreflight=refuse' 'phase=sans-privilege\npreflight=conforme' 'phase=root'; do
+    printf '%b\n' "$contenu" > "$faits"
+    run "$SANDBOX/provision" apply --faits "$faits"
+    [ "$status" -eq 1 ] || { echo "« $contenu » : $output"; return 1; }
+    [[ "$output" == *"ce n'est pas une mesure root conforme"* ]]
+  done
+  run "$SANDBOX/provision" apply --faits "$BATS_TEST_TMPDIR/absent"
+  [ "$status" -eq 1 ]
   [ ! -s "$RUN_LOG" ]
 }
 
@@ -377,7 +466,8 @@ EOF
       ln -s "$f" "$sans/$n"
     done
   done
-  run env PATH="$DECOR_BIN:$sans" LCARS_ALLOW_ANY_HOST=1 "$SANDBOX/provision" apply
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/ss"; chmod 0755 "$DECOR_BIN/ss"
+  run env PATH="$DECOR_BIN:$sans" LCARS_ALLOW_ANY_HOST=1 "$SANDBOX/provision" apply --port-deck "$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"=== 00-preflight (apply) ==="*"OK    00-preflight: arch"*"=== 10-packages (apply) ==="* ]]
   [ "$(cat "$RUN_LOG")" = "10-packages:apply" ]

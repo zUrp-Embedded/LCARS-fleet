@@ -2,30 +2,45 @@
 # SOURCE: deploy/workstation
 # AUTHOR: bob
 # STARDATE: 2026-09-14
-# STATUS: le délégué du poste — escalade, provisionnement, acceptation, depuis ce checkout ou un kit
+# STATUS: le délégué du poste — mesure sans privilège, root une fois par sudo, provisionnement, acceptation, depuis ce checkout ou un kit
 #
 # USAGE  deploy/workstation <commande> [options]
-#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options de provision] — mesure, escalade
-#           par sudo une fois, pose, puis accepte ; un terrain que le préflight refuse s'arrête avant sudo,
-#           et sous root la barrière de l'apply le juge
-#   doctor  [options de provision] — la sonde seule, sans escalade
+#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options] — pose, puis accepte. Exige root :
+#           sans root, il mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que
+#           root va poser, puis se relance une fois par sudo sur ce fichier ; en root, il mesure ce que
+#           root seul lit, puis joue « provision apply » sur ces faits
+#   doctor  [options de provision] — la sonde complète, en root ; sans root, sudo sur ce fichier
 #
 #   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
 #              détare sous l'utilisateur dans ~/.lcars/kits/<nom>/, et tout se joue depuis lui
 #              (canal « kit »). Sans --from : ce checkout (canal « source »).
-#   Un canal ne se pose pas sur un autre : une machine installée par kit refuse un checkout, et
-#   inversement — mise à jour par le même canal, ou le terrain se refait.
+#   Un canal ne se pose pas sur un autre : le préflight refuse une machine installée par kit sous un
+#   checkout, et inversement — mise à jour par le même canal, ou le terrain se refait.
+#   --faits F  (up, en root) la mesure root conforme de cette invocation : l'apply la reçoit à la place
+#              du préflight, et le fichier est retiré à la sortie
+#   --bench    la forge montée par l'installation, son runner et l'humain de démonstration
+#   Options de provision, passées telles quelles : --substrate, --only, --human, --env, --port-forge,
+#   --port-deck, --forge-project, --verbose
 #
-#   EXIT  up      0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, échec du provisionnement
-#                 ou de l'acceptation
+#   sudo ne transmet aucune variable : la relance les reçoit en options, que ce script écrit lui-même.
+#   --ports-tenus NOMS   deck, forge : les ports tenus par un processus que la mesure sans privilège
+#                        ne voit pas ; leur propriétaire se vérifie en root
+#   --docker-host URL    DOCKER_HOST, le daemon que la mesure sans privilège a vu répondre
+#   --linux-dedie        LCARS_ALLOW_ANY_HOST=1
+#   --forge URL          FORGE_BASE_URL        --forge-publique URL   FORGE_PUBLIC_URL
+#   --humain-demo NOM    LCARS_BUILTIN_HUMAN (défaut lcars sous --bench)
+#   --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1
+#
+#   EXIT  up      0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, sudo impossible, échec
+#                 du provisionnement ou de l'acceptation
 #         doctor  les codes de « provision doctor » : 0 conforme · 1 drift · 2 erreur (deploy/provision --help)
 #         un verbe inconnu sort en 1
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$HERE/workstation"
 PROVISION="$HERE/provision"
-PROVISION_LIB="$HERE/lib/provision-lib.sh"
 
 usage() { sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
@@ -33,70 +48,62 @@ case "${1:-help}" in
   -h|--help|help) usage; exit 0 ;;
 esac
 
-# sudo remet l'environnement à zéro : seule cette liste traverse, nommée variable par variable, et lue
-# avant la lib, qui en pose certaines. Aucun secret ici — « sudo VAR=valeur » met la valeur dans l'argv
-# d'un processus root.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BENCH LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
-declare -a ESCALADE_ARGS=()
-for _v in "${ESCALADE_ENV[@]}"; do
-  [[ -z "${!_v:-}" ]] || ESCALADE_ARGS+=("$_v=${!_v}")
-done
-unset _v
-
 # shellcheck source=lib/provision-lib.sh
-. "$PROVISION_LIB"
+. "$HERE/lib/provision-lib.sh"
 # shellcheck source=lib/forge-bootstrap.sh
 . "$HERE/lib/forge-bootstrap.sh"
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
-FACTS_FILE="" MESURE_OUT="" MESURE_RC=0
+FACTS_FILE="" MESURE_OUT="" MESURE_RC=0 PORTS_TENUS="" SUITE_ROOT=0
+declare -a ARGS=() MESURE=()   # à provision ; --only et --human choisissent ce que l'apply joue et sert, la mesure ne les reçoit pas
 fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
-mesurer() { # mesurer <options de provision…> — le préflight sous ces options : ses faits dans FACTS_FILE, son rapport dans MESURE_OUT
+
+lire_options() { # lire_options <options…> — les choix de l'opérateur deviennent ses variables ; le reste va dans ARGS
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bench)          export LCARS_BENCH=1 PROV_FORGE_MONTEE=1; shift ;;
+      --linux-dedie)    export LCARS_ALLOW_ANY_HOST=1; shift ;;
+      --forge)          export FORGE_BASE_URL="${2:?--forge attend une URL}"; shift 2 ;;
+      --forge-publique) export FORGE_PUBLIC_URL="${2:?--forge-publique attend une URL}"; shift 2 ;;
+      --humain-demo)    export LCARS_BUILTIN_HUMAN="${2:?--humain-demo attend un nom}"; shift 2 ;;
+      --forge-admin-reset) export PROV_FORGE_ADMIN_RESET=1; shift ;;
+      --docker-host)    export DOCKER_HOST="${2:?--docker-host attend une adresse}"; shift 2 ;;
+      --ports-tenus)    PORTS_TENUS="${2?--ports-tenus attend une liste, vide comprise}"; SUITE_ROOT=1; shift 2 ;;
+      --faits)          FACTS_FILE="${2:?--faits attend un fichier}"; shift 2 ;;
+      --only|--human)   ARGS+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+      --env|--substrate|--port-forge|--port-deck|--port-ssh|--forge-project)
+                        ARGS+=("$1" "${2:?$1 attend une valeur}"); MESURE+=("$1" "$2"); shift 2 ;;
+      *)                ARGS+=("$1"); MESURE+=("$1"); shift ;;
+    esac
+  done
+  [[ "${LCARS_BENCH:-}" != 1 ]] || export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
+}
+
+choix_argv() { # choix_argv → CHOIX, les variables de l'opérateur en options, pour sudo qui ne les transmet pas
+  CHOIX=()
+  [[ "${LCARS_BENCH:-}" != 1 ]] || CHOIX+=(--bench)
+  [[ -z "${LCARS_ALLOW_ANY_HOST:-}" ]] || CHOIX+=(--linux-dedie)
+  [[ -z "${FORGE_BASE_URL:-}" ]] || CHOIX+=(--forge "$FORGE_BASE_URL")
+  [[ -z "${FORGE_PUBLIC_URL:-}" ]] || CHOIX+=(--forge-publique "$FORGE_PUBLIC_URL")
+  [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || CHOIX+=(--humain-demo "$LCARS_BUILTIN_HUMAN")
+  [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] || CHOIX+=(--forge-admin-reset)
+}
+
+sudo_possible() { # sudo_possible — rien, ou le refus en une phrase
+  command -v sudo >/dev/null 2>&1 || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
+  { exec 3< /dev/tty; } 2>/dev/null && { exec 3<&-; return 0; }
+  sudo -n true 2>/dev/null \
+    || fail "root requis : sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé"
+}
+
+mesurer() { # mesurer <options de provision…> — « provision mesure » : ses faits dans FACTS_FILE, son rapport dans MESURE_OUT, son code dans MESURE_RC
   FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
     || fail "aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp} — la mesure y écrit ses faits" "corriger TMPDIR, puis relancer"
-  MESURE_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight "$@" 2>&1)" || MESURE_RC=$?
-}
-
-# un refus que la mesure porte déjà se dit avant l'escalade : il ne coûte pas un mot de passe
-refuser_terrain() {
-  [[ -s "$FACTS_FILE" ]] || fail "la mesure n'a rendu aucun fait — rien n'a été posé. Ce que provision a dit :" "$MESURE_OUT"
+  MESURE_OUT="$("$PROVISION" mesure --faits "$FACTS_FILE" "$@" 2>&1)" || MESURE_RC=$?
+  [[ -n "$(fait preflight)" ]] || fail "la mesure n'a rendu aucun fait — rien n'a été posé. Ce que provision a dit :" "$MESURE_OUT"
   [[ "$MESURE_RC" -eq 0 ]] || fail "le préflight refuse ce terrain — rien n'a été posé. Ce qu'il constate :" \
     "$(grep -E '^(DRIFT|FAIL|ERREUR) ' <<<"$MESURE_OUT" || printf '%s\n' "$MESURE_OUT")"
-}
-
-# le DOCKER_HOST qui traverse est celui que le préflight a vu répondre : sous root, sans lui, seule la socket système est sondée
-escalade_si_besoin() {
-  [[ "$EUID" -ne 0 ]] || return 0
-  command -v sudo >/dev/null 2>&1 \
-    || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
-  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" != none ]]; then
-    echo "  docker est absent : le provisionnement pose docker-ce (12-docker-engine) avant la forge."
-  fi
-  echo ""
-  echo "  [sudo] Privilèges root requis — le mot de passe de l'utilisateur peut être demandé."
-  local -a env_args=("${ESCALADE_ARGS[@]}")
-  [[ -z "$(fait docker_host)" ]] || env_args+=("DOCKER_HOST=$(fait docker_host)")
-  # exec ne rejoue pas le trap EXIT
-  rm -f "$FACTS_FILE"
-  exec sudo "${env_args[@]}" bash "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
-}
-
-refuser_melange() {
-  local machine=invalide
-  if prov_channel >/dev/null 2>&1; then machine="$PROV_CHANNEL"; fi
-  case "$machine" in
-    aucun|"$1") return 0 ;;
-    invalide) fail "le canal d'installation de cette machine est illisible ($PROV_CHANNEL_FILE) — rien n'a été posé" \
-                   "à corriger, ou à retirer si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
-  esac
-  local geste
-  case "$machine" in
-    kit) geste="deploy/workstation up --from <kit.tar.gz>" ;;
-    *)   geste="deploy/workstation up, depuis un checkout" ;;
-  esac
-  fail "cette machine est installée par « $machine », et ce geste poserait « $1 » — un canal ne se pose pas sur un autre. Rien n'a été posé sur la machine" \
-       "mise à jour par le même canal : $geste — ou refaire le terrain, il est jetable"
 }
 
 kit_racine() { # kit_racine <répertoire> → 0 si c'est un kit : son tampon de livraison et son délégué
@@ -105,7 +112,7 @@ kit_racine() { # kit_racine <répertoire> → 0 si c'est un kit : son tampon de 
 
 kit_deballer() { # kit_deballer <kit.tar.gz> → la racine du kit détaré
   local tar="$1" nom dest
-  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance sans sudo : le kit se détare sous l'utilisateur, l'escalade vient après"
+  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance sans sudo : le kit se détare sous l'utilisateur, root vient après"
   [[ -f "$tar" ]] || fail "--from : kit introuvable : $tar"
   tar="$(readlink -f "$tar")"
   if [[ -f "$tar.sha256" ]]; then
@@ -202,27 +209,19 @@ bench_seed() {
 
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
-  local from="" kit_dir="" voulu=kit
-  # --only et --human choisissent ce que l'apply joue et sert : la mesure ne les reçoit pas
-  local -a args=() mesure=()
+  local from="" kit_dir="" p v tenus=""
+  local -a opts=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --from)         [[ -z "$from" ]] || fail "--from : un seul kit à la fois (${2:-})"
-                      from="${2:?--from attend un artefact : kit.tar.gz, ou un kit détaré}"; shift 2 ;;
-      --only|--human) args+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
-      *)              args+=("$1"); mesure+=("$1"); shift ;;
+      --from) [[ -z "$from" ]] || fail "--from : un seul kit à la fois (${2:-})"
+              from="${2:?--from attend un artefact : kit.tar.gz, ou un kit détaré}"; shift 2 ;;
+      *)      opts+=("$1"); shift ;;
     esac
   done
+  lire_options ${opts[@]+"${opts[@]}"}
   trap nettoyer EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  [[ -n "$from" ]] || voulu="$(prov_channel_here)"
-  refuser_melange "$voulu"
-  # sous root, l'apply joue le préflight en barrière : la mesure d'avant sudo ne se rejoue pas
-  if [[ "$EUID" -ne 0 ]]; then
-    mesurer ${mesure[@]+"${mesure[@]}"}
-    refuser_terrain
-  fi
 
   # wrapper, lib, provision et accept viennent tous du kit, jamais un mélange avec le checkout
   if [[ -n "$from" ]]; then
@@ -235,17 +234,41 @@ cmd_up() {
     kit_dir="$(readlink -f "$kit_dir")"
     if [[ "$kit_dir/deploy" != "$HERE" ]]; then
       echo "  kit : $kit_dir — tout se joue depuis ce kit"
-      rm -f "$FACTS_FILE"
-      exec bash "$kit_dir/deploy/workstation" up --from "$kit_dir" ${args[@]+"${args[@]}"}
+      exec bash "$kit_dir/deploy/workstation" up --from "$kit_dir" "${opts[@]}"
     fi
   fi
-  escalade_si_besoin up ${kit_dir:+--from "$kit_dir"} ${args[@]+"${args[@]}"}
+
+  if [[ "$EUID" -ne 0 ]]; then
+    [[ -z "$FACTS_FILE" && "$SUITE_ROOT" -eq 0 ]] || fail "--faits et --ports-tenus appartiennent à la suite en root, que ce script se donne par sudo"
+    mesurer ${MESURE[@]+"${MESURE[@]}"}
+    for p in deck forge; do
+      [[ "$p" == deck || "${LCARS_BENCH:-}" == 1 ]] || continue
+      v="$(fait "port_$p")"
+      case "${v#* }" in
+        tenu)   tenus="${tenus:+$tenus,}$p" ;;
+        pris*)  fail "le port ${v%% *} ($p) est ${v#* } — rien n'a été posé" "déplacer avec --port-$p, ou libérer le port" ;;
+      esac
+    done
+    sudo_possible
+    if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" ]]; then
+      echo "  docker est absent : le provisionnement pose docker-ce (12-docker-engine) avant la forge."
+    fi
+    echo ""
+    echo "  La suite se joue en root, par sudo : provision apply pose /etc, $(fait racine), les comptes et groupes de service, les paquets apt, puis l'acceptation."
+    choix_argv
+    [[ "$(fait docker)" != oui ]] || CHOIX+=(--docker-host "$(fait docker_host)")
+    rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
+    exec sudo bash "$SELF" up ${ARGS[@]+"${ARGS[@]}"} "${CHOIX[@]}" --ports-tenus "$tenus"
+  fi
+
+  # en root : la relance mesure ce que root seul lit ; lancé en root sans elle, l'apply joue le préflight entier
+  [[ "$SUITE_ROOT" -eq 0 ]] || mesurer ${MESURE[@]+"${MESURE[@]}"} --ports-tenus "$PORTS_TENUS"
 
   PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")"
   export PROV_ANNOUNCE_FILE
 
   local rc=0
-  "$PROVISION" apply ${args[@]+"${args[@]}"} || rc=$?
+  "$PROVISION" apply ${FACTS_FILE:+--faits "$FACTS_FILE"} ${ARGS[@]+"${ARGS[@]}"} || rc=$?
   (( rc == 0 || rc == 2 )) || exit 1
   [[ "${LCARS_BENCH:-}" != 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] || bench_seed "$LCARS_BUILTIN_HUMAN"
 
@@ -257,8 +280,20 @@ cmd_up() {
   exit "$rc"
 }
 
-# une sonde ne coûte pas un mot de passe : doctor n'escalade pas
-cmd_doctor() { exec "$PROVISION" doctor "$@"; }
+# ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
+# la sonde complète lit ce que root seul lit : sans root, rien ne se mesure à moitié
+cmd_doctor() {
+  lire_options "$@"
+  [[ -z "$FACTS_FILE" && "$SUITE_ROOT" -eq 0 ]] || fail "--faits et --ports-tenus appartiennent à up"
+  if [[ "$EUID" -ne 0 ]]; then
+    sudo_possible
+    echo "  La sonde lit ce que root seul lit : sudo, une fois."
+    choix_argv
+    [[ -z "${DOCKER_HOST:-}" ]] || CHOIX+=(--docker-host "$DOCKER_HOST")
+    exec sudo bash "$SELF" doctor ${ARGS[@]+"${ARGS[@]}"} "${CHOIX[@]}"
+  fi
+  exec "$PROVISION" doctor ${ARGS[@]+"${ARGS[@]}"}
+}
 
 case "$1" in
   up)        shift; cmd_up "$@" ;;

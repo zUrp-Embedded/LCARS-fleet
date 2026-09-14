@@ -2,30 +2,34 @@
 # SOURCE: install.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-14
-# STATUS: l'installeur — il mesure, montre, délègue
+# STATUS: l'installeur — il mesure sans privilège, montre, marque la pause, puis agit ; root une fois, par sudo
 #
 #     install.sh — l'installeur de LCARS-FLEET.
 #
-#     Il mesure la machine, montre ce qu'il va faire, marque une pause (Entrée pour continuer,
-#     Ctrl+C pour annuler ; sans terminal, il continue en le disant), puis délègue. Avant cette pause,
-#     seul ~/.lcars/kits/ reçoit quelque chose, et ce script ne demande jamais sudo lui-même. Le script
-#     d'une release, pipé ou avec --from-release, y télécharge d'abord le kit de sa version, le vérifie
-#     et le détare : la mesure vit dans le kit.
+#     Il mesure la machine sans privilège, montre ce qu'il va faire, marque une pause (Entrée pour
+#     continuer, Ctrl+C pour annuler ; sans terminal, il continue en le disant), puis agit. Avant
+#     cette pause, seul ~/.lcars/kits/ reçoit quelque chose. Le script d'une release, pipé ou avec
+#     --from-release, y télécharge d'abord le kit de sa version, le vérifie et le détare : la mesure
+#     vit dans le kit.
 #
-#       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker ; jq est requis sur
-#                       cette machine : le banc lit l'API de sa forge, et « deploy/container
+#       (sans option)   LCARS tourne dans un conteneur Docker, sans root. Rien hors de Docker ; jq est
+#                       requis sur cette machine : le banc lit l'API de sa forge, et « deploy/container
 #                       forge-apply » dérive le roster d'une forge fournie. Une instance déjà
 #                       présente n'est pas réinstallée : le refus nomme sa mise à jour.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
 #                       Linux dédiée déclarée par LCARS_ALLOW_ANY_HOST=1. Ce mode possède /etc,
 #                       la racine de LCARS, des groupes, des comptes et des paquets ; un terrain se
-#                       refait, il ne se désinstalle pas.
+#                       refait, il ne se désinstalle pas. Après la pause, l'installeur se relance une
+#                       fois par sudo, sur son fichier (pipé, celui du kit vérifié) : root mesure ce
+#                       que root seul lit (qui tient un port, l'écriture sous la racine), puis pose.
+#                       Sans sudo, ou sans terminal quand sudo demande un mot de passe, il s'arrête.
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
 #                       démonstration. Sans ce drapeau, une forge existante est requise (FORGE_BASE_URL).
 #       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Un refus
-#                       du bilan sort en 1 avant la grille ; avec --workstation, un terrain que le
-#                       préflight refuse en est un.
-#       --dry-run       tout jusqu'au bilan, puis la commande qui serait exécutée.
+#                       du bilan sort en 1 avant la grille ; avec --workstation, la mesure se complète
+#                       en root, par sudo, et un terrain qu'elle refuse en est un.
+#       --dry-run       tout jusqu'à la commande qui serait exécutée ; avec --workstation, par sudo,
+#                       pour mesurer entier. Rien n'est exécuté.
 #                       Pipés sans kit déjà posé, --check et --dry-run s'arrêtent avant de télécharger.
 #       --from-release  depuis un clone : télécharge l'installeur de la dernière release du dépôt,
 #                       le vérifie contre sa somme publiée et le rejoue avec les mêmes options.
@@ -41,6 +45,18 @@
 #       --human USER, --only MODULE   passés au provisionnement (--workstation).
 #       --version       la version de ce script.
 #       -h, --help      cette aide.
+#
+#     La relance en root ne reçoit aucune variable : ce que la mesure sans privilège a vu et les
+#     choix de l'opérateur y passent en options, que l'installeur écrit lui-même.
+#       --ports-tenus NOMS   deck, forge : les ports tenus par un processus que la mesure sans
+#                       privilège ne voit pas ; root en vérifie le propriétaire. Sans cette option,
+#                       l'installeur refuse root.
+#       --docker-host URL    le daemon docker que la mesure sans privilège a vu répondre.
+#       --linux-dedie   la déclaration LCARS_ALLOW_ANY_HOST=1.
+#       --forge URL, --forge-publique URL   FORGE_BASE_URL et FORGE_PUBLIC_URL.
+#       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut lcars).
+#       --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1 : un mot de passe neuf pour l'administrateur
+#                       de la forge du poste.
 #
 #     Relancer reprend depuis la mesure : l'état est celui du système, lu à chaque passage.
 #
@@ -59,13 +75,6 @@ if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
   AMBER=''; W=''; G=''; R=''; N=''
 else
   AMBER=$'\033[38;5;214m'; W=$'\033[1;37m'; G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'
-fi
-
-if [[ "$EUID" -eq 0 ]]; then
-  echo ""
-  echo "  ${R}Cet installeur ne se lance pas en root.${N}"
-  echo "  Il mesure et délègue ; le mode --workstation demande sudo lui-même, une fois."
-  exit 1
 fi
 
 # BASH_SOURCE n'est pas lié quand bash lit sur stdin (curl | bash) : sans fichier, pas d'arbre.
@@ -92,43 +101,63 @@ SUMS
 MODE=container
 FROM_RELEASE=0; DRY_RUN=0; DOCTOR_MODE=0; WITH_BENCH=0; REPO_DONNE=0
 FORCED_SUBSTRATE=""
+SUITE_ROOT=0; PORTS_TENUS=""
 declare -a PASSTHRU=()       # au délégué du mode --workstation, tel quel
-declare -a MESURE=()         # au préflight initial : ce qui change la mesure
-declare -a PROJET_PORTS=()   # au préflight et au délégué : le projet et les ports
+declare -a MESURE=()         # à la mesure : ce qui la change
+declare -a PROJET_PORTS=()   # à la mesure et au délégué : le projet et les ports
 declare -a COMMUNS=()        # ce que les deux modes acceptent : un remède le rejoue
 declare -a SSH_ARGS=()       # --port-ssh, que le mode --workstation refuse
+declare -a SUITE=()          # à la relance en root : tout sauf ce qui a servi à tirer le kit
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --workstation)    MODE=workstation; shift ;;
-    --bench)          WITH_BENCH=1; COMMUNS+=("$1"); shift ;;
-    --check|--doctor) DOCTOR_MODE=1; COMMUNS+=("$1"); shift ;;
-    --dry-run)        DRY_RUN=1; COMMUNS+=("$1"); shift ;;
+    --workstation)    MODE=workstation; SUITE+=("$1"); shift ;;
+    --bench)          WITH_BENCH=1; COMMUNS+=("$1"); SUITE+=("$1"); shift ;;
+    --check|--doctor) DOCTOR_MODE=1; COMMUNS+=("$1"); SUITE+=("$1"); shift ;;
+    --dry-run)        DRY_RUN=1; COMMUNS+=("$1"); SUITE+=("$1"); shift ;;
     --from-release)   FROM_RELEASE=1; COMMUNS+=("$1"); shift ;;
     --repo)           REPO_URL="${2:?--repo attend une URL}"; REPO_DONNE=1; COMMUNS+=("$1" "$2"); shift 2 ;;
-    --substrate)      FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"; COMMUNS+=("$1" "$2"); shift 2 ;;
+    --substrate)      FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"; COMMUNS+=("$1" "$2"); SUITE+=("$1" "$2"); shift 2 ;;
     --port-forge|--port-deck)
-                      PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); COMMUNS+=("$1" "$2"); shift 2 ;;
+                      PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); COMMUNS+=("$1" "$2"); SUITE+=("$1" "$2"); shift 2 ;;
     --port-ssh)       PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); SSH_ARGS+=("$1" "$2"); shift 2 ;;
-    --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); COMMUNS+=("$1" "$2"); shift 2 ;;
+    --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); COMMUNS+=("$1" "$2"); SUITE+=("$1" "$2"); shift 2 ;;
     # 00-preflight lit ce que --env pose (la forge fournie, la déclaration) ; l'humain et la sélection ne pèsent que sur l'apply
-    --env)            PASSTHRU+=("$1" "${2:?$1 attend un fichier}"); MESURE+=("$1" "$2"); shift 2 ;;
-    --human|--only)   PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+    --env)            PASSTHRU+=("$1" "${2:?$1 attend un fichier}"); MESURE+=("$1" "$2"); SUITE+=("$1" "$2"); shift 2 ;;
+    --human|--only)   PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); SUITE+=("$1" "$2"); shift 2 ;;
+    --ports-tenus)    PORTS_TENUS="${2?--ports-tenus attend une liste, vide comprise}"; SUITE_ROOT=1; shift 2 ;;
+    --docker-host)    export DOCKER_HOST="${2:?--docker-host attend une adresse}"; shift 2 ;;
+    --linux-dedie)    export LCARS_ALLOW_ANY_HOST=1; shift ;;
+    --forge)          export FORGE_BASE_URL="${2:?--forge attend une URL}"; shift 2 ;;
+    --forge-publique) export FORGE_PUBLIC_URL="${2:?--forge-publique attend une URL}"; shift 2 ;;
+    --humain-demo)    export LCARS_BUILTIN_HUMAN="${2:?--humain-demo attend un nom}"; shift 2 ;;
+    --forge-admin-reset) export PROV_FORGE_ADMIN_RESET=1; shift ;;
     --version) echo "$VERSION_DITE"; exit 0 ;;
     --help|-h)
       if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
         sed -n '/^#     install.sh — /,/^#     Relancer/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
       else
         echo "install.sh $VERSION_DITE — l'installeur de LCARS-FLEET."
-        echo "  (sans option) conteneur Docker · --workstation dans ce système · --bench la forge montée"
+        echo "  (sans option) conteneur Docker · --workstation dans ce système, root par sudo après la pause · --bench la forge montée"
         echo "  --check (--doctor) · --dry-run · --from-release · --repo URL · --substrate S"
         echo "  --forge-project N · --port-forge N · --port-deck N · --port-ssh N · --env F · --human U · --only M"
+        echo "  la relance en root : --ports-tenus NOMS · --docker-host URL · --linux-dedie · --forge URL · --forge-publique URL"
+        echo "  · --humain-demo NOM · --forge-admin-reset"
         echo "  --version · -h, --help"
       fi
       exit 0 ;;
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
   esac
 done
+# root ne sert que la relance que l'installeur se donne après la pause, en mode --workstation
+if [[ "$EUID" -eq 0 && ( "$SUITE_ROOT" -eq 0 || "$MODE" != workstation ) ]]; then
+  echo ""
+  echo "  ${R}Cet installeur se lance sans root.${N}"
+  echo "  Il mesure et montre sans privilège ; le mode --workstation demande sudo lui-même, une fois, après la pause."
+  exit 1
+fi
+[[ "$EUID" -eq 0 || "$SUITE_ROOT" -eq 0 ]] \
+  || { echo "  --ports-tenus appartient à la relance en root, que l'installeur se donne par sudo." >&2; exit 1; }
 case "${FORCED_SUBSTRATE:-wsl}" in
   wsl|docker|linux) ;;
   *) echo "  ${R}--substrate $FORCED_SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
@@ -204,7 +233,7 @@ obtenir() { # obtenir <artefact> <sha256> — dans KITS_DIR, vérifié ; rc 2 s'
   [[ "$deja" -eq 0 ]] || return 2
 }
 delegue_dit() { # la commande du délégué, en mots, pour un --dry-run ou un --check qui n'a pas d'arbre
-  if [[ "$MODE" == "workstation" ]]; then echo "deploy/workstation up --from <kit>"
+  if [[ "$MODE" == "workstation" ]]; then echo "sudo bash <kit>/install.sh, puis deploy/workstation up"
   elif [[ "$WITH_BENCH" -eq 1 ]]; then echo "deploy/container --bench up"
   else echo "deploy/container up"
   fi
@@ -269,9 +298,68 @@ source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vér
   fi
   SCRIPT_DIR="$KITS_DIR/lcars_install"
 }
+mesurer() { # mesurer [option de provision…] — « provision mesure » de cet arbre : ses faits dans FACTS_FILE, son rapport dans PREFLIGHT_OUT, son code dans PREFLIGHT_RC
+  FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
+    || stop "${R}Aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp}${N} — la mesure y écrit ses faits. Corriger TMPDIR, puis relancer."
+  trap 'rm -f "$FACTS_FILE"' EXIT
+  PREFLIGHT_RC=0
+  PREFLIGHT_OUT="$("$SCRIPT_DIR/deploy/provision" mesure --faits "$FACTS_FILE" ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
+    ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} "$@" 2>&1)" || PREFLIGHT_RC=$?
+}
+constat() { printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'; }
+# Les choix de l'opérateur vivent dans ses variables ; sudo ne les transmet pas, la relance les reçoit en options.
+relance_root() { # relance_root → exec sudo sur ce fichier, avec ce que la mesure sans privilège a vu et les choix en options
+  local -a choix=(--ports-tenus "$TENUS")
+  [[ "$DOCKER_OK" -eq 0 ]] || choix+=(--docker-host "$(fait docker_host)")
+  [[ -z "${LCARS_ALLOW_ANY_HOST:-}" ]] || choix+=(--linux-dedie)
+  [[ -z "${FORGE_BASE_URL:-}" ]] || choix+=(--forge "$FORGE_BASE_URL")
+  [[ -z "${FORGE_PUBLIC_URL:-}" ]] || choix+=(--forge-publique "$FORGE_PUBLIC_URL")
+  [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || choix+=(--humain-demo "$LCARS_BUILTIN_HUMAN")
+  [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] || choix+=(--forge-admin-reset)
+  rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
+  exec sudo bash "$SCRIPT_DIR/install.sh" "${SUITE[@]}" "${choix[@]}"
+}
+suite_root() { # la relance en root : ce que root seul lit, sur les ports laissés tenus, puis le délégué sur ces faits
+  mesurer --ports-tenus "$PORTS_TENUS"
+  [[ "$(fait phase)" == root ]] || {
+    echo "  ${R}La mesure en root n'a rendu aucun fait : rien n'est fait. Ce que provision a dit :${N}"
+    printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'
+    exit 1
+  }
+  local nom v etat
+  v="$(fait echange)"
+  case "${v##* }" in
+    oui) etat="écriture et « mv --exchange » joués par root" ;;
+    non) etat="${R}« mv --exchange » refusé${N}" ;;
+    *)   etat="${R}non inscriptible par root${N}" ;;
+  esac
+  echo "  ${W}En root${N}    ${v% *} : $etat"
+  for nom in ${PORTS_TENUS//,/ }; do
+    v="$(fait "port_$nom")"
+    case "${v#* }" in
+      nous*)       etat="tenu par ${v#* nous }, de ce projet" ;;
+      "pris par"*) etat="${R}TENU ${v#* pris } — un autre que ce projet${N}" ;;
+      *)           etat="${R}tenu par un processus que root ne voit pas${N}" ;;
+    esac
+    echo "             port ${v%% *} ($nom) $etat"
+  done
+  echo ""
+  [[ "$PREFLIGHT_RC" -eq 0 ]] || stop "${R}La mesure en root refuse ce terrain.${N} Ce qu'elle constate :" "$(constat)"
+  if [[ "$DOCTOR_MODE" -eq 1 ]]; then
+    echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/workstation doctor"
+    echo ""
+    exit 0
+  fi
+  local -a cmd=("$DELEGUE" up --faits "$FACTS_FILE" ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
+  [[ "$WITH_BENCH" -eq 0 ]] || cmd+=(--bench)
+  [[ "$DRY_RUN" -eq 0 ]] || sortie_dite "${cmd[@]}"
+  # le délégué reçoit les faits et les retire à sa sortie
+  trap - EXIT
+  exec "${cmd[@]}"
+}
 
-# ─── 1. le bandeau ────────────────────────────────────────────────────────────────────────────
-cat <<EOF
+# ─── 1. le bandeau, une fois : la relance en root ne le redit pas ─────────────────────────────
+[[ "$EUID" -eq 0 ]] || cat <<EOF
 
 ${AMBER}     ____________________________________________________
     /                                                    \\
@@ -304,14 +392,10 @@ DELEGUE="$SCRIPT_DIR/deploy/$MODE"
 # le délégué ne part qu'après la pause : son absence se dit avant tout ; celle du runner, la mesure la dit
 [[ -x "$DELEGUE" ]] || stop "${R}L'arbre est incomplet : $DELEGUE absent ou non exécutable.${N}" "Ce n'est pas docker qui manque, c'est la source."
 
-# ─── 3. le préflight : une seule mesure, celle du provisionnement ─────────────────────────────
-FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
-  || stop "${R}Aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp}${N} — le préflight y écrit ses faits. Corriger TMPDIR, puis relancer."
-trap 'rm -f "$FACTS_FILE"' EXIT
-PREFLIGHT_RC=0
-PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
-  "$SCRIPT_DIR/deploy/provision" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
-  ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || PREFLIGHT_RC=$?
+[[ "$EUID" -ne 0 ]] || suite_root
+
+# ─── 3. la mesure sans privilège : une seule, celle du préflight ──────────────────────────────
+mesurer
 
 [[ -n "$(fait docker)" ]] || {
   echo "  ${R}Le préflight n'a rendu aucun fait : rien n'est mesuré, rien n'est fait. Ce que provision a dit :${N}"
@@ -386,7 +470,7 @@ else
   FORGE_ETAT=aucune
   echo "  ${W}Forge${N}      ${R}aucune${N} : FORGE_BASE_URL n'est pas définie et --bench n'a pas été passé"
 fi
-PORTS_PRIS=""; ports_ligne=""; PORT_DECK=""; PORT_SSH=""
+PORTS_PRIS=""; ports_ligne=""; PORT_DECK=""; PORT_SSH=""; TENUS=""
 for p in forge deck ssh; do
   v="$(fait "port_$p")"; n="${v%% *}"; etat="${v#* }"; [[ "$v" == *" "* ]] || etat=""
   [[ "$p" != "deck" ]] || PORT_DECK="$n"; [[ "$p" != "ssh" ]] || PORT_SSH="$n"
@@ -397,6 +481,12 @@ for p in forge deck ssh; do
     libre)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) libre" ;;
     nous*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) publié par ce projet" ;;
     pris*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) ${R}${etat^^}${N}"; PORTS_PRIS="${PORTS_PRIS:+$PORTS_PRIS ; }$p $n $etat" ;;
+    # un processus que ce compte ne voit pas : dans ce système, root dit s'il est de ce projet ; un conteneur ne publie pas un port tenu
+    tenu)   if [[ "$MODE" == workstation ]]; then
+              ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) tenu, propriétaire vérifié après sudo"; TENUS="${TENUS:+$TENUS,}$p"
+            else
+              ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) ${R}TENU${N}"; PORTS_PRIS="${PORTS_PRIS:+$PORTS_PRIS ; }$p $n tenu par un processus que ce compte ne voit pas"
+            fi ;;
     *)      ports_ligne="${ports_ligne:+$ports_ligne · }$(ou "$n") ($p) ${etat:-état inconnu}" ;;
   esac
 done
@@ -440,8 +530,7 @@ fi
 # l'installation dans ce système est ce que le préflight juge : un plancher en dérive (OS, arch, RAM,
 # disque, WSL1) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
 if [[ "$MODE" == "workstation" && "$PREFLIGHT_RC" -ne 0 ]]; then
-  stop "${R}Le préflight refuse ce terrain pour l'installation dans ce système.${N} Ce qu'il constate :" \
-       "$(printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /')"
+  stop "${R}Le préflight refuse ce terrain pour l'installation dans ce système.${N} Ce qu'il constate :" "$(constat)"
 fi
 if [[ "$MODE" == "container" && "$(fait compose)" == "non" ]]; then
   stop "${R}Docker répond, mais compose est absent.${N} Le conteneur se pose par docker compose." \
@@ -478,6 +567,15 @@ case "$FORGE_ETAT" in
 esac
 [[ -z "$PORTS_PRIS" ]] || stop "${R}Un port demandé est déjà tenu : $PORTS_PRIS.${N}" \
   "Déplacer avec --port-forge, --port-deck ou --port-ssh, ou libérer le port."
+# sans terminal, sudo ne demande aucun mot de passe : la relance en root n'a lieu que si « sudo -n » passe
+if [[ "$MODE" == "workstation" ]]; then
+  if { exec 3< /dev/tty; } 2>/dev/null; then
+    exec 3<&-
+  else
+    sudo -n true 2>/dev/null \
+      || stop "${R}Sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé : la suite en root n'aura pas lieu.${N}"
+  fi
+fi
 
 # ─── 6. le mode, et sa grille ─────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "container" ]]; then
@@ -511,7 +609,7 @@ else
   ${W}Installation dans ce système${N} — LCARS s'installe sur cette distribution, la fleet
   tourne sous un humain de fleet. C'est le mode pour travailler sur le code.
     Modifie    $MODIFIE
-    Requiert   sudo, demandé une fois au démarrage · docker · la forge (ci-dessus)
+    Requiert   root, par sudo, une fois après la pause · docker · la forge (ci-dessus)
     Espace     ~2 Go · durée ~10 min
     Retour     $RETOUR
   Pour installer en conteneur à la place :  $(relance container)
@@ -520,7 +618,12 @@ EOF
 fi
 
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/workstation doctor · deploy/container status"
+  if [[ "$MODE" == "workstation" ]]; then
+    echo "  ${W}--check${N} : la mesure se complète en root, par sudo ; rien n'est posé."
+    echo ""
+    relance_root
+  fi
+  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/container status"
   echo ""
   exit 0
 fi
@@ -562,34 +665,35 @@ if [[ "$MODE" == "workstation" ]]; then
   fi
 fi
 
-# ─── 8. la sortie : un seul exec, vers le délégué du mode ─────────────────────────────────────
-if [[ "$MODE" == "workstation" ]]; then
-  if [[ "$WITH_BENCH" -eq 1 ]]; then
-    export LCARS_BENCH=1 PROV_FORGE_MONTEE=1
-    export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
-  fi
-  CMD=("$DELEGUE" up ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
-  [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/lcars_install")   # le kit déjà détaré et vérifié, pas le tar une seconde fois
-  RAPPEL="Installation dans ce système — deploy/workstation up"
-elif [[ "$WITH_BENCH" -eq 1 ]]; then
-  CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} --bench up)
-  RAPPEL="Installation en conteneur, avec le banc — deploy/container --bench up"
-else
-  CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)
-  RAPPEL="Installation en conteneur — deploy/container up"
-fi
-# une release en conteneur nomme son image ; absente du daemon, elle est tirée avant le up, qui ne tire jamais
+# ─── 8. la sortie : un seul exec, vers sudo dans ce système, vers le délégué en conteneur ─────
 PRE=()
-if [[ "$MODE" != "workstation" && "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]]; then
-  export LCARS_IMAGE="$DOOR_IMAGE"
-  if ! "$(fait docker_bin)" image inspect "$DOOR_IMAGE" >/dev/null 2>&1; then
-    PRE=("$DELEGUE" pull)
-    echo "  l'image de cette version n'est pas sur ce daemon : elle sera tirée d'abord ($DOOR_IMAGE)"
+if [[ "$MODE" == "workstation" ]]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  ${W}--dry-run${N} : la commande se dit après la mesure en root, par sudo ; rien n'est exécuté."
+    echo ""
+    relance_root
   fi
-fi
-if [[ "$DRY_RUN" -eq 1 ]]; then
-  [[ "${#PRE[@]}" -eq 0 ]] || { printf '  --dry-run : d'"'"'abord'; printf ' %q' "${PRE[@]}"; echo ""; }
-  sortie_dite "${CMD[@]}"
+  RAPPEL="Installation dans ce système — la suite demande root : sudo, puis deploy/workstation up"
+else
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} --bench up)
+    RAPPEL="Installation en conteneur, avec le banc — deploy/container --bench up"
+  else
+    CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)
+    RAPPEL="Installation en conteneur — deploy/container up"
+  fi
+  # une release en conteneur nomme son image ; absente du daemon, elle est tirée avant le up, qui ne tire jamais
+  if [[ "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]]; then
+    export LCARS_IMAGE="$DOOR_IMAGE"
+    if ! "$(fait docker_bin)" image inspect "$DOOR_IMAGE" >/dev/null 2>&1; then
+      PRE=("$DELEGUE" pull)
+      echo "  l'image de cette version n'est pas sur ce daemon : elle sera tirée d'abord ($DOOR_IMAGE)"
+    fi
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    [[ "${#PRE[@]}" -eq 0 ]] || { printf '  --dry-run : d'"'"'abord'; printf ' %q' "${PRE[@]}"; echo ""; }
+    sortie_dite "${CMD[@]}"
+  fi
 fi
 echo "  ${G}$RAPPEL${N}"
 echo ""
@@ -602,6 +706,7 @@ if { exec 3< /dev/tty; } 2>/dev/null; then
 elif [[ "$SANS_TERMINAL_DIT" -eq 0 ]]; then
   echo "  Pas de terminal : l'installation continue."
 fi
+[[ "$MODE" != "workstation" ]] || relance_root
 rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
 [[ "${#PRE[@]}" -eq 0 ]] || "${PRE[@]}" || exit 1
 exec "${CMD[@]}"

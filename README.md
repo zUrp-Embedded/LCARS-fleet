@@ -23,7 +23,7 @@ ou dans le système.
 | Docker, avec le plugin compose | exécute le conteneur LCARS, la forge et le runner CI. Sous Windows : Docker Desktop avec l'intégration WSL 2 activée pour la distribution ; un `docker.io` posé dans la distribution à côté de Docker Desktop est refusé. Sous Ubuntu natif : `docker.io` et `docker-compose-v2`, ou Docker Engine ; en mode conteneur le daemon est un prérequis, en mode `--workstation` sur une machine dédiée l'installeur le pose |
 | git, curl | le clone, le téléchargement du kit, les échanges avec la forge |
 | jq | mode conteneur : le banc (`--bench`) lit l'API de sa forge, et `deploy/container forge-apply` dérive le roster d'une forge fournie ; en mode `--workstation`, l'installation le pose |
-| sudo | mode `--workstation` seulement : une escalade, pour le provisionnement du système |
+| sudo | mode `--workstation` seulement : root une fois, après la pause, pour mesurer ce que root seul lit et provisionner le système ; sans terminal, un `sudo` sans mot de passe |
 | WSL 2 | sous Windows ; WSL 1 ne fournit pas les espaces de noms nécessaires |
 | Compte Anthropic | les agents sont des processus Claude Code ; les identifiants de `~/.claude/.credentials.json` sont réutilisés quand ils existent |
 
@@ -51,19 +51,24 @@ Sur une machine Linux dédiée, la déclaration se donne à `bash`, après le `|
 curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | LCARS_ALLOW_ANY_HOST=1 bash -s -- --workstation --bench
 ```
 
-`install.sh` mesure la machine, affiche ce qui sera installé, marque une pause avant de modifier
-le système (Entrée pour continuer, Ctrl+C pour annuler), puis délègue. Avant cette pause, seul
-`~/.lcars/kits/` reçoit le kit de la version. Sans terminal, il continue en le disant. Il ne
-demande jamais `sudo` lui-même ; le mode `--workstation` le fait, une fois. Relancer reprend depuis
-la mesure : l'état est celui du système, lu à chaque passage.
+`install.sh` mesure la machine sans privilège, affiche ce qui sera installé, marque une pause
+avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler), puis agit. Avant cette
+pause, seul `~/.lcars/kits/` reçoit le kit de la version. Sans terminal, il continue en le disant.
+En conteneur, rien ne demande root. En mode `--workstation`, la grille nomme ce que root pose (/etc,
+la racine de LCARS, les comptes, les groupes, les paquets) ; après la pause, l'installeur se relance
+une fois par `sudo`, sur son fichier (pipé, celui du kit vérifié), mesure ce que root seul lit (qui
+tient un port de ce projet, l'écriture sous la racine), puis provisionne sur ces faits. Les choix de
+l'opérateur passent à `sudo` en options, jamais en variables. Sans `sudo`, ou sans terminal quand
+`sudo` demande un mot de passe, il s'arrête avant la grille. Relancer reprend depuis la mesure :
+l'état est celui du système, lu à chaque passage.
 
 | Option | Effet |
 |---|---|
 | *(sans option)* | LCARS tourne dans un conteneur Docker ; rien n'est installé hors de Docker |
 | `--workstation` | LCARS s'installe dans le système |
 | `--bench` | l'installeur monte lui-même la forge Gitea, son runner CI et un compte de démonstration. Sans cette option, une forge existante est requise (`FORGE_BASE_URL`) |
-| `--check` | mesure et affiche, ne modifie rien |
-| `--dry-run` | tout jusqu'au bilan, puis la commande qui serait exécutée |
+| `--check` | mesure et affiche, ne modifie rien ; avec `--workstation`, la mesure se complète en root, par `sudo` |
+| `--dry-run` | tout jusqu'à la commande qui serait exécutée ; avec `--workstation`, par `sudo`, pour mesurer entier |
 | `--port-forge N` `--port-deck N` `--port-ssh N` | ports publiés ; le bilan affiche chaque port retenu, défaut compris. `--port-forge` va avec `--bench`, `--port-ssh` avec le mode conteneur |
 | `--forge-project N` | la base des projets compose (défaut `lcars`) |
 
@@ -260,7 +265,7 @@ docker compose -p <base>-runner down -v
 ```bash
 deploy/container -p <base>-fleet status   # l'état de l'instance vu de l'hôte : 0 sain · 1 dégradé · 2 panne
 deploy/container -p <base>-fleet logs     # le récit que le conteneur fait de son propre démarrage
-deploy/workstation doctor                 # mode --workstation : ce qui est posé, ce qui a dérivé
+deploy/workstation doctor                 # mode --workstation : ce qui est posé, ce qui a dérivé ; la sonde demande sudo, une fois
 ```
 
 Ces commandes se jouent depuis l'arbre de l'installation (un clone, ou
@@ -303,7 +308,7 @@ Voir [`LICENSE`](LICENSE) et [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 | Docker, with the compose plugin | runs the LCARS container, the forge and the CI runner. On Windows: Docker Desktop with WSL 2 integration enabled for the distribution; a `docker.io` installed in the distribution next to Docker Desktop is refused. On native Ubuntu: `docker.io` and `docker-compose-v2`, or Docker Engine; in container mode the daemon is a prerequisite, in `--workstation` mode on a dedicated machine the installer installs it |
 | git, curl | the clone, the kit download, the exchanges with the forge |
 | jq | container mode: the bench (`--bench`) reads its forge's API, and `deploy/container forge-apply` derives the roster of a provided forge; in `--workstation` mode, the install puts it in place |
-| sudo | `--workstation` mode only: one escalation, for provisioning the system |
+| sudo | `--workstation` mode only: root once, after the pause, to measure what only root reads and provision the system; without a terminal, a passwordless `sudo` |
 | WSL 2 | on Windows; WSL 1 does not provide the namespaces needed |
 | Anthropic account | agents are Claude Code processes; the credentials in `~/.claude/.credentials.json` are reused when present |
 
@@ -331,19 +336,24 @@ On a dedicated Linux machine, the declaration goes to `bash`, after the `|`, on 
 curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | LCARS_ALLOW_ANY_HOST=1 bash -s -- --workstation --bench
 ```
 
-`install.sh` measures the machine, shows what will be installed, pauses before changing the
-system (Enter to continue, Ctrl+C to cancel), then delegates. Before that pause, only
-`~/.lcars/kits/` receives the version's kit. Without a terminal it goes on and says so. It never
-asks for `sudo` itself; `--workstation` mode does, once. Re-running starts again from the
-measurement: the state is the system's, read on every run.
+`install.sh` measures the machine without privilege, shows what will be installed, pauses before
+changing the system (Enter to continue, Ctrl+C to cancel), then acts. Before that pause, only
+`~/.lcars/kits/` receives the version's kit. Without a terminal it goes on and says so. In a
+container, nothing asks for root. In `--workstation` mode, the grid names what root puts in place
+(/etc, the LCARS root, accounts, groups, packages); after the pause, the installer relaunches
+itself once through `sudo`, on its own file (piped, the verified kit's one), measures what only
+root reads (who holds one of this project's ports, writing under the root), then provisions on
+those facts. The operator's choices reach `sudo` as options, never as variables. Without `sudo`, or
+without a terminal when `sudo` asks for a password, it stops before the grid. Re-running starts
+again from the measurement: the state is the system's, read on every run.
 
 | Option | Effect |
 |---|---|
 | *(no option)* | LCARS runs in a Docker container; nothing is installed outside Docker |
 | `--workstation` | LCARS is installed into the system |
 | `--bench` | the installer brings up the Gitea forge, its CI runner and a demo account itself. Without it, an existing forge is required (`FORGE_BASE_URL`) |
-| `--check` | measures and reports, changes nothing |
-| `--dry-run` | everything up to the summary, then the command that would run |
+| `--check` | measures and reports, changes nothing; with `--workstation`, the measurement completes as root, through `sudo` |
+| `--dry-run` | everything up to the command that would run; with `--workstation`, through `sudo`, to measure in full |
 | `--port-forge N` `--port-deck N` `--port-ssh N` | published ports; the summary shows each port in use, defaults included. `--port-forge` goes with `--bench`, `--port-ssh` with container mode |
 | `--forge-project N` | the base name of the compose projects (default `lcars`) |
 
@@ -541,7 +551,7 @@ docker compose -p <base>-runner down -v
 ```bash
 deploy/container -p <base>-fleet status   # the instance's state seen from the host: 0 healthy · 1 degraded · 2 down
 deploy/container -p <base>-fleet logs     # the container's own account of its boot
-deploy/workstation doctor                 # --workstation mode: what is installed, what drifted
+deploy/workstation doctor                 # --workstation mode: what is installed, what drifted; the probe asks for sudo, once
 ```
 
 These commands run from the install's tree (a clone, or `~/.lcars/kits/<version>/lcars_install`

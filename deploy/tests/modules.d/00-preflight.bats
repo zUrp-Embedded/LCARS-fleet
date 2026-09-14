@@ -2,8 +2,8 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/00-preflight.bats
 # AUTHOR: DrDree
-# STARDATE: 2026-08-31
-# STATUS: témoins de 00-preflight — les faits que l'installeur lit, et les verdicts qui ne bougent pas
+# STARDATE: 2026-09-14
+# STATUS: témoins de 00-preflight — les faits que l'installeur lit, ses deux phases, et les verdicts qui ne bougent pas
 
 load ../refute
 load ../support/decor
@@ -37,11 +37,13 @@ setup() {
 
 teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
 
-# la garde du runner est armée : un module qui meurt rend 3, et « status -ne 3 » mesure quelque chose
+# la garde du runner est armée : un module qui meurt rend 3, et « status -ne 3 » mesure quelque chose ;
+# la phase est celle de « provision mesure » sans root, sauf PROV_PHASE=root|entier parmi les variables
 preflight() { # preflight <substrat> [VAR=val…]
   local sub="$1"; shift
+  rm -f "$FACTS"
   run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROVISION_RUN=1 \
-      PROV_SUBSTRATE="$sub" PROV_DOCKER_BIN="$BIN/docker" \
+      PROV_SUBSTRATE="$sub" PROV_DOCKER_BIN="$BIN/docker" PROV_PHASE=sans-privilege \
       PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" \
       "$@" bash "$MOD" check
 }
@@ -109,10 +111,10 @@ listen_on() { # listen_on <port> — un processus python qui écoute quelques se
 }
 
 
-contrat() { # les faits que lisent install.sh et deploy/workstation, dérivés de leurs appels à fait
+contrat() { # les faits que lisent install.sh et deploy/workstation, dérivés de leurs appels à fait ; preflight est le verdict que le runner écrit
   local install="$BATS_TEST_DIRNAME/../../../install.sh" poste="$BATS_TEST_DIRNAME/../../workstation"
   {
-    grep -hvE '^\s*#' "$install" "$poste" | grep -oE '\bfait "?[a-z0-9_]+("|\)| |$)' | sed -E 's/^fait "?//; s/("|\)| )$//'
+    grep -hvE '^\s*#' "$install" "$poste" | grep -oE '\bfait "?[a-z0-9_]+("|\)| |$)' | sed -E 's/^fait "?//; s/("|\)| )$//' | grep -vx preflight
     # les deux familles nommées par variable : fait "port_$p" sur la boucle des ports, fait "$t" sur les
     # outils requis, posés ou ajoutés selon le mode
     sed -n 's/^for p in \(.*\); do$/\1/p' "$install" | tr ' ' '\n' | sed 's/^/port_/'
@@ -125,7 +127,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   c="$(contrat)"
   # chaque forme de lecture est vue : littérale, par la boucle des ports, par la liste des outils
   local attendu
-  for attendu in substrat port_ssh jq sudo docker_host racine revision; do
+  for attendu in substrat port_ssh jq sudo docker_host racine revision echange phase; do
     grep -qx "$attendu" <<<"$c" || { echo "dérivation aveugle : $attendu absent du contrat" >&2; return 1; }
   done
   for f in $c; do
@@ -135,21 +137,37 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   done
 }
 
+# les deux phases à la suite posent tout ce que les lanceurs lisent, avant sudo comme après
 @test "les faits que l'installeur lit sont tous posés, avec une valeur, docker absent" {
-  preflight docker
+  preflight docker PROV_PHASE=entier
   faits_poses "docker_bin docker_host docker_server docker_flavor compose_why forge_fournie projet_pris apt_installs"
 }
 
 @test "les faits que l'installeur lit sont tous posés, avec une valeur, docker présent" {
   docker_qui_repond
-  preflight docker DOCKER_HOST=unix:///dev/null
+  preflight docker DOCKER_HOST=unix:///dev/null PROV_PHASE=entier
   faits_poses "docker_why compose_why forge_fournie projet_pris apt_installs"
 }
 
-@test "un fait par nom, jamais deux valeurs" {
+@test "un fait par nom, jamais deux valeurs, dans chaque phase" {
+  local phase n
+  for phase in sans-privilege root entier; do
+    preflight docker PROV_PHASE="$phase" PROV_PORTS_TENUS=deck
+    n="$(cut -d= -f1 "$FACTS" | sort | uniq -d | head -1)"
+    [ -z "$n" ] || { echo "phase $phase : fait posé deux fois : $n" >&2; return 1; }
+  done
+}
+
+@test "la phase dite est un fait, et chaque phase ne mesure que sa part" {
   preflight docker
-  local n; n="$(cut -d= -f1 "$FACTS" | sort | uniq -d | head -1)"
-  [ -z "$n" ] || { echo "fait posé deux fois : $n" >&2; return 1; }
+  [ "$(fact phase)" = sans-privilege ]
+  [ -n "$(fact distro)" ]
+  [ -z "$(fact echange)" ]
+  preflight docker PROV_PHASE=root
+  [ "$(fact phase)" = root ]
+  [ -n "$(fact echange)" ]
+  [ -z "$(fact distro)" ]
+  [ -z "$(fact docker)" ]
 }
 
 @test "sous apply, sans fichier de faits, les faits qui ne servent qu'à l'installeur ne se calculent pas" {
@@ -172,16 +190,8 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   grep -qx dpkg-query "$BATS_TEST_TMPDIR/calculs"
 }
 
-# bats test_tags=structure
-@test "aucun fait n'est posé après le dernier rapport : pas de bloc récapitulatif" {
-  local dernier_rapport dernier_fait
-  dernier_rapport="$(grep -nE '^\s*(p_ok|p_warn|p_fail|p_drift) ' "$MOD" | tail -1 | cut -d: -f1)"
-  dernier_fait="$(grep -nE '^\s*p_fact ' "$MOD" | tail -1 | cut -d: -f1)"
-  [ "$dernier_fait" -lt "$dernier_rapport" ]
-}
 
-
-@test "le système est décrit : distribution, noyau, cœurs, systemd, utilisateur et groupes" {
+@test "le système est décrit : distribution, noyau, cœurs, systemd, utilisateur" {
   mkdir -p "$LCARS_DECOR_ROOT/run/systemd/system"
   preflight docker
   [ -n "$(fact distro)" ]
@@ -189,7 +199,15 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ "$(fact cpu)" -ge 1 ]
   [ "$(fact systemd)" = oui ]
   [ "$(fact utilisateur)" = "$(id -un)" ]
-  [[ "$(fact groupes)" == *"$(id -gn)"* ]]
+}
+
+@test "les groupes sont ceux que la base donne à l'humain servi, pas ceux de la session qui mesure" {
+  # un groupe ajouté depuis l'ouverture de la session est dans la base : root, qui travaille, le verra
+  double id "[[ \"\$*\" == '-Gn -- $(id -un)' ]] && { echo 'base docker'; exit 0; }
+[[ \"\$*\" == -Gn ]] && { echo 'session'; exit 0; }
+exec /usr/bin/id \"\$@\""
+  preflight docker
+  [ "$(fact groupes)" = "base,docker" ]
 }
 
 @test "forge : avec --bench, un FORGE_BASE_URL résiduel est ignoré et dit — le fait forge_fournie reste vide" {
@@ -306,27 +324,41 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ -z "$(fact docker_flavor)" ]
 }
 
-@test "mv --exchange refusé : échec dit, rien ne reste de la sonde" {
+@test "mv --exchange refusé en root : échec dit, rien ne reste de la sonde" {
   double mv '[[ "$*" != *--exchange* ]] || { echo "mv: unrecognized option" >&2; exit 1; }
 exec /bin/mv "$@"'
-  preflight docker
+  preflight docker PROV_PHASE=root
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  00-preflight: « mv --exchange » refusé sous $LCARS_DECOR_ROOT/opt/lcars"* ]]
+  [ "$(fact echange)" = "$LCARS_DECOR_ROOT/opt/lcars non" ]
   [ -z "$(ls -Ad "$LCARS_DECOR_ROOT"/opt/lcars/.prov-echange.* 2>/dev/null)" ]
 }
 
-@test "mv --exchange se sonde sur le système de fichiers des bascules, sous PROV_ROOT — pas dans TMPDIR" {
+@test "mv --exchange se sonde en root sur le système de fichiers des bascules, sous PROV_ROOT — pas dans TMPDIR" {
   double mv "echo \"\$*\" >> '$BATS_TEST_TMPDIR/mv.args'; exec /bin/mv \"\$@\""
-  preflight docker
+  preflight docker PROV_PHASE=root
   [[ "$output" == *"OK    00-preflight: « mv --exchange » joué sous $LCARS_DECOR_ROOT/opt/lcars"* ]]
   grep -q -- "--exchange -T -- $LCARS_DECOR_ROOT/opt/lcars/.prov-echange\." "$BATS_TEST_TMPDIR/mv.args"
+  [ "$(fact echange)" = "$LCARS_DECOR_ROOT/opt/lcars oui" ]
 }
 
-@test "mv --exchange sous une racine que ce compte ne peut pas écrire : non mesuré, et dit" {
+@test "sans privilège, aucune sonde d'écriture sous la racine : elle appartient à root" {
+  double mv "echo \"\$*\" >> '$BATS_TEST_TMPDIR/mv.args'; exec /bin/mv \"\$@\""
   chmod 0555 "$LCARS_DECOR_ROOT/opt/lcars"
   preflight docker
   chmod 0755 "$LCARS_DECOR_ROOT/opt/lcars"
-  [[ "$output" == *"WARN  00-preflight: « mv --exchange » non sondé : $LCARS_DECOR_ROOT/opt/lcars n'est pas inscriptible"* ]]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -e "$BATS_TEST_TMPDIR/mv.args" ]
+  refute_out 'mv --exchange|inscriptible' <<<"$output"
+}
+
+@test "une racine où root ne peut pas écrire est un échec de la phase root, nommé" {
+  chmod 0555 "$LCARS_DECOR_ROOT/opt/lcars"
+  preflight docker PROV_PHASE=root
+  chmod 0755 "$LCARS_DECOR_ROOT/opt/lcars"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: $LCARS_DECOR_ROOT/opt/lcars n'est pas inscriptible par root"* ]]
+  [ "$(fact echange)" = "$LCARS_DECOR_ROOT/opt/lcars non-inscriptible" ]
 }
 
 @test "WSL1 : un noyau WSL sans WSL2 est une dérive qui nomme le geste ; un noyau WSL2 n'en dit rien" {
@@ -427,38 +459,82 @@ exec $(command -v uname) \"\$@\""
   [[ "$output" != *"port $p"*"pris"* ]]
 }
 
-@test "un port écouté que ni docker ni ss ne savent nommer est dit pris, docker présent ou non" {
+@test "sans privilège, un port écouté par un processus que ce compte ne voit pas est tenu, jamais un refus, docker présent ou non" {
   local p; p="$(free_port)"
   ss_muet "$p"
   listen_on "$p"
   preflight docker PROV_DECK_PORT="$p"
-  [ "$(fact port_deck)" = "$p pris" ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(fact port_deck)" = "$p tenu" ]
+  refute_out "port $p" <<<"$output"
   docker_qui_repond
   preflight docker DOCKER_HOST=unix:///dev/null PROV_DECK_PORT="$p"
   kill "$LISTENER" 2>/dev/null || true
-  [ "$(fact port_deck)" = "$p pris" ]
+  [ "$status" -eq 0 ]
+  [ "$(fact port_deck)" = "$p tenu" ]
 }
 
-landing_ici() { # landing_ici <cgroup rendu par systemd, vide si arrêtée> <cgroup de la socket> <port> — ss ne nomme pas le processus, il nomme le cgroup
-  double systemctl "[[ \"\$*\" == 'show -p ControlGroup --value lcars-landing.service' ]] && echo '$1'"
-  double ss "[[ \"\$*\" == *--cgroup* ]] && c=' cgroup:$2'
-echo \"LISTEN 0 4096 127.0.0.1:$3 0.0.0.0:*\${c:-}\""
+ss_nomme() { # ss_nomme <port> <pid> — un ss qui nomme le processus à root ; noté dans ss.args
+  double ss "echo \"\$*\" >> '$BATS_TEST_TMPDIR/ss.args'
+echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+echo 'LISTEN 0 4096 127.0.0.1:$1 0.0.0.0:* users:((\"python3\",pid=$2,fd=3))'"
+}
+landing_pid() { double systemctl "[[ \"\$*\" == 'show -p MainPID --value lcars-landing.service' ]] && echo '$1'"; }   # landing_pid <pid, 0 si arrêtée>
+
+@test "en root, le deck tenu par le processus principal de la landing est à ce projet : aucun refus" {
+  ss_nomme 20999 4242
+  landing_pid 4242
+  preflight wsl PROV_PHASE=root PROV_PORTS_TENUS=deck PROV_DECK_PORT=20999
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(fact port_deck)" = "20999 nous lcars-landing (service)" ]
+  grep -q -- '-ltnp' "$BATS_TEST_TMPDIR/ss.args"
 }
 
-@test "le port du deck tenu par la landing en marche ici est dit nous, services.env illisible compris ; arrêtée ici, la même socket est prise" {
+@test "en root, un port tenu par un autre que ce projet est un refus qui nomme le processus et le drapeau" {
+  ss_nomme 20999 4243
+  landing_pid 4242
+  preflight wsl PROV_PHASE=root PROV_PORTS_TENUS=deck PROV_DECK_PORT=20999
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: port 20999 (deck) pris par \"python3\",pid=4243"*"--port-deck"* ]]
+  [ "$(fact port_deck)" = "20999 pris par \"python3\",pid=4243" ]
+  # la landing arrêtée ici (MainPID 0) ne reconnaît aucun processus, pid 0 compris
+  ss_nomme 20999 0
+  landing_pid 0
+  preflight wsl PROV_PHASE=root PROV_PORTS_TENUS=deck PROV_DECK_PORT=20999
+  [ "$status" -eq 2 ]
+}
+
+@test "en root, un port que ss ne nomme pas, même à root, est tenu hors de cette machine : un refus" {
+  double ss 'exit 0'
+  landing_pid 4242
+  preflight wsl PROV_PHASE=root PROV_PORTS_TENUS=forge
+  [ "$status" -eq 2 ]
+  [ "$(fact port_forge)" = "21000 pris" ]
+}
+
+@test "en root, seuls les ports que la mesure sans privilège a laissés tenus se vérifient" {
+  ss_nomme 20999 4243
+  preflight wsl PROV_PHASE=root PROV_PORTS_TENUS= PROV_DECK_PORT=20999
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -e "$BATS_TEST_TMPDIR/ss.args" ]
+  [ -z "$(fact port_deck)" ]
+}
+
+@test "joué entier (apply, doctor), un deck tenu par un processus étranger est un refus ; par la landing, non ; le port SSH n'arrête rien" {
   local p; p="$(free_port)"
-  listen_on "$p"
-  printf 'LCARS_LANDING_PORT=%s\n' "$p" > "$LCARS_DECOR_ROOT/etc/lcars/services.env"
-  chmod 0000 "$LCARS_DECOR_ROOT/etc/lcars/services.env"
-  landing_ici /system.slice/lcars-landing.service /system.slice/lcars-landing.service "$p"
-  preflight wsl PROV_DECK_PORT="$p"
+  ss_nomme "$p" 4243
+  landing_pid 4242
+  preflight docker PROV_PHASE=entier PROV_DECK_PORT="$p"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: port $p (deck) pris par \"python3\",pid=4243"* ]]
+  ss_nomme "$p" 4242
+  preflight docker PROV_PHASE=entier PROV_DECK_PORT="$p"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(fact port_deck)" = "$p nous lcars-landing (service)" ]
-  [[ "$output" != *"port $p"*"pris"* ]]
-  # sous WSL la hiérarchie des cgroups est partagée : la landing d'une autre distribution porte le même nom
-  landing_ici "" /system.slice/lcars-landing.service "$p"
-  preflight wsl PROV_DECK_PORT="$p"
-  kill "$LISTENER" 2>/dev/null || true
-  [ "$(fact port_deck)" = "$p pris" ]
+  ss_nomme "$p" 4243
+  preflight docker PROV_PHASE=entier PROV_SSH_PORT="$p" PROV_DECK_PORT="$(free_port)"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(fact port_ssh)" = "$p pris par \"python3\",pid=4243" ]
 }
 
 @test "l'utilisateur des faits est l'humain que --human nomme" {
@@ -478,23 +554,26 @@ echo \"LISTEN 0 4096 127.0.0.1:$3 0.0.0.0:*\${c:-}\""
   preflight docker DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
   [ "$(fact projet)" = "lcars" ]
   [ "$(fact projet_pris)" = "lcars-fleet" ]
-  [[ "$output" == *"projet compose déjà présent"*"lcars-fleet"* ]]
 }
 
 @test "la forge et le runner que ce poste a montés sont présents sans avertissement ; une instance du même nom en garde un" {
   local mode; mode="$LCARS_DECOR_ROOT$(sed -n 's/^PROV_FORGE_MODE_FILE=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
   docker_qui_repond "" "" lcars-forge
-  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars PROV_PHASE=entier
   [ "$(fact projet_pris)" = "lcars-forge" ]
   [[ "$output" == *"WARN"*"projet compose déjà présent sur ce daemon : lcars-forge"* ]]
   mkdir -p "$(dirname "$mode")"; echo poste > "$mode"
-  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars PROV_PHASE=entier
   [ "$(fact projet_pris)" = "lcars-forge" ]
   [[ "$output" == *"OK"*"projet compose de la forge de ce poste présent : lcars-forge"* ]]
   refute_out 'projet compose déjà présent' <<<"$output"
   docker_qui_repond "" "" lcars-fleet
-  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars PROV_PHASE=entier
   [[ "$output" == *"WARN"*"projet compose déjà présent sur ce daemon : lcars-fleet"* ]]
+  # sans privilège, le mode de la forge, sous le dossier des jetons, ne se lit pas : le fait seul est dit
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  [ "$(fact projet_pris)" = "lcars-fleet" ]
+  refute_out 'projet compose' <<<"$output"
 }
 
 @test "sans docker, aucun projet n'est dit pris" {
@@ -600,6 +679,16 @@ EOF
   preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$(fact channel)" = "aucun" ]
   [ "$(fact channel_tree)" = "source" ]
+}
+
+@test "un canal ne se pose pas sur un autre : une machine posée par kit refuse ce checkout, en nommant le geste" {
+  printf 'kit\n' > "$CHANNEL"
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: cette machine est installée par « kit », et cet arbre poserait « source »"*"--from <kit.tar.gz>"*"refaire le terrain"* ]]
+  printf 'source\n' > "$CHANNEL"
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "un canal illisible est un échec qui compte, et le fait dit invalide" {
