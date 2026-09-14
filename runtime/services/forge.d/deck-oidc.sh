@@ -6,7 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 21-service-accounts 63-forge-tokens
 
 set -euo pipefail
 

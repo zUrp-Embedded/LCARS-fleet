@@ -6,7 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 48-forge-host 50-catalogues 61-forge-structure
 
 set -euo pipefail
 # Ce geste est joue par le boot du conteneur et, sur un poste, par 63-forge-tokens (un appelant
@@ -370,7 +369,7 @@ check_human_onboardable() {
   local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
   [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
   if ! account_exists "$LCARS_LOGIN"; then
-    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : la personne crée son compte sur la page d'inscription de la forge, puis un propriétaire d'org l'ajoute à la team humans"
+    p_drift "compte forge absent pour « $LCARS_LOGIN », l'admin du système — l'onboarding projet échouera (human_not_provisioned) : l'administrateur de la forge porte ce login ; il s'inscrit une fois sur la forge sous ce nom"
     return 0
   fi
   p_ok "compte forge de l'humain ($LCARS_LOGIN)"

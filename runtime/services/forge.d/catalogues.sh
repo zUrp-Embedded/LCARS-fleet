@@ -6,7 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 25-directories 48-forge-host
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
 # la lecture et le clone se font en anonyme. Un conteneur qui n'a jamais recu `container config`

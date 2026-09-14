@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/forge-gestures.sh
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
-# STATUS: les gestes forge du conteneur — poses UNE fois, joues par tout appelant
+# STATUS: les gestes de forge — posés une fois, joués sur un poste comme dans un conteneur
 # ⚠ LES SECRETS ENTRENT PAR STDIN, JAMAIS PAR argv : `/proc/<pid>/cmdline` est lisible par tout le
 # monde pendant l'appel, et un `--token X` l'aurait mis dans la ligne de commande de CE script ET
 # dans celle du client docker.
@@ -12,7 +12,8 @@
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
 #   builtin-human  imprime le nom du compte integre. Ce fichier en est l'AUTORITE ; le verbe existe
 #                  pour que ses appelants le DEMANDENT au lieu d'en recopier le defaut.
-#   apply          joue la recette. Ne prend RIEN — il lit ce que le conteneur detient.
+#   apply          joue la recette avec le jeton master lu sur STDIN, à défaut celui que la
+#                  machine détient, et le seed posé.
 #   toolchain-protection <login-du-siege> [admins...]
 #                  pose la protection de branche du depot ops. Le login du siege est VARIABLE,
 #                  jamais en dur. SANS status check : l'allumage se fait en deux temps.
@@ -27,36 +28,19 @@
 
 set -euo pipefail
 
-# Les chemins sont SURCHARGEABLES, comme ceux de `provision-lib.sh`, et pour la meme raison : un
-# temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /opt/lcars/var/tokens. Les defauts
-# sont les chemins reels ; aucun appelant de production ne les passe.
+# Chemins et noms se lisent dans l'environnement : sur un poste, l'installeur les passe depuis ses
+# constantes (`prov_product_env`), un témoin les pose dans son décor. Les défauts sont ceux d'un
+# conteneur.
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
-# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER (les deux projections de catalogue le lisent
-# ici, jamais en dur). Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
-# chacune est un DEFAUT dans un runtime different (bash de conteneur, bash de provisioning, HCL), pas
-# une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
-# Le compte integre, resolu UNE fois : le `TF_VAR_builtin_human` plus bas et le verbe
-# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-…}` dans le meme fichier seraient
-# trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
-#
-# ⚠ VIDE PAR DEFAUT, ET C'EST LE CANON (⚖ user 2026-08-30). Un defaut nomme semerait un compte
-# humain sur tout deploiement, avec un mot de passe pose et ANNONCE. Or aucun deploiement de
-# TRAVAIL ne fabrique d'humain — le rail pose les autorites (le siege, l'admin de forge, le master
-# token) et les personnes s'enrolent par la page d'inscription, sous leur nom.
-#
-# Qui en veut un le NOMME : les deux bancs posent `LCARS_BUILTIN_HUMAN` — `bench-up.sh`
-# pour le conteneur, `install.sh --bench` pour le poste (il traverse le sudo par l'ESCALADE_ENV de
-# `deploy/workstation`) ; ⚖ user 2026-09-11, « les install doivent etre ISO a la fin ». C'est la
-# SEULE voie. Un `LCARS_DISPOSABLE` a vecu ici, qui demandait un humain de demonstration
-# sans le nommer (« lcars » par defaut) depuis un `--disposable` de la porte, quatre etages plus
-# haut : ⚖ user 2026-09-04, « un vieux reliquat a virer » — un axe entier pour un defaut que plus
-# personne ne demandait. Ce fichier reste le seul declarant du nom ; deux temoins de
-# le temoin de 48 le garde.
+# Le compte intégré, résolu une fois : `TF_VAR_builtin_human` et le verbe `builtin-human` lisent
+# celui-ci. Vide par défaut : un déploiement de travail ne fabrique pas d'humain, les personnes
+# s'enrôlent par la page d'inscription. Un banc le nomme (`bench-up.sh`, `install.sh --bench`).
 BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
+# Les deux projections de catalogue lisent le compte système ici ; le contrat
+# `forge.system_account_single_source` tient ce défaut d'accord avec `Fleet.Credentials.ForgeIdentity`.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-# LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
-# et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
-# compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
+# Le détenteur des secrets de forge : le compte que `put_secret` pose sur ce qu'il écrit, le seul qui
+# ouvrira ces fichiers (`PROV_AUTHORITY_USER` de `deploy/installer-constants.env` sur un poste).
 AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 # Le groupe qui TRAVERSE `/opt/lcars/var/tokens` — jamais celui qui lit. Meme defaut que partout ailleurs
 # dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
@@ -586,11 +570,10 @@ cmd_install() {
   local dir="$CATALOGUE_WORK/$name"
   mkdir -p "$dir"
 
-  # L'ETAT DE CE CATALOGUE-CI SURVIT A LA COPIE, celui du voisin non. `cp -r` ecraserait le premier
-  # avec le second : le dossier de recette de reference porte l'etat de `fleet`, et le copier par
-  # dessus celui de `web-demo` revient a jeter le sien A CHAQUE passe. Le rejeu re-importerait alors
-  # tout depuis zero — ca converge (l'etat est jetable par construction, « tofu dedans »),
-  # mais ca ne tient pas la promesse que la CLI affiche : « rien n'a bouge -> il ne touche rien ».
+  # L'état de ce catalogue-ci survit à la copie, celui du voisin non : le dossier de recette de
+  # référence peut porter l'état de `fleet`, et `cp -r` l'écrirait par-dessus celui de `web-demo`.
+  # Sans son état, tofu réimporte la forge et recrée ce qui ne s'importe pas, et la CLI ne tient plus
+  # sa promesse : « rien n'a bougé -> il ne touche rien ».
   local keep; keep="$(mktemp -d)"
   for f in terraform.tfstate terraform.tfstate.backup; do
     [[ -f "$dir/$f" ]] && cp "$dir/$f" "$keep/$f"
@@ -601,9 +584,6 @@ cmd_install() {
   # ⚠ L'ETAT DE TOFU NE SE COPIE PAS D'UN CATALOGUE A L'AUTRE. Un etat portant les comptes du
   # voisin, applique avec les variables de CELUI-CI, decrit ces comptes comme « plus dans la
   # configuration » — et le plan suivant les DETRUIT. Installer un catalogue desinstallerait l'autre.
-  #
-  # Partir d'un etat VIDE est le design : la recette reconstruit ce qui existe par ses blocs
-  # `import`, donc l'etat est jetable. En apporter un etranger, c'est lui mentir sur ce qu'il gouverne.
   rm -rf "$dir/.terraform" "$dir/instance/.terraform"
   rm -f "$dir"/terraform.tfstate* "$dir"/instance/terraform.tfstate*
 

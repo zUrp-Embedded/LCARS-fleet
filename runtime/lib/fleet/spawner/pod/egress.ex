@@ -323,14 +323,18 @@ defmodule Fleet.Spawner.Pod.Egress do
   end
 
   # The host resolver appends its search list to a bare name: on a network whose DNS answers
-  # every name under that suffix, a host that does not exist resolves and the wall opens.
-  # An absolute name (trailing dot) is looked up as is; an IP literal is used as is.
-  defp upstream_name(host) do
-    chars = String.to_charlist(host)
+  # every name under that suffix, a host that does not exist resolves and the wall opens. An IP
+  # literal is used as is; a name the hosts file declares (/etc/hosts, a container's `extra_hosts`)
+  # connects to that address; any other name is looked up absolute (trailing dot).
+  defp upstream_address(host) do
+    name = String.to_charlist(host)
 
-    case :inet.parse_address(chars) do
-      {:ok, _} -> chars
-      _ -> String.to_charlist(String.trim_trailing(host, ".") <> ".")
+    with {:error, _} <- :inet.parse_address(name),
+         {:error, _} <- :inet_hosts.gethostbyname(name, :inet) do
+      String.to_charlist(String.trim_trailing(host, ".") <> ".")
+    else
+      {:ok, {:hostent, _name, _aliases, :inet, 4, [ip | _]}} -> ip
+      {:ok, ip} -> ip
     end
   end
 
@@ -339,7 +343,7 @@ defmodule Fleet.Spawner.Pod.Egress do
          {:ok, host, port} <- decide(line, allowed),
          {:ok, upstream} <-
            :gen_tcp.connect(
-             upstream_name(host),
+             upstream_address(host),
              port,
              [:binary, active: false],
              @connect_timeout_ms

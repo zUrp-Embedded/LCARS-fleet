@@ -77,6 +77,19 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
       assert note =~ "1 temoins"
     end
 
+    test "un artefact de `__pycache__/` n'est pas un temoin" do
+      root =
+        depot(
+          fichiers: [
+            {"runtime/test/services/deck_test.py", "def test_x(): pass\n"},
+            {"runtime/test/services/__pycache__/deck_test.cpython-312.pyc", "\x00"}
+          ]
+        )
+
+      assert %{status: :pass, evidence: [], note: note} = Tests.check_witness_naming(root)
+      assert note =~ "1 temoins"
+    end
+
     test "hors de sa zone, un outil de deploy/tests est nomme par son chemin relatif" do
       root = depot(fichiers: [{"deploy/tests/lib/decor.bash", "decor() { :; }\n"}])
 

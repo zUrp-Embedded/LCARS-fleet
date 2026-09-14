@@ -7,12 +7,12 @@
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
-  export LCARS_FORGE_D="$BATS_TEST_TMPDIR/forge.d"; mkdir -p "$LCARS_FORGE_D"
+  FORGE_D="$BATS_TEST_TMPDIR/forge.d"; mkdir -p "$FORGE_D"
   export LCARS_FORGE_RC_FILE="$BATS_TEST_TMPDIR/forge.rc"
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
   {
     printf '%s\n' 'say() { echo "[boot] $*"; }' 'MODULE_PROTOCOL=/dev/null' 'LCARS_ADMIRAL=admiral'
-    sed -n '/^RC_FILE=/,/^done$/p' "$SRC"
+    sed -n '/^RC_FILE=/,/^done$/p' "$SRC" | sed "s#/opt/lcars/services/forge.d/#$FORGE_D/#"
     sed -n '/^publier_verdicts() {/,/^}/p' "$SRC"
     printf '%s\n' 'publier_verdicts'
   } > "$BLOC"
@@ -22,7 +22,7 @@ gestes() { # gestes <rc tokens> <rc catalogues> <rc ops-branch> <rc deck-oidc>
   local g rc i=1
   for g in tokens catalogues ops-branch deck-oidc; do
     rc="${!i}"; i=$((i + 1))
-    printf '#!/usr/bin/env bash\nexit %s\n' "$rc" > "$LCARS_FORGE_D/$g.sh"
+    printf '#!/usr/bin/env bash\nexit %s\n' "$rc" > "$FORGE_D/$g.sh"
   done
 }
 

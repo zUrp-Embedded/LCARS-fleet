@@ -9,12 +9,11 @@ defmodule LcarsFleet.MixProject do
       version: "0.9.0",
       elixir: "~> 1.18",
       compilers: [:boundary | Mix.compilers()],
-      # ⚠ LA COUVERTURE EST DANS LA CHAINE (decision 2 du lot E6, arbitree le 2026-09-12), et elle
-      # passe par `Fleet.Test.CoverOtp27` tant que le parc est en OTP 27 : `cover` y fait crasher
-      # des modules (erlang/otp#11524), et l'outil de Mix s'arrete au premier. Ils sont
-      # DECLARES ici — cliquet, pas exemption : l'outil rougit si la liste bouge dans un sens ou
-      # dans l'autre. Le jour ou le parc passe en OTP >= 28.4, `tool:` et `otp27_refused:` sortent
-      # et l'outil de Mix reprend sans trou.
+      # La couverture est dans la chaîne, et elle passe par `Fleet.Test.CoverOtp27` tant que le parc
+      # est en OTP 27 : `cover` y fait crasher des modules (erlang/otp#11524), et l'outil de Mix
+      # s'arrête au premier. Ils sont déclarés ici — cliquet, pas exemption : l'outil rougit si la
+      # liste bouge dans un sens ou dans l'autre. Le jour où le parc passe en OTP >= 28.4, `tool:` et
+      # `otp27_refused:` sortent et l'outil de Mix reprend sans trou.
       #
       # `Fleet.Pilot` est retire du total : une facade sans une ligne executable, son zero ne mesure
       # rien. Les doublures de `test/support/` sont retirees par l'outil, sur leur SOURCE.
@@ -34,7 +33,6 @@ defmodule LcarsFleet.MixProject do
           Fleet.Spawner.PublishConsumer,
           Mix.Tasks.Lcars.Contracts.Check.Artifact,
           Mix.Tasks.Lcars.Contracts.Check.SingleSource,
-          Mix.Tasks.Lcars.Contracts.Check.Tests,
           Mix.Tasks.Lcars.Contracts.Check.Tools,
           Mix.Tasks.Lcars.Contracts.Check.Types
         ]

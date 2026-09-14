@@ -1,17 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # LCARS Fleet — ce que la forge PORTE DÉJÀ, et les imports qui en découlent
 #
-# POURQUOI CE FICHIER EXISTE. Sans lui, la recette est rejouable une seule fois : un apply à état
-# vide contre une forge déjà provisionnée meurt en 409 « user already exists » — 7 erreurs, 0
-# création (mesuré 2026-08-16). Son état devrait alors SURVIVRE, donc vivre là où on peut le
-# garder : hors du conteneur, chez l'opérateur, avec un binaire tofu que rien n'installe.
-#
-# Ce serait la seule pièce du système non convergente. Tout le reste sonde le réel et le converge —
-# chaque module de `provision`, le convergeur d'humains, le doctor, `catalogue verify`, le runtime.
-# Un état de tofu conservé prétendrait détenir une vérité que la forge détient seule.
-#
-# Ce fichier la lui laisse : la forge est sondée, ce qui existe entre dans l'état par `import`, ce
-# qui manque est créé. L'état est JETABLE — reconstruit à chaque apply, jamais conservé.
+# Un apply à état vide contre une forge déjà provisionnée meurt en 409 « user already exists ». La
+# forge est donc sondée : ce qui existe entre dans l'état par `import`, ce qui manque est créé. Un
+# état perdu se reconstruit ainsi, mais ce qui ne s'importe pas serait recréé : l'appelant garde
+# l'état d'une passe à l'autre (61-forge-structure sur un poste).
 # ═══════════════════════════════════════════════════════════════════════════
 
 # La sonde est un programme externe et pas une data source du provider, pour deux raisons mesurées :

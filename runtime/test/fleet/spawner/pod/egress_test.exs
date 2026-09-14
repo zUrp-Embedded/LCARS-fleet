@@ -139,18 +139,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       :gen_tcp.close(listen)
     end
 
-    test "an allowed host that does not resolve fails CLOSED, never open", %{tmp_dir: tmp} do
-      path = sock(tmp)
-      {:ok, listen} = Egress.start(path, ["nx.invalid"], pod_id: "test")
-
-      c = connect(path)
-      :ok = :gen_tcp.send(c, "CONNECT nx.invalid:443 HTTP/1.1\r\n\r\n")
-
-      assert {:ok, answer} = :gen_tcp.recv(c, 0, 5_000)
-      assert answer =~ "403 Forbidden"
-      :gen_tcp.close(listen)
-    end
-
     test "a path over the AF_UNIX limit is REFUSED by name, not by :einval", %{tmp_dir: tmp} do
       long = Path.join(tmp, String.duplicate("x", 120) <> ".sock")
 
@@ -166,6 +154,86 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       :gen_tcp.close(listen)
     end
   end
+
+  # The node resolver is doubled: a hosts table, and a DNS on loopback that answers every name
+  # under the search suffix, as a provider DNS that resolves any name under its own domain.
+  describe "start/3 — the upstream name, under a doubled resolver" do
+    setup do
+      saved =
+        for opt <- [:resolv_conf, :lookup, :nameservers, :search],
+            do: {opt, :inet_db.res_option(opt)}
+
+      {:ok, upstream} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false])
+      {:ok, port} = :inet.port(upstream)
+      dns = dns_answering_suffix(".search.invalid", {127, 0, 0, 1})
+
+      :inet_db.res_option(:resolv_conf, ~c"")
+      :inet_db.res_option(:nameservers, [{{127, 0, 0, 1}, dns}])
+      :inet_db.res_option(:search, [~c"search.invalid"])
+      :inet_db.res_option(:lookup, [:file, :dns])
+
+      on_exit(fn ->
+        :inet_db.del_host({127, 0, 0, 1})
+        for {opt, value} <- saved, do: :inet_db.res_option(opt, value)
+      end)
+
+      %{port: port}
+    end
+
+    test "an allowed name the DNS does not know stays CLOSED, though the search list would answer it",
+         %{tmp_dir: tmp, port: port} do
+      assert tunnel(tmp, "nx.invalid", port) =~ "403 Forbidden"
+    end
+
+    test "an allowed name the hosts file declares is served", %{tmp_dir: tmp, port: port} do
+      :inet_db.add_host({127, 0, 0, 1}, [~c"forge-host.invalid"])
+
+      assert tunnel(tmp, "forge-host.invalid", port) =~ "200 Connection Established"
+    end
+  end
+
+  # The first answer of the proxy to a CONNECT for `host`, allowed, on `port`.
+  defp tunnel(tmp, host, port) do
+    path = sock(tmp)
+    {:ok, listen} = Egress.start(path, [host], pod_id: "test")
+    on_exit(fn -> :gen_tcp.close(listen) end)
+    c = connect(path)
+    :ok = :gen_tcp.send(c, "CONNECT #{host}:#{port} HTTP/1.1\r\n\r\n")
+    {:ok, answer} = :gen_tcp.recv(c, 0, 5_000)
+    answer
+  end
+
+  # A DNS server on loopback: an A record for names under `suffix`, NXDOMAIN for any other.
+  defp dns_answering_suffix(suffix, {a, b, c, d}) do
+    {:ok, udp} = :gen_udp.open(0, [:binary, ip: {127, 0, 0, 1}, active: false])
+    {:ok, port} = :inet.port(udp)
+
+    serve = fn serve ->
+      {:ok, {peer, peer_port, <<id::16, _::80, query::binary>>}} = :gen_udp.recv(udp, 0)
+      {labels, tail} = dns_labels(query, [])
+      question = binary_part(query, 0, byte_size(query) - byte_size(tail) + 4)
+
+      reply =
+        if String.ends_with?(Enum.join(labels, "."), suffix),
+          do:
+            <<id::16, 0x8180::16, 1::16, 1::16, 0::32>> <>
+              question <> <<0xC00C::16, 1::16, 1::16, 0::32, 4::16, a, b, c, d>>,
+          else: <<id::16, 0x8183::16, 1::16, 0::16, 0::32>> <> question
+
+      :ok = :gen_udp.send(udp, peer, peer_port, reply)
+      serve.(serve)
+    end
+
+    pid = spawn(fn -> serve.(serve) end)
+    :ok = :gen_udp.controlling_process(udp, pid)
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    port
+  end
+
+  defp dns_labels(<<0, rest::binary>>, acc), do: {Enum.reverse(acc), rest}
+
+  defp dns_labels(<<len, label::binary-size(len), rest::binary>>, acc),
+    do: dns_labels(rest, [label | acc])
 
   describe "Vendor.hosts/1 — the declaration lives beside its launcher" do
     alias Fleet.Spawner.Pod.Egress.Vendor

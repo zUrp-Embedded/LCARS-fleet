@@ -391,12 +391,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Container init needs zones before provisioning runs; native provisioning carries its own list.
-  # The module lists the directories it poses, modes live in deploy/system.manifest. A row names its
-  # system path through `$(prov_decor <path>)`; the canonical path is its argument.
+  # The module lists the directories it poses in the body of `prov_dirs()`, modes live in
+  # deploy/system.manifest. A row names its system path through `$(prov_decor <path>)`; the
+  # canonical path is its argument.
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
+         [_, body] <- Regex.run(~r/^prov_dirs\(\) \{\n(.*?)^\}/ms, content),
          [_ | _] = rows <-
-           Regex.scan(~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m, content) do
+           Regex.scan(~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m, body) do
       rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
     else
       _ -> nil
@@ -537,7 +539,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     sources =
       [{cli, &shell_default(cli_src, &1), expected || %{}}] ++
         if deploy?,
-          do: [{constants, &installer_constant(constants_src, &1), lib_expected(expected)}],
+          do: [{constants, &installer_constant(constants_src, &1), constants_expected(expected)}],
           else: []
 
     mismatches =
@@ -581,8 +583,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Provisioning writes the installed cache, not the image's seed catalogue.
-  defp lib_expected(nil), do: %{}
-  defp lib_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
+  defp constants_expected(nil), do: %{}
+  defp constants_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
 
   defp read_or_empty(root, rel) do
     path = Path.join(root, rel)

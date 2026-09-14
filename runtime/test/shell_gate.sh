@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 2026.256
+# STARDATE: 2026.257
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -21,7 +21,7 @@
 #                                     est a ZERO et mord au premier warning. L'audit complet, toutes
 #                                     severites, est opt-in (`LCARS_SHELL_LINT=1`, informatif) — un
 #                                     pas qu'on sait toujours rouge apprend a lire « rouge » comme
-#                                     « normal » (⚖ USER 2026-08-29), cf. §5.
+#                                     « normal ».
 #   - bats PRESENT + rouge         → exit != 0.
 #   - bats ABSENT                  → PAS d'echec ICI (warning + compte MANQUE). Choix delibere : ce filet
 #                                     est cable dans `mix gate`, l'absence de bats sur une machine sans

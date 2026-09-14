@@ -9,11 +9,11 @@ defmodule Fleet.Test.CoverOtp27 do
   source ne peut pas porter — est sur `master` et n'est pas retroporte a `maint-27`. Elixir n'y est
   pour rien : 1.20 REVELE le bug parce qu'il expanse `in` autrement que 1.18.
 
-  Mesure du 2026-09-12 : `Mix.Tasks.Test.Coverage` compile tout le repertoire en UN appel, le
-  premier crash arrete tout, aucun test ne tourne. `ignore_modules` n'y peut rien (applique au
-  RAPPORT, apres la compilation). Reecrire les sites ne tient pas : la collision porte sur le
-  compteur de temporaires de la fonction entiere, pas sur une forme locale — sortir le `in` de sa
-  chaine `and` fait crasher la ligne suivante.
+  `Mix.Tasks.Test.Coverage` compile tout le répertoire en un appel : le premier crash arrête tout,
+  aucun test ne tourne. `ignore_modules` n'y peut rien (appliqué au rapport, après la compilation).
+  La collision porte sur le compteur de temporaires de la fonction entière, pas sur une forme
+  locale : sortir un `in` de sa chaîne `and` fait crasher la ligne suivante. Un `in` porté par une
+  garde n'en crée pas, et un module réécrit ainsi sort de la liste.
 
   CE QUE FAIT CET OUTIL. Il sonde chaque module dans un VM SEPARE (un crash de cover vide l'etat
   du serveur et, cumule, tue le process mix — mesure), CONFRONTE les refuses a la liste declaree
@@ -27,9 +27,9 @@ defmodule Fleet.Test.CoverOtp27 do
   reprend la main, sans trou.
 
   ⚠ CE QUI N'EST PAS MESURE EST DIT. Les modules refuses sont imprimes a chaque run, sous le
-  total. Sept d'entre eux GARDENT quelque chose (confinement, allowlist des opts de spawn,
-  vocabulaire des verdicts, champs proteges de la forge) : le total ne les contient pas, et le
-  lecteur doit le savoir. « Non mesure » et « couvert » ne sont pas la meme ligne.
+  total. Plusieurs d'entre eux gardent quelque chose (confinement, allowlist des opts de spawn,
+  vocabulaire des verdicts, champs protégés de la forge, murs des contrats) : le total ne les
+  contient pas, et le lecteur doit le savoir. « Non mesure » et « couvert » ne sont pas la meme ligne.
 
   Les doublures de `test/support/` sont retirees du rapport par leur SOURCE, pas par une liste de
   noms : `cover` les compte parce que `elixirc_paths(:test)` les compile, et un seuil qui mesure la

@@ -61,9 +61,8 @@ export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-# ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot
-# precedent, et « container status » lirait un `awaiting-config` ou un `forge.rc` d'hier comme
-# l'etat de maintenant (relecture hostile 2026-09-04). Chaque boot part d'un /run vide de ses verdicts.
+# /run n'est pas un tmpfs dans un conteneur : un `docker restart` garde les verdicts du boot précédent,
+# que « container status » lirait comme l'état présent. Chaque boot part d'un /run vide de ses verdicts.
 rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
 say() { echo "[container-boot] $*"; }
 [[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
@@ -99,7 +98,7 @@ prov_rc=0
 for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
-    bash "${LCARS_FORGE_D:-/opt/lcars/services/forge.d}/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+    bash "/opt/lcars/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
     2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant"
@@ -198,10 +197,6 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # team vide EST un résultat valide, et sur un conteneur de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur un conteneur conforme SANS
-  # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
-  # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
-  # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et le conteneur l'annoncait.
   # Un humain de fleet est un membre du groupe `fleet` que `is_fleet_human` reconnait (uid au-dessus
   # de UID_MIN, pas le siege). Le protocole est source dans un sous-shell : ses defauts sont faits
   # pour un module, pas pour le PID 1.
@@ -233,7 +228,7 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   elif [[ "$pop_rc" -eq 2 ]]; then
-    say "population des humains NON mesuree — la frontiere systeme/humain n'est pas etablie (bornes d'uid illisibles dans ${PASSWD_DEFS:-/etc/login.defs}, le remede est ci-dessus) : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
+    say "population des humains NON mesurée — la frontière système/humain n'est pas établie, la cause est dite ci-dessus : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
   else
     say "AUCUN humain de fleet dans ce conteneur — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi

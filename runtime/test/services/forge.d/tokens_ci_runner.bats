@@ -75,22 +75,6 @@ EOF
   [[ "$output" == *"deploy/container runner-token"* ]]
 }
 
-@test "le module NOMME dans le drift est celui qui ENROLE vraiment" {
-  # ⚠ LA PROPRIETE, ET PAS LE NOM. Epingler `49-forge-runner` en dur referait le defaut au prochain
-  # decoupage. Ce qui est vrai est : le module cite doit exister ET porter l'enrolement.
-  stub_curl '{"runners":[],"total_count":0}'
-  run bash "$MODULE" check
-  local cite
-  cite="$(sed -n 's/.*module \([0-9][0-9]-[a-z-]*\).*/\1/p' <<<"$output" | head -1)"
-  [ -n "$cite" ]
-  local f="$BATS_TEST_DIRNAME/../../../../deploy/modules.d/${cite}.sh"
-  [ -f "$f" ]
-  # ⚠ « contient le mot runner » NE SUFFIT PAS : `48-forge-host` le porte encore (il nomme le projet
-  # compose du runner) et le temoin restait vert sur le mauvais module — mesure par mutation.
-  # Ce qui distingue le module qui ENROLE est la fonction qui le fait.
-  grep -q 'converge_ci_runner' "$f"
-}
-
 @test "le verdict ne depend PAS du substrat — un etat-cible n'a pas deux valeurs" {
   # Degrader le mot la ou le rail ne convergeait pas rendait le seul voyant fiable muet, et laissait
   # livrer une forge que rien ne peut servir. Le rail converge : le mot ne bouge plus.

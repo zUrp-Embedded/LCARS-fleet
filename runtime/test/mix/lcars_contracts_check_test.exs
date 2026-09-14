@@ -327,7 +327,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       rows = Enum.map_join(module_zones, " \\\n", &~s|    "$(prov_decor #{&1})"|)
 
       File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
-      prov_dirs_durables() {
+      prov_dirs() {
         printf '%s\\n' \\
           "$PROV_ROOT" \\
           "$(prov_decor '/run/lcars/console/<human>')" \\
@@ -405,6 +405,29 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              "une face absente du seul createur commun aux trois substrats est passee au vert"
 
       assert result.evidence == [
+               "/home/projects.ops: absent du module provision (donc absent sur wsl et linux)"
+             ]
+    end
+
+    test "face citée hors de prov_dirs() → fail : seul le corps de la liste pose une zone", %{
+      root: root
+    } do
+      write_mirrors!(root, ["/home/projects", "/home/projects.ops"], ["/home/projects"])
+
+      zone_elsewhere = """
+      prov_runtime_dirs() {
+        printf '%s\\n' \\
+          "$(prov_decor /home/projects.ops)"
+      }
+      """
+
+      File.write!(
+        Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]),
+        zone_elsewhere,
+        [:append]
+      )
+
+      assert Catalogue.check_face_roots_provisioned(root).evidence == [
                "/home/projects.ops: absent du module provision (donc absent sur wsl et linux)"
              ]
     end

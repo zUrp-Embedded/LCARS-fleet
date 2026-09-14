@@ -266,8 +266,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   bloc 0 0
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 2 ]
-  grep -q 'NON mesuree' "$JOURNAL"
-  grep -q "nulle-part/login.defs" "$JOURNAL"
+  grep -q 'NON mesurée' "$JOURNAL"
   refute grep -q 'présent' "$JOURNAL"
   refute grep -q 'AUCUN humain' "$JOURNAL"
   # Le remede du protocole passe sur la sortie du boot, une fois.
@@ -311,6 +310,8 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 2 ]
   grep -q 'protocole des humains introuvable' "$JOURNAL"
+  # Les bornes d'uid n'ont pas été lues : le verdict ne les accuse pas.
+  refute grep -q 'login.defs' "$JOURNAL"
 }
 
 @test "console-humans.sh et le protocole lisent la MEME source pour les bornes (PASSWD_DEFS → login.defs) ; le convergeur ne lit RIEN lui-meme, il source le protocole" {
