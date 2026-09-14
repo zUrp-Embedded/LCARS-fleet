@@ -91,7 +91,7 @@ EOF
   chmod 0755 "$BIN/curl"
 }
 
-docker_double() { # un daemon doublé qui journalise ; STUB_MANIFEST=absent|present|injoignable, STUB_PUSH_RC, STUB_ANONYME=public|prive
+docker_double() { # un daemon doublé qui journalise ; STUB_MANIFEST=absent|present|injoignable, STUB_PUSH_RC, STUB_ANONYME=public|prive, STUB_REGISTRE_REV
   cat > "$BIN/docker" <<'EOF'
 #!/usr/bin/env bash
 # anonyme : un magasin de configuration nommé qui ne porte aucun identifiant
@@ -99,7 +99,9 @@ anonyme=""; [[ -n "${DOCKER_CONFIG:-}" && ! -e "$DOCKER_CONFIG/config.json" ]] &
 echo "DOCKER $*$anonyme" >> "$CALLS"
 case "$1" in
   version) exit 0 ;;
-  image)   git rev-parse --short=8 HEAD ;;
+  # le tag local du registre porte la révision du kit (le tag d'une passe précédente) ; tiré, il porte celle du registre
+  pull)    : > "$CALLS.tire" ;;
+  image)   if [[ -e "$CALLS.tire" ]]; then printf '%s\n' "${STUB_REGISTRE_REV:-$(git rev-parse --short=8 HEAD)}"; else git rev-parse --short=8 HEAD; fi ;;
   login)   cat >/dev/null ;;
   manifest)
     if [[ -n "$anonyme" ]]; then
@@ -229,6 +231,43 @@ publier() { # publier — une publication complète vers une forge https doublé
   [ "$l_push" -lt "$l_post" ]
   [[ "$output" != *"jeton-du-temoin"* ]]
   grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
+  # l'image se bâtit depuis le kit posé dans l'étage : son Dockerfile, et l'arbre du kit pour contexte
+  local build; build="$(grep '^DOCKER build ' "$CALLS")"
+  [[ "$build" =~ ^DOCKER\ build\ -f\ (/[^\ ]+)/lcars_install/deploy/docker/Dockerfile\ .*\ ([^\ ]+)$ ]] || { echo "$build"; return 1; }
+  [ "${BASH_REMATCH[2]}" = "${BASH_REMATCH[1]}/lcars_install" ] || { echo "contexte ${BASH_REMATCH[2]}, étage ${BASH_REMATCH[1]}"; return 1; }
+  [[ "$build" == *" --build-arg GIT_SHA=$HEAD8 "*" -t lcars-fleet:v9.9 -t lcars-fleet:local "* ]]
+}
+
+@test "--publish rejoué : l'image du tag déjà publiée à la révision du kit est reprise sans push, tirée sans identifiants, et la release suit" {
+  forge_qui_repond; docker_double
+  STUB_MANIFEST=present publier
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q '^DOCKER push' "$CALLS"
+  grep -q '^DOCKER pull -q forge.decor/fleet/lcars-fleet:v9.9$' "$CALLS"
+  [[ "$output" == *"image déjà publiée à la révision $HEAD8 : forge.decor/fleet/lcars-fleet:v9.9 est reprise, rien n'est poussé"* ]]
+  local l_anon l_post
+  l_anon="$(grep -n '^DOCKER manifest inspect .* (anonyme)$' "$CALLS" | cut -d: -f1)"
+  l_post="$(grep -n '^CURL POST .*/releases$' "$CALLS" | cut -d: -f1)"
+  [ -n "$l_anon" ]
+  [ "$l_anon" -lt "$l_post" ]
+}
+
+@test "--publish : une image du tag déjà publiée à une autre révision est un refus qui nomme les deux révisions, sans push ni release" {
+  forge_qui_repond; docker_double
+  STUB_MANIFEST=present STUB_REGISTRE_REV=0badc0de publier
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"forge.decor/fleet/lcars-fleet:v9.9 existe déjà, à la révision « 0badc0de » et non $HEAD8"* ]]
+  refute grep -q '^DOCKER push' "$CALLS"
+  refute grep -q '^CURL POST' "$CALLS"
+  grep -q '^DOCKER logout forge.decor' "$CALLS"
+}
+
+@test "--help rend l'usage, les prérequis et les codes de sortie, sans rien jouer" {
+  pack --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deploy/pack.sh --publish"*"PRÉ-REQUIS"*"bats et shellcheck"*"EXIT"* ]]
+  [ ! -s "$GATE_LOG" ]
+  [ ! -s "$CALLS" ]
 }
 
 @test "--publish : l'image poussée est tirée sans identifiants avant la release — privée, la release n'est pas créée et le geste est dit ; publique, la release suit" {

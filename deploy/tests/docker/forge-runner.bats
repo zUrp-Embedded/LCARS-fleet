@@ -7,6 +7,7 @@
 
 load ../refute
 load ../support/decor
+load ../support/compose
 
 # un PATH qui porte tout celui de la machine sauf python3 : forge-runner lit la forge par jq
 setup_file() {
@@ -158,6 +159,7 @@ run_runner() {
 }
 
 @test "la pose se relit par compose : adresse de --instance-url, réseau externe de la forge, aucune config copiée" {
+  compose_requis
   routes_nominales
   run_runner --instance-url http://host.docker.internal:21000
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -168,6 +170,7 @@ run_runner() {
 }
 
 @test "--bench : la surcouche de banc marque le runner et ses volumes ; sans lui, aucun label, même sous un LCARS_BENCH_BASE de l'environnement" {
+  compose_requis
   routes_nominales
   run_runner --bench bt
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -181,10 +184,18 @@ run_runner() {
 }
 
 @test "sans --labels, compose rend les labels des constantes, et un LCARS_RUNNER_LABELS de l'environnement ne les remplace pas" {
+  compose_requis
   routes_nominales
   LCARS_RUNNER_LABELS=shell:docker://alpine:environnement run bash "$SRC" --forge-api "$FORGE_API" --admin-token-file "$ADMIN" --network bt-forge_default --project bt-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -r '.services.act.environment.GITEA_RUNNER_LABELS' "$RENDU")" = shell:docker://alpine:temoin ] || { cat "$RENDU"; return 1; }
+}
+
+@test "--help rend l'usage et les codes de sortie, sans jeton ni appel à la forge ou au daemon" {
+  run bash "$SRC" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"USAGE : forge-runner.sh --forge-api"*"--bench"*"EXIT"* ]]
+  [ ! -s "$CALLS" ]
 }
 
 @test "--verify-repo et --accept-generic sont des options inconnues" {

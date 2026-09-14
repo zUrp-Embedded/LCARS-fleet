@@ -57,8 +57,10 @@ le même endroit.
 
 `deploy/lib/deploy-release.sh` bâtit et bascule. Depuis les sources, `MIX_ENV=prod mix release` sur
 le checkout, sans gate, avec les dépendances tirées de hex.pm. Depuis un kit, la release est celle que `pack.sh` a bâtie après son gate :
-ni gate ni compilation. Puis swap atomique de `rel/` (la génération précédente reste en `.prev`),
-copie atomique de chaque entrée du manifest (exécutable si elle est `exec`) et du template d'env.
+ni gate ni compilation. Avant le build et toute bascule, il lit le manifest et vérifie que chaque
+entrée est dans `bin/` et que le template d'env existe : un manque arrête là, la release en place
+reste entière. Puis swap atomique de `rel/` (la génération précédente reste en `.prev`), copie
+atomique de chaque entrée du manifest (exécutable si elle est `exec`) et du template d'env.
 Il refuse de tourner en root : `deploy/modules.d/60-deploy.sh` le joue comme l'humain, puis pose
 les modes et les liens du PATH, et retire ce que le manifest ne nomme plus. Sortie `0` = release
 basculée, `1` = échec nommé sur stderr.

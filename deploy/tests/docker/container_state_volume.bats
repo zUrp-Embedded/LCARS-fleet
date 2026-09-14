@@ -6,6 +6,7 @@
 # STATUS: bats tests — l'etat de l'instance vit dans un VOLUME, jamais dans le systeme de fichiers du conteneur
 
 load ../refute
+load ../support/compose
 
 setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
@@ -13,8 +14,10 @@ setup() {
   PROTO="$DOCKER/../../runtime/services/lib/module-protocol.sh"
   CONSTANTES="$DOCKER/../installer-constants.env"
   [ -r "$CONSTANTES" ]
-  # le compose rendu par docker compose avec les constantes de l'installeur, sans daemon
   RENDU="$BATS_TEST_TMPDIR/rendu.json"
+}
+rendre() { # rendre — le compose rendu par docker compose avec les constantes de l'installeur, sans daemon, dans RENDU
+  compose_requis
   env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" LCARS_STORE_PREFIX=p \
     docker compose --env-file "$CONSTANTES" -f "$DEV" -p p config --format json > "$RENDU"
   [ "$(jq '.services.lcars.volumes | length' "$RENDU")" -ge 2 ]
@@ -29,6 +32,7 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
 }
 
 @test "le client OAuth2 du deck est sous un volume du compose" {
+  rendre
   local dev
   dev="$(env_rendu LCARS_DECK_OIDC_FILE)"
   [ -n "$dev" ]
@@ -50,6 +54,7 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
 }
 
 @test "le repertoire des jetons est sous un volume du compose — l'etat ne se separe pas" {
+  rendre
   local jetons; jetons="$(constante PROV_TOKENS_DIR)"
   [ -n "$jetons" ]
   under_mount "$jetons"
@@ -57,6 +62,7 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
 
 # bats test_tags=structure
 @test "TOUT chemin d'etat que l'init ou le protocole nomme tombe sous un volume — ou dans la liste d'exceptions ECRITE ici" {
+  rendre
   local INIT="$DOCKER/../../runtime/services/container/init.sh"
   [ -f "$INIT" ]
   local chemins var val ov

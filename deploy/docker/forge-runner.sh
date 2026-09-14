@@ -8,6 +8,7 @@
 #                         --network <réseau compose de la forge> --project <projet compose du runner>
 #                         [--instance-url <adresse de la forge vue du runner>] [--reg-token-file <chemin>] [--labels <liste>]
 #                         [--bench <base>]
+#         forge-runner.sh --help
 #   --instance-url   défaut : l'adresse interne de la forge, PROV_FORGE_INTERNAL_URL
 #   --labels         défaut : PROV_RUNNER_LABELS ; chaque image docker:// nommée est vérifiée, puis semée
 #   --bench          le runner d'un banc : lui et ses volumes portent le marqueur lcars.bench=<base> (runner-compose.bench.yml)
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --project)      PROJECT="${2:?}"; shift 2 ;;
     --labels)       LABELS="${2:?}"; shift 2 ;;
     --bench)        BENCH="${2:?}"; shift 2 ;;
+    -h|--help)      sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "forge-runner : option inconnue : $1" >&2; exit 1 ;;
   esac
 done

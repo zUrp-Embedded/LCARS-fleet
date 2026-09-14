@@ -110,7 +110,15 @@ launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
 
 @test "le pilote est IDEMPOTENT — sinon il empile un ttyd par tour" {
   local console="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
-  code "$console" | grep -q 'console_alive'
+  # dans chaque fonction qui lance un ttyd, la sonde de sa socket précède le lancement, et un retour la suit
+  local sans_garde
+  sans_garde="$(code "$console" | awk '
+    /^[a-z_]+\(\) *\{/                { fn = $1; garde = 0; sortie = 0 }
+    /console_alive "\$sock"/          { garde = 1 }
+    garde && /return 0/               { sortie = 1 }
+    /ttyd --writable/                 { lanceurs++; if (!sortie) print fn }
+    END                               { if (!lanceurs) print "AUCUN LANCEUR LU" }')"
+  [ -z "$sans_garde" ] || { echo "ttyd lancé sans sonde qui rend la main avant lui : $sans_garde" >&2; return 1; }
   # et l'appel par tour ne contourne pas cette garde en retirant la socket
   code "$CONVERGER" | refute_out 'rm -f.*console\.sock'
 }

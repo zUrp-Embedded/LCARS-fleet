@@ -6,8 +6,10 @@
 # STATUS: bats tests for les compose — chacun rendu par docker compose avec les constantes de l'installeur, sans daemon
 
 load ../refute
+load ../support/compose
 
 setup() {
+  compose_requis
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
   CF="$DOCKER/docker-compose.yml"
   [ -f "$CF" ]
@@ -49,21 +51,26 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   [[ "$output" == *"LCARS_STORE_PREFIX absent"* ]]
 }
 
-@test "le conteneur reçoit SYS_ADMIN sous le profil seccomp durci, jamais sans confinement — et un seul compose le porte" {
-  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(jq -c '.services.lcars.cap_add' <<<"$output")" = '["SYS_ADMIN"]' ]
-  jq -r '.services.lcars.security_opt[]' <<<"$output" | grep -qx 'seccomp=./lcars-hardened-seccomp.json'
-  jq -r '.services.lcars.security_opt[]' <<<"$output" | refute_out '^seccomp=unconfined$'
+@test "le conteneur reçoit SYS_ADMIN sous le profil seccomp durci, jamais sans confinement, chaque surcouche empilée — et un seul compose le porte" {
   [ -f "$DOCKER/lcars-hardened-seccomp.json" ]
-  # bench et secrets sont des surcouches : aucun autre compose ne déclare le service
-  local c porteurs=0
+  # chaque compose se rend : un fichier de base seul, une surcouche <base>.<nom>.yml empilée sur sa base ; un rendu en échec est un échec
+  local c base porteurs=0 rendus=0
+  local -a pile
   for c in "$DOCKER"/*compose*.yml; do
+    base="${c##*/}"; base="$DOCKER/${base%%.*}.yml"
+    pile=(-f "$base"); [[ "$c" == "$base" ]] || pile+=(-f "$c")
     run rendu LCARS_STORE_PREFIX=p LCARS_BENCH_BASE=b LCARS_DEVFORGE_NETWORK=n LCARS_CONTAINER_MASTER_TOKEN=/m LCARS_CONTAINER_SEED=/s \
-      LCARS_RUNNER_NETWORK=n docker compose --env-file "$CONST" -f "$c" -p p config --format json
-    [ "$status" -eq 0 ] || continue
-    [ "$(jq -r '.services.lcars.image // empty' <<<"$output")" = "" ] || porteurs=$((porteurs + 1))
+      LCARS_RUNNER_NETWORK=n docker compose --env-file "$CONST" "${pile[@]}" -p p config --format json
+    [ "$status" -eq 0 ] || { echo "${pile[*]} ne se rend pas : $output"; return 1; }
+    rendus=$((rendus + 1))
+    jq -r '.services[] | .security_opt[]?' <<<"$output" | refute_out '^seccomp=unconfined$' || { echo "${pile[*]}"; return 1; }
+    [[ "$(jq -r '.services | has("lcars")' <<<"$output")" == true ]] || continue
+    [ "$(jq -c '.services.lcars.cap_add' <<<"$output")" = '["SYS_ADMIN"]' ] || { echo "${pile[*]}"; return 1; }
+    jq -r '.services.lcars.security_opt[]' <<<"$output" | grep -qx 'seccomp=./lcars-hardened-seccomp.json' || { echo "${pile[*]}"; return 1; }
+    [[ "$c" != "$base" ]] || porteurs=$((porteurs + 1))
   done
+  # GARDE D'INSTRUMENT : le compose de l'instance et ses surcouches sont passés par la boucle
+  [ "$rendus" -gt 1 ]
   [ "$porteurs" -eq 1 ]
 }
 

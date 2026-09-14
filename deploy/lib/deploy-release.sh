@@ -5,7 +5,9 @@
 # STATUS: la release du runtime — bâtie depuis les sources par mix release, ou reprise du kit, puis basculée sous le préfixe
 #
 # ENV   LCARS_RUNTIME_DIR   l'arbre du runtime à poser (60-deploy le passe)
-# EXIT  0 posée · 1 échec, nommé sur stderr ; la génération précédente de rel/ reste en .prev
+# EXIT  0 posée · 1 échec, nommé sur stderr. Un manifeste illisible ou mal formé, une entrée de bin/ ou le gabarit
+#       d'env absents, root ou un build en échec arrêtent avant toute bascule : la release en place reste
+#       entière. Une fois rel/ basculé, la génération précédente reste en rel/lcars_fleet.prev.
 #
 # Jouée par 60-deploy sous l'humain qui bâtit ; 60 pose ensuite les modes, les liens du PATH et
 # retire ce que le manifeste ne nomme plus. Le build ne joue pas le gate : un kit porte la release que

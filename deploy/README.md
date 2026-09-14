@@ -14,10 +14,10 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 
 | commande | rôle |
 |---|---|
-| `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et délègue. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration, et demande jq sur l'hôte en mode conteneur. Le reste : `install.sh --help` |
-| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` mesure, arrête avant `sudo` un terrain que le préflight refuse, escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit détaré sous `~/.lcars/kits/<nom>/`, puis `accept` ; `doctor` sonde sans escalader |
+| `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et délègue ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration, et demande jq sur l'hôte en mode conteneur. Le reste : `install.sh --help` |
+| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` mesure, arrête avant `sudo` un terrain que le préflight refuse, escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel), puis `accept` ; `doctor` sonde sans escalader et rend les codes de `provision doctor` |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/`. Codes de sortie et variables : `deploy/container help` |
-| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : les deux gates, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace) ; le tiroir `dist/<tag>/` les reprend par liens durs, avec le compose de l'instance, son profil seccomp, les constantes de l'installeur et l'installeur de la version ; l'image reste dans le daemon. `--publish` : « Publier une version », plus bas |
+| `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : les deux gates, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace) ; le tiroir `dist/<tag>/` les reprend par liens durs, avec le compose de l'instance, son profil seccomp, les constantes de l'installeur et l'installeur de la version ; l'image reste dans le daemon. Prérequis et codes de sortie : `deploy/pack.sh --help` ; `--publish` : « Publier une version », plus bas |
 | `deploy/provision apply \| doctor \| list \| audit` | le runner des modules, joué par `workstation`, par le préflight de l'installeur et par la construction de l'image ; `apply` se joue en root. Options et codes de sortie : `deploy/provision --help` |
 | `deploy/accept` | l'acceptation d'une installation dans le système : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows du modèle de projet demandent, la fleet démarre sous un humain de fleet de la machine (sur un banc, sous l'humain de démonstration) |
 
@@ -42,10 +42,14 @@ Les faits fixes de l'installeur — racines, fichiers de jetons, comptes et grou
 de la forge, épingles de la chaîne Elixir, listes de ce que 62 pose — sont déclarés une fois dans
 `installer-constants.env` : la lib le lit comme une donnée, compose le reçoit par `--env-file`, et
 l'environnement ne les surcharge pas. Les choix de l'opérateur (ports, base des projets, humain)
-viennent des drapeaux de `provision`, de l'environnement ou d'un `--env FICHIER` ; leurs défauts
-sont les clés `_DEFAULT` du même fichier, et la ligne `params` du journal de la machine retient
-ceux qui s'en écartent. Le fichier de canal (`PROV_CHANNEL_FILE`) retient qui a posé le produit,
-`source` (un checkout) ou `kit` ; un canal ne se pose pas sur un autre.
+viennent des drapeaux de `provision`, de l'environnement ou d'un `--env FICHIER`. Les ports et la
+base ont leurs défauts dans les clés `_DEFAULT` du même fichier, et la ligne `params` du journal de
+la machine retient ceux qui s'en écartent ; l'humain se redonne à chaque passe (`--human`, sinon
+`SUDO_USER`, sinon l'appelant). Le fichier de canal (`PROV_CHANNEL_FILE`) retient qui a posé le
+produit, `source` (un checkout) ou `kit` ; un canal ne se pose pas sur un autre. La livraison suit
+l'arbre joué : une livraison source est un checkout, qui bâtit la release et la doc sur la machine
+et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de révision
+(`PROV_SOURCE_STAMP`), porte la release (ERTS embarqué) et la doc déjà bâties.
 
 ## Modules (`modules.d/NN-*.sh`)
 
@@ -124,11 +128,18 @@ L'installeur généré nomme l'image de la version (`<registre>/<owner>/<repo>:<
 `LCARS_MINISIGN_SECKEY` (le fichier de la clé secrète) vont ensemble : le kit est signé par minisign
 dans le tiroir, et l'installeur porte la clé publique qui vérifie cette signature.
 
-Une release du tag qui existe, brouillon compris, est un refus avant tout envoi : pour refaire, la
-supprimer sur la forge. L'image part ensuite (un tag d'image qui existe est un refus) et se relit
-par un tirage sans identifiants, celui de l'installeur : une image que ce tirage ne voit pas arrête la
-publication avant la release (sur GHCR, un paquet est privé à sa première publication et se passe
-public dans ses réglages). La release naît alors en brouillon sur le commit, reçoit tout le tiroir
+Avant tout envoi, dans cet ordre, sont des refus : une forge ou un propriétaire indéterminables,
+aucun jeton, une release du tag qui existe (brouillon compris ; pour refaire, la supprimer sur la
+forge) ou un jeton qui ne lit pas le dépôt, un commit que la forge ne porte pas (il se pousse
+d'abord), un registre qui refuse le jeton. Vient l'image. Un tag d'image qui existe déjà au
+registre n'est jamais repoussé : à la révision du kit (le label `org.opencontainers.image.revision`
+de l'image), c'est l'image d'une publication arrêtée après son envoi, et elle est reprise ; à une
+autre révision, c'est un refus. Sinon l'image part. Elle se relit alors par un tirage sans
+identifiants, celui de l'installeur : une image que ce tirage ne voit pas arrête la publication
+avant la release. Sur GHCR, un paquet naît privé à sa première publication : dans les réglages du
+paquet (Package settings), « Change visibility » le passe public et « Connect repository » le relie
+au dépôt ; `deploy/pack.sh --publish` relancé reprend ensuite l'image poussée. La release naît en
+brouillon sur le commit, reçoit tout le tiroir
 (le kit, son `.sha256` et sa `.minisig` quand le kit est signé, `docker-compose.yml`,
 `lcars-hardened-seccomp.json`, `installer-constants.env`, `install.sh` et `install.sh.sha256`), et
 est publiée d'un coup. L'installeur publié porte en dur la base
@@ -168,6 +179,11 @@ d'un opérateur. Une instance en conteneur la reçoit par sa conf de projet, pos
 posées, une forge qui répond, un jeton accepté et site-admin, un seed posé ; chaque manque vient
 avec son geste, et la sortie est 0 quand le contrat tient, 1 sinon. `deploy/container forge-apply`
 pose ensuite la structure (OpenTofu tourne dans le conteneur), rejouable.
+
+Une installation dans le système reçoit `FORGE_BASE_URL` et `FORGE_PUBLIC_URL` de l'environnement
+ou d'un `--env FICHIER`. `48-forge-host` y génère le seed ; le jeton master s'écrit à la main dans
+le fichier que son drift nomme (`PROV_MASTER_TOKEN_FILE`, 0600, au compte d'autorité), puis la passe
+se relance et `61-forge-structure` pose la structure.
 
 ## Témoins
 

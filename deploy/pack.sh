@@ -6,6 +6,7 @@
 # USAGE : deploy/pack.sh            gate + release + doc + tar + installeur + image : dans le tiroir et le daemon, rien n'en sort
 #         deploy/pack.sh --publish  … puis l'image au registre et la release de la forge (tout le tiroir)
 #         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit)
+#         deploy/pack.sh --help     cette aide
 #         Se lance hors root, sur un arbre commité.
 # ENV   : LCARS_PACK_DIR      le tiroir des paquets (défaut : lcars-packs à côté du checkout)
 #         LCARS_PACK_TAG      le tag de la version (défaut : le tag git de HEAD, sinon <AAAA-MM-JJ>-<sha>)
@@ -18,12 +19,16 @@
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
 #         LCARS_MINISIGN_PUBKEY, LCARS_MINISIGN_SECKEY   la clé publique inscrite dans l'installeur et le fichier de la clé
 #                             secrète qui signe le kit : l'une ne va pas sans l'autre
-# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; docker, sauf --no-image ; minisign avec les clés
+# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; bats et shellcheck, que la porte
+#         de l'installeur exige ; docker compose, sans lequel cette porte saute les témoins des composes et les
+#         compte ; docker, sauf --no-image ; jq avec --publish ; minisign avec les clés
 # EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
 #         inconnue), gate rouge, build ou doc en échec, kit incomplet, docker injoignable, publication refusée
+#         (dont une image du tag déjà publiée à une autre révision)
 
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")/.."
+SELF="$(readlink -f "$0")"
+cd "$(dirname "$SELF")/.."
 # shellcheck source=lib/provision-lib.sh
 . deploy/lib/provision-lib.sh
 
@@ -33,7 +38,8 @@ for _arg in "$@"; do
   case "$_arg" in
     --publish)  PUBLISH=1 ;;
     --no-image) IMAGE=0 ;;
-    *) echo "pack: option inconnue: $_arg (--publish | --no-image)" >&2; exit 1 ;;
+    -h|--help)  sed -n '/^# USAGE/,/^$/p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "pack: option inconnue: $_arg (--publish | --no-image | --help)" >&2; exit 1 ;;
   esac
 done
 
@@ -202,18 +208,25 @@ if [[ "$IMAGE" -eq 1 ]]; then
   trap 'rm -rf "$STAGE"; "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true' EXIT
   _rc=0; _insp="$("$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" || _rc=$?
   if [[ "$_rc" -eq 0 ]]; then
-    die "--publish : $IMAGE_REMOTE existe déjà — un tag publié ne se réécrit jamais ; pour refaire, le supprimer sur la forge, ce script ne le fait pas"
+    # un tag publié ne se réécrit pas ; à la révision du kit, c'est l'image d'une publication arrêtée après son push, qui se reprend
+    "$PROV_DOCKER_BIN" pull -q "$IMAGE_REMOTE" >/dev/null 2>&1 \
+      || die "--publish : $IMAGE_REMOTE existe déjà et ne se tire pas pour lire sa révision — rien n'est poussé"
+    _rev_publiee="$("$PROV_DOCKER_BIN" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_REMOTE" 2>/dev/null || true)"
+    [[ "$_rev_publiee" == "$REV" ]] \
+      || die "--publish : $IMAGE_REMOTE existe déjà, à la révision « ${_rev_publiee:-aucune} » et non $REV — un tag publié ne se réécrit jamais ; pour refaire, le supprimer sur la forge, ce script ne le fait pas"
+    say "image déjà publiée à la révision $REV : $IMAGE_REMOTE est reprise, rien n'est poussé"
+  else
+    [[ "${_insp,,}" == *"no such manifest"* || "${_insp,,}" == *"manifest unknown"* || "${_insp,,}" == *"not found"* ]] \
+      || die "--publish : le registre ne dit pas si $IMAGE_REMOTE existe (${_insp:0:200}) — rien n'est poussé"
+    say "image → $IMAGE_REMOTE…"
+    "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
+      || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
+    say "image publiée : $IMAGE_REMOTE"
   fi
-  [[ "${_insp,,}" == *"no such manifest"* || "${_insp,,}" == *"manifest unknown"* || "${_insp,,}" == *"not found"* ]] \
-    || die "--publish : le registre ne dit pas si $IMAGE_REMOTE existe (${_insp:0:200}) — rien n'est poussé"
-  say "image → $IMAGE_REMOTE…"
-  "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
-    || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
-  say "image publiée : $IMAGE_REMOTE"
   # l'installeur de la release tire l'image sans identifiants : un magasin de configuration vide rejoue ce tirage
   mkdir -p "$STAGE/docker-anonyme"
   _anon="$(DOCKER_CONFIG="$STAGE/docker-anonyme" "$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" \
-    || die "--publish : $IMAGE_REMOTE est poussée, mais un tirage anonyme est refusé (${_anon:0:200}) — l'installeur de la release ne la tirerait pas, la release n'est pas créée. Le paquet de l'image est privé : sur GHCR, un paquet est privé à sa première publication, il se passe public dans ses réglages (Package settings → Change visibility)"
+    || die "--publish : $IMAGE_REMOTE est au registre, mais un tirage anonyme est refusé (${_anon:0:200}) — l'installeur de la release ne la tirerait pas, la release n'est pas créée. Le paquet de l'image est privé : sur GHCR, un paquet est privé à sa première publication, il se passe public dans ses réglages (Package settings → Change visibility) ; relancer ensuite --publish, qui reprend l'image de cette révision"
   say "image tirable sans identifiants : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"

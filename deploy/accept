@@ -4,15 +4,17 @@
 # STARDATE: 2026-09-14
 # STATUS: l'acceptation d'une installation : ce qu'un opérateur peut en faire — se connecter à la forge, faire fusionner une PR, démarrer la fleet
 # USAGE : accept --announce-file <chemin> [--forge-url URL]
-# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une capacité manque · 2 argument inconnu
+# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une capacité manque · 2 option inconnue, ou sans sa valeur
 
 set -euo pipefail
 
 ANNOUNCE="" ; FORGE_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --announce-file) ANNOUNCE="${2:?}"; shift 2 ;;
-    --forge-url)     FORGE_URL="${2:?}"; shift 2 ;;
+    --announce-file|--forge-url)
+      [[ -n "${2:-}" ]] || { echo "accept: $1 attend une valeur" >&2; exit 2; }
+      if [[ "$1" == --announce-file ]]; then ANNOUNCE="$2"; else FORGE_URL="$2"; fi
+      shift 2 ;;
     *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
   esac
 done

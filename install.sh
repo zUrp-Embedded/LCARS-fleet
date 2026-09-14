@@ -7,10 +7,10 @@
 #     install.sh — l'installeur de LCARS-FLEET.
 #
 #     Il mesure la machine, montre ce qu'il va faire, marque une pause (Entrée pour continuer,
-#     Ctrl+C pour annuler ; sans terminal, il continue en le disant), puis délègue. Le système n'est
-#     modifié qu'après cette pause, et ce script ne demande jamais sudo lui-même. Le script d'une
-#     release, pipé ou avec --from-release, télécharge d'abord le kit de sa version, le vérifie et le
-#     détare dans ~/.lcars/kits/.
+#     Ctrl+C pour annuler ; sans terminal, il continue en le disant), puis délègue. Avant cette pause,
+#     seul ~/.lcars/kits/ reçoit quelque chose, et ce script ne demande jamais sudo lui-même. Le script
+#     d'une release, pipé ou avec --from-release, y télécharge d'abord le kit de sa version, le vérifie
+#     et le détare : la mesure vit dans le kit.
 #
 #       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
@@ -66,14 +66,18 @@ if [[ "$EUID" -eq 0 ]]; then
   exit 1
 fi
 
-# BASH_SOURCE n'est pas lié quand bash lit sur stdin (curl | bash) : sans fichier, pas d'arbre
+# BASH_SOURCE n'est pas lié quand bash lit sur stdin (curl | bash) : sans fichier, pas d'arbre.
+# Une variable proposée à l'opérateur se place devant PORTE_BASH : pipée, devant curl, bash ne la recevrait pas.
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  PORTE_CMD="bash ${BASH_SOURCE[0]}"
+  PORTE_TIRAGE=""
+  PORTE_BASH="bash ${BASH_SOURCE[0]}"
 else
   SCRIPT_DIR=""
-  PORTE_CMD="curl -fsSL <install.sh> | bash -s --"
+  PORTE_TIRAGE="curl -fsSL <install.sh> | "
+  PORTE_BASH="bash -s --"
 fi
+PORTE_CMD="$PORTE_TIRAGE$PORTE_BASH"
 
 REPO_URL="https://github.com/zurp-embedded/LCARS-fleet.git"
 # Les constantes d'une version : vides dans le gabarit, écrites par deploy/lib/door-gen.sh sur les
@@ -403,7 +407,7 @@ if [[ "$MODE" == "workstation" ]]; then
       [[ "$(fait consent)" == "env" ]] || stop \
         "${R}Linux natif sans déclaration.${N} L'installation dans ce système possède la machine (/etc, $RACINE," \
         "des groupes, des comptes) et ne se désinstalle pas : elle est réservée à une machine dédiée." \
-        "Pour la déclarer dédiée, à chaque passe :  LCARS_ALLOW_ANY_HOST=1 $PORTE_CMD --workstation" \
+        "Pour la déclarer dédiée, à chaque passe :  ${PORTE_TIRAGE}LCARS_ALLOW_ANY_HOST=1 $PORTE_BASH --workstation" \
         "Sinon, le conteneur ne touche à rien :      $PORTE_CMD" ;;
     *) stop "${R}--workstation ne s'installe que dans une distribution WSL2 ou sur une machine Linux dédiée.${N}" \
             "Ici (substrat $SUBSTRATE), le conteneur :  $PORTE_CMD" ;;
@@ -417,7 +421,7 @@ if [[ "$DOCKER_OK" -eq 0 ]]; then
          "Sous WSL, activer l'intégration WSL de Docker Desktop pour cette distribution, puis relancer."
   elif [[ "$MODE" == "container" ]]; then
     stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas." \
-         "L'installer, ou donner la machine à l'installation dans le système :  LCARS_ALLOW_ANY_HOST=1 $PORTE_CMD --workstation"
+         "L'installer, ou donner la machine à l'installation dans le système :  ${PORTE_TIRAGE}LCARS_ALLOW_ANY_HOST=1 $PORTE_BASH --workstation"
   fi
 else
   # le daemon qui a répondu au préflight, pas un DOCKER_HOST de l'environnement qu'il a écarté
@@ -439,7 +443,7 @@ case "$FORGE_ETAT" in
   aucune) stop "${R}Les deux installations ont besoin d'une forge et de son runner CI. Aucune n'est indiquée.${N}" \
                "Relancer en précisant laquelle :" \
                "  $PORTE_CMD$MODE_FLAG --bench                       une forge jetable, montée par l'installeur" \
-               "  FORGE_BASE_URL=https://… $PORTE_CMD$MODE_FLAG      une forge existante" ;;
+               "  ${PORTE_TIRAGE}FORGE_BASE_URL=https://… $PORTE_BASH$MODE_FLAG      une forge existante" ;;
   injoignable) stop "${R}La forge fournie ne répond pas : $(fait forge_fournie)${N}" "Vérifier l'URL et que l'API répond (/api/v1/version), puis relancer." ;;
 esac
 [[ -z "$PORTS_PRIS" ]] || stop "${R}Un port demandé est déjà tenu : $PORTS_PRIS.${N}" \
@@ -452,13 +456,18 @@ fi
 # ─── 6. le mode, et sa grille ─────────────────────────────────────────────────────────────────
 BASE_PROJET="$(ou "$(fait projet)")"
 if [[ "$MODE" == "container" ]]; then
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    RETOUR="deploy/docker/bench/bench-down.sh --project $BASE_PROJET --yes : le conteneur, la forge, le runner et le magasin"
+  else
+    RETOUR="deploy/container -p $BASE_PROJET-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"
+  fi
   cat <<EOF
   ${W}Installation en conteneur${N} — LCARS tourne dans Docker, la distribution
   n'est pas modifiée : aucun paquet, aucun compte, rien dans /etc ni /usr.
     Modifie    Docker : un conteneur et deux volumes au projet $BASE_PROJET-fleet, le magasin $BASE_PROJET-fleet-*
     Requiert   docker · la forge (ci-dessus)
     Espace     ~3 Go · durée ~15 min · ports $(ou "$PORT_DECK") (deck), $(ou "$PORT_SSH") (ssh)
-    Retour     deploy/container -p $BASE_PROJET-fleet reset, 30 s
+    Retour     $RETOUR
   Pour installer dans ce système à la place :  $PORTE_CMD --workstation
 
 EOF
@@ -466,6 +475,9 @@ else
   if [[ "$SUBSTRATE" == "wsl" ]]; then
     MODIFIE="/etc/wsl.conf, $RACINE, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"
     RETOUR="aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"
+    # la forge montée et son runner vivent dans le daemon de Docker Desktop, hors de la distribution
+    [[ "$WITH_BENCH" -eq 0 ]] \
+      || RETOUR+=" ; la forge et le runner restent dans Docker Desktop : docker compose -p $BASE_PROJET-forge down -v, docker compose -p $BASE_PROJET-runner down -v"
   else
     MODIFIE="$RACINE, des groupes et des comptes de service, des paquets apt, ~/.claude de l'utilisateur, docker-ce si aucun daemon ne répond"
     RETOUR="aucun désinstalleur : la machine se réinstalle"

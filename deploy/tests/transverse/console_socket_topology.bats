@@ -8,6 +8,7 @@
 # shellcheck disable=SC2016
 
 load ../refute
+load ../support/compose
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
@@ -229,6 +230,7 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
 }
 
 @test "6-072: NOTHING of the per-human block space is published" {
+  compose_requis
   local dir="$BATS_TEST_DIRNAME/../../docker" p
   for p in $(ports_of "$dir/docker-compose.yml"); do
     [ "$p" -lt 21000 ] || [ "$p" -gt 25999 ] \
@@ -237,6 +239,7 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
 }
 
 @test "6-072: TEMOIN — l'instrument voit encore les publications qui restent" {
+  compose_requis
   local dir="$BATS_TEST_DIRNAME/../../docker" pub
   pub="$(ports_of "$dir/docker-compose.yml")"
   [ -n "$pub" ]

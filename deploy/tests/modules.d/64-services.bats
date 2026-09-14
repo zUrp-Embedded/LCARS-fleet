@@ -478,11 +478,19 @@ EOF
   [[ "$output" == *"lcars-converger.service debout"* ]]
 }
 
-@test "un service pose mais MORT fait echouer l'apply, et l'echec porte sa cause au lieu de renvoyer a un second geste" {
+@test "un service pose mais MORT fait echouer l'apply, et l'echec porte la derniere erreur de son journal" {
   echo 1 > "$ACTIVE"
+  # le journal de l'unité, tel que journalctl le rend : du bruit, puis l'erreur qui l'a tuée
+  cat > "$BINDIR/journalctl" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == "-u lcars-converger.service "* ]] || exit 0
+echo "sept. 14 10:00:00 poste systemd[1]: Started lcars-converger.service."
+echo 'sept. 14 10:00:01 poste human-converger.sh[42]: OSError: [Errno 13] Permission denied: "/opt/lcars/var/tokens"'
+EOF
+  chmod 0755 "$BINDIR/journalctl"
   mod apply
   [ "$status" -ne 0 ]
-  [[ "$output" == *"FAIL  64-services: lcars-converger.service posé mais pas debout — « journalctl -u lcars-converger.service » dit pourquoi"* ]]
+  [[ "$output" == *"FAIL  64-services: lcars-converger.service posé mais pas debout — « journalctl -u lcars-converger.service » dit pourquoi (journal : OSError: [Errno 13] Permission denied: )"* ]]
 }
 
 @test "un port DEJA PRIS se dit, et nomme --port-deck" {

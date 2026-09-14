@@ -15,7 +15,10 @@
 #   Un canal ne se pose pas sur un autre : une machine installée par kit refuse un checkout, et
 #   inversement — mise à jour par le même canal, ou le terrain se refait.
 #
-#   EXIT  0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, échec du provisionnement ou de l'acceptation
+#   EXIT  up      0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, échec du provisionnement
+#                 ou de l'acceptation
+#         doctor  les codes de « provision doctor » : 0 conforme · 1 drift · 2 erreur (deploy/provision --help)
+#         un verbe inconnu sort en 1
 
 set -euo pipefail
 
@@ -23,7 +26,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROVISION="$HERE/provision"
 PROVISION_LIB="$HERE/lib/provision-lib.sh"
 
-usage() { sed -n '/^# USAGE/,/^#   EXIT/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-help}" in
   -h|--help|help) usage; exit 0 ;;

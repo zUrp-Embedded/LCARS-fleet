@@ -23,9 +23,9 @@
 #         outil ou image absents, docker muet, port tenu, banc déjà monté, ou projet qui n'est pas
 #         ce banc · 2 la forge ne monte pas · 3 le conteneur ne
 #         monte pas · 4 amorçage de la forge · 5 humain ou credentials · 6 le banc n'est pas prêt
-#         (jeton système absent après la relance, runner demandé qui ne sert pas, conteneur en échec
-#         de convergence) · 7 la source ne se sème pas (révision de l'image, push, alignement du
-#         clone du conteneur)
+#         (jeton système absent après la relance, conteneur en échec de convergence, fleet qui ne
+#         démarre pas, runner demandé qui ne sert pas) · 7 la source ne se sème pas (révision de
+#         l'image, push, alignement du clone du conteneur)
 
 set -euo pipefail
 
@@ -273,9 +273,11 @@ fi
 
 # la fleet démarre sous l'humain ; sans credentials claude elle tourne sans penser, et c'est dit
 FLEET_STATE="non démarrée"
+FLEET_OK=0
 if [[ "$CONTAINER_PROV_OK" -eq 1 ]]; then
   if [[ "$WITH_CREDS" -eq 1 ]]; then fleet_env=(); else fleet_env=(LCARS_START_WITHOUT_CLAUDE=1); fi
   if d exec -u "$HUMAN" "$CONTAINER" env ${fleet_env[@]+"${fleet_env[@]}"} fleet start >/dev/null 2>&1; then
+    FLEET_OK=1
     FLEET_STATE="démarrée sous $HUMAN$([[ "$WITH_CREDS" -eq 1 ]] || printf ' (sans credentials claude : aucun pod ne pense)')"
   else
     FLEET_STATE="« fleet start » a échoué sous $HUMAN — docker exec -u $HUMAN $CONTAINER fleet start pour lire sa plainte"
@@ -286,6 +288,9 @@ REFUS=""
 if [[ "$CONTAINER_PROV_OK" -ne 1 ]]; then
   VERDICT="banc PAS PRÊT — le conteneur s'est déclaré en échec de convergence"
   REFUS="le conteneur a publié un échec de convergence — banc incomplet ; il tourne et reste joignable pour être réparé, et ne produira rien tant que la convergence n'est pas verte"
+elif [[ "$FLEET_OK" -ne 1 ]]; then
+  VERDICT="banc PAS PRÊT — la fleet ne démarre pas sous $HUMAN"
+  REFUS="« fleet start » a échoué sous $HUMAN — banc incomplet ; le conteneur tourne et reste joignable pour lire la plainte"
 elif [[ "$WITH_RUNNER" -eq 0 ]]; then
   VERDICT="banc PRÊT sans CI"
 elif [[ "$RUNNER_SERT" -eq 1 ]]; then

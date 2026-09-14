@@ -91,12 +91,13 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   [[ "$output" == 100755* ]]
 }
 
-@test "les réglages d'affichage de l'appelant traversent le sudo" {
+@test "chaque variable de la liste nommée que l'appelant porte traverse le sudo, dans l'ordre de la liste — affichage, déclaration, forge, banc" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre channel=aucun docker=absent docker_host=
-  PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 ws
+  PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 PROV_DUMP_LINES=7 LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_ADMIN_RESET=1 \
+    PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test FORGE_PUBLIC_URL=http://forge.public.test ws
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 bash $WS up" ]
+  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 PROV_DUMP_LINES=7 LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_ADMIN_RESET=1 PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars FORGE_BASE_URL=http://forge.test FORGE_PUBLIC_URL=http://forge.public.test bash $WS up" ]
 }
 
 @test "toute FORGE_ que la lib lit dans l'environnement traverse le sudo" {
@@ -122,6 +123,7 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"workstation <commande>"*"up "*"--from <kit.tar.gz>"*"doctor "*"EXIT"* ]]
+  [[ "$output" == *"EXIT  up      0 convergé"*"doctor  les codes de « provision doctor »"*"un verbe inconnu sort en 1"* ]]
   [[ "$output" == *"ne se pose pas sur un autre"* ]]
   refute_out '\.deb' <<<"$output"
 }

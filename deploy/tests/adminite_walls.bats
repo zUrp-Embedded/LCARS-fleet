@@ -57,7 +57,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   [[ "$secrets" == *'|'* ]] || { echo "MUR 1 — les deux secrets d'autorité ne se lisent plus dans installer-constants.env : « $secrets »" >&2; return 1; }
   local motif="MASTER_TOKEN_FILE|FORGE_SEED_FILE|$secrets"
 
-  local f ligne mode proprio poses=0
+  local f ligne mode proprio proprios poses=0
   for f in "${CODE[@]}"; do
     while IFS= read -r ligne; do
       [[ -n "$ligne" ]] || continue
@@ -65,12 +65,16 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
       for mode in $(grep -oE '0[0-7]{3}' <<<"$ligne"); do
         [[ "$mode" == "0600" ]] || { echo "MUR 1 rompu — $f pose un secret d'autorite en $mode :" >&2; echo "  $ligne" >&2; return 1; }
       done
+      proprios="$(grep -oE '"?(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*):(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*)"?' <<<"$ligne" | grep -v '^[a-z]*://' || true)"
+      # une pose qui nomme un propriétaire sans « compte:compte » laisse le groupe à ce qui était là : elle se refuse
+      [[ -n "$proprios" ]] || ! grep -qE 'chown|chgrp|write_atomic|install -m' <<<"$ligne" || {
+        echo "MUR 1 rompu — $f pose un secret d'autorite sans propriétaire « compte:compte » :" >&2; echo "  $ligne" >&2; return 1; }
       while read -r proprio; do
         [[ -n "$proprio" ]] || continue
         proprio="${proprio//\"/}"
         [[ "${proprio%%:*}" == "${proprio#*:}" ]] || {
           echo "MUR 1 rompu — $f donne un secret d'autorite au groupe « ${proprio#*:} » :" >&2; echo "  $ligne" >&2; return 1; }
-      done < <(grep -oE '"?(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*):(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*)"?' <<<"$ligne" | grep -v '^[a-z]*://' || true)
+      done <<<"$proprios"
     done < <(code_of "$f" | grep -E "$motif" | grep -E 'chmod|chown|chgrp|write_atomic|install -m')
   done
   # GARDE D'INSTRUMENT : les deux poses de 48-forge-host au moins

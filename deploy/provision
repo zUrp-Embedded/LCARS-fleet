@@ -27,6 +27,9 @@
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
 #          runner apply  0 convergé · 1 échec, ou terrain refusé par le préflight · 2 drift résiduel
 #          runner doctor 0 conforme · 1 drift · 2 erreur
+#          runner audit  0 rien de non déclaré · 1 au moins un objet non déclaré, ou instantané illisible
+#          un refus avant tout module (commande ou option inconnue, valeur absente ou invalide, --env
+#          illisible, substrat contredit) sort en 1, sous chaque commande
 #
 #   --substrate S    wsl, linux ou docker : celui que ce système mesure (docker si /.dockerenv ou
 #                    LCARS_DOCKER=1, wsl sous un noyau Microsoft, linux sinon) ; un autre est refusé,

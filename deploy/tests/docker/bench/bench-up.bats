@@ -452,16 +452,24 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 
 # ─── la fleet ───────────────────────────────────────────────────────────────────────────────────
 
-@test "la fleet démarre sous l'humain : sans credentials avec LCARS_START_WITHOUT_CLAUDE=1, avec credentials sans lui, et un échec est nommé" {
+@test "la fleet démarre sous l'humain : sans credentials avec LCARS_START_WITHOUT_CLAUDE=1, avec credentials sans lui" {
   run_bench --no-runner
   grep -q "DOCKER:exec -u lcars bt-fleet-lcars-1 env LCARS_START_WITHOUT_CLAUDE=1 fleet start" "$CALLS"
   printf 'CREDS\n' > "$BATS_TEST_TMPDIR/creds.json"; : > "$CALLS"
   run_bench --no-runner --creds-from "$BATS_TEST_TMPDIR/creds.json"
   grep -q "DOCKER:exec -u lcars bt-fleet-lcars-1 env fleet start" "$CALLS"
-  echo 1 > "$FLEET_RC"; rm -f "$CREDS_POSED"
+}
+
+@test "une fleet qui ne démarre pas : banc PAS PRÊT, sortie 6, l'échec nommé — avec ou sans runner" {
+  echo 1 > "$FLEET_RC"
   run_bench --no-runner
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"fleet     : « fleet start » a échoué sous lcars"* ]]
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous lcars"*"fleet     : « fleet start » a échoué sous lcars"*"détruire  :"*"banc incomplet"* ]]
+  [[ "$output" != *"banc PRÊT sans CI"* ]]
+  run_bench
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous lcars"* ]]
+  [[ "$output" != *"[bench-up] banc PRÊT"$'\n'* ]]
 }
 
 # ─── la source du conteneur, le daemon, les substitutions ──────────────────────────────────────

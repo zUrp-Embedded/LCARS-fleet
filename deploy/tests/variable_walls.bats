@@ -12,11 +12,22 @@ setup() {
 code_of() { sed 's/#.*//' "$1"; }
 
 # le code bash du dépôt, reconnu à son shebang : hors témoins, arbres bâtis ou jetables, et arbres de
-# travail d'autres branches posés sous .claude/worktrees ; un awk par lot de fichiers, pas deux processus par fichier
+# travail d'autres branches posés sous .claude/worktrees ; un awk par lot de fichiers, pas deux processus par fichier.
+# Lisibles seulement : awk meurt sur un fichier qu'il ne peut ouvrir, et le reste de son lot partirait avec lui
 bash_code() {
   find "$REPO" \( -path "$REPO/.git" -o -path "$REPO/.claude/worktrees" -o -name tests -o -name _build \
-                  -o -name deps -o -name tmp -o -name node_modules \) -prune -o -type f -print0 2>/dev/null \
+                  -o -name deps -o -name tmp -o -name node_modules \) -prune -o -type f -readable -print0 2>/dev/null \
     | xargs -0 awk 'FNR == 1 { if (/^#!.*(bash|bats)/) print FILENAME; nextfile }' 2>/dev/null | sort
+}
+
+@test "instrument : un fichier illisible ne retire pas du périmètre les fichiers bash de son lot" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège : root lit un fichier en 000"
+  local REPO="$BATS_TEST_TMPDIR/depot" i
+  mkdir -p "$REPO/lot"
+  for i in $(seq 1 40); do printf '#!/usr/bin/env bash\n' > "$REPO/lot/s$i"; done
+  printf '#!/usr/bin/env bash\n' > "$REPO/lot/illisible"; chmod 000 "$REPO/lot/illisible"
+  run bash_code
+  [ "$(grep -c "^$REPO/lot/s" <<<"$output")" -eq 40 ] || { echo "$output"; return 1; }
 }
 
 @test "MUR 1: aucun repli sur une variable que bash pose TOUJOURS" {

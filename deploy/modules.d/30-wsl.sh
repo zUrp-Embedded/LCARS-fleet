@@ -21,7 +21,6 @@ WSL_CONF="$(prov_decor /etc/wsl.conf)"
 SNAP_DIRS=("$(prov_decor /snap)" "$(prov_decor /var/snap)" "$(prov_decor /var/lib/snapd)")
 HOSTNAME_CIBLE="${PROV_FORGE_BASE//_/-}"
 
-# une étiquette DNS : la base du projet arrive aussi par --env, qui ne passe pas par la validation du projet
 hostname_valide() { [[ "$HOSTNAME_CIBLE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; }
 
 # section clé valeur — l'état-cible entier ; [interop] coupée = pas d'exécutable Windows depuis l'instance

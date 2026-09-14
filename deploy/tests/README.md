@@ -30,10 +30,19 @@ Chaque témoin déclare sa couche en deuxième ligne, sous son shebang, `# bats 
 
 La couche est celle du fichier. Un fichier qui mêle des cas joués et des lectures de source porte
 la couche de ses cas joués ; le partage en deux fichiers se fait quand le fichier est repris.
+Chaque lecture de source d'un tel fichier porte, juste au-dessus de son `@test`,
+`# bats test_tags=structure` : un marqueur de tri, que `gate.sh` ne lit pas (ses entrées suivent la
+couche du fichier). `bats --filter-tags structure -r deploy/tests` joue les fichiers de structure
+et ces cas marqués ; `bats --filter-tags '!structure' -r deploy/tests`, les cas joués seuls.
 
 `deploy/gate.sh` sans argument joue tout, après le plancher shellcheck et les en-têtes
 déclaratifs ; c'est ce que `pack.sh` joue avant d'empaqueter. `runtime/test/shell_gate.sh` ne joue
 rien d'ici.
+
+La porte demande `bats` et `shellcheck`, et refuse de passer sans eux. Les cas qui rendent un compose
+par `docker compose config` (sans daemon) demandent la CLI docker et son plugin compose : sans eux,
+`support/compose.bash` (`compose_requis`) les saute en le disant, et le verdict de la porte compte
+les cas sautés. `pack.sh --no-image` reste ainsi possible sur un poste sans docker.
 
 ## Écrire un témoin
 

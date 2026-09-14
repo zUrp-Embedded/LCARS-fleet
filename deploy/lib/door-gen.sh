@@ -4,13 +4,14 @@
 # STARDATE: 2026-09-05
 # STATUS: l'installeur d'une version — le gabarit install.sh avec sa version, sa base, sa clé, son image et la table des sha256 du tiroir
 # USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ou <tiroir>/minisign.pub ; une clé fait vérifier la signature de chaque kit, minisign requis)
+# ENV   : LCARS_DOOR_TEMPLATE  le gabarit lu (défaut : install.sh à la racine de cet arbre)
 # EXIT  : 0 install.sh et install.sh.sha256 écrits dans le tiroir · 1 refus, l'installeur n'est pas écrit
 
 set -euo pipefail
 
-TAG="${1:?usage : door-gen.sh <tag> <base> <dist-dir>}"
-BASE="${2:?usage : door-gen.sh <tag> <base> <dist-dir>}"
-DIST="${3:?usage : door-gen.sh <tag> <base> <dist-dir>}"
+TAG="${1:?usage : door-gen.sh <tag> <base> <tiroir>}"
+BASE="${2:?usage : door-gen.sh <tag> <base> <tiroir>}"
+DIST="${3:?usage : door-gen.sh <tag> <base> <tiroir>}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="${LCARS_DOOR_TEMPLATE:-$HERE/../../install.sh}"
 

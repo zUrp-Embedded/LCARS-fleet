@@ -44,6 +44,8 @@ _faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écr
     echo 'cat > "$PROV_FACTS_FILE" <<'"'"'FACTS'"'"''
     printf '%s\n' "$@"
     echo 'FACTS'
+    # la déclaration d'un Linux dédié se lit dans l'environnement du préflight, comme le vrai
+    echo '[[ "${LCARS_ALLOW_ANY_HOST:-}" != 1 ]] || echo consent=env >> "$PROV_FACTS_FILE"'
     echo '[[ -z "${FAUX_PREFLIGHT_REFUS:-}" ]] || { echo "OK    00-preflight: décor"; echo "$FAUX_PREFLIGHT_REFUS"; exit 1; }'
   } > "$arbre/deploy/provision"
   chmod 0755 "$arbre/deploy/provision"
@@ -71,7 +73,8 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 
 @test "root est refusé avant tout parsing : ni l'aide, ni la version, ni une option inconnue ne passent" {
   # le vrai unshare, hors des doublures du décor : root y est l'uid 0
-  local us; us="$(PATH="${PATH#"$BINDIR:"}" command -v unshare)"
+  local us; us="$(PATH="${PATH#"$BINDIR:"}" command -v unshare || true)"
+  [[ -n "$us" ]] || skip "unshare absent de ce poste : root ne se joue pas ici"
   "$us" -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
   local a
   for a in --help --version --zzz; do
@@ -472,9 +475,34 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   local a; a="$(_arbre projet=bob_10)"
   porte "$a" --bench --forge-project bob_10 --check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Installation en conteneur"*"Modifie"*"bob_10-fleet"*"Requiert"*"docker · la forge"*"Retour     deploy/container -p bob_10-fleet reset"* ]]
+  [[ "$output" == *"Installation en conteneur"*"Modifie"*"bob_10-fleet"*"Requiert"*"docker · la forge"*"Retour     "* ]]
   [[ "$output" == *"Pour installer dans ce système à la place :"*"--workstation"* ]]
   [[ "$output" != *"Choix ["* ]]
+}
+
+@test "le retour du conteneur est celui de son cas : le banc se détruit entier, une instance sur forge fournie se remet à zéro sans son magasin" {
+  local a; a="$(_arbre projet=bob_10)"
+  porte "$a" --bench --forge-project bob_10 --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retour     deploy/docker/bench/bench-down.sh --project bob_10 --yes : le conteneur, la forge, le runner et le magasin"* ]]
+  refute_out 'reset' <<<"$output"
+  a="$(_arbre projet=bob_10 forge_fournie=https://forge.example.net forge_joignable=oui)"
+  porte "$a" --forge-project bob_10 --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retour     deploy/container -p bob_10-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"* ]]
+  refute_out 'bench-down' <<<"$output"
+}
+
+@test "le retour du système sous WSL : avec --bench, la forge et le runner qui restent dans Docker Desktop sont nommés avec leur geste" {
+  local a; a="$(_arbre projet=bob_10)"
+  porte "$a" --bench --workstation --forge-project bob_10 --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retour     aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>) ; la forge et le runner restent dans Docker Desktop : docker compose -p bob_10-forge down -v, docker compose -p bob_10-runner down -v"* ]]
+  a="$(_arbre projet=bob_10 forge_fournie=https://forge.example.net forge_joignable=oui)"
+  porte "$a" --workstation --forge-project bob_10 --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retour     aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"$'\n'* ]]
+  refute_out 'down -v' <<<"$output"
 }
 
 @test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux — et rien de ce que fait le conteneur" {
@@ -749,6 +777,31 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   [[ "$output" != *"bash bash"* ]]
   pipee --workstation
   [[ "$output" == *"| bash -s -- --workstation --bench"* ]]
+  [[ "$output" == *"curl -fsSL <install.sh> | FORGE_BASE_URL=https://… bash -s -- --workstation "* ]]
+}
+
+@test "pipée, un Linux dédié non déclaré : le remède donne la variable à bash, et suivi tel quel il passe" {
+  _release substrat=linux consent=none forge_fournie=https://forge.example.net forge_joignable=oui
+  pipee --workstation
+  [ "$status" -eq 1 ]
+  local remede tirage="cat '$PORTE'"
+  remede="$(sed -n 's/^ *Pour la déclarer dédiée, à chaque passe : *//p' <<<"$output")"
+  [ -n "$remede" ] || { echo "$output"; return 1; }
+  # le remède tel qu'imprimé, la porte servie à la place de <install.sh>
+  run bash -c "${remede/curl -fsSL <install.sh>/$tirage}"
+  [ "$status" -eq 0 ] || { echo "remède suivi : $remede"; echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up --from $KITS/lcars_install"* ]]
+  [ "$remede" = "curl -fsSL <install.sh> | LCARS_ALLOW_ANY_HOST=1 bash -s -- --workstation" ]
+}
+
+@test "hors mode pipé, le remède d'un Linux dédié non déclaré garde la variable devant bash install.sh" {
+  local a; a="$(_arbre substrat=linux consent=none forge_fournie=https://forge.example.net forge_joignable=oui)"
+  porte "$a" --workstation
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Pour la déclarer dédiée, à chaque passe :  LCARS_ALLOW_ANY_HOST=1 bash $a/install.sh --workstation"* ]]
+  LCARS_ALLOW_ANY_HOST=1 porte "$a" --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
 @test "--check pipée ne télécharge rien : le préflight vit dans le kit, et il le dit" {

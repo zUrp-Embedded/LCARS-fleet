@@ -4,12 +4,12 @@
 # STARDATE: 2026-09-12
 # STATUS: le délégué du conteneur — un compose, une conf par projet, les gestes de l'instance
 #
-# USAGE : deploy/container [-p <projet>] [--forge-project <nom>] [--port-deck N] [--port-ssh N] [--bench [--port-forge N]] <commande>
+# USAGE : deploy/container [-p|--project <projet>] [--forge-project <nom>] [--port-deck N] [--port-ssh N] [--bench [--port-forge N]] <commande>
 #   up               démarre l'instance (détachée) depuis l'image LCARS_IMAGE, attend le verdict de son
 #                    démarrage et montre status ; avec --bench, confie le banc entier (forge jetable,
 #                    runner CI, instance) à deploy/docker/bench/bench-up.sh et rend ses codes
 #   pull             tire l'image LCARS_IMAGE depuis son registre — « up » ne tire jamais
-#   build            bâtit l'image sur ce poste (deploy/pack.sh : gate, kit, image)
+#   build            bâtit l'image sur ce poste, depuis un arbre commité (deploy/pack.sh : gate, kit, image)
 #   status           l'état de l'instance vu de l'hôte
 #   shell            un shell dans le conteneur, en tant que LCARS_HUMAN (défaut : le siège de l'instance)
 #   logs             les logs du conteneur (suivi)
@@ -25,7 +25,7 @@
 #   source-push [DIR] copie un clone LCARS dans le conteneur (/home/projects/LCARS)
 #   help             cette aide
 #
-#   -p <projet>          le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
+#   -p, --project <p>    le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
 #                        qui créent ou détruisent refusent un projet que ce compose n'a pas créé
 #   --forge-project <n>  la base des projets : <n>-fleet, et avec --bench <n>-forge, <n>-runner
 #   --port-deck N        port du deck publié sur 127.0.0.1, sur toutes les interfaces avec --bench
