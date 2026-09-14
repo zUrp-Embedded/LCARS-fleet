@@ -294,7 +294,8 @@ verifier_port() { # verifier_port <nom> <port> → ETAT_VERIFIE ; un FAIL si un 
   p_fail "port $port ($nom) tenu par $tenant — ce projet doit être seul à le tenir : relancer avec --port-$nom <autre port>, ou arrêter ce qui le tient"
 }
 
-# sans privilège, ss ne nomme pas le processus d'un autre compte : ce port est tenu, son propriétaire attend root
+# en phase sans privilège, un port tenu par un processus est « tenu » : qui le tient, notre landing ou un autre, la
+# phase root le décide — même quand cette phase se joue en root pour la grille d'un installeur lancé à la main
 mesure_ports() {
   local nom port etat
   for nom in forge deck ssh; do
@@ -305,7 +306,7 @@ mesure_ports() {
       continue
     else
       etat="$(port_state "$port" "${MIENS[@]}")"
-      if [[ "$PROV_PHASE" == sans-privilege && "$etat" == pris ]]; then
+      if [[ "$PROV_PHASE" == sans-privilege && ( "$etat" == pris || ( "$etat" == "pris par "* && "$etat" != *"(projet "* ) ) ]]; then
         etat=tenu
       elif [[ "$etat" == pris* ]]; then
         p_warn "port $port ($nom) $etat"

@@ -693,12 +693,12 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   local a; a="$(_arbre "port_deck=20999 tenu")"
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"Requiert   root"*"--check : la mesure se complète en root, par sudo"*"En root    /opt : écriture et « mv --exchange » joués par root"*"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"--check : rien n'est fait"* ]]
+  [[ "$output" == *"Requiert   root"*"--check : la mesure se complète en root (root, par sudo, une fois après la pause)"*"En root    /opt : écriture et « mv --exchange » joués par root"*"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"--check : rien n'est fait"* ]]
   [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --apres-pause --docker-host unix:///var/run/docker.sock" ]
   refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
   [ "$(grep -c "Système    " <<<"$output")" -eq 1 ]
   # sans terminal, --check dit qu'il continue, comme le parcours complet
-  [[ "$output" == *"--check : la mesure se complète en root, par sudo ; rien n'est posé."$'\n'"  Pas de terminal : --check continue."* ]]
+  [[ "$output" == *"--check : la mesure se complète en root (root, par sudo, une fois après la pause) ; rien n'est posé."$'\n'"  Pas de terminal : --check continue."* ]]
 }
 
 @test "--dry-run dit la commande exacte, mot à mot, sans l'exécuter ; dans ce système, après sudo et la mesure root" {
@@ -711,7 +711,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   # la commande dite se rejoue telle quelle : elle refait sa mesure, les choix de l'opérateur en options, aucun fichier de faits
   FORGE_PUBLIC_URL=http://forge.public.test porte "$a" --workstation --bench --dry-run --substrate wsl --only 10-packages
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"--dry-run : la commande se dit après la mesure en root, par sudo"*"--dry-run : rien n'est fait. La commande serait :"$'\n'"    $a/deploy/workstation up --substrate wsl --only 10-packages --bench --forge-publique http://forge.public.test" ]]
+  [[ "$output" == *"--dry-run : la commande se dit après la mesure en root (root, par sudo, une fois après la pause)"*"--dry-run : rien n'est fait. La commande serait :"$'\n'"    $a/deploy/workstation up --substrate wsl --only 10-packages --bench --forge-publique http://forge.public.test" ]]
   refute_out 'lcars-facts|--faits' <<<"$output"
   grep -q '^SUDO:' "$BATS_TEST_TMPDIR/sudo.calls"
   refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
@@ -1097,7 +1097,7 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   SUDO_ALTERE="$ARCHIVE" pipee --workstation --bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"$ARCHIVE ne porte plus la somme inscrite dans l'installeur : root ne le détare pas, rien n'est fait."* ]]
+  [[ "$output" == *"$ARCHIVE ne porte plus la somme inscrite dans l'installeur : root ne le détare pas, rien n'est fait ; relancer l'installeur."* ]]
   refute_out 'WORKSTATION:' <<<"$output"
   [ -z "$(compgen -G "$TMPDIR/lcars-kit.*" || true)" ]
 }

@@ -159,6 +159,8 @@ if [[ "$EUID" -eq 0 && "$MODE" != workstation ]]; then
   echo "  Il mesure et montre sans privilège ; le mode --workstation demande sudo lui-même, une fois, après la pause."
   exit 1
 fi
+ROOT_DIT="root, par sudo, une fois après la pause"
+[[ "$EUID" -ne 0 ]] || ROOT_DIT="root, déjà obtenu : la suite se joue sur place, après la pause"
 case "${FORCED_SUBSTRATE:-wsl}" in
   wsl|docker|linux) ;;
   *) echo "  ${R}--substrate $FORCED_SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
@@ -326,7 +328,7 @@ trap "exit 130" INT
 trap "exit 143" TERM
 cp -- "$archive" "$copie/kit.tar.gz"
 printf "%s  %s\n" "$somme" "$copie/kit.tar.gz" | sha256sum -c --quiet --strict >/dev/null 2>&1 \
-  || { echo "  $archive ne porte plus la somme inscrite dans l'\''installeur : root ne le détare pas, rien n'\''est fait." >&2; exit 1; }
+  || { echo "  $archive ne porte plus la somme inscrite dans l'\''installeur : root ne le détare pas, rien n'\''est fait ; relancer l'\''installeur." >&2; exit 1; }
 tar --no-same-owner -xzf "$copie/kit.tar.gz" -C "$copie" \
   || { echo "  la copie de $archive ne se détare pas : rien n'\''est fait." >&2; exit 1; }
 bash "$copie/lcars_install/install.sh" "$@"'
@@ -670,7 +672,7 @@ else
   ${W}Installation dans ce système${N} — LCARS s'installe sur cette distribution, la fleet
   tourne sous un humain de fleet. C'est le mode pour travailler sur le code.
     Modifie    $MODIFIE
-    Requiert   root, par sudo, une fois après la pause · docker · la forge (ci-dessus)
+    Requiert   $ROOT_DIT · docker · la forge (ci-dessus)
     Espace     ~2 Go · durée ~10 min
     Retour     $RETOUR
   Pour installer en conteneur à la place :  $(relance container)
@@ -680,7 +682,7 @@ fi
 
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   if [[ "$MODE" == "workstation" ]]; then
-    echo "  ${W}--check${N} : la mesure se complète en root, par sudo ; rien n'est posé."
+    echo "  ${W}--check${N} : la mesure se complète en root ($ROOT_DIT) ; rien n'est posé."
     [[ "$SANS_TERMINAL" -eq 0 ]] || echo "  Pas de terminal : --check continue."
     echo ""
     relance_root
@@ -731,7 +733,7 @@ fi
 PRE=()
 if [[ "$MODE" == "workstation" ]]; then
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "  ${W}--dry-run${N} : la commande se dit après la mesure en root, par sudo ; rien n'est exécuté."
+    echo "  ${W}--dry-run${N} : la commande se dit après la mesure en root ($ROOT_DIT) ; rien n'est exécuté."
     [[ "$SANS_TERMINAL" -eq 0 ]] || echo "  Pas de terminal : --dry-run continue."
     echo ""
     relance_root

@@ -499,6 +499,17 @@ exec $(command -v uname) \"\$@\""
   [ "$(fact port_deck)" = "$p tenu" ]
 }
 
+@test "phase sans privilège jouée en root pour la grille : un port dont ss nomme le processus est tenu aussi — la landing du poste n'arrête pas l'installeur avant la pause" {
+  local p; p="$(free_port)"
+  ss_nomme "$p" 4243
+  listen_on "$p"
+  preflight docker PROV_DECK_PORT="$p"
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(fact port_deck)" = "$p tenu" ]
+  refute_out "pris par|port $p" <<<"$output"
+}
+
 ss_nomme() { # ss_nomme <port> <pid> — un ss qui nomme le processus à root ; noté dans ss.args
   double ss "echo \"\$*\" >> '$BATS_TEST_TMPDIR/ss.args'
 echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
