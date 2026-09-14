@@ -323,7 +323,11 @@ cmd_up() {
   local img="$LCARS_IMAGE"
   if ! "$DOCKER" image inspect "$img" >/dev/null 2>&1; then
     echo "container: image « $img » absente — un up ne la fabrique pas." >&2
-    echo "   la tirer   : deploy/container pull        (LCARS_IMAGE=<registre/image:tag> pour une autre)" >&2
+    if [[ "$img" == lcars-fleet:local ]]; then
+      echo "   une version publiée : LCARS_IMAGE=<registre/image:tag> deploy/container pull, puis le même up avec LCARS_IMAGE" >&2
+    else
+      echo "   la tirer   : deploy/container pull        (LCARS_IMAGE=<registre/image:tag> pour une autre)" >&2
+    fi
     echo "   la bâtir   : deploy/container build       (deploy/pack.sh : gate, kit, image — plusieurs minutes)" >&2
     exit 1
   fi

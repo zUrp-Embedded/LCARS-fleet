@@ -316,9 +316,18 @@ arbre_container() {
 
 @test "up : image absente — un up ne la fabrique pas, il nomme pull et build, et sort 1" {
   seed_project "$CF"
+  STUB_NO_IMAGE=1 LCARS_IMAGE=registre.exemple/lcars-fleet:v7 run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"image « registre.exemple/lcars-fleet:v7 » absente"*"deploy/container pull"*"deploy/container build"* ]]
+  refute grep -qE "compose .* up|build" "$CALLS"
+}
+
+@test "up depuis un checkout, image locale absente : la bâtir, ou tirer une version publiée en la nommant — jamais un pull de l'image locale" {
+  seed_project "$CF"
   STUB_NO_IMAGE=1 run bash "$SRC" up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"image « ghcr.io/"*" » absente"*"deploy/container pull"*"deploy/container build"* ]]
+  [[ "$output" == *"image « lcars-fleet:local » absente"*"LCARS_IMAGE=<registre/image:tag> deploy/container pull"*"deploy/container build"* ]]
+  refute_out 'la tirer   : deploy/container pull' <<<"$output"
   refute grep -qE "compose .* up|build" "$CALLS"
 }
 
