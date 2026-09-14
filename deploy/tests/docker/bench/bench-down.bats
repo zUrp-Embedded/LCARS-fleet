@@ -48,6 +48,7 @@ objets() { # objets <projet> <c|v> <format> — le format reçu, rendu pour chaq
     [[ "$type" == "$2" && "$nom" == "$1"[-_]* ]] || continue
     parti "$nom" && continue
     ligne="${3//\{\{.Names\}\}/$nom}"; ligne="${ligne//\{\{.Name\}\}/$nom}"
+    ligne="${ligne//\{\{.Label \"com.docker.compose.project.config_files\"\}\}/${STUB_FICHIERS:-}}"
     printf '%s\n' "${ligne//\{\{.Label \"lcars.bench\"\}\}/$marque}"
   done
 }
@@ -237,4 +238,13 @@ BANC="bt-fleet-lcars-1:c:bt bt-runner-act-1:c:bt bt-forge-gitea-1:c:bt"
   for f in $(grep -oE -- '^compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
     [ "$(readlink -f "$f")" = "$constantes" ]
   done
+}
+
+@test "un banc d'avant le marqueur : chaque projet refusé vient avec un geste qui aboutit — compose pour le banc, le runner d'abord" {
+  STUB_FICHIERS="/kit/deploy/docker/docker-compose.yml,/kit/deploy/docker/docker-compose.bench.yml" \
+    DAEMON_OBJETS="bt-fleet-lcars-1:c: bt-forge-gitea-1:c: bt-runner-act-1:c:" run_down
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker compose -p bt-runner down -v"*"docker compose -p bt-fleet down -v"*"docker compose -p bt-forge down -v"* ]]
+  [[ "$output" != *"reset"* ]]
+  refute grep -q -- "down -v --remove-orphans" "$CALLS"
 }

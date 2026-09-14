@@ -594,27 +594,6 @@ EOF
   grep -qx "LCARS_BUILTIN_HUMAN=autre" "$RUN_LOG"
 }
 
-@test "LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration que le journal retient ; un banc le refuse avant tout module" {
-  terrain wsl
-  lib_module 50-humain 'prov_product_env; printf "%s\n" "prov=$PROV_BUILTIN_HUMAN" "${PROV_PRODUCT_ENV[@]}" | grep -E "^(prov=|LCARS_BUILTIN_HUMAN=)" >> "$RUN_LOG"; p_ok "ok"'
-  run env LCARS_BUILTIN_HUMAN=demo "$SANDBOX/provision" apply
-  [ "$status" -eq 0 ]
-  : > "$RUN_LOG"
-  run env LCARS_BUILTIN_HUMAN=- LCARS_BENCH=1 "$SANDBOX/provision" apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration, qu'un banc (LCARS_BENCH=1) exige"* ]]
-  [ ! -s "$RUN_LOG" ]
-  run env LCARS_BUILTIN_HUMAN=- "$SANDBOX/provision" apply
-  [ "$status" -eq 0 ]
-  grep -qx "prov=" "$RUN_LOG"
-  grep -qx "LCARS_BUILTIN_HUMAN=" "$RUN_LOG"
-  grep -qx 'params *' "$JOURNAL"
-  : > "$RUN_LOG"
-  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
-  [ "$status" -eq 0 ]
-  grep -qx "prov=" "$RUN_LOG"
-}
-
 @test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {
   # un défaut écrit au journal deviendrait un choix : la passe suivante ne distinguerait plus l'opérateur de l'usine
   terrain wsl

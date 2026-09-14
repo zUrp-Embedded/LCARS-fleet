@@ -231,6 +231,15 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ "$(fact consent)" = "env" ]
 }
 
+@test "linux déjà posé par LCARS, sans LCARS_ALLOW_ANY_HOST : le fait dit posee, et le doctor de la machine ne refuse pas" {
+  mkdir -p "$LCARS_DECOR_ROOT/etc/lcars"; echo source > "$LCARS_DECOR_ROOT/etc/lcars/channel"
+  preflight linux
+  [ "$status" -ne 2 ] || { echo "$output"; return 1; }
+  [ "$(fact consent)" = "posee" ]
+  [[ "$output" == *"OK    00-preflight: Linux natif posé par LCARS"* ]]
+  refute_out 'Linux natif sans déclaration' <<<"$output"
+}
+
 @test "hors linux la garde est sans objet" {
   preflight wsl
   [ "$(fact consent)" = "sans-objet" ]

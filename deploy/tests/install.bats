@@ -368,6 +368,11 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
   [[ "$output" == *"Installation dans ce système"* ]]
+  # une machine que LCARS a déjà posée a été déclarée à sa pose
+  a="$(_arbre substrat=linux consent=posee)"
+  porte "$a" --bench --workstation --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Installation dans ce système"* ]]
 }
 
 @test "--workstation hors WSL et hors Linux est refusé, et le conteneur est nommé" {
@@ -401,6 +406,12 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ "$status" -eq 1 ]
   [[ "$output" == *"L'instance « lcars-fleet » existe déjà"*"volumes et magasin gardés"*"LCARS_IMAGE=lcars-fleet:neuve deploy/container -p lcars-fleet up"* ]]
   refute_out 'reset|CONTAINER:' <<<"$output"
+  # sans forge indiquée, la mise à jour de l'instance vient avant la demande d'une forge
+  a="$(_arbre projet_pris=lcars-fleet)"
+  porte "$a"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"L'instance « lcars-fleet » existe déjà"* ]]
+  refute_out 'Aucune n.est indiquée' <<<"$output"
   a="$(_arbre projet_pris=lcars-fleet,lcars-forge,lcars-runner)"
   porte "$a" --bench --forge-project lcars
   [ "$status" -eq 1 ]

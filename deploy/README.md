@@ -46,8 +46,8 @@ de la forge, épingles de la chaîne Elixir, listes de ce que 62 pose — sont d
 l'environnement ne les surcharge pas. Les choix de l'opérateur (ports, base des projets, humain)
 viennent des drapeaux de `provision`, de l'environnement ou d'un `--env FICHIER`. Les ports, la
 base et l'humain de démonstration d'un banc ont leurs défauts dans les clés `_DEFAULT` du même
-fichier, et la ligne `params` du journal de la machine retient ceux qui s'en écartent ;
-`LCARS_BUILTIN_HUMAN=-` retire l'humain de démonstration retenu. L'humain servi se redonne à chaque
+fichier, et la ligne `params` du journal de la machine retient ceux qui s'en écartent ; l'humain de
+démonstration retenu ne se retire pas, son compte de forge porte son travail. L'humain servi se redonne à chaque
 passe (`--human`, sinon `SUDO_USER`, sinon l'appelant). Le fichier de canal (`PROV_CHANNEL_FILE`) retient qui a posé le
 produit, `source` (un checkout) ou `kit` ; un canal ne se pose pas sur un autre. La livraison suit
 l'arbre joué : une livraison source est un checkout, qui bâtit la release et la doc sur la machine

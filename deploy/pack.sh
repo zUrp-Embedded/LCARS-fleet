@@ -97,6 +97,10 @@ if [[ "$IMAGE" -eq 1 ]]; then
   "$PROV_DOCKER_BIN" buildx version >/dev/null 2>&1 \
     || die "docker buildx absent — l'image se bâtit par lui (Docker Desktop l'inclut ; sur linux : apt install docker-buildx-plugin) ; « --no-image » pour le kit seul"
 fi
+# le gate, la release et la doc les appellent : un absent se dit avant plusieurs minutes de gate
+for _outil in erl mix npm; do
+  command -v "$_outil" >/dev/null 2>&1 || die "$_outil absent — le gate, la release et la doc en ont besoin (pré-requis : deploy/pack.sh --help)"
+done
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
 # le nom du kit porte le tag : c'est par lui que l'installeur le retrouve dans sa table (lcars-fleet-<tag>-*-<arch>)
@@ -124,8 +128,6 @@ say "release attestée : build $_built"
 SITE_SRC=assets/github.io
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 [[ -d "$SITE_SRC" ]] || die "sources du site absentes ($SITE_SRC) — le paquet serait une demi-livraison"
-command -v npm >/dev/null 2>&1 \
-  || die "npm absent — ce script bâtit aussi la doc depuis $SITE_SRC ; un poste en livraison source pose node"
 say "doc du deck (npm ci + build, base $SITE_BASE)…"
 ( cd "$SITE_SRC" && npm ci --no-audit --no-fund >/dev/null 2>&1 ) \
   || die "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"

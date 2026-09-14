@@ -70,7 +70,7 @@ escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0
   command -v sudo >/dev/null 2>&1 \
     || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
-  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" == "env" ]]; then
+  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" != none ]]; then
     echo "  docker est absent : le provisionnement pose docker-ce (12-docker-engine) avant la forge."
   fi
   echo ""

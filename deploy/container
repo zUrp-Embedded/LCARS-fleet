@@ -26,7 +26,7 @@
 #   help             cette aide
 #
 #   -p, --project <p>    le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
-#                        qui créent ou détruisent refusent un projet que ce compose n'a pas créé
+#                        qui créent ou détruisent refusent un projet qu'aucun compose d'instance LCARS n'a créé
 #   --forge-project <n>  la base des projets : <n>-fleet, et avec --bench <n>-forge, <n>-runner
 #   --port-deck N        port du deck publié sur 127.0.0.1, sur toutes les interfaces avec --bench
 #   --port-ssh N         port ssh publié sur 127.0.0.1, sur toutes les interfaces avec --bench
@@ -261,17 +261,21 @@ project_config_files() {
     --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
 }
 
-# appliquer un compose à un projet qu'il n'a pas créé recrée et republie sans erreur
+# appliquer un compose à un projet qu'il n'a pas créé recrée et republie sans erreur ; une instance
+# posée par un autre arbre LCARS (le kit d'une version précédente) porte le même compose, à la même place
 assert_project_ours() {
-  local files line
+  local files line f
+  local -a elements
   files="$(project_config_files)"
   [[ -n "$files" ]] || return 0
   while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    case ",$line," in *",$COMPOSE_FILE,"*) return 0 ;; esac
+    IFS=, read -ra elements <<< "$line"
+    for f in "${elements[@]}"; do
+      [[ "$f" != "$COMPOSE_FILE" && "$f" != */deploy/docker/docker-compose.yml ]] || return 0
+    done
   done <<< "$files"
   {
-    echo "container: refus — le projet compose « $PROJECT » existe, et ce n'est pas celui de ce fichier."
+    echo "container: refus — le projet compose « $PROJECT » existe, et aucun compose d'instance LCARS ne l'a créé."
     echo "  il a été créé depuis : ${files//$'\n'/ ; }"
     echo "  ce script appliquerait : $COMPOSE_FILE"
     echo ""

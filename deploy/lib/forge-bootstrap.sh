@@ -16,7 +16,7 @@ forge_mount() { # forge_mount <docker> <compose> <projet> <port> <bind> <url pub
   local -a fichiers=(-f "$compose")
   [[ -z "$banc" ]] || fichiers+=(-f "${compose%.yml}.bench.yml")
   LCARS_DEVFORGE_PORT="$port" LCARS_DEVFORGE_BIND="$bind" LCARS_DEVFORGE_ROOT_URL="${root%/}/" LCARS_BENCH_BASE="$banc" \
-    "$docker" compose "${fichiers[@]}" -p "$projet" up -d
+    "$docker" compose --env-file "$PROV_CONSTANTS_FILE" "${fichiers[@]}" -p "$projet" up -d
 }
 
 forge_wait() { # forge_wait <url> [essais] → 0 quand /api/v1/version répond

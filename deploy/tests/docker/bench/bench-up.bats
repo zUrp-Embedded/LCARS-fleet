@@ -360,7 +360,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "la forge monte avec port, bind et URL racine, puis admiral est créé sans mot de passe dans la CLI de la forge, et reçoit celui du contrat par l'API au jeton master" {
   run_bench --no-runner --advertise 10.0.0.9
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "DOCKER:compose -f .*forge-compose.yml -f .*forge-compose.bench.yml -p bt-forge up -d" "$CALLS"
+  grep -q "DOCKER:compose --env-file [^ ]*/installer-constants.env -f .*forge-compose.yml -f .*forge-compose.bench.yml -p bt-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$BF" "$CALLS"
   grep -q "DOCKER:exec -i -u root bt-fleet-lcars-1 chpasswd <<< admiral:toto123456" "$CALLS"
   grep -qx 'DOCKER:exec -u git bt-forge-gitea-1 gitea admin user create --username admiral --random-password --email admiral@lcars.local --admin --must-change-password=false' "$CALLS"
@@ -550,7 +550,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "sans drapeau, projet et ports du banc viennent des constantes" {
   run bash "$REAL" --image lcars-fleet:9 --no-runner < /dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "DOCKER:compose -f $DOCKER_D/forge-compose.yml -f $DOCKER_D/forge-compose.bench.yml -p banc-temoin-forge up -d" "$CALLS"
+  grep -qx "DOCKER:compose --env-file $ROOT/deploy/lib/../installer-constants.env -f $DOCKER_D/forge-compose.yml -f $DOCKER_D/forge-compose.bench.yml -p banc-temoin-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$DF" "$CALLS"
   grep -qx "LCARS_SSH_PORT=0.0.0.0:$DS" "$CALLS"
   grep -qx "LCARS_LANDING_PORT_BIND=0.0.0.0:$DD" "$CALLS"
@@ -624,11 +624,11 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q '^RUNNER:' "$CALLS"
 }
 
-@test "un banc posé avant le marqueur : chaque projet refusé vient avec son geste — reset pour le conteneur, down -v pour la forge et le runner" {
+@test "des projets sans marqueur : chaque projet refusé vient avec son geste — le runner d'abord, reset pour une instance, down -v pour la forge" {
   export OBJETS="bt-fleet-lcars-1:c: bt-forge-gitea-1:c: bt-runner-act-1:c:"
   run_bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"deploy/container -p bt-fleet reset"*"docker compose -p bt-forge down -v"*"docker compose -p bt-runner down -v"* ]]
+  [[ "$output" == *"docker compose -p bt-runner down -v"*"deploy/container -p bt-fleet reset"*"docker compose -p bt-forge down -v"* ]]
   [[ "$output" != *"container -p bt-forge"* && "$output" != *"container -p bt-runner"* ]]
 }
 

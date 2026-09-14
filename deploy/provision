@@ -48,8 +48,8 @@
 #   --verbose, -v
 #   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
 #
-#   LCARS_BUILTIN_HUMAN   l'humain de démonstration d'un banc, retenu dans le journal ; « - » retire
-#                    celui que le journal retient, et se refuse avec LCARS_BENCH=1
+#   LCARS_BUILTIN_HUMAN   l'humain de démonstration d'un banc, retenu dans le journal ; il ne se retire
+#                    pas : son compte de forge porte son travail, et un terrain se refait
 
 set -euo pipefail
 
@@ -138,12 +138,6 @@ _journal_params() {
 }
 _journal_params
 [[ -z "${PROV_FORGE_BASE:-}" ]] || valid_project "$PROV_FORGE_BASE" PROV_FORGE_BASE
-# « - » dit « aucun humain de démonstration » : vide, la valeur retenue par le journal reprendrait sa place
-if [[ "${LCARS_BUILTIN_HUMAN:-}" == - ]]; then
-  [[ "${LCARS_BENCH:-}" != 1 ]] || die "LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration, qu'un banc (LCARS_BENCH=1) exige"
-  unset LCARS_BUILTIN_HUMAN
-  export PROV_BUILTIN_HUMAN=""
-fi
 
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"

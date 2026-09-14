@@ -181,7 +181,7 @@ promotions() { forge_requests 'select(.method == "PATCH") | select((.body | from
   UP=0 routes
   STUB_PORTS="" STUB_PUBLISH=bob_9-forge-gitea-1 STUB_INSPECT_PROJECT=bob_9-forge mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q 'DOCKER:compose -f .*forge-compose.yml -p bob_9-forge up -d' "$CALLS"
+  grep -q 'DOCKER:compose --env-file [^ ]*/installer-constants.env -f .*forge-compose.yml -p bob_9-forge up -d' "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$PORT" "$CALLS"
   grep -qx 'LCARS_DEVFORGE_BIND=0.0.0.0' "$CALLS"
   grep -qx "LCARS_DEVFORGE_ROOT_URL=http://10.9.9.9:$PORT/" "$CALLS"

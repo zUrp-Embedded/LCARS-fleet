@@ -129,7 +129,12 @@ check() {
   fi
 
   p_fact utilisateur "$PROV_HUMAN"
-  p_fact groupes "$(id -Gn "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
+  # pour la session qui mesure, ses groupes ; un groupe ajouté depuis sa connexion ne lui sert pas encore
+  if [[ "$PROV_HUMAN" == "$(id -un)" ]]; then
+    p_fact groupes "$(id -Gn | tr ' ' ',')"
+  else
+    p_fact groupes "$(id -Gn "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
+  fi
 
   # ─── Le substrat ──────────────────────────────────────────────────────────────────────────────
   p_fact substrat "$PROV_SUBSTRATE"
@@ -138,6 +143,10 @@ check() {
     if [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
       p_fact consent env
       p_warn "Linux natif déclaré dédié (LCARS_ALLOW_ANY_HOST) — ce provisionnement possède la machine et n'a pas de désinstalleur"
+    elif [[ -e "$PROV_CHANNEL_FILE" ]]; then
+      # la déclaration a été faite à la pose : une machine posée est dédiée
+      p_fact consent posee
+      p_ok "Linux natif posé par LCARS ($PROV_CHANNEL_FILE) — la machine a été déclarée dédiée à sa pose"
     else
       p_fact consent none
       p_fail "Linux natif sans déclaration : LCARS s'installe sur un terrain dédié, qu'il possède (/etc, $PROV_ROOT, groupes, comptes) et qui se refait plutôt qu'il ne se désinstalle. Pour déclarer cette machine dédiée : LCARS_ALLOW_ANY_HOST=1. Sinon : une distribution WSL2, ou le conteneur (bash install.sh)"

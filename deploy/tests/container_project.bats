@@ -339,3 +339,17 @@ arbre_container() {
   done
   refute grep -qE "compose .* up|^pull" "$CALLS"
 }
+
+@test "une instance posée par le compose d'un autre arbre LCARS (le kit d'une version précédente) est la nôtre : la mise à jour passe" {
+  local kit=/home/bob/.lcars/kits/v0.9-beta/lcars_install/deploy/docker
+  seed_project "$kit/docker-compose.yml,$kit/docker-compose.secrets.yml"
+  run bash "$SRC" -p f63c-fleet down
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" != *"refus"* ]]
+  grep -q -- "-p f63c-fleet down" "$CALLS"
+  # un fichier qui ne fait que finir pareil, hors d'un arbre deploy/docker, reste étranger
+  seed_project "/ailleurs/docker-compose.yml"
+  run bash "$SRC" -p f63c-fleet down
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun compose d'instance LCARS ne l'a créé"* ]]
+}

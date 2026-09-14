@@ -87,16 +87,22 @@ bench_etrangers() { # bench_etrangers <objets> → ceux qui ne portent pas la ba
 }
 
 bench_refus_etrangers() { # bench_refus_etrangers <étrangers> <remède> — l'arrêt en 1 qui les nomme, avec le geste qui retire chaque projet
-  local p
+  local p fichiers
   {
     say "refus : ces objets portent un nom du banc « $PROJECT » sans son marqueur (label lcars.bench=$PROJECT) :"
     sed "s/^/[$BENCH_NOM]   /" <<<"$1"
     say "  $2"
-    say "  Ce qui retire un projet refusé, s'il ne sert plus (volumes compris) :"
-    for p in "$CONTAINER_PROJECT" "$FORGE_PROJECT" "$RUNNER_PROJECT"; do
+    # une instance posée se retire par reset ; un banc d'avant le marqueur, que ni reset ni bench-down ne
+    # reconnaissent, par compose ; le runner d'abord, il tient le réseau de la forge
+    say "  Ce qui retire un projet refusé, s'il ne sert plus (volumes compris), dans cet ordre :"
+    for p in "$RUNNER_PROJECT" "$CONTAINER_PROJECT" "$FORGE_PROJECT"; do
       [[ "$1" == *"(projet $p)"* ]] || continue
-      if [[ "$p" == "$CONTAINER_PROJECT" ]]; then say "    deploy/container -p $p reset"
-      else say "    docker compose -p $p down -v"
+      fichiers="$("$DOCKER_BIN" ps -a --filter "label=com.docker.compose.project=$p" \
+                    --format '{{.Label "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
+      if [[ "$p" == "$CONTAINER_PROJECT" && "$fichiers" != *docker-compose.bench.yml* ]]; then
+        say "    deploy/container -p $p reset"
+      else
+        say "    docker compose -p $p down -v"
       fi
     done
   } >&2

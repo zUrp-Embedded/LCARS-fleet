@@ -321,7 +321,8 @@ PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
 SUBSTRATE="$(fait substrat)"
 RACINE="$(fait racine)"
 case "$PROVENANCE" in
-  source)  SOURCE_LIGNE="clone git · branche $(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo inconnue) · commit $(fait revision)" ;;
+  source)  BRANCHE="$(git -C "$SCRIPT_DIR" symbolic-ref -q --short HEAD 2>/dev/null)" && BRANCHE="branche $BRANCHE" || BRANCHE="tête détachée"
+           SOURCE_LIGNE="clone git · $BRANCHE · commit $(fait revision)" ;;
   kit)     SOURCE_LIGNE="archive (kit) · révision $(fait revision)" ;;
   release) SOURCE_LIGNE="release $LCARS_DOOR_VERSION · kit dans $SCRIPT_DIR" ;;
 esac
@@ -410,7 +411,7 @@ if [[ "$MODE" == "workstation" ]]; then
   case "$SUBSTRATE" in
     wsl) ;;
     linux)
-      [[ "$(fait consent)" == "env" ]] || stop \
+      [[ "$(fait consent)" == env || "$(fait consent)" == posee ]] || stop \
         "${R}Linux natif sans déclaration.${N} L'installation dans ce système possède la machine (/etc, $RACINE," \
         "des groupes, des comptes) et ne se désinstalle pas : elle est réservée à une machine dédiée." \
         "Pour la déclarer dédiée, à chaque passe :  $(relance workstation)" \
@@ -447,16 +448,8 @@ if [[ "$MODE" == "container" && "$(fait compose)" == "non" ]]; then
        "$(fait compose_why)" \
        "Poser le plugin compose de docker (paquet docker-compose-plugin), puis relancer."
 fi
-case "$FORGE_ETAT" in
-  aucune) stop "${R}Les deux installations ont besoin d'une forge et de son runner CI. Aucune n'est indiquée.${N}" \
-               "Une forge jetable, montée par l'installeur :  $(relance "$MODE" --bench)" \
-               "Une forge existante :  $(relance "$MODE" "FORGE_BASE_URL=https://…")" ;;
-  injoignable) stop "${R}La forge fournie ne répond pas : $(fait forge_fournie)${N}" "Vérifier l'URL et que l'API répond (/api/v1/version), puis relancer." ;;
-esac
-[[ -z "$PORTS_PRIS" ]] || stop "${R}Un port demandé est déjà tenu : $PORTS_PRIS.${N}" \
-  "Déplacer avec --port-forge, --port-deck ou --port-ssh, ou libérer le port."
-# une instance posée se met à jour par son délégué, depuis l'arbre qui l'a créée : « container up » ne recrée
-# que le projet de son propre compose, et sa conf (forge, secrets) n'est pas celle que ce bilan mesure
+# une instance posée se met à jour par le délégué de cet arbre, qui la reconnaît à son compose ; sa conf
+# (forge, secrets) n'est pas celle que ce bilan mesure : l'installeur ne la repose pas
 BASE_PROJET="$(ou "$(fait projet)")"
 if [[ "$MODE" == "container" && -n "$(fait projet_pris)" ]]; then
   IMAGE_DITE="${DOOR_IMAGE:-${LCARS_IMAGE:-}}"
@@ -467,16 +460,24 @@ if [[ "$MODE" == "container" && -n "$(fait projet_pris)" ]]; then
          "Choisir une autre base : la même commande, avec --forge-project <autre base>."
   elif [[ "$WITH_BENCH" -eq 1 ]]; then
     stop "${R}Le banc « $BASE_PROJET » existe déjà sur ce daemon ($(fait projet_pris)).${N} L'installeur ne pose pas un banc sur un autre." \
-         "Le mettre à jour, la forge, ses jetons et les volumes gardés, depuis l'arbre qui l'a installé :" \
+         "Le mettre à jour, la forge, ses jetons et les volumes gardés :" \
          "  ${TIRER}deploy/docker/bench/bench-swap-image.sh --image ${IMAGE_DITE:-<image>}$PROJET_DIT" \
          "Un second banc à côté : la même commande, avec --forge-project <autre base>."
   else
     stop "${R}L'instance « $BASE_PROJET-fleet » existe déjà sur ce daemon.${N} L'installeur ne pose pas une instance sur une autre." \
-         "La mettre à jour, volumes et magasin gardés, depuis l'arbre qui l'a installée :" \
+         "La mettre à jour, volumes et magasin gardés :" \
          "  ${TIRER}${IMAGE_DITE:+LCARS_IMAGE=$IMAGE_DITE }deploy/container -p $BASE_PROJET-fleet up" \
          "Une seconde instance à côté : la même commande, avec --forge-project <autre base>."
   fi
 fi
+case "$FORGE_ETAT" in
+  aucune) stop "${R}Les deux installations ont besoin d'une forge et de son runner CI. Aucune n'est indiquée.${N}" \
+               "Une forge jetable, montée par l'installeur :  $(relance "$MODE" --bench)" \
+               "Une forge existante :  $(relance "$MODE" "FORGE_BASE_URL=https://…")" ;;
+  injoignable) stop "${R}La forge fournie ne répond pas : $(fait forge_fournie)${N}" "Vérifier l'URL et que l'API répond (/api/v1/version), puis relancer." ;;
+esac
+[[ -z "$PORTS_PRIS" ]] || stop "${R}Un port demandé est déjà tenu : $PORTS_PRIS.${N}" \
+  "Déplacer avec --port-forge, --port-deck ou --port-ssh, ou libérer le port."
 
 # ─── 6. le mode, et sa grille ─────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "container" ]]; then
