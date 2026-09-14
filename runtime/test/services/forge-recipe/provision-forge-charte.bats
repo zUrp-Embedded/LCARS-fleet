@@ -121,6 +121,26 @@ run_avatars() {
   [[ "$output" == *"LCARS_MEDIA_ROOT"* ]]
 }
 
+@test "aide: --help imprime l'en-tete entier, jusqu'a sa ligne EXIT (RT-C-39)" {
+  run "$SCRIPT" --help
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == "SOURCE: runtime/services/forge-recipe/provision-forge-charte.sh" ]]
+  [[ "${lines[-1]}" == "EXIT : 0 = tout posé/valide"* ]]
+  # autant de lignes que l'en-tete du script en porte, sans une ligne de code
+  local attendu; attendu="$(awk 'NR == 1 { next } !/^#/ { exit } { n++ } END { print n }' "$SCRIPT")"
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq "$attendu" ]
+  [[ "$output" != *"set -euo pipefail"* ]]
+}
+
+@test "aide: un en-tete qui grandit est imprime entier — la fin se lit au bloc, pas a un numero de ligne (RT-C-39)" {
+  local copie="$BATS_TEST_TMPDIR/charte.sh"
+  sed '5a # LIGNE AJOUTEE A L EN-TETE' "$SCRIPT" > "$copie"
+  run bash "$copie" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LIGNE AJOUTEE A L EN-TETE"* ]]
+  [[ "${lines[-1]}" == "EXIT : 0 = tout posé/valide"* ]]
+}
+
 @test "6-141bis: le jeton SITE-ADMIN n'apparait JAMAIS dans argv" {
   run_avatars
   run grep -c "JETON-ADMIN-SECRET" "$ARGV_LOG"

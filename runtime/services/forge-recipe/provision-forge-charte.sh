@@ -103,7 +103,9 @@ ADMIRAL=""
 # tiers. Un catalogue apporte les siens, `<role>.png`, et le compte se derive : `<org>_<role>`.
 CAT_AVATARS=""
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
+# L'aide est l'en-tete entier : de la ligne 2 jusqu'a la premiere ligne qui n'est pas un commentaire.
+# Un numero de ligne de fin couperait le bloc des qu'il grandit.
+usage() { awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
