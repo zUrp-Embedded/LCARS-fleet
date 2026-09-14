@@ -32,7 +32,7 @@
 #   aucun autre module. Un apply qui reçoit --faits, la mesure root rendue conforme dans la même
 #   invocation, ne le rejoue pas : il le compte, rendu par la mesure.
 #
-#   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
+#   Codes  module check  0 conforme · 1 drift · 2 échec (ses lignes FAIL) · 3 mort avant son verdict
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
 #          runner apply  0 convergé · 1 échec, ou terrain refusé par le préflight · 2 drift résiduel
 #          runner doctor, mesure  0 conforme · 1 drift · 2 erreur
@@ -57,7 +57,7 @@
 #                    verdict (preflight=conforme|refuse) ; apply : ce fichier, écrit par une mesure
 #                    root conforme et privé à son compte (0600), à la place du préflight
 #   --verbose, -v
-#   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
+#   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|FAIL|ERROR par module
 #
 #   LCARS_BUILTIN_HUMAN   l'humain de démonstration d'un banc, retenu dans le journal ; il ne se retire
 #                    pas : son compte de forge porte son travail, et un terrain se refait
@@ -269,6 +269,10 @@ run_module() {
   ( export PROVISION_RUN=1 PROVISION_MODULE="$2"; bash "$1" "$3" ) 9>&- </dev/null
 }
 
+garde_armee() { # garde_armee <module> → 0 s'il source la lib, dont la garde change une mort en 3
+  grep -qE '^\. "\$\{PROVISION_LIB' "$1"
+}
+
 # ─── Exécution ──────────────────────────────────────────────────────────────────────────────────
 total=0 ok=0 drift=0 failed=0 REFUS=0
 declare -a REPORT=()
@@ -310,8 +314,12 @@ for i in "${!SELECTED[@]}"; do
     *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     doctor:check:0|mesure:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     doctor:check:1|mesure:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    # le refus du préflight est son verdict : ses lignes FAIL sont le constat
-    mesure:check:2) failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
+    # un module qui source la lib meurt en 3 par sa garde : son 2 est verdict_check sur ses lignes FAIL, qui
+    # sont le constat ; sans la lib, un 2 peut être une mort sous pipefail, et reste une sonde en erreur
+    doctor:check:2|mesure:check:2) if garde_armee "$mod"; then failed=$((failed + 1)); REPORT+=("$name=FAIL")
+      else failed=$((failed + 1)); REPORT+=("$name=ERROR")
+        echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=2) — ce module ne source pas la lib : sans ligne FAIL au-dessus, il est mort avant de rendre son verdict" >&2
+      fi ;;
     doctor:check:*|mesure:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;
@@ -372,7 +380,12 @@ else
     "$(_tint "$_PR" "échecs" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     if [[ "$SUBSTRATE" == "docker" ]]; then
-      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebâtir l'image (deploy/pack.sh) — un drift ici est une image non conforme à son build"
+      # qui lit ce doctor a tiré l'image publiée : le remède se joue depuis l'hôte, sans bâtir
+      echo "  ${_PA}→ un conteneur ne se converge pas sur place :${_PN} depuis l'hôte, tirer à nouveau l'image de cette version"
+      echo "    et recréer le conteneur sur ses volumes : LCARS_IMAGE=<image:version> deploy/container pull, puis"
+      echo "    LCARS_IMAGE=<image:version> deploy/container -p <projet> up (un banc : deploy/docker/bench/bench-swap-image.sh"
+      echo "    --forge-project <base> --image <image:version>). Si le drift revient sur l'image fraîche, le signaler avec"
+      echo "    la révision $PROV_SOURCE_REV et ces lignes."
     else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi

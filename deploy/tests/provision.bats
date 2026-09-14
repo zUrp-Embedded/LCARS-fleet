@@ -115,15 +115,35 @@ mort_module() { # mort_module <NN-nom> <source la lib : 0|1> — meurt sous pipe
   [[ "$output" == *"60-deploystub"* ]]
 }
 
-@test "un drift au doctor sous docker est une image non conforme : rc 1 et le conseil est pack.sh" {
+@test "un drift au doctor sous docker : rc 1, et le remède se joue depuis l'hôte par qui a tiré l'image — jamais rebâtir" {
   terrain docker
   stub_module 60-deploystub "wsl linux" any STUB_RC_DRIFT
   export STUB_RC_DRIFT=1
+  local root
+  root="$(PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; repo_root')"
+  [ -n "$root" ]
+  echo "abcd1234" > "$root/.source-revision"
   run "$SANDBOX/provision" doctor
+  rm -f "$root/.source-revision"
   [ "$status" -eq 1 ]
   [[ "$output" == *"drift: 1"* ]]
-  [[ "$output" == *"deploy/pack.sh"* ]]
+  [[ "$output" == *"depuis l'hôte, tirer à nouveau l'image de cette version"*"deploy/container pull"*"deploy/container -p <projet> up"*"bench-swap-image.sh"* ]]
+  [[ "$output" == *"le signaler avec"*"la révision abcd1234"* ]]
+  refute_out 'pack\.sh|rebâtir' <<<"$output"
   [[ "$output" != *"converger : sudo"* ]]
+}
+
+@test "doctor : un check qui rend 2 sur ses lignes FAIL est un échec dit par elles, jamais une sonde en erreur" {
+  terrain docker
+  lib_module 00-preflight 'p_fail "port 20999 (deck) tenu par un autre"'
+  lib_module 20-okstub 'p_ok "conforme"'
+  run "$SANDBOX/provision" doctor
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  00-preflight: port 20999 (deck) tenu par un autre"*"échecs: 1"* ]]
+  refute_out 'ERREUR|sonde en erreur' <<<"$output"
+  run "$SANDBOX/provision" doctor --porcelain
+  grep -qx "00-preflight=FAIL" <<<"$output"
+  refute_out '=ERROR' <<<"$output"
 }
 
 @test "un substrat forcé qui contredit la mesure est refusé avant tout module ; le substrat mesuré passe" {
