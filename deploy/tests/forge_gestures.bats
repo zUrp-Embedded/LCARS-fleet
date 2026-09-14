@@ -668,24 +668,41 @@ EOF
   refute grep -q "^VOISIN" "$ENTRY_LOG"
 }
 
-@test "cli: SANS CLI sur le PATH, le voisin ../bin/lcars de l'arbre repond — le cas d'un checkout" {
+@test "cli: SANS CLI sur le PATH ni dans le repertoire des liens, le voisin ../bin/lcars de l'arbre repond — le cas d'un checkout" {
   setup_install
   local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre2/services")"
   _fake_entry "$BATS_TEST_TMPDIR/arbre2/bin/lcars" VOISIN
   rm -f "$BIN/lcars"
-  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/liens-vides" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
   grep -q "^VOISIN catalogue-source cat" "$ENTRY_LOG"
 }
 
-@test "cli: AUCUN candidat -> refus A LA PORTE qui nomme la CLI, pas « pas de source »" {
+@test "cli: la copie a plat, sans CLI sur le PATH, trouve la CLI posee dans le repertoire des liens (A-202)" {
+  # La disposition des deux rails : `/opt/lcars/forge-gestures.sh`, dont le `../bin/lcars` est
+  # `/opt/bin/lcars`, qui n'existe pas ; la CLI est posee dans `/usr/local/bin`.
   setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre3/services")"
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/opt/lcars")"
+  _fake_entry "$BATS_TEST_TMPDIR/usr/local/bin/lcars" POSEE
   rm -f "$BIN/lcars"
-  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
+  [ ! -e "$BATS_TEST_TMPDIR/opt/bin/lcars" ]
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/usr/local/bin" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "^POSEE catalogue-source cat" "$ENTRY_LOG"
+}
+
+@test "cli: AUCUN candidat -> refus A LA PORTE qui nomme ce qui a ete cherche, jamais un chemin qui n'existe pas" {
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/opt/lcars")"
+  rm -f "$BIN/lcars"
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/liens-vides" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"portes outil du release introuvables"* ]]
-  [[ "$output" == *"lcars"* ]]
+  [[ "$output" == *"portes outil du release introuvables (ni « lcars » sur le PATH, ni $BATS_TEST_TMPDIR/liens-vides/lcars, ni $BATS_TEST_TMPDIR/opt/lcars/../bin/lcars)"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
   [[ "$output" != *"pas de source installable"* ]]
+  [ ! -s "$ENTRY_LOG" ]
 }
 
 @test "cli: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {

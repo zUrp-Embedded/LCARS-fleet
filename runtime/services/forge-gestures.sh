@@ -61,21 +61,33 @@ CATALOGUE_WORK="${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}"
 # qui pose. Rien ne se DECIDE en la lisant. Le `_` initial est de l'UX (⚖ user) : il separe a l'oeil
 # ce que la fleet pose de ce qu'un humain depose.
 STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
+# La CLI posee vit dans le repertoire des liens (`PROV_LINK_DIR` de l'installeur, meme defaut que
+# `lib/module-protocol.sh`). Ce script tourne depuis DEUX places : l'arbre embarque
+# (`/opt/lcars/services/`, un checkout), ou `bin/` est son voisin, et la copie a plat
+# (`/opt/lcars/forge-gestures.sh`, celle que lancent l'executeur de catalogue et le boot), dont le
+# `../bin` ne designe rien. Un candidat n'est rendu que s'il existe ; aucun candidat rend vide, et
+# `need_cli` refuse en nommant ce qui a ete cherche.
 _lcars_cli() {
-  local here
+  local here cand
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
   if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  printf '%s' "$here/../bin/lcars"
+  for cand in "${LCARS_LINK_DIR:-/usr/local/bin}/lcars" "$here/../bin/lcars"; do
+    [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
+  done
+  return 0
 }
 LCARS_CLI="$(_lcars_cli)"
 tool() { bash "$LCARS_CLI" tool "$@"; }
 
 need_cli() {
-  [[ -r "$LCARS_CLI" ]] && return 0
-  die "portes outil du release introuvables ($LCARS_CLI).
+  [[ -n "$LCARS_CLI" && -r "$LCARS_CLI" ]] && return 0
+  local vu="$LCARS_CLI"
+  [[ -n "$vu" ]] || vu="ni « lcars » sur le PATH, ni ${LCARS_LINK_DIR:-/usr/local/bin}/lcars, ni $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/lcars"
+  die "portes outil du release introuvables ($vu).
   Ce script les appelle pour resoudre, verifier et enroler un catalogue (« lcars tool … »). Sur un
-  poste, 60-deploy pose la CLI ; l'image la porte. « LCARS_CLI=<chemin> » force la resolution."
+  poste, « deploy/workstation up » pose la CLI ; dans un conteneur, l'image la porte.
+  « LCARS_CLI=<chemin> » designe une CLI posee ailleurs."
 }
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
