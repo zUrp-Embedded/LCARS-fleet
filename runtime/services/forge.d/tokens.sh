@@ -100,12 +100,33 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
   printf '%s' "${absents# }"
 }
 
+# L'etat d'un jeton en CINQ mots. `-r` seul confondait trois faits : un fichier absent, un fichier
+# present que ce compte ne peut pas ouvrir (0600 a lcars-authority, lu par le doctor d'un humain),
+# et un fichier vide. Le premier se pose, le deuxieme ne se conclut pas, le troisieme se repose.
+token_state() { # <fichier> -> present | empty | unreadable | absent | unmeasurable
+  local st
+  st="$(prov_file_state "$1")"
+  if [[ "$st" == present && -z "$(read_token "$1")" ]]; then st=empty; fi
+  printf '%s' "$st"
+}
+# La phrase d'un jeton qu'on ne peut pas ouvrir : ce qui est mesure (proprietaire, mode) et le geste.
+token_unreadable_why() { # <fichier>
+  local owner_mode
+  owner_mode="$(stat -c '%U:%G, mode %a' -- "$1" 2>/dev/null || true)"
+  printf 'présent mais illisible pour %s (%s, %s) — rien n'"'"'est conclu sur son contenu ; relance la sonde sous sudo pour le mesurer' \
+    "$(id -un 2>/dev/null || echo "ce compte")" "$1" "${owner_mode:-propriétaire et mode illisibles}"
+}
+MASTER_POSE_GESTE="sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
+
 check_master_authority() {
-  if [[ -r "$LCARS_MASTER_TOKEN_FILE" ]]; then
-    p_ok "autorité de création présente ($LCARS_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
-  else
-    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — LCARS tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
-  fi
+  local f="$LCARS_MASTER_TOKEN_FILE"
+  case "$(token_state "$f")" in
+    present)      p_ok "autorité de création présente ($f) — un catalogue de plus s'enrôle sans geste d'opérateur" ;;
+    unreadable)   p_warn "autorité de création $(token_unreadable_why "$f")" ;;
+    unmeasurable) p_warn "autorité de création $(prov_state_why unmeasurable "$f")" ;;
+    empty)        p_warn "autorité de création VIDE ($f) — le fichier existe sans jeton : tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la reposer, $MASTER_POSE_GESTE" ;;
+    *)            p_warn "pas d'autorité de création ($f absent) — LCARS tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la poser, $MASTER_POSE_GESTE" ;;
+  esac
 }
 
 # ⚠ DEUX REGIMES DE PROPRIETE DANS LE REPERTOIRE PRIVE, ET LES DEUX SE MESURENT. Le jeton master et
@@ -284,10 +305,13 @@ check_members_visible() {
 # `forge-runner.sh` aussi — et c'est exactement la forme qui derive.
 check_ci_runner() {
   local body n labels
-  [[ -r "$LCARS_MASTER_TOKEN_FILE" ]] || {
-    p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"
-    return 0
-  }
+  case "$(token_state "$LCARS_MASTER_TOKEN_FILE")" in
+    present)      ;;
+    unreadable)   p_warn "runners CI non sondables — jeton master $(token_unreadable_why "$LCARS_MASTER_TOKEN_FILE")"; return 0 ;;
+    unmeasurable) p_warn "runners CI non sondables — jeton master $(prov_state_why unmeasurable "$LCARS_MASTER_TOKEN_FILE")"; return 0 ;;
+    empty)        p_warn "runners CI non sondables (jeton master VIDE : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu. Pour le reposer, $MASTER_POSE_GESTE"; return 0 ;;
+    *)            p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"; return 0 ;;
+  esac
   body="$(forge_curl "$LCARS_MASTER_TOKEN_FILE" -fsS -m 10 "$FORGE_BASE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
   [[ -n "$body" ]] || {
