@@ -68,10 +68,63 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   [ "$(jq -r '.services.gitea.environment.GITEA__server__ROOT_URL' <<<"$output")" = http://forge-temoin:3000/ ]
 }
 
-@test "runner-compose.yml rend les labels des constantes quand LCARS_RUNNER_LABELS manque" {
-  run rendu LCARS_FORGE_URL=http://f.invalid docker compose --env-file "$CONST" -f "$DOCKER/runner-compose.yml" -p r config --format json
+@test "runner-compose.yml se lit sans adresse de forge, et rend les labels des constantes quand LCARS_RUNNER_LABELS manque" {
+  run rendu docker compose --env-file "$CONST" -f "$DOCKER/runner-compose.yml" -p r config --format json
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -r '.services.act.environment.GITEA_RUNNER_LABELS' <<<"$output")" = shell:docker://alpine:temoin ]
+}
+
+@test "runner-network.yml met le runner sur le réseau externe qu'on lui nomme, et l'exige" {
+  local base=(docker compose --env-file "$CONST" -f "$DOCKER/runner-compose.yml" -f "$DOCKER/runner-network.yml" -p r config)
+  run rendu "${base[@]}" -q
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LCARS_RUNNER_NETWORK absent"* ]]
+  run rendu LCARS_RUNNER_NETWORK=bt-forge_default "${base[@]}" --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '.networks.default | [.name, .external]' <<<"$output")" = '["bt-forge_default",true]' ]
+}
+
+@test "lcars-home et lcars-var portent un nom écrit, celui que compose leur donnait : <projet>_<clé>, qu'une clé renommée ne change pas" {
+  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '[.volumes["lcars-home"].name, .volumes["lcars-var"].name]' <<<"$output")" = '["p_lcars-home","p_lcars-var"]' ]
+  # la même instance, clés renommées dans une copie : le volume monté sur /home ne change pas de nom
+  local copie="$BATS_TEST_TMPDIR/docker-compose.yml"
+  sed -E 's/^(  |      - )lcars-home:/\1maisons:/; s/^(  |      - )lcars-var:/\1etat:/' "$CF" > "$copie"
+  cp "$DOCKER/lcars-hardened-seccomp.json" "$BATS_TEST_TMPDIR/"
+  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$copie" -p p config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -r '.services.lcars.volumes[] | select(.target == "/home") | .source' <<<"$output")" = maisons ]
+  [ "$(jq -r '.volumes.maisons.name' <<<"$output")" = p_lcars-home ]
+  [ "$(jq -r '.volumes.etat.name' <<<"$output")" = p_lcars-var ]
+}
+
+@test "l'override de banc : la forge interne et la source des constantes, et le marqueur du banc sur le conteneur et ses volumes" {
+  local base=(docker compose --env-file "$CONST" -f "$CF" -f "$DOCKER/docker-compose.bench.yml" -p bt-fleet config)
+  run rendu LCARS_STORE_PREFIX=bt-fleet LCARS_DEVFORGE_NETWORK=bt-forge_default "${base[@]}" -q
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LCARS_BENCH_BASE absent"* ]]
+  run rendu LCARS_STORE_PREFIX=bt-fleet LCARS_DEVFORGE_NETWORK=bt-forge_default LCARS_BENCH_BASE=bt "${base[@]}" --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local j="$output"
+  [ "$(jq -r '.services.lcars.environment.FORGE_BASE_URL' <<<"$j")" = http://forge-temoin:3000 ]
+  [ "$(jq -r '.services.lcars.environment.LCARS_SOURCE_REMOTE' <<<"$j")" = "http://forge-temoin:3000/$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$CONST")/lcars.git" ]
+  [ "$(jq -c '[.services.lcars.labels["lcars.bench"], .volumes["lcars-home"].labels["lcars.bench"], .volumes["lcars-var"].labels["lcars.bench"]]' <<<"$j")" = '["bt","bt","bt"]' ]
+  [ "$(jq -c '.networks.devforge | [.name, .external]' <<<"$j")" = '["bt-forge_default",true]' ]
+}
+
+@test "la forge et le runner portent la base du banc qui les monte, et un marqueur vide hors banc" {
+  local f svc j
+  for f in forge-compose.yml:gitea runner-compose.yml:act; do
+    svc="${f#*:}"; f="${f%:*}"
+    run rendu LCARS_BENCH_BASE=bt docker compose --env-file "$CONST" -f "$DOCKER/$f" -p x config --format json
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    j="$output"
+    [ "$(jq -c --arg s "$svc" '[.services[$s].labels["lcars.bench"]] + [.volumes[].labels["lcars.bench"]] | unique' <<<"$j")" = '["bt"]' ]
+    run rendu docker compose --env-file "$CONST" -f "$DOCKER/$f" -p x config --format json
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(jq -r --arg s "$svc" '.services[$s].labels["lcars.bench"]' <<<"$output")" = "" ]
+  done
 }
 
 @test "l'override des secrets exige ses deux chemins, et monte ceux qu'on lui donne" {

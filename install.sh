@@ -342,8 +342,8 @@ case "$(fait docker)" in
           fi ;;
 esac
 
-# jq lit l'API de la forge depuis l'hôte du conteneur ; dans ce système, 10-packages le pose
-OUTILS_REQUIS="git curl jq"; [[ "$MODE" != "workstation" ]] || OUTILS_REQUIS="git curl sudo"
+# le banc lit l'API de sa forge par jq depuis l'hôte ; dans ce système, 10-packages le pose
+OUTILS_REQUIS="git curl"; [[ "$WITH_BENCH" -eq 0 ]] || OUTILS_REQUIS+=" jq"; [[ "$MODE" != "workstation" ]] || OUTILS_REQUIS="git curl sudo"
 OUTILS_MANQUANTS=""
 for t in $OUTILS_REQUIS; do
   case "$(fait "$t")" in oui|root) ;; *) OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t" ;; esac

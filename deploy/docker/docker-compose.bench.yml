@@ -1,10 +1,7 @@
 # SOURCE: deploy/docker/docker-compose.bench.yml
 # AUTHOR: DrDree
 # STARDATE: 2026-09-13
-# STATUS: surcouche de banc — le conteneur rejoint le réseau de la forge jetable dès sa création
-#
-# Ni l'amorçage de la forge (admin, jeton, graine, semis) ni son démarrage ni celui du runner : ce
-# sont des gestes contre des services qui tournent, enchaînés par `bench/bench-up.sh`.
+# STATUS: surcouche de banc — le conteneur rejoint le réseau de la forge jetable dès sa création, et porte le marqueur du banc
 
 services:
   lcars:
@@ -12,9 +9,22 @@ services:
     networks:
       - lcars
       - devforge
+    environment:
+      FORGE_BASE_URL: "${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent — les constantes de l'installeur, par --env-file}"
+      LCARS_SOURCE_REMOTE: "${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent}/${PROV_FORGE_ORG_DEFAULT:?PROV_FORGE_ORG_DEFAULT absent}/lcars.git"
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent — la base du banc, posée par lib/bench.sh}"
+
+volumes:
+  lcars-home:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"
+  lcars-var:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"
 
 networks:
   # externe : le réseau appartient au projet de la forge, compose ne le crée ni ne le détruit ici
   devforge:
     external: true
-    name: "${LCARS_DEVFORGE_NETWORK:-lcars-devforge_default}"
+    name: "${LCARS_DEVFORGE_NETWORK:?LCARS_DEVFORGE_NETWORK absent — le réseau de la forge du banc}"

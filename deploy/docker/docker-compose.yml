@@ -73,9 +73,12 @@ services:
     networks: [lcars]
 
 volumes:
-  # au projet : les humains et l'état de cette instance meurent avec elle
+  # au projet : les humains et l'état de cette instance meurent avec elle ; le nom est écrit, un
+  # renommage de clé ne remonte pas l'instance sur un volume vide
   lcars-home:
+    name: "${COMPOSE_PROJECT_NAME}_lcars-home"
   lcars-var:
+    name: "${COMPOSE_PROJECT_NAME}_lcars-var"
   # hors projet : ce qui coûte des heures à refabriquer survit à un `down -v` (cf. lib/store.sh)
   lcars-cache:
     external: true

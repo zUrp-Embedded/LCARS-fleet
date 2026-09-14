@@ -134,9 +134,29 @@ Pages, indépendamment.
   machine que l'administrateur définit ; le daemon y est un prérequis nommé. Seul le mode
   `--workstation` sur une machine Linux dédiée (`LCARS_ALLOW_ANY_HOST=1`) pose docker-ce.
 - **Pas de forge d'opérateur gérée** : une forge fournie (`FORGE_BASE_URL`) est mesurée par
-  `container forge-check` et amenée à son contrat par `container forge-apply`.
+  `container forge-check` et amenée à son contrat par `container forge-apply` (« Une forge
+  fournie », plus bas).
 - **Pas d'utilisateur Linux par rôle** : un pod est un processus bwrap sous l'uid de l'humain ;
   les rôles sont des comptes de forge.
+
+## Une forge fournie
+
+La forge porte les dépôts, les issues et les PR, la seule copie durable du travail ; LCARS ne la
+fabrique pas. Une instance en conteneur la reçoit par sa conf de projet, posée par
+`deploy/container config` (`~/.lcars/container/<projet>.env` et `<projet>.secrets/`) :
+
+- `FORGE_BASE_URL`, son adresse vue du conteneur : `http://host.docker.internal:<port publié>` sous
+  Docker Desktop, le nom de service de la forge sur un réseau partagé sous docker natif ;
+- `FORGE_PUBLIC_URL`, la même forge vue du navigateur, où reviennent les retours OAuth2 du deck ;
+- `FORGE_ADMIN_TOKEN`, un jeton master d'un compte site-admin (Gitea : Settings → Applications,
+  scope « all ») ; le conteneur le garde, la structure change pendant toute la vie du système ;
+- `FORGE_SEED_PASSWORD`, le mot de passe que les comptes de rôle reçoivent à leur création, et que
+  le conteneur relit pour minter leurs jetons.
+
+`deploy/container forge-check` vérifie ce contrat depuis l'hôte, sans docker : les deux adresses
+posées, une forge qui répond, un jeton accepté et site-admin, un seed posé ; chaque manque vient
+avec son geste. `deploy/container forge-apply` pose ensuite la structure (OpenTofu tourne dans le
+conteneur), rejouable.
 
 ## Témoins
 

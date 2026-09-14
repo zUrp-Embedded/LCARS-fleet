@@ -45,7 +45,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   REAL="$BENCH/bench-up.sh"
   local f
-  for f in provision-lib.sh docker-endpoint.sh store.sh forge-bootstrap.sh; do cp "$BATS_TEST_DIRNAME/../../../lib/$f" "$ROOT/deploy/lib/"; done
+  for f in provision-lib.sh docker-endpoint.sh store.sh forge-bootstrap.sh bench.sh; do cp "$BATS_TEST_DIRNAME/../../../lib/$f" "$ROOT/deploy/lib/"; done
   : > "$DOCKER_D/docker-compose.yml"; : > "$DOCKER_D/docker-compose.bench.yml"; : > "$DOCKER_D/forge-compose.yml"
   read -r BF BD BS DF DD DS < <(free_ports 6)
   export BF BD BS DF DD DS
@@ -72,13 +72,14 @@ setup() {
   export CREATE_RC="$BATS_TEST_TMPDIR/create_rc";       echo "0" > "$CREATE_RC"
   export FLEET_RC="$BATS_TEST_TMPDIR/fleet_rc";         echo "0" > "$FLEET_RC"
   export RUNNER_RC="$BATS_TEST_TMPDIR/runner_rc";       echo "0" > "$RUNNER_RC"
-  export RUNNERS_JSON="$BATS_TEST_TMPDIR/runners";      printf '{"runners":[{"id":1}]}\n' > "$RUNNERS_JSON"
   export REV_OK="$BATS_TEST_TMPDIR/rev_ok";             echo "0" > "$REV_OK"
   export REMOTE_MAIN="$BATS_TEST_TMPDIR/remote_main";   : > "$REMOTE_MAIN"
   export ANCESTOR_RC="$BATS_TEST_TMPDIR/ancestor";      echo "0" > "$ANCESTOR_RC"
   export PATCH_CODE="$BATS_TEST_TMPDIR/patch";          echo "200" > "$PATCH_CODE"
   export DAEMON_MORT="$BATS_TEST_TMPDIR/daemon-mort"
   export PS_RC="$BATS_TEST_TMPDIR/ps_rc";               echo "0" > "$PS_RC"
+  # les objets des projets du banc, « <nom>:<c|v>:<marqueur> », rangés dans le projet que leur nom porte
+  export OBJETS=""
   export SOURCE_OWNER_OUT="$BATS_TEST_TMPDIR/owner";    echo "admiral" > "$SOURCE_OWNER_OUT"
   export PORT_HOLDER="$BATS_TEST_TMPDIR/port_holder"
   export CREDS_POSED="$BATS_TEST_TMPDIR/creds_posed"
@@ -87,7 +88,7 @@ setup() {
 #!/usr/bin/env bash
 echo "RUNNER:$*" >> "$CALLS"
 while [[ $# -gt 0 ]]; do
-  case "$1" in *-file) echo "RUNNER-FILE:$1=$(cat "$2") mode=$(stat -c %a "$(dirname "$2")")" >> "$CALLS"; shift ;; esac
+  case "$1" in *-file) echo "RUNNER-FILE:$1=$(cat "$2") mode=$(stat -c %a "$2") dossier=$(stat -c %a "$(dirname "$2")") $2" >> "$CALLS"; shift ;; esac
   shift
 done
 rc="$(cat "$RUNNER_RC")"
@@ -110,18 +111,29 @@ argv="$*"
 stdin=""; [[ -p /dev/stdin || -f /dev/stdin ]] && stdin="$(cat)"
 echo "DOCKER:$argv${stdin:+ <<< $stdin}" >> "$CALLS"
 [[ -z "${PW-}" ]] || echo "PW=$PW" >> "$CALLS"
+objets() {
+  local o nom type marque ligne
+  for o in $OBJETS; do
+    IFS=: read -r nom type marque <<<"$o"
+    [[ "$type" == "$2" && "$nom" == "$1"[-_]* ]] || continue
+    ligne="${3//\{\{.Names\}\}/$nom}"; ligne="${ligne//\{\{.Name\}\}/$nom}"
+    printf '%s\n' "${ligne//\{\{.Label \"lcars.bench\"\}\}/$marque}"
+  done
+}
 case "$argv" in
-  *" create lcars"*|*" up -d")   env | grep '^LCARS_\|^FORGE_' | sort >> "$CALLS"; exit 0 ;;
+  "ps -a --filter label=com.docker.compose.project="*)
+    [[ "$(cat "$PS_RC")" -eq 0 ]] || exit 1
+    objets "${4#label=com.docker.compose.project=}" c "$6"; exit 0 ;;
+  "volume ls --filter label=com.docker.compose.project="*)
+    objets "${4#label=com.docker.compose.project=}" v "$6"; exit 0 ;;
+  *" up -d"*)                    env | grep '^LCARS_\|^FORGE_' | sort >> "$CALLS"; exit 0 ;;
   *"ps --filter publish="*)      [[ -f "$PORT_HOLDER" ]] && cat "$PORT_HOLDER"; exit 0 ;;
   *"com.docker.compose.project"*) echo "un-autre-projet"; exit 0 ;;
   version*)                      [[ -e "$DAEMON_MORT" ]] && exit 1; echo "29.0.0"; exit 0 ;;
-  "run --rm"*)                   echo flux-ok; exit 0 ;;
-  "ps -a"*)                      exit "$(cat "$PS_RC")" ;;
   *"stat -c %U "*)               cat "$SOURCE_OWNER_OUT"; exit 0 ;;
   "inspect -f {{.State.Health.Status}}"*) echo healthy; exit 0 ;;
   "image inspect -f"*)           cat "$IMAGE_REV_OUT"; exit 0 ;;
   "image inspect"*)              exit 0 ;;
-  "inspect "*"Config.Image"*)    echo "gitea/runner:test"; exit 0 ;;
   *"user create"*)               rc="$(cat "$CREATE_RC")"; [[ "$rc" -eq 0 ]] || echo "user already exists" >&2; exit "$rc" ;;
   *"generate-access-token"*)     cat "$MASTER_TOKEN_OUT"; exit 0 ;;
   *"forge-seed.pass"*)           exit 1 ;;
@@ -131,7 +143,6 @@ case "$argv" in
   *"credentials.json"*)          [[ "$argv" == *"mkdir"* ]] && { touch "$CREDS_POSED"; exit 0; }; [[ -e "$CREDS_POSED" ]] && echo oui || echo non; exit 0 ;;
   *"lcars-forge.rc"*)        cat "$PROV_RC_OUT"; exit 0 ;;
   *"forge-gestures.sh runner-token"*) echo REG-TOKEN-TEMOIN; exit 0 ;;
-  *"gitea-runner --version"*)    echo "v1"; exit 0 ;;
   *" env "*"fleet start")        exit "$(cat "$FLEET_RC")" ;;
 esac
 exit 0
@@ -156,7 +167,6 @@ echo "CURL:$method $url | $hdr | $body" >> "$CALLS"
 code=200; rep=""
 case "$method $url" in
   "GET "*/api/v1/user)              [[ "$hdr" == "Authorization: token $(cat "$ACCEPTED_TOKEN")" || "$hdr" == "Authorization: Basic "* ]] || code=401 ;;
-  "GET "*/admin/actions/runners)    rep="$(cat "$RUNNERS_JSON")" ;;
   "PATCH "*/api/v1/admin/users/*)   code="$(cat "$PATCH_CODE")" ;;
   "POST "*/api/v1/users/*/tokens)   code=201; rep='{"sha1":"OP-TOKEN"}' ;;
   "GET "*/api/v1/users/*)           rep='{"is_admin":true}' ;;
@@ -180,7 +190,7 @@ FAKE
   export PATH="$BINDIR:$DECOR_BIN:$SANS_PYTHON3"
   export DOCKER_BIN=dockerstub DOCKER_HOST=unix:///dev/null
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
-  unset LCARS_WORK_TREE LCARS_BENCH_ADMIRAL_PW LCARS_BENCH_HUMAN_PW
+  unset LCARS_BENCH_ADMIRAL_PW LCARS_BENCH_HUMAN_PW
 }
 
 run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
@@ -233,17 +243,10 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   local ligne; ligne="$(grep '^RUNNER:' "$CALLS")"
   [[ "$ligne" == *"--forge-api http://127.0.0.1:$BF/api/v1 --admin-token-file "*" --reg-token-file "*"--network bt-forge_default"*"--project bt-runner"* ]]
   [[ "$ligne" != *MASTER* && "$ligne" != *REG-TOKEN-TEMOIN* ]]
-  grep -qx 'RUNNER-FILE:--admin-token-file=MASTER mode=700' "$CALLS"
-  grep -qx 'RUNNER-FILE:--reg-token-file=REG-TOKEN-TEMOIN mode=700' "$CALLS"
+  grep -qE '^RUNNER-FILE:--admin-token-file=MASTER mode=600 dossier=700 ' "$CALLS"
+  grep -qE '^RUNNER-FILE:--reg-token-file=REG-TOKEN-TEMOIN mode=600 dossier=700 ' "$CALLS"
   [[ "$ligne" == *" --labels shell:docker://alpine:temoin,dood:docker://docker:temoin" ]]
-}
-
-@test "les runners se comptent sur la forge avec le jeton master, reçu en en-tête" {
-  run_bench
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "CURL:GET http://127.0.0.1:$BF/api/v1/admin/actions/runners | Authorization: token MASTER | " "$CALLS"
-  grep '^CURL-ARGV:' "$CALLS" | refute_out 'MASTER'
-  [[ "$output" == *"runner    : enregistré (1 vu(s) par la forge)"* ]]
+  [[ "$output" == *"runner    : enregistré — labels : shell:docker://alpine:temoin,dood:docker://docker:temoin"* ]]
 }
 
 @test "le jeton master se vérifie par son en-tête : la forge qui en attend un autre arrête le banc en 4" {
@@ -271,19 +274,13 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" != *"REFUS-TEMOIN"* ]]
 }
 
-@test "runner démarré mais aucun vu par la forge : PAS PRÊT, sortie 6" {
-  printf '{"runners":[]}\n' > "$RUNNERS_JSON"
-  run_bench
-  [ "$status" -eq 6 ]
-  [[ "$output" == *"banc PAS PRÊT — le runner était demandé"*"démarré mais aucun runner vu par la forge"* ]]
-}
 
-
-@test "une image sans révision, ou « unknown », est annoncée inconnue ; une image estampillée montre sa révision" {
+@test "une image sans révision, ou « unknown », est refusée en 7 avant toute forge ; une image estampillée montre sa révision" {
   : > "$IMAGE_REV_OUT"
   run_bench --no-runner
   [ "$status" -eq 7 ]
   [[ "$output" == *"ne porte pas de révision"* ]]
+  refute grep -q 'forge-compose.yml' "$CALLS"
   echo unknown > "$IMAGE_REV_OUT"
   run_bench --no-runner
   [ "$status" -eq 7 ]
@@ -411,15 +408,9 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -q "GIT:-C $ROOT push -q http://127.0.0.1:$BF/fleet/lcars.git deadbeef1:refs/heads/main | http.http://127.0.0.1:$BF/.extraheader=Authorization: token SYS-TOKEN" "$CALLS"
   refute grep -qE 'GIT:[^|]*SYS-TOKEN' "$CALLS"
   refute grep -q 'push -q --force' "$CALLS"
-  [[ "$output" == *"main poussé (révision de l'image : deadbeef1)"*"ops non poussé (LCARS_WORK_TREE non posé"* ]]
-}
-
-@test "le dépôt de semis se crée sur la forge avec le jeton système, reçu en en-tête" {
-  run_bench --no-runner
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local post; post="$(grep "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos | Authorization: token SYS-TOKEN | " "$CALLS")"
-  [ "$(jq -c '{name, private, auto_init}' <<<"${post##* | }")" = '{"name":"lcars","private":false,"auto_init":false}' ]
-  grep '^CURL-ARGV:' "$CALLS" | refute_out 'SYS-TOKEN'
+  [[ "$output" == *"main poussé (révision de l'image : deadbeef1)"* ]]
+  refute grep -q 'GIT:.* ops:ops' "$CALLS"
+  refute grep -q '^CURL:POST .*/repos' "$CALLS"
 }
 
 @test "rejeu sur une forge qui porte déjà un main étranger : le hook est levé et le push forcé, dit" {
@@ -498,13 +489,6 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"source du conteneur clonée depuis main"* ]]
 }
 
-@test "le conteneur voit la forge à l'adresse interne des constantes, et clone sa source de là" {
-  run_bench --no-runner
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx 'FORGE_BASE_URL=http://forge-temoin:3000' "$CALLS"
-  grep -qx 'LCARS_SOURCE_REMOTE=http://forge-temoin:3000/fleet/lcars.git' "$CALLS"
-}
-
 @test "sans drapeau, projet et ports du banc viennent des constantes" {
   run bash "$REAL" --image lcars-fleet:9 --no-runner < /dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -514,11 +498,11 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -qx "LCARS_LANDING_PORT_BIND=0.0.0.0:$DD" "$CALLS"
 }
 
-@test "le conteneur se crée et démarre par un compose qui lit les constantes de l'arbre" {
+@test "le conteneur se crée et démarre par un compose qui lit les constantes de l'arbre, et reçoit la base du banc" {
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qE "^DOCKER:compose --env-file [^ ]+ -f $DOCKER_D/docker-compose.yml -f $DOCKER_D/docker-compose.bench.yml -p bt-fleet create lcars$" "$CALLS"
-  grep -qE "^DOCKER:compose --env-file [^ ]+ -f $DOCKER_D/docker-compose.yml -f $DOCKER_D/docker-compose.bench.yml -p bt-fleet start lcars$" "$CALLS"
+  grep -qE "^DOCKER:compose --env-file [^ ]+ -f $DOCKER_D/docker-compose.yml -f $DOCKER_D/docker-compose.bench.yml -p bt-fleet up -d --no-build lcars$" "$CALLS"
+  grep -qx 'LCARS_BENCH_BASE=bt' "$CALLS"
   local f
   for f in $(grep -oE '^DOCKER:compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
     [ "$(readlink -f "$f")" = "$CONSTANTES" ]
@@ -549,11 +533,37 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q 'forge-compose.yml' "$CALLS"
 }
 
-@test "un « docker ps » en échec ne tue pas le banc en silence" {
+@test "un « docker ps » en échec est un arrêt en 1 qui le dit, avant toute forge" {
   echo 1 > "$PS_RC"
   run_bench --no-runner
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"banc PRÊT sans CI"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker ne rend pas les objets des projets bt-fleet, bt-forge, bt-runner"* ]]
+  refute grep -q 'forge-compose.yml' "$CALLS"
+}
+
+@test "la forge d'un poste homonyme (projet sans marqueur) est refusée en 1 : ni montée, ni admiral reposé" {
+  export OBJETS="bt-forge-gitea-1:c: bt-forge_data:v:"
+  run_bench --no-runner
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sans son marqueur"*"conteneur bt-forge-gitea-1 (projet bt-forge)"*"volume bt-forge_data (projet bt-forge)"* ]]
+  refute grep -q 'forge-compose.yml' "$CALLS"
+  refute grep -q 'change-password' "$CALLS"
+}
+
+@test "un runner de poste homonyme est refusé aussi : forge-runner le détruirait" {
+  export OBJETS="bt-runner-act-1:c:"
+  run_bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"conteneur bt-runner-act-1 (projet bt-runner)"* ]]
+  refute grep -q '^RUNNER:' "$CALLS"
+}
+
+@test "un banc déjà monté sous cette base est refusé : il se détruit d'abord" {
+  export OBJETS="bt-fleet-lcars-1:c:bt bt-forge-gitea-1:c:bt"
+  run_bench --no-runner
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le banc bt existe déjà (bt-fleet)"*"bench-down.sh --project bt --yes"* ]]
+  refute grep -q 'forge-compose.yml' "$CALLS"
 }
 
 @test "le conteneur ne reçoit pas de LCARS_BIND, que le compose ne lit pas" {
@@ -563,9 +573,11 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -qx "LCARS_SSH_PORT=0.0.0.0:$BS" "$CALLS"
 }
 
-@test "les fichiers de jetons du runner ne survivent pas au banc" {
+@test "les fichiers de jetons du runner ont existé sous TMPDIR, en 0600, et ne survivent pas au banc" {
   local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
   TMPDIR="$T" run_bench
   [ "$status" -eq 0 ]
+  local fichiers; fichiers="$(sed -n 's/^RUNNER-FILE:[^ ]* mode=600 dossier=700 //p' "$CALLS")"
+  [ "$(grep -c "^$T/bench-up-jetons\.[^/]*/" <<<"$fichiers")" -eq 2 ]
   [ "$(find "$T" -name 'bench-up-jetons.*' | wc -l)" -eq 0 ]
 }

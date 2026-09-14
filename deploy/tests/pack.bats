@@ -46,7 +46,6 @@ if [[ "$1" == release ]]; then
   mkdir -p "$rel/bin" "$rel/lib/lcars_fleet-0.9.0/priv/api"
   printf '#!/bin/sh\nexit 0\n' > "$rel/bin/lcars_fleet"; chmod 0755 "$rel/bin/lcars_fleet"
   printf 'sha=%s\n' "${STUB_MIX_SHA:-$(git rev-parse --short HEAD)}" > "$rel/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
-  [[ -z "${STUB_MIX_TWO_LIBS:-}" ]] || mkdir -p "$rel/lib/lcars_fleet-0.1.0/priv/api"
 fi
 exit 0
 EOF
@@ -293,7 +292,7 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   grep -q "  lcars-fleet-v9.9-otp27-$ARCH.tar.gz\$" "$dist/install.sh"
   grep -q "^DOOR_BASE=\"https://forge.invalid/lcars/lcars-fleet/releases/download/v9.9\"" "$dist/install.sh"
   grep -q '^mix deps.get$' "$CALLS"
-  grep -q '^mix release --overwrite$' "$CALLS"
+  grep -q '^mix release$' "$CALLS"
   [[ "$output" == *"pack: --no-image : pas d'image"*"pack: sans --publish : le tar et l'installeur restent dans $dist"* ]]
 }
 
@@ -303,12 +302,12 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   cmp "$R/deploy/installer-constants.env" "$LCARS_PACK_DIR/dist/v9.9/installer-constants.env"
 }
 
-@test "sans tag, la version est <AAAA-MM-JJ>-<sha> et le kit se nomme d'elle" {
+@test "sans tag, la version est <AAAA-MM-JJ>-<révision du kit> et le kit se nomme d'elle" {
   pack --no-image
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local tars; tars="$(find "$LCARS_PACK_DIR" -maxdepth 1 -name "lcars-fleet-*-$HEAD_SHA-otp27-$ARCH.tar.gz")"
+  local tars; tars="$(find "$LCARS_PACK_DIR" -maxdepth 1 -name "lcars-fleet-*-$HEAD8-otp27-$ARCH.tar.gz")"
   [ -n "$tars" ]
-  [[ "$(basename "$tars")" =~ ^lcars-fleet-[0-9]{4}-[0-9]{2}-[0-9]{2}-$HEAD_SHA-otp27-$ARCH\.tar\.gz$ ]]
+  [[ "$(basename "$tars")" =~ ^lcars-fleet-[0-9]{4}-[0-9]{2}-[0-9]{2}-$HEAD8-otp27-$ARCH\.tar\.gz$ ]]
   [ -d "$LCARS_PACK_DIR/dist/$(basename "$tars" | sed "s/^lcars-fleet-//; s/-otp27-$ARCH.tar.gz$//")" ]
 }
 
@@ -331,26 +330,26 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   [ ! -e "$LCARS_PACK_DIR" ]
 }
 
-@test "une release dont le tampon n'est pas HEAD, ou qui porte deux libs, n'est pas empaquetée" {
+@test "une release dont le tampon n'est pas HEAD n'est pas empaquetée ; l'abréviation courte de HEAD passe" {
   STUB_MIX_SHA=deadbee pack --no-image
   [ "$status" -eq 1 ]
-  [[ "$output" == *"le tampon de la release dit « deadbee », HEAD est $HEAD_SHA"* ]]
+  [[ "$output" == *"le tampon de la release dit « deadbee », HEAD est $HEAD8"* ]]
   [ ! -e "$LCARS_PACK_DIR" ]
-  STUB_MIX_TWO_LIBS=1 pack --no-image
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"la release porte 2 lib/lcars_fleet-*"*"une assemblée n'en a qu'une"* ]]
+  STUB_MIX_SHA="$HEAD_SHA" pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"release attestée : build $HEAD_SHA"* ]]
 }
 
 @test "--publish : sans jeton, refus qui nomme les deux sources ; avec un jeton, son état est dit et jamais sa valeur" {
   LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
   [ "$status" -eq 1 ]
-  [[ "$output" == *"jeton : absent"*"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE"* ]]
+  [[ "$output" == *"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE"* ]]
   refute grep -q '^CURL' "$CALLS"
   local sentinelle="s3cr3t-de-forge-a-ne-jamais-imprimer"
   : > "$CALLS"
   LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN="$sentinelle" pack --no-image --publish
   [ "$status" -eq 1 ]
-  [[ "$output" == *"jeton : trouvé"*"publication refusée avant tout envoi"* ]]
+  [[ "$output" == *"jeton trouvé"*"publication refusée avant tout envoi"* ]]
   [[ "$output" != *"$sentinelle"* ]]
   refute grep -q "$sentinelle" "$CALLS"
 }

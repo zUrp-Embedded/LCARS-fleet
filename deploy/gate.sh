@@ -86,24 +86,22 @@ fi
 
 # la liste vient d'un find, pas de git : la porte se joue aussi sur un kit détaré sans .git ; les
 # entrées sans extension se reconnaissent à leur shebang, et chaque .bats a le sien (vérifié ci-dessus)
-mapfile -t SHELL_FILES < <(
-  { find "$HERE" -type f 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort | while IFS= read -r f; do
-    IFS= read -r first < "$f" || true
-    case "$f" in
-      *.bats|*.sh|*.bash) printf '%s\n' "$f"; continue ;;
-    esac
-    [[ "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] && printf '%s\n' "$f"
-  done
-)
+mapfile -t ARBRE < <({ find "$HERE" -type f 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort)
+SHELL_FILES=()
+for f in "${ARBRE[@]}"; do
+  case "$f" in
+    *.bats|*.sh|*.bash) SHELL_FILES+=("$f"); continue ;;
+  esac
+  IFS= read -r first < "$f" || true
+  [[ ! "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] || SHELL_FILES+=("$f")
+done
 if ! command -v shellcheck >/dev/null 2>&1; then
   echo "ÉCHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
   echo "       Installer : apt install shellcheck." >&2
   exit 1
 fi
-set +e
-SC_FLOOR="$(shellcheck -x --source-path=SCRIPTDIR -S warning -f gcc "${SHELL_FILES[@]}" 2>&1)"
-SC_FLOOR_RC=$?
-set -e
+SC_FLOOR_RC=0
+SC_FLOOR="$(shellcheck -x --source-path=SCRIPTDIR -S warning -f gcc "${SHELL_FILES[@]}" 2>&1)" || SC_FLOOR_RC=$?
 if [[ "$SC_FLOOR_RC" -ne 0 ]]; then
   printf '%s\n' "$SC_FLOOR" >&2
   echo "ÉCHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de sévérité >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
@@ -133,14 +131,15 @@ go7_source_header() {
 }
 GO7_BAD=()
 GO7_N=0
-while IFS= read -r f; do
+for f in "${ARBRE[@]}"; do
+  case "${f##*.}" in md|sh|py) ;; *) continue ;; esac
   go7_exempt "$f" && continue
   GO7_N=$((GO7_N + 1))
   case "${f##*.}" in
     md) go7_md_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
     sh|py) go7_source_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
   esac
-done < <({ find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort)
+done
 if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
   echo "ÉCHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
   printf '   %s\n' "${GO7_BAD[@]}" >&2
@@ -163,10 +162,8 @@ fi
 echo "--- bats${COUCHE:+ (couche $COUCHE)} : ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas ---"
 # un cas sauté n'est pas un cas joué : le verdict les compte, sinon un poste qui en saute soixante rend le même vert
 SORTIE="$(mktemp "${TMPDIR:-/tmp}/gate-bats.XXXXXX")"
-set +e
-env "${BATS_ENV[@]}" bats "${JOUES[@]}" | tee "$SORTIE"
-RC="${PIPESTATUS[0]}"
-set -e
+RC=0
+env "${BATS_ENV[@]}" bats "${JOUES[@]}" | tee "$SORTIE" || RC=$?
 SAUTES="$(grep -c '# skip' "$SORTIE" || true)"
 rm -f "$SORTIE"
 

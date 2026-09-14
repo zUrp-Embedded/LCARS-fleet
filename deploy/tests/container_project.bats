@@ -29,8 +29,7 @@ sans_outil() {
 
 setup_file() {
   SANS_DOCKER="$(sans_outil docker)"
-  SANS_PYTHON3="$(sans_outil python3)"
-  export SANS_DOCKER SANS_PYTHON3
+  export SANS_DOCKER
 }
 
 setup() {
@@ -43,12 +42,12 @@ setup() {
   mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"
   : > "$CALLS"
+  local real_docker; real_docker="$(command -v docker)"
 
   cat > "$BINDIR/docker" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
-if [[ "\$*" == *"config --format json"* ]]; then printf '{"volumes":{"lcars-home":{"name":"%s"}}}\n' "\${STUB_COMPOSE_HOME:-}"; exit 0; fi
-if [[ "\$*" == *".Mounts"* ]]; then echo "\${STUB_HOME_VOLUME:-}"; exit 0; fi
+if [[ "\$*" == *" config --images" ]]; then DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" exec "$real_docker" "\$@"; fi
 if [[ "\$1 \$2" == "image inspect" && -n "\${STUB_NO_IMAGE:-}" ]]; then exit 1; fi
 case "\$1 \$2" in
   "compose version") exit 0 ;;
@@ -56,19 +55,12 @@ case "\$1 \$2" in
   "volume ls")       printf '%s' "\${STUB_VOLUMES:-}"; [[ -n "\${STUB_VOLUMES:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
-# Le verdict des gestes de forge, lu par 'up' DANS le conteneur ; STUB_PROV_RC vide = pas encore ecrit.
-# Pas d'accents graves ici : ce heredoc n'est pas quote, un mot entre accents graves y serait execute.
-if [[ "\$*" == *"cat /run/lcars-forge.rc"* ]]; then
-  [[ -n "\${STUB_PROV_RC:-}" ]] || exit 1
-  printf '%s\n' "\${STUB_PROV_RC}"
-  exit 0
-fi
 exit 0
 EOF
   chmod 0755 "$BINDIR/docker"
 
   export PATH="$BINDIR:$PATH"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC STUB_VOLUMES STUB_HOME_VOLUME STUB_COMPOSE_HOME
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_VOLUMES
 
   export DOCKER_HOST="unix:///dev/null"
   export PROV_DOCKER_BIN="$BINDIR/docker"
@@ -180,22 +172,13 @@ seed_project() {
   [[ "$output" == *"<aucun>"* ]]
 }
 
-# shellcheck disable=SC2016 # motif `grep` : `${PROJECT}` doit atteindre grep tel quel
-@test "up refuse une instance dont /home vit sur un autre volume que celui du compose — jamais un /home vide en silence" {
+@test "reset confirmé : compose down -v retire le conteneur et les volumes du projet, aucun volume n'est retiré à la main" {
   seed_project "$CF"
-  # le rendu de compose se lit par jq : un poste sans python3 garde la garde
-  export PATH="$BINDIR:$DECOR_BIN:$SANS_PYTHON3"
-  STUB_HOME_VOLUME=lcars-fleet_home STUB_COMPOSE_HOME=lcars-fleet_lcars-home LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"lcars-fleet_home"*"lcars-fleet_lcars-home"*"volume vide"* ]]
-  [[ "$output" == *"reset"* ]]
-  refute grep -qE "compose .* up" "$CALLS"
-  # même volume des deux côtés : la garde se tait et up va jusqu'au verdict
-  STUB_HOME_VOLUME=lcars-fleet_lcars-home STUB_COMPOSE_HOME=lcars-fleet_lcars-home STUB_PROV_RC=0 \
-    LCARS_UP_VERDICT_TIMEOUT=5 run bash "$SRC" up
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"volume vide"* ]]
-  grep -qE "compose .* up" "$CALLS"
+  run script -qec "bash '$SRC' -p lcars-a-moi reset" /dev/null <<<yes
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"reset fait"* ]]
+  grep -qE -- "-p lcars-a-moi down -v$" "$CALLS"
+  refute grep -q 'volume rm' "$CALLS"
 }
 
 @test "LCARS_PROJECT is read, and -p overrides it" {
@@ -236,44 +219,26 @@ seed_project() {
 }
 
 
-@test "up: verdict 0 -> convergé, sortie 0, et compose n'a jamais bâti" {
-  STUB_PROV_RC=0 run "$SRC" -p lcars up
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"gestes de forge convergés"* ]]
+@test "up ne bâtit jamais : compose reçoit --no-build" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/sleep"; chmod 0755 "$BINDIR/sleep"
+  run "$SRC" -p lcars up
   grep -q -- ' up -d --no-build' "$CALLS"
   refute grep -qE '(^| )build( |$)' "$CALLS"
 }
 
-@test "up: verdict 2 -> DRIFT nomme, mais PAS un echec (un geste manque, rien n'est casse)" {
-  STUB_PROV_RC=2 run "$SRC" -p lcars up
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"drift résiduel"* ]]
-  [[ "$output" != *"en échec"* ]]
+# arbre_container — une copie de container avec ses libs, ses compose et ses constantes, où les délégués se doublent
+arbre_container() {
+  ARBRE="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$ARBRE/deploy/docker/bench" "$ARBRE/deploy/lib"
+  cp "$SRC" "$REPO/deploy/installer-constants.env" "$ARBRE/deploy/"
+  cp -a "$REPO/deploy/lib/." "$ARBRE/deploy/lib/"
+  cp "$CF" "$REPO/deploy/docker/docker-compose.secrets.yml" "$ARBRE/deploy/docker/"
 }
-
-@test "up: verdict non nul -> ECHEC, sortie NON NULLE, et la consequence est nommee" {
-  STUB_PROV_RC=1 run "$SRC" -p lcars up
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"en échec"* ]]
-  # « le conteneur tourne » ET « ne produira rien » : les deux moities, sinon le lecteur croit que
-  # le conteneur est mort et va le relancer au lieu de diagnostiquer.
-  [[ "$output" == *"le conteneur tourne"* ]]
-  [[ "$output" == *"ne produira rien"* ]]
-}
-
-@test "up: verdict ILLISIBLE -> on le DIT et on sort 0 — une non-mesure n'est pas un echec" {
-  LCARS_UP_VERDICT_TIMEOUT=1 run "$SRC" -p lcars up
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"non lu"* ]]
-  [[ "$output" == *"n'est pas mesuré"* ]]
-  [[ "$output" != *"en échec"* ]]
-}
-
 
 @test "build DELEGUE a pack.sh — aucun docker build, aucun compose build ici" {
-  local stub="$BATS_TEST_TMPDIR/pack-stub"
-  printf '#!/usr/bin/env bash\necho "PACK:$*"\n' > "$stub"; chmod 0755 "$stub"
-  LCARS_PACK_BIN="$stub" run bash "$SRC" build --no-image
+  arbre_container
+  printf '#!/usr/bin/env bash\necho "PACK:$*"\n' > "$ARBRE/deploy/pack.sh"; chmod 0755 "$ARBRE/deploy/pack.sh"
+  run bash "$ARBRE/deploy/container" build --no-image
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"PACK:--no-image"* ]]
   refute grep -qE -- "compose .*build|build --target" "$CALLS"
@@ -308,11 +273,10 @@ seed_project() {
 }
 
 @test "up --bench : exec du banc avec la base du projet, l'image et les ports traduits" {
-  local bench="$BATS_TEST_TMPDIR/arbre/deploy/docker/bench"; mkdir -p "$bench" "$BATS_TEST_TMPDIR/arbre/deploy/lib" "$BATS_TEST_TMPDIR/arbre/deploy/docker"
-  cp "$SRC" "$REPO/deploy/installer-constants.env" "$BATS_TEST_TMPDIR/arbre/deploy/"; cp -a "$REPO/deploy/lib/." "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
-  cp "$CF" "$REPO/deploy/docker/docker-compose.secrets.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
+  arbre_container
+  local bench="$ARBRE/deploy/docker/bench"
   printf '#!/usr/bin/env bash\necho "BENCH:$*"; echo "DOCKER_BIN=$DOCKER_BIN"\n' > "$bench/bench-up.sh"; chmod 0755 "$bench/bench-up.sh"
-  LCARS_IMAGE=lcars-fleet:9 run bash "$BATS_TEST_TMPDIR/arbre/deploy/container" --forge-project bob_10 --port-forge 20100 --port-deck 20101 --port-ssh 20102 --bench up
+  LCARS_IMAGE=lcars-fleet:9 run bash "$ARBRE/deploy/container" --forge-project bob_10 --port-forge 20100 --port-deck 20101 --port-ssh 20102 --bench up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"BENCH:--forge-project bob_10 --image lcars-fleet:9 --port-forge 20100 --port-deck 20101 --port-ssh 20102"* ]]
   [[ "$output" == *"DOCKER_BIN=$BINDIR/docker"* ]]

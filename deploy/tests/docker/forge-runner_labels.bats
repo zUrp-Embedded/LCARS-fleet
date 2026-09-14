@@ -15,7 +15,7 @@ setup() {
   # les labels des constantes de cet arbre ne s'écrivent nulle part ailleurs
   local vrai="$BATS_TEST_DIRNAME/../.."
   mkdir -p "$BATS_TEST_TMPDIR/arbre/deploy/docker" "$BATS_TEST_TMPDIR/arbre/deploy/lib"
-  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
+  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-network.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
   { grep -v '^PROV_RUNNER_LABELS=' "$vrai/installer-constants.env"; echo 'PROV_RUNNER_LABELS=shell:docker://alpine:temoin'; } \
     > "$BATS_TEST_TMPDIR/arbre/deploy/installer-constants.env"
@@ -67,33 +67,12 @@ run_runner() {
       --network t_default --project t-runner "$@"
 }
 
-@test "no --labels at all is REFUSED, and the refusal carries the way out" {
+@test "sans --labels, les images des labels des constantes sont vérifiées avant la forge" {
+  printf 'alpine:temoin\n' > "$UNPULLABLE"
   run_runner
-
   [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUS"* ]]
-  # A refusal that does not say how to proceed is an obstacle, not a wall.
-  [[ "$output" == *'--labels "shell:docker://alpine:temoin"'* ]]
-  [[ "$output" == *"--accept-generic"* ]]
-  # Upstream of the forge: nothing was minted, nothing registered.
+  [[ "$output" == *"REFUS : image(s) introuvable(s)"*"alpine:temoin"* ]]
   refute grep -q '^CURL' "$CALLS"
-}
-
-@test "LCARS_RUNNER_LABELS dans l'environnement ne remplace pas --labels : le refus tient" {
-  LCARS_RUNNER_LABELS="shell:docker://alpine:3.20" run_runner
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"REFUS : aucun --labels"* ]]
-  refute grep -q '^CURL' "$CALLS"
-}
-
-@test "--accept-generic proceeds, and SAYS what was accepted" {
-  run_runner --accept-generic
-
-  # The generic default is right for an operator who cannot resolve a local LCARS image. Choosing
-  # it is a decision; inheriting it silently was the defect.
-  [[ "$output" == *"défaut générique accepté (--accept-generic)"* ]]
-  [[ "$output" == *"ne sait pas jouer mix gate"* ]]
-  grep -q '^CURL' "$CALLS"
 }
 
 @test "an image no daemon can resolve is REFUSED — the runner would announce it anyway" {

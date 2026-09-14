@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/docker/forge-runner.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-14
-# STATUS: témoins de forge-runner.sh au-delà des labels — jetons par fichier, forge HTTP locale, env-file, compose relu, semis du daemon embarqué, verdicts
+# STATUS: témoins de forge-runner.sh au-delà des labels — jetons par fichier, forge HTTP locale, environnement de compose, compose relu, semis du daemon embarqué, verdicts
 
 load ../refute
 load ../support/decor
@@ -33,7 +33,7 @@ setup() {
   local vrai="$BATS_TEST_DIRNAME/../.."
   ARBRE="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$ARBRE/deploy/docker" "$ARBRE/deploy/lib"
-  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$ARBRE/deploy/docker/"
+  cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-network.yml" "$ARBRE/deploy/docker/"
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$ARBRE/deploy/lib/"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS)=' "$vrai/installer-constants.env"
@@ -48,8 +48,10 @@ setup() {
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export UP_RC="$BATS_TEST_TMPDIR/up_rc";   echo 0 > "$UP_RC"
   export DIND_OUT="$BATS_TEST_TMPDIR/dind"; echo "27.0.0" > "$DIND_OUT"
-  # le compose de la pose est relu par compose lui-même, sans daemon, et son rendu JSON gardé
+  # le compose de la pose est relu par compose lui-même, sans daemon, et son rendu JSON gardé ;
+  # l'environnement qu'il reçoit est noté, et l'arbre de TMPDIR listé au même instant
   export RENDU="$BATS_TEST_TMPDIR/rendu.json" NO_DAEMON="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   REAL_DOCKER="$(command -v docker)"; REAL_CURL="$(command -v curl)"
   export REAL_DOCKER REAL_CURL
 
@@ -58,10 +60,9 @@ setup() {
 echo "DOCKER:$*" >> "$CALLS"
 case "$*" in
   "image inspect "*)                    exit 0 ;;
-  "compose "*" up --no-start")
-    prev="" envfile=""
-    for a in "$@"; do [[ "$prev" == --env-file ]] && envfile="$a"; prev="$a"; done
-    echo "ENVFILE:mode=$(stat -c %a "$envfile")" >> "$CALLS"; sed 's/^/ENVFILE:/' "$envfile" >> "$CALLS"
+  "compose "*" up -d")
+    env | grep -E '^LCARS_(FORGE_URL|RUNNER_[A-Z]+)=' | sort | sed 's/^/ENV:/' >> "$CALLS"
+    grep -rl 'REG-' "$TMPDIR" 2>/dev/null | sed 's/^/FICHIER-A-JETON:/' >> "$CALLS"
     DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-2}" config --format json > "$RENDU" 2>&1
     exit "$(cat "$UP_RC")" ;;
   "exec "*" docker version "*)          cat "$DIND_OUT"; exit 0 ;;
@@ -77,7 +78,7 @@ EOF
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/sleep"
   chmod 0755 "$BINDIR/dockerstub" "$BINDIR/curl" "$BINDIR/sleep"
   export PATH="$BINDIR:$DECOR_BIN:$SANS_PYTHON3" DOCKER_BIN=dockerstub
-  unset LCARS_RUNNER_LABELS LCARS_RUNNER_NAME
+  unset LCARS_RUNNER_LABELS
 
   ADMIN="$BATS_TEST_TMPDIR/admin.token"; printf 'ADMIN-TOK\n' > "$ADMIN"
   REGF="$BATS_TEST_TMPDIR/reg.token"; printf 'REG-FILE\n' > "$REGF"
@@ -113,14 +114,14 @@ run_runner() {
   [[ "$output" == *"--admin-token-file (non vide) requis"* ]]
 }
 
-@test "--reg-token-file : aucun appel à l'API d'enregistrement, et le jeton voyage par un env-file 0600" {
+@test "--reg-token-file : aucun appel à l'API d'enregistrement, le jeton arrive à compose par son environnement et aucun fichier ne le porte" {
   routes_nominales
   run_runner --reg-token-file "$REGF"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"jeton d'enregistrement fourni (--reg-token-file)"* ]]
   forge_requests '.path' | refute_out 'registration-token'
-  grep -qx 'ENVFILE:mode=600' "$CALLS"
-  grep -qx 'ENVFILE:LCARS_RUNNER_TOKEN=REG-FILE' "$CALLS"
+  grep -qx 'ENV:LCARS_RUNNER_TOKEN=REG-FILE' "$CALLS"
+  refute grep -q '^FICHIER-A-JETON:' "$CALLS"
   refute grep -qE '^DOCKER:.*(REG-FILE|ADMIN-TOK)' "$CALLS"
 }
 
@@ -129,7 +130,7 @@ run_runner() {
   run_runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners/registration-token") | [.method, .auth]')" = '["POST","token ADMIN-TOK"]' ]
-  grep -qx 'ENVFILE:LCARS_RUNNER_TOKEN=REG-API' "$CALLS"
+  grep -qx 'ENV:LCARS_RUNNER_TOKEN=REG-API' "$CALLS"
   grep '^CURL-ARGV:' "$CALLS" | refute_out 'ADMIN-TOK'
 }
 
@@ -137,34 +138,47 @@ run_runner() {
   routes_nominales
   run_runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx 'ENVFILE:LCARS_FORGE_URL=http://forge-temoin:3000' "$CALLS"
+  grep -qx 'ENV:LCARS_FORGE_URL=http://forge-temoin:3000' "$CALLS"
 }
 
-@test "chaque compose du runner lit les constantes de l'installeur" {
+@test "le runner se retire puis se pose, chaque fois par un compose qui lit les constantes de l'installeur" {
   routes_nominales
   run_runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(grep -c '^DOCKER:compose ' "$CALLS")" -eq 3 ]
+  [ "$(grep -c '^DOCKER:compose ' "$CALLS")" -eq 2 ]
+  grep -q '^DOCKER:compose .* -p bt-runner down -v$' "$CALLS"
+  grep -q '^DOCKER:compose .* -p bt-runner up -d$' "$CALLS"
   local f
   for f in $(grep -oE '^DOCKER:compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
     [ "$(readlink -f "$f")" = "$CONSTANTES" ]
   done
 }
 
-@test "la pose se relit par compose : adresse de --instance-url, réseau externe de la forge, config copiée" {
+@test "la pose se relit par compose : adresse de --instance-url, réseau externe de la forge, aucune config copiée" {
   routes_nominales
   run_runner --instance-url http://host.docker.internal:21000
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -r '.services.act.environment.GITEA_INSTANCE_URL' "$RENDU")" = http://host.docker.internal:21000 ] || { cat "$RENDU"; return 1; }
   [ "$(jq -c '.networks.default | [.name, .external]' "$RENDU")" = '["bt-forge_default",true]' ]
-  grep -q '^DOCKER:cp .*/config.yaml bt-runner-act-1:/data/bench-config.yaml' "$CALLS"
+  [ "$(jq -r '.services.act.environment.CONFIG_FILE // "absent"' "$RENDU")" = absent ]
+  refute grep -q '^DOCKER:cp ' "$CALLS"
 }
 
-@test "--accept-generic : compose rend les labels des constantes" {
+@test "sans --labels, compose rend les labels des constantes, et un LCARS_RUNNER_LABELS de l'environnement ne les remplace pas" {
   routes_nominales
-  run bash "$SRC" --forge-api "$FORGE_API" --admin-token-file "$ADMIN" --network bt-forge_default --project bt-runner --accept-generic
+  LCARS_RUNNER_LABELS=shell:docker://alpine:environnement run bash "$SRC" --forge-api "$FORGE_API" --admin-token-file "$ADMIN" --network bt-forge_default --project bt-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -r '.services.act.environment.GITEA_RUNNER_LABELS' "$RENDU")" = shell:docker://alpine:temoin ] || { cat "$RENDU"; return 1; }
+}
+
+@test "--verify-repo et --accept-generic sont des options inconnues" {
+  run_runner --verify-repo fleet/lcars
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"option inconnue : --verify-repo"* ]]
+  run_runner --accept-generic
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"option inconnue : --accept-generic"* ]]
+  refute grep -q '^DOCKER:compose' "$CALLS"
 }
 
 @test "la forge ne rend pas de jeton d'enregistrement : sortie 2, et rien n'est monté" {
@@ -207,16 +221,4 @@ run_runner() {
   run_runner
   [ "$status" -eq 0 ]
   [[ "$output" == *"NON VÉRIFIÉ (HTTP 403"* ]]
-}
-
-@test "--verify-repo lit le statut du dernier run : success est la preuve, failure sort en 4" {
-  forge_route GET /api/v1/repos/fleet/lcars/actions/tasks 200 x1 '{"workflow_runs":[{"status":"success"}]}'
-  forge_route GET /api/v1/repos/fleet/lcars/actions/tasks 200 '{"workflow_runs":[{"status":"failure"}]}'
-  routes_nominales
-  run_runner --verify-repo fleet/lcars
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"PREUVE : un job a tourné et la forge rend un verdict vert"* ]]
-  run_runner --verify-repo fleet/lcars
-  [ "$status" -eq 4 ]
-  [[ "$output" == *"le job de vérification finit en failure"* ]]
 }

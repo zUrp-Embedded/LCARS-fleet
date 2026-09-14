@@ -253,7 +253,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"Système    Ubuntu 26.04 sous WSL2 · noyau 6.6.0 · systemd actif"* ]]
   [[ "$output" == *"x86_64 · 4 cœurs · 8 Go de RAM · 100 Go libres sur /"* ]]
   [[ "$output" == *"utilisateur temoin · groupes sudo, docker"* ]]
-  [[ "$output" == *"Outils     git, curl, jq présents"* ]]   # sudo n'est requis que par --workstation, jq que par le conteneur
+  [[ "$output" == *"Outils     git, curl présents"* ]]   # sudo n'est requis que par --workstation, jq que par le banc en conteneur
   [[ "$output" == *"Forge      aucune"* ]]
   porte "$a" --workstation --check
   [[ "$output" == *"Outils     git, curl, sudo présents"* ]]
@@ -418,13 +418,17 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"Outils manquants : git"* ]]
 }
 
-@test "jq absent : arrête le conteneur avant la confirmation en le nommant, laisse passer le système qui le pose" {
-  local a; a="$(_arbre jq=absent)"
+@test "jq absent : arrête le banc en conteneur avant la confirmation en le nommant, laisse passer le conteneur sans banc et le système qui le pose" {
+  local a; a="$(_arbre jq=absent forge_fournie=http://forge.example forge_joignable=oui)"
   porte "$a" --bench
   [ "$status" -eq 1 ]
   [[ "$output" == *"Outils manquants : jq"* ]]
   refute_out "Entrée pour continuer" <<<"$output"
   refute_out "CONTAINER:" <<<"$output"
+  porte "$a"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Outils     git, curl présents"* ]]
+  [[ "$output" == *"CONTAINER:up"* ]]
   porte "$a" --bench --workstation
   [ "$status" -eq 0 ]
   [[ "$output" == *"WORKSTATION:up"* ]]

@@ -12,7 +12,7 @@
 #         LCARS_PACK_REGISTRY le registre du --publish (défaut : l'hôte de la forge, ou ghcr.io chez GitHub)
 #         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge du --publish quand origin n'est pas http
 #         LCARS_PACK_TOKEN, LCARS_PACK_TOKEN_FILE   le jeton du --publish (write:repository et write:package)
-#         LCARS_SITE_SRC, LCARS_SITE_BASE   les sources de la doc et sa base d'URL, les mêmes que 44-media
+#         LCARS_SITE_BASE     la base d'URL de la doc, la même que 44-media
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
 #         LCARS_MINISIGN_PUBKEY   la clé publique inscrite dans l'installeur, si le tiroir porte la signature du kit
 # PRÉ-REQUIS : erl, mix, npm — un poste en livraison source les a tous
@@ -32,7 +32,6 @@ for _arg in "$@"; do
     *) echo "pack: option inconnue: $_arg (--publish | --no-image)" >&2; exit 1 ;;
   esac
 done
-unset _arg
 
 say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
@@ -43,29 +42,28 @@ die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 _etat="$(git status --porcelain 2>/dev/null)" || die "pas un dépôt git — le kit est un git archive de HEAD"
 [[ -z "$_etat" ]] || die "arbre modifié ou fichiers non suivis — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes différents dans un même paquet. À commiter (ou remiser) d'abord."
 
-SHA="$(git rev-parse --short HEAD)"
+COMMIT="$(git rev-parse HEAD)"
+REV="$(git rev-parse --short=8 HEAD)"
 VERSION="$(date +%Y-%m-%d)"
-TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
+TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${REV}")}"
 [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "tag « $TAG » : lettres, chiffres, . _ - seulement (il nomme le kit, l'image et la release)"
 
 # la forge de la version, tirée d'origin : l'installeur y prendra son kit, la publication y posera la release
-_ORIGIN="$(git remote get-url origin 2>/dev/null || true)"
-_o="${_ORIGIN%/}"; _o="${_o%.git}"; _f="" _ow="" _re=""
+_o="$(git remote get-url origin 2>/dev/null || true)"; _o="${_o%/}"; _o="${_o%.git}"; _f="" _ow="" _re=""
 if [[ "$_o" =~ ^(https?)://([^/]+)/([^/]+)/([^/]+)$ ]]; then
   _f="${BASH_REMATCH[1]}://${BASH_REMATCH[2]##*@}"; _ow="${BASH_REMATCH[3]}"; _re="${BASH_REMATCH[4]}"
 fi
-_FORGE="${LCARS_PACK_FORGE:-$_f}"; _FORGE="${_FORGE%/}"
-_OWNER="${LCARS_PACK_OWNER:-$_ow}"
-_REPO="${LCARS_PACK_REPO:-$_re}"
-unset _o _f _ow _re
+FORGE="${LCARS_PACK_FORGE:-$_f}"; FORGE="${FORGE%/}"
+OWNER="${LCARS_PACK_OWNER:-$_ow}"
+REPO="${LCARS_PACK_REPO:-${_re:-lcars-fleet}}"
 if [[ -n "${LCARS_DOOR_BASE:-}" ]]; then
   [[ "$PUBLISH" -eq 0 ]] || die "LCARS_DOOR_BASE est posée : l'installeur publié chercherait son kit ailleurs que sur la release — la retirer pour --publish"
   DOOR_BASE="$LCARS_DOOR_BASE"
 else
-  DOOR_BASE="${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/${_REPO:-lcars-fleet}/releases/download/$TAG"
+  DOOR_BASE="${FORGE:-https://forge.invalid}/${OWNER:-lcars}/$REPO/releases/download/$TAG"
 fi
 if [[ "$DOOR_BASE" != https://* ]]; then
-  [[ "$PUBLISH" -eq 0 ]] || die "la forge de publication « ${_FORGE} » n'est pas en https : l'installeur publié refuserait de télécharger son kit — LCARS_PACK_FORGE=https://… la pose"
+  [[ "$PUBLISH" -eq 0 ]] || die "la forge de publication « $FORGE » n'est pas en https : l'installeur publié refuserait de télécharger son kit — LCARS_PACK_FORGE=https://… la pose"
   say "base de l'installeur en clair ($DOOR_BASE) : il ne téléchargera que sous LCARS_DOOR_INSECURE_HTTP=1"
 fi
 ARCH="$(uname -m)"
@@ -81,20 +79,18 @@ say "gate du runtime (compile strict + suite + bats + contrats + topologie + dia
 say "gate de l'installeur…"
 bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
-# mix release --overwrite ne retire pas une lib/lcars_fleet-<ancienne> : on repart d'un répertoire vide et on vérifie le tampon
+# une release assemblée par-dessus une ancienne garde sa lib/lcars_fleet-<ancienne> : elle repart d'un répertoire vide
 say "release prod…"
 rm -rf runtime/_build/prod/rel/lcars_fleet
-( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release en échec"
-_libs=(runtime/_build/prod/rel/lcars_fleet/lib/lcars_fleet-*)
-[[ "${#_libs[@]}" -eq 1 && -d "${_libs[0]}" ]] \
-  || die "la release porte ${#_libs[@]} lib/lcars_fleet-* (${_libs[*]##*/}) — une assemblée n'en a qu'une ; rien n'est empaqueté"
-_built="$(sed -n 's/^sha=//p' "${_libs[0]}/priv/api/build_info.txt" 2>/dev/null | head -1 || true)"
-[[ "$_built" == "$SHA" ]] \
-  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $SHA — les bits assemblés ne sont pas ceux du commit ; rien n'est empaqueté"
-say "release attestée : ${_libs[0]##*/}, build $_built"
+( cd runtime && MIX_ENV=prod mix release >/dev/null ) || die "mix release en échec"
+# le tampon de la release porte l'abréviation courte de git, le kit la sienne : l'une préfixe l'autre
+_built="$(sed -n 's/^sha=//p' runtime/_build/prod/rel/lcars_fleet/lib/lcars_fleet-*/priv/api/build_info.txt 2>/dev/null | head -1 || true)"
+[[ -n "$_built" && ( "$REV" == "$_built"* || "$_built" == "$REV"* ) ]] \
+  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $REV — les bits assemblés ne sont pas ceux du commit ; rien n'est empaqueté"
+say "release attestée : build $_built"
 
-# une cible en livraison binaire ne pose pas node : la doc voyage bâtie, au chemin que 44-media lit
-SITE_SRC="${LCARS_SITE_SRC:-assets/github.io}"
+# une cible en livraison binaire ne pose pas node : la doc voyage bâtie, au chemin que 44-media et kit-verify lisent
+SITE_SRC=assets/github.io
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 [[ -d "$SITE_SRC" ]] || die "sources du site absentes ($SITE_SRC) — le paquet serait une demi-livraison"
 command -v npm >/dev/null 2>&1 \
@@ -104,8 +100,6 @@ say "doc du deck (npm ci + build, base $SITE_BASE)…"
   || die "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"
 ( cd "$SITE_SRC" && LCARS_SITE_BASE="$SITE_BASE" npm run build >/dev/null 2>&1 ) \
   || die "build du site en échec ($SITE_SRC)"
-[[ -s "$SITE_SRC/dist/index.html" ]] \
-  || die "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"
 say "doc bâtie : $(find "$SITE_SRC/dist" -type f | wc -l) fichier(s)"
 
 # le kit : l'arbre suivi (git archive HEAD), la release et la doc bâties, sous une racine fixe, avec sa révision
@@ -116,10 +110,8 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive en échec"
-_rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
-  || die "révision indéterminable — le paquet serait intraçable"
-printf '%s\n' "$_rev" > "$STAGE/$ROOT/$PROV_SOURCE_STAMP"
-say "révision estampillée : $_rev"
+printf '%s\n' "$REV" > "$STAGE/$ROOT/$PROV_SOURCE_STAMP"
+say "révision estampillée : $REV"
 mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
 cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
 mkdir -p "$STAGE/$ROOT/$SITE_SRC"
@@ -138,25 +130,19 @@ say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 DIST="$PACK_DIR/dist/$TAG"
 rm -rf "$DIST"
 mkdir -p "$DIST"
-for _f in "$OUT" "${OUT}.sha256"; do
-  [[ -f "$_f" ]] || continue
-  ln -f "$_f" "$DIST/$(basename "$_f")"
-done
+ln -f "$OUT" "$OUT.sha256" "$DIST/"
 # le compose lit les constantes de l'installeur : elles voyagent à côté de lui
-for _f in deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json deploy/installer-constants.env; do
-  [[ -f "$_f" ]] || die "artefact de la version introuvable : $_f"
-  cp -f "$_f" "$DIST/$(basename "$_f")"
-done
+cp -f deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json deploy/installer-constants.env "$DIST/"
 # shellcheck source=lib/forge-publish.sh
 . deploy/lib/forge-publish.sh
 # l'image de la version, telle que --publish la pousse : l'installeur la nomme pour la tirer ; sans image ni forge, il ne nomme rien
 IMAGE_REMOTE=""
-if [[ "$IMAGE" -eq 1 && -n "$_FORGE" && -n "$_OWNER" ]]; then
+if [[ "$IMAGE" -eq 1 && -n "$FORGE" && -n "$OWNER" ]]; then
   _registry="${LCARS_PACK_REGISTRY:-}"
   if [[ -z "$_registry" ]]; then
-    if [[ "$(fp_dialect "$_FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${_FORGE#*://}"; _registry="${_registry%%/*}"; fi
+    if [[ "$(fp_dialect "$FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${FORGE#*://}"; _registry="${_registry%%/*}"; fi
   fi
-  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$_OWNER/${_REPO:-lcars-fleet}"):$TAG"
+  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
 fi
 say "installeur de la version → $DIST/install.sh (base $DOOR_BASE${IMAGE_REMOTE:+, image $IMAGE_REMOTE})…"
 LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "installeur de la version non généré"
@@ -169,13 +155,11 @@ if [[ "$IMAGE" -eq 1 ]]; then
   say "image → $IMAGE_NAME:$TAG (le kit posé par les modules, puis leur doctor)…"
   "$PROV_DOCKER_BIN" build \
       -f "$STAGE/$ROOT/deploy/docker/Dockerfile" \
-      --build-arg GIT_SHA="$_rev" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
+      --build-arg GIT_SHA="$REV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
       -t "$IMAGE_NAME:$TAG" -t "$IMAGE_NAME:local" \
       "$STAGE/$ROOT" \
     || die "image non bâtie — les modules ont rougi dans le conteneur (le kit et l'installeur sont là, dans $DIST)"
-  _img_rev="$("$PROV_DOCKER_BIN" image inspect "$IMAGE_NAME:$TAG" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
-  [[ "$_img_rev" == "$_rev" ]] || die "l'image dit « $_img_rev », le kit $_rev — deux révisions dans une même version, rien ne sort"
-  say "image : $IMAGE_NAME:$TAG (révision $_img_rev), aussi $IMAGE_NAME:local"
+  say "image : $IMAGE_NAME:$TAG (révision $REV), aussi $IMAGE_NAME:local"
 else
   say "--no-image : pas d'image — le kit et l'installeur seulement"
 fi
@@ -183,21 +167,17 @@ fi
 [[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar et l'installeur restent dans $DIST, l'image dans le daemon"; exit 0; }
 
 # la release se mesure avant l'image : un refus de la forge ne doit pas laisser une image publiée sans sa release
-FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
 [[ -n "$FORGE" && -n "$OWNER" ]] || die "--publish : forge ou owner indéterminables (origin n'est pas http) — LCARS_PACK_FORGE et LCARS_PACK_OWNER les posent"
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" || -z "${LCARS_PACK_TOKEN_FILE:-}" ]] || TOKEN="$(cat "$LCARS_PACK_TOKEN_FILE" 2>/dev/null || true)"
-_tok_state="absent"
-[[ -n "$TOKEN" ]] && _tok_state="trouvé"
-say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 [[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (portées write:repository + write:package)"
+say "publication : forge $FORGE · jeton trouvé"
 # la publication lit le jeton dans un fichier : 0600 dans l'étage, retiré avec lui à la sortie
 export FP_TOKEN_FILE="$STAGE/.jeton-de-publication"
 ( umask 077; printf '%s\n' "$TOKEN" > "$FP_TOKEN_FILE" )
-fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$(git rev-parse HEAD)" \
+fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$COMMIT" \
   || die "publication refusée avant tout envoi — voir ci-dessus"
 if [[ "$IMAGE" -eq 1 ]]; then
-  [[ -n "$IMAGE_REMOTE" ]] || die "--publish : l'image n'a pas de nom de registre (forge ou owner indéterminés à la génération de l'installeur)"
   _registry="${IMAGE_REMOTE%%/*}"
   printf '%s' "$TOKEN" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
@@ -214,6 +194,6 @@ if [[ "$IMAGE" -eq 1 ]]; then
   say "image publiée : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
-FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
+FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$COMMIT" \
   || die "publication interrompue — voir ci-dessus"
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

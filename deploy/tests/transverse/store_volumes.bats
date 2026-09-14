@@ -156,14 +156,16 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
   local f
-  # chez `container` le projet est celui du conteneur ; sur le banc c'est `<N>-fleet`, dérivé de la base
+  # chez `container` le projet est celui du conteneur ; sur le banc c'est `<N>-fleet`, dérivé de la base par lib/bench.sh
   grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
     || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
-  for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$f" \
-      || { echo "n'exporte pas le prefixe au nom du projet du conteneur : $f"; return 1; }
-    grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
-      || { echo "ne derive pas le projet du conteneur de la base : $f"; return 1; }
+  local bench="$DEPLOY/lib/bench.sh"
+  grep -qE '^\s*export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"( |$)' "$bench" \
+    || { echo "n'exporte pas le prefixe au nom du projet du conteneur : $bench"; return 1; }
+  grep -qE '^\s*CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$bench" \
+    || { echo "ne derive pas le projet du conteneur de la base : $bench"; return 1; }
+  for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh" "$DEPLOY/docker/bench/bench-swap-image.sh"; do
+    grep -qE '^bench_projets$' "$f" || { echo "ne derive pas ses projets par bench_projets : $f"; return 1; }
   done
 }
 

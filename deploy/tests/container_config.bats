@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/container_config.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for deploy/container config|status — la conf de l'instance vit COTE HOTE, le verdict se lit de l'hote
+# STATUS: bats tests for deploy/container config|status|up|forge-check — la conf de l'instance vit COTE HOTE, le verdict et la forge se lisent de l'hote
 
 load refute
 load support/decor
@@ -33,6 +33,7 @@ echo "\$*" >> "$CALLS"
 case "\$1 \$2" in
   "compose version") exit 0 ;;
 esac
+if [[ "\$*" == *" config --images" ]]; then DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" exec "$real_docker" "\$@"; fi
 if [[ "\$*" == *" ps -q lcars"* ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
 if [[ "\$*" == *" up -d"* ]]; then
   printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"
@@ -60,8 +61,10 @@ if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR
 exit 0
 EOS
   chmod 0755 "$BINDIR/docker"
-  # curl (la sonde du deck de « status ») : STUB_DECK_HTTP, 000 par defaut
+  # curl (la sonde du deck de « status ») : STUB_DECK_HTTP, 000 par defaut ; forge-check parle a la vraie forge doublee
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s" "${STUB_DECK_HTTP:-000}"' > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"
+  # l'attente du verdict de up tourne sans dormir
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/sleep"; chmod 0755 "$BINDIR/sleep"
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
@@ -71,12 +74,17 @@ EOS
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
 }
 
+teardown() { forge_double_stop; }
+
+# une instance saine vue par les doublures : conteneur, verdicts, deck et tampon
+sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_TAMPON=436f94cd STUB_REV=436f94cd; }
+
 @test "chaque appel compose de container lit les constantes de l'installeur" {
-  export STUB_IDS=c0ffee STUB_PROV=0
+  sain
   FORGE_ADMIN_TOKEN=tok LCARS_ADMIRAL=zoe run bash "$SRC" config
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run bash "$SRC" status
-  LCARS_UP_VERDICT_TIMEOUT=5 run bash "$SRC" up
+  run bash "$SRC" up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run bash "$SRC" down
   [ "$status" -eq 0 ]
@@ -91,7 +99,8 @@ EOS
 }
 
 @test "up : sans bind donné, ssh et deck se publient sur la loopback aux ports des constantes, exportés à compose" {
-  LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  sain
+  run bash "$SRC" up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(cat "$BATS_TEST_TMPDIR/binds.seen")" = $'LCARS_LANDING_PORT_BIND=127.0.0.1:4999\nLCARS_SSH_PORT=127.0.0.1:4222' ]
   [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:4999,http://localhost:4999" ]
@@ -156,7 +165,8 @@ EOS
   mkdir -p "$LCARS_CONTAINER_CONF_DIR"
   printf 'FORGE_BASE_URL=http://fichier:3000\nLCARS_ADMIRAL=zoe\nLCARS_IMAGE=depuis-fichier:1\n' > "$ENV_FILE"
   # `docker image inspect` rend 0 sur la doublure : up passe jusqu'au compose, qui note son env
-  FORGE_BASE_URL=http://appelant:3000 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  sain
+  FORGE_BASE_URL=http://appelant:3000 run bash "$SRC" up
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/env.seen")" = "http://appelant:3000 zoe" ]
   [[ "$output" == *"image depuis-fichier:1"* ]]
@@ -172,7 +182,8 @@ EOS
 }
 
 @test "up : compose lit l'override des secrets et monte les deux fichiers de l'hôte, posés vides (vide = rien)" {
-  LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  sain
+  run bash "$SRC" up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -c '[.secrets.forge_master_token.file, .secrets.forge_seed_password.file]' "$BATS_TEST_TMPDIR/rendu.json")" \
     = "[\"$SECRETS/maitre-temoin.token\",\"$SECRETS/graine-temoin.pass\"]" ] || { cat "$BATS_TEST_TMPDIR/rendu.json"; return 1; }
@@ -224,20 +235,62 @@ EOS
   [[ "$output" != *"aucun humain"* ]]
 }
 
-@test "up sur un conteneur en attente de configuration : rc 1, le geste de config et la recréation sont dits" {
-  export STUB_BOOT=awaiting-config LCARS_UP_VERDICT_TIMEOUT=30
+@test "up sur un conteneur en attente de configuration : rc 1 dès l'état lu, le geste de config et la recréation sont dits" {
+  export STUB_IDS=c0ffee STUB_BOOT=awaiting-config
   run bash "$SRC" up
   [ "$status" -eq 1 ]
   [[ "$output" == *"en attente de configuration"*"config"*"up --force-recreate"* ]]
+  [ "$(grep -c 'cat /run/lcars-boot.state' "$CALLS")" -eq 2 ]
 }
 
-@test "up sur un init en échec : rc 1 aussitôt, sans attendre le délai du verdict" {
-  export STUB_BOOT=init-failed LCARS_UP_VERDICT_TIMEOUT=60
-  local t0=$SECONDS
+@test "up sur un init en échec : panne (2) dès l'état lu, sans attendre le verdict des gestes" {
+  export STUB_IDS=c0ffee STUB_BOOT=init-failed
+  run bash "$SRC" up
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"init en échec"*"logs"* ]]
+  # l'attente lit l'état une fois, status une fois
+  [ "$(grep -c 'cat /run/lcars-boot.state' "$CALLS")" -eq 2 ]
+}
+
+@test "up attend le verdict des gestes de forge, puis rend celui de status : drift dégradé (1), geste en échec panne (2)" {
+  sain
+  export STUB_PROV=2
   run bash "$SRC" up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"init de l'instance en échec"* ]]
-  [ $((SECONDS - t0)) -lt 30 ]
+  [[ "$output" == *"container up (lcars-fleet)"*"container status (lcars-fleet)"*"drift résiduel"* ]]
+  export STUB_PROV=1
+  run bash "$SRC" up
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"échec d'un geste (rc=1)"*"le conteneur tourne et ne produira rien"* ]]
+  export STUB_PROV=0
+  run bash "$SRC" up
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gestes convergés"* ]]
+}
+
+@test "up sans verdict dans le délai : le conteneur tourne, status le dit en cours, dégradé (1)" {
+  sain
+  unset STUB_PROV
+  run bash "$SRC" up
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"boot        : en cours (aucun verdict encore)"* ]]
+  [ "$(grep -c 'cat /run/lcars-forge.rc' "$CALLS")" -gt 2 ]
+}
+
+@test "up avec des clés ssh multi-lignes : le conteneur les reçoit, up rend status, et la conf ne les retient pas" {
+  sain
+  LCARS_SSH_AUTHORIZED_KEYS=$'ssh-ed25519 AAA a\nssh-ed25519 BBB b' LCARS_ADMIRAL=zoe run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"LCARS_SSH_AUTHORIZED_KEYS porte un retour à la ligne — prise pour ce démarrage, non retenue"* ]]
+  grep -qx 'LCARS_ADMIRAL=zoe' "$ENV_FILE"
+  refute grep -q 'LCARS_SSH_AUTHORIZED_KEYS' "$ENV_FILE"
+}
+
+@test "status : sans verdict encore, le boot est en cours — dégradé (1), jamais sain" {
+  export STUB_IDS=c0ffee STUB_HUM=0 STUB_DECK_HTTP=302
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"en cours (aucun verdict encore)"* ]]
 }
 
 @test "config de secrets seuls sur un conteneur qui tourne : rc 0" {
@@ -248,7 +301,7 @@ EOS
 }
 
 @test "up retient ce qu'on lui a donné : l'image et la forge valent pour les gestes suivants" {
-  export STUB_PROV=0 LCARS_UP_VERDICT_TIMEOUT=10
+  sain
   LCARS_IMAGE=registre/lcars:v1 FORGE_BASE_URL=https://forge.exemple run bash "$SRC" up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx 'LCARS_IMAGE=registre/lcars:v1' "$ENV_FILE"
@@ -290,13 +343,14 @@ EOS
 }
 
 @test "up : le port PUBLIE entre dans les origines du deck — sinon 409 sur le chemin nominal" {
-  LCARS_LANDING_PORT_BIND=127.0.0.1:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  sain
+  LCARS_LANDING_PORT_BIND=127.0.0.1:22021 run bash "$SRC" up
   [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:22021,http://localhost:22021" ]
   # un bind sur toutes les interfaces devient la loopback pour le navigateur local
-  LCARS_LANDING_PORT_BIND=0.0.0.0:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  LCARS_LANDING_PORT_BIND=0.0.0.0:22021 run bash "$SRC" up
   [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:22021,http://localhost:22021" ]
   # l'operateur qui pose LCARS_DECK_ORIGINS garde la main
-  LCARS_DECK_ORIGINS=http://deck.example LCARS_LANDING_PORT_BIND=127.0.0.1:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  LCARS_DECK_ORIGINS=http://deck.example LCARS_LANDING_PORT_BIND=127.0.0.1:22021 run bash "$SRC" up
   [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://deck.example" ]
 }
 
@@ -320,4 +374,62 @@ EOS
     grep -qE "(^|[^A-Z0-9_])$n([^A-Z0-9_]|$)" <<<"$code" || { echo "$n : annoncee par l'aide de container, lue nulle part" >&2; bad=1; }
   done <<<"$names"
   [ "$bad" -eq 0 ]
+}
+
+# ─── forge-check : la forge fournie, vérifiée depuis l'hôte avec la conf du projet ─────────────
+
+# forge_fournie <adresse publique> — la conf d'un projet complet : deux adresses, jeton et seed posés ; curl est le vrai
+forge_fournie() {
+  rm -f "$BINDIR/curl"
+  mkdir -p "$SECRETS"
+  printf 'FORGE_BASE_URL=http://host.docker.internal:3000\nFORGE_PUBLIC_URL=%s\n' "$1" > "$ENV_FILE"
+  printf 'JETON-MAITRE\n' > "$SECRETS/maitre-temoin.token"
+  printf 'graine\n' > "$SECRETS/graine-temoin.pass"
+}
+
+@test "forge-check : une forge qui tient le contrat rend 0, sans appeler docker, et le jeton voyage en en-tête" {
+  forge_double_start
+  forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
+  forge_route GET '/api/v1/admin/users*' 200 '[]'
+  forge_fournie "$FORGE_DOUBLE_URL"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"ok       la forge répond sur $FORGE_DOUBLE_URL"*"ok       jeton master accepté, site-admin"*"ok       seed posé"*"la forge tient le contrat"* ]]
+  [[ "$output" != *"manque"* ]]
+  [ "$(forge_requests 'select(.path | startswith("/api/v1/admin/users")) | .auth')" = '"token JETON-MAITRE"' ]
+  [ ! -s "$CALLS" ]
+}
+
+@test "forge-check : une conf vide rend 1, et chaque manque vient avec son geste" {
+  run bash "$SRC" forge-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FORGE_BASE_URL=http://<hôte>:<port> deploy/container -p lcars-fleet config"* ]]
+  [[ "$output" == *"FORGE_PUBLIC_URL=http://<adresse tapée dans le navigateur>:<port> deploy/container -p lcars-fleet config"* ]]
+  [[ "$output" == *"FORGE_ADMIN_TOKEN=<jeton> deploy/container -p lcars-fleet config"*"scope « all »"* ]]
+  [[ "$output" == *"FORGE_SEED_PASSWORD=<mot de passe> deploy/container -p lcars-fleet config"* ]]
+  [[ "$output" == *"4 manque(s)"*"deploy/README.md"* ]]
+}
+
+@test "forge-check : une forge qui ne répond pas est un manque, et le jeton posé n'est pas déclaré valide" {
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  forge_fournie "http://127.0.0.1:$port"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"manque   rien ne répond sur http://127.0.0.1:$port/api/v1/version depuis cet hôte"* ]]
+  [[ "$output" == *"jeton master posé — non vérifié, la forge ne répond pas"* ]]
+  [[ "$output" == *"1 manque(s)"* ]]
+}
+
+@test "forge-check : un jeton que la forge refuse, ou qui n'est pas site-admin, est un manque qui le dit" {
+  forge_double_start
+  forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
+  forge_route GET '/api/v1/admin/users*' 403 x1 '{"message":"forbidden"}'
+  forge_route GET '/api/v1/admin/users*' 401 '{"message":"unauthorized"}'
+  forge_fournie "$FORGE_DOUBLE_URL"
+  run bash "$SRC" forge-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"manque   le jeton master n'est pas site-admin (HTTP 403)"* ]]
+  run bash "$SRC" forge-check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"manque   la forge refuse le jeton master (HTTP 401)"* ]]
 }

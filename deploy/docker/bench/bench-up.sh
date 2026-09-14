@@ -14,82 +14,50 @@
 #   jetons, enrôle un runner CI (<base>-runner) et démarre la fleet. Les mots de passe sont ceux
 #   du contrat de banc : admiral / toto123456, lcars / toto32toto32 — publics, jetables. L'humain
 #   de démonstration est site-admin de la forge : ce banc ne mesure pas ce que la team humans
-#   autorise à un compte ordinaire.
+#   autorise à un compte ordinaire. Un projet de ce nom qui ne porte pas le marqueur du banc
+#   (label lcars.bench=<base>) est refusé avant tout.
 #
-# EXIT  : 0 banc prêt (« banc PRÊT », ou « banc PRÊT sans CI » sous --no-runner) · 1 arguments ou
-#         dépendance · 2 la forge ne monte pas · 3 le conteneur ne monte pas · 4 amorçage de la forge ·
-#         5 humain ou credentials · 6 le banc n'est pas prêt (jeton système absent après la relance,
-#         runner demandé qui ne sert pas, conteneur en échec de convergence) · 7 la source ne se sème
-#         pas (révision de l'image, push, alignement du clone du conteneur)
+# EXIT  : 0 banc prêt (« banc PRÊT », ou « banc PRÊT sans CI » sous --no-runner) · 1 arguments,
+#         dépendance, ou projet qui n'est pas ce banc · 2 la forge ne monte pas · 3 le conteneur ne
+#         monte pas · 4 amorçage de la forge · 5 humain ou credentials · 6 le banc n'est pas prêt
+#         (jeton système absent après la relance, runner demandé qui ne sert pas, conteneur en échec
+#         de convergence) · 7 la source ne se sème pas (révision de l'image, push, alignement du
+#         clone du conteneur)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
+BENCH_NOM=bench-up
+# shellcheck source=../../lib/bench.sh
+. "$DOCKER_DIR/../lib/bench.sh"
 
-# shellcheck source=../../lib/provision-lib.sh
-source "$DOCKER_DIR/../lib/provision-lib.sh"
-# shellcheck source=../../lib/store.sh
-source "$DOCKER_DIR/../lib/store.sh"
-# shellcheck source=../../lib/forge-bootstrap.sh
-source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
-
-PROJECT="$PROV_FORGE_BASE_DEFAULT"
-FORGE_PORT="$PROV_FORGE_HOST_PORT_DEFAULT"
-DECK_PORT="$PROV_DECK_PORT_DEFAULT"
-SSH_PORT="$PROV_SSH_PORT_DEFAULT"
-BIND="0.0.0.0"
-ADVERTISE=""
 IMAGE="lcars-fleet:local"
-RUNNER_LABELS=""
+RUNNER_LABELS="$PROV_RUNNER_LABELS"
 WITH_RUNNER=1
-CREDS_FROM="$HOME/.claude/.credentials.json"
-WITH_CREDS=1
-HUMAN="lcars"
-DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project|--forge-project)  PROJECT="${2:?}"; shift 2 ;;
-    --forge-port|--port-forge)  FORGE_PORT="${2:?}"; shift 2 ;;
-    --deck-port|--port-deck)    DECK_PORT="${2:?}"; shift 2 ;;
-    --ssh-port|--port-ssh)      SSH_PORT="${2:?}"; shift 2 ;;
-    --bench)      shift ;;
-    --bind)       BIND="${2:?}"; shift 2 ;;
-    --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
-    --image)      IMAGE="${2:?}"; shift 2 ;;
-    --runner-labels) RUNNER_LABELS="${2:?}"; shift 2 ;;
-    --no-runner)  WITH_RUNNER=0; shift ;;
-    --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
-    --no-creds)   WITH_CREDS=0; shift ;;
-    --human)      HUMAN="${2:?}"; shift 2 ;;
-    -h|--help)    sed -n '/^# USAGE/,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bench-up: option inconnue: $1" >&2; exit 1 ;;
+    --runner-labels) RUNNER_LABELS="${2:?--runner-labels attend une liste}"; shift 2 ;;
+    --no-runner)     WITH_RUNNER=0; shift ;;
+    -h|--help)       sed -n '/^# USAGE/,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)               bench_option "$@"; shift "$BENCH_LU" ;;
   esac
 done
+bench_projets
+bench_adresses
 
-CONTAINER_PROJECT="${PROJECT}-fleet"
-FORGE_PROJECT="${PROJECT}-forge"
-RUNNER_PROJECT="${PROJECT}-runner"
 FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
-FORGE_NET="${FORGE_PROJECT}_default"
-CONTAINER="${CONTAINER_PROJECT}-lcars-1"
 RACINE_CONTENEUR="$(prov_canon "$PROV_ROOT")"
 GESTES="$RACINE_CONTENEUR/forge-gestures.sh"
-COMPOSE_ARGS=(--env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
-ADMIRAL="admiral"
+ADMIRAL="$BENCH_ADMIRAL"
 
 case "$BIND" in
   0.0.0.0|::|"*") PROBE_HOST="127.0.0.1" ;;
   *)              PROBE_HOST="$BIND" ;;
 esac
-if [[ -z "$ADVERTISE" ]]; then
-  advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"
-  ADVERTISE_GUESSED="${PROV_ADVERTISE_WHY:-}"
-fi
 FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
-FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 # l'adresse par laquelle un conteneur de job atteint cette machine : ni le nom de service compose
 # (le runner est en dind, réseau par job), ni l'adresse annoncée (localhost sous WSL est le conteneur)
 if [[ "$(detect_substrate)" == "wsl" ]]; then
@@ -100,18 +68,9 @@ fi
 ADMIRAL_PW="$(bench_admiral_password)"
 HUMAN_PW="$(bench_human_password)"
 
-say() { printf '[bench-up] %s\n' "$*"; }
-die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
 d()   { "$DOCKER_BIN" "$@"; }
 in_container() { d exec -i -u root "$CONTAINER" "$@"; }
 as_human()     { d exec -i -u "$HUMAN" "$CONTAINER" "$@"; }
-attendre_healthy() {
-  for _ in $(seq 1 90); do
-    [[ "$(d inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == "healthy" ]] && return 0
-    sleep 2
-  done
-  return 1
-}
 
 # ─── Le terrain ─────────────────────────────────────────────────────────────────────────────────
 for _outil in curl jq git; do
@@ -123,20 +82,14 @@ DOCKER_BIN="$PROV_DOCKER_BIN"
 d image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement : $IMAGE — la tirer (deploy/container pull) ou la bâtir (deploy/pack.sh)" 1
 IMAGE_REV="$(d image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE" 2>/dev/null || true)"
-if [[ -z "$IMAGE_REV" || "$IMAGE_REV" == "unknown" ]]; then
-  IMAGE_REV_STATE="INCONNUE — image bâtie sans GIT_SHA : ce banc ne pourra attribuer aucun verdict à un commit"
-else
-  IMAGE_REV_STATE="$IMAGE_REV"
-fi
-PROBE="$(d run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/dev/null | tr -d '[:space:]' || true)"
-[[ "$PROBE" == "flux-ok" ]] || die \
-  "le daemon répond mais un conteneur lancé de $IMAGE ne rend pas sa sortie (reçu : '${PROBE:-<rien>}') — DOCKER_HOST=${DOCKER_HOST:-<vide>}
-   Le banc lit ses mesures par docker exec et docker run : un chemin vers le daemon qui avale les flux
-   attachés (contexte distant, proxy de socket) le rendrait aveugle. Viser la socket du daemon." 1
-_noms="$(d ps -a --format '{{.Names}}' || true)"
-if grep -qx -- "$CONTAINER" <<<"$_noms"; then
-  die "le projet $PROJECT existe déjà ($CONTAINER) — le détruire d'abord (bench-down.sh --project $PROJECT --yes) ou changer --forge-project" 1
-fi
+[[ -n "$IMAGE_REV" && "$IMAGE_REV" != "unknown" ]] \
+  || die "l'image $IMAGE ne porte pas de révision (label OCI) — le banc ne sème pas un code qu'il ne peut pas nommer" 7
+OBJETS="$(bench_objets)" \
+  || die "docker ne rend pas les objets des projets $CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT — rien n'est monté sur un état non lu" 1
+ETRANGERS="$(bench_etrangers "$OBJETS")"
+[[ -z "$ETRANGERS" ]] || bench_refus_etrangers "$ETRANGERS" "Un banc prend une base à lui : --forge-project <base>."
+[[ "$OBJETS" != *"$CONTAINER_PROJECT conteneur "* ]] \
+  || die "le banc $PROJECT existe déjà ($CONTAINER_PROJECT) — le détruire d'abord (bench-down.sh --project $PROJECT --yes) ou changer --forge-project" 1
 BUSY=()
 for _p in "$SSH_PORT" "$DECK_PORT" "$FORGE_PORT"; do
   _h="$(port_state "$_p" "$CONTAINER_PROJECT" "$FORGE_PROJECT" "$RUNNER_PROJECT")"
@@ -152,14 +105,6 @@ if [[ ${#BUSY[@]} -gt 0 ]]; then
 fi
 
 # ─── La forge ───────────────────────────────────────────────────────────────────────────────────
-# un succès est une ligne, un échec montre la sortie : compose et tofu parlent beaucoup quand tout va bien
-quiet() { # quiet <cmd…> — la sortie n'apparaît que si la commande échoue (40 dernières lignes)
-  local out rc=0; out="$(mktemp "${TMPDIR:-/tmp}/bench-up.XXXXXX")"
-  "$@" > "$out" 2>&1 || rc=$?
-  [[ "$rc" -eq 0 ]] || tail -n 40 "$out" >&2
-  rm -f "$out"
-  return "$rc"
-}
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
 quiet forge_mount "$DOCKER_BIN" "$DOCKER_DIR/forge-compose.yml" "$FORGE_PROJECT" "$FORGE_PORT" "$BIND" "$FORGE_URL" \
   || die "la forge ne monte pas" 2
@@ -167,31 +112,14 @@ forge_wait "$FORGE_LOCAL_URL" || die "la forge ne répond pas sur $FORGE_LOCAL_U
 say "forge up"
 
 # ─── Le conteneur ───────────────────────────────────────────────────────────────────────────────
-export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
 store_ensure_volumes "$DOCKER_BIN" || die "magasin non posé — le conteneur ne peut pas se créer" 3
 say "conteneur : projet $CONTAINER_PROJECT, image $IMAGE, bind $BIND"
-# le conteneur matérialise admiral (uid 1000) ; l'humain vient de la forge, par le convergeur.
-# Le deck compare exactement l'entrée annoncée à son client OAuth2 : on ne nomme que celle-là, le
-# geste deck-oidc sème les deux écritures de la loopback.
-quiet env LCARS_IMAGE="$IMAGE" \
-    LCARS_ADMIRAL="$ADMIRAL" \
-    FORGE_BASE_URL="$PROV_FORGE_INTERNAL_URL" \
-    LCARS_SOURCE_REMOTE="$PROV_FORGE_INTERNAL_URL/$PROV_FORGE_ORG_DEFAULT/lcars.git" \
-    LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
-    LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
-    FORGE_PUBLIC_URL="$FORGE_URL" \
-    LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
-    LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
-    "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
+# le conteneur matérialise admiral (uid 1000) ; l'humain vient de la forge, par le convergeur
+quiet bench_conteneur_monte \
   || die "le conteneur ne se crée pas (le réseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
-quiet d compose "${COMPOSE_ARGS[@]}" start lcars || die "le conteneur ne démarre pas" 3
-attendre_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
+bench_attendre_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
 say "conteneur healthy"
-if printf '%s:%s\n' "$ADMIRAL" "$ADMIRAL_PW" | in_container chpasswd 2>/dev/null; then
-  say "mot de passe de banc posé sur $ADMIRAL (ssh, sudo)"
-else
-  say "$ADMIRAL : mot de passe unix non posé — ssh par clé, ou docker exec -u $ADMIRAL $CONTAINER bash"
-fi
+bench_mot_de_passe "$ADMIRAL" "$ADMIRAL_PW"
 
 # ─── L'amorçage : admin, jeton, seed, structure, humain ─────────────────────────────────────────
 say "amorçage de la forge : compte $ADMIRAL, jeton master, seed"
@@ -204,10 +132,10 @@ case "$(forge_admin_ensure "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "$ADMIRAL
 esac
 MASTER_TOKEN="$(forge_master_token "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "bench-$(date +%s)")" \
   || die "la forge n'a pas rendu de jeton master" 4
-# les jetons de l'hôte vivent dans des fichiers d'un dossier 0700 : forge_api et forge-runner les lisent, jamais un argv
+# les jetons de l'hôte vivent dans des fichiers 0600 d'un dossier 0700 : forge_api et forge-runner les lisent, jamais un argv
 JETONS="$(mktemp -d "${TMPDIR:-/tmp}/bench-up-jetons.XXXXXX")"
 trap 'rm -rf "$JETONS"' EXIT
-printf '%s\n' "$MASTER_TOKEN" > "$JETONS/master"
+( umask 077; printf '%s\n' "$MASTER_TOKEN" > "$JETONS/master" )
 forge_token_ok "$FORGE_LOCAL_URL" "$JETONS/master" || die "le jeton master ne s'authentifie pas" 4
 say "jeton master minté"
 SEED_PW="$(in_container cat "$(prov_canon "$PROV_FORGE_SEED_FILE")" 2>/dev/null | tr -d '\r\n' || true)"
@@ -245,44 +173,25 @@ printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -z "$l" ]] || say "cha
 
 # ─── La relance : le geste tokens minte les jetons de rôle, le convergeur matérialise l'humain ──
 say "relance du conteneur : les jetons de rôle se mintent au boot, sur le seed"
-d restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
-attendre_healthy || die "le conteneur ne redevient pas healthy après relance" 3
+bench_relance
 as_human id -u "$HUMAN" >/dev/null 2>&1 \
   || die "l'humain '$HUMAN' n'existe pas dans le conteneur après la relance — il vient de la forge (team $ORG:humans), matérialisé par le convergeur : docker logs $CONTAINER" 5
 printf '%s\n' "$HUMAN_TOKEN" | as_human bash -c 'umask 077 && cat > ~/.gitea_token' \
   || die "jeton opérateur non posé chez $HUMAN dans $CONTAINER" 5
 say "jeton opérateur posé (~$HUMAN/.gitea_token)"
-printf '%s:%s\n' "$HUMAN" "$HUMAN_PW" | in_container chpasswd 2>/dev/null \
-  && say "mot de passe de banc posé sur $HUMAN (ssh)" \
-  || say "$HUMAN : mot de passe unix non posé — ssh par clé"
-
-if [[ "$WITH_CREDS" -eq 0 ]]; then
-  say "creds claude non posées (--no-creds) — aucun pod ne pourra penser, par choix"
-elif [[ ! -r "$CREDS_FROM" ]]; then
-  say "creds claude absentes ($CREDS_FROM) — non posées chez $HUMAN, aucun pod ne pourra penser ; le banc continue"
-  WITH_CREDS=0
-fi
-if [[ "$WITH_CREDS" -eq 1 ]]; then
-  as_human bash -c 'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
-    < "$CREDS_FROM" || die "creds non posées dans le conteneur" 5
-  say "creds claude posées chez $HUMAN"
-fi
+bench_mot_de_passe "$HUMAN" "$HUMAN_PW"
+bench_creds
 
 # ─── Le semis des dépôts : la source que le conteneur clone, à la révision de l'image ──────────
 SYS_TOKEN="$(in_container cat "$(prov_canon "$PROV_SYSTEM_TOKEN_FILE")" 2>/dev/null | tr -d '[:space:]' || true)"
 [[ -n "$SYS_TOKEN" ]] || die "jeton système absent après la relance — le banc n'est pas prêt (docker logs $CONTAINER)" 6
-printf '%s\n' "$SYS_TOKEN" > "$JETONS/system"
 git_forge() {
   GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_KEY_0="http.$FORGE_LOCAL_URL/.extraheader" \
   GIT_CONFIG_VALUE_0="Authorization: token ${SYS_TOKEN}" \
   git "$@"
 }
-forge_api POST "$FORGE_LOCAL_URL/api/v1/orgs/$ORG/repos" /dev/null --token-file "$JETONS/system" -m 10 \
-  --json '{name: "lcars", description: "LCARS — la source du conteneur", private: false, auto_init: false}' >/dev/null || true
 LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/lcars.git"
-[[ -n "$IMAGE_REV" && "$IMAGE_REV" != "unknown" ]] \
-  || die "$ORG/lcars : l'image $IMAGE ne porte pas de révision (label OCI) — le banc ne sème pas un code qu'il ne peut pas nommer" 7
 if [[ -d "$REPO_ROOT/.git" ]]; then
   git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
     || die "$ORG/lcars : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
@@ -311,7 +220,7 @@ PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q
 say "$ORG/lcars : main poussé ($SEED_DIT)"
 # la relance a cloné le dépôt tel que la structure l'a créé, avant le semis : le clone du conteneur
 # se réaligne sur le main poussé, sous le compte qui le possède
-SOURCE_IN="${LCARS_SOURCE_DIR:-/home/projects/LCARS}"
+SOURCE_IN="/home/projects/LCARS"
 SOURCE_OWNER="$(in_container stat -c %U "$SOURCE_IN" 2>/dev/null | tr -d '[:space:]' || true)"
 SOURCE_REMOTE_IN="$PROV_FORGE_INTERNAL_URL/$ORG/lcars.git"
 if [[ -n "$SOURCE_OWNER" && "$SOURCE_OWNER" != "UNKNOWN" ]]; then
@@ -325,20 +234,9 @@ else
     || die "$ORG/lcars : aucun clone dans le conteneur et « git clone » y échoue ($SOURCE_IN)" 7
   say "source du conteneur clonée depuis main ($SOURCE_IN)"
 fi
-WORK_TREE="${LCARS_WORK_TREE:-}"
-if [[ -z "$WORK_TREE" ]]; then
-  say "$ORG/lcars : ops non poussé (LCARS_WORK_TREE non posé — le clone qui porte la branche ops, si le banc doit l'avoir)"
-elif [[ -d "$WORK_TREE/.git" ]]; then
-  if git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null; then say "$ORG/lcars : ops poussé"; else say "$ORG/lcars : ops non poussé (push refusé depuis $WORK_TREE)"; fi
-else
-  say "$ORG/lcars : ops non poussé (LCARS_WORK_TREE=$WORK_TREE n'est pas un clone)"
-fi
 
 # ─── L'état du conteneur, le runner, la fleet ───────────────────────────────────────────────────
-TOKENS_IN="$(prov_canon "$PROV_TOKENS_DIR")"
-# shellcheck disable=SC2016 # $1 est l'argument du bash du conteneur
-ROLE_TOKENS="$(in_container bash -c 'ls "$1"/*.gitea_token 2>/dev/null | wc -l' _ "$TOKENS_IN" || echo 0)"
-CREDS_OK="$(as_human bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non' || echo non)"
+ROLE_TOKENS="$(bench_jetons_de_role)"
 CONTAINER_PROV_RC="$(in_container cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$CONTAINER_PROV_RC" =~ ^[0-9]+$ ]] || CONTAINER_PROV_RC=""
 CONTAINER_PROV_OK=1
@@ -350,62 +248,48 @@ case "$CONTAINER_PROV_RC" in
       CONTAINER_PROV_OK=0 ;;
 esac
 
-RUNNER_STATE="non démarré"
 RUNNER_SERT=0
-[[ -n "$RUNNER_LABELS" ]] || RUNNER_LABELS="$PROV_RUNNER_LABELS"
 if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
 else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
-  in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" || true
-  reg_args=()
-  [[ -z "$(tr -d '[:space:]' < "$JETONS/reg")" ]] || reg_args=(--reg-token-file "$JETONS/reg")
+  ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
-       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" \
-       ${reg_args[@]+"${reg_args[@]}"} \
+       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
        --instance-url "http://${JOB_HOST}:${FORGE_PORT}" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
-    RUNNERS_BODY="$(mktemp "${TMPDIR:-/tmp}/bench-up-runners.XXXXXX")"
-    forge_api GET "$FORGE_LOCAL_URL/api/v1/admin/actions/runners" "$RUNNERS_BODY" --token-file "$JETONS/master" -m 5 >/dev/null || true
-    RUNNERS="$(jq 'if type == "array" then length else (.runners // []) | length end' "$RUNNERS_BODY" 2>/dev/null || echo 0)"
-    rm -f "$RUNNERS_BODY"
-    if [[ "${RUNNERS:-0}" -gt 0 ]]; then
-      RUNNER_VER="$(d exec "${RUNNER_PROJECT}-act-1" gitea-runner --version 2>/dev/null | head -1 || true)"
-      RUNNER_IMG="$(d inspect "${RUNNER_PROJECT}-act-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
-      RUNNER_STATE="enregistré ($RUNNERS vu(s) par la forge)
-              ${RUNNER_VER:-version illisible} · image ${RUNNER_IMG:-inconnue}
-              labels : ${RUNNER_LABELS:-aucun}"
-      RUNNER_SERT=1
-    else
-      RUNNER_STATE="démarré mais aucun runner vu par la forge — enregistrement raté"
-    fi
+    RUNNER_SERT=1
+    RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"
+    rm -f "$RUNNER_LOG"
   else
     RUNNER_STATE="absent — forge-runner.sh en échec, son refus mot pour mot :
 $(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
               sortie complète conservée : $RUNNER_LOG"
   fi
-  [[ "$RUNNER_SERT" -eq 1 ]] && rm -f "$RUNNER_LOG"
 fi
 
 # la fleet démarre sous l'humain ; sans credentials claude elle tourne sans penser, et c'est dit
 FLEET_STATE="non démarrée"
 if [[ "$CONTAINER_PROV_OK" -eq 1 ]]; then
-  if [[ "$CREDS_OK" == oui ]]; then fleet_env=(); else fleet_env=(LCARS_START_WITHOUT_CLAUDE=1); fi
+  if [[ "$WITH_CREDS" -eq 1 ]]; then fleet_env=(); else fleet_env=(LCARS_START_WITHOUT_CLAUDE=1); fi
   if d exec -u "$HUMAN" "$CONTAINER" env ${fleet_env[@]+"${fleet_env[@]}"} fleet start >/dev/null 2>&1; then
-    FLEET_STATE="démarrée sous $HUMAN$([[ "$CREDS_OK" == oui ]] || printf ' (sans credentials claude : aucun pod ne pense)')"
+    FLEET_STATE="démarrée sous $HUMAN$([[ "$WITH_CREDS" -eq 1 ]] || printf ' (sans credentials claude : aucun pod ne pense)')"
   else
     FLEET_STATE="« fleet start » a échoué sous $HUMAN — docker exec -u $HUMAN $CONTAINER fleet start pour lire sa plainte"
   fi
 fi
 
+REFUS=""
 if [[ "$CONTAINER_PROV_OK" -ne 1 ]]; then
   VERDICT="banc PAS PRÊT — le conteneur s'est déclaré en échec de convergence"
+  REFUS="le conteneur a publié un échec de convergence — banc incomplet ; il tourne et reste joignable pour être réparé, et ne produira rien tant que la convergence n'est pas verte"
 elif [[ "$WITH_RUNNER" -eq 0 ]]; then
   VERDICT="banc PRÊT sans CI"
 elif [[ "$RUNNER_SERT" -eq 1 ]]; then
   VERDICT="banc PRÊT"
 else
   VERDICT="banc PAS PRÊT — le runner était demandé et ne sert pas"
+  REFUS="runner demandé et non servi — banc incomplet ; « --no-runner » pour un banc sans CI, assumé et dit comme tel"
 fi
 say "───────────────────────────────────────────────────────"
 say "$VERDICT"
@@ -415,7 +299,7 @@ say "  conteneur : $CONTAINER   ssh $HUMAN@${ADVERTISE} -p ${SSH_PORT}"
 if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
   say "  écoute    : $BIND — ouvert sur le réseau ; les mots de passe de ce banc sont des défauts de"
   say "              test, publics : à n'ouvrir que sur un réseau de confiance. « --bind 127.0.0.1 » le referme."
-  if [[ -n "${ADVERTISE_GUESSED:-}" ]]; then
+  if [[ -n "$ADVERTISE_GUESSED" ]]; then
     say "  adresse   : les liens pointent sur $ADVERTISE. ${ADVERTISE_GUESSED}"
     say "              « --advertise <ip-ou-nom> » pour annoncer autre chose."
   fi
@@ -426,17 +310,12 @@ else
   say "  écoute    : $BIND (cette machine seulement)"
 fi
 say "  image     : $IMAGE"
-say "  révision  : $IMAGE_REV_STATE"
+say "  révision  : $IMAGE_REV"
 say "  runner    : $RUNNER_STATE"
-say "  jetons    : $ROLE_TOKENS fichiers dans $TOKENS_IN"
-say "  creds     : $CREDS_OK"
+say "  jetons    : $ROLE_TOKENS fichiers dans $(prov_canon "$PROV_TOKENS_DIR")"
+say "  creds     : $([[ "$WITH_CREDS" -eq 1 ]] && echo oui || echo non)"
 say "  fleet     : $FLEET_STATE"
 say "  converge  : $CONTAINER_PROV_STATE"
 say "  détruire  : bench-down.sh --project $PROJECT --yes"
 say "───────────────────────────────────────────────────────"
-if [[ "$CONTAINER_PROV_OK" -ne 1 ]]; then
-  die "le conteneur a publié un échec de convergence ($CONTAINER_PROV_STATE) — banc incomplet ; il tourne et reste joignable pour être réparé, et ne produira rien tant que la convergence n'est pas verte" 6
-fi
-if [[ "$WITH_RUNNER" -eq 1 && "$RUNNER_SERT" -ne 1 ]]; then
-  die "runner demandé et non servi ($RUNNER_STATE) — banc incomplet ; « --no-runner » pour un banc sans CI, assumé et dit comme tel" 6
-fi
+[[ -z "$REFUS" ]] || die "$REFUS" 6

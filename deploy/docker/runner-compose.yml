@@ -22,10 +22,9 @@ services:
       - apparmor=rootlesskit
     hostname: lcars-runner
     environment:
-      # pas de défaut : une adresse fausse ferait un runner qui tourne et ne sert rien
-      GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'adresse de la forge (ex. http://192.0.2.10)}"
+      GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:-}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
-      GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
+      GITEA_RUNNER_NAME: lcars-runner
       GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-${PROV_RUNNER_LABELS:?PROV_RUNNER_LABELS absent — les constantes de l'installeur, par --env-file}}"
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"
@@ -38,7 +37,14 @@ services:
     tmpfs:
       - /var/lib/docker
     restart: unless-stopped
+    # la base du banc qui l'a enrôlé, vide pour le runner d'un poste
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:-}"
 
 volumes:
   data:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:-}"
   dind:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:-}"

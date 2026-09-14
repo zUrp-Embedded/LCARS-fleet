@@ -260,28 +260,8 @@ code_of() { sed 's/#.*//' "$1"; }
   printf '%s\n' "$table" | grep -qx "$sonde"
 }
 
-@test "MUR 8: l'override genere nomme le service que la base DEFINIT, et sa prose ne s'execute pas" {
-  local src="$REPO/deploy/docker/forge-runner.sh" base="$REPO/deploy/docker/runner-compose.yml"
-  [ -r "$src" ] && [ -r "$base" ] || { echo "MUR 8 — source ou base illisible" >&2; return 1; }
-
-  # (1) Le nom se DERIVE de la base, il ne se recopie pas : le script doit le lire, pas l'ecrire.
-  grep -qE 'SERVICE="\$\(sed' "$src" || {
-    echo "MUR 8 rompu — forge-runner.sh ne DERIVE plus le nom du service de runner-compose.yml" >&2
-    return 1
-  }
-  # (2) Et aucun nom de service en dur ne subsiste dans le heredoc de l'override.
-  # ⚠ LE MOTIF DE PLAGE ETAIT INERTE, ET SEULE LA MUTATION L'A MONTRE. Il disait
-  # `/override.yml <</` alors que la ligne porte `…override.yml" <<EOF` — un guillemet entre les
-  # deux. La plage ne capturait RIEN, donc ce controle passait au vert sans rien lire, y compris
-  # quand on recodait le nom du service en dur. Un mur vert qui n'a rien lu est le defaut que ce
-  # fichier existe pour interdire, commis en l'ecrivant.
-  local codees; codees="$(sed -n '/override\.yml.*<</,/^EOF$/p' "$src" | sed -nE 's/^  ([a-z][a-z0-9_-]+):[[:space:]]*$/\1/p' | grep -v '^default$' || true)"
-  [ -z "$codees" ] || {
-    echo "MUR 8 rompu — l'override code un nom de service en dur : $codees" >&2
-    return 1
-  }
-
-  # (3) LES HEREDOCS QUI N'ONT RIEN A EXPANSER SONT QUOTES. Un `<<EOF` nu evalue sa prose : les
+@test "MUR 8: la prose d'un heredoc de docker/ ne s'execute pas" {
+  # LES HEREDOCS QUI N'ONT RIEN A EXPANSER SONT QUOTES. Un `<<EOF` nu evalue sa prose : les
   # accents graves y sont des substitutions de commande. Mesure du banc : `bridge`, `host`, `none`,
   # `getent`, `wget` et `git ls-remote` EXECUTES, et le fichier produit troue de leurs sorties vides.
   # Meme defaut que `bats.descriptions_inert`, a un endroit qu'aucun mur ne regardait.

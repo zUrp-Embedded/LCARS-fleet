@@ -168,7 +168,7 @@ Mode conteneur, avec la commande affichée sur la ligne `détruire` :
 
 ```bash
 deploy/docker/bench/bench-down.sh --project <base> --yes   # le conteneur, la forge et le runner, volumes compris
-deploy/container -p <base>-fleet reset                     # le conteneur, son image locale et ses volumes ; la forge reste
+deploy/container -p <base>-fleet reset                     # le conteneur et ses volumes ; la forge et le magasin restent
 ```
 
 Mode `--workstation` : la distribution WSL 2 se supprime (`wsl --unregister <distribution>` côté
@@ -375,7 +375,7 @@ Container mode, with the command printed on the `détruire` line:
 
 ```bash
 deploy/docker/bench/bench-down.sh --project <base> --yes   # the container, the forge and the runner, volumes included
-deploy/container -p <base>-fleet reset                     # the container, its local image and its volumes; the forge stays
+deploy/container -p <base>-fleet reset                     # the container and its volumes; the forge and the store stay
 ```
 
 `--workstation` mode: the WSL 2 distribution is removed (`wsl --unregister <distribution>` on the

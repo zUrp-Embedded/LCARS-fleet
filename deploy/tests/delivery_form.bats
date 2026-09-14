@@ -131,7 +131,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # un fichier de plus dans le tar, et un drift de plus sur la cible.
   local pack="$BATS_TEST_DIRNAME/../pack.sh"
   local media="$DEPLOY/modules.d/44-media.sh"
-  grep -qE '^SITE_SRC="\$\{LCARS_SITE_SRC:-assets/github\.io\}"' "$pack"
+  grep -qE '^SITE_SRC=assets/github\.io$' "$pack"
   grep -qE 'SITE_SRC="\$\{LCARS_SITE_SRC:-\$\(repo_root\)/assets/github\.io\}"' "$media"
   # et la BASE d'URL est la meme des deux cotes — servie ailleurs, chaque asset serait faux
   grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$pack"
