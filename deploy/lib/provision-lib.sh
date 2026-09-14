@@ -202,14 +202,9 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…> — un code listé rend 
   return "$rc"
 }
 
-prov_lock_path() {
-  local dir uid scope="${1:-}"
+prov_lock_path() { # prov_lock_path → le chemin du verrou de l'apply, dans un dossier 0700 de l'appelant
+  local dir uid
   uid="$(id -u)"
-
-  if [[ -n "$scope" && ! "$scope" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    p_fail "verrou : portée « $scope » hors charset — refusée"
-    return 1
-  fi
 
   if [[ "$uid" -eq 0 ]]; then
     dir=/run/lock/lcars
@@ -228,7 +223,7 @@ prov_lock_path() {
   owner="$(stat -c '%u' "$dir")" || { p_fail "verrou : stat impossible : $dir"; return 1; }
   [[ "$owner" == "$uid" ]] || { p_fail "verrou : $dir appartient à l'uid $owner, pas à $uid"; return 1; }
 
-  local lock="$dir/provision${scope:+.$scope}.lock"
+  local lock="$dir/provision.lock"
   [[ -L "$lock" ]] && { p_fail "verrou : $lock est un symlink — refusé"; return 1; }
 
   printf '%s\n' "$lock"
@@ -534,11 +529,10 @@ apt_mirror_diag() {
 }
 
 apt_ensure() {
-  local missing=() already=() pkg
+  local missing=() pkg
   for pkg in "$@"; do
-    if pkg_installed "$pkg"; then already+=("$pkg"); else missing+=("$pkg"); fi
+    pkg_installed "$pkg" || missing+=("$pkg")
   done
-  [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
   p_chg "apt: install ${missing[*]}"
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update "${APT_ACQUIRE_OPTS[@]}" -qq \

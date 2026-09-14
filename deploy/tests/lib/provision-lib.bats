@@ -458,40 +458,13 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "prov_lock_path : deux portées ont deux verrous distincts" {
+@test "prov_lock_path : le verrou pris deux fois se bloque" {
   module_sh '
-    a="$(prov_lock_path alice)"
-    b="$(prov_lock_path bob)"
-    [[ "$a" != "$b" ]]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_lock_path : le verrou d'une portée et le verrou global se prennent ensemble" {
-  module_sh '
-    g="$(prov_lock_path)"
-    h="$(prov_lock_path lcars)"
-    exec 8>"$g"; flock -n 8 || exit 1
-    exec 7>"$h"; flock -n 7 || exit 2
-    exec 7>&-; exec 8>&-
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_lock_path : la même portée prise deux fois se bloque" {
-  module_sh '
-    exec 8>"$(prov_lock_path lcars)"; flock -n 8 || exit 1
-    exec 7>"$(prov_lock_path lcars)"
+    exec 8>"$(prov_lock_path)"; flock -n 8 || exit 1
+    exec 7>"$(prov_lock_path)"
     flock -n 7 && exit 2
     exec 7>&-; exec 8>&-
   '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_lock_path : une portée qui sort du dossier est refusée" {
-  module_sh 'prov_lock_path "../evade" >/dev/null 2>&1 && exit 1; :'
-  [ "$status" -eq 0 ]
-  module_sh 'prov_lock_path "a/b" >/dev/null 2>&1 && exit 1; :'
   [ "$status" -eq 0 ]
 }
 

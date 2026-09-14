@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # SOURCE: install.sh
 # AUTHOR: DrDree
-# STARDATE: 2026-09-12
+# STARDATE: 2026-09-14
 # STATUS: l'installeur — il mesure, montre, délègue
 #
 #     install.sh — l'installeur de LCARS-FLEET.
 #
-#     Il mesure la machine, montre ce qu'il va faire, puis délègue. Rien n'est modifié avant le
-#     bilan, et ce script ne demande jamais sudo lui-même.
+#     Il mesure la machine, montre ce qu'il va faire, puis délègue. Le système n'est modifié qu'après
+#     le bilan, et ce script ne demande jamais sudo lui-même. Pipé, ou avec --from-release, il
+#     télécharge d'abord le kit de la version, le vérifie et le détare dans ~/.lcars/kits/.
 #
 #       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
@@ -17,18 +18,22 @@
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
 #                       démonstration. Sans ce drapeau, une forge existante est requise
 #                       (FORGE_BASE_URL).
-#       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Pipé, il s'arrête avant de télécharger.
+#       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau).
 #       --dry-run       tout jusqu'au bilan, puis la commande qui serait exécutée.
+#                       Pipés sans kit déjà posé, --check et --dry-run s'arrêtent avant de télécharger.
 #       --from-release  depuis un clone : installer la dernière version publiée du dépôt au lieu de
 #                       l'arbre courant (son installeur, vérifié par sa somme, est rejoué).
 #       --repo URL      le dépôt dont les releases sont tirées (défaut : celui de cette version).
-#       --substrate S   forcer le substrat mesuré : wsl, linux ou docker.
+#       --substrate S   le substrat attendu : wsl, linux ou docker ; un substrat que la mesure
+#                       contredit est refusé.
 #       --forge-project N   la base des projets compose (défaut lcars) : N-forge, N-runner, N-fleet.
 #       --port-forge N  le port de la forge montée par --bench (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
-#       --port-ssh N    le port SSH du conteneur (défaut 2222).
-#       --env FICHIER, --human USER, --only MODULE   passés au provisionnement (--workstation).
+#       --port-ssh N    le port SSH du conteneur (défaut 2222) ; sans objet avec --workstation.
+#       --env FICHIER   passé au provisionnement et à la mesure (--workstation).
+#       --human USER, --only MODULE   passés au provisionnement (--workstation).
 #       --version       la version de ce script.
+#       -h, --help      cette aide.
 #
 #     Relancer est toujours sûr : l'état est celui du système, mesuré à chaque passage.
 #
@@ -85,7 +90,6 @@ declare -a PROJET_PORTS=()   # au préflight et au délégué : le projet et les
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --workstation)    MODE=workstation; shift ;;
-    --container)      MODE=container; shift ;;
     --bench)          WITH_BENCH=1; shift ;;
     --check|--doctor) DOCTOR_MODE=1; shift ;;
     --dry-run)        DRY_RUN=1; shift ;;
@@ -95,14 +99,9 @@ while [[ $# -gt 0 ]]; do
     --port-forge|--port-deck|--port-ssh)
                       PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
     --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
-    # --env et --human pèsent sur la mesure (forge, déclaration, humain) : le préflight les reçoit aussi ; --only ne concerne que l'apply
-    --env|--human)    PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); MESURE+=("$1" "$2"); shift 2 ;;
-    --only)           PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
-    # les drapeaux retirés font rater, ils ne sont pas ignorés
-    --source|--branch)
-      echo "  $1 est retiré : un développeur clone lui-même ; une évaluation prend le kit (--from-release)." >&2; exit 1 ;;
-    --tar|--uninstall|--disposable|--consented|--fleet-human)
-      echo "  $1 est retiré : il n'y a plus de paquet système, ni de désinstalleur, ni d'humain semé hors --bench." >&2; exit 1 ;;
+    # 00-preflight lit ce que --env pose (la forge fournie, la déclaration) ; l'humain et la sélection ne pèsent que sur l'apply
+    --env)            PASSTHRU+=("$1" "${2:?$1 attend un fichier}"); MESURE+=("$1" "$2"); shift 2 ;;
+    --human|--only)   PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     --version) echo "$VERSION_DITE"; exit 0 ;;
     --help|-h)
       if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
@@ -110,8 +109,9 @@ while [[ $# -gt 0 ]]; do
       else
         echo "install.sh $VERSION_DITE — l'installeur de LCARS-FLEET."
         echo "  (sans option) conteneur Docker · --workstation dans ce système · --bench la forge montée"
-        echo "  --check · --dry-run · --from-release · --repo URL · --substrate S"
+        echo "  --check (--doctor) · --dry-run · --from-release · --repo URL · --substrate S"
         echo "  --forge-project N · --port-forge N · --port-deck N · --port-ssh N · --env F · --human U · --only M"
+        echo "  --version · -h, --help"
       fi
       exit 0 ;;
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
@@ -124,15 +124,18 @@ esac
 if [[ "$MODE" == "container" ]]; then
   [[ "${#PASSTHRU[@]}" -eq 0 ]] \
     || { echo "  ${PASSTHRU[0]} est un drapeau du mode --workstation : il pilote le provisionnement, que le conteneur n'appelle pas." >&2; exit 1; }
-  [[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
-    || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
+else
+  [[ " ${PROJET_PORTS[*]:-} " != *" --port-ssh "* ]] \
+    || { echo "  --port-ssh est le port SSH du conteneur : l'installation dans ce système n'en publie aucun." >&2; exit 1; }
 fi
+[[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
+  || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
 PASSTHRU+=(${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
 MODE_FLAG=""; [[ "$MODE" != "workstation" ]] || MODE_FLAG=" --workstation"
 
 # ─── outils ───────────────────────────────────────────────────────────────────────────────────
 FACTS_FILE=""
-fait() { [[ -n "$FACTS_FILE" ]] || return 0; sed -n "s/^$1=//p" "$FACTS_FILE" 2>/dev/null | tail -1; }
+fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
 stop() { # stop <ligne…> — le bilan s'arrête là, rien n'est fait
   echo ""; local l; for l in "$@"; do echo "  $l"; done; echo ""; exit 1
 }
@@ -161,9 +164,8 @@ signature() { # signature <artefact> — minisign si l'outil est là ; sinon le 
     || { rm -f "$f" "$f.minisig"; echo "  ${R}signature de $a invalide (minisign) — rien n'est posé.${N}"; return 1; }
   echo "  $a : signature vérifiée (minisign)"
 }
-obtenir() { # obtenir <artefact> — dans KITS_DIR, sha256 vérifié contre la table ; rc 2 s'il était déjà là
-  local a="$1" f="$KITS_DIR/$1" want got deja=0
-  want="$(sum_of "$a")" || { echo "  ${R}$a n'est pas dans la table de ce script — rien n'est posé.${N}"; return 1; }
+obtenir() { # obtenir <artefact> <sha256> — dans KITS_DIR, vérifié ; rc 2 s'il était déjà là
+  local a="$1" want="$2" f="$KITS_DIR/$1" got deja=0
   if [[ -f "$f" && "$(sha256sum "$f" | cut -d' ' -f1)" == "$want" ]]; then
     echo "  $a : déjà là, sha256 vérifié"; deja=1
   else
@@ -205,20 +207,18 @@ derniere_release() { # le script du dépôt n'a pas de table : il rejoue l'insta
   exec bash "$dest/install.sh" ${suite[@]+"${suite[@]}"}
 }
 source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vérifié, détaré → c'est l'arbre
-  local arch a s manque=0 rc
+  local arch asset somme rc=0
   [[ -n "$DOOR_BASE" ]] || derniere_release
   arch="$(uname -m)"
-  mapfile -t ASSETS < <(assets_for "$arch")
-  [[ -n "${ASSETS[0]:-}" ]] || {
+  asset="$(assets_for "$arch")"
+  [[ -n "$asset" ]] || {
     echo "  ${R}aucun kit $LCARS_DOOR_VERSION pour $arch dans la table de ce script.${N}"
     exit 1
   }
+  somme="$(sum_of "$asset")"
   KITS_DIR="$HOME/.lcars/kits/$LCARS_DOOR_VERSION"
   echo "  ${W}source${N} : release ${W}$LCARS_DOOR_VERSION${N} — $BASE → $KITS_DIR/  (arch $arch)"
-  for a in "${ASSETS[@]}"; do
-    if s="$(sum_of "$a")"; then printf '    %-56s sha256 %s\n' "$a" "$s"; else printf '    %-56s sha256 absent de la table\n' "$a"; manque=1; fi
-  done
-  [[ "$manque" -eq 0 ]] || { echo "  ${R}un artefact n'est pas dans la table de ce script — rien n'est téléchargé.${N}"; exit 1; }
+  printf '    %-56s sha256 %s\n' "$asset" "$somme"
   if [[ "$DRY_RUN" -eq 1 || "$DOCTOR_MODE" -eq 1 ]]; then
     if [[ ! -x "$KITS_DIR/lcars_install/deploy/provision" ]]; then
       echo "  ${W}$([[ "$DRY_RUN" -eq 1 ]] && echo --dry-run || echo --check)${N} : rien n'est téléchargé. Le préflight vit dans le kit, qui n'est pas là."
@@ -234,15 +234,17 @@ source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vér
   fi
   command -v curl >/dev/null 2>&1 || { echo "  ${R}curl est absent — apt install curl${N}"; exit 1; }
   mkdir -p "$KITS_DIR"
-  local neuf=0
-  for a in "${ASSETS[@]}"; do
-    rc=0; obtenir "$a" || rc=$?
-    [[ "$rc" -ne 1 ]] || exit 1
-    [[ "$rc" -eq 2 ]] || neuf=1
-  done
-  if [[ "$neuf" -eq 1 || ! -x "$KITS_DIR/lcars_install/deploy/provision" ]]; then
+  obtenir "$asset" "$somme" || rc=$?
+  [[ "$rc" -ne 1 ]] || exit 1
+  # un détarage interrompu reste dans son échafaudage : seul un arbre complet porte le nom lcars_install
+  if [[ "$rc" -ne 2 || ! -x "$KITS_DIR/lcars_install/deploy/provision" ]]; then
+    local echafaudage="$KITS_DIR/.lcars_install.partiel"
+    rm -rf "$echafaudage"; mkdir -p "$echafaudage"
+    tar -xzf "$KITS_DIR/$asset" -C "$echafaudage" && [[ -d "$echafaudage/lcars_install" ]] \
+      || { rm -rf "$echafaudage"; echo "  ${R}le kit ne se détare pas — rien n'est posé.${N}"; exit 1; }
     rm -rf "$KITS_DIR/lcars_install"
-    tar -xzf "$KITS_DIR/${ASSETS[0]}" -C "$KITS_DIR" || { echo "  ${R}le kit ne se détare pas — rien n'est posé.${N}"; exit 1; }
+    mv "$echafaudage/lcars_install" "$KITS_DIR/lcars_install"
+    rm -rf "$echafaudage"
   fi
   SCRIPT_DIR="$KITS_DIR/lcars_install"
 }
@@ -266,15 +268,10 @@ ${AMBER}     ____________________________________________________
 EOF
 
 # ─── 2. la source : l'arbre d'où tout se joue ─────────────────────────────────────────────────
-if [[ -n "${LCARS_DOOR_BASE:-}" ]]; then BASE="$LCARS_DOOR_BASE"
-elif [[ "$REPO_DONNE" -eq 0 && -n "$DOOR_BASE" ]]; then BASE="$DOOR_BASE"
+if [[ "$REPO_DONNE" -eq 0 && -n "$DOOR_BASE" ]]; then BASE="$DOOR_BASE"
 else BASE="${REPO_URL%.git}/releases/download/$LCARS_DOOR_VERSION"
 fi
 KITS_DIR=""; PROVENANCE=""
-if [[ -n "$SCRIPT_DIR" && -e "$SCRIPT_DIR/deploy/provision" && ! -x "$SCRIPT_DIR/deploy/provision" ]]; then
-  echo "  ${R}$SCRIPT_DIR/deploy/provision existe mais n'est pas exécutable${N} — chmod +x deploy/provision, ou reprendre l'arbre par git."
-  exit 1
-fi
 if [[ "$FROM_RELEASE" -eq 1 || -z "$SCRIPT_DIR" || ! -e "$SCRIPT_DIR/deploy/provision" ]]; then
   source_release; PROVENANCE=release
 elif [[ -e "$SCRIPT_DIR/.git" ]]; then
@@ -283,16 +280,12 @@ else
   PROVENANCE=kit
 fi
 PROVISION="$SCRIPT_DIR/deploy/provision"
-[[ -x "$PROVISION" ]] || {
-  echo "  ${R}provision introuvable : $PROVISION${N}"
-  echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est la source."
-  exit 1
-}
-[[ -r "$SCRIPT_DIR/deploy/installer-constants.env" ]] || {
-  echo "  ${R}constantes de l'installeur introuvables : $SCRIPT_DIR/deploy/installer-constants.env${N}"
-  echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est la source."
-  exit 1
-}
+DELEGUE="$SCRIPT_DIR/deploy/$MODE"
+arbre_incomplet() { stop "${R}L'arbre est incomplet : $1.${N}" "Ce n'est pas docker qui manque, c'est la source."; }
+[[ -x "$PROVISION" ]] || arbre_incomplet "$PROVISION absent ou non exécutable"
+[[ -x "$DELEGUE" ]]   || arbre_incomplet "$DELEGUE absent ou non exécutable"
+[[ -r "$SCRIPT_DIR/deploy/installer-constants.env" ]] \
+  || arbre_incomplet "constantes de l'installeur introuvables : $SCRIPT_DIR/deploy/installer-constants.env"
 # les constantes de l'installeur se lisent dans l'arbre, comme une donnée ; avant lui, seule l'aide en cite
 constante() { sed -n "s/^$1=//p" "$SCRIPT_DIR/deploy/installer-constants.env"; }
 RACINE="$(constante PROV_ROOT)"
@@ -303,23 +296,20 @@ case "$PROVENANCE" in
 esac
 
 # ─── 3. le préflight : une seule mesure, celle du provisionnement ─────────────────────────────
-FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
-trap '[[ -n "${FACTS_FILE:-}" ]] && rm -f "$FACTS_FILE"' EXIT
-: > "$FACTS_FILE"
+FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
+  || stop "${R}Aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp}${N} — le préflight y écrit ses faits. Corriger TMPDIR, puis relancer."
+trap 'rm -f "$FACTS_FILE"' EXIT
+PREFLIGHT_RC=0
 PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
   "$PROVISION" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
-  ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || true
+  ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || PREFLIGHT_RC=$?
 
-SUBSTRATE="$(fait substrat)"; [[ -n "$SUBSTRATE" ]] || SUBSTRATE="${FORCED_SUBSTRATE:-linux}"
-case "$SUBSTRATE" in
-  wsl|docker|linux) ;;
-  *) echo "  ${R}--substrate $SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
-esac
 [[ -n "$(fait docker)" ]] || {
   echo "  ${R}Le préflight n'a rendu aucun fait — provision doctor n'a pas tourné.${N}"
   printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'
   exit 1
 }
+SUBSTRATE="$(fait substrat)"
 
 # ─── 4. le bilan ──────────────────────────────────────────────────────────────────────────────
 go() { [[ "${1:-}" =~ ^[0-9]+$ ]] && awk -v m="$1" 'BEGIN { printf "%d", (m + 512) / 1024 }' || printf '?'; }
@@ -384,8 +374,9 @@ PORTS_PRIS=""; ports_ligne=""; PORT_DECK=""; PORT_SSH=""
 for p in forge deck ssh; do
   v="$(fait "port_$p")"; n="${v%% *}"; etat="${v#* }"; [[ "$v" == *" "* ]] || etat=""
   [[ "$p" != "deck" ]] || PORT_DECK="$n"; [[ "$p" != "ssh" ]] || PORT_SSH="$n"
-  # le port de la forge n'est pas à ce projet quand elle est fournie
+  # le port de la forge n'est pas à ce projet quand elle est fournie ; le port SSH n'est publié que par le conteneur
   [[ "$p" == "forge" && "$FORGE_ETAT" != "montee" ]] && continue
+  [[ "$p" == "ssh" && "$MODE" == "workstation" ]] && continue
   case "$etat" in
     libre)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) libre" ;;
     nous*)  ports_ligne="${ports_ligne:+$ports_ligne · }$n ($p) publié par ce projet" ;;
@@ -400,11 +391,6 @@ echo ""
 
 # ─── 5. ce qui arrête, avant toute grille ─────────────────────────────────────────────────────
 [[ -z "$OUTILS_MANQUANTS" ]] || stop "${R}Outils manquants : $OUTILS_MANQUANTS.${N}" "Les installer, puis relancer. Le rapport du préflight :" "$(printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /')"
-if [[ "$SUBSTRATE" == "wsl" ]] && ! unshare -Ur true 2>/dev/null; then
-  stop "${R}Pas de namespaces utilisateur (unshare -Ur échoue) — les pods tournent sous bwrap, qui les exige.${N}" \
-       "WSL1 ? passer en WSL2 :  wsl --set-version <distro> 2   (PowerShell)" \
-       "Sinon : kernel.apparmor_restrict_unprivileged_userns vaut « $(ou "$(fait userns_knob)") » ; 0 attendu."
-fi
 if [[ "$MODE" == "workstation" ]]; then
   case "$SUBSTRATE" in
     wsl) ;;
@@ -416,13 +402,6 @@ if [[ "$MODE" == "workstation" ]]; then
         "Sinon, le conteneur ne touche à rien :      $PORTE_CMD" ;;
     *) stop "${R}--workstation ne s'installe que dans une distribution WSL2 ou sur une machine Linux dédiée.${N}" \
             "Ici (substrat $SUBSTRATE), le conteneur :  $PORTE_CMD" ;;
-  esac
-  VOULU="$(fait channel_tree)"
-  case "$(fait channel)" in
-    ""|aucun|inconnu|"$VOULU") ;;
-    invalide) stop "${R}Le canal d'installation de cette machine est illisible${N} (le préflight nomme le fichier). À corriger avant de poser quoi que ce soit." ;;
-    *) stop "${R}Cette machine est installée par « $(fait channel) », et cet arbre poserait « $VOULU ».${N}" \
-            "Un canal ne se pose pas sur un autre : mettre à jour par le même canal, ou refaire le terrain." ;;
   esac
 fi
 if [[ "$DOCKER_OK" -eq 0 ]]; then
@@ -439,6 +418,12 @@ else
   # le daemon qui a répondu au préflight, pas un DOCKER_HOST de l'environnement qu'il a écarté
   DOCKER_HOST_VU="$(fait docker_host)"
   if [[ -n "$DOCKER_HOST_VU" ]]; then export DOCKER_HOST="$DOCKER_HOST_VU"; else unset DOCKER_HOST; fi
+fi
+# l'installation dans ce système est ce que le préflight juge : un plancher en dérive (RAM, disque, arch,
+# WSL1…) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
+if [[ "$MODE" == "workstation" && "$PREFLIGHT_RC" -ne 0 ]]; then
+  stop "${R}Le préflight refuse ce terrain pour l'installation dans ce système.${N} Ce qu'il constate :" \
+       "$(printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /')"
 fi
 if [[ "$MODE" == "container" && "$(fait compose)" == "non" ]]; then
   stop "${R}Docker répond, mais compose est absent.${N} Le conteneur se pose par docker compose." \
@@ -474,10 +459,10 @@ if [[ "$MODE" == "container" ]]; then
 EOF
 else
   if [[ "$SUBSTRATE" == "wsl" ]]; then
-    MODIFIE="/etc/wsl.conf, $RACINE, un groupe système, des paquets apt"
+    MODIFIE="/etc/wsl.conf, $RACINE, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"
     RETOUR="aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"
   else
-    MODIFIE="$RACINE, un groupe système, des paquets apt, docker-ce si aucun daemon ne répond"
+    MODIFIE="$RACINE, des groupes et des comptes de service, des paquets apt, ~/.claude de l'utilisateur, docker-ce si aucun daemon ne répond"
     RETOUR="aucun désinstalleur : la machine se réinstalle"
   fi
   cat <<EOF
@@ -499,6 +484,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
 fi
 
 # ─── 7. l'instance, quand on va la posséder ───────────────────────────────────────────────────
+CONSENTI=0
 if [[ "$MODE" == "workstation" ]]; then
   SIGNAUX=""
   apt="$(fait apt_installs)"
@@ -521,7 +507,7 @@ if [[ "$MODE" == "workstation" ]]; then
         read -r ans <&3 || stop "Rien n'a été fait."
         exec 3<&-
         case "$ans" in
-          ""|o|O|oui|y|Y|yes) ;;
+          ""|o|O|oui|y|Y|yes) CONSENTI=1 ;;
           n|N|non|no) stop "Rien n'a été fait." ;;
           *) stop "Réponse « $ans » non comprise — rien n'a été fait." ;;
         esac
@@ -534,28 +520,18 @@ if [[ "$MODE" == "workstation" ]]; then
 fi
 
 # ─── 8. la sortie : un seul exec, vers le délégué du mode ─────────────────────────────────────
-delegue() { # delegue <workstation|container> -> DELEGUE, le chemin du script, vérifié
-  case "$1" in
-    workstation) DELEGUE="$SCRIPT_DIR/deploy/workstation" ;;
-    container)   DELEGUE="$SCRIPT_DIR/deploy/container" ;;
-  esac
-  [[ -x "$DELEGUE" ]] || { echo "  ${R}${DELEGUE#"$SCRIPT_DIR"/} introuvable — l'arbre est incomplet.${N}"; exit 1; }
-}
 if [[ "$MODE" == "workstation" ]]; then
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     export LCARS_BENCH=1 PROV_FORGE_MONTEE=1
     export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
   fi
-  delegue workstation
   CMD=("$DELEGUE" up ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"})
   [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/lcars_install")   # le kit déjà détaré et vérifié, pas le tar une seconde fois
   RAPPEL="Installation dans ce système — deploy/workstation up"
 elif [[ "$WITH_BENCH" -eq 1 ]]; then
-  delegue container
   CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} --bench up)
   RAPPEL="Installation en conteneur, avec le banc — deploy/container --bench up"
 else
-  delegue container
   CMD=("$DELEGUE" ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} up)
   RAPPEL="Installation en conteneur — deploy/container up"
 fi
@@ -574,13 +550,16 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 echo "  ${G}$RAPPEL${N}"
 echo ""
-echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
-echo ""
-if { exec 3< /dev/tty; } 2>/dev/null; then
-  read -r _ <&3 || true
-  exec 3<&-
-else
-  echo "  Pas de terminal : l'installation continue."
+# la réponse à « Continuer ? » est déjà le consentement : une seconde invite ne décide rien de plus
+if [[ "$CONSENTI" -eq 0 ]]; then
+  echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
+  echo ""
+  if { exec 3< /dev/tty; } 2>/dev/null; then
+    read -r _ <&3 || stop "Rien n'a été fait."
+    exec 3<&-
+  else
+    echo "  Pas de terminal : l'installation continue."
+  fi
 fi
 rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
 [[ "${#PRE[@]}" -eq 0 ]] || "${PRE[@]}" || exit 1

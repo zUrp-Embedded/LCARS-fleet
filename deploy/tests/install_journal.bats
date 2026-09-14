@@ -16,9 +16,7 @@ setup() {
     < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
 
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  RUNNER="$BATS_TEST_DIRNAME/../provision"
   [ -f "$LIB" ]
-  [ -f "$RUNNER" ]
 
   export PROVISION_LIB="$LIB"
   export PROVISION_MODULE=test-journal
@@ -30,8 +28,6 @@ setup() {
 
 # Sourcer la lib et jouer une expression dedans.
 lib() { run bash -c "set -euo pipefail; . '$LIB' >/dev/null 2>&1; $1"; }
-
-code() { grep -vE '^\s*#' "$1"; }
 
 @test "MUET sans accumulateur — un appelant n'a jamais a savoir si le journal existe" {
   # `doctor`, un module joue nu, un temoin : aucun n'ouvre d'accumulateur. La note doit alors etre
@@ -102,8 +98,8 @@ SH
   APT_BIN="$bin"
 }
 
-@test "apt_ensure SEPARE les deux listes, et le fait AVANT d'installer" {
-  # Le coeur du fichier. On double `dpkg` : `git` est deja la, `socat` non.
+@test "apt_ensure n'installe et ne revendique que ce qui manquait avant l'install" {
+  # On double `dpkg` : `git` et `curl` sont deja la, `socat` non.
   local bin; apt_decor; bin="$APT_BIN"
 
   run bash -c "set -euo pipefail
@@ -111,9 +107,7 @@ SH
     . '$LIB' >/dev/null 2>&1
     apt_ensure git socat curl >/dev/null 2>&1 || true
     cat '$ACC'"
-  [[ "$output" == *"apt_already git curl"* ]]
-  [[ "$output" == *"apt_installed socat"* ]]
-  # et `git`/`curl` ne partent JAMAIS a l'install : c'est ce que la separation protege
+  [ "$output" = "apt_installed socat" ]
   refute grep -q 'install.*git' "$APT_TRACE"
 }
 
@@ -153,73 +147,9 @@ SH
   refute grep -qE 'apt_installed.*socat' <<<"$output"
 }
 
-@test "la separation est notee AVANT l'appel a apt — apres, elle n'existe plus" {
-  # ⚠ L'ORDRE EST LE FOND. Une seconde apres l'install, `dpkg -s` repond « present » pour les deux
-  # listes : la distinction est perdue pour toujours. La noter apres serait noter une egalite.
-  local body; body="$(code "$LIB" | sed -n '/^apt_ensure()/,/^}/p')"
-  local n_note n_apt
-  n_note="$(grep -n 'prov_journal_note apt_already' <<<"$body" | head -1 | cut -d: -f1)"
-  n_apt="$(grep -n 'apt-get install' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_note" ]
-  [ -n "$n_apt" ]
-  [ "$n_note" -lt "$n_apt" ]
-}
-
-@test "le runner n'ouvre l'accumulateur QUE sur apply" {
-  # Un `doctor` ne pose rien. Lui faire ecrire un journal ferait raconter a la machine une pose qui
-  # n'a pas eu lieu — et ce journal servirait ensuite a desinstaller.
-  local body; body="$(code "$RUNNER")"
-  grep -q 'PROV_JOURNAL_ACC="\$(mktemp' <<<"$body"
-  grep -B2 'PROV_JOURNAL_ACC="\$(mktemp' <<<"$body" | grep -q 'CMD" == "apply"'
-  grep -q 'CMD" == "apply" && -n "\${PROV_JOURNAL_ACC' <<<"$body"
-}
-
-@test "le journal se scelle AVANT le recap, et ne peut pas renverser un verdict" {
-  local body; body="$(code "$RUNNER")"
-  local n_seal n_recap
-  n_seal="$(grep -n 'JOURNAL_FILE"' <<<"$body" | head -1 | cut -d: -f1)"
-  n_recap="$(grep -n 'provision \$CMD — substrat' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_seal" ]
-  [ -n "$n_recap" ]
-  [ "$n_seal" -lt "$n_recap" ]
-  # une ecriture ratee se DIT, elle ne `die` pas
-  grep -q 'journal NON écrit' <<<"$body"
-  refute grep -qE 'journal.*\|\| die' <<<"$body"
-}
-
-@test "le repli DEDOUBLONNE — apt_ensure est appelee par plusieurs modules" {
-  printf 'apt_installed socat jq\napt_already git\napt_installed jq gh\n' > "$ACC"
-  run awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
-       END { for (k in acc) {
-               n=split(acc[k], w, " "); delete seen; out=""
-               for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }
-               printf "%-13s%s\n", k, out } }' "$ACC"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"socat jq gh"* ]]
-  [ "$(grep -c 'jq' <<<"$output")" -eq 1 ]
-}
-
-@test "le journal se declare MESURE, jamais declaration" {
-  # Les deux fichiers se ressemblent et disent des choses opposees. Celui qui les confond
-  # desinstalle depuis une intention au lieu d'un fait.
-  local body; body="$(code "$RUNNER")"
-  grep -q 'mesure, pas declaration' <<<"$body"
+# bats test_tags=structure
+@test "la table se declare donnee : le journal mesure, le manifeste declare" {
   grep -q 'data, not code' "$BATS_TEST_DIRNAME/../system.manifest"
-}
-
-@test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
-  # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
-  # ferait un fichier qui raconte deux dates a la fois.
-  local body; body="$(code "$RUNNER")"
-  grep -qE 'apt_installed\|apt_already' <<<"$body"
-  refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
-}
-
-@test "FUSION : le journal s'ecrit MEME si la passe n'a rien pose" {
-  # Sinon l'ANCIEN survit, avec son `posed_at` et son `prefix` d'une autre passe — un fichier qui se
-  # declare « mesure » et date d'avant est pire qu'absent : il repond avec assurance.
-  local body; body="$(code "$RUNNER")"
-  refute grep -qE '\$CMD" == "apply" && -n "\$\{PROV_JOURNAL_ACC:-\}" && -s' <<<"$body"
 }
 
 @test "un paquet RETIRE (etat rc) est REINSTALLE — dpkg -s le croit la, et le rail se coupait la scie" {

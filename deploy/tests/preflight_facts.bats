@@ -88,14 +88,25 @@ listen_on() { # listen_on <port> — un processus python qui écoute quelques se
 }
 
 
-CONTRAT="os distro distro_version noyau cpu systemd bash arch ram_mb disque_mb utilisateur groupes
-substrat consent wsl2 userns_knob docker docker_bin docker_host docker_server docker_flavor docker_why
-compose compose_why forge_fournie forge_joignable port_forge port_deck port_ssh projet projet_pris
-apt_installs comptes_humains sudo curl git jq channel channel_tree"
+contrat() { # les faits que lisent install.sh et deploy/workstation, dérivés de leurs appels à fait
+  local install="$BATS_TEST_DIRNAME/../../install.sh" poste="$BATS_TEST_DIRNAME/../workstation"
+  {
+    grep -hvE '^\s*#' "$install" "$poste" | grep -oE '\bfait "?[a-z0-9_]+("|\)| |$)' | sed -E 's/^fait "?//; s/("|\)| )$//'
+    # les deux familles nommées par variable : fait "port_$p" sur la boucle des ports, fait "$t" sur les outils requis
+    sed -n 's/^for p in \(.*\); do$/\1/p' "$install" | tr ' ' '\n' | sed 's/^/port_/'
+    grep -ohE 'OUTILS_REQUIS="[a-z ]+"' "$install" | sed 's/.*="\(.*\)"/\1/' | tr ' ' '\n'
+  } | sort -u
+}
 
 faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est posé ; vide seulement s'il est admis vide
-  local f
-  for f in $CONTRAT; do
+  local f c
+  c="$(contrat)"
+  # chaque forme de lecture est vue : littérale, par la boucle des ports, par la liste des outils
+  local attendu
+  for attendu in substrat port_ssh jq sudo docker_host; do
+    grep -qx "$attendu" <<<"$c" || { echo "dérivation aveugle : $attendu absent du contrat" >&2; return 1; }
+  done
+  for f in $c; do
     if [[ " $1 " == *" $f "* ]]; then grep -qE "^$f=" "$FACTS" || { echo "fait absent : $f" >&2; return 1; }
     else grep -qE "^$f=.+" "$FACTS" || { echo "fait absent ou vide : $f" >&2; return 1; }
     fi

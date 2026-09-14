@@ -17,11 +17,11 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SRC="$REPO/install.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
-  # un unshare qui répond : la garde des user namespaces mesure le noyau, le décor la dicte
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/unshare"; chmod 0755 "$BINDIR/unshare"
-  # un sudo et un docker qui rougissent s'ils sont appelés : l'installeur n'escalade jamais et ne sonde pas lui-même
-  printf '#!/usr/bin/env bash\necho SUDO-APPELE >&2; exit 97\n' > "$BINDIR/sudo"; chmod 0755 "$BINDIR/sudo"
-  printf '#!/usr/bin/env bash\necho DOCKER-APPELE >&2; exit 97\n' > "$BINDIR/docker"; chmod 0755 "$BINDIR/docker"
+  # un sudo, un docker et un unshare qui rougissent s'ils sont appelés : l'installeur n'escalade jamais et ne sonde pas lui-même
+  local t
+  for t in sudo docker unshare; do
+    printf '#!/usr/bin/env bash\necho %s-APPELE >&2; exit 97\n' "${t^^}" > "$BINDIR/$t"; chmod 0755 "$BINDIR/$t"
+  done
   export PATH="$BINDIR:$PATH"
   TAG="9.9.9-test"
 }
@@ -35,7 +35,7 @@ _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker do
   "port_forge=21000 libre" "port_deck=20999 libre" "port_ssh=2222 libre" projet=lcars projet_pris=
   apt_installs= comptes_humains=temoin channel=aucun channel_tree=source jq=oui)
 
-_faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écrit ces faits, et rien d'autre
+_faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écrit ces faits ; FAUX_PREFLIGHT_REFUS : sa ligne de refus, et le verdict qui va avec
   local arbre="$1"; shift
   mkdir -p "$arbre/deploy"
   { echo '#!/usr/bin/env bash'
@@ -44,6 +44,7 @@ _faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écr
     echo 'cat > "$PROV_FACTS_FILE" <<'"'"'FACTS'"'"''
     printf '%s\n' "$@"
     echo 'FACTS'
+    echo '[[ -z "${FAUX_PREFLIGHT_REFUS:-}" ]] || { echo "OK    00-preflight: décor"; echo "$FAUX_PREFLIGHT_REFUS"; exit 1; }'
   } > "$arbre/deploy/provision"
   chmod 0755 "$arbre/deploy/provision"
 }
@@ -120,28 +121,31 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ "$output" = "non publiée" ]
 }
 
-@test "--help marche sans docker et pipée, et nomme tous les drapeaux acceptés" {
+@test "--help, en fichier comme pipée, nomme chaque drapeau que le parseur accepte" {
+  # la liste se lit dans les bras du parseur : un drapeau ajouté sans son aide rougit ici
+  local drapeaux f
+  drapeaux="$(sed -n '/^while \[\[ \$# -gt 0 \]\]; do$/,/^done$/p' "$SRC" | grep -oE '^ *-[-a-z|]+\)' | tr -d ' )' | tr '|' '\n')"
+  grep -qx -- '--workstation' <<<"$drapeaux"
+  grep -qx -- '-h' <<<"$drapeaux"
   run bash "$SRC" --help
   [ "$status" -eq 0 ]
-  local f
-  for f in --workstation --bench --check --dry-run --from-release --repo --substrate --forge-project --port-forge --port-deck --port-ssh --env --human --only --version; do
+  for f in $drapeaux; do
     [[ "$output" == *"$f"* ]] || { echo "aide sans $f" >&2; return 1; }
   done
   run bash -c "cat '$SRC' | bash -s -- --help"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--workstation"* ]]
+  for f in $drapeaux; do
+    [[ "$output" == *"$f"* ]] || { echo "aide pipée sans $f" >&2; return 1; }
+  done
 }
 
-@test "les drapeaux retirés font rater le script en se nommant" {
+@test "un drapeau inconnu fait rater le script en se nommant, drapeaux retirés et --container compris" {
   local f
-  for f in --source --branch --tar --uninstall --disposable --consented --fleet-human; do
+  for f in --source --branch --tar --uninstall --disposable --consented --fleet-human --container --inconnu; do
     run bash "$SRC" "$f" < /dev/null
     [ "$status" -eq 1 ] || { echo "$f accepté (rc $status)" >&2; return 1; }
-    [[ "$output" == *"$f est retiré"* ]]
+    [[ "$output" == *"Option inconnue : $f"* ]] || { echo "$f : $output" >&2; return 1; }
   done
-  run bash "$SRC" --inconnu < /dev/null
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Option inconnue"* ]]
 }
 
 @test "--substrate invalide est refusé au parsing, avant toute mesure" {
@@ -171,12 +175,27 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   grep -vE '^\s*#' "$SRC" | refute_out 'docker_endpoint|detect_substrate'
 }
 
-@test "--port-forge sans --bench est refusé au parsing : la forge fournie n'a pas de port à nous" {
+@test "--port-forge sans --bench est refusé au parsing, dans les deux modes : la forge fournie n'a pas de port à nous" {
   local a; a="$(_arbre)"
   porte "$a" --port-forge 21000
   [ "$status" -eq 1 ]
   [[ "$output" == *"--port-forge n'a d'objet qu'avec --bench"* ]]
+  porte "$a" --workstation --port-forge 21000
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--port-forge n'a d'objet qu'avec --bench"* ]]
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+}
+
+@test "en poste, le port SSH n'a pas d'objet : --port-ssh est refusé, et un port 2222 tenu n'arrête rien" {
+  local a; a="$(_arbre "port_ssh=2222 pris par sshd")"
+  porte "$a" --workstation --bench --port-ssh 2300
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--port-ssh est le port SSH du conteneur"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+  porte "$a" --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" != *"(ssh)"* ]]
+  [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
 @test "le préflight reçoit le substrat, le projet et les ports demandés" {
@@ -189,19 +208,39 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local a="$BATS_TEST_TMPDIR/arbre"; rm -rf "$a"; mkdir -p "$a/deploy"
   cp "$SRC" "$a/install.sh"
   cp "$REPO/deploy/installer-constants.env" "$a/deploy/"
-  printf '#!/usr/bin/env bash\necho "le doctor est mort"; exit 3\n' > "$a/deploy/provision"; chmod 0755 "$a/deploy/provision"
+  printf '#!/usr/bin/env bash\necho "le doctor est mort"; exit 3\n' > "$a/deploy/provision"
+  printf '#!/usr/bin/env bash\necho "CONTAINER:$*"\n' > "$a/deploy/container"
+  chmod 0755 "$a/deploy/provision" "$a/deploy/container"
   porte "$a" --check
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucun fait"*"le doctor est mort"* ]]
 }
 
-@test "un arbre sans le fichier des constantes est incomplet, et le nom du fichier est dit" {
+@test "un arbre incomplet s'arrête avant la mesure et nomme ce qui manque : le runner, le délégué du mode, les constantes" {
   local a; a="$(_arbre)"
   rm "$a/deploy/installer-constants.env"
   porte "$a" --bench --check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"constantes de l'installeur introuvables : $a/deploy/installer-constants.env"*"L'arbre est incomplet"* ]]
+  [[ "$output" == *"L'arbre est incomplet : constantes de l'installeur introuvables : $a/deploy/installer-constants.env"* ]]
+  a="$(_arbre)"
+  chmod 0644 "$a/deploy/provision"
+  porte "$a" --bench --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"L'arbre est incomplet : $a/deploy/provision absent ou non exécutable"* ]]
+  a="$(_arbre)"
+  rm "$a/deploy/workstation"
+  porte "$a" --workstation --bench --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"L'arbre est incomplet : $a/deploy/workstation absent ou non exécutable"* ]]
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+}
+
+@test "sans fichier temporaire possible, l'installeur s'arrête en le nommant, sans erreur brute de bash" {
+  local a; a="$(_arbre)"
+  TMPDIR="$BATS_TEST_TMPDIR/absent" porte "$a" --bench --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Aucun fichier temporaire ne se crée dans $BATS_TEST_TMPDIR/absent"* ]]
+  refute_out 'line [0-9]+:' <<<"$output"
 }
 
 
@@ -335,12 +374,25 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"ne s'installe que dans une distribution WSL2 ou sur une machine Linux dédiée"* ]]
 }
 
-@test "sans user namespaces sous WSL, arrêt qui nomme WSL2" {
-  printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/unshare"
+@test "sous WSL, l'installeur ne sonde pas les namespaces lui-même : aucun des deux modes n'appelle unshare" {
   local a; a="$(_arbre)"
   porte "$a" --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out 'UNSHARE-APPELE' <<<"$output"
+  porte "$a" --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out 'UNSHARE-APPELE' <<<"$output"
+}
+
+@test "un préflight qui refuse le terrain arrête l'installation dans ce système avant la grille, en citant son constat ; le conteneur continue" {
+  local a; a="$(_arbre)"
+  FAUX_PREFLIGHT_REFUS="DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo — la release ne se construira pas" porte "$a" --workstation --bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"namespaces utilisateur"*"wsl --set-version"* ]]
+  [[ "$output" == *"Le préflight refuse ce terrain pour l'installation dans ce système"*"DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo"* ]]
+  refute_out 'OK    00-preflight|Modifie|WORKSTATION:' <<<"$output"
+  FAUX_PREFLIGHT_REFUS="FAIL  00-preflight: Linux natif sans déclaration" porte "$a" --bench
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CONTAINER:--bench up"* ]]
 }
 
 @test "un port demandé déjà tenu arrête et nomme les drapeaux qui déplacent" {
@@ -378,19 +430,36 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"WORKSTATION:up"* ]]
 }
 
-@test "le canal : un autre canal en place arrête --workstation, illisible aussi ; aucun ou inconnu continuent" {
-  local a; a="$(_arbre channel=kit channel_tree=source)"
+vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib dans l'arbre ; sudo note son argv
+  cp "$REPO/deploy/workstation" "$1/deploy/workstation"
+  cp -a "$REPO/deploy/lib" "$1/deploy/lib"
+  cp "$REPO/deploy/system.manifest" "$1/deploy/"
+  printf '#!/usr/bin/env bash\necho "SUDO:$*" >> "%s"\n' "$BATS_TEST_TMPDIR/sudo.calls" > "$BINDIR/sudo"
+}
+
+@test "l'argv que l'installeur émet est lu par le vrai délégué du poste, jusqu'au sudo" {
+  local a; a="$(_arbre)"
+  vrai_poste "$a"
+  porte "$a" --workstation --bench --human alice --port-deck 20091 --only 60
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^PROVISION:doctor --only 00-preflight --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls"
+  [[ "$(cat "$BATS_TEST_TMPDIR/sudo.calls")" == "SUDO:"*"PROV_FORGE_MONTEE=1 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars DOCKER_HOST=unix:///var/run/docker.sock bash $a/deploy/workstation up --human alice --only 60 --port-deck 20091" ]]
+}
+
+@test "le canal : le mélange est refusé par le délégué, avant tout sudo ; un canal illisible arrête avec le préflight ; le conteneur ne lit pas le canal" {
+  local a; a="$(_arbre channel=source channel_tree=kit)"
+  vrai_poste "$a"
   porte "$a" --bench --workstation
   [ "$status" -eq 1 ]
-  [[ "$output" == *"installée par « kit »"*"« source »"* ]]
+  [[ "$output" == *"installée par « source »"*"poserait « kit »"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
   a="$(_arbre channel=invalide)"
-  porte "$a" --bench --workstation
+  FAUX_PREFLIGHT_REFUS="FAIL  00-preflight: canal d'installation illisible" porte "$a" --bench --workstation
   [ "$status" -eq 1 ]
-  [[ "$output" == *"illisible"* ]]
+  [[ "$output" == *"Le préflight refuse ce terrain"*"canal d'installation illisible"* ]]
   a="$(_arbre channel=inconnu)"
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
-  # le conteneur ne lit pas le canal
   a="$(_arbre channel=kit channel_tree=source)"
   porte "$a" --bench --check
   [ "$status" -eq 0 ]
@@ -409,11 +478,11 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 @test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux" {
   local a; a="$(_arbre)"
   porte "$a" --bench --workstation --check
-  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, un groupe système"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
+  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
   [[ "$output" == *"Pour installer en conteneur à la place :"* ]]
   a="$(_arbre substrat=linux consent=env)"
   porte "$a" --bench --workstation --check
-  [[ "$output" == *"Modifie    /opt/lcars, un groupe système"*"la machine se réinstalle"* ]]
+  [[ "$output" == *"Modifie    /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.claude de l'utilisateur, docker-ce"*"la machine se réinstalle"* ]]
 }
 
 @test "--check s'arrête après la grille, rien n'est appelé" {
@@ -469,14 +538,6 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   refute grep -q 'SUDO-APPELE\|DOCKER-APPELE' <<<"$output"   # sudo est l'affaire du délégué
   porte "$a" --workstation
   [ "$status" -eq 1 ]   # sans forge : arrêt, pas de montée silencieuse
-}
-
-@test "un délégué absent nomme l'arbre incomplet" {
-  local a; a="$(_arbre)"
-  rm "$a/deploy/workstation"
-  porte "$a" --workstation --bench
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"deploy/workstation introuvable"* ]]
 }
 
 
@@ -539,14 +600,28 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
+@test "une réponse à « Continuer ? » vaut la décision : aucune seconde invite ne suit" {
+  command -v script >/dev/null || skip "script (util-linux) absent"
+  local a; a="$(_arbre comptes_humains=temoin,alice)"
+  run bash -c "printf 'o\n' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
+  [[ "$output" == *"Continuer ? [O/n]"*"WORKSTATION:up"* ]]
+  [[ "$output" != *"Entrée pour continuer"* ]]
+}
 
-@test "--env et --human atteignent le préflight initial, --only n'y va pas ; le délégué reçoit les trois" {
+@test "à la pause, un terminal sans réponse (Ctrl-D) est un abandon : le délégué ne part pas" {
+  command -v script >/dev/null || skip "script (util-linux) absent"
+  local a; a="$(_arbre)"
+  run bash -c "script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null < /dev/null"
+  [[ "$output" == *"Entrée pour continuer"*"Rien n'a été fait"* ]]
+  [[ "$output" != *"WORKSTATION:up"* ]]
+}
+
+@test "--env atteint le préflight initial, --human et --only n'y vont pas ; le délégué reçoit les trois" {
   local a; a="$(_arbre)"
   printf 'FORGE_BASE_URL=http://forge.env:3000\n' > "$BATS_TEST_TMPDIR/env"
   run bash "$a/install.sh" --workstation --bench --env "$BATS_TEST_TMPDIR/env" --human zoe --only 60 --dry-run
   [ "$status" -eq 0 ]
-  grep -qE "^PROVISION:doctor --only 00-preflight .*--env $BATS_TEST_TMPDIR/env --human zoe" "$BATS_TEST_TMPDIR/provision.calls"
-  refute grep -qE "^PROVISION:doctor .*--only 60" "$BATS_TEST_TMPDIR/provision.calls"
+  grep -qx "PROVISION:doctor --only 00-preflight --env $BATS_TEST_TMPDIR/env" "$BATS_TEST_TMPDIR/provision.calls"
   [[ "$output" == *"--env $BATS_TEST_TMPDIR/env --human zoe --only 60"* ]]
 }
 
@@ -678,10 +753,34 @@ _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker do
   [ ! -d "$HOME/.lcars" ]
 }
 
-@test "--repo l'emporte sur la base gravée dans la porte" {
+@test "--repo l'emporte sur la base gravée dans la porte ; une LCARS_DOOR_BASE de l'environnement ne compte pas" {
   _release
-  pipee --bench --repo https://exemple.invalide/x.git --dry-run
+  LCARS_DOOR_BASE=https://ailleurs.invalide/base pipee --bench --repo https://exemple.invalide/x.git --dry-run
   [[ "$output" == *"https://exemple.invalide/x/releases/download/$TAG"* ]]
+  LCARS_DOOR_BASE=https://ailleurs.invalide/base pipee --bench --dry-run
+  [[ "$output" == *"$SERVEUR_URL →"* ]]
+  refute_out 'ailleurs\.invalide' <<<"$output"
+}
+
+@test "un détarage interrompu n'est jamais repris : la passe suivante détare un arbre complet" {
+  _release
+  # un tar qui pose le runner puis meurt : l'arbre partiel porte deploy/provision exécutable
+  cat > "$BINDIR/tar" <<EOF
+#!/usr/bin/env bash
+d="\${*: -1}"
+mkdir -p "\$d/lcars_install/deploy"
+printf '#!/usr/bin/env bash\n' > "\$d/lcars_install/deploy/provision"
+chmod 0755 "\$d/lcars_install/deploy/provision"
+exit 1
+EOF
+  chmod 0755 "$BINDIR/tar"
+  pipee --workstation --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le kit ne se détare pas"* ]]
+  rm "$BINDIR/tar"
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"déjà là, sha256 vérifié"*"WORKSTATION:up --from $KITS/lcars_install"* ]]
 }
 
 @test "pipée : le kit de la version est téléchargé, vérifié, détaré, et le délégué part du kit" {
