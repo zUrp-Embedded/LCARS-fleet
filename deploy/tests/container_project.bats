@@ -353,3 +353,16 @@ arbre_container() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucun compose d'instance LCARS ne l'a créé"* ]]
 }
+
+@test "down et reset d'un banc sont refusés avant tout geste : un banc se retire en entier par bench-down" {
+  seed_project "$CF,$REPO/deploy/docker/docker-compose.bench.yml"
+  local geste
+  for geste in down reset; do
+    : > "$CALLS"
+    run setsid --wait bash "$SRC" -p b63b-fleet "$geste" </dev/null
+    [ "$status" -eq 1 ] || { echo "$geste : $output"; return 1; }
+    [[ "$output" == *"$geste: le projet « b63b-fleet » est un banc"*"deploy/docker/bench/bench-down.sh --project b63b --yes"* ]]
+    [[ "$output" != *"Confirmer"* ]]
+    refute grep -q -- "down" "$CALLS"
+  done
+}

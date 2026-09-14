@@ -54,6 +54,7 @@ if [[ "\$1" == inspect ]]; then
     *revision*)       echo "\${STUB_REV:-}" ;;
     "{{.Image}}")     echo "sha256:image-temoin" ;;
     *Config.Env*)     [[ -z "\${STUB_ORIGINES:-}" ]] || echo "LCARS_DECK_ORIGINS=\$STUB_ORIGINES" ;;
+    *PortBindings*)   printf "%b" "\${STUB_PUBLIES:-}" ;;
   esac; exit 0
 fi
 if [[ "\$*" == *"cat /run/lcars-boot.state"* ]];   then [[ -n "\${STUB_BOOT:-}" ]]   || exit 1; echo "\$STUB_BOOT"; exit 0; fi
@@ -84,7 +85,7 @@ EOS
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_ORIGINES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_ORIGINES STUB_PUBLIES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -641,4 +642,16 @@ FAKE
   [ "$(tail -n1 "$BATS_TEST_TMPDIR/curl.urls")" = "http://127.0.0.1:4999/auth/login" ]
   [[ "$output" == *"deck        : rien ne répond sur http://127.0.0.1:4999"* ]]
   [[ "$output" != *"000000"* ]]
+}
+
+@test "up d'une instance qui tourne sans ports dans sa conf : elle garde les ports qu'elle publie, jamais les défauts" {
+  sain
+  export STUB_PUBLIES='22/tcp=127.0.0.1:20032\n4999/tcp=:20031\n'
+  run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$BATS_TEST_TMPDIR/binds.seen")" = $'LCARS_LANDING_PORT_BIND=0.0.0.0:20031\nLCARS_SSH_PORT=127.0.0.1:20032' ]
+  # un port donné à l'appel gagne sur celui que l'instance publie
+  run bash "$SRC" --port-deck 20091 up
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/binds.seen")" = $'LCARS_LANDING_PORT_BIND=127.0.0.1:20091\nLCARS_SSH_PORT=127.0.0.1:20032' ]
 }

@@ -533,13 +533,21 @@ cmd_status() {
 # ─── logs, down, reset, source-push ─────────────────────────────────────────────────────────────
 cmd_logs()  { compose logs -f "$@"; }
 
+refuser_banc() { # refuser_banc <geste> — un banc se retire en entier, conteneur, forge, runner et magasin
+  [[ "$(project_config_files)" != *docker-compose.bench.yml* ]] \
+    || fail "$1: le projet « $PROJECT » est un banc : son conteneur ne se retire pas seul, sa forge et son runner resteraient" \
+            "deploy/docker/bench/bench-down.sh --project ${PROJECT%-fleet} --yes"
+}
+
 cmd_down() {
   assert_project_ours down
+  refuser_banc down
   compose down "$@"
 }
 
 cmd_reset() {
   assert_project_ours reset
+  refuser_banc reset
   local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//' || true)"
   echo "container: reset du projet « $PROJECT » — conteneur et volume(s) ${_vols:-<aucun>}."
   echo "           La forge n'est pas concernée : elle vit dans son propre déploiement, le travail poussé y survit."
@@ -589,7 +597,20 @@ cmd_source_push() {
 }
 
 # ─── Défauts et dispatch ────────────────────────────────────────────────────────────────────────
-# les défauts viennent après load_conf : posés avant, ils masqueraient le fichier de conf du projet
+# les défauts viennent après load_conf : posés avant, ils masqueraient le fichier de conf du projet ;
+# une instance qui tourne garde les ports qu'elle publie quand ni l'appel ni sa conf n'en nomment
+# (une conf posée par une version précédente ne les retenait pas)
+ports_publies() { # ports_publies → « <port du conteneur>/tcp=<ip>:<port de l'hôte> » par port publié de l'instance ; rien sans conteneur
+  local id; id="$(compose ps -q lcars 2>/dev/null | head -n1)"
+  [[ -n "$id" ]] || return 0
+  "$DOCKER" inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{$p}}={{(index $b 0).HostIp}}:{{(index $b 0).HostPort}}{{println}}{{end}}' "$id" 2>/dev/null \
+    | sed 's/=:/=0.0.0.0:/' || true
+}
+if [[ -z "${LCARS_SSH_PORT:-}" || -z "${LCARS_LANDING_PORT_BIND:-}" ]]; then
+  PUBLIES="$(ports_publies)"
+  : "${LCARS_SSH_PORT:=$(sed -n 's|^22/tcp=||p' <<<"$PUBLIES")}"
+  : "${LCARS_LANDING_PORT_BIND:=$(sed -n "s|^$PROV_DECK_PORT_DEFAULT/tcp=||p" <<<"$PUBLIES")}"
+fi
 : "${LCARS_SSH_PORT:=127.0.0.1:$PROV_SSH_PORT_DEFAULT}"
 : "${LCARS_LANDING_PORT_BIND:=127.0.0.1:$PROV_DECK_PORT_DEFAULT}"
 image_defaut() { # image_defaut <commande> — pull vise l'image du compose : un tag local ne se tire d'aucun registre
