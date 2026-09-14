@@ -133,9 +133,23 @@ resource "gitea_user" "human" {
   # installation réelle l'oublierait simplement.
   must_change_password = false
 
-  admin                = false # NON site-admin : ce compte opère VIA la fleet, pas par gestes forge manuels
-  # Hardening : il ne crée ni org, ni git-hook serveur, ni import local
-  # (le break-glass, c'est le compte admin de l'installeur, pas ce compte-ci).
+  # `true` (T2). Deux adminités existent, et elles ne se confondent pas :
+  #
+  #   · L'ADMIN DE LCARS — les droits d'administration que la fleet voit. Il est porté par un compte
+  #     SITE-ADMIN de la forge, et c'est `is_admin` que lit la porte de `lcars catalogue install`
+  #     (`catalogue-executor.py`, `forge_is_admin`). L'humain de démonstration est un admin de LCARS :
+  #     il tient la place du compte admin que Gitea fait créer à son installation (ci-dessus).
+  #   · L'ADMIN DU SYSTÈME — le siège (`admiral`), par défaut root ou le premier compte Linux de la
+  #     machine (`/etc/lcars/seat.uid`). Il administre la machine ; sur la forge, il détient le
+  #     compte d'administration que l'installeur crée HORS de cette recette (le jeton master, le
+  #     break-glass). La garde du siège lui refuse la fleet : son adminité ne passe jamais par elle.
+  #
+  # CETTE LIGNE EST LA SEULE MAIN QUI POSE L'ADMINITÉ DE CE COMPTE. Tofu la réapplique à chaque
+  # passe de 61-forge-structure : une autre main (le banc) qui la poserait aussi serait défaite ici
+  # dès que les deux divergent. Le banc (`bench_human_seed`) la vérifie, il ne la pose pas.
+  admin                = true
+  # Réglages durcis, gardés pour le jour où l'adminité serait retirée : un site-admin Gitea passe
+  # outre `allow_create_organization` (POST /orgs rend 201 sous ce compte).
   allow_create_organization = false
   allow_git_hook            = false
   allow_import_local        = false

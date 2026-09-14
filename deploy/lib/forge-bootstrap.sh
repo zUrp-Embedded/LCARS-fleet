@@ -44,13 +44,15 @@ forge_admin_ensure() { # forge_admin_ensure <docker> <conteneur> <login> → imp
   return 1
 }
 
-forge_admin_password() { # forge_admin_password <url> <fichier du jeton master> <login> <mot de passe> — mot de passe et adminité ; un refus rend 1 et nomme le code HTTP
-  local code
+forge_account_password() { # forge_account_password <url> <fichier du jeton master> <login> <mot de passe> [admin] — le mot de passe, et l'adminité si « admin » est nommé ; un refus rend 1 et nomme le code HTTP
+  local code corps='{login_name: $l, source_id: 0, password: $pw, must_change_password: false}'
+  [[ "${5:-}" != admin ]] || corps='{login_name: $l, source_id: 0, password: $pw, must_change_password: false, admin: true}'
   code="$(forge_api PATCH "$1/api/v1/admin/users/$3" /dev/null --token-file "$2" -m 10 \
-            --json '{login_name: $l, source_id: 0, password: $pw, must_change_password: false, admin: true}' \
-            --arg l "$3" --rawfile pw <(printf '%s' "$4"))" \
+            --json "$corps" --arg l "$3" --rawfile pw <(printf '%s' "$4"))" \
     || { echo "la forge refuse le compte « $3 » (HTTP $code)" >&2; return 1; }
 }
+
+forge_admin_password() { forge_account_password "$1" "$2" "$3" "$4" admin; } # forge_admin_password <url> <fichier du jeton master> <login> <mot de passe> — le compte d'administration de la forge : mot de passe et adminité
 
 forge_master_token() { # forge_master_token <docker> <conteneur> <login> [nom] → imprime le jeton
   local docker="$1" conteneur="$2" login="$3" nom="${4:-master-$(date +%s)}" tok
@@ -66,14 +68,16 @@ forge_token_ok() { # forge_token_ok <url> <fichier du jeton> → 0 si le jeton s
   forge_api GET "$1/api/v1/user" /dev/null --token-file "$2" -m 5 >/dev/null
 }
 
-bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] → mot de passe, site-admin, imprime un jeton opérateur
+bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] → mot de passe, adminité vérifiée, imprime un jeton opérateur
   # un jeton posé qui s'authentifie encore est rendu tel quel : chaque passe en minterait un de plus sur la forge
+  # l'adminité de l'humain de démonstration a une seule main, la recette (gitea_user.human, que
+  # 61-forge-structure réapplique à chaque passe) : le banc la lit au jeton master, il ne la pose pas
   local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" is_admin body sha
-  forge_admin_password "$url" "$tokfile" "$humain" "$pw" || return 1
+  forge_account_password "$url" "$tokfile" "$humain" "$pw" || return 1
   body="$(mktemp "${TMPDIR:-/tmp}/forge-bench.XXXXXX")"
   forge_api GET "$url/api/v1/users/$humain" "$body" --token-file "$tokfile" -m 5 >/dev/null || true
   is_admin="$(jq -r '.is_admin' "$body" 2>/dev/null || echo "?")"
-  [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin après la promotion (is_admin=$is_admin)" >&2; rm -f "$body"; return 1; }
+  [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin (is_admin=$is_admin) : son adminité est posée par la structure de la forge (gitea_user.human), qui ne l'a pas appliquée à cet humain — rejouer la structure avec LCARS_BUILTIN_HUMAN=$humain (poste : « sudo deploy/provision apply --only 61-forge-structure » ; conteneur : « forge-gestures.sh apply »)" >&2; rm -f "$body"; return 1; }
   forge_api GET "$url/api/v1/user" /dev/null --basic "$humain" <(printf '%s' "$pw") -m 5 >/dev/null \
     || { echo "« $humain » ne s'authentifie pas avec le mot de passe posé" >&2; rm -f "$body"; return 1; }
   if [[ -s "$pose" ]] && forge_token_ok "$url" "$pose"; then

@@ -177,7 +177,7 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   [ "$status" -ne 0 ]
 }
 
-@test "bench_human_seed : PATCH JSON au jeton master — mot de passe, admin, login_name, source_id" {
+@test "bench_human_seed : PATCH JSON au jeton master — mot de passe, login_name, source_id, et aucune adminité : la recette seule la pose" {
   forge_double_start
   routes_du_banc
   lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32'
@@ -185,7 +185,7 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   local patch='select(.method == "PATCH" and .path == "/api/v1/admin/users/lcars")'
   [ "$(forge_requests "$patch | .auth" | jq -r .)" = "token tok-master" ]
   [ "$(forge_requests "$patch | .ctype" | jq -r .)" = application/json ]
-  [ "$(forge_requests "$patch | .body | fromjson")" = '{"login_name":"lcars","source_id":0,"password":"toto32toto32","must_change_password":false,"admin":true}' ]
+  [ "$(forge_requests "$patch | .body | fromjson")" = '{"login_name":"lcars","source_id":0,"password":"toto32toto32","must_change_password":false}' ]
 }
 
 @test "bench_human_seed : l'adminité lue au jeton master, le mot de passe éprouvé en Basic, le jeton opérateur minté en Basic et son sha1 rendu" {
@@ -234,13 +234,15 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   [ "$stderr" = "la forge refuse le compte « lcars » (HTTP 403)" ]
 }
 
-@test "bench_human_seed : une promotion qui ne prend pas est nommée avec is_admin, rien n'est rendu" {
+@test "bench_human_seed : un humain que la structure n'a pas fait site-admin est nommé avec is_admin et le geste qui la rejoue, rien n'est rendu" {
   forge_double_start
   routes_du_banc false
   run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "« lcars » n'est pas site-admin après la promotion (is_admin=false)" ]
+  [[ "$stderr" == "« lcars » n'est pas site-admin (is_admin=false) : son adminité est posée par la structure de la forge (gitea_user.human)"* ]]
+  [[ "$stderr" == *"LCARS_BUILTIN_HUMAN=lcars"*"deploy/provision apply --only 61-forge-structure"*"forge-gestures.sh apply"* ]]
+  [ -z "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | select(has("admin"))')" ]
 }
 
 @test "bench_human_seed : un mot de passe que la forge refuse en Basic est nommé, rien n'est rendu" {
