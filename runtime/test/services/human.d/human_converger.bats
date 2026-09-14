@@ -25,6 +25,8 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+load ../../support/refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../../services/human-converger.sh"
   export SUT
@@ -596,6 +598,114 @@ EOF
   absent alice dave erin
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# ─── LE GESTE REFUSE SUR UN COMPTE D'ADMINISTRATION DE LA MACHINE ───────────────────────────────
+#
+# Mesure sur banc (2026-09-14) : un compte de test membre de `sudo`, absent de la forge, mis dans
+# fleet par une passe de l'installeur, a ete revoque par le convergeur — shell nologin. La selection
+# ci-dessus le designe, et c'est juste : il est dans fleet et pas dans la team. C'est le GESTE qui
+# refuse. `revoke_absent` est extrait (il vit apres le garde de sourcing) et `revoke_human`, qui
+# touche gpasswd/pkill/usermod, est double : ce qui se mesure est QUI serait revoque et ce qui est dit.
+#
+# Le `sudo` du decor repond comme le vrai en `LC_ALL=C` (mesure dans l'image) : rc 0 dans les deux
+# cas, et la phrase porte le verdict. Les logins qui ont une regle a leur nom sont dans SUDOERS_RULES.
+sudo_stub() {
+  cat > "$BATS_TEST_TMPDIR/sudo" <<'EOF'
+#!/usr/bin/env bash
+login="${@: -1}"
+if [[ " ${SUDOERS_RULES:-} " == *" $login "* ]]; then
+  printf 'User %s may run the following commands on decor:\n    (ALL) ALL\n' "$login"
+else
+  printf 'User %s is not allowed to run sudo on decor.\n' "$login"
+fi
+EOF
+  chmod 0755 "$BATS_TEST_TMPDIR/sudo"
+}
+
+revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent extrait, revoke_human double
+  local fn="$BATS_TEST_TMPDIR/revoke.sh"
+  sed -n '/^revoke_absent() {/,/^}/p' "$SUT" > "$fn"
+  [ -s "$fn" ] || { echo "revoke_absent introuvable dans $SUT" >&2; return 1; }
+  sudo_stub
+  REVOQUES="$BATS_TEST_TMPDIR/revoques.log"; : > "$REVOQUES"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export LCARS_SYSADMIN_UID=1000 LCARS_SUDO_BIN=\"\${LCARS_SUDO_BIN:-$BATS_TEST_TMPDIR/sudo}\"
+    source '$SUT'
+    revoke_human() { echo \"REVOKE \$1\" >> '$REVOQUES'; }
+    source '$fn'
+    $1"
+}
+
+@test "revocation: un membre du groupe sudo absent de la team n'est PAS revoque — refus nomme, une fois par processus" {
+  passwd_fixture
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:alice,bob,carol\nsudo:x:27:root,bob\n' > "$GROUP_FILE"
+  revoke_with 'revoke_absent alice; revoke_absent alice'
+  [ "$status" -eq 0 ]
+  refute grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  [ "$(grep -c 'REFUS de revoquer bob' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (membre du groupe sudo) : absent de fleet/humans"*"gpasswd -d bob fleet"* ]]
+}
+
+@test "revocation: le siege d'hier, sudoer par une regle a son nom et membre d'aucun groupe, n'est PAS revoque" {
+  # Le siege d'aujourd'hui est 1000 (GUARD A) ; `bob` (1002) a installe avant lui, par une regle
+  # sudoers et non par un groupe, et il est reste dans fleet.
+  passwd_fixture; group_fixture "alice,bob,carol"
+  SUDOERS_RULES=bob revoke_with 'revoke_absent alice'
+  [ "$status" -eq 0 ]
+  refute grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (regle sudoers a son nom)"* ]]
+}
+
+@test "revocation: sans sudo sur la machine, les groupes d'administration suffisent au refus, et un membre ordinaire reste revoque" {
+  passwd_fixture
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:alice,bob,carol\nwheel:x:10:bob\n' > "$GROUP_FILE"
+  LCARS_SUDO_BIN="$BATS_TEST_TMPDIR/aucun-sudo" SUDOERS_RULES=carol revoke_with 'revoke_absent alice'
+  [ "$status" -eq 0 ]
+  refute grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (membre du groupe wheel)"* ]]
+  refute grep -q 'REFUS de revoquer carol' <<<"$output"
+}
+
+# ─── LE RATTRAPAGE : LE CONVERGEUR SEUL REMET UN HUMAIN DE LA FORGE DANS FLEET ──────────────────
+#
+# Seul juge de l'appartenance a fleet : il cree, ajoute et revoque d'apres la team. Un humain de la
+# team dont le compte existe mais qui a perdu le groupe (ou porte le shell d'un revoque) y est remis
+# a chaque tour ; un humain en bonne sante n'est pas touche ; le siege ne l'est jamais (GUARD A).
+@test "rattrapage: un humain de la team hors de fleet, ou revoque, est remis dans fleet ; ni un humain sain ni le siege ne sont touches" {
+  passwd_fixture; group_fixture "bob,carol"
+  local fn="$BATS_TEST_TMPDIR/once.sh"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":1,\"login\":\"lcars\"},{\"id\":2,\"login\":\"alice\"},{\"id\":3,\"login\":\"bob\"},{\"id\":4,\"login\":\"carol\"}]'; }
+    id() { return 0; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    restore_human() { echo \"RESTORE \$1\" >> '$GESTES'; }
+    ensure_console() { :; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    converge_once"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'RESTORE alice' "$GESTES"
+  grep -qx 'RESTORE carol' "$GESTES"
+  refute grep -qx 'RESTORE bob' "$GESTES"
+  refute grep -qx 'RESTORE lcars' "$GESTES"
+  refute grep -q '^USERADD' "$GESTES"
 }
 
 # ─── L'ADMINITE N'EST PLUS PROJETEE — SEPT TEMOINS SONT PARTIS AVEC LEUR SUJET ─────────────────

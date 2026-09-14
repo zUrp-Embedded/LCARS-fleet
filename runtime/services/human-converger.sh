@@ -199,12 +199,54 @@ mark_refused() { # mark_refused <login> <raison lisible>
 # Meme idiome de sonde que `PASSWD_FILE` plus haut : un fichier injectable pour les tests, la base
 # reelle sinon. Sans ca, la selection des revoques ne serait epinglee par rien — et c'est la partie
 # qui, en se trompant, ferme la porte a quelqu'un qui travaille.
-group_members() { # group_members -> un login par ligne
+members_of() { # members_of <groupe> -> un login par ligne
   if [[ -n "${GROUP_FILE:-}" ]]; then
-    awk -F: -v g="$GROUP" '$1==g {print $4}' "$GROUP_FILE"
+    awk -F: -v g="$1" '$1==g {print $4}' "$GROUP_FILE"
   else
-    getent group "$GROUP" 2>/dev/null | cut -d: -f4
+    getent group "$1" 2>/dev/null | cut -d: -f4
   fi | tr ',' '\n' | grep -v '^$' || true
+}
+
+group_members() { members_of "$GROUP"; } # group_members -> les membres du groupe fleet, un par ligne
+
+# ─── UN COMPTE D'ADMINISTRATION DE LA MACHINE NE SE REVOQUE PAS ────────────────────────────────
+# L'adminite de la MACHINE, pas celle de la forge : ce convergeur ne lit rien de la seconde.
+#
+# La revocation vise tout membre de fleet, dans la plage des humains, absent de la team. GUARD A
+# n'en retire que le siege DECLARE AUJOURD'HUI. Restent atteignables : le siege d'hier (un autre
+# sudoer a rejoue l'installation, `seat.uid` a change), le compte qui a lance une installation, un
+# sudoer mis dans fleet a la main. Sur eux, `nologin` et le kill fermeraient la machine sur son
+# administrateur. Le convergeur refuse, le dit une fois par processus, et nomme le geste manuel.
+#
+# Deux lectures, et la seconde couvre ce que la premiere ne voit pas : les groupes d'administration
+# usuels (`sudo`, `admin`, `wheel`), et la regle sudoers au nom du compte, que root lit par
+# `sudo -l -U` (une regle `bob ALL=(ALL) ALL` ne met bob dans aucun groupe).
+# La sortie se lit en `LC_ALL=C` : c'est la phrase de sudo qui porte le verdict, pas son code.
+SUDOER_GROUPS="${LCARS_SUDOER_GROUPS:-sudo admin wheel}"
+SUDO_BIN="${LCARS_SUDO_BIN:-sudo}"
+declare -A MACHINE_ADMINS_SPARED=()
+
+machine_admin_why() { # machine_admin_why <login> -> la raison s'il administre la machine, rien sinon
+  local login=$1 g members out
+  for g in $SUDOER_GROUPS; do
+    members="$(members_of "$g")"
+    if grep -qxF -- "$login" <<<"$members"; then
+      printf 'membre du groupe %s\n' "$g"
+      return 0
+    fi
+  done
+  command -v "$SUDO_BIN" >/dev/null 2>&1 || return 0
+  out="$(LC_ALL=C "$SUDO_BIN" -n -l -U "$login" 2>/dev/null || true)"
+  if [[ "$out" == *"may run the following commands"* ]]; then
+    printf 'regle sudoers a son nom\n'
+  fi
+  return 0
+}
+
+spare_machine_admin() { # spare_machine_admin <login> <raison> — le refus, dit une fois par processus
+  [[ -z "${MACHINE_ADMINS_SPARED[$1]:-}" ]] || return 0
+  MACHINE_ADMINS_SPARED[$1]=1
+  err "REFUS de revoquer $1 — compte d'administration de la machine ($2) : absent de $ORG/$TEAM, il garde son groupe $GROUP, son shell et ses process. Le retirer de $GROUP est un geste d'administrateur : gpasswd -d $1 $GROUP"
 }
 
 in_group() { group_members | grep -qxF -- "$1"; }
@@ -407,9 +449,14 @@ restore_human() { # restore_human <login>
 # vide — le garde est chez l'appelant, et il y est parce qu'ici on ne saurait pas distinguer « la
 # team est vide » de « la forge n'a pas repondu ».
 revoke_absent() { # revoke_absent <membres…>
-  local login
+  local login why
   while IFS= read -r login; do
     [[ -n "$login" ]] || continue
+    why="$(machine_admin_why "$login")"
+    if [[ -n "$why" ]]; then
+      spare_machine_admin "$login" "$why"
+      continue
+    fi
     revoke_human "$login"
   done < <(absent_humans "$@")
   return 0
