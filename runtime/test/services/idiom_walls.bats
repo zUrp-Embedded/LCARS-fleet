@@ -30,6 +30,33 @@ code() { grep -vE '^\s*#' "$1"; }
   refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
 }
 
+# A-118 : un mot de passe voyage comme un jeton. `curl -u "$compte:$seed"` le met dans
+# /proc/<pid>/cmdline ; la ligne `user = "<compte>:<secret>"` d'une config lue sur stdin (`-K -`) ne
+# l'y met pas. Le perimetre ajoute au shell des services celui de la recette et de `runtime/bin`.
+@test "MUR I2 (produit) : aucun identifiant compte:secret ne passe par argv (curl -u / --user)" {
+  local root f bad=0 motif='(^|[[:space:]])(-u|--user)(=|[[:space:]]+)["'"'"']?[^"'"'"'[:space:]]*:\$'
+  root="$(cd "$SERVICES/../.." && pwd)"
+  local -a bin_sh=() recette=()
+  mapfile -t bin_sh < <(grep -lE '^#!.*(bash|[^a-z]sh)([[:space:]]|$)' "$root"/runtime/bin/* 2>/dev/null || true)
+  mapfile -t recette < <(ls "$SERVICES"/forge-recipe/*.sh)
+  [ "${#bin_sh[@]}" -ge 5 ] || { echo "runtime/bin : ${#bin_sh[@]} script(s) shell — le perimetre du mur n'est plus le bon" >&2; return 1; }
+  [ "${#recette[@]}" -ge 1 ] || { echo "forge-recipe : aucun script — le perimetre du mur n'est plus le bon" >&2; return 1; }
+  for f in "${SOURCES[@]}" "${recette[@]}" "${bin_sh[@]}"; do
+    if code "$f" | grep -qE -- "$motif"; then
+      echo "identifiant en argv : ${f#"$root"/} : $(code "$f" | grep -E -- "$motif" | head -1)" >&2; bad=1
+    fi
+  done
+  [ "$bad" -eq 0 ]
+  # temoin du temoin : le motif mord les formes interdites…
+  grep -qE -- "$motif" <<<'    code="$(curl -sS -o /dev/null -X PUT -u "$acct:$seed" "$url")"'
+  grep -qE -- "$motif" <<<'  curl --user "admin:$PASS" "$url"'
+  grep -qE -- "$motif" <<<'  curl --user=admin:$PASS "$url"'
+  # … et laisse passer la config sur stdin, ainsi qu'un `-u` qui n'est pas un identifiant
+  refute grep -qE -- "$motif" <<<'  printf '"'"'user = "%s:%s"\n'"'"' "$acct" "$seed" | curl -K - -X PUT "$url"'
+  refute grep -qE -- "$motif" <<<'  sort -u "$f"'
+  refute grep -qE -- "$motif" <<<'  runuser -u "$login" -- true'
+}
+
 @test "MUR I2 (produit) : les porteurs sont nommes — forge_curl (protocole), hcurl (forge-gestures), le convergeur" {
   grep -qE 'curl -K -' "$SERVICES/lib/module-protocol.sh"
   grep -qE '^hcurl\(\)' "$SERVICES/forge-gestures.sh"

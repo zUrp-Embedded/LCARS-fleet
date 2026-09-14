@@ -238,8 +238,11 @@ publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
     # DEJA PUBLIC : on ne rejoue pas un PUT pour le plaisir d'un 204. 204 = public, 404 = prive.
     [[ "$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 10 \
           "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null)" == "204" ]] && continue
-    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 -X PUT -u "$acct:$seed" \
-            "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null || true)"
+    # Le seed part dans la config de curl, sur stdin, comme les jetons de `hcurl` : un `-u` en argv
+    # le montrerait dans `/proc/<pid>/cmdline` a chaque compte de la boucle.
+    code="$(printf 'user = "%s:%s"\n' "$(curl_cfg_escape "$acct")" "$(curl_cfg_escape "$seed")" \
+            | curl -sS -K - -o /dev/null -w '%{http_code}' -m 10 -X PUT \
+                "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null || true)"
     case "$code" in
       204) posed=$((posed + 1)) ;;
       # 401/403 = ce compte n'est pas a nous (une personne a change son mot de passe, ou n'a jamais
