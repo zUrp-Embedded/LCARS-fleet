@@ -441,7 +441,7 @@ cmd_forge_apply() {
     lcars "$RACINE_CONTENEUR/forge-gestures.sh" apply \
     || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
   echo ""
-  echo "container forge-apply: structure posée. Rejouable — un second passage importe ce qui existe."
+  echo "container forge-apply: structure posée. Rejouable : un second passage ne recrée rien de ce qui existe."
   echo "  Les jetons de rôle, les catalogues, la branche ops et le client OAuth2 du deck se posent au démarrage du conteneur,"
   echo "  sur cette structure :  deploy/container -p $PROJECT up --force-recreate"
 }
@@ -488,13 +488,18 @@ cmd_status() {
     "") : ;;
     *) echo "  humains     : aucun humain de fleet — un humain s'inscrit sur la forge, team « humans »" ;;
   esac
-  local _bind="$LCARS_LANDING_PORT_BIND" deck_http
-  deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${_bind/0.0.0.0/127.0.0.1}/auth/login" 2>/dev/null || echo 000)"
-  case "$deck_http" in
-    2*|3*) echo "  deck        : répond sur http://$_bind (HTTP $deck_http)" ;;
-    409)   echo "  deck        : http://$_bind rend 409 — entrée non déclarée au client OAuth2 (LCARS_DECK_ORIGINS) ; « $relancer »" ;;
-    000)   echo "  deck        : rien ne répond sur http://$_bind" ;;
-    *)     echo "  deck        : http://$_bind rend HTTP $deck_http" ;;
+  # le deck se sonde par l'entrée que le conteneur a déclarée au client OAuth2 : une autre adresse ou un autre port rendraient 409
+  local deck deck_http
+  deck="$(env_field <("$DOCKER" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$id" 2>/dev/null) LCARS_DECK_ORIGINS)"
+  deck="${deck%%,*}"
+  [[ -n "$deck" ]] || deck="http://${LCARS_LANDING_PORT_BIND/0.0.0.0/127.0.0.1}"
+  # curl écrit 000 lui-même quand rien ne répond, et sort non nul
+  deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$deck/auth/login" 2>/dev/null)" || true
+  case "${deck_http:=000}" in
+    2*|3*) echo "  deck        : répond sur $deck (HTTP $deck_http)" ;;
+    409)   echo "  deck        : $deck rend 409 — entrée non déclarée au client OAuth2 (LCARS_DECK_ORIGINS) ; « $relancer »" ;;
+    000)   echo "  deck        : rien ne répond sur $deck" ;;
+    *)     echo "  deck        : $deck rend HTTP $deck_http" ;;
   esac
   if [[ -n "$tampon" ]]; then
     if [[ -n "$rev" && ( "$rev" == "$tampon"* || "$tampon" == "$rev"* ) ]]; then

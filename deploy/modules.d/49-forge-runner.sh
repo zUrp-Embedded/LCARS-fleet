@@ -36,9 +36,16 @@ en_ligne() { jq '[.[] | select(.status != "offline")] | length' <<<"$RUNNERS"; }
 # un réenrôlement enregistre un runner neuf sous le même nom : les enregistrements plus anciens, hors ligne, sont périmés
 perimes() { jq -r 'group_by(.name)[] | (max_by(.id).id) as $neuf | .[] | select(.id != $neuf and .status == "offline") | .id' <<<"$RUNNERS"; }
 
-runner_vise() { # runner_vise → l'adresse de forge qu'a reçue le runner de ce poste ; vide sans conteneur lisible
-  env_field <("${PROV_DOCKER_BIN:-docker}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PROV_RUNNER_PROJECT-act-1" 2>/dev/null) \
-    GITEA_INSTANCE_URL
+runner_ecart() { # runner_ecart → ce qui sépare le runner de ce poste de ce que cette passe lui donnerait ; vide s'il est conforme ou sans conteneur lisible
+  local env url labels
+  env="$("${PROV_DOCKER_BIN:-docker}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PROV_RUNNER_PROJECT-act-1" 2>/dev/null)" || return 0
+  url="$(env_field <(printf '%s\n' "$env") GITEA_INSTANCE_URL)"
+  labels="$(env_field <(printf '%s\n' "$env") GITEA_RUNNER_LABELS)"
+  if [[ -n "$url" && "$url" != "$JOB_URL" ]]; then
+    printf "vise %s, qu'un job n'atteint pas (attendu %s)\n" "$url" "$JOB_URL"
+  elif [[ -n "$labels" && "$labels" != "$PROV_RUNNER_LABELS" ]]; then
+    printf 'porte les labels %s (attendu %s)\n' "$labels" "$PROV_RUNNER_LABELS"
+  fi
 }
 
 retirer_perimes() {
@@ -61,16 +68,16 @@ converge_ci_runner() {
   # une liste illisible n'est pas une liste vide : forge-runner.sh remplacerait le runner existant
   lire_runners \
     || { p_warn "runner CI non mesurable (API muette ou réponse illisible) — rien n'est enrôlé sur une liste inconnue"; return 0; }
-  local n vise
+  local n ecart
   n="$(en_ligne)"
   if [[ "$n" -gt 0 ]]; then
-    vise="$(runner_vise)"
-    if [[ -z "$vise" || "$vise" == "$JOB_URL" ]]; then
+    ecart="$(runner_ecart)"
+    if [[ -z "$ecart" ]]; then
       p_ok "$n runner(s) CI en ligne — la CI de cette forge a une machine"
       retirer_perimes
       return 0
     fi
-    p_step "le runner $PROV_RUNNER_PROJECT vise $vise, qu'un job n'atteint pas : réenrôlé sur $JOB_URL"
+    p_step "le runner $PROV_RUNNER_PROJECT $ecart : réenrôlé"
   fi
   if ! docker_endpoint; then
     p_warn "runner CI non enrôlable : $PROV_DOCKER_WHY"
@@ -105,13 +112,13 @@ check() {
     p_warn "runner CI non mesurable (jeton master illisible ou API muette) — la CI peut être sans machine ; relancer sous sudo pour conclure"
     verdict_check
   fi
-  local n vise perime
+  local n ecart perime
   n="$(en_ligne)"
-  vise="$(runner_vise)"
+  ecart="$(runner_ecart)"
   if [[ "$n" -eq 0 ]]; then
     p_drift "aucun runner CI en ligne — la CI acceptera des jobs que rien ne servira"
-  elif [[ -n "$vise" && "$vise" != "$JOB_URL" ]]; then
-    p_drift "le runner $PROV_RUNNER_PROJECT vise $vise, qu'un job n'atteint pas (attendu $JOB_URL) — l'apply le réenrôle"
+  elif [[ -n "$ecart" ]]; then
+    p_drift "le runner $PROV_RUNNER_PROJECT $ecart — l'apply le réenrôle"
   else
     p_ok "$n runner(s) CI en ligne — la CI de cette forge a une machine"
   fi

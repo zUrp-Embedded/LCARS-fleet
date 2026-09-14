@@ -230,3 +230,14 @@ fn() { run bash -c "set -uo pipefail; source <(sed '\$d' '$MOD') >/dev/null 2>&1
   [ "$(stat -c %U:%G "$SHARE/.doc-revision")" = "$(id -un):$(id -gn)" ]
   [ ! -e "$SHARE/doc/.doc-revision" ]
 }
+
+@test "l'empreinte de la doc suit son contenu : une copie qui change les dates garde l'empreinte, un octet changé la change" {
+  mkdir -p "$SITE/dist/assets"; printf 'v1' > "$SITE/dist/index.html"; printf 'x' > "$SITE/dist/assets/a.css"
+  fn "a=\$(doc_empreinte); touch -d '2001-01-01' '$SITE/dist/index.html' '$SITE/dist/assets/a.css'; b=\$(doc_empreinte)
+      printf v2 > '$SITE/dist/index.html'; c=\$(doc_empreinte); echo \"\$a \$b \$c\""
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  read -r a b c <<<"$output"
+  [ -n "$a" ]
+  [ "$a" = "$b" ]
+  [ "$a" != "$c" ]
+}

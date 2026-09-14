@@ -31,10 +31,11 @@ media_check_perms() { # media_check_perms [sous-arbre] — mode et propriétaire
   return 0
 }
 
+# par contenu : une copie de l'arbre (62, le kit) change les dates, pas la doc
 doc_empreinte() { # doc_empreinte → une signature du dist/ et de la base qui l'a bâti, ou 1 sans dist
   [[ -d "$SITE_SRC/dist" ]] || return 1
   { printf 'base=%s\n' "$SITE_BASE"
-    find "$SITE_SRC/dist" -printf '%P %s %T@\n' 2>/dev/null | LC_ALL=C sort
+    ( cd "$SITE_SRC/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum )
   } | sha256sum | cut -d' ' -f1
 }
 doc_tampon_lit() { sed -n "s/^$1 //p" "$DOC_STAMP" 2>/dev/null | head -n1; }
@@ -124,9 +125,15 @@ build_doc() {
 }
 
 poser_doc() {
-  local partial emp; partial="$DOC_DIR.partial"
+  local partial emp tampon=""; partial="$DOC_DIR.partial"
   emp="$(doc_empreinte || true)"
+  if [[ -n "$PROV_SOURCE_REV" && "$PROV_SOURCE_REV" != "inconnue" && "$PROV_SOURCE_REV" != *"+local" ]]; then
+    tampon+="rev $PROV_SOURCE_REV"$'\n'"base $SITE_BASE"$'\n'
+  fi
+  [[ -n "$emp" ]] && tampon+="dist $emp"$'\n'
+  # un dist identique n'est pas recopié ; le tampon suit quand même la révision qui l'a rebâti
   if [[ -n "$emp" && "$emp" == "$(doc_tampon_lit dist)" && -s "$DOC_DIR/index.html" ]]; then
+    write_atomic "$DOC_STAMP" 0644 "$MEDIA_OWNER" <<<"${tampon%$'\n'}" || true
     p_ok "doc du deck déjà posée ($DOC_DIR, base $SITE_BASE) — rien à poser"
     return 0
   fi
@@ -135,11 +142,6 @@ poser_doc() {
   find -H "$SITE_SRC/dist" -mindepth 1 -maxdepth 1 -exec cp -a -t "$partial/" {} + \
     || { p_fail "doc non copiable ($SITE_SRC/dist → $DOC_DIR)"; rm -rf "$partial"; verdict_apply; }
   prov_promote_dir "$partial" "$DOC_DIR" || verdict_apply
-  local tampon=""
-  if [[ -n "$PROV_SOURCE_REV" && "$PROV_SOURCE_REV" != "inconnue" && "$PROV_SOURCE_REV" != *"+local" ]]; then
-    tampon+="rev $PROV_SOURCE_REV"$'\n'"base $SITE_BASE"$'\n'
-  fi
-  [[ -n "$emp" ]] && tampon+="dist $emp"$'\n'
   [[ -n "$tampon" ]] && { write_atomic "$DOC_STAMP" 0644 "$MEDIA_OWNER" <<<"${tampon%$'\n'}" || true; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "doc du deck posée ($DOC_DIR, base $SITE_BASE)"

@@ -53,6 +53,7 @@ if [[ "\$1" == inspect ]]; then
     *Health*)         echo "\${STUB_HEALTH:-healthy}" ;;
     *revision*)       echo "\${STUB_REV:-}" ;;
     "{{.Image}}")     echo "sha256:image-temoin" ;;
+    *Config.Env*)     [[ -z "\${STUB_ORIGINES:-}" ]] || echo "LCARS_DECK_ORIGINS=\$STUB_ORIGINES" ;;
   esac; exit 0
 fi
 if [[ "\$*" == *"cat /run/lcars-boot.state"* ]];   then [[ -n "\${STUB_BOOT:-}" ]]   || exit 1; echo "\$STUB_BOOT"; exit 0; fi
@@ -75,13 +76,15 @@ exit 0
 EOS
   chmod 0755 "$BINDIR/docker"
   # curl (la sonde du deck de « status ») : STUB_DECK_HTTP, 000 par defaut ; forge-check parle a la vraie forge doublee
-  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s" "${STUB_DECK_HTTP:-000}"' > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"
+  # comme le vrai : rien ne répond, il écrit 000 et sort non nul
+  printf '%s\n' '#!/usr/bin/env bash' "printf '%s\n' \"\${@: -1}\" >> '$BATS_TEST_TMPDIR/curl.urls'" \
+    'printf "%s" "${STUB_DECK_HTTP:-000}"; [[ "${STUB_DECK_HTTP:-000}" != 000 ]] || exit 7' > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"
   # l'attente du verdict de up tourne sans dormir
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/sleep"; chmod 0755 "$BINDIR/sleep"
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_ORIGINES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -624,4 +627,18 @@ FAKE
   [ "$status" -eq 1 ]
   [[ "$output" == *"deploy/docker/bench/bench-swap-image.sh --forge-project bt --image lcars-fleet:banc"* ]] || { echo "$output"; return 1; }
   [[ "$output" != *"--bench up"* ]]
+}
+
+@test "status : le deck se sonde par la première entrée que le conteneur a déclarée, et un deck muet se dit sans code doublé" {
+  sain
+  export STUB_ORIGINES="http://localhost:4321,http://192.0.2.9:4321"
+  run bash "$SRC" status
+  [ "$(tail -n1 "$BATS_TEST_TMPDIR/curl.urls")" = "http://localhost:4321/auth/login" ]
+  [[ "$output" == *"deck        : répond sur http://localhost:4321 (HTTP 302)"* ]]
+  unset STUB_ORIGINES STUB_DECK_HTTP
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+  [ "$(tail -n1 "$BATS_TEST_TMPDIR/curl.urls")" = "http://127.0.0.1:4999/auth/login" ]
+  [[ "$output" == *"deck        : rien ne répond sur http://127.0.0.1:4999"* ]]
+  [[ "$output" != *"000000"* ]]
 }

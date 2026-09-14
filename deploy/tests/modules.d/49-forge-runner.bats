@@ -200,6 +200,21 @@ mod() { run bash "$MODULE" "$1"; }
   [[ "$output" == *"1 runner(s) CI en ligne"* ]]
 }
 
+@test "un runner du poste qui porte d'autres labels que les constantes : drift au check, réenrôlé avec les labels des constantes à l'apply" {
+  forge_runners 200 '{"runners":[{"id":1,"name":"lcars-runner","status":"online"}]}'
+  stub_delegue 0
+  printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" lcars-runner-act-1" ]] || exit 0\nprintf "GITEA_INSTANCE_URL=http://host.docker.internal:%s\\nGITEA_RUNNER_LABELS=shell:docker://alpine:ancien\\n"\n' \
+    "$PROV_FORGE_HOST_PORT" > "$DECOR_BIN/docker"
+  local labels; labels="$(sed -n 's/^PROV_RUNNER_LABELS=//p' "$DEPLOY/installer-constants.env")"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: le runner lcars-runner porte les labels shell:docker://alpine:ancien (attendu $labels) — l'apply le réenrôle"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"POSÉ  49-forge-runner: runner CI enrôlé"* ]]
+  grep -qxF "$labels" "$ARGV"
+}
+
 @test "l'argv émis vers forge-runner.sh passe son vrai parseur : les labels arrivent à la vérification des images" {
   forge_runners 200 '{"runners":[],"total_count":0}'
   stub_delegue 0
