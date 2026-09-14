@@ -276,24 +276,11 @@ check_members_visible() {
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est celui de la structure, qui les publicise juste après elle : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
   fi
 
-  # ⚠ CES DEUX ETATS NE SONT PAS DES DRIFTS, ET C'EST LE CANON DU 2026-08-30 QUI LE DIT. Le rail pose
-  # les AUTORITES — siège, admin de forge, master token, comptes de service ; les PERSONNES
-  # s'inscrivent sur la forge, et un propriétaire d'org les ajoute. Un humain pas encore membre est
-  # donc l'état NORMAL d'une machine fraîche, pas un écart à réduire.
-  #
-  # Le mot compte parce qu'il engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN
-  # faire — il n'a pas les credentials de la personne, et les avoir serait le contraire du canon. Un
-  # drift qui ne part jamais apprend à l'opérateur que le rapport se lit de travers, et le jour où
-  # un vrai drift s'y trouve, il est dans la même liste.
-  #
-  # Le motif est celui de `64-services` : on RECOPIE la cause et le geste qui la lève, on ne délègue
-  # pas le verdict à un état qu'on ne contrôle pas.
-  if [[ -n "$LCARS_LOGIN" ]] && account_exists "$LCARS_LOGIN"; then
-    case "$(member_state "$LCARS_LOGIN")" in
-      hidden) p_warn "adhésion org de $LCARS_LOGIN privée — geste UTILISATEUR, hors de portée du rail : profil forge → Organizations → $LCARS_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
-      absent) p_warn "$LCARS_LOGIN n'est membre d'aucune team de $LCARS_FORGE_ORG — état normal tant qu'un propriétaire d'org ne l'a pas ajouté (team humans, lecture). Le rail pose les autorités, pas les personnes" ;;
-    esac
-  fi
+  # Le compte que nomme `LCARS_LOGIN` n'est pas de cette population, et aucune adhésion ne se sonde
+  # pour lui : c'est le siège, l'admin du système, que les deux rails posent sous ce nom (le poste :
+  # le compte qui installe ; le conteneur : `/run/lcars-seat.login`). La fleet lui est fermée (GUARD B)
+  # et le convergeur ne le matérialise jamais (GUARD A) : il n'a rien à faire dans la team humans.
+  # `check_seat_account` dit ce qui le concerne.
 }
 
 
@@ -378,43 +365,24 @@ check() {
     p_fail "script A4 introuvable/inexécutable : $A4_SCRIPT (checkout incomplet ?)"
   fi
 
-  check_human_onboardable
+  check_seat_account
   check_members_visible
   verdict_check
 }
 
-# L'HUMAIN sur la forge — ce que le runtime exige à l'onboarding d'un projet, sondé ICI plutôt
-# que découvert par un pod au milieu d'un create_project ({:human_not_provisioned, …} puis
-# {:human_team_unverifiable, …}, vécus au premier E2E docker). L'appartenance se sonde au
-# niveau ORG (204/404, lisible par le token système) et non au niveau TEAM : `GET
-# /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
-# et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
-check_human_onboardable() {
-  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
-  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
+# LE SIÈGE sur la forge. `LCARS_LOGIN` nomme l'admin du système : sur un poste, le compte qui
+# installe (`PROV_HUMAN`), sous le nom duquel 48-forge-host crée l'administrateur de la forge ; dans
+# le conteneur, le siège résolu par l'init (la table des uid, sinon le compte #1 de la forge). Ce
+# n'est pas une personne de fleet : la fleet lui est fermée (GUARD B), le convergeur ne le
+# matérialise pas (GUARD A), et il n'entre dans aucune team — ni humans, ni une autre. Ce qui se
+# sonde ici est son compte, et rien de son adhésion : un siège hors de l'org est l'état attendu.
+check_seat_account() {
+  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun siège nommé (LCARS_LOGIN) — son compte forge ne se sonde pas ici"; return 0; }
   if ! account_exists "$LCARS_LOGIN"; then
     p_drift "compte forge absent pour « $LCARS_LOGIN », l'admin du système — l'onboarding projet échouera (human_not_provisioned) : l'administrateur de la forge porte ce login ; il s'inscrit une fois sur la forge sous ce nom"
     return 0
   fi
-  p_ok "compte forge de l'humain ($LCARS_LOGIN)"
-  # Même partage qu'au-dessus : un jeton absent se converge, un jeton qu'on ne peut pas ouvrir se
-  # dit. Les deux menaient au même `p_drift`, donc au même faux écart entre un doctor et un sudo.
-  case "$(prov_file_state "$tokfile")" in
-    present) ;;
-    absent)  p_drift "token système ABSENT ($tokfile) — l'apply le minte ; appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable en attendant"; return 0 ;;
-    *)       p_warn  "token système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable"; return 0 ;;
-  esac
-  code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/orgs/$LCARS_FORGE_ORG/members/$LCARS_LOGIN" 2>/dev/null || true)"
-  case "$code" in
-    204) p_ok "$LCARS_LOGIN membre de l'org $LCARS_FORGE_ORG (sonde du token système)" ;;
-    # ⚠ LE SECOND SITE DU CANON DU 2026-08-30, ET JE L'AVAIS MANQUE en ne corrigeant que
-    # `member_state`. Mesure du 2026-09-01, banc 2001 : `doctor` SOUS SUDO rendait « bob N'EST PAS
-    # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
-    # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
-    # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
-    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans. L'onboarding projet le refusera d'ici là" ;;
-    *)   p_warn "appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
-  esac
+  p_ok "compte forge du siège « $LCARS_LOGIN », l'admin du système — il n'entre dans aucune team de la forge, et la fleet ne tourne jamais sous lui"
 }
 
 apply() {
