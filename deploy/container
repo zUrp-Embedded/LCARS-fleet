@@ -39,8 +39,8 @@
 #   LCARS_ADMIRAL              login du siège, quand la forge ne le donne pas encore
 #   LCARS_UID                  uid du sysadmin (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys) ; multi-ligne, valable pour le up qui la reçoit
-#   LCARS_SSH_PORT             bind du port ssh (défaut 127.0.0.1:2222)
-#   LCARS_LANDING_PORT_BIND    bind du port du deck (défaut 127.0.0.1:20999)
+#   LCARS_SSH_PORT             bind du port ssh (défaut : la loopback, au port des constantes)
+#   LCARS_LANDING_PORT_BIND    bind du port du deck (défaut : la loopback, au port des constantes)
 #   LCARS_DECK_ORIGINS         les entrées du deck déclarées au client OAuth2 (défaut : celles du bind)
 #   LCARS_HOSTNAME             hostname du conteneur
 #   LCARS_SOURCE_REMOTE        le dépôt que le conteneur clone comme source (défaut : celui du compose)
