@@ -337,14 +337,23 @@ cmd_up() {
 # au-delà de quinze minutes, status dit « en cours »
 attendre_verdict() {
   local id etat
+  local n
   id="$(compose ps -q lcars 2>/dev/null | head -n1)"
-  for _ in $(seq 1 180); do
+  for n in $(seq 1 180); do
     [[ -n "$id" && "$("$DOCKER" inspect -f '{{.State.Status}}' "$id" 2>/dev/null)" == running ]] || return 0
-    [[ -z "$(lire_run /run/lcars-forge.rc)" ]] || return 0
+    [[ -z "$(verdict_forge)" ]] || return 0
     etat="$(lire_run /run/lcars-boot.state)"
     [[ "$etat" != awaiting-config && "$etat" != init-failed ]] || return 0
+    (( n % 12 )) || echo "container up : boot en cours depuis $((n * 5)) s, sans verdict — « deploy/container -p $PROJECT logs » le suit"
     sleep 5
   done
+}
+
+# une image publiée avant le renommage du verdict l'écrit dans lcars-provision.rc
+verdict_forge() {
+  local v; v="$(lire_run /run/lcars-forge.rc)"
+  [[ -n "$v" ]] || v="$(lire_run /run/lcars-provision.rc)"
+  printf '%s\n' "$v"
 }
 
 humain_cible() { # le compte d'une console : LCARS_HUMAN s'il est donné, sinon le siège de l'instance
@@ -412,6 +421,13 @@ cmd_config() {
 }
 
 cmd_forge_apply() {
+  local id image
+  id="$(compose ps -q lcars 2>/dev/null | head -n1)"
+  [[ -n "$id" ]] || fail "forge-apply: aucun conteneur lcars — la recette tourne dans le conteneur" "deploy/container -p $PROJECT up"
+  image="$("$DOCKER" inspect -f '{{.Image}}' "$id")" || fail "forge-apply: image du conteneur illisible ($id)"
+  # la recette de l'image ne porte pas de roster : il se dérive du catalogue de cette image, à chaque passage
+  DOCKER_BIN="$DOCKER" prov_roster_conteneur "$image" compose exec -T -u root lcars >/dev/null \
+    || fail "forge-apply: roster des rôles non posé dans la recette (la sortie ci-dessus dit pourquoi)"
   printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
     lcars "$RACINE_CONTENEUR/forge-gestures.sh" apply \
     || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
@@ -434,7 +450,7 @@ cmd_status() {
   health="$("$DOCKER" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sans healthcheck{{end}}' "$id" 2>/dev/null || echo inconnu)"
   rev="$("$DOCKER" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id" 2>/dev/null || true)"
   boot="$(lire_run /run/lcars-boot.state)"
-  prov="$(lire_run /run/lcars-forge.rc)"
+  prov="$(verdict_forge)"
   hum="$(lire_run /run/lcars-humans.rc)"
   tampon="$(lire_run "$RACINE_CONTENEUR/.verified")"
   local p="deploy/container -p $PROJECT" relancer="deploy/container -p $PROJECT up --force-recreate"
@@ -507,7 +523,13 @@ cmd_reset() {
   echo "           La forge n'est pas concernée : elle vit dans son propre déploiement, le travail poussé y survit."
   echo ""
   store_spared_line | sed 's/^/           /'
-  read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
+  local a=""
+  if { exec 3< /dev/tty; } 2>/dev/null; then
+    read -r -p "Confirmer (yes/N) ? " a <&3 || a=""
+    exec 3<&-
+  else
+    echo "container: la confirmation se tape dans un terminal, et il n'y en a pas ici."
+  fi
   [[ "$a" == "yes" ]] || { echo "container: annulé."; exit 1; }
   compose down -v
   # compose rend 0 quand un volume encore monté ailleurs refuse de partir

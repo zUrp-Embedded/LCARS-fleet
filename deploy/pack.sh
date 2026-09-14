@@ -19,7 +19,8 @@
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
 #         LCARS_MINISIGN_PUBKEY, LCARS_MINISIGN_SECKEY   la clé publique inscrite dans l'installeur et le fichier de la clé
 #                             secrète qui signe le kit : l'une ne va pas sans l'autre
-# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; bats et shellcheck, que la porte
+# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; claude dans ~/.local/bin, que
+#         la suite ExUnit du runtime exige de qui la joue ; bats et shellcheck, que la porte
 #         de l'installeur exige ; docker compose, sans lequel cette porte saute les témoins des composes et les
 #         compte ; docker, sauf --no-image ; jq avec --publish ; minisign avec les clés
 # EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
@@ -172,7 +173,9 @@ LCARS_MINISIGN_PUBKEY="$MINISIGN_PUBKEY" LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash d
   || die "installeur de la version non généré"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, installeur compris)"
 
-# l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
+# l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile) ;
+# sans attestation, le stockage containerd garde une image Docker v2 simple, et non un index OCI que des clients
+# de registre (Portainer) ne savent pas demander
 IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
 if [[ "$IMAGE" -eq 1 ]]; then
   docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
@@ -180,6 +183,7 @@ if [[ "$IMAGE" -eq 1 ]]; then
   "$PROV_DOCKER_BIN" build \
       -f "$STAGE/$ROOT/deploy/docker/Dockerfile" \
       --build-arg GIT_SHA="$REV" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --build-arg VERSION="$TAG" \
+      --provenance=false --sbom=false \
       -t "$IMAGE_NAME:$TAG" -t "$IMAGE_NAME:local" \
       "$STAGE/$ROOT" \
     || die "image non bâtie — les modules ont rougi dans le conteneur (le kit et l'installeur sont là, dans $DIST)"

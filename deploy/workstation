@@ -174,7 +174,7 @@ bench_seed() {
   fi
   url="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
   if [[ -n "$url" && -s "$PROV_MASTER_TOKEN_FILE" ]] \
-     && tok="$(bench_human_seed "$url" "$PROV_MASTER_TOKEN_FILE" "$human" "$(bench_human_password)")"; then
+     && tok="$(bench_human_seed "$url" "$PROV_MASTER_TOKEN_FILE" "$human" "$(bench_human_password)" "$home/.gitea_token")"; then
     if write_atomic "$home/.gitea_token" 0600 "$human:$grp" <<<"$tok"; then
       echo "  banc : « $human » sur la forge — mot de passe de banc, site-admin, jeton opérateur (~/.gitea_token)"
     else

@@ -155,7 +155,8 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   grep -q "^LCARS_DEMO_CATALOGUE=$RACINE/catalogues/web-demo$" "$GESTE_ENV"
   grep -q "^TF_CLI_CONFIG_FILE=$TOFU_DIR/tofurc$" "$GESTE_ENV"
   grep -q '^recette: instance roles.auto.tfvars.json versions.tf $' "$GESTE_ENV"
-  refute grep -q '^LCARS_BUILTIN_HUMAN=' "$GESTE_ENV"
+  # hors banc, le geste ne reçoit aucun humain de démonstration
+  refute grep -q '^LCARS_BUILTIN_HUMAN=.' "$GESTE_ENV"
   refute grep -q '^PIEGE' "$CALLS"
   [ -z "$(copies_restantes)" ]
   [ ! -e "$RACINE/runtime/services/forge-recipe/roles.auto.tfvars.json" ]

@@ -35,6 +35,8 @@ prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin syst
 : "${PROV_DECK_PORT:=$PROV_DECK_PORT_DEFAULT}"
 : "${PROV_SSH_PORT:=$PROV_SSH_PORT_DEFAULT}"
 : "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
+# le nom que le produit lit (LCARS_BUILTIN_HUMAN) est un choix explicite, et gagne sur celui que le journal retient
+PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
 PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
 PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
 PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"
@@ -577,6 +579,18 @@ wsl_networking_mode() {
 
 lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 
+# un conteneur de job tourne dans le daemon embarqué du runner : ni le nom de service de la forge, ni
+# localhost ne l'atteignent, seul le port publié sur l'hôte
+job_forge_url() { # job_forge_url <port publié> [adresse annoncée] → l'adresse de la forge vue d'un job CI
+  local hote
+  if [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" == wsl ]]; then
+    hote="host.docker.internal"
+  else
+    hote="$(lan_addr)"; hote="${hote:-${2:-127.0.0.1}}"
+  fi
+  printf 'http://%s:%s\n' "$hote" "$1"
+}
+
 advertise_addr() {
   local bind="${1:-0.0.0.0}"
   PROV_ADVERTISE=""; PROV_ADVERTISE_WHY=""
@@ -704,6 +718,7 @@ PROV_PRODUCT_NAMES=(
   LCARS_FORGE_ORG=PROV_FORGE_ORG
   LCARS_ROLES=PROV_ROLES
   LCARS_LOGIN=PROV_HUMAN
+  LCARS_BUILTIN_HUMAN=PROV_BUILTIN_HUMAN
   LCARS_CATALOGUES_DIR=PROV_CATALOGUES_DIR
   LCARS_CATALOGUES_WORK=PROV_CATALOGUES_WORK
   LCARS_LANDING_PORT=PROV_DECK_PORT
@@ -752,7 +767,7 @@ prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou �
   printf 'inconnue\n'
 }
 
-PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_SSH_PORT PROV_FORGE_BASE)
+PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_SSH_PORT PROV_FORGE_BASE PROV_BUILTIN_HUMAN)
 
 prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, les choix qui s'écartent de leur défaut
   local n d out=""
@@ -911,6 +926,22 @@ forge_repond() { # forge_repond <url> <délai en s> → 0 si /api/v1/version ren
 }
 
 forge_up() { forge_repond "$PROV_FORGE_URL" 5; }   # la forge de cette installation répond
+
+# prov_roster_conteneur <image> <exec…> — le roster dérivé de l'image, posé root 0644 dans la recette d'un
+# conteneur par <exec…>, qui lit son entrée ; imprime la sortie de la dérivation
+# EXIT 0 · 1 dérivation en échec · 2 dépôt refusé
+prov_roster_conteneur() {
+  local image="$1" dir out rc=0; shift
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/prov-roster.XXXXXX")"
+  out="$("$_PROV_LIB_DIR/enroll-catalogue.sh" --tofu-dir "$dir" --image "$image")" || rc=1
+  if [[ "$rc" -eq 0 ]]; then
+    "$@" install -m 0644 -o root -g root /dev/stdin "$(prov_canon "$PROV_ROOT")/services/forge-recipe/roles.auto.tfvars.json" \
+      < "$dir/roles.auto.tfvars.json" || rc=2
+  fi
+  rm -rf "$dir"
+  [[ "$rc" -ne 0 ]] || printf '%s\n' "$out"
+  return "$rc"
+}
 
 prov_forge_seat_login() {
   [[ -s "$PROV_MASTER_TOKEN_FILE" && -n "$PROV_FORGE_URL" ]] || return 0

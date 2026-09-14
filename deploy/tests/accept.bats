@@ -61,7 +61,7 @@ fleet_stub() { # fleet_stub <vivant|mort|start-casse>
     printf '%s\n' '    printf "fleet: visibilite debug : off\n"'
     printf '%s\n' '    printf "(aucun pod vivant)\n"'
     printf '%s\n' '    ;;'
-    printf '%s\n' '  start) [[ "$ETAT" == start-casse ]] && exit 1; : > "$MARQUEUR"; [[ -z "${LCARS_START_WITHOUT_CLAUDE:-}" ]] || : > "$MARQUEUR.sans-claude" ;;'
+    printf '%s\n' '  start) [[ "$ETAT" == start-casse ]] && { echo "plainte-temoin du lanceur" >&2; exit 1; }; : > "$MARQUEUR"; [[ -z "${LCARS_START_WITHOUT_CLAUDE:-}" ]] || : > "$MARQUEUR.sans-claude" ;;'
     printf '%s\n' '  stop)  rm -f "$MARQUEUR" ;;'
     printf '%s\n' 'esac'
     printf '%s\n' 'exit 0'
@@ -268,11 +268,11 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
   refute_out '« alice »|« lcars »' <<<"$output"
 }
 
-@test "start en échec : refus qui renvoie vers la plainte du lanceur" {
+@test "start en échec : refus qui cite la plainte du lanceur" {
   fleet_stub start-casse
   accept_joue
   [ "$status" -eq 1 ]
-  [[ "$output" == *"NON   fleet : « fleet start » a échoué sous « lcars »"* ]]
+  [[ "$output" == *"NON   fleet : « fleet start » a échoué sous « lcars »"*"plainte-temoin du lanceur"* ]]
 }
 
 @test "fleet absent du PATH de l'humain : refus qui nomme le compte" {

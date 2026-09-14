@@ -221,7 +221,17 @@ check() {
     done
   fi
   p_fact projet_pris "$pris"
-  [[ -z "$pris" ]] || p_warn "projet compose déjà présent sur ce daemon : $pris"
+  # la forge et le runner que 48 et 49 ont montés pour ce poste ne sont pas ceux d'un autre déploiement
+  local etrangers=""
+  for nom in ${pris//,/ }; do
+    [[ "$(head -n1 "$PROV_FORGE_MODE_FILE" 2>/dev/null)" == poste \
+       && ( "$nom" == "$PROV_FORGE_PROJECT" || "$nom" == "$PROV_RUNNER_PROJECT" ) ]] || etrangers="${etrangers:+$etrangers,}$nom"
+  done
+  if [[ -n "$etrangers" ]]; then
+    p_warn "projet compose déjà présent sur ce daemon : $etrangers"
+  elif [[ -n "$pris" ]]; then
+    p_ok "projet compose de la forge de ce poste présent : $pris"
+  fi
 
   # ─── L'instance : ce qu'elle porte déjà ───────────────────────────────────────────────────────
   if [[ "$PROV_SUBSTRATE" == "docker" ]]; then

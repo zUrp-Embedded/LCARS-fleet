@@ -108,8 +108,39 @@ mod() { run bash "$MODULE" "$1"; }
   local labels; labels="$(sed -n 's/^PROV_RUNNER_LABELS=//p' "$DEPLOY/installer-constants.env")"
   [ -n "$labels" ]
   [ "$(cat "$ARGV")" = "$(printf '%s\n' --forge-api "$FORGE_DOUBLE_URL/api/v1" --admin-token-file "$MASTER" \
+                          --instance-url "http://host.docker.internal:$PROV_FORGE_HOST_PORT" \
                           --network bob_9-forge_default --project bob_9-runner --labels "$labels")" ]
   [ -z "$(ls -A "$TMPDIR")" ]
+}
+
+@test "un runner du poste qui vise une adresse qu'un job n'atteint pas : drift au check, réenrôlé sur le port publié à l'apply" {
+  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
+  stub_delegue 0
+  printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" %s-act-1" ]] || exit 0\nprintf "PATH=/bin\\nGITEA_INSTANCE_URL=%s\\n"\n' \
+    lcars-runner "${VISE:-http://gitea:3000}" > "$DECOR_BIN/docker"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: le runner lcars-runner vise http://gitea:3000, qu'un job n'atteint pas (attendu http://host.docker.internal:$PROV_FORGE_HOST_PORT)"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"POSÉ  49-forge-runner: runner CI enrôlé"* ]]
+  grep -qx "http://host.docker.internal:$PROV_FORGE_HOST_PORT" "$ARGV"
+}
+
+@test "un runner du poste qui vise le port publié est conforme, et un runner sans conteneur de ce projet n'est pas touché" {
+  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
+  stub_delegue 0
+  printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" lcars-runner-act-1" ]] || exit 0\nprintf "GITEA_INSTANCE_URL=http://host.docker.internal:%s\\n"\n' \
+    "$PROV_FORGE_HOST_PORT" > "$DECOR_BIN/docker"
+  mod check
+  [ "$status" -eq 0 ]
+  mod apply
+  [ "$status" -eq 0 ]
+  [ ! -e "$ARGV" ]
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/docker"
+  mod check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 runner(s) CI enregistré(s)"* ]]
 }
 
 @test "l'argv émis vers forge-runner.sh passe son vrai parseur : les labels arrivent à la vérification des images" {

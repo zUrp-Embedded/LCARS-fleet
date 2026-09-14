@@ -242,6 +242,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 0 ]
   local ligne; ligne="$(grep '^RUNNER:' "$CALLS")"
   [[ "$ligne" == *"--forge-api http://127.0.0.1:$BF/api/v1 --admin-token-file "*" --reg-token-file "*"--network bt-forge_default"*"--project bt-runner"* ]]
+  [[ "$ligne" == *" --instance-url http://"*":$BF --network "* ]]
+  [[ "$ligne" != *"--instance-url http://127.0.0.1:"* ]]
   [[ "$ligne" != *MASTER* && "$ligne" != *REG-TOKEN-TEMOIN* ]]
   grep -qE '^RUNNER-FILE:--admin-token-file=MASTER mode=600 dossier=700 ' "$CALLS"
   grep -qE '^RUNNER-FILE:--reg-token-file=REG-TOKEN-TEMOIN mode=600 dossier=700 ' "$CALLS"
@@ -356,7 +358,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -qE "forge-gestures.sh config-seed <<< [A-Za-z0-9]{20}" "$CALLS"
   grep -q "ENROLL:--tofu-dir .* --image lcars-fleet:9" "$CALLS"
   refute grep -q 'ENROLL:.*--repo' "$CALLS"
-  grep -q "DOCKER:cp .*/roles.auto.tfvars.json bt-fleet-lcars-1:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" "$CALLS"
+  grep -qF 'DOCKER:exec -i -u root bt-fleet-lcars-1 install -m 0644 -o root -g root /dev/stdin /opt/lcars/services/forge-recipe/roles.auto.tfvars.json <<< {"roles":[]}' "$CALLS"
   grep -q "DOCKER:exec -i -u root -e LCARS_BUILTIN_HUMAN=lcars -e LCARS_BUILTIN_EMAIL=lcars@lcars.local bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" "$CALLS"
   refute grep -qE 'DOCKER:[^<]*MASTER' "$CALLS"
 }
@@ -413,7 +415,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q '^CURL:POST .*/repos' "$CALLS"
 }
 
-@test "rejeu sur une forge qui porte déjà un main étranger : le hook est levé et le push forcé, dit" {
+@test "une forge qui porte déjà un main étranger : le hook est levé et le push forcé, dit" {
   echo "0123456789abcdef" > "$REMOTE_MAIN"; echo 1 > "$ANCESTOR_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

@@ -172,6 +172,15 @@ seed_project() {
   [[ "$output" == *"<aucun>"* ]]
 }
 
+@test "reset sans terminal : dit que la confirmation manque, annule, et n'imprime aucune erreur de bash" {
+  seed_project "$CF"
+  run setsid --wait bash "$SRC" -p lcars-a-moi reset </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la confirmation se tape dans un terminal, et il n'y en a pas ici."*"container: annulé."* ]]
+  [[ "$output" != *"/dev/tty"* ]]
+  refute grep -q -- "down -v" "$CALLS"
+}
+
 @test "reset confirmé : compose down -v retire le conteneur et les volumes du projet, aucun volume n'est retiré à la main" {
   seed_project "$CF"
   run script -qec "bash '$SRC' -p lcars-a-moi reset" /dev/null <<<yes

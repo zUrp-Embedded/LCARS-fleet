@@ -562,6 +562,23 @@ EOF
   grep -qx "deck=20990" "$RUN_LOG"
 }
 
+@test "l'humain de démonstration d'un banc est retenu : une passe sans lui le relit, et le produit reçoit le même nom" {
+  terrain wsl
+  lib_module 50-humain 'prov_product_env; printf "%s\n" "prov=$PROV_BUILTIN_HUMAN" "${PROV_PRODUCT_ENV[@]}" | grep -E "^(prov=|LCARS_BUILTIN_HUMAN=)" >> "$RUN_LOG"; p_ok "ok"'
+  run env LCARS_BUILTIN_HUMAN=demo "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'params *PROV_BUILTIN_HUMAN=demo' "$JOURNAL"
+  : > "$RUN_LOG"
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  grep -qx "prov=demo" "$RUN_LOG"
+  grep -qx "LCARS_BUILTIN_HUMAN=demo" "$RUN_LOG"
+  : > "$RUN_LOG"
+  run env LCARS_BUILTIN_HUMAN=autre "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  grep -qx "LCARS_BUILTIN_HUMAN=autre" "$RUN_LOG"
+}
+
 @test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {
   # un défaut écrit au journal deviendrait un choix : la passe suivante ne distinguerait plus l'opérateur de l'usine
   terrain wsl

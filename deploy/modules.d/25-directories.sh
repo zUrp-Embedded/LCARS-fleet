@@ -17,7 +17,8 @@ set -euo pipefail
 
 console_human() { # l'humain intégré si le geste de forge le nomme et qu'il existe, sinon l'humain de la passe
   local h
-  h="$(bash "$(product_tree)/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  prov_product_env
+  h="$(env "${PROV_PRODUCT_ENV[@]}" bash "$(product_tree)/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   if [[ -z "$h" ]] || ! id -u -- "$h" >/dev/null 2>&1; then
     h="$PROV_HUMAN"
   fi

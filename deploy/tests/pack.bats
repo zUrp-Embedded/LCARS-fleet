@@ -236,6 +236,8 @@ publier() { # publier — une publication complète vers une forge https doublé
   [[ "$build" =~ ^DOCKER\ build\ -f\ (/[^\ ]+)/lcars_install/deploy/docker/Dockerfile\ .*\ ([^\ ]+)$ ]] || { echo "$build"; return 1; }
   [ "${BASH_REMATCH[2]}" = "${BASH_REMATCH[1]}/lcars_install" ] || { echo "contexte ${BASH_REMATCH[2]}, étage ${BASH_REMATCH[1]}"; return 1; }
   [[ "$build" == *" --build-arg GIT_SHA=$HEAD8 "*" -t lcars-fleet:v9.9 -t lcars-fleet:local "* ]]
+  # ni provenance ni sbom : l'image publiée est un manifeste simple, pas un index OCI
+  [[ "$build" == *" --provenance=false --sbom=false "* ]]
 }
 
 @test "--publish rejoué : l'image du tag déjà publiée à la révision du kit est reprise sans push, tirée sans identifiants, et la release suit" {

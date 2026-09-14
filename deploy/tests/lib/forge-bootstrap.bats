@@ -244,3 +244,35 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   LCARS_BENCH_ADMIRAL_PW=autre lib 'bench_admiral_password'
   [ "$output" = "autre" ]
 }
+
+@test "bench_human_seed : un jeton posé qui s'authentifie encore est rendu tel quel, aucun jeton n'est minté" {
+  forge_double_start
+  routes_du_banc
+  printf 'op-pose\n' > "$BATS_TEST_TMPDIR/pose"
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/pose"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "op-pose" ]
+  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r . | tail -n1)" = "token op-pose" ]
+  [ -z "$(forge_requests 'select(.path == "/api/v1/users/lcars/tokens")')" ]
+}
+
+@test "bench_human_seed : un jeton posé que la forge refuse est remplacé par un jeton minté" {
+  forge_double_start
+  forge_route PATCH /api/v1/admin/users/lcars 200 '{"login":"lcars"}'
+  forge_route GET /api/v1/users/lcars 200 '{"login":"lcars","is_admin":true}'
+  forge_route GET /api/v1/user 200 x1 '{"login":"lcars"}'
+  forge_route GET /api/v1/user 401 '{"message":"unauthorized"}'
+  forge_route POST /api/v1/users/lcars/tokens 201 '{"sha1":"op-neuf"}'
+  printf 'op-revoque\n' > "$BATS_TEST_TMPDIR/pose"
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/pose"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "op-neuf" ]
+}
+
+@test "bench_human_seed : sans jeton posé à l'endroit nommé, un jeton est minté" {
+  forge_double_start
+  routes_du_banc
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/absent"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "op-abc" ]
+}

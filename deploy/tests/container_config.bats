@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/container_config.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for deploy/container config|status|up|forge-check — la conf de l'instance vit COTE HOTE, le verdict et la forge se lisent de l'hote
+# STATUS: bats tests for deploy/container config|status|up|forge-check|forge-apply — la conf de l'instance vit COTE HOTE, le verdict et la forge se lisent de l'hote
 
 load refute
 load support/decor
@@ -48,16 +48,19 @@ if [[ "\$1" == inspect ]]; then
     *State.Status*)   echo "\${STUB_STATE:-running}" ;;
     *Health*)         echo "\${STUB_HEALTH:-healthy}" ;;
     *revision*)       echo "\${STUB_REV:-}" ;;
+    "{{.Image}}")     echo "sha256:image-temoin" ;;
   esac; exit 0
 fi
 if [[ "\$*" == *"cat /run/lcars-boot.state"* ]];   then [[ -n "\${STUB_BOOT:-}" ]]   || exit 1; echo "\$STUB_BOOT"; exit 0; fi
 if [[ "\$*" == *"cat /run/lcars-forge.rc"* ]]; then [[ -n "\${STUB_PROV:-}" ]]   || exit 1; echo "\$STUB_PROV"; exit 0; fi
+if [[ "\$*" == *"cat /run/lcars-provision.rc"* ]]; then [[ -n "\${STUB_PROV_ANCIEN:-}" ]] || exit 1; echo "\$STUB_PROV_ANCIEN"; exit 0; fi
 if [[ "\$*" == *"cat /run/lcars-humans.rc"* ]];    then [[ -n "\${STUB_HUM:-}" ]]    || exit 1; echo "\$STUB_HUM"; exit 0; fi
 if [[ "\$*" == *"cat /opt/lcars/.verified"* ]];    then [[ -n "\${STUB_TAMPON:-}" ]] || exit 1; echo "\$STUB_TAMPON"; exit 0; fi
 if [[ "\$*" == *"cat /run/lcars-seat.login"* ]];   then [[ -n "\${STUB_SEAT:-}" ]]   || exit 1; echo "\$STUB_SEAT"; exit 0; fi
 if [[ "\$*" == *" exec -it -u "* ]]; then echo "SHELL \$*"; exit 0; fi
 all="\$*"   # \${*##…} s'appliquerait a CHAQUE parametre, pas a la ligne
 if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR/pushed.\${all##* config-}"; exit 0; fi
+if [[ "\$all" == *" install -m 0644 "* ]]; then cat > "$BATS_TEST_TMPDIR/roster.seen"; exit 0; fi
 exit 0
 EOS
   chmod 0755 "$BINDIR/docker"
@@ -68,7 +71,7 @@ EOS
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
+  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -295,6 +298,19 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   [ "$status" -eq 1 ]
   [[ "$output" == *"boot        : en cours (aucun verdict encore)"* ]]
   [ "$(grep -c 'cat /run/lcars-forge.rc' "$CALLS")" -gt 2 ]
+  # l'attente se dit chaque minute
+  [[ "$output" == *"container up : boot en cours depuis 60 s, sans verdict — « deploy/container -p lcars-fleet logs » le suit"* ]]
+  [ "$(grep -c 'boot en cours depuis' <<<"$output")" -eq 15 ]
+}
+
+@test "up d'une image publiée avant le renommage du verdict : lcars-provision.rc est lu, l'attente s'arrête" {
+  sain
+  unset STUB_PROV
+  export STUB_PROV_ANCIEN=2
+  run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"drift résiduel"* ]]
+  [[ "$output" != *"boot en cours depuis"* ]]
 }
 
 @test "up avec des clés ssh multi-lignes : le conteneur les reçoit, up rend status, et la conf ne les retient pas" {
@@ -480,4 +496,34 @@ forge_fournie() {
   run bash "$SRC" forge-check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"note     le jeton master part en clair vers http://forge.exemple:$port"*"ok       jeton master accepté, site-admin"* ]]
+}
+
+@test "forge-apply : le roster se dérive de l'image du conteneur et se pose root 0644 dans la recette, avant la recette" {
+  run bash "$SRC" forge-apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun conteneur lcars"*"deploy/container -p lcars-fleet up"* ]]
+  cat > "$ARBRE/deploy/lib/enroll-catalogue.sh" <<FAKE
+#!/usr/bin/env bash
+echo "ENROLL \$*" >> "$CALLS"
+[[ -z "\${ENROLL_REFUS:-}" ]] || { echo "refus-temoin" >&2; exit 2; }
+while [[ \$# -gt 0 ]]; do [[ "\$1" == --tofu-dir ]] && dir="\$2"; shift; done
+echo '{"roles":["temoin"]}' > "\$dir/roles.auto.tfvars.json"
+FAKE
+  chmod +x "$ARBRE/deploy/lib/enroll-catalogue.sh"
+  export STUB_IDS=c0ffee
+  run bash "$SRC" forge-apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^ENROLL --tofu-dir .* --image sha256:image-temoin$" "$CALLS"
+  [ "$(cat "$BATS_TEST_TMPDIR/roster.seen")" = '{"roles":["temoin"]}' ]
+  local pose recette
+  pose="$(grep -n "exec -T -u root lcars install -m 0644 -o root -g root /dev/stdin /opt/lcars/services/forge-recipe/roles.auto.tfvars.json" "$CALLS" | cut -d: -f1)"
+  recette="$(grep -n "exec -T -u root lcars /opt/lcars/forge-gestures.sh apply" "$CALLS" | cut -d: -f1)"
+  [ -n "$pose" ]
+  [ -n "$recette" ]
+  [ "$pose" -lt "$recette" ]
+  : > "$CALLS"
+  ENROLL_REFUS=1 run bash "$SRC" forge-apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refus-temoin"*"roster des rôles non posé"* ]]
+  refute grep -q "forge-gestures.sh apply" "$CALLS"
 }

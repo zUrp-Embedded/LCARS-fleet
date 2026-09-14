@@ -134,8 +134,10 @@ check_fleet_start() {
   # sur un banc, la fleet démarre sans credentials claude et reste debout : c'est le contrat du banc
   local -a sans_claude=()
   [[ "${LCARS_BENCH:-}" != 1 ]] || sans_claude=(env LCARS_START_WITHOUT_CLAUDE=1)
-  if ! as_human ${sans_claude[@]+"${sans_claude[@]}"} bash -lc 'fleet start' >/dev/null 2>&1; then
-    no "fleet : « fleet start » a échoué sous « $login » — à relancer à la main pour lire sa plainte"
+  local plainte
+  if ! plainte="$(as_human ${sans_claude[@]+"${sans_claude[@]}"} bash -lc 'fleet start' 2>&1)"; then
+    no "fleet : « fleet start » a échoué sous « $login » — sa plainte :"
+    printf '%s\n' "$plainte" | tail -n 10 | sed 's/^/          /'
     return
   fi
   local alive=0 suite="arrêtée après mesure"

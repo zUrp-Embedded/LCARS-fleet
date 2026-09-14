@@ -61,13 +61,6 @@ case "$BIND" in
   *)              PROBE_HOST="$BIND" ;;
 esac
 FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
-# l'adresse par laquelle un conteneur de job atteint cette machine : ni le nom de service compose
-# (le runner est en dind, réseau par job), ni l'adresse annoncée (localhost sous WSL est le conteneur)
-if [[ "$(detect_substrate)" == "wsl" ]]; then
-  JOB_HOST="host.docker.internal"
-else
-  JOB_HOST="$(lan_addr)"; JOB_HOST="${JOB_HOST:-$ADVERTISE}"
-fi
 ADMIRAL_PW="$(bench_admiral_password)"
 HUMAN_PW="$(bench_human_password)"
 
@@ -149,14 +142,11 @@ else
 fi
 
 # le roster des rôles vient du catalogue de l'image, jamais d'un clone de l'hôte
-ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
-ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" --tofu-dir "$ENROLL_DIR" --image "$IMAGE" 2>/dev/null)" \
-  || die "dérivation du roster en échec (enroll-catalogue.sh, image $IMAGE)" 4
+ROSTER_RC=0; ENROLL_OUT="$(prov_roster_conteneur "$IMAGE" in_container)" || ROSTER_RC=$?
+[[ "$ROSTER_RC" -ne 1 ]] || die "dérivation du roster en échec (enroll-catalogue.sh, image $IMAGE)" 4
+[[ "$ROSTER_RC" -eq 0 ]] || die "roster non déposé dans la recette de $CONTAINER" 4
 ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"; ORG="${ORG:-$PROV_FORGE_ORG_DEFAULT}"
 say "roster dérivé du catalogue $(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_ROLES=//p') · org $ORG"
-d cp "$ENROLL_DIR/roles.auto.tfvars.json" "$CONTAINER:$RACINE_CONTENEUR/services/forge-recipe/roles.auto.tfvars.json" \
-  || die "roster non déposé dans la recette de $CONTAINER" 4
-rm -rf "$ENROLL_DIR"
 
 printf '%s' "$MASTER_TOKEN" | in_container "$GESTES" config-token || die "jeton master refusé par le conteneur" 4
 printf '%s' "$SEED_PW"      | in_container "$GESTES" config-seed  || die "seed non posé dans le conteneur" 4
@@ -213,7 +203,7 @@ fi
 seed_hooks=(); seed_force=()
 remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
 if [[ -n "$remote_main" ]] && ! git -C "$SEED_DIR" merge-base --is-ancestor "$remote_main" "$SEED_REF" 2>/dev/null; then
-  say "$ORG/lcars : main existe déjà sur la forge de banc (${remote_main:0:9}) et n'est pas un ancêtre de $SEED_REF — rejeu sur une forge jetable, poussé de force"
+  say "$ORG/lcars : main existe déjà sur la forge de banc (${remote_main:0:9}) et n'est pas un ancêtre de $SEED_REF — la forge du banc est jetable : main est remplacé, poussé de force"
   seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
 fi
 PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${SEED_REF}:refs/heads/main" 2>&1)" \
@@ -259,7 +249,7 @@ else
   ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
-       --instance-url "http://${JOB_HOST}:${FORGE_PORT}" --network "$FORGE_NET" \
+       --instance-url "$(job_forge_url "$FORGE_PORT" "$ADVERTISE")" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then
     RUNNER_SERT=1
     RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"

@@ -41,8 +41,8 @@ litteraux() { # litteraux <racine> <fichier des constantes> → « fichier|clé|
   while IFS= read -r l || [[ -n "$l" ]]; do
     k="${l%%=*}"; v="${l#*=}"
     [[ "$k" != "$l" && "$k" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
-    # un mot nu ou un petit nombre se confond avec la prose (fleet, humans, lcars, 27) : il n'est pas balayé
-    [[ "$v" =~ ^[a-z]+$ || "$v" =~ ^[0-9]{1,3}$ ]] && continue
+    # un mot nu ou un petit nombre se confond avec la prose (fleet, humans, lcars, 27), et une valeur vide ne se recopie pas : ils ne sont pas balayés
+    [[ -z "$v" || "$v" =~ ^[a-z]+$ || "$v" =~ ^[0-9]{1,3}$ ]] && continue
     motif="$(printf '%s' "$v" | sed 's/[][\.*^$/+?(){}|]/\\&/g')"
     suite='[^A-Za-z0-9_./-]'
     [[ ! "$k" =~ $RACINE ]] || suite='[^A-Za-z0-9_.-]'

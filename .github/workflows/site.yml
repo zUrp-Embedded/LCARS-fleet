@@ -71,6 +71,8 @@ concurrency:
 
 jobs:
   build:
+    # Pages n'existe que sur GitHub : la forge d'une installation, qui porte le même dépôt, ne publie rien
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     defaults:
       run:

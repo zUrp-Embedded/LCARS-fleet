@@ -448,6 +448,22 @@ exec $(command -v uname) \"\$@\""
   [[ "$output" == *"projet compose déjà présent"*"lcars-fleet"* ]]
 }
 
+@test "la forge et le runner que ce poste a montés sont présents sans avertissement ; une instance du même nom en garde un" {
+  local mode; mode="$LCARS_DECOR_ROOT$(sed -n 's/^PROV_FORGE_MODE_FILE=//p' "$BATS_TEST_DIRNAME/../installer-constants.env")"
+  docker_qui_repond "" "" lcars-forge
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  [ "$(fact projet_pris)" = "lcars-forge" ]
+  [[ "$output" == *"WARN"*"projet compose déjà présent sur ce daemon : lcars-forge"* ]]
+  mkdir -p "$(dirname "$mode")"; echo poste > "$mode"
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  [ "$(fact projet_pris)" = "lcars-forge" ]
+  [[ "$output" == *"OK"*"projet compose de la forge de ce poste présent : lcars-forge"* ]]
+  refute_out 'projet compose déjà présent' <<<"$output"
+  docker_qui_repond "" "" lcars-fleet
+  preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
+  [[ "$output" == *"WARN"*"projet compose déjà présent sur ce daemon : lcars-fleet"* ]]
+}
+
 @test "sans docker, aucun projet n'est dit pris" {
   preflight docker PROV_FORGE_BASE=lcars
   [ -z "$(fact projet_pris)" ]

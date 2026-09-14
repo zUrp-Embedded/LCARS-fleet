@@ -558,6 +558,18 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+@test "job_forge_url : un job atteint la forge par le port publié — host.docker.internal sous WSL, l'adresse de sortie ailleurs" {
+  module_sh '
+    lan_addr() { echo 198.51.100.63; }
+    [ "$(PROV_SUBSTRATE=wsl job_forge_url 20010 localhost)" = "http://host.docker.internal:20010" ]
+    [ "$(PROV_SUBSTRATE=linux job_forge_url 20010 localhost)" = "http://198.51.100.63:20010" ]
+    lan_addr() { echo ""; }
+    [ "$(PROV_SUBSTRATE=linux job_forge_url 20010 192.0.2.7)" = "http://192.0.2.7:20010" ]
+    [ "$(PROV_SUBSTRATE=linux job_forge_url 20010)" = "http://127.0.0.1:20010" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
 @test "wsl_networking_mode : le mode que wslinfo dit, nat quand il ne dit rien" {
   WSLINFO_MODE=mirrored module_sh 'wsl_networking_mode'
   [ "$output" = mirrored ]
