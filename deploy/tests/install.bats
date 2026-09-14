@@ -1014,6 +1014,14 @@ suivre_remedes() { # suivre_remedes <commande> — la joue, puis le premier rem�
   done
 }
 
+@test "Linux sans docker, posé par un autre canal : le refus ne propose pas l'installation dans ce système, que le préflight refuserait" {
+  local a; a="$(_arbre substrat=linux consent=posee docker=absent "docker_why=aucun daemon" channel=source channel_tree=kit)"
+  porte "$a" --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker est absent."*"Le conteneur ne l'installe pas"* ]]
+  refute_out 'workstation' <<<"$output"
+}
+
 @test "--check pipée ne télécharge rien : la mesure vit dans le kit, et il le dit" {
   _release
   pipee --bench --check
