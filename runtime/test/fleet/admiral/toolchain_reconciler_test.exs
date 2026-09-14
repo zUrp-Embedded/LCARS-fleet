@@ -3,7 +3,8 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   Exercises manual passes with forge/convergence stubs and a temporary marker.
   Socket cases use a fake privileged service. Checks marker/result protocol, not
   package installation, container rebuild mounts, protected-branch policy or timers.
-  rc=2 freeze cases inject converger_failed; the default socket uses converger_refused.
+  Exit-code cases replay, through the fake service, the FAIL line that
+  services/privileged-executor.py writes for a failed converger.
   """
   use ExUnit.Case, async: false
 
@@ -278,48 +279,89 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   describe "le SHA refusé est COLLANT (rc=2 du convergeur = document faux)" do
     test "rc=2 => gel : la passe suivante NE rappelle PAS le convergeur ; un nouveau head dégèle",
          %{server: server} do
-      converger_result({:error, {:converger_failed, 2, "kind inattendu"}})
+      fake_privileged([executor_reply(2), "OK:sha-2"])
 
-      assert {:error, {:converger_failed, 2, _}} = R.check_now(server)
-      assert_received {:converged, "sha-1"}
+      assert {:error, {:converger_failed, 2, ""}} = R.check_now(server)
+      assert_receive :privileged_called
 
       assert {:error, {:manifest_rejected, "sha-1"}} = R.check_now(server)
-      refute_received {:converged, _}
+      refute_received :privileged_called
 
-      converger_result(:ok)
       :persistent_term.put({ForgeUp, :head}, "sha-2")
       assert {:ok, :converged, "sha-2"} = R.check_now(server)
+      assert_receive :privileged_called
     end
 
     test "rc=3 (retryable) ne gèle PAS : le tick suivant rappelle le convergeur", %{
       server: server
     } do
-      converger_result({:error, {:converger_failed, 3, "apt transitoire"}})
-      assert {:error, {:converger_failed, 3, "apt transitoire"}} = R.check_now(server)
-      assert_received {:converged, "sha-1"}
+      fake_privileged([executor_reply(3), executor_reply(3)])
 
-      assert {:error, {:converger_failed, 3, _}} = R.check_now(server)
-      assert_received {:converged, "sha-1"}
+      assert {:error, {:converger_failed, 3, ""}} = R.check_now(server)
+      assert_receive :privileged_called
+
+      assert {:error, {:converger_failed, 3, ""}} = R.check_now(server)
+      assert_receive :privileged_called
+    end
+
+    test "un refus du service lui-même ne porte pas de code : il ne gèle pas", %{server: server} do
+      fake_privileged(["FAIL:busy", "FAIL:converger_failed:", "OK:sha-1"])
+
+      assert {:error, {:converger_refused, "busy"}} = R.check_now(server)
+      assert {:error, {:converger_refused, "converger_failed:"}} = R.check_now(server)
+      assert {:ok, :converged, "sha-1"} = R.check_now(server)
+    end
+  end
+
+  # The line is read from the executor's source: a change of its wire format turns this file
+  # red instead of leaving the freeze tested against a shape the service never writes.
+  defp executor_reply(rc) do
+    src = File.read!("services/privileged-executor.py")
+
+    case Regex.run(~r/done\(f"(FAIL:converger_failed:)\{proc\.returncode\}"\)/, src) do
+      [_, prefix] ->
+        prefix <> Integer.to_string(rc)
+
+      nil ->
+        flunk(
+          "services/privileged-executor.py n'écrit plus `FAIL:converger_failed:{proc.returncode}` " <>
+            "— accorder la lecture de ToolchainReconciler et ce témoin à la nouvelle ligne"
+        )
     end
   end
 
   # Default transport connects without sending a SHA; the service chooses what to apply.
 
   # nil closes without a line, exercising a different result from an empty line.
-  defp answer_once({:ok, conn}, reply) do
+  defp answer_once(conn, reply) do
     if reply, do: :gen_tcp.send(conn, reply <> "\n")
     :gen_tcp.close(conn)
   end
 
-  defp answer_once(_accept_failed, _reply), do: :ok
+  # One connection per reply, in order. Once the replies are spent the listener closes, so an
+  # unexpected extra call fails as unreachable instead of waiting for an answer.
+  defp serve_replies(listen, [], _test), do: :gen_tcp.close(listen)
 
-  defp fake_privileged(reply) do
+  defp serve_replies(listen, [reply | rest], test) do
+    case :gen_tcp.accept(listen, 5_000) do
+      {:ok, conn} ->
+        send(test, :privileged_called)
+        answer_once(conn, reply)
+        serve_replies(listen, rest, test)
+
+      _accept_failed ->
+        :gen_tcp.close(listen)
+    end
+  end
+
+  defp fake_privileged(replies) when is_list(replies) do
     path = Path.join(System.tmp_dir!(), "tc-#{System.unique_integer([:positive])}.sock")
 
     {:ok, listen} =
       :gen_tcp.listen(0, [{:ifaddr, {:local, path}}, :binary, packet: :line, active: false])
 
-    {:ok, _} = Task.start(fn -> answer_once(:gen_tcp.accept(listen, 5_000), reply) end)
+    test = self()
+    {:ok, _} = Task.start(fn -> serve_replies(listen, replies, test) end)
 
     Application.delete_env(:lcars_fleet, :toolchain_converger)
     Application.put_env(:lcars_fleet, :toolchain_socket, path)
@@ -332,6 +374,8 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
     path
   end
+
+  defp fake_privileged(reply), do: fake_privileged([reply])
 
   describe "le SHA noté est celui qui a été APPLIQUÉ" do
     # The fake service reports a different SHA; the marker must preserve its response.

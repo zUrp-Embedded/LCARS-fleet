@@ -117,7 +117,13 @@ def serve_converge(conn):
 
         -> (la connexion suffit ; rien n'est lu sur le fil)
         <- "OK:<sha applique>"
-        <- "FAIL:<cause>"
+        <- "FAIL:<cause>"                    (refus du service : no_forge, forge_unreachable, busy,
+                                              converger_absent)
+        <- "FAIL:converger_failed:<code>"   (code de sortie du convergeur ; 2 = manifeste refuse,
+                                              que le reconciliateur gele jusqu'au merge suivant)
+
+    ⚠ LA FORME DE LA LIGNE EST UN CONTRAT : `Fleet.Admiral.ToolchainReconciler` lit le code apres
+    `converger_failed:`, et son temoin rejoue la ligne ecrite ici.
 
     ⚠ RIEN N'EST LU SUR LE FIL, ET C'EST DELIBERE. La socket dit le verbe, la forge dit le contenu.
     Un `readline` ici rouvrirait la seule surface par laquelle un appelant pourrait influer sur ce

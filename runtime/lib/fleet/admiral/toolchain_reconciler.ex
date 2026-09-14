@@ -95,8 +95,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   end
 
   # Cache the head rejected by {:converger_failed, 2, _} until a different head is read.
-  # The cache is process-local. Default socket FAIL responses use converger_refused
-  # and do not trigger this freeze; the rc=2 tests inject the older error shape.
+  # Exit 2 of lcars-toolchain-converge means the manifest itself is refused: replaying the
+  # same head cannot succeed. The cache is process-local.
   defp reconcile_pass(state) do
     repo = state.repo || Fleet.Toolchain.ops_repo()
     branch = state.branch || Fleet.Toolchain.branch()
@@ -310,7 +310,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
             {:ok, sha}
 
           "FAIL:" <> cause ->
-            {:error, {:converger_refused, cause}}
+            {:error, refusal(cause)}
 
           other ->
             {:error, {:converger_mute, path, other}}
@@ -320,6 +320,19 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         {:error, {:converger_mute, path, reason}}
     end
   end
+
+  # The service reports a converger exit as FAIL:converger_failed:<rc>; its own refusals
+  # (no_forge, forge_unreachable, busy, converger_absent) carry no exit code. Only a
+  # parsed rc can reach the rc=2 freeze in reconcile_pass/1.
+  defp refusal("converger_failed:" <> code = cause) do
+    case Integer.parse(code) do
+      {rc, ""} -> {:converger_failed, rc, ""}
+      {rc, ":" <> detail} -> {:converger_failed, rc, detail}
+      _ -> {:converger_refused, cause}
+    end
+  end
+
+  defp refusal(cause), do: {:converger_refused, cause}
 
   defp unreachable(reason) do
     Logger.warning(
@@ -378,7 +391,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   @spec default_converger_fun(String.t(), keyword()) ::
           {:ok, String.t()}
           | {:error,
-             {:converger_refused, binary()}
+             {:converger_failed, integer(), binary()}
+             | {:converger_refused, binary()}
              | {:converger_mute, Path.t(), term()}
              | {:privileged_unreachable, Path.t(), term()}}
   def default_converger_fun(head, opts), do: default_converger(head, opts)
