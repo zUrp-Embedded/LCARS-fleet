@@ -407,11 +407,12 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -qE 'DOCKER:[^<]*MASTER' "$CALLS"
 }
 
-@test "l'humain du banc : mot de passe et site-admin par l'API avec le jeton master en en-tête, jeton opérateur posé après la relance, mot de passe unix" {
+@test "l'humain du banc : mot de passe par l'API avec le jeton master en en-tête, site-admin lu et non posé (la structure le pose), jeton opérateur posé après la relance, mot de passe unix" {
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local patch; patch="$(grep "^CURL:PATCH http://127.0.0.1:$BF/api/v1/admin/users/lcars | Authorization: token MASTER | " "$CALLS")"
-  [ "$(jq -c '{password, admin}' <<<"${patch##* | }")" = '{"password":"toto32toto32","admin":true}' ]
+  [ "$(jq -c '{password, pose_admin: has("admin")}' <<<"${patch##* | }")" = '{"password":"toto32toto32","pose_admin":false}' ]
+  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/users/lcars | Authorization: token MASTER" "$CALLS"
   grep '^CURL-ARGV:' "$CALLS" | refute_out 'MASTER|toto32toto32'
   local relance jeton; relance="$(grep -n '^DOCKER:restart' "$CALLS" | cut -d: -f1)"; jeton="$(grep -n 'gitea_token <<< OP-TOKEN' "$CALLS" | cut -d: -f1)"
   [ -n "$relance" ]

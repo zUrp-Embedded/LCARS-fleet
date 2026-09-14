@@ -463,14 +463,15 @@ EOF
   HROOT="$hroot"
 }
 
-@test "root, banc : l'humain reçoit ses mots de passe unix et forge, l'adminité, son jeton opérateur, et l'absence de creds est dite" {
+@test "root, banc : l'humain reçoit ses mots de passe unix et forge, son adminité vérifiée (la recette la pose), son jeton opérateur, et l'absence de creds est dite" {
   arbre
   banc
   SUDO_USER=root root --bench --humain-demo root
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx 'root:toto32toto32' "$TRACE"
   [ "$(forge_requests 'select(.method == "PATCH") | .auth')" = '"token tok-master"' ]
-  [ "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | [.password, .admin] | @csv')" = '"\"toto32toto32\",true"' ]
+  [ "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | [.password, has("admin")] | @csv')" = '"\"toto32toto32\",false"' ]
+  [ "$(forge_requests 'select(.method == "GET" and .path == "/api/v1/users/root") | .auth')" = '"token tok-master"' ]
   [ "$(forge_requests 'select(.method == "POST") | .auth')" = '"basic root:toto32toto32"' ]
   [ -s "$BATS_TEST_TMPDIR/curl.argv" ]
   refute grep -qE 'tok-master|toto32toto32' "$BATS_TEST_TMPDIR/curl.argv"
