@@ -12,6 +12,7 @@
 setup() {
   FLEET_DIR="$BATS_TEST_DIRNAME/../../runtime"
   command -v mix >/dev/null 2>&1 || skip "mix absent de ce poste"
+  [[ -d "$FLEET_DIR/deps" ]] || skip "dépendances du runtime absentes ($FLEET_DIR/deps) : « cd runtime && mix deps.get »"
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
 }
 
