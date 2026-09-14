@@ -73,10 +73,9 @@ FAKE
   export LCARS_PRIVATE_DIR="$PRIV"
   export LCARS_RECIPE_DIR="$RECIPE"
   export FORGE_BASE_URL="http://forge.test"
-  # Le verrou d'apply vit dans le tmpdir du test : `/run/lock` n'est pas ecrivable par le temoin,
-  # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
-  export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
+  # le dossier de travail, qui est aussi le verrou d'apply, propre à chaque cas
   export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu"
+  mkdir -p "$LCARS_CATALOGUES_WORK"
   # Le CACHE local du materiel. Pointe dans le tmpdir : sans ca le temoin ecrirait dans
   # `/home/catalogues`, c'est-a-dire dans le conteneur de celui qui lance la suite.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
@@ -237,7 +236,7 @@ FAKE
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
 
   # Un tiers tient le verrou pendant que l'apply tente sa chance.
-  ( flock 9 && sleep 5 ) 9>"$LCARS_APPLY_LOCK" &
+  ( flock 9 && sleep 5 ) 9<"$LCARS_CATALOGUES_WORK" &
   holder=$!
   sleep 0.3
   run bash -c "'$SCRIPT' apply < /dev/null"
@@ -544,48 +543,23 @@ FAKE
 }
 
 
-@test "le verrou vit dans le repertoire de travail, pas dans /run/lock" {
-  unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-work"
-  mkdir -p "$LCARS_CATALOGUES_WORK"
+@test "le verrou est le dossier de travail lui-même : un apply n'y crée rien" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
-
   run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-
-  LOCK="$LCARS_CATALOGUES_WORK/.apply.lock"
-  [ -e "$LOCK" ]
-  run bash -c "sed 's/#.*//' '$SCRIPT' | grep -c '/run/lock' || true"
-  [ "$output" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -z "$(ls -A "$LCARS_CATALOGUES_WORK")" ]
 }
 
-@test "un verrou DEJA pose garde son mode — un durcissement d'operateur n'est pas contredit" {
-  unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-work2"
-  mkdir -p "$LCARS_CATALOGUES_WORK"
-  : > "$LCARS_CATALOGUES_WORK/.apply.lock"
-  # un mode que le geste ne pose jamais lui-meme : le garder se distingue de le reposer
-  chmod 0640 "$LCARS_CATALOGUES_WORK/.apply.lock"
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-
-  run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  [ "$(stat -c '%a' "$LCARS_CATALOGUES_WORK/.apply.lock")" = "640" ]
-}
-
-# Le verrou passe d'une identite a l'autre : `apply` en root, `install` sous le compte d'autorite.
-# Un seul uid ne le voit pas. Le decor : root de namespace, un compte d'autorite double dont l'uid
-# est un sous-uid (`--map-auto`, donc un vrai proprietaire distinct sur le disque), /etc/passwd et
-# /etc/group doubles par un montage prive, et /opt en tmpfs pour que ce compte traverse jusqu'au
-# verrou par le chemin et le mode de la machine.
+# `apply` en root, `install` sous le compte d'autorité : un seul uid ne voit pas le passage. Le décor :
+# root de namespace, un compte d'autorité doublé dont l'uid est un sous-uid (`--map-auto`), /etc/passwd
+# et /etc/group doublés par un montage privé, /opt en tmpfs au chemin et au mode de la machine.
 AUTORITE_UID=4242
 
 _deux_identites() { # <scenario bash, joue en root de namespace dans le decor> -> run
   unshare --map-auto -r -m true 2>/dev/null \
     || skip "sous-uids indisponibles pour ce compte (unshare --map-auto) : le passage de root au compte d'autorité ne se joue pas ici"
-  unset LCARS_APPLY_LOCK LCARS_CATALOGUES_WORK
+  unset LCARS_CATALOGUES_WORK
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
   { cat /etc/passwd; printf 'autorite-double:x:%s:%s::/nonexistent:/usr/sbin/nologin\n' "$AUTORITE_UID" "$AUTORITE_UID"; } > "$BATS_TEST_TMPDIR/passwd"
@@ -602,81 +576,52 @@ install -d -m 0700 -o autorite-double -g autorite-double /opt/lcars/var/tofu
 install -m 0755 "$SCRIPT" /opt/lcars/forge-gestures.sh
 export LCARS_AUTHORITY_USER=autorite-double
 SCRIPT="$SCRIPT"
-LOCK=/opt/lcars/var/tofu/.apply.lock
-# le verrou ouvert comme install l'ouvre : la meme fonction, sous le compte d'autorite
-ouvre_sous_autorite() {
-  setpriv --reuid "$AUTORITE_UID" --regid "$AUTORITE_UID" --clear-groups \
-    bash -c 'source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu'
+sous_autorite() { # sous_autorite <scenario> — joue le verrou comme install le prend, sous le compte d'autorite
+  setpriv --reuid "$AUTORITE_UID" --regid "$AUTORITE_UID" --clear-groups bash -c "\$1"
 }
 $1
 EOF
   run unshare --map-auto -r -m bash "$BATS_TEST_TMPDIR/scenario.sh"
 }
 
-@test "un apply joué en root rend le verrou au compte d'autorité en 0600 : l'installation, sous ce compte, l'ouvre" {
+@test "un apply joué en root ne laisse rien à root sous le dossier de travail : l'installation, sous le compte d'autorité, tient le verrou" {
   _deux_identites '
 bash "$SCRIPT" apply </dev/null >/dev/null
-stat -c "verrou %u %a" "$LOCK"
-printf "a-root:[%s]\n" "$(find /opt/lcars/var/tofu -uid 0 | tr "\n" " ")"
-ouvre_sous_autorite'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"verrou $AUTORITE_UID 600"* ]]
-  # rien d'autre que le geste pose sous le dossier de travail ne reste a root
+printf "a-root:[%s]\n" "$(find /opt/lcars/var/tofu -mindepth 1 -uid 0 | tr "\n" " ")"
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"a-root:[]"* ]]
   [[ "$output" == *"verrou-tenu"* ]]
 }
 
-@test "un verrou que l'apply n'a pas créé garde son propriétaire ; sous le compte d'autorité, fermé, il se dit par son propriétaire et son mode" {
+@test "le compte d'autorité tient le verrou : un apply en root est refusé sans rien tenter, et l'inverse" {
   _deux_identites '
-( umask 022; : > "$LOCK" )
-bash "$SCRIPT" apply </dev/null >/dev/null
-stat -c "verrou %u %a" "$LOCK"
-ouvre_sous_autorite || echo "rc=$?"'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"verrou 0 644"* ]]
-  [[ "$output" == *"rc=1"* ]]
-  [[ "$output" == *"ce geste tourne sous autorite-double, et le verrou appartient à root en mode 644"* ]]
-  [[ "$output" == *"deploy/workstation up"* ]]
-  refute grep -q "tourne en root" <<<"$output"
-  refute grep -q "verrou-tenu" <<<"$output"
+sous_autorite "exec 9</opt/lcars/var/tofu; flock 9; sleep 3" &
+tenu=$!
+sleep 0.5
+bash "$SCRIPT" apply </dev/null || echo "apply-root rc=$?"
+wait "$tenu"
+( exec 9</opt/lcars/var/tofu; flock 9; sleep 3 ) &
+tenu=$!
+sleep 0.5
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu" || echo "autorite rc=$?"
+wait "$tenu"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"apply-root rc=1"*"autorite rc=1"* ]]
+  [ "$(grep -c "un autre apply de structure est en cours" <<<"$output")" -eq 2 ]
+  refute grep -q verrou-tenu <<<"$output"
+  refute grep -q "^init " "$TOFU_LOG"
 }
 
-@test "sous le compte d'autorité, un dossier de travail fermé se dit par son propriétaire et son mode" {
+@test "sous le compte d'autorité, un dossier de travail qui ne lui revient pas se dit, et nomme qui pose ce dossier" {
   _deux_identites '
 chown root:root /opt/lcars/var/tofu
-chmod 0755 /opt/lcars/var/tofu
-ouvre_sous_autorite || echo "rc=$?"'
+chmod 0700 /opt/lcars/var/tofu
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu" || echo "rc=$?"'
   [ "$status" -eq 0 ]
   [[ "$output" == *"rc=1"* ]]
-  [[ "$output" == *"ce geste tourne sous autorite-double, et ne peut pas créer le verrou dans /opt/lcars/var/tofu (root, mode 755)"* ]]
-  refute grep -q "tourne en root" <<<"$output"
-}
-
-@test "en root, un lien posé à la place du verrou est refusé : le fichier de root qu'il désigne reste intact" {
-  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
-  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-lien"
-  mkdir -p "$LCARS_CATALOGUES_WORK"
-  printf 'contenu-de-root\n' > "$BATS_TEST_TMPDIR/cible"
-  ln -s "$BATS_TEST_TMPDIR/cible" "$LCARS_CATALOGUES_WORK/.apply.lock"
-  run unshare -Ur env -u LCARS_APPLY_LOCK LCARS_AUTHORITY_USER=compte-absent-du-decor \
-    bash -c 'source "$1"; with_apply_lock echo verrou-tenu' _ "$SCRIPT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"verrou d'apply refusé ($LCARS_CATALOGUES_WORK/.apply.lock) : ce n'est pas un fichier régulier"* ]]
+  [[ "$output" == *"dossier de travail des applies inaccessible (/opt/lcars/var/tofu) — ce geste se joue en root ou sous autorite-double"*"deploy/workstation up"* ]]
   refute grep -q verrou-tenu <<<"$output"
-  [ "$(cat "$BATS_TEST_TMPDIR/cible")" = contenu-de-root ]
-}
-
-@test "un apply joué en root sans compte d'autorité sur la machine pose le verrou en 0600 et passe" {
-  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
-  unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-root"
-  mkdir -p "$LCARS_CATALOGUES_WORK"
-  printf 'TOK\n' > "$PRIV/forge-master.token"
-  printf 'SEED\n' > "$PRIV/forge-seed.pass"
-
-  run unshare -Ur env LCARS_AUTHORITY_USER=compte-absent-du-decor bash "$SCRIPT" apply < /dev/null
-  [ "$status" -eq 0 ]
-  [ "$(stat -c '%a' "$LCARS_CATALOGUES_WORK/.apply.lock")" = "600" ]
 }
 
 
