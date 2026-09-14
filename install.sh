@@ -714,7 +714,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo ""
     relance_root
   fi
-  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/container status"
+  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/container -p $BASE_PROJET-fleet status"
   echo ""
   exit 0
 fi

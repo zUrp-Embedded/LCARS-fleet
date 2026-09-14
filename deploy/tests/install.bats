@@ -1137,6 +1137,7 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Espace     ~3 Go · durée ~2 min, tirage de l'image compris · ports"* ]]
   [[ "$output" == *"Statut     deploy/container -p lcars-fleet status"$'\n'"    Retour     deploy/docker/bench/bench-down.sh --project lcars --yes"* ]]
+  [[ "$output" == *"--check : rien n'est fait. Pour un déploiement existant : deploy/container -p lcars-fleet status"* ]]
   refute_out '15 min' <<<"$output"
   _daemon_avec_image oui
   pipee --bench --check
