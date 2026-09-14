@@ -172,13 +172,39 @@ cmd_config_seed() {
 # `terraform.tfstate`, et celui qui finit rendrait un verdict sur un travail qu'il n'a pas fait.
 # `flock -n` REFUSE au lieu d'attendre — un appelant qui attend repartirait sur une forge qui a
 # bouge sous lui.
+#
+# ⚠ LE VERROU APPARTIENT AU COMPTE D'AUTORITE, QUI QUE SOIT CELUI QUI LE POSE : `apply` se joue en
+# root (61-forge-structure, `container forge-apply`), `install` sous ce compte (le service
+# lcars-catalogue). Un verrou laisse a root refuse son `exec 9>` a `install`. Root le lui rend donc a
+# chaque passage ; son mode, lui, reste celui qui est pose.
 with_apply_lock() {
   local lock="${LCARS_APPLY_LOCK:-$CATALOGUE_WORK/.apply.lock}"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
-  [[ -e "$lock" ]] || ( : > "$lock" ) 2>/dev/null || true
-  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — regarde son proprietaire et son mode : ce geste tourne en root, donc un refus ici designe un montage ou un systeme de fichiers en lecture seule, pas une permission"
+  [[ -e "$lock" ]] || ( umask 077; : > "$lock" ) 2>/dev/null || true
+  if [[ "$(id -u)" -eq 0 && -e "$lock" && "$(stat -c %u "$lock")" -eq 0 ]] && id -u "$AUTHORITY_USER" >/dev/null 2>&1; then
+    chown "$AUTHORITY_USER:$AUTHORITY_USER" "$lock" \
+      || die "verrou d'apply non rendu à $AUTHORITY_USER ($lock) — l'installation d'un catalogue, jouée sous ce compte, le trouverait fermé"
+  fi
+  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — $(apply_lock_refusal "$lock")"
   flock -n 9 || die "un autre apply de structure est en cours (verrou $lock) — rien n'a ete tente"
   "$@"
+}
+
+apply_lock_refusal() { # $1=verrou -> la cause d'un refus d'ouverture, selon qui joue le geste
+  if [[ "$(id -u)" -eq 0 ]]; then
+    printf 'ce geste tourne en root : le refus désigne un montage ou un système de fichiers en lecture seule, pas une permission'
+    return 0
+  fi
+  local qui dir
+  qui="$(id -un 2>/dev/null || id -u)"
+  if [[ -e "$1" ]]; then
+    printf 'ce geste tourne sous %s, et le verrou appartient à %s en mode %s : il revient au compte %s, et un apply joué en root le lui rend (sur un poste « deploy/workstation up », dans un conteneur « deploy/container forge-apply »)' \
+      "$qui" "$(stat -c %U "$1")" "$(stat -c %a "$1")" "$AUTHORITY_USER"
+  else
+    dir="$(dirname "$1")"
+    printf "ce geste tourne sous %s, et ne peut pas créer le verrou dans %s (%s, mode %s) : ce répertoire revient au compte %s, et l'installation le pose (sur un poste « deploy/workstation up », dans un conteneur son démarrage)" \
+      "$qui" "$dir" "$(stat -c %U "$dir" 2>/dev/null || echo absent)" "$(stat -c %a "$dir" 2>/dev/null || echo -)" "$AUTHORITY_USER"
+  fi
 }
 
 # ─── ensure_ops_repo — LE DEPOT DU SYSADMIN ─────────────────────────────────────────────────────
