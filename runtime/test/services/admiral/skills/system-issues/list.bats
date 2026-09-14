@@ -61,3 +61,36 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"client d'autorité absent"* ]]
 }
+
+# ─── L'ADRESSE DE LA FORGE, SANS LA VARIABLE DU TÉMOIN ─────────────────────────────────────────
+# La session du siège ne porte pas LCARS_FORGE_URL : les cas ci-dessous jouent les défauts. Le défaut
+# d'origine lisait /home/lcars/tokens/forge.url, un chemin qu'aucun rail ne pose.
+
+@test "sans variable : l'adresse vient de forge.url du répertoire des jetons (le poste)" {
+  unset LCARS_FORGE_URL FORGE_BASE_URL
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$LCARS_PRIVATE_DIR"
+  printf 'http://forge.poste:3000\n' > "$LCARS_PRIVATE_DIR/forge.url"
+  run "$LIST"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c 'http://forge.poste:3000/api/v1/repos/fleet/lcars/' "$CALLS")" -eq 2 ]
+}
+
+@test "FORGE_BASE_URL de l'environnement (le conteneur) passe avant le fichier" {
+  unset LCARS_FORGE_URL
+  export FORGE_BASE_URL="http://gitea:3000"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$LCARS_PRIVATE_DIR"
+  printf 'http://forge.poste:3000\n' > "$LCARS_PRIVATE_DIR/forge.url"
+  run "$LIST"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c 'http://gitea:3000/api/v1/' "$CALLS")" -eq 2 ]
+}
+
+@test "aucune adresse : le refus nomme le fichier par défaut du poste et la variable du conteneur, curl n'est pas appelé" {
+  [[ ! -e /opt/lcars/var/tokens/forge.url ]] || skip "cette machine porte /opt/lcars/var/tokens/forge.url : le défaut y trouverait une adresse"
+  unset LCARS_FORGE_URL FORGE_BASE_URL LCARS_PRIVATE_DIR
+  run "$LIST"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"/opt/lcars/var/tokens/forge.url"* ]]
+  [[ "$output" == *"FORGE_BASE_URL"* ]]
+  [ ! -s "$CALLS" ]
+}
