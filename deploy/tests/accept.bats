@@ -138,7 +138,8 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
 
 @test "CI : une forge injoignable est sautée, jamais comptée comme zéro runner" {
   forge_runners 200 '{"total_count":0,"runners":[]}'
-  accept_joue --forge-url http://127.0.0.1:1
+  printf 'http://127.0.0.1:1\n' > "$TOKENS/forge.url"
+  accept_joue
   [[ "$output" == *"---   CI : l'API admin des runners n'a pas répondu (HTTP 000)"* ]]
   refute_out "aucun runner" <<<"$output"
 }
@@ -331,16 +332,12 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
 }
 
 @test "verdict : une option sans sa valeur rend 2, comme une option inconnue — jamais le 1 d'une capacité manquante" {
-  accept_joue --forge-url
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"accept: --forge-url attend une valeur"* ]]
   run unshare -Ur env PATH="$DECOR_BIN:$BINDIR:/usr/bin:/bin" bash "$MOD" --announce-file
   [ "$status" -eq 2 ]
   [[ "$output" == *"accept: --announce-file attend une valeur"* ]]
 }
 
 @test "la palette suit NO_COLOR, même sur un terminal" {
-  command -v script >/dev/null || skip "script (util-linux) absent"
   fleet_stub vivant
   local cmd="unshare -Ur env PATH='$DECOR_BIN:$BINDIR:/usr/bin:/bin' bash '$MOD' --announce-file '$ANNOUNCE'"
   run script -qec "$cmd" /dev/null

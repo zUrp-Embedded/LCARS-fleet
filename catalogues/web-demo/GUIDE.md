@@ -418,8 +418,7 @@ deploy/lib/enroll-catalogue.sh --catalogue /chemin/vers/mon-catalogue --tofu-dir
 
 Le script écrit les entrées de la recette forge (`roles.auto.tfvars.json`). Les jetons, eux, n'ont
 pas de liste à poser : le minteur unit les rôles de la release et ceux de chaque catalogue installé.
-La ligne `PROV_ROLES` que le script rend n'est qu'un plancher, que l'installeur d'un poste ajoute
-à cette union. Vous pouvez aussi lire la liste seule :
+Vous pouvez aussi lire la liste seule :
 
 ```bash
 mix lcars.catalogue.roles /chemin/vers/mon-catalogue

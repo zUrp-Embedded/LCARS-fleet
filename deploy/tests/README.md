@@ -41,8 +41,8 @@ rien d'ici.
 
 La porte demande `bats` et `shellcheck`, et refuse de passer sans eux. Les cas qui rendent un compose
 par `docker compose config` (sans daemon) demandent la CLI docker et son plugin compose : sans eux,
-`support/compose.bash` (`compose_requis`) les saute en le disant, et le verdict de la porte compte
-les cas sautés. `pack.sh --no-image` reste ainsi possible sur un poste sans docker.
+`support/compose.bash` (`compose_requis`) les saute en le disant. Un cas sauté n'est pas joué : le
+verdict de la porte les compte, et une porte verte qui en compte n'a pas vérifié les composes.
 
 ## Écrire un témoin
 

@@ -129,46 +129,33 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 
-# bats test_tags=structure
-@test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
-  # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
-  # un fichier de plus dans le tar, et un drift de plus sur la cible.
-  local pack="$BATS_TEST_DIRNAME/../pack.sh"
-  local media="$DEPLOY/modules.d/44-media.sh"
-  grep -qE '^SITE_SRC=assets/github\.io$' "$pack"
-  grep -qE '^SITE_SRC="\$\(repo_root\)/assets/github\.io"$' "$media"
-  # et la BASE d'URL est la meme des deux cotes — servie ailleurs, chaque asset serait faux
-  grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$pack"
-  grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$media"
+media_sources() { # media_sources [--avec-dist] — les médias et le site sous assets/ de l'arbre ; npm note chaque appel
+  mkdir -p "$RACINE/assets/avatars" "$RACINE/assets/favicon" "$RACINE/assets/github.io"
+  printf 'png' > "$RACINE/assets/avatars/lcars.png"; printf 'ico' > "$RACINE/assets/favicon/favicon.ico"
+  if [[ "${1:-}" == --avec-dist ]]; then
+    mkdir -p "$RACINE/assets/github.io/dist"; printf '<html>doc du paquet</html>' > "$RACINE/assets/github.io/dist/index.html"
+  fi
+  printf '#!/usr/bin/env bash\necho "npm $*" >> "%s"\n' "$BATS_TEST_TMPDIR/npm.trace" > "$DECOR_BIN/npm"; chmod 0755 "$DECOR_BIN/npm"
+}
+media() { run unshare -Ur env PROVISION_MODULE=44-media PROV_SUBSTRATE=linux PROV_HUMAN=root PROV_SOURCE_REV=abc1234 bash "$DEPLOY/modules.d/44-media.sh" "$1"; }
+
+@test "44-media, livraison binaire : la doc bâtie que le paquet porte sous assets/github.io/dist est posée, npm n'est jamais appelé" {
+  paquet
+  media_sources --avec-dist
+  media apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$LCARS_DECOR_ROOT/opt/lcars/share/doc/index.html")" = "<html>doc du paquet</html>" ]
+  [ ! -e "$BATS_TEST_TMPDIR/npm.trace" ]
 }
 
-# bats test_tags=structure
-@test "44-media : livraison binaire — il POSE la doc du paquet, il ne la batit pas" {
-  local media="$DEPLOY/modules.d/44-media.sh"
-  local bloc; bloc="$(sed -n '/^build_doc()/,/^}$/p' "$media")"
-  [ -n "$bloc" ]
-  grep -q 'prov_delivery_is_binary' <<<"$bloc"
-  # la garde est AVANT le test de npm, sinon elle ne sert a rien
-  local n_bin n_npm
-  n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_npm="$(grep -n 'command -v npm' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_bin" ]
-  [ -n "$n_npm" ]
-  [ "$n_bin" -lt "$n_npm" ]
-  # et un paquet SANS doc est un echec NOMME, pas un build silencieux
-  grep -q 'demi-livraison' <<<"$bloc"
-}
-
-# bats test_tags=structure
-@test "44-media : la POSE est commune aux deux livraisons — une seule copie" {
-  local media="$DEPLOY/modules.d/44-media.sh"
-  [ "$(grep -c 'poser_doc' "$media")" -ge 3 ]           # la fonction + ses deux appelants
-  # les lignes de CODE (commentaires exclus) qui copient le dist, quelle que soit la primitive
-  local n_copies
-  n_copies="$(grep -vE '^\s*#' "$media" | grep -E '\$SITE_SRC/dist' | grep -cE '\b(cp|rsync|install)\b')"
-  [ "$n_copies" -eq 1 ] \
-    || { echo "$n_copies gestes copient \$SITE_SRC/dist — une seule pose, sinon les deux formes derivent"; \
-         grep -vE '^\s*#' "$media" | grep -nE '\$SITE_SRC/dist' >&2; return 1; }
+@test "44-media, livraison binaire sans doc bâtie : un échec qui nomme la demi-livraison, rien n'est bâti ni posé" {
+  paquet
+  media_sources
+  media apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"livraison binaire sans doc bâtie"*"demi-livraison"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/npm.trace" ]
+  [ ! -e "$LCARS_DECOR_ROOT/opt/lcars/share/doc" ]
 }
 
 

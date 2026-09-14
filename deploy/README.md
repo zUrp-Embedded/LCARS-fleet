@@ -14,7 +14,7 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 
 | commande | rôle |
 |---|---|
-| `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et délègue ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration, et demande jq sur l'hôte en mode conteneur. Le reste : `install.sh --help` |
+| `install.sh` (racine) | l'installeur : il mesure la machine, montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et délègue ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur ; `--workstation` l'installe dans le système ; `--bench` monte aussi la forge, son runner CI et un compte de démonstration. En mode conteneur, jq est demandé sur l'hôte (le banc lit l'API de sa forge, `container forge-apply` dérive le roster d'une forge fournie), et une instance déjà posée est refusée avec sa mise à jour. Le reste : `install.sh --help` |
 | `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste : `up` mesure, arrête avant `sudo` un terrain que le préflight refuse, escalade par `sudo` une fois, joue `provision apply` depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel), puis `accept` ; `doctor` sonde sans escalader et rend les codes de `provision doctor` |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/`. Codes de sortie et variables : `deploy/container help` |
 | `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : les deux gates, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace) ; le tiroir `dist/<tag>/` les reprend par liens durs, avec le compose de l'instance, son profil seccomp, les constantes de l'installeur et l'installeur de la version ; l'image reste dans le daemon. Prérequis et codes de sortie : `deploy/pack.sh --help` ; `--publish` : « Publier une version », plus bas |
@@ -25,7 +25,9 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 
 `provision` joue `modules.d/NN-*.sh` dans l'ordre des préfixes. Chaque module est un processus
 (`<module> check|apply`) qui déclare en tête où il mute (`APPLY-ON`), où son état doit tenir
-(`CHECK-ON`), `NEEDS: root`, et des modules qui le précèdent (`AFTER`). Le substrat se mesure —
+(`CHECK-ON`), `NEEDS: root`, et les modules dont il emploie le travail (`AFTER`, que
+`provision list` affiche ; l'ordre est celui des préfixes, et un `AFTER` nomme un préfixe
+inférieur). Le substrat se mesure —
 `docker` dans un conteneur, `wsl` sous un noyau Microsoft, `linux` sinon — et un `--substrate` qui
 contredit la mesure est refusé. Le préflight (`00-preflight`) est la barrière de l'apply : tout
 verdict autre que conforme arrête la passe avant le module suivant, et `--only` le joue quand
@@ -42,10 +44,11 @@ Les faits fixes de l'installeur — racines, fichiers de jetons, comptes et grou
 de la forge, épingles de la chaîne Elixir, listes de ce que 62 pose — sont déclarés une fois dans
 `installer-constants.env` : la lib le lit comme une donnée, compose le reçoit par `--env-file`, et
 l'environnement ne les surcharge pas. Les choix de l'opérateur (ports, base des projets, humain)
-viennent des drapeaux de `provision`, de l'environnement ou d'un `--env FICHIER`. Les ports et la
-base ont leurs défauts dans les clés `_DEFAULT` du même fichier, et la ligne `params` du journal de
-la machine retient ceux qui s'en écartent ; l'humain se redonne à chaque passe (`--human`, sinon
-`SUDO_USER`, sinon l'appelant). Le fichier de canal (`PROV_CHANNEL_FILE`) retient qui a posé le
+viennent des drapeaux de `provision`, de l'environnement ou d'un `--env FICHIER`. Les ports, la
+base et l'humain de démonstration d'un banc ont leurs défauts dans les clés `_DEFAULT` du même
+fichier, et la ligne `params` du journal de la machine retient ceux qui s'en écartent ;
+`LCARS_BUILTIN_HUMAN=-` retire l'humain de démonstration retenu. L'humain servi se redonne à chaque
+passe (`--human`, sinon `SUDO_USER`, sinon l'appelant). Le fichier de canal (`PROV_CHANNEL_FILE`) retient qui a posé le
 produit, `source` (un checkout) ou `kit` ; un canal ne se pose pas sur un autre. La livraison suit
 l'arbre joué : une livraison source est un checkout, qui bâtit la release et la doc sur la machine
 et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de révision

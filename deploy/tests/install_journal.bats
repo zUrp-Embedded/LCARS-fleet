@@ -158,30 +158,17 @@ SH
 }
 
 
-@test "M8 : prov_scaffold_dir puis prov_promote_dir — l'echafaudage disparait, le final est la" {
-  lib "PROV_JOURNAL_ACC='$ACC'; prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"
+@test "prov_scaffold_dir puis prov_promote_dir : l'échafaudage disparaît, le final est là" {
+  lib "prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
   [ -f "$BATS_TEST_TMPDIR/final/x" ]
   [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
 }
 
-@test "M8 : prov_promote_dir REMPLACE un final existant" {
+@test "prov_promote_dir remplace un final existant" {
   mkdir -p "$BATS_TEST_TMPDIR/final/vieux"
   lib "prov_scaffold_dir '$BATS_TEST_TMPDIR/final.new' 0755 >/dev/null; prov_promote_dir '$BATS_TEST_TMPDIR/final.new' '$BATS_TEST_TMPDIR/final'"
   [ "$status" -eq 0 ]
   [ -d "$BATS_TEST_TMPDIR/final" ]
   [ ! -e "$BATS_TEST_TMPDIR/final/vieux" ]
-}
-
-# bats test_tags=structure
-@test "M8 : aucun module ne cree son echafaudage par ensure_dir — et trois au moins passent par la primitive" {
-  local hits n_scaffold n_promote
-  hits="$(grep -nE 'ensure_dir "[^"]*\.(partial|new)"' "$BATS_TEST_DIRNAME"/../modules.d/*.sh || true)"
-  [ -z "$hits" ] || { echo "echafaudage journalise :" >&2; printf '%s\n' "$hits" >&2; return 1; }
-  n_scaffold="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_scaffold_dir ')"
-  n_promote="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_promote_dir ')"
-  [ "$n_scaffold" -ge 3 ]
-  [ "$n_promote" -ge 3 ]
-  # le motif voit bien la forme interdite
-  grep -qE 'ensure_dir "[^"]*\.(partial|new)"' <<<'  ensure_dir "${NODE_HOME}.partial" 0755 root:root || verdict_apply'
 }

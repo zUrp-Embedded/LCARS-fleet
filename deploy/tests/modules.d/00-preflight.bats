@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/preflight_facts.bats
+# SOURCE: deploy/tests/modules.d/00-preflight.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-31
 # STATUS: témoins de 00-preflight — les faits que l'installeur lit, et les verdicts qui ne bougent pas
 
-load refute
-load support/decor
+load ../refute
+load ../support/decor
 
 setup() {
   # le décor possède l'environnement : toute la famille est effacée, pas les noms connus
@@ -14,9 +14,11 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_|DOCKER_)' || true)
   unset SUDO_USER
+  # la révision de l'arbre, que le runner exporte avant tout module
+  export PROV_SOURCE_REV=cafe1234
 
-  MOD="$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh"
-  LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/00-preflight.sh"
+  LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   [ -f "$MOD" ]
   [ -f "$LIB" ]
   FACTS="$BATS_TEST_TMPDIR/facts"
@@ -46,6 +48,11 @@ preflight() { # preflight <substrat> [VAR=val…]
 
 double() { # double <outil> <corps bash> — une doublure dans le PATH du décor
   printf '#!/usr/bin/env bash\n%s\n' "$2" > "$BIN/$1"; chmod 0755 "$BIN/$1"
+}
+
+naissance_est() { # naissance_est <valeur> — ce que « stat -c %W / » rend pour la naissance de l'instance ; le reste va au vrai stat
+  double stat "[[ \"\$*\" == '-c %W /' ]] && { echo '$1'; exit 0; }
+exec $(PATH=/usr/bin:/bin command -v stat) \"\$@\""
 }
 
 df_rend() { # df_rend <Mo libres> — df note son argument dans $BATS_TEST_TMPDIR/df.args
@@ -103,7 +110,7 @@ listen_on() { # listen_on <port> — un processus python qui écoute quelques se
 
 
 contrat() { # les faits que lisent install.sh et deploy/workstation, dérivés de leurs appels à fait
-  local install="$BATS_TEST_DIRNAME/../../install.sh" poste="$BATS_TEST_DIRNAME/../workstation"
+  local install="$BATS_TEST_DIRNAME/../../../install.sh" poste="$BATS_TEST_DIRNAME/../../workstation"
   {
     grep -hvE '^\s*#' "$install" "$poste" | grep -oE '\bfait "?[a-z0-9_]+("|\)| |$)' | sed -E 's/^fait "?//; s/("|\)| )$//'
     # les deux familles nommées par variable : fait "port_$p" sur la boucle des ports, fait "$t" sur les
@@ -118,7 +125,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   c="$(contrat)"
   # chaque forme de lecture est vue : littérale, par la boucle des ports, par la liste des outils
   local attendu
-  for attendu in substrat port_ssh jq sudo docker_host; do
+  for attendu in substrat port_ssh jq sudo docker_host racine revision; do
     grep -qx "$attendu" <<<"$c" || { echo "dérivation aveugle : $attendu absent du contrat" >&2; return 1; }
   done
   for f in $c; do
@@ -153,13 +160,14 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   double dpkg-query "echo dpkg-query >> '$BATS_TEST_TMPDIR/calculs'; exit 1"
   double date "echo date >> '$BATS_TEST_TMPDIR/calculs'; exec /bin/date \"\$@\""
   printf 'Start-Date: 2026-09-11  22:37:57\nInstall: openssh-server:amd64 (1:10.2p1)\n' > "$APT_HISTORY"
+  naissance_est 1
   run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROVISION_RUN=1 PROV_SUBSTRATE=wsl \
-      PROV_DOCKER_BIN="$BIN/docker" DOCKER_HOST=unix:///dev/null LCARS_INSTANCE_BIRTH=1 \
+      PROV_DOCKER_BIN="$BIN/docker" DOCKER_HOST=unix:///dev/null \
       PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" bash "$MOD" apply
   [ "$status" -ne 3 ]
   [ ! -e "$BATS_TEST_TMPDIR/calculs" ] || { echo "calculé pour rien : $(sort -u "$BATS_TEST_TMPDIR/calculs" | paste -sd' ')"; return 1; }
   # le même décor, avec un fichier de faits : les deux calculs ont lieu, l'instrument voit ce qu'il cherche
-  preflight wsl DOCKER_HOST=unix:///dev/null LCARS_INSTANCE_BIRTH=1
+  preflight wsl DOCKER_HOST=unix:///dev/null
   grep -qx date "$BATS_TEST_TMPDIR/calculs"
   grep -qx dpkg-query "$BATS_TEST_TMPDIR/calculs"
 }
@@ -422,15 +430,31 @@ exec $(command -v uname) \"\$@\""
   [ "$(fact port_deck)" = "$p pris" ]
 }
 
-@test "le port du deck tenu par notre service landing est dit nous" {
+landing_ici() { # landing_ici <cgroup rendu par systemd, vide si arrêtée> <cgroup de la socket> <port> — ss ne nomme pas le processus, il nomme le cgroup
+  double systemctl "[[ \"\$*\" == 'show -p ControlGroup --value lcars-landing.service' ]] && echo '$1'"
+  double ss "[[ \"\$*\" == *--cgroup* ]] && c=' cgroup:$2'
+echo \"LISTEN 0 4096 127.0.0.1:$3 0.0.0.0:*\${c:-}\""
+}
+
+@test "le port du deck tenu par la landing en marche ici est dit nous, services.env illisible compris ; arrêtée ici, la même socket est prise" {
   local p; p="$(free_port)"
-  ss_muet "$p"
   listen_on "$p"
   printf 'LCARS_LANDING_PORT=%s\n' "$p" > "$LCARS_DECOR_ROOT/etc/lcars/services.env"
+  chmod 0000 "$LCARS_DECOR_ROOT/etc/lcars/services.env"
+  landing_ici /system.slice/lcars-landing.service /system.slice/lcars-landing.service "$p"
   preflight wsl PROV_DECK_PORT="$p"
-  kill "$LISTENER" 2>/dev/null || true
   [ "$(fact port_deck)" = "$p nous lcars-landing (service)" ]
   [[ "$output" != *"port $p"*"pris"* ]]
+  # sous WSL la hiérarchie des cgroups est partagée : la landing d'une autre distribution porte le même nom
+  landing_ici "" /system.slice/lcars-landing.service "$p"
+  preflight wsl PROV_DECK_PORT="$p"
+  kill "$LISTENER" 2>/dev/null || true
+  [ "$(fact port_deck)" = "$p pris" ]
+}
+
+@test "l'utilisateur des faits est l'humain que --human nomme" {
+  preflight docker SUDO_USER=alice PROV_HUMAN=zoe
+  [ "$(fact utilisateur)" = zoe ]
 }
 
 @test "les trois ports suivent leurs variables, ssh compris" {
@@ -449,7 +473,7 @@ exec $(command -v uname) \"\$@\""
 }
 
 @test "la forge et le runner que ce poste a montés sont présents sans avertissement ; une instance du même nom en garde un" {
-  local mode; mode="$LCARS_DECOR_ROOT$(sed -n 's/^PROV_FORGE_MODE_FILE=//p' "$BATS_TEST_DIRNAME/../installer-constants.env")"
+  local mode; mode="$LCARS_DECOR_ROOT$(sed -n 's/^PROV_FORGE_MODE_FILE=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
   docker_qui_repond "" "" lcars-forge
   preflight wsl DOCKER_HOST=unix:///dev/null PROV_FORGE_BASE=lcars
   [ "$(fact projet_pris)" = "lcars-forge" ]
@@ -488,7 +512,8 @@ Commandline: apt install -y openssh-server
 Install: libwrap0:amd64 (7.6, automatic), openssh-server:amd64 (1:10.2p1), openssh-sftp-server:amd64 (1:10.2p1, automatic)
 End-Date: 2026-09-11  22:38:10
 EOF
-  preflight wsl LCARS_INSTANCE_BIRTH="$(date -d '2026-09-11 22:36:29' +%s)"
+  naissance_est "$(date -d '2026-09-11 22:36:29' +%s)"
+  preflight wsl
   [ "$(fact apt_installs)" = "openssh-server (2026-09-11)" ]
 }
 
@@ -500,7 +525,8 @@ Commandline: apt-get install ubuntu-wsl
 Install: ubuntu-wsl:amd64 (1.0)
 End-Date: 2026-04-20  18:07:00
 EOF
-  preflight wsl LCARS_INSTANCE_BIRTH="$(date +%s)"
+  naissance_est "$(date +%s)"
+  preflight wsl
   [ -z "$(fact apt_installs)" ]
 }
 
@@ -512,9 +538,11 @@ Commandline: apt-get install ubuntu-wsl
 Install: ubuntu-wsl:amd64 (1.0)
 End-Date: 2026-04-20  18:07:00
 EOF
-  preflight wsl LCARS_INSTANCE_BIRTH=0
+  naissance_est 0
+  preflight wsl
   [ "$(fact apt_installs)" = "inconnu" ]
-  preflight wsl LCARS_INSTANCE_BIRTH="?"
+  naissance_est "?"
+  preflight wsl
   [ "$(fact apt_installs)" = "inconnu" ]
 }
 

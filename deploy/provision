@@ -19,9 +19,10 @@
 #            <type> <mode> <uid>:<gid> <chemin>)
 #
 #   Un module modules.d/NN-nom.sh déclare en tête APPLY-ON (où il mute), CHECK-ON (où son état
-#   doit être vrai), NEEDS: root et AFTER (les modules qui le précèdent). Il est joué en processus
-#   séparé, dans l'ordre du préfixe. Le préflight (00) est la barrière de l'apply : un terrain
-#   qu'il ne déclare pas conforme ne reçoit aucun autre module.
+#   doit être vrai), NEEDS: root et AFTER (les modules dont il emploie le travail, que « list »
+#   affiche). Il est joué en processus séparé, dans l'ordre du préfixe, seul ordre du runner. Le
+#   préflight (00) est la barrière de l'apply : un terrain qu'il ne déclare pas conforme ne reçoit
+#   aucun autre module.
 #
 #   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
@@ -46,6 +47,9 @@
 #                    WSL ; une étiquette DNS, retenue dans le journal
 #   --verbose, -v
 #   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
+#
+#   LCARS_BUILTIN_HUMAN   l'humain de démonstration d'un banc, retenu dans le journal ; « - » retire
+#                    celui que le journal retient, et se refuse avec LCARS_BENCH=1
 
 set -euo pipefail
 
@@ -54,12 +58,9 @@ DEPLOY_DIR="$(dirname "$SELF")"
 MODULES_DIR="$DEPLOY_DIR/modules.d"
 export PROVISION_LIB="$DEPLOY_DIR/lib/provision-lib.sh"
 
-# l'aide se borne par son contenu, jamais par des numéros de ligne : une aide tronquée ne se signale pas
-usage() { sed -n '/^# USAGE/,/^#   --porcelain/p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE/,/^$/p' "$SELF" | sed 's/^# \{0,1\}//'; }
 die()   { echo "provision: $*" >&2; exit 1; }
 
-[[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
-[[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
 [[ "$EUID" -ne 0 || -z "${LCARS_DECOR_ROOT:-}" ]] \
   || die "LCARS_DECOR_ROOT est posée et le runner tourne en root : ce décor de témoin déplace les chemins, pas les comptes, les paquets, les services ni docker. Retirer LCARS_DECOR_ROOT de l'environnement (sudo -E, profil du shell), puis relancer."
 
@@ -137,6 +138,12 @@ _journal_params() {
 }
 _journal_params
 [[ -z "${PROV_FORGE_BASE:-}" ]] || valid_project "$PROV_FORGE_BASE" PROV_FORGE_BASE
+# « - » dit « aucun humain de démonstration » : vide, la valeur retenue par le journal reprendrait sa place
+if [[ "${LCARS_BUILTIN_HUMAN:-}" == - ]]; then
+  [[ "${LCARS_BENCH:-}" != 1 ]] || die "LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration, qu'un banc (LCARS_BENCH=1) exige"
+  unset LCARS_BUILTIN_HUMAN
+  export PROV_BUILTIN_HUMAN=""
+fi
 
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"
@@ -151,16 +158,13 @@ export PROV_SUBSTRATE="$SUBSTRATE"
 unset _mesure
 
 # l'uid du siège vient du compte qui a lancé le runner, jamais de --human
-_seat_login="${SUDO_USER:-$(id -un)}"
-_seat_uid="$(id -u -- "$_seat_login" 2>/dev/null || true)"
-if [[ "$_seat_uid" =~ ^[0-9]+$ ]]; then
-  : "${LCARS_SYSADMIN_UID:=$_seat_uid}"
-else
-  echo "[provision] uid du siège illisible pour « $_seat_login » — LCARS_SYSADMIN_UID reste ${LCARS_SYSADMIN_UID:-1000}, la garde du siège retient cet uid-là" >&2
-  : "${LCARS_SYSADMIN_UID:=1000}"
+if [[ -z "${LCARS_SYSADMIN_UID:-}" ]]; then
+  _seat_login="${SUDO_USER:-$(id -un)}"
+  LCARS_SYSADMIN_UID="$(id -u -- "$_seat_login" 2>/dev/null)" \
+    || die "uid du siège illisible pour « $_seat_login » (SUDO_USER, sinon l'appelant) — la garde du siège ne retient pas un uid deviné ; LCARS_SYSADMIN_UID le donne"
+  unset _seat_login
 fi
 export LCARS_SYSADMIN_UID
-unset _seat_login _seat_uid
 
 # shellcheck disable=SC2119 # l'argument de prov_source_rev est optionnel : l'appel nu est le cas nominal
 PROV_SOURCE_REV="$(prov_source_rev)"
@@ -224,7 +228,8 @@ if [[ "$CMD" == "audit" ]]; then
   exit $?
 fi
 if [[ "$CMD" == "apply" ]]; then
-  PROV_JOURNAL_ACC="$(mktemp "${TMPDIR:-/tmp}/prov-journal.XXXXXX" 2>/dev/null || true)"
+  PROV_JOURNAL_ACC="$(mktemp "${TMPDIR:-/tmp}/prov-journal.XXXXXX" 2>/dev/null)" \
+    || die "aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp} — la passe y accumule son journal ; apply refusé avant tout module"
   export PROV_JOURNAL_ACC
 fi
 
@@ -289,7 +294,7 @@ else
   echo ""
   # Le journal s'écrit même quand la passe ne pose rien ; l'inventaire apt_installed s'additionne
   # avec celui des passes précédentes, le reste décrit cette passe.
-  if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" ]]; then
+  if [[ "$CMD" == "apply" ]]; then
     _journal_ancien=""
     [[ -r "$PROV_JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^apt_installed ' "$PROV_JOURNAL_FILE" || true)"
     if ! {
@@ -298,13 +303,13 @@ else
         echo "# SOURCE: $PROV_JOURNAL_FILE"
         echo "# STATUS: mesure, pas declaration — ce qui a été posé sur cette machine ; deploy/system.manifest dit ce qui peut l'être."
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
+        echo "source_rev    $PROV_SOURCE_REV"
         echo "substrate     $SUBSTRATE"
         echo "params        $(prov_params_line)"
         echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
         { printf '%s\n' "$_journal_ancien"; cat "$PROV_JOURNAL_ACC"; } \
-        | awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
+        | awk 'NF { k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
              END { for (k in acc) {
                      n=split(acc[k], w, " "); delete seen; out=""
                      for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }

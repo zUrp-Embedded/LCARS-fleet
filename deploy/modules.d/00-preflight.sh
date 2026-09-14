@@ -48,6 +48,16 @@ ancetre_existant() { # ancetre_existant <chemin> → le chemin s'il existe, sino
 # hors de l'installeur, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à lui ne se calcule pas
 faits_attendus() { [[ -n "${PROV_FACTS_FILE:-}" ]]; }
 
+# Sans root, ss ne nomme pas le processus d'un autre compte, mais il nomme le cgroup de la socket. Sous WSL
+# la hiérarchie des cgroups est partagée entre distributions : seul le cgroup que ce systemd rend dit « ici ».
+landing_tient() { # landing_tient <port> → 0 si la socket qui écoute sur ce port est dans le cgroup de lcars-landing en marche sur cette machine
+  local cg sockets
+  cg="$(systemctl show -p ControlGroup --value lcars-landing.service 2>/dev/null)" || return 1
+  [[ -n "$cg" ]] || return 1
+  sockets="$(ss -ltnH --cgroup "sport = :$1" 2>/dev/null)" || return 1
+  [[ " ${sockets//$'\n'/ } " == *" cgroup:$cg "* ]]
+}
+
 check() {
   # ─── Le système ───────────────────────────────────────────────────────────────────────────────
   if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
@@ -108,6 +118,7 @@ check() {
 
   local disk_mb
   disk_mb="$(df -Pm "$sous" | awk 'NR==2 {print $4}')"
+  p_fact racine "$(prov_canon "$PROV_ROOT")"
   p_fact disque_mb "$disk_mb"
   if [[ "$disk_mb" -lt 2048 ]]; then
     p_drift "disque ${disk_mb} Mo libres sur $sous < 2048 Mo — libérer de l'espace avant l'installation"
@@ -117,9 +128,8 @@ check() {
     p_ok "disque ${disk_mb} Mo libres ($sous)"
   fi
 
-  local humain; humain="${SUDO_USER:-$(id -un)}"
-  p_fact utilisateur "$humain"
-  p_fact groupes "$(id -Gn "$humain" 2>/dev/null | tr ' ' ',')"
+  p_fact utilisateur "$PROV_HUMAN"
+  p_fact groupes "$(id -Gn "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
 
   # ─── Le substrat ──────────────────────────────────────────────────────────────────────────────
   p_fact substrat "$PROV_SUBSTRATE"
@@ -203,13 +213,12 @@ check() {
   fi
 
   # ─── Les ports et le projet compose ───────────────────────────────────────────────────────────
-  local base="$PROV_FORGE_BASE" nom port etat landing
+  local base="$PROV_FORGE_BASE" nom port etat
   local -a miens=("$PROV_FORGE_PROJECT" "$base-fleet" "$PROV_RUNNER_PROJECT")
-  landing="$(env_field "$PROV_SERVICES_ENV" LCARS_LANDING_PORT)"
   for nom in forge:"$PROV_FORGE_HOST_PORT" deck:"$PROV_DECK_PORT" ssh:"$PROV_SSH_PORT"; do
     port="${nom#*:}"
     etat="$(port_state "$port" "${miens[@]}")"
-    [[ "$etat" != pris* || "$nom" != deck:* || "$port" != "$landing" ]] || etat="nous lcars-landing (service)"
+    if [[ "$etat" == pris* && "$nom" == deck:* ]] && landing_tient "$port"; then etat="nous lcars-landing (service)"; fi
     p_fact "port_${nom%%:*}" "$port $etat"
     [[ "$etat" != pris* ]] || p_warn "port $port (${nom%%:*}) $etat"
   done
@@ -237,7 +246,7 @@ check() {
   if [[ "$PROV_SUBSTRATE" == "docker" ]]; then
     p_fact apt_installs sans-objet
   elif faits_attendus; then
-    local naissance; naissance="${LCARS_INSTANCE_BIRTH:-$(stat -c %W / 2>/dev/null || true)}"
+    local naissance; naissance="$(stat -c %W / 2>/dev/null || true)"
     if [[ "$naissance" =~ ^[1-9][0-9]*$ ]]; then
       p_fact apt_installs "$(apt_installs_depuis "$naissance" | paste -sd, -)"
     else
@@ -262,6 +271,7 @@ check() {
 
   # ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ───────────────────────────
   p_fact channel_tree "$(prov_channel_here)"
+  p_fact revision "$PROV_SOURCE_REV"
   # appel nu : le p_fail d'un canal illisible doit compter dans le verdict
   local canal=invalide
   if prov_channel >/dev/null; then canal="$PROV_CHANNEL"; fi

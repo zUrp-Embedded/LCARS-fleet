@@ -3,18 +3,17 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-09-14
 # STATUS: l'acceptation d'une installation : ce qu'un opérateur peut en faire — se connecter à la forge, faire fusionner une PR, démarrer la fleet
-# USAGE : accept --announce-file <chemin> [--forge-url URL]
+# USAGE : accept --announce-file <chemin>
 # EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une capacité manque · 2 option inconnue, ou sans sa valeur
 
 set -euo pipefail
 
-ANNOUNCE="" ; FORGE_URL=""
+ANNOUNCE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --announce-file|--forge-url)
+    --announce-file)
       [[ -n "${2:-}" ]] || { echo "accept: $1 attend une valeur" >&2; exit 2; }
-      if [[ "$1" == --announce-file ]]; then ANNOUNCE="$2"; else FORGE_URL="$2"; fi
-      shift 2 ;;
+      ANNOUNCE="$2"; shift 2 ;;
     *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
   esac
 done
@@ -22,7 +21,8 @@ done
 # shellcheck source=lib/provision-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/provision-lib.sh"
 
-[[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
+# l'adresse que 48-forge-host a annoncée pour cette machine
+FORGE_URL="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
 
 # une capacité sautée n'est pas une capacité tenue : seul ce qui est établi porte la phrase finale
 FAILED=0 ; HELD=0 ; SKIPPED=0 ; SKIPPED_NAMES=""

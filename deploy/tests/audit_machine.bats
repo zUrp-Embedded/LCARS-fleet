@@ -146,7 +146,7 @@ STUB
   [[ "$output" != *"Rien n'est apparu"* ]]
 }
 
-@test "M5 : un chmod sur un chemin preexistant ne fait pas un objet apparu" {
+@test "un chmod sur un chemin préexistant ne fait pas un objet apparu" {
   printf 'f -rw-r--r-- 0:0 /etc/pas-a-nous.conf\n' > "$AVANT"
   printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
   audit
@@ -155,7 +155,7 @@ STUB
   refute grep -q '/etc/pas-a-nous.conf' <<<"$output"
 }
 
-@test "M5 : TEMOIN DU TEMOIN — le meme chemin ABSENT de l'avant est bien apparu (et non couvert)" {
+@test "le même chemin, absent de l'instantané d'avant, est un objet apparu et non couvert" {
   : > "$AVANT"
   printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
   audit

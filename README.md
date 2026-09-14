@@ -22,7 +22,7 @@ ou dans le système.
 |---|---|
 | Docker, avec le plugin compose | exécute le conteneur LCARS, la forge et le runner CI. Sous Windows : Docker Desktop avec l'intégration WSL 2 activée pour la distribution ; un `docker.io` posé dans la distribution à côté de Docker Desktop est refusé. Sous Ubuntu natif : `docker.io` et `docker-compose-v2`, ou Docker Engine ; en mode conteneur le daemon est un prérequis, en mode `--workstation` sur une machine dédiée l'installeur le pose |
 | git, curl | le clone, le téléchargement du kit, les échanges avec la forge |
-| jq | mode conteneur avec `--bench` : le banc lit l'API de sa forge ; en mode `--workstation`, l'installation le pose |
+| jq | mode conteneur : le banc (`--bench`) lit l'API de sa forge, et `deploy/container forge-apply` dérive le roster d'une forge fournie ; en mode `--workstation`, l'installation le pose |
 | sudo | mode `--workstation` seulement : une escalade, pour le provisionnement du système |
 | WSL 2 | sous Windows ; WSL 1 ne fournit pas les espaces de noms nécessaires |
 | Compte Anthropic | les agents sont des processus Claude Code ; les identifiants de `~/.claude/.credentials.json` sont réutilisés quand ils existent |
@@ -64,7 +64,7 @@ la mesure : l'état est celui du système, lu à chaque passage.
 | `--bench` | l'installeur monte lui-même la forge Gitea, son runner CI et un compte de démonstration. Sans cette option, une forge existante est requise (`FORGE_BASE_URL`) |
 | `--check` | mesure et affiche, ne modifie rien |
 | `--dry-run` | tout jusqu'au bilan, puis la commande qui serait exécutée |
-| `--port-forge N` `--port-deck N` `--port-ssh N` | ports publiés ; défauts 21000, 20999, 2222. `--port-forge` va avec `--bench`, `--port-ssh` avec le mode conteneur |
+| `--port-forge N` `--port-deck N` `--port-ssh N` | ports publiés ; le bilan affiche chaque port retenu, défaut compris. `--port-forge` va avec `--bench`, `--port-ssh` avec le mode conteneur |
 | `--forge-project N` | la base des projets compose (défaut `lcars`) |
 
 La mesure vit dans le kit : pipés sans kit déjà posé, `--check` et `--dry-run` s'arrêtent avant de
@@ -134,7 +134,7 @@ bash install.sh --workstation --bench
 
 Un kit (`lcars-fleet-<version>-otp<N>-<arch>.tar.gz`, produit par `deploy/pack.sh`) s'installe
 dans le système par `deploy/workstation up --from <kit.tar.gz>` (canal `kit`).
-`/etc/lcars/channel` enregistre le canal utilisé ; les mises à jour se font par le même canal, et
+La machine enregistre le canal utilisé ; les mises à jour se font par le même canal, et
 l'installation d'un canal par-dessus un autre est refusée en nommant le geste.
 
 ### Entrer
@@ -155,14 +155,16 @@ sur `0.0.0.0` ; sans `--bench`, le conteneur publie le tableau de bord et ssh su
 le système, le tableau de bord écoute sur `0.0.0.0` dans les deux cas, et la forge montée par
 `--bench` aussi. Réseau de confiance seulement.
 
-**Le tableau de bord** — `http://<adresse>:20999`. L'entrée principale ; on s'y connecte par la
-forge (le bouton est sur la page d'accueil). Il porte un terminal web par humain, l'état de la
-flotte et la liste des agents qui tournent.
+Les ports sont ceux que le bilan de l'installeur a affichés.
 
-**La forge** — `http://<adresse>:21000`. Un Gitea complet : les projets, leurs pull requests,
-leurs runs de CI. Connexion en `lcars`.
+**Le tableau de bord** — `http://<adresse>:<port du deck>`. L'entrée principale ; on s'y connecte
+par la forge (le bouton est sur la page d'accueil). Il porte un terminal web par humain, l'état de
+la flotte et la liste des agents qui tournent.
 
-**SSH** — `ssh lcars@<adresse> -p 2222`. Le même conteneur, dans un terminal :
+**La forge** — `http://<adresse>:<port de la forge>`. Un Gitea complet : les projets, leurs pull
+requests, leurs runs de CI. Connexion en `lcars`.
+
+**SSH** — `ssh lcars@<adresse> -p <port ssh>`. Le même conteneur, dans un terminal :
 
 ```bash
 fleet start           # démarrer la flotte
@@ -179,6 +181,10 @@ matériel sur la machine. C'est un geste d'administration de la forge ; sur ce b
 administrateur. Une fois installé, ses cartes apparaissent à côté de celles de `fleet` quand un
 agent propose le catalogue d'un nouveau projet ; le catalogue d'un projet est fixé à sa création.
 
+Dans cette version, `lcars catalogue install` échoue : la résolution du dépôt du catalogue lit une
+ligne de journal au lieu de sa réponse. Le défaut est connu ; `fleet`, livré avec l'installation,
+n'est pas concerné.
+
 ### Un premier projet
 
 Tout passe par une conversation avec un agent ; il n'y a pas de formulaire.
@@ -193,6 +199,23 @@ Tout passe par une conversation avec un agent ; il n'y a pas de formulaire.
 
 Avec `--bench`, le runner est enregistré : la CI d'un projet tourne. Sur une forge existante, la CI
 tourne sur les runners que son opérateur y a enregistrés.
+
+### Mettre à jour
+
+En conteneur, une instance déjà posée n'est pas réinstallée : `install.sh` la refuse et nomme sa mise
+à jour. Le conteneur est recréé sur l'image de la nouvelle version ; ses volumes et son magasin
+restent. Le geste se joue depuis l'arbre qui a installé l'instance, dont le compose l'a créée :
+
+```bash
+LCARS_IMAGE=<image de la version> deploy/container pull
+LCARS_IMAGE=<image de la version> deploy/container -p <base>-fleet up
+```
+
+Un banc (`--bench`) garde sa forge et ses jetons ; seule l'image de son conteneur change :
+`deploy/docker/bench/bench-swap-image.sh --image <image de la version> --forge-project <base>`.
+
+Dans le système, l'installeur de la nouvelle version se relance par le même canal : il reprend depuis
+la mesure et repose ce qui a changé.
 
 ### Retirer
 
@@ -256,8 +279,8 @@ fichier et repousser débloque la PR elle-même.
 - **Un runner** — Gitea Actions, enregistré, pour que la CI soit réelle.
 - **Des catalogues** — les définitions métier : quels rôles existent, quelles cartes de workflow
   ils servent, quel est le system prompt de chaque agent. Un catalogue est de la donnée, pas du
-  code. `fleet` est livré dans le runtime ; `web-demo` est déposé sur la forge et s'installe en un
-  geste.
+  code. `fleet` est livré dans le runtime ; `web-demo` est déposé sur la forge, et son installation
+  échoue dans cette version (« Le catalogue de démonstration »).
 - **Des agents** — des processus Claude Code, chacun dans un bac à sable qui monte exactement ce
   dont son rôle a besoin.
 
@@ -279,7 +302,7 @@ Voir [`LICENSE`](LICENSE) et [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 |---|---|
 | Docker, with the compose plugin | runs the LCARS container, the forge and the CI runner. On Windows: Docker Desktop with WSL 2 integration enabled for the distribution; a `docker.io` installed in the distribution next to Docker Desktop is refused. On native Ubuntu: `docker.io` and `docker-compose-v2`, or Docker Engine; in container mode the daemon is a prerequisite, in `--workstation` mode on a dedicated machine the installer installs it |
 | git, curl | the clone, the kit download, the exchanges with the forge |
-| jq | container mode with `--bench`: the bench reads its forge's API; in `--workstation` mode, the install puts it in place |
+| jq | container mode: the bench (`--bench`) reads its forge's API, and `deploy/container forge-apply` derives the roster of a provided forge; in `--workstation` mode, the install puts it in place |
 | sudo | `--workstation` mode only: one escalation, for provisioning the system |
 | WSL 2 | on Windows; WSL 1 does not provide the namespaces needed |
 | Anthropic account | agents are Claude Code processes; the credentials in `~/.claude/.credentials.json` are reused when present |
@@ -321,7 +344,7 @@ measurement: the state is the system's, read on every run.
 | `--bench` | the installer brings up the Gitea forge, its CI runner and a demo account itself. Without it, an existing forge is required (`FORGE_BASE_URL`) |
 | `--check` | measures and reports, changes nothing |
 | `--dry-run` | everything up to the summary, then the command that would run |
-| `--port-forge N` `--port-deck N` `--port-ssh N` | published ports; defaults 21000, 20999, 2222. `--port-forge` goes with `--bench`, `--port-ssh` with container mode |
+| `--port-forge N` `--port-deck N` `--port-ssh N` | published ports; the summary shows each port in use, defaults included. `--port-forge` goes with `--bench`, `--port-ssh` with container mode |
 | `--forge-project N` | the base name of the compose projects (default `lcars`) |
 
 The measurement lives in the kit: piped with no kit already in place, `--check` and `--dry-run`
@@ -391,7 +414,7 @@ bash install.sh --workstation --bench
 ```
 
 A kit (`lcars-fleet-<version>-otp<N>-<arch>.tar.gz`, produced by `deploy/pack.sh`) installs into
-the system with `deploy/workstation up --from <kit.tar.gz>` (`kit` channel). `/etc/lcars/channel`
+the system with `deploy/workstation up --from <kit.tar.gz>` (`kit` channel). The machine
 records the channel used; updates go through the same channel, and installing one channel over
 another is refused, naming the way out.
 
@@ -413,14 +436,16 @@ from their own machine. In a container, `--bench` publishes the forge, the dashb
 the dashboard listens on `0.0.0.0` either way, and so does the forge brought up by `--bench`.
 Trusted network only.
 
-**The dashboard** — `http://<address>:20999`. The main entrance; you log in through the forge (the
-button is on the landing page). It carries one web terminal per human, the fleet's state and the
-list of running agents.
+The ports are the ones the installer's summary showed.
 
-**The forge** — `http://<address>:21000`. A full Gitea: the projects, their pull requests, their CI
-runs. Log in as `lcars`.
+**The dashboard** — `http://<address>:<deck port>`. The main entrance; you log in through the forge
+(the button is on the landing page). It carries one web terminal per human, the fleet's state and
+the list of running agents.
 
-**SSH** — `ssh lcars@<address> -p 2222`. The same container, in a terminal:
+**The forge** — `http://<address>:<forge port>`. A full Gitea: the projects, their pull requests,
+their CI runs. Log in as `lcars`.
+
+**SSH** — `ssh lcars@<address> -p <ssh port>`. The same container, in a terminal:
 
 ```bash
 fleet start           # start the fleet
@@ -437,6 +462,10 @@ material on the machine. It is a forge admin gesture; on this bench, `lcars` is 
 installed, its cards show up next to `fleet`'s when an agent proposes a catalogue for a new
 project; a project's catalogue is fixed at creation.
 
+In this version, `lcars catalogue install` fails: resolving the catalogue's repository reads a log
+line instead of its answer. The defect is known; `fleet`, which ships with the install, is not
+affected.
+
 ### A first project
 
 Everything goes through a conversation with an agent; there is no form.
@@ -451,6 +480,23 @@ Everything goes through a conversation with an agent; there is no form.
 
 With `--bench`, the runner is registered: a project's CI runs. On an existing forge, CI runs on the
 runners its operator has registered there.
+
+### Updating
+
+In a container, an instance already in place is not reinstalled: `install.sh` refuses it and names
+its update. The container is recreated on the new version's image; its volumes and its store stay.
+The gesture runs from the tree that installed the instance, whose compose created it:
+
+```bash
+LCARS_IMAGE=<version image> deploy/container pull
+LCARS_IMAGE=<version image> deploy/container -p <base>-fleet up
+```
+
+A bench (`--bench`) keeps its forge and its tokens; only its container's image changes:
+`deploy/docker/bench/bench-swap-image.sh --image <version image> --forge-project <base>`.
+
+Into the system, the new version's installer is run again through the same channel: it starts again
+from the measurement and puts back what changed.
 
 ### Tearing down
 
@@ -513,7 +559,8 @@ fixing that file and pushing again unblocks the PR itself.
 - **A runner** — Gitea Actions, registered, so that CI is real.
 - **Catalogues** — the business definitions: which roles exist, which workflow cards they serve,
   what each agent's system prompt is. A catalogue is data, not code. `fleet` ships in the runtime;
-  `web-demo` is deposited on the forge and installs in one gesture.
+  `web-demo` is deposited on the forge, and its install fails in this version (« The demo
+  catalogue »).
 - **Agents** — Claude Code processes, each in a sandbox that mounts exactly what its role needs.
 
 ### License

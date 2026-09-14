@@ -12,14 +12,16 @@
 #     d'une release, pipé ou avec --from-release, y télécharge d'abord le kit de sa version, le vérifie
 #     et le détare : la mesure vit dans le kit.
 #
-#       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker.
+#       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker ; jq est requis sur
+#                       cette machine : le banc lit l'API de sa forge, et « deploy/container
+#                       forge-apply » dérive le roster d'une forge fournie. Une instance déjà
+#                       présente n'est pas réinstallée : le refus nomme sa mise à jour.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
 #                       Linux dédiée déclarée par LCARS_ALLOW_ANY_HOST=1. Ce mode possède /etc,
 #                       la racine de LCARS, des groupes, des comptes et des paquets ; un terrain se
 #                       refait, il ne se désinstalle pas.
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
-#                       démonstration ; en conteneur, jq est requis sur cette machine. Sans ce
-#                       drapeau, une forge existante est requise (FORGE_BASE_URL).
+#                       démonstration. Sans ce drapeau, une forge existante est requise (FORGE_BASE_URL).
 #       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Un refus
 #                       du bilan sort en 1 avant la grille ; avec --workstation, un terrain que le
 #                       préflight refuse en est un.
@@ -67,7 +69,6 @@ if [[ "$EUID" -eq 0 ]]; then
 fi
 
 # BASH_SOURCE n'est pas lié quand bash lit sur stdin (curl | bash) : sans fichier, pas d'arbre.
-# Une variable proposée à l'opérateur se place devant PORTE_BASH : pipée, devant curl, bash ne la recevrait pas.
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PORTE_TIRAGE=""
@@ -77,7 +78,6 @@ else
   PORTE_TIRAGE="curl -fsSL <install.sh> | "
   PORTE_BASH="bash -s --"
 fi
-PORTE_CMD="$PORTE_TIRAGE$PORTE_BASH"
 
 REPO_URL="https://github.com/zurp-embedded/LCARS-fleet.git"
 # Les constantes d'une version : vides dans le gabarit, écrites par deploy/lib/door-gen.sh sur les
@@ -95,19 +95,22 @@ FORCED_SUBSTRATE=""
 declare -a PASSTHRU=()       # au délégué du mode --workstation, tel quel
 declare -a MESURE=()         # au préflight initial : ce qui change la mesure
 declare -a PROJET_PORTS=()   # au préflight et au délégué : le projet et les ports
+declare -a COMMUNS=()        # ce que les deux modes acceptent : un remède le rejoue
+declare -a SSH_ARGS=()       # --port-ssh, que le mode --workstation refuse
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --workstation)    MODE=workstation; shift ;;
-    --bench)          WITH_BENCH=1; shift ;;
-    --check|--doctor) DOCTOR_MODE=1; shift ;;
-    --dry-run)        DRY_RUN=1; shift ;;
-    --from-release)   FROM_RELEASE=1; shift ;;
-    --repo)           REPO_URL="${2:?--repo attend une URL}"; REPO_DONNE=1; shift 2 ;;
-    --substrate)      FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
-    --port-forge|--port-deck|--port-ssh)
-                      PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
-    --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
+    --bench)          WITH_BENCH=1; COMMUNS+=("$1"); shift ;;
+    --check|--doctor) DOCTOR_MODE=1; COMMUNS+=("$1"); shift ;;
+    --dry-run)        DRY_RUN=1; COMMUNS+=("$1"); shift ;;
+    --from-release)   FROM_RELEASE=1; COMMUNS+=("$1"); shift ;;
+    --repo)           REPO_URL="${2:?--repo attend une URL}"; REPO_DONNE=1; COMMUNS+=("$1" "$2"); shift 2 ;;
+    --substrate)      FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"; COMMUNS+=("$1" "$2"); shift 2 ;;
+    --port-forge|--port-deck)
+                      PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); COMMUNS+=("$1" "$2"); shift 2 ;;
+    --port-ssh)       PROJET_PORTS+=("$1" "${2:?$1 attend un port}"); SSH_ARGS+=("$1" "$2"); shift 2 ;;
+    --forge-project)  PROJET_PORTS+=("$1" "${2:?$1 attend un nom}"); COMMUNS+=("$1" "$2"); shift 2 ;;
     # 00-preflight lit ce que --env pose (la forge fournie, la déclaration) ; l'humain et la sélection ne pèsent que sur l'apply
     --env)            PASSTHRU+=("$1" "${2:?$1 attend un fichier}"); MESURE+=("$1" "$2"); shift 2 ;;
     --human|--only)   PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
@@ -139,8 +142,6 @@ else
 fi
 [[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
   || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
-PASSTHRU+=(${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
-MODE_FLAG=""; [[ "$MODE" != "workstation" ]] || MODE_FLAG=" --workstation"
 
 # ─── outils ───────────────────────────────────────────────────────────────────────────────────
 FACTS_FILE=""
@@ -148,14 +149,30 @@ fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
 stop() { # stop <ligne…> — le bilan s'arrête là, rien n'est fait
   echo ""; local l; for l in "$@"; do echo "  $l"; done; echo ""; exit 1
 }
+# Une commande proposée est celle de l'opérateur, rejouée dans le mode visé : suivie telle quelle, elle ne
+# ramène pas au refus qui l'a imprimée. Une variable se place devant PORTE_BASH : pipée, devant curl, bash
+# ne la recevrait pas.
+relance() { # relance <container|workstation> [VAR=valeur | drapeau…] → la ligne à relancer, ces ajouts compris
+  local mode="$1" a; shift
+  local -a vars=() recus=(${COMMUNS[@]+"${COMMUNS[@]}"})
+  [[ "$mode" != workstation || "$SUBSTRATE" != linux ]] || vars+=(LCARS_ALLOW_ANY_HOST=1)
+  [[ -z "${FORGE_BASE_URL:-}" ]] || vars+=("FORGE_BASE_URL=$FORGE_BASE_URL")
+  if [[ "$mode" == workstation ]]; then recus=(--workstation ${recus[@]+"${recus[@]}"} ${PASSTHRU[@]+"${PASSTHRU[@]}"})
+  else recus+=(${SSH_ARGS[@]+"${SSH_ARGS[@]}"})
+  fi
+  for a in "$@"; do [[ "$a" != *=* ]] || vars+=("$a"); done
+  printf '%s%s%s' "$PORTE_TIRAGE" "${vars[*]:+${vars[*]} }" "$PORTE_BASH"
+  [[ "${#recus[@]}" -eq 0 ]] || printf ' %q' "${recus[@]}"
+  for a in "$@"; do [[ "$a" == *=* ]] || printf ' %s' "$a"; done
+}
 sortie_dite() { # sortie_dite <argv…> — ce que --dry-run rend à la place d'un exec
   echo ""; echo "  ${W}--dry-run${N} : rien n'est fait. La commande serait :"
   printf '   '; printf ' %q' "$@"; echo ""; echo ""
   exit 0
 }
-fetch() { # fetch <url> <fichier>
+fetch() { # fetch <url> <fichier> — en https seul, sauf LCARS_DOOR_INSECURE_HTTP pour un banc local ; curl dit pourquoi il refuse
   local proto='=https'; [[ -z "${LCARS_DOOR_INSECURE_HTTP:-}" ]] || proto='=http,https'
-  curl --proto "$proto" -fsSL "$1" -o "$2"
+  curl --proto "$proto" -fsSL --show-error "$1" -o "$2"
 }
 sum_of() { local s n; while read -r s n; do [[ "$n" == "$1" ]] && { echo "$s"; return 0; }; done < <(sums); return 1; }
 assets_for() { # assets_for <arch> -> le kit de cette version pour cette arch, par convention de nom
@@ -183,7 +200,6 @@ obtenir() { # obtenir <artefact> <sha256> — dans KITS_DIR, vérifié ; rc 2 s'
     [[ "$got" == "$want" ]] || { rm -f "$f"; echo "  ${R}sha256 de $a : attendu $want, obtenu $got — artefact altéré ou incomplet, rien n'est posé.${N}"; return 1; }
     echo "  $a : téléchargé, sha256 vérifié"
   fi
-  printf '%s  %s\n' "$want" "$a" > "$f.sha256"
   signature "$a" || return 1
   [[ "$deja" -eq 0 ]] || return 2
 }
@@ -237,10 +253,6 @@ source_release() { # le kit de cette version dans ~/.lcars/kits/<version>/, vér
     echo "  kit déjà posé, rien n'est téléchargé"
     SCRIPT_DIR="$KITS_DIR/lcars_install"; return 0
   fi
-  if [[ "$BASE" != https://* ]]; then
-    [[ -n "${LCARS_DOOR_INSECURE_HTTP:-}" ]] || { echo "  ${R}$BASE n'est pas https — ce script ne télécharge qu'en https (LCARS_DOOR_INSECURE_HTTP=1 pour un banc local).${N}"; exit 1; }
-    echo "  ${AMBER}LCARS_DOOR_INSECURE_HTTP=1 : $BASE — transport en clair, banc seulement.${N}" >&2
-  fi
   command -v curl >/dev/null 2>&1 || { echo "  ${R}curl est absent — apt install curl${N}"; exit 1; }
   mkdir -p "$KITS_DIR"
   obtenir "$asset" "$somme" || rc=$?
@@ -288,21 +300,9 @@ elif [[ -e "$SCRIPT_DIR/.git" ]]; then
 else
   PROVENANCE=kit
 fi
-PROVISION="$SCRIPT_DIR/deploy/provision"
 DELEGUE="$SCRIPT_DIR/deploy/$MODE"
-arbre_incomplet() { stop "${R}L'arbre est incomplet : $1.${N}" "Ce n'est pas docker qui manque, c'est la source."; }
-[[ -x "$PROVISION" ]] || arbre_incomplet "$PROVISION absent ou non exécutable"
-[[ -x "$DELEGUE" ]]   || arbre_incomplet "$DELEGUE absent ou non exécutable"
-[[ -r "$SCRIPT_DIR/deploy/installer-constants.env" ]] \
-  || arbre_incomplet "constantes de l'installeur introuvables : $SCRIPT_DIR/deploy/installer-constants.env"
-# les constantes de l'installeur se lisent dans l'arbre, comme une donnée
-constante() { sed -n "s/^$1=//p" "$SCRIPT_DIR/deploy/installer-constants.env"; }
-RACINE="$(constante PROV_ROOT)"
-case "$PROVENANCE" in
-  source)  SOURCE_LIGNE="clone git · branche $(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo inconnue) · commit $(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo inconnu)" ;;
-  kit)     SOURCE_LIGNE="archive (kit) · révision $(cat "$SCRIPT_DIR/$(constante PROV_SOURCE_STAMP)" 2>/dev/null || echo inconnue)" ;;
-  release) SOURCE_LIGNE="release $LCARS_DOOR_VERSION · kit dans $SCRIPT_DIR" ;;
-esac
+# le délégué ne part qu'après la pause : son absence se dit avant tout ; celle du runner, la mesure la dit
+[[ -x "$DELEGUE" ]] || stop "${R}L'arbre est incomplet : $DELEGUE absent ou non exécutable.${N}" "Ce n'est pas docker qui manque, c'est la source."
 
 # ─── 3. le préflight : une seule mesure, celle du provisionnement ─────────────────────────────
 FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
@@ -310,15 +310,21 @@ FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
 trap 'rm -f "$FACTS_FILE"' EXIT
 PREFLIGHT_RC=0
 PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
-  "$PROVISION" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
+  "$SCRIPT_DIR/deploy/provision" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} \
   ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || PREFLIGHT_RC=$?
 
 [[ -n "$(fait docker)" ]] || {
-  echo "  ${R}Le préflight n'a rendu aucun fait — provision doctor n'a pas tourné.${N}"
+  echo "  ${R}Le préflight n'a rendu aucun fait : rien n'est mesuré, rien n'est fait. Ce que provision a dit :${N}"
   printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'
   exit 1
 }
 SUBSTRATE="$(fait substrat)"
+RACINE="$(fait racine)"
+case "$PROVENANCE" in
+  source)  SOURCE_LIGNE="clone git · branche $(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo inconnue) · commit $(fait revision)" ;;
+  kit)     SOURCE_LIGNE="archive (kit) · révision $(fait revision)" ;;
+  release) SOURCE_LIGNE="release $LCARS_DOOR_VERSION · kit dans $SCRIPT_DIR" ;;
+esac
 
 # ─── 4. le bilan ──────────────────────────────────────────────────────────────────────────────
 go() { [[ "${1:-}" =~ ^[0-9]+$ ]] && awk -v m="$1" 'BEGIN { printf "%d", (m + 512) / 1024 }' || printf '?'; }
@@ -351,11 +357,11 @@ case "$(fait docker)" in
           fi ;;
 esac
 
-# le banc lit l'API de sa forge par jq depuis l'hôte ; dans ce système, 10-packages le pose
-OUTILS_REQUIS="git curl"; [[ "$WITH_BENCH" -eq 0 ]] || OUTILS_REQUIS+=" jq"; [[ "$MODE" != "workstation" ]] || OUTILS_REQUIS="git curl sudo"
+# en conteneur, le banc et forge-apply lisent l'API de la forge par jq depuis l'hôte ; dans ce système, 10-packages le pose
+if [[ "$MODE" == workstation ]]; then OUTILS_REQUIS="git curl sudo"; else OUTILS_REQUIS="git curl jq"; fi
 OUTILS_MANQUANTS=""
 for t in $OUTILS_REQUIS; do
-  case "$(fait "$t")" in oui|root) ;; *) OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t" ;; esac
+  [[ "$(fait "$t")" == oui ]] || OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t"
 done
 if [[ -z "$OUTILS_MANQUANTS" ]]; then
   echo "  ${W}Outils${N}     ${OUTILS_REQUIS// /, } présents"
@@ -407,10 +413,10 @@ if [[ "$MODE" == "workstation" ]]; then
       [[ "$(fait consent)" == "env" ]] || stop \
         "${R}Linux natif sans déclaration.${N} L'installation dans ce système possède la machine (/etc, $RACINE," \
         "des groupes, des comptes) et ne se désinstalle pas : elle est réservée à une machine dédiée." \
-        "Pour la déclarer dédiée, à chaque passe :  ${PORTE_TIRAGE}LCARS_ALLOW_ANY_HOST=1 $PORTE_BASH --workstation" \
-        "Sinon, le conteneur ne touche à rien :      $PORTE_CMD" ;;
+        "Pour la déclarer dédiée, à chaque passe :  $(relance workstation)" \
+        "Sinon, le conteneur ne touche à rien :  $(relance container)" ;;
     *) stop "${R}--workstation ne s'installe que dans une distribution WSL2 ou sur une machine Linux dédiée.${N}" \
-            "Ici (substrat $SUBSTRATE), le conteneur :  $PORTE_CMD" ;;
+            "Ici (substrat $SUBSTRATE), le conteneur :  $(relance container)" ;;
   esac
 fi
 if [[ "$DOCKER_OK" -eq 0 ]]; then
@@ -419,9 +425,11 @@ if [[ "$DOCKER_OK" -eq 0 ]]; then
   elif [[ "$SUBSTRATE" == "wsl" ]]; then
     stop "${R}Docker est absent.${N} Les deux installations en ont besoin : la forge est un conteneur." \
          "Sous WSL, activer l'intégration WSL de Docker Desktop pour cette distribution, puis relancer."
+  elif [[ "$MODE" == "container" && "$SUBSTRATE" == "linux" ]]; then
+    stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas : l'installer, puis relancer." \
+         "Ou donner la machine à l'installation dans le système, qui le pose :  $(relance workstation)"
   elif [[ "$MODE" == "container" ]]; then
-    stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas." \
-         "L'installer, ou donner la machine à l'installation dans le système :  ${PORTE_TIRAGE}LCARS_ALLOW_ANY_HOST=1 $PORTE_BASH --workstation"
+    stop "${R}Docker est absent.${N} Le conteneur ne l'installe pas : l'installer, puis relancer." "$(fait docker_why)"
   fi
 else
   # le daemon qui a répondu au préflight, pas un DOCKER_HOST de l'environnement qu'il a écarté
@@ -441,20 +449,36 @@ if [[ "$MODE" == "container" && "$(fait compose)" == "non" ]]; then
 fi
 case "$FORGE_ETAT" in
   aucune) stop "${R}Les deux installations ont besoin d'une forge et de son runner CI. Aucune n'est indiquée.${N}" \
-               "Relancer en précisant laquelle :" \
-               "  $PORTE_CMD$MODE_FLAG --bench                       une forge jetable, montée par l'installeur" \
-               "  ${PORTE_TIRAGE}FORGE_BASE_URL=https://… $PORTE_BASH$MODE_FLAG      une forge existante" ;;
+               "Une forge jetable, montée par l'installeur :  $(relance "$MODE" --bench)" \
+               "Une forge existante :  $(relance "$MODE" "FORGE_BASE_URL=https://…")" ;;
   injoignable) stop "${R}La forge fournie ne répond pas : $(fait forge_fournie)${N}" "Vérifier l'URL et que l'API répond (/api/v1/version), puis relancer." ;;
 esac
 [[ -z "$PORTS_PRIS" ]] || stop "${R}Un port demandé est déjà tenu : $PORTS_PRIS.${N}" \
   "Déplacer avec --port-forge, --port-deck ou --port-ssh, ou libérer le port."
+# une instance posée se met à jour par son délégué, depuis l'arbre qui l'a créée : « container up » ne recrée
+# que le projet de son propre compose, et sa conf (forge, secrets) n'est pas celle que ce bilan mesure
+BASE_PROJET="$(ou "$(fait projet)")"
 if [[ "$MODE" == "container" && -n "$(fait projet_pris)" ]]; then
-  stop "${R}Un projet compose « $(fait projet_pris) » existe déjà sur ce daemon.${N}" \
-       "Choisir un autre nom :  $PORTE_CMD --forge-project <nom>   — ou détruire l'autre :  deploy/container -p <projet> reset"
+  IMAGE_DITE="${DOOR_IMAGE:-${LCARS_IMAGE:-}}"
+  TIRER=""; [[ "$PROVENANCE" != release || -z "$DOOR_IMAGE" ]] || TIRER="LCARS_IMAGE=$DOOR_IMAGE deploy/container pull && "
+  PROJET_DIT=""; [[ "${#PROJET_PORTS[@]}" -eq 0 ]] || PROJET_DIT="$(printf ' %q' "${PROJET_PORTS[@]}")"
+  if [[ ",$(fait projet_pris)," != *",$BASE_PROJET-fleet,"* ]]; then
+    stop "${R}Un projet compose « $(fait projet_pris) » existe déjà sur ce daemon, sous la base « $BASE_PROJET ».${N}" \
+         "Choisir une autre base : la même commande, avec --forge-project <autre base>."
+  elif [[ "$WITH_BENCH" -eq 1 ]]; then
+    stop "${R}Le banc « $BASE_PROJET » existe déjà sur ce daemon ($(fait projet_pris)).${N} L'installeur ne pose pas un banc sur un autre." \
+         "Le mettre à jour, la forge, ses jetons et les volumes gardés, depuis l'arbre qui l'a installé :" \
+         "  ${TIRER}deploy/docker/bench/bench-swap-image.sh --image ${IMAGE_DITE:-<image>}$PROJET_DIT" \
+         "Un second banc à côté : la même commande, avec --forge-project <autre base>."
+  else
+    stop "${R}L'instance « $BASE_PROJET-fleet » existe déjà sur ce daemon.${N} L'installeur ne pose pas une instance sur une autre." \
+         "La mettre à jour, volumes et magasin gardés, depuis l'arbre qui l'a installée :" \
+         "  ${TIRER}${IMAGE_DITE:+LCARS_IMAGE=$IMAGE_DITE }deploy/container -p $BASE_PROJET-fleet up" \
+         "Une seconde instance à côté : la même commande, avec --forge-project <autre base>."
+  fi
 fi
 
 # ─── 6. le mode, et sa grille ─────────────────────────────────────────────────────────────────
-BASE_PROJET="$(ou "$(fait projet)")"
 if [[ "$MODE" == "container" ]]; then
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     RETOUR="deploy/docker/bench/bench-down.sh --project $BASE_PROJET --yes : le conteneur, la forge, le runner et le magasin"
@@ -468,7 +492,7 @@ if [[ "$MODE" == "container" ]]; then
     Requiert   docker · la forge (ci-dessus)
     Espace     ~3 Go · durée ~15 min · ports $(ou "$PORT_DECK") (deck), $(ou "$PORT_SSH") (ssh)
     Retour     $RETOUR
-  Pour installer dans ce système à la place :  $PORTE_CMD --workstation
+  Pour installer dans ce système à la place :  $(relance workstation)
 
 EOF
 else
@@ -484,12 +508,12 @@ else
   fi
   cat <<EOF
   ${W}Installation dans ce système${N} — LCARS s'installe sur cette distribution, la fleet
-  tourne sous un compte de service. C'est le mode pour travailler sur le code.
+  tourne sous un humain de fleet. C'est le mode pour travailler sur le code.
     Modifie    $MODIFIE
     Requiert   sudo, demandé une fois au démarrage · docker · la forge (ci-dessus)
     Espace     ~2 Go · durée ~10 min
     Retour     $RETOUR
-  Pour installer en conteneur à la place :  $PORTE_CMD
+  Pour installer en conteneur à la place :  $(relance container)
 
 EOF
 fi
@@ -543,7 +567,7 @@ if [[ "$MODE" == "workstation" ]]; then
     export LCARS_BENCH=1 PROV_FORGE_MONTEE=1
     export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
   fi
-  CMD=("$DELEGUE" up ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"})
+  CMD=("$DELEGUE" up ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PASSTHRU[@]+"${PASSTHRU[@]}"} ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"})
   [[ "$PROVENANCE" != "release" ]] || CMD+=(--from "$KITS_DIR/lcars_install")   # le kit déjà détaré et vérifié, pas le tar une seconde fois
   RAPPEL="Installation dans ce système — deploy/workstation up"
 elif [[ "$WITH_BENCH" -eq 1 ]]; then

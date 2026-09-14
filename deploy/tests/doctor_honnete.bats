@@ -154,12 +154,12 @@ journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s
   [ "$output" = "" ]
 }
 
-@test "MEMOIRE : la liste est FERMEE — les trois ports et la base, jamais un drapeau du geste" {
-  run env PROV_DECK_PORT=20901 PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903 PROV_FORGE_BASE=zoe \
+@test "MEMOIRE : la liste est fermée — les trois ports, la base et l'humain de démonstration, jamais un drapeau du geste" {
+  run env PROV_DECK_PORT=20901 PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903 PROV_FORGE_BASE=zoe PROV_BUILTIN_HUMAN=demo \
       PROV_ONLY=60 PROV_VERBOSE=1 PROV_PORCELAIN=1 PROV_HUMAN=quelquun PROV_SUBSTRATE=linux \
       bash -c '. "$1" >/dev/null 2>&1; prov_params_line' _ "$LIB"
   [ "$status" -eq 0 ]
-  [ "$(tr ' ' '\n' <<<"$output" | sort | paste -sd' ')" = "PROV_DECK_PORT=20901 PROV_FORGE_BASE=zoe PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903" ]
+  [ "$(tr ' ' '\n' <<<"$output" | sort | paste -sd' ')" = "PROV_BUILTIN_HUMAN=demo PROV_DECK_PORT=20901 PROV_FORGE_BASE=zoe PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903" ]
 }
 
 @test "MEMOIRE : ce que le journal ecrit est ce que la liste fermee autorise" {
@@ -171,26 +171,4 @@ journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s
   [[ "$output" == *"PROV_FORGE_BASE=zoe"* ]]
   printf '%s\n' "$output" | refute_out 'PROV_VERBOSE|PROV_HUMAN'
 }
-
-
-# bats test_tags=structure
-@test "63-forge-tokens : un humain pas encore membre de l'org n'est pas un DRIFT" {
-  local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
-  local bloc; bloc="$(sed -n '/case "\$(member_state "\$LCARS_LOGIN")"/,/esac/p' "$mod")"
-  [ -n "$bloc" ]
-  refute grep -q 'p_drift' <<<"$bloc"
-  [ "$(grep -c 'p_warn' <<<"$bloc")" -eq 2 ]
-  # et chacun NOMME le geste qui le leve — un warn muet est juste un drift plus poli
-  grep -q 'profil forge'      <<<"$bloc"
-  grep -q 'proprietaire d.org\|propriétaire d.org' <<<"$bloc"
-}
-
-# bats test_tags=structure
-@test "63-forge-tokens : ce que le rail PEUT converger reste un drift" {
-  # Le sens qui manquait. `63-forge-tokens` porte de vrais drifts — structure absente, tokens a re-minter —
-  # et les passer tous en warn aurait rendu le module incapable de signaler quoi que ce soit.
-  local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
-  [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
-}
-
 

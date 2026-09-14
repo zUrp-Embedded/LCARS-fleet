@@ -210,6 +210,21 @@ EOF
   grep -qx "sous=$(id -un) servi=root" "$RUN_LOG"
 }
 
+@test "l'uid du siège est celui du compte qui lance : illisible, il ne se devine pas et rien ne se joue ; donné, il sert" {
+  terrain wsl
+  lib_module 50-siege 'echo "siege=$LCARS_SYSADMIN_UID" >> "$RUN_LOG"; p_ok "siège"'
+  run env SUDO_USER=compte-qui-n-existe-pas "$SANDBOX/provision" doctor
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"uid du siège illisible pour « compte-qui-n-existe-pas »"* ]]
+  [ ! -s "$RUN_LOG" ]
+  run env SUDO_USER=compte-qui-n-existe-pas LCARS_SYSADMIN_UID=4242 "$SANDBOX/provision" doctor
+  [ "$status" -eq 0 ]
+  grep -qx "siege=4242" "$RUN_LOG"
+  : > "$RUN_LOG"
+  run "$SANDBOX/provision" doctor
+  grep -qx "siege=$(id -u)" "$RUN_LOG"
+}
+
 # ─── options ────────────────────────────────────────────────────────────────────────────────────
 
 @test "--porcelain rend une ligne MODULE=verdict par module" {
@@ -579,6 +594,27 @@ EOF
   grep -qx "LCARS_BUILTIN_HUMAN=autre" "$RUN_LOG"
 }
 
+@test "LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration que le journal retient ; un banc le refuse avant tout module" {
+  terrain wsl
+  lib_module 50-humain 'prov_product_env; printf "%s\n" "prov=$PROV_BUILTIN_HUMAN" "${PROV_PRODUCT_ENV[@]}" | grep -E "^(prov=|LCARS_BUILTIN_HUMAN=)" >> "$RUN_LOG"; p_ok "ok"'
+  run env LCARS_BUILTIN_HUMAN=demo "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  : > "$RUN_LOG"
+  run env LCARS_BUILTIN_HUMAN=- LCARS_BENCH=1 "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"LCARS_BUILTIN_HUMAN=- retire l'humain de démonstration, qu'un banc (LCARS_BENCH=1) exige"* ]]
+  [ ! -s "$RUN_LOG" ]
+  run env LCARS_BUILTIN_HUMAN=- "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  grep -qx "prov=" "$RUN_LOG"
+  grep -qx "LCARS_BUILTIN_HUMAN=" "$RUN_LOG"
+  grep -qx 'params *' "$JOURNAL"
+  : > "$RUN_LOG"
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  grep -qx "prov=" "$RUN_LOG"
+}
+
 @test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {
   # un défaut écrit au journal deviendrait un choix : la passe suivante ne distinguerait plus l'opérateur de l'usine
   terrain wsl
@@ -613,6 +649,24 @@ EOF
   [ "$(grep -c "^posed_at" "$JOURNAL")" = "1" ]
   refute grep -q "2026-01-01T00:00:00Z" "$JOURNAL"
   [ -z "$(compgen -G "$TMPDIR/prov-journal.*" || true)" ]
+}
+
+@test "un journal sans inventaire apt antérieur ni note de la passe ne porte aucune ligne vide" {
+  terrain wsl
+  lib_module 20-okstub 'p_ok "converge"'
+  run "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ]
+  refute grep -qE '^\s*$' "$JOURNAL"
+}
+
+@test "apply sans fichier temporaire possible est refusé avant tout module, en le nommant : le journal de la passe ne se perd pas en silence" {
+  terrain wsl
+  lib_module 20-okstub 'echo joue >> "$RUN_LOG"; p_ok "converge"'
+  TMPDIR="$BATS_TEST_TMPDIR/nulle-part" run "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun fichier temporaire ne se crée dans $BATS_TEST_TMPDIR/nulle-part"* ]]
+  [ ! -s "$RUN_LOG" ]
+  [ ! -e "$JOURNAL" ]
 }
 
 @test "l'inventaire du journal dédoublonne ce que plusieurs modules et la passe précédente notent" {
