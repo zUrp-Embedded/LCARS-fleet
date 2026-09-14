@@ -24,7 +24,6 @@ observe() {
     return 0
   }
   while read -r h; do
-    [[ -n "$h" ]] || continue
     found=1
     if prov_in_group "$h" "$PROV_FLEET_GROUP"; then
       p_ok "« $h » (uid $(id -u -- "$h")) ∈ $PROV_FLEET_GROUP — il peut lancer la fleet"
@@ -32,33 +31,19 @@ observe() {
       p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
     fi
   done < <(fleet_humans)
-  [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien à vérifier ici tant que personne ne s'est enrôlé.
-     Le chemin : la page d'inscription de la forge, puis la team « $PROV_HUMANS_TEAM » — le convergeur matérialise au tour suivant.
-     S'il ne matérialise pas : « journalctl -u lcars-converger » dit pourquoi (forge, jeton, team)."
+  [[ "$found" -eq 1 ]] || p_ok "aucun humain de fleet — chacun s'inscrit sur la forge (team « $PROV_HUMANS_TEAM »), le convergeur le crée ; « journalctl -u lcars-converger » dit pourquoi s'il ne le fait pas"
 }
 
 check() { observe; verdict_check; }
 
-# le rattrapage d'un compte fait à la main ou d'un groupe perdu ; la garde des bornes est ici et non
-# dans la substitution, où elle dirait le remède une seconde fois
+# le rattrapage d'un compte fait à la main ou d'un groupe perdu ; observe, qui suit, dit la cause d'une population illisible
 apply() {
   local h
-  if prov_uid_bounds; then
-    while read -r h; do
-      [[ -n "$h" ]] || continue
-      prov_in_group "$h" "$PROV_FLEET_GROUP" && continue
-      if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
-        PROV_CHANGED=$((PROV_CHANGED + 1))
-        p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"
-      fi
-    done < <(fleet_humans)
-  fi
+  while read -r h; do
+    ensure_member "$h" "$PROV_FLEET_GROUP" || true
+  done < <(fleet_humans 2>/dev/null)
   observe
   verdict_apply
 }
 
-case "${1:?usage: 22-fleet-human.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+"$1"

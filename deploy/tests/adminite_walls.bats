@@ -139,9 +139,9 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
   # LES DEUX RAILS POSENT LE COMPTE. En verifier un seul laisserait l'autre demarrer un `setpriv`
   # vers un nom que `/etc/passwd` ne connait pas — et `setpriv` echoue alors en parlant de lui-meme.
-  code_of "$mod" | grep -q 'SYSTEM_USER="\$PROV_SYSTEM_USER"'
+  code_of "$mod" | grep -q 'creer_compte "\$PROV_SYSTEM_USER"'
   grep -qx 'PROV_SYSTEM_USER=lcars-system' "$REPO/deploy/installer-constants.env"
-  code_of "$mod" | grep -q -- '-g "\$SYSTEM_GROUP" -- "\$SYSTEM_USER"'
+  code_of "$mod" | grep -q -- '-g "\$1" -- "\$1"'
 }
 
 @test "MUR 5 bis: le groupe du secret OIDC est le compte du deck, et le MANIFESTE dit la meme chose" {

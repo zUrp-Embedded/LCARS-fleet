@@ -443,7 +443,7 @@ PYX
   # ⚠ DELIMITEUR `@`, ET PAS `|` : `sed` prend le premier `|` pour sa borne, donc une alternance
   # `(anchor|file|…)` coupe le motif en deux et l'extraction rend VIDE. Deuxieme fois aujourd'hui
   # que ce delimiteur mord — le sigil `~r|…|` d'Elixir avait le meme piege dans la famille A.
-  declares="$(sed -nE 's@^(anchor|file|dir|preserve|runtime)[[:space:]]+/etc/lcars/([A-Za-z0-9_.-]+)[[:space:]].*@\2@p' "$manifeste" | sort -u)"
+  declares="$(sed -nE 's@^(anchor|file|dir|runtime)[[:space:]]+/etc/lcars/([A-Za-z0-9_.-]+)[[:space:]].*@\2@p' "$manifeste" | sort -u)"
   [ "$(printf '%s\n' "$declares" | grep -c .)" -ge 3 ] || {
     echo "MUR 11 — moins de 3 declarations lues sous /etc/lcars : l'instrument ne lit plus le manifeste" >&2
     return 1
@@ -557,7 +557,7 @@ PYX
   local rompu=0
   # (1) Le groupe se DERIVE du compte partout, il ne se grave pas.
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
-    | grep -qE '^SYSTEM_GROUP="\$PROV_SYSTEM_USER"' || {
+    | grep -qF -- '-g "$1" -- "$1"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
   sed 's/#.*//' "$REPO/deploy/modules.d/66-deck-oidc.sh" \
     | grep -qE 'LCARS_SYSTEM_GROUP="\$\{PROV_SYSTEM_USER:-\}"' || {

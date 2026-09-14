@@ -29,17 +29,31 @@ setup() {
   mkdir -p "$(dirname "$APT_HISTORY")"
   printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\n' > "$LCARS_DECOR_ROOT/etc/passwd"
   printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
+  mkdir -p "$LCARS_DECOR_ROOT/proc/sys/kernel"
+  printf 'MemTotal:       8388608 kB\n' > "$LCARS_DECOR_ROOT/proc/meminfo"
 }
 
 teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
 
+# la garde du runner est armée : un module qui meurt rend 3, et « status -ne 3 » mesure quelque chose
 preflight() { # preflight <substrat> [VAR=val…]
   local sub="$1"; shift
-  run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight \
+  run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROVISION_RUN=1 \
       PROV_SUBSTRATE="$sub" PROV_DOCKER_BIN="$BIN/docker" \
       PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" \
       "$@" bash "$MOD" check
 }
+
+double() { # double <outil> <corps bash> — une doublure dans le PATH du décor
+  printf '#!/usr/bin/env bash\n%s\n' "$2" > "$BIN/$1"; chmod 0755 "$BIN/$1"
+}
+
+df_rend() { # df_rend <Mo libres> — df note son argument dans $BATS_TEST_TMPDIR/df.args
+  double df "echo \"\$*\" >> '$BATS_TEST_TMPDIR/df.args'
+printf 'Filesystem 1048576-blocks Used Available Capacity Mounted\\nfaux 100000 0 %s 1%% /\\n' '$1'"
+}
+
+lignes() { grep -c -- "$1" <<<"$output" || true; }
 
 fact() { sed -n "s/^$1=//p" "$FACTS" 2>/dev/null | tail -1; }
 
@@ -130,10 +144,23 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ -z "$n" ] || { echo "fait posé deux fois : $n" >&2; return 1; }
 }
 
-@test "sans PROV_FACTS_FILE le module ne change rien" {
-  run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROV_SUBSTRATE=docker \
-      PROV_DOCKER_BIN="$BIN/docker" bash "$MOD" check
-  [ ! -e "$FACTS" ]
+@test "sous apply, sans fichier de faits, les faits qui ne servent qu'à l'installeur ne se calculent pas" {
+  # l'historique apt (un date par entrée) et le paquet du dockerd ne servent qu'aux faits
+  docker_qui_repond
+  sed -i 's/29.0.0|Docker Engine - Test/29.1.3|/' "$BIN/docker"
+  double dockerd ''
+  double dpkg-query "echo dpkg-query >> '$BATS_TEST_TMPDIR/calculs'; exit 1"
+  double date "echo date >> '$BATS_TEST_TMPDIR/calculs'; exec /bin/date \"\$@\""
+  printf 'Start-Date: 2026-09-11  22:37:57\nInstall: openssh-server:amd64 (1:10.2p1)\n' > "$APT_HISTORY"
+  run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROVISION_RUN=1 PROV_SUBSTRATE=wsl \
+      PROV_DOCKER_BIN="$BIN/docker" DOCKER_HOST=unix:///dev/null LCARS_INSTANCE_BIRTH=1 \
+      PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" bash "$MOD" apply
+  [ "$status" -ne 3 ]
+  [ ! -e "$BATS_TEST_TMPDIR/calculs" ] || { echo "calculé pour rien : $(sort -u "$BATS_TEST_TMPDIR/calculs" | paste -sd' ')"; return 1; }
+  # le même décor, avec un fichier de faits : les deux calculs ont lieu, l'instrument voit ce qu'il cherche
+  preflight wsl DOCKER_HOST=unix:///dev/null LCARS_INSTANCE_BIRTH=1
+  grep -qx date "$BATS_TEST_TMPDIR/calculs"
+  grep -qx dpkg-query "$BATS_TEST_TMPDIR/calculs"
 }
 
 @test "aucun fait n'est posé après le dernier rapport : pas de bloc récapitulatif" {
@@ -260,12 +287,87 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [ -z "$(fact docker_flavor)" ]
 }
 
-@test "mv --exchange refusé : échec dit, une bascule de dossier n'aurait pas de forme atomique" {
-  printf '#!/usr/bin/env bash\n[[ "$*" != *--exchange* ]] || { echo "mv: unrecognized option" >&2; exit 1; }\nexec /bin/mv "$@"\n' > "$BIN/mv"; chmod 0755 "$BIN/mv"
+@test "mv --exchange refusé : échec dit et fait posé, rien ne reste de la sonde" {
+  double mv '[[ "$*" != *--exchange* ]] || { echo "mv: unrecognized option" >&2; exit 1; }
+exec /bin/mv "$@"'
   preflight docker
   [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  00-preflight: « mv --exchange » refusé"* ]]
-  [ -z "$(ls -d "${TMPDIR:-/tmp}"/prov-echange.* 2>/dev/null)" ]
+  [[ "$output" == *"FAIL  00-preflight: « mv --exchange » refusé sous $LCARS_DECOR_ROOT/opt/lcars"* ]]
+  [ "$(fact mv_exchange)" = non ]
+  [ -z "$(ls -Ad "$LCARS_DECOR_ROOT"/opt/lcars/.prov-echange.* 2>/dev/null)" ]
+}
+
+@test "mv --exchange se sonde sur le système de fichiers des bascules, sous PROV_ROOT — pas dans TMPDIR" {
+  double mv "echo \"\$*\" >> '$BATS_TEST_TMPDIR/mv.args'; exec /bin/mv \"\$@\""
+  preflight docker
+  [ "$(fact mv_exchange)" = oui ]
+  grep -q -- "--exchange -T -- $LCARS_DECOR_ROOT/opt/lcars/.prov-echange\." "$BATS_TEST_TMPDIR/mv.args"
+}
+
+@test "mv --exchange sous une racine que ce compte ne peut pas écrire : non mesuré, et dit" {
+  chmod 0555 "$LCARS_DECOR_ROOT/opt/lcars"
+  preflight docker
+  chmod 0755 "$LCARS_DECOR_ROOT/opt/lcars"
+  [ "$(fact mv_exchange)" = non-mesure ]
+  [[ "$output" == *"WARN  00-preflight: « mv --exchange » non sondé : $LCARS_DECOR_ROOT/opt/lcars n'est pas inscriptible"* ]]
+}
+
+@test "disque : mesuré sur l'ancêtre existant de PROV_ROOT, jamais sur / par défaut" {
+  rm -rf "$LCARS_DECOR_ROOT/opt/lcars"
+  df_rend 9000
+  preflight docker
+  [ "$(fact disque_mb)" = 9000 ]
+  grep -qx -- "-Pm $LCARS_DECOR_ROOT/opt" "$BATS_TEST_TMPDIR/df.args"
+}
+
+@test "disque : sous 2048 Mo une dérive, sous 5120 Mo un seul avertissement, au-delà conforme" {
+  df_rend 1000
+  preflight docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 00-preflight: disque 1000 Mo libres sur $LCARS_DECOR_ROOT/opt/lcars < 2048 Mo"* ]]
+  df_rend 4000
+  preflight docker
+  [ "$(lignes 'disque 4000 Mo')" -eq 1 ]
+  [[ "$output" == *"WARN  00-preflight: disque 4000 Mo libres"* ]]
+  df_rend 9000
+  preflight docker
+  [[ "$output" == *"OK    00-preflight: disque 9000 Mo libres"* ]]
+}
+
+@test "RAM : lue dans meminfo, sous 1536 Mo une dérive, sous 3072 Mo un seul avertissement" {
+  printf 'MemTotal:       1048576 kB\n' > "$LCARS_DECOR_ROOT/proc/meminfo"
+  preflight docker
+  [ "$status" -eq 1 ]
+  [ "$(fact ram_mb)" = 1024 ]
+  [[ "$output" == *"DRIFT 00-preflight: RAM 1024 Mo < 1536 Mo"* ]]
+  printf 'MemTotal:       2097152 kB\n' > "$LCARS_DECOR_ROOT/proc/meminfo"
+  preflight docker
+  [ "$(lignes 'RAM 2048 Mo')" -eq 1 ]
+  [[ "$output" == *"WARN  00-preflight: RAM 2048 Mo < 3072 Mo"* ]]
+}
+
+@test "arch : une architecture hors cible est une dérive, et le fait la nomme" {
+  double uname "[[ \"\$1\" != -m ]] || { echo riscv64; exit 0; }
+exec $(command -v uname) \"\$@\""
+  preflight docker
+  [ "$status" -eq 1 ]
+  [ "$(fact arch)" = riscv64 ]
+  [[ "$output" == *"DRIFT 00-preflight: arch non supportée : riscv64"* ]]
+}
+
+@test "OS : sans dpkg, hors famille Debian est une dérive" {
+  preflight docker PATH="$BIN:$(path_sans dpkg)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 00-preflight: OS hors famille Debian"* ]]
+}
+
+@test "userns : la clé se lit dans /proc, même sans sysctl — une clé posée n'est jamais « absent »" {
+  printf '1\n' > "$LCARS_DECOR_ROOT/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+  preflight docker PATH="$BIN:$(path_sans sysctl)"
+  [ "$(fact userns_knob)" = 1 ]
+  rm "$LCARS_DECOR_ROOT/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+  preflight docker
+  [ "$(fact userns_knob)" = absent ]
 }
 
 
@@ -463,10 +565,12 @@ EOF
   [ "$(fact jq)" = oui ]
 }
 
-@test "jq absent : le fait le dit, en avertissement et sans dérive" {
-  # ce système le pose lui-même (10-packages) : seul le conteneur l'exige, et install.sh en décide
-  preflight docker PATH="$BIN:$(path_sans jq)"
-  [ "$(fact jq)" = absent ]
-  [[ "$output" == *"WARN  00-preflight: jq absent"* ]]
-  printf '%s\n' "$output" | refute_out 'DRIFT.*jq'
+@test "un outil d'amorçage absent est un fait, jamais une dérive — l'installeur décide, 10-packages le pose" {
+  local t
+  for t in curl git jq; do
+    preflight docker PATH="$BIN:$(path_sans "$t")"
+    [ "$(fact "$t")" = absent ] || { echo "$t : fait $(fact "$t")"; return 1; }
+    [ "$status" -eq 0 ] || { echo "$t absent : status $status"; echo "$output"; return 1; }
+    printf '%s\n' "$output" | refute_out "$t (absent|présent)"
+  done
 }

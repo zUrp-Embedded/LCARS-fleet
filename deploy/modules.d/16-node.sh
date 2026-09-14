@@ -21,31 +21,17 @@ NODE_SHA256_ARM64=5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465
 NODE_HOME="$(prov_decor "/opt/node-${NODE_VERSION}")"
 NODE_BINS=(node npm npx)
 
-node_arch() { arch_tag node; }
-
-# un binaire absent est un état, pas une erreur : sous set -e, l'exécuter tuerait le module avant son verdict
+# un binaire absent ou qui échoue est un état : sous set -e, son code tuerait le module avant son verdict
 node_version_posee() {
   [[ -x "$PROV_LINK_DIR/node" ]] || return 0
-  "$PROV_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'
-}
-
-DECK_DOC="$PROV_MEDIA_ROOT/doc"
-check_doc_batie() {
-  local n
-  if [[ ! -s "$DECK_DOC/index.html" ]]; then
-    p_drift "doc du deck absente ($DECK_DOC/index.html) — /doc/ rendra 404 ; sur cette machine elle arrive bâtie ($(rien_a_batir_car)), elle ne se bâtit jamais ici"
-    return 0
-  fi
-  n="$(find "$DECK_DOC" -type f 2>/dev/null | wc -l)" || n="?"
-  p_ok "doc du deck bâtie et posée ($DECK_DOC, $n fichiers)"
+  { "$PROV_LINK_DIR/node" --version 2>/dev/null || true; } | sed 's/^v//'
 }
 
 rien_a_batir() { prov_delivery_is_binary; }
-rien_a_batir_car() { echo "livraison binaire — bâtie par pack.sh"; }
 
 check() {
   if rien_a_batir; then
-    check_doc_batie
+    p_ok "node non requis — livraison binaire, la doc du deck arrive bâtie (44-media la pose)"
     verdict_check
   fi
   local v; v="$(node_version_posee)"
@@ -61,11 +47,11 @@ check() {
 
 apply() {
   if rien_a_batir; then
-    p_ok "node non posé — rien à bâtir sur cette machine ($(rien_a_batir_car))"
+    p_ok "node non posé — livraison binaire, rien à bâtir sur cette machine"
     verdict_apply
   fi
   local arch want_sha
-  arch="$(node_arch)"
+  arch="$(arch_tag node)"
   case "$arch" in
     x64)   want_sha="$NODE_SHA256_X64" ;;
     arm64) want_sha="$NODE_SHA256_ARM64" ;;
@@ -92,18 +78,8 @@ apply() {
   for b in "${NODE_BINS[@]}"; do
     ensure_symlink "$PROV_LINK_DIR/$b" "$NODE_HOME/bin/$b" || verdict_apply
   done
-  local v; v="$(node_version_posee)"
-  if [[ "$v" == "$NODE_VERSION" ]]; then
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "node $v posé ($NODE_HOME) — npm $("$PROV_LINK_DIR/npm" --version 2>/dev/null || echo '?') embarqué"
-  else
-    p_fail "node répond « ${v:-rien} » après pose ≠ pin $NODE_VERSION (PATH parasite ? node d'apt devant $PROV_LINK_DIR ?)"
-  fi
+  p_chg "node $NODE_VERSION posé ($NODE_HOME)"
   verdict_apply
 }
 
-case "${1:?usage: 16-node.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+"$1"

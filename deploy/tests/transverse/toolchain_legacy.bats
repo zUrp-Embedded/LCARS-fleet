@@ -27,7 +27,7 @@ setup() {
 }
 
 sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
-  bash -c "set -euo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); $1"
+  bash -c "set -euo pipefail; source <(sed '\$d' '$MOD'); $1"
 }
 
 @test "un symlink vers NOTRE ancien arbre est selectionne" {
@@ -35,7 +35,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
   : > "${PREFIXE}1.18.4/bin/elixir"
   ln -s "${PREFIXE}1.18.4/bin/elixir" "$LINKS/elixir"
 
-  run sourced 'elixir_links_ours'
+  run sourced 'elixir_links_stale'
   [ "$status" -eq 0 ]
   [[ "$output" == *"$LINKS/elixir"* ]]
 }
@@ -45,7 +45,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
   : > "$BATS_TEST_TMPDIR/ailleurs/bin/elixir"
   ln -s "$BATS_TEST_TMPDIR/ailleurs/bin/elixir" "$LINKS/elixir"
 
-  run sourced 'elixir_links_ours'
+  run sourced 'elixir_links_stale'
   [ "$status" -eq 0 ]
   # le vide est exigé, pas l'absence d'un nom : le lien porte le nom `elixir`
   [ -z "$output" ] || { echo "un lien qui ne pointe pas chez nous a ete selectionne : $output" >&2; return 1; }
@@ -53,7 +53,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
 
 @test "un FICHIER ordinaire au nom d'un binaire n'est pas un symlink, et n'entre pas" {
   : > "$LINKS/mix"
-  run sourced 'elixir_links_ours'
+  run sourced 'elixir_links_stale'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -64,7 +64,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
   ln -s "${PREFIXE}1.18.4/bin/iex" "$LINKS/iex"
   [ ! -e "$LINKS/iex" ]
 
-  run sourced 'elixir_links_ours'
+  run sourced 'elixir_links_stale'
   [ "$status" -eq 0 ]
   [[ "$output" == *"$LINKS/iex"* ]]
 }
@@ -77,14 +77,16 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
     ln -s "${PREFIXE}1.18.4/bin/$b" "$LINKS/$b"
   done
 
-  run sourced 'elixir_links_ours'
+  run sourced 'elixir_links_stale'
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq 4 ]
 }
 
-@test "un arbre present est selectionne, et deux versions cote a cote le sont toutes les deux" {
+@test "un arbre marque present est selectionne, et deux versions cote a cote le sont toutes les deux" {
   mkdir -p "${PREFIXE}1.18.4" "${PREFIXE}1.17.3"
-  run sourced 'elixir_trees'
+  : > "${PREFIXE}1.18.4/.lcars-pose"
+  : > "${PREFIXE}1.17.3/.lcars-pose"
+  run sourced 'elixir_trees_other'
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq 2 ]
 }
@@ -92,7 +94,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
 @test "AUCUN arbre : la selection est VIDE, elle ne rend pas son propre motif" {
   # Un glob qui ne matche rien rend la chaine litterale `<prefixe>*` ; sans la garde `-d`, c'est
   # elle que l'appelant passerait a `rm -rf`. Le cas nominal d'une machine neuve, donc.
-  run sourced 'elixir_trees'
+  run sourced 'elixir_trees_other'
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { echo "selection non vide sur une machine sans ancien arbre : $output" >&2; return 1; }
 }
@@ -100,7 +102,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
 @test "un FICHIER au prefixe de l'arbre n'est pas un arbre" {
   # un zip laissé à côté des arbres ne s'emporte pas avec eux
   : > "${PREFIXE}1.18.4.zip"
-  run sourced 'elixir_trees'
+  run sourced 'elixir_trees_other'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }

@@ -297,7 +297,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
               status: :fail,
               evidence: [Path.relative_to(module, root)],
               note:
-                "the provision module's `2775` zone table is unreadable — guard fail-closed " <>
+                "the provision module's directory list is unreadable — guard fail-closed " <>
                   "(25-directories is the creator on every substrate; container/init.sh only " <>
                   "covers the container volumes)"
             }
@@ -362,13 +362,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Container init needs zones before provisioning runs; native provisioning carries its own table.
-  # Read only mode-2775 rows, excluding other provisioned directories. A row names its system path
-  # through `$(prov_decor <path>)`; the canonical path is its argument.
+  # Container init needs zones before provisioning runs; native provisioning carries its own list.
+  # The module lists the directories it poses, modes live in deploy/system.manifest. A row names its
+  # system path through `$(prov_decor <path>)`; the canonical path is its argument.
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
          [_ | _] = rows <-
-           Regex.scan(~r/^\s*"\$\(prov_decor\s+"?(\/[^"\s)]+)"?\)\s+2775\s/m, content) do
+           Regex.scan(~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m, content) do
       rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
     else
       _ -> nil

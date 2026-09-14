@@ -305,6 +305,10 @@ ensure_mode() {
   fi
   cur_mode="$(stat -c '%a' "$path")"
   [[ "$cur_mode" == "$want_mode" ]] || { p_fail "ensure_mode: mode $cur_mode ≠ $want_mode après chmod: $path"; return 1; }
+  if [[ -n "$owner" ]]; then
+    cur_owner="$(stat -c '%U:%G' "$path")"
+    [[ "$cur_owner" == "$owner" ]] || { p_fail "ensure_mode: propriétaire $cur_owner ≠ $owner après chown: $path"; return 1; }
+  fi
   if [[ "$changed" -eq 1 ]]; then PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
   return 0
 }
@@ -363,6 +367,15 @@ prov_substrate_satisfait() { # prov_substrate_satisfait <liste> <substrat> -> 0 
   return 1
 }
 
+prov_group_gid_ok() { # prov_group_gid_ok <groupe existant> → 0 s'il porte le gid que system.manifest déclare, ou si elle n'en déclare aucun ; 1 et un drift sinon
+  local gid cur
+  gid="$(prov_manifest_gid "$1")"
+  cur="$(getent group "$1" | cut -d: -f3)"
+  [[ -z "$gid" || "$cur" == "$gid" ]] && return 0
+  p_drift "groupe $1 : gid $cur, la table déclare $gid — une machine ne se renumérote pas, elle se recrée"
+  return 1
+}
+
 ensure_group() { # ensure_group <groupe> — le gid, s'il est fixé, vient de system.manifest
   local grp="$1" gid
   gid="$(prov_manifest_gid "$grp")"
@@ -373,9 +386,7 @@ ensure_group() { # ensure_group <groupe> — le gid, s'il est fixé, vient de sy
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp${gid:+ (gid $gid, table)}"
     return 0
   fi
-  local cur; cur="$(getent group "$grp" | cut -d: -f3)"
-  [[ -z "$gid" || "$cur" == "$gid" ]] \
-    || p_drift "groupe $grp : gid $cur, la table déclare $gid — une machine ne se renumérote pas, elle se recrée"
+  prov_group_gid_ok "$grp" || true
 }
 
 prov_pgrep_pattern() { # prov_pgrep_pattern <chaine> -> le motif ERE qui ne matche pas son porteur

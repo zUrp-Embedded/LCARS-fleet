@@ -39,13 +39,20 @@ apt_installs_depuis() {
     }'
 }
 
+ancetre_existant() { # ancetre_existant <chemin> → le chemin s'il existe, sinon son ancêtre le plus proche qui existe
+  local p="$1"
+  while [[ ! -e "$p" ]]; do p="$(dirname "$p")"; done
+  printf '%s\n' "$p"
+}
+
+# sous apply, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à l'installeur ne se calcule pas
+faits_attendus() { [[ -n "${PROV_FACTS_FILE:-}" ]]; }
+
 check() {
   # ─── Le système ───────────────────────────────────────────────────────────────────────────────
   if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
-    p_fact os debian
     p_ok "OS de la famille Debian (dpkg et apt présents)"
   else
-    p_fact os autre
     p_drift "OS hors famille Debian : dpkg ou apt absent — ce provisionnement cible Debian et Ubuntu"
   fi
 
@@ -60,20 +67,29 @@ check() {
   p_fact cpu "$(nproc 2>/dev/null || echo 1)"
   if [[ -d "$(prov_decor /run/systemd/system)" ]]; then p_fact systemd oui; else p_fact systemd non; fi
 
-  p_fact bash "$BASH_VERSION"
-  if [[ "${BASH_VERSINFO[0]}" -gt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 ) ]]; then
-    p_ok "bash ${BASH_VERSION} (plancher 4.4)"
+  # des faits sans verdict : l'installeur choisit ceux qu'il exige, 10-packages les pose dans ce système
+  local tool
+  for tool in curl git jq; do
+    if command -v "$tool" >/dev/null; then p_fact "$tool" oui; else p_fact "$tool" absent; fi
+  done
+
+  # les bascules de dossiers ont lieu sous PROV_ROOT : échange et espace se mesurent sur son système de fichiers
+  local sous echange
+  sous="$(ancetre_existant "$PROV_ROOT")"
+  if echange="$(mktemp -d "$sous/.prov-echange.XXXXXX" 2>/dev/null)"; then
+    mkdir "$echange/a" "$echange/b"
+    if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
+      p_fact mv_exchange oui
+      p_ok "« mv --exchange » joué sous $sous : les bascules de dossiers ont une forme atomique"
+    else
+      p_fact mv_exchange non
+      p_fail "« mv --exchange » refusé sous $sous (coreutils 9.5, sur un système de fichiers qui sait échanger) — les bascules de dossiers n'ont pas de forme atomique"
+    fi
+    rm -rf -- "$echange"
   else
-    p_drift "bash ${BASH_VERSION} < 4.4 — un bash récent est requis"
+    p_fact mv_exchange non-mesure
+    p_warn "« mv --exchange » non sondé : $sous n'est pas inscriptible par $(id -un) — la sonde se joue sous root"
   fi
-  local echange; echange="$(mktemp -d "${TMPDIR:-/tmp}/prov-echange.XXXXXX")"
-  mkdir -p "$echange/a" "$echange/b"
-  if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
-    p_ok "« mv --exchange » joué : les bascules de dossiers ont une forme atomique (coreutils 9.5)"
-  else
-    p_fail "« mv --exchange » refusé (coreutils 9.5 requis) — les bascules de dossiers n'ont pas de forme atomique"
-  fi
-  rm -rf -- "$echange"
 
   local arch; arch="$(uname -m)"
   p_fact arch "$arch"
@@ -83,29 +99,25 @@ check() {
   esac
 
   local ram_mb
-  ram_mb="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  ram_mb="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' "$(prov_decor /proc/meminfo)" 2>/dev/null || echo 0)"
   p_fact ram_mb "$ram_mb"
   if [[ "$ram_mb" -lt 1536 ]]; then
     p_drift "RAM ${ram_mb} Mo < 1536 Mo — la release ne se construira pas (WSL : .wslconfig, [wsl2] memory=)"
   elif [[ "$ram_mb" -lt 3072 ]]; then
     p_warn "RAM ${ram_mb} Mo < 3072 Mo — construction lente possible"
-    p_ok "RAM ${ram_mb} Mo (plancher 1536 Mo)"
   else
     p_ok "RAM ${ram_mb} Mo"
   fi
 
-  local disk_mb probe_dir
-  probe_dir="$(dirname "$PROV_PREFIX")"
-  [[ -d "$probe_dir" ]] || probe_dir="/"
-  disk_mb="$(df -Pm "$probe_dir" | awk 'NR==2 {print $4}')"
+  local disk_mb
+  disk_mb="$(df -Pm "$sous" | awk 'NR==2 {print $4}')"
   p_fact disque_mb "$disk_mb"
   if [[ "$disk_mb" -lt 2048 ]]; then
-    p_drift "disque ${disk_mb} Mo libres sur $probe_dir < 2048 Mo — libérer de l'espace avant l'installation"
+    p_drift "disque ${disk_mb} Mo libres sur $sous < 2048 Mo — libérer de l'espace avant l'installation"
   elif [[ "$disk_mb" -lt 5120 ]]; then
-    p_warn "disque ${disk_mb} Mo libres sur $probe_dir < 5120 Mo — juste"
-    p_ok "disque ${disk_mb} Mo libres ($probe_dir)"
+    p_warn "disque ${disk_mb} Mo libres sur $sous < 5120 Mo — juste"
   else
-    p_ok "disque ${disk_mb} Mo libres ($probe_dir)"
+    p_ok "disque ${disk_mb} Mo libres ($sous)"
   fi
 
   local humain; humain="${SUDO_USER:-$(id -un)}"
@@ -127,73 +139,51 @@ check() {
     p_fact consent sans-objet
   fi
 
-  if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
-    if grep -qi 'WSL2\|microsoft-standard' /proc/version 2>/dev/null; then
-      p_fact wsl2 oui
-      p_ok "WSL2 (noyau $(uname -r))"
-    else
-      p_fact wsl2 non
-      p_drift "WSL1 ($(uname -r)) — bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"
-    fi
-  else
-    p_fact wsl2 sans-objet
-  fi
-
+  # sysctl vient de procps, que 10-packages pose après ce module : la clé se lit dans /proc
   local knob
-  knob="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
+  knob="$(cat "$(prov_decor /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" 2>/dev/null || echo absent)"
   p_fact userns_knob "$knob"
-  case "$knob" in
-    0)      p_ok "kernel.apparmor_restrict_unprivileged_userns=0" ;;
-    absent) p_ok "pas de restriction AppArmor sur les user namespaces" ;;
-    *)      p_warn "kernel.apparmor_restrict_unprivileged_userns=$knob — bwrap peut être bloqué ; la sonde réelle est dans 10-packages" ;;
-  esac
 
   # ─── Docker, sur tout substrat ────────────────────────────────────────────────────────────────
   # Le fait est mesuré partout ; le refus ne vaut que sous WSL, où la forge n'a pas d'autre forme.
-  # Les faits de ce bloc sont tous posés dans les deux états, vides quand ils n'ont pas d'objet.
-  local docker_repond=0 serveur=""
+  local docker=absent docker_bin="" serveur="" saveur=""
   if docker_endpoint; then
-    docker_repond=1
+    docker=oui docker_bin="$PROV_DOCKER_BIN"
     serveur="$("$PROV_DOCKER_BIN" version --format '{{.Server.Version}}|{{.Server.Platform.Name}}' 2>/dev/null || true)"
+    saveur="${serveur#*|}"
     # le paquet docker.io ne nomme pas sa plateforme : le paquet propriétaire d'un dockerd local la donne
-    local saveur="${serveur#*|}" dockerd
-    dockerd="$(command -v dockerd || true)"
-    if [[ -z "$saveur" && -n "$dockerd" ]]; then
+    local dockerd; dockerd="$(command -v dockerd || true)"
+    if [[ -z "$saveur" && -n "$dockerd" ]] && faits_attendus; then
       saveur="$(dpkg-query -S "$(readlink -f "$dockerd")" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     fi
-    p_fact docker oui
-    p_fact docker_bin "$PROV_DOCKER_BIN"
-    p_fact docker_host "$PROV_DOCKER_HOST"
-    p_fact docker_server "${serveur%%|*}"
-    p_fact docker_flavor "$saveur"
-    p_fact docker_why ""
     p_ok "docker répond (serveur ${serveur%%|*}, $PROV_DOCKER_HOST)"
   else
-    if [[ "$PROV_DOCKER_DENIED" == "1" ]]; then p_fact docker refuse; else p_fact docker absent; fi
-    p_fact docker_bin ""
-    p_fact docker_host ""
-    p_fact docker_server ""
-    p_fact docker_flavor ""
-    p_fact docker_why "$PROV_DOCKER_WHY"
+    [[ "$PROV_DOCKER_DENIED" != "1" ]] || docker=refuse
     if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
       p_fail "$PROV_DOCKER_WHY — sans docker la forge de LCARS n'a aucune forme : 63-forge-tokens et 66-deck-oidc ne convergeront pas"
     else
       p_warn "$PROV_DOCKER_WHY"
     fi
   fi
+  p_fact docker "$docker"
+  p_fact docker_bin "$docker_bin"
+  p_fact docker_host "$PROV_DOCKER_HOST"
+  p_fact docker_server "${serveur%%|*}"
+  p_fact docker_flavor "$saveur"
+  p_fact docker_why "$PROV_DOCKER_WHY"
 
-  if [[ "$docker_repond" -eq 0 ]]; then
-    p_fact compose sans-objet
-    p_fact compose_why ""
-  elif docker_compose_cmd "$PROV_DOCKER_BIN"; then
-    p_fact compose oui
-    p_fact compose_why ""
-    p_ok "docker compose répond ($PROV_COMPOSE_CMD)"
-  else
-    p_fact compose non
-    p_fact compose_why "$PROV_COMPOSE_WHY"
-    p_warn "$PROV_COMPOSE_WHY"
+  local compose=sans-objet
+  if [[ "$docker" == oui ]]; then
+    if docker_compose_cmd "$docker_bin"; then
+      compose=oui
+      p_ok "docker compose répond ($PROV_COMPOSE_CMD)"
+    else
+      compose=non
+      p_warn "$PROV_COMPOSE_WHY"
+    fi
   fi
+  p_fact compose "$compose"
+  p_fact compose_why "$PROV_COMPOSE_WHY"
 
   # ─── La forge : fournie, ou montée par l'installeur ───────────────────────────────────────────
   if [[ -n "${FORGE_BASE_URL:-}" && "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
@@ -227,9 +217,9 @@ check() {
   done
   p_fact projet "$base"
   local pris=""
-  if [[ "$docker_repond" -eq 1 ]]; then
+  if [[ "$docker" == oui ]]; then
     for nom in "${miens[@]}"; do
-      [[ -z "$("$PROV_DOCKER_BIN" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || pris="${pris:+$pris,}$nom"
+      [[ -z "$("$docker_bin" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || pris="${pris:+$pris,}$nom"
     done
   fi
   p_fact projet_pris "$pris"
@@ -238,7 +228,7 @@ check() {
   # ─── L'instance : ce qu'elle porte déjà ───────────────────────────────────────────────────────
   if [[ "$PROV_SUBSTRATE" == "docker" ]]; then
     p_fact apt_installs sans-objet
-  else
+  elif faits_attendus; then
     local naissance; naissance="${LCARS_INSTANCE_BIRTH:-$(stat -c %W / 2>/dev/null || true)}"
     if [[ "$naissance" =~ ^[1-9][0-9]*$ ]]; then
       p_fact apt_installs "$(apt_installs_depuis "$naissance" | paste -sd, -)"
@@ -265,44 +255,18 @@ check() {
   # ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ───────────────────────────
   p_fact channel_tree "$(prov_channel_here)"
   # appel nu : le p_fail d'un canal illisible doit compter dans le verdict
-  if prov_channel >/dev/null; then
-    p_fact channel "$PROV_CHANNEL"
-    if [[ "$PROV_CHANNEL" == "aucun" ]]; then
-      p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $(prov_channel_here) »"
-    elif [[ "$PROV_CHANNEL" == "inconnu" ]]; then
-      p_warn "canal d'installation inconnu : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) ; un kit ou une source le reprend et l'écrit"
-    else
-      p_ok "canal d'installation : $PROV_CHANNEL ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
-    fi
-  else
-    p_fact channel invalide
+  local canal=invalide
+  if prov_channel >/dev/null; then canal="$PROV_CHANNEL"; fi
+  p_fact channel "$canal"
+  if [[ "$canal" == aucun ]]; then
+    p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $(prov_channel_here) »"
+  elif [[ "$canal" == inconnu ]]; then
+    p_warn "canal d'installation inconnu : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) ; un kit ou une source le reprend et l'écrit"
+  elif [[ "$canal" != invalide ]]; then
+    p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
   fi
-
-  # ─── Les outils d'amorçage ────────────────────────────────────────────────────────────────────
-  local tool
-  for tool in curl git; do
-    if command -v "$tool" >/dev/null; then
-      p_fact "$tool" oui
-      p_ok "$tool présent"
-    else
-      p_fact "$tool" absent
-      p_drift "$tool absent — apt-get install -y $tool"
-    fi
-  done
-  # jq lit l'API de la forge : requis sur l'hôte du conteneur et du banc ; dans ce système, 10-packages le pose
-  if command -v jq >/dev/null; then
-    p_fact jq oui
-    p_ok "jq présent"
-  else
-    p_fact jq absent
-    p_warn "jq absent — requis pour l'installation en conteneur et le banc : apt-get install -y jq"
-  fi
-
 }
 
 # le préflight ne pose rien : les deux verbes sondent, chacun rend le verdict de son contrat
-case "${1:?usage: 00-preflight.sh <check|apply>}" in
-  check) check; verdict_check ;;
-  apply) check; verdict_apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+check
+"verdict_$1"

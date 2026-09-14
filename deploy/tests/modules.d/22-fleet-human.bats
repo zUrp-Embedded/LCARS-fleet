@@ -39,10 +39,18 @@ if [[ "${1:-}" == -u && "${2:-}" == -- ]]; then
   u="$(awk -F: -v n="$3" '$1==n {print $3; exit}' "$LCARS_DECOR_ROOT/etc/passwd")"
   [[ -n "$u" ]] && { echo "$u"; exit 0; }
 fi
+if [[ $# -eq 1 && "$1" != -* ]]; then
+  awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$LCARS_DECOR_ROOT/etc/passwd" && exit 0
+fi
 exec /usr/bin/id "$@"
 EOS
-  # le décor ne change pas les groupes : usermod note son appel et refuse
-  printf '#!/usr/bin/env bash\necho "usermod $*" >> "$USERMOD_LOG"\nexit 1\n' > "$DECOR_BIN/usermod"
+  # usermod note son appel ; il refuse, sauf sous STUB_USERMOD_OK où il ajoute le groupe à la ligne de l'humain
+  cat > "$DECOR_BIN/usermod" <<'EOS'
+#!/usr/bin/env bash
+echo "usermod $*" >> "$USERMOD_LOG"
+[[ -n "${STUB_USERMOD_OK:-}" ]] || { echo "usermod: /etc/group verrouillé" >&2; exit 10; }
+sed -i "s/^${*: -1} .*/& $2/" "$ID_GROUPS"
+EOS
   chmod 0755 "$DECOR_BIN"/*
 }
 
@@ -54,7 +62,7 @@ passwd_with() { # passwd_with <ligne>...  → pose le passwd du décor
   local l; for l in "$@"; do printf '%s\n' "$l" >> "$f"; done
 }
 
-mod() { run bash -c "set -euo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$SRC') >/dev/null 2>&1; $1"; }
+mod() { run bash -c "set -euo pipefail; source <(sed '\$d' '$SRC') >/dev/null 2>&1; $1"; }
 nu() { run bash "$SRC" "$1"; }
 
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
@@ -92,7 +100,7 @@ nu() { run bash "$SRC" "$1"; }
 @test "le verdict PROPOSE un geste — et ce n'est plus un useradd : le convergeur est le seul createur" {
   mod 'observe'
   refute grep -q 'useradd' <<<"$output"
-  [[ "$output" == *"inscription"* ]]
+  [[ "$output" == *"s'inscrit sur la forge"* ]]
   [[ "$output" == *"lcars-converger"* ]]
 }
 
@@ -107,11 +115,11 @@ nu() { run bash "$SRC" "$1"; }
 
 
 
-@test "AUCUN humain : la sonde le DIT sans deriver, et elle dit qui s'en occupera" {
+@test "AUCUN humain : l'état nominal d'une machine neuve est conforme, dit en une ligne qui nomme qui s'en occupera" {
   nu check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"WARN"* ]]
-  [[ "$output" == *"convergeur"* ]]
+  [ "$(grep -c . <<<"$output")" -eq 1 ]
+  [[ "$output" == "OK    22-fleet-human: aucun humain de fleet — "*"convergeur"* ]]
 }
 
 @test "AUCUN humain : l'APPLY non plus ne derive pas — les deux verbes s'accordent enfin" {
@@ -172,12 +180,24 @@ nu() { run bash "$SRC" "$1"; }
   [ ! -e "$USERMOD_LOG" ]
 }
 
-@test "un humain hors du groupe : l'apply tente l'adhesion, et ne rend jamais l'echec — un groupe manquant est un drift" {
+@test "un humain hors du groupe : l'apply l'y ajoute, et check le voit" {
+  passwd_with 'horsgroupe:x:1001:1001::/home/horsgroupe:/bin/bash'
+  printf 'horsgroupe horsgroupe\n' > "$ID_GROUPS"
+  STUB_USERMOD_OK=1 nu apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'usermod -aG fleet horsgroupe' "$USERMOD_LOG"
+  nu check
+  [ "$status" -eq 0 ]
+}
+
+@test "un usermod en échec est un échec nommé avec sa cause, pas un drift muet" {
   passwd_with 'horsgroupe:x:1001:1001::/home/horsgroupe:/bin/bash'
   printf 'horsgroupe horsgroupe\n' > "$ID_GROUPS"
   nu apply
-  [ "$status" -eq 2 ]
-  grep -qx 'usermod -aG fleet -- horsgroupe' "$USERMOD_LOG"
+  [ "$status" -eq 1 ]
+  grep -qx 'usermod -aG fleet horsgroupe' "$USERMOD_LOG"
+  [[ "$output" == *"FAIL  22-fleet-human: commande en échec (rc=10) : usermod -aG fleet horsgroupe"* ]]
+  [[ "$output" == *"/etc/group verrouillé"* ]]
 }
 
 @test "un apply ne DELEGUE JAMAIS a check — le verdict n'est pas partageable" {

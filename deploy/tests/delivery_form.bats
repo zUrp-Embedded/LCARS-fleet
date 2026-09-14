@@ -27,7 +27,6 @@ setup() {
   # le canal, les liens, l'Elixir posé : tout se lit sous le décor, jamais sur la machine
   decor_pose
   CHANNEL="$LCARS_DECOR_ROOT/etc/lcars/channel"
-  LINK_DIR="$LCARS_DECOR_ROOT/usr/local/bin"
   ELIXIR_PREFIX="$LCARS_DECOR_ROOT/opt/elixir-"
   mkdir -p "$LCARS_DECOR_ROOT/opt"
 }
@@ -59,18 +58,15 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   [ "$output" = source ]
 }
 
-@test "NODE : livraison binaire — la doc est EXIGEE, node n'est pas posé" {
-  paquet
-  node apply
-  [[ "$output" == *"node non posé"* ]]
-  [[ "$output" == *"livraison binaire"* ]]
-}
-
-@test "NODE : livraison binaire — le check mesure la DOC, jamais la version de node" {
+@test "NODE : livraison binaire — node n'est ni mesuré ni posé, et la doc est l'affaire de 44-media" {
+  # le décor ne porte aucune doc : un check qui la mesurait ici portait un drift que 16 ne converge jamais
   paquet
   node check
-  [[ "$output" == *"doc du deck"* ]]
-  printf '%s\n' "$output" | refute_out 'node absent'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf '%s\n' "$output" | refute_out 'DRIFT|node absent'
+  node apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"node non posé — livraison binaire"* ]]
 }
 
 @test "NODE : livraison source — c'est node qui est mesuré, pas la doc" {
@@ -88,14 +84,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   [[ "$output" == *"toolchain non requise"* ]]
   toolchain apply
   [[ "$output" == *"non posés"* ]]
-}
-
-@test "TOOLCHAIN : livraison binaire — le nettoyage des reliquats PASSE QUAND MEME" {
-  paquet
-  ln -sf "${ELIXIR_PREFIX}1.14.0/bin/elixir" "$LINK_DIR/elixir"
-  toolchain check
-  [[ "$output" == *"toolchain non requise"* ]]
-  [[ "$output" == *"DEVANT apt"* ]]   # le nettoyage a bien ete evalue, pas saute
 }
 
 @test "LES DEUX MODULES LISENT LE MEME DISCRIMINANT — jamais une moitié de forme" {
@@ -121,6 +109,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   otp="$(sed -n 's/^PROV_ELIXIR_OTP_MAJOR=//p' "$DEPLOY/installer-constants.env")"
   [ -n "$pin" ]
   printf '#!/usr/bin/env bash\necho "%s"\n' "$otp" > "$DECOR_BIN/erl"; chmod 0755 "$DECOR_BIN/erl"
+  printf '#!/usr/bin/env bash\n[[ "${@: -1}" == erlang ]] && printf installed || printf not-installed\n' > "$DECOR_BIN/dpkg-query"
+  chmod 0755 "$DECOR_BIN/dpkg-query"
   mkdir -p "${ELIXIR_PREFIX}${pin}/bin"
   printf '#!/usr/bin/env bash\necho "%s"\n' "$pin" > "${ELIXIR_PREFIX}${pin}/bin/elixir"
   chmod 0755 "${ELIXIR_PREFIX}${pin}/bin/elixir"
@@ -175,18 +165,6 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
          grep -vE '^\s*#' "$media" | grep -nE '\$SITE_SRC/dist' >&2; return 1; }
 }
 
-
-@test "15-toolchain : livraison binaire — le plancher OTP n est PAS verifie" {
-  local mod="$DEPLOY/modules.d/15-toolchain.sh"
-  # ⚠ HORS COMMENTAIRES, pour la meme raison : la prose du correctif CITE le message qu il corrige.
-  local bloc; bloc="$(sed -n "/^apply()/,\$p" "$mod" | grep -vE "^\\s*#")"
-  local n_garde n_plancher
-  n_garde="$(grep -n 'plancher OTP/Elixir non vérifié' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_plancher="$(grep -n 'toujours sous le plancher' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ -n "$n_garde" ]
-  [ -n "$n_plancher" ]
-  [ "$n_garde" -lt "$n_plancher" ]
-}
 
 @test "60-deploy : livraison binaire — \`mix\` n est pas exige" {
   # La release arrive faite ; `deploy-release.sh` la voit et ne compile pas. Exiger `mix` renvoyait

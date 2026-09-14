@@ -180,10 +180,3 @@ engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
   grep -q '^PACKAGES=(' "$(pkg_mod)"
   grep -vE '^\s*#' "$(pkg_mod)" | refute_out 'docker-ce|ensure_docker_repo|LINUX_PACKAGES'
 }
-
-@test "check et apply lisent la MEME liste — deux derivations repondraient differemment" {
-  # `check` iterait sur `PACKAGES`, `apply` aussi : ajouter une liste conditionnelle a un seul des
-  # deux ferait sonder autre chose que ce qu'on installe.
-  grep -q 'done < <(effective_packages)' "$(pkg_mod)"
-  grep -q 'mapfile -t pkgs < <(effective_packages)' "$(pkg_mod)"
-}

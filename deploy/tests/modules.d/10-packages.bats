@@ -97,6 +97,12 @@ liste() { sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^PACKAGES=\(|^\)|^\s*#
   [[ "$output" == *"FAIL  10-packages: bwrap installé mais un sandbox minimal ÉCHOUE"*"apparmor_restrict_unprivileged_userns=0"* ]]
 }
 
+@test "xz-utils est dans la liste : 16-node détare le précompilé de node, un .tar.xz" {
+  grep -qE 'fetch_verify "https://nodejs\.org/[^"]*\.tar\.xz"' "$BATS_TEST_DIRNAME/../../modules.d/16-node.sh" \
+    || { echo "16-node ne télécharge plus un .tar.xz — ce cas n'a plus de sujet"; return 1; }
+  liste | grep -qx xz-utils
+}
+
 @test "apply : apt qui refuse est un échec, sans sonde derrière" {
   STUB_APT_RC=100 mod apply
   [ "$status" -eq 1 ]

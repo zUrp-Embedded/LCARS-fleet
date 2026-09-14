@@ -19,6 +19,9 @@ WSL_CONF="$(prov_decor /etc/wsl.conf)"
 SNAP_DIRS=("$(prov_decor /snap)" "$(prov_decor /var/snap)" "$(prov_decor /var/lib/snapd)")
 HOSTNAME_CIBLE="${PROV_FORGE_BASE//_/-}"
 
+# une étiquette DNS : la base du projet arrive aussi par --env, qui ne passe pas par la validation du projet
+hostname_valide() { [[ "$HOSTNAME_CIBLE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; }
+
 # section clé valeur — l'état-cible entier ; [interop] coupée = pas d'exécutable Windows depuis l'instance
 wsl_cles() {
   printf '%s\n' \
@@ -26,8 +29,16 @@ wsl_cles() {
     "automount enabled false" \
     "automount mountFsTab true" \
     "interop enabled false" \
-    "interop appendWindowsPath false" \
-    "network hostname $HOSTNAME_CIBLE"
+    "interop appendWindowsPath false"
+  if hostname_valide; then printf '%s\n' "network hostname $HOSTNAME_CIBLE"; fi
+}
+
+dire_hostname() { # le même constat au check et à l'apply : un nom refusé, ou un nom qui ne prend qu'au redémarrage
+  if ! hostname_valide; then
+    p_fail "hostname « $HOSTNAME_CIBLE » refusé : une étiquette DNS porte lettres, chiffres et tirets, sans tiret aux bords, 63 caractères au plus — [network] hostname n'est pas posé ; choisir une autre base de projet"
+  elif [[ "$(hostname)" != "$HOSTNAME_CIBLE" ]]; then
+    p_warn "hostname « $(hostname) » — « $HOSTNAME_CIBLE » prendra après « wsl --shutdown »"
+  fi
 }
 
 ini_get() { # ini_get <fichier> <section> <clé> → la valeur, ou rien
@@ -60,9 +71,10 @@ wsl_conf_cible() { # le contenu de wsl.conf avec l'état-cible posé sur le fich
 }
 
 # la sonde de C: mesure l'état réel : root écrit partout, l'humain dit si C: est ouvert
-c_drive_open() {
+c_drive_open() { # → 0 ouvert · 1 fermé · 2 non sondé, as_human a dit pourquoi
   local c; c="$(prov_decor /mnt/c)"
   [[ -d "$c" ]] || return 1
+  as_human true || return 2
   local probe="$c/.lcars-lockdown-probe.$$"
   if as_human touch "$probe" 2>/dev/null; then
     as_human rm -f "$probe" 2>/dev/null || true
@@ -81,7 +93,7 @@ gpg_socket_mask_path() { # vide quand l'humain n'a pas de home — à l'appelant
 docker_io_next_to_desktop() { pkg_installed docker.io && [[ -x "$(_docker_mount_cli)" ]]; }
 DOCKER_IO_DESKTOP_GESTE="docker.io est posé À CÔTÉ de Docker Desktop : deux daemons, et /var/run/docker.sock de Desktop écrasé. Geste : « sudo apt purge docker.io containerd runc », puis Docker Desktop → Settings → Resources → WSL integration : décocher puis recocher ce distro (ou « wsl --shutdown ») pour qu'il retende le socket ; enfin « sudo dpkg --configure -a » et relancer"
 
-wsl_conf_report() { # wsl_conf_report <p_drift|p_warn> — chaque clé de l'état-cible contre le fichier
+wsl_conf_report() { # chaque clé de l'état-cible contre le fichier → 0 si toutes sont posées
   local section cle valeur lue conforme=1
   while read -r section cle valeur; do
     lue="$(ini_get "$WSL_CONF" "$section" "$cle")"
@@ -97,7 +109,7 @@ wsl_conf_report() { # wsl_conf_report <p_drift|p_warn> — chaque clé de l'éta
 
 check() {
   if docker_io_next_to_desktop; then
-    p_fail "$DOCKER_IO_DESKTOP_GESTE"
+    p_drift "$DOCKER_IO_DESKTOP_GESTE"
   elif [[ -x "$(_docker_mount_cli)" ]]; then
     p_ok "docker.io absent — Docker Desktop est le daemon de ce distro"
   else
@@ -114,18 +126,16 @@ check() {
   else
     p_drift "gpg-agent-ssh.socket non masqué pour $PROV_HUMAN (race shutdown WSL2 → sessions user cassées)"
   fi
-  local conforme=1; wsl_conf_report || conforme=0
-  if c_drive_open; then
-    if [[ "$conforme" -eq 1 ]]; then
-      p_warn "C: encore OUVERT alors que wsl.conf est posé — redémarrage requis : « wsl --shutdown » (PowerShell), un nouvel onglet, puis le doctor"
-    else
-      p_drift "C: OUVERT (sonde réelle) et wsl.conf non conforme — le lockdown n'est pas armé"
-    fi
-  else
+  local conforme=1 c=0; wsl_conf_report || conforme=0
+  c_drive_open || c=$?
+  if [[ "$c" -eq 0 && "$conforme" -eq 1 ]]; then
+    p_warn "C: encore OUVERT alors que wsl.conf est posé — redémarrage requis : « wsl --shutdown » (PowerShell), un nouvel onglet, puis le doctor"
+  elif [[ "$c" -eq 0 ]]; then
+    p_drift "C: OUVERT (sonde réelle) et wsl.conf non conforme — le lockdown n'est pas armé"
+  elif [[ "$c" -eq 1 ]]; then
     p_ok "C: fermé (sonde réelle : $PROV_HUMAN ne peut pas y écrire)"
   fi
-  [[ "$(hostname)" == "$HOSTNAME_CIBLE" ]] \
-    || p_warn "hostname « $(hostname) » — « $HOSTNAME_CIBLE » prendra après « wsl --shutdown »"
+  dire_hostname
   verdict_check
 }
 
@@ -136,11 +146,7 @@ apply() {
   if pkg_installed snapd; then
     run_quiet env DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd || verdict_apply
     rm -rf "${SNAP_DIRS[@]}"
-    if pkg_installed snapd; then
-      p_fail "snapd toujours présent après purge"
-    else
-      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "snapd purgé (+ ${SNAP_DIRS[*]})"
-    fi
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "snapd purgé (+ ${SNAP_DIRS[*]})"
   fi
   local home mask
   home="$(human_home)"
@@ -165,36 +171,23 @@ apply() {
     dtmp="$(mktemp "${TMPDIR:-/tmp}/prov-dockercfg.XXXXXX")" || { p_fail "tmp config docker impossible"; verdict_apply; }
     jq 'del(.credsStore)' "$dcfg" > "$dtmp" 2>/dev/null \
       || { rm -f "$dtmp"; p_fail "config docker : $dcfg n'est pas un JSON lisible par jq — rien n'est réécrit"; verdict_apply; }
-    [[ -s "$dtmp" ]] \
-      || { rm -f "$dtmp"; p_fail "config docker: résultat VIDE — rien n'est écrit ($dcfg)"; verdict_apply; }
     write_atomic "$dcfg" 0600 "$PROV_HUMAN:" < "$dtmp" \
       || { rm -f "$dtmp"; verdict_apply; }
     rm -f "$dtmp"
     p_warn "credsStore retiré de $dcfg — il désignait un helper Windows (.exe) que la coupure de l'interop rendra inexécutable. Les registres publics restent joignables ; un registre privé redemandera un « docker login »"
   fi
 
-  # wsl.conf en dernier : rien n'arme le redémarrage tant que le reste n'est pas posé ; un fichier
-  # vide laisserait l'interop ouverte, c'est le seul objet du rail dont l'échec rouvre une porte
+  # wsl.conf en dernier : rien n'arme le redémarrage tant que le reste n'est pas posé
   local cible; cible="$(wsl_conf_cible)"
-  [[ -n "${cible//[$'\n'[:space:]]/}" ]] \
-    || { p_fail "wsl.conf: contenu cible VIDE — la frontière ne sera pas armée, rien n'est posé"; verdict_apply; }
-  if [[ -f "$WSL_CONF" && "$(cat "$WSL_CONF")" == "$cible" ]]; then
-    p_ok "$WSL_CONF conforme, clé par clé"
-  else
-    write_atomic "$WSL_CONF" 0644 root:root <<<"$cible" || verdict_apply
-  fi
-  if c_drive_open; then
+  write_atomic "$WSL_CONF" 0644 root:root <<<"$cible" || verdict_apply
+  local c=0; c_drive_open || c=$?
+  if [[ "$c" -eq 0 ]]; then
     p_warn "wsl.conf posé mais C: encore OUVERT — « wsl --shutdown » (PowerShell), un nouvel onglet, puis relancer l'installation"
-  else
+  elif [[ "$c" -eq 1 ]]; then
     p_ok "C: fermé (sonde réelle)"
   fi
-  [[ "$(hostname)" == "$HOSTNAME_CIBLE" ]] \
-    || p_warn "hostname « $(hostname) » — « $HOSTNAME_CIBLE » prendra après « wsl --shutdown »"
+  dire_hostname
   verdict_apply
 }
 
-case "${1:?usage: 30-wsl.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+"$1"

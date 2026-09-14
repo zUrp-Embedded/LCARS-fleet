@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/service_accounts.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-01
-# STATUS: bats tests for modules.d/21-service-accounts.sh — le GROUPE PRIMAIRE et le shell des comptes de service
+# STATUS: bats tests for modules.d/21-service-accounts.sh — deux comptes de service, posés s'ils manquent, refusés s'ils s'écartent
 
 # chaque `@test` de bats est un sous-shell, et c'est l'isolation qu'on veut
 # shellcheck disable=SC2030,SC2031
@@ -18,7 +18,7 @@ setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/21-service-accounts.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   [ -f "$MOD" ]
-  export PROVISION_LIB="$LIB" PROVISION_MODULE=21-service-accounts PROV_SUBSTRATE=linux
+  export PROVISION_LIB="$LIB" PROVISION_MODULE=21-service-accounts PROV_SUBSTRATE=linux PROVISION_RUN=1
 
   decor_pose
   PASSWD="$LCARS_DECOR_ROOT/etc/passwd"
@@ -57,9 +57,9 @@ EOS
   cat > "$DECOR_BIN/groupadd" <<'EOS'
 #!/usr/bin/env bash
 echo "groupadd $*" >> "$CALLS"
-printf '%s:x:9999:\n' "${*: -1}" >> "$LCARS_DECOR_ROOT/etc/group"
+printf '%s:x:%s:\n' "${*: -1}" "$((3000 + $(wc -l < "$LCARS_DECOR_ROOT/etc/group")))" >> "$LCARS_DECOR_ROOT/etc/group"
 EOS
-  # la doublure d'`usermod` applique vraiment -g, -s et -aG : l'idempotence se mesure sur le décor
+  # la doublure d'`usermod` applique vraiment -g, -s et -aG : un geste interdit se verrait sur le décor
   cat > "$DECOR_BIN/usermod" <<'EOS'
 #!/usr/bin/env bash
 p="$LCARS_DECOR_ROOT/etc/passwd" g="$LCARS_DECOR_ROOT/etc/group"
@@ -71,18 +71,17 @@ if [[ "${1:-}" == "-g" ]]; then
 elif [[ "${1:-}" == "-s" ]]; then
   awk -F: -v OFS=: -v n="${*: -1}" -v s="$2" '$1==n {$7=s} {print}' "$p" > "$p.new" && mv "$p.new" "$p"
 elif [[ "${1:-}" == "-aG" ]]; then
-  # l'adhésion secondaire s'écrit dans la quatrième colonne du group : sans elle, ensure_member
-  # échoue, verdict_apply coupe, et la suite d'apply n'est jamais jouée
   awk -F: -v OFS=: -v gr="$2" -v u="${*: -1}" \
     '$1==gr {$4=($4=="" ? u : $4","u)} {print}' "$g" > "$g.new" && mv "$g.new" "$g"
 fi
 EOS
+  # useradd pose le compte avec le shell et le groupe demandés ; STUB_USERADD_SHELL simule un outil qui les ignore
   cat > "$DECOR_BIN/useradd" <<'EOS'
 #!/usr/bin/env bash
 echo "useradd $*" >> "$CALLS"
 grp=""; shell=""; while [[ $# -gt 0 ]]; do [[ "$1" == "-g" ]] && grp="$2"; [[ "$1" == "--shell" ]] && shell="$2"; last="$1"; shift; done
 gid="$(awk -F: -v n="$grp" '$1==n {print $3; exit}' "$LCARS_DECOR_ROOT/etc/group")"
-printf '%s:x:999:%s::/nonexistent:%s\n' "$last" "${gid:-65534}" "$shell" >> "$LCARS_DECOR_ROOT/etc/passwd"
+printf '%s:x:999:%s::/nonexistent:%s\n' "$last" "${gid:-65534}" "${STUB_USERADD_SHELL:-$shell}" >> "$LCARS_DECOR_ROOT/etc/passwd"
 EOS
   chmod +x "$DECOR_BIN"/*
 }
@@ -90,105 +89,107 @@ EOS
 check() { run bash "$MOD" check; }
 apply() { run bash "$MOD" apply; }
 
-# Le groupe primaire d'un compte, lu comme le module le lit.
-pg() {
+pg() { # le groupe primaire d'un compte, lu dans le décor
   local gid; gid="$(awk -F: -v n="$1" '$1==n {print $4; exit}' "$PASSWD")"
   awk -F: -v g="$gid" '$3==g {print $1; exit}' "$GROUP"
 }
 
-# Deplace un compte vers un autre groupe primaire, sans passer par le module.
-derive() {
+derive() { # derive <compte> <groupe> — déplace le groupe primaire d'un compte, sans passer par le module
   local gid; gid="$(awk -F: -v n="$2" '$1==n {print $3; exit}' "$GROUP")"
   awk -F: -v OFS=: -v n="$1" -v g="$gid" '$1==n {$4=g} {print}' "$PASSWD" > "$PASSWD.n"
   mv "$PASSWD.n" "$PASSWD"
 }
 
-@test "DECOR : le module se joue, et le decor nominal ne porte aucun drift de groupe primaire" {
+shell_de() { # shell_de <compte> <shell>
+  awk -F: -v OFS=: -v n="$1" -v s="$2" '$1==n {$7=s} {print}' "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"
+}
+
+retire() { grep -v "^$1:" "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"; }
+
+@test "check : le décor nominal est conforme, les deux comptes sont nommés" {
   check
-  [ "$status" -eq 0 ]                 # un decor nominal ne rend AUCUN drift, sinon les autres mentent
-  printf '%s\n' "$output" | refute_out 'groupe primaire de .* au lieu de'
-  [[ "$output" == *"groupe primaire de lcars-authority : lcars-authority"* ]]
-  [[ "$output" == *"groupe primaire de lcars-system : lcars-system"* ]]
-}
-
-@test "le groupe de chaque compte est son nom — PROV_AUTHORITY_GROUP et PROV_SYSTEM_GROUP exportés n'y changent rien" {
-  PROV_AUTHORITY_GROUP=nogroup PROV_SYSTEM_GROUP=nogroup check
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"groupe primaire de lcars-authority : lcars-authority"* ]]
-  [[ "$output" == *"groupe primaire de lcars-system : lcars-system"* ]]
-}
-
-@test "CHECK : un compte de service derive vers nogroup est un DRIFT, pas un vert" {
-  # `nogroup` est partagé par plusieurs comptes système : un secret écrit par `lcars-system` y naîtrait lisible par tous
-  derive lcars-system nogroup
-  check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT"*"groupe primaire de lcars-system : « nogroup » au lieu de lcars-system"* ]]
-}
-
-@test "CHECK : le drift nomme la CONSEQUENCE, pas seulement l'ecart" {
-  # ce qui décide d'agir, c'est ce qui se passe si on n'agit pas
-  derive lcars-authority nogroup
-  check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"secrets de forge"* ]]
-}
-
-@test "CHECK : les DEUX comptes sont sondes — pas seulement le premier" {
-  # La symetrie du module est sa forme, et une moitie oubliee y est invisible a la lecture.
-  derive lcars-authority nogroup
-  derive lcars-system nogroup
-  check
-  [ "$status" -eq 1 ]
-  local n; n="$(grep -c 'DRIFT.*groupe primaire de .* au lieu de' <<<"$output" || true)"
-  [ "$n" -eq 2 ]
-}
-
-@test "CHECK : un compte de service qui se connecte est un drift — le shell attendu est /usr/sbin/nologin" {
-  awk -F: -v OFS=: '$1=="lcars-system" {$7="/bin/bash"} {print}' "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"
-  check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 21-service-accounts: compte lcars-system présent mais son shell n'est pas /usr/sbin/nologin"* ]]
-}
-
-@test "APPLY : le shell converge vers /usr/sbin/nologin — un LCARS_NOLOGIN exporté n'y change rien" {
-  awk -F: -v OFS=: '$1=="lcars-system" {$7="/bin/false"} {print}' "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"
-  LCARS_NOLOGIN=/bin/false apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx 'usermod -s /usr/sbin/nologin -- lcars-system' "$CALLS"
-  [ "$(awk -F: '$1=="lcars-system" {print $7}' "$PASSWD")" = /usr/sbin/nologin ]
+  [[ "$output" == *"OK    21-service-accounts: compte de service lcars-authority (groupe lcars-authority, /usr/sbin/nologin)"* ]]
+  [[ "$output" == *"OK    21-service-accounts: compte de service lcars-system (groupe lcars-system, /usr/sbin/nologin)"* ]]
+  [[ "$output" == *"lcars-authority ∈ fleet"* ]]
 }
 
-@test "APPLY : la derive est CONVERGEE, pas seulement signalee" {
+@test "check : un groupe primaire qui s'écarte est un drift qui nomme l'écart, ce que le compte détient et le geste" {
   derive lcars-system nogroup
-  [ "$(pg lcars-system)" = "nogroup" ]
-  apply
-  [ "$(pg lcars-system)" = "lcars-system" ]
-  grep -q -- 'usermod -g lcars-system' "$CALLS"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 21-service-accounts: compte lcars-system : groupe primaire « nogroup » au lieu de lcars-system — il détient le secret OAuth2 du deck"*"userdel lcars-system"* ]]
 }
 
-@test "APPLY : idempotent — le second passage ne touche plus au groupe primaire" {
-  # un état déjà bon ne produit aucun geste : un usermod inconditionnel ferait mentir les compteurs
+@test "check : un compte de service qui se connecte est un drift" {
+  shell_de lcars-authority /bin/bash
+  check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 21-service-accounts: compte lcars-authority : shell « /bin/bash » au lieu de /usr/sbin/nologin — il détient les secrets de forge"* ]]
+}
+
+@test "check : les deux comptes passent par la même mesure — deux écarts, deux drifts" {
   derive lcars-authority nogroup
-  apply
-  : > "$CALLS"
-  apply
-  refute grep -q -- 'usermod -g' "$CALLS"
+  shell_de lcars-system /bin/bash
+  check
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '^DRIFT 21-service-accounts: compte lcars-' <<<"$output")" -eq 2 ]
 }
 
-@test "APPLY : un compte CREE par nous ne se fait pas corriger derriere — useradd -g suffit" {
-  # sur un compte neuf, `useradd -g` a déjà posé le bon groupe : un usermod de plus dirait que les deux gestes s'ignorent
-  grep -v '^lcars-system:' "$PASSWD" > "$PASSWD.n"
-  mv "$PASSWD.n" "$PASSWD"
+@test "apply : un compte existant qui s'écarte est refusé et nommé, jamais corrigé" {
+  derive lcars-system nogroup
+  shell_de lcars-authority /bin/false
   apply
-  [ "$(pg lcars-system)" = "lcars-system" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  21-service-accounts: compte lcars-authority : shell « /bin/false » au lieu de /usr/sbin/nologin"* ]]
+  [[ "$output" == *"FAIL  21-service-accounts: compte lcars-system : groupe primaire « nogroup » au lieu de lcars-system"* ]]
+  refute grep -qE '^usermod -(s|g) ' "$CALLS"
+  [ "$(pg lcars-system)" = nogroup ]
+  [ "$(awk -F: '$1=="lcars-authority" {print $7}' "$PASSWD")" = /bin/false ]
+}
+
+@test "apply : un compte absent est créé sur son groupe éponyme, et lcars-authority rejoint fleet" {
+  retire lcars-authority
+  retire lcars-system
+  printf '%s\n' 'root:x:0:' 'fleet:x:2000:' 'nogroup:x:65534:' > "$GROUP"
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'groupadd lcars-authority' "$CALLS"
+  grep -qx 'useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-authority -- lcars-authority' "$CALLS"
   grep -qx 'useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-system -- lcars-system' "$CALLS"
-  refute grep -q -- 'usermod -g lcars-system' "$CALLS"
+  grep -qx 'usermod -aG fleet lcars-authority' "$CALLS"
+  [ "$(pg lcars-system)" = lcars-system ]
+  run bash "$MOD" check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "apply : un compte que useradd pose de travers est relu, et l'écart est un échec" {
+  retire lcars-system
+  STUB_USERADD_SHELL=/bin/bash apply
+  [ "$status" -eq 1 ]
+  grep -q '^useradd .* lcars-system$' "$CALLS"
+  [[ "$output" == *"FAIL  21-service-accounts: compte lcars-system : shell « /bin/bash » au lieu de /usr/sbin/nologin"* ]]
+}
+
+@test "apply : lcars-authority hors de fleet est ajouté — check le dit avant" {
+  printf '%s\n' 'root:x:0:' 'fleet:x:2000:' 'lcars-authority:x:2002:' 'lcars-system:x:2003:' > "$GROUP"
+  check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 21-service-accounts: lcars-authority ∉ fleet"* ]]
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'usermod -aG fleet lcars-authority' "$CALLS"
+}
+
+@test "apply : idempotent — un état conforme ne produit aucun geste" {
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -s "$CALLS" ] || { cat "$CALLS"; return 1; }
 }
 
 @test "le group du décor est lu — la sonde ne lit pas /etc/group de la machine" {
   # le gid 2002 change de nom dans le décor : seul un module qui lit ce fichier peut le nommer
-  printf '%s\n' 'root:x:0:' 'fleet:x:2000:lcars-authority' 'renomme-au-decor:x:2002:' 'lcars-system:x:2003:' > "$GROUP"
+  printf '%s\n' 'root:x:0:' 'fleet:x:2000:lcars-authority' 'renomme-au-decor:x:2002:' 'lcars-system:x:2003:' 'lcars-authority:x:2004:' > "$GROUP"
   check
-  [[ "$output" == *"groupe primaire de lcars-authority : « renomme-au-decor » au lieu de lcars-authority"* ]]
+  [[ "$output" == *"compte lcars-authority : groupe primaire « renomme-au-decor » au lieu de lcars-authority"* ]]
 }

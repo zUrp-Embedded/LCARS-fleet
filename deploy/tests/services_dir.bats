@@ -73,7 +73,7 @@ declare_couvre() {
       admiral/skills/system-issues/list.sh)  continue ;;  # container/init.sh
       agent/claude-automode.json) continue ;;  # human.d/70-human.sh
       container/boot.sh)          continue ;;  # ENTRYPOINT du Dockerfile
-      container/init.sh)          continue ;;  # boot.sh, 25-directories
+      container/init.sh)          continue ;;  # boot.sh
       forge.d/catalogues.sh)      continue ;;  # 50-catalogues
       forge.d/deck-oidc.sh)       continue ;;  # 66-deck-oidc
       forge.d/ops-branch.sh)      continue ;;  # 65-ops-branch
@@ -81,7 +81,7 @@ declare_couvre() {
       human.d/40-claude-bin.sh)   continue ;;  # 60-deploy (convergeur d'humains)
       human.d/70-human.sh)        continue ;;  # 60-deploy, provision-lib
       human.d/75-projects.sh)     continue ;;  # 60-deploy
-      lib/human-protocol.sh)      continue ;;  # provision-lib, 22-fleet-human
+      lib/human-protocol.sh)      continue ;;  # human-converger.sh, human.d
       lib/module-protocol.sh)     continue ;;  # provision-lib, 63-forge-tokens
     esac
     bad+=("$base")

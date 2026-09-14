@@ -74,7 +74,8 @@ absent() { # absent <motif etendu> <fichier>
     n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700.*(PRIVATE_DIR|TOKENS_DIR)' || true)"
     [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
   done
-  grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
+  # 25-directories pose la racine au mode que le manifeste déclare
+  grep -qF '"$PROV_TOKENS_DIR"' "$REPO/deploy/modules.d/25-directories.sh"
   grep -qE "^dir[[:space:]]+${TOKENS_DIR}[[:space:]]+0710" "$MANIFEST"
 }
 

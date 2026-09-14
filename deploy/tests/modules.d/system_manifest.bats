@@ -19,13 +19,16 @@ setup() {
 
   EXEMPT="$BATS_TEST_TMPDIR/exempt"
   printf '%s\n' /usr/local/bin /etc/systemd/system /etc/sudoers.d /etc/tmpfiles.d \
-                /home/projects/LCARS /opt/elixir- /home/catalogues /etc/apt/keyrings > "$EXEMPT"
+                /home/projects/LCARS /home/catalogues > "$EXEMPT"
 }
 
 # Les lignes de donnees du manifeste : ni commentaire, ni vide.
 rows() { grep -vE '^\s*#|^\s*$' "$MANIFEST"; }
 
-code() {
+code() { poseurs; grep -hvE '^\s*#' "$BATS_TEST_DIRNAME"/../../installer-constants.env; }
+
+# le code qui pose, sans le fichier de constantes : une valeur déclarée n'est pas un geste
+poseurs() {
   grep -hvE '^\s*#' \
     "$BATS_TEST_DIRNAME"/../../modules.d/*.sh \
     "$ROOT"/install.sh \
@@ -36,8 +39,28 @@ code() {
     "$BATS_TEST_DIRNAME"/../../../runtime/services/human.d/*.sh \
     "$BATS_TEST_DIRNAME"/../../../runtime/services/forge.d/*.sh \
     ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
-    "$BATS_TEST_DIRNAME"/../../lib/*.sh \
-    "$BATS_TEST_DIRNAME"/../../installer-constants.env 2>/dev/null
+    "$BATS_TEST_DIRNAME"/../../lib/*.sh 2>/dev/null
+}
+
+resolu() { # le code qui pose, les constantes remplacées par leur valeur et « $(prov_decor X) » par X
+  local c k v
+  c="$(poseurs)"
+  while IFS='=' read -r k v; do
+    [[ "$k" =~ ^PROV_[A-Z0-9_]+$ ]] || continue
+    c="${c//\$\{$k\}/$v}"; c="${c//\$$k/$v}"
+  done < <(sort -r "$BATS_TEST_DIRNAME/../../installer-constants.env")
+  sed -E 's/\$\(prov_decor "?([^")]*)"?\)/\1/g' <<<"$c"
+}
+
+ere() { sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$1"; }   # ere <texte> → le texte en motif étendu littéral
+
+chemin_entier() { grep -qE -- "$(ere "$1")([^A-Za-z0-9_.-]|$)" <<<"$2"; }   # chemin_entier <objet> <corpus>
+
+a_un_poseur() { # a_un_poseur <objet> <corpus résolu> — son chemin entier, ou son nom borné : jamais un fragment d'un autre mot
+  local stem
+  chemin_entier "$1" "$2" && return 0
+  stem="$(basename "$1" | sed -e 's#-<version>$##' -e 's#\.service$##')"
+  grep -qE -- "(^|[^A-Za-z0-9_.-])$(ere "$stem")([^A-Za-z0-9_-]|$)" <<<"$2"
 }
 
 _bins_du_rail=()
@@ -49,10 +72,11 @@ done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
          | sed 's|.*/||; s|"$||' | sort -u)
 
 posed() {
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/etc/wsl\.conf|/etc/apt/keyrings/|/etc/apt/sources\.list\.d/[a-z]|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           -e 's#/opt/node-[^ ]*#/opt/node-<version>#' \
+          -e 's#/opt/elixir-[^ ]*#/opt/elixir-<version>#' \
           `# le joker de l'humain s'ecrit <humain> dans la prose du code et <human> dans la table :` \
           `# deux orthographes pour UN meme fait. La table gagne — code et identifiants en anglais.` \
           -e 's#<humain>#<human>#' \
@@ -85,15 +109,38 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     trait="${cls#*:}"; [[ "$trait" != "$cls" ]] || trait=""
     cls="${cls%%:*}"
     case "$trait" in
-      ""|cond|merge|single|unset) ;;
+      ""|unset) ;;
       *) echo "trait inconnu « $trait » : $line"; return 1 ;;
     esac
     case "$cls" in
-      prefix|dir|anchor|link|group|runtime|human|preserve) ;;
-      account|person|docker) ;;
+      prefix|dir|anchor|link|group|runtime|human|account|person) ;;
       *) echo "classe inconnue « $cls » : $line"; return 1 ;;
     esac
   done < "$BATS_TEST_TMPDIR/rows"
+}
+
+@test "SUBSTRAT : un parent déclaré couvre au moins les substrats de ses enfants" {
+  # un enfant posé sur un substrat exige son parent sur ce substrat : le parent déclaré plus étroit ment
+  local cls p s rest parent ps m etroit bad=0 vus=0
+  while read -r cls p rest; do
+    [[ "$p" == /* ]] || continue
+    s="$(awk '{print $NF}' <<<"$rest")"
+    parent="${p%/*}"
+    while [[ -n "$parent" ]]; do
+      ps="$(awk -v o="$parent" '$2==o {print $5; exit}' "$BATS_TEST_TMPDIR/rows")"
+      [[ -z "$ps" ]] || break
+      parent="${parent%/*}"
+    done
+    [[ -n "$parent" ]] || continue
+    vus=$((vus + 1))
+    etroit=0
+    for m in ${s//+/ }; do
+      [[ "$ps" == any || ( "$m" != any && "+$ps+" == *"+$m+"* ) ]] || etroit=1
+    done
+    [[ "$etroit" -eq 0 ]] || { echo "$p ($s) sous $parent ($ps)"; bad=1; }
+  done < "$BATS_TEST_TMPDIR/rows"
+  [ "$vus" -ge 10 ] || { echo "seulement $vus parents trouvés — l'instrument ne lit plus la table"; return 1; }
+  [ "$bad" -eq 0 ]
 }
 
 @test "SUBSTRAT : la cinquieme colonne est du vocabulaire connu" {
@@ -128,26 +175,35 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 }
 
 @test "ISO 2/2 : tout objet DECLARE a un poseur dans le code" {
-  local cls p rest base stem bad=0 CODE
-  CODE="$(code)"
+  local cls p rest bad=0 CODE entiers=0
+  CODE="$(resolu)"
   while read -r cls p rest; do
     cls="${cls%%:*}"        # le trait qualifie la classe, il ne la remplace pas
     if [[ "$cls" == "group" ]]; then
-      grep -qF "$p" <<<"$CODE" || { echo "GROUPE DECLARE, aucun poseur : $p"; bad=1; }
+      grep -qwF "$p" <<<"$CODE" || { echo "GROUPE DECLARE, aucun poseur : $p"; bad=1; }
       continue
     fi
-    base="$(basename "$p")"
-    [[ "$base" == "<human>" ]] && continue
+    [[ "$(basename "$p")" == "<human>" ]] && continue
     case "$p" in
       /root/.terraform.d)      continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
-      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   60-deploy (48 ne compile plus, lot 4)
+      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   60-deploy
       /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 60-deploy
-      /opt/lcars/.verified)    continue ;;   # pose par le DOCKERFILE (stage final, tampon de verify) — hors du corpus de ce mur, qui lit le rail et le runtime, pas l'image
     esac
-    stem="$(sed -e 's#-<version>$##' -e 's#\.service$##' <<<"$base")"
-    grep -qF "$stem" <<<"$CODE" || { echo "DECLARE, aucun poseur : $p (radical « $stem »)"; bad=1; }
+    if chemin_entier "$p" "$CODE"; then entiers=$((entiers + 1)); fi
+    a_un_poseur "$p" "$CODE" || { echo "DECLARE, aucun poseur : $p"; bad=1; }
   done < "$BATS_TEST_TMPDIR/rows"
   [ "$bad" -eq 0 ]
+  # garde d'instrument : sans résolution des constantes, presque rien ne se trouve par son chemin entier
+  [ "$entiers" -ge 20 ] || { echo "$entiers objets trouvés par leur chemin entier — la résolution des constantes est cassée"; return 1; }
+}
+
+@test "ISO 2/2, témoin du témoin : un nom qui n'est qu'un fragment d'un autre mot ne vaut pas poseur" {
+  local corpus
+  corpus="$(printf '%s\n' 'ensure_dir "$MEDIA_ROOT/avatars" 0755' 'x=/opt/lcars/var/tokens')"
+  a_un_poseur /opt/lcars/share/avatars "$corpus"
+  a_un_poseur /opt/lcars/var/tokens "$corpus"
+  refute a_un_poseur /opt/lcars/share/ava "$corpus"
+  refute a_un_poseur /opt/lcars/var/tok "$corpus"
 }
 
 @test "le nom REEL du fichier tmpfiles, pas celui qu'on croit" {
@@ -160,24 +216,6 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   grep -qE '^runtime +/run/lcars-converger\.refused ' "$MANIFEST"
   grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
 }
-
-@test "preserve = POSE mais JAMAIS RETIRE — pas « non pose »" {
-  local p
-  while read -r p; do
-    grep -rqF -- "$p" "$BATS_TEST_DIRNAME"/../../modules.d/*.sh \
-      || { echo "objet preserve sans poseur dans modules.d : $p"; return 1; }
-  done < <(awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows")
-
-  local f
-  for f in /home/projects /home/projects.ops /home/projects.workshop; do
-    awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows" | grep -qx -- "$f" \
-      || { echo "face canonique DISPARUE de preserve : $f"; return 1; }
-  done
-
-  # ⚠ GARDE DE POPULATION : zero ligne `preserve` passerait les deux boucles ci-dessus.
-  [ "$(awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -ge 3 ]
-}
-
 
 @test "LA TABLE A UN LECTEUR DE PRODUCTION, et il applique la colonne GID" {
   local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
@@ -276,12 +314,12 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   local dirs_mod="$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
   local liste; liste="$(sed -n '/^prov_dirs()/,/^}$/p' "$dirs_mod")"
   [ -n "$liste" ]
-  grep -q 'PROV_PREFIX' <<<"$liste"
-
-  # et il est pose avec ce que la TABLE declare, pas avec autre chose
+  grep -qF '"$PROV_PREFIX"' <<<"$liste"
+  # 25 le pose au mode et au propriétaire que la table déclare pour lui
   local decl; decl="$(awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"{print $3, $4; exit}' "$MANIFEST")"
   [ "$decl" = "0750 root:fleet" ]
-  grep -qE 'PROV_PREFIX 0750 root:\$PROV_FLEET_GROUP' <<<"$liste"
+  run lib 'prov_manifest_mode "$PROV_PREFIX"; prov_manifest_owner "$PROV_PREFIX"'
+  [ "$output" = "$(printf '0750\nroot:fleet')" ]
 }
 
 
@@ -314,7 +352,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   local poseur
   poseur="$(env -i PATH="$PATH" HOME="$BATS_TEST_TMPDIR" bash -c '
     . "'"$BATS_TEST_DIRNAME"'/../../lib/provision-lib.sh" >/dev/null 2>&1
-    prov_console_human() { echo "<human>"; }
+    PROV_SUBSTRATE=linux
     '"$(sed -n '/^prov_runtime_dirs()/,/^}/p;/^prov_dirs()/,/^}/p' \
           "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh")"'
     prov_dirs 2>/dev/null | awk "{print \$1}"

@@ -404,6 +404,20 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+@test "ensure_mode : le propriétaire est relu après chown — un chown qui rend 0 sans rien changer est un échec" {
+  local bin="$BATS_TEST_TMPDIR/bin-chown"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/chown"; chmod 0755 "$bin/chown"
+  module_sh '
+    PATH="'"$bin"':$PATH"
+    unset LCARS_DECOR_ROOT   # sous le décor, tout appartient à qui joue : le propriétaire demandé ne serait jamais root
+    f="$BATS_TEST_TMPDIR/proprio"; : > "$f"; chmod 0644 "$f"
+    ensure_mode "$f" 0644 root:root || true
+    [ "$PROV_FAILED" -eq 1 ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"FAIL  test-mod: ensure_mode: propriétaire $(id -un):$(id -gn) ≠ root:root après chown"* ]]
+}
+
 @test "ensure_mode : un lien cassé se dit lien, pas absent" {
   module_sh '
     ln -s "$BATS_TEST_TMPDIR/nulle-part" "$BATS_TEST_TMPDIR/casse"

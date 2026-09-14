@@ -34,7 +34,8 @@ echo "APT:$*" >> "$CALLS"
 [[ "$1" == purge ]] && sed -i '/^snapd$/d' "$INSTALLES"
 exit 0
 EOF
-  printf '#!/usr/bin/env bash\n[[ "$1" == passwd ]] && printf "%%s:x:0:0::%s:/bin/bash\\n" "$2"\nexit 0\n' "$HOME_DIR" > "$BIN/getent"
+  # tout compte existe et habite HOME_DIR, sauf « inconnu »
+  printf '#!/usr/bin/env bash\n[[ "$1" == passwd && "$2" != inconnu ]] && printf "%%s:x:0:0::%s:/bin/bash\\n" "$2"\nexit 0\n' "$HOME_DIR" > "$BIN/getent"
   printf '#!/usr/bin/env bash\necho "$STUB_HOSTNAME"\n' > "$BIN/hostname"
   chmod 0755 "$BIN"/*
 }
@@ -78,9 +79,33 @@ desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "
   [ "$(grep -c '^systemd=' "$WSL_CONF")" -eq 1 ]
   [ "$(head -1 "$WSL_CONF")" = "[user]" ]
   [[ "$output" == *"POSÉ  30-wsl: $WSL_CONF"* ]]
+  local avant; avant="$(cat "$WSL_CONF")"
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$WSL_CONF conforme, clé par clé"* ]]
+  [ "$(cat "$WSL_CONF")" = "$avant" ]
+  refute_out "POSÉ  30-wsl: $WSL_CONF" <<<"$output"
+}
+
+@test "hostname : une base de projet qui n'est pas une étiquette DNS est refusée, la clé n'est pas posée, les autres le sont" {
+  local base
+  for base in "bob-" "$(printf 'a%.0s' {1..64})"; do
+    rm -f "$WSL_CONF"
+    PROV_FORGE_BASE="$base" mod check
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"FAIL  30-wsl: hostname « $base » refusé"* ]] || { echo "$output"; return 1; }
+    PROV_FORGE_BASE="$base" mod apply
+    [ "$status" -eq 1 ]
+    [ -z "$(cle network hostname)" ]
+    [ "$(cle interop enabled)" = "false" ]
+  done
+}
+
+@test "C: sondé pour un humain que as_human ne peut pas jouer : l'échec est dit, jamais « C: fermé »" {
+  mkdir -p "$C_DRIVE"
+  PROV_HUMAN=inconnu mod check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  30-wsl: as_human: user inconnu: inconnu"* ]]
+  refute_out 'C: fermé' <<<"$output"
 }
 
 @test "apply : sans wsl.conf, le fichier naît sous le décor avec son en-tête et les six clés, en 0644 root" {
@@ -127,11 +152,11 @@ desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "
   [[ "$output" == *"snapd absent"* ]]
 }
 
-@test "docker.io à côté de Docker Desktop : échec au check et à l'apply, le geste entier dit, rien n'est enlevé" {
+@test "docker.io à côté de Docker Desktop : un état de la machine, dérive au check et échec à l'apply, le geste entier dit, rien n'est enlevé" {
   echo docker.io > "$INSTALLES"; desktop_monte
   mod check
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  30-wsl: docker.io est posé À CÔTÉ de Docker Desktop"*"apt purge docker.io containerd runc"*"WSL integration"*"dpkg --configure -a"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 30-wsl: docker.io est posé À CÔTÉ de Docker Desktop"*"apt purge docker.io containerd runc"*"WSL integration"*"dpkg --configure -a"* ]]
   mod apply
   [ "$status" -eq 1 ]
   refute grep -q '^APT:' "$CALLS"
