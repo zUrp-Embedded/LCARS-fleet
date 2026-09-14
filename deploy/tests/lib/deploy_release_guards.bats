@@ -51,6 +51,31 @@ joue() { run bash "$SCRIPT"; }
   [ "$(find "$LCARS_DECOR_ROOT" -type l | wc -l)" -eq 1 ]
 }
 
+@test "une entrée du manifeste ou le gabarit absents du source : refus avant toute bascule, l'ancienne pose reste entière" {
+  joue
+  [ "$status" -eq 0 ]
+  printf '#!/bin/sh\necho ancienne\n' > "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  printf 'ancien fleet\n' > "$PREFIX/bin/fleet"
+  printf '#!/bin/sh\necho neuve\n' > "$LCARS_RUNTIME_DIR/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
+  printf 'neuf fleet\n' > "$LCARS_RUNTIME_DIR/bin/fleet"
+  local avant; avant="$(find "$PREFIX" -printf '%P\n' | LC_ALL=C sort)"
+  rm "$LCARS_RUNTIME_DIR/bin/note.txt"
+  joue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"entrée du manifest absente du source bin/ : note.txt — rien n'est posé"* ]]
+  grep -q ancienne "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  [ "$(cat "$PREFIX/bin/fleet")" = "ancien fleet" ]
+  [ "$(find "$PREFIX" -printf '%P\n' | LC_ALL=C sort)" = "$avant" ]
+  printf 'note\n' > "$LCARS_RUNTIME_DIR/bin/note.txt"
+  rm "$LCARS_RUNTIME_DIR/etc/fleet.env.template"
+  joue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gabarit absent du source : $LCARS_RUNTIME_DIR/etc/fleet.env.template — rien n'est posé"* ]]
+  grep -q ancienne "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  [ "$(cat "$PREFIX/bin/fleet")" = "ancien fleet" ]
+  [ "$(find "$PREFIX" -printf '%P\n' | LC_ALL=C sort)" = "$avant" ]
+}
+
 @test "lancé en root, il refuse avant toute pose" {
   run unshare -Ur bash "$SCRIPT"
   [ "$status" -eq 1 ]

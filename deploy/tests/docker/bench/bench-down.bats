@@ -27,7 +27,7 @@ setup() {
 #!/usr/bin/env bash
 echo "$*" >> "$CALLS"
 if [[ "$1" == compose && "$*" == *" down -v --remove-orphans" ]]; then
-  if err="$(DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-3}" config -q 2>&1)"; then echo "LU:${*: -4:1}" >> "$CALLS"
+  if err="$(DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-3}" config --format json 2>&1 > "$CALLS.modele-${*: -4:1}")"; then echo "LU:${*: -4:1}" >> "$CALLS"
   else echo "ILLISIBLE:${*: -4:1}: $err" >> "$CALLS"
   fi
 fi
@@ -179,6 +179,19 @@ BANC="bt-fleet-lcars-1:c:bt bt-runner-act-1:c:bt bt-forge-gitea-1:c:bt"
 
   [ "$status" -eq 1 ]
   refute grep -q -- "down -v" "$CALLS"
+}
+
+@test "le down du runner relit le modèle que forge-runner --bench pose : le réseau externe de la forge, les volumes marqués" {
+  OBJETS="$BANC" run_down
+
+  [ "$status" -eq 0 ]
+  grep -qx 'LU:bt-runner' "$CALLS"
+  local modele="$CALLS.modele-bt-runner"
+  [ "$(jq -r '.networks.default.name' "$modele")" = bt-forge_default ]
+  [ "$(jq -r '.networks.default.external' "$modele")" = true ]
+  [ "$(jq -r '.volumes.data.labels["lcars.bench"]' "$modele")" = bt ]
+  [ "$(jq -r '.volumes.dind.labels["lcars.bench"]' "$modele")" = bt ]
+  [ "$(jq -r '.services.act.labels["lcars.bench"]' "$modele")" = bt ]
 }
 
 @test "les trois down se lisent par compose avec les constantes de l'installeur, sans valeur factice" {

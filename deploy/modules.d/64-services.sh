@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 62-runtime-helpers
+# AFTER: 10-packages 20-groups 21-service-accounts 25-directories 48-forge-host 60-deploy 62-runtime-helpers 63-forge-tokens
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

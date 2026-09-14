@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 10-packages
 #
 # Le tarball officiel apporte npm signé et vérifié ; corepack le retéléchargerait depuis le
 # registre au premier usage, une pièce mobile de plus. C'est la livraison qui décide, jamais le

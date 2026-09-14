@@ -87,6 +87,11 @@ while read -r mf_name mf_mode mf_flag mf_extra; do
   MF_FILES+=("$mf_name"); MF_MODES+=("$mf_mode")
 done < "$MANIFEST"
 [[ "${#MF_FILES[@]}" -gt 0 ]] || die "manifest vide : $MANIFEST"
+# vérifié avant toute bascule : rel/ basculé puis une entrée manquante laisserait une release neuve avec l'ancien bin/
+for f in "${MF_FILES[@]}"; do
+  [[ -e "$RUNTIME_DIR/bin/$f" ]] || die "entrée du manifest absente du source bin/ : $f — rien n'est posé"
+done
+[[ -r "$RUNTIME_DIR/etc/fleet.env.template" ]] || die "gabarit absent du source : $RUNTIME_DIR/etc/fleet.env.template — rien n'est posé"
 
 [[ "$EUID" -ne 0 ]] || die "lancé en root — le build laisserait des artefacts root dans l'arbre source. À lancer sous le compte propriétaire de l'install ; seule la pose demande des droits"
 
@@ -102,7 +107,6 @@ atomic_swap_dir "$REL_SRC" "$PROV_PREFIX/rel/lcars_fleet"
 
 for i in "${!MF_FILES[@]}"; do
   f="${MF_FILES[$i]}"
-  [[ -e "$RUNTIME_DIR/bin/$f" ]] || die "entrée du manifest absente du source bin/ : $f"
   atomic_swap_file "$RUNTIME_DIR/bin/$f" "$PROV_PREFIX/bin/$f"
   if [[ "${MF_MODES[$i]}" == "exec" ]]; then
     chmod +x "$PROV_PREFIX/bin/$f" || die "chmod +x refusé : $PROV_PREFIX/bin/$f"

@@ -6,6 +6,7 @@
 # APPLY-ON: wsl
 # CHECK-ON: wsl
 # NEEDS: root
+# AFTER: 10-packages
 #
 # wsl.conf est le fichier de l'instance : chaque clé de l'état-cible s'y pose, le reste du fichier
 # ([user] compris) est conservé. Il ne prend effet qu'après « wsl --shutdown » ; la sonde de C:

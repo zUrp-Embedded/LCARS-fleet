@@ -6,7 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 25-directories 48-forge-host
+# AFTER: 10-packages 25-directories 48-forge-host
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

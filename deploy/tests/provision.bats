@@ -716,6 +716,20 @@ MODEOF
 }
 
 # bats test_tags=structure
+@test "les modules réels : AFTER déclare ce que l'apply emploie — la chaîne de 60, l'hôte de la forge, les avatars de la charte" {
+  after() { sed -n 's/^# AFTER: *//p' "$MODULES/$1.sh" | head -1; }
+  local manque="" paire mod dep
+  for paire in 60-deploy:15-toolchain 60-deploy:20-groups 48-forge-host:12-docker-engine 48-forge-host:21-service-accounts \
+               48-forge-host:25-directories 64-services:21-service-accounts 46-tofu:10-packages 61-forge-structure:44-media; do
+    mod="${paire%%:*}"; dep="${paire#*:}"
+    [[ " $(after "$mod") " == *" $dep "* ]] || manque="$manque $mod(sans $dep)"
+  done
+  [ -z "$manque" ] || { echo "$manque" >&2; false; }
+  # 48 ne lit aucun média : la charte, qui pose les avatars sur la forge, est jouée par 61
+  [[ " $(after 48-forge-host) " != *" 44-media "* ]]
+}
+
+# bats test_tags=structure
 @test "le README de deploy décrit chaque module avec les terrains qu'il déclare" {
   local readme="$SRC/README.md" missing="" wrong="" f name row a c ra rc
   for f in "$MODULES"/*.sh; do

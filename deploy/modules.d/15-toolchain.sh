@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: wsl linux docker
 # NEEDS: root
+# AFTER: 10-packages
 #
 # Elixir vient du zip précompilé officiel d'une majeure OTP, épinglé par version et sha256 dans
 # installer-constants.env : la distro LTS sert une minor qu'Elixir ne corrige plus. Erlang est celui

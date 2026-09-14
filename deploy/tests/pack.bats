@@ -6,6 +6,7 @@
 # STATUS: témoins de deploy/pack.sh — le refus d'un arbre modifié, le kit et son nom, la porte de la version, le tiroir, ce que la publication dit du jeton
 
 load refute
+load support/minisign_double
 
 setup() {
   local _v
@@ -90,15 +91,21 @@ EOF
   chmod 0755 "$BIN/curl"
 }
 
-docker_double() { # un daemon doublé qui journalise ; STUB_MANIFEST=absent|present|injoignable, STUB_PUSH_RC
+docker_double() { # un daemon doublé qui journalise ; STUB_MANIFEST=absent|present|injoignable, STUB_PUSH_RC, STUB_ANONYME=public|prive
   cat > "$BIN/docker" <<'EOF'
 #!/usr/bin/env bash
-echo "DOCKER $*" >> "$CALLS"
+# anonyme : un magasin de configuration nommé qui ne porte aucun identifiant
+anonyme=""; [[ -n "${DOCKER_CONFIG:-}" && ! -e "$DOCKER_CONFIG/config.json" ]] && anonyme=" (anonyme)"
+echo "DOCKER $*$anonyme" >> "$CALLS"
 case "$1" in
   version) exit 0 ;;
   image)   git rev-parse --short=8 HEAD ;;
   login)   cat >/dev/null ;;
   manifest)
+    if [[ -n "$anonyme" ]]; then
+      [[ "${STUB_ANONYME:-public}" == public ]] && exit 0
+      echo "unauthorized: authentication required" >&2; exit 1
+    fi
     case "${STUB_MANIFEST:-absent}" in
       present) exit 0 ;;
       absent) echo "no such manifest: $3" >&2; exit 1 ;;
@@ -224,6 +231,28 @@ publier() { # publier — une publication complète vers une forge https doublé
   grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
 }
 
+@test "--publish : l'image poussée est tirée sans identifiants avant la release — privée, la release n'est pas créée et le geste est dit ; publique, la release suit" {
+  forge_qui_repond; docker_double
+  STUB_ANONYME=prive publier
+  [ "$status" -eq 1 ]
+  grep -q '^DOCKER push forge.decor/fleet/lcars-fleet:v9.9$' "$CALLS"
+  grep -q '^DOCKER manifest inspect forge.decor/fleet/lcars-fleet:v9.9 (anonyme)$' "$CALLS"
+  [[ "$output" == *"un tirage anonyme est refusé (unauthorized: authentication required)"*"la release n'est pas créée"* ]]
+  [[ "$output" == *"sur GHCR, un paquet est privé à sa première publication, il se passe public dans ses réglages"* ]]
+  refute grep -q '^CURL POST' "$CALLS"
+  grep -q '^DOCKER logout forge.decor' "$CALLS"
+  : > "$CALLS"
+  STUB_ANONYME=public publier
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local l_push l_anon l_post
+  l_push="$(grep -n '^DOCKER push' "$CALLS" | cut -d: -f1)"
+  l_anon="$(grep -n '^DOCKER manifest inspect .* (anonyme)$' "$CALLS" | cut -d: -f1)"
+  l_post="$(grep -n '^CURL POST .*/releases$' "$CALLS" | cut -d: -f1)"
+  [ "$l_push" -lt "$l_anon" ]
+  [ "$l_anon" -lt "$l_post" ]
+  [[ "$output" == *"image tirable sans identifiants : forge.decor/fleet/lcars-fleet:v9.9"* ]]
+}
+
 publier_par_fichier() { # publier_par_fichier — la publication complète, le jeton de l'opérateur donné par LCARS_PACK_TOKEN_FILE
   JETON="jeton-du-fichier-de-l-operateur"
   printf '%s\n' "$JETON" > "$BATS_TEST_TMPDIR/jeton-operateur"
@@ -263,6 +292,44 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   run env HOME="$BATS_TEST_TMPDIR/home" LCARS_DOOR_INSECURE_HTTP=1 PATH=/usr/bin:/bin \
     bash -c "cat '$LCARS_PACK_DIR/dist/v9.9/install.sh' | bash -s -- --workstation"
   [[ "$output" == *"lcars-fleet-v9.9-otp27-$ARCH.tar.gz : téléchargé, sha256 vérifié"* ]]
+}
+
+@test "clés minisign : le kit est signé dans le tiroir de la version, et son installeur, servi, vérifie la signature avec la clé qu'il porte" {
+  minisign_double "$BATS_TEST_TMPDIR/minisign-bin"
+  minisign_cle "$BATS_TEST_TMPDIR/cle-secrete" RWQclepack
+  mkdir -p "$LCARS_PACK_DIR/dist/v9.9"
+  printf 'untrusted comment: signature doublée\nRWQancienne 0\n' > "$LCARS_PACK_DIR/dist/v9.9/lcars-fleet-v9.9-otp27-$ARCH.tar.gz.minisig"
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  python3 -m http.server --bind 127.0.0.1 "$port" --directory "$LCARS_PACK_DIR/dist" >/dev/null 2>&1 3>&- &
+  SRV_PID=$!
+  PATH="$BATS_TEST_TMPDIR/minisign-bin:$PATH" LCARS_MINISIGN_PUBKEY=RWQclepack LCARS_MINISIGN_SECKEY="$BATS_TEST_TMPDIR/cle-secrete" \
+    LCARS_DOOR_BASE="http://127.0.0.1:$port/v9.9" LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local kit="$LCARS_PACK_DIR/dist/v9.9/lcars-fleet-v9.9-otp27-$ARCH.tar.gz"
+  [[ "$output" == *"pack: kit signé : $kit.minisig"* ]]
+  PATH="$BATS_TEST_TMPDIR/minisign-bin:$PATH" minisign -Vq -P RWQclepack -m "$kit"
+  grep -qE '^MINISIGN_PUBKEY="RWQclepack" +# @@DOOR_PUBKEY@@' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
+  run env HOME="$BATS_TEST_TMPDIR/home" LCARS_DOOR_INSECURE_HTTP=1 PATH="$BATS_TEST_TMPDIR/minisign-bin:/usr/bin:/bin" \
+    bash -c "cat '$LCARS_PACK_DIR/dist/v9.9/install.sh' | bash -s -- --workstation"
+  [[ "$output" == *"lcars-fleet-v9.9-otp27-$ARCH.tar.gz : signature vérifiée (minisign)"* ]]
+}
+
+@test "clés minisign : l'une sans l'autre, une clé secrète illisible ou minisign absent sont refusés avant le gate" {
+  LCARS_MINISIGN_PUBKEY=RWQclepack LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"LCARS_MINISIGN_PUBKEY et LCARS_MINISIGN_SECKEY vont ensemble"* ]]
+  LCARS_MINISIGN_SECKEY="$BATS_TEST_TMPDIR/cle-secrete" LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"vont ensemble"* ]]
+  LCARS_MINISIGN_PUBKEY=RWQclepack LCARS_MINISIGN_SECKEY="$BATS_TEST_TMPDIR/absente" LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"clé secrète minisign illisible : $BATS_TEST_TMPDIR/absente"* ]]
+  minisign_cle "$BATS_TEST_TMPDIR/cle-secrete" RWQclepack
+  run env PATH="$BIN:/usr/bin:/bin" LCARS_MINISIGN_PUBKEY=RWQclepack LCARS_MINISIGN_SECKEY="$BATS_TEST_TMPDIR/cle-secrete" LCARS_PACK_TAG=v9.9 \
+    bash "$R/deploy/pack.sh" --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"minisign absent"* ]]
+  [ ! -s "$GATE_LOG" ]
 }
 
 @test "une option inconnue est refusée en se nommant" {

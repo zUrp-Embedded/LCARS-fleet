@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 44-media
+# AFTER: 10-packages 12-docker-engine 20-groups 21-service-accounts 25-directories
 #
 # FORGE_BASE_URL posée, ou une forge déjà gravée « fournie » : rien n'est monté, docker n'est pas
 # requis, et le jeton master s'écrit à la main. Sinon, ou sous PROV_FORGE_MONTEE=1 (ce que --bench

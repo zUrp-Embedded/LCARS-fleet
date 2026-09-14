@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 16-node
+# AFTER: 10-packages 16-node
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -16,8 +16,8 @@ set -euo pipefail
 MEDIA_ROOT="$PROV_MEDIA_ROOT"
 MEDIA_OWNER="$(prov_owner "$(prov_manifest_owner "$MEDIA_ROOT")")"
 MEDIA_TREES=(avatars favicon)
-MEDIA_SRC_ROOT="${LCARS_MEDIA_SRC_ROOT:-$(repo_root)/assets}"
-SITE_SRC="${LCARS_SITE_SRC:-$(repo_root)/assets/github.io}"
+MEDIA_SRC_ROOT="$(repo_root)/assets"
+SITE_SRC="$(repo_root)/assets/github.io"
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 
 media_mode() { prov_manifest_mode "$MEDIA_ROOT${1:+/$1}"; }   # media_mode [sous-arbre] → le mode que system.manifest déclare pour share[/<sous-arbre>]

@@ -850,9 +850,9 @@ EOF
   _release
   local pub="RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
   : > "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
   PORTE="$(_porte "$DIST" "$pub")"
   rm -f "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"   # la signature disparue du serveur après la génération
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
   pipee --workstation --bench
   [ "$status" -ne 0 ]
   [[ "$output" == *".minisig introuvable"* ]]

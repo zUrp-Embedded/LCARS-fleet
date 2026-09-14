@@ -13,17 +13,22 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   MOD="$BATS_TEST_DIRNAME/../../modules.d/44-media.sh"; [ -f "$MOD" ]
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  # un arbre de source : la lib et ses tables, les médias et le site sous assets/ — le module les lit sous la racine de la lib
+  ARBRE="$BATS_TEST_TMPDIR/source"
+  mkdir -p "$ARBRE/deploy"
+  cp -r "$BATS_TEST_DIRNAME/../../lib" "$ARBRE/deploy/lib"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$BATS_TEST_DIRNAME/../../system.manifest" "$ARBRE/deploy/"
+  export PROVISION_LIB="$ARBRE/deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=44-media PROV_SUBSTRATE=linux PROV_HUMAN=root
   export PROV_SOURCE_REV=abc12345
   decor_pose
   SHARE="$LCARS_DECOR_ROOT/opt/lcars/share"
-  export LCARS_MEDIA_SRC_ROOT="$BATS_TEST_TMPDIR/assets"
-  export LCARS_SITE_SRC="$BATS_TEST_TMPDIR/site"
-  mkdir -p "$LCARS_MEDIA_SRC_ROOT/avatars" "$LCARS_MEDIA_SRC_ROOT/favicon" "$LCARS_SITE_SRC"
-  printf 'png' > "$LCARS_MEDIA_SRC_ROOT/avatars/admiral.png"; printf 'png' > "$LCARS_MEDIA_SRC_ROOT/avatars/lcars.png"
-  printf 'ico' > "$LCARS_MEDIA_SRC_ROOT/favicon/favicon.ico"
-  printf 'dist\nnode_modules\n' > "$LCARS_SITE_SRC/.gitignore"; printf '{}' > "$LCARS_SITE_SRC/package.json"
+  MEDIAS="$ARBRE/assets"
+  SITE="$ARBRE/assets/github.io"
+  mkdir -p "$MEDIAS/avatars" "$MEDIAS/favicon" "$SITE"
+  printf 'png' > "$MEDIAS/avatars/admiral.png"; printf 'png' > "$MEDIAS/avatars/lcars.png"
+  printf 'ico' > "$MEDIAS/favicon/favicon.ico"
+  printf 'dist\nnode_modules\n' > "$SITE/.gitignore"; printf '{}' > "$SITE/package.json"
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   export NPM_TRACE="$BATS_TEST_TMPDIR/npm.trace"; : > "$NPM_TRACE"
   cat > "$DECOR_BIN/npm" <<'EOF'
@@ -39,8 +44,8 @@ EOF
 
 mod() { run unshare -Ur bash "$MOD" "$@"; }
 site_git() { # le site est un dépôt propre : la révision devient comparable
-  git -C "$LCARS_SITE_SRC" init -q && git -C "$LCARS_SITE_SRC" add -A \
-    && git -C "$LCARS_SITE_SRC" -c user.email=t@t -c user.name=t commit -qm décor
+  git -C "$SITE" init -q && git -C "$SITE" add -A \
+    && git -C "$SITE" -c user.email=t@t -c user.name=t commit -qm décor
 }
 fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD') >/dev/null 2>&1; $1"; }
 
@@ -80,6 +85,21 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [[ "$output" == *"avatars posé (2 fichiers)"*"doc posée (2 fichiers)"* ]]
 }
 
+@test "les sources se lisent sous l'arbre de la lib : un environnement qui nomme d'autres médias ou un autre site ne les déplace pas" {
+  site_git
+  local piege="$BATS_TEST_TMPDIR/piege"
+  mkdir -p "$piege/avatars" "$piege/favicon" "$piege/site/dist"
+  printf 'piège' > "$piege/avatars/piege.png"; printf 'piège' > "$piege/favicon/piege.ico"
+  printf '<html>piège</html>' > "$piege/site/dist/index.html"
+  LCARS_MEDIA_SRC_ROOT="$piege" LCARS_SITE_SRC="$piege/site" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$SHARE/avatars/admiral.png" ]
+  [ ! -e "$SHARE/avatars/piege.png" ]
+  [ "$(cat "$SHARE/doc/index.html")" = "<html>doc /doc/</html>" ]
+  [ "$(cat "$piege/site/dist/index.html")" = "<html>piège</html>" ]
+  refute_out 'piege' <<<"$output"
+}
+
 @test "apply rejoué sur un site propre : la doc n'est pas rebâtie, rien n'est reposé" {
   site_git
   mod apply; [ "$status" -eq 0 ]
@@ -95,7 +115,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   site_git
   mod apply; [ "$status" -eq 0 ]
   [[ "$output" == *"POSÉ  44-media: médias posés ($SHARE/avatars)"*"POSÉ  44-media: médias posés ($SHARE/favicon)"* ]]
-  printf 'png v2' > "$LCARS_MEDIA_SRC_ROOT/avatars/admiral.png"
+  printf 'png v2' > "$MEDIAS/avatars/admiral.png"
   printf 'posé à la main' > "$SHARE/favicon/local.ico"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -113,7 +133,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   grep -qx 'base=/autre/' "$NPM_TRACE"
   [ "$(cat "$SHARE/doc/index.html")" = "<html>doc /autre/</html>" ]
   : > "$NPM_TRACE"
-  printf 'brouillon' > "$LCARS_SITE_SRC/nouveau.md"
+  printf 'brouillon' > "$SITE/nouveau.md"
   LCARS_SITE_BASE=/autre/ mod apply
   [ "$status" -eq 0 ]
   grep -q 'npm run build' "$NPM_TRACE"
@@ -131,10 +151,10 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
 }
 
 @test "apply : source des médias absente — échec nommé, l'arbre n'est pas posé" {
-  rm -rf "$LCARS_MEDIA_SRC_ROOT/favicon"
+  rm -rf "$MEDIAS/favicon"
   mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  44-media: source absente : $LCARS_MEDIA_SRC_ROOT/favicon"* ]]
+  [[ "$output" == *"FAIL  44-media: source absente : $MEDIAS/favicon"* ]]
   [ ! -e "$SHARE/favicon" ]
 }
 
@@ -155,14 +175,9 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
 
 @test "modes : le mode vient de la table — une table à 0750 pour avatars est lue telle quelle, au check et à l'apply" {
   site_git
-  local arbre="$BATS_TEST_TMPDIR/arbre/deploy"
-  mkdir -p "$arbre"
-  cp -r "$BATS_TEST_DIRNAME/../../lib" "$arbre/lib"
-  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$arbre/"
   sed 's#^\(dir  *\)/opt/lcars/share/avatars  *0755#\1/opt/lcars/share/avatars  0750#' \
-    "$BATS_TEST_DIRNAME/../../system.manifest" > "$arbre/system.manifest"
-  grep -qE '^dir +/opt/lcars/share/avatars +0750 ' "$arbre/system.manifest"
-  export PROVISION_LIB="$arbre/lib/provision-lib.sh"
+    "$BATS_TEST_DIRNAME/../../system.manifest" > "$ARBRE/deploy/system.manifest"
+  grep -qE '^dir +/opt/lcars/share/avatars +0750 ' "$ARBRE/deploy/system.manifest"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(stat -c %a "$SHARE/avatars")" = 750 ]
@@ -201,10 +216,10 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
 }
 
 @test "pose de la doc sous un décor, au compte qui joue : la seconde pose du même dist ne compte rien, un dist qui a changé est reposé" {
-  mkdir -p "$SHARE" "$LCARS_SITE_SRC/dist"; printf 'v1' > "$LCARS_SITE_SRC/dist/index.html"
+  mkdir -p "$SHARE" "$SITE/dist"; printf 'v1' > "$SITE/dist/index.html"
   fn "PROV_CHANGED=0; poser_doc; echo \"c1=\$PROV_CHANGED\"; PROV_CHANGED=0; poser_doc; echo \"c2=\$PROV_CHANGED\"
       [ -e '$SHARE/doc.partial' ] && echo 'partiel-laissé'
-      printf v2 > '$LCARS_SITE_SRC/dist/index.html'; PROV_CHANGED=0; poser_doc; echo \"c3=\$PROV_CHANGED\""
+      printf v2 > '$SITE/dist/index.html'; PROV_CHANGED=0; poser_doc; echo \"c3=\$PROV_CHANGED\""
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" =~ c1=[1-9] ]]
   [[ "$output" == *"c2=0"* ]]

@@ -54,10 +54,12 @@ if [[ -z "$OBJETS" ]]; then
   exit 1
 fi
 
-# le runner d'abord : il tient le réseau de la forge
+# le runner d'abord : il tient le réseau de la forge ; ses fichiers sont ceux que forge-runner.sh --bench empile,
+# pour que compose relise le modèle du runner posé (réseau externe de la forge, volumes marqués)
 say "destruction du runner ($RUNNER_PROJECT)"
-"$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
-  down -v --remove-orphans || true
+LCARS_RUNNER_NETWORK="$FORGE_NET" "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" \
+  -f "$DOCKER_DIR/runner-compose.yml" -f "$DOCKER_DIR/runner-network.yml" -f "$DOCKER_DIR/runner-compose.bench.yml" \
+  -p "$RUNNER_PROJECT" down -v --remove-orphans || true
 
 say "destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true

@@ -120,13 +120,18 @@ http(s) ; une forge de publication est en https. Le jeton vient de `LCARS_PACK_T
 `LCARS_PACK_TOKEN_FILE`, portées `write:repository` et `write:package`, jamais en argv.
 L'installeur généré nomme l'image de la version (`<registre>/<owner>/<repo>:<tag>`) et la tire avant
 `container up` quand elle manque au daemon ; le registre est `LCARS_PACK_REGISTRY`, par défaut
-`ghcr.io` pour une forge GitHub et l'hôte de la forge sinon.
+`ghcr.io` pour une forge GitHub et l'hôte de la forge sinon. `LCARS_MINISIGN_PUBKEY` et
+`LCARS_MINISIGN_SECKEY` (le fichier de la clé secrète) vont ensemble : le kit est signé par minisign
+dans le tiroir, et l'installeur porte la clé publique qui vérifie cette signature.
 
 Une release du tag qui existe, brouillon compris, est un refus avant tout envoi : pour refaire, la
-supprimer sur la forge. L'image part ensuite (un tag d'image qui existe est un refus), puis la
-release naît en brouillon sur le commit, reçoit tout le tiroir (le kit et son `.sha256`,
-`docker-compose.yml`, `lcars-hardened-seccomp.json`, `installer-constants.env`, `install.sh` et
-`install.sh.sha256`), et est publiée d'un coup. L'installeur publié porte en dur la base
+supprimer sur la forge. L'image part ensuite (un tag d'image qui existe est un refus) et se relit
+par un tirage sans identifiants, celui de l'installeur : une image que ce tirage ne voit pas arrête la
+publication avant la release (sur GHCR, un paquet est privé à sa première publication et se passe
+public dans ses réglages). La release naît alors en brouillon sur le commit, reçoit tout le tiroir
+(le kit, son `.sha256` et sa `.minisig` quand le kit est signé, `docker-compose.yml`,
+`lcars-hardened-seccomp.json`, `installer-constants.env`, `install.sh` et `install.sh.sha256`), et
+est publiée d'un coup. L'installeur publié porte en dur la base
 `<forge>/<owner>/<repo>/releases/download/<tag>` et les sha256 de ses artefacts, qui vérifient le
 kit. Aucun workflow de CI ne publie de version ; `.github/workflows/site.yml` publie la plaquette du
 site sur GitHub Pages, indépendamment.

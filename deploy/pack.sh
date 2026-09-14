@@ -16,7 +16,9 @@
 #         LCARS_PACK_TOKEN, LCARS_PACK_TOKEN_FILE   le jeton du --publish (write:repository et write:package)
 #         LCARS_SITE_BASE     la base d'URL de la doc, la même que 44-media
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
-# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; docker, sauf --no-image
+#         LCARS_MINISIGN_PUBKEY, LCARS_MINISIGN_SECKEY   la clé publique inscrite dans l'installeur et le fichier de la clé
+#                             secrète qui signe le kit : l'une ne va pas sans l'autre
+# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; docker, sauf --no-image ; minisign avec les clés
 # EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
 #         inconnue), gate rouge, build ou doc en échec, kit incomplet, docker injoignable, publication refusée
 
@@ -67,6 +69,15 @@ fi
 if [[ "$DOOR_BASE" != https://* ]]; then
   [[ "$PUBLISH" -eq 0 ]] || die "la forge de publication « $FORGE » n'est pas en https : l'installeur publié refuserait de télécharger son kit — LCARS_PACK_FORGE=https://… la pose"
   say "base de l'installeur en clair ($DOOR_BASE) : il ne téléchargera que sous LCARS_DOOR_INSECURE_HTTP=1"
+fi
+# une clé publique inscrite fait exiger à l'installeur la signature que seule la clé secrète produit
+MINISIGN_PUBKEY="${LCARS_MINISIGN_PUBKEY:-}"
+MINISIGN_SECKEY="${LCARS_MINISIGN_SECKEY:-}"
+if [[ -n "$MINISIGN_PUBKEY$MINISIGN_SECKEY" ]]; then
+  [[ -n "$MINISIGN_PUBKEY" && -n "$MINISIGN_SECKEY" ]] \
+    || die "LCARS_MINISIGN_PUBKEY et LCARS_MINISIGN_SECKEY vont ensemble : l'installeur vérifie avec la clé publique la signature que la clé secrète produit"
+  [[ -r "$MINISIGN_SECKEY" ]] || die "clé secrète minisign illisible : $MINISIGN_SECKEY"
+  command -v minisign >/dev/null 2>&1 || die "minisign absent — il signe le kit que la clé publique fait vérifier"
 fi
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
@@ -146,8 +157,13 @@ if [[ "$IMAGE" -eq 1 && -n "$FORGE" && -n "$OWNER" ]]; then
   fi
   IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
 fi
+if [[ -n "$MINISIGN_SECKEY" ]]; then
+  minisign -S -s "$MINISIGN_SECKEY" -m "$DIST/${NAME}.tar.gz" || die "signature du kit refusée par minisign"
+  say "kit signé : $DIST/${NAME}.tar.gz.minisig"
+fi
 say "installeur de la version → $DIST/install.sh (base $DOOR_BASE${IMAGE_REMOTE:+, image $IMAGE_REMOTE})…"
-LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "installeur de la version non généré"
+LCARS_MINISIGN_PUBKEY="$MINISIGN_PUBKEY" LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null \
+  || die "installeur de la version non généré"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, installeur compris)"
 
 # l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
@@ -194,6 +210,11 @@ if [[ "$IMAGE" -eq 1 ]]; then
   "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
     || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
   say "image publiée : $IMAGE_REMOTE"
+  # l'installeur de la release tire l'image sans identifiants : un magasin de configuration vide rejoue ce tirage
+  mkdir -p "$STAGE/docker-anonyme"
+  _anon="$(DOCKER_CONFIG="$STAGE/docker-anonyme" "$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" \
+    || die "--publish : $IMAGE_REMOTE est poussée, mais un tirage anonyme est refusé (${_anon:0:200}) — l'installeur de la release ne la tirerait pas, la release n'est pas créée. Le paquet de l'image est privé : sur GHCR, un paquet est privé à sa première publication, il se passe public dans ses réglages (Package settings → Change visibility)"
+  say "image tirable sans identifiants : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$COMMIT" \

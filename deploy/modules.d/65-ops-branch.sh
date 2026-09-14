@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 48-forge-host 63-forge-tokens
+# AFTER: 10-packages 48-forge-host 61-forge-structure 63-forge-tokens
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

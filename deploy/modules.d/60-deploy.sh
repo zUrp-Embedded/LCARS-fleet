@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 10-packages 15-toolchain 20-groups 25-directories
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

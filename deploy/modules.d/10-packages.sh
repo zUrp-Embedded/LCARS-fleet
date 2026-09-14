@@ -6,7 +6,6 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 00-preflight
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

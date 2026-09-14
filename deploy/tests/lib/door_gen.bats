@@ -8,6 +8,7 @@
 # shellcheck disable=SC2016
 
 load ../refute
+load ../support/minisign_double
 
 setup() {
   local _v
@@ -17,9 +18,12 @@ setup() {
   TEMPLATE="$BATS_TEST_DIRNAME/../../../install.sh"
   [ -f "$GEN" ]
   [ -f "$TEMPLATE" ]
+  minisign_double "$BATS_TEST_TMPDIR/bin"; export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
-  printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
-  printf 'sig\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig"
+  KIT="$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
+  printf 'kit\n'  > "$KIT"
+  minisign_cle "$BATS_TEST_TMPDIR/cle-RWQcle" RWQcle
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-RWQcle" -m "$KIT"
   printf 'a1\n' > "$DIST/annexe-a.bin"
   printf 'b2\n' > "$DIST/annexe-b.bin"
   printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
@@ -86,6 +90,8 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [[ "$output" == *"aucune clé publique"*"NON vérifiée"* ]]
   grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
   printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
+  minisign_cle "$BATS_TEST_TMPDIR/cle-fichier" RWQdepuisfichier
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-fichier" -m "$KIT"
   PUB="" gen; [ "$status" -eq 0 ]
   grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
   refute_out 'aucune clé' <<<"$output"
@@ -135,5 +141,42 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   gen
   [ "$status" -eq 1 ]
   [[ "$output" == *"lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig manque"* ]]
+  [ ! -f "$DIST/install.sh" ]
+}
+
+@test "un kit signé d'une autre clé, ou modifié après sa signature, est un refus : l'installeur le refuserait ; signé de la clé fournie, l'installeur est écrit" {
+  minisign_cle "$BATS_TEST_TMPDIR/cle-autre" RWQautre
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-autre" -m "$KIT"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la signature de lcars-fleet-0.9.0-otp27-x86_64.tar.gz ne se vérifie pas avec la clé publique fournie"* ]]
+  [ ! -f "$DIST/install.sh" ]
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-RWQcle" -m "$KIT"
+  printf 'kit altéré\n' > "$KIT"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne se vérifie pas"* ]]
+  [ ! -f "$DIST/install.sh" ]
+  printf 'kit\n' > "$KIT"
+  gen
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qE '^MINISIGN_PUBKEY="RWQcle" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
+}
+
+@test "une clé publique sans minisign pour vérifier les kits est un refus qui le nomme, rien n'est écrit" {
+  local sans="$BATS_TEST_TMPDIR/sans-minisign" d f
+  mkdir -p "$sans"
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -x "$f" ] || continue
+      [ "$(basename "$f")" != minisign ] || continue
+      [ -e "$sans/$(basename "$f")" ] || ln -s "$f" "$sans/$(basename "$f")"
+    done
+  done < <(tr ':' '\n' <<<"$PATH")
+  [ ! -e "$sans/minisign" ]
+  run env PATH="$sans" LCARS_MINISIGN_PUBKEY=RWQcle bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"une clé publique est fournie et minisign est absent"* ]]
   [ ! -f "$DIST/install.sh" ]
 }

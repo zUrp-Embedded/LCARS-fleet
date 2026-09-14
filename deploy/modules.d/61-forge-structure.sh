@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 46-tofu 48-forge-host 60-deploy
+# AFTER: 10-packages 25-directories 44-media 46-tofu 48-forge-host 60-deploy
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 48-forge-host
+# AFTER: 10-packages 12-docker-engine 48-forge-host
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

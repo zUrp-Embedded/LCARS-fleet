@@ -3,7 +3,7 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-05
 # STATUS: l'installeur d'une version — le gabarit install.sh avec sa version, sa base, sa clé, son image et la table des sha256 du tiroir
-# USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ou <tiroir>/minisign.pub)
+# USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ou <tiroir>/minisign.pub ; une clé fait vérifier la signature de chaque kit, minisign requis)
 # EXIT  : 0 install.sh et install.sh.sha256 écrits dans le tiroir · 1 refus, l'installeur n'est pas écrit
 
 set -euo pipefail
@@ -30,12 +30,16 @@ PUBKEY="${LCARS_MINISIGN_PUBKEY:-}"
 if [[ -z "$PUBKEY" && -f "$DIST/minisign.pub" ]]; then
   PUBKEY="$(grep -v '^untrusted comment' "$DIST/minisign.pub" | head -1 || true)"
 fi
-# une clé inscrite fait exiger une signature à l'installeur : sans .minisig dans le tiroir, il refuserait son propre kit
+# une clé inscrite fait exiger une signature à l'installeur : un kit sans .minisig, ou signé d'une autre clé, il le refuserait
 if [[ -n "$PUBKEY" ]]; then
   [[ "$PUBKEY" =~ ^[A-Za-z0-9+/=]+$ ]] || die "clé publique illisible (base64 attendu) : « $PUBKEY »"
+  command -v minisign >/dev/null 2>&1 \
+    || die "une clé publique est fournie et minisign est absent : la signature des kits ne se vérifie pas ici — installer minisign, ou retirer la clé"
   for _k in "$DIST"/*.tar.gz; do
     [[ -e "$_k" ]] || continue
     [[ -f "$_k.minisig" ]] || die "une clé publique est fournie, mais $(basename "$_k").minisig manque : l'installeur refuserait ce kit — signer, ou retirer la clé"
+    minisign -Vq -P "$PUBKEY" -m "$_k" >/dev/null 2>&1 \
+      || die "la signature de $(basename "$_k") ne se vérifie pas avec la clé publique fournie : l'installeur refuserait ce kit — le signer avec la clé secrète de cette clé"
   done
 else
   say "aucune clé publique (LCARS_MINISIGN_PUBKEY, ou $DIST/minisign.pub) — l'installeur dira « provenance NON vérifiée (sha256 seul) »"
