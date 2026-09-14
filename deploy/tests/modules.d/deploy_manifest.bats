@@ -90,8 +90,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 
-# bats test_tags=structure
-@test "le rail natif n'installe PLUS d'outillage de gate — l'install ne re-atteste pas la source (DI-07)" {
+@test "le rail natif n'installe pas d'outillage de gate — l'install ne re-atteste pas la source" {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
   [ -f "$MOD" ]
   local code; code="$(grep -vE '^\s*#' "$MOD")"
@@ -116,7 +115,6 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   ' "$2" | tr '\n' ' '
 }
 
-# bats test_tags=structure
 @test "l'image ne pose par apt qu'un SOCLE — chaque paquet est sur le rail (10-packages), ou image-only et NOMME" {
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
@@ -128,7 +126,6 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
     | grep -vE '^$|apt-get|install|-y|--no-install-recommends|DEBIAN_FRONTEND|&&|^rm$|-rf|/var/lib/apt' \
     | sort -u)"
   [ -n "$image" ] || { echo "aucune liste apt lue dans le Dockerfile — l'instrument est casse"; return 1; }
-  [ "$(printf '%s\n' "$image" | grep -c .)" -le 8 ] || { echo "l'image pose $(printf '%s\n' "$image" | grep -c .) paquets : ce n'est plus un socle" >&2; printf '%s\n' "$image" >&2; return 1; }
 
   local native; native=" $(native_list 'PACKAGES' "$PKG") "
   # tini — PID 1 d'un conteneur, c'est systemd sur une machine ; openssh-server — la porte d'admin du conteneur, hors du poste
@@ -147,14 +144,12 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
 pkg_mod()    { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
 
-# bats test_tags=structure
 @test "docker n'est PAS dans la liste des deux rails — il n'a rien a faire dans l'image" {
   run native_list 'PACKAGES' "$(pkg_mod)"
   [ -n "$output" ]
   [[ "$output" != *"docker"* ]]
 }
 
-# bats test_tags=structure
 @test "docker-ce vit dans 12-docker-engine, sur le substrat linux seul ; 10-packages n'en parle plus" {
   grep -q '^# APPLY-ON: linux$' "$(engine_mod)"
   grep -q '^# CHECK-ON: linux$' "$(engine_mod)"

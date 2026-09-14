@@ -35,8 +35,8 @@ prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin syst
 : "${PROV_DECK_PORT:=$PROV_DECK_PORT_DEFAULT}"
 : "${PROV_SSH_PORT:=$PROV_SSH_PORT_DEFAULT}"
 : "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
-# le nom que le produit lit (LCARS_BUILTIN_HUMAN) est un choix explicite, et gagne sur celui que le journal retient
-PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
+# LCARS_BUILTIN_HUMAN posé, même vide, est un choix explicite : il gagne sur l'humain que le journal retient
+PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
 PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
 PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
 PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"
@@ -65,7 +65,6 @@ unset -f _prov_lu
 PROV_FORGE_URL="${PROV_FORGE_URL%/}"
 PROV_FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL%/}"
 : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
-: "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 : "${PROV_DUMP_LINES:=40}"
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 
@@ -103,7 +102,7 @@ PROV_VERDICT_RENDERED=0
 _prov_exit_guard() {
   local rc=$?
   [[ "$PROV_VERDICT_RENDERED" -eq 1 ]] && return 0
-  printf '%sERREUR %s:%s mort avant de rendre son verdict (rc=%d) — aucune ligne ci-dessus ne le dit, faute de temps\n' \
+  printf '%sERREUR %s:%s mort avant de rendre son verdict (rc=%d)\n' \
     "$_PR" "$PROV_MODULE_TAG" "$_PN" "$rc" >&2
   exit 3
 }
@@ -305,14 +304,18 @@ ensure_mode() {
       changed=1
     fi
   fi
-  cur_mode="$(stat -c '%a' "$path")"
-  [[ "$cur_mode" == "$want_mode" ]] || { p_fail "ensure_mode: mode $cur_mode ≠ $want_mode après chmod: $path"; return 1; }
-  if [[ -n "$owner" ]]; then
-    cur_owner="$(stat -c '%U:%G' "$path")"
-    [[ "$cur_owner" == "$owner" ]] || { p_fail "ensure_mode: propriétaire $cur_owner ≠ $owner après chown: $path"; return 1; }
-  fi
   if [[ "$changed" -eq 1 ]]; then PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
   return 0
+}
+
+prov_check_mode() { # prov_check_mode <chemin> <mode> <propriétaire> → 0 conforme · 1 écart dit en DRIFT · 2 absent, rien de dit
+  local cur want
+  [[ -e "$1" ]] || return 2
+  cur="$(stat -c '%a %U:%G' "$1")"
+  want="${2#0} $(prov_owner "$3")"
+  [[ "$cur" != "$want" ]] || return 0
+  p_drift "$1 : $cur ≠ $want — l'apply le repose"
+  return 1
 }
 
 ensure_dir() {
@@ -552,6 +555,7 @@ apt_ensure() {
     || { apt_mirror_diag; return 1; }
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install "${APT_ACQUIRE_OPTS[@]}" -y --no-install-recommends "${missing[@]}" \
     || { apt_mirror_diag; return 1; }
+  # apt-get install peut rendre 0 en ayant servi moins que la liste : le journal ne porte que ce que dpkg voit posé
   local rc=0 posed=()
   for pkg in "${missing[@]}"; do
     if pkg_installed "$pkg"; then
@@ -580,14 +584,11 @@ wsl_networking_mode() {
 lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 
 # un conteneur de job tourne dans le daemon embarqué du runner : ni le nom de service de la forge, ni
-# localhost ne l'atteignent, seul le port publié sur l'hôte
-job_forge_url() { # job_forge_url <port publié> [adresse annoncée] → l'adresse de la forge vue d'un job CI
-  local hote
-  if [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" == wsl ]]; then
-    hote="host.docker.internal"
-  else
-    hote="$(lan_addr)"; hote="${hote:-${2:-127.0.0.1}}"
-  fi
+# une adresse de loopback (la sienne) ne l'atteignent, seul le port publié sur une adresse de l'hôte
+job_forge_url() { # job_forge_url <port publié> <adresse annoncée> → l'adresse de la forge vue d'un job CI ; rc 1 sans adresse qu'un job joigne
+  local hote="$2"
+  [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" != wsl ]] || hote="host.docker.internal"
+  case "$hote" in ""|127.*|localhost|::1) return 1 ;; esac
   printf 'http://%s:%s\n' "$hote" "$1"
 }
 
@@ -700,7 +701,7 @@ fleet_humans() {
       '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "$(prov_decor /etc/passwd)"
 }
 
-repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
+repo_root() { readlink -f "$_PROV_LIB_DIR/../.."; }
 product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
 # la traduction unique : le nom que lit le produit (runtime/services), puis le nom de l'installeur
@@ -713,7 +714,6 @@ PROV_PRODUCT_NAMES=(
   LCARS_SYSTEM_ACCOUNT=PROV_SYSTEM_ACCOUNT
   LCARS_SYSTEM_TOKEN_FILE=PROV_SYSTEM_TOKEN_FILE
   LCARS_SYSTEM_USER=PROV_SYSTEM_USER
-  LCARS_SYSTEM_GROUP=PROV_SYSTEM_USER
   LCARS_AUTHORITY_USER=PROV_AUTHORITY_USER
   LCARS_FORGE_ORG=PROV_FORGE_ORG
   LCARS_ROLES=PROV_ROLES
@@ -722,7 +722,6 @@ PROV_PRODUCT_NAMES=(
   LCARS_CATALOGUES_DIR=PROV_CATALOGUES_DIR
   LCARS_CATALOGUES_WORK=PROV_CATALOGUES_WORK
   LCARS_LANDING_PORT=PROV_DECK_PORT
-  LCARS_DECK_ORIGINS=PROV_DECK_ORIGINS
   LCARS_DECK_OIDC_FILE=PROV_DECK_OIDC_FILE
   LCARS_ADVERTISE=PROV_ADVERTISE
   LCARS_ADVERTISE_WHY=PROV_ADVERTISE_WHY
@@ -813,12 +812,11 @@ release_app_dir() { # release_app_dir <racine de release> → lib/lcars_fleet-<v
   return 1
 }
 
-prov_channel() {
+prov_channel() { # prov_channel → PROV_CHANNEL et stdout : source | kit | aucun (canal absent) ; rc 1 et un FAIL sur une autre valeur
   local v
   PROV_CHANNEL=""
   if [[ ! -e "$PROV_CHANNEL_FILE" ]]; then
-    if [[ -d "$PROV_PREFIX" || -e "$PROV_ROOT/$PROV_SOURCE_STAMP" ]]; then PROV_CHANNEL=inconnu; printf 'inconnu\n'
-    else PROV_CHANNEL=aucun; printf 'aucun\n'; fi
+    PROV_CHANNEL=aucun; printf 'aucun\n'
     return 0
   fi
   v="$(head -n1 "$PROV_CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -861,10 +859,6 @@ prov_seat_record() { # prov_seat_record <login> <uid> — la ligne du siège, su
 
 env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
 
-set_diff() {
-  comm -13 <(printf '%s\n' "$1" | sed '/^$/d' | sort -u) <(printf '%s\n' "$2" | sed '/^$/d' | sort -u)
-}
-
 arch_tag() {
   local deb; deb="$(dpkg --print-architecture 2>/dev/null || true)"
   case "$1:$deb" in
@@ -882,13 +876,13 @@ read_token() { # read_token <fichier> — le jeton sans blancs, ou rien : jamais
 }
 
 # forge_api <méthode> <url> <sortie> [--token-file <f> | --basic <login> <f>] [--json <filtre jq> [--arg <nom> <valeur> | --rawfile <nom> <f>]…] [option curl…]
-#   → le code HTTP sur stdout ; rend 0 pour un 2xx · 3 pour un 3xx · 4 pour un 4xx · 5 pour un 5xx · 1 sans réponse
+#   → le code HTTP sur stdout ; rend 0 pour un 2xx · 3 pour un 3xx · 4 pour un 4xx · 5 pour un 5xx · 1 sans réponse entière
 # Aucun secret dans un argv ni dans l'environnement d'un enfant : un secret se lit dans un fichier ou
 # un descripteur (<(printf '%s' "$pw")), l'en-tête d'authentification arrive à curl par son entrée
 # (-H @-), le corps de --json sort de « jq -n ». Toute autre option va telle quelle à curl, après les défauts.
 forge_api() {
-  local method="$1" url="$2" out="$3" auth="" filtre="" code tok pw; shift 3
-  local -a jq_args=() curl_args=(-sS -m 15)
+  local method="$1" url="$2" out="$3" auth="" filtre="" code tok pw fd=""; shift 3
+  local -a jq_args=() curl_args=(-sS -m 15) corps=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --token-file) tok="$(read_token "$2")"; [[ -z "$tok" ]] || auth="token $tok"; shift 2 ;;
@@ -900,15 +894,15 @@ forge_api() {
       *)            curl_args+=("$1"); shift ;;
     esac
   done
-  # la substitution du corps vit sur la ligne de curl : ailleurs, son descripteur serait fermé avant la lecture
+  # un <(…) affecté à une variable serait fermé avant que curl le lise : le descripteur s'ouvre par exec
   if [[ -n "$filtre" ]]; then
-    code="$( { [[ -z "$auth" ]] || printf 'Authorization: %s\n' "$auth"; } \
-      | curl "${curl_args[@]}" -H @- -H 'Content-Type: application/json' --data-binary @<(jq -cn "${jq_args[@]}" "$filtre") \
-          -X "$method" -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || true
-  else
-    code="$( { [[ -z "$auth" ]] || printf 'Authorization: %s\n' "$auth"; } \
-      | curl "${curl_args[@]}" -H @- -X "$method" -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || true
+    exec {fd}< <(jq -cn "${jq_args[@]}" "$filtre")
+    corps=(-H 'Content-Type: application/json' --data-binary "@/dev/fd/$fd")
   fi
+  # un curl en échec (délai dépassé, sortie non inscriptible) peut rendre un 200 sur un corps tronqué : il vaut « sans réponse »
+  code="$( { [[ -z "$auth" ]] || printf 'Authorization: %s\n' "$auth"; } \
+    | curl "${curl_args[@]}" -H @- "${corps[@]}" -X "$method" -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || code=000
+  [[ -z "$fd" ]] || exec {fd}<&-
   printf '%s\n' "${code:-000}"
   case "$code" in
     2??) return 0 ;;
@@ -927,16 +921,18 @@ forge_repond() { # forge_repond <url> <délai en s> → 0 si /api/v1/version ren
 
 forge_up() { forge_repond "$PROV_FORGE_URL" 5; }   # la forge de cette installation répond
 
-# prov_roster_conteneur <image> <exec…> — le roster dérivé de l'image, posé root 0644 dans la recette d'un
-# conteneur par <exec…>, qui lit son entrée ; imprime la sortie de la dérivation
+# prov_roster_conteneur <image> <exec…> — le roster dérivé de l'image, posé 0644 dans la recette d'un
+# conteneur par <exec…>, qui joue en root et lit son entrée ; imprime la sortie de la dérivation
 # EXIT 0 · 1 dérivation en échec · 2 dépôt refusé
+# « install /dev/stdin » de uutils refuse un tube quand la destination existe : le dépôt passe par un temporaire voisin
 prov_roster_conteneur() {
   local image="$1" dir out rc=0; shift
   dir="$(mktemp -d "${TMPDIR:-/tmp}/prov-roster.XXXXXX")"
   out="$("$_PROV_LIB_DIR/enroll-catalogue.sh" --tofu-dir "$dir" --image "$image")" || rc=1
   if [[ "$rc" -eq 0 ]]; then
-    "$@" install -m 0644 -o root -g root /dev/stdin "$(prov_canon "$PROV_ROOT")/services/forge-recipe/roles.auto.tfvars.json" \
-      < "$dir/roles.auto.tfvars.json" || rc=2
+    # shellcheck disable=SC2016 # $1 et $t sont ceux du shell du conteneur
+    "$@" sh -c 't="$(mktemp "$1.XXXXXX")" && cat > "$t" && chmod 0644 "$t" && mv -f "$t" "$1" || { rm -f "$t"; exit 1; }' \
+      sh "$(prov_canon "$PROV_ROOT")/services/forge-recipe/roles.auto.tfvars.json" < "$dir/roles.auto.tfvars.json" || rc=2
   fi
   rm -rf "$dir"
   [[ "$rc" -ne 0 ]] || printf '%s\n' "$out"

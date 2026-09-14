@@ -16,42 +16,11 @@ setup() {
   export PROVISION_MODULE=20-groups PROV_SUBSTRATE=linux PROVISION_RUN=1 PROV_HUMAN=zoe
 
   decor_pose
-  export CALLS="$BATS_TEST_TMPDIR/calls"
+  decor_comptes
+  CALLS="$DECOR_COMPTES"
   GROUP="$LCARS_DECOR_ROOT/etc/group"
   printf '%s\n' 'root:x:0:0::/root:/bin/bash' 'zoe:x:1000:1000::/home/zoe:/bin/bash' > "$LCARS_DECOR_ROOT/etc/passwd"
   printf '%s\n' 'root:x:0:' 'zoe:x:1000:' 'fleet:x:2000:zoe' 'lcars-console:x:2001:' > "$GROUP"
-
-  # getent, id, groupadd et usermod lisent et écrivent le passwd et le group du décor
-  cat > "$DECOR_BIN/getent" <<'EOS'
-#!/usr/bin/env bash
-[[ "$1" == group ]] || exit 2
-awk -F: -v n="$2" '$1==n {print; found=1} END {exit !found}' "$LCARS_DECOR_ROOT/etc/group"
-EOS
-  cat > "$DECOR_BIN/id" <<'EOS'
-#!/usr/bin/env bash
-p="$LCARS_DECOR_ROOT/etc/passwd" g="$LCARS_DECOR_ROOT/etc/group"
-case "${1:-}" in
-  -nG) u="$2"; gid="$(awk -F: -v n="$u" '$1==n {print $4; exit}' "$p")"
-       [[ -n "$gid" ]] || exit 1
-       { awk -F: -v g="$gid" '$3==g {print $1}' "$g"
-         awk -F: -v u="$u" '{n=split($4,m,","); for(i=1;i<=n;i++) if (m[i]==u) print $1}' "$g"; } | sort -u | tr '\n' ' ' ;;
-  -*)  exec /usr/bin/id "$@" ;;
-  *)   awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$p" ;;
-esac
-EOS
-  cat > "$DECOR_BIN/groupadd" <<'EOS'
-#!/usr/bin/env bash
-echo "groupadd $*" >> "$CALLS"
-gid=3999; [[ "$1" == -g ]] && gid="$2"
-printf '%s:x:%s:\n' "${*: -1}" "$gid" >> "$LCARS_DECOR_ROOT/etc/group"
-EOS
-  cat > "$DECOR_BIN/usermod" <<'EOS'
-#!/usr/bin/env bash
-echo "usermod $*" >> "$CALLS"
-g="$LCARS_DECOR_ROOT/etc/group"
-awk -F: -v OFS=: -v gr="$2" -v u="${*: -1}" '$1==gr {$4=($4=="" ? u : $4","u)} {print}' "$g" > "$g.new" && mv "$g.new" "$g"
-EOS
-  chmod 0755 "$DECOR_BIN"/*
 }
 
 mod() { run bash "$SRC" "$1"; }
@@ -92,7 +61,7 @@ mod() { run bash "$SRC" "$1"; }
 @test "apply : un état conforme ne produit aucun geste, et le dit" {
   mod apply
   [ "$status" -eq 0 ]
-  [ ! -e "$CALLS" ]
+  [ ! -s "$CALLS" ]
   [[ "$output" == *"OK    20-groups: groupes fleet et lcars-console en place, zoe membre de fleet"* ]]
 }
 

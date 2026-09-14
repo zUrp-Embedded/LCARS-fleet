@@ -107,7 +107,6 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
   [ -z "$output" ]
 }
 
-# bats test_tags=structure
 @test "le module ne demande pas ELIXIR a apt — erlang seul ; le precompile est le pin des constantes, jamais un zip libre" {
   # Garde d'instrument : on lit le bon module (erlang par apt y est).
   grep -qE 'apt_ensure erlang( \|\|| *$)' "$MOD" \
@@ -118,8 +117,7 @@ sourced() { # sourced <code bash> — le module sans son dispatch, puis le code
   refute grep -qE 'curl .*elixir' "$MOD"
 }
 
-# bats test_tags=structure
-@test "les cinq objets sont de RETOUR dans la table, a cote de node" {
+@test "les cinq objets de la toolchain sont dans la table, à côté de node" {
   local manifest="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$manifest" ]
   grep -qE '^dir[[:space:]]+/opt/node-<version>' "$manifest" \

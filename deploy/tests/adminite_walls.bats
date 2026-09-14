@@ -7,8 +7,7 @@
 
 # shellcheck disable=SC2016
 
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC2013 — lecture mot a mot VOULUE : le champ mesure ne contient pas d'espace
+# SC2013 : le champ lu mot à mot ne porte pas d'espace
 # shellcheck disable=SC2013
 
 setup() {
@@ -81,13 +80,6 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   [ "$poses" -ge 2 ] || { echo "MUR 1 — $poses pose(s) de secret d'autorite lue(s) : l'instrument ne voit plus les ecrivains" >&2; return 1; }
 }
 
-@test "MUR 2: aucune porte n'interroge un groupe unix pour decider d'une adminite" {
-  local f
-  for f in "${CODE[@]}"; do
-    absent 'lcars-admin|ADMIN_GROUP' "$f"
-  done
-}
-
 @test "MUR 2 bis: les deux portes du geste ne lisent AUCUN groupe unix" {
   local porte
   for porte in "$REPO/runtime/bin/lcars" "$REPO/runtime/services/catalogue-executor.py"; do
@@ -124,7 +116,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
 
 @test "MUR 5: le deck ne se depose pas sur une identite partagee — ni nobody, ni nogroup" {
-  # son compte, le défaut de ce compte et le groupe de son secret : service_accounts.bats et le MUR 13 de variable_walls.bats
+  # son compte, le défaut de ce compte et le groupe de son secret : modules.d/21-service-accounts.bats et le MUR 13 de variable_walls.bats
   local landing="$REPO/runtime/services/console-landing.sh"
   [ -r "$landing" ]
   code_of "$landing" | grep -q 'setpriv'
@@ -141,7 +133,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 @test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau dans le conteneur — le service y est depose par setpriv" {
-  # sur le poste, l'unité porte User= et son compte est posé : modules.d/64-services.bats et service_accounts.bats le jouent
+  # sur le poste, l'unité porte User= et son compte est posé : modules.d/64-services.bats et modules.d/21-service-accounts.bats le jouent
   local entry="$REPO/runtime/services/container/boot.sh"
   [ -r "$entry" ]
   # la commande lancée, continuations jointes : le setpriv vers le détenteur porte l'exécuteur lui-même
@@ -156,7 +148,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
   code_of "$REPO/runtime/services/container/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
-      echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
+      echo "MUR 4 bis rompu — le boot du conteneur ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
       code_of "$REPO/runtime/services/container/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
       return 1
     }

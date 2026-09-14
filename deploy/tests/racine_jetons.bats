@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/racine_jetons.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
-# STATUS: bats tests — les defauts de la racine des jetons du runtime s'accordent avec la constante de l'installeur, dans trois langages
+# STATUS: mur d'accord — les défauts de la racine des jetons que le convergeur, le geste de forge et l'exécuteur de catalogue gardent s'accordent avec la constante de l'installeur
 
 # shellcheck disable=SC2016
 
@@ -23,17 +23,17 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
     | sed -E 's#/$##'
 }
 
-@test "GARDE D'INSTRUMENT : la SSoT rend une racine absolue" {
-  # Sans ce garde, une extraction cassee rendrait vide et TOUS les temoins ci-dessous compareraient
-  # du vide a du vide — verts sur rien, la forme d'echec la plus chere.
+@test "GARDE D'INSTRUMENT : la constante rend une racine absolue" {
+  # une extraction cassée rendrait vide, et les cas suivants compareraient du vide à du vide
   [ -n "$ATTENDU" ]
   [[ "$ATTENDU" == /* ]]
 }
 
-@test "BASH : les defauts du rail et du produit disent ce que la lib declare" {
+# le protocole des modules du produit et le RoleToken du BEAM : tenus par le contrat
+# SingleSource.check_private_dir_single_source (runtime/lib/mix/tasks/lcars/contracts/check/single_source.ex)
+@test "BASH : les défauts du convergeur et du geste de forge disent ce que la constante déclare" {
   local bad=0
   declare -A sites=(
-    ["$R/runtime/services/lib/module-protocol.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:=[^}]*'
     ["$R/runtime/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
     ["$R/runtime/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
     ["$R/runtime/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'
@@ -47,19 +47,11 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   [ "$bad" -eq 0 ]
 }
 
-@test "PYTHON : les deux defauts de l'executeur de catalogue s'accordent" {
-  # Ce service DETIENT l'autorite de la forge. Un repli qui pointe ailleurs, et il demarre en
-  # refusant chaque geste sur un fichier absent.
+@test "PYTHON : les deux défauts de l'exécuteur de catalogue s'accordent" {
+  # ce service détient l'autorité de la forge : un repli qui pointe ailleurs refuse chaque geste sur un fichier absent
   local f="$R/runtime/services/catalogue-executor.py" vu
   vu="$(racine_de "$f" 'FORGE_ROLE_TOKENS_DIR", "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
   vu="$(racine_de "$f" 'LCARS_MASTER_TOKEN_FILE", "[^"]*')"
-  [ "$vu" = "$ATTENDU" ]
-}
-
-@test "ELIXIR : le defaut de \`RoleToken\` s'accorde avec le rail" {
-  # Le runtime lit ces jetons par `Fleet.Credentials.RoleToken`. Son `@default_dir` est le huitieme
-  # decideur, et le seul que ni bash ni python ne verraient diverger.
-  local vu; vu="$(racine_de "$R/runtime/lib/fleet/credentials/role_token.ex" '@default_dir "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
 }

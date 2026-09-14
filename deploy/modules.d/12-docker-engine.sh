@@ -21,8 +21,6 @@ ENGINE_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin dock
 
 DOCKER_KEYRING="$(prov_decor /etc/apt/keyrings/docker.asc)"
 DOCKER_LIST="$(prov_decor /etc/apt/sources.list.d/docker.list)"
-# la même clé sert les dépôts ubuntu et debian (même sha256 aux deux URL)
-DOCKER_GPG_SHA256=1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
 
 os_field() { # os_field <clef de /etc/os-release>
   local f; f="$(prov_decor /etc/os-release)"
@@ -54,8 +52,8 @@ ensure_docker_repo() {
 
   url="https://download.docker.com/linux/$id"
   ensure_dir "$(dirname "$DOCKER_KEYRING")" 0755 root:root || return 1
-  if [[ "$(sha256sum "$DOCKER_KEYRING" 2>/dev/null | awk '{print $1}')" != "$DOCKER_GPG_SHA256" ]]; then
-    fetch_verify "$url/gpg" "$DOCKER_GPG_SHA256" "$DOCKER_KEYRING" 0644 || return 1
+  if [[ "$(sha256sum "$DOCKER_KEYRING" 2>/dev/null | awk '{print $1}')" != "$PROV_DOCKER_GPG_SHA256" ]]; then
+    fetch_verify "$url/gpg" "$PROV_DOCKER_GPG_SHA256" "$DOCKER_KEYRING" 0644 || return 1
   fi
   write_atomic "$DOCKER_LIST" 0644 "root:root" <<EOF || return 1
 deb [arch=$arch signed-by=$DOCKER_KEYRING] $url $codename stable

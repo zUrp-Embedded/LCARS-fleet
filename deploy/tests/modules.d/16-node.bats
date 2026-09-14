@@ -14,8 +14,8 @@ setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/16-node.sh"; [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=16-node PROV_SUBSTRATE=linux PROVISION_RUN=1
-  VERSION="$(sed -n 's/^NODE_VERSION=//p' "$SRC")"
-  PIN_X64="$(sed -n 's/^NODE_SHA256_X64=//p' "$SRC")"
+  VERSION="$(sed -n 's/^PROV_NODE_PIN=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
+  PIN_X64="$(sed -n 's/^PROV_NODE_PIN_SHA256_X64=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
   [ -n "$VERSION" ]
   [ -n "$PIN_X64" ]
 
@@ -88,9 +88,13 @@ mod() { run bash "$SRC" "$1"; }
   [ ! -e "$LINKS/node" ]
 }
 
-@test "check : un node lié qui échoue est une dérive, pas un module mort" {
-  printf '#!/usr/bin/env bash\nexit 126\n' > "$LINKS/node"; chmod 0755 "$LINKS/node"
+@test "check : un node lié qui échoue est une dérive qui le dit posé, et l'absence se dit absence" {
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$LINKS/node"; chmod 0755 "$LINKS/node"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 16-node: node absent"* ]]
+  [[ "$output" == *"DRIFT 16-node: node posé ($LINKS/node) mais ne répond pas à --version"* ]]
+  rm -f "$LINKS/node"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 16-node: node absent ($LINKS/node)"* ]]
 }

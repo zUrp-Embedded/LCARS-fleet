@@ -173,19 +173,21 @@ cmd_config_seed() {
 # `flock -n` REFUSE au lieu d'attendre — un appelant qui attend repartirait sur une forge qui a
 # bouge sous lui.
 #
-# ⚠ LE VERROU APPARTIENT AU COMPTE D'AUTORITE, QUI QUE SOIT CELUI QUI LE POSE : `apply` se joue en
-# root (61-forge-structure, `container forge-apply`), `install` sous ce compte (le service
-# lcars-catalogue). Un verrou laisse a root refuse son `exec 9>` a `install`. Root le lui rend donc a
-# chaque passage ; son mode, lui, reste celui qui est pose.
+# Le verrou appartient au compte d'autorité : `apply` se joue en root (61-forge-structure, `container
+# forge-apply`), `install` sous ce compte (le service lcars-catalogue). Root lui rend le verrou qu'il
+# crée, et celui-là seul. Le dossier de travail est à ce compte : ce qui s'y trouve à la place du
+# verrou peut désigner un fichier de root, d'où le refus d'un lien, l'ouverture en ajout et le chown -h.
 with_apply_lock() {
   local lock="${LCARS_APPLY_LOCK:-$CATALOGUE_WORK/.apply.lock}"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
-  [[ -e "$lock" ]] || ( umask 077; : > "$lock" ) 2>/dev/null || true
-  if [[ "$(id -u)" -eq 0 && -e "$lock" && "$(stat -c %u "$lock")" -eq 0 ]] && id -u "$AUTHORITY_USER" >/dev/null 2>&1; then
-    chown "$AUTHORITY_USER:$AUTHORITY_USER" "$lock" \
+  [[ ! -L "$lock" && ( ! -e "$lock" || -f "$lock" ) ]] \
+    || die "verrou d'apply refusé ($lock) : ce n'est pas un fichier régulier — ouvert ici, un lien atteindrait ce qu'il désigne ; le retirer, puis relancer"
+  if [[ ! -e "$lock" ]] && ( umask 077; : >> "$lock" ) 2>/dev/null \
+     && [[ "$(id -u)" -eq 0 ]] && id -u "$AUTHORITY_USER" >/dev/null 2>&1; then
+    chown -h "$AUTHORITY_USER:$AUTHORITY_USER" "$lock" \
       || die "verrou d'apply non rendu à $AUTHORITY_USER ($lock) — l'installation d'un catalogue, jouée sous ce compte, le trouverait fermé"
   fi
-  exec 9>"$lock" || die "verrou d'apply inouvrable ($lock) — $(apply_lock_refusal "$lock")"
+  exec 9>>"$lock" || die "verrou d'apply inouvrable ($lock) — $(apply_lock_refusal "$lock")"
   flock -n 9 || die "un autre apply de structure est en cours (verrou $lock) — rien n'a ete tente"
   "$@"
 }
@@ -198,7 +200,7 @@ apply_lock_refusal() { # $1=verrou -> la cause d'un refus d'ouverture, selon qui
   local qui dir
   qui="$(id -un 2>/dev/null || id -u)"
   if [[ -e "$1" ]]; then
-    printf 'ce geste tourne sous %s, et le verrou appartient à %s en mode %s : il revient au compte %s, et un apply joué en root le lui rend (sur un poste « deploy/workstation up », dans un conteneur « deploy/container forge-apply »)' \
+    printf 'ce geste tourne sous %s, et le verrou appartient à %s en mode %s : il revient au compte %s — le retirer, puis un apply joué en root le recrée pour lui (sur un poste « deploy/workstation up », dans un conteneur « deploy/container forge-apply »)' \
       "$qui" "$(stat -c %U "$1")" "$(stat -c %a "$1")" "$AUTHORITY_USER"
   else
     dir="$(dirname "$1")"

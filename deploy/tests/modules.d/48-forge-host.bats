@@ -27,7 +27,9 @@ setup() {
   # la forge du poste écoute sur 127.0.0.1:<port choisi> : le port choisi est celui de la forge locale
   PORT="${FORGE_DOUBLE_URL##*:}"
   POSTE="http://127.0.0.1:$PORT"
-  export PROV_SUBSTRATE=linux PROV_FORGE_ADVERTISE=10.9.9.9 PROV_HUMAN="$ME" PROV_FORGE_BASE=bob_9 PROV_FORGE_HOST_PORT="$PORT"
+  export PROV_SUBSTRATE=linux PROV_HUMAN="$ME" PROV_FORGE_BASE=bob_9 PROV_FORGE_HOST_PORT="$PORT"
+  # l'adresse de sortie de la machine, que la forge annonce
+  printf '#!/usr/bin/env bash\necho "1.1.1.1 via 10.9.9.1 dev eth0 src 10.9.9.9 uid 1000"\n' > "$DECOR_BIN/ip"; chmod 0755 "$DECOR_BIN/ip"
   export DOCKER_HOST=unix:///dev/null
   export STUB_PORTS="0.0.0.0:$PORT->3000/tcp"   # notre projet publie le port : la forge qui répond est la nôtre
   routes
@@ -44,7 +46,6 @@ case "\$*" in
   ps*publish=*)                   [[ -z "\${STUB_PUBLISH:-}" ]] || echo "\$STUB_PUBLISH"; exit 0 ;;
   ps*"--format {{.Names}}")       echo "\${STUB_NAME-bob_9-forge-gitea-1}"; exit 0 ;;
   inspect*)                       echo "\${STUB_INSPECT_PROJECT:-autre}"; exit 0 ;;
-  "exec "*"printf lcars-stream-ok") printf 'lcars-stream-ok'; exit 0 ;;
   *"user create"*)                [[ -z "\${STUB_CREATE_ERR:-}" ]] || echo "\$STUB_CREATE_ERR" >&2; exit "\${STUB_CREATE_RC:-0}" ;;
   *"generate-access-token"*)      printf '%s\n' "\${STUB_TOKEN-tok-master}"; exit 0 ;;
 esac
@@ -82,15 +83,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   [[ "$output" == *"forge du poste vivante ($POSTE) — ouverte sur 0.0.0.0, composable en http://10.9.9.9:$PORT"* ]]
 }
 
-@test "un bind sur la loopback ferme la forge à cette machine, et le verdict le dit" {
-  PROV_FORGE_BIND=127.0.0.1 mod check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cette machine seule"* ]]
-  [[ "$output" != *"ouverte sur"* ]]
-}
-
-@test "sous WSL en NAT sans adresse donnée, l'annonce est localhost et le motif remonte ; hors WSL non" {
-  unset PROV_FORGE_ADVERTISE
+@test "sous WSL en NAT, l'annonce est localhost et le motif remonte ; hors WSL non" {
   PROV_SUBSTRATE=wsl STUB_WSL_NET=nat mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"composable en http://localhost:$PORT (WSL2 en mode NAT"* ]]

@@ -3,10 +3,9 @@
 # SOURCE: deploy/tests/runtime_guard.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-19
-# STATUS: bats tests for R-no-root-runtime — la reservation du siege cote BEAM (B9)
+# STATUS: bats tests for R-no-root-runtime — la réservation du siège côté BEAM
 
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC2005 — `echo $(...)` garde la sortie sur UNE ligne, ce que le motif attend
+# SC2005 : `echo $(...)` garde la sortie sur une ligne, ce que le motif attend
 # shellcheck disable=SC2005
 
 setup() {
@@ -31,8 +30,7 @@ setup() {
 }
 
 @test "R-no-root: un compte SYSTEME (uid < UID_MIN) est refuse — le miroir de GUARD B est ENTIER" {
-  # fleet porte DEUX regles (siege + frontiere systeme/humain) ; la v1 du miroir n'en portait
-  # qu'une et demie (audit). `id` est double en tete de PATH : la config lit uid=999.
+  # fleet porte deux règles, le siège et la frontière système/humain ; `id` doublé en tête de PATH rend uid=999
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
   echo "1000" > "$LCARS_SEAT_UID_FILE"

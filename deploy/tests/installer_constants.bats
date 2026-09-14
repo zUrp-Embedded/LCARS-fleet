@@ -100,6 +100,8 @@ litteraux() { # litteraux <racine> <fichier des constantes> → « fichier|clé|
   done
   [ "$(c PROV_SYSTEM_TOKEN_FILE)" = "$jetons/$(c PROV_SYSTEM_ACCOUNT).gitea_token" ]
   [ "$(c PROV_TOFU_BIN)" = "$(c PROV_LINK_DIR)/tofu" ]
+  [ "$(dirname "$(c PROV_TOFU_RC)")" = "$(c PROV_TOFU_DIR)" ]
+  [ "$(dirname "$(c PROV_FORGE_STATE_DIR)")" = "$(c PROV_TOFU_DIR)" ]
 }
 
 @test "qui source la lib ne pose avant elle aucun nom de constante — la lib l'écraserait sans un mot" {

@@ -78,20 +78,19 @@ joue() { # joue <racine> <module> <verbe>
 }
 
 @test "les noms du produit portent les valeurs de l'installeur, les mêmes pour les quatre gestes" {
-  racine_doublee 'env | grep -E "^(LCARS|FORGE)_" | sort; verdict_check'
+  racine_doublee 'env | grep -E "^(LCARS|FORGE)_" | sort; printf "groupe du systeme=%s\n" "$LCARS_SYSTEM_GROUP"; verdict_check'
   local c systeme
   systeme="$(sed -n 's/^PROV_SYSTEM_USER=//p' "$DEPLOY/installer-constants.env")"
-  export PROV_DECK_BIND=10.9.9.9
   for c in "${CALLERS[@]}"; do
     joue "$ROOT" "${c%%:*}" check
     [ "$status" -eq 0 ] || { echo "${c%%:*} : rc=$status — $output" >&2; return 1; }
     grep -qx "LCARS_MODULE_TAG=${c%%:*}" <<<"$output"
     grep -qx 'LCARS_LOGIN=humain-du-poste' <<<"$output"
     grep -qx 'FORGE_BASE_URL=http://127.0.0.1:1' <<<"$output"
-    grep -qx "LCARS_SYSTEM_GROUP=$systeme" <<<"$output"
+    grep -qx "LCARS_SYSTEM_USER=$systeme" <<<"$output"
+    # le groupe du compte système dérive de son compte dans le protocole du produit
+    grep -qx "groupe du systeme=$systeme" <<<"$output"
     grep -qx "LCARS_MASTER_TOKEN_FILE=$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token" <<<"$output"
-    # un réglage retiré n'a pas de traduction
-    refute_out '^LCARS_DECK_BIND=' <<<"$output"
   done
   joue "$ROOT" 63-forge-tokens check
   grep -qx "LCARS_CLI=$LCARS_DECOR_ROOT/usr/local/bin/lcars" <<<"$output"

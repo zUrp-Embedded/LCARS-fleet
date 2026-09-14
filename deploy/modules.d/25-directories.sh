@@ -15,16 +15,15 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-console_human() { # l'humain intégré si le geste de forge le nomme et qu'il existe, sinon l'humain de la passe
+# l'humain de la console : l'humain de démonstration que le geste de forge nomme, même pas encore créé (64 le
+# crée), sinon l'humain de la passe
+console_human() {
   local h
   prov_product_env
   h="$(env "${PROV_PRODUCT_ENV[@]}" bash "$(product_tree)/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
-  if [[ -z "$h" ]] || ! id -u -- "$h" >/dev/null 2>&1; then
-    h="$PROV_HUMAN"
-  fi
-  printf '%s\n' "$h"
+  printf '%s\n' "${h:-$PROV_HUMAN}"
 }
-# une fois par passe : les tables se lisent dans des sous-shells, où une mémoire se perdrait
+# lu une fois : les tables se lisent dans des sous-shells
 CONSOLE_HUMAN="$(console_human)"
 
 TMPFILES_CONF="$(prov_decor /etc/tmpfiles.d/lcars-console.conf)"
@@ -100,8 +99,6 @@ prov_tmpfiles_body() {
   done < <(prov_runtime_dirs | dir_specs)
 }
 
-runtime_dirs_declared() { [[ -n "$(prov_runtime_dirs)" ]]; }
-
 # joue <check|apply> sur chaque dossier de la table ; un dossier que le manifeste ne déclare pas est un échec
 parcourir() {
   local verbe="$1" path mode owner cur hors_substrat="" hors_build=""
@@ -112,6 +109,8 @@ parcourir() {
     esac
     if [[ "$mode" == - ]]; then
       p_fail "$path : absent de system.manifest — ni mode ni propriétaire à poser"
+    elif [[ "$verbe" == apply && "${owner%%:*}" == "$CONSOLE_HUMAN" ]] && ! id -u -- "$CONSOLE_HUMAN" >/dev/null 2>&1; then
+      p_warn "$path : le compte « $CONSOLE_HUMAN » n'existe pas encore (le convergeur des humains le crée) — le dossier se pose à la passe suivante, ou au boot par tmpfiles"
     elif [[ "$verbe" == apply ]]; then
       ensure_dir "$path" "$mode" "$owner" || true
     elif [[ ! -d "$path" ]]; then
@@ -130,7 +129,7 @@ parcourir() {
 }
 
 check_tmpfiles() {
-  runtime_dirs_declared || return 0
+  [[ "$PROV_SUBSTRATE" != docker ]] || return 0
   if [[ ! -f "$TMPFILES_CONF" ]]; then
     p_drift "tmpfiles: $TMPFILES_CONF absent — /run/lcars/console ne se refera pas au reboot, et la fleet ne démarrera pas"
   elif [[ "$(cat "$TMPFILES_CONF")" != "$(prov_tmpfiles_body)" ]]; then
@@ -142,18 +141,10 @@ check_tmpfiles() {
 
 # le fichier vaut pour le prochain boot ; ce boot-ci est déjà convergé par apply, et --create jugerait tout /etc/tmpfiles.d
 apply_tmpfiles() {
-  runtime_dirs_declared || return 0
-  if [[ ! -d "$(dirname "$TMPFILES_CONF")" ]]; then
-    p_drift "tmpfiles: $(dirname "$TMPFILES_CONF") absent — les dossiers de /run ne se referont pas au reboot"
-    return 0
-  fi
-  local body; body="$(prov_tmpfiles_body)"
-  write_atomic "$TMPFILES_CONF" 0644 <<<"$body" || { p_fail "tmpfiles: $TMPFILES_CONF"; return 1; }
-  if command -v systemd-tmpfiles >/dev/null 2>&1; then
-    p_ok "tmpfiles: $TMPFILES_CONF posé — /run/lcars/console se refera au reboot"
-  else
-    p_drift "tmpfiles: $TMPFILES_CONF posé mais systemd-tmpfiles est absent — au reboot, /run/lcars/console ne sera pas recréé et la fleet ne démarrera pas tant que « provision apply » n'aura pas rejoué"
-  fi
+  [[ "$PROV_SUBSTRATE" != docker ]] || return 0
+  local avant="$PROV_CHANGED"
+  write_atomic "$TMPFILES_CONF" 0644 <<<"$(prov_tmpfiles_body)" || return 1
+  [[ "$PROV_CHANGED" -ne "$avant" ]] || p_ok "tmpfiles: $TMPFILES_CONF conforme"
 }
 
 check() {

@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/poseurs.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-01
-# STATUS: bats tests — CE QUE LES POSEURS LAISSENT DERRIERE EUX
+# STATUS: bats tests — ce que les poseurs laissent derrière eux
 
 # shellcheck disable=SC2030,SC2031
 
@@ -15,23 +15,21 @@ setup() {
 
 embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' | grep -qx "$2"; }   # embarque <liste des constantes> <arbre>
 
-@test "C2 : ~/.lcars/log est chmode par l'apply — il ne nait plus au umask" {
+@test "~/.lcars/log est posé en 0700 par l'apply de 70-human, pas laissé au umask" {
   local mod="$BATS_TEST_DIRNAME/../../runtime/services/human.d/70-human.sh"
   local ligne; ligne="$(grep -n 'chmod 0700' "$mod" | head -1)"
   [ -n "$ligne" ]
   grep -q 'chmod 0700 .*\.lcars/log' "$mod"
 }
 
-@test "C2 : et le CHECK le regarde — sinon le doctor reste aveugle apres le correctif" {
-  # L'angle mort etait double, et la seconde moitie est la plus sournoise : corriger l'apply sans
-  # toucher au check aurait rendu le defaut invisible au lieu de le fermer.
+@test "le check de 70-human regarde ~/.lcars/log — sinon le doctor ne voit pas ce que l'apply pose" {
   local mod="$BATS_TEST_DIRNAME/../../runtime/services/human.d/70-human.sh"
   local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$mod")"
   grep -q '\.lcars/log' <<<"$bloc"
 }
 
 
-@test "C4 : le contenu de la racine des medias est rendu a root, pas laisse a l'operateur" {
+@test "le contenu de la racine des medias est rendu a root, pas laisse a l'operateur" {
   # sous un décor tout appartient à qui le joue : le propriétaire ne se mesure pas, il se lit dans le code
   local mod="$MODS/44-media.sh" media
   media="$(sed -n 's/^PROV_MEDIA_ROOT=//p' "$DEPLOY/installer-constants.env")"
@@ -56,9 +54,9 @@ embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' 
 }
 
 
-@test "C6+ : ce que les modules LISENT a la RACINE (repo_root) est ce qui est embarque" {
+@test "ce que les modules LISENT a la RACINE (repo_root) est ce qui est embarque" {
   local lus; lus="$(grep -rhoE 'repo_root\)/[a-z]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
-    | sed 's|repo_root)/||' | sort -u | grep -vE '^(fleet|runtime)$')"
+    | sed 's|repo_root)/||' | sort -u | grep -vx runtime)"
   local n
   for n in $lus; do
     embarque PROV_EMBEDDED_ROOT "$n" \
@@ -66,7 +64,7 @@ embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' 
   done
 }
 
-@test "C6+ : ce que les modules LISENT dans l ARBRE PRODUIT (product_tree) est dans EMBEDDED" {
+@test "ce que les modules LISENT dans l ARBRE PRODUIT (product_tree) est dans EMBEDDED" {
   local lus; lus="$(grep -rhoE 'product_tree\)/[a-z_]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
     | sed 's|product_tree)/||' | sort -u)"
   [ -n "$lus" ] || { echo "extraction ratee : aucune lecture sous product_tree trouvee"; return 1; }

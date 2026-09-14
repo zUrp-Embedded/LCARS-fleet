@@ -1,6 +1,6 @@
 # SOURCE: deploy/system.manifest
 # STARDATE: 2026-09-13
-# STATUS: data, not code — ce que le provisionnement a le droit de poser sur une machine ; lu par provision (audit), la lib (gid, mode, propriétaire, substrat), 25, 44 et 46
+# STATUS: data, not code — ce que le provisionnement a le droit de poser sur une machine ; lu par provision (audit), la lib (gid, mode, propriétaire, substrat), 25, 44, 46 et 61
 #
 #   <classe>[:<trait>]  <objet>  <mode>  <propriétaire>  <substrat>
 #
@@ -29,6 +29,8 @@ anchor    /opt/lcars/.source-revision                  0644  root:root          
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
 dir       /opt/lcars/tofu                              0755  root:root           any
 dir       /opt/lcars/tofu/providers                    0755  root:root           any
+# l'état tofu de la structure de la forge, gardé par 61 d'une passe à l'autre : il porte le seed des comptes en clair
+dir       /opt/lcars/tofu/forge-state                  0700  root:root           wsl+linux
 dir       /opt/lcars/share                                  0755  root:root           any
 dir       /opt/lcars/share/avatars                     0755  root:root           any
 dir       /opt/lcars/share/favicon                     0755  root:root           any
@@ -38,8 +40,8 @@ anchor    /opt/lcars/share/.doc-revision               0644  root:root          
 # 0710 : le groupe traverse (forge.url en 0644 s'ouvre par son chemin), il ne liste pas, les secrets restent 0600
 dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
 dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
-# forge-gestures.sh y travaille sur les deux substrats
-dir       /var/lib/lcars                               0755  root:root           any
+# la racine du magasin : ses natures sont celles de deploy/lib/store.sh
+dir       /var/lib/lcars                              0755  root:root           any
 
 # /var/tmp est 1777 : déclarés, ces répertoires sont posés par l'installeur et leur propriétaire est
 # relu à chaque passe, sinon le premier venu possède le dossier où root télécharge puis exécute
@@ -123,6 +125,7 @@ human:unset  /home/<human>/.local/bin/claude               0755  <human>:-      
 # ~/.claude naît au umask : mode observé
 human:unset  /home/<human>/.claude                        775   <human>:-        any
 human     /home/<human>/.claude/settings.json          0644  <human>:-        any
+# posé chez le siège seul (45-seat-skill), le seul humain qui lit la boîte de réception d'admiral
 human     /home/<human>/.claude/skills/system-issues   0755  <human>:-        any
 
 # posés par mix lui-même (mix local.hex), mode au umask de la machine

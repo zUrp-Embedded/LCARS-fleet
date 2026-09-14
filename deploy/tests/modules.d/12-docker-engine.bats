@@ -23,7 +23,7 @@ setup() {
   LIST="$LCARS_DECOR_ROOT/etc/apt/sources.list.d/docker.list"
   SOCK="$LCARS_DECOR_ROOT/var/run/docker.sock"
   mkdir -p "$(dirname "$LIST")" "$(dirname "$SOCK")"
-  PIN="$(sed -n 's/^DOCKER_GPG_SHA256=//p' "$SRC")"
+  PIN="$(sed -n 's/^PROV_DOCKER_GPG_SHA256=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
   [ -n "$PIN" ]
 
   # la frontière : dpkg, apt, curl, docker et sleep. apt-get install note les paquets et « démarre » le daemon
@@ -63,13 +63,6 @@ os_release() { printf 'ID=%s\nVERSION_CODENAME=%s\n' "$1" "$2" > "$LCARS_DECOR_R
 cle_du_pin() {
   printf '#!/usr/bin/env bash\n[[ -e "$1" ]] || exit 1\nprintf "%%s  %%s\\n" "%s" "$1"\n' "$PIN" > "$DECOR_BIN/sha256sum"
   chmod 0755 "$DECOR_BIN/sha256sum"
-}
-
-@test "en-tête : linux seul, après 10-packages, sous root" {
-  grep -q '^# APPLY-ON: linux$' "$SRC"
-  grep -q '^# CHECK-ON: linux$' "$SRC"
-  grep -q '^# AFTER: 10-packages$' "$SRC"
-  grep -q '^# NEEDS: root$' "$SRC"
 }
 
 @test "check : un daemon qui répond est conforme" {
@@ -173,7 +166,7 @@ cle_du_pin() {
 
 @test "dépôt docker : une clé qui n'est pas celle du pin est refusée — un sha exporté n'y change rien" {
   os_release ubuntu resolute
-  LCARS_DOCKER_GPG_SHA256="$(echo CLE-TELECHARGEE | sha256sum | awk '{print $1}')" mod apply
+  PROV_DOCKER_GPG_SHA256="$(echo CLE-TELECHARGEE | sha256sum | awk '{print $1}')" mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"sha256 différent"* ]]
   [ ! -e "$KEY" ]

@@ -30,7 +30,7 @@ porteurs_de_release() {
 }
 
 
-@test "LES DEUX chemins de binaire de release sont le MEME, derive du prefixe" {
+@test "le seul chemin de binaire de release posée vit dans runtime/bin/lcars et dérive du préfixe ; aucun ne vise une release bâtie" {
   local f n=0 nb=0 b porteur=""
   while IFS= read -r f; do
     while read -r b; do

@@ -12,7 +12,6 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-HELPERS_DIR="$PROV_ROOT"
 TOOLCHAIN_BIN="$PROV_LINK_DIR/lcars-toolchain-converge"
 AUTHORITY_ASK_BIN="$PROV_LINK_DIR/lcars-authority-ask"
 HELPERS_OWNER="$(prov_owner root:root)"
@@ -21,18 +20,21 @@ SRC_DIR="$(product_tree)/services"
 BIN_SRC_DIR="$(product_tree)/bin"
 read -ra HELPERS <<<"$PROV_HELPERS"
 read -ra HELPERS_DATA <<<"$PROV_HELPERS_DATA"
-# les arbres embarqués à plat sous HELPERS_DIR : la copie sert à rejouer le provisionnement (repo_root y mène) et aux lecteurs du produit
+# les arbres embarqués à plat sous PROV_ROOT : la copie sert à rejouer le provisionnement (repo_root y mène) et aux lecteurs du produit
 read -ra EMBEDDED <<<"$PROV_EMBEDDED"
 read -ra EMBEDDED_ROOT <<<"$PROV_EMBEDDED_ROOT"
 SKEL_FILE="$(prov_decor /etc/skel/.bashrc)"
 BASH_BASHRC="$(prov_decor /etc/bash.bashrc)"
+# le tampon des auxiliaires n'est pas .source-revision, le discriminant de livraison que prov_delivery lit à la même racine
+HELPERS_STAMP="$PROV_ROOT/$PROV_HELPERS_STAMP"
+COPIE_DELIVERY_STAMP="$PROV_ROOT/$PROV_SOURCE_STAMP"
 
 XTERM_VERSION=5.5.0
 XTERM_FIT_VERSION=0.10.0
 XTERM_JS_SHA256=1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495
 XTERM_CSS_SHA256=ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6
 XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089
-deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
+DECK_STATIC="$PROV_ROOT/deck-static"
 deck_static_table() {
   printf '%s\t%s\t%s\n' \
     xterm.js "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/lib/xterm.js" "$XTERM_JS_SHA256" \
@@ -49,25 +51,16 @@ EMBEDDED_EXCLUDE=(
   --exclude='*.tfvars'
   --exclude=crash.log
 )
-# le tampon des auxiliaires n'est pas .source-revision, le discriminant de livraison que prov_delivery lit à la même racine
-helpers_stamp() { echo "$HELPERS_DIR/$PROV_HELPERS_STAMP"; }
-copie_delivery_stamp() { echo "$HELPERS_DIR/$PROV_SOURCE_STAMP"; }
 posed_rev() { # posed_rev → la révision d'où sort ce qui est posé, ou « inconnue »
-  local f; f="$(helpers_stamp)"
-  if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
+  if [[ -r "$HELPERS_STAMP" ]]; then head -n1 "$HELPERS_STAMP" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
 }
 
 sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 
 _PERMS_OK=0
-perm_of() { stat -c '%a %U:%G' "$1" 2>/dev/null || echo '?'; }
-check_perm() { # check_perm <chemin> <mode> [owner] — relit ce qui est là contre ce que l'apply affirme
-  local path="$1" want="${2#0}" owner="${3:-}" cur
-  [[ -e "$path" ]] || return 0
-  cur="$(perm_of "$path")"
-  if [[ -n "$owner" ]]; then want="$want $owner"; else cur="${cur%% *}"; fi
-  if [[ "$cur" == "$want" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
-  p_drift "$path : $cur ≠ $want — l'apply le repose"
+check_perm() { # check_perm <chemin> <mode> — relit ce qui est là contre ce que l'apply affirme
+  if prov_check_mode "$1" "$2" "$HELPERS_OWNER"; then _PERMS_OK=$((_PERMS_OK + 1)); fi
+  return 0
 }
 tree_hors_contrat() { # tree_hors_contrat <racine> → les objets qui ne sont pas à HELPERS_OWNER, ou setgid, ou inscriptibles par le groupe ou les autres ; ce que la copie n'emporte pas n'est pas jugé
   local x
@@ -82,21 +75,21 @@ check_tree_perms() { # check_tree_perms <racine>
   bad="$(tree_hors_contrat "$root")"
   if [[ -z "$bad" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
   n="$(wc -l <<<"$bad")"; first="${bad%%$'\n'*}"
-  p_drift "$root : $n objet(s) hors contrat (premier : $first, $(perm_of "$first")) — propriétaire $HELPERS_OWNER, ni setgid ni écriture groupe/autres ; l'apply repose l'arbre"
+  p_drift "$root : $n objet(s) hors contrat (premier : $first, $(stat -c '%a %U:%G' "$first" 2>/dev/null || echo '?')) — propriétaire $HELPERS_OWNER, ni setgid ni écriture groupe/autres ; l'apply repose l'arbre"
 }
 check_perms() {
   local n name _u _s _r
   _PERMS_OK=0
-  for n in "${HELPERS[@]}"; do check_perm "$HELPERS_DIR/$n" 0755 "$HELPERS_OWNER"; done
-  for n in "${HELPERS_DATA[@]}"; do check_perm "$HELPERS_DIR/$n" 0644 "$HELPERS_OWNER"; done
-  check_perm "$PROV_SHELL_RC" 0644 "$HELPERS_OWNER"
-  check_perm "$TOOLCHAIN_BIN" 0755 "$HELPERS_OWNER"
-  check_perm "$AUTHORITY_ASK_BIN" 0755 "$HELPERS_OWNER"
-  check_perm "$(helpers_stamp)" 0644 "$HELPERS_OWNER"
-  check_perm "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER"
-  check_perm "$(deck_static_dir)" 0755 "$HELPERS_OWNER"
-  while IFS=$'\t' read -r name _u _s; do check_perm "$(deck_static_dir)/$name" 0644 "$HELPERS_OWNER"; done < <(deck_static_table)
-  for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do check_tree_perms "$HELPERS_DIR/$_r"; done
+  for n in "${HELPERS[@]}"; do check_perm "$PROV_ROOT/$n" 0755; done
+  for n in "${HELPERS_DATA[@]}"; do check_perm "$PROV_ROOT/$n" 0644; done
+  check_perm "$PROV_SHELL_RC" 0644
+  check_perm "$TOOLCHAIN_BIN" 0755
+  check_perm "$AUTHORITY_ASK_BIN" 0755
+  check_perm "$HELPERS_STAMP" 0644
+  check_perm "$COPIE_DELIVERY_STAMP" 0644
+  check_perm "$DECK_STATIC" 0755
+  while IFS=$'\t' read -r name _u _s; do check_perm "$DECK_STATIC/$name" 0644; done < <(deck_static_table)
+  for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do check_tree_perms "$PROV_ROOT/$_r"; done
   [[ "$_PERMS_OK" -eq 0 ]] || p_ok "modes et propriétaires relus : $_PERMS_OK objet(s)/arbre(s) conformes à ce que l'apply pose"
   return 0
 }
@@ -121,23 +114,22 @@ bloc_conforme() { # bloc_conforme <fichier> <marqueur> <corps> → 0 si le bloc 
 
 check() {
   local n f name url sha stale=0
-  local src posed
-  src="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  local posed
   posed="$(posed_rev)"
   if [[ "$posed" == "inconnue" ]]; then
-    if [[ -r "$(helpers_stamp)" ]]; then
-      p_drift "$(helpers_stamp) existe mais vaut « inconnue » — les auxiliaires ont été posés depuis un arbre sans révision lisible"
+    if [[ -r "$HELPERS_STAMP" ]]; then
+      p_drift "$HELPERS_STAMP existe mais vaut « inconnue » — les auxiliaires ont été posés depuis un arbre sans révision lisible"
     else
-      p_drift "$(helpers_stamp) absent — impossible de dire de quelle révision sortent les auxiliaires posés"
+      p_drift "$HELPERS_STAMP absent — impossible de dire de quelle révision sortent les auxiliaires posés"
     fi
-  elif [[ "$posed" == "$src" ]]; then
+  elif [[ "$posed" == "$PROV_SOURCE_REV" ]]; then
     p_ok "auxiliaires posés depuis $posed (identique à la source)"
   else
-    local rc=0; prov_rev_is_behind "$src" "$posed" || rc=$?
+    local rc=0; prov_rev_is_behind "$PROV_SOURCE_REV" "$posed" || rc=$?
     case "$rc" in
-      0) p_drift "retour en arrière : posé depuis $posed, cet arbre est $src, qui en est un ancêtre — l'apply remplacerait du code par du code plus ancien" ;;
-      1) p_drift "auxiliaires posés depuis $posed, cet arbre est $src — l'apply les mettra à jour" ;;
-      *) p_warn "auxiliaires posés depuis $posed, cet arbre est $src — parenté indéterminable (pas de git, ou révision inconnue de ce clone)" ;;
+      0) p_drift "retour en arrière : posé depuis $posed, cet arbre est $PROV_SOURCE_REV, qui en est un ancêtre — l'apply remplacerait du code par du code plus ancien" ;;
+      1) p_drift "auxiliaires posés depuis $posed, cet arbre est $PROV_SOURCE_REV — l'apply les mettra à jour" ;;
+      *) p_warn "auxiliaires posés depuis $posed, cet arbre est $PROV_SOURCE_REV — parenté indéterminable (pas de git, ou révision inconnue de ce clone)" ;;
     esac
   fi
   if command -v ttyd >/dev/null; then
@@ -146,22 +138,22 @@ check() {
     p_drift "ttyd absent — la console web n'a aucun serveur derrière sa socket (page noire) ; 10-packages le pose"
   fi
   for n in "${HELPERS[@]}"; do
-    if [[ ! -e "$HELPERS_DIR/$n" ]]; then
-      p_drift "$HELPERS_DIR/$n absent"
+    if [[ ! -e "$PROV_ROOT/$n" ]]; then
+      p_drift "$PROV_ROOT/$n absent"
       stale=1
-    elif [[ ! -x "$HELPERS_DIR/$n" ]]; then
-      p_drift "$HELPERS_DIR/$n présent mais non exécutable (mode $(stat -c '%a' "$HELPERS_DIR/$n" 2>/dev/null || echo '?')) — l'apply pose 0755"
+    elif [[ ! -x "$PROV_ROOT/$n" ]]; then
+      p_drift "$PROV_ROOT/$n présent mais non exécutable (mode $(stat -c '%a' "$PROV_ROOT/$n" 2>/dev/null || echo '?')) — l'apply pose 0755"
       stale=1
     elif [[ ! -r "$SRC_DIR/$n" ]]; then
-      p_warn "$HELPERS_DIR/$n : rien n'est conclu — la source est absente ou illisible ici ($SRC_DIR/$n)"
-    elif ! cmp -s "$SRC_DIR/$n" "$HELPERS_DIR/$n"; then
-      p_drift "$HELPERS_DIR/$n diverge de la source ($SRC_DIR/$n)"
+      p_warn "$PROV_ROOT/$n : rien n'est conclu — la source est absente ou illisible ici ($SRC_DIR/$n)"
+    elif ! cmp -s "$SRC_DIR/$n" "$PROV_ROOT/$n"; then
+      p_drift "$PROV_ROOT/$n diverge de la source ($SRC_DIR/$n)"
       stale=1
     fi
   done
-  [[ "$stale" -eq 0 ]] && p_ok "${#HELPERS[@]} auxiliaires à jour dans $HELPERS_DIR"
+  [[ "$stale" -eq 0 ]] && p_ok "${#HELPERS[@]} auxiliaires à jour dans $PROV_ROOT"
   while IFS=$'\t' read -r name url sha; do
-    f="$(deck_static_dir)/$name"
+    f="$DECK_STATIC/$name"
     if [[ ! -s "$f" ]]; then
       p_drift "client de terminal absent ($f) — la console s'ouvre sur un cadre noir, et rien à l'écran ne le dit"
     elif [[ "$(sha_of "$f")" != "$sha" ]]; then
@@ -178,25 +170,25 @@ check() {
   else
     p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
   fi
-  if [[ -x "$HELPERS_DIR/deploy/provision" ]]; then
-    p_ok "provisionnement embarqué posé ($HELPERS_DIR/deploy/provision)"
+  if [[ -x "$PROV_ROOT/deploy/provision" ]]; then
+    p_ok "provisionnement embarqué posé ($PROV_ROOT/deploy/provision)"
   else
-    p_drift "provisionnement embarqué absent ($HELPERS_DIR/deploy/provision) — le convergeur ne pourra pas converger un humain"
+    p_drift "provisionnement embarqué absent ($PROV_ROOT/deploy/provision) — le convergeur ne pourra pas converger un humain"
   fi
   local _r
   for _r in "${EMBEDDED[@]}" "${EMBEDDED_ROOT[@]}"; do
-    if [[ -d "$HELPERS_DIR/$_r" ]]; then
-      p_ok "arbre embarqué $HELPERS_DIR/$_r"
+    if [[ -d "$PROV_ROOT/$_r" ]]; then
+      p_ok "arbre embarqué $PROV_ROOT/$_r"
     else
-      p_drift "arbre embarqué absent ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/deploy/provision échouerait"
+      p_drift "arbre embarqué absent ($PROV_ROOT/$_r) — un apply rejoué depuis $PROV_ROOT/deploy/provision échouerait"
     fi
   done
   local _veut _a
-  _veut="$(prov_delivery)"; _a="source"; [[ -f "$(copie_delivery_stamp)" ]] && _a="binary"
+  _veut="$(prov_delivery)"; _a="source"; [[ -f "$COPIE_DELIVERY_STAMP" ]] && _a="binary"
   if [[ "$_veut" == "$_a" ]]; then
     p_ok "forme de livraison propagée dans la copie ($_a)"
   else
-    p_drift "la copie de $HELPERS_DIR se déclare « $_a » alors que cette source est « $_veut » — un apply rejoué depuis $HELPERS_DIR/deploy/provision poserait (ou refuserait) un toolchain à tort"
+    p_drift "la copie de $PROV_ROOT se déclare « $_a » alors que cette source est « $_veut » — un apply rejoué depuis $PROV_ROOT/deploy/provision poserait (ou refuserait) un toolchain à tort"
   fi
   if bloc_conforme "$BASH_BASHRC" path "$BLOC_PATH"; then
     p_ok "PATH des shells interactifs : ~/.local/bin ($BASH_BASHRC)"
@@ -229,11 +221,20 @@ poser_donnee() { # poser_donnee <source> <destination> — 0644 ; la redirection
 
 arbre_forme() { ( cd "$1" && find . -printf '%P %y %m\n' | LC_ALL=C sort ); }   # chemins, types et modes : diff ne compare que les contenus
 
+# 64 relance un daemon quand un objet qu'il charge est plus récent que son démarrage : ce qui change prend la
+# date de sa pose, ce qui est identique garde celle de l'arbre posé
+garder_dates() { # garder_dates <arbre neuf> <arbre posé>
+  local f
+  while IFS= read -r -d '' f; do
+    { [[ -d "$1/$f" && -d "$2/$f" ]] || cmp -s "$1/$f" "$2/$f"; } || continue
+    touch -h -r "$2/$f" "$1/$f"
+  done < <(cd "$1" && find . -print0)
+}
+
 embarquer() { # embarquer <source> <destination> [--exclude…] — l'arbre copié par tar (exclusions à la source) ; basculé et compté s'il diffère de ce qui est posé
   local src="$1" dst="$2"; shift 2
   rm -rf "${dst:?}.new"
   prov_scaffold_dir "$dst.new" 0755 "$HELPERS_OWNER" || return 1
-  # --touch : l'arbre basculé porte la date de sa pose, que 64 compare au démarrage des daemons
   ( cd "$src" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "$@" . ) | ( cd "$dst.new" && tar --no-same-owner --touch -xf - ) \
     || { p_fail "copie ratée : $src"; return 1; }
   chmod -R g-s,go-w "$dst.new" || { p_fail "modes de la copie non posés : $dst"; return 1; }
@@ -242,24 +243,23 @@ embarquer() { # embarquer <source> <destination> [--exclude…] — l'arbre copi
     rm -rf "$dst.new"
     return 0
   fi
+  [[ ! -d "$dst" ]] || garder_dates "$dst.new" "$dst"
   prov_promote_dir "$dst.new" "$dst" || return 1
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "arbre embarqué $dst"
 }
 
 apply() {
-  local n name url sha f
-  local src posed
-  src="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  local n name url sha f posed
   posed="$(posed_rev)"
-  if prov_rev_is_behind "$src" "$posed"; then
-    p_warn "retour en arrière : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ancêtre — ce qui suit remplace du code par du code plus ancien, convergeur d'humains compris"
+  if prov_rev_is_behind "$PROV_SOURCE_REV" "$posed"; then
+    p_warn "retour en arrière : $PROV_ROOT sort de $posed, cet arbre est $PROV_SOURCE_REV, qui en est un ancêtre — ce qui suit remplace du code par du code plus ancien, convergeur d'humains compris"
   fi
 
   for n in "${HELPERS[@]}"; do
-    poser_executable "$SRC_DIR/$n" "$HELPERS_DIR/$n" || verdict_apply
+    poser_executable "$SRC_DIR/$n" "$PROV_ROOT/$n" || verdict_apply
   done
   for n in "${HELPERS_DATA[@]}"; do
-    poser_donnee "$SRC_DIR/$n" "$HELPERS_DIR/$n" || verdict_apply
+    poser_donnee "$SRC_DIR/$n" "$PROV_ROOT/$n" || verdict_apply
   done
   poser_donnee "$SRC_DIR/${PROV_SHELL_RC##*/}" "$PROV_SHELL_RC" || verdict_apply
 
@@ -271,31 +271,31 @@ apply() {
 
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente : $(product_tree)/$n"; verdict_apply; }
-    embarquer "$(product_tree)/$n" "$HELPERS_DIR/$n" || verdict_apply
+    embarquer "$(product_tree)/$n" "$PROV_ROOT/$n" || verdict_apply
   done
   local -a _only
   for n in "${EMBEDDED_ROOT[@]}"; do
     [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente : $(repo_root)/$n"; verdict_apply; }
     _only=(); [[ "$n" == deploy ]] && _only=(--exclude=./tests)
-    embarquer "$(repo_root)/$n" "$HELPERS_DIR/$n" "${_only[@]}" || verdict_apply
+    embarquer "$(repo_root)/$n" "$PROV_ROOT/$n" "${_only[@]}" || verdict_apply
   done
 
   # le tampon s'écrit après la pose : il atteste ce qui est là
-  write_atomic "$(helpers_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" || verdict_apply
+  write_atomic "$HELPERS_STAMP" 0644 "$HELPERS_OWNER" <<<"$PROV_SOURCE_REV" || verdict_apply
   # la forme de la livraison se propage dans la copie, dans les deux sens : un rejeu depuis la copie la lit à sa racine
   if prov_delivery_is_binary; then
-    write_atomic "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" || verdict_apply
-  elif [[ -e "$(copie_delivery_stamp)" ]]; then
-    rm -f "$(copie_delivery_stamp)" \
-      || { p_fail "discriminant de livraison périmé non retiré ($(copie_delivery_stamp)) — cette machine se déclarerait binaire alors qu'elle bâtit"; verdict_apply; }
+    write_atomic "$COPIE_DELIVERY_STAMP" 0644 "$HELPERS_OWNER" <<<"$PROV_SOURCE_REV" || verdict_apply
+  elif [[ -e "$COPIE_DELIVERY_STAMP" ]]; then
+    rm -f "$COPIE_DELIVERY_STAMP" \
+      || { p_fail "discriminant de livraison périmé non retiré ($COPIE_DELIVERY_STAMP) — cette machine se déclarerait binaire alors qu'elle bâtit"; verdict_apply; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "discriminant de livraison retiré ($(copie_delivery_stamp)) — cette machine bâtit, elle ne consomme pas un paquet"
+    p_chg "discriminant de livraison retiré ($COPIE_DELIVERY_STAMP) — cette machine bâtit, elle ne consomme pas un paquet"
   fi
 
   # le réseau en dernier : une coupure ne coûte que le client de terminal, et le check le nomme
-  ensure_dir "$(deck_static_dir)" 0755 "$HELPERS_OWNER" || verdict_apply
+  ensure_dir "$DECK_STATIC" 0755 "$HELPERS_OWNER" || verdict_apply
   while IFS=$'\t' read -r name url sha; do
-    f="$(deck_static_dir)/$name"
+    f="$DECK_STATIC/$name"
     if [[ -s "$f" && "$(sha_of "$f")" == "$sha" ]]; then
       ensure_mode "$f" 0644 "$HELPERS_OWNER" || verdict_apply
       continue
@@ -305,8 +305,4 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 62-runtime-helpers.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

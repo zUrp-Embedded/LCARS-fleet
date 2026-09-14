@@ -148,15 +148,13 @@ if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
 fi
 echo "--- GO-7 : en-têtes déclaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
 
-# copie assumée du bloc de runtime/test/shell_gate.sh : sans elle, l'environnement du lanceur
-# (FORGE_BASE_URL exporté par provision --env, un LCARS_DECOR_ROOT posé à la main, PROV_FLEET_GROUP
-# qui voyage par services.env) retunerait la mesure ; installer_gate.bats tient l'accord des copies
+# l'environnement du lanceur ne règle pas la mesure : un FORGE_BASE_URL exporté par provision --env, ou
+# un LCARS_DECOR_ROOT posé à la main, retuneraient les témoins
+mapfile -t NEUTRES < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort || true)
 BATS_ENV=()
-while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(
-  compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort
-)
-if [[ "${#BATS_ENV[@]}" -gt 0 ]]; then
-  echo "--- ${#BATS_ENV[@]} variable(s) du lanceur neutralisée(s) : ${BATS_ENV[*]//-u/}"
+for v in "${NEUTRES[@]}"; do BATS_ENV+=(-u "$v"); done
+if [[ "${#NEUTRES[@]}" -gt 0 ]]; then
+  echo "--- ${#NEUTRES[@]} variable(s) du lanceur neutralisée(s) : ${NEUTRES[*]}"
 fi
 
 echo "--- bats${COUCHE:+ (couche $COUCHE)} : ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas ---"

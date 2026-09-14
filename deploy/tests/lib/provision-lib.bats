@@ -405,20 +405,6 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "ensure_mode : le propriétaire est relu après chown — un chown qui rend 0 sans rien changer est un échec" {
-  local bin="$BATS_TEST_TMPDIR/bin-chown"; mkdir -p "$bin"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/chown"; chmod 0755 "$bin/chown"
-  module_sh '
-    PATH="'"$bin"':$PATH"
-    unset LCARS_DECOR_ROOT   # sous le décor, tout appartient à qui joue : le propriétaire demandé ne serait jamais root
-    f="$BATS_TEST_TMPDIR/proprio"; : > "$f"; chmod 0644 "$f"
-    ensure_mode "$f" 0644 root:root || true
-    [ "$PROV_FAILED" -eq 1 ]
-  '
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"FAIL  test-mod: ensure_mode: propriétaire $(id -un):$(id -gn) ≠ root:root après chown"* ]]
-}
-
 @test "ensure_mode : un lien cassé se dit lien, pas absent" {
   module_sh '
     ln -s "$BATS_TEST_TMPDIR/nulle-part" "$BATS_TEST_TMPDIR/casse"
@@ -558,16 +544,21 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "job_forge_url : un job atteint la forge par le port publié — host.docker.internal sous WSL, l'adresse de sortie ailleurs" {
+@test "job_forge_url : un job atteint la forge par le port publié — host.docker.internal sous WSL, l'adresse annoncée ailleurs" {
   module_sh '
-    lan_addr() { echo 198.51.100.63; }
     [ "$(PROV_SUBSTRATE=wsl job_forge_url 20010 localhost)" = "http://host.docker.internal:20010" ]
-    [ "$(PROV_SUBSTRATE=linux job_forge_url 20010 localhost)" = "http://198.51.100.63:20010" ]
-    lan_addr() { echo ""; }
     [ "$(PROV_SUBSTRATE=linux job_forge_url 20010 192.0.2.7)" = "http://192.0.2.7:20010" ]
-    [ "$(PROV_SUBSTRATE=linux job_forge_url 20010)" = "http://127.0.0.1:20010" ]
   '
   [ "$status" -eq 0 ]
+}
+
+@test "job_forge_url : hors WSL, une adresse de loopback ou absente n'est jamais rendue — elle désigne le conteneur du job" {
+  local a
+  for a in 127.0.0.1 localhost ::1 ""; do
+    module_sh "PROV_SUBSTRATE=linux job_forge_url 20010 '$a'"
+    [ "$status" -eq 1 ] || { echo "« $a » : rc=$status, $output"; return 1; }
+    [ -z "$output" ]
+  done
 }
 
 @test "wsl_networking_mode : le mode que wslinfo dit, nat quand il ne dit rien" {
@@ -699,6 +690,33 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+@test "prov_roster_conteneur : un second dépôt remplace le roster posé, en 0644 à root, sans temporaire laissé" {
+  local arbre="$BATS_TEST_TMPDIR/arbre" recette="$LCARS_DECOR_ROOT/opt/lcars/services/forge-recipe"
+  mkdir -p "$arbre/deploy/lib" "$recette"
+  cp "$BATS_TEST_DIRNAME"/../../lib/*.sh "$arbre/deploy/lib/"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$BATS_TEST_DIRNAME/../../system.manifest" "$arbre/deploy/"
+  cat > "$arbre/deploy/lib/enroll-catalogue.sh" <<'EOF'
+#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do case "$1" in --tofu-dir) d="$2" ;; --image) i="$2" ;; esac; shift; done
+printf '{"image":"%s"}\n' "$i" > "$d/roles.auto.tfvars.json"
+echo "roster de $i"
+EOF
+  chmod +x "$arbre/deploy/lib/enroll-catalogue.sh"
+  # le conteneur : root, son chemin de recette lu sous le décor, et l'entrée livrée par un tube comme « docker exec -i »
+  cat > "$DECOR_BIN/conteneur" <<'EOF'
+#!/usr/bin/env bash
+set -- "${@:1:$#-1}" "$LCARS_DECOR_ROOT${!#}"
+cat | unshare -Ur "$@"
+EOF
+  chmod +x "$DECOR_BIN/conteneur"
+  run bash -c '. "$1"; prov_roster_conteneur image-1 conteneur && prov_roster_conteneur image-2 conteneur' _ "$arbre/deploy/lib/provision-lib.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "${lines[1]}" = "roster de image-2" ]
+  [ "$(cat "$recette/roles.auto.tfvars.json")" = '{"image":"image-2"}' ]
+  [ "$(unshare -Ur stat -c '%a %U' "$recette/roles.auto.tfvars.json")" = "644 root" ]
+  [ "$(ls -A "$recette")" = roles.auto.tfvars.json ]
+}
+
 @test "prov_seat_binding : la table et le candidat unix s'accordent → agree" {
   printf '1\t1000\tamiral\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map"
   module_sh 'prov_seat_binding amiral; echo "$PROV_SEAT_BINDING|$PROV_SEAT_LOGIN|$PROV_SEAT_SOURCE"'
@@ -758,16 +776,6 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui répond <arch>
   rm -f "$DECOR_BIN/dpkg"
   module_sh 'PATH="$DECOR_BIN"; printf "[%s|%s]\n" "$(arch_tag node)" "$(arch_tag raw)"'
   [ "$output" = "[|]" ]
-}
-
-@test "set_diff : les lignes de b absentes de a — trie, dédoublonne, ignore le vide" {
-  module_sh '
-    out="$(set_diff $'"'"'b\na\n\nc'"'"' $'"'"'c\nd\na\nd\n'"'"')"
-    [ "$out" = d ]
-    [ -z "$(set_diff $'"'"'x\ny'"'"' $'"'"'y\nx'"'"')" ]
-    [ "$(set_diff "" $'"'"'z\nz'"'"')" = z ]
-  '
-  [ "$status" -eq 0 ]
 }
 
 @test "env_field : fichier absent = vide et 0 ; clé répétée = la dernière, comme un source" {
@@ -1083,15 +1091,6 @@ canal() { # canal <code bash> — la lib sourcée, verdicts à zéro, sous le d�
   [ -z "$(find "$(dirname "$f")" -name '.prov.*')" ]
 }
 
-@test "prov_channel : un produit posé sans canal dit « inconnu », une machine vierge « aucun »" {
-  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/runtime"
-  canal 'prov_channel; echo "var=$PROV_CHANNEL"'
-  [ "$output" = "$(printf 'inconnu\nvar=inconnu')" ]
-  rmdir "$LCARS_DECOR_ROOT/opt/lcars/runtime"
-  canal 'prov_channel'
-  [ "$output" = "aucun" ]
-}
-
 @test "prov_substrate_satisfait : espace et + séparent la liste de la même façon, et « any » accueille tout" {
   run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl linux' linux"
   [ "$status" -eq 0 ]
@@ -1164,6 +1163,15 @@ canal() { # canal <code bash> — la lib sourcée, verdicts à zéro, sous le d�
   PROV_DECK_PORT=21999 module_sh 'prov_params_line'
   [ "$status" -eq 0 ]
   [ "$output" = "PROV_DECK_PORT=21999" ]
+}
+
+@test "humain de démonstration : LCARS_BUILTIN_HUMAN gagne sur celui du journal, et posé vide il le retire" {
+  PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
+  [ "$output" = "[lcars] PROV_BUILTIN_HUMAN=lcars" ]
+  LCARS_BUILTIN_HUMAN=zoe PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s]" "$PROV_BUILTIN_HUMAN"'
+  [ "$output" = "[zoe]" ]
+  LCARS_BUILTIN_HUMAN='' PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
+  [ "$output" = "[] " ]
 }
 
 @test "prov_announce_credential sans fichier d'annonce : l'encadré IDENTIFIANTS porte le libellé, le login et le secret" {

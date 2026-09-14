@@ -123,7 +123,7 @@ launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
   code "$CONVERGER" | refute_out 'rm -f.*console\.sock'
 }
 
-@test "sshd n'est PAS dans la table : l'entrypoint le lance par exec, hors de la supervision" {
+@test "sshd n'est PAS dans la table : le boot du conteneur le lance par exec, hors de la supervision" {
   code "$ENTRY" | grep -qE 'exec .*sshd'
   starters | refute_out '^sshd:'
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # bats file_tags=integration
-# SOURCE: deploy/tests/service_accounts.bats
+# SOURCE: deploy/tests/modules.d/21-service-accounts.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-01
 # STATUS: bats tests for modules.d/21-service-accounts.sh — deux comptes de service, posés s'ils manquent, refusés s'ils s'écartent
@@ -8,82 +8,29 @@
 # chaque `@test` de bats est un sous-shell, et c'est l'isolation qu'on veut
 # shellcheck disable=SC2030,SC2031
 
-load refute
-load support/decor
+load ../refute
+load ../support/decor
 
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
-  MOD="$BATS_TEST_DIRNAME/../modules.d/21-service-accounts.sh"
-  LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/21-service-accounts.sh"
+  LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   [ -f "$MOD" ]
   export PROVISION_LIB="$LIB" PROVISION_MODULE=21-service-accounts PROV_SUBSTRATE=linux PROVISION_RUN=1
 
   decor_pose
+  decor_comptes
   PASSWD="$LCARS_DECOR_ROOT/etc/passwd"
   GROUP="$LCARS_DECOR_ROOT/etc/group"
-  export CALLS="$BATS_TEST_TMPDIR/calls"
-  : > "$CALLS"
+  CALLS="$DECOR_COMPTES"
 
   printf '%s\n' 'root:x:0:'            'fleet:x:2000:lcars-authority' 'lcars-authority:x:2002:' \
                 'lcars-system:x:2003:' 'nogroup:x:65534:'             > "$GROUP"
   printf '%s\n' 'root:x:0:0::/root:/bin/bash' \
                 'lcars-authority:x:900:2002::/nonexistent:/usr/sbin/nologin' \
                 'lcars-system:x:901:2003::/nonexistent:/usr/sbin/nologin' > "$PASSWD"
-
-  # `getent` et `id` lisent le passwd et le group du décor — sans quoi le module mesurerait la machine
-  cat > "$DECOR_BIN/getent" <<'EOS'
-#!/usr/bin/env bash
-g="$LCARS_DECOR_ROOT/etc/group"
-[[ "$1" == "group" ]] || exit 2
-[[ -n "${2:-}" ]] || { cat "$g"; exit 0; }
-awk -F: -v n="$2" '$1==n {print; found=1} END {exit !found}' "$g"
-EOS
-  cat > "$DECOR_BIN/id" <<'EOS'
-#!/usr/bin/env bash
-# deux formes, et les deux sont appelées : `id <user>` (existence, par `ensure_member`) et
-# `id -nG <user>` (le groupe primaire plus les secondaires portés par le group du décor)
-p="$LCARS_DECOR_ROOT/etc/passwd" g="$LCARS_DECOR_ROOT/etc/group"
-if [[ "${1:-}" == -u || "${1:-}" == -g || "${1:-}" == -un || "${1:-}" == -gn ]]; then exec /usr/bin/id "$@"; fi
-if [[ "${1:-}" != "-nG" ]]; then
-  awk -F: -v n="${1:-}" '$1==n {found=1} END {exit !found}' "$p"; exit
-fi
-u="$2"; gid="$(awk -F: -v n="$u" '$1==n {print $4; exit}' "$p")"
-{ awk -F: -v g="$gid" '$3==g {print $1}' "$g"
-  awk -F: -v u="$u" '{n=split($4,m,","); for(i=1;i<=n;i++) if (m[i]==u) print $1}' "$g"
-} | sort -u | tr '\n' ' '
-EOS
-  cat > "$DECOR_BIN/groupadd" <<'EOS'
-#!/usr/bin/env bash
-echo "groupadd $*" >> "$CALLS"
-printf '%s:x:%s:\n' "${*: -1}" "$((3000 + $(wc -l < "$LCARS_DECOR_ROOT/etc/group")))" >> "$LCARS_DECOR_ROOT/etc/group"
-EOS
-  # la doublure d'`usermod` applique vraiment -g, -s et -aG : un geste interdit se verrait sur le décor
-  cat > "$DECOR_BIN/usermod" <<'EOS'
-#!/usr/bin/env bash
-p="$LCARS_DECOR_ROOT/etc/passwd" g="$LCARS_DECOR_ROOT/etc/group"
-echo "usermod $*" >> "$CALLS"
-if [[ "${1:-}" == "-g" ]]; then
-  gid="$(awk -F: -v n="$2" '$1==n {print $3; exit}' "$g")"
-  [[ -n "$gid" ]] || exit 1
-  awk -F: -v OFS=: -v n="${*: -1}" -v g="$gid" '$1==n {$4=g} {print}' "$p" > "$p.new" && mv "$p.new" "$p"
-elif [[ "${1:-}" == "-s" ]]; then
-  awk -F: -v OFS=: -v n="${*: -1}" -v s="$2" '$1==n {$7=s} {print}' "$p" > "$p.new" && mv "$p.new" "$p"
-elif [[ "${1:-}" == "-aG" ]]; then
-  awk -F: -v OFS=: -v gr="$2" -v u="${*: -1}" \
-    '$1==gr {$4=($4=="" ? u : $4","u)} {print}' "$g" > "$g.new" && mv "$g.new" "$g"
-fi
-EOS
-  # useradd pose le compte avec le shell et le groupe demandés ; STUB_USERADD_SHELL simule un outil qui les ignore
-  cat > "$DECOR_BIN/useradd" <<'EOS'
-#!/usr/bin/env bash
-echo "useradd $*" >> "$CALLS"
-grp=""; shell=""; while [[ $# -gt 0 ]]; do [[ "$1" == "-g" ]] && grp="$2"; [[ "$1" == "--shell" ]] && shell="$2"; last="$1"; shift; done
-gid="$(awk -F: -v n="$grp" '$1==n {print $3; exit}' "$LCARS_DECOR_ROOT/etc/group")"
-printf '%s:x:999:%s::/nonexistent:%s\n' "$last" "${gid:-65534}" "${STUB_USERADD_SHELL:-$shell}" >> "$LCARS_DECOR_ROOT/etc/passwd"
-EOS
-  chmod +x "$DECOR_BIN"/*
 }
 
 check() { run bash "$MOD" check; }
@@ -148,6 +95,16 @@ retire() { grep -v "^$1:" "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"; }
   [ "$(awk -F: '$1=="lcars-authority" {print $7}' "$PASSWD")" = /bin/false ]
 }
 
+@test "apply : un compte existant sans son groupe éponyme est refusé avant tout geste — aucun groupe ne lui est créé" {
+  printf '%s\n' 'root:x:0:' 'fleet:x:2000:lcars-authority' 'lcars-system:x:2003:' 'nogroup:x:65534:' > "$GROUP"
+  derive lcars-authority nogroup
+  apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  21-service-accounts: compte lcars-authority : groupe primaire « nogroup » au lieu de lcars-authority"*"userdel lcars-authority"* ]]
+  refute_out '^POSÉ' <<<"$output"
+  refute grep -q '^groupadd' "$CALLS"
+}
+
 @test "apply : un compte absent est créé sur son groupe éponyme, et lcars-authority rejoint fleet" {
   retire lcars-authority
   retire lcars-system
@@ -165,7 +122,7 @@ retire() { grep -v "^$1:" "$PASSWD" > "$PASSWD.n"; mv "$PASSWD.n" "$PASSWD"; }
 
 @test "apply : un compte que useradd pose de travers est relu, et l'écart est un échec" {
   retire lcars-system
-  STUB_USERADD_SHELL=/bin/bash apply
+  DECOR_USERADD_SHELL=/bin/bash apply
   [ "$status" -eq 1 ]
   grep -q '^useradd .* lcars-system$' "$CALLS"
   [[ "$output" == *"FAIL  21-service-accounts: compte lcars-system : shell « /bin/bash » au lieu de /usr/sbin/nologin"* ]]

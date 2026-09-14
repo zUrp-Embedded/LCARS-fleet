@@ -47,7 +47,7 @@ site_git() { # le site est un dépôt propre : la révision devient comparable
   git -C "$SITE" init -q && git -C "$SITE" add -A \
     && git -C "$SITE" -c user.email=t@t -c user.name=t commit -qm décor
 }
-fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD') >/dev/null 2>&1; $1"; }
+fn() { run bash -c "set -uo pipefail; source <(sed '\$d' '$MOD') >/dev/null 2>&1; $1"; }
 
 @test "check : arbres et doc absents — trois drifts qui disent la conséquence" {
   mod check
@@ -61,8 +61,22 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   mkdir -p "$SHARE/avatars" "$SHARE/favicon" "$SHARE/doc"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"$SHARE/avatars incomplet (0 fichiers) — la source en porte plus"* ]]
+  [[ "$output" == *"$SHARE/avatars ne porte pas tout ce que la source porte"* ]]
   [[ "$output" == *"$SHARE/doc absente"* ]]
+}
+
+@test "check et apply jugent pareil : un média changé à la source, et une doc posée d'une autre révision, sont des drifts que l'apply repose" {
+  site_git
+  mod apply; [ "$status" -eq 0 ]
+  printf 'png v2' > "$MEDIAS/avatars/admiral.png"
+  PROV_SOURCE_REV=def67890 mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 44-media: $SHARE/avatars ne porte pas tout ce que la source porte, à l'identique"* ]]
+  [[ "$output" == *"DRIFT 44-media: $SHARE/doc posée, mais pas depuis cette source"* ]]
+  PROV_SOURCE_REV=def67890 mod apply
+  [[ "$output" == *"POSÉ  44-media: médias posés ($SHARE/avatars)"* ]]
+  PROV_SOURCE_REV=def67890 mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "apply : les deux arbres posés (leur contenu, pas avatars/avatars), la doc bâtie sous la base /doc/ et posée, le tampon à côté de doc/, le check vert" {
@@ -83,21 +97,6 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"avatars posé (2 fichiers)"*"doc posée (2 fichiers)"* ]]
-}
-
-@test "les sources se lisent sous l'arbre de la lib : un environnement qui nomme d'autres médias ou un autre site ne les déplace pas" {
-  site_git
-  local piege="$BATS_TEST_TMPDIR/piege"
-  mkdir -p "$piege/avatars" "$piege/favicon" "$piege/site/dist"
-  printf 'piège' > "$piege/avatars/piege.png"; printf 'piège' > "$piege/favicon/piege.ico"
-  printf '<html>piège</html>' > "$piege/site/dist/index.html"
-  LCARS_MEDIA_SRC_ROOT="$piege" LCARS_SITE_SRC="$piege/site" mod apply
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -f "$SHARE/avatars/admiral.png" ]
-  [ ! -e "$SHARE/avatars/piege.png" ]
-  [ "$(cat "$SHARE/doc/index.html")" = "<html>doc /doc/</html>" ]
-  [ "$(cat "$piege/site/dist/index.html")" = "<html>piège</html>" ]
-  refute_out 'piege' <<<"$output"
 }
 
 @test "apply rejoué sur un site propre : la doc n'est pas rebâtie, rien n'est reposé" {
@@ -164,7 +163,7 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   chmod 0700 "$SHARE/avatars"; chmod 2755 "$SHARE/doc"; chmod 0750 "$SHARE"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"$SHARE/avatars : 700 root:root ≠ 755 root:root (deploy/system.manifest) — l'apply le repose"* ]]
+  [[ "$output" == *"$SHARE/avatars : 700 root:root ≠ 755 root:root — l'apply le repose"* ]]
   [[ "$output" == *"$SHARE/doc : 2755 root:root ≠ 755 root:root"*"$SHARE : 750 root:root ≠ 755 root:root"* ]]
   mod apply
   [ "$status" -eq 0 ]

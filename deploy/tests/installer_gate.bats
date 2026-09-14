@@ -10,7 +10,6 @@ load refute
 setup() {
   PORTE_SRC="$BATS_TEST_DIRNAME/../gate.sh"
   [ -f "$PORTE_SRC" ]
-  SHELL_GATE="$BATS_TEST_DIRNAME/../../runtime/test/shell_gate.sh"
 
   DECOR="$BATS_TEST_TMPDIR/decor"
   mkdir -p "$DECOR/tests"
@@ -189,25 +188,13 @@ path_sans() { # path_sans <outil> → un dossier
   [ "$output" = "decor/tests" ]
 }
 
-@test "l'environnement du lanceur est neutralisé, et le dire fait partie du geste" {
+@test "l'environnement du lanceur est neutralisé pour bats, et la ligne compte et nomme chaque variable une fois" {
   temoin x.bats unit '@test "faux" { true; }'
-  stub_bats 0
-  run env PROV_FLEET_GROUP=piege LCARS_DECOR_ROOT=/x bash "$DECOR/gate.sh"
+  printf '#!/usr/bin/env bash\nenv | grep -E "^(LCARS_|PROV_|FORGE_)" | sed "s/^/VU: /"\nexit 0\n' > "$BIN/bats"; chmod 0755 "$BIN/bats"
+  run env -i PATH="$PATH" HOME="$HOME" PROV_FLEET_GROUP=piege LCARS_DECOR_ROOT=/x bash "$DECOR/gate.sh"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"neutralisée"* ]]
-  [[ "$output" == *"PROV_FLEET_GROUP"* ]]
-  [[ "$output" == *"LCARS_DECOR_ROOT"* ]]
-}
-
-# bats test_tags=structure
-@test "la seconde copie du bloc de neutralisation s'accorde avec celle de shell_gate.sh" {
-  [ -f "$SHELL_GATE" ] || skip "shell_gate.sh absent de cet arbre (contexte installeur seul)"
-  local a b
-  a="$(grep -oE "\\^\\(LCARS_\\|PROV_\\|FORGE_\\)" "$PORTE_SRC" | head -1)"
-  b="$(grep -oE "\\^\\(LCARS_\\|PROV_\\|FORGE_\\)" "$SHELL_GATE" | head -1)"
-  [ -n "$a" ]
-  [ -n "$b" ]
-  [ "$a" = "$b" ]
+  [[ "$output" == *"--- 2 variable(s) du lanceur neutralisée(s) : LCARS_DECOR_ROOT PROV_FLEET_GROUP"$'\n'* ]]
+  refute_out '^VU: ' <<<"$output"
 }
 
 go7_shape() { # go7_shape <fichier> <fonction> — la forme d'un prédicat : fenêtre lue, drapeaux triés, motifs
@@ -224,7 +211,6 @@ go7_shape() { # go7_shape <fichier> <fonction> — la forme d'un prédicat : fen
       done
 }
 
-# bats test_tags=structure
 @test "les deux prédicats GO-7 s'accordent avec leurs originaux du pre-commit" {
   local hook="$BATS_TEST_DIRNAME/../../runtime/git-hooks/pre-commit"
   [ -f "$hook" ] || skip "pre-commit absent de cet arbre (contexte installeur seul)"

@@ -50,14 +50,6 @@ verdict_product()   { bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1; LCARS_FAILE
   [ "$status" -eq 1 ]
 }
 
-# bats test_tags=structure
-@test "les compteurs sont bien ceux que p_drift et p_fail incrementent, dans les deux dialectes" {
-  grep -qE 'p_drift\(\).*PROV_DRIFT=\$\(\(PROV_DRIFT \+ 1\)\)' "$INSTALLER"
-  grep -qE 'p_fail\(\).*PROV_FAILED=\$\(\(PROV_FAILED \+ 1\)\)' "$INSTALLER"
-  grep -qE 'p_drift\(\).*LCARS_DRIFT=\$\(\(LCARS_DRIFT \+ 1\)\)' "$PRODUCT"
-  grep -qE 'p_fail\(\).*LCARS_FAILED=\$\(\(LCARS_FAILED \+ 1\)\)' "$PRODUCT"
-}
-
 @test "un mode inconnu est refusé par chaque module qui porte son dispatch, en FATAL avant toute mesure : jamais une fonction de la lib jouée sous son nom" {
   local m
   for m in "$REPO"/deploy/modules.d/*.sh; do

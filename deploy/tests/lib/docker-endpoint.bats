@@ -80,8 +80,8 @@ sonde() { # sonde — docker_endpoint sous le décor avec une CLI muette
   socket_posee "$SOCK"
   printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == unix://%s ]]\n' "$SOCK" > "$BIN/docker"; chmod +x "$BIN/docker"
   run env -u DOCKER_HOST PATH="$BIN:/usr/bin:/bin" \
-    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=$PROV_DOCKER_HOST sock=$PROV_DOCKER_SOCK"' _ "$LIB"
-  [ "$output" = "rc=0 host=unix://$SOCK prov=unix://$SOCK sock=$SOCK" ]
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=$PROV_DOCKER_HOST"' _ "$LIB"
+  [ "$output" = "rc=0 host=unix://$SOCK prov=unix://$SOCK" ]
 }
 
 @test "sans daemon : le refus nomme la CLI, la socket essayée, et sur WSL l'intégration de la distribution" {

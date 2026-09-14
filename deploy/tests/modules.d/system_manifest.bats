@@ -18,8 +18,7 @@ setup() {
   awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"||c=="dir"{print $2}' "$BATS_TEST_TMPDIR/rows" | sort -u > "$ROOTS"
 
   EXEMPT="$BATS_TEST_TMPDIR/exempt"
-  printf '%s\n' /usr/local/bin /etc/systemd/system /etc/sudoers.d /etc/tmpfiles.d \
-                /home/projects/LCARS /home/catalogues > "$EXEMPT"
+  printf '%s\n' /usr/local/bin /etc/systemd/system /etc/tmpfiles.d /home/projects/LCARS > "$EXEMPT"
 }
 
 # Les lignes de donnees du manifeste : ni commentaire, ni vide.
@@ -72,7 +71,7 @@ done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
          | sed 's|.*/||; s|"$||' | sort -u)
 
 posed() {
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/etc/wsl\.conf|/etc/apt/keyrings/|/etc/apt/sources\.list\.d/[a-z]|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/wsl\.conf|/etc/apt/keyrings/|/etc/apt/sources\.list\.d/[a-z]|/opt/[a-z]|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           -e 's#/opt/node-[^ ]*#/opt/node-<version>#' \

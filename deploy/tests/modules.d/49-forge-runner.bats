@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/modules.d/49-forge-runner.bats
 # AUTHOR: alice
 # STARDATE: 2026-09-12
-# STATUS: témoins de 49-forge-runner — l'enrôlement du runner CI, reporté, sauté, refusé ou posé
+# STATUS: témoins de 49-forge-runner — l'enrôlement du runner CI, reporté, sauté, refusé ou posé, l'adresse qu'un job joint, les enregistrements périmés
 
 load ../refute
 load ../support/decor
@@ -26,13 +26,14 @@ setup() {
   # un daemon répond par le DOCKER_HOST hérité : la doublure rend 0 à « version »
   printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/docker"; chmod +x "$DECOR_BIN/docker"
   export PROV_DOCKER_BIN="$DECOR_BIN/docker" DOCKER_HOST=unix:///dev/null
+  printf '#!/usr/bin/env bash\necho nat\n' > "$DECOR_BIN/wslinfo"; chmod +x "$DECOR_BIN/wslinfo"
 }
 
 teardown() { forge_double_stop; }
 
 forge_runners() { # forge_runners <code> <corps> — la forge vivante, et sa liste de runners
   forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
-  forge_route GET /api/v1/admin/actions/runners "$1" "$2"
+  forge_route GET /api/v1/admin/actions/runners "$@"
 }
 
 stub_delegue() { # stub_delegue <rc> [ligne écrite sur stdout] — l'argv reçu, un argument par ligne
@@ -51,6 +52,11 @@ EOF
   export PROVISION_LIB="$d/lib/provision-lib.sh"
 }
 
+adresse_de_sortie() { # adresse_de_sortie [adresse] — ce que « ip route get » rend sur ce Linux ; sans argument, aucune route
+  printf '#!/usr/bin/env bash\n[ -z "%s" ] || echo "1.1.1.1 via 10.0.0.1 dev eth0 src %s uid 0"\n' "${1:-}" "${1:-}" > "$DECOR_BIN/ip"
+  chmod +x "$DECOR_BIN/ip"
+}
+
 mod() { run bash "$MODULE" "$1"; }
 
 @test "forge éteinte : l'enrôlement est reporté, ce n'est pas un échec ; le check n'y voit pas de dérive" {
@@ -63,17 +69,46 @@ mod() { run bash "$MODULE" "$1"; }
   [[ "$output" == *"OK    49-forge-runner: forge du poste éteinte — le runner n'est pas mesurable"* ]]
 }
 
-@test "un runner existe déjà : compté par l'API avec le jeton master en en-tête, le délégué n'est pas rejoué, le check est vert" {
-  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
+@test "un runner en ligne : lu par l'API avec le jeton master en en-tête, le délégué n'est pas rejoué, le check est vert" {
+  forge_runners 200 '{"runners":[{"id":1,"name":"lcars-runner","status":"online"}],"total_count":1}'
   stub_delegue 0
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 runner(s) CI déjà enregistré(s)"* ]]
+  [[ "$output" == *"OK    49-forge-runner: 1 runner(s) CI en ligne"* ]]
   [ ! -e "$ARGV" ]
   [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners") | .auth' | sort -u)" = '"token MASTERTOK"' ]
   mod check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 runner(s) CI enregistré(s)"* ]]
+  [[ "$output" == *"OK    49-forge-runner: 1 runner(s) CI en ligne"* ]]
+}
+
+@test "le seul runner enregistré est hors ligne : il ne compte pas, le runner est réenrôlé et l'enregistrement périmé retiré de la forge" {
+  forge_runners 200 x2 '{"runners":[{"id":1,"name":"lcars-runner","status":"offline"}]}'
+  forge_runners 200 '{"runners":[{"id":1,"name":"lcars-runner","status":"offline"},{"id":2,"name":"lcars-runner","status":"offline"}]}'
+  forge_route DELETE /api/v1/admin/actions/runners/1 204
+  stub_delegue 0
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: aucun runner CI en ligne"* ]]
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"POSÉ  49-forge-runner: runner CI enrôlé"* ]]
+  [ -s "$ARGV" ]
+  [[ "$output" == *"POSÉ  49-forge-runner: enregistrement périmé du runner retiré de la forge (id 1, hors ligne)"* ]]
+  [ "$(forge_requests 'select(.method == "DELETE") | .path' | jq -r .)" = /api/v1/admin/actions/runners/1 ]
+}
+
+@test "un enregistrement périmé à côté d'un runner en ligne : dit au check, retiré à l'apply, le runner neuf et un runner d'un autre nom restent" {
+  forge_runners 200 '{"runners":[{"id":3,"name":"lcars-runner","status":"offline"},{"id":7,"name":"lcars-runner","status":"online"},{"id":2,"name":"autre","status":"offline"}]}'
+  forge_route DELETE '/api/v1/admin/actions/runners/*' 204
+  stub_delegue 0
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: enregistrement(s) périmé(s) du runner sur la forge, hors ligne (id 3)"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [ ! -e "$ARGV" ]
+  [ "$(forge_requests 'select(.method == "DELETE") | .path' | jq -r .)" = /api/v1/admin/actions/runners/3 ]
 }
 
 @test "jeton master absent : dit, et ce n'est pas un échec d'apply" {
@@ -113,11 +148,33 @@ mod() { run bash "$MODULE" "$1"; }
   [ -z "$(ls -A "$TMPDIR")" ]
 }
 
-@test "un runner du poste qui vise une adresse qu'un job n'atteint pas : drift au check, réenrôlé sur le port publié à l'apply" {
-  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
+@test "Linux : un job joint la forge par l'adresse de sortie de la machine" {
+  forge_runners 200 '{"runners":[]}'
   stub_delegue 0
-  printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" %s-act-1" ]] || exit 0\nprintf "PATH=/bin\\nGITEA_INSTANCE_URL=%s\\n"\n' \
-    lcars-runner "${VISE:-http://gitea:3000}" > "$DECOR_BIN/docker"
+  adresse_de_sortie 192.0.2.44
+  PROV_SUBSTRATE=linux mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "http://192.0.2.44:$PROV_FORGE_HOST_PORT" "$ARGV"
+}
+
+@test "Linux sans adresse de sortie : aucun enrôlement sur 127.0.0.1, un drift qui le dit au check comme à l'apply" {
+  forge_runners 200 '{"runners":[]}'
+  stub_delegue 0
+  adresse_de_sortie
+  PROV_SUBSTRATE=linux mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: aucune adresse de cette machine ne joint la forge depuis un job CI"* ]]
+  PROV_SUBSTRATE=linux mod apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"DRIFT 49-forge-runner: aucune adresse de cette machine ne joint la forge depuis un job CI"* ]]
+  [ ! -e "$ARGV" ]
+}
+
+@test "un runner du poste qui vise une adresse qu'un job n'atteint pas : drift au check, réenrôlé sur le port publié à l'apply" {
+  forge_runners 200 '{"runners":[{"id":1,"name":"lcars-runner","status":"online"}]}'
+  stub_delegue 0
+  printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" %s-act-1" ]] || exit 0\nprintf "PATH=/bin\\nGITEA_INSTANCE_URL=http://gitea:3000\\n"\n' \
+    lcars-runner > "$DECOR_BIN/docker"
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT 49-forge-runner: le runner lcars-runner vise http://gitea:3000, qu'un job n'atteint pas (attendu http://host.docker.internal:$PROV_FORGE_HOST_PORT)"* ]]
@@ -128,7 +185,7 @@ mod() { run bash "$MODULE" "$1"; }
 }
 
 @test "un runner du poste qui vise le port publié est conforme, et un runner sans conteneur de ce projet n'est pas touché" {
-  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
+  forge_runners 200 '{"runners":[{"id":1,"name":"lcars-runner","status":"online"}]}'
   stub_delegue 0
   printf '#!/usr/bin/env bash\n[[ "$*" == "inspect "*" lcars-runner-act-1" ]] || exit 0\nprintf "GITEA_INSTANCE_URL=http://host.docker.internal:%s\\n"\n' \
     "$PROV_FORGE_HOST_PORT" > "$DECOR_BIN/docker"
@@ -140,7 +197,7 @@ mod() { run bash "$MODULE" "$1"; }
   printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/docker"
   mod check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 runner(s) CI enregistré(s)"* ]]
+  [[ "$output" == *"1 runner(s) CI en ligne"* ]]
 }
 
 @test "l'argv émis vers forge-runner.sh passe son vrai parseur : les labels arrivent à la vérification des images" {
@@ -153,10 +210,10 @@ mod() { run bash "$MODULE" "$1"; }
   run env DOCKER_BIN="$DECOR_BIN/docker-sans-images" bash "$DEPLOY/docker/forge-runner.sh" "${argv[@]}"
   [ "$status" -eq 1 ]
   refute_out 'option inconnue|requis' <<<"$output"
-  [[ "$output" == *"REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : alpine:3.20,docker:cli,catthehacker/ubuntu:act-latest"* ]]
+  [[ "$output" == *"REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : catthehacker/ubuntu:act-latest,docker:cli,catthehacker/ubuntu:act-latest"* ]]
 }
 
-@test "API muette : rien n'est conclu, ni au check ni à l'apply — un compte inconnu n'enrôle pas un runner qui remplacerait l'existant" {
+@test "API muette : rien n'est conclu, ni au check ni à l'apply — une liste inconnue n'enrôle pas un runner qui remplacerait l'existant" {
   forge_runners 500 '{"message":"panne"}'
   stub_delegue 0
   mod check
@@ -166,6 +223,17 @@ mod() { run bash "$MODULE" "$1"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable (API muette ou réponse illisible) — rien n'est enrôlé"* ]]
   [ ! -e "$ARGV" ]
+}
+
+@test "une réponse sans liste de runners n'est pas mesurée ; une liste sans total_count se lit" {
+  forge_runners 200 x1 '{"total_count":null}'
+  forge_runners 200 '{"runners":[]}'
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable"* ]]
+  mod check
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"DRIFT 49-forge-runner: aucun runner CI en ligne — la CI acceptera des jobs que rien ne servira"* ]]
 }
 
 @test "forge fournie : son runner est à qui la tient — rien n'est compté ni enrôlé, au check comme à l'apply" {
@@ -179,11 +247,4 @@ mod() { run bash "$MODULE" "$1"; }
   mod check
   [ "$status" -eq 0 ]
   [ -z "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners")')" ]
-}
-
-@test "aucun runner et forge vivante : le check le dit en drift" {
-  forge_runners 200 '{"runners":[],"total_count":0}'
-  mod check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 49-forge-runner: aucun runner CI — la CI acceptera des jobs que rien ne servira"* ]]
 }

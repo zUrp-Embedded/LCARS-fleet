@@ -128,6 +128,21 @@ time.sleep(60)' "$BATS_TEST_TMPDIR/muet.port" 3>&- &
   [ $((SECONDS - debut)) -lt 5 ]
 }
 
+@test "forge_api : un 200 dont le corps n'arrive pas entier avant le délai vaut « sans réponse », pas un succès" {
+  python3 -c 'import os,socket,sys,time
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(8)
+open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1])); os.rename(sys.argv[1] + ".tmp", sys.argv[1])
+c, _ = s.accept(); c.recv(4096)
+c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n{\"runners\":[")
+time.sleep(60)' "$BATS_TEST_TMPDIR/muet.port" 3>&- &
+  MUET_PID=$!
+  local _
+  for _ in $(seq 1 50); do [[ -s "$BATS_TEST_TMPDIR/muet.port" ]] && break; sleep 0.1; done
+  api forge_api GET "http://127.0.0.1:$(cat "$BATS_TEST_TMPDIR/muet.port")/api/v1/admin/actions/runners" "$BATS_TEST_TMPDIR/corps" -m 1
+  [ "$status" -eq 1 ]
+  [ "$output" = 000 ]
+}
+
 @test "prov_seat_binding : la table muette, le siège est le compte d'id 1 que la forge nomme au jeton master" {
   printf 'jeton-master\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token"
   forge_route GET '/api/v1/admin/users?limit=50' 200 '[{"id":2,"login":"autre"},{"id":1,"login":"amiral"}]'

@@ -86,20 +86,6 @@ desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "
   refute_out "POSÉ  30-wsl: $WSL_CONF" <<<"$output"
 }
 
-@test "hostname : une base de projet qui n'est pas une étiquette DNS est refusée, la clé n'est pas posée, les autres le sont" {
-  local base
-  for base in "bob-" "$(printf 'a%.0s' {1..64})"; do
-    rm -f "$WSL_CONF"
-    PROV_FORGE_BASE="$base" mod check
-    [ "$status" -eq 2 ]
-    [[ "$output" == *"FAIL  30-wsl: hostname « $base » refusé"* ]] || { echo "$output"; return 1; }
-    PROV_FORGE_BASE="$base" mod apply
-    [ "$status" -eq 1 ]
-    [ -z "$(cle network hostname)" ]
-    [ "$(cle interop enabled)" = "false" ]
-  done
-}
-
 @test "C: sondé pour un humain que as_human ne peut pas jouer : l'échec est dit, jamais « C: fermé »" {
   mkdir -p "$C_DRIVE"
   PROV_HUMAN=inconnu mod check

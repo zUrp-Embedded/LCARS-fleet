@@ -65,11 +65,15 @@ IFS= read -r jeton_tape || true
 } > "$GESTE_ENV"
 for m in instance .; do
   ( cd "$LCARS_RECIPE_DIR/$m" && tofu init -input=false -no-color ) || { echo "forge-gestures: init $m en echec" >&2; exit 1; }
+  # l'état : repris s'il est là, réécrit par chaque apply, même en échec
+  [[ ! -f "$LCARS_RECIPE_DIR/$m/terraform.tfstate" ]] || echo "ETAT REPRIS $m $(cat "$LCARS_RECIPE_DIR/$m/terraform.tfstate")" >> "$CALLS"
+  echo "etat-de-$m-${STUB_GESTE:-pose}" > "$LCARS_RECIPE_DIR/$m/terraform.tfstate"
 done
 case "${STUB_GESTE:-pose}" in
-  pose)   echo "Apply complete! Resources: 3 added, 0 changed, 0 destroyed." ;;
-  rien)   echo "Apply complete! Resources: 0 added, 0 changed, 0 destroyed." ;;
-  echec)  echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
+  pose)    echo "Apply complete! Resources: 12 imported, 3 added, 0 changed, 0 destroyed." ;;
+  importe) echo "Apply complete! Resources: 4 imported, 0 added, 0 changed, 0 destroyed." ;;
+  rien)    echo "Apply complete! Resources: 0 added, 0 changed, 0 destroyed." ;;
+  echec)   echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
 esac
 EOF
   chmod 0755 "$BIN"/* "$TOFU_BIN" "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
@@ -175,11 +179,30 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   grep -qx "FORGE_BASE_URL=$FORGE_DOUBLE_URL" "$GESTE_ENV"
 }
 
-@test "apply : une recette qui n'a rien bougé est conforme, rien n'est compté" {
-  STUB_GESTE=rien mod apply
+@test "apply : une recette qui n'a rien bougé, ou qui n'a fait qu'importer, est conforme" {
+  local geste
+  for geste in rien importe; do
+    STUB_GESTE="$geste" mod apply
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [[ "$output" == *"OK    61-forge-structure: structure de la forge déjà conforme — rien à poser"* ]] || { echo "$geste : $output"; return 1; }
+    [[ "$output" != *"POSÉ  61-forge-structure: structure"* ]]
+  done
+}
+
+@test "apply : l'état tofu survit à la copie jetable — gardé en 0600 dans le dossier d'état, repris par la passe suivante, gardé aussi après un échec" {
+  local etats="$LCARS_DECOR_ROOT/opt/lcars/tofu/forge-state"
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"OK    61-forge-structure: structure de la forge déjà conforme — rien à poser"* ]]
-  [[ "$output" != *"POSÉ"* ]]
+  [ "$(stat -c %a "$etats")" = 700 ]
+  [ "$(cat "$etats/instance.tfstate")" = etat-de-instance-pose ]
+  [ "$(cat "$etats/structure.tfstate")" = etat-de-.-pose ]
+  [ "$(stat -c %a "$etats/structure.tfstate")" = 600 ]
+  refute grep -q '^ETAT REPRIS' "$CALLS"
+  STUB_GESTE=echec mod apply
+  [ "$status" -eq 1 ]
+  grep -qx 'ETAT REPRIS instance etat-de-instance-pose' "$CALLS"
+  grep -qx 'ETAT REPRIS \. etat-de-\.-pose' "$CALLS"
+  [ "$(cat "$etats/structure.tfstate")" = etat-de-.-echec ]
 }
 
 @test "apply : un geste en échec est un échec qui montre sa sortie, les copies partent" {

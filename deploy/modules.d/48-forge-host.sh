@@ -22,17 +22,15 @@ set -euo pipefail
 : "${PROV_FORGE_ADMIN:=$(prov_seat_from_map)}"
 : "${PROV_FORGE_ADMIN:=$PROV_HUMAN}"
 : "${PROV_DOCKER_BIN:=docker}"
-: "${PROV_FORGE_BIND:=0.0.0.0}"
-: "${PROV_FORGE_ADVERTISE:=}"
-advertise_addr "${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}"
-PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
-PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
+# la forge du poste publie son port sur toutes les adresses : un job CI la joint par l'adresse annoncée (49)
+FORGE_BIND=0.0.0.0
+advertise_addr "$FORGE_BIND"
 
 COMPOSE_FILE="$(repo_root)/deploy/docker/forge-compose.yml"
 
 # l'adresse de la forge vient de la lib ; l'adresse publique de la forge du poste se compose ici, et s'écrit dans forge.public.url
 if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
-  PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
+  PUBLIC_URL="http://${PROV_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
   FORGE_MODE=poste
 else
   PUBLIC_URL="$PROV_FORGE_PUBLIC_URL"
@@ -53,12 +51,8 @@ foreign_forge_refusal() {
 }
 
 forge_reach_note() {
-  case "$PROV_FORGE_BIND" in
-    127.0.0.1|localhost|::1) printf ' — cette machine seule' ;;
-    *) printf ' — ouverte sur %s, composable en %s' "$PROV_FORGE_BIND" "$PUBLIC_URL"
-       [[ -n "${PROV_FORGE_ADVERTISE_WHY:-}" ]] && printf ' (%s)' "$PROV_FORGE_ADVERTISE_WHY"
-       return 0 ;;
-  esac
+  printf ' — ouverte sur %s, composable en %s' "$FORGE_BIND" "$PUBLIC_URL"
+  [[ -z "$PROV_ADVERTISE_WHY" ]] || printf ' (%s)' "$PROV_ADVERTISE_WHY"
 }
 
 new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | cut -c1-10; }
@@ -192,7 +186,7 @@ monter_forge() { # la forge du poste : refus d'un port tenu par un autre, montag
   fi
   [[ "$was_up" -eq 1 ]] \
     || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
-  run_capture forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_BIND" "$PUBLIC_URL" \
+  run_capture forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$FORGE_BIND" "$PUBLIC_URL" \
     || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; prov_dump_last; verdict_apply; }
   forge_wait "$PROV_FORGE_URL" || { p_fail "forge montée mais muette sur $PROV_FORGE_URL après 120 s"; verdict_apply; }
   if [[ "$was_up" -eq 1 ]]; then
@@ -223,10 +217,6 @@ amorcer_forge() {
       verdict_apply ;;
   esac
   rm -f "$err"
-  docker_stream_ok "$CONTENEUR" || {
-    p_fail "le daemon docker répond aux lectures mais rend du vide sur « exec » — rien ne peut être capturé depuis $CONTENEUR ; un relais docker amputé (contexte, proxy) est en cause"
-    verdict_apply
-  }
   local tok
   tok="$(forge_master_token "$PROV_DOCKER_BIN" "$CONTENEUR" "$PROV_FORGE_ADMIN" "poste-$(date +%s)")" \
     || { p_fail "la forge n'a rendu aucun jeton master pour $PROV_FORGE_ADMIN"; verdict_apply; }

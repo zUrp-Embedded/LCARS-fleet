@@ -13,7 +13,7 @@ setup() {
   [ -f "$LIB" ]
   [ -f "$DECK" ]
   # là où 44-media pose la doc, avec les constantes de la lib : ses deux lignes de définition, jouées
-  DOC_DEST="$(env -u LCARS_DECOR_ROOT bash -c 'export PROVISION_MODULE=t; source "$1"; eval "$(grep -E "^(MEDIA_ROOT=|doc_dir\(\))" "$2")"; doc_dir' _ "$LIB" "$MOD")"
+  DOC_DEST="$(env -u LCARS_DECOR_ROOT bash -c 'export PROVISION_MODULE=t; source "$1"; eval "$(grep -E "^(MEDIA_ROOT=|DOC_DIR=)" "$2")"; printf "%s" "$DOC_DIR"' _ "$LIB" "$MOD")"
   # le défaut du serveur, celui qui vaut quand personne ne pose la variable
   DECK_DEFAULT="$(grep -oE 'LCARS_DECK_DOC", "[^"]+' "$DECK" | sed 's/.*, "//')"
 }

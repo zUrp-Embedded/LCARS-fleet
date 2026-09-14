@@ -54,9 +54,9 @@ release_posee() { # release_posee [sha du build] — la release et tout ce que l
     printf '#!/bin/sh\n' > "$PREFIX/bin/$n"; chmod 0755 "$PREFIX/bin/$n"
   done < "$MANIFEST"
 }
-verrouille() { chmod 0750 "$PREFIX"; }
+verrouille() { chmod -R u=rwX,g=rX,o= "$PREFIX"; }
 mod() { run unshare -Ur bash "$MOD" "$@"; }
-fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD') >/dev/null 2>&1; $1"; }
+fn() { run bash -c "set -uo pipefail; source <(sed '\$d' '$MOD') >/dev/null 2>&1; $1"; }
 
 @test "check : release absente — drift, rien d'autre n'est sondé" {
   mod check
@@ -80,7 +80,18 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"release posée ($PREFIX, build $HEAD_SHA)"* ]]
-  [[ "$output" == *"DRIFT 60-deploy: prefix non verrouillé : root:root 755 ≠ root:root 750"* ]]
+  [[ "$output" == *"DRIFT 60-deploy: prefix non verrouillé : root:root 755 — attendu root:root 750"* ]]
+}
+
+@test "check : une racine en 750 sur un arbre qui porte un fichier inscriptible par le groupe n'est pas verrouillée — l'apply le reverrouille" {
+  release_posee; verrouille
+  chmod g+w "$PREFIX/bin/fleet"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 60-deploy: prefix non verrouillé : root:root 750"* ]]
+  refute_out 'verrou RO du prefix' <<<"$output"
+  mod apply
+  [[ "$output" == *"POSÉ  60-deploy: prefix verrouillé"* ]]
 }
 
 @test "check : release posée et verrouillée, symlinks du PATH absents — un drift par lien du manifeste" {
@@ -223,13 +234,15 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ ! -e "$MARQUEUR" ]
 }
 
-@test "apply : rejeu depuis la copie posée, sans source — la release en place est l'état-cible, le canal est écrit" {
+@test "apply : rejeu depuis la copie posée, sans source — la release en place est l'état-cible, le prefix resté ouvert est reverrouillé, le canal est écrit" {
   racine_pose "$LCARS_DECOR_ROOT/opt/lcars"
-  release_posee; verrouille
+  release_posee; chmod -R 0777 "$PREFIX"
   rm -f "$RACINE/runtime/mix.exs"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"rejeu depuis la copie posée : release en place, aucune source ici"* ]]
+  [[ "$output" == *"POSÉ  60-deploy: prefix verrouillé : $PREFIX"* ]]
+  [ "$(stat -c %a "$PREFIX")" = 750 ]
   [ ! -e "$MARQUEUR" ]
   [ "$(cat "$CHANNEL")" = source ]
 }

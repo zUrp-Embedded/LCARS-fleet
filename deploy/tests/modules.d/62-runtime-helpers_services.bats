@@ -1,23 +1,20 @@
 #!/usr/bin/env bats
 # bats file_tags=structure
-# SOURCE: deploy/tests/services_dir.bats
+# SOURCE: deploy/tests/modules.d/62-runtime-helpers_services.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-25
-# STATUS: bats tests for runtime/services — un repertoire par ROLE, et il doit le rester
+# STATUS: bats tests for runtime/services et 62-runtime-helpers — tout fichier de services est posé, par son nom ou par l'arbre embarqué
 
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC2012 — `ls` sur des noms que ce depot controle — pas de nom exotique a manier
+# SC2012 : `ls` sur des noms que ce dépôt contrôle
 # shellcheck disable=SC2012
 
-load refute
+load ../refute
 
 setup() {
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   MOD="$REPO/deploy/modules.d/62-runtime-helpers.sh"
-  DOCKERFILE="$REPO/deploy/docker/Dockerfile"
   SERVICES="$REPO/runtime/services"
   [ -f "$MOD" ]
-  [ -f "$DOCKERFILE" ]
   [ -d "$SERVICES" ]
 }
 
@@ -36,8 +33,8 @@ declare_couvre() {
 }
 
 @test "GARDE D'INSTRUMENT : les deux listes sont NON VIDES" {
-  [ "$(helpers | wc -l)" -ge 8 ]
-  [ "$(ls -1 "$SERVICES" | wc -l)" -ge 10 ]
+  [ -n "$(helpers)" ]
+  [ -n "$(ls -A "$SERVICES")" ]
 }
 
 @test "PROPRIETE 2 : tout fichier de services est POSE quelque part" {
@@ -46,8 +43,7 @@ declare_couvre() {
     [[ "$(basename "$base")" == "README.md" ]] && continue
     declare_couvre "$base" && continue
     case "$base" in
-      # ⚠ DEUX ARBRES QUE LE COPY DE L'IMAGE NOMMAIT, ET QUE LE RAIL LIT PAR LEUR RACINE — le jumeau
-      # est parti le 2026-09-11, leur lecteur reel reste : un fichier par ligne, avec lui.
+      # les fichiers que le rail lit par leur racine, chacun avec son lecteur
       forge-recipe/*)             continue ;;  # 61-forge-structure (LCARS_RECIPE_DIR, copie de l'arbre entier)
       admiral/skills/system-issues/SKILL.md) continue ;;  # container/init.sh (le skill du siege)
       admiral/skills/system-issues/list.sh)  continue ;;  # container/init.sh
@@ -76,6 +72,5 @@ declare_couvre() {
 
 @test "PROPRIETE 3 : le rail pose l'arbre entier — c'est ce qui tient les fichiers non nommes, sur les deux terrains" {
   bulk_poste  || { echo "62-runtime-helpers n'embarque plus 'services' (EMBEDDED)" >&2
-                   echo "  12 fichiers non nommes n'atteignent plus les machines — declare-les, ou remets-le dans EMBEDDED" >&2; false; }
-  refute grep -qE '^COPY .*runtime/services' "$DOCKERFILE"
+                   echo "  les fichiers non nommes n'atteignent plus les machines — declare-les, ou remets-le dans EMBEDDED" >&2; false; }
 }

@@ -121,21 +121,12 @@ secret_writers() {
   done
 }
 
-@test "MUR 3 bis: l'entrypoint relaie bien la VALEUR — sinon la porte part sans credential" {
+@test "MUR 3 bis: la CLI et le geste de forge relaient la VALEUR du jeton — sinon la porte part sans credential" {
   grep -qE 'FORGE_TOKEN="\$\{FORGE_TOKEN:-\}"' "$REPO/runtime/bin/lcars"
   grep -qE 'FORGE_TOKEN="\$sys_tok_value"' "$REPO/runtime/services/forge-gestures.sh"
 }
 
 
-
-@test "MUR 5: aucune ligne de CODE n'accorde root a un groupe par sudoers" {
-  local f
-  for f in "${CODE[@]}"; do
-    # `ALL=(root)` est la syntaxe d'une regle. La PROSE qui nomme la regle retiree est legitime —
-    # c'est son metier — et `code_of` l'a deja retiree.
-    absent 'ALL=\(root\)' "$f"
-  done
-}
 
 @test "MUR 5 bis: le rail d'outillage ne passe plus par sudo" {
   local recon="$REPO/runtime/lib/fleet/admiral/toolchain_reconciler.ex"

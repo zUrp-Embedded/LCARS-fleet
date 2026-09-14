@@ -48,6 +48,15 @@ EOF
   chmod 0755 "$TOFU_BIN"
 }
 mod() { run bash "$MOD" "$@"; }
+sans_recette() { # sans_recette — le module et sa lib joués depuis un arbre qui ne porte pas la recette
+  SANS="$BATS_TEST_TMPDIR/sans-recette"
+  mkdir -p "$SANS/deploy/modules.d" "$SANS/runtime/services"
+  cp -r "$BATS_TEST_DIRNAME/../../lib" "$SANS/deploy/lib"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$BATS_TEST_DIRNAME/../../system.manifest" "$SANS/deploy/"
+  cp "$MOD" "$SANS/deploy/modules.d/"
+  MOD="$SANS/deploy/modules.d/46-tofu.sh"
+  export PROVISION_LIB="$SANS/deploy/lib/provision-lib.sh"
+}
 copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-recipe.*'; }
 
 @test "check : tofu et miroir absents — deux drifts qui disent la conséquence" {
@@ -78,9 +87,9 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   chmod 0755 "$TOFU_DIR"; chmod 0700 "$TOFU_DIR/providers"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"$TOFU_BIN : 700 $me ≠ 755 $me (deploy/system.manifest)"* ]]
+  [[ "$output" == *"$TOFU_BIN : 700 $me ≠ 755 $me — l'apply le repose"* ]]
   [[ "$output" == *"$TOFU_DIR/providers : 700 $me ≠ 755 $me"* ]]
-  [[ "$output" == *"$TOFU_DIR 755 $me (table)"* ]]
+  [[ "$output" == *"OK    46-tofu: $TOFU_DIR (mode et propriétaire de la table)"* ]]
   chmod 0755 "$TOFU_BIN" "$TOFU_DIR/providers"
   touch "$STUB_STATE/mirrored"
   mod check
@@ -111,9 +120,9 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(grep -c ' init ' "$CALLS")" -eq 2 ]
   refute grep -q 'COPIE-DEJA-LA' "$CALLS"
-  LCARS_FORGE_RECIPE="$BATS_TEST_TMPDIR/nulle-part" mod check
+  sans_recette; mod check
   [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  46-tofu: recette absente : $BATS_TEST_TMPDIR/nulle-part"* ]]
+  [[ "$output" == *"FAIL  46-tofu: recette absente : $SANS/runtime/services/forge-recipe"* ]]
   [[ "$output" != *"miroir de providers incomplet"* ]]
 }
 
@@ -175,9 +184,9 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
 
 @test "apply : recette absente — échec nommé avec son verdict, tofu n'est pas lancé" {
   tofu_double
-  LCARS_FORGE_RECIPE="$BATS_TEST_TMPDIR/nulle-part" mod apply
+  sans_recette; mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  46-tofu: recette absente : $BATS_TEST_TMPDIR/nulle-part"* ]]
+  [[ "$output" == *"FAIL  46-tofu: recette absente : $SANS/runtime/services/forge-recipe"* ]]
   [[ "$output" != *"MORT"* ]]
   refute grep -qE ' (init|providers) ' "$CALLS"
 }

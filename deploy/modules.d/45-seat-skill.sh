@@ -11,12 +11,11 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 
 HUMAN_UID="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
-est_le_siege() { [[ "$HUMAN_UID" == "$SYSADMIN_UID" ]]; }
-pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"; }
+est_le_siege() { [[ "$HUMAN_UID" == "$LCARS_SYSADMIN_UID" ]]; }
+pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $LCARS_SYSADMIN_UID) — rien à poser"; }
 siege_home() { getent passwd -- "$PROV_HUMAN" | cut -d: -f6 || true; }   # un compte inconnu rend un home vide, que l'apply nomme
 skill_pose() { # skill_pose → 0 si le skill posé chez le siège est celui de la source, list.sh exécutable
   local d f; d="$(siege_home)/.claude/skills/system-issues"

@@ -236,8 +236,7 @@ bash_code() {
     echo "MUR 7 — seulement $(printf '%s\n' "$daemons" | grep -c .) daemon(s) lus dans les ExecStart : l'instrument est casse" >&2
     return 1
   }
-  # le jumeau installeur d'un nom produit : LCARS_X -> PROV_X, sauf les quatre noms que le lot 8 a
-  # rapproches d'un nom que le produit possedait deja
+  # le jumeau installeur d'un nom produit : LCARS_X -> PROV_X, sauf quatre noms que la table de la lib traduit autrement
   jumeau() { case "$1" in
     FORGE_BASE_URL) echo PROV_FORGE_URL ;; FORGE_PUBLIC_URL) echo PROV_FORGE_PUBLIC_URL ;;
     LCARS_LANDING_PORT) echo PROV_DECK_PORT ;; LCARS_PRIVATE_DIR) echo PROV_TOKENS_DIR ;;
@@ -280,10 +279,6 @@ bash_code() {
   [ "$(printf '%s\n' "$natures" | grep -c .)" -ge 3 ] || {
     echo "MUR 9 — moins de 3 natures lues dans store.sh : l'instrument ne lit plus la liste" >&2; return 1; }
 
-  # tofu : l'arbre de travail d'OpenTofu partage la persistance de la racine sans être une nature
-  # de magasin (il ne se purge pas par durée de vie)
-  local hors_nature="tofu"
-
   : > "$BATS_TEST_TMPDIR/vus"
   local f
   while read -r f; do
@@ -299,7 +294,8 @@ for m in re.finditer(r'/var/lib/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*(?:/([a-z.]+)
     tete = '/'.join(m.group(0).split('/')[:4])
     print('ORPHELIN:' + tete if tete != racine else (m.group(1) or ''))
 PYX
-  done < <(grep -rl '/var/lib/.*lcars' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=worktrees 2>/dev/null | grep -v '/deps/[a-z_]*/')
+  done < <(grep -rl '/var/lib/.*lcars' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=worktrees \
+             --exclude-dir=tests 2>/dev/null | grep -v '/deps/[a-z_]*/')
 
   [ -s "$BATS_TEST_TMPDIR/vus" ] || { echo "MUR 9 — aucun porteur lu : le balayage est casse" >&2; return 1; }
   local rompu=0 sub
@@ -307,12 +303,11 @@ PYX
     [ -n "$sub" ] || continue
     case "$sub" in
       ORPHELIN:*)
-        echo "MUR 9 rompu — « ${sub#ORPHELIN:} » ne s'accorde pas avec la racine que le compose declare (« $racine »)" >&2
+        echo "MUR 9 rompu — « ${sub#ORPHELIN:} » ne s'accorde pas avec la racine que les constantes declarent (« $racine »)" >&2
         rompu=1; continue ;;
     esac
     printf '%s\n' "$natures" | grep -qx "$sub" && continue
-    printf '%s\n' "$hors_nature" | grep -qx "$sub" && continue
-    echo "MUR 9 rompu — « $racine/$sub » n'est ni une NATURE de LCARS_STORE_TREES ni un sous-arbre declare" >&2
+    echo "MUR 9 rompu — « $racine/$sub » n'est pas une NATURE de LCARS_STORE_TREES" >&2
     rompu=1
   done < <(sort -u "$BATS_TEST_TMPDIR/vus")
   [ "$rompu" -eq 0 ] || return 1
@@ -331,9 +326,8 @@ PYX
     return 1
   }
 
-  # fleet.json      — les réglages de l'administrateur, lus au boot, que le provisionnement ne pose pas
-  # install.journal — l'artefact de l'installeur lui-même, pas un état convergé
-  local hors_manifeste="fleet.json install.journal"
+  # fleet.json — les réglages de l'administrateur, lus au boot, que le provisionnement ne pose pas
+  local hors_manifeste="fleet.json"
 
   : > "$BATS_TEST_TMPDIR/etcl"
   local f
@@ -424,7 +418,7 @@ PYX
 @test "MUR 13: le compte de service du deck a un nom — les replis du produit et la table le nomment, le groupe du secret en derive" {
   # le groupe du compte porte le secret OIDC du deck : un groupe qui ne dérive pas du compte se crée
   # d'un côté et se chown de l'autre ; la pose du compte sur son groupe éponyme et la traduction de la
-  # lib se jouent (service_accounts.bats, modules.d/thin_callers.bats)
+  # lib se jouent (modules.d/21-service-accounts.bats, modules.d/thin_callers.bats)
   local nom
   nom="$(sed -nE 's/^PROV_SYSTEM_USER=([a-z0-9_-]+)$/\1/p' "$REPO/deploy/installer-constants.env")"
   [ -n "$nom" ] || { echo "MUR 13 — PROV_SYSTEM_USER ne se lit plus dans installer-constants.env" >&2; return 1; }

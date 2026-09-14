@@ -30,10 +30,6 @@ primary_group_of() { # primary_group_of <compte> -> le NOM de son groupe primair
 # éponyme, avec nologin ; le verdict qualifie l'écart. Un compte qui s'en écarte n'est jamais corrigé.
 compte_de_service() {
   local verdict="$1" compte="$2" detient="$3" ecart="" shell pg
-  if ! getent group "$compte" >/dev/null 2>&1; then
-    "$verdict" "groupe $compte absent — le compte qui détient $detient n'a pas de groupe à lui"
-    return 1
-  fi
   if ! account_exists "$compte"; then
     "$verdict" "compte de service $compte absent — personne ne détient $detient"
     return 1
@@ -49,9 +45,9 @@ compte_de_service() {
   p_ok "compte de service $compte (groupe $compte, $NOLOGIN)"
 }
 
-creer_compte() { # creer_compte <compte> <ce qu'il détient> — groupe éponyme et compte, s'ils manquent
-  ensure_group "$1" || return 1
+creer_compte() { # creer_compte <compte> <ce qu'il détient> — groupe éponyme et compte, pour un compte absent seulement : un compte existant se mesure, rien ne se pose pour lui
   account_exists "$1" && return 0
+  ensure_group "$1" || return 1
   # --system : uid sous UID_MIN, donc bin/fleet refuse une fleet sous ce compte
   if ! run_capture useradd --system --no-create-home --shell "$NOLOGIN" -g "$1" -- "$1"; then
     p_fail "création de $1 en échec — personne ne détient $2"

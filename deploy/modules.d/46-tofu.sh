@@ -22,18 +22,9 @@ TOFU_OWNER="$(prov_owner "$(prov_manifest_owner "$TOFU_DIR")")"
 tofu_mode() { prov_manifest_mode "$1"; }   # tofu_mode <chemin> → le mode que system.manifest déclare
 
 tofu_check_perms() { # tofu_check_perms <chemin posé>
-  local path="$1" cur want
-  [[ -e "$path" ]] || return 0
-  cur="$(stat -c '%a %U:%G' "$path")"
-  want="$(tofu_mode "$path") $TOFU_OWNER"; want="${want#0}"
-  if [[ "$cur" == "$want" ]]; then
-    p_ok "$path $cur (table)"
-  else
-    p_drift "$path : $cur ≠ $want (deploy/system.manifest) — l'apply le repose"
-  fi
+  if prov_check_mode "$1" "$(tofu_mode "$1")" "$TOFU_OWNER"; then p_ok "$1 (mode et propriétaire de la table)"; fi
+  return 0
 }
-
-tofu_rc() { echo "$TOFU_DIR/tofurc"; }
 
 tofu_installed_version() { # tofu_installed_version → la version que rend le binaire posé, vide s'il n'en rend aucune
   "$TOFU_BIN" version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
@@ -42,7 +33,7 @@ tofu_installed_version() { # tofu_installed_version → la version que rend le b
 # tofu init écrit un .terraform/ à côté de la recette : elle se joue sur une copie jetable, jamais dans l'arbre
 recette_copie() { # recette_copie → pose WORK, la copie de la recette
   local src
-  src="${LCARS_FORGE_RECIPE:-$(product_tree)/services/forge-recipe}"
+  src="$(product_tree)/services/forge-recipe"
   [[ -d "$src" ]] || { p_fail "recette absente : $src"; return 1; }
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" || { p_fail "tofu : tmp impossible"; return 1; }
   cp -a "$src/." "$WORK/" || { p_fail "recette non copiable ($src)"; rm -rf "$WORK"; return 1; }
@@ -54,7 +45,7 @@ recette_copie() { # recette_copie → pose WORK, la copie de la recette
 init_hors_ligne() {
   local m
   for m in "$WORK/instance" "$WORK"; do
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" env -C "$m" "$TOFU_BIN" init -input=false -no-color >/dev/null 2>&1 || return 1
+    TF_CLI_CONFIG_FILE="$PROV_TOFU_RC" env -C "$m" "$TOFU_BIN" init -input=false -no-color >/dev/null 2>&1 || return 1
     rm -rf "$m/.terraform"
   done
 }
@@ -72,7 +63,7 @@ check() {
     tofu_check_perms "$TOFU_BIN"
   fi
   local WORK=""
-  if [[ ! -s "$(tofu_rc)" || ! -x "$TOFU_BIN" ]]; then
+  if [[ ! -s "$PROV_TOFU_RC" || ! -x "$TOFU_BIN" ]]; then
     p_drift "miroir de providers absent ($TOFU_DIR) — tofu irait les chercher sur le réseau, ou échouerait"
   elif ! recette_copie; then
     :   # recette_copie a dit l'échec : le miroir n'est pas mesurable sans recette
@@ -102,7 +93,6 @@ poser_binaire() { # poser_binaire <arch> <sha256>
     "$want_sha" "$tmpd/tofu.zip" 0644 || { rm -rf "$tmpd"; verdict_apply; }
   unzip -q -o -d "$tmpd/x" "$tmpd/tofu.zip" \
     || { p_fail "tofu : archive illisible"; rm -rf "$tmpd"; verdict_apply; }
-  ensure_dir "$(dirname "$TOFU_BIN")" 0755 "$TOFU_OWNER" || { rm -rf "$tmpd"; verdict_apply; }
   install -m "$(tofu_mode "$TOFU_BIN")" -o "${TOFU_OWNER%%:*}" -g "${TOFU_OWNER##*:}" "$tmpd/x/tofu" "$TOFU_BIN" \
     || { p_fail "tofu : pose ratée ($TOFU_BIN)"; rm -rf "$tmpd"; verdict_apply; }
   rm -rf "$tmpd"
@@ -118,7 +108,7 @@ apply() {
 
   ensure_dir "$TOFU_DIR" "$(tofu_mode "$TOFU_DIR")" "$TOFU_OWNER" || verdict_apply
   ensure_dir "$TOFU_DIR/providers" "$(tofu_mode "$TOFU_DIR/providers")" "$TOFU_OWNER" || verdict_apply
-  write_atomic "$(tofu_rc)" 0644 "$TOFU_OWNER" <<EOF || verdict_apply
+  write_atomic "$PROV_TOFU_RC" 0644 "$TOFU_OWNER" <<EOF || verdict_apply
 provider_installation {
   filesystem_mirror {
     path    = "$TOFU_DIR/providers"
@@ -139,12 +129,11 @@ EOF
   fi
 
   for m in "$WORK/instance" "$WORK"; do
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_capture env -C "$m" "$TOFU_BIN" providers mirror -platform="linux_${arch}" "$TOFU_DIR/providers" \
+    TF_CLI_CONFIG_FILE="$PROV_TOFU_RC" run_capture env -C "$m" "$TOFU_BIN" providers mirror -platform="linux_${arch}" "$TOFU_DIR/providers" \
       || { p_fail "miroir de providers : échec sur $m"; prov_dump_last; rm -rf "$WORK"; verdict_apply; }
   done
-  chmod -R a+rX "$TOFU_DIR" 2>/dev/null || true
   for m in "$WORK/instance" "$WORK"; do
-    TF_CLI_CONFIG_FILE="$(tofu_rc)" run_capture env -C "$m" "$TOFU_BIN" init -input=false -no-color \
+    TF_CLI_CONFIG_FILE="$PROV_TOFU_RC" run_capture env -C "$m" "$TOFU_BIN" init -input=false -no-color \
       || { p_fail "tofu : init hors-ligne en échec dans $m après miroir — le miroir ne couvre pas la recette"; prov_dump_last; rm -rf "$WORK"; verdict_apply; }
   done
   rm -rf "$WORK"

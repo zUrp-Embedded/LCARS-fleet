@@ -72,7 +72,7 @@ FAKE
   [[ "$output" == *"Aucun des deux n'est choisi"* ]]
 }
 
-@test "list: la porte CHARGE fleet.env — l'adresse forge ne vit que la (D3)" {
+@test "list: la porte CHARGE fleet.env — l'adresse forge ne vit que là" {
   bin="$BATS_TEST_TMPDIR/fake_env_release"
   cat > "$bin" <<'FAKE'
 #!/usr/bin/env bash
@@ -275,7 +275,6 @@ FAIL:gesture_signalled:15"
   [[ "$output" == *"livre DANS le release"* ]]
 }
 
-# bats test_tags=structure
 @test "catalogue install: la CLI ne lit AUCUN secret et n'appelle AUCUN geste" {
   local body
   body="$(sed -n '/^cmd_catalogue_install()/,/^}/p' "$SUT" | sed 's/#.*//')"
@@ -288,7 +287,6 @@ FAIL:gesture_signalled:15"
 }
 
 
-# bats test_tags=structure
 @test "catalogue install: le defaut de la socket est l'adresse REELLE du service" {
   local defaut manifeste
   defaut="$(sed -n 's/^_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-\(.*\)}"$/\1/p' "$SUT")"

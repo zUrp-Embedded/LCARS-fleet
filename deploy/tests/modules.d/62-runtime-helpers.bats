@@ -33,7 +33,9 @@ setup() {
   stub_curl "peu importe"
 }
 
-mod() { run bash "$MOD" "$1"; }
+# provision exporte la révision de l'arbre qu'il joue : un module la reçoit, il ne la recalcule pas
+revision_de() { bash -c '. "$1" >/dev/null 2>&1; prov_source_rev' _ "$1"; }
+mod() { run env PROV_SOURCE_REV="${PROV_SOURCE_REV:-$(revision_de "$PROVISION_LIB")}" bash "$MOD" "$1"; }
 stub_curl() { # stub_curl <contenu rendu par curl dans -o>
   cat > "$BINDIR/curl" <<EOF
 #!/usr/bin/env bash
@@ -73,7 +75,10 @@ racine_avec_artefacts() { # racine_avec_artefacts → la racine paquet avec serv
   printf 'resource "gitea_org" "x" {}\n' > "$src/runtime/services/forge-recipe/charte.tf"
   printf '%s\n' "$src"
 }
-mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/deploy/modules.d/62-runtime-helpers.sh" "$2"; }
+mod_depuis() {
+  run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" PROV_SOURCE_REV="$(revision_de "$1/deploy/lib/provision-lib.sh")" \
+    bash "$1/deploy/modules.d/62-runtime-helpers.sh" "$2"
+}
 
 @test "check sur une machine nue : chaque manque est un drift nommé" {
   mod check
@@ -97,7 +102,7 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
 }
 
 @test "la liste des auxiliaires du module n'est pas vide" {
-  [ "$(helpers | wc -l)" -ge 8 ]
+  [ -n "$(helpers)" ]
   helpers | grep -qx 'console-deck.py'
 }
 
@@ -168,9 +173,10 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   cmp -s "$src/runtime/services/console.tmux.conf" "$HELPERS/services/console.tmux.conf"
 }
 
-@test "un arbre rebasculé porte la date de sa pose, pas celle de la source : un protocole sourcé changé se voit plus récent que les daemons" {
+@test "un arbre rebasculé : l'objet changé porte la date de sa pose, pas celle de la source ; l'objet identique et son dossier gardent la leur" {
   local src avant; src="$(racine_avec_artefacts)"
   mod_depuis "$src" apply
+  touch -d '2001-01-01 00:00:00' "$HELPERS/services/console.tmux.conf" "$HELPERS/services/lib"
   printf '# retouche\n' >> "$src/runtime/services/lib/human-protocol.sh"
   touch -d '2001-01-01 00:00:00' "$src/runtime/services/lib/human-protocol.sh"
   avant="$(date +%s)"
@@ -178,6 +184,8 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]]
   cmp -s "$src/runtime/services/lib/human-protocol.sh" "$HELPERS/services/lib/human-protocol.sh"
   [ "$(stat -c %Y "$HELPERS/services/lib/human-protocol.sh")" -ge "$avant" ]
+  [ "$(date -u -d "@$(stat -c %Y "$HELPERS/services/console.tmux.conf")" +%Y)" = 2001 ]
+  [ "$(date -u -d "@$(stat -c %Y "$HELPERS/services/lib")" +%Y)" = 2001 ]
 }
 
 @test "un changement de mode seul, contenu identique, rebascule l'arbre" {

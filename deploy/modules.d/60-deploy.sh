@@ -114,12 +114,10 @@ check() {
     p_drift "release absente sous $PROV_PREFIX"
     verdict_check
   fi
-  local cur
-  cur="$(stat -c '%U:%G %a' "$PROV_PREFIX")"
-  if [[ "$cur" == "$PREFIX_OWNER 750" ]]; then
-    p_ok "verrou RO du prefix ($cur)"
+  if prefix_verrouille; then
+    p_ok "verrou RO du prefix ($PREFIX_OWNER 750)"
   else
-    p_drift "prefix non verrouillé : $cur ≠ $PREFIX_OWNER 750"
+    p_drift "prefix non verrouillé : $(stat -c '%U:%G %a' "$PROV_PREFIX") — attendu $PREFIX_OWNER 750, et dans l'arbre rien qui soit à un autre, inscriptible par le groupe ou ouvert aux autres"
   fi
   local name mode is_link
   while read -r name mode is_link; do
@@ -151,7 +149,7 @@ check() {
     p_drift "symlink intrus $e → $(readlink "$e") — sa cible n'est pas dans release.manifest : l'apply le retire"
   done < <(intrus_links)
   if [[ -d "$PREFIX_REL.prev" ]]; then
-    p_ok "génération précédente gardée : $PREFIX_REL.prev ($(du -sh "$PREFIX_REL.prev" 2>/dev/null | cut -f1 || echo '?')) — rollback de deploy-release.sh ; « sudo rm -rf $PREFIX_REL.prev » pour libérer l'espace"
+    p_ok "génération précédente gardée : $PREFIX_REL.prev ($(du -sh "$PREFIX_REL.prev" 2>/dev/null | cut -f1 || echo '?')) — « sudo rm -rf $PREFIX_REL.prev » pour libérer l'espace"
   fi
   verdict_check
 }
@@ -160,7 +158,7 @@ apply() {
   # la copie posée sert à rejouer, pas à reconstruire : sans mix.exs, la release en place est l'état-cible
   if prov_dans_la_copie && [[ ! -f "$RUNTIME_DIR/mix.exs" ]] && release_present; then
     p_ok "rejeu depuis la copie posée : release en place, aucune source ici ($RUNTIME_DIR) — rien à bâtir"
-    prov_channel_write "$(prov_channel_here)" || verdict_apply
+    clore_la_pose
     verdict_apply
   fi
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
@@ -198,8 +196,4 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 60-deploy.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

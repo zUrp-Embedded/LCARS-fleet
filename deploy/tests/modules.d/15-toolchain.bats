@@ -86,7 +86,6 @@ mod() {
     PROVISION_MODULE=15-toolchain PROV_SUBSTRATE=linux PROVISION_RUN=1 bash "$ARBRE/deploy/modules.d/15-toolchain.sh" "$1"
 }
 
-# bats test_tags=structure
 @test "le pin d'Elixir des constantes satisfait ce que mix.exs exige" {
   [ -n "$PIN" ]
   [ -n "$OTP" ]
@@ -118,19 +117,12 @@ mod() {
   refute grep -qs erlang "$PROV_JOURNAL_ACC"
 }
 
-@test "l'URL du zip est celle du pin officiel — un LCARS_ELIXIR_ZIP_URL exporté n'y change rien" {
+@test "le zip téléchargé est celui du pin officiel, et son arbre vit sous /opt/elixir-<pin> du décor" {
   zip_du_pin
-  LCARS_ELIXIR_ZIP_URL=https://ailleurs.invalid/elixir.zip mod apply
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(cat "$CURL_LOG")" = "https://github.com/elixir-lang/elixir/releases/download/v${PIN}/elixir-otp-${OTP}.zip" ]
-}
-
-@test "l'arbre du pin vit sous /opt/elixir-<pin> du décor — LCARS_ELIXIR_HOME et LCARS_ELIXIR_PREFIX exportés n'y changent rien" {
-  zip_du_pin
-  LCARS_ELIXIR_HOME="$BATS_TEST_TMPDIR/ailleurs" LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/ailleurs-" mod apply
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -x "$HOME_PIN/bin/elixir" ]
-  refute compgen -G "$BATS_TEST_TMPDIR/ailleurs*"
 }
 
 @test "un sha256 qui ne correspond pas : rien n'est gardé, ni zip ni arbre ni lien — et l'apply est rouge" {
@@ -202,13 +194,14 @@ mod() {
   [[ "$output" == *"DRIFT 15-toolchain: Elixir $PIN compilé pour OTP « 26 », VM OTP « $OTP »"* ]]
 }
 
-@test "CHECK : un elixir posé qui échoue est une dérive, pas un module mort" {
+@test "CHECK : un elixir posé qui échoue est une dérive qui le dit posé, pas absent" {
   mkdir -p "$HOME_PIN/bin"
   printf '#!/usr/bin/env bash\nexit 127\n' > "$HOME_PIN/bin/elixir"; chmod 0755 "$HOME_PIN/bin/elixir"
   ln -sf "$HOME_PIN/bin/elixir" "$LINKS/elixir"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 15-toolchain: Elixir $PIN non posé"* ]]
+  [[ "$output" == *"DRIFT 15-toolchain: Elixir $PIN posé ($HOME_PIN) mais son elixir ne répond pas"* ]]
+  refute_out "Elixir $PIN non posé" <<<"$output"
 }
 
 @test "CHECK : un elixir d'apt devant PROV_LINK_DIR = drift qui le nomme" {

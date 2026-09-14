@@ -19,7 +19,6 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-# un binaire présent qui échoue est un état : sous set -e, son code tuerait le module avant son verdict
 otp_release() { erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo absent; }
 elixir_version() { elixir --short-version 2>/dev/null || echo absent; }
 
@@ -30,9 +29,9 @@ ELIXIR_ZIP_URL="https://github.com/elixir-lang/elixir/releases/download/v${PROV_
 # la marque qu'un arbre a été posé ici : sans elle, un /opt/elixir-* n'est jamais retiré
 ELIXIR_MARK=.lcars-pose
 
-elixir_version_posee() {
-  [[ -x "$ELIXIR_HOME/bin/elixir" ]] || return 0
-  "$ELIXIR_HOME/bin/elixir" --short-version 2>/dev/null || true
+elixir_version_posee() { # elixir_version_posee → la version de l'arbre du pin, vide sans arbre ; rc 1 si son elixir ne répond pas
+  [[ -e "$ELIXIR_HOME/bin/elixir" ]] || return 0
+  "$ELIXIR_HOME/bin/elixir" --short-version 2>/dev/null
 }
 
 elixir_links_stale() { # les liens de PROV_LINK_DIR qui pointent sous notre préfixe, ailleurs que sur l'arbre du pin
@@ -59,8 +58,6 @@ elixir_built_for() {
   { elixir --version 2>/dev/null || true; } \
     | sed -n 's/.*compiled with Erlang\/OTP \([0-9]\+\).*/\1/p' | head -1
 }
-
-rien_a_batir() { prov_delivery_is_binary; }
 
 mesure_vm() { # mesure_vm <p_drift|p_fail>
   local otp; otp="$(otp_release)"
@@ -105,12 +102,15 @@ check_reliquats() {
 }
 
 check() {
-  if rien_a_batir; then
+  if prov_delivery_is_binary; then
     p_ok "toolchain non requise — livraison binaire, la release est bâtie et embarque son ERTS"
     verdict_check
   fi
   mesure_vm p_drift
-  if [[ "$(elixir_version_posee)" != "$PROV_ELIXIR_PIN" ]]; then
+  local posee
+  if ! posee="$(elixir_version_posee)"; then
+    p_drift "Elixir $PROV_ELIXIR_PIN posé ($ELIXIR_HOME) mais son elixir ne répond pas — l'apply repose l'arbre du pin"
+  elif [[ "$posee" != "$PROV_ELIXIR_PIN" ]]; then
     p_drift "Elixir $PROV_ELIXIR_PIN non posé ($ELIXIR_HOME) — l'apply le télécharge (zip officiel, sha256 épinglé)"
   else
     mesure_elixir p_drift
@@ -120,7 +120,7 @@ check() {
 }
 
 apply() {
-  if rien_a_batir; then
+  if prov_delivery_is_binary; then
     p_ok "erlang et elixir non posés — livraison binaire, rien à bâtir ici"
     verdict_apply
   fi
@@ -137,7 +137,7 @@ apply() {
 
   apt_ensure erlang || verdict_apply
 
-  if [[ "$(elixir_version_posee)" == "$PROV_ELIXIR_PIN" ]]; then
+  if [[ "$(elixir_version_posee || true)" == "$PROV_ELIXIR_PIN" ]]; then
     p_ok "Elixir $PROV_ELIXIR_PIN déjà posé ($ELIXIR_HOME)"
   else
     # le zip à côté de l'arbre, jamais dans /tmp ; un crash ne laisse pas un ELIXIR_HOME à moitié écrit

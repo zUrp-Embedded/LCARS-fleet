@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/transverse/console_socket_topology.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
-# STATUS: bats tests for console.sh + console-landing.sh — JG-072/JG-098, le terminal n'a plus de port
+# STATUS: bats tests for console.sh + console-landing.sh — le terminal n'a pas de port, une socket par humain
 
 # shellcheck disable=SC2016
 
@@ -111,7 +111,7 @@ ttyd_line() {
   grep -- "^ttyd .*$1" "$CALLS" | head -1
 }
 
-@test "JG-072: NEITHER ttyd carries -p — the terminal has no port at all" {
+@test "NEITHER ttyd carries -p — the terminal has no port at all" {
   run_console
   [ "$status" -eq 0 ]
 
@@ -123,7 +123,7 @@ ttyd_line() {
   refute grep -q -- "-i 0.0.0.0" "$CALLS"
 }
 
-@test "JG-072: each ttyd listens on an AF_UNIX socket under the console root" {
+@test "each ttyd listens on an AF_UNIX socket under the console root" {
   run_console
   [ "$status" -eq 0 ]
 
@@ -131,7 +131,7 @@ ttyd_line() {
   [[ "$(ttyd_line pod.sock)"     == *"-i $LCARS_CONSOLE_SOCK_ROOT/bt/pod.sock"* ]]
 }
 
-@test "JG-072: the per-human directory is asked for as 2710 <human>:lcars-console" {
+@test "the per-human directory is asked for as 2710 <human>:lcars-console" {
   run_console
   [ "$status" -eq 0 ]
 
@@ -142,7 +142,7 @@ ttyd_line() {
   grep -q -- "chown bt:lcars-console $LCARS_CONSOLE_SOCK_ROOT/bt" "$CALLS"
 }
 
-@test "JG-072: ttyd is asked to refuse a request without the identity header" {
+@test "ttyd is asked to refuse a request without the identity header" {
   run_console
   [ "$status" -eq 0 ]
 
@@ -150,7 +150,7 @@ ttyd_line() {
   [[ "$(ttyd_line pod.sock)"     == *"-H X-LCARS-Human"* ]]
 }
 
-@test "JG-098: ttyd still runs AS the human, never as root" {
+@test "ttyd still runs AS the human, never as root" {
   # The socket is the new boundary, and it would be worth nothing if the shell behind it ran with
   # more rights than its owner. What is typed in the browser has exactly the human's rights.
   run_console
@@ -229,7 +229,7 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
     | jq -r '.services[].ports[]? | .target' | sort -u
 }
 
-@test "6-072: NOTHING of the per-human block space is published" {
+@test "NOTHING of the per-human block space is published" {
   compose_requis
   local dir="$BATS_TEST_DIRNAME/../../docker" p
   for p in $(ports_of "$dir/docker-compose.yml"); do
@@ -238,7 +238,7 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
   done
 }
 
-@test "6-072: TEMOIN — l'instrument voit encore les publications qui restent" {
+@test "l'instrument voit encore les publications qui restent" {
   compose_requis
   local dir="$BATS_TEST_DIRNAME/../../docker" pub
   pub="$(ports_of "$dir/docker-compose.yml")"
@@ -247,7 +247,6 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
   grep -qx "22"    <<< "$pub"   # ssh, la porte d'admin
 }
 
-# bats test_tags=structure
 @test "the deck gains the console group and NOT fleet" {
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
@@ -280,7 +279,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [[ "$output" == *"bornes d'uid illisibles"* ]]
 }
 
-@test "6-surface: console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {
+@test "console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe"
   printf 'root:x:0:0::/root:/bin/bash\n' > "$pw"
@@ -344,7 +343,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [[ "$output" == *"max"* ]]
 }
 
-@test "6-surface: un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
+@test "un humain SANS home est refuse — une console sans home s'ouvre sur / et ment" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
@@ -356,7 +355,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   [[ "$output" != *"max"* ]]
 }
 
-@test "6-surface: un revoque (nologin) et un compte systeme sont hors de la liste" {
+@test "un revoque (nologin) et un compte systeme sont hors de la liste" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe" "$home/gone" "$home/svc"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
@@ -401,7 +400,6 @@ s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/
 
 hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 
-# bats test_tags=structure
 @test "la sonde de l'image teste le DECK, pas seulement sshd" {
   # Sans cette moitie, le healthcheck mesure une porte d'admin et la presente comme la sante du
   # conteneur. Les deux ports sont testes : sshd reste la porte de secours, le deck est l'entree.
@@ -409,14 +407,12 @@ hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
   hc_cmd | grep -q 'LCARS_LANDING_PORT'
 }
 
-# bats test_tags=structure
 @test "une landing DESACTIVEE ne rend pas le conteneur malade — c'est un reglage, pas une panne" {
   # `LCARS_LANDING=0` est supporte par l'entrypoint. Sonder son port quand meme transformerait un
   # reglage en panne definitive : le conteneur serait *unhealthy* a vie, sans que rien ne soit casse.
   hc_cmd | grep -q '${LCARS_LANDING:-1}'
 }
 
-# bats test_tags=structure
 @test "la sonde de l'image est du JSON valide — la forme exec, pas un shell devine" {
   # Un `CMD` en forme exec est un tableau JSON. Une guillemet mal echappee ne casse pas le build :
   # docker retombe sur la forme SHELL et execute la ligne autrement que ce qu'on a ecrit.

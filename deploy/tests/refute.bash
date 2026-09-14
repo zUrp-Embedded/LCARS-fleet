@@ -25,14 +25,12 @@ refute() {
 }
 
 refute_out() {
-  # `if`, pas `[[ … ]] && …` : sous `errexit` une liste `&&` dont le test est faux rend 1 et tue
-  # l'appelant. Le drapeau est colle au `-E` (`grep -E` ou `grep -Ei`) pour n'avoir aucun tableau
-  # a developper sous `set -u`.
+  # le drapeau est collé au -E (grep -E ou grep -Ei) : aucun tableau à développer sous set -u
   local ci=""
   if [[ "${1:-}" == "-i" ]]; then ci="i"; shift; fi
   local motif="${1:?refute_out attend un motif}" trouve
   trouve="$(grep -E"$ci" -- "$motif" || true)"
-  [[ -z "$trouve" ]] && return 0
+  if [[ -z "$trouve" ]]; then return 0; fi
   {
     echo "REFUTE : « $motif » TROUVE, alors que ce temoin l'interdit :"
     printf '%s\n' "$trouve" | head -5

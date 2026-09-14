@@ -16,9 +16,7 @@ SYSTEMD_DIR="$(prov_decor /etc/systemd/system)"
 SERVICES_ENV="$PROV_SERVICES_ENV"
 # ce que lit la garde du siège dans le shell d'un humain : hors de services.env, que seuls les daemons chargent
 SEAT_UID_FILE="$PROV_SEAT_UID_FILE"
-HELPERS_DIR="$PROV_ROOT"
 SERVICES_OWNER=root:root
-SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 # programme → unité ; en conteneur, sans unités, c'est le programme que le superviseur tient qui se sonde
@@ -46,7 +44,7 @@ consequence_of() { # consequence_of <unité> — ce que coûte son absence
 
 # le conteneur tient ses services par supervise.sh ; pendant son boot (superviseur absent) l'état vérifiable est « en place »
 check_container_services() {
-  local sup="$HELPERS_DIR/supervise.sh"
+  local sup="$PROV_ROOT/supervise.sh"
   local e prog rel unit sup_vivant=0
   if [[ -x "$sup" ]]; then
     p_ok "superviseur posé ($sup) — ce que « Restart= » fait sur un poste"
@@ -57,8 +55,8 @@ check_container_services() {
   for e in "${STARTERS[@]}"; do
     IFS=: read -r prog rel unit <<<"$e"
     [[ "$rel" == "unit" ]] || continue
-    if [[ ! -x "$HELPERS_DIR/$prog" ]]; then
-      p_drift "$unit : « $prog » absent ou pas exécutable ($HELPERS_DIR/$prog) — $(consequence_of "$unit")"
+    if [[ ! -x "$PROV_ROOT/$prog" ]]; then
+      p_drift "$unit : « $prog » absent ou pas exécutable ($PROV_ROOT/$prog) — $(consequence_of "$unit")"
     elif pgrep -f "$(prov_pgrep_pattern "$prog")" >/dev/null 2>&1; then
       p_ok "$unit : « $prog » tenu par le superviseur"
     elif [[ "$sup_vivant" -eq 1 ]]; then
@@ -112,7 +110,7 @@ services_env_body() {
   echo "LCARS_ROLES=\"$PROV_ROLES\""
   echo "LCARS_CATALOGUES_WORK=$PROV_CATALOGUES_WORK"
   echo "LCARS_STORE_ROOT=$PROV_STORE_ROOT"
-  echo "TF_CLI_CONFIG_FILE=$PROV_TOFU_DIR/tofurc"
+  echo "TF_CLI_CONFIG_FILE=$PROV_TOFU_RC"
 }
 
 # une unité est un gabarit : chaque bras pose ce qui la distingue. Pas de User= pour la landing : elle se
@@ -122,37 +120,35 @@ unit_body() { # unit_body <nom sans .service>
   case "$1" in
     lcars-landing)
       desc="l'accueil web (deck) sur :$PROV_DECK_PORT"
-      exec="ExecStart=$HELPERS_DIR/console-landing.sh --foreground"
+      exec="ExecStart=$PROV_ROOT/console-landing.sh --foreground"
       ;;
     lcars-converger)
       desc="la team humans de la forge vers les comptes Unix de cette machine"
-      exec="ExecStart=$HELPERS_DIR/human-converger.sh"; restart=10
+      exec="ExecStart=$PROV_ROOT/human-converger.sh"; restart=10
       ;;
     lcars-catalogue)
       desc="installe un catalogue pour un admin de la forge, sans jamais lui donner le jeton"
-      exec="ExecStart=/usr/bin/env python3 $HELPERS_DIR/catalogue-executor.py"; borne=0; user="User=$PROV_AUTHORITY_USER"
+      exec="ExecStart=/usr/bin/env python3 $PROV_ROOT/catalogue-executor.py"; borne=0; user="User=$PROV_AUTHORITY_USER"
       ;;
     lcars-privileged)
       desc="l'unique geste privilégié de la machine, et il ne détient aucun secret"
-      exec="ExecStart=/usr/bin/env python3 $HELPERS_DIR/privileged-executor.py"; borne=0
+      exec="ExecStart=/usr/bin/env python3 $PROV_ROOT/privileged-executor.py"; borne=0
       ;;
   esac
   doc="${exec##*/}"; doc="${doc%% *}"
   printf '[Unit]\nDescription=LCARS — %s\nDocumentation=file://%s/%s\nAfter=network-online.target\nWants=network-online.target\n' \
-    "$desc" "$HELPERS_DIR" "$doc"
+    "$desc" "$PROV_ROOT" "$doc"
   [[ "$borne" -eq 0 ]] || printf 'StartLimitIntervalSec=60\nStartLimitBurst=5\n'
   printf '[Service]\nType=simple\nEnvironmentFile=-%s\n' "$SERVICES_ENV"
   [[ -z "$user" ]] || printf '%s\n' "$user"
   printf '%s\nRestart=always\nRestartSec=%s\n[Install]\nWantedBy=multi-user.target\n' "$exec" "$restart"
 }
-unit_path() { echo "$SYSTEMD_DIR/$1.service"; }
 unit_current() { # unit_current <unité> → 0 si l'unité posée est identique à ce qui serait généré
-  local u="$1"
-  [[ -f "$(unit_path "$u")" ]] || return 1
-  diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
+  [[ -f "$SYSTEMD_DIR/$1.service" ]] || return 1
+  diff -q <(unit_body "$1") "$SYSTEMD_DIR/$1.service" >/dev/null 2>&1
 }
 
-# ce qu'un daemon garde de son démarrage, sous HELPERS_DIR : son programme et ce qu'il source ou importe ;
+# ce qu'un daemon garde de son démarrage, sous PROV_ROOT : son programme et ce qu'il source ou importe ;
 # ce qu'il lance à chaque tour (console.sh, forge-gestures.sh, human.d) se relit sans relance
 unit_charge() { # unit_charge <unité>
   case "$1" in
@@ -163,7 +159,7 @@ unit_charge() { # unit_charge <unité>
   esac
 }
 
-# charge_reposee_depuis <unité> → 0 si 62 a posé, après le démarrage de l'unité, un objet qu'elle charge (62 date ses poses)
+# charge_reposee_depuis <unité> → 0 si 62 a posé, après le démarrage de l'unité, un objet qu'elle charge (62 date ce qu'il change, un objet reposé à l'identique garde sa date)
 charge_reposee_depuis() {
   local debut n
   # en UTC : un fuseau local se relit mal (CST, HKT, WIB) et aucune relance n'aurait lieu
@@ -171,7 +167,7 @@ charge_reposee_depuis() {
   # un horodatage vide se lirait « aujourd'hui à minuit »
   [[ -n "$debut" ]] && debut="$(TZ=UTC date -d "$debut" +%s 2>/dev/null)" || return 1
   for n in $(unit_charge "$1"); do
-    [[ -z "$(find "$HELPERS_DIR/$n" -newermt "@$debut" -print -quit 2>/dev/null)" ]] || return 0
+    [[ -z "$(find "$PROV_ROOT/$n" -newermt "@$debut" -print -quit 2>/dev/null)" ]] || return 0
   done
   return 1
 }
@@ -254,7 +250,7 @@ check() {
   fi
   for u in "${UNITS[@]}"; do
     if ! unit_current "$u"; then
-      p_drift "$(unit_path "$u") absente ou divergente"
+      p_drift "$SYSTEMD_DIR/$u.service absente ou divergente"
       continue
     fi
     if systemctl is-active --quiet "$u.service" 2>/dev/null; then
@@ -265,8 +261,6 @@ check() {
   done
   verdict_check
 }
-
-pause() { [[ "$SETTLE_SECS" -eq 0 ]] || sleep "$1"; }   # LCARS_SERVICES_SETTLE=0 : les témoins n'attendent pas
 
 apply() {
   local u env_body env_change=0
@@ -288,7 +282,7 @@ apply() {
       if ! unit_current "$u" || [[ "$env_change" -eq 1 ]] || charge_reposee_depuis "$u"; then relancer+=("$u"); fi
     fi
     unit_current "$u" && continue
-    write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" <<<"$(unit_body "$u")" || verdict_apply
+    write_atomic "$SYSTEMD_DIR/$u.service" 0644 "$SERVICES_OWNER" <<<"$(unit_body "$u")" || verdict_apply
     reload=1
   done
   [[ "$reload" -eq 1 ]] && { systemctl daemon-reload || p_warn "daemon-reload en échec"; }
@@ -305,11 +299,12 @@ apply() {
       p_warn "$u.service : relance sans service debout derrière — le verdict ci-dessous le mesure"
     fi
   done
-  pause "$SETTLE_SECS"
+  # un service qui boucle a le temps d'y retomber, et son compteur de relances de monter
+  sleep 12
   local n
   for u in "${UNITS[@]}"; do
     n="$(restarts_of "$u")"
-    pause 2
+    sleep 2
     if [[ "$(restarts_of "$u")" -gt "${n:-0}" ]]; then
       p_fail "$u.service redémarre en boucle — $(loop_hint "$u")"
     elif systemctl is-active --quiet "$u.service"; then
@@ -324,7 +319,7 @@ apply() {
 
 # une passe du convergeur dans l'environnement du daemon (env -i + services.env), pas celui de l'apply ; --once rend 1 sur dépendance absente, 2 sur configuration absente
 converge_humans_now() {
-  local conv="$HELPERS_DIR/human-converger.sh"
+  local conv="$PROV_ROOT/human-converger.sh"
   if systemctl is-active --quiet lcars-converger.service 2>/dev/null; then
     p_ok "convergeur d'humains debout (lcars-converger) — il réconcilie lui-même, aucune passe de plus"
     return 0
@@ -337,12 +332,8 @@ converge_humans_now() {
   case "$PROV_LAST_RC" in
     0) ;;
     2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet start » n'aura personne à lancer" ;;
-    *) p_drift "convergeur d'humains : passe en échec (rc=$PROV_LAST_RC) — « journalctl -u lcars-converger » dit pourquoi" ;;
+    *) p_drift "convergeur d'humains : dépendance absente (rc=$PROV_LAST_RC : curl, jq, ou une passe hors root) — aucun humain n'est matérialisé par cette passe" ;;
   esac
 }
 
-case "${1:?usage: 64-services.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

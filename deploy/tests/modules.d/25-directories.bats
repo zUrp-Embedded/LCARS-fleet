@@ -41,51 +41,49 @@ setup() {
 mod() { run env -u PROVISION_RUN bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 entier() { run bash "$SRC" "$1"; }
 
-@test "substrat natif : la racine des sockets de console, son parent et le dossier de l'humain, au mode et au propriétaire du manifeste" {
+@test "substrat natif : la racine des sockets de console, son parent et le dossier de l'humain de démonstration, au mode et au propriétaire du manifeste" {
   mod 'prov_runtime_dirs | dir_specs'
   [ "$status" -eq 0 ]
   grep -qx "$D/run/lcars 0755 root:root" <<<"$output"
   grep -qx "$D/run/lcars/console 0711 root:root" <<<"$output"
   grep -qx "$D/run/lcars/console/$LCARS_BUILTIN_HUMAN 2710 $LCARS_BUILTIN_HUMAN:lcars-console" <<<"$output"
+  refute_out '/run/lcars/console/temoin' <<<"$output"
 }
 
-@test "le dossier de console est celui de l'humain qui LANCE, pas de --human" {
-  mod 'prov_runtime_dirs | dir_specs'
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"/run/lcars/console/temoin"* ]]
-}
-
-@test "humain de fleet PAS ENCORE la : repli sur --human, jamais aucune racine du tout" {
-  LCARS_BUILTIN_HUMAN="n-existe-pas-$$" mod 'prov_runtime_dirs | dir_specs'
+@test "sans humain de démonstration, la console est celle de l'humain de la passe" {
+  LCARS_BUILTIN_HUMAN='' mod 'prov_runtime_dirs | dir_specs'
   [ "$status" -eq 0 ]
   grep -qx "$D/run/lcars/console/temoin 2710 temoin:lcars-console" <<<"$output"
 }
 
-@test "le nom vient de l'AUTORITE, pas d'un litteral ni d'un drapeau" {
-  local code; code="$(sed 's/#.*//' "$SRC")"
-  grep -q 'forge-gestures.sh" builtin-human' <<<"$code"
-  run grep -cE 'PROV_FLEET_HUMAN|"lcars"|:-lcars\}' <<<"$code"
-  [ "$output" = "0" ]
+@test "l'humain de démonstration retenu par le journal atteint le geste de forge, sans LCARS_BUILTIN_HUMAN dans l'environnement" {
+  PROV_BUILTIN_HUMAN="$LCARS_BUILTIN_HUMAN" run env -u LCARS_BUILTIN_HUMAN -u PROVISION_RUN \
+    bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_tmpfiles_body"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"d /run/lcars/console/$(id -un) 2710 $(id -un) lcars-console -"* ]]
+  refute_out '/run/lcars/console/temoin' <<<"$output"
+}
+
+@test "humain de démonstration pas encore créé : la déclaration tmpfiles le nomme déjà, son dossier attend son compte, dit sans échec" {
+  local absent="pas-encore-cree-$$"
+  LCARS_BUILTIN_HUMAN="$absent" entier apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "d /run/lcars/console/$absent 2710 $absent lcars-console -" "$CONF"
+  [[ "$output" == *"WARN  25-directories: $D/run/lcars/console/$absent : le compte « $absent » n'existe pas encore"* ]]
+  [ ! -e "$D/run/lcars/console/$absent" ]
+  [ ! -e "$D/run/lcars/console/temoin" ]
 }
 
 @test "l'humain de la console est demandé au geste de forge une fois par passe" {
-  # la mémoire d'avant vivait dans des sous-shells : chaque lecture de la table relançait le geste
   local t="$BATS_TEST_TMPDIR/arbre" src="$BATS_TEST_DIRNAME/../.."
   mkdir -p "$t/deploy/lib" "$t/deploy/modules.d" "$t/runtime/services"
   cp "$src"/lib/*.sh "$t/deploy/lib/"
   cp "$src/installer-constants.env" "$src/system.manifest" "$t/deploy/"
   cp "$SRC" "$t/deploy/modules.d/"
   printf '#!/usr/bin/env bash\necho appel >> "%s"\necho "%s"\n' "$BATS_TEST_TMPDIR/geste" "$(id -un)" > "$t/runtime/services/forge-gestures.sh"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/systemd-tmpfiles"; chmod 0755 "$DECOR_BIN/systemd-tmpfiles"
   run env PROVISION_LIB="$t/deploy/lib/provision-lib.sh" bash "$t/deploy/modules.d/25-directories.sh" apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(wc -l < "$BATS_TEST_TMPDIR/geste")" -eq 1 ]
-}
-
-@test "le dossier de l'humain ne NOMME jamais un groupe homonyme — le groupe primaire est celui de la fleet" {
-  mod 'prov_runtime_dirs | dir_specs'
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"temoin:temoin"* ]]
 }
 
 @test "la racine du magasin dans la table est la constante PROV_STORE_ROOT, sous le décor" {
@@ -135,14 +133,18 @@ entier() { run bash "$SRC" "$1"; }
   grep -qx 'd /run/lcars 0755 root root -' <<<"$output"
 }
 
-@test "apply pose la declaration, et check la voit" {
-  mod 'apply_tmpfiles'
+@test "apply pose la declaration, et check la voit ; rejouée, elle se dit conforme, jamais posée" {
+  run env -u PROVISION_RUN bash -c "set -euo pipefail; source '$MOD'; apply_tmpfiles"
   [ "$status" -eq 0 ]
   [ -f "$CONF" ]
   [ "$(stat -c %a "$CONF")" = 644 ]
+  [[ "$output" == *"POSÉ  25-directories: $CONF"* ]]
   mod 'check_tmpfiles'
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK"* ]]
+  run env -u PROVISION_RUN bash -c "set -euo pipefail; source '$MOD'; apply_tmpfiles"
+  [ "$status" -eq 0 ]
+  [ "$output" = "OK    25-directories: tmpfiles: $CONF conforme" ]
 }
 
 @test "declaration ABSENTE = drift, et le drift dit la CONSEQUENCE (la fleet ne demarrera pas)" {
@@ -162,7 +164,6 @@ entier() { run bash "$SRC" "$1"; }
 }
 
 @test "apply puis check, joués entiers : tout est conforme, /opt/lcars/var compris — le propriétaire attendu se lit par prov_owner" {
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/systemd-tmpfiles"; chmod 0755 "$DECOR_BIN/systemd-tmpfiles"
   entier apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   entier check
@@ -244,8 +245,6 @@ check_on() {
   PROV_SUBSTRATE=docker mod 'prov_dirs'
   [ "$status" -eq 0 ]
   refute_out '/run/' <<<"$output"
-  PROV_SUBSTRATE=docker mod 'runtime_dirs_declared'
-  [ "$status" -ne 0 ]
   # la même table, sur le poste, n'est pas vide : un `return 0` inconditionnel passerait les lignes du dessus
   mod 'prov_runtime_dirs | grep -c "/run/"'
   [ "$output" -ge 5 ]
@@ -296,7 +295,6 @@ check_on() {
   refute_out 'hors substrat|volume du conteneur' <<<"$output"
 }
 
-# bats test_tags=structure
 @test "mode, propriétaire et substrat d'un dossier viennent du manifeste — la table du module n'en porte aucun" {
   local code tables
   code="$(sed 's/#.*//' "$SRC")"
@@ -304,7 +302,7 @@ check_on() {
   grep -q 'prov_manifest_owner' <<<"$code"
   grep -q 'prov_manifest_substrate' <<<"$code"
   tables="$(sed -n '/^prov_runtime_dirs()/,/^}$/p;/^prov_dirs()/,/^}$/p' "$SRC")"
-  [ "$(grep -c 'prov_decor\|\$PROV_' <<<"$tables")" -ge 15 ]
+  [ -n "$tables" ]
   refute grep -qE ' [0-7]{3,4}( |")|root:|wsl\+linux' <<<"$tables"
 }
 

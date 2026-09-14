@@ -28,7 +28,6 @@ setup() {
   ENVF="$LCARS_DECOR_ROOT/etc/lcars/services.env"
   SEAT="$LCARS_DECOR_ROOT/etc/lcars/seat.uid"
   HELPERS="$LCARS_DECOR_ROOT/opt/lcars"
-  export LCARS_SERVICES_SETTLE=0
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN
   PROV_HUMAN="$(id -un)"
@@ -74,9 +73,13 @@ EOF
   # systemd est l'init du décor : /run/systemd/system existe
   SYSTEMD_RUN="$LCARS_DECOR_ROOT/run/systemd/system"; mkdir -p "$SYSTEMD_RUN"
   chmod 0755 "$BINDIR/systemctl"
+  SANS_SOMMEIL="$BATS_TEST_TMPDIR/sans-sommeil"; mkdir -p "$SANS_SOMMEIL"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SANS_SOMMEIL/sleep"; chmod 0755 "$SANS_SOMMEIL/sleep"
+  MOD62="$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh"
 }
 
-mod() { run bash "$MOD" "$1"; }
+# l'attente du module après l'activation se joue sans dormir ; le cas lui-même garde le vrai sleep
+mod() { run env PATH="$SANS_SOMMEIL:$PATH" bash "$MOD" "$1"; }
 sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
 
 @test "sans systemd, aucune unité n'est posée, et c'est dit — un fichier d'unité sans init est un décor" {
@@ -97,8 +100,8 @@ sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
   grep -q "^FORGE_BASE_URL=http://127.0.0.1:3000$" "$ENVF"
 }
 
-# le rendu des unités avant leur gabarit (6e0831a9) : une unité qui change d'un octet relance son daemon au premier apply
-rendu_d_avant() { # rendu_d_avant <unité> <port du deck> <compte d'autorité>
+# le rendu attendu de chaque unité : une unité qui change d'un octet relance son daemon au premier apply
+unite_attendue() { # unite_attendue <unité> <port du deck> <compte d'autorité>
   local HELPERS_DIR="$HELPERS" SERVICES_ENV="$ENVF" PROV_DECK_PORT="$2" AUTHORITY_USER="$3"
   case "$1" in
     lcars-landing)
@@ -177,14 +180,14 @@ EOF
   esac
 }
 
-@test "les quatre unités posées sont, à l'octet, celles d'avant leur gabarit — sur deux ports du deck" {
+@test "les quatre unités posées sont, à l'octet, celles attendues — sur deux ports du deck" {
   local port u autorite
   autorite="$(sed -n 's/^PROV_AUTHORITY_USER=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
   for port in 20999 31337; do
     PROV_DECK_PORT="$port" mod apply
     for u in lcars-landing lcars-converger lcars-catalogue lcars-privileged; do
-      cmp "$UNITDIR/$u.service" <(rendu_d_avant "$u" "$port" "$autorite") \
-        || { echo "$u (port $port) diffère du rendu d'avant" >&2; return 1; }
+      cmp "$UNITDIR/$u.service" <(unite_attendue "$u" "$port" "$autorite") \
+        || { echo "$u (port $port) diffère du rendu attendu" >&2; return 1; }
     done
   done
 }
@@ -278,7 +281,7 @@ EOF
   grep -q "^Restart=always$" "$UNITDIR/lcars-landing.service"
 }
 
-@test "AUCUNE unite ne pose User= — la landing se depose ELLE-MEME, avec son groupe de console" {
+@test "ni la landing ni le convergeur ne posent User= — la landing se dépose elle-même, avec son groupe de console" {
   mod apply
   refute grep -q "^User=" "$UNITDIR/lcars-landing.service"
   refute grep -q "^User=" "$UNITDIR/lcars-converger.service"
@@ -347,18 +350,28 @@ EOF
   [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
 }
 
-@test "chaque daemon est relancé sur ce qu'il charge : le protocole sourcé relance le convergeur seul, un README rien" {
-  mkdir -p "$HELPERS/services/lib"
-  printf '# notes\n' > "$HELPERS/services/README.md"
-  printf '# protocole\n' > "$HELPERS/services/lib/human-protocol.sh"
-  find "$HELPERS/services" -exec touch -d '@1' {} +
+bascule_62() { # bascule_62 <source> — l'arbre services posé par la bascule de 62 elle-même
+  run bash -c 'set -euo pipefail; source <(sed "\$d" "$1") >/dev/null; embarquer "$2" "$3"' _ "$MOD62" "$1" "$HELPERS/services"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "après la bascule réelle de 62, chaque daemon est relancé sur ce qu'il charge : le protocole sourcé relance le convergeur seul, un README rien" {
+  local src="$BATS_TEST_TMPDIR/source-services"
+  mkdir -p "$src/lib" "$HELPERS"
+  printf '# notes\n' > "$src/README.md"
+  printf '# protocole\n' > "$src/lib/human-protocol.sh"
+  bascule_62 "$src"
+  # posé bien avant le démarrage du daemon
+  find "$HELPERS/services" -exec touch -h -d '@1000' {} +
   mod apply
-  printf '%s\n' "$(( $(date +%s) - 3600 ))" > "$STARTED.epoch"
+  printf '2000\n' > "$STARTED.epoch"
   : > "$CALLS"
-  touch "$HELPERS/services/README.md"
+  printf '# notes revues\n' > "$src/README.md"
+  bascule_62 "$src"
   mod apply
   refute grep -q "try-restart" "$CALLS"
-  printf '# protocole reposé\n' > "$HELPERS/services/lib/human-protocol.sh"
+  printf '# protocole reposé\n' > "$src/lib/human-protocol.sh"
+  bascule_62 "$src"
   mod apply
   [ "$status" -eq 0 ]
   grep -q -- "systemctl try-restart lcars-converger.service" "$CALLS"
@@ -676,8 +689,7 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   stub_converger 1
   mod apply
   [ "$status" -eq 2 ]
-  [[ "$output" == *"rc=1"* ]]
-  [[ "$output" == *"journalctl"* ]]
+  [[ "$output" == *"DRIFT 64-services: convergeur d'humains : dépendance absente (rc=1"* ]]
 }
 
 @test "un rc INATTENDU reste un echec entier — la tolerance est bornee, pas generale" {

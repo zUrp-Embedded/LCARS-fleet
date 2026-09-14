@@ -7,7 +7,6 @@
 
 # shellcheck disable=SC2030,SC2031
 
-# bats test_tags=structure
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand le conteneur n'est pas la" {
   local container="$BATS_TEST_DIRNAME/../container"
   [ -f "$container" ]
@@ -627,22 +626,14 @@ ouvre_sous_autorite'
   [[ "$output" == *"verrou-tenu"* ]]
 }
 
-@test "un verrou laissé à root est rendu au compte d'autorité par l'apply suivant, son mode gardé" {
+@test "un verrou que l'apply n'a pas créé garde son propriétaire ; sous le compte d'autorité, fermé, il se dit par son propriétaire et son mode" {
   _deux_identites '
 ( umask 022; : > "$LOCK" )
 bash "$SCRIPT" apply </dev/null >/dev/null
 stat -c "verrou %u %a" "$LOCK"
-ouvre_sous_autorite'
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"verrou $AUTORITE_UID 644"* ]]
-  [[ "$output" == *"verrou-tenu"* ]]
-}
-
-@test "sous le compte d'autorité, un verrou fermé se dit par son propriétaire et son mode, pas par root" {
-  _deux_identites '
-( umask 022; : > "$LOCK" )
 ouvre_sous_autorite || echo "rc=$?"'
   [ "$status" -eq 0 ]
+  [[ "$output" == *"verrou 0 644"* ]]
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"ce geste tourne sous autorite-double, et le verrou appartient à root en mode 644"* ]]
   [[ "$output" == *"deploy/workstation up"* ]]
@@ -659,6 +650,20 @@ ouvre_sous_autorite || echo "rc=$?"'
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"ce geste tourne sous autorite-double, et ne peut pas créer le verrou dans /opt/lcars/var/tofu (root, mode 755)"* ]]
   refute grep -q "tourne en root" <<<"$output"
+}
+
+@test "en root, un lien posé à la place du verrou est refusé : le fichier de root qu'il désigne reste intact" {
+  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
+  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu-lien"
+  mkdir -p "$LCARS_CATALOGUES_WORK"
+  printf 'contenu-de-root\n' > "$BATS_TEST_TMPDIR/cible"
+  ln -s "$BATS_TEST_TMPDIR/cible" "$LCARS_CATALOGUES_WORK/.apply.lock"
+  run unshare -Ur env -u LCARS_APPLY_LOCK LCARS_AUTHORITY_USER=compte-absent-du-decor \
+    bash -c 'source "$1"; with_apply_lock echo verrou-tenu' _ "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"verrou d'apply refusé ($LCARS_CATALOGUES_WORK/.apply.lock) : ce n'est pas un fichier régulier"* ]]
+  refute grep -q verrou-tenu <<<"$output"
+  [ "$(cat "$BATS_TEST_TMPDIR/cible")" = contenu-de-root ]
 }
 
 @test "un apply joué en root sans compte d'autorité sur la machine pose le verrou en 0600 et passe" {

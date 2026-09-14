@@ -10,8 +10,8 @@
 #
 # wsl.conf est le fichier de l'instance : chaque clé de l'état-cible s'y pose, le reste du fichier
 # ([user] compris) est conservé. Il ne prend effet qu'après « wsl --shutdown » ; la sonde de C:
-# mesure l'état réel, pas la configuration. Le hostname de l'instance prend la base du projet ; une
-# base qui n'est pas une étiquette DNS est refusée, et la clé n'est pas posée.
+# mesure l'état réel, pas la configuration. Le hostname de l'instance prend la base du projet, que
+# provision a validée comme étiquette DNS.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -21,8 +21,6 @@ WSL_CONF="$(prov_decor /etc/wsl.conf)"
 SNAP_DIRS=("$(prov_decor /snap)" "$(prov_decor /var/snap)" "$(prov_decor /var/lib/snapd)")
 HOSTNAME_CIBLE="${PROV_FORGE_BASE//_/-}"
 
-hostname_valide() { [[ "$HOSTNAME_CIBLE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; }
-
 # section clé valeur — l'état-cible entier ; [interop] coupée = pas d'exécutable Windows depuis l'instance
 wsl_cles() {
   printf '%s\n' \
@@ -30,16 +28,12 @@ wsl_cles() {
     "automount enabled false" \
     "automount mountFsTab true" \
     "interop enabled false" \
-    "interop appendWindowsPath false"
-  if hostname_valide; then printf '%s\n' "network hostname $HOSTNAME_CIBLE"; fi
+    "interop appendWindowsPath false" \
+    "network hostname $HOSTNAME_CIBLE"
 }
 
-dire_hostname() { # le même constat au check et à l'apply : un nom refusé, ou un nom qui ne prend qu'au redémarrage
-  if ! hostname_valide; then
-    p_fail "hostname « $HOSTNAME_CIBLE » refusé : une étiquette DNS porte lettres, chiffres et tirets, sans tiret aux bords, 63 caractères au plus — [network] hostname n'est pas posé ; choisir une autre base de projet"
-  elif [[ "$(hostname)" != "$HOSTNAME_CIBLE" ]]; then
-    p_warn "hostname « $(hostname) » — « $HOSTNAME_CIBLE » prendra après « wsl --shutdown »"
-  fi
+dire_hostname() { # un hostname qui ne prend qu'au redémarrage se dit, au check comme à l'apply
+  [[ "$(hostname)" == "$HOSTNAME_CIBLE" ]] || p_warn "hostname « $(hostname) » — « $HOSTNAME_CIBLE » prendra après « wsl --shutdown »"
 }
 
 ini_get() { # ini_get <fichier> <section> <clé> → la valeur, ou rien
