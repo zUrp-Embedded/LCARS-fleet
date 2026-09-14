@@ -26,7 +26,7 @@ deploy_copie() { # deploy_copie <dossier deploy> — le délégué, sa lib et le
   cp "$BATS_TEST_DIRNAME/../installer-constants.env" "$BATS_TEST_DIRNAME/../system.manifest" "$1/"
 }
 
-arbre() { # arbre <faits…> — le deploy/ factice ; les faits sont ceux que provision doctor rendra
+arbre() { # arbre <faits…> — le deploy/ factice ; provision doctor rend ces faits, la ligne DOCTOR_LIGNE et le code DOCTOR_RC
   local d="$BATS_TEST_TMPDIR/arbre/deploy"; rm -rf "$BATS_TEST_TMPDIR/arbre"; mkdir -p "$d"
   deploy_copie "$d"
   { echo '#!/usr/bin/env bash'
@@ -34,6 +34,8 @@ arbre() { # arbre <faits…> — le deploy/ factice ; les faits sont ceux que pr
     echo '[[ "$1" != apply ]] || exit "${PROVISION_RC:-0}"'
     echo '[[ -n "${PROV_FACTS_FILE:-}" ]] || exit 0'
     echo 'cat > "$PROV_FACTS_FILE" <<FACTS'; printf '%s\n' "$@"; echo 'FACTS'
+    echo 'echo "OK    00-preflight: décor"; [[ -z "${DOCTOR_LIGNE:-}" ]] || echo "$DOCTOR_LIGNE"'
+    echo 'exit "${DOCTOR_RC:-0}"'
   } > "$d/provision"
   { echo '#!/usr/bin/env bash'
     echo 'echo "ACCEPT:$*" >> "${TRACE:?}"'
@@ -60,7 +62,7 @@ kit() { # kit <nom> [--sans-sha256|--sha256-faux] — un kit.tar.gz (lcars_insta
   deploy_copie "$st/lcars_install/deploy"
   { echo '#!/usr/bin/env bash'
     echo 'echo "KIT-PROVISION:$*" >> "${TRACE:?}"'
-    echo '[[ -z "${PROV_FACTS_FILE:-}" || -z "${KIT_FACTS:-}" ]] || printf "%s\n" "$KIT_FACTS" > "$PROV_FACTS_FILE"'
+    echo '[[ -z "${PROV_FACTS_FILE:-}" ]] || printf "%s\n" "${KIT_FACTS:-channel=aucun}" > "$PROV_FACTS_FILE"'
   } > "$st/lcars_install/deploy/provision"
   chmod 0755 "$st/lcars_install/deploy/provision" "$st/lcars_install/deploy/workstation"
   mkdir -p "$BATS_TEST_TMPDIR/kits"
@@ -214,6 +216,47 @@ EOF
   grep -q '^SUDO:' "$TRACE"
 }
 
+# ─── les refus que la mesure porte déjà : avant l'escalade ──────────────────────────────────────
+
+@test "un préflight qui refuse le terrain (Linux non déclaré, plancher en dérive) sort avant sudo en citant son constat" {
+  local cas
+  for cas in "2|FAIL  00-preflight: Linux natif sans déclaration|substrat=linux consent=none" \
+             "1|DRIFT 00-preflight: RAM 512 Mo < 1536 Mo|substrat=wsl consent=sans-objet"; do
+    # shellcheck disable=SC2086 # les faits sont des mots, un par ligne
+    arbre channel=aucun docker=oui ${cas##*|}
+    DOCTOR_RC="${cas%%|*}" DOCTOR_LIGNE="$(cut -d'|' -f2 <<<"$cas")" ws
+    [ "$status" -eq 1 ] || { echo "$cas : $output"; return 1; }
+    [[ "$output" == *"le préflight refuse ce terrain"*"$(cut -d'|' -f2 <<<"$cas")"* ]]
+    refute_out 'OK    00-preflight: décor' <<<"$output"
+    refute grep -qE '^SUDO:|^PROVISION:apply' "$TRACE"
+    [[ "$output" != *"Privilèges root requis"* ]]
+    sans_faits_restants
+  done
+}
+
+@test "un --substrate que la mesure contredit sort avant sudo, sur le vrai provision, avec ce qu'il a dit" {
+  arbre
+  local d; d="$(dirname "$WS")"
+  cp "$BATS_TEST_DIRNAME/../provision" "$d/provision"
+  mkdir -p "$d/modules.d"
+  printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: root\n. "${PROVISION_LIB:?}"\np_fact channel aucun\nverdict_check\n' > "$d/modules.d/00-preflight.sh"
+  # le décor ne porte ni /.dockerenv ni noyau Microsoft : ce système se mesure linux
+  ws --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la mesure n'a rendu aucun fait"*"--substrate docker : ce système se mesure « linux »"* ]]
+  refute grep -q '^SUDO:' "$TRACE"
+  [[ "$output" != *"Privilèges root requis"* ]]
+  sans_faits_restants
+}
+
+@test "un fichier temporaire impossible à créer arrête la mesure en le nommant, sans sudo" {
+  arbre channel=aucun
+  TMPDIR="$BATS_TEST_TMPDIR/nulle-part" ws
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun fichier temporaire ne se crée dans $BATS_TEST_TMPDIR/nulle-part"*"corriger TMPDIR"* ]]
+  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+}
+
 # ─── le chemin root : provisionnement, acceptation, sortie ──────────────────────────────────────
 
 @test "root : la mesure reçoit les options de la machine, l'apply les reçoit toutes, l'acceptation suit, la sortie est 0" {
@@ -229,10 +272,12 @@ EOF
   [[ "$output" != *"creds claude"* ]]
 }
 
-@test "root : docker absent sur linux s'annonce en une ligne, et un seul apply pose tout" {
+@test "root : docker absent sur un linux déclaré s'annonce en une ligne, et un seul apply pose tout" {
   local decor
+  # consent=none ne passe pas le préflight ; mesuré tel quel, il n'annonce rien pour autant
   for decor in "substrat=linux docker=absent consent=env" \
                "substrat=linux docker=oui consent=env" \
+               "substrat=linux docker=absent consent=none" \
                "substrat=wsl docker=absent consent=sans-objet"; do
     # shellcheck disable=SC2086 # les faits sont des mots, un par ligne
     arbre channel=aucun $decor
@@ -240,7 +285,7 @@ EOF
     [ "$status" -eq 0 ] || { echo "$decor : $output"; return 1; }
     [ "$(grep '^PROVISION:' "$TRACE")" = "$(printf 'PROVISION:doctor --only 00-preflight\nPROVISION:apply')" ] \
       || { echo "$decor : $(cat "$TRACE")"; return 1; }
-    if [[ "$decor" == "substrat=linux docker=absent"* ]]; then
+    if [[ "$decor" == "substrat=linux docker=absent consent=env" ]]; then
       [ "$(grep -c 'docker est absent : le provisionnement pose docker-ce' <<<"$output")" -eq 1 ]
     else
       refute_out 'docker est absent' <<<"$output"
@@ -450,6 +495,30 @@ EOF
   ws --from "$BATS_TEST_TMPDIR/kits/vide.tar.gz"
   [ "$status" -eq 1 ]
   [[ "$output" == *"ne porte pas un kit LCARS (0 racine(s)"* ]]
+  refute grep -q '^SUDO:' "$TRACE"
+}
+
+@test "--from : un tar tronqué ne touche pas au kit déjà détaré de ce nom, et aucun échafaudage ne reste" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre channel=aucun channel_tree=source
+  local k; k="$(kit k7 --sans-sha256)"
+  ws --from "$k"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local kits="$HOME/.lcars/kits"
+  [ "$(cat "$kits/k7/lcars_install/.source-revision")" = cafe1234 ]
+  # le même nom, une autre révision : un fichier en tête d'archive, puis un gros fichier coupé en route
+  local st="$BATS_TEST_TMPDIR/stage-tronque"; mkdir -p "$st/lcars_install"
+  printf 'beef5678\n' > "$st/lcars_install/.source-revision"
+  head -c 4000000 /dev/urandom > "$st/lcars_install/gros"
+  tar -czf "$k" -C "$st" lcars_install/.source-revision lcars_install/gros
+  truncate -s 1000000 "$k"
+  : > "$TRACE"
+  ws --from "$k"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"détarage de $k en échec"* ]]
+  [ "$(cat "$kits/k7/lcars_install/.source-revision")" = cafe1234 ]
+  [ ! -e "$kits/k7/lcars_install/gros" ]
+  [ -z "$(compgen -G "$kits/.*.partiel" || true)" ]
   refute grep -q '^SUDO:' "$TRACE"
 }
 

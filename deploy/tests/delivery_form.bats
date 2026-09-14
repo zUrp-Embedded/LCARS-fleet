@@ -24,9 +24,8 @@ setup() {
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
 
   STAMP="$RACINE/.source-revision"
-  # le canal, les liens, l'Elixir posé : tout se lit sous le décor, jamais sur la machine
+  # les liens, l'Elixir posé : tout se lit sous le décor, jamais sur la machine
   decor_pose
-  CHANNEL="$LCARS_DECOR_ROOT/etc/lcars/channel"
   ELIXIR_PREFIX="$LCARS_DECOR_ROOT/opt/elixir-"
   mkdir -p "$LCARS_DECOR_ROOT/opt"
 }
@@ -99,9 +98,11 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
     | refute_out 'source-revision'
 }
 
-@test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme erlang, et elixir n'y entre PLUS par apt" {
+@test "TOOLCHAIN : livraison source, erlang et le pin déjà là — rien n'est posé, ni par apt ni par le zip, et le journal n'en note rien" {
   checkout                                   # livraison source : le module travaille
   export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\n' "$BATS_TEST_TMPDIR/apt.trace" > "$DECOR_BIN/apt-get"
+  chmod 0755 "$DECOR_BIN/apt-get"
   # Le pin est DEJA pose sous le décor : le module prend la branche « deja pose » et ne telecharge
   # rien — un temoin ne sort jamais sur le reseau. Un erl doublé répond la majeure du plancher.
   local pin otp
@@ -120,9 +121,10 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   done
   run env PROVISION_LIB="$PROVISION_LIB" PROV_JOURNAL_ACC="$PROV_JOURNAL_ACC" \
       bash "$DEPLOY/modules.d/15-toolchain.sh" apply
-  grep -q '^apt_already .*erlang' "$PROV_JOURNAL_ACC"
   [[ "$output" == *"déjà posé"* ]]
-  refute grep -qE '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
+  [ ! -e "$BATS_TEST_TMPDIR/apt.trace" ]
+  # le journal compte ce que la passe a posé : un paquet trouvé n'y entre pas
+  refute grep -qsE 'erlang|elixir' "$PROV_JOURNAL_ACC"
 }
 
 
@@ -166,47 +168,8 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 
-@test "60-deploy : livraison binaire — \`mix\` n est pas exige" {
-  # La release arrive faite ; `deploy-release.sh` la voit et ne compile pas. Exiger `mix` renvoyait
-  # vers `15-toolchain`, dont l etat-cible en binaire est de ne RIEN poser.
-  local mod="$DEPLOY/modules.d/60-deploy.sh"
-  # ⚠ HORS COMMENTAIRES, pour la meme raison : la prose du correctif CITE le message qu il corrige.
-  local bloc; bloc="$(sed -n "/^apply()/,\$p" "$mod" | grep -vE "^\\s*#")"
-  grep -q 'prov_delivery_is_binary' <<<"$bloc"
-  # l exigence vit DANS la branche source, pas avant elle
-  local n_bin n_mix
-  n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_mix="$(grep -n 'mix absent' <<<"$bloc" | head -1 | cut -d: -f1)"
-  [ "$n_bin" -lt "$n_mix" ]
-}
-
-
-canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la racine du decor
-  local m="$BATS_TEST_TMPDIR/60.sh"
-  sed '/^case "${1:?usage/,$d' "$DEPLOY/modules.d/60-deploy.sh" > "$m"
-  run env PROVISION_MODULE=60-deploy XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR" \
-      bash -c "set -euo pipefail; mkdir -p '$RACINE/runtime/etc'; . '$m' >/dev/null 2>&1; $1"
-}
-
-@test "CANAL : 60-deploy ecrit KIT d'une livraison binaire, SOURCE d'un checkout — le MEME discriminant, pas un second" {
-  paquet;   canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$CHANNEL")" = "kit" ]
-  checkout; canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$CHANNEL")" = "source" ]
-  # et la decision vit dans la LIB (prov_channel_here : binaire -> kit, sinon source), lue aussi par
-  # le preflight et workstation — jamais le tampon par son nom (meme regle que 15/16)
-  local corps; corps="$(sed -n '/^poser_canal()/,/^}/p' "$DEPLOY/modules.d/60-deploy.sh")"
-  grep -q 'prov_channel_write "$(prov_channel_here)"' <<<"$corps"
-  grep -vE '^\s*#' <<<"$corps" | refute_out 'source-revision|prov_delivery'
+# 60-deploy écrit ce canal, sur la livraison que dit le même discriminant : ses témoins le jouent, apply entier
+@test "CANAL : prov_channel_here dit kit d'une livraison binaire, source d'un checkout — le même discriminant, pas un second" {
   paquet;   run lib 'prov_channel_here'; [ "$output" = kit ]
   checkout; run lib 'prov_channel_here'; [ "$output" = source ]
-}
-
-@test "CANAL : 60-deploy ECRIT le canal (poser_canal, dans apply seulement) et ne le LIT jamais" {
-  # Le seul ecrivain du canal sur ce rail est `poser_canal`, et il ne vit que dans `apply()` ; la
-  # lecture est l'affaire du preflight — aucun module ne branche dessus depuis que `deb` est parti.
-  local mod="$DEPLOY/modules.d/60-deploy.sh" code
-  code="$(grep -vE '^\s*#' "$mod")"
-  [ "$(grep -c 'prov_channel_write' <<<"$code")" -eq 1 ]                 # dans poser_canal seul
-  sed -n '/^poser_canal()/,/^}/p' "$mod" | grep -q 'prov_channel_write'
-  sed -n '/^check()/,/^}/p' "$mod" | grep -vE '^\s*#' | refute_out 'poser_canal|prov_channel_write'
-  refute_out 'prov_channel( |$|\))|poseur_is_dpkg|prov_channel_or_verdict|PROV_CHANNEL\b' <<<"$code"
 }

@@ -127,6 +127,19 @@ fn() { run bash -c "set -uo pipefail; source <(sed '/^case \"\${1:?usage/,\$d' '
   [ "$(cat "$CHANNEL")" = source ]
 }
 
+@test "canal : le check ne l'écrit pas ; l'apply l'écrit sans le lire — un autre canal ou une valeur illisible cède à celui de l'arbre" {
+  release_posee; verrouille
+  mod check
+  [ ! -e "$CHANNEL" ]
+  local ancien
+  for ancien in kit 'hors vocabulaire'; do
+    printf '%s\n' "$ancien" > "$CHANNEL"
+    mod apply
+    [ "$status" -eq 0 ] || { echo "canal « $ancien » : $output"; return 1; }
+    [ "$(cat "$CHANNEL")" = source ]
+  done
+}
+
 @test "apply : rien à bâtir sur un prefix resté ouvert après un apply avorté — il est reverrouillé, et le check qui suit est conforme" {
   release_posee; chmod -R 0777 "$PREFIX"
   mod apply

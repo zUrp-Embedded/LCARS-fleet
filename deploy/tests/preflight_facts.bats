@@ -106,9 +106,10 @@ contrat() { # les faits que lisent install.sh et deploy/workstation, dérivés d
   local install="$BATS_TEST_DIRNAME/../../install.sh" poste="$BATS_TEST_DIRNAME/../workstation"
   {
     grep -hvE '^\s*#' "$install" "$poste" | grep -oE '\bfait "?[a-z0-9_]+("|\)| |$)' | sed -E 's/^fait "?//; s/("|\)| )$//'
-    # les deux familles nommées par variable : fait "port_$p" sur la boucle des ports, fait "$t" sur les outils requis
+    # les deux familles nommées par variable : fait "port_$p" sur la boucle des ports, fait "$t" sur les
+    # outils requis, posés ou ajoutés selon le mode
     sed -n 's/^for p in \(.*\); do$/\1/p' "$install" | tr ' ' '\n' | sed 's/^/port_/'
-    grep -ohE 'OUTILS_REQUIS="[a-z ]+"' "$install" | sed 's/.*="\(.*\)"/\1/' | tr ' ' '\n'
+    grep -ohE 'OUTILS_REQUIS\+?="[a-z ]+"' "$install" | sed 's/.*="\(.*\)"/\1/' | tr ' ' '\n' | grep -v '^$'
   } | sort -u
 }
 

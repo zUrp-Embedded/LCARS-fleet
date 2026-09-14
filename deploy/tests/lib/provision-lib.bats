@@ -98,14 +98,15 @@ module_sh() {
 @test "prov_dump_last : les dernières lignes de la sortie capturée, le fichier conservé" {
   module_sh '
     export PROV_DUMP_LINES=2
-    run_capture bash -c "echo l1; echo l2; echo l3; exit 1" || true
+    run_capture bash -c "echo ligne-premiere; echo ligne-deuxieme; echo ligne-troisieme; exit 1" || true
     prov_dump_last
     [ -s "$PROV_LAST_OUT" ]
     rm -f "$PROV_LAST_OUT"
   '
   [ "$status" -eq 0 ]
-  [[ "$output" == *"l2"*"l3"*"conservée"* ]]
-  [[ "$output" != *"l1"* ]]
+  # des lignes qu'aucun nom de fichier temporaire ne contient : le chemin conservé est affiché aussi
+  [[ "$output" == *"ligne-deuxieme"*"ligne-troisieme"*"conservée"* ]]
+  [[ "$output" != *"ligne-premiere"* ]]
 }
 
 @test "run_quiet : un succès se tait et ne compte rien" {

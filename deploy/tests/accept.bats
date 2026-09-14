@@ -33,6 +33,11 @@ setup() {
     "[[ \"\$1\" == passwd && -n \"\$2\" ]] || exit 2" \
     "printf '%s:x:1001:1001::%s:/bin/bash\\n' \"\$2\" '$HOME_DIR'" > "$BINDIR/getent"
   printf '%s\n' '#!/usr/bin/env bash' 'shift 2; [[ "$1" == "--" ]] && shift; exec "$@"' > "$BINDIR/runuser"
+  # les groupes d'un compte : membre de fleet s'il est nommé dans MEMBRES_FLEET ; le reste va au vrai id
+  export MEMBRES_FLEET="$BATS_TEST_TMPDIR/membres-fleet"; printf 'lcars\n' > "$MEMBRES_FLEET"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'if [[ "$1" == -nG ]]; then if grep -qx -- "$2" "$MEMBRES_FLEET"; then echo "$2 fleet"; else echo "$2"; fi; exit 0; fi' \
+    'exec /usr/bin/id "$@"' > "$BINDIR/id"
   chmod 0755 "$BINDIR"/*
   # fleet n'est que dans le PATH de la session de l'humain : le lanceur ne le voit pas
   FLEET_BIN="$BATS_TEST_TMPDIR/fleet-bin"; mkdir -p "$FLEET_BIN"
@@ -47,7 +52,7 @@ fleet_stub() { # fleet_stub <vivant|mort|start-casse>
   {
     printf '%s\n' '#!/usr/bin/env bash'
     printf '%s\n' "ETAT='$etat'"
-    printf '%s\n' 'pwd >> "$MARQUEUR.cwd"'
+    printf '%s\n' 'pwd >> "$MARQUEUR.cwd"; printf "%s\n" "${USER:-}" >> "$MARQUEUR.user"'
     printf '%s\n' 'case "${1:-}" in'
     printf '%s\n' '  status)'
     printf '%s\n' '    printf "fleet: build deadbeef (source=release)\n"'
@@ -63,7 +68,7 @@ fleet_stub() { # fleet_stub <vivant|mort|start-casse>
   } > "$FLEET_BIN/fleet"
   chmod 0755 "$FLEET_BIN/fleet"
   export MARQUEUR="$BATS_TEST_TMPDIR/beam.vivant"
-  rm -f "$MARQUEUR" "$MARQUEUR.cwd"
+  rm -f "$MARQUEUR" "$MARQUEUR.cwd" "$MARQUEUR.user"
 }
 
 accept_joue() { # accept_joue [option d'accept…] — le script entier, en root de namespace, sous le décor
@@ -229,12 +234,38 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
   [ "$(sort -u "$MARQUEUR.cwd")" = "$HOME_DIR" ]
 }
 
-@test "sur un banc, la fleet démarre sans credentials claude et reste debout" {
+@test "sur un banc, la fleet démarre sous l'humain de démonstration, sans credentials claude, et reste debout" {
   fleet_stub mort
-  LCARS_BENCH=1 accept_joue
+  # un autre humain de fleet le précède dans la table : c'est l'humain de démonstration qui est retenu
+  printf 'root:x:0:0::/root:/bin/bash\nsiege:x:1000:1000::/home/siege:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nlcars:x:1002:1002::%s:/bin/bash\n' "$HOME_DIR" > "$LCARS_DECOR_ROOT/etc/passwd"
+  printf 'alice\nlcars\n' > "$MEMBRES_FLEET"
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars accept_joue
   [[ "$output" == *"OUI   fleet : démarre et vivante sous « lcars », laissée debout"* ]]
+  [ "$(sort -u "$MARQUEUR.user")" = lcars ]
   [ -e "$MARQUEUR" ]
   [ -e "$MARQUEUR.sans-claude" ]
+}
+
+@test "sur un banc, un humain de démonstration absent des humains de fleet est un manque nommé : rien ne démarre sous un autre" {
+  fleet_stub mort
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=demo accept_joue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NON   fleet : l'humain de démonstration du banc « demo » n'est pas matérialisé parmi les humains de fleet de cette machine"* ]]
+  refute_out '« lcars »' <<<"$output"
+  [ ! -e "$MARQUEUR" ]
+  [ ! -e "$MARQUEUR.user" ]
+}
+
+@test "hors banc, un compte humain hors du groupe fleet n'est pas un humain de fleet : la fleet démarre sous un membre, ou rien n'est démarré" {
+  fleet_stub mort
+  printf 'root:x:0:0::/root:/bin/bash\nsiege:x:1000:1000::/home/siege:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nlcars:x:1002:1002::%s:/bin/bash\n' "$HOME_DIR" > "$LCARS_DECOR_ROOT/etc/passwd"
+  accept_joue
+  [[ "$output" == *"OUI   fleet : démarre et vivante sous « lcars »"* ]]
+  [ "$(sort -u "$MARQUEUR.user")" = lcars ]
+  : > "$MEMBRES_FLEET"
+  accept_joue
+  [[ "$output" == *"---   fleet : aucun humain de fleet sur cette machine (membre du groupe « fleet »)"* ]]
+  refute_out '« alice »|« lcars »' <<<"$output"
 }
 
 @test "start en échec : refus qui renvoie vers la plainte du lanceur" {

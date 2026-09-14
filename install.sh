@@ -7,8 +7,9 @@
 #     install.sh — l'installeur de LCARS-FLEET.
 #
 #     Il mesure la machine, montre ce qu'il va faire, puis délègue. Le système n'est modifié qu'après
-#     le bilan, et ce script ne demande jamais sudo lui-même. Pipé, ou avec --from-release, il
-#     télécharge d'abord le kit de la version, le vérifie et le détare dans ~/.lcars/kits/.
+#     le bilan, et ce script ne demande jamais sudo lui-même. Le script d'une release, pipé ou avec
+#     --from-release, télécharge d'abord le kit de sa version, le vérifie et le détare dans
+#     ~/.lcars/kits/.
 #
 #       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
@@ -18,11 +19,13 @@
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
 #                       démonstration. Sans ce drapeau, une forge existante est requise
 #                       (FORGE_BASE_URL).
-#       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau).
+#       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Un refus
+#                       du bilan sort en 1 avant la grille ; avec --workstation, un terrain que le
+#                       préflight refuse en est un.
 #       --dry-run       tout jusqu'au bilan, puis la commande qui serait exécutée.
 #                       Pipés sans kit déjà posé, --check et --dry-run s'arrêtent avant de télécharger.
-#       --from-release  depuis un clone : installer la dernière version publiée du dépôt au lieu de
-#                       l'arbre courant (son installeur, vérifié par sa somme, est rejoué).
+#       --from-release  depuis un clone : télécharge l'installeur de la dernière release du dépôt,
+#                       le vérifie contre sa somme publiée et le rejoue avec les mêmes options.
 #       --repo URL      le dépôt dont les releases sont tirées (défaut : celui de cette version).
 #       --substrate S   le substrat attendu : wsl, linux ou docker ; un substrat que la mesure
 #                       contredit est refusé.
@@ -419,8 +422,8 @@ else
   DOCKER_HOST_VU="$(fait docker_host)"
   if [[ -n "$DOCKER_HOST_VU" ]]; then export DOCKER_HOST="$DOCKER_HOST_VU"; else unset DOCKER_HOST; fi
 fi
-# l'installation dans ce système est ce que le préflight juge : un plancher en dérive (RAM, disque, arch,
-# WSL1…) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
+# l'installation dans ce système est ce que le préflight juge : un plancher en dérive (OS, arch, RAM,
+# disque) ou un canal illisible arrêterait son apply, il arrête ici avant le choix
 if [[ "$MODE" == "workstation" && "$PREFLIGHT_RC" -ne 0 ]]; then
   stop "${R}Le préflight refuse ce terrain pour l'installation dans ce système.${N} Ce qu'il constate :" \
        "$(printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /')"
@@ -484,7 +487,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
 fi
 
 # ─── 7. l'instance, quand on va la posséder ───────────────────────────────────────────────────
-CONSENTI=0
+SANS_TERMINAL_DIT=0
 if [[ "$MODE" == "workstation" ]]; then
   SIGNAUX=""
   apt="$(fait apt_installs)"
@@ -507,12 +510,13 @@ if [[ "$MODE" == "workstation" ]]; then
         read -r ans <&3 || stop "Rien n'a été fait."
         exec 3<&-
         case "$ans" in
-          ""|o|O|oui|y|Y|yes) CONSENTI=1 ;;
+          ""|o|O|oui|y|Y|yes) ;;
           n|N|non|no) stop "Rien n'a été fait." ;;
           *) stop "Réponse « $ans » non comprise — rien n'a été fait." ;;
         esac
       else
         echo "  (sans terminal, l'installation continue : le terrain est jetable)"
+        SANS_TERMINAL_DIT=1
       fi
     fi
     echo ""
@@ -550,16 +554,14 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 echo "  ${G}$RAPPEL${N}"
 echo ""
-# la réponse à « Continuer ? » est déjà le consentement : une seconde invite ne décide rien de plus
-if [[ "$CONSENTI" -eq 0 ]]; then
-  echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
-  echo ""
-  if { exec 3< /dev/tty; } 2>/dev/null; then
-    read -r _ <&3 || stop "Rien n'a été fait."
-    exec 3<&-
-  else
-    echo "  Pas de terminal : l'installation continue."
-  fi
+# la pause se joue à chaque passe, « Continuer ? » répondu ou non : c'est le dernier moment avant que le système change
+echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
+echo ""
+if { exec 3< /dev/tty; } 2>/dev/null; then
+  read -r _ <&3 || stop "Rien n'a été fait."
+  exec 3<&-
+elif [[ "$SANS_TERMINAL_DIT" -eq 0 ]]; then
+  echo "  Pas de terminal : l'installation continue."
 fi
 rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
 [[ "${#PRE[@]}" -eq 0 ]] || "${PRE[@]}" || exit 1

@@ -45,11 +45,19 @@ unset _v
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
-FACTS_FILE=""
+FACTS_FILE="" MESURE_OUT="" MESURE_RC=0
 fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
-mesurer() { # mesurer <options de provision…> — le préflight sous ces options, ses faits dans FACTS_FILE
-  FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")"
-  env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight "$@" >/dev/null 2>&1 || true
+mesurer() { # mesurer <options de provision…> — le préflight sous ces options : ses faits dans FACTS_FILE, son rapport dans MESURE_OUT
+  FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
+    || fail "aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp} — la mesure y écrit ses faits" "corriger TMPDIR, puis relancer"
+  MESURE_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight "$@" 2>&1)" || MESURE_RC=$?
+}
+
+# un refus que la mesure porte déjà se dit avant l'escalade : il ne coûte pas un mot de passe
+refuser_terrain() {
+  [[ -s "$FACTS_FILE" ]] || fail "la mesure n'a rendu aucun fait — rien n'a été posé. Ce que provision a dit :" "$MESURE_OUT"
+  [[ "$MESURE_RC" -eq 0 ]] || fail "le préflight refuse ce terrain — rien n'a été posé. Ce qu'il constate :" \
+    "$(grep -E '^(DRIFT|FAIL|ERREUR) ' <<<"$MESURE_OUT" || printf '%s\n' "$MESURE_OUT")"
 }
 
 # le DOCKER_HOST qui traverse est celui que le préflight a vu répondre : sous root, sans lui, seule la socket système est sondée
@@ -101,12 +109,19 @@ kit_deballer() { # kit_deballer <kit.tar.gz> → la racine du kit détaré
     echo "  kit : aucun $tar.sha256 à côté — le kit n'est pas vérifié, l'installation continue" >&2
   fi
   nom="$(basename "$tar" .tar.gz)"; dest="$HOME/.lcars/kits/$nom"
-  mkdir -p "$dest" && tar -xzf "$tar" -C "$dest" || fail "--from : détarage de $tar dans $dest en échec"
+  # le kit se détare dans un échafaudage : seul un détarage complet qui porte un kit prend la place de dest
+  local echafaudage="$HOME/.lcars/kits/.$nom.partiel"
+  rm -rf "$echafaudage"
+  { mkdir -p "$echafaudage" && tar -xzf "$tar" -C "$echafaudage"; } \
+    || { rm -rf "$echafaudage"; fail "--from : détarage de $tar en échec — $dest n'a pas été touché"; }
   local -a racines=()
-  mapfile -t racines < <(compgen -G "$dest/*/$PROV_SOURCE_STAMP" || true)
+  mapfile -t racines < <(compgen -G "$echafaudage/*/$PROV_SOURCE_STAMP" || true)
   [[ "${#racines[@]}" -eq 1 ]] \
-    || fail "--from : $dest ne porte pas un kit LCARS (${#racines[@]} racine(s) marquée(s) $PROV_SOURCE_STAMP, une attendue)"
-  dirname "${racines[0]}"
+    || { rm -rf "$echafaudage"; fail "--from : $tar ne porte pas un kit LCARS (${#racines[@]} racine(s) marquée(s) $PROV_SOURCE_STAMP, une attendue)"; }
+  rm -rf "$dest"
+  mv "$echafaudage" "$dest" || fail "--from : $echafaudage ne prend pas la place de $dest"
+  racines[0]="${racines[0]#"$echafaudage"}"
+  dirname "$dest${racines[0]}"
 }
 
 # Les identifiants s'impriment avant que leur fichier parte, sur toute sortie, INT et TERM compris :
@@ -197,6 +212,7 @@ cmd_up() {
   mesurer ${mesure[@]+"${mesure[@]}"}
   [[ -n "$from" ]] || voulu="$(prov_channel_here)"
   refuser_melange "$voulu"
+  refuser_terrain
 
   # wrapper, lib, provision et accept viennent tous du kit, jamais un mélange avec le checkout
   if [[ -n "$from" ]]; then
@@ -217,7 +233,7 @@ cmd_up() {
 
   PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")"
   export PROV_ANNOUNCE_FILE
-  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" ]]; then
+  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" == "env" ]]; then
     echo "  docker est absent : le provisionnement pose docker-ce (12-docker-engine) avant la forge."
   fi
 

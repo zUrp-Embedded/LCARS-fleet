@@ -98,13 +98,23 @@ check_ci() {
   fi
 }
 
-# 3. la fleet peut démarrer, sous un humain de fleet de cette machine, depuis son home et avec le PATH de sa session
+# 3. la fleet peut démarrer, sous un humain de fleet de cette machine, depuis son home et avec le PATH de sa session ;
+#    sur un banc, sous l'humain de démonstration que le banc nomme et que la passe a matérialisé
 check_fleet_start() {
-  local population rc=0 login
+  local population rc=0 login="" h
   population="$(fleet_humans 2>&1)" || rc=$?
   [[ "$rc" -eq 0 ]] || { skip "fleet : ${population#fleet_humans: } ; rien à démarrer"; return; }
-  login="${population%%$'\n'*}"
-  [[ -n "$login" ]] || { skip "fleet : aucun humain de fleet sur cette machine — personne n'est encore inscrit sur la forge (team « $PROV_HUMANS_TEAM ») : rien à démarrer"; return; }
+  if [[ "${LCARS_BENCH:-}" == 1 ]]; then
+    while read -r h; do
+      if [[ -n "$h" && "$h" == "${LCARS_BUILTIN_HUMAN:-}" ]]; then login="$h"; fi
+    done <<<"$population"
+    [[ -n "$login" ]] || { no "fleet : l'humain de démonstration du banc « ${LCARS_BUILTIN_HUMAN:-} » n'est pas matérialisé parmi les humains de fleet de cette machine — la fleet du banc n'a personne sous qui démarrer"; return; }
+  else
+    while read -r h; do
+      if [[ -n "$h" && -z "$login" ]] && prov_in_group "$h" "$PROV_FLEET_GROUP"; then login="$h"; fi
+    done <<<"$population"
+    [[ -n "$login" ]] || { skip "fleet : aucun humain de fleet sur cette machine (membre du groupe « $PROV_FLEET_GROUP ») — personne n'est encore inscrit sur la forge (team « $PROV_HUMANS_TEAM ») : rien à démarrer"; return; }
+  fi
   [[ "$EUID" -eq 0 ]] || { no "fleet : démarrer la fleet sous « $login » demande root — à rejouer sous « sudo »"; return; }
   command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }
   PROV_HUMAN="$login"

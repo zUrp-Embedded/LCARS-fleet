@@ -550,7 +550,9 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   porte "$a" --workstation --bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"traces d'usage"*"openssh-server (2026-09-11)"*"comptes humains : temoin,alice"*"sans terminal, l'installation continue"* ]]
-  [[ "$output" == *"WORKSTATION:up"* ]]
+  [[ "$output" == *"Entrée pour continuer"*"WORKSTATION:up"* ]]
+  # l'absence de terminal se dit une fois, pas à la question puis à la pause
+  [ "$(grep -ciE 'sans terminal|pas de terminal' <<<"$output")" -eq 1 ]
 }
 
 @test "une instance déjà posée par LCARS ne pose pas la question : c'est une mise à jour" {
@@ -604,12 +606,14 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
-@test "une réponse à « Continuer ? » vaut la décision : aucune seconde invite ne suit" {
+@test "la pause se joue même quand « Continuer ? » a répondu : Entrée part, Ctrl-D à la pause arrête" {
   command -v script >/dev/null || skip "script (util-linux) absent"
   local a; a="$(_arbre comptes_humains=temoin,alice)"
-  run bash -c "printf 'o\n' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
-  [[ "$output" == *"Continuer ? [O/n]"*"WORKSTATION:up"* ]]
-  [[ "$output" != *"Entrée pour continuer"* ]]
+  run bash -c "printf 'o\n\n' | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
+  [[ "$output" == *"Continuer ? [O/n]"*"Entrée pour continuer"*"WORKSTATION:up"* ]]
+  run bash -c "{ printf 'o\n'; sleep 3; } | script -qec \"bash '$a/install.sh' --workstation --bench\" /dev/null"
+  [[ "$output" == *"Continuer ? [O/n]"*"Entrée pour continuer"*"Rien n'a été fait"* ]]
+  [[ "$output" != *"WORKSTATION:up"* ]]
 }
 
 @test "à la pause, un terminal sans réponse (Ctrl-D) est un abandon : le délégué ne part pas" {

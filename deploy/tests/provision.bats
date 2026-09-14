@@ -303,7 +303,7 @@ EOF
   export STUB_RC_PRE=1
   run "$SANDBOX/provision" apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ARRÊT"*"le préflight refuse ce terrain"* ]]
+  [[ "$output" == *"ARRÊT"*"le préflight refuse ce terrain (ses lignes FAIL ci-dessus)"*"TERRAIN REFUSÉ par le préflight"* ]]
   grep -q "00-preflight:apply" "$RUN_LOG"
   refute grep -q "20-suivant" "$RUN_LOG"
   : > "$RUN_LOG"
@@ -312,17 +312,61 @@ EOF
 }
 
 @test "un plancher en dérive au préflight arrête l'apply comme un échec : rien d'autre n'est joué, sortie 1" {
-  # RAM, disque, arch, bash, OS ou WSL1 sous le plancher rendent 2 à l'apply du préflight : le terrain ne tiendra pas l'installation
+  # RAM, disque, arch ou OS sous le plancher rendent 2 à l'apply du préflight : le terrain ne tiendra pas l'installation
   terrain wsl
   stub_module 00-preflight any any STUB_RC_PRE
   stub_module 20-suivant any any
   export STUB_RC_PRE=2
   run "$SANDBOX/provision" apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"ARRÊT"*"le préflight refuse ce terrain"* ]]
-  [[ "$output" == *"échecs: 1"* ]]
+  # le constat renvoie aux seules lignes affichées : un drift n'écrit aucune ligne FAIL
+  [[ "$output" == *"ARRÊT"*"le préflight refuse ce terrain (ses lignes DRIFT ci-dessus)"* ]]
+  [[ "$output" == *"échecs: 1"*"TERRAIN REFUSÉ par le préflight"* ]]
+  refute_out 'lignes FAIL|EN ÉCHEC' <<<"$output"
   [[ "$output" != *"Rien n'est cassé"* ]]
   refute grep -q "20-suivant" "$RUN_LOG"
+}
+
+@test "un préflight mort avant son verdict arrête l'apply, et une ligne le dit, que la garde de la lib ait parlé ou non" {
+  terrain wsl
+  stub_module 00-preflight any any STUB_RC_PRE
+  stub_module 20-suivant any any
+  STUB_RC_PRE=127 run "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ERREUR 00-preflight: mort avant de rendre son verdict (rc=127)"*"ARRÊT"*"(la ligne ERREUR ci-dessus)"* ]]
+  refute grep -q "20-suivant" "$RUN_LOG"
+  mort_module 00-preflight 1
+  run "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [ "$(grep -c 'ERREUR 00-preflight.*mort avant de rendre son verdict' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"ARRÊT"*"(la ligne ERREUR ci-dessus)"* ]]
+  refute grep -q "20-suivant" "$RUN_LOG"
+}
+
+@test "curl et git absents ne sont pas un refus : le vrai préflight les rend en faits, et 10-packages, qui les pose, est joué" {
+  terrain linux
+  cp "$MODULES/00-preflight.sh" "$SANDBOX/modules.d/"
+  stub_module 10-packages "wsl linux docker" any
+  # un terrain sain sous le décor : mémoire et disque au-dessus des planchers, docker absent (un avertissement sur linux)
+  mkdir -p "$LCARS_DECOR_ROOT/proc"
+  printf 'MemTotal:       8388608 kB\n' > "$LCARS_DECOR_ROOT/proc/meminfo"
+  printf '#!/usr/bin/env bash\nprintf "Filesystem 1048576-blocks Used Available Capacity Mounted\\nfaux 100000 0 90000 1%%%% /\\n"\n' > "$DECOR_BIN/df"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$DECOR_BIN/docker"
+  chmod 0755 "$DECOR_BIN/df" "$DECOR_BIN/docker"
+  local sans="$BATS_TEST_TMPDIR/sans-git-curl" d f n; mkdir -p "$sans"
+  for d in /usr/sbin /usr/bin /sbin /bin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      n="${f##*/}"
+      [[ -x "$f" && "$n" != git && "$n" != curl && ! -e "$sans/$n" ]] || continue
+      ln -s "$f" "$sans/$n"
+    done
+  done
+  run env PATH="$DECOR_BIN:$sans" LCARS_ALLOW_ANY_HOST=1 "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"=== 00-preflight (apply) ==="*"OK    00-preflight: arch"*"=== 10-packages (apply) ==="* ]]
+  [ "$(cat "$RUN_LOG")" = "10-packages:apply" ]
+  refute_out 'ARRÊT' <<<"$output"
 }
 
 @test "apply --only garde le préflight comme barrière : un terrain refusé ne reçoit pas le module choisi" {

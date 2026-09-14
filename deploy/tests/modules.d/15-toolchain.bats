@@ -113,7 +113,8 @@ mod() {
   [[ "$output" == *"OK    15-toolchain: Elixir $PIN posé ($HOME_PIN), variante OTP $OTP"* ]]
   [ ! -e "$LCARS_DECOR_ROOT/opt/.elixir-${PIN}.zip" ]
   [ ! -e "$BATS_TEST_TMPDIR/apt.trace" ]
-  grep -q 'apt_already erlang' "$PROV_JOURNAL_ACC"
+  # le journal compte ce que la passe a posé par apt : erlang trouvé n'y entre pas
+  refute grep -qs erlang "$PROV_JOURNAL_ACC"
 }
 
 @test "l'URL du zip est celle du pin officiel — un LCARS_ELIXIR_ZIP_URL exporté n'y change rien" {

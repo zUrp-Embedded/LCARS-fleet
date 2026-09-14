@@ -29,7 +29,8 @@
 #          runner doctor 0 conforme · 1 drift · 2 erreur
 #
 #   --substrate S    wsl, linux ou docker : celui que ce système mesure (docker si /.dockerenv ou
-#                    LCARS_DOCKER=1, wsl sous un noyau Microsoft, linux sinon) ; un autre est refusé
+#                    LCARS_DOCKER=1, wsl sous un noyau Microsoft, linux sinon) ; un autre est refusé,
+#                    sauf par list, qui lit les en-têtes du substrat nommé
 #   --only M         ce module seulement, répétable — nom complet ou préfixe numérique
 #   --human USER     l'humain que les modules servent (défaut : SUDO_USER, sinon l'appelant)
 #   --env FILE       fichier KEY=VALUE sourcé avant tout
@@ -225,7 +226,7 @@ run_module() {
 }
 
 # ─── Exécution ──────────────────────────────────────────────────────────────────────────────────
-total=0 ok=0 drift=0 failed=0
+total=0 ok=0 drift=0 failed=0 REFUS=0
 declare -a REPORT=()
 
 for i in "${!SELECTED[@]}"; do
@@ -240,10 +241,17 @@ for i in "${!SELECTED[@]}"; do
   fi
   rc=0
   run_module "$mod" "$name" "$eff" || rc=$?
-  # un plancher en dérive est un refus : le préflight ne rend « conforme » qu'un terrain où l'installation peut tenir
+  # tout verdict du préflight autre que « convergé » refuse le terrain, un plancher en dérive compris
   if [[ "$CMD" == apply && "$name" == 00-* && "$rc" -ne 0 ]]; then
-    failed=$((failed + 1)); REPORT+=("$name=FAIL")
-    echo "${_PR}ARRÊT${_PN} : le préflight refuse ce terrain (lignes DRIFT et FAIL ci-dessus) — aucun autre module n'est joué" >&2
+    failed=$((failed + 1)); REPORT+=("$name=FAIL"); REFUS=1
+    case "$rc" in
+      1) constat="ses lignes FAIL ci-dessus" ;;
+      2) constat="ses lignes DRIFT ci-dessus" ;;
+      3) constat="la ligne ERREUR ci-dessus" ;;
+      *) echo "${_PR}ERREUR $name:${_PN} mort avant de rendre son verdict (rc=$rc)" >&2
+         constat="la ligne ERREUR ci-dessus" ;;
+    esac
+    echo "${_PR}ARRÊT${_PN} : le préflight refuse ce terrain ($constat) — aucun autre module n'est joué" >&2
     break
   fi
   case "$CMD:$eff:$rc" in
@@ -315,7 +323,9 @@ else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi
   fi
-  if [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
+  if [[ "$REFUS" -eq 1 ]]; then
+    echo "  ${_PR}→ TERRAIN REFUSÉ${_PN} par le préflight — aucun module n'a été joué après lui ; son constat est au-dessus."
+  elif [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
     echo "  ${_PR}→ EN ÉCHEC${_PN} sur $failed module(s) — voir les lignes FAIL ci-dessus."
     [[ "$drift" -gt 0 ]] && \
       echo "    ($drift autre(s) module(s) en DRIFT : état-cible non tenu, souvent en conséquence.)"
