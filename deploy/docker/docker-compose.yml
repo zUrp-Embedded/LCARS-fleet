@@ -27,8 +27,9 @@ name: lcars
 
 services:
   lcars:
-    # une release publiée, jamais une tête de branche : le tag est immuable, `missing` suffit
-    image: "${LCARS_IMAGE:-ghcr.io/zurp-embedded/lcars-fleet:v0.9-beta}"
+    # dans un checkout, l'image que « deploy/container build » bâtit ; dans un kit et le tiroir d'une version,
+    # `deploy/pack.sh` inscrit ici l'image de cette version. Un tag de version est immuable : `missing` suffit
+    image: "${LCARS_IMAGE:-lcars-fleet:local}"
     pull_policy: missing
     hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:

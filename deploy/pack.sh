@@ -135,6 +135,19 @@ say "doc du deck (npm ci + build, base $SITE_BASE)…"
   || die "build du site en échec ($SITE_SRC)"
 say "doc bâtie : $(find "$SITE_SRC/dist" -type f | wc -l) fichier(s)"
 
+# shellcheck source=lib/forge-publish.sh
+. deploy/lib/forge-publish.sh
+# l'image de la version, telle que --publish la pousse : l'installeur la nomme pour la tirer ; sans image ni forge, il ne nomme rien
+IMAGE_REMOTE=""
+if [[ "$IMAGE" -eq 1 && -n "$FORGE" && -n "$OWNER" ]]; then
+  _registry="${LCARS_PACK_REGISTRY:-}"
+  if [[ -z "$_registry" ]]; then
+    if [[ "$(fp_dialect "$FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${FORGE#*://}"; _registry="${_registry%%/*}"; fi
+  fi
+  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
+fi
+IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
+
 # le kit : l'arbre suivi (git archive HEAD), la release et la doc bâties, sous une racine fixe, avec sa révision
 ROOT="lcars_install"
 say "tar → $OUT  (racine : $ROOT/)"
@@ -145,6 +158,15 @@ mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive en échec"
 printf '%s\n' "$REV" > "$STAGE/$ROOT/$PROV_SOURCE_STAMP"
 say "révision estampillée : $REV"
+# le compose d'un checkout nomme l'image locale ; celui du kit nomme l'image de sa version, publiée ou bâtie ici
+if [[ "$IMAGE" -eq 1 ]]; then
+  _compose="$STAGE/$ROOT/deploy/docker/docker-compose.yml"
+  _image_version="${IMAGE_REMOTE:-$IMAGE_NAME:$TAG}"
+  grep -qF '${LCARS_IMAGE:-lcars-fleet:local}' "$_compose" \
+    || die "deploy/docker/docker-compose.yml ne nomme plus l'image par « \${LCARS_IMAGE:-lcars-fleet:local} » : le kit ne saurait pas y inscrire $_image_version"
+  sed -i "s|\${LCARS_IMAGE:-lcars-fleet:local}|\${LCARS_IMAGE:-$_image_version}|" "$_compose"
+  say "compose du kit : image $_image_version"
+fi
 mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
 cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
 mkdir -p "$STAGE/$ROOT/$SITE_SRC"
@@ -164,19 +186,8 @@ DIST="$PACK_DIR/dist/$TAG"
 rm -rf "$DIST"
 mkdir -p "$DIST"
 ln -f "$OUT" "$OUT.sha256" "$DIST/"
-# le compose lit les constantes de l'installeur : elles voyagent à côté de lui
-cp -f deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json deploy/installer-constants.env "$DIST/"
-# shellcheck source=lib/forge-publish.sh
-. deploy/lib/forge-publish.sh
-# l'image de la version, telle que --publish la pousse : l'installeur la nomme pour la tirer ; sans image ni forge, il ne nomme rien
-IMAGE_REMOTE=""
-if [[ "$IMAGE" -eq 1 && -n "$FORGE" && -n "$OWNER" ]]; then
-  _registry="${LCARS_PACK_REGISTRY:-}"
-  if [[ -z "$_registry" ]]; then
-    if [[ "$(fp_dialect "$FORGE")" == github ]]; then _registry=ghcr.io; else _registry="${FORGE#*://}"; _registry="${_registry%%/*}"; fi
-  fi
-  IMAGE_REMOTE="$_registry/$(tr '[:upper:]' '[:lower:]' <<<"$OWNER/$REPO"):$TAG"
-fi
+# le compose lit les constantes de l'installeur : elles voyagent à côté de lui ; c'est la copie du kit, qui nomme l'image de la version
+cp -f "$STAGE/$ROOT/deploy/docker/docker-compose.yml" deploy/docker/lcars-hardened-seccomp.json deploy/installer-constants.env "$DIST/"
 if [[ -n "$MINISIGN_SECKEY" ]]; then
   minisign -S -s "$MINISIGN_SECKEY" -m "$DIST/${NAME}.tar.gz" || die "signature du kit refusée par minisign"
   say "kit signé : $DIST/${NAME}.tar.gz.minisig"
@@ -190,7 +201,6 @@ say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) f
 # l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile) ;
 # sans attestation, le stockage containerd garde une image Docker v2 simple, et non un index OCI que des clients
 # de registre (Portainer) ne savent pas demander
-IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
 if [[ "$IMAGE" -eq 1 ]]; then
   say "image → $IMAGE_NAME:$TAG (le kit posé par les modules, puis leur doctor)…"
   "$PROV_DOCKER_BIN" build \

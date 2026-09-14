@@ -609,7 +609,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 
 @test "MUR 17: l'image et le port SSH du conteneur ont UNE declaration dans deploy/container, et le compose replie sur la meme valeur" {
   # deploy/container pose et exporte (compose est un fils) ; le compose se joue aussi nu, avec les
-  # constantes : son repli SSH est celui de container, et son image par défaut est une release publiée
+  # constantes : son repli SSH est celui de container, et son image par défaut est celle que le checkout bâtit
   local container="$REPO/deploy/container" compose="$REPO/deploy/docker/docker-compose.yml"
   local port img
   port="$(sed 's/#.*//' "$container" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_SSH_PORT:=([^}]+)\}".*$/\1/p' | head -n1)"
@@ -626,8 +626,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$container" || { echo "MUR 17 rompu — LCARS_SSH_PORT non exportee par deploy/container : compose ne la verra pas" >&2; rompu=1; }
   grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$container" || { echo "MUR 17 rompu — LCARS_IMAGE non exportee par deploy/container : compose ne la verra pas" >&2; rompu=1; }
   grep -qF -- '${LCARS_SSH_PORT:-127.0.0.1:${PROV_SSH_PORT_DEFAULT:?' "$compose" || { echo "MUR 17 rompu — docker-compose.yml ne replie pas LCARS_SSH_PORT sur 127.0.0.1 et la constante" >&2; rompu=1; }
-  # une release : un tag qui commence par un chiffre, ou par v puis un chiffre, après le dernier / — jamais :main ni :latest ni un nom nu
-  grep -qE 'image: "\$\{LCARS_IMAGE:-[^} ]*/[^}/:]+:v?[0-9][^}/:]*\}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut une release taguee" >&2; rompu=1; }
-  grep -qE 'image: "\$\{LCARS_IMAGE:-[^}]*:(main|latest)\}"' "$compose" && { echo "MUR 17 rompu — l'image par defaut vise une tete de branche" >&2; rompu=1; }
+  # un checkout nomme l'image qu'il bâtit, jamais une image de registre : une version écrite ici se périme à la
+  # suivante (v0.9-beta restée dans le kit de v0.9-beta2). Le kit reçoit l'image de sa version de pack.sh (pack.bats)
+  grep -qF 'image: "${LCARS_IMAGE:-lcars-fleet:local}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut lcars-fleet:local, que pack.sh remplace par l'image de la version" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — le compose la lit et replie sur la meme valeur." >&2; return 1; }
 }

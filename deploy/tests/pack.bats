@@ -30,7 +30,7 @@ setup() {
   done
   printf 'png' > "$R/assets/avatars/a.png"; printf 'ico' > "$R/assets/favicon/f.ico"
   printf '{"name":"doc"}\n' > "$R/assets/github.io/package.json"
-  printf 'services: {}\n' > "$R/deploy/docker/docker-compose.yml"; printf '{}\n' > "$R/deploy/docker/lcars-hardened-seccomp.json"
+  cp "$RACINE_REELLE/deploy/docker/docker-compose.yml" "$R/deploy/docker/"; printf '{}\n' > "$R/deploy/docker/lcars-hardened-seccomp.json"
   printf 'dist\n_build\n' > "$R/.gitignore"
   export GATE_LOG="$BATS_TEST_TMPDIR/gate.log"
   printf '#!/usr/bin/env bash\necho gate >> "$GATE_LOG"\nexit "${STUB_GATE_RC:-0}"\n' > "$R/deploy/gate.sh"; chmod 0755 "$R/deploy/gate.sh"
@@ -240,6 +240,22 @@ publier() { # publier — une publication complète vers une forge https doublé
   [[ "$build" == *" --build-arg GIT_SHA=$HEAD8 "*" -t lcars-fleet:v9.9 -t lcars-fleet:local "* ]]
   # ni provenance ni sbom : l'image publiée est un manifeste simple, pas un index OCI
   [[ "$build" == *" --provenance=false --sbom=false "* ]]
+  # le compose du kit et celui du tiroir nomment l'image publiée de la version, celui du checkout reste local
+  local x="$BATS_TEST_TMPDIR/x"; mkdir -p "$x"; tar -xzf "$LCARS_PACK_DIR/lcars-fleet-v9.9-otp27-$ARCH.tar.gz" -C "$x"
+  grep -qF 'image: "${LCARS_IMAGE:-forge.decor/fleet/lcars-fleet:v9.9}"' "$x/lcars_install/deploy/docker/docker-compose.yml"
+  grep -qF 'image: "${LCARS_IMAGE:-forge.decor/fleet/lcars-fleet:v9.9}"' "$LCARS_PACK_DIR/dist/v9.9/docker-compose.yml"
+  grep -qF 'image: "${LCARS_IMAGE:-lcars-fleet:local}"' "$R/deploy/docker/docker-compose.yml"
+}
+
+@test "sans --publish ni forge, le compose du kit nomme l'image bâtie de la version ; sans image, il garde l'image locale" {
+  docker_double
+  git -C "$R" remote remove origin 2>/dev/null || true
+  LCARS_PACK_TAG=v9.9 pack
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF 'image: "${LCARS_IMAGE:-lcars-fleet:v9.9}"' "$LCARS_PACK_DIR/dist/v9.9/docker-compose.yml"
+  LCARS_PACK_TAG=v9.8 pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF 'image: "${LCARS_IMAGE:-lcars-fleet:local}"' "$LCARS_PACK_DIR/dist/v9.8/docker-compose.yml"
 }
 
 @test "--publish rejoué : l'image du tag déjà publiée à la révision du kit est reprise sans push, tirée sans identifiants, et la release suit" {

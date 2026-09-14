@@ -649,6 +649,18 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [[ "$output" == *"fleet start"* ]]
 }
 
+@test "check en conteneur, bornes d'uid illisibles : la sonde des humains dit sa cause en drift et le verdict tombe, sans mourir" {
+  humans_are
+  sans_systemd
+  container_services_present
+  printf 'UID_MIN 1000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
+  PROV_SUBSTRATE=docker mod check
+  [ "$status" -eq 1 ] || { echo "rc=$status"; echo "$output"; return 1; }
+  printf '%s\n' "$output" | grep -qE "^DRIFT .*humains de fleet non mesurables : la frontiere systeme/humain n'est pas etablie \(UID_MAX illisible"
+  # la sonde continue après la population : les services se mesurent quand même
+  printf '%s\n' "$output" | grep -qE '^OK .*lcars-privileged'
+}
+
 @test "check SANS systemd hors conteneur : services.env et seat.uid, que l'apply pose sans systemd, sont sondés quand même" {
   sans_systemd
   mod check

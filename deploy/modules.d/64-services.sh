@@ -174,7 +174,13 @@ charge_reposee_depuis() {
 
 # une machine neuve n'a aucun humain, et c'est nominal : les gens s'enrôlent sur la forge — dit, pas compté
 probe_fleet_humans() {
-  local found; found="$(fleet_humans | paste -sd' ' -)"
+  local found pourquoi
+  # une population illisible (siège ou bornes d'uid) se dit en drift avec sa cause, elle ne fait pas mourir la sonde
+  if ! pourquoi="$(fleet_humans 2>&1 >/dev/null)"; then
+    p_drift "humains de fleet non mesurables : ${pourquoi#fleet_humans: }"
+    return 0
+  fi
+  found="$(fleet_humans | paste -sd' ' -)"
   p_fact fleet_humans "$found"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"

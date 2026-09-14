@@ -662,6 +662,8 @@ export LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE
 case "$1:$LCARS_IMAGE" in
   up:|pull:) fail "$1: aucune image nommée — ni lcars-fleet:local sur ce daemon, ni celle du compose (« compose config --images » ne la rend pas)" \
                "LCARS_IMAGE=<registre/image:tag> deploy/container $1" ;;
+  pull:lcars-fleet:local) fail "pull: lcars-fleet:local est l'image qu'un checkout bâtit, aucun registre ne la porte — le compose d'un kit nomme l'image de sa version" \
+               "LCARS_IMAGE=<registre/image:tag> deploy/container pull — ou « deploy/container build » pour la bâtir ici" ;;
 esac
 
 case "$1" in

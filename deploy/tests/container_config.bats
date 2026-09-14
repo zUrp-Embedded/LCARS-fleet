@@ -668,10 +668,19 @@ FAKE
   grep -qx "mv -T /home/projects/.LCARS.incoming /home/projects/LCARS" "$BATS_TEST_TMPDIR/conteneur.calls"
 }
 
-@test "pull sans image nommée vise l'image du compose, même quand lcars-fleet:local est sur ce daemon" {
+@test "pull sans image nommée, depuis un kit, vise l'image que pack a inscrite au compose, même quand lcars-fleet:local est sur ce daemon" {
+  sed -i 's|${LCARS_IMAGE:-lcars-fleet:local}|${LCARS_IMAGE:-registre.exemple/lcars-fleet:v7}|' "$ARBRE/deploy/docker/docker-compose.yml"
   run bash "$SRC" pull
-  grep -qx 'pull ghcr.io/zurp-embedded/lcars-fleet:v0.9-beta' "$CALLS" || { cat "$CALLS"; return 1; }
+  grep -qx 'pull registre.exemple/lcars-fleet:v7' "$CALLS" || { cat "$CALLS"; return 1; }
   refute grep -qx 'pull lcars-fleet:local' "$CALLS"
+}
+
+@test "pull sans image nommée, depuis un checkout, refuse de tirer l'image locale et nomme les deux gestes" {
+  run bash "$SRC" pull
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"lcars-fleet:local est l'image qu'un checkout bâtit, aucun registre ne la porte"* ]]
+  [[ "$output" == *"LCARS_IMAGE=<registre/image:tag> deploy/container pull"* ]]
+  refute grep -q '^pull ' "$CALLS"
 }
 
 @test "up pose le magasin du projet avant de créer le conteneur : compose refuse un volume externe absent" {
