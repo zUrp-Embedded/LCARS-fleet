@@ -265,11 +265,6 @@ arbre_container() {
 }
 
 
-@test "logs suit le journal et transmet ses arguments à compose" {
-  run bash "$SRC" -p lcars-fleet logs --tail 20 lcars
-  [ "$status" -eq 0 ]
-  grep -qF -- "-p lcars-fleet logs -f --tail 20 lcars" "$CALLS"
-}
 
 @test "un banc ne se recrée pas par un up simple : le remède mène à bench-swap-image, ou à bench-down puis --bench up — jamais à un --bench up sur le banc qui existe" {
   seed_project "$CF,$REPO/deploy/docker/docker-compose.bench.yml"

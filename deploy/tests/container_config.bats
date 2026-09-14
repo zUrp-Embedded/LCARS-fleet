@@ -45,6 +45,9 @@ if [[ "\$*" == *" up -d"* ]]; then
   exit 0
 fi
 if [[ "\$1 \$2" == "ps -aq" ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
+# les conteneurs lcars du daemon, « <projet> <fichiers compose> » par ligne ; le journal du démarrage en cours
+if [[ "\$1 \$2 \$3" == "ps -a --filter" ]]; then printf '%b' "\${STUB_LCARS_DAEMON:-}"; exit 0; fi
+if [[ "\$1 \$2" == "logs --since" ]]; then [[ "\$3" == 2026-09-14T22:45:50.339480853Z ]] || exit 1; printf '%b' "\${STUB_JOURNAL:-}"; exit 0; fi
 if [[ "\$1 \$3" == "inspect --format" ]]; then echo "\${STUB_CONFIG_FILES:-}"; exit 0; fi
 if [[ "\$1" == inspect ]]; then
   case "\$3" in
@@ -55,6 +58,7 @@ if [[ "\$1" == inspect ]]; then
     "{{.Image}}")     echo "sha256:image-temoin" ;;
     *Config.Env*)     [[ -z "\${STUB_ORIGINES:-}" ]] || echo "LCARS_DECK_ORIGINS=\$STUB_ORIGINES" ;;
     *PortBindings*)   printf "%b" "\${STUB_PUBLIES:-}" ;;
+    *StartedAt*)      echo "2026-09-14T22:45:50.339480853Z" ;;
   esac; exit 0
 fi
 if [[ "\$*" == *"cat /run/lcars-boot.state"* ]];   then [[ -n "\${STUB_BOOT:-}" ]]   || exit 1; echo "\$STUB_BOOT"; exit 0; fi
@@ -85,7 +89,7 @@ EOS
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_ORIGINES STUB_PUBLIES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_ORIGINES STUB_PUBLIES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT STUB_LCARS_DAEMON STUB_JOURNAL LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -245,6 +249,65 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   run bash "$SRC" status; [ "$status" -eq 2 ]
 }
 
+@test "status : le geste en drift ou en échec se nomme lui-même, lu dans le journal du démarrage en cours seul" {
+  # le journal d'un banc relancé (mesuré sur .63) : le boot d'avant la relance a d'autres drifts, que --since écarte
+  export STUB_IDS=c0ffee STUB_PROV=2 STUB_HUM=0 STUB_DECK_HTTP=302
+  export STUB_JOURNAL='[container-init] OK    container-init: siege\n[forge.d] WARN  tokens: pas grave\n[forge.d] DRIFT tokens: AUCUN runner CI enregistré sur cette forge — tout job reste en attente, aucune PR ne fusionne\n[container-boot] geste de forge « tokens » : drift residuel — il se reposera au boot suivant\n[container-init] DRIFT container-init: CLONAGE ECHOUE (http://gitea:3000/fleet/lcars.git) — le conteneur demarre sans source\n'
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"forge       : drift résiduel — un geste manque, rien n'est cassé :"$'\n'"                tokens : AUCUN runner CI enregistré sur cette forge"$'\n'"                container-init : CLONAGE ECHOUE (http://gitea:3000/fleet/lcars.git)"$'\n'"                (le détail et son remède : « deploy/container -p lcars-fleet logs »)"* ]] || { echo "$output"; return 1; }
+  grep -qx 'logs --since 2026-09-14T22:45:50.339480853Z c0ffee' "$CALLS"
+  refute_out 'pas grave|tout job reste' <<<"$output"
+  export STUB_PROV=1 STUB_JOURNAL='[forge.d] FAIL  deck-oidc: client OAuth2 refusé par la forge — HTTP 422\n'
+  run bash "$SRC" status
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"échec d'un geste (rc=1) — le conteneur tourne et ne produira rien :"$'\n'"                deck-oidc : client OAuth2 refusé par la forge"* ]]
+  # un journal muet : le renvoi aux logs, qui rendent la main
+  export STUB_PROV=2 STUB_JOURNAL=''
+  run bash "$SRC" status
+  [[ "$output" == *"drift résiduel — un geste manque ; « deploy/container -p lcars-fleet logs » nomme lequel"* ]]
+  # convergé : le journal n'est pas lu
+  : > "$CALLS"
+  export STUB_PROV=0
+  run bash "$SRC" status
+  refute grep -q '^logs' "$CALLS"
+}
+
+@test "status sans conteneur dans le projet visé nomme les projets lcars du daemon et la commande exacte ; aucun, le geste d'installation" {
+  export STUB_LCARS_DAEMON="z5-fleet $BATS_TEST_TMPDIR/kit/deploy/docker/docker-compose.yml,$BATS_TEST_TMPDIR/kit/deploy/docker/docker-compose.bench.yml\nbob63-forge $BATS_TEST_TMPDIR/kit/deploy/docker/forge-compose.yml\nautre /srv/autre/docker-compose.yml\n"
+  run bash "$SRC" status
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"container status (lcars-fleet) : aucun conteneur lcars dans ce projet — projets lcars sur ce daemon : z5-fleet ; « deploy/container -p <projet> status »"* ]]
+  refute_out 'bob63-forge|autre' <<<"$output"
+  grep -qF 'ps -a --filter label=com.docker.compose.service=lcars' "$CALLS"
+  unset STUB_LCARS_DAEMON
+  run bash "$SRC" status
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucun conteneur lcars — « deploy/container up »"* ]]
+}
+
+@test "logs rend la main ; -f le suit, explicitement" {
+  run bash "$SRC" -p lcars-fleet logs --tail 20
+  [ "$status" -eq 0 ]
+  grep -qE -- "-p lcars-fleet logs --tail 20$" "$CALLS"
+  refute grep -qE -- " logs -f --tail" "$CALLS"
+  run bash "$SRC" -p lcars-fleet logs -f
+  grep -qE -- "-p lcars-fleet logs -f$" "$CALLS"
+}
+
+@test "pull sur une installation neuve ne dit pas de suite — l'installeur enchaîne ; sur une instance posée, la suite exacte, banc compris" {
+  LCARS_IMAGE=registre/lcars:v2 run bash "$SRC" pull
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"container pull: « registre/lcars:v2 » tirée"* ]]
+  refute_out 'Puis' <<<"$output"
+  export STUB_IDS=c0ffee
+  LCARS_IMAGE=registre/lcars:v2 run bash "$SRC" -p prod-fleet pull
+  [[ "$output" == *"Puis :  LCARS_IMAGE=registre/lcars:v2 deploy/container -p prod-fleet up"* ]]
+  export STUB_CONFIG_FILES="$ARBRE/deploy/docker/docker-compose.yml,$ARBRE/deploy/docker/docker-compose.bench.yml"
+  LCARS_IMAGE=registre/lcars:v2 run bash "$SRC" -p z5-fleet pull
+  [[ "$output" == *"Puis :  deploy/docker/bench/bench-swap-image.sh --forge-project z5 --image registre/lcars:v2"* ]]
+}
+
 @test "status : population d'humains non mesurée — dite comme telle, jamais « aucun humain »" {
   export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=2
   run bash "$SRC" status
@@ -313,7 +376,7 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   [[ "$output" == *"boot        : en cours (aucun verdict encore)"* ]]
   [ "$(grep -c 'cat /run/lcars-forge.rc' "$CALLS")" -gt 2 ]
   # l'attente se dit chaque minute
-  [[ "$output" == *"container up : boot en cours depuis 60 s, sans verdict — « deploy/container -p lcars-fleet logs » le suit"* ]]
+  [[ "$output" == *"container up : boot en cours depuis 60 s, sans verdict — « deploy/container -p lcars-fleet logs -f » le suit"* ]]
   [ "$(grep -c 'boot en cours depuis' <<<"$output")" -eq 15 ]
 }
 

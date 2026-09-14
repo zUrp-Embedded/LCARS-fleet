@@ -12,7 +12,7 @@
 #   build            bâtit l'image sur ce poste, depuis un arbre commité (deploy/pack.sh : gate, kit, image)
 #   status           l'état de l'instance vu de l'hôte
 #   shell            un shell dans le conteneur, en tant que LCARS_HUMAN (défaut : le siège de l'instance)
-#   logs             les logs du conteneur (suivi)
+#   logs [-f] [--tail N]  les logs du conteneur, puis la main rendue ; -f les suit jusqu'à Ctrl+C
 #   down             arrête et retire le conteneur, les volumes restent
 #   reset            après confirmation (« yes »), détruit le conteneur et les volumes du projet
 #                    (compose down -v) ; la forge et le magasin restent
@@ -252,6 +252,11 @@ lire_run() { compose exec -T lcars cat "$1" 2>/dev/null | tr -d '[:space:]' || t
 project_volumes() { # → les volumes que docker déclare au projet ; le code de docker
   "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort
 }
+projets_lcars() { # → les projets compose dont un conteneur vient d'un compose d'instance LCARS, un par ligne
+  "$DOCKER" ps -a --filter label=com.docker.compose.service=lcars \
+    --format '{{.Label "com.docker.compose.project"}} {{.Label "com.docker.compose.project.config_files"}}' 2>/dev/null \
+    | awk 'index($0, "/deploy/docker/docker-compose.yml") {print $1}' | sort -u || true
+}
 project_config_files() {
   local ids
   ids="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
@@ -291,8 +296,16 @@ assert_project_ours() {
 cmd_pull() {
   local img="$LCARS_IMAGE"
   "$DOCKER" pull "$img" || fail "pull: « $img » n'a pas pu être tirée" "LCARS_IMAGE=<registre/image:tag> deploy/container pull — ou « deploy/container build » sur un poste de dev"
-  local rev; rev="$("$DOCKER" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null || true)"
-  echo "container pull: « $img » tirée (révision ${rev:-inconnue}). Puis :  deploy/container up   (conteneur recréé sur le même volume)"
+  local rev id; rev="$("$DOCKER" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null || true)"
+  id="$(compose ps -q lcars 2>/dev/null | head -n1)"
+  # la suite ne se dit qu'à une instance déjà posée : une installation neuve enchaîne elle-même sur son up
+  if [[ -z "$id" ]]; then
+    echo "container pull: « $img » tirée (révision ${rev:-inconnue})."
+  elif [[ "$(project_config_files)" == *docker-compose.bench.yml* ]]; then
+    echo "container pull: « $img » tirée (révision ${rev:-inconnue}). Puis :  $(remede_banc "$img")"
+  else
+    echo "container pull: « $img » tirée (révision ${rev:-inconnue}). Puis :  LCARS_IMAGE=$img deploy/container -p $PROJECT up   (conteneur recréé sur les mêmes volumes)"
+  fi
 }
 
 cmd_build() {
@@ -355,7 +368,7 @@ attendre_verdict() {
     [[ -z "$VERDICT_FORGE" ]] || return 0
     etat="$(lire_run /run/lcars-boot.state)"
     [[ "$etat" != awaiting-config && "$etat" != init-failed ]] || return 0
-    (( n % 12 )) || echo "container up : boot en cours depuis $((n * 5)) s, sans verdict — « deploy/container -p $PROJECT logs » le suit"
+    (( n % 12 )) || echo "container up : boot en cours depuis $((n * 5)) s, sans verdict — « deploy/container -p $PROJECT logs -f » le suit"
     sleep 5
   done
 }
@@ -367,6 +380,17 @@ verdict_forge() { # verdict_forge → VERDICT_FORGE, le code publié ou vide ; V
   [[ -z "$VERDICT_FORGE" ]] || return 0
   VERDICT_FORGE="$(lire_run /run/lcars-provision.rc)"
   [[ -z "$VERDICT_FORGE" ]] || VERDICT_SANS_DRIFT=1
+}
+
+# le boot préfixe chaque ligne d'un geste ([container-init], [forge.d]) et ses lignes DRIFT et FAIL nomment le
+# geste ; seules celles du démarrage en cours comptent : le journal d'un conteneur relancé garde les boots d'avant
+gestes_en_defaut() { # gestes_en_defaut <id> → « <geste> : <constat> » par geste en drift ou en échec au dernier démarrage, sans le remède
+  local debut
+  debut="$("$DOCKER" inspect -f '{{.State.StartedAt}}' "$1" 2>/dev/null)" || return 0
+  [[ -n "$debut" ]] || return 0
+  "$DOCKER" logs --since "$debut" "$1" 2>&1 \
+    | sed -n 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
+    | sed 's/ — .*$//' | awk '!vu[$0]++' || true
 }
 
 humain_cible() { # le compte d'une console : LCARS_HUMAN s'il est donné, sinon le siège de l'instance
@@ -459,7 +483,16 @@ cmd_status() {
   local id state health boot prov hum rev tampon rc
   VERDICT_UP=2
   id="$(compose ps -q lcars 2>/dev/null | head -n1)"
-  [[ -n "$id" ]] || { echo "container status ($PROJECT) : aucun conteneur lcars — « deploy/container up »"; return 2; }
+  if [[ -z "$id" ]]; then
+    local autres
+    autres="$(projets_lcars | { grep -vx -- "$PROJECT" || true; } | paste -sd' ' - | sed 's/ /, /g')"
+    if [[ -n "$autres" ]]; then
+      echo "container status ($PROJECT) : aucun conteneur lcars dans ce projet — projets lcars sur ce daemon : $autres ; « deploy/container -p <projet> status »"
+    else
+      echo "container status ($PROJECT) : aucun conteneur lcars — « deploy/container up »"
+    fi
+    return 2
+  fi
   state="$("$DOCKER" inspect -f '{{.State.Status}}' "$id" 2>/dev/null || echo inconnu)"
   health="$("$DOCKER" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sans healthcheck{{end}}' "$id" 2>/dev/null || echo inconnu)"
   rev="$("$DOCKER" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$id" 2>/dev/null || true)"
@@ -476,16 +509,21 @@ cmd_status() {
   case "$boot" in
     awaiting-config) echo "  boot        : en attente de configuration — « $p config », puis « $relancer »" ;;
     init-failed)     echo "  boot        : init en échec — aucun service n'est démarré ; « $p logs » nomme ce qui manque" ;;
-    "")              if [[ -n "$prov" ]]; then echo "  boot        : services démarrés"; else echo "  boot        : en cours (aucun verdict encore) — « $p status » plus tard, « $p logs » pour le suivre"; fi ;;
+    "")              if [[ -n "$prov" ]]; then echo "  boot        : services démarrés"; else echo "  boot        : en cours (aucun verdict encore) — « $p status » plus tard, « $p logs -f » pour le suivre"; fi ;;
     *)               echo "  boot        : $boot" ;;
   esac
+  local defauts=""
+  [[ "$prov" == 0 || -z "$prov" ]] || defauts="$(gestes_en_defaut "$id")"
   case "$VERDICT_SANS_DRIFT:$prov" in
     1:0) echo "  forge       : aucun geste en échec — cette image publie son verdict sans distinguer un drift ; « $p logs » nomme les gestes en drift" ;;
     *:0) echo "  forge       : gestes convergés (jetons, catalogues, branche ops, client OAuth2)" ;;
-    *:2) echo "  forge       : drift résiduel — un geste manque ; « $p logs » nomme lequel" ;;
+    *:2) if [[ -n "$defauts" ]]; then echo "  forge       : drift résiduel — un geste manque, rien n'est cassé :"
+         else echo "  forge       : drift résiduel — un geste manque ; « $p logs » nomme lequel"; fi ;;
     *:)  : ;;
-    *)   echo "  forge       : échec d'un geste (rc=$prov) — le conteneur tourne et ne produira rien ; « $p logs »" ;;
+    *)   if [[ -n "$defauts" ]]; then echo "  forge       : échec d'un geste (rc=$prov) — le conteneur tourne et ne produira rien :"
+         else echo "  forge       : échec d'un geste (rc=$prov) — le conteneur tourne et ne produira rien ; « $p logs »"; fi ;;
   esac
+  [[ -z "$defauts" ]] || { sed 's/^/                /' <<<"$defauts"; echo "                (le détail et son remède : « $p logs »)"; }
   case "$hum" in
     0) echo "  humains     : présents — « fleet start » a quelqu'un" ;;
     2) echo "  humains     : population non mesurée — « $p logs » dit ce qui l'empêche" ;;
@@ -531,7 +569,8 @@ cmd_status() {
 }
 
 # ─── logs, down, reset, source-push ─────────────────────────────────────────────────────────────
-cmd_logs()  { compose logs -f "$@"; }
+# le journal rend la main, les remèdes y renvoient ; « -f » le suit
+cmd_logs()  { compose logs "$@"; }
 
 refuser_banc() { # refuser_banc <geste> — un banc se retire en entier, conteneur, forge, runner et magasin
   [[ "$(project_config_files)" != *docker-compose.bench.yml* ]] \
