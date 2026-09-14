@@ -25,9 +25,11 @@ refute() {
 }
 
 refute_out() {
-  # `if`, pas `[[ … ]] && …` : sous `errexit` une liste `&&` dont le test est faux rend 1 et tue
-  # l'appelant. Le drapeau est colle au `-E` (`grep -E` ou `grep -Ei`) pour n'avoir aucun tableau
-  # a developper sous `set -u`.
+  # `errexit` exempte une liste `&&` dont le test est faux, sauf quand elle est la DERNIERE commande
+  # de la fonction : son 1 devient alors le code rendu, et l'appelant meurt. `[[ -z … ]] && return 0`
+  # est donc sur ici, parce qu'il n'est pas en fin de fonction ; un trouve continue jusqu'au message
+  # et au `return 1`. Le drapeau est colle au `-E` (`grep -E` ou `grep -Ei`) pour n'avoir aucun
+  # tableau a developper sous `set -u`.
   local ci=""
   if [[ "${1:-}" == "-i" ]]; then ci="i"; shift; fi
   local motif="${1:?refute_out attend un motif}" trouve
