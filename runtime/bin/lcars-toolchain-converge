@@ -16,8 +16,13 @@
 #   Lit `ops/toolchains.d/*.yaml` du depot ops AU SHA donne, et applique chaque manifeste.
 #   Idempotent : rejouer applique le meme etat. Un ecosysteme deja pose est saute.
 #
-# EXIT : 0 tout applique · 1 usage/dependance manquante · 2 manifeste refuse (forme, motif)
-#      · 3 une application a echoue (le reconciliateur ne notera PAS le SHA)
+# EXIT : 0 tout applique · 1 usage/dependance manquante (keyring de la cible compris)
+#      · 2 manifeste refuse (forme, motif) · 3 une application a echoue
+#      · 4 echec passager avant d'appliquer : forge illisible, ou verrou tenu par une autre convergence
+#
+# ⚠ 2 EST RESERVE AU DOCUMENT : le reconciliateur gele la tete qui l'a rendu jusqu'au merge suivant.
+# Tout ce qu'un nouveau tick peut reparer — la forge, le verrou, un fichier de l'hote — sort
+# ailleurs. Seul 0 fait noter le SHA.
 
 set -euo pipefail
 
@@ -49,18 +54,22 @@ done
 
 mkdir -p "$(dirname "$LOCK")" "$WORK"
 exec 9>"$LOCK" || die 1 "verrou inouvrable ($LOCK)"
-flock -n 9 || die 0 "une convergence tourne deja — celle-ci n'a rien a faire (ce n'est PAS un echec)"
+# Un verrou tenu n'est pas un etat applique : sortir 0 ferait noter le SHA par-dessus une convergence
+# qui peut encore echouer.
+flock -n 9 || die 4 "une convergence tourne deja — celle-ci n'applique rien, la passe suivante reessaiera"
 
 [[ -n "$FORGE" ]] || die 1 "FORGE_BASE_URL absent — impossible de lire le manifeste"
 
 # ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV se lit dans `/proc/<pid>/cmdline`. Le tube
 # ferme la fuite.
+# `-f` : une reponse d'erreur de la forge est un echec de lecture, pas un corps a interpreter. Sans
+# lui, `{"message":…}` part dans `jq` et devient un faux manifeste.
 api() {
   if [[ -n "$TOKEN" ]]; then
     printf 'header = "Authorization: token %s"\n' "$TOKEN" \
-      | curl -sS -m 30 -K - "$FORGE/api/v1$1"
+      | curl -sS -m 30 -K - -f "$FORGE/api/v1$1"
   else
-    curl -sS -m 30 "$FORGE/api/v1$1"
+    curl -sS -m 30 -f "$FORGE/api/v1$1"
   fi
 }
 
@@ -71,22 +80,25 @@ BRANCH="tool_request"
 head_of_branch() {
   api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
 }
-HEAD_SHA="$(head_of_branch || true)"
+HEAD_SHA="$(head_of_branch)" || HEAD_SHA=""
 [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
-  || die 1 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
+  || die 4 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
 [[ "${HEAD_SHA:0:${#SHA}}" == "$SHA" ]] \
   || die 1 "sha '$SHA' n'est PAS la tete de la branche protegee « $BRANCH » ($HEAD_SHA) — refuse. Un manifeste ne s'applique qu'a la revision qu'un humain a signee sur cette branche."
 
 # ⚠ LU AU SHA, JAMAIS SUR LA BRANCHE. Lire « la derniere version » ouvrirait une fenetre entre le
 # constat d'ecart du reconciliateur et cette lecture : un merge qui atterrit entre les deux serait
 # applique SANS que le SHA note lui corresponde.
+# Une liste illisible n'est pas une liste vide : « aucun manifeste » ferait sortir 0 et noter le SHA.
 list_manifests() {
   api "/repos/$OPS_REPO/contents/ops/toolchains.d?ref=$SHA" \
-    | jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else empty end'
+    | jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else error("pas une liste") end'
 }
 
+# `-e` : un `.content` absent rend `null`, que `base64 -d` decode sans erreur en octets — un
+# document faux fabrique par la lecture, refuse ensuite en 2.
 fetch_manifest() {
-  api "/repos/$OPS_REPO/contents/$1?ref=$SHA" | jq -r '.content' | base64 -d
+  api "/repos/$OPS_REPO/contents/$1?ref=$SHA" | jq -er '.content' | base64 -d
 }
 
 # `yq` n'est pas garanti present. Un champ inconnu n'est pas une erreur : c'est un champ qu'on ne
@@ -172,8 +184,11 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
   [[ ${#pkgs[@]} -eq 0 ]] && return 0
 
   mkdir -p "$target"
-  ( cd "$root" && apt-get "${O[@]}" install --print-uris -y -- "${pkgs[@]}" \
-      | grep "^'http" | sed "s/^'//;s/'.*//" | xargs -r -n1 curl -sSO )
+  # La resolution d'apt est capturee avant d'etre filtree : un `grep` sans correspondance au milieu
+  # du tube ferait echouer un plan vide, et un echec d'apt se perdrait derriere le filtre.
+  local uris
+  uris="$(cd "$root" && apt-get "${O[@]}" install --print-uris -y -- "${pkgs[@]}")"
+  ( cd "$root" && sed -n "s/^'\(http[^']*\)'.*/\1/p" <<< "$uris" | xargs -r -n1 curl -fsSO )
   for d in "$root"/*.deb; do [[ -e "$d" ]] && dpkg-deb -x "$d" "$target"; done
   rm -rf "$root"
   echo "toolchain-converger: sysroot $2 assemble dans $target"
@@ -301,7 +316,10 @@ validate_manifest() { # validate_manifest <yaml> <eco>
   if grep -q '^sysroot:' <<< "$1"; then
     v="$(field arch "$1")"; [[ "$v" =~ ^[a-z0-9]+$ ]] || die 2 "arch refusee: '$v'"
     v="$(field keyring "$1")"
-    [[ -n "$v" && -r "$v" ]] || die 2 "keyring de la cible absent ou illisible: '$v'"
+    [[ -n "$v" ]] || die 2 "keyring de la cible non declare dans le manifeste de '$2'"
+    # Le manifeste NOMME un fichier de l'hote : son absence est un defaut de la machine, que la pose
+    # du fichier repare sans nouveau merge. En 2, la tete resterait gelee apres la reparation.
+    [[ -r "$v" ]] || die 1 "keyring de la cible absent ou illisible sur l'hote: '$v' — poser ce fichier, la passe suivante reprendra"
   fi
 
   if grep -q '^installer:' <<< "$1"; then
@@ -312,7 +330,9 @@ validate_manifest() { # validate_manifest <yaml> <eco>
 }
 
 rc=0
-for path in $(list_manifests); do
+manifests="$(list_manifests)" \
+  || die 4 "liste des manifestes illisible sur $OPS_REPO au sha $SHA — rien n'est applique (la forge repond-elle ?)"
+for path in $manifests; do
   eco="$(basename "$path" .yaml)"
   safe_eco "$eco" || die 2 "nom d'ecosysteme refuse: '$eco'"
 
@@ -323,18 +343,28 @@ for path in $(list_manifests); do
   store_current=0
   [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
 
-  yaml="$(fetch_manifest "$path")"
+  yaml="$(fetch_manifest "$path")" \
+    || die 4 "manifeste $path illisible sur $OPS_REPO au sha $SHA — rien de plus n'est applique (la forge repond-elle ?)"
   validate_manifest "$yaml" "$eco"
 
-  if ( set -e
-       grep -q '^apt:'         <<< "$yaml" && apply_apt       "$yaml"
-       if [[ "$store_current" -eq 0 ]]; then
-         grep -q '^sysroot:'   <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
-         grep -q '^installer:' <<< "$yaml" && apply_installer "$yaml" "$eco"
-       fi
-       grep -q '^egress_hosts:' <<< "$yaml" && apply_egress   "$yaml" "$eco"
-       true )
-  then
+  # ⚠ JAMAIS EN CONDITION D'UN `if` NI D'UNE LISTE `||` : bash y ignore `set -e` jusque dans le
+  # sous-shell, et un `apt-get` en echec laissait la passe continuer puis poser le marqueur. Le
+  # piege ERR (herite par `-E`) fait sortir en 3 tout echec qui n'est pas un `die` ; un `die 2`
+  # garde son code, et lui seul dit « document faux ».
+  set +e
+  ( set -eE
+    trap 'exit 3' ERR
+    grep -q '^apt:'         <<< "$yaml" && apply_apt       "$yaml"
+    if [[ "$store_current" -eq 0 ]]; then
+      grep -q '^sysroot:'   <<< "$yaml" && apply_sysroot   "$yaml" "$eco"
+      grep -q '^installer:' <<< "$yaml" && apply_installer "$yaml" "$eco"
+    fi
+    grep -q '^egress_hosts:' <<< "$yaml" && apply_egress   "$yaml" "$eco"
+    true )
+  sub=$?
+  set -e
+
+  if [[ "$sub" -eq 0 ]]; then
     mkdir -p "$(dirname "$marker")"; printf '%s\n' "$SHA" > "$marker"
     if [[ "$store_current" -eq 1 ]]; then
       echo "toolchain-converger: $eco — magasin deja a $SHA (verbes magasin sautes), apt rejoue"
@@ -342,7 +372,6 @@ for path in $(list_manifests); do
       echo "toolchain-converger: $eco applique a $SHA"
     fi
   else
-    sub=$?
     if [[ "$sub" -eq 2 ]]; then
       echo "toolchain-converger: $eco REFUSE en application (document faux) — le marqueur n'est PAS pose" >&2
       [[ "$rc" -eq 3 ]] || rc=2

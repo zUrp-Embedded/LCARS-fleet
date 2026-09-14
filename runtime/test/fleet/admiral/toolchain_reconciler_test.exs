@@ -292,16 +292,19 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       assert_receive :privileged_called
     end
 
-    test "rc=3 (retryable) ne gèle PAS : le tick suivant rappelle le convergeur", %{
-      server: server
-    } do
-      fake_privileged([executor_reply(3), executor_reply(3)])
+    # 1 host dependency (target keyring included), 3 application failed, 4 forge unreadable or
+    # lock held: each is repaired without a new merge, so none may freeze the head.
+    for rc <- [1, 3, 4] do
+      test "rc=#{rc} ne gèle PAS : le tick suivant rappelle le convergeur", %{server: server} do
+        rc = unquote(rc)
+        fake_privileged([executor_reply(rc), executor_reply(rc)])
 
-      assert {:error, {:converger_failed, 3, ""}} = R.check_now(server)
-      assert_receive :privileged_called
+        assert {:error, {:converger_failed, ^rc, ""}} = R.check_now(server)
+        assert_receive :privileged_called
 
-      assert {:error, {:converger_failed, 3, ""}} = R.check_now(server)
-      assert_receive :privileged_called
+        assert {:error, {:converger_failed, ^rc, ""}} = R.check_now(server)
+        assert_receive :privileged_called
+      end
     end
 
     test "un refus du service lui-même ne porte pas de code : il ne gèle pas", %{server: server} do

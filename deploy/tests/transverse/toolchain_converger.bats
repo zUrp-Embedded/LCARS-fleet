@@ -106,13 +106,18 @@ EOF
   sed 's/#.*//' "$SUT" | grep -qE 'curl -sS -m 30 -K -'
 }
 
-@test "VERROU: une seconde convergence pendant la premiere sort 0 sans rien faire" {
+@test "VERROU: une seconde convergence pendant la premiere sort 4 sans rien poser — tenu n'est pas applique" {
+  # Un 0 ferait repondre `OK:<sha>` a l'executeur, et le reconciliateur noterait un SHA que la
+  # convergence en vol peut encore ne pas appliquer.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
   exec 8>"$LCARS_TOOLCHAIN_LOCK"
   flock -n 8
   run "$SUT" deadbeef
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"tourne deja"* ]]
   exec 8>&-
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"tourne deja"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
 
 @test "IDEMPOTENCE: marqueur au MEME SHA — les verbes MAGASIN sont sautes, APT REJOUE" {
@@ -340,7 +345,8 @@ exit 0
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   run "$SUT" deadbeef
-  [[ "$status" -eq 1 ]]
+  # 4 et pas 1 : une forge muette est un echec passager, pas un appel mal forme.
+  [[ "$status" -eq 4 ]]
   [[ "$output" == *"tete de"* ]]
   [[ "$output" == *"introuvable"* ]]
 }
@@ -360,4 +366,122 @@ EOF
   # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le
   # runtime aurait pu changer sans lui.
   grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/toolchain.ex"
+}
+
+# Une forge en erreur, telle que `curl` la rend : avec `-f`, rien sur stdout et le code 22 ; sans
+# `-f`, le corps d'erreur JSON et le code 0. `jq` suit sa semantique reelle sur ce corps : `.content`
+# absent rend `null`, et `-e` en fait un code 1.
+stub_forge_en_erreur() { # stub_forge_en_erreur <motif d'url en erreur> <yaml-base64 des autres>
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!/usr/bin/env bash
+fail=0
+for a in "\$@"; do case "\$a" in --fail) fail=1;; --*|http*) ;; -*f*) fail=1;; esac; done
+for a in "\$@"; do
+  case "\$a" in
+    $1)
+      if [[ "\$fail" -eq 1 ]]; then echo "curl: (22) The requested URL returned error: 500" >&2; exit 22; fi
+      echo '{"message":"Internal Server Error"}'; exit 0;;
+  esac
+done
+for a in "\$@"; do case "\$a" in *branches/*) echo '{"commit":{"id":"$STUB_HEAD"}}'; exit 0;; esac; done
+for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d/python.yaml*) echo '{"content":"$2"}'; exit 0;; esac; done
+for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d*) echo '[{"name":"python.yaml","path":"ops/toolchains.d/python.yaml"}]'; exit 0;; esac; done
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  cat > "$BATS_TEST_TMPDIR/bin/jq" <<'EOF'
+#!/usr/bin/env bash
+in=$(cat)
+e=0
+for a in "$@"; do case "$a" in -e|-er|-re) e=1;; esac; done
+case "$*" in
+  *commit.id*) if [[ "$in" == *'"commit"'* ]]; then sed 's/.*"id":"\([^"]*\)".*/\1/' <<<"$in"; fi ;;
+  *endswith*)
+    if [[ "$in" == '['* ]]; then
+      echo "ops/toolchains.d/python.yaml"
+    elif [[ "$*" == *'error('* ]]; then
+      echo "jq: error (at <stdin>:1): pas une liste" >&2
+      exit 5
+    fi ;;
+  *.content*)
+    if [[ "$in" == *'"content"'* ]]; then
+      sed 's/.*"content":"\([^"]*\)".*/\1/' <<<"$in"
+    else
+      echo null
+      if [[ "$e" -eq 1 ]]; then exit 1; fi
+    fi ;;
+esac
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/jq"
+}
+
+@test "FORGE: une erreur sur le CONTENU d'un manifeste sort en 4, jamais en 2 — une panne ne gele pas la tete" {
+  # En 2, le reconciliateur gele la tete jusqu'au merge suivant : une forge qui hoquette une fois
+  # bloquerait un manifeste juste. Sans `-f` ni `-e`, le `null` du corps d'erreur passait par
+  # `base64 -d` et devenait « kind inattendu ».
+  stub_forge_en_erreur '*contents/ops/toolchains.d/python.yaml*' \
+    "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"illisible"* ]]
+  printf '%s\n' "$output" | refute_out 'kind inattendu'
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "FORGE: un contenu qui n'est pas du base64 sort en 4 — illisible n'est pas refuse" {
+  stub_forge '@@@ pas du base64 @@@'
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+}
+
+@test "FORGE: une erreur sur la LISTE des manifestes sort en 4 — illisible n'est pas vide" {
+  # Lue comme vide, la liste faisait sortir 0 et estampiller `.applied` : le SHA etait note sans
+  # qu'un seul manifeste ait ete lu.
+  stub_forge_en_erreur '*contents/ops/toolchains.d\?ref=*' \
+    "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "APPLICATION: un apt-get en echec (100) fait echouer la passe en 3, sans aucun marqueur" {
+  # Le sous-shell d'application etait en condition d'un `if` : bash y ignore `set -e`, la passe
+  # continuait apres l'echec et posait les marqueurs. L'executeur repondait `OK:<sha>`.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n    - python3-yaml\negress_hosts:\n  - pypi.org\n' | base64 -w0)"
+  cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<'EOS'
+#!/usr/bin/env bash
+echo "E: Unable to locate package python3-yaml" >&2
+exit 100
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/apt-get"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 3 ]]
+  [[ "$output" == *"A ECHOUE"* ]]
+  printf '%s\n' "$output" | refute_out 'applique a deadbeef'
+  # La suite de la passe ne s'est pas jouee : l'egress, qui vient apres apt, n'est pas pose.
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "SYSROOT: un keyring DECLARE mais absent de l'hote sort en 1 — un fichier a poser n'est pas un document faux" {
+  # En 2, la tete resterait gelee apres que l'operateur a pose le fichier : seul un merge sans objet
+  # la degelerait.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\nsysroot:\n  arch: arm64\n  keyring: %s\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' "$BATS_TEST_TMPDIR/absent.gpg" | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"keyring de la cible absent ou illisible sur l'hote"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "SYSROOT: un keyring NON DECLARE reste un manifeste refuse (2)" {
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\nsysroot:\n  arch: arm64\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"non declare"* ]]
 }
