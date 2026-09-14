@@ -606,10 +606,10 @@ ports_publies() { # ports_publies → « <port du conteneur>/tcp=<ip>:<port de l
   "$DOCKER" inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{$p}}={{(index $b 0).HostIp}}:{{(index $b 0).HostPort}}{{println}}{{end}}' "$id" 2>/dev/null \
     | sed 's/=:/=0.0.0.0:/' || true
 }
-if [[ -z "${LCARS_SSH_PORT:-}" || -z "${LCARS_LANDING_PORT_BIND:-}" ]]; then
+if [[ -z "${LCARS_SSH_PORT-}" || -z "${LCARS_LANDING_PORT_BIND-}" ]]; then
   PUBLIES="$(ports_publies)"
-  : "${LCARS_SSH_PORT:=$(sed -n 's|^22/tcp=||p' <<<"$PUBLIES")}"
-  : "${LCARS_LANDING_PORT_BIND:=$(sed -n "s|^$PROV_DECK_PORT_DEFAULT/tcp=||p" <<<"$PUBLIES")}"
+  [[ -n "${LCARS_SSH_PORT-}" ]] || LCARS_SSH_PORT="$(sed -n 's|^22/tcp=||p' <<<"$PUBLIES")"
+  [[ -n "${LCARS_LANDING_PORT_BIND:-}" ]] || LCARS_LANDING_PORT_BIND="$(sed -n "s|^$PROV_DECK_PORT_DEFAULT/tcp=||p" <<<"$PUBLIES")"
 fi
 : "${LCARS_SSH_PORT:=127.0.0.1:$PROV_SSH_PORT_DEFAULT}"
 : "${LCARS_LANDING_PORT_BIND:=127.0.0.1:$PROV_DECK_PORT_DEFAULT}"
