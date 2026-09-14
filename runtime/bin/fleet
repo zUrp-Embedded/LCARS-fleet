@@ -376,8 +376,8 @@ cmd_status() {
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
     echo "fleet: BEAM vivant. Logs : $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION"
     status_debug_visibility
-    LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}" \
-      "$BIN_DIR/lcars" list 2>/dev/null || true
+    # la racine des sockets tmux est résolue par `lcars` lui-même : aucun second défaut ici
+    "$BIN_DIR/lcars" list 2>/dev/null || true
   else
     echo "fleet: fleet morte."
   fi

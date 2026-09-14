@@ -291,6 +291,15 @@ teardown() { rm -rf "$TMP_BASE"; }
   export LCARS_TMUX_SOCK_BASE="/nonexistent/sock-base"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"sock parent"* ]]
 }
+@test "setup: sans LCARS_TMUX_SOCK_BASE le lanceur refuse en nommant la variable — aucun défaut recopié (RT-C-15)" {
+  # Le défaut d'origine, /run/lcars/tmux-sock, n'était pas la racine où l'hôte (PodTmux, lcars,
+  # consoles) cherche les sockets des pods : un lancement à la main posait un pod que personne ne voyait.
+  unset LCARS_TMUX_SOCK_BASE
+  run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"LCARS_TMUX_SOCK_BASE: non posé"*"Fleet.Spawner.PodTmux"* ]]
+  [[ "$output" != *"/run/lcars/tmux-sock"* ]]
+}
 @test "setup: exit 1 when the per-pod MCP socket dir is missing (central's provisioning contract)" {
   rm -rf "$LCARS_FLEET_MCP_SOCK_BASE/pod-1"
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"dir socket MCP"* ]]

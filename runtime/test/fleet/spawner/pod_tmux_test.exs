@@ -21,7 +21,7 @@ defmodule Fleet.Spawner.PodTmuxTest do
       assert byte_size(path) < 108, "sock_path too long (#{byte_size(path)} bytes): #{path}"
     end
 
-    test "sock_base has a non-empty default (agreement with launchers = the LCARS_TMUX_SOCK_BASE export, not equality of defaults)" do
+    test "sock_base has a non-empty default (launchers have none: they read the LCARS_TMUX_SOCK_BASE export)" do
       # Assert the declared state root and an absolute path, not merely a nonempty string.
       base = PodTmux.sock_base()
 

@@ -37,7 +37,9 @@ VENDOR_BIN="${LCARS_VENDOR_BIN:-$(readlink -f "$(command -v "$VENDOR_NAME" 2>/de
 VENDOR_SHARE="${LCARS_VENDOR_SHARE:-$([ -n "$VENDOR_BIN" ] && dirname "$(dirname "$VENDOR_BIN")" || true)}"
 
 # Per-pod socket dir (P1 #1 — bind the DIR, not the file that does not exist yet).
-SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
+# Aucun défaut ici : la racine des sockets tmux est celle de `Fleet.Spawner.PodTmux.sock_base/0`, que le
+# spawner exporte à chaque lancement. Un défaut recopié divergerait du chemin où l'hôte cherche le pod.
+SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:?non posé — la racine des sockets tmux vient du spawner (Fleet.Spawner.PodTmux), qui la pose à chaque lancement ; à la main, « source ~/.lcars/run/fleet.runtime.env » la reprend de la fleet qui tourne}"
 
 
 if [[ $# -lt 4 ]]; then

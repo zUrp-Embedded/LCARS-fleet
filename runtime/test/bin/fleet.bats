@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.256
+# STARDATE: 2026.258
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -127,6 +127,18 @@ teardown() {
   run bash -c "source '$SCRIPT'; setup_env; echo \"flag=\$LCARS_BOOT_PERMANENT_AT_START\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"flag=false"* ]]
+}
+
+@test "la racine des sockets tmux : fleet l'exporte à la valeur que lcars résout, sous la racine d'état (RT-C-15)" {
+  # Une seule valeur côté hôte : `fleet start` l'exporte au BEAM et aux lanceurs, `lcars` (et `fleet
+  # status`, qui lui délègue) la résout seul. Les lanceurs n'en portent plus : host_launch.bats et
+  # bwrap_launch.bats tiennent leur refus.
+  run bash -c "unset LCARS_TMUX_SOCK_BASE; source '$SCRIPT'; setup_env; echo \"base=\$LCARS_TMUX_SOCK_BASE\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"base=$HOME/.lcars/run/tmux-sock"* ]]
+  [ -d "$HOME/.lcars/run/tmux-sock" ]
+  run env -u LCARS_TMUX_SOCK_BASE HOME="$HOME" "$BATS_TEST_DIRNAME/../../bin/lcars" help
+  [[ "$output" == *"LCARS_TMUX_SOCK_BASE=$HOME/.lcars/run/tmux-sock"* ]]
 }
 
 @test "sourcing the launcher never runs the dispatcher (source guard)" {
