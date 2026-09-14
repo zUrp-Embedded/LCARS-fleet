@@ -55,8 +55,8 @@ _faux_provision() { # _faux_provision <arbre> [nom=valeur…]
     echo "echo \"PROVISION:\$*\" >> '$BATS_TEST_TMPDIR/provision.calls'"
     echo "echo \"PROVISION-ENV:PROV_FORGE_MONTEE=\${PROV_FORGE_MONTEE:-}\" >> '$BATS_TEST_TMPDIR/provision.calls'"
     echo '[[ "$1" == mesure ]] || exit 0'
-    echo 'while [[ "$1" != --faits ]]; do shift; done; faits="$2"; shift 2'
-    echo 'if [[ "$EUID" -eq 0 ]]; then'
+    echo 'tous=" $* "; while [[ "$1" != --faits ]]; do shift; done; faits="$2"; shift 2'
+    echo 'if [[ "$EUID" -eq 0 && "$tous" != *" --sans-privilege "* ]]; then'
     echo '  printf "phase=root\nechange=/opt oui\n" > "$faits"'
     echo "  if [[ -e '$BATS_TEST_TMPDIR/refus-root' ]]; then"
     echo '    printf "port_deck=20999 pris par python3 (pid 4243, compte nobody)\npreflight=refuse\n" >> "$faits"'
@@ -111,19 +111,32 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
 }
 
-@test "une relance root tapée à la main passe par la mesure root : un port tenu par un autre est refusé avant le délégué" {
+@test "lancé à la main en root : la grille et la pause d'abord, sans sudo, puis la mesure root refuse un port tenu par un autre avant le délégué" {
   root_de_namespace
   local a; a="$(_arbre)"
   : > "$BATS_TEST_TMPDIR/refus-root"
-  run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench --check < /dev/null
+  run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench < /dev/null
   [ "$status" -eq 1 ]
-  [[ "$output" == *"port 20999 (deck) tenu par python3 (pid 4243, compte nobody)"*"La mesure en root refuse ce terrain"* ]]
+  [[ "$output" == *"Installation dans ce système"*"Entrée pour continuer"*"port 20999 (deck) tenu par python3 (pid 4243, compte nobody)"*"La mesure en root refuse ce terrain"* ]]
+  grep -qx 'PROVISION:mesure --faits [^ ]* --sans-privilege' "$BATS_TEST_TMPDIR/provision.calls"
   grep -qx 'PROVISION:mesure --faits [^ ]*' "$BATS_TEST_TMPDIR/provision.calls"
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
   refute_out 'WORKSTATION:' <<<"$output"
   rm "$BATS_TEST_TMPDIR/refus-root"
   run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench < /dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"WORKSTATION:up --faits "* ]]
+  [[ "$output" == *"Entrée pour continuer"*"WORKSTATION:up --faits "* ]]
+}
+
+@test "la relance marquée après la pause ne remontre ni grille ni pause : la mesure root décide directement" {
+  root_de_namespace
+  local a; a="$(_arbre)"
+  : > "$BATS_TEST_TMPDIR/refus-root"
+  run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench --apres-pause < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"La mesure en root refuse ce terrain"* ]]
+  refute_out 'Entrée pour continuer|Installation dans ce système' <<<"$output"
+  refute grep -q -- '--sans-privilege' "$BATS_TEST_TMPDIR/provision.calls"
 }
 
 @test "--ports-tenus n'existe plus : aucune option ne dispense root de sa mesure, sans root comme en root" {
@@ -600,7 +613,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   vrai_poste "$a"
   porte "$a" --workstation --bench --human alice --port-deck 20091 --only 60
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --human alice --port-deck 20091 --only 60 --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --human alice --port-deck 20091 --only 60 --apres-pause --docker-host unix:///var/run/docker.sock" ]
   local faits
   faits="$(sed -n 's/^PROVISION:apply --faits \([^ ]*\) .*/\1/p' "$BATS_TEST_TMPDIR/provision.calls")"
   [ -n "$faits" ]
@@ -615,7 +628,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   FORGE_BASE_URL=https://forge.example.net FORGE_PUBLIC_URL=https://forge.public.example LCARS_BUILTIN_HUMAN=demo \
     PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret porte "$a" --workstation
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --apres-pause --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
   refute grep -qE '^SUDO:.* [A-Z_]+=' "$BATS_TEST_TMPDIR/sudo.calls"
   [[ "$output" == *"ENV:DOCKER_HOST=unix:///var/run/docker.sock"*"ENV:FORGE_BASE_URL=https://forge.example.net"*"ENV:FORGE_PUBLIC_URL=https://forge.public.example"*"ENV:LCARS_BUILTIN_HUMAN=demo"*"ENV:PROV_FORGE_ADMIN_RESET=1"*"ENV:SUDO_USER=$(id -un)"* ]]
   refute_out 'tres-secret' <<<"$output"
@@ -681,7 +694,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Requiert   root"*"--check : la mesure se complète en root, par sudo"*"En root    /opt : écriture et « mv --exchange » joués par root"*"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"--check : rien n'est fait"* ]]
-  [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --apres-pause --docker-host unix:///var/run/docker.sock" ]
   refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
   [ "$(grep -c "Système    " <<<"$output")" -eq 1 ]
   # sans terminal, --check dit qu'il continue, comme le parcours complet
@@ -733,7 +746,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   porte "$a" --workstation --bench --substrate wsl --human alice --port-deck 20091
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Installation dans ce système — la suite demande root : sudo, puis deploy/workstation up"*"Entrée pour continuer"* ]]
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --substrate wsl --human alice --port-deck 20091 --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --substrate wsl --human alice --port-deck 20091 --apres-pause --docker-host unix:///var/run/docker.sock" ]
   [[ "$output" == *"WORKSTATION:up --faits $TMPDIR/lcars-facts."*" --substrate wsl --human alice --port-deck 20091 --bench"* ]]
   # une seule mesure par phase, jamais rejouée
   [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
@@ -1046,7 +1059,7 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"téléchargé, sha256 vérifié"* ]]
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
-  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $ARCHIVE $SOMME --workstation --bench --docker-host unix:///var/run/docker.sock" ]]
+  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $ARCHIVE $SOMME --workstation --bench --apres-pause --docker-host unix:///var/run/docker.sock" ]]
   [[ "$output" == *"WORKSTATION:up --faits "*" --bench"* ]]
   # le délégué joue d'un dossier que root a créé pour lui seul, sous TMPDIR, et que la sortie retire
   [[ "$output" == *"COPIE:$TMPDIR/lcars-kit."??????" 700"* ]]
@@ -1223,7 +1236,7 @@ EOF
   [[ "$output" == *"Source     release $TAG"* ]]
   [ -x "$HOME/.lcars/kits/$TAG/lcars_install/deploy/provision" ]
   # la relance en root ne retélécharge rien : --from-release et --repo ne la suivent pas
-  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $HOME/.lcars/kits/$TAG/lcars-fleet-$TAG-otp27-x86_64.tar.gz $(sha256sum "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz" | cut -d' ' -f1) --workstation --bench --docker-host unix:///var/run/docker.sock" ]]
+  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $HOME/.lcars/kits/$TAG/lcars-fleet-$TAG-otp27-x86_64.tar.gz $(sha256sum "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz" | cut -d' ' -f1) --workstation --bench --apres-pause --docker-host unix:///var/run/docker.sock" ]]
 }
 
 @test "--from-release depuis un clone : un installeur qui ne correspond pas à sa somme n'est pas rejoué" {

@@ -249,6 +249,14 @@ EOF
   run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --ports-tenus ""
   [ "$status" -eq 1 ]
   [[ "$output" == *"option inconnue: --ports-tenus"* ]]
+  # la grille d'un installeur lancé en root se mesure en phase sans privilège, sur demande explicite
+  : > "$RUN_LOG"
+  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --sans-privilege
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=sans-privilege" ]
+  run "$SANDBOX/provision" doctor --sans-privilege
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--sans-privilege ne vaut que pour mesure"* ]]
 }
 
 @test "mesure refuse ce qu'elle n'honore pas : sans --faits, avec --only ; --faits hors mesure et apply" {

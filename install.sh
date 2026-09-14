@@ -58,6 +58,8 @@
 #       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut lcars).
 #       --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1 : un mot de passe neuf pour l'administrateur
 #                       de la forge du poste.
+#       --apres-pause   la grille et la pause ont eu lieu avant sudo ; sans elle, l'installeur lancé
+#                       en root mesure, montre et marque la pause lui-même avant d'agir.
 #
 #     Relancer reprend depuis la mesure : l'état est celui du système, lu à chaque passage.
 #
@@ -102,6 +104,7 @@ SUMS
 MODE=container
 FROM_RELEASE=0; DRY_RUN=0; DOCTOR_MODE=0; WITH_BENCH=0; REPO_DONNE=0
 FORCED_SUBSTRATE=""
+APRES_PAUSE=0                # la relance en root : la grille et la pause ont eu lieu sans privilège
 declare -a PASSTHRU=()       # au délégué du mode --workstation, tel quel
 declare -a MESURE=()         # à la mesure : ce qui la change
 declare -a PROJET_PORTS=()   # à la mesure et au délégué : le projet et les ports
@@ -131,6 +134,7 @@ while [[ $# -gt 0 ]]; do
     --forge-publique) export FORGE_PUBLIC_URL="${2:?--forge-publique attend une URL}"; shift 2 ;;
     --humain-demo)    export LCARS_BUILTIN_HUMAN="${2:?--humain-demo attend un nom}"; shift 2 ;;
     --forge-admin-reset) export PROV_FORGE_ADMIN_RESET=1; shift ;;
+    --apres-pause)    APRES_PAUSE=1; shift ;;
     --version) echo "$VERSION_DITE"; exit 0 ;;
     --help|-h)
       if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
@@ -141,7 +145,7 @@ while [[ $# -gt 0 ]]; do
         echo "  --check (--doctor) · --dry-run · --from-release · --repo URL · --substrate S"
         echo "  --forge-project N · --port-forge N · --port-deck N · --port-ssh N · --env F · --human U · --only M"
         echo "  la relance en root : --docker-host URL · --linux-dedie · --forge URL · --forge-publique URL"
-        echo "  · --humain-demo NOM · --forge-admin-reset"
+        echo "  · --humain-demo NOM · --forge-admin-reset · --apres-pause"
         echo "  --version · -h, --help"
       fi
       exit 0 ;;
@@ -307,7 +311,7 @@ mesurer() { # mesurer [option de provision…] — « provision mesure » de cet
   PREFLIGHT_RC=0
   # la forge montée par --bench est celle du poste : son port est de ce projet, et root le vérifie
   local montee=""; [[ "$WITH_BENCH" -eq 0 ]] || montee=1
-  PREFLIGHT_OUT="$(PROV_FORGE_MONTEE="$montee" "$SCRIPT_DIR/deploy/provision" mesure --faits "$FACTS_FILE" \
+  PREFLIGHT_OUT="$(PROV_FORGE_MONTEE="$montee" "$SCRIPT_DIR/deploy/provision" mesure --faits "$FACTS_FILE" "$@" \
     ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} ${PROJET_PORTS[@]+"${PROJET_PORTS[@]}"} ${MESURE[@]+"${MESURE[@]}"} 2>&1)" || PREFLIGHT_RC=$?
 }
 constat() { printf '%s\n' "$PREFLIGHT_OUT" | grep -E '^(DRIFT|FAIL|ERREUR) ' | sed 's/^/    /' || printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'; }
@@ -342,9 +346,11 @@ relance_root() { # relance_root → exec sudo : sur ce fichier, ou pour un kit s
   choix_options
   choix+=(${CHOIX[@]+"${CHOIX[@]}"})
   rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
+  # lancé en root, l'installeur a déjà montré et marqué la pause : la suite root se joue ici
+  [[ "$EUID" -ne 0 ]] || suite_root
   [[ "$PROVENANCE" != release ]] \
-    || exec sudo bash -c "$VERIFIE_KIT" lcars-kit "$KIT_ARCHIVE" "$KIT_SOMME" "${SUITE[@]}" ${choix[@]+"${choix[@]}"}
-  exec sudo bash "$SCRIPT_DIR/install.sh" "${SUITE[@]}" ${choix[@]+"${choix[@]}"}
+    || exec sudo bash -c "$VERIFIE_KIT" lcars-kit "$KIT_ARCHIVE" "$KIT_SOMME" "${SUITE[@]}" --apres-pause ${choix[@]+"${choix[@]}"}
+  exec sudo bash "$SCRIPT_DIR/install.sh" "${SUITE[@]}" --apres-pause ${choix[@]+"${choix[@]}"}
 }
 suite_root() { # la relance en root : la mesure root décide seule, puis le délégué sur ses faits
   mesurer
@@ -435,10 +441,11 @@ DELEGUE="$SCRIPT_DIR/deploy/$MODE"
 # le délégué ne part qu'après la pause : son absence se dit avant tout ; celle du runner, la mesure la dit
 [[ -x "$DELEGUE" ]] || stop "${R}L'arbre est incomplet : $DELEGUE absent ou non exécutable.${N}" "Ce n'est pas docker qui manque, c'est la source."
 
-[[ "$EUID" -ne 0 ]] || suite_root
+[[ "$EUID" -ne 0 || "$APRES_PAUSE" -eq 0 ]] || suite_root
 
 # ─── 3. la mesure sans privilège : une seule, celle du préflight ──────────────────────────────
-mesurer
+# lancé en root sans la marque de relance, la grille se mesure comme sans privilège : root la montre, marque la pause, puis décide
+if [[ "$EUID" -eq 0 ]]; then mesurer --sans-privilege; else mesurer; fi
 
 [[ -n "$(fait docker)" ]] || {
   echo "  ${R}Le préflight n'a rendu aucun fait : rien n'est mesuré, rien n'est fait. Ce que provision a dit :${N}"
@@ -495,7 +502,7 @@ case "$(fait docker)" in
 esac
 
 # en conteneur, le banc et forge-apply lisent l'API de la forge par jq depuis l'hôte ; dans ce système, 10-packages le pose
-if [[ "$MODE" == workstation ]]; then OUTILS_REQUIS="git curl sudo"; else OUTILS_REQUIS="git curl jq"; fi
+if [[ "$MODE" != workstation ]]; then OUTILS_REQUIS="git curl jq"; elif [[ "$EUID" -eq 0 ]]; then OUTILS_REQUIS="git curl"; else OUTILS_REQUIS="git curl sudo"; fi
 OUTILS_MANQUANTS=""
 for t in $OUTILS_REQUIS; do
   [[ "$(fait "$t")" == oui ]] || OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t"
@@ -626,7 +633,7 @@ if [[ "$MODE" == "workstation" ]]; then
     exec 3<&-
   else
     SANS_TERMINAL=1
-    sudo -n true 2>/dev/null \
+    [[ "$EUID" -eq 0 ]] || sudo -n true 2>/dev/null \
       || stop "${R}Sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé : la suite en root n'aura pas lieu.${N}"
   fi
 fi

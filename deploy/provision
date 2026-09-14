@@ -9,7 +9,7 @@
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #                    [--faits F]
 #   provision doctor (mêmes options, sans --faits) [--porcelain]
-#   provision mesure --faits F [--substrate S] [--human USER] [--env FILE]
+#   provision mesure --faits F [--sans-privilege] [--substrate S] [--human USER] [--env FILE]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
@@ -18,7 +18,8 @@
 #   doctor   sonde seule, en root — le même check que l'apply
 #   mesure   le préflight seul, pour un lanceur qui décide avant d'agir : sans root, ce qui se lit
 #            sans privilège ; en root, les refus qui protègent la machine, mesurés par root. Ses
-#            faits vont dans --faits
+#            faits vont dans --faits ; --sans-privilege joue la première phase même en root, pour la
+#            grille d'un installeur lancé directement en root
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
 #            « find / … > avant ; install ; find / … > après » (une ligne par objet :
@@ -82,6 +83,7 @@ ENV_FILE=""
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
 FAITS=""
+SANS_PRIVILEGE=0
 declare -a ONLY=()
 
 # les validations ne rendent rien : dans une substitution `X="$(valid_port …)"`, le die ne tuerait
@@ -113,6 +115,7 @@ while [[ $# -gt 0 ]]; do
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --faits)     FAITS="${2:?--faits attend un fichier}"; shift 2 ;;
+    --sans-privilege) SANS_PRIVILEGE=1; shift ;;
     --porcelain) PORCELAIN=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
@@ -126,12 +129,13 @@ case "$CMD" in apply|doctor|mesure|list|audit) ;; ""|-h|--help) usage; exit 0 ;;
 [[ -z "$FAITS" || "$CMD" == mesure || "$CMD" == apply ]] || die "--faits ne vaut que pour mesure, qui l'écrit, et apply, qui le reçoit"
 [[ -n "$FAITS" || "$CMD" != mesure ]] || die "mesure écrit ses faits dans --faits FICHIER : sans lui, rien ne serait rendu"
 [[ "${#ONLY[@]}" -eq 0 || "$CMD" != mesure ]] || die "--only ne vaut pas pour mesure : elle joue le préflight seul"
+[[ "$SANS_PRIVILEGE" -eq 0 || "$CMD" == mesure ]] || die "--sans-privilege ne vaut que pour mesure"
 # sous un décor de témoin, le runner ne tourne jamais en root (refus plus haut) : apply et doctor s'y jouent sans privilège
 [[ "$EUID" -eq 0 || -n "${LCARS_DECOR_ROOT:-}" || ( "$CMD" != apply && "$CMD" != doctor ) ]] \
   || die "$CMD exige root : un fichier que ce compte ne lit pas passerait pour absent — relancer : sudo $SELF $CMD${ONLY[0]:+ --only ${ONLY[*]}}"
 if [[ "$CMD" == mesure ]]; then
   : 2>/dev/null > "$FAITS" || die "--faits $FAITS : non inscriptible — la mesure y écrit ses faits"
-  PROV_PHASE=sans-privilege; [[ "$EUID" -ne 0 ]] || PROV_PHASE=root
+  PROV_PHASE=sans-privilege; [[ "$EUID" -ne 0 || "$SANS_PRIVILEGE" -eq 1 ]] || PROV_PHASE=root
   export PROV_FACTS_FILE="$FAITS" PROV_PHASE
 else
   # hors mesure, le préflight se joue entier et n'écrit aucun fait
