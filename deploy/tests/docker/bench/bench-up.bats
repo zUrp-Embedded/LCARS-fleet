@@ -79,6 +79,7 @@ setup() {
   export PATCH_CODE="$BATS_TEST_TMPDIR/patch";          echo "200" > "$PATCH_CODE"
   export DAEMON_MORT="$BATS_TEST_TMPDIR/daemon-mort"
   export PS_RC="$BATS_TEST_TMPDIR/ps_rc";               echo "0" > "$PS_RC"
+  export JOURNAL_OUT="$BATS_TEST_TMPDIR/journal"
   # les objets des projets du banc, « <nom>:<c|v>:<marqueur> », rangés dans le projet que leur nom porte
   export OBJETS=""
   export SOURCE_OWNER_OUT="$BATS_TEST_TMPDIR/owner";    echo "admiral" > "$SOURCE_OWNER_OUT"
@@ -132,6 +133,8 @@ case "$argv" in
   version*)                      [[ -e "$DAEMON_MORT" ]] && exit 1; echo "29.0.0"; exit 0 ;;
   *"stat -c %U "*)               cat "$SOURCE_OWNER_OUT"; exit 0 ;;
   "inspect -f {{.State.Health.Status}}"*) echo healthy; exit 0 ;;
+  "inspect -f {{.State.StartedAt}}"*) echo 2026-09-14T22:45:50.339480853Z; exit 0 ;;
+  "logs --since 2026-09-14T22:45:50.339480853Z "*) [[ ! -f "$JOURNAL_OUT" ]] || cat "$JOURNAL_OUT"; exit 0 ;;
   "image inspect -f"*)           cat "$IMAGE_REV_OUT"; exit 0 ;;
   "image inspect"*)              exit 0 ;;
   *"user create"*)               rc="$(cat "$CREATE_RC")"; [[ "$rc" -eq 0 ]] || echo "user already exists" >&2; exit "$rc" ;;
@@ -212,7 +215,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   echo "1" > "$PROV_RC_OUT"
   run_bench
   [ "$status" -eq 6 ]
-  [[ "$output" == *"PAS PRÊT — le conteneur s'est déclaré en échec"*"rc=1"*"provision doctor"* ]]
+  [[ "$output" == *"PAS PRÊT — le conteneur s'est déclaré en échec"*"rc=1"*"(docker logs bt-fleet-lcars-1 le nomme)"* ]]
+  refute_out 'provision doctor' <<<"$output"
   [[ "$output" != *"le runner était demandé"* ]]
   refute grep -q 'lcars-1 env.* fleet start' "$CALLS"
 }
@@ -222,6 +226,42 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRÊT"*"drift résiduel"* ]]
+}
+
+@test "le PRÊT nomme lui-même le geste en drift, lu au journal du dernier démarrage, et donne la commande de statut exacte" {
+  echo "2" > "$PROV_RC_OUT"
+  printf '%s\n' '[forge.d] WARN  tokens: rien' \
+    '[forge.d] DRIFT tokens: AUCUN runner CI enregistré sur cette forge — tout job reste en attente' \
+    '[container-boot] geste de forge « tokens » : drift residuel — il se reposera au boot suivant' > "$JOURNAL_OUT"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"converge  : appliqué avec drift résiduel — un geste manque, rien n'est cassé :"$'\n'"              tokens : AUCUN runner CI enregistré sur cette forge"$'\n'"              (le détail et son remède : docker logs bt-fleet-lcars-1)"* ]] || { echo "$output"; return 1; }
+  refute_out 'provision doctor|tout job reste' <<<"$output"
+  grep -qx 'DOCKER:logs --since 2026-09-14T22:45:50.339480853Z bt-fleet-lcars-1' "$CALLS"
+  [[ "$output" == *"statut    : deploy/container -p bt-fleet status"$'\n'"[bench-up]   détruire  : deploy/docker/bench/bench-down.sh --project bt --yes"* ]]
+}
+
+@test "le runner s'enrôle avant la relance : le boot qui publie le verdict lu par le banc et par status le voit" {
+  run_bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local runner relance verdict
+  runner="$(grep -n '^RUNNER:' "$CALLS" | head -1 | cut -d: -f1)"
+  relance="$(grep -n '^DOCKER:restart' "$CALLS" | head -1 | cut -d: -f1)"
+  verdict="$(grep -n 'lcars-forge.rc' "$CALLS" | head -1 | cut -d: -f1)"
+  [ -n "$runner" ]
+  [ -n "$relance" ]
+  [ -n "$verdict" ]
+  [ "$runner" -lt "$relance" ]
+  [ "$relance" -lt "$verdict" ]
+}
+
+# bats test_tags=structure
+@test "le PRÊT et status lisent les gestes en défaut par la même expression" {
+  local lib="$BATS_TEST_DIRNAME/../../../lib/bench.sh" cont="$BATS_TEST_DIRNAME/../../../container" e1 e2
+  e1="$(grep -oE "sed -n 's/\^\\\\\[\\\\\(container-init[^']*'" "$lib")"
+  e2="$(grep -oE "sed -n 's/\^\\\\\[\\\\\(container-init[^']*'" "$cont")"
+  [ -n "$e1" ]
+  [ "$e1" = "$e2" ]
 }
 
 @test "un verdict de conteneur illisible est une non-mesure, dite, pas un échec" {
@@ -464,12 +504,13 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q '^CURL:POST .*/repos' "$CALLS"
 }
 
-@test "une forge qui porte déjà un main étranger : le hook est levé et le push forcé, dit" {
+@test "le main que la structure a posé sur la forge neuve : le hook est levé et le push forcé, dit sans alarme" {
   echo "0123456789abcdef" > "$REMOTE_MAIN"; echo 1 > "$ANCESTOR_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qE "^GIT:-c include.path=[^ ]+ -C $ROOT -c core.hooksPath=/dev/null push -q --force " "$CALLS"
-  [[ "$output" == *"main existe déjà sur la forge de banc (012345678)"*"poussé de force"* ]]
+  [[ "$output" == *"fleet/lcars : le main posé à la création du dépôt (012345678) est remplacé par le semis"* ]]
+  refute_out 'existe déjà|poussé de force' <<<"$output"
 }
 
 @test "une révision d'image absente du clone est refusée : le banc ne sème pas un autre code" {

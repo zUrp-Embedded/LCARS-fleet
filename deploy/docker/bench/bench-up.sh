@@ -167,6 +167,33 @@ charte_out="$(d exec "$CONTAINER" bash -c \
     _ "$RACINE_CONTENEUR" "$ADMIRAL" 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -z "$l" ]] || say "charte: $l"; done
 
+# ─── Le runner, avant la relance ────────────────────────────────────────────────────────────────
+# Le geste tokens du boot sonde les runners de la forge : enrôlé après la relance, le runner laissait
+# un « AUCUN runner CI » dans le verdict que le banc lit et que status garde jusqu'au boot suivant.
+# Il ne demande que la forge, son réseau et le jeton master déjà posé dans le conteneur.
+RUNNER_SERT=0
+if [[ "$WITH_RUNNER" -eq 0 ]]; then
+  RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
+elif ! JOB_URL="$(job_forge_url "$FORGE_PORT" "$ADVERTISE")"; then
+  RUNNER_STATE="absent — aucune adresse de cette machine ne joint la forge depuis un job CI (adresse annoncée : $ADVERTISE) ; --advertise <adresse de l'hôte> la donne"
+else
+  say "runner CI : enrôlement sur la forge du banc (projet $RUNNER_PROJECT)"
+  RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
+  ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
+  if "$DOCKER_DIR/forge-runner.sh" \
+       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
+       --instance-url "$JOB_URL" --network "$FORGE_NET" \
+       --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then
+    RUNNER_SERT=1
+    RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"
+    rm -f "$RUNNER_LOG"
+  else
+    RUNNER_STATE="absent — forge-runner.sh en échec, son refus mot pour mot :
+$(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
+              sortie complète conservée : $RUNNER_LOG"
+  fi
+fi
+
 # ─── La relance : le geste tokens minte les jetons de rôle, le convergeur matérialise l'humain ──
 say "relance du conteneur : les jetons de rôle se mintent au boot, sur le seed"
 bench_relance
@@ -207,7 +234,8 @@ fi
 seed_hooks=(); seed_force=()
 remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
 if [[ -n "$remote_main" ]] && ! git -C "$SEED_DIR" merge-base --is-ancestor "$remote_main" "$SEED_REF" 2>/dev/null; then
-  say "$ORG/lcars : main existe déjà sur la forge de banc (${remote_main:0:9}) et n'est pas un ancêtre de $SEED_REF — la forge du banc est jetable : main est remplacé, poussé de force"
+  # sur une forge neuve, c'est le main du dépôt modèle que la structure vient de poser
+  say "$ORG/lcars : le main posé à la création du dépôt (${remote_main:0:9}) est remplacé par le semis"
   seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
 fi
 PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${SEED_REF}:refs/heads/main" 2>&1)" \
@@ -246,36 +274,22 @@ if [[ -z "$CONTAINER_PROV_RC" ]]; then
   CONTAINER_PROV_RC="$(verdict_conteneur "$VERDICT_FICHIER")"
 fi
 CONTAINER_PROV_OK=1
+gestes_dits() { # gestes_dits → « : » puis un geste en défaut par ligne, lus au journal du dernier démarrage ; sans eux, où les lire
+  local defauts; defauts="$(bench_gestes_en_defaut)"
+  if [[ -n "$defauts" ]]; then
+    printf ' :\n%s\n              (le détail et son remède : docker logs %s)' "$(sed 's/^/              /' <<<"$defauts")" "$CONTAINER"
+  else
+    printf ' (docker logs %s le nomme)' "$CONTAINER"
+  fi
+}
 case "$VERDICT_FICHIER:$CONTAINER_PROV_RC" in
   */lcars-provision.rc:0) CONTAINER_PROV_STATE="aucun geste en échec — cette image publie son verdict sans distinguer un drift (docker logs $CONTAINER nomme les gestes en drift)" ;;
   *:0)  CONTAINER_PROV_STATE="convergé" ;;
-  *:2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor le nomme)" ;;
+  *:2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé$(gestes_dits)" ;;
   *:)   CONTAINER_PROV_STATE="non mesuré — ni /run/lcars-forge.rc ni /run/lcars-provision.rc ne se lisent dans le conteneur (il n'a peut-être pas fini de converger)" ;;
-  *)    CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor)"
+  *)    CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien$(gestes_dits)"
         CONTAINER_PROV_OK=0 ;;
 esac
-
-RUNNER_SERT=0
-if [[ "$WITH_RUNNER" -eq 0 ]]; then
-  RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
-elif ! JOB_URL="$(job_forge_url "$FORGE_PORT" "$ADVERTISE")"; then
-  RUNNER_STATE="absent — aucune adresse de cette machine ne joint la forge depuis un job CI (adresse annoncée : $ADVERTISE) ; --advertise <adresse de l'hôte> la donne"
-else
-  RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
-  ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
-  if "$DOCKER_DIR/forge-runner.sh" \
-       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
-       --instance-url "$JOB_URL" --network "$FORGE_NET" \
-       --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then
-    RUNNER_SERT=1
-    RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"
-    rm -f "$RUNNER_LOG"
-  else
-    RUNNER_STATE="absent — forge-runner.sh en échec, son refus mot pour mot :
-$(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
-              sortie complète conservée : $RUNNER_LOG"
-  fi
-fi
 
 # la fleet démarre sous l'humain ; sans credentials claude elle tourne sans penser, et c'est dit
 FLEET_STATE="non démarrée"
@@ -330,6 +344,7 @@ say "  jetons    : $ROLE_TOKENS fichiers dans $(prov_canon "$PROV_TOKENS_DIR")"
 say "  creds     : $([[ "$WITH_CREDS" -eq 1 ]] && echo oui || echo non)"
 say "  fleet     : $FLEET_STATE"
 say "  converge  : $CONTAINER_PROV_STATE"
-say "  détruire  : bench-down.sh --project $PROJECT --yes"
+say "  statut    : deploy/container -p $CONTAINER_PROJECT status"
+say "  détruire  : deploy/docker/bench/bench-down.sh --project $PROJECT --yes"
 say "───────────────────────────────────────────────────────"
 [[ -z "$REFUS" ]] || die "$REFUS" 6

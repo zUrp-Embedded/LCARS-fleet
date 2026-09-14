@@ -168,6 +168,18 @@ bench_creds() { # bench_creds — les credentials claude chez l'humain ; absente
   say "creds claude posées chez $HUMAN"
 }
 
+# le boot préfixe chaque ligne d'un geste ([container-init], [forge.d]) et ses lignes DRIFT et FAIL nomment le
+# geste ; seules celles du démarrage en cours comptent : le journal d'un conteneur relancé garde les boots d'avant.
+# La même lecture que « deploy/container status » (gestes_en_defaut), que bench-up.bats tient d'accord.
+bench_gestes_en_defaut() { # bench_gestes_en_defaut → « <geste> : <constat> » par geste en drift ou en échec au dernier démarrage, sans le remède
+  local debut
+  debut="$("$DOCKER_BIN" inspect -f '{{.State.StartedAt}}' "$CONTAINER" 2>/dev/null)" || return 0
+  [[ -n "$debut" ]] || return 0
+  "$DOCKER_BIN" logs --since "$debut" "$CONTAINER" 2>&1 \
+    | sed -n 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
+    | sed 's/ — .*$//' | awk '!vu[$0]++' || true
+}
+
 bench_jetons_de_role() { # bench_jetons_de_role → le nombre de jetons de rôle posés dans le conteneur
   # shellcheck disable=SC2016 # $1 est l'argument du bash du conteneur
   "$DOCKER_BIN" exec -i -u root "$CONTAINER" bash -c 'ls "$1"/*.gitea_token 2>/dev/null | wc -l' _ "$(prov_canon "$PROV_TOKENS_DIR")" < /dev/null \
