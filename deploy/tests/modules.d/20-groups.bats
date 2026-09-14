@@ -65,6 +65,22 @@ mod() { run bash "$SRC" "$1"; }
   [[ "$output" == *"OK    20-groups: groupes fleet et lcars-console en place, zoe membre de fleet"* ]]
 }
 
+@test "root pris pour humain (doctor du conteneur par docker exec, sans --human) : ni dérive, ni ajout à fleet" {
+  # mesuré dans l'image beta2 : root ∉ fleet, et « DRIFT 20-groups: root ∉ fleet » au doctor que le PRÊT désigne
+  PROV_HUMAN=root mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"OK    20-groups: root n'est pas un humain de fleet"*"--human <login>"* ]]
+  refute_out 'DRIFT' <<<"$output"
+  PROV_HUMAN=root mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q 'usermod' "$CALLS"
+  # un humain hors de fleet reste une dérive
+  printf '%s\n' 'root:x:0:' 'zoe:x:1000:' 'fleet:x:2000:' 'lcars-console:x:2001:' > "$GROUP"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 20-groups: zoe ∉ fleet"* ]]
+}
+
 @test "un humain inconnu du système : check le nomme, apply échoue sans créer de groupe à sa place" {
   PROV_HUMAN=personne mod check
   [ "$status" -eq 1 ]
