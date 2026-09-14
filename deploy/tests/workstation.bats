@@ -91,15 +91,29 @@ sans_faits_restants() { [ -z "$(compgen -G "$TMPDIR/lcars-*" || true)" ]; }
   [[ "$output" == 100755* ]]
 }
 
-# bats test_tags=structure
+@test "les réglages d'affichage de l'appelant traversent le sudo" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre channel=aucun docker=absent docker_host=
+  PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 ws
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep '^SUDO:' "$TRACE")" = "SUDO:PROV_COLOR=0 NO_COLOR=1 PROV_VERBOSE=1 bash $WS up" ]
+}
+
 @test "toute FORGE_ que la lib lit dans l'environnement traverse le sudo" {
-  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" lues manquantes="" v
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" lues v i=0 sudo_ligne
   lues="$(grep -ohE '\$\{FORGE_[A-Z_]+' "$lib" | tr -d '${' | sort -u)"
   [ -n "$lues" ]
+  arbre channel=aucun docker=absent docker_host=
+  for v in $lues; do i=$((i + 1)); export "$v=http://forge-$i.test"; done
+  ws
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  sudo_ligne="$(sed -n 's/^SUDO://p' "$TRACE")"
+  i=0
   for v in $lues; do
-    grep -qE "ESCALADE_ENV=\(.*[( ]$v([) ]|\$)" "$SRC" || manquantes="$manquantes $v"
+    i=$((i + 1))
+    [[ " $sudo_ligne " == *" $v=http://forge-$i.test "* ]] || { echo "$v lue par la lib et perdue au sudo : $sudo_ligne"; return 1; }
   done
-  [ -z "$manquantes" ] || { echo "lue(s) par la lib et perdue(s) au sudo :$manquantes"; return 1; }
 }
 
 # ─── l'entrée ───────────────────────────────────────────────────────────────────────────────────

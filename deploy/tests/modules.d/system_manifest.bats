@@ -206,28 +206,14 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   refute a_un_poseur /opt/lcars/var/tok "$corpus"
 }
 
-@test "le nom REEL du fichier tmpfiles, pas celui qu'on croit" {
-  grep -qE '^anchor +/etc/tmpfiles\.d/lcars-console\.conf ' "$MANIFEST"
-  refute grep -qE '^anchor +/etc/tmpfiles\.d/lcars\.conf ' "$MANIFEST"
-  grep -q 'lcars-console.conf' "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
-}
-
-@test "le marqueur HORS de l'arbre /run/lcars est declare" {
-  grep -qE '^runtime +/run/lcars-converger\.refused ' "$MANIFEST"
-  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
-}
-
-@test "LA TABLE A UN LECTEUR DE PRODUCTION, et il applique la colonne GID" {
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  # Le lecteur existe et il lit bien CE fichier.
-  grep -q '^prov_manifest_gid()' "$lib"
-  sed 's/#.*//' "$lib" | grep -q 'system\.manifest'
-  # Et il sert : `ensure_group` en derive le `-g`, jamais un litteral.
-  local body; body="$(sed -n '/^ensure_group()/,/^}$/p' "$lib")"
-  grep -q 'prov_manifest_gid' <<<"$body"
-  grep -q 'groupadd' <<<"$body"
-  # Garde d'instrument : une extraction cassee rendrait vide, donc verte sur rien.
-  [ "$(wc -l <<<"$body")" -gt 10 ]
+@test "le fichier tmpfiles que 25-directories ecrit est celui que la table declare" {
+  # /etc/tmpfiles.d est exempté du balayage ISO 1/2 : le nom posé se confronte ici à la table
+  local pose
+  pose="$(sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh" \
+          | sed -nE 's#^TMPFILES_CONF="\$\(prov_decor (/etc/tmpfiles\.d/[^)]+)\)"$#\1#p')"
+  [ -n "$pose" ] || { echo "le chemin tmpfiles ne se lit plus dans 25-directories" >&2; return 1; }
+  awk -v p="$pose" '$1 == "anchor" && $2 == p {t=1} END {exit !t}' "$BATS_TEST_TMPDIR/rows" \
+    || { echo "25-directories écrit $pose, que la table ne déclare pas" >&2; return 1; }
 }
 
 @test "un GID absent de la table reste FLOTTANT — on ne l'invente pas" {
@@ -240,7 +226,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$output" = "2000" ]
 }
 
-@test "LA TABLE A DEUX LECTEURS DE PLUS — mode et proprietaire — et ce sont les POSEURS qui les lisent (lot 15)" {
+@test "LA TABLE A DEUX LECTEURS DE PLUS — mode et proprietaire, vides pour un chemin absent, un mode observe ou une colonne sans valeur" {
   run lib 'prov_manifest_mode /opt/lcars/share/avatars'
   [ "$output" = "0755" ]
   run lib 'prov_manifest_owner /opt/lcars/share/avatars'
@@ -259,14 +245,6 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ -z "$output" ]
   run lib 'prov_manifest_owner /usr/local/bin/lcars'
   [ -z "$output" ]
-  # et les deux poseurs les lisent — sur le code, pas sur la prose
-  local m
-  for m in 44-media 46-tofu; do
-    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_mode' \
-      || { echo "$m ne lit pas le mode dans la table"; return 1; }
-    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_owner' \
-      || { echo "$m ne lit pas le proprietaire dans la table"; return 1; }
-  done
 }
 
 
@@ -300,14 +278,21 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$bad" -eq 0 ]
 }
 
-@test "les GID declares sont FIXES, et ils sont ceux de l'image" {
-  local g gid
+@test "les GID declares sont FIXES, au-dessus du plancher, et les deux groupes des constantes en ont un" {
+  local g gid n=0
   while read -r g gid; do
+    n=$((n + 1))
     [[ "$gid" =~ ^[0-9]+$ ]] || { echo "GID non numerique pour $g : $gid"; return 1; }
     [ "$gid" -ge 2000 ] || { echo "GID $gid sous le plancher fixe (2000) pour $g"; return 1; }
   done < <(awk '$1=="group"{print $2, $3}' "$BATS_TEST_TMPDIR/rows")
-  grep -qE '^group +fleet +2000 ' "$MANIFEST"
-  grep -qE '^group +lcars-console +2001 ' "$MANIFEST"
+  [ "$n" -ge 2 ]
+  local constantes="$BATS_TEST_DIRNAME/../../installer-constants.env" k nom
+  for k in PROV_FLEET_GROUP PROV_CONSOLE_GROUP; do
+    nom="$(sed -n "s/^$k=//p" "$constantes")"
+    [ -n "$nom" ]
+    awk -v g="$nom" '$1 == "group" && $2 == g && $3 ~ /^[0-9]+$/ {t=1} END {exit !t}' "$BATS_TEST_TMPDIR/rows" \
+      || { echo "$k=$nom n'a pas de GID fixe dans la table"; return 1; }
+  done
 }
 
 @test "PREFIX : la classe la plus importante de la table a un POSEUR, pas un effet de bord" {

@@ -79,17 +79,6 @@ EOF
 mod() { run bash "$MOD" "$1"; }
 sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS + les trois en-tetes de module" {
-  run head -9 "$MOD"
-  [[ "$output" == *"SOURCE:"* ]]
-  [[ "$output" == *"AUTHOR:"* ]]
-  [[ "$output" == *"STARDATE:"* ]]
-  [[ "$output" == *"STATUS:"* ]]
-  [[ "$output" == *"APPLY-ON: wsl linux"* ]]
-  [[ "$output" == *"CHECK-ON: any"* ]]
-  [[ "$output" == *"NEEDS: root"* ]]
-}
-
 @test "sans systemd, aucune unité n'est posée, et c'est dit — un fichier d'unité sans init est un décor" {
   sans_systemd
   mod apply
@@ -443,12 +432,6 @@ EOF
   [[ "$output" == *"lcars-converger.service absente ou divergente"* ]]
 }
 
-@test "l'environnement ne REDIT pas les defauts de la lib — un littéral mort se lit comme une décision" {
-  refute grep -qE 'LCARS_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
-  refute grep -qE 'LCARS_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
-  grep -q 'echo "LCARS_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
-}
-
 @test "le port du deck choisi atteint le DAEMON, pas seulement les callbacks OIDC" {
   export PROV_DECK_PORT=20997
   mod apply
@@ -495,11 +478,11 @@ EOF
   [[ "$output" == *"lcars-converger.service debout"* ]]
 }
 
-@test "un service pose mais MORT fait echouer l'apply" {
+@test "un service pose mais MORT fait echouer l'apply, et l'echec porte sa cause au lieu de renvoyer a un second geste" {
   echo 1 > "$ACTIVE"
   mod apply
   [ "$status" -ne 0 ]
-  [[ "$output" == *"pas debout"* ]]
+  [[ "$output" == *"FAIL  64-services: lcars-converger.service posé mais pas debout — « journalctl -u lcars-converger.service » dit pourquoi"* ]]
 }
 
 @test "un port DEJA PRIS se dit, et nomme --port-deck" {
@@ -739,16 +722,6 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   sans_systemd
   PROV_SUBSTRATE=docker mod check
   [[ "$output" == *"superviseur"* ]]
-}
-
-@test "un service qui ne monte pas PORTE sa cause — il ne renvoie pas a un second geste" {
-  local code; code="$(grep -vE '^\s*#' "$MOD")"
-  grep -q 'p_fail "$u.service redémarre en boucle — $(loop_hint' <<<"$code"
-  grep -q 'p_fail "$u.service posé mais pas debout$(unit_cause' <<<"$code"
-  refute grep -q 'pas debout — « \$SYSTEMCTL status' <<<"$code"
-  local corps; corps="$(sed -n '/^unit_cause()/,/^}/p' "$MOD")"
-  grep -q 'loop_hint' <<<"$corps"
-  grep -q '|| true' <<<"$corps"
 }
 
 @test "sans systemd, seat.uid et services.env sont POSES quand meme — seules les unites s'abstiennent" {

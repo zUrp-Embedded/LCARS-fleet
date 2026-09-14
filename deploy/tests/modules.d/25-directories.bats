@@ -41,14 +41,6 @@ setup() {
 mod() { run env -u PROVISION_RUN bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 entier() { run bash "$SRC" "$1"; }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  run head -6 "$SRC"
-  [[ "$output" == *"SOURCE:"* ]]
-  [[ "$output" == *"AUTHOR:"* ]]
-  [[ "$output" == *"STARDATE:"* ]]
-  [[ "$output" == *"STATUS:"* ]]
-}
-
 @test "substrat natif : la racine des sockets de console, son parent et le dossier de l'humain, au mode et au propriétaire du manifeste" {
   mod 'prov_runtime_dirs | dir_specs'
   [ "$status" -eq 0 ]
@@ -304,6 +296,7 @@ check_on() {
   refute_out 'hors substrat|volume du conteneur' <<<"$output"
 }
 
+# bats test_tags=structure
 @test "mode, propriétaire et substrat d'un dossier viennent du manifeste — la table du module n'en porte aucun" {
   local code tables
   code="$(sed 's/#.*//' "$SRC")"

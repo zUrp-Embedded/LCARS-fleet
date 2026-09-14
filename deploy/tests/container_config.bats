@@ -381,6 +381,7 @@ EOS
   [[ "$output" == *"409"*"non déclarée"* ]]
 }
 
+# bats test_tags=structure
 @test "aide : chaque variable d'env ANNONCEE est LUE — par container, par un compose qu'il pilote, ou par une lib qu'il source" {
   local names
   names="$(sed -n '/^# ENV (optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"

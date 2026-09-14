@@ -86,6 +86,7 @@ mod() {
     PROVISION_MODULE=15-toolchain PROV_SUBSTRATE=linux PROVISION_RUN=1 bash "$ARBRE/deploy/modules.d/15-toolchain.sh" "$1"
 }
 
+# bats test_tags=structure
 @test "le pin d'Elixir des constantes satisfait ce que mix.exs exige" {
   [ -n "$PIN" ]
   [ -n "$OTP" ]

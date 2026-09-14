@@ -5,26 +5,12 @@
 # STARDATE: 2026-08-14
 # STATUS: bats tests for 6-071 — the container's privileges are the narrowest that let bwrap run
 
-load ../refute
+# le compose qui accorde SYS_ADMIN sous ce profil se joue dans docker/compose_context.bats
 
 setup() {
   HERE="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
   DOCKER_DIR="$(cd "$HERE/../../docker" && pwd)"
   PROFILE="$DOCKER_DIR/lcars-hardened-seccomp.json"
-}
-
-@test "6-071: the compose that grants SYS_ADMIN points at the hardened profile, and it is the only one" {
-  local f="$DOCKER_DIR/docker-compose.yml"
-  [[ -f "$f" ]]
-  grep -q "SYS_ADMIN" "$f"
-  grep -q "seccomp=./lcars-hardened-seccomp.json" "$f"
-  refute grep -qE "^\s*-\s*seccomp=unconfined" "$f"
-  # un seul compose porte le conteneur ; bench et secrets sont des surcouches
-  local c n=0
-  for c in "$DOCKER_DIR"/docker-compose*.yml; do
-    case "$c" in *bench*|*secrets*) ;; *) n=$((n + 1)) ;; esac
-  done
-  [ "$n" -eq 1 ]
 }
 
 @test "6-071: the profile exists, is valid JSON, and refuses by default" {

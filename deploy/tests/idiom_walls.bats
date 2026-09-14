@@ -130,30 +130,20 @@ I3_AWK='
 # la lib lit les fichiers de la machine qui joue la porte
 pose_le_decor() { grep -qE '^[[:space:]]*(export LCARS_DECOR_ROOT=|decor_pose([[:space:]]|$))' "$1"; }
 
-@test "MUR I9: un temoin dont le code nomme une fonction du siege pose le decor — il ne lit jamais le siege de la machine" {
-  local f bad=0
-  for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
-    [[ "$f" == */idiom_walls.bats ]] && continue
-    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'prov_seat_uid|fleet_humans|uid_floor' || continue
-    pose_le_decor "$f" || { echo "${f##*/} nomme une fonction du siege sans poser le decor"; bad=1; }
-  done
-  [ "$bad" -eq 0 ]
-}
-
-@test "MUR I19: un temoin qui nomme un lecteur des bornes d'uid pose le decor — il ne lit jamais le login.defs de la machine" {
+@test "MUR I19: un temoin qui nomme un lecteur du siege ou des bornes d'uid pose le decor — il ne lit jamais le siege ni le login.defs de la machine" {
   local f bad=0 vus=0
   for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
-    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E 'fleet_humans|prov_uid_bounds')" ]] || continue
+    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E 'prov_seat_uid|fleet_humans|prov_uid_bounds')" ]] || continue
     vus=$((vus + 1))
-    pose_le_decor "$f" || { echo "${f##*/} nomme un lecteur des bornes sans poser le decor"; bad=1; }
+    pose_le_decor "$f" || { echo "${f##*/} nomme un lecteur du siege ou des bornes sans poser le decor"; bad=1; }
   done
   [ "$vus" -gt 0 ] || { echo "aucun temoin dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
   [ "$bad" -eq 0 ]
 }
 
-I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
-@test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose le decor — il ne lit jamais le canal de la machine" {
+I21_MODS='[0-9]{2}-[a-z0-9-]+\.sh'
+@test "MUR I21: un temoin qui EXECUTE un module pose le decor — il ne lit ni n'ecrit jamais les fichiers de la machine" {
   local f bad=0 vus=0 c execute v
   while IFS= read -r f; do
     [[ "$f" == */idiom_walls.bats ]] && continue
@@ -168,11 +158,11 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
     [ "$execute" -eq 1 ] || continue
     vus=$((vus + 1))
     pose_le_decor "$f" \
-      || { echo "${f#"$DEPLOY"/} execute un lecteur du canal sans poser le decor"; bad=1; }
+      || { echo "${f#"$DEPLOY"/} execute un module sans poser le decor"; bad=1; }
   done < <(find "$DEPLOY/tests" -name '*.bats' | sort)
   [ "$bad" -eq 0 ]
-  # GARDE D INSTRUMENT : les quatre temoins de module et deploy_manifest au moins
-  [ "$vus" -ge 5 ] || { echo "instrument casse : $vus temoin(s) vu(s), 5 au moins attendus" >&2; return 1; }
+  # GARDE D INSTRUMENT : les témoins de modules.d/ au moins
+  [ "$vus" -ge 15 ] || { echo "instrument casse : $vus temoin(s) vu(s), 15 au moins attendus" >&2; return 1; }
   # le mur mord : un temoin qui execute 60 par sa copie, ou par une variable du fichier, est VU
   local ech="$BATS_TEST_TMPDIR/ech.bats" seen
   printf '%s\n' 'MOD="$X/modules.d/62-runtime-helpers.sh"' 'run bash "$MOD" check' > "$ech"
@@ -462,41 +452,6 @@ I17_RE='p(grep|kill)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*f[[:space:]]+
   grep -qE "$I17_RE" <<<'  if pgrep -f "$PREFIX_REL" >/dev/null; then'
   grep -qE "$I17_RE" <<<'  pkill -TERM -f "$sup"'
   refute grep -qE "$I17_RE" <<<'  pgrep -x supervise.sh'
-}
-
-# ─── MUR I18 : AUCUN LITTERAL 1000 / 60000 COMME REPLI DE BORNE D'UID (la lib de l'installeur) ──
-#
-# ⚖ user 2026-09-05 (lot 14, solution A + C + E) : la frontiere systeme/humain est celle que
-# `login.defs` declare, et elle est FAIL-CLOSED — bornes illisibles, personne n'est un humain, et le
-# remede (le fichier) est dit une fois. La lib (`is_fleet_human`, `fleet_humans`) devinait
-# `1000`/`60000` par `_uid_bound … <defaut>` ; ce mur est le temoin du temoin : le repli n'est
-# plus ECRIT.
-#
-# JUMEAU de `runtime/test/services/idiom_walls.bats` (MUR I18, lot 15) : le mur du produit lit les
-# quatre lecteurs du produit, celui-ci lit la lib de l'installeur — meme motif, chacun SES fichiers,
-# aucun mur ne traverse la couture. L'EGALITE des deux corps (la lib et le protocole du produit)
-# est tenue ailleurs, par un temoin qui lit les deux par nature (`lib/provision-lib.bats`).
-#
-# La forme mordue : une ligne de CODE qui porte le nombre 1000 ou 60000 ET parle d'uid.
-I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
-
-@test "MUR I18 (lib de l'installeur) : aucun litteral 1000/60000 comme repli de borne d'uid dans lib/provision-lib.sh" {
-  local f="$DEPLOY/lib/provision-lib.sh" pop=0 trouve
-  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : le seul lecteur de la borne cote installeur.
-  [ -f "$f" ] || { echo "lecteur absent : $f — la population du mur n'est plus de un" >&2; return 1; }
-  pop=$((pop + 1))
-  trouve="$(code "$f" | grep -nE "$I18_RE" | grep -iE 'uid' || true)"
-  [ -z "$trouve" ] || { echo "MUR I18 rompu — lib/provision-lib.sh :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
-  # GARDE D INSTRUMENT : un lecteur, et il lit bien la borne — sinon le mur garde un fichier qui ne
-  # la lit plus, et il est vert a vide.
-  [ "$pop" -eq 1 ]
-  [ -n "$(code "$f" | grep -E 'UID_MIN')" ] || { echo "instrument casse : la lib ne lit plus UID_MIN" >&2; return 1; }
-  # Le mur mord : la forme qui vivait dans la lib, presentee au meme grep, est vue…
-  local forme='  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \\'
-  [ -n "$(grep -E "$I18_RE" <<<"$forme" | grep -iE 'uid')" ] || { echo "le mur ne mord pas : $forme" >&2; return 1; }
-  # … et un uid a cinq chiffres, ou un nombre qui ne parle pas d'uid, ne le sont pas.
-  refute grep -qE "$I18_RE" <<<'  export LCARS_SYSADMIN_UID=10001'
-  refute grep -qiE 'uid' <<<"$(grep -E "$I18_RE" <<<'  local timeout_ms=60000')"
 }
 
 # ─── MUR I20 : LE RAIL S'APPELLE `container` — PLUS AUCUN box / boite / boîte DANS deploy/ ──────

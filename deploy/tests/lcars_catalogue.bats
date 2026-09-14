@@ -275,6 +275,7 @@ FAIL:gesture_signalled:15"
   [[ "$output" == *"livre DANS le release"* ]]
 }
 
+# bats test_tags=structure
 @test "catalogue install: la CLI ne lit AUCUN secret et n'appelle AUCUN geste" {
   local body
   body="$(sed -n '/^cmd_catalogue_install()/,/^}/p' "$SUT" | sed 's/#.*//')"
@@ -287,6 +288,7 @@ FAIL:gesture_signalled:15"
 }
 
 
+# bats test_tags=structure
 @test "catalogue install: le defaut de la socket est l'adresse REELLE du service" {
   local defaut manifeste
   defaut="$(sed -n 's/^_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-\(.*\)}"$/\1/p' "$SUT")"

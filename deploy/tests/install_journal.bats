@@ -147,11 +147,6 @@ SH
   refute grep -qE 'apt_installed.*socat' <<<"$output"
 }
 
-# bats test_tags=structure
-@test "la table se declare donnee : le journal mesure, le manifeste declare" {
-  grep -q 'data, not code' "$BATS_TEST_DIRNAME/../system.manifest"
-}
-
 @test "un paquet RETIRE (etat rc) est REINSTALLE — dpkg -s le croit la, et le rail se coupait la scie" {
   apt_decor
   : > "$APT_POSED_DIR/docker-ce.rc"          # retire, config conservee
@@ -178,6 +173,7 @@ SH
   [ ! -e "$BATS_TEST_TMPDIR/final/vieux" ]
 }
 
+# bats test_tags=structure
 @test "M8 : aucun module ne cree son echafaudage par ensure_dir — et trois au moins passent par la primitive" {
   local hits n_scaffold n_promote
   hits="$(grep -nE 'ensure_dir "[^"]*\.(partial|new)"' "$BATS_TEST_DIRNAME"/../modules.d/*.sh || true)"

@@ -90,6 +90,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 
+# bats test_tags=structure
 @test "le rail natif n'installe PLUS d'outillage de gate — l'install ne re-atteste pas la source (DI-07)" {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
   [ -f "$MOD" ]
@@ -115,6 +116,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   ' "$2" | tr '\n' ' '
 }
 
+# bats test_tags=structure
 @test "l'image ne pose par apt qu'un SOCLE — chaque paquet est sur le rail (10-packages), ou image-only et NOMME" {
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
@@ -142,37 +144,17 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   done
 }
 
-@test "les exemptions sont NOMMEES dans le temoin, pas glissees dans une liste" {
-  # Une exclusion sans motif ecrit devient l'endroit ou l'on range ce qu'on ne veut pas traiter.
-  local f="$BATS_TEST_DIRNAME/deploy_manifest.bats"
-  grep -q 'tini *— PID 1' "$f"
-  grep -q 'openssh-server *— la porte' "$f"
-}
-
-
-@test "le rail POSTE fait TRAVERSER ses reglages a l'escalade sudo" {
-  SH="$BATS_TEST_DIRNAME/../../workstation"
-  [ -f "$SH" ]
-  grep -q 'ESCALADE_ENV=(' "$SH"
-  grep -q 'exec sudo "${env_args\[@\]}"' "$SH"
-  for v in PROV_COLOR NO_COLOR PROV_VERBOSE; do
-    grep -q "$v" "$SH" || { echo "reglage $v non transmis a travers sudo" >&2; false; }
-  done
-  # ET LA PORTE N'ESCALADE PLUS : sinon il y aurait deux listes, dont une que personne ne relit.
-  local door="$BATS_TEST_DIRNAME/../../../install.sh"
-  refute grep -q 'exec sudo' <<<"$(grep -vE '^\s*#' "$door")"
-}
-
-
 pkg_mod()    { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
 
+# bats test_tags=structure
 @test "docker n'est PAS dans la liste des deux rails — il n'a rien a faire dans l'image" {
   run native_list 'PACKAGES' "$(pkg_mod)"
   [ -n "$output" ]
   [[ "$output" != *"docker"* ]]
 }
 
+# bats test_tags=structure
 @test "docker-ce vit dans 12-docker-engine, sur le substrat linux seul ; 10-packages n'en parle plus" {
   grep -q '^# APPLY-ON: linux$' "$(engine_mod)"
   grep -q '^# CHECK-ON: linux$' "$(engine_mod)"

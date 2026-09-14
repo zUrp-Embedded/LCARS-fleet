@@ -7,39 +7,13 @@
 
 # shellcheck disable=SC2030,SC2031
 
-load refute
-
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   MODS="$DEPLOY/modules.d"
-  PORTE="$BATS_TEST_DIRNAME/../../install.sh"
   [ -d "$MODS" ]
-  [ -f "$PORTE" ]
 }
 
 embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' | grep -qx "$2"; }   # embarque <liste des constantes> <arbre>
-
-
-
-@test "C1 : --bench est CABLE sur le rail poste — il n'est plus avale" {
-  grep -q 'export LCARS_BENCH=1 PROV_FORGE_MONTEE=1' "$PORTE"
-  grep -qE '^ESCALADE_ENV=\(.*LCARS_BENCH ' "$DEPLOY/workstation"
-  grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_ADMIN_RESET' "$DEPLOY/workstation"
-  # et le banc du POSTE nomme son humain de demo comme celui du conteneur (ISO, ⚖ user 2026-09-11)
-  grep -q 'export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"' "$PORTE"
-  grep -qE '^ESCALADE_ENV=\(.*LCARS_BUILTIN_HUMAN' "$DEPLOY/workstation"
-  # et il traverse le `sudo` — ce qui n'est pas dans ESCALADE_ENV meurt a l'escalade, sans un mot
-  grep -q 'PROV_FORGE_MONTEE' "$DEPLOY/workstation"
-  grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_MONTEE' "$DEPLOY/workstation"
-}
-
-@test "C1 : la banniere du POSTE ne promet pas ce que fait le CONTENEUR" {
-  local bloc; bloc="$(sed -n "/Installation dans ce système.*LCARS s'installe/,/Pour installer en conteneur/p" "$PORTE")"
-  [ -n "$bloc" ]
-  grep -q 'la forge' <<<"$bloc"
-  grep -vE '^[[:space:]]*#' <<<"$bloc" | refute_out 'runner CI|humain de d|deploy/container'
-}
-
 
 @test "C2 : ~/.lcars/log est chmode par l'apply — il ne nait plus au umask" {
   local mod="$BATS_TEST_DIRNAME/../../runtime/services/human.d/70-human.sh"
@@ -57,11 +31,14 @@ embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' 
 }
 
 
-@test "C4 : le contenu de /usr/share/lcars est rendu a root, pas laisse a l'operateur" {
-  local mod="$MODS/44-media.sh"
+@test "C4 : le contenu de la racine des medias est rendu a root, pas laisse a l'operateur" {
+  # sous un décor tout appartient à qui le joue : le propriétaire ne se mesure pas, il se lit dans le code
+  local mod="$MODS/44-media.sh" media
+  media="$(sed -n 's/^PROV_MEDIA_ROOT=//p' "$DEPLOY/installer-constants.env")"
+  [ -n "$media" ]
   # 1. le propriétaire de l'arbre est celui que la table déclare, et la table dit root:root
-  grep -qE '^dir +/opt/lcars/share +[0-7]+ +root:root ' "$DEPLOY/system.manifest" \
-    || { echo "la table ne déclare plus /opt/lcars/share à root:root : le contenu garderait l'identite de la source (« cp -a » la preserve)"; return 1; }
+  awk -v p="$media" '$1 == "dir" && $2 == p && $4 == "root:root" {t=1} END {exit !t}' "$DEPLOY/system.manifest" \
+    || { echo "la table ne déclare plus $media à root:root : le contenu garderait l'identite de la source (« cp -a » la preserve)"; return 1; }
   grep -qF 'MEDIA_OWNER="$(prov_owner "$(prov_manifest_owner "$MEDIA_ROOT")")"' "$mod" \
     || { echo "le propriétaire de 44-media ne vient plus de la table"; return 1; }
   # 2. le chown est CONDITIONNEL — il ne touche que ce qui devie
@@ -76,18 +53,6 @@ embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' 
   [ -n "$n_chown" ] || { echo "aucun chown vers le propriétaire de la table dans 44-media"; return 1; }
   [ "$n_chmod" -lt "$n_chown" ] \
     || { echo "le chown (l. $n_chown) precede la pose des modes (l. $n_chmod) — l'ordre dit l'intention"; return 1; }
-}
-
-
-@test "C6 : la copie embarquee emporte services/ — le module en depend LUI-MEME" {
-  embarque PROV_EMBEDDED services
-  # et l'arbre que le module LIT est bien celui-la
-  grep -q 'services' "$MODS/62-runtime-helpers.sh"
-}
-
-@test "C6 : le second lecteur de l'arbre est servi lui aussi" {
-  grep -q 'product_tree)/services/forge-gestures.sh' "$MODS/25-directories.sh"
-  embarque PROV_EMBEDDED services
 }
 
 

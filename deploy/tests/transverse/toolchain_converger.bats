@@ -4,6 +4,7 @@
 
 # shellcheck disable=SC2016
 
+# bats test_tags=structure
 @test "le repertoire de travail par defaut ne s'ouvre ni dans l'etat tofu ni dans le magasin" {
   local default
   default="$(sed -n 's/^WORK="\${LCARS_TOOLCHAIN_WORK:-\(.*\)}"$/\1/p' "$SUT")"
@@ -89,6 +90,7 @@ EOF
 }
 
 
+# bats test_tags=structure
 @test "AUCUN SECRET: ce script n'OUVRE aucun fichier de la racine des jetons" {
   # ⚠ ON MESURE LE CODE, PAS LA PROSE : la cicatrice de ce fichier NOMME le chemin qu'elle a retire,
   # et c'est son metier. Ce qui est interdit est de le LIRE.
@@ -99,6 +101,7 @@ EOF
   [ "$n" -eq 0 ]
 }
 
+# bats test_tags=structure
 @test "AUCUN SECRET: quand un jeton EST fourni, il ne passe pas en argv de curl" {
   local n
   n="$(sed 's/#.*//' "$SUT" | grep -cE '\-H "Authorization' || true)"
@@ -354,6 +357,7 @@ EOF
   [[ "$output" != *"n'est PAS la tete"* ]]
 }
 
+# bats test_tags=structure
 @test "GARDE: la branche est un LITTERAL GELE — une borne ne se regle pas" {
   grep -qx 'BRANCH="tool_request"' "$SUT"
   refute grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"

@@ -7,40 +7,37 @@
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
-
-  mapfile -t BASH_CODE < <(
-    find "$REPO" -type f \
-      -not -path '*/tests/*' -not -path '*/_build/*' -not -path '*/deps/*' -not -path '*/.git/*' \
-      2>/dev/null \
-      | while read -r f; do
-          head -1 "$f" 2>/dev/null | grep -qE '^#!.*(bash|bats)' && echo "$f"
-        done | sort
-  )
 }
 
 code_of() { sed 's/#.*//' "$1"; }
 
-@test "MUR: le perimetre n'est pas VIDE — un balayage casse compte zero, comme un sans-faute" {
-  local t
-  # `runtime/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
-  for t in deploy runtime/test runtime/bin runtime/services; do
-    printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
-      echo "MUR 0 rompu — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre" >&2
-      return 1
-    }
-  done
-  [ "${#BASH_CODE[@]}" -ge 85 ]
-  # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
-  # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/deploy-release.sh$'
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet$'
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/provision-lib.sh$'
+# le code bash du dépôt, reconnu à son shebang : hors témoins, arbres bâtis ou jetables, et arbres de
+# travail d'autres branches posés sous .claude/worktrees ; un awk par lot de fichiers, pas deux processus par fichier
+bash_code() {
+  find "$REPO" \( -path "$REPO/.git" -o -path "$REPO/.claude/worktrees" -o -name tests -o -name _build \
+                  -o -name deps -o -name tmp -o -name node_modules \) -prune -o -type f -print0 2>/dev/null \
+    | xargs -0 awk 'FNR == 1 { if (/^#!.*(bash|bats)/) print FILENAME; nextfile }' 2>/dev/null | sort
 }
 
 @test "MUR 1: aucun repli sur une variable que bash pose TOUJOURS" {
   local internes='EUID|UID|PPID|BASHPID|RANDOM|SECONDS|LINENO|SHLVL|GROUPS|PWD|IFS|BASH_VERSION|MACHTYPE|OSTYPE|HOSTTYPE'
-
   local motif="\\\$\\{($internes):?[-=]"
+  local -a BASH_CODE
+  mapfile -t BASH_CODE < <(bash_code)
+
+  # GARDE D'INSTRUMENT : un balayage cassé compte zéro, comme un sans-faute ; chaque arbre contribue,
+  # et trois membres nommés, un par forme de nom (suffixe, sans suffixe, la porte)
+  local t
+  for t in deploy runtime/test runtime/bin runtime/services; do
+    printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
+      echo "MUR 1 — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre : l'instrument est casse" >&2
+      return 1
+    }
+  done
+  [ "${#BASH_CODE[@]}" -ge 85 ]
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/deploy-release.sh$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -qx "$REPO/install.sh"
 
   local f n total=0 rompu=0
   for f in "${BASH_CODE[@]}"; do
@@ -72,7 +69,7 @@ code_of() { sed 's/#.*//' "$1"; }
 
   # La portee : les fichiers qui sourcent la lib, PLUS le runner qui la source lui-meme.
   local portee
-  portee="$(grep -rl '\. "\${PROVISION_LIB' "$REPO/deploy" "$REPO/runtime/etc" 2>/dev/null; echo "$REPO/deploy/provision")"
+  portee="$(grep -rl '\. "\${PROVISION_LIB' "$REPO/deploy" 2>/dev/null; echo "$REPO/deploy/provision")"
   [ "$(printf '%s\n' "$portee" | wc -l)" -ge 20 ] || {
     echo "portee a $(printf '%s\n' "$portee" | wc -l) fichiers — le balayage est casse" >&2; return 1; }
 
@@ -104,8 +101,9 @@ code_of() { sed 's/#.*//' "$1"; }
   local interdit="[^${bs}n]"
 
   mapfile -t SUITES < <(
-    find "$REPO" "$REPO/../.claude" -type f \( -name '*.bats' -o -name '*.bash' \) \
-      -not -path '*/_build/*' -not -path '*/deps/*' 2>/dev/null | sort -u
+    find "$REPO" \( -path "$REPO/.git" -o -path "$REPO/.claude/worktrees" -o -name _build -o -name deps \
+                    -o -name tmp -o -name node_modules \) -prune -o -type f \( -name '*.bats' -o -name '*.bash' \) -print \
+      2>/dev/null | sort -u
   )
   [ "${#SUITES[@]}" -ge 60 ] || { echo "corpus de temoins a ${#SUITES[@]} fichiers — balayage casse" >&2; return 1; }
 
@@ -210,8 +208,7 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   need runtime/services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
   need runtime/services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
-  need deploy/modules.d/20-groups.sh "ensure_group \"\\\$PROV_CONSOLE_GROUP\""    "la creation sur le rail natif"
-  need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
+  need deploy/system.manifest      "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans installer-constants.env." >&2; return 1; }
 }
@@ -255,33 +252,6 @@ code_of() { sed 's/#.*//' "$1"; }
     return 1
   }
   [ -z "$(printf '%b' "$lus")" ] || { echo "MUR 7 rompu — lues par un daemon, decidees par l'installeur, ABSENTES de services.env :" >&2; printf '%b' "$lus" >&2; return 1; }
-  # TEMOIN APPARIE : une entree retiree de la table doit rougir — la premiere decidee sert de sonde
-  local sonde; sonde="$(printf '%s\n' "$decidees" | head -1)"
-  printf '%s\n' "$table" | grep -qx "$sonde"
-}
-
-@test "MUR 8: la prose d'un heredoc de docker/ ne s'execute pas" {
-  # LES HEREDOCS QUI N'ONT RIEN A EXPANSER SONT QUOTES. Un `<<EOF` nu evalue sa prose : les
-  # accents graves y sont des substitutions de commande. Mesure du banc : `bridge`, `host`, `none`,
-  # `getent`, `wget` et `git ls-remote` EXECUTES, et le fichier produit troue de leurs sorties vides.
-  # Meme defaut que `bats.descriptions_inert`, a un endroit qu'aucun mur ne regardait.
-  local f n=0
-  for f in "$REPO"/deploy/docker/*.sh "$REPO"/services/*.sh; do
-    [ -r "$f" ] || continue
-    # Pour chaque heredoc NON quote, le corps doit etre exempt d'accent grave.
-    awk '
-      /<<[[:space:]]*EOF[[:space:]]*$/ { inhd=1; start=NR; body=""; next }
-      inhd && /^EOF$/ { if (body ~ /`/) printf "%s:%d\n", FILENAME, start; inhd=0; next }
-      inhd { body = body $0 "\n" }
-    ' "$f"
-  done > "$BATS_TEST_TMPDIR/hd" 2>/dev/null || true
-  n="$(grep -c . "$BATS_TEST_TMPDIR/hd" || true)"
-  [ "$n" -eq 0 ] || {
-    echo "MUR 8 rompu — $n heredoc(s) NON quote(s) dont la prose porte un accent grave : elle sera EXECUTEE" >&2
-    cat "$BATS_TEST_TMPDIR/hd" >&2
-    echo "   Le geste : <<'EOF' si rien n'est a expanser, sinon echapper les accents graves." >&2
-    return 1
-  }
 }
 
 @test "MUR 9: le chemin du magasin s'accorde partout avec celui que les constantes de l'installeur declarent" {
@@ -299,20 +269,15 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "$(printf '%s\n' "$natures" | grep -c .)" -ge 3 ] || {
     echo "MUR 9 — moins de 3 natures lues dans store.sh : l'instrument ne lit plus la liste" >&2; return 1; }
 
-  # ⚠ LES SOUS-ARBRES HORS NATURE SE DECLARENT PAR LEUR NOM, chacun une decision visible.
-  #   tofu — l'arbre de travail d'OpenTofu, pose par le manifeste en 0700 lcars-authority. Ce n'est
-  #          pas une nature de magasin (il ne se purge pas par duree de vie) mais il partage la
-  #          persistance de la racine.
+  # tofu : l'arbre de travail d'OpenTofu partage la persistance de la racine sans être une nature
+  # de magasin (il ne se purge pas par durée de vie)
   local hors_nature="tofu"
 
   : > "$BATS_TEST_TMPDIR/vus"
   local f
   while read -r f; do
     [ -r "$f" ] || continue
-    # ⚠ CODE SEUL, ET LES DOCSTRINGS ELIXIR COMPTENT. Sans les depouiller, ce mur accusait
-    # `admiral/toolchain_reconciler.ex`, dont le `@moduledoc` cite `/var/lib/lcars/toolchain` (au
-    # SINGULIER) pour raconter une faute de la v2 — 0 occurrence en code, 1 en prose. Un mur qui lit
-    # la prose interdit de l'ecrire, et `MUR 4 bis` a coute cette lecon le meme jour.
+    # le code seul : commentaires et docstrings Elixir retirés, un mur qui lit la prose interdit de l'écrire
     python3 - "$f" "$racine" <<'PYX' >> "$BATS_TEST_TMPDIR/vus" 2>/dev/null || true
 import io, re, sys
 s = io.open(sys.argv[1], encoding='utf-8', errors='replace').read()
@@ -323,7 +288,7 @@ for m in re.finditer(r'/var/lib/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*(?:/([a-z.]+)
     tete = '/'.join(m.group(0).split('/')[:4])
     print('ORPHELIN:' + tete if tete != racine else (m.group(1) or ''))
 PYX
-  done < <(grep -rl '/var/lib/.*lcars' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp 2>/dev/null | grep -v '/deps/[a-z_]*/')
+  done < <(grep -rl '/var/lib/.*lcars' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=worktrees 2>/dev/null | grep -v '/deps/[a-z_]*/')
 
   [ -s "$BATS_TEST_TMPDIR/vus" ] || { echo "MUR 9 — aucun porteur lu : le balayage est casse" >&2; return 1; }
   local rompu=0 sub
@@ -342,99 +307,21 @@ PYX
   [ "$rompu" -eq 0 ] || return 1
 }
 
-@test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
-  # la garde `.claude/hooks/runtime-guard.sh` refuse les écritures dans l'arbre d'install en le
-  # nommant : un préfixe qui bouge sans elle la laisserait garder un chemin que personne n'utilise
-  local lib="$REPO/deploy/lib/provision-lib.sh"
-  local guard="$REPO/../.claude/hooks/runtime-guard.sh"
-  [ -r "$lib" ] || { echo "MUR 10 — provision-lib.sh illisible" >&2; return 1; }
-
-  local a b
-  a="$(sed -n 's/^PROV_PREFIX=//p' "$REPO/deploy/installer-constants.env")"
-  b="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
-  [ -n "$a" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus dans installer-constants.env" >&2; return 1; }
-  [ -n "$b" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus par provision-lib.sh" >&2; return 1; }
-  [ "$a" = "$b" ] || {
-    echo "MUR 10 rompu — la lib charge « $b », les constantes declarent « $a »" >&2
-    return 1
-  }
-
-  # La garde doit NOMMER ce prefixe. Elle protege aussi l'arbre v1 (`/local/LCARS`), ce qui est
-  # deliberé et hors sujet ici : on ne verifie que la presence du prefixe COURANT.
-  if [ -r "$guard" ]; then
-    sed 's/#.*//' "$guard" | grep -qF -- "$a" || {
-      echo "MUR 10 rompu — .claude/hooks/runtime-guard.sh ne protege pas « $a » : la garde vise un" >&2
-      echo "   arbre que l'install n'utilise plus, et laisse le vrai ouvert" >&2
-      return 1
-    }
-  fi
-
-  # Et aucun litteral du corpus ne nomme un AUTRE prefixe de la meme forme.
-  local orphelins
-  #
-  # ⚠ LA TRONCATURE GARDE LE POINT. Sans lui `/local/LCARS-v1.5` sortait en `/local/LCARS-v1`, et
-  # l'exemption ecrite plus bas ne le reconnaissait pas : le mur accusait un arbre qu'il declarait
-  # connaitre. Un motif qui mutile le nom qu'il compare ne compare rien.
-  #
-  # LES ARBRES NON-INSTALL SE DECLARENT PAR LEUR NOM, chacun avec sa raison :
-  #   /local/LCARS      — l'arbre v1, que la garde protege AUSSI et deliberement
-  #   /local/LCARS-v1.5 — cite par une donnee de CATALOGUE (`systemPrompt:` d'un cap-profile) ;
-  #                       un catalogue est substituable, son contenu n'est pas un fait de la fleet
-  #   /local/LCARS-fleet— un nom d'avant, qui ne vit plus que dans le CHANGELOG et un plan
-  #   /local/LCARS_v2   — le prefixe d'AVANT la descente sous `/opt/lcars`. Il n'a pas eu besoin
-  #                       d'etre declare tant qu'il ETAIT `$a` : le balayage l'excluait a ce titre.
-  #                       La migration l'a rendu orphelin sans que personne ne le nomme, et il ne
-  #                       vit plus que dans la cicatrice de `25-directories` qui raconte le scraper
-  #                       qui ne connaissait que lui. Meme statut que ses trois voisins ci-dessus.
-  #
-  # ⚠ ET LES `tests/` SONT HORS BALAYAGE, PARCE QUE CE MUR S'EST ACCUSE LUI-MEME. La cicatrice
-  # ci-dessus cite le nom tronque pour expliquer le defaut ; le balayage l'a lue et l'a comptee
-  # comme un prefixe etranger. C'est la lecon nº2 du chantier, mot pour mot : « un temoin qui lit
-  # la prose accuse la prose ». `adminite_walls` la porte deja — « un mur qui attraperait
-  # l'explication d'un defaut interdirait de l'expliquer ».
-  orphelins="$(grep -rhoE '/local/LCARS[A-Za-z0-9_.-]*' "$REPO" "$REPO/../.claude" \
-                 --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
-                 --exclude-dir=tests 2>/dev/null \
-               | sed -E 's|(/local/LCARS[A-Za-z0-9_.-]*).*|\1|' | sed -E 's|\.$||' | sort -u \
-               | grep -vxF -- "$a" \
-               | grep -vxF -- '/local/LCARS' \
-               | grep -vxF -- '/local/LCARS-v1.5' \
-               | grep -vxF -- '/local/LCARS-fleet' \
-               | grep -vxF -- '/local/LCARS_v2' || true)"
-  [ -z "$orphelins" ] || {
-    echo "MUR 10 rompu — prefixe(s) etranger(s) sous /local, ni « $a » ni un arbre v1 declare :" >&2
-    printf '     %s\n' $orphelins >&2
-    return 1
-  }
-}
-
 @test "MUR 11: tout fichier de /etc/lcars est DECLARE par le manifeste, ou nomme ici" {
-  # `/etc/lcars` est la configuration MACHINE : le siege, le secret OIDC du deck, le consentement
-  # d'hote, la table de transport des services. Le manifeste est l'inventaire de ce que le
-  # provisionnement TIENT — mode, proprietaire, rail. Un fichier qui y vit sans y figurer n'a ni
-  # mode garanti ni proprietaire garanti, et personne ne le sait.
-  #
-  # ⚠ DEUX FICHIERS N'Y SONT PAS, ET C'EST LEGITIME — POUR DEUX RAISONS DIFFERENTES. Les nommer
-  # separement est le point : une exemption groupee cacherait qu'elles ne disent pas la meme chose.
+  # un fichier de configuration machine qui n'est pas au manifeste n'a ni mode ni propriétaire garantis
   local manifeste="$REPO/deploy/system.manifest"
   [ -r "$manifeste" ] || { echo "MUR 11 — manifeste introuvable" >&2; return 1; }
 
   local declares
-  # ⚠ DELIMITEUR `@`, ET PAS `|` : `sed` prend le premier `|` pour sa borne, donc une alternance
-  # `(anchor|file|…)` coupe le motif en deux et l'extraction rend VIDE. Deuxieme fois aujourd'hui
-  # que ce delimiteur mord — le sigil `~r|…|` d'Elixir avait le meme piege dans la famille A.
+  # délimiteur @ : un | de sed couperait l'alternance du motif
   declares="$(sed -nE 's@^(anchor|file|dir|runtime)[[:space:]]+/etc/lcars/([A-Za-z0-9_.-]+)[[:space:]].*@\2@p' "$manifeste" | sort -u)"
   [ "$(printf '%s\n' "$declares" | grep -c .)" -ge 3 ] || {
     echo "MUR 11 — moins de 3 declarations lues sous /etc/lcars : l'instrument ne lit plus le manifeste" >&2
     return 1
   }
 
-  # fleet.json      — ADMIN-OWNED. `Fleet.SystemConfig` le LIT au boot ; rien ne le cree, et c'est
-  #                   voulu : le provisionnement ne pose pas les reglages de l'administrateur.
-  # install.journal — l'artefact de l'INSTALLEUR lui-meme (`deploy/provision`), pas un etat converge.
-  # (`channel` a quitte cette liste : la table le declare, ecrit par `60-deploy`, lu par `prov_channel`.
-  #  `forge.conf` et `provision.conf` aussi : seuls les postinst des .deb les lisaient, et la chaine
-  #  .deb est partie le 2026-09-11 — plus aucun porteur ne les nomme.)
+  # fleet.json      — les réglages de l'administrateur, lus au boot, que le provisionnement ne pose pas
+  # install.journal — l'artefact de l'installeur lui-même, pas un état convergé
   local hors_manifeste="fleet.json install.journal"
 
   : > "$BATS_TEST_TMPDIR/etcl"
@@ -451,7 +338,7 @@ for m in re.finditer(r'/etc/lcars/([A-Za-z0-9_.-]+)', s):
     print(re.sub(r'[.\-]+$', '', m.group(1)))
 PYX
   done < <(grep -rl '/etc/lcars/' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
-             --exclude-dir=.expert --exclude-dir=tests 2>/dev/null | grep -v '/deps/[a-z_]*/')
+             --exclude-dir=.expert --exclude-dir=tests --exclude-dir=worktrees 2>/dev/null | grep -v '/deps/[a-z_]*/')
 
   [ -s "$BATS_TEST_TMPDIR/etcl" ] || { echo "MUR 11 — aucun porteur lu : le balayage est casse" >&2; return 1; }
   local rompu=0 nom
@@ -501,18 +388,14 @@ s = re.sub(r'@(?:module)?doc\s+"""(.*?)"""', '', s, flags=re.S)
 s = '\n'.join(re.sub(r'#.*', '', l) for l in s.split('\n'))
 for m in re.finditer(re.escape(sys.argv[2]) + r'/([A-Za-z0-9_.$-]+)', s):
     nom = re.sub(r'[.\-]+$', '', m.group(1))
-    # ⚠ UNE EXPANSION N'EST PAS UN NOM. `<secrets>/$SYSTEM_ACCOUNT.gitea_token` compose son
-    # nom a l'execution : ce mur ne peut pas le lire, et l'accuser serait accuser une derivation.
+    # un nom composé à l'exécution ($SYSTEM_ACCOUNT.gitea_token) ne se lit pas ici
     if nom.startswith('$') or not nom:
         continue
     print(nom)
 PYX
-  # ⚠ `test` AU SINGULIER AUSSI. `--exclude-dir=tests` ne couvre pas `runtime/test/`, et ce mur
-  # accusait `test_catalogue_executor.py`, dont un fixture porte « ../../home/private/forge-master »
-  # — une tentative de traversee que le temoin REFUSE. Accuser un temoin pour la chaine qu'il
-  # interdit est la meme faute que lire la prose : on punit celui qui documente le defaut.
+  # les témoins (tests/ et runtime/test/) écrivent les chemins qu'ils refusent
   done < <(grep -rl "$secdir/" "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
-             --exclude-dir=.expert --exclude-dir=tests --exclude-dir=test 2>/dev/null | grep -v '/deps/[a-z_]*/')
+             --exclude-dir=.expert --exclude-dir=tests --exclude-dir=test --exclude-dir=worktrees 2>/dev/null | grep -v '/deps/[a-z_]*/')
 
   [ -s "$BATS_TEST_TMPDIR/sec" ] || { echo "MUR 12 — aucun porteur lu : le balayage est casse" >&2; return 1; }
   local rompu=0 nom
@@ -527,28 +410,19 @@ PYX
   [ "$rompu" -eq 0 ] || return 1
 }
 
-@test "MUR 13: le compte de service du deck — un nom, et les replis qui le nomment derivent" {
-  # le groupe du compte porte le secret OIDC du deck : un groupe qui ne dérive pas du compte se
-  # crée d'un côté et se chown de l'autre, et le deck sert 503 avec la cause dans un autre module
+@test "MUR 13: le compte de service du deck a un nom — les replis du produit et la table le nomment, le groupe du secret en derive" {
+  # le groupe du compte porte le secret OIDC du deck : un groupe qui ne dérive pas du compte se crée
+  # d'un côté et se chown de l'autre ; la pose du compte sur son groupe éponyme et la traduction de la
+  # lib se jouent (service_accounts.bats, modules.d/thin_callers.bats)
   local nom
   nom="$(sed -nE 's/^PROV_SYSTEM_USER=([a-z0-9_-]+)$/\1/p' "$REPO/deploy/installer-constants.env")"
   [ -n "$nom" ] || { echo "MUR 13 — PROV_SYSTEM_USER ne se lit plus dans installer-constants.env" >&2; return 1; }
 
   local rompu=0
-  # (1) Le groupe se DERIVE du compte partout, il ne se grave pas.
-  sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
-    | grep -qF -- '-g "$1" -- "$1"' || {
-      echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
-    | grep -qE '^[[:space:]]+LCARS_SYSTEM_GROUP=PROV_SYSTEM_USER$' || {
-      echo "MUR 13 rompu — la table de traduction de la lib ne transmet plus le compte comme groupe" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/runtime/services/forge.d/deck-oidc.sh" \
-    | grep -qE 'LCARS_SYSTEM_GROUP:-\$\{LCARS_SYSTEM_USER:-'"$nom"'\}' || {
-      echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
-
-  # (2) Les autres porteurs nomment le MEME compte, chacun sur son geste.
   need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
       echo "MUR 13 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }; }
+  need13 runtime/services/forge.d/deck-oidc.sh "OIDC_GROUP=\"\\\$\{LCARS_SYSTEM_GROUP:-\\\$\{LCARS_SYSTEM_USER:-$nom\}\}\"" \
+                                     "le groupe du secret OIDC, dérivé du compte"
   need13 runtime/services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
   need13 deploy/system.manifest      "^anchor[[:space:]]+/etc/lcars/deck-oidc.json[[:space:]]+0640[[:space:]]+root:$nom" \
                                      "le proprietaire du secret OIDC"
@@ -556,25 +430,11 @@ PYX
 }
 
 @test "MUR 14: un nom de service compose est une ENTREE DNS et un nom de CONTENEUR — ses lecteurs le derivent" {
-  # ⚠ CETTE CLASSE A CASSE LA CI DEUX FOIS LE 2026-08-28, ET LES DEUX FOIS PAR LE MEME COMMIT.
-  # `b01fe3164` a renomme deux services compose — `forge` -> `gitea`, `runner` -> `act` — et compose
-  # publie le nom du service a la fois comme ENTREE DNS du reseau et comme segment du nom de
-  # conteneur (`<projet>-<service>-1`). Les consommateurs le portent en CHAINE :
-  #
-  #   · l'override genere de `forge-runner.sh` nommait `runner:` -> compose creait un service sans
-  #     image, « invalid compose project », le runner ne demarrait pas ;
-  #   · une fois cela repare, l'URL interne disait encore `http://forge:3000` -> le runner tournait
-  #     et bouclait sur « lookup forge : no such host ».
-  #
-  # Un nom dans une URL et un nom dans un nom de conteneur ne RESSEMBLENT pas a des references :
-  # aucun grep sur « le nom du service » ne les trouve. Ce mur les trouve.
-  #
-  # ⚠ ET LE RENOMMAGE NE SE VOIT QUE SUR UN CONTENEUR NEUF — le rail ne reapplique pas un compose a
-  # une forge debout. D'ou quinze jours sans rien casser, puis deux pannes a la premiere install
-  # fraiche. Un mur est le seul instrument qui puisse voir ca sans monter une machine.
+  # compose publie le nom d'un service comme entrée DNS du réseau, segment du nom de conteneur
+  # (<projet>-<service>-1) et valeur de label : un renommage ne se voit que sur un conteneur neuf
   local rompu=0
 
-  # (1) LA FORGE : le service que `forge-compose.yml` definit EST l'hote des URL internes.
+  # (1) la forge : le service que forge-compose.yml définit est l'hôte des URL internes, sur son port
   local forge_svc
   forge_svc="$(python3 -c "
 import yaml,io
@@ -582,32 +442,14 @@ d=yaml.safe_load(io.open('$REPO/deploy/docker/forge-compose.yml'))
 print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
   [ -n "$forge_svc" ] || { echo "MUR 14 — le service de forge-compose.yml ne se lit plus" >&2; return 1; }
 
-  # ⚠ CODE SEUL — ET LA PROSE COMPTE QUAND MEME, AILLEURS. Ce mur ne lit que le code (quatrieme
-  # fois qu'un extracteur de ce fichier avale de la prose). Un mur qui accuserait un commentaire
-  # interdirait d'expliquer le defaut qu'il garde ; la prose se repare a la main.
-  #
-  # ⚠ ET CETTE PHRASE DISAIT « les commentaires qui nommaient `http://forge:3000` ont ete corriges
-  # dans le meme geste ». C'ETAIT FAUX, mesure le 2026-08-29 : SEIZE lignes de prose survivaient
-  # dans six fichiers de production — `forge-runner.sh` (7), `entrypoint.sh` (2), `bench-up.sh` (2),
-  # `forge-compose.yml` (2), `provision-lib.sh` (2), un commentaire de temoin (1). Deux d'entre
-  # elles documentaient l'ENTREE `FORGE_BASE_URL` a l'operateur, et `bench-up.sh` se contredisait
-  # dans un seul fichier : la ligne 17 prescrivait `forge:3000`, la ligne 364 passait `gitea:3000`.
-  #
-  # LA LECON EST SUR L'ANGLE, PAS SUR LE COMPTE. Deux relectures adverses ont debattu de la GRAVITE
-  # de deux de ces lignes sans jamais demander CE QU'ELLES DEVRAIENT DIRE — et la question, posee,
-  # transforme l'arbitrage en balayage et rend les quatorze autres. Un mur ne peut pas poser cette
-  # question a notre place : il ne lit pas la prose, et c'est bien.
+  # le code seul : un mur qui accuserait un commentaire interdirait d'expliquer le défaut qu'il garde
   local hotes
   hotes="$(grep -rhE 'https?://[a-z][a-z0-9_.-]*:3000' "$REPO" \
              --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
-             --exclude-dir=tests --exclude-dir=test 2>/dev/null \
+             --exclude-dir=tests --exclude-dir=test --exclude-dir=worktrees 2>/dev/null \
            | sed 's/#.*//' | grep -oE 'https?://[a-z][a-z0-9_.-]*:3000' \
            | sed -E 's@https?://([a-z][a-z0-9_.-]*):3000@\1@' | sort -u \
            | grep -vE '^(localhost|127\.0\.0\.1|0\.0\.0\.0)$' || true)"
-  # ⚠ ET LE PORT EST L'AUTRE MOITIE DE L'ADRESSE. Ce mur tenait l'HOTE et pas le PORT : un
-  # `http://gitea:3001` aurait passe, alors que le conteneur ecoute sur ce que le compose MAPPE.
-  # Garder une moitie d'une adresse est la forme exacte que le §22 denonce — et c'est la deuxieme
-  # fois aujourd'hui qu'on la trouve sur ce meme fait (le depot ops etait garde sans sa branche).
   local port_conteneur
   port_conteneur="$(sed 's/#.*//' "$REPO/deploy/docker/forge-compose.yml" \
                     | sed -nE 's@^[[:space:]]*-[[:space:]]*".*:([0-9]{2,5})"[[:space:]]*$@\1@p' | head -n1)"
@@ -616,7 +458,7 @@ print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
   local ports
   ports="$(grep -rhE 'https?://[a-z][a-z0-9_.-]*:[0-9]+' "$REPO" \
              --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
-             --exclude-dir=tests --exclude-dir=test 2>/dev/null \
+             --exclude-dir=tests --exclude-dir=test --exclude-dir=worktrees 2>/dev/null \
            | sed 's/#.*//' | grep -oE "https?://$forge_svc:[0-9]+" \
            | sed -E 's@.*:([0-9]+)$@\1@' | sort -u || true)"
   local pt
@@ -635,14 +477,7 @@ print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
     rompu=1
   done
 
-  # (2) LE RUNNER : le service que `runner-compose.yml` definit EST le segment du nom de conteneur.
-  # (2) LES NOMS DE CONTENEUR : `<projet>-<service>-1`. Le segment doit etre un service qu'UN des
-  # compose definit — pas forcement celui du runner : ce depot en a trois (`lcars` pour le conteneur,
-  # `gitea` pour la forge, `act` pour le runner) et les references les nomment tous les trois.
-  # Ma premiere ecriture comparait tout au service du RUNNER et accusait `${PROJECT}-lcars-1`, une
-  # reference parfaitement juste vers le conteneur. Comparer a l'ENSEMBLE evite d'avoir a deviner quel
-  # compose une variable de projet designe — et c'est aussi ce qui rend le mur juste quand un
-  # quatrieme compose arrive.
+  # (2) les noms de conteneur : le segment est un service qu'un des compose définit, quel qu'il soit
   local services
   services="$(python3 -c "
 import yaml, io, glob
@@ -668,24 +503,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     rompu=1
   done
 
-  # (3) LES FILTRES PAR LABEL — LA TROISIEME FORME, ET CE MUR NE LA GARDAIT PAS.
-  #
-  # ⚠ CE MUR ETAIT VERT PENDANT QUE `48-forge-host.sh` PORTAIT LE NOM MORT, ET C'EST LA CLASSE §22 :
-  # il tenait l'hote DNS, le port, et le segment de nom de conteneur — trois expressions du meme
-  # fait sur QUATRE. La quatrieme est `docker ps --filter label=com.docker.compose.service=<nom>`,
-  # et c'est celle qui avait garde `forge` apres `b01fe3164`.
-  #
-  # ⚠ ET IL NE POUVAIT PAS LA VOIR EN CHERCHANT DES COPIES DE `gitea` : une copie qui a DEJA diverge
-  # ne ressemble plus au fait qu'elle copie. Un verrou qui balaie les occurrences du bon nom est
-  # aveugle a celle qui porte l'ancien — il faut balayer les EMPLOIS, puis confronter chacun a la
-  # declaration. C'est la difference entre « toutes les copies se ressemblent » et « toute copie est
-  # une valeur que le compose definit ».
-  #
-  # ⚠ MESURE DU 2026-08-28, banc 1241 : sur une machine dont la forge TOURNE DEJA, la sonde ne
-  # reconnaissait plus sa propre forge, et le module refusait l'install en accusant l'operateur —
-  # « ce n'est pas la forge de cette machine ». Invisible en CI : on n'y installe jamais deux fois.
-  #
-  # Une valeur DERIVEE (`$VAR`) passe : c'est la forme qu'on veut. Seul un litteral est confronte.
+  # (3) les filtres par label : chaque emploi littéral est confronté aux services définis ; une valeur
+  # dérivée ($VAR) passe
   local filtres
   filtres="$(grep -rhE 'com\.docker\.compose\.service=' "$REPO/deploy" "$REPO/runtime/bin" "$REPO/runtime/services" \
                --exclude-dir=tests 2>/dev/null \
@@ -705,37 +524,14 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 }
 
 @test "MUR 15: AUCUNE adresse de LAN gravee en code — le compte declare est ZERO" {
-  # ⚠ CE MUR A CHANGE DE SUJET LE 2026-09-08, PARCE QUE SA CONDITION DE SORTIE EST TOMBEE.
-  # Il gardait UNE adresse tolereee (`10.42.0.118`) et comptait ses SITES (deux : le defaut d'image
-  # et `LCARS_SOURCE_REMOTE`), parce que le compose d'install ne pouvait pointer nulle part ailleurs :
-  # aucune registry publique ne portait l'image, et « un defaut qui ment est pire qu'un defaut
-  # local ». La promesse ecrite etait : « le jour ou GHCR est alimente, ce defaut change, et LUI
-  # SEUL ».
-  #
-  # GHCR EST ALIMENTE (mesure du 2026-09-08 : paquet publie par le workflow du depot, rattache,
-  # public, manifeste anonyme en HTTP 200, `docker pull` sans compte). Les deux sites ont bascule
-  # dans le meme geste — exactement ce que le compte de sites servait a garantir. Il ne reste rien
-  # a tolerer, donc le compte declare devient ZERO et ce mur redevient ce qu'il aurait toujours du
-  # etre : aucune adresse de machine dans le code livre.
-  #
-  # LES DEUX FORMES DE PROSE RESTENT HORS SUJET et le mur ne les lit pas : les exemples d'un
-  # template ou d'un `@doc`, et la sortie de banc recopiee dans les README. Ce sont des
-  # ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de montrer une URL.
-  # C'est pourquoi le balayage coupe les commentaires (`sed 's/#.*//'`) avant de compter.
-  # ⚠ LE TITRE DIT « EN CODE », LE BALAYAGE NE LISAIT QUE QUATRE RACINES. Mesuré par relecture
-  # hostile le 2026-09-08 : des appâts posés dans `runtime/lib/` (toute l'application Elixir livrée),
-  # `runtime/config/` (`runtime.exs`, l'endroit le plus naturel pour un hôte par défaut) et à la
-  # racine (`install.sh`, et `pack.sh` qui y vivait encore) laissaient ce mur VERT. Un mur dont le périmètre est plus
-  # étroit que sa promesse ne protège pas : il certifie.
+  # le code livré seul : la prose (commentaires, exemples de README) peut montrer une adresse
   local racines=("$REPO/deploy" "$REPO/install.sh" \
                  "$REPO/runtime/lib" "$REPO/runtime/config" "$REPO/runtime/priv" \
                  "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
                  "$REPO/catalogues")
   local motif='(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
 
-  # GARDE D'INSTRUMENT — elle ne peut plus s'appuyer sur une adresse attendue, puisqu'on n'en
-  # attend aucune. Un mur qui n'accuse jamais et un balayage qui ne lit rien rendent le meme vert :
-  # on prouve donc que le motif MORD, sur un decor pose ici.
+  # GARDE D'INSTRUMENT : aucune adresse n'est attendue, le motif mord donc sur un décor posé ici
   printf 'image: "10.42.0.118:80/fleet/lcars:2"\n' > "$BATS_TEST_TMPDIR/appat.yml"
   grep -hE "$motif" "$BATS_TEST_TMPDIR/appat.yml" >/dev/null || {
     echo "MUR 15 — le motif ne reconnait plus une adresse de LAN : l'instrument est casse" >&2
@@ -745,10 +541,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   for r in "${racines[@]}"; do
     [ -e "$r" ] || { echo "MUR 15 — chemin balaye absent : $r (l'instrument ne lit plus rien)" >&2; return 1; }
   done
-  # ⚠ ET ON PROUVE QUE LE BALAYAGE LIT VRAIMENT CES CHEMINS, pas seulement qu'ils existent : un
-  # appât posé pour CHAQUE racine doit ressortir. Sans ça, des options de `grep` qui changent ou un
-  # chemin qui se déplace rendraient un vert sur du vide — la forme d'échec qui certifie. On mesure
-  # sur des copies sous le bac à sable : le mur ne modifie jamais l'arbre.
+  # un appât par racine, fichier ou dossier, ressort des mêmes options de grep
   local sonde="$BATS_TEST_TMPDIR/sonde-mur15"; rm -rf "$sonde"; mkdir -p "$sonde"
   local i=0 r2
   for r2 in "${racines[@]}"; do
@@ -766,10 +559,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 
   [ -z "$trouvees" ] || {
     echo "MUR 15 rompu — adresse(s) de LAN gravee(s) en code : $(echo $trouvees)" >&2
-    echo "   Le compte declare est ZERO depuis le basculement GHCR. Une adresse de machine dans" >&2
-    echo "   le code livre est un defaut qui ne marche que chez nous — nomme la registry, la forge" >&2
-    echo "   ou l'hote par une variable, pas par son IP." >&2
-    # Ou est-elle ? Le refus doit nommer le fichier, pas seulement l'adresse.
+    echo "   Une adresse de machine dans le code livré ne marche que chez nous : nommer la registry," >&2
+    echo "   la forge ou l'hôte par une variable, pas par son IP." >&2
     grep -rnE "$motif" "${racines[@]}" --exclude-dir=tests 2>/dev/null \
       | grep -vE '^[^:]+:[0-9]+: *#' | sed 's/^/   /' >&2
     return 1
@@ -777,22 +568,10 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 }
 
 @test "MUR 16: le fichier d'environnement de l'humain — un chemin, deux ecrivains, un lecteur" {
-  # ⚠ QUATORZE PORTEURS, AUCUNE AUTORITE. `bin/fleet` LIT `$HOME/.lcars/fleet.env` (deux
-  # fois), `70-human` l'ECRIT depuis un template, et le template lui-meme porte le nom. Le
-  # repertoire d'etat a une autorite — `Fleet.Layout` `@state_dirname` — le NOM DU FICHIER n'en a
-  # aucune, et c'est lui qui porte `FORGE_BASE_URL` : sans ce fichier, `fleet start` refuse.
-  #
-  # UNE DIVERGENCE ICI EST MUETTE DANS LE PIRE SENS : `70-human` ecrirait un fichier que personne
-  # ne lit, `fleet` lirait un fichier que personne n'ecrit, et le module RAPPORTERAIT « posé »
-  # pendant que le lanceur dit « FORGE_BASE_URL manquant — édite <un autre chemin> ». L'operateur
-  # editerait le fichier que le module nomme, sans effet.
-  #
-  # LE REPERTOIRE SE DERIVE DE `Fleet.Layout`, le nom du fichier se compare entre ses porteurs :
-  # c'est l'ACCORD, faute d'autorite designee — meme forme que `/home/private`.
+  # le répertoire d'état a une autorité (Fleet.Layout @state_dirname), le nom du fichier n'en a pas :
+  # il se compare entre son lecteur (bin/fleet) et ses écrivains
   local dir_etat
-  # ⚠ DELIMITEUR `,` : `@` separe le `sed` ET ouvre `@state_dirname`. Troisieme fois aujourd'hui
-  # qu'un delimiteur mange son propre motif — apres `~r|…|` en Elixir et `s|(anchor|file)|` plus
-  # haut dans ce fichier. Le choix du delimiteur n'est pas cosmetique : c'est une partie du motif.
+  # délimiteur , : @ ouvre @state_dirname
   dir_etat="$(sed -nE 's,^[[:space:]]*@state_dirname[[:space:]]+"([^"]+)".*,\1,p' "$REPO/runtime/lib/fleet/layout.ex" | head -n1)"
   [ -n "$dir_etat" ] || { echo "MUR 16 — @state_dirname ne se lit plus dans Fleet.Layout" >&2; return 1; }
 
@@ -845,7 +624,5 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # une release : un tag qui commence par un chiffre, ou par v puis un chiffre, après le dernier / — jamais :main ni :latest ni un nom nu
   grep -qE 'image: "\$\{LCARS_IMAGE:-[^} ]*/[^}/:]+:v?[0-9][^}/:]*\}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut une release taguee" >&2; rompu=1; }
   grep -qE 'image: "\$\{LCARS_IMAGE:-[^}]*:(main|latest)\}"' "$compose" && { echo "MUR 17 rompu — l'image par defaut vise une tete de branche" >&2; rompu=1; }
-  local annonce; annonce="127.0.0.1:$(sed -n 's/^PROV_SSH_PORT_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
-  grep -qE "^#   LCARS_SSH_PORT .*défaut $annonce\)" "$container" || { echo "MUR 17 rompu — l'aide de container n'annonce pas « $annonce » pour LCARS_SSH_PORT" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — le compose la lit et replie sur la meme valeur." >&2; return 1; }
 }

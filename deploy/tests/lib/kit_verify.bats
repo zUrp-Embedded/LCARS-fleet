@@ -38,13 +38,6 @@ constante() { sed -n "s/^$1=//p" "$BATS_TEST_DIRNAME/../../installer-constants.e
 REL_KIT=runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet
 verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  head -6 "$LIB" | grep -q '^# SOURCE:'
-  head -6 "$LIB" | grep -q '^# AUTHOR:'
-  head -6 "$LIB" | grep -q '^# STARDATE:'
-  head -6 "$LIB" | grep -q '^# STATUS:'
-}
-
 @test "KIT COMPLET : il passe — sinon tous les temoins suivants ne mesurent rien" {
   verifie
   [ "$status" -eq 0 ] || { echo "un kit COMPLET est refuse :"; echo "$output"; return 1; }

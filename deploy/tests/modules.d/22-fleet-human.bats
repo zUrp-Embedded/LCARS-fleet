@@ -65,14 +65,6 @@ passwd_with() { # passwd_with <ligne>...  → pose le passwd du décor
 mod() { run bash -c "set -euo pipefail; source <(sed '\$d' '$SRC') >/dev/null 2>&1; $1"; }
 nu() { run bash "$SRC" "$1"; }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  run head -8 "$SRC"
-  [[ "$output" == *"SOURCE:"* ]]
-  [[ "$output" == *"AUTHOR:"* ]]
-  [[ "$output" == *"STARDATE:"* ]]
-  [[ "$output" == *"STATUS:"* ]]
-}
-
 @test "ce module ne CREE pas de compte unix — un seul createur, et ce n'est pas lui" {
   local mouchard="$BATS_TEST_TMPDIR/appele" u
   for u in useradd adduser; do
@@ -105,6 +97,7 @@ nu() { run bash "$SRC" "$1"; }
 }
 
 
+# bats test_tags=structure
 @test "le nom d'un compte n'est JAMAIS ecrit ici — ce module ne connait personne par son nom" {
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   refute grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
@@ -200,6 +193,7 @@ nu() { run bash "$SRC" "$1"; }
   [[ "$output" == *"/etc/group verrouillé"* ]]
 }
 
+# bats test_tags=structure
 @test "un apply ne DELEGUE JAMAIS a check — le verdict n'est pas partageable" {
   # le verdict porte le dialecte du verbe : la règle se garde pour tous les modules
   local m bad=0

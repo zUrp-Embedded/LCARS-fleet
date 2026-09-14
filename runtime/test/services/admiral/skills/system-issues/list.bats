@@ -1,14 +1,13 @@
 #!/usr/bin/env bats
-# bats file_tags=integration
-# SOURCE: deploy/tests/admiral_skill.bats
+# SOURCE: runtime/test/services/admiral/skills/system-issues/list.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-12
 # STATUS: témoins de runtime/services/admiral/skills/system-issues/list.sh, la lecture de la boîte de réception d'admiral
 
-load refute
+load ../../../../support/refute
 
 setup() {
-  LIST="$BATS_TEST_DIRNAME/../../runtime/services/admiral/skills/system-issues/list.sh"; [ -x "$LIST" ]
+  LIST="$BATS_TEST_DIRNAME/../../../../../services/admiral/skills/system-issues/list.sh"; [ -x "$LIST" ]
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   cat > "$BIN/curl" <<'EOF'

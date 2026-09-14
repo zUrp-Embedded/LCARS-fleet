@@ -69,14 +69,17 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 }
 
 
-# bats test_tags=structure
-@test "root est refusé avant tout parsing" {
-  local code; code="$(grep -vE '^\s*#' "$SRC")"
-  grep -q 'EUID" -eq 0' <<<"$code"
-  local l_garde l_parse
-  l_garde="$(grep -n 'EUID" -eq 0' "$SRC" | head -1 | cut -d: -f1)"
-  l_parse="$(grep -n '^while \[\[ \$# -gt 0 \]\]' "$SRC" | head -1 | cut -d: -f1)"
-  [ "$l_garde" -lt "$l_parse" ]
+@test "root est refusé avant tout parsing : ni l'aide, ni la version, ni une option inconnue ne passent" {
+  # le vrai unshare, hors des doublures du décor : root y est l'uid 0
+  local us; us="$(PATH="${PATH#"$BINDIR:"}" command -v unshare)"
+  "$us" -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
+  local a
+  for a in --help --version --zzz; do
+    run "$us" -Ur bash "$SRC" "$a" < /dev/null
+    [ "$status" -eq 1 ] || { echo "$a : rc=$status — $output"; return 1; }
+    [[ "$output" == *"Cet installeur ne se lance pas en root."* ]] || { echo "$a : $output"; return 1; }
+    refute_out 'Option inconnue|non publiée|install.sh —' <<<"$output"
+  done
 }
 
 # bats test_tags=structure
@@ -93,7 +96,6 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [ -z "$hors" ] || { echo "hors de main : $hors" >&2; return 1; }
 }
 
-# bats test_tags=structure
 @test "une porte pipée et coupée n'exécute rien" {
   local n; n="$(wc -c < "$SRC")"
   local p c out
@@ -475,11 +477,12 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" != *"Choix ["* ]]
 }
 
-@test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux" {
+@test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux — et rien de ce que fait le conteneur" {
   local a; a="$(_arbre)"
   porte "$a" --bench --workstation --check
   [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
   [[ "$output" == *"Pour installer en conteneur à la place :"* ]]
+  sed -n '/Installation dans ce système/,/Pour installer en conteneur/p' <<<"$output" | refute_out 'runner CI|humain de d|deploy/container'
   a="$(_arbre substrat=linux consent=env)"
   porte "$a" --bench --workstation --check
   [[ "$output" == *"Modifie    /opt/lcars, des groupes et des comptes de service, des paquets apt, ~/.claude de l'utilisateur, docker-ce"*"la machine se réinstalle"* ]]

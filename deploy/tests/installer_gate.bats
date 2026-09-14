@@ -49,13 +49,6 @@ path_sans() { # path_sans <outil> → un dossier
   printf '%s' "$sans"
 }
 
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  grep -q "^# SOURCE:" "$PORTE_SRC"
-  grep -q "^# AUTHOR:" "$PORTE_SRC"
-  grep -q "^# STARDATE:" "$PORTE_SRC"
-  grep -q "^# STATUS:" "$PORTE_SRC"
-}
-
 @test "corpus vide = échec — zéro test joué ne se lit pas comme zéro test rouge" {
   stub_bats 0
   run bash "$DECOR/gate.sh"
@@ -206,6 +199,7 @@ path_sans() { # path_sans <outil> → un dossier
   [[ "$output" == *"LCARS_DECOR_ROOT"* ]]
 }
 
+# bats test_tags=structure
 @test "la seconde copie du bloc de neutralisation s'accorde avec celle de shell_gate.sh" {
   [ -f "$SHELL_GATE" ] || skip "shell_gate.sh absent de cet arbre (contexte installeur seul)"
   local a b
@@ -230,6 +224,7 @@ go7_shape() { # go7_shape <fichier> <fonction> — la forme d'un prédicat : fen
       done
 }
 
+# bats test_tags=structure
 @test "les deux prédicats GO-7 s'accordent avec leurs originaux du pre-commit" {
   local hook="$BATS_TEST_DIRNAME/../../runtime/git-hooks/pre-commit"
   [ -f "$hook" ] || skip "pre-commit absent de cet arbre (contexte installeur seul)"

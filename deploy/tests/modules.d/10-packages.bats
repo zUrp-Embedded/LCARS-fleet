@@ -97,6 +97,7 @@ liste() { sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^PACKAGES=\(|^\)|^\s*#
   [[ "$output" == *"FAIL  10-packages: bwrap installé mais un sandbox minimal ÉCHOUE"*"apparmor_restrict_unprivileged_userns=0"* ]]
 }
 
+# bats test_tags=structure
 @test "xz-utils est dans la liste : 16-node détare le précompilé de node, un .tar.xz" {
   grep -qE 'fetch_verify "https://nodejs\.org/[^"]*\.tar\.xz"' "$BATS_TEST_DIRNAME/../../modules.d/16-node.sh" \
     || { echo "16-node ne télécharge plus un .tar.xz — ce cas n'a plus de sujet"; return 1; }

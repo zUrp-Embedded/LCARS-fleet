@@ -154,15 +154,12 @@ journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s
   [ "$output" = "" ]
 }
 
-@test "MEMOIRE : la liste est FERMEE — un drapeau du geste n'est pas un fait de la machine" {
-  local liste; liste="$(sed -n 's/^PROV_REMEMBERED=(\(.*\))$/\1/p' "$LIB")"
-  [ -n "$liste" ]
-  [ "$(wc -w <<<"$liste")" -eq 4 ]
-  grep -q 'PROV_DECK_PORT'       <<<"$liste"
-  grep -q 'PROV_FORGE_HOST_PORT' <<<"$liste"
-  grep -q 'PROV_SSH_PORT'        <<<"$liste"
-  grep -q 'PROV_FORGE_BASE'      <<<"$liste"
-  printf '%s\n' "$liste" | refute_out 'ONLY|VERBOSE|PORCELAIN|HUMAN'
+@test "MEMOIRE : la liste est FERMEE — les trois ports et la base, jamais un drapeau du geste" {
+  run env PROV_DECK_PORT=20901 PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903 PROV_FORGE_BASE=zoe \
+      PROV_ONLY=60 PROV_VERBOSE=1 PROV_PORCELAIN=1 PROV_HUMAN=quelquun PROV_SUBSTRATE=linux \
+      bash -c '. "$1" >/dev/null 2>&1; prov_params_line' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$(tr ' ' '\n' <<<"$output" | sort | paste -sd' ')" = "PROV_DECK_PORT=20901 PROV_FORGE_BASE=zoe PROV_FORGE_HOST_PORT=20902 PROV_SSH_PORT=20903" ]
 }
 
 @test "MEMOIRE : ce que le journal ecrit est ce que la liste fermee autorise" {
@@ -176,6 +173,7 @@ journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s
 }
 
 
+# bats test_tags=structure
 @test "63-forge-tokens : un humain pas encore membre de l'org n'est pas un DRIFT" {
   local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
   local bloc; bloc="$(sed -n '/case "\$(member_state "\$LCARS_LOGIN")"/,/esac/p' "$mod")"
@@ -187,6 +185,7 @@ journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s
   grep -q 'proprietaire d.org\|propriétaire d.org' <<<"$bloc"
 }
 
+# bats test_tags=structure
 @test "63-forge-tokens : ce que le rail PEUT converger reste un drift" {
   # Le sens qui manquait. `63-forge-tokens` porte de vrais drifts — structure absente, tokens a re-minter —
   # et les passer tous en warn aurait rendu le module incapable de signaler quoi que ce soit.

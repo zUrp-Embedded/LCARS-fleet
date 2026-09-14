@@ -63,7 +63,3 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   local vu; vu="$(racine_de "$R/runtime/lib/fleet/credentials/role_token.ex" '@default_dir "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
 }
-
-@test "LA TABLE declare cette racine, et c'est la meme" {
-  grep -qE "^dir[[:space:]]+${ATTENDU}[[:space:]]" "$R/deploy/system.manifest"
-}

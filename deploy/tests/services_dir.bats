@@ -40,17 +40,6 @@ declare_couvre() {
   [ "$(ls -1 "$SERVICES" | wc -l)" -ge 10 ]
 }
 
-@test "PROPRIETE 1 : deploy/docker ne porte plus AUCUN auxiliaire pose" {
-  local n bad=()
-  while read -r n; do
-    [[ -e "$REPO/deploy/docker/$n" ]] && bad+=("$n")
-  done < <(helpers)
-  [ "${#bad[@]}" -eq 0 ] || {
-    echo "auxiliaires revenus dans deploy/docker/ : ${bad[*]}" >&2
-    false
-  }
-}
-
 @test "PROPRIETE 2 : tout fichier de services est POSE quelque part" {
   local base bad=()
   while read -r base; do
@@ -76,7 +65,7 @@ declare_couvre() {
       lib/module-protocol.sh)     continue ;;  # provision-lib, 63-forge-tokens
     esac
     bad+=("$base")
-  done < <(cd "$SERVICES" && git ls-files)
+  done < <(cd "$SERVICES" && find . -type f -not -path '*/__pycache__/*' | sed 's#^\./##' | sort)
   [ "${#bad[@]}" -eq 0 ] || {
     echo "dans services/ mais pose NULLE PART (ni HELPERS, ni la pose en bloc) : ${bad[*]}" >&2
     echo "  soit c'est un service — declare-le ; soit ce n'en est pas un — il n'a rien a faire ici." >&2

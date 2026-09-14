@@ -7,6 +7,7 @@
 
 # shellcheck disable=SC2030,SC2031
 
+# bats test_tags=structure
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand le conteneur n'est pas la" {
   local container="$BATS_TEST_DIRNAME/../container"
   [ -f "$container" ]

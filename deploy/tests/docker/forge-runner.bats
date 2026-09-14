@@ -48,6 +48,7 @@ setup() {
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export UP_RC="$BATS_TEST_TMPDIR/up_rc";   echo 0 > "$UP_RC"
   export DIND_OUT="$BATS_TEST_TMPDIR/dind"; echo "27.0.0" > "$DIND_OUT"
+  export DIND_CHARGE="$BATS_TEST_TMPDIR/dind-charge"
   # le compose de la pose est relu par compose lui-même, sans daemon, et son rendu JSON gardé ;
   # l'environnement qu'il reçoit est noté, et l'arbre de TMPDIR listé au même instant
   export RENDU="$BATS_TEST_TMPDIR/rendu.json" NO_DAEMON="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock"
@@ -66,7 +67,9 @@ case "$*" in
     DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-2}" config --format json > "$RENDU" 2>&1
     exit "$(cat "$UP_RC")" ;;
   "exec "*" docker version "*)          cat "$DIND_OUT"; exit 0 ;;
-  "exec "*" docker image inspect "*)    echo sha256:abc; exit 0 ;;
+  "exec -i "*" docker load")            : > "$DIND_CHARGE"; exit 0 ;;
+  # outil-local:9 n'est dans le daemon du runner qu'une fois chargée depuis la machine
+  "exec "*" docker image inspect "*)    [[ " $* " != *" outil-local:9 "* || -e "$DIND_CHARGE" ]] || exit 0; echo sha256:abc; exit 0 ;;
 esac
 exit 0
 EOF
@@ -217,6 +220,20 @@ run_runner() {
   [ "$status" -eq 3 ]
   [[ "$output" == *"le daemon embarqué du runner ne rend rien"* ]]
   refute grep -q '^DOCKER:save' "$CALLS"
+}
+
+@test "le semis lit les images dans les labels reçus : chacune est demandée au daemon du runner, une absente y est chargée depuis la machine" {
+  routes_nominales
+  run bash "$SRC" --forge-api "$FORGE_API" --admin-token-file "$ADMIN" --network bt-forge_default --project bt-runner \
+    --labels "shell:docker://alpine:3.20,outil:docker://outil-local:9,hote:host"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'DOCKER:exec bt-runner-act-1 docker image inspect -f {{.Id}} alpine:3.20' "$CALLS"
+  grep -qx 'DOCKER:exec bt-runner-act-1 docker image inspect -f {{.Id}} outil-local:9' "$CALLS"
+  grep -qx 'DOCKER:save outil-local:9' "$CALLS"
+  refute grep -q '^DOCKER:save alpine' "$CALLS"
+  [[ "$output" == *"image locale semée dans le daemon du runner : outil-local:9"* ]]
+  # un label sans image docker:// n'est pas demandé
+  refute grep -q 'inspect -f {{.Id}} hote' "$CALLS"
 }
 
 @test "la forge ne liste aucun runner : sortie 3, après une liste lue sur le jeton admin" {

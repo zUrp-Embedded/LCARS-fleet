@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/container_state_volume.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
@@ -13,56 +13,49 @@ setup() {
   PROTO="$DOCKER/../../runtime/services/lib/module-protocol.sh"
   CONSTANTES="$DOCKER/../installer-constants.env"
   [ -r "$CONSTANTES" ]
+  # le compose rendu par docker compose avec les constantes de l'installeur, sans daemon
+  RENDU="$BATS_TEST_TMPDIR/rendu.json"
+  env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" LCARS_STORE_PREFIX=p \
+    docker compose --env-file "$CONSTANTES" -f "$DEV" -p p config --format json > "$RENDU"
+  [ "$(jq '.services.lcars.volumes | length' "$RENDU")" -ge 2 ]
 }
 constante() { sed -n "s/^$1=//p" "$CONSTANTES"; }
-resout() { # resout <texte> — chaque ${PROV_…} du compose remplacé par sa valeur dans les constantes, comme --env-file
-  local t="$1"
-  while [[ "$t" =~ \$\{(PROV_[A-Z0-9_]+)[^}]*\} ]]; do
-    t="${t/"${BASH_REMATCH[0]}"/$(constante "${BASH_REMATCH[1]}")}"
-  done
-  printf '%s\n' "$t"
-}
-env_of() { resout "$(sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1)"; }
-mounts_of() {
+env_rendu() { jq -r --arg v "$1" '.services.lcars.environment[$v] // empty' "$RENDU"; }
+under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneur rendu
   local m
-  while read -r m; do resout "$m"; done \
-    < <(sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+|\$\{[^}]+\}[^:]*).*$/\1/p')
-}
-under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]] && return 0; done < <(mounts_of "$2"); return 1; }
-
-@test "GARDE D'INSTRUMENT : mounts_of lit chaque montage nommé du compose, ceux écrits par une constante compris" {
-  local m
-  m="$(mounts_of "$DEV")"
-  [ -n "$m" ] || { echo "aucun montage lu dans $DEV : chaque « sous un volume » ci-dessous serait faux" >&2; return 1; }
-  [ "$(grep -c . <<<"$m")" -eq "$(sed 's/#.*//' "$DEV" | grep -cE '^[[:space:]]+-[[:space:]]+lcars-[a-z]+:')" ]
-  grep -qx "$(constante PROV_ROOT)/var" <<<"$m"
-  grep -qx "$(constante PROV_STORE_ROOT)/state" <<<"$m"
+  while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]] && return 0; done \
+    < <(jq -r '.services.lcars.volumes[] | select(.type == "volume") | .target' "$RENDU")
+  return 1
 }
 
 @test "le client OAuth2 du deck est sous un volume du compose" {
   local dev
-  dev="$(env_of "$DEV" LCARS_DECK_OIDC_FILE)"
+  dev="$(env_rendu LCARS_DECK_OIDC_FILE)"
   [ -n "$dev" ]
-  under_mount "$dev" "$DEV"  || { echo "$dev hors de tout volume de $DEV" >&2; return 1; }
-  refute grep -qE '^\s*LCARS_DECK_OIDC_FILE:\s*/etc/' "$DEV"
+  under_mount "$dev" || { echo "$dev hors de tout volume de $DEV" >&2; return 1; }
 }
 
-@test "le poste garde le defaut du protocole (/etc/lcars) — la, /etc persiste" {
-  grep -qE '^: "\$\{LCARS_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json\}"' "$PROTO"
+# bats test_tags=structure
+@test "le poste garde le defaut du protocole, celui des constantes — la, /etc persiste" {
+  local poste; poste="$(constante PROV_DECK_OIDC_FILE)"
+  [ -n "$poste" ]
+  grep -qxF ": \"\${LCARS_DECK_OIDC_FILE:=$poste}\"" "$PROTO"
 }
 
+# bats test_tags=structure
 @test "le deck LIT le fichier sous le MEME nom que le geste qui l'ecrit — un seul nom" {
   grep -q 'os.environ.get("LCARS_DECK_OIDC_FILE"' "$DOCKER/../../runtime/services/console-deck.py"
   refute grep -q '"LCARS_DECK_OIDC"' "$DOCKER/../../runtime/services/console-deck.py"
   grep -q 'LCARS_DECK_OIDC_FILE' "$DOCKER/../../runtime/services/forge.d/deck-oidc.sh"
 }
 
-@test "le repertoire prive (jetons) est aussi sous le volume var — l'etat ne se separe pas" {
-  local priv; priv="$(sed -nE 's/^: "\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/\1/p' "$PROTO" | head -1)"
-  [ -n "$priv" ]
-  under_mount "$priv" "$DEV"
+@test "le repertoire des jetons est sous un volume du compose — l'etat ne se separe pas" {
+  local jetons; jetons="$(constante PROV_TOKENS_DIR)"
+  [ -n "$jetons" ]
+  under_mount "$jetons"
 }
 
+# bats test_tags=structure
 @test "TOUT chemin d'etat que l'init ou le protocole nomme tombe sous un volume — ou dans la liste d'exceptions ECRITE ici" {
   local INIT="$DOCKER/../../runtime/services/container/init.sh"
   [ -f "$INIT" ]
@@ -72,7 +65,7 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]
     sed 's/#.*//' "$INIT" | grep -oE '\$\{LCARS_[A-Z_]+:-/[^}]+\}' | sed -E 's/^\$\{[A-Z_]+:-//; s/\}$//'
     while IFS='=' read -r var val; do
       [ -n "$var" ] || continue
-      ov="$(env_of "$DEV" "$var")"; [ -n "$ov" ] && val="$ov"
+      ov="$(env_rendu "$var")"; [ -n "$ov" ] && val="$ov"
       printf '%s\n' "$val"
     done < <(sed 's/#.*//' "$PROTO" | sed -nE 's/^: "\$\{(LCARS_[A-Z_]+_(FILE|DIR)):=(\/[^}]+)\}".*/\1=\3/p')
   } | sort -u)"
@@ -85,7 +78,7 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]
     [ -n "$p" ] || continue
     [[ "$p" == /run/* ]] && continue
     [[ "$exceptions" == *" $p "* ]] && continue
-    under_mount "$p" "$DEV" && continue
+    under_mount "$p" && continue
     echo "$p : ecrit par l'init ou le protocole, hors de tout volume du compose, et pas nomme dans les exceptions" >&2
     rompu=1
   done <<<"$chemins"

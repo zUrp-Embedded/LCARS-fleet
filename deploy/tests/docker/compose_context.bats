@@ -1,18 +1,16 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=integration
 # SOURCE: deploy/tests/docker/compose_context.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-14
-# STATUS: bats tests for les compose et le Dockerfile — l'image vient de pack.sh, et chaque compose se lit avec les constantes de l'installeur
+# STATUS: bats tests for les compose — chacun rendu par docker compose avec les constantes de l'installeur, sans daemon
 
 load ../refute
 
 setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
   CF="$DOCKER/docker-compose.yml"
-  DF="$DOCKER/Dockerfile"
   [ -f "$CF" ]
-  [ -f "$DF" ]
   # des valeurs que rien d'autre n'écrit : un compose qui les rend les a lues dans le fichier donné
   CONST="$BATS_TEST_TMPDIR/installer-constants.env"
   local cles='PROV_STORE_ROOT|PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS'
@@ -26,21 +24,63 @@ setup() {
 # l'appelant ne fournit rien que le cas ne pose
 rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" "$@"; }
 
-@test "le compose n'a AUCUN bloc build: — l'image se nomme (image:), elle vient de pack.sh" {
-  refute grep -qE '^\s*build:' "$CF"
-  refute grep -qE '^\s*context:' "$CF"
-  refute grep -qE '^\s*dockerfile:' "$CF"
-  grep -qE '^\s*image:' "$CF"
+@test "le compose nomme son image et ne la bâtit pas : elle vient de pack.sh" {
+  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '[.services[] | select(has("build") and .build != null)] | length' <<<"$output")" = 0 ]
+  [ -n "$(jq -r '.services.lcars.image // empty' <<<"$output")" ]
 }
 
-@test "le Dockerfile ne copie QUE le contexte entier vers /src — le kit, tel que pack.sh le scelle" {
-  local copies; copies="$(grep -vE '^\s*#' "$DF" | grep -E '^COPY ' | grep -v -- '--from=')"
-  [ "$(grep -c . <<<"$copies")" -eq 1 ]
-  grep -qE '^COPY --chown=builder:builder \. /src/lcars_install$' <<<"$copies"
-  # et pack.sh batit bien depuis le stage du kit, avec ce Dockerfile
-  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
-  grep -qE -- '-f "\$STAGE/\$ROOT/deploy/docker/Dockerfile"' "$pk"
-  grep -qE '"\$STAGE/\$ROOT" \\$' "$pk"
+@test "le magasin : chaque nature de store.sh est un volume externe au nom du projet, monté sous la racine des constantes — sans préfixe, compose refuse en le nommant" {
+  # shellcheck source=../../lib/store.sh
+  source "$DOCKER/../lib/store.sh"
+  [ "${#LCARS_STORE_TREES[@]}" -ge 3 ]
+  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local j="$output" n
+  # externe : un down -v ne l'emporte pas ; au préfixe : deux instances ne partagent pas de magasin
+  [ "$(jq '[.volumes[] | select(.external == true)] | length' <<<"$j")" -eq "${#LCARS_STORE_TREES[@]}" ]
+  for n in "${LCARS_STORE_TREES[@]}"; do
+    [ "$(jq -c --arg k "lcars-$n" '.volumes[$k] | [.external, .name]' <<<"$j")" = "[true,\"p-$n\"]" ] || { echo "nature $n : $(jq -c --arg k "lcars-$n" '.volumes[$k]' <<<"$j")"; return 1; }
+    [ "$(jq -r --arg k "lcars-$n" '.services.lcars.volumes[] | select(.source == $k) | .target' <<<"$j")" = "/srv/magasin-temoin/$n" ]
+  done
+  run rendu docker compose --env-file "$CONST" -f "$CF" -p p config -q
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LCARS_STORE_PREFIX absent"* ]]
+}
+
+@test "le conteneur reçoit SYS_ADMIN sous le profil seccomp durci, jamais sans confinement — et un seul compose le porte" {
+  run rendu LCARS_STORE_PREFIX=p docker compose --env-file "$CONST" -f "$CF" -p p config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '.services.lcars.cap_add' <<<"$output")" = '["SYS_ADMIN"]' ]
+  jq -r '.services.lcars.security_opt[]' <<<"$output" | grep -qx 'seccomp=./lcars-hardened-seccomp.json'
+  jq -r '.services.lcars.security_opt[]' <<<"$output" | refute_out '^seccomp=unconfined$'
+  [ -f "$DOCKER/lcars-hardened-seccomp.json" ]
+  # bench et secrets sont des surcouches : aucun autre compose ne déclare le service
+  local c porteurs=0
+  for c in "$DOCKER"/*compose*.yml; do
+    run rendu LCARS_STORE_PREFIX=p LCARS_BENCH_BASE=b LCARS_DEVFORGE_NETWORK=n LCARS_CONTAINER_MASTER_TOKEN=/m LCARS_CONTAINER_SEED=/s \
+      LCARS_RUNNER_NETWORK=n docker compose --env-file "$CONST" -f "$c" -p p config --format json
+    [ "$status" -eq 0 ] || continue
+    [ "$(jq -r '.services.lcars.image // empty' <<<"$output")" = "" ] || porteurs=$((porteurs + 1))
+  done
+  [ "$porteurs" -eq 1 ]
+}
+
+@test "le runner : dind rootless sans le socket de l'hôte, son magasin dans un volume nommé, celui du dind rootful en tmpfs" {
+  run rendu docker compose --env-file "$CONST" -f "$DOCKER/runner-compose.yml" -p r config --format json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local j="$output"
+  # une étiquette mouvante, pas un digest : la variante suit sa branche
+  [[ "$(jq -r '.services.act.image' <<<"$j")" =~ ^gitea/runner:[a-z0-9.]+-dind-rootless$ ]]
+  [ "$(jq -r '.services.act.privileged' <<<"$j")" = true ]
+  jq -r '.services.act.security_opt[]' <<<"$j" | grep -qx 'apparmor=rootlesskit'
+  [ "$(jq -r '.services.act.environment.DOCKER_HOST' <<<"$j")" = unix:///var/run/user/1000/docker.sock ]
+  jq -r '.services.act.volumes[] | .source // "", .target' <<<"$j" | refute_out 'docker\.sock'
+  [ "$(jq -c '.services.act.volumes[] | select(.target == "/home/rootless/.local/share/docker") | [.type, .source]' <<<"$j")" = '["volume","dind"]' ]
+  [ "$(jq -r '.volumes | has("dind")' <<<"$j")" = true ]
+  [ "$(jq -c '.services.act.tmpfs' <<<"$j")" = '["/var/lib/docker"]' ]
+  jq -r '.services.act.volumes[].target' <<<"$j" | refute_out '^/var/lib/docker$'
 }
 
 @test "docker-compose.yml publie ses ports par défaut et monte le magasin d'après les constantes" {

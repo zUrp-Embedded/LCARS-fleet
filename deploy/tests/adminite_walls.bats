@@ -50,39 +50,31 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 @test "MUR 1: le jeton master et le seed ne sont poses QUE pour leur detenteur, sans groupe" {
-  local trouvees=0 f mode
-  for f in "${CODE[@]}"; do
-    trouvees=$((trouvees + $(code_of "$f" \
-      | grep -cE 'MASTER_TOKEN_FILE|forge-master\.token|SEED_FILE|forge-seed\.pass' \
-      | head -1) ))
-  done
-  [ "$trouvees" -ge 3 ] || {
-    echo "MUR 1 INSTRUMENT CASSE — seulement $trouvees ligne(s) parlent des secrets d'autorite." >&2
-    echo "  Ce mur ne mesure plus rien : les ecrivains ont bouge, ou le balayage est faux." >&2
-    return 1
-  }
+  # le mode se joue (modules.d/48-forge-host.bats) ; le propriétaire, qu'un décor rend à qui le joue,
+  # ne se lit que dans le code : chaque propriétaire écrit est « compte:compte », le groupe éponyme du détenteur
+  local secrets
+  secrets="$(sed -nE 's#^PROV_(MASTER_TOKEN_FILE|FORGE_SEED_FILE)=.*/##p' "$REPO/deploy/installer-constants.env" | sed 's/\./\\./g' | paste -sd'|')"
+  [[ "$secrets" == *'|'* ]] || { echo "MUR 1 — les deux secrets d'autorité ne se lisent plus dans installer-constants.env : « $secrets »" >&2; return 1; }
+  local motif="MASTER_TOKEN_FILE|FORGE_SEED_FILE|$secrets"
 
+  local f ligne mode proprio poses=0
   for f in "${CODE[@]}"; do
-    # Les lignes de CODE qui posent un mode sur l'un des deux secrets.
     while IFS= read -r ligne; do
-      [[ -z "$ligne" ]] && continue
-      # Tout mode octal a quatre chiffres cite sur cette ligne doit etre 0600.
+      [[ -n "$ligne" ]] || continue
+      poses=$((poses + 1))
       for mode in $(grep -oE '0[0-7]{3}' <<<"$ligne"); do
-        [[ "$mode" == "0600" ]] || {
-          echo "MUR 1 rompu — $f pose un secret d'autorite en $mode :" >&2
-          echo "  $ligne" >&2
-          return 1
-        }
+        [[ "$mode" == "0600" ]] || { echo "MUR 1 rompu — $f pose un secret d'autorite en $mode :" >&2; echo "  $ligne" >&2; return 1; }
       done
-      # Et aucun groupe ne s'y attache.
-      grep -qE 'root:(root)?$|root:root' <<<"$ligne" || grep -qv 'root:' <<<"$ligne" || {
-        echo "MUR 1 rompu — $f attache un groupe a un secret d'autorite :" >&2
-        echo "  $ligne" >&2
-        return 1
-      }
-    done < <(code_of "$f" | grep -E 'MASTER_TOKEN_FILE|forge-master\.token|SEED_FILE|forge-seed\.pass' \
-                          | grep -E 'chmod|chown|chgrp|write_atomic|install -m|0[0-7]{3}')
+      while read -r proprio; do
+        [[ -n "$proprio" ]] || continue
+        proprio="${proprio//\"/}"
+        [[ "${proprio%%:*}" == "${proprio#*:}" ]] || {
+          echo "MUR 1 rompu — $f donne un secret d'autorite au groupe « ${proprio#*:} » :" >&2; echo "  $ligne" >&2; return 1; }
+      done < <(grep -oE '"?(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*):(\$\{?[A-Za-z_]+\}?|[a-z][a-z0-9_-]*)"?' <<<"$ligne" | grep -v '^[a-z]*://' || true)
+    done < <(code_of "$f" | grep -E "$motif" | grep -E 'chmod|chown|chgrp|write_atomic|install -m')
   done
+  # GARDE D'INSTRUMENT : les deux poses de 48-forge-host au moins
+  [ "$poses" -ge 2 ] || { echo "MUR 1 — $poses pose(s) de secret d'autorite lue(s) : l'instrument ne voit plus les ecrivains" >&2; return 1; }
 }
 
 @test "MUR 2: aucune porte n'interroge un groupe unix pour decider d'une adminite" {
@@ -127,36 +119,13 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 
-@test "MUR 5: le deck ne se depose plus sur une identite partagee, et son compte existe — pose par 21 sur les deux terrains" {
+@test "MUR 5: le deck ne se depose pas sur une identite partagee — ni nobody, ni nogroup" {
+  # son compte, le défaut de ce compte et le groupe de son secret : service_accounts.bats et le MUR 13 de variable_walls.bats
   local landing="$REPO/runtime/services/console-landing.sh"
-  local mod="$REPO/deploy/modules.d/21-service-accounts.sh"
-
-  # Le drop ne nomme plus `nobody` : ni en uid, ni en gid.
+  [ -r "$landing" ]
+  code_of "$landing" | grep -q 'setpriv'
   absent 'reuid nobody' "$landing"
   absent 'regid nogroup' "$landing"
-  # ... et il nomme un compte, par une variable dont le defaut est lisible.
-  code_of "$landing" | grep -q 'DECK_USER="\${LCARS_DECK_USER:-lcars-system}"'
-
-  # LES DEUX RAILS POSENT LE COMPTE. En verifier un seul laisserait l'autre demarrer un `setpriv`
-  # vers un nom que `/etc/passwd` ne connait pas — et `setpriv` echoue alors en parlant de lui-meme.
-  code_of "$mod" | grep -q 'creer_compte "\$PROV_SYSTEM_USER"'
-  grep -qx 'PROV_SYSTEM_USER=lcars-system' "$REPO/deploy/installer-constants.env"
-  code_of "$mod" | grep -q -- '-g "\$1" -- "\$1"'
-}
-
-@test "MUR 5 bis: le groupe du secret OIDC est le compte du deck, et le MANIFESTE dit la meme chose" {
-  local mod="$REPO/runtime/services/forge.d/deck-oidc.sh"
-  local manifest="$REPO/deploy/system.manifest"
-  local row group
-
-  group="$(code_of "$mod" | sed -nE 's@^OIDC_GROUP=.*:-([a-z0-9-]+)\}+"$@\1@p')"
-  [ -n "$group" ] || { echo "OIDC_GROUP illisible dans $mod" >&2; return 1; }
-
-  row="$(grep -E '^anchor[[:space:]]+/etc/lcars/deck-oidc\.json[[:space:]]' "$manifest")"
-  [ -n "$row" ] || { echo "deck-oidc.json n'est plus declare dans le manifeste" >&2; return 1; }
-  [[ "$row" == *0640* ]] || { echo "mode attendu 0640 : $row" >&2; return 1; }
-  [[ "$row" == *"root:$group"* ]] \
-    || { echo "le module pose root:$group, le manifeste declare autre chose : $row" >&2; return 1; }
 }
 
 @test "MUR 5 ter: lcars-console n'a AUCUN membre declare — il s'accorde a l'exec, jamais par adhesion" {
@@ -167,23 +136,13 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   done
 }
 
-@test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau — le poste et le conteneur" {
-  local unit="$REPO/deploy/modules.d/64-services.sh"
+@test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau dans le conteneur — le service y est depose par setpriv" {
+  # sur le poste, l'unité porte User= et son compte est posé : modules.d/64-services.bats et service_accounts.bats le jouent
   local entry="$REPO/runtime/services/container/boot.sh"
-
-  # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
-  code_of "$unit" | sed -n '/lcars-catalogue)/,/^      ;;/p' | grep -q 'User='
-  run bash -c "sed 's/#.*//' '$unit' | sed -n '/lcars-converger)/,/^      ;;/p' | grep -c 'User=' || true"
-  [ "$output" -eq 0 ]
-
-  # RAIL CONTENEUR : le service est depose par setpriv, et le compte existe dans l'image.
-  code_of "$entry" | grep -q 'setpriv .*catalogue-executor.py\|setpriv[^|]*\\$'
-  code_of "$entry" | grep -q 'catalogue-executor.py'
-
-  # LE COMPTE EST POSE PAR LE RAIL POSTE AUSSI — sinon `User=` designe un compte absent et l'unite
-  # meurt au demarrage sur `failed to determine user credentials`.
-  [ -r "$REPO/deploy/modules.d/21-service-accounts.sh" ]
-  code_of "$REPO/deploy/modules.d/21-service-accounts.sh" | grep -q 'useradd'
+  [ -r "$entry" ]
+  # la commande lancée, continuations jointes : le setpriv vers le détenteur porte l'exécuteur lui-même
+  code_of "$entry" | sed -e :a -e '/\\$/N; s/\\\n//; ta' \
+    | grep -qE 'setpriv[^;|&]*--reuid "\$LCARS_AUTHORITY_USER"[^;|&]*catalogue-executor\.py'
 }
 
 @test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {

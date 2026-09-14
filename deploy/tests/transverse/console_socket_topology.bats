@@ -228,11 +228,6 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
     | jq -r '.services[].ports[]? | .target' | sort -u
 }
 
-@test "6-072: the compose publishes no RANGE of ports" {
-  local dir="$BATS_TEST_DIRNAME/../../docker"
-  refute grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.yml"
-}
-
 @test "6-072: NOTHING of the per-human block space is published" {
   local dir="$BATS_TEST_DIRNAME/../../docker" p
   for p in $(ports_of "$dir/docker-compose.yml"); do
@@ -249,6 +244,7 @@ ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compos
   grep -qx "22"    <<< "$pub"   # ssh, la porte d'admin
 }
 
+# bats test_tags=structure
 @test "the deck gains the console group and NOT fleet" {
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
@@ -402,6 +398,7 @@ s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/
 
 hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 
+# bats test_tags=structure
 @test "la sonde de l'image teste le DECK, pas seulement sshd" {
   # Sans cette moitie, le healthcheck mesure une porte d'admin et la presente comme la sante du
   # conteneur. Les deux ports sont testes : sshd reste la porte de secours, le deck est l'entree.
@@ -409,16 +406,14 @@ hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
   hc_cmd | grep -q 'LCARS_LANDING_PORT'
 }
 
-@test "la sonde lit le PORT depuis l'environnement, jamais un littéral" {
-  hc_cmd | grep -q '${LCARS_LANDING_PORT:-20999}'
-}
-
+# bats test_tags=structure
 @test "une landing DESACTIVEE ne rend pas le conteneur malade — c'est un reglage, pas une panne" {
   # `LCARS_LANDING=0` est supporte par l'entrypoint. Sonder son port quand meme transformerait un
   # reglage en panne definitive : le conteneur serait *unhealthy* a vie, sans que rien ne soit casse.
   hc_cmd | grep -q '${LCARS_LANDING:-1}'
 }
 
+# bats test_tags=structure
 @test "la sonde de l'image est du JSON valide — la forme exec, pas un shell devine" {
   # Un `CMD` en forme exec est un tableau JSON. Une guillemet mal echappee ne casse pas le build :
   # docker retombe sur la forme SHELL et execute la ligne autrement que ce qu'on a ecrit.

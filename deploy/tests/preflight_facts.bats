@@ -164,6 +164,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   grep -qx dpkg-query "$BATS_TEST_TMPDIR/calculs"
 }
 
+# bats test_tags=structure
 @test "aucun fait n'est posé après le dernier rapport : pas de bloc récapitulatif" {
   local dernier_rapport dernier_fait
   dernier_rapport="$(grep -nE '^\s*(p_ok|p_warn|p_fail|p_drift) ' "$MOD" | tail -1 | cut -d: -f1)"

@@ -89,10 +89,12 @@ setup() {
 }
 
 @test "CE QUE SEULE L'IMAGE PORTE, et rien de plus : volumes, port, healthcheck, entrypoint du produit" {
-  grep -qE '^VOLUME \["/home", "/opt/lcars/var"\]$' <<<"$CODE"
+  local racine; racine="$(sed -n 's/^PROV_ROOT=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
+  [ -n "$racine" ]
+  grep -qxF "VOLUME [\"/home\", \"$racine/var\"]" <<<"$CODE"
   grep -qE '^EXPOSE 22$' <<<"$CODE"
   grep -qE '^HEALTHCHECK ' <<<"$CODE"
-  grep -qE '^ENTRYPOINT \["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.sh"\]$' <<<"$CODE"
+  grep -qxF "ENTRYPOINT [\"/usr/bin/tini\", \"--\", \"bash\", \"$racine/services/container/boot.sh\"]" <<<"$CODE"
   # tini et sshd viennent du socle, pas d'un module : ils n'ont pas de sens sur un poste
   grep -qE '^\s+ca-certificates curl git sudo tini openssh-server \\$' <<<"$RUNTIME"
 }

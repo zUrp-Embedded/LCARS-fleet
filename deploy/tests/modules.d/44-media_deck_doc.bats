@@ -22,7 +22,9 @@ setup() {
   [ -n "$DOC_DEST" ]
   [ -n "$DECK_DEFAULT" ]
   [ "$DOC_DEST" = "$DECK_DEFAULT" ]
-  [[ "$DOC_DEST" != /opt/lcars/runtime* ]]
+  local prefixe; prefixe="$(sed -n 's/^PROV_PREFIX=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
+  [ -n "$prefixe" ]
+  [[ "$DOC_DEST" != "$prefixe"* ]]
 }
 
 @test "la source porte les deux formats d'avatar — le png n'est pas dérivé du svg" {

@@ -85,6 +85,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   [[ "$output" == *"non posés"* ]]
 }
 
+# bats test_tags=structure
 @test "LES DEUX MODULES LISENT LE MEME DISCRIMINANT — jamais une moitié de forme" {
   # La faute que ce temoin interdit : un discriminant recopie, qui derive dans un seul des deux
   # modules. Une machine porterait alors node sans la toolchain, ou l'inverse.
@@ -128,6 +129,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 }
 
 
+# bats test_tags=structure
 @test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
   # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
   # un fichier de plus dans le tar, et un drift de plus sur la cible.
@@ -140,6 +142,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$media"
 }
 
+# bats test_tags=structure
 @test "44-media : livraison binaire — il POSE la doc du paquet, il ne la batit pas" {
   local media="$DEPLOY/modules.d/44-media.sh"
   local bloc; bloc="$(sed -n '/^build_doc()/,/^}$/p' "$media")"
@@ -156,6 +159,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -q 'demi-livraison' <<<"$bloc"
 }
 
+# bats test_tags=structure
 @test "44-media : la POSE est commune aux deux livraisons — une seule copie" {
   local media="$DEPLOY/modules.d/44-media.sh"
   [ "$(grep -c 'poser_doc' "$media")" -ge 3 ]           # la fonction + ses deux appelants

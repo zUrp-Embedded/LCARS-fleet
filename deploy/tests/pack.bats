@@ -360,6 +360,7 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   [[ "$output" == *"--publish : forge ou owner indéterminables"*"LCARS_PACK_FORGE et LCARS_PACK_OWNER"* ]]
 }
 
+# bats test_tags=structure
 @test "aucun secret ni chemin de machine n'est écrit dans le lanceur" {
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   refute grep -qE '[0-9a-f]{40}' <<<"$code"

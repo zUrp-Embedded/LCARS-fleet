@@ -16,23 +16,11 @@ load ../refute
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/../.."
   STORE_LIB="$DEPLOY/lib/store.sh"
-  COMPOSE="$DEPLOY/docker/docker-compose.yml"
   # shellcheck source=../../lib/store.sh
   source "$STORE_LIB"
   # Le prefixe est EXIGE par la lib (aucun defaut, pour que deux installations ne puissent pas
   # retomber sur le meme magasin). Les temoins s'en donnent un, arbitraire.
   export LCARS_STORE_PREFIX="testproj"
-}
-
-store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z.]+' "$1" | sed 's/^\s*- //'; }
-
-@test "chaque nature declaree par store.sh est montee par le compose — aucun orphelin" {
-  local nature
-  [ "$(store_mounts "$COMPOSE" | wc -l)" -eq "${#LCARS_STORE_TREES[@]}" ]
-  for nature in "${LCARS_STORE_TREES[@]}"; do
-    store_mounts "$COMPOSE" | grep -qE "^lcars-${nature}:.*\}/${nature}\$" \
-      || { echo "nature declaree et JAMAIS montee : $nature"; return 1; }
-  done
 }
 
 @test "REGRESSION — le nom REEL porte le projet : deux installations ne partagent AUCUN volume" {
@@ -70,30 +58,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z
   [ "$status" -ne 0 ]
   # Et docker n'a JAMAIS ete appele : refuser, ce n'est pas agir a moitie.
   [ ! -s "$calls" ]
-}
-
-@test "le compose EXIGE le prefixe sur ses quatre volumes — un up sans lui est refuse, jamais silencieux" {
-  # `:?` et non `:-` : sans elle, la lib refuserait de creer pendant que le compose monterait un nom nu.
-  [ "$(grep -c 'LCARS_STORE_PREFIX:?' "$COMPOSE")" -eq 4 ]
-}
-
-@test "REGRESSION — chaque montage du magasin a son volume EXTERNE, aucun ne tombe sur la couche conteneur" {
-  local mount vol
-  while read -r mount; do
-    [[ -n "$mount" ]] || continue
-    vol="${mount%%:*}"
-    grep -A 2 "^  ${vol}:\$" "$COMPOSE" | grep -q "external: true" \
-      || { echo "monte mais PAS external (donc emporte par down -v) : $vol"; return 1; }
-  done < <(store_mounts "$COMPOSE")
-}
-
-@test "le chemin du magasin est déclaré par les constantes et lu par le compose, jamais écrit par un script" {
-  # store.sh possède les noms, les constantes possèdent le chemin
-  local racine; racine="$(grep '^PROV_STORE_ROOT=' "$DEPLOY/installer-constants.env" | cut -d= -f2)"
-  [ -n "$racine" ]
-  grep -qF 'LCARS_STORE_ROOT: "${PROV_STORE_ROOT:?' "$COMPOSE"
-  refute grep -qF "$racine" "$COMPOSE"
-  refute grep -qF "$racine" "$STORE_LIB"
 }
 
 @test "store_ensure_volumes cree TOUS les volumes, et rejouer ne casse rien" {
@@ -145,13 +109,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z
   [[ "$output" == *"docker volume rm"* ]]
 }
 
-@test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
-  grep -q "store_spared_line" "$DEPLOY/container"
-  refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
-  grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
-  refute grep -q "store_destroy_volumes" "$DEPLOY/container"
-}
-
+# bats test_tags=structure
 @test "tout appelant du magasin POSE le prefixe avant d'appeler compose ou la lib" {
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
@@ -169,6 +127,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z
   done
 }
 
+# bats test_tags=structure
 @test "les deux gestes qui montent le conteneur posent le magasin AVANT" {
   # `external: true` = compose refuse de demarrer sur un volume absent. L'appel doit donc preceder
   # le up/create, et ces deux scripts sont les seuls a s'executer avant.

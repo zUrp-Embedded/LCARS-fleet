@@ -102,13 +102,6 @@ litteraux() { # litteraux <racine> <fichier des constantes> → « fichier|clé|
   [ "$(c PROV_TOFU_BIN)" = "$(c PROV_LINK_DIR)/tofu" ]
 }
 
-@test "une constante chargée écrase la variable du même nom posée avant la lib — et un chemin se lit sous le décor" {
-  run env -i PATH="$PATH" PROV_TOKENS_DIR=/ailleurs LCARS_DECOR_ROOT="$BATS_TEST_TMPDIR/decor" \
-    bash -c ". '$R/deploy/lib/provision-lib.sh'; printf '%s|%s' \"\$PROV_TOKENS_DIR\" \"\$PROV_SYSTEM_ACCOUNT\""
-  [ "$status" -eq 0 ]
-  [ "$output" = "$BATS_TEST_TMPDIR/decor$(sed -n 's/^PROV_TOKENS_DIR=//p' "$CONSTANTES")|$(sed -n 's/^PROV_SYSTEM_ACCOUNT=//p' "$CONSTANTES")" ]
-}
-
 @test "qui source la lib ne pose avant elle aucun nom de constante — la lib l'écraserait sans un mot" {
   local noms f src hits=""
   noms="$(sed -nE 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "$CONSTANTES" | sort -u)"
