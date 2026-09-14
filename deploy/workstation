@@ -7,8 +7,8 @@
 # USAGE  deploy/workstation <commande> [options]
 #   up      [--from <kit.tar.gz> | --from <kit détaré>] [options] — pose, puis accepte. Exige root :
 #           sans root, il mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que
-#           root va poser, puis se relance une fois par sudo sur ce fichier ; en root, il mesure ce que
-#           root seul lit, puis joue « provision apply » sur ces faits
+#           root va poser, puis se relance une fois par sudo sur ce fichier ; en root, la mesure root
+#           décide des refus qui protègent la machine, puis « provision apply » joue sur ses faits
 #   doctor  [options de provision] — la sonde complète, en root ; sans root, sudo sur ce fichier
 #
 #   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
@@ -23,8 +23,7 @@
 #   --port-deck, --forge-project, --verbose
 #
 #   sudo ne transmet aucune variable : la relance les reçoit en options, que ce script écrit lui-même.
-#   --ports-tenus NOMS   deck, forge : les ports tenus par un processus que la mesure sans privilège
-#                        ne voit pas ; leur propriétaire se vérifie en root
+#   root exécute tel quel l'arbre d'où ce script est lancé, checkout ou kit détaré : il fait confiance à cet arbre.
 #   --docker-host URL    DOCKER_HOST, le daemon que la mesure sans privilège a vu répondre
 #   --linux-dedie        LCARS_ALLOW_ANY_HOST=1
 #   --forge URL          FORGE_BASE_URL        --forge-publique URL   FORGE_PUBLIC_URL
@@ -55,7 +54,7 @@ esac
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
-FACTS_FILE="" MESURE_OUT="" MESURE_RC=0 PORTS_TENUS="" SUITE_ROOT=0
+FACTS_FILE="" MESURE_OUT="" MESURE_RC=0
 declare -a ARGS=() MESURE=()   # à provision ; --only et --human choisissent ce que l'apply joue et sert, la mesure ne les reçoit pas
 fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
 
@@ -69,7 +68,6 @@ lire_options() { # lire_options <options…> — les choix de l'opérateur devie
       --humain-demo)    export LCARS_BUILTIN_HUMAN="${2:?--humain-demo attend un nom}"; shift 2 ;;
       --forge-admin-reset) export PROV_FORGE_ADMIN_RESET=1; shift ;;
       --docker-host)    export DOCKER_HOST="${2:?--docker-host attend une adresse}"; shift 2 ;;
-      --ports-tenus)    PORTS_TENUS="${2?--ports-tenus attend une liste, vide comprise}"; SUITE_ROOT=1; shift 2 ;;
       --faits)          FACTS_FILE="${2:?--faits attend un fichier}"; shift 2 ;;
       --only|--human)   ARGS+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
       --env|--substrate|--port-forge|--port-deck|--port-ssh|--forge-project)
@@ -209,7 +207,7 @@ bench_seed() {
 
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
-  local from="" kit_dir="" p v tenus=""
+  local from="" kit_dir="" p v
   local -a opts=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -239,15 +237,12 @@ cmd_up() {
   fi
 
   if [[ "$EUID" -ne 0 ]]; then
-    [[ -z "$FACTS_FILE" && "$SUITE_ROOT" -eq 0 ]] || fail "--faits et --ports-tenus appartiennent à la suite en root, que ce script se donne par sudo"
+    [[ -z "$FACTS_FILE" ]] || fail "--faits appartient à la suite en root : la mesure root de la même invocation l'écrit"
     mesurer ${MESURE[@]+"${MESURE[@]}"}
     for p in deck forge; do
       [[ "$p" == deck || "${LCARS_BENCH:-}" == 1 ]] || continue
       v="$(fait "port_$p")"
-      case "${v#* }" in
-        tenu)   tenus="${tenus:+$tenus,}$p" ;;
-        pris*)  fail "le port ${v%% *} ($p) est ${v#* } — rien n'a été posé" "déplacer avec --port-$p, ou libérer le port" ;;
-      esac
+      [[ "${v#* }" != pris* ]] || fail "le port ${v%% *} ($p) est ${v#* } — rien n'a été posé" "déplacer avec --port-$p, ou libérer le port"
     done
     sudo_possible
     if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" ]]; then
@@ -255,20 +250,21 @@ cmd_up() {
     fi
     echo ""
     echo "  La suite se joue en root, par sudo : provision apply pose /etc, $(fait racine), les comptes et groupes de service, les paquets apt, puis l'acceptation."
+    [[ -z "$(fait docker_host_ecarte)" ]] || echo "  DOCKER_HOST=$(fait docker_host_ecarte) ne répond pas : root ne le reçoit pas."
     choix_argv
     [[ "$(fait docker)" != oui ]] || CHOIX+=(--docker-host "$(fait docker_host)")
     rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
-    exec sudo bash "$SELF" up ${ARGS[@]+"${ARGS[@]}"} "${CHOIX[@]}" --ports-tenus "$tenus"
+    exec sudo bash "$SELF" up ${ARGS[@]+"${ARGS[@]}"} ${CHOIX[@]+"${CHOIX[@]}"}
   fi
 
-  # en root : la relance mesure ce que root seul lit ; lancé en root sans elle, l'apply joue le préflight entier
-  [[ "$SUITE_ROOT" -eq 0 ]] || mesurer ${MESURE[@]+"${MESURE[@]}"} --ports-tenus "$PORTS_TENUS"
+  # en root, sans les faits qu'install.sh vient de mesurer en root : la mesure root, qui ne reprend rien d'avant sudo
+  [[ -n "$FACTS_FILE" ]] || mesurer ${MESURE[@]+"${MESURE[@]}"}
 
   PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")"
   export PROV_ANNOUNCE_FILE
 
   local rc=0
-  "$PROVISION" apply ${FACTS_FILE:+--faits "$FACTS_FILE"} ${ARGS[@]+"${ARGS[@]}"} || rc=$?
+  "$PROVISION" apply --faits "$FACTS_FILE" ${ARGS[@]+"${ARGS[@]}"} || rc=$?
   (( rc == 0 || rc == 2 )) || exit 1
   [[ "${LCARS_BENCH:-}" != 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] || bench_seed "$LCARS_BUILTIN_HUMAN"
 
@@ -284,13 +280,19 @@ cmd_up() {
 # la sonde complète lit ce que root seul lit : sans root, rien ne se mesure à moitié
 cmd_doctor() {
   lire_options "$@"
-  [[ -z "$FACTS_FILE" && "$SUITE_ROOT" -eq 0 ]] || fail "--faits et --ports-tenus appartiennent à up"
+  [[ -z "$FACTS_FILE" ]] || fail "--faits appartient à up"
   if [[ "$EUID" -ne 0 ]]; then
     sudo_possible
     echo "  La sonde lit ce que root seul lit : sudo, une fois."
     choix_argv
-    [[ -z "${DOCKER_HOST:-}" ]] || CHOIX+=(--docker-host "$DOCKER_HOST")
-    exec sudo bash "$SELF" doctor ${ARGS[@]+"${ARGS[@]}"} "${CHOIX[@]}"
+    # root reçoit le daemon qui répond à ce compte, jamais une adresse que personne n'a vue répondre
+    if docker_endpoint; then
+      CHOIX+=(--docker-host "$PROV_DOCKER_HOST")
+      [[ -z "$PROV_DOCKER_ECARTE" ]] || echo "  DOCKER_HOST=$PROV_DOCKER_ECARTE ne répond pas : la sonde reçoit la socket par défaut, $PROV_DOCKER_HOST"
+    elif [[ -n "$PROV_DOCKER_ECARTE" ]]; then
+      echo "  DOCKER_HOST=$PROV_DOCKER_ECARTE ne répond pas : la sonde ne le reçoit pas"
+    fi
+    exec sudo bash "$SELF" doctor ${ARGS[@]+"${ARGS[@]}"} ${CHOIX[@]+"${CHOIX[@]}"}
   fi
   exec "$PROVISION" doctor ${ARGS[@]+"${ARGS[@]}"}
 }

@@ -9,7 +9,7 @@
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #                    [--faits F]
 #   provision doctor (mêmes options, sans --faits) [--porcelain]
-#   provision mesure --faits F [--ports-tenus NOMS] [--substrate S] [--human USER] [--env FILE]
+#   provision mesure --faits F [--substrate S] [--human USER] [--env FILE]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
@@ -17,7 +17,8 @@
 #   apply    converge la machine, en root : chaque module joue check, fix, re-check
 #   doctor   sonde seule, en root — le même check que l'apply
 #   mesure   le préflight seul, pour un lanceur qui décide avant d'agir : sans root, ce qui se lit
-#            sans privilège ; en root, ce que root seul lit. Ses faits vont dans --faits
+#            sans privilège ; en root, les refus qui protègent la machine, mesurés par root. Ses
+#            faits vont dans --faits
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
 #            « find / … > avant ; install ; find / … > après » (une ligne par objet :
@@ -28,7 +29,7 @@
 #   affiche). Il est joué en processus séparé, dans l'ordre du préfixe, seul ordre du runner. Le
 #   préflight (00) est la barrière de l'apply : un terrain qu'il ne déclare pas conforme ne reçoit
 #   aucun autre module. Un apply qui reçoit --faits, la mesure root rendue conforme dans la même
-#   invocation, ne le rejoue pas.
+#   invocation, ne le rejoue pas : il le compte, rendu par la mesure.
 #
 #   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
@@ -53,9 +54,7 @@
 #                    WSL ; une étiquette DNS, retenue dans le journal
 #   --faits F        mesure : le fichier où le préflight écrit ses faits `nom=valeur`, et son
 #                    verdict (preflight=conforme|refuse) ; apply : ce fichier, écrit par une mesure
-#                    root conforme, à la place du préflight
-#   --ports-tenus NOMS   (mesure en root) deck, forge : les ports que la mesure sans privilège a
-#                    trouvés tenus par un processus qu'elle ne voit pas, séparés par des virgules
+#                    root conforme et privé à son compte (0600), à la place du préflight
 #   --verbose, -v
 #   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
 #
@@ -82,7 +81,7 @@ PORCELAIN=0
 ENV_FILE=""
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
-FAITS="" TENUS_DONNE=0
+FAITS=""
 declare -a ONLY=()
 
 # les validations ne rendent rien : dans une substitution `X="$(valid_port …)"`, le die ne tuerait
@@ -114,7 +113,6 @@ while [[ $# -gt 0 ]]; do
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --faits)     FAITS="${2:?--faits attend un fichier}"; shift 2 ;;
-    --ports-tenus) export PROV_PORTS_TENUS="${2?--ports-tenus attend une liste}"; TENUS_DONNE=1; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
@@ -127,7 +125,6 @@ case "$CMD" in apply|doctor|mesure|list|audit) ;; ""|-h|--help) usage; exit 0 ;;
 [[ "$PORCELAIN" -eq 0 || "$CMD" == doctor ]] || die "--porcelain ne vaut que pour doctor : $CMD écrit son verdict et son journal en clair"
 [[ -z "$FAITS" || "$CMD" == mesure || "$CMD" == apply ]] || die "--faits ne vaut que pour mesure, qui l'écrit, et apply, qui le reçoit"
 [[ -n "$FAITS" || "$CMD" != mesure ]] || die "mesure écrit ses faits dans --faits FICHIER : sans lui, rien ne serait rendu"
-[[ "$TENUS_DONNE" -eq 0 || "$CMD" == mesure ]] || die "--ports-tenus ne vaut que pour mesure"
 [[ "${#ONLY[@]}" -eq 0 || "$CMD" != mesure ]] || die "--only ne vaut pas pour mesure : elle joue le préflight seul"
 # sous un décor de témoin, le runner ne tourne jamais en root (refus plus haut) : apply et doctor s'y jouent sans privilège
 [[ "$EUID" -eq 0 || -n "${LCARS_DECOR_ROOT:-}" || ( "$CMD" != apply && "$CMD" != doctor ) ]] \
@@ -141,6 +138,9 @@ else
   unset PROV_FACTS_FILE PROV_PHASE
   [[ -z "$FAITS" || "$(sed -n 's/^phase=//p' "$FAITS" 2>/dev/null)|$(sed -n 's/^preflight=//p' "$FAITS" 2>/dev/null)" == "root|conforme" ]] \
     || die "--faits $FAITS : ce n'est pas une mesure root conforme (phase=root, preflight=conforme) — apply refusé avant tout module"
+  # la mesure de l'invocation écrit un fichier privé au compte qui joue l'apply : un fichier d'un autre ne dispense pas du préflight
+  [[ -z "$FAITS" || "$(stat -c '%u %a' "$FAITS" 2>/dev/null)" == "$EUID 600" ]] \
+    || die "--faits $FAITS : ce fichier n'a pas été écrit par la mesure de ce compte (propriétaire $EUID, mode 0600 attendus) — apply refusé avant tout module"
 fi
 
 if [[ -n "$ENV_FILE" ]]; then
@@ -217,10 +217,11 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
     [[ "$CMD" == apply && "$name" == 00-* ]] && keep=1
     [[ "$keep" -eq 1 ]] || continue
   fi
-  [[ -z "$FAITS" || "$CMD" != apply || "$name" != 00-* ]] || continue
   substrate_in "$(module_field "$mod" CHECK-ON)" || continue
   SELECTED+=("$mod")
-  if [[ "$CMD" == "apply" ]] && substrate_in "$(module_field "$mod" APPLY-ON)"; then
+  if [[ -n "$FAITS" && "$CMD" == apply && "$name" == 00-* ]]; then
+    EFFECTIVE+=("mesure")
+  elif [[ "$CMD" == "apply" ]] && substrate_in "$(module_field "$mod" APPLY-ON)"; then
     EFFECTIVE+=("apply")
   else
     EFFECTIVE+=("check")
@@ -273,6 +274,11 @@ for i in "${!SELECTED[@]}"; do
   name="$(basename "$mod" .sh)"
   eff="${EFFECTIVE[$i]}"
   total=$((total + 1))
+  if [[ "$eff" == mesure ]]; then
+    [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (rendu par la mesure) ===${_PN}"
+    ok=$((ok + 1)); REPORT+=("$name=OK")
+    continue
+  fi
   if [[ "$CMD" == "apply" && "$eff" == "check" ]]; then
     [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ===${_PN}"
   else
@@ -300,6 +306,8 @@ for i in "${!SELECTED[@]}"; do
     *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     doctor:check:0|mesure:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     doctor:check:1|mesure:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    # le refus du préflight est son verdict : ses lignes FAIL sont le constat
+    mesure:check:2) failed=$((failed + 1)); REPORT+=("$name=FAIL") ;;
     doctor:check:*|mesure:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;

@@ -19,12 +19,14 @@ setup() {
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   # un docker qui rougit s'il est appelé : l'installeur ne sonde pas lui-même
   printf '#!/usr/bin/env bash\necho DOCKER-APPELE >&2; exit 97\n' > "$BINDIR/docker"
-  # sudo note son argv, puis joue la suite comme le vrai : root, un environnement remis à zéro,
-  # SUDO_USER posé ; seuls le PATH des doublures, le HOME, TMPDIR et le décor du témoin passent
+  # sudo note son argv sur une ligne, puis joue la suite comme le vrai : root, un environnement remis à
+  # zéro, SUDO_USER posé ; seuls le PATH des doublures, le HOME, TMPDIR et le décor du témoin passent.
+  # SUDO_ALTERE nomme un fichier qu'un programme du compte modifie pendant l'invite de sudo.
   cat > "$BINDIR/sudo" <<EOF
 #!/usr/bin/env bash
 [[ "\$1" != -n ]] || { echo "SUDO-N:\$*" >> '$BATS_TEST_TMPDIR/sudo.calls'; exit "\${SUDO_N_RC:-0}"; }
-echo "SUDO:\$*" >> '$BATS_TEST_TMPDIR/sudo.calls'
+a="\$*"; echo "SUDO:\${a//\$'\n'/\\\\n}" >> '$BATS_TEST_TMPDIR/sudo.calls'
+[[ -z "\${SUDO_ALTERE:-}" ]] || printf 'altéré\n' >> "\$SUDO_ALTERE"
 exec unshare -Ur env -i PATH="\$PATH" HOME="\$HOME" \${TMPDIR:+TMPDIR="\$TMPDIR"} \${LCARS_DECOR_ROOT:+LCARS_DECOR_ROOT="\$LCARS_DECOR_ROOT"} \
   SUDO_USER="\$(id -un)" "\$@"
 EOF
@@ -44,23 +46,23 @@ _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker do
   apt_installs= comptes_humains=temoin channel=aucun channel_tree=source jq=oui racine=/opt/lcars revision=cafe1234)
 
 # provision de décor : « mesure » sans root écrit ces faits et son verdict (FAUX_PREFLIGHT_REFUS : sa ligne de
-# refus) ; en root, l'écriture sous la racine et les ports tenus, qu'il rend à la landing, ou à un processus
-# étranger quand le fichier refus-root existe
+# refus) ; en root, sans rien lire d'avant sudo, l'écriture sous la racine et le deck, qu'il rend à la
+# landing, ou à un processus étranger quand le fichier refus-root existe
 _faux_provision() { # _faux_provision <arbre> [nom=valeur…]
   local arbre="$1"; shift
   mkdir -p "$arbre/deploy"
   { echo '#!/usr/bin/env bash'
     echo "echo \"PROVISION:\$*\" >> '$BATS_TEST_TMPDIR/provision.calls'"
+    echo "echo \"PROVISION-ENV:PROV_FORGE_MONTEE=\${PROV_FORGE_MONTEE:-}\" >> '$BATS_TEST_TMPDIR/provision.calls'"
     echo '[[ "$1" == mesure ]] || exit 0'
     echo 'while [[ "$1" != --faits ]]; do shift; done; faits="$2"; shift 2'
-    echo 'tenus=""; while [[ $# -gt 0 ]]; do [[ "$1" != --ports-tenus ]] || tenus="$2"; shift; done'
     echo 'if [[ "$EUID" -eq 0 ]]; then'
     echo '  printf "phase=root\nechange=/opt oui\n" > "$faits"'
     echo "  if [[ -e '$BATS_TEST_TMPDIR/refus-root' ]]; then"
-    echo '    printf "port_deck=20999 pris par \"python3\",pid=4243\npreflight=refuse\n" >> "$faits"'
-    echo '    echo "FAIL  00-preflight: port 20999 (deck) pris par \"python3\",pid=4243"; exit 2'
+    echo '    printf "port_deck=20999 pris par python3 (pid 4243, compte nobody)\npreflight=refuse\n" >> "$faits"'
+    echo '    echo "FAIL  00-preflight: port 20999 (deck) tenu par python3 (pid 4243, compte nobody) — ce projet doit être seul à le tenir"; exit 2'
     echo '  fi'
-    echo '  for p in ${tenus//,/ }; do printf "port_%s=20999 nous lcars-landing (service)\n" "$p" >> "$faits"; done'
+    echo '  printf "port_deck=20999 nous lcars-landing (service)\n" >> "$faits"'
     echo '  echo preflight=conforme >> "$faits"; exit 0'
     echo 'fi'
     echo 'cat > "$faits" <<'"'"'FACTS'"'"''
@@ -94,26 +96,51 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 }
 
 
-@test "root sans la relance que l'installeur se donne est refusé ; le mode conteneur ne se joue jamais en root" {
-  local us; us="$(command -v unshare || true)"
-  [[ -n "$us" ]] || skip "unshare absent de ce poste : root ne se joue pas ici"
-  "$us" -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
-  local a cas; a="$(_arbre)"
-  for cas in "--workstation --bench" "--bench --ports-tenus deck"; do
-    # shellcheck disable=SC2086 # les options sont des mots
-    run "$us" -Ur bash "$a/install.sh" $cas < /dev/null
-    [ "$status" -eq 1 ] || { echo "$cas : rc=$status — $output"; return 1; }
-    [[ "$output" == *"Cet installeur se lance sans root."* ]] || { echo "$cas : $output"; return 1; }
-  done
+root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
+  UNSHARE="$(command -v unshare || true)"
+  [[ -n "$UNSHARE" ]] || skip "unshare absent de ce poste : root ne se joue pas ici"
+  "$UNSHARE" -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
+}
+
+@test "le mode conteneur ne se joue jamais en root" {
+  root_de_namespace
+  local a; a="$(_arbre)"
+  run "$UNSHARE" -Ur bash "$a/install.sh" --bench < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Cet installeur se lance sans root."* ]]
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
 }
 
-@test "--ports-tenus sans root est refusé : il appartient à la relance en root" {
+@test "une relance root tapée à la main passe par la mesure root : un port tenu par un autre est refusé avant le délégué" {
+  root_de_namespace
   local a; a="$(_arbre)"
-  porte "$a" --workstation --bench --ports-tenus deck
+  : > "$BATS_TEST_TMPDIR/refus-root"
+  run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench --check < /dev/null
   [ "$status" -eq 1 ]
-  [[ "$output" == *"--ports-tenus appartient à la relance en root"* ]]
+  [[ "$output" == *"port 20999 (deck) tenu par python3 (pid 4243, compte nobody)"*"La mesure en root refuse ce terrain"* ]]
+  grep -qx 'PROVISION:mesure --faits [^ ]*' "$BATS_TEST_TMPDIR/provision.calls"
+  refute_out 'WORKSTATION:' <<<"$output"
+  rm "$BATS_TEST_TMPDIR/refus-root"
+  run "$UNSHARE" -Ur bash "$a/install.sh" --workstation --bench < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up --faits "* ]]
+}
+
+@test "--ports-tenus n'existe plus : aucune option ne dispense root de sa mesure, sans root comme en root" {
+  local a; a="$(_arbre)"
+  porte "$a" --workstation --bench --ports-tenus ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Option inconnue : --ports-tenus"* ]]
   [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+}
+
+@test "le script d'une release se lance sans root : root ne joue qu'une copie du kit qu'il vérifie" {
+  root_de_namespace
+  _release
+  run "$UNSHARE" -Ur bash -c "cat '$PORTE' | bash -s -- --workstation --bench"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Le script d'une release se lance sans root."* ]]
+  [ ! -s "$SERVEUR_LOG" ]
 }
 
 # bats test_tags=structure
@@ -162,7 +189,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local drapeaux f
   drapeaux="$(sed -n '/^while \[\[ \$# -gt 0 \]\]; do$/,/^done$/p' "$SRC" | grep -oE '^ *-[-a-z|]+\)' | tr -d ' )' | tr '|' '\n')"
   grep -qx -- '--workstation' <<<"$drapeaux"
-  grep -qx -- '--ports-tenus' <<<"$drapeaux"
+  grep -qx -- '--docker-host' <<<"$drapeaux"
   grep -qx -- '-h' <<<"$drapeaux"
   run bash "$SRC" --help
   [ "$status" -eq 0 ]
@@ -236,6 +263,15 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local a; a="$(_arbre)"
   porte "$a" --check --bench --substrate wsl --forge-project bob_9 --port-forge 20090 --port-deck 20091 --port-ssh 20092
   grep -qx -- "PROVISION:mesure --faits [^ ]* --substrate wsl --forge-project bob_9 --port-forge 20090 --port-deck 20091 --port-ssh 20092" "$BATS_TEST_TMPDIR/provision.calls"
+}
+
+@test "sous --bench, la mesure sait que la forge est celle du poste : root vérifie son port avec celui du deck" {
+  local a; a="$(_arbre)"
+  porte "$a" --workstation --bench --check
+  [ "$(grep -c '^PROVISION-ENV:PROV_FORGE_MONTEE=1$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
+  rm "$BATS_TEST_TMPDIR/provision.calls"
+  FORGE_BASE_URL=https://forge.example.net porte "$a" --workstation --check
+  refute grep -q '^PROVISION-ENV:PROV_FORGE_MONTEE=1$' "$BATS_TEST_TMPDIR/provision.calls"
 }
 
 @test "sans fait rendu, l'installeur s'arrête et montre le rapport du préflight" {
@@ -322,7 +358,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local a; a="$(_arbre "port_deck=20999 pris par autre-fleet-lcars-1 (projet autre-fleet)")"
   porte "$a" --check --bench
   [[ "$output" == *"Forge      montée par l'installeur avec son runner CI (--bench)"* ]]
-  [[ "$output" == *"21000 (forge) libre"*"20999 (deck) PRIS PAR AUTRE-FLEET"* ]]
+  [[ "$output" == *"21000 (forge) libre"*"20999 (deck) pris par autre-fleet-lcars-1 (projet autre-fleet)"* ]]
   a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
   porte "$a" --check
   [[ "$output" == *"Forge      fournie : https://forge.example.net · joignable"* ]]
@@ -439,8 +475,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   porte "$a" --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"20999 (deck) tenu, propriétaire vérifié après sudo"* ]]
-  [[ "$(sudo_ligne)" == *" --ports-tenus deck "* ]]
-  grep -qx "PROVISION:mesure --faits [^ ]* --ports-tenus deck" "$BATS_TEST_TMPDIR/provision.calls"
+  [ "$(grep -c '^PROVISION:mesure --faits [^ ]*$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
   [[ "$output" == *"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"WORKSTATION:up"* ]]
   a="$(_arbre "port_deck=20999 tenu" forge_fournie=https://forge.example.net forge_joignable=oui)"
   porte "$a"
@@ -453,9 +488,25 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   : > "$BATS_TEST_TMPDIR/refus-root"
   porte "$a" --workstation --bench
   [ "$status" -eq 1 ]
-  [[ "$output" == *"port 20999 (deck) TENU par \"python3\",pid=4243 — un autre que ce projet"* ]]
-  [[ "$output" == *"La mesure en root refuse ce terrain"*"FAIL  00-preflight: port 20999 (deck)"* ]]
-  refute_out 'WORKSTATION:' <<<"$output"
+  [[ "$output" == *"port 20999 (deck) tenu par python3 (pid 4243, compte nobody)"* ]]
+  [[ "$output" == *"La mesure en root refuse ce terrain"*"FAIL  00-preflight: port 20999 (deck) tenu par python3 (pid 4243, compte nobody) — ce projet doit être seul à le tenir"* ]]
+  refute_out 'WORKSTATION:|PYTHON3|pid=' <<<"$output"
+}
+
+@test "la grille montre le canal de l'arbre et celui de la machine, dans ce système" {
+  local a; a="$(_arbre channel=aucun channel_tree=kit)"
+  porte "$a" --workstation --bench --check
+  [[ "$output" == *"Source     archive (kit) · révision cafe1234"$'\n'"             canal kit · machine jamais installée"* ]]
+  a="$(_arbre channel=source channel_tree=source)"
+  porte "$a" --workstation --bench --check
+  [[ "$output" == *"canal source · machine installée par le canal source"* ]]
+}
+
+@test "un DOCKER_HOST donné qui ne répond pas est nommé dans la grille, à côté de la socket qui sert à sa place" {
+  local a; a="$(_arbre docker_host_ecarte=unix:///nulle-part/docker.sock)"
+  porte "$a" --workstation --bench --check
+  [[ "$output" == *"Docker     serveur 29.0.0 · Docker Engine · unix:///var/run/docker.sock"$'\n'"             DOCKER_HOST=unix:///nulle-part/docker.sock ne répond pas : la socket par défaut sert à sa place"* ]]
+  [[ "$(sudo_ligne)" == *"--docker-host unix:///var/run/docker.sock" ]]
 }
 
 @test "une instance déjà posée n'est pas réinstallée : le refus nomme sa mise à jour, volumes gardés, jamais sa destruction" {
@@ -549,7 +600,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   vrai_poste "$a"
   porte "$a" --workstation --bench --human alice --port-deck 20091 --only 60
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --human alice --port-deck 20091 --only 60 --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --human alice --port-deck 20091 --only 60 --docker-host unix:///var/run/docker.sock" ]
   local faits
   faits="$(sed -n 's/^PROVISION:apply --faits \([^ ]*\) .*/\1/p' "$BATS_TEST_TMPDIR/provision.calls")"
   [ -n "$faits" ]
@@ -564,7 +615,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   FORGE_BASE_URL=https://forge.example.net FORGE_PUBLIC_URL=https://forge.public.example LCARS_BUILTIN_HUMAN=demo \
     PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret porte "$a" --workstation
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --ports-tenus  --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
   refute grep -qE '^SUDO:.* [A-Z_]+=' "$BATS_TEST_TMPDIR/sudo.calls"
   [[ "$output" == *"ENV:DOCKER_HOST=unix:///var/run/docker.sock"*"ENV:FORGE_BASE_URL=https://forge.example.net"*"ENV:FORGE_PUBLIC_URL=https://forge.public.example"*"ENV:LCARS_BUILTIN_HUMAN=demo"*"ENV:PROV_FORGE_ADMIN_RESET=1"*"ENV:SUDO_USER=$(id -un)"* ]]
   refute_out 'tres-secret' <<<"$output"
@@ -630,9 +681,11 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Requiert   root"*"--check : la mesure se complète en root, par sudo"*"En root    /opt : écriture et « mv --exchange » joués par root"*"port 20999 (deck) tenu par lcars-landing (service), de ce projet"*"--check : rien n'est fait"* ]]
-  [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --ports-tenus deck --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --bench --workstation --check --docker-host unix:///var/run/docker.sock" ]
   refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
   [ "$(grep -c "Système    " <<<"$output")" -eq 1 ]
+  # sans terminal, --check dit qu'il continue, comme le parcours complet
+  [[ "$output" == *"--check : la mesure se complète en root, par sudo ; rien n'est posé."$'\n'"  Pas de terminal : --check continue."* ]]
 }
 
 @test "--dry-run dit la commande exacte, mot à mot, sans l'exécuter ; dans ce système, après sudo et la mesure root" {
@@ -642,9 +695,11 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [[ "$output" == *"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/container --forge-project bob_10 --port-deck 20101 --bench up"* ]]
   refute grep -q 'CONTAINER:' <<<"$output"
   [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
-  porte "$a" --workstation --bench --dry-run --substrate wsl --only 10-packages
+  # la commande dite se rejoue telle quelle : elle refait sa mesure, les choix de l'opérateur en options, aucun fichier de faits
+  FORGE_PUBLIC_URL=http://forge.public.test porte "$a" --workstation --bench --dry-run --substrate wsl --only 10-packages
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"--dry-run : la commande se dit après la mesure en root, par sudo"*"--dry-run : rien n'est fait. La commande serait :"*"$a/deploy/workstation up --faits "*" --substrate wsl --only 10-packages --bench"* ]]
+  [[ "$output" == *"--dry-run : la commande se dit après la mesure en root, par sudo"*"--dry-run : rien n'est fait. La commande serait :"$'\n'"    $a/deploy/workstation up --substrate wsl --only 10-packages --bench --forge-publique http://forge.public.test" ]]
+  refute_out 'lcars-facts|--faits' <<<"$output"
   grep -q '^SUDO:' "$BATS_TEST_TMPDIR/sudo.calls"
   refute_out 'WORKSTATION:|Entrée pour continuer' <<<"$output"
 }
@@ -678,11 +733,11 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   porte "$a" --workstation --bench --substrate wsl --human alice --port-deck 20091
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Installation dans ce système — la suite demande root : sudo, puis deploy/workstation up"*"Entrée pour continuer"* ]]
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --substrate wsl --human alice --port-deck 20091 --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --substrate wsl --human alice --port-deck 20091 --docker-host unix:///var/run/docker.sock" ]
   [[ "$output" == *"WORKSTATION:up --faits $TMPDIR/lcars-facts."*" --substrate wsl --human alice --port-deck 20091 --bench"* ]]
   # une seule mesure par phase, jamais rejouée
-  [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 1 ]
-  [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091 --ports-tenus $' "$BATS_TEST_TMPDIR/provision.calls")" -eq 1 ]
+  [ "$(grep -c '^PROVISION:mesure --faits [^ ]* --substrate wsl --port-deck 20091$' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
+  [ "$(grep -c '^PROVISION:' "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
   # le bandeau se dit une fois
   [ "$(grep -c 'FEDERATION DATABASE' <<<"$output")" -eq 1 ]
   refute grep -q 'DOCKER-APPELE' <<<"$output"
@@ -776,8 +831,7 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   printf 'FORGE_BASE_URL=http://forge.env:3000\n' > "$BATS_TEST_TMPDIR/env"
   run bash "$a/install.sh" --workstation --bench --env "$BATS_TEST_TMPDIR/env" --human zoe --only 60 --dry-run
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "PROVISION:mesure --faits [^ ]* --env $BATS_TEST_TMPDIR/env" "$BATS_TEST_TMPDIR/provision.calls"
-  grep -qx "PROVISION:mesure --faits [^ ]* --env $BATS_TEST_TMPDIR/env --ports-tenus " "$BATS_TEST_TMPDIR/provision.calls"
+  [ "$(grep -cx "PROVISION:mesure --faits [^ ]* --env $BATS_TEST_TMPDIR/env" "$BATS_TEST_TMPDIR/provision.calls")" -eq 2 ]
   [[ "$output" == *"--env $BATS_TEST_TMPDIR/env --human zoe --only 60"* ]]
 }
 
@@ -788,16 +842,18 @@ _dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un ki
   cp "$REPO/deploy/installer-constants.env" "$st/lcars_install/deploy/"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
   _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
-  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$st/lcars_install/deploy/workstation"
+  # le délégué du kit dit d'où il joue : le dossier au-dessus de lcars_install et son mode
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\nd="$(cd "$(dirname "$0")/../.." && pwd)"; echo "COPIE:$d $(stat -c %%a "$d")"\n' > "$st/lcars_install/deploy/workstation"
   printf '#!/usr/bin/env bash\necho "IMAGE:${LCARS_IMAGE:-}"\necho "CONTAINER:$*"\n' > "$st/lcars_install/deploy/container"
   printf '#!/usr/bin/env bash\necho "BENCHUP:$*"\n' > "$st/lcars_install/deploy/docker/bench/bench-up.sh"
   chmod 0755 "$st/lcars_install/deploy/workstation" "$st/lcars_install/deploy/container" "$st/lcars_install/deploy/docker/bench/bench-up.sh"
   tar -czf "$d/lcars-fleet-$TAG-otp27-x86_64.tar.gz" -C "$st" lcars_install
   printf '%s' "$d"
 }
-_machine() { # x86_64 et un HOME à nous, dictés
+_machine() { # x86_64, un HOME et un TMPDIR à nous, dictés
   printf '#!/usr/bin/env bash\necho x86_64\n' > "$BINDIR/uname"; chmod 0755 "$BINDIR/uname"
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   export LCARS_DOOR_INSECURE_HTTP=1
 }
 _serveur() { # sert <dir> en http local ; SERVEUR_URL, SERVEUR_PID, SERVEUR_LOG
@@ -817,7 +873,11 @@ _porte() { # la porte de la version $TAG générée depuis le gabarit, base = le
     bash "$REPO/deploy/lib/door-gen.sh" "$TAG" "$SERVEUR_URL" "$1" >/dev/null 2>&1 || { echo "door-gen a échoué" >&2; return 1; }
   printf '%s' "$1/install.sh"
 }
-_release() { _machine; DIST="$(_dist "$@")"; _serveur "$DIST"; PORTE="$(_porte "$DIST")"; KITS="$HOME/.lcars/kits/$TAG"; }
+_release() { # _release [nom=valeur…] — la version $TAG servie ; PORTE, KITS, et l'ARCHIVE du kit posée avec sa SOMME inscrite
+  _machine; DIST="$(_dist "$@")"; _serveur "$DIST"; PORTE="$(_porte "$DIST")"; KITS="$HOME/.lcars/kits/$TAG"
+  ARCHIVE="$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz"
+  SOMME="$(sha256sum "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz" | cut -d' ' -f1)"
+}
 pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }
 _daemon_avec_image() { # _daemon_avec_image <oui|non> — une doublure docker dont « image inspect » répond selon l'argument
   local rc=1; [[ "$1" == oui ]] && rc=0
@@ -977,17 +1037,20 @@ EOF
   pipee --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"déjà là, sha256 vérifié"*"WORKSTATION:up --faits "* ]]
-  [[ "$(sudo_ligne)" == "bash $KITS/lcars_install/install.sh "* ]]
+  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $ARCHIVE $SOMME "* ]]
 }
 
-@test "pipée : le kit de la version est téléchargé, vérifié, détaré, et sudo relance l'installeur du kit, jamais l'entrée du tube" {
+@test "pipée : le kit de la version est téléchargé, vérifié, détaré, et root joue une copie qu'il vérifie lui-même, jamais l'entrée du tube" {
   _release
   pipee --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"téléchargé, sha256 vérifié"* ]]
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
-  [ "$(sudo_ligne)" = "bash $KITS/lcars_install/install.sh --workstation --bench --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $ARCHIVE $SOMME --workstation --bench --docker-host unix:///var/run/docker.sock" ]]
   [[ "$output" == *"WORKSTATION:up --faits "*" --bench"* ]]
+  # le délégué joue d'un dossier que root a créé pour lui seul, sous TMPDIR, et que la sortie retire
+  [[ "$output" == *"COPIE:$TMPDIR/lcars-kit."??????" 700"* ]]
+  [ -z "$(compgen -G "$TMPDIR/lcars-kit.*" || true)" ]
   # sans clé : la porte le dit, et continue
   [[ "$output" == *"provenance non vérifiée (sha256 seul)"* ]]
   # relancée : déjà là, vérifié, rien de retéléchargé
@@ -996,6 +1059,51 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"déjà là, sha256 vérifié"* ]]
   [ ! -s "$SERVEUR_LOG" ]
+}
+
+@test "l'arbre du kit détaré sous le compte de l'utilisateur, modifié après sa vérification : root n'exécute pas la modification" {
+  _release
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local f
+  for f in install.sh deploy/workstation; do
+    printf '#!/usr/bin/env bash\n[[ "$EUID" -ne 0 ]] || echo "MARQUEUR-ROOT:%s"\nexit 0\n' "$f" > "$KITS/lcars_install/$f"
+  done
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out 'MARQUEUR-ROOT' <<<"$output"
+  [[ "$output" == *"WORKSTATION:up --faits "*" --bench"* ]]
+  pipee --workstation --bench --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out 'MARQUEUR-ROOT' <<<"$output"
+}
+
+@test "l'archive modifiée entre la vérification sous le compte de l'utilisateur et root : root refuse de la détarer, rien n'est fait" {
+  _release
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  SUDO_ALTERE="$ARCHIVE" pipee --workstation --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$ARCHIVE ne porte plus la somme inscrite dans l'installeur : root ne le détare pas, rien n'est fait."* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+  [ -z "$(compgen -G "$TMPDIR/lcars-kit.*" || true)" ]
+}
+
+@test "--check et --dry-run pipés sur un kit déjà posé revérifient son archive à chaque passe : altérée, rien n'est téléchargé ni joué" {
+  _release
+  pipee --workstation --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf 'altéré\n' >> "$ARCHIVE"
+  : > "$SERVEUR_LOG"; rm -f "$BATS_TEST_TMPDIR/sudo.calls"
+  local drapeau
+  for drapeau in --check --dry-run; do
+    pipee --workstation --bench "$drapeau"
+    [ "$status" -eq 0 ] || { echo "$drapeau : $output"; return 1; }
+    [[ "$output" == *"$drapeau : rien n'est téléchargé. Le préflight vit dans le kit, qui n'est pas là, ou dont l'archive ne porte plus sa somme."* ]]
+    refute_out 'kit déjà posé' <<<"$output"
+  done
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
 @test "pipée en mode conteneur : même kit, exec deploy/container depuis le kit" {
@@ -1078,21 +1186,26 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local a="lcars-fleet-$TAG-otp27-x86_64.tar.gz"
   [[ "$output" == *"$a "*"sha256 $(sha256sum "$DIST/$a" | cut -d' ' -f1)"* ]]
-  [[ "$output" == *"rien n'est téléchargé"*"sudo bash <kit>/install.sh, puis deploy/workstation up"* ]]
+  [[ "$output" == *"rien n'est téléchargé"*"sudo sur l'installeur du kit vérifié, puis deploy/workstation up"* ]]
   [ ! -s "$SERVEUR_LOG" ]
   [ ! -d "$HOME/.lcars" ]
-  # une fois le kit posé, --dry-run dit la commande exacte, après sudo sur l'installeur du kit
+  # --check ne promet pas le provisionnement
+  pipee --workstation --bench --check
+  [[ "$output" == *"La commande serait : sudo sur l'installeur du kit vérifié, pour la mesure en root ; rien n'est posé"* ]]
+  refute_out 'workstation up' <<<"$output"
+  # une fois le kit posé, --dry-run dit la commande, après sudo sur la copie vérifiée du kit, qui ne survit pas à la sortie
   pipee --workstation --bench
   [ "$status" -eq 0 ]
   pipee --workstation --bench --dry-run
-  [[ "$output" == *"kit déjà posé"*"$KITS/lcars_install/deploy/workstation up --faits "*" --bench"* ]]
+  [[ "$output" == *"kit déjà posé"*"Depuis le kit vérifié, dont root retire la copie à la sortie :"*"La commande serait :"$'\n'"    deploy/workstation up --bench" ]]
+  refute_out 'lcars-kit\.|--faits' <<<"$output"
 }
 
-@test "le script du dépôt, pipé avec --dry-run, dit l'installeur de la dernière release qu'il rejouerait, sans rien télécharger" {
+@test "le script du dépôt, pipé avec --dry-run, dit l'installeur de la dernière release qu'il rejouerait, déclaration gardée, sans rien télécharger" {
   _machine
-  run bash -c "cat '$SRC' | bash -s -- --workstation --dry-run"
+  run bash -c "cat '$SRC' | LCARS_ALLOW_ANY_HOST=1 bash -s -- --workstation --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rien n'est téléchargé"*"curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | bash -s -- --workstation --dry-run"* ]]
+  [[ "$output" == *"rien n'est téléchargé"*"curl -fsSL https://github.com/zurp-embedded/LCARS-fleet/releases/latest/download/install.sh | LCARS_ALLOW_ANY_HOST=1 bash -s -- --workstation --dry-run"* ]]
   [ ! -e "$HOME/.lcars" ]
 }
 
@@ -1110,7 +1223,7 @@ EOF
   [[ "$output" == *"Source     release $TAG"* ]]
   [ -x "$HOME/.lcars/kits/$TAG/lcars_install/deploy/provision" ]
   # la relance en root ne retélécharge rien : --from-release et --repo ne la suivent pas
-  [ "$(sudo_ligne)" = "bash $HOME/.lcars/kits/$TAG/lcars_install/install.sh --workstation --bench --ports-tenus  --docker-host unix:///var/run/docker.sock" ]
+  [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $HOME/.lcars/kits/$TAG/lcars-fleet-$TAG-otp27-x86_64.tar.gz $(sha256sum "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz" | cut -d' ' -f1) --workstation --bench --docker-host unix:///var/run/docker.sock" ]]
 }
 
 @test "--from-release depuis un clone : un installeur qui ne correspond pas à sa somme n'est pas rejoué" {

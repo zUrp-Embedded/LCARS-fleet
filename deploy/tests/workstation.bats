@@ -120,7 +120,7 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"workstation <commande>"*"up "*"--from <kit.tar.gz>"*"doctor "*"EXIT"* ]]
   [[ "$output" == *"EXIT  up      0 convergé"*"doctor  les codes de « provision doctor »"*"un verbe inconnu sort en 1"* ]]
-  [[ "$output" == *"ne se pose pas sur un autre"*"--ports-tenus"*"--docker-host"*"--linux-dedie"*"--forge URL"* ]]
+  [[ "$output" == *"ne se pose pas sur un autre"*"fait confiance à cet arbre"*"--docker-host"*"--linux-dedie"*"--forge URL"* ]]
   refute_out '\.deb' <<<"$output"
 }
 
@@ -141,7 +141,7 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$(sed -n 1p "$TRACE")" =~ ^PROVISION:mesure\ --faits\ [^\ ]+\ --port-deck\ 20991$ ]]
   [[ "$output" == *"La suite se joue en root, par sudo : provision apply pose /etc, /opt/lcars"* ]]
-  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --bench --linux-dedie --forge http://forge.test --forge-publique http://forge.public.test --humain-demo demo --forge-admin-reset --docker-host unix:///run/user/1000/docker.sock --ports-tenus deck" ]
+  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --bench --linux-dedie --forge http://forge.test --forge-publique http://forge.public.test --humain-demo demo --forge-admin-reset --docker-host unix:///run/user/1000/docker.sock" ]
   # sudo remet l'environnement à zéro : la suite en root reçoit chaque choix par son option, le jeton nulle part
   grep -qx 'ENV:FORGE_BASE_URL=http://forge.test' "$TRACE"
   grep -qx 'ENV:FORGE_PUBLIC_URL=http://forge.public.test' "$TRACE"
@@ -157,7 +157,7 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   sans_faits_restants
 }
 
-@test "la suite en root mesure ce que root seul lit sur les ports tenus, puis l'apply reçoit ces faits sans remesure, et les retire" {
+@test "la suite en root refait sa mesure en root, puis l'apply reçoit ces faits sans remesure, et les retire" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre "port_deck=20999 tenu"
   ws --only 60
@@ -166,7 +166,7 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   faits="$(sed -n 's/^PROVISION:apply --faits \([^ ]*\) .*/\1/p' "$TRACE")"
   [ -n "$faits" ]
   [ "$(grep -c '^PROVISION:mesure ' "$TRACE")" -eq 2 ]
-  grep -qx "PROVISION:mesure --faits [^ ]* --ports-tenus deck" "$TRACE"
+  grep -qx "PROVISION:mesure --faits $faits" "$TRACE"
   grep -qx "PROVISION:apply --faits $faits --only 60" "$TRACE"
   grep -q '^ACCEPT:--announce-file ' "$TRACE"
   [ ! -e "$faits" ]
@@ -176,9 +176,9 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
 @test "une mesure root qui refuse le terrain arrête avant l'apply, en citant son constat" {
   unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le chemin root ne se joue pas ici"
   arbre
-  DOCTOR_RC=2 DOCTOR_LIGNE='FAIL  00-preflight: port 20999 (deck) pris par "python3",pid=4243' root --ports-tenus deck
+  DOCTOR_RC=2 DOCTOR_LIGNE='FAIL  00-preflight: port 20999 (deck) tenu par python3 (pid 4243, compte nobody)' root
   [ "$status" -eq 1 ]
-  [[ "$output" == *"le préflight refuse ce terrain"*"port 20999 (deck) pris par"* ]]
+  [[ "$output" == *"le préflight refuse ce terrain"*"port 20999 (deck) tenu par python3"* ]]
   refute grep -q '^PROVISION:apply' "$TRACE"
   sans_faits_restants
 }
@@ -195,25 +195,30 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   [ ! -e "$faits" ]
 }
 
-@test "lancé en root sans la suite, l'apply joue le préflight entier : aucune mesure ni faits" {
+@test "lancé en root à la main, sans faits reçus : la mesure root se joue, puis l'apply sur ses faits" {
   arbre
   root --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  refute grep -qE '^(SUDO|PROVISION:mesure)' "$TRACE"
-  [ "$(grep '^PROVISION:' "$TRACE")" = "PROVISION:apply --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice" ]
+  refute grep -q '^SUDO' "$TRACE"
+  local faits
+  faits="$(sed -n 's/^PROVISION:mesure --faits \([^ ]*\) .*/\1/p' "$TRACE")"
+  [ "$(grep '^PROVISION:' "$TRACE")" = "$(printf 'PROVISION:mesure --faits %s --port-deck 20991 --forge-project bob_9\nPROVISION:apply --faits %s --port-deck 20991 --only 60-deploy --forge-project bob_9 --human alice' "$faits" "$faits")" ]
   grep -q '^ACCEPT:--announce-file ' "$TRACE"
   [[ "$output" == *"provisionnement terminé"* ]]
   [[ "$output" != *"creds claude"* ]]
+  # la mesure root qui refuse arrête avant l'apply, sans option pour l'en dispenser
+  : > "$TRACE"
+  DOCTOR_RC=2 DOCTOR_LIGNE='FAIL  00-preflight: port 20991 (deck) tenu par python3 (pid 4243)' root --port-deck 20991
+  [ "$status" -eq 1 ]
+  refute grep -q '^PROVISION:apply' "$TRACE"
 }
 
-@test "--faits et --ports-tenus sans root sont refusés : ils appartiennent à la suite en root" {
+@test "--faits sans root est refusé : il appartient à la suite en root" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
-  ws --ports-tenus deck
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"appartiennent à la suite en root"* ]]
   ws --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 1 ]
+  [[ "$output" == *"--faits appartient à la suite en root"* ]]
   refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
 }
 
@@ -249,7 +254,7 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   arbre docker=absent docker_host=
   DOCKER_HOST=unix:///mort.sock ws
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $WS up --ports-tenus " ]
+  [ "$(sudo_ligne)" = "bash $WS up" ]
 }
 
 @test "un port tenu par un processus visible et étranger arrête avant sudo ; la forge ne compte que sous --bench" {
@@ -259,13 +264,15 @@ sudo_ligne() { sed -n 's/^SUDO://p' "$TRACE"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"le port 20999 (deck) est pris par autre-fleet-lcars-1"*"--port-deck"* ]]
   refute grep -q '^SUDO' "$TRACE"
-  arbre "port_forge=21000 tenu"
+  arbre "port_forge=21000 pris par python3 (pid 4243)"
   ws
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$(sudo_ligne)" == *"--ports-tenus " ]]
+  grep -q '^SUDO:' "$TRACE"
   : > "$TRACE"
   ws --bench
-  [[ "$(sudo_ligne)" == *"--ports-tenus forge" ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le port 21000 (forge) est pris par python3 (pid 4243)"* ]]
+  refute grep -q '^SUDO' "$TRACE"
 }
 
 @test "un préflight qui refuse le terrain (Linux non déclaré, plancher en dérive) sort avant sudo en citant son constat" {
@@ -305,7 +312,7 @@ verdict_check
 EOF
   ws --port-deck 20991 --forge-project bob_9 --only 60
   grep -qx "PREFLIGHT:check phase=sans-privilege deck=20991 base=bob_9" "$TRACE"
-  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --forge-project bob_9 --only 60 --docker-host unix:///decor.sock --ports-tenus deck" ]
+  [ "$(sudo_ligne)" = "bash $WS up --port-deck 20991 --forge-project bob_9 --only 60 --docker-host unix:///decor.sock" ]
   : > "$TRACE"
   # le décor ne porte ni /.dockerenv ni noyau Microsoft : ce système se mesure linux
   ws --substrate docker
@@ -342,9 +349,10 @@ EOF
 
 # ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
 
-@test "doctor sans root : sudo sur ce fichier, les choix en options ; en root, la sonde complète reçoit ses options" {
+@test "doctor sans root : sudo sur ce fichier, les choix et le daemon qui a répondu en options ; en root, la sonde complète reçoit ses options" {
   [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
+  printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == unix:///run/user/1000/docker.sock ]]\n' > "$BINDIR/docker"; chmod 0755 "$BINDIR/docker"
   FORGE_BASE_URL=http://forge.test DOCKER_HOST=unix:///run/user/1000/docker.sock run setsid -w bash "$WS" doctor --port-deck 20991 < /dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(sudo_ligne)" = "bash $WS doctor --port-deck 20991 --forge http://forge.test --docker-host unix:///run/user/1000/docker.sock" ]
@@ -354,11 +362,22 @@ EOF
   refute grep -q '^PROVISION:mesure' "$TRACE"
 }
 
-@test "doctor refuse --faits et --ports-tenus : ils appartiennent à up" {
+@test "doctor sans root : un DOCKER_HOST qui ne répond pas ne part pas à sudo, et c'est dit" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
   arbre
-  run bash "$WS" doctor --ports-tenus deck
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BINDIR/docker"; chmod 0755 "$BINDIR/docker"
+  DOCKER_HOST=unix:///nulle-part/docker.sock run setsid -w bash "$WS" doctor < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $WS doctor" ]
+  [[ "$output" == *"DOCKER_HOST=unix:///nulle-part/docker.sock ne répond pas : la sonde ne le reçoit pas"* ]]
+  refute grep -q 'ENV:DOCKER_HOST' "$TRACE"
+}
+
+@test "doctor refuse --faits : il appartient à up" {
+  arbre
+  run bash "$WS" doctor --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"appartiennent à up"* ]]
+  [[ "$output" == *"--faits appartient à up"* ]]
   refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
 }
 
@@ -509,7 +528,7 @@ EOF
   [ -f "$racine/.source-revision" ]
   [[ "$output" == *"kit : $racine"*"depuis ce kit"* ]]
   grep -q '^KIT-PROVISION:mesure --faits [^ ]* --port-deck 20991$' "$TRACE"
-  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up --port-deck 20991 --ports-tenus " ]
+  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up --port-deck 20991" ]
   grep -q '^KIT-PROVISION:apply --faits ' "$TRACE"
   refute grep -qE '^PROVISION:' "$TRACE"
   refute grep -qE '^(SUDO|KIT-PROVISION):.*\.tar\.gz' "$TRACE"
@@ -542,7 +561,7 @@ EOF
   local racine="$BATS_TEST_TMPDIR/detare/lcars_install"
   ws --from "$racine"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up --ports-tenus " ]
+  [ "$(sudo_ligne)" = "bash $racine/deploy/workstation up" ]
   rm -f "$racine/.source-revision"
   ws --from "$racine"
   [ "$status" -eq 1 ]

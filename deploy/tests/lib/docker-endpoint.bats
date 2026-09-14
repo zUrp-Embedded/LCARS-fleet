@@ -174,16 +174,16 @@ sonde() { # sonde — docker_endpoint sous le décor avec une CLI muette
 @test "DOCKER_HOST hérité qui répond : gardé tel quel, et PROV_DOCKER_HOST posé à sa valeur" {
   printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == tcp://daemon:2375 ]]\n' > "$BIN/docker"; chmod +x "$BIN/docker"
   run env DOCKER_HOST=tcp://daemon:2375 PATH="$BIN:/usr/bin:/bin" \
-    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=[$PROV_DOCKER_HOST]"' _ "$LIB"
-  [ "$output" = "rc=0 host=tcp://daemon:2375 prov=[tcp://daemon:2375]" ]
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=[$PROV_DOCKER_HOST] ecarte=[$PROV_DOCKER_ECARTE]"' _ "$LIB"
+  [ "$output" = "rc=0 host=tcp://daemon:2375 prov=[tcp://daemon:2375] ecarte=[]" ]
 }
 
-@test "DOCKER_HOST mort : il est retiré, la socket du décor qui répond le remplace" {
+@test "DOCKER_HOST mort : il est retiré, la socket du décor qui répond le remplace, et l'adresse écartée est rendue pour être dite" {
   socket_posee "$SOCK"
   printf '#!/usr/bin/env bash\n[[ "$1" == version && "$DOCKER_HOST" == unix://%s ]]\n' "$SOCK" > "$BIN/docker"; chmod +x "$BIN/docker"
   run env DOCKER_HOST=unix:///nulle/part.sock PATH="$BIN:/usr/bin:/bin" \
-    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=$PROV_DOCKER_HOST"' _ "$LIB"
-  [ "$output" = "rc=0 host=unix://$SOCK prov=unix://$SOCK" ]
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? host=$DOCKER_HOST prov=$PROV_DOCKER_HOST ecarte=$PROV_DOCKER_ECARTE"' _ "$LIB"
+  [ "$output" = "rc=0 host=unix://$SOCK prov=unix://$SOCK ecarte=unix:///nulle/part.sock" ]
 }
 
 @test "DOCKER_HOST mort et aucune socket : le refus nomme l'adresse de l'environnement, et DOCKER_HOST est retiré" {

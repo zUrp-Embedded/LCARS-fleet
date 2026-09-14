@@ -201,6 +201,24 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
   [[ "$output" == *"NON   CI : aucun « runs-on » lu dans les workflows du modèle de projet de la release posée"* ]]
 }
 
+@test "CI : après un réenrôlement, seul le runner le plus récent de son nom compte, s'il est en ligne ; l'ancien n'est pas un second runner" {
+  modele 1.2.0 shell
+  # l'ancien enregistrement, encore « en ligne » à l'instant du réenrôlement, porte des labels que le neuf ne sert plus
+  forge_runners 200 '{"total_count":3,"runners":[{"id":2,"name":"lcars-runner","status":"online","labels":[{"name":"shell"}]},{"id":3,"name":"lcars-runner","status":"online","labels":[{"name":"autre"}]},{"id":1,"name":"vieux","status":"offline","labels":[{"name":"shell"}]}]}'
+  accept_joue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NON   CI : 1 runner(s), mais aucun ne sert : shell"* ]]
+  : > "$FORGE_DOUBLE_DIR/routes"
+  forge_runners 200 '{"total_count":2,"runners":[{"id":2,"name":"lcars-runner","status":"online","labels":[{"name":"shell"}]},{"id":3,"name":"lcars-runner","status":"online","labels":[{"name":"shell"}]}]}'
+  accept_joue
+  [[ "$output" == *"OUI   CI : 1 runner(s) servant"* ]]
+  : > "$FORGE_DOUBLE_DIR/routes"
+  forge_runners 200 '{"total_count":1,"runners":[{"id":4,"name":"lcars-runner","status":"offline","labels":[{"name":"shell"}]}]}'
+  accept_joue
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NON   CI : aucun runner en ligne"* ]]
+}
+
 @test "CI : un runner qui ne sert pas le label demandé est un échec qui le nomme" {
   modele 1.2.0 shell
   forge_runners 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"autre"}]}]}'

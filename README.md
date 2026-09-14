@@ -56,9 +56,12 @@ avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler), pui
 pause, seul `~/.lcars/kits/` reçoit le kit de la version. Sans terminal, il continue en le disant.
 En conteneur, rien ne demande root. En mode `--workstation`, la grille nomme ce que root pose (/etc,
 la racine de LCARS, les comptes, les groupes, les paquets) ; après la pause, l'installeur se relance
-une fois par `sudo`, sur son fichier (pipé, celui du kit vérifié), mesure ce que root seul lit (qui
-tient un port de ce projet, l'écriture sous la racine), puis provisionne sur ces faits. Les choix de
-l'opérateur passent à `sudo` en options, jamais en variables. Sans `sudo`, ou sans terminal quand
+une fois par `sudo`. Depuis un clone, root exécute ce checkout tel quel : ce canal fait confiance au
+checkout. Pipé, root copie l'archive du kit dans un dossier à lui, la vérifie contre la somme inscrite
+dans l'installeur, la détare et joue cette copie ; l'arbre posé sous `~/.lcars/kits/` n'est jamais
+exécuté par root. Root décide lui-même de ce qui protège la machine (déclaration d'un Linux dédié,
+canal, chaque port de ce projet, projets compose présents, écriture sous la racine), puis
+provisionne. Les choix de l'opérateur passent à `sudo` en options, jamais en variables. Sans `sudo`, ou sans terminal quand
 `sudo` demande un mot de passe, il s'arrête avant la grille. Relancer reprend depuis la mesure :
 l'état est celui du système, lu à chaque passage.
 
@@ -341,9 +344,12 @@ changing the system (Enter to continue, Ctrl+C to cancel), then acts. Before tha
 `~/.lcars/kits/` receives the version's kit. Without a terminal it goes on and says so. In a
 container, nothing asks for root. In `--workstation` mode, the grid names what root puts in place
 (/etc, the LCARS root, accounts, groups, packages); after the pause, the installer relaunches
-itself once through `sudo`, on its own file (piped, the verified kit's one), measures what only
-root reads (who holds one of this project's ports, writing under the root), then provisions on
-those facts. The operator's choices reach `sudo` as options, never as variables. Without `sudo`, or
+itself once through `sudo`. From a clone, root runs that checkout as it is: this channel trusts the
+checkout. Piped, root copies the kit archive into a directory of its own, checks it against the sum
+written into the installer, unpacks it and runs that copy; the tree under `~/.lcars/kits/` is never
+run by root. Root decides by itself what protects the machine (the dedicated-Linux declaration, the
+channel, each of this project's ports, the compose projects present, writing under the root), then
+provisions. The operator's choices reach `sudo` as options, never as variables. Without `sudo`, or
 without a terminal when `sudo` asks for a password, it stops before the grid. Re-running starts
 again from the measurement: the state is the system's, read on every run.
 

@@ -86,6 +86,13 @@ check_ci() {
     no "CI : aucun runner enregistré — tout job reste en attente, aucune PR ne fusionne"
     return
   fi
+  # un réenrôlement enregistre un runner neuf sous le même nom, l'ancien reste listé un temps : seul le plus récent de chaque nom sert, s'il est en ligne
+  body="$(jq -c '.runners = ([.runners[]? | select(.status != "offline")] | group_by(.name) | map(max_by(.id)))' <<<"$body")"
+  n="$(jq -r '.runners | length' <<<"$body")"
+  if [[ "$n" -eq 0 ]]; then
+    no "CI : aucun runner en ligne — tout job reste en attente, aucune PR ne fusionne"
+    return
+  fi
   served="$(jq -r '[.runners[]?.labels[]?.name] | unique | join(" ")' <<<"$body" 2>/dev/null || true)"
   want="$(labels_demandes || true)"
   [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans les workflows du modèle de projet de la release posée ($PROV_PREFIX/rel/lcars_fleet) — le contrôle des labels serait vide, donc faux"; return; }

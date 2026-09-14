@@ -1245,12 +1245,16 @@ ss_dit() { # ss_dit <ligne> — un ss qui répond cette ligne
   [ "$output" = "solitaire (projet <hors compose>)" ]
 }
 
-@test "port_holder retombe sur le processus que ss nomme quand docker ne publie rien" {
+@test "port_holder retombe sur le processus que ss nomme quand docker ne publie rien : son nom, son pid et son compte, sans la forme brute de ss" {
   docker_stub "" ""
-  ss_dit 'LISTEN 0 128 127.0.0.1:45678 0.0.0.0:* users:(("python3",pid=4242,fd=3))'
+  # le pid du témoin existe, son compte se lit ; un pid au-delà de tout pid_max n'a pas de compte à dire
+  ss_dit "LISTEN 0 128 127.0.0.1:45678 0.0.0.0:* users:((\"python3\",pid=$$,fd=3))"
   module_sh 'port_holder 45678'
   [ "$status" -eq 0 ]
-  [ "$output" = '"python3",pid=4242' ]
+  [ "$output" = "python3 (pid $$, compte $(id -un))" ]
+  ss_dit 'LISTEN 0 128 127.0.0.1:45678 0.0.0.0:* users:(("python3",pid=4194399,fd=3))'
+  module_sh 'port_holder 45678'
+  [ "$output" = "python3 (pid 4194399)" ]
 }
 
 @test "port_holder ne rend rien, et rc 0, quand ni docker ni ss ne nomment" {

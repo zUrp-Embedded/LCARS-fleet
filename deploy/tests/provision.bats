@@ -204,16 +204,16 @@ EOF
   [ "$(cat "$RUN_LOG")" = "00-preflight:check" ]
 }
 
-phase_module() { # phase_module <rc> — un préflight qui note la phase et les ports tenus que le runner lui donne, et un fait
+phase_module() { # phase_module <rc> — un préflight qui note la phase que le runner lui donne, et un fait
   cat > "$SANDBOX/modules.d/00-preflight.sh" <<EOF
 #!/usr/bin/env bash
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
 . "\${PROVISION_LIB:?}"
-echo "00-preflight:\$1 phase=\${PROV_PHASE:-} tenus=\${PROV_PORTS_TENUS:-}" >> "\$RUN_LOG"
+echo "00-preflight:\$1 phase=\${PROV_PHASE:-}" >> "\$RUN_LOG"
 p_fact phase "\${PROV_PHASE:-entier}"
-[[ "$1" -eq 0 ]] || p_fail "décor : refus"
+[[ "$1" -eq 0 ]] || p_fail "port 20999 (deck) tenu par python3 (pid 4243)"
 verdict_check
 EOF
 }
@@ -224,25 +224,34 @@ EOF
   stub_module 20-suivant any any
   run "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=sans-privilege tenus=" ]
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=sans-privilege" ]
   [ "$(cat "$BATS_TEST_TMPDIR/faits")" = "$(printf 'phase=sans-privilege\npreflight=conforme')" ]
+}
+
+@test "un refus du préflight en mesure est un verdict, jamais une sonde en erreur" {
+  terrain wsl
   phase_module 1
   run "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 2 ]
   [ "$(tail -1 "$BATS_TEST_TMPDIR/faits")" = "preflight=refuse" ]
+  [[ "$output" == *"FAIL  00-preflight: port 20999 (deck) tenu par python3 (pid 4243)"*"échecs: 1"* ]]
+  refute_out 'ERREUR|sonde en erreur' <<<"$output"
 }
 
-@test "mesure en root joue la phase root sur les ports tenus qu'elle reçoit" {
+@test "mesure en root joue la phase root, et aucune option ne lui tend de faits d'avant sudo" {
   # sans décor : le runner refuse root sous LCARS_DECOR_ROOT ; le module de décor ne lit rien de la machine
   unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : root ne se joue pas ici"
   phase_module 0
-  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --ports-tenus deck,forge
+  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=root tenus=deck,forge" ]
+  [ "$(cat "$RUN_LOG")" = "00-preflight:check phase=root" ]
   grep -qx 'phase=root' "$BATS_TEST_TMPDIR/faits"
+  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" mesure --faits "$BATS_TEST_TMPDIR/faits" --ports-tenus ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"option inconnue: --ports-tenus"* ]]
 }
 
-@test "mesure refuse ce qu'elle n'honore pas : sans --faits, avec --only ; --faits hors mesure et apply, --ports-tenus hors mesure" {
+@test "mesure refuse ce qu'elle n'honore pas : sans --faits, avec --only ; --faits hors mesure et apply" {
   terrain wsl
   phase_module 0
   run "$SANDBOX/provision" mesure
@@ -254,39 +263,43 @@ EOF
   run "$SANDBOX/provision" doctor --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 1 ]
   [[ "$output" == *"--faits ne vaut que pour mesure"* ]]
-  run "$SANDBOX/provision" apply --ports-tenus deck
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"--ports-tenus ne vaut que pour mesure"* ]]
   [ ! -s "$RUN_LOG" ]
 }
 
-@test "apply --faits reçoit une mesure root conforme et ne rejoue pas le préflight ; appelé seul, il le joue" {
+@test "apply --faits reçoit une mesure root conforme : le préflight n'est pas rejoué, il compte, rendu par la mesure ; appelé seul, il le joue" {
   terrain wsl
   phase_module 0
   stub_module 20-suivant any any
-  printf 'phase=root\nport_deck=20999 nous lcars-landing (service)\npreflight=conforme\n' > "$BATS_TEST_TMPDIR/faits"
+  ( umask 077; printf 'phase=root\nport_deck=20999 nous lcars-landing (service)\npreflight=conforme\n' > "$BATS_TEST_TMPDIR/faits" )
   run "$SANDBOX/provision" apply --faits "$BATS_TEST_TMPDIR/faits"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(cat "$RUN_LOG")" = "20-suivant:apply" ]
+  [[ "$output" == *"=== 00-preflight (rendu par la mesure) ==="*"modules: 2 · conformes/convergés: 2"* ]]
+  grep -qx "modules       total=2 ok=2 drift=0 failed=0" "$JOURNAL"
   : > "$RUN_LOG"
   run "$SANDBOX/provision" apply
   [ "$status" -eq 0 ]
-  [ "$(cat "$RUN_LOG")" = "$(printf '00-preflight:apply phase= tenus=\n20-suivant:apply')" ]
+  [ "$(cat "$RUN_LOG")" = "$(printf '00-preflight:apply phase=\n20-suivant:apply')" ]
 }
 
-@test "apply --faits refuse, avant tout module, des faits qui ne sont pas une mesure root conforme" {
+@test "apply --faits refuse, avant tout module, des faits qui ne sont pas une mesure root conforme, ou qu'un autre que ce compte a pu écrire" {
   terrain wsl
   phase_module 0
   stub_module 20-suivant any any
   local faits="$BATS_TEST_TMPDIR/faits" contenu
   for contenu in 'phase=root\npreflight=refuse' 'phase=sans-privilege\npreflight=conforme' 'phase=root'; do
-    printf '%b\n' "$contenu" > "$faits"
+    ( umask 077; printf '%b\n' "$contenu" > "$faits" )
     run "$SANDBOX/provision" apply --faits "$faits"
     [ "$status" -eq 1 ] || { echo "« $contenu » : $output"; return 1; }
     [[ "$output" == *"ce n'est pas une mesure root conforme"* ]]
   done
   run "$SANDBOX/provision" apply --faits "$BATS_TEST_TMPDIR/absent"
   [ "$status" -eq 1 ]
+  # une mesure conforme, lisible et modifiable par d'autres : elle ne dispense pas du préflight
+  printf 'phase=root\npreflight=conforme\n' > "$faits"; chmod 0644 "$faits"
+  run "$SANDBOX/provision" apply --faits "$faits"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ce fichier n'a pas été écrit par la mesure de ce compte"* ]]
   [ ! -s "$RUN_LOG" ]
 }
 

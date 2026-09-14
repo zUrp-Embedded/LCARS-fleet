@@ -14,11 +14,11 @@ WSL2, une machine Linux dédiée, un conteneur — jusqu'à `fleet start`. Le pr
 
 | commande | rôle |
 |---|---|
-| `install.sh` (racine) | l'installeur : il mesure la machine sans privilège (`provision mesure`), montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et agit ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur, sans root ; `--workstation` l'installe dans le système : après la pause, un seul `sudo` relance l'installeur sur son fichier (pipé, celui du kit), qui mesure ce que root seul lit puis exec `workstation up --faits` sur ces faits ; les choix de l'opérateur et ce que la mesure sans privilège a vu passent à `sudo` en options. `--bench` monte aussi la forge, son runner CI et un compte de démonstration. En mode conteneur, jq est demandé sur l'hôte (le banc lit l'API de sa forge, `container forge-apply` dérive le roster d'une forge fournie), et une instance déjà posée est refusée avec sa mise à jour. Le reste : `install.sh --help` |
-| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste, en root : `up` sans root mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que root pose et se relance une fois par `sudo` ; en root, il mesure ce que root seul lit (ou reçoit ces faits d'`install.sh` par `--faits`), joue `provision apply` sur ces faits depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel), puis `accept`. `doctor` sans root se relance par `sudo` ; en root, il rend les codes de `provision doctor` |
+| `install.sh` (racine) | l'installeur : il mesure la machine sans privilège (`provision mesure`), montre ce qu'il va faire, marque une pause avant de modifier le système (Entrée pour continuer, Ctrl+C pour annuler) et agit ; avant la pause, seul `~/.lcars/kits/` reçoit le kit d'une release, où vit la mesure. Sans option, LCARS tourne dans un conteneur, sans root ; `--workstation` l'installe dans le système : après la pause, un seul `sudo` relance l'installeur : depuis un clone, sur ce checkout tel quel (ce canal fait confiance au checkout) ; pour un kit, sur une copie que root fait de l'archive dans un dossier à lui, vérifie contre la somme inscrite dans l'installeur, détare et retire à la sortie. En root, la mesure décide seule des refus qui protègent la machine, puis exec `workstation up --faits` sur ses faits ; les choix de l'opérateur passent à `sudo` en options, et aucune ne dispense root de sa mesure. `--bench` monte aussi la forge, son runner CI et un compte de démonstration. En mode conteneur, jq est demandé sur l'hôte (le banc lit l'API de sa forge, `container forge-apply` dérive le roster d'une forge fournie), et une instance déjà posée est refusée avec sa mise à jour. Le reste : `install.sh --help` |
+| `deploy/workstation up [--from <kit>] \| doctor` | le délégué du poste, en root : `up` sans root mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que root pose et se relance une fois par `sudo` ; en root, il joue la mesure root (ou reçoit ses faits d'`install.sh` par `--faits`), puis `provision apply` sur ces faits depuis ce checkout ou depuis un kit (un `.tar.gz` se détare sous `~/.lcars/kits/<nom>/`, un kit déjà détaré se prend tel quel : root exécute cet arbre tel quel), puis `accept`. `doctor` sans root se relance par `sudo`, avec le daemon docker qui a répondu à l'opérateur ; en root, il rend les codes de `provision doctor` |
 | `deploy/container <verbe>` | le délégué du conteneur : `up`, `pull`, `build`, `status`, `shell`, `logs`, `down`, `reset`, `config`, `forge-check`, `forge-apply`, `runner-token`, `source-push` ; une conf par projet compose sous `~/.lcars/container/`. Codes de sortie et variables : `deploy/container help` |
 | `deploy/pack.sh [--publish \| --no-image]` | le lanceur de version : les deux gates, release, doc, kit `.tar.gz`, installeur de la version, image docker. Le kit et son `.sha256` restent dans `<parent du checkout>/lcars-packs/` (`LCARS_PACK_DIR` le déplace) ; le tiroir `dist/<tag>/` les reprend par liens durs, avec le compose de l'instance, son profil seccomp, les constantes de l'installeur et l'installeur de la version ; l'image reste dans le daemon. Prérequis et codes de sortie : `deploy/pack.sh --help` ; `--publish` : « Publier une version », plus bas |
-| `deploy/provision apply \| doctor \| mesure \| list \| audit` | le runner des modules, joué par `workstation`, par l'installeur et par la construction de l'image ; `apply` et `doctor` se jouent en root ; `mesure` joue le préflight seul pour un lanceur, sans root ce qui se lit sans privilège, en root ce que root seul lit, et écrit ses faits dans `--faits`. Options et codes de sortie : `deploy/provision --help` |
+| `deploy/provision apply \| doctor \| mesure \| list \| audit` | le runner des modules, joué par `workstation`, par l'installeur et par la construction de l'image ; `apply` et `doctor` se jouent en root ; `mesure` joue le préflight seul pour un lanceur, sans root ce qui se lit sans privilège, en root les refus qui protègent la machine, et écrit ses faits dans `--faits`. Options et codes de sortie : `deploy/provision --help` |
 | `deploy/accept` | l'acceptation d'une installation dans le système : les identifiants annoncés ouvrent la forge, des runners servent les labels que les workflows du modèle de projet demandent, la fleet démarre sous un humain de fleet de la machine (sur un banc, sous l'humain de démonstration) |
 
 ## Le pipeline
@@ -31,12 +31,17 @@ inférieur). Le substrat se mesure —
 `docker` dans un conteneur, `wsl` sous un noyau Microsoft, `linux` sinon — et un `--substrate` qui
 contredit la mesure est refusé. Le préflight (`00-preflight`) est la barrière de l'apply : tout
 verdict autre que conforme arrête la passe avant le module suivant, et `--only` le joue quand
-même ; un apply qui reçoit `--faits`, la mesure root conforme de la même invocation, ne le rejoue
-pas. Le préflight a deux phases, que `provision mesure` choisit par l'identité : sans privilège
-(système, docker, forge, ports, traces, canal ; un port tenu par un processus invisible y est
-« tenu », jamais un refus) et root (écriture et `mv --exchange` sous l'ancêtre de la racine,
-propriétaire des ports tenus par `ss -ltnp` : seul ce projet tient ses ports) ; apply et doctor les
-jouent à la suite. En apply, un module retenu par `CHECK-ON` mais hors `APPLY-ON` est joué en check, et son
+même ; un apply qui reçoit `--faits`, la mesure root conforme de la même invocation (un fichier 0600
+du compte qui joue l'apply), ne le rejoue pas et le compte, rendu par la mesure. Le préflight a deux
+phases, que `provision mesure` choisit par l'identité : sans privilège (système, docker, forge,
+ports, traces, canal ; un port tenu par un processus invisible y est « tenu », jamais un refus), pour
+la grille et les refus précoces ; et root, qui ne reprend rien d'avant `sudo` et décide des refus
+qui protègent la machine : déclaration d'un Linux dédié, canal, chaque port de ce projet par
+`ss -ltnp` (seuls ses conteneurs et la landing de cette machine le tiennent ; un port écouté sans
+processus visible, sous WSL2 celui d'une autre distribution, est refusé avec son remède), projets
+compose présents qualifiés par le mode de la forge, écriture et `mv --exchange` sous le parent de la
+racine. Les planchers (OS, architecture, mémoire, disque) ne sont pas repris en root. Apply et doctor
+jouent les deux phases à la suite. En apply, un module retenu par `CHECK-ON` mais hors `APPLY-ON` est joué en check, et son
 drift est un échec : rien sur place ne peut converger.
 
 Le doctor joue le check de chaque module, le même que celui qui encadre son apply. Un module sonde
@@ -63,7 +68,7 @@ et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de
 
 | Module | APPLY-ON | CHECK-ON | Pose |
 |---|---|---|---|
-| 00-preflight | any | any | les planchers (famille Debian, `mv --exchange` sous la racine, architecture, mémoire, disque, WSL2 plutôt que WSL1, déclaration d'un Linux dédié, docker sous WSL, canal lisible et non mélangé, ports de ce projet tenus par lui seul) et les faits d'entrée de l'installeur, en deux phases (sans privilège, root) ; aucune mutation |
+| 00-preflight | any | any | les planchers (famille Debian, architecture, mémoire, disque, WSL2 plutôt que WSL1, docker sous WSL) et les refus qui protègent la machine (`mv --exchange` sous le parent de la racine, déclaration d'un Linux dédié, canal lisible et non mélangé, ports de ce projet tenus par lui seul, projets compose d'un autre déploiement), et les faits d'entrée de l'installeur, en deux phases (sans privilège, root) ; aucune mutation |
 | 10-packages | wsl linux docker | any | les paquets apt du runtime et des pods (la liste `PACKAGES` du module), et une sandbox bwrap réellement lancée sous l'humain ; au build de l'image, cette sonde se reporte au boot |
 | 12-docker-engine | linux | linux | docker-ce depuis le dépôt upstream, posé si aucun moteur n'est là ; un daemon qui répond est conforme, un moteur posé et arrêté (docker-ce ou docker.io) ou un daemon qui refuse l'utilisateur se disent sans que rien ne soit reposé. Sous WSL, le daemon vient de Docker Desktop |
 | 15-toolchain | wsl linux docker | wsl linux docker | Erlang par apt, à la majeure OTP du zip d'Elixir, et Elixir précompilé épinglé (version et sha256) sous `/opt`, avec le retrait des arbres d'une autre version que ce module a marqués ; sur une livraison source seulement, un kit embarque son ERTS |
@@ -98,7 +103,7 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 |---|---|
 | `provision-lib.sh` | le protocole des modules : les constantes de `installer-constants.env` et les choix de l'opérateur, verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), lecture de `system.manifest`, verrou, apt, `as_human`, `forge_api` (le client de forge : jeton lu dans un fichier et passé sur stdin), la table de traduction vers les noms `LCARS_*` du produit et `prov_geste`, le lanceur des gestes de `runtime/services/forge.d` (50, 63, 65, 66) |
 | `geste-protocol.sh` | le protocole que `prov_geste` donne à un geste : celui du produit, dont les sorties de verdict se marquent |
-| `docker-endpoint.sh` | le substrat et le daemon docker : une CLI, le `DOCKER_HOST` de l'environnement s'il répond, sinon la socket système, un verdict qui nomme le geste manquant |
+| `docker-endpoint.sh` | le substrat et le daemon docker : une CLI, le `DOCKER_HOST` de l'environnement s'il répond, sinon la socket système et l'adresse écartée rendue pour être dite, un verdict qui nomme le geste manquant |
 | `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, basculée sous le préfixe ; liens, modes et élagage par `60-deploy` |
 | `kit-verify.sh` | ce qu'un kit doit porter : tampon de révision, release, doc bâtie, entrées de `release.manifest`, listes que 62 pose (`PROV_HELPERS`, `PROV_HELPERS_DATA`, `PROV_SHELL_RC` des constantes), médias |
 | `door-gen.sh` | l'installeur d'une version : le gabarit `install.sh` avec sa version, sa base, sa clé, son image et sa table de sommes, et son `install.sh.sha256` |

@@ -631,12 +631,13 @@ port_holder() {
   port_process "$port"
 }
 
-port_process() { # port_process <port> → le processus que ss nomme sur ce port (« "nom",pid=N »), ou rien ; rc 0
+port_process() { # port_process <port> → le processus que ss nomme sur ce port (« nom (pid N, compte C) »), ou rien ; rc 0
   command -v ss >/dev/null 2>&1 || return 0
-  ss -ltnp 2>/dev/null \
-    | awk -v p=":$1\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }' \
-    | sed -e 's/users:((//' -e 's/))$//' -e 's/,fd=[0-9]*//' | head -1
-  return 0
+  local users compte
+  users="$(ss -ltnp 2>/dev/null | awk -v p=":$1\$" '$4 ~ p { for (i=1;i<=NF;i++) if ($i ~ /users:/) { print $i; exit } }')" || return 0
+  [[ "$users" =~ \(\(\"([^\"]*)\",pid=([0-9]+) ]] || return 0
+  compte="$(ps -o user:32= -p "${BASH_REMATCH[2]}" 2>/dev/null | tr -d ' ')" || compte=""
+  printf '%s (pid %s%s)\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${compte:+, compte $compte}"
 }
 
 port_state() {

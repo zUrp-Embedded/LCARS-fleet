@@ -21,6 +21,7 @@ PROV_DOCKER_BIN="${PROV_DOCKER_BIN:-}"
 PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
 PROV_DOCKER_DENIED=0
+PROV_DOCKER_ECARTE=""
 
 docker_denied_geste() { # docker_denied_geste <socket> → le geste qui rend l'accès, selon que la session porte déjà le groupe ou non
   local sock="$1" grp me
@@ -51,10 +52,10 @@ _docker_sock_listening() { # _docker_sock_listening <socket> → 0 écoute · 1 
 # la CLI que porte le montage de Docker Desktop : 30-wsl y lit la présence de Desktop
 _docker_mount_cli() { echo "${LCARS_DECOR_ROOT:-}/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 
-docker_endpoint() { # docker_endpoint → 0, PROV_DOCKER_HOST posé et DOCKER_HOST exporté ; ou 1 et PROV_DOCKER_WHY
+docker_endpoint() { # docker_endpoint → 0, PROV_DOCKER_HOST posé et DOCKER_HOST exporté ; ou 1 et PROV_DOCKER_WHY ; PROV_DOCKER_ECARTE, le DOCKER_HOST donné qui n'a pas répondu
   local want="${PROV_DOCKER_BIN:-}" cli sock
   sock="${LCARS_DECOR_ROOT:-}/var/run/docker.sock"
-  PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0
+  PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_ECARTE=""
   local wsl_geste="Sur WSL, deux choses, dans cet ordre : Docker Desktop démarré côté Windows, et l'intégration WSL activée pour cette distribution (Settings > Resources > WSL integration), puis rouvrir la session"
   for cli in "$want" docker; do
     [[ -n "$cli" ]] || continue
@@ -76,6 +77,7 @@ docker_endpoint() { # docker_endpoint → 0, PROV_DOCKER_HOST posé et DOCKER_HO
       PROV_DOCKER_HOST="$DOCKER_HOST"
       return 0
     fi
+    PROV_DOCKER_ECARTE="$DOCKER_HOST"
     dh="${DOCKER_HOST#unix://}"
     if [[ -S "$dh" ]]; then
       envhost=" ${DOCKER_HOST}[env,$([[ -w "$dh" ]] && echo "accessible" || echo "refusé à $(id -un)")]"
