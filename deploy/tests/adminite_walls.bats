@@ -139,7 +139,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
   # LES DEUX RAILS POSENT LE COMPTE. En verifier un seul laisserait l'autre demarrer un `setpriv`
   # vers un nom que `/etc/passwd` ne connait pas — et `setpriv` echoue alors en parlant de lui-meme.
-  code_of "$mod" | grep -q 'SYSTEM_USER="\${PROV_SYSTEM_USER:-lcars-system}"'
+  code_of "$mod" | grep -q 'SYSTEM_USER="\$PROV_SYSTEM_USER"'
+  grep -qx 'PROV_SYSTEM_USER=lcars-system' "$REPO/deploy/installer-constants.env"
   code_of "$mod" | grep -q -- '-g "\$SYSTEM_GROUP" -- "\$SYSTEM_USER"'
 }
 
@@ -187,8 +188,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 
 @test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {
   local attendu
-  attendu="$(sed -n 's/^: "${PROV_AUTHORITY_USER:=\([a-z-]*\)}"$/\1/p' "$REPO/deploy/lib/provision-lib.sh")"
-  [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans provision-lib.sh" >&2; return 1; }
+  attendu="$(sed -n 's/^PROV_AUTHORITY_USER=\([a-z-]*\)$/\1/p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans installer-constants.env" >&2; return 1; }
 
   code_of "$REPO/runtime/services/container/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {

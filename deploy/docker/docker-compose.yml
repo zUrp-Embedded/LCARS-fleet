@@ -15,10 +15,11 @@
 #     et aucun pod ne naît. Le chemin du profil est relatif à ce fichier.
 # Ces trois lignes sont le prix des sandboxes des pods, à demander à l'hôte, pas à corriger ici.
 #
-# À la main, sans `deploy/container` :
+# À la main, sans `deploy/container` (les constantes de l'installeur sont à côté de ce fichier dans
+# une release, sous deploy/ dans un arbre) :
 #   export LCARS_STORE_PREFIX=<projet> LCARS_ADMIRAL=<login>
 #   for v in cache toolchains sysroots state; do docker volume create "$LCARS_STORE_PREFIX-$v"; done
-#   docker compose -p <projet> up -d
+#   docker compose --env-file installer-constants.env -p <projet> up -d
 # Les quatre volumes du magasin sont externes (un `down -v` ne les emporte pas) et nommés par le
 # projet (deux instances ne partagent pas de magasin) : ils existent avant le `up`.
 
@@ -33,7 +34,7 @@ services:
     environment:
       LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
       LCARS_UID: "${LCARS_UID:-1000}"
-      LCARS_STORE_ROOT: /var/lib/lcars
+      LCARS_STORE_ROOT: "${PROV_STORE_ROOT:?PROV_STORE_ROOT absent — les constantes de l'installeur, par --env-file}"
       # les listeners écoutent sur toutes les interfaces du conteneur ; la frontière est la
       # publication compose ci-dessous, sur la loopback de l'hôte
       LCARS_BIND_HOST: 0.0.0.0
@@ -44,19 +45,19 @@ services:
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
       # sous le volume `var`, avec les jetons : un conteneur recréé garde son client OAuth
-      LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
+      LCARS_DECK_OIDC_FILE: "${PROV_ROOT:?PROV_ROOT absent}/var/deck-oidc.json"
       LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-https://github.com/zurp-embedded/LCARS-fleet.git}"
       LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
     ports:
-      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
-      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
+      - "${LCARS_SSH_PORT:-127.0.0.1:${PROV_SSH_PORT_DEFAULT:?PROV_SSH_PORT_DEFAULT absent}}:22"
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:${PROV_DECK_PORT_DEFAULT:?PROV_DECK_PORT_DEFAULT absent}}:${PROV_DECK_PORT_DEFAULT:?PROV_DECK_PORT_DEFAULT absent}"
     volumes:
       - lcars-home:/home
-      - lcars-var:/opt/lcars/var
-      - lcars-cache:/var/lib/lcars/cache
-      - lcars-toolchains:/var/lib/lcars/toolchains
-      - lcars-sysroots:/var/lib/lcars/sysroots
-      - lcars-state:/var/lib/lcars/state
+      - lcars-var:${PROV_ROOT:?PROV_ROOT absent}/var
+      - lcars-cache:${PROV_STORE_ROOT:?PROV_STORE_ROOT absent}/cache
+      - lcars-toolchains:${PROV_STORE_ROOT:?PROV_STORE_ROOT absent}/toolchains
+      - lcars-sysroots:${PROV_STORE_ROOT:?PROV_STORE_ROOT absent}/sysroots
+      - lcars-state:${PROV_STORE_ROOT:?PROV_STORE_ROOT absent}/state
     cap_add:
       - SYS_ADMIN
     security_opt:

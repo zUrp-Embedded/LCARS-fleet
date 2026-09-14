@@ -29,12 +29,12 @@ prov_runtime_dirs() {
   [[ "${PROV_SUBSTRATE:?PROV_SUBSTRATE non posé — ce module se joue par ./provision, pas nu}" != docker ]] || return 0
   local h; h="$(prov_console_human)"
   printf '%s\n' \
-    "/run/lcars 0755 root:root" \
-    "/run/lcars/console 0711 root:root" \
-    "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP" \
-    "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
-    "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP" \
-    "/run/lcars/toolchain 2775 root:$PROV_FLEET_GROUP"
+    "$(prov_decor /run/lcars) 0755 root:root" \
+    "$(prov_decor /run/lcars/console) 0711 root:root" \
+    "$(prov_decor "/run/lcars/console/$h") 2710 $h:$PROV_CONSOLE_GROUP" \
+    "$(prov_decor /run/lcars/authority) 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
+    "$(prov_decor /run/lcars/privileged) 0750 root:$PROV_FLEET_GROUP" \
+    "$(prov_decor /run/lcars/toolchain) 2775 root:$PROV_FLEET_GROUP"
 }
 
 prov_dirs() {
@@ -44,18 +44,18 @@ prov_dirs() {
     "$PROV_TOKENS_DIR 0710 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
-    "/home/projects 2775 root:$PROV_FLEET_GROUP" \
-    "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
-    "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP" \
-    "/var/lib/lcars 0755 root:root" \
-    "/var/tmp/lcars 0755 root:root" \
-    "/var/tmp/lcars/toolchain-work 0700 root:root" \
-    "/etc/lcars 0755 root:root"
+    "$(prov_decor /home/projects) 2775 root:$PROV_FLEET_GROUP" \
+    "$(prov_decor /home/projects.ops) 2775 root:$PROV_FLEET_GROUP" \
+    "$(prov_decor /home/projects.workshop) 2775 root:$PROV_FLEET_GROUP" \
+    "$PROV_STORE_ROOT 0755 root:root" \
+    "$(prov_decor /var/tmp/lcars) 0755 root:root" \
+    "$(prov_decor /var/tmp/lcars/toolchain-work) 0700 root:root" \
+    "$(prov_decor /etc/lcars) 0755 root:root"
   prov_runtime_dirs
 }
 
 # le substrat d'une entrée se lit dans system.manifest (cinquième colonne), pas dans une seconde table ici
-prov_container_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
+prov_container_volumes() { printf '%s\n' "$(prov_decor /home)" "$PROV_ROOT/var"; }
 
 prov_dir_scope() { # prov_dir_scope <chemin> → here | substrate | volume
   local path="$1" sub col v
@@ -79,14 +79,14 @@ say_unmeasured() { # say_unmeasured <hors substrat> <sur volume> — ce qui n'es
   return 0
 }
 
-prov_tmpfiles_conf() { echo "${LCARS_TMPFILES_CONF:-/etc/tmpfiles.d/lcars-console.conf}"; }
+prov_tmpfiles_conf() { prov_decor /etc/tmpfiles.d/lcars-console.conf; }
 
 prov_tmpfiles_body() {
   echo "# Généré par 25-directories.sh — /run est un tmpfs, ces dossiers s'y refont à chaque boot."
   echo "# Ne pas éditer : la source est la table prov_runtime_dirs du module."
   local path mode owner
   while read -r path mode owner; do
-    printf 'd %s %s %s %s -\n' "$path" "$mode" "${owner%%:*}" "${owner##*:}"
+    printf 'd %s %s %s %s -\n' "$(prov_canon "$path")" "$mode" "${owner%%:*}" "${owner##*:}"
   done < <(prov_runtime_dirs)
 }
 
@@ -103,6 +103,7 @@ check() {
       continue
     fi
     cur="$(stat -c '%a %U:%G' "$path")"
+    owner="$(prov_owner "$owner")"
     if [[ "$cur" == "${mode#0} $owner" ]]; then
       p_ok "$path ($cur)"
     else

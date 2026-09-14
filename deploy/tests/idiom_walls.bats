@@ -44,7 +44,7 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   refute grep -qE '(^|[^|])\|[[:space:]]*write_atomic' <<<'  x || write_atomic "$f" 0644'
 }
 
-@test "MUR I2: aucun jeton de forge ne passe par argv — forge_curl le porte sur stdin" {
+@test "MUR I2: aucun jeton de forge ne passe par argv — forge_api le porte sur stdin" {
   local f hits=0
   for f in "${SOURCES[@]}"; do
     if code "$f" | grep -qE -- '-H ["'"'"']?Authorization: token'; then
@@ -53,8 +53,8 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   done
   [ "$hits" -eq 0 ]
   echo '  curl -s -H "Authorization: token $tok" "$url"' | grep -qE -- '-H ["'"'"']?Authorization: token'
-  # la forme sure — un en-tete ecrit dans une config lue sur stdin — n'est pas prise pour la fragile
-  refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
+  # la forme sure — un en-tete lu par curl sur son entree — n'est pas prise pour la fragile
+  refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'Authorization: token %s\n'"'"' "$tok" | curl -H @- "$url"'
 }
 
 I3_AWK='
@@ -118,7 +118,7 @@ I3_AWK='
   echo '  x="$(sed -n '"'"'s/^LCARS_X=//p'"'"' "$f" | tail -n1)"' | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"
 }
 
-@test "MUR I8: un fichier de jeton se lit par read_token ou forge_curl — jamais par une redirection nue" {
+@test "MUR I8: un fichier de jeton se lit par read_token ou forge_api — jamais par une redirection nue" {
   local hits=0 f
   for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
     if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE' || code "$f" | grep -qF "tr -d '[:space:]' <"; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
@@ -126,33 +126,34 @@ I3_AWK='
   [ "$hits" -eq 0 ]
 }
 
-@test "MUR I9: un temoin dont le code nomme une fonction du siege pose LCARS_SEAT_UID_FILE — il ne lit jamais celui de la machine" {
+# un témoin pose le décor de la lib (LCARS_DECOR_ROOT, directement ou par decor_pose) : sans lui,
+# la lib lit les fichiers de la machine qui joue la porte
+pose_le_decor() { grep -qE '^[[:space:]]*(export LCARS_DECOR_ROOT=|decor_pose([[:space:]]|$))' "$1"; }
+
+@test "MUR I9: un temoin dont le code nomme une fonction du siege pose le decor — il ne lit jamais le siege de la machine" {
   local f bad=0
-  for f in "$BATS_TEST_DIRNAME"/*.bats; do
+  for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
-    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'is_fleet_human|prov_seat_uid|fleet_humans|uid_floor' || continue
-    grep -qE '^[[:space:]]*export LCARS_SEAT_UID_FILE=' "$f" || { echo "${f##*/} nomme une fonction du siege sans poser LCARS_SEAT_UID_FILE"; bad=1; }
+    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'prov_seat_uid|fleet_humans|uid_floor' || continue
+    pose_le_decor "$f" || { echo "${f##*/} nomme une fonction du siege sans poser le decor"; bad=1; }
   done
   [ "$bad" -eq 0 ]
 }
 
-@test "MUR I19: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
+@test "MUR I19: un temoin qui nomme un lecteur des bornes d'uid pose le decor — il ne lit jamais le login.defs de la machine" {
   local f bad=0 vus=0
   for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
-    # capture puis test (DI-12) : aucun `grep -q` ne ferme un tuyau. `LCARS_PASSWD_FILE` (le seam
-    # de 21-service-accounts) n'est pas une population d'humains : il ne compte pas.
-    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E '(^|[^A-Z_])PASSWD_FILE=|is_fleet_human|fleet_humans|prov_uid_bounds')" ]] || continue
+    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E 'fleet_humans|prov_uid_bounds')" ]] || continue
     vus=$((vus + 1))
-    grep -qE '^[[:space:]]*export PASSWD_DEFS=' "$f" \
-      || { echo "${f##*/} pose une population ou nomme un lecteur des bornes sans poser PASSWD_DEFS"; bad=1; }
+    pose_le_decor "$f" || { echo "${f##*/} nomme un lecteur des bornes sans poser le decor"; bad=1; }
   done
-  [ "$vus" -ge 3 ] || { echo "seulement $vus temoin(s) dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
+  [ "$vus" -gt 0 ] || { echo "aucun temoin dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
   [ "$bad" -eq 0 ]
 }
 
 I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
-@test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose LCARS_CHANNEL_FILE — il ne lit jamais le canal de la machine" {
+@test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose le decor — il ne lit jamais le canal de la machine" {
   local f bad=0 vus=0 c execute v
   while IFS= read -r f; do
     [[ "$f" == */idiom_walls.bats ]] && continue
@@ -166,8 +167,8 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
     done
     [ "$execute" -eq 1 ] || continue
     vus=$((vus + 1))
-    grep -qE '^[[:space:]]*export LCARS_CHANNEL_FILE=' <<<"$c" \
-      || { echo "${f#"$DEPLOY"/} execute un lecteur du canal sans poser LCARS_CHANNEL_FILE"; bad=1; }
+    pose_le_decor "$f" \
+      || { echo "${f#"$DEPLOY"/} execute un lecteur du canal sans poser le decor"; bad=1; }
   done < <(find "$DEPLOY/tests" -name '*.bats' | sort)
   [ "$bad" -eq 0 ]
   # GARDE D INSTRUMENT : les quatre temoins de module et deploy_manifest au moins

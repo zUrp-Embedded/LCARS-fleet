@@ -7,7 +7,7 @@
 # et se repose sans toucher à l'instance ni à la forge.
 #
 #   POST /api/v1/admin/actions/runners/registration-token   (site-admin) rend le jeton du premier démarrage
-#   LCARS_FORGE_URL=<forge> LCARS_RUNNER_TOKEN=<jeton> docker compose -f deploy/docker/runner-compose.yml -p <projet>-runner up -d
+#   LCARS_FORGE_URL=<forge> LCARS_RUNNER_TOKEN=<jeton> docker compose --env-file deploy/installer-constants.env -f deploy/docker/runner-compose.yml -p <projet>-runner up -d
 
 name: lcars-runner
 
@@ -26,7 +26,7 @@ services:
       GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'adresse de la forge (ex. http://192.0.2.10)}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
       GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
-      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-${PROV_RUNNER_LABELS:?PROV_RUNNER_LABELS absent — les constantes de l'installeur, par --env-file}}"
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"
       DOCKERD_ROOTLESS_ROOTLESSKIT_MTU: "65520"

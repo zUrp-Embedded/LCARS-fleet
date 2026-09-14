@@ -182,17 +182,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
     files =
       Enum.flat_map(["test", "../deploy/tests"], fn troot ->
-        Path.join([root, troot, "**", "*"])
+        base = Path.expand(troot, root)
+
+        Path.join([base, "**", "*"])
         |> Path.wildcard()
-        # Python execution creates __pycache__ artifacts that are not witnesses.
-        |> Enum.reject(&(File.dir?(&1) or &1 =~ ~r"/__pycache__/"))
-        |> Enum.map(&Path.relative_to(&1, root))
-      end)
-      |> Enum.reject(fn f ->
-        case Path.split(f) do
-          [_, zone | _] when zone in ~w(support fixtures probes integration) -> true
-          _ -> Path.basename(f) in service
-        end
+        |> Enum.filter(&witness_candidate?(&1, base, service))
+        |> Enum.map(&Path.join(troot, Path.relative_to(&1, base)))
       end)
       |> Enum.sort()
 
@@ -219,6 +214,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       note:
         "#{length(files)} temoins dans les deux arbres, #{length(files) - length(misnamed)} nommes selon la regle"
     })
+  end
+
+  # La zone est le premier segment sous la racine du corpus, quelle que soit la profondeur de cette
+  # racine vue du runtime. Python execution creates __pycache__ artifacts that are not witnesses.
+  defp witness_candidate?(path, base, service) do
+    cond do
+      File.dir?(path) or path =~ ~r"/__pycache__/" ->
+        false
+
+      hd(Path.split(Path.relative_to(path, base))) in ~w(support fixtures probes integration) ->
+        false
+
+      true ->
+        Path.basename(path) not in service
+    end
   end
 
   @doc false

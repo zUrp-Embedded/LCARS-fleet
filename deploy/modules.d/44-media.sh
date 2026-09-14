@@ -13,19 +13,14 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 # le même défaut que runtime/config/runtime.exs (LCARS_MEDIA_ROOT) et deck.ex (:media_root)
-MEDIA_ROOT_CANON="$PROV_ROOT/share"
-MEDIA_ROOT="${LCARS_MEDIA_ROOT:-$MEDIA_ROOT_CANON}"
-MEDIA_OWNER="${LCARS_MEDIA_OWNER:-$(prov_manifest_owner "$MEDIA_ROOT_CANON")}"
-: "${MEDIA_OWNER:=root:root}"
+MEDIA_ROOT="$PROV_MEDIA_ROOT"
+MEDIA_OWNER="$(prov_owner "$(prov_manifest_owner "$MEDIA_ROOT")")"
 MEDIA_TREES=(avatars favicon)
 MEDIA_SRC_ROOT="${LCARS_MEDIA_SRC_ROOT:-$(repo_root)/assets}"
 SITE_SRC="${LCARS_SITE_SRC:-$(repo_root)/assets/github.io}"
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
-NPM_BIN="${LCARS_NPM_BIN:-npm}"
 
-media_mode() { # media_mode [sous-arbre] → le mode que system.manifest déclare pour share[/<sous-arbre>], sinon 0755
-  local m; m="$(prov_manifest_mode "$MEDIA_ROOT_CANON${1:+/$1}")"; printf '%s\n' "${m:-0755}"
-}
+media_mode() { prov_manifest_mode "$MEDIA_ROOT${1:+/$1}"; }   # media_mode [sous-arbre] → le mode que system.manifest déclare pour share[/<sous-arbre>]
 media_src() { echo "$MEDIA_SRC_ROOT/$1"; }
 doc_dir() { echo "$MEDIA_ROOT/doc"; }
 doc_stamp() { echo "$MEDIA_ROOT/.doc-revision"; }   # à côté de doc/, que prov_promote_dir remplace en entier
@@ -108,11 +103,11 @@ build_doc() {
     p_ok "doc du deck à jour ($(doc_dir), révision ${PROV_SOURCE_REV:-$(prov_source_rev)}) — rien à rebâtir"
     return 0
   fi
-  command -v "$NPM_BIN" >/dev/null 2>&1 \
+  command -v npm >/dev/null 2>&1 \
     || { p_fail "npm absent — 16-node pose le précompilé épinglé"; verdict_apply; }
-  run_step "doc du deck · dépendances (npm ci, $SITE_SRC)" -- as_human env -C "$SITE_SRC" "$NPM_BIN" ci --no-audit --no-fund \
+  run_step "doc du deck · dépendances (npm ci, $SITE_SRC)" -- as_human env -C "$SITE_SRC" npm ci --no-audit --no-fund \
     || verdict_apply
-  run_step "doc du deck · build ($SITE_SRC)" -- as_human env -C "$SITE_SRC" LCARS_SITE_BASE="$SITE_BASE" "$NPM_BIN" run build \
+  run_step "doc du deck · build ($SITE_SRC)" -- as_human env -C "$SITE_SRC" LCARS_SITE_BASE="$SITE_BASE" npm run build \
     || verdict_apply
   [[ -s "$SITE_SRC/dist/index.html" ]] \
     || { p_fail "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"; verdict_apply; }
@@ -169,7 +164,7 @@ apply() {
     setfacl -bR "$MEDIA_ROOT" || { p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"; _media_warn=1; }
   fi
   media_modes "$MEDIA_ROOT" || _media_warn=1
-  find "$MEDIA_ROOT" \( ! -user root -o ! -group root \) -exec chown -h root:root {} + \
+  find "$MEDIA_ROOT" \( ! -user "${MEDIA_OWNER%%:*}" -o ! -group "${MEDIA_OWNER##*:}" \) -exec chown -h "$MEDIA_OWNER" {} + \
     || { p_warn "propriétaire non posé sous $MEDIA_ROOT — le contenu garde celui de la source"; _media_warn=1; }
   local d
   for d in "" "${MEDIA_TREES[@]}" doc; do

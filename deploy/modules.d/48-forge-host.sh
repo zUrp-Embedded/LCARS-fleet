@@ -18,7 +18,6 @@ set -euo pipefail
 # shellcheck source=../lib/forge-bootstrap.sh
 . "$(dirname "$PROVISION_LIB")/forge-bootstrap.sh"
 
-: "${PROV_FORGE_HOST_PORT:=21000}"
 : "${PROV_FORGE_ADMIN:=$(prov_seat_from_map)}"
 : "${PROV_FORGE_ADMIN:=$PROV_HUMAN}"
 : "${PROV_DOCKER_BIN:=docker}"
@@ -28,24 +27,18 @@ advertise_addr "${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}"
 PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
 PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 
-SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/deploy/docker/forge-compose.yml"
 FORGE_SERVICE="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$COMPOSE_FILE" 2>/dev/null | head -n1 || true)"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-${FORGE_SERVICE}-1"
 
-# le mode et les adresses sont résolus par la lib, une fois pour tous les modules ; ici seulement : sans drapeau ni forge fournie, la forge du poste se monte
-if [[ "${PROV_FORGE_MONTEE:-}" == "1" || -z "${FORGE_BASE_URL:-}" ]]; then
-  FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
-  FORGE_MONTEE=1
+# les adresses viennent de la lib ; l'adresse publique de la forge du poste s'écrit ici, d'où la lib la relit
+if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
   PUBLIC_URL="http://${PROV_FORGE_ADVERTISE}:${PROV_FORGE_HOST_PORT}"
 else
-  FORGE_URL="$PROV_FORGE_URL"
-  FORGE_MONTEE=0
   PUBLIC_URL="$PROV_FORGE_PUBLIC_URL"
 fi
 
 d() { "$PROV_DOCKER_BIN" "$@"; }
-forge_up() { curl -fsS -m 5 -o /dev/null "$FORGE_URL/api/v1/version" 2>/dev/null; }
 docker_answers() { d ps --format '{{.ID}}' >/dev/null 2>&1; }
 
 forge_service_known() {
@@ -63,7 +56,7 @@ forge_running_port() {
 forge_is_ours() { [[ "$(forge_running_port)" == "$PROV_FORGE_HOST_PORT" ]]; }
 
 foreign_forge_refusal() {
-  p_fail "une forge répond sur $FORGE_URL, mais aucun conteneur du projet « $PROV_FORGE_PROJECT » ne publie $PROV_FORGE_HOST_PORT — ce n'est pas la forge de cette machine"
+  p_fail "une forge répond sur $PROV_FORGE_URL, mais aucun conteneur du projet « $PROV_FORGE_PROJECT » ne publie $PROV_FORGE_HOST_PORT — ce n'est pas la forge de cette machine"
   p_fail "  en monter une autre : « --port-forge <autre port> » (et « --forge-project <nom> » si le nom est pris lui aussi)"
 }
 
@@ -94,48 +87,43 @@ reset_admin_password_if_asked() { # reset_admin_password_if_asked <0 si le compt
 }
 
 forge_admin_state() { # forge_admin_state <login> → admin | plain | absent | unknown
-  local out body code
+  local body code
   [[ -n "$(read_token "$PROV_MASTER_TOKEN_FILE")" ]] || { echo unknown; return 0; }
-  out="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -sS -m 10 -w '\n%{http_code}' "$FORGE_URL/api/v1/users/$1" 2>/dev/null)" \
-    || { echo unknown; return 0; }
-  code="${out##*$'\n'}"; body="${out%$'\n'*}"
+  body="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
+  code="$(forge_api GET "$PROV_FORGE_URL/api/v1/users/$1" "$body" --token-file "$PROV_MASTER_TOKEN_FILE" -m 10)" || true
   case "$code" in
-    200) case "$body" in *'"is_admin":true'*|*'"is_admin": true'*) echo admin ;; *) echo plain ;; esac ;;
+    200) if jq -e '.is_admin == true' "$body" >/dev/null 2>&1; then echo admin; else echo plain; fi ;;
     404) echo absent ;;
     *)   echo unknown ;;
   esac
+  rm -f "$body"
 }
 
-# la CLI gitea sait créer un administrateur, pas en promouvoir un : la promotion passe par l'API
+# la CLI gitea sait créer un administrateur, pas en promouvoir un : la promotion passe par l'API ;
+# login_name et source_id sont exigés par l'endpoint, sans eux il rend 422
 forge_promote_admin() { # forge_promote_admin <login>
-  local tok
-  tok="$(read_token "$PROV_MASTER_TOKEN_FILE")"
-  [[ -n "$tok" ]] || return 1
-  # login_name et source_id sont exigés par l'endpoint : sans eux, 422
-  printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"admin\\":true,\\"login_name\\":\\"%s\\",\\"source_id\\":0}"\n' \
-    "$tok" "$1" \
-    | curl -K - -fsS -m 15 "$FORGE_URL/api/v1/admin/users/$1" >/dev/null 2>&1
+  forge_api PATCH "$PROV_FORGE_URL/api/v1/admin/users/$1" /dev/null --token-file "$PROV_MASTER_TOKEN_FILE" \
+    --json '{admin: true, login_name: $l, source_id: 0}' --arg l "$1" >/dev/null
 }
 
 seat_binding_report() { # seat_binding_report <check|apply>
-  local mode="${1:?}"
+  local mode="$1"
   prov_seat_binding "$PROV_FORGE_ADMIN"
-  case "$PROV_SEAT_BINDING" in
-    diverge)
-      p_drift "siège : « $PROV_FORGE_ADMIN » côté unix, « $PROV_SEAT_LOGIN » côté $PROV_SEAT_SOURCE — deux acteurs pour un rôle, le lien n'est pas enregistré tant qu'ils ne s'accordent pas"
-      return 0 ;;
-    unknown)
-      p_warn "siège : ni compte unix nommé, ni #1 lisible sur la forge — le lien n'est pas mesurable"
-      return 0 ;;
-  esac
-  local _carte; _carte="$(prov_file_state "$PROV_UID_MAP_FILE")"
+  if [[ "$PROV_SEAT_BINDING" == diverge ]]; then
+    p_drift "siège : « $PROV_FORGE_ADMIN » côté unix, « $PROV_SEAT_LOGIN » côté $PROV_SEAT_SOURCE — deux acteurs pour un rôle, le lien n'est pas enregistré tant qu'ils ne s'accordent pas"
+    return 0
+  fi
+  local _carte _uid; _carte="$(prov_file_state "$PROV_UID_MAP_FILE")"
+  _uid="$(id -u -- "$PROV_SEAT_LOGIN" 2>/dev/null || true)"
   if [[ -n "$(prov_seat_from_map)" ]]; then
     p_ok "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
   elif [[ "$_carte" != "present" && "$_carte" != "absent" ]]; then
     p_warn "siège : carte des uid $(prov_state_why "$_carte" "$PROV_UID_MAP_FILE") — rien n'est conclu sur l'enregistrement de « $PROV_SEAT_LOGIN »"
+  elif [[ ! "$_uid" =~ ^[0-9]+$ ]]; then
+    p_drift "siège : « $PROV_SEAT_LOGIN » n'a pas de compte sur cette machine — la carte des uid ne l'enregistre pas sans uid ; créer ce compte, ou désigner un compte existant par PROV_FORGE_ADMIN"
   elif [[ "$mode" != "apply" ]]; then
     p_drift "siège : « $PROV_SEAT_LOGIN » connu ($PROV_SEAT_SOURCE) mais non enregistré — l'apply pose la ligne"
-  elif prov_seat_record "$PROV_SEAT_LOGIN" "$(id -u "$PROV_SEAT_LOGIN")"; then
+  elif prov_seat_record "$PROV_SEAT_LOGIN" "$_uid"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
   else
@@ -144,7 +132,7 @@ seat_binding_report() { # seat_binding_report <check|apply>
 }
 
 check() {
-  if [[ "$FORGE_MONTEE" -eq 1 ]]; then
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
     if ! docker_endpoint; then
       p_fail "$PROV_DOCKER_WHY — la forge du poste est un conteneur, il n'en existe aucune autre forme"
       verdict_check
@@ -155,14 +143,14 @@ check() {
       verdict_check
     fi
   elif ! forge_up; then
-    p_drift "forge fournie muette ($FORGE_URL) — c'est l'adresse de FORGE_BASE_URL ; cette installation ne la monte pas, elle la consomme"
+    p_drift "forge fournie muette ($PROV_FORGE_URL) — c'est l'adresse de FORGE_BASE_URL ; cette installation ne la monte pas, elle la consomme"
     verdict_check
   fi
   if forge_up; then
-    if [[ "$FORGE_MONTEE" -eq 1 ]]; then
-      p_ok "forge du poste vivante ($FORGE_URL)$(forge_reach_note)"
+    if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
+      p_ok "forge du poste vivante ($PROV_FORGE_URL)$(forge_reach_note)"
     else
-      p_ok "forge fournie vivante ($FORGE_URL) — montée ailleurs, structurée par cette installation"
+      p_ok "forge fournie vivante ($PROV_FORGE_URL) — montée ailleurs, structurée par cette installation"
     fi
     if [[ -s "$PROV_MASTER_TOKEN_FILE" ]]; then
       p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)"
@@ -177,25 +165,25 @@ check() {
       *)       p_warn "adminité de « $PROV_FORGE_ADMIN » non mesurable (jeton absent ou forge muette)" ;;
     esac
   else
-    p_drift "aucune forge sur $FORGE_URL — l'apply monte le conteneur et l'amorce, 61-forge-structure pose la structure"
+    p_drift "aucune forge sur $PROV_FORGE_URL — l'apply monte le conteneur et l'amorce, 61-forge-structure pose la structure"
   fi
   verdict_check
 }
 
 apply() {
-  if [[ "$FORGE_MONTEE" -eq 1 ]]; then
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
     if ! docker_endpoint; then
       p_fail "$PROV_DOCKER_WHY — forge non montée, et elle ne peut pas l'être autrement"
       verdict_apply
     fi
     forge_service_known || verdict_apply
   elif ! forge_up; then
-    p_fail "forge fournie muette ($FORGE_URL) — cette installation la consomme, elle ne la monte pas ; c'est à qui la tient de la relever"
+    p_fail "forge fournie muette ($PROV_FORGE_URL) — cette installation la consomme, elle ne la monte pas ; c'est à qui la tient de la relever"
     verdict_apply
   fi
   local was_up=0; forge_up && was_up=1
 
-  if [[ "$FORGE_MONTEE" -eq 1 ]]; then
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
     if [[ "$was_up" -eq 1 ]] && docker_answers && ! forge_is_ours; then
       foreign_forge_refusal
       verdict_apply
@@ -210,7 +198,7 @@ apply() {
     local etat; etat="$(port_state "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_PROJECT")"
     if [[ "$was_up" -eq 0 && "$etat" == pris* ]]; then
       local holder; holder="${etat#pris}"; holder="${holder# par }"
-      p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est pas la forge de LCARS (elle ne répond pas sur $FORGE_URL)"
+      p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est pas la forge de LCARS (elle ne répond pas sur $PROV_FORGE_URL)"
       p_fail "en choisir un autre : PROV_FORGE_HOST_PORT=<port> — ou libérer celui-ci"
       verdict_apply
     fi
@@ -218,26 +206,28 @@ apply() {
       || p_step "forge du poste : montage du conteneur Gitea (projet $PROV_FORGE_PROJECT, port $PROV_FORGE_HOST_PORT)"
     run_capture forge_mount "$PROV_DOCKER_BIN" "$COMPOSE_FILE" "$PROV_FORGE_PROJECT" "$PROV_FORGE_HOST_PORT" "$PROV_FORGE_BIND" "$PUBLIC_URL" \
       || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; prov_dump_last; verdict_apply; }
-    forge_wait "$FORGE_URL" || { p_fail "forge montée mais muette sur $FORGE_URL après 120 s"; verdict_apply; }
+    forge_wait "$PROV_FORGE_URL" || { p_fail "forge montée mais muette sur $PROV_FORGE_URL après 120 s"; verdict_apply; }
   fi
 
-  if [[ "$FORGE_MONTEE" -eq 0 ]]; then
-    p_ok "forge fournie ($FORGE_URL) — rien à monter ; cette installation l'amorce, 61-forge-structure y pose la structure"
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 0 ]]; then
+    p_ok "forge fournie ($PROV_FORGE_URL) — rien à monter ; cette installation l'amorce, 61-forge-structure y pose la structure"
   elif [[ "$was_up" -eq 1 ]]; then
-    p_ok "forge du poste vivante et convergée ($FORGE_URL)$(forge_reach_note)"
+    p_ok "forge du poste vivante et convergée ($PROV_FORGE_URL)$(forge_reach_note)"
   else
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "forge du poste montée ($FORGE_URL)$(forge_reach_note)"
+    p_chg "forge du poste montée ($PROV_FORGE_URL)$(forge_reach_note)"
   fi
 
-  write_atomic "$PROV_TOKENS_DIR/forge.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$FORGE_URL" \
-    || { p_fail "adresse de la forge non posée ($PROV_TOKENS_DIR/forge.url)"; verdict_apply; }
-  write_atomic "$PROV_TOKENS_DIR/forge.public.url" 0644 "root:$PROV_FLEET_GROUP" <<<"$PUBLIC_URL" \
-    || { p_fail "adresse publique de la forge non posée ($PROV_TOKENS_DIR/forge.public.url)"; verdict_apply; }
+  write_atomic "$PROV_FORGE_URL_FILE" 0644 "root:$PROV_FLEET_GROUP" <<<"$PROV_FORGE_URL" \
+    || { p_fail "adresse de la forge non posée ($PROV_FORGE_URL_FILE)"; verdict_apply; }
+  write_atomic "$PROV_FORGE_PUBLIC_URL_FILE" 0644 "root:$PROV_FLEET_GROUP" <<<"$PUBLIC_URL" \
+    || { p_fail "adresse publique de la forge non posée ($PROV_FORGE_PUBLIC_URL_FILE)"; verdict_apply; }
+  write_atomic "$PROV_FORGE_MODE_FILE" 0644 "root:$PROV_FLEET_GROUP" \
+    <<<"$([[ "$PROV_FORGE_DU_POSTE" -eq 1 ]] && echo poste || echo fournie)" || verdict_apply
 
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
   # en banc, chaque passe repose le mot de passe du contrat
-  if [[ "${LCARS_BENCH:-}" == "1" && "$FORGE_MONTEE" -eq 1 && -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+  if [[ "${LCARS_BENCH:-}" == "1" && "$PROV_FORGE_DU_POSTE" -eq 1 && -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     if forge_admin_password "$PROV_DOCKER_BIN" "$FORGE_CONTAINER" "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"; then
       announce_password "$PROV_FORGE_ADMIN" "$(bench_admiral_password)"
     else
@@ -245,7 +235,7 @@ apply() {
     fi
   fi
 
-  if [[ "$FORGE_MONTEE" -eq 0 && ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+  if [[ "$PROV_FORGE_DU_POSTE" -eq 0 && ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_drift "forge fournie sans autorité : y écrire un jeton master site-admin de cette forge dans $PROV_MASTER_TOKEN_FILE (0600, $PROV_AUTHORITY_USER), puis relancer"
     verdict_apply
   fi
@@ -303,14 +293,14 @@ apply() {
   esac
 
   # le seed ne se régénère pas : le provider n'écrit pas le mot de passe d'un compte existant, un seed neuf rendrait les jetons de rôle en 401
-  if [[ ! -s "$SEED_FILE" ]]; then
+  if [[ ! -s "$PROV_FORGE_SEED_FILE" ]]; then
     local seed; seed="$(forge_seed_new)"
     [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
-    write_atomic "$SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
-      || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
-    p_chg "seed des comptes posé ($SEED_FILE, $PROV_AUTHORITY_USER seul)"
+    write_atomic "$PROV_FORGE_SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
+      || { p_fail "seed non posé ($PROV_FORGE_SEED_FILE)"; verdict_apply; }
+    p_chg "seed des comptes posé ($PROV_FORGE_SEED_FILE, $PROV_AUTHORITY_USER seul)"
   else
-    p_ok "seed des comptes déjà posé ($SEED_FILE)"
+    p_ok "seed des comptes déjà posé ($PROV_FORGE_SEED_FILE)"
   fi
 
   seat_binding_report apply

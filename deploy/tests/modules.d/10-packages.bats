@@ -6,17 +6,20 @@
 # STATUS: témoins des paquets du runtime — présence mesurée par dpkg, pose par apt, sonde bwrap réelle
 
 load ../refute
+load ../support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   SRC="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=10-packages PROV_SUBSTRATE=wsl
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"; mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
+  decor_pose
   export INSTALLES="$BATS_TEST_TMPDIR/installes"; : > "$INSTALLES"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  BIN="$DECOR_BIN"
   cat > "$BIN/dpkg-query" <<'EOF'
 #!/usr/bin/env bash
 pkg="${@: -1}"
@@ -35,7 +38,6 @@ echo "BWRAP:$*" >> "$CALLS"
 exit "${STUB_BWRAP_RC:-0}"
 EOF
   chmod 0755 "$BIN"/*
-  export PATH="$BIN:$PATH"
 }
 
 mod() { run bash "$SRC" "$@"; }

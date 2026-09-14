@@ -12,13 +12,12 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-SYSTEMD_DIR="${LCARS_SYSTEMD_DIR:-/etc/systemd/system}"
-SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+SYSTEMD_DIR="$(prov_decor /etc/systemd/system)"
+SERVICES_ENV="$PROV_SERVICES_ENV"
 # ce que lit la garde du siège dans le shell d'un humain : hors de services.env, que seuls les daemons chargent
-SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
-HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
-SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
+SEAT_UID_FILE="$PROV_SEAT_UID_FILE"
+HELPERS_DIR="$PROV_ROOT"
+SERVICES_OWNER=root:root
 AUTHORITY_USER="$PROV_AUTHORITY_USER"
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
@@ -33,8 +32,8 @@ STARTERS=(
 )
 
 # /run/systemd/system n'existe que si systemd est l'init (sd_booted) : systemctl et /etc/systemd/system existent aussi dans une image sans lui
-SYSTEMD_RUN="${LCARS_SYSTEMD_RUN:-/run/systemd/system}"
-have_systemd() { [[ -d "$SYSTEMD_RUN" ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
+SYSTEMD_RUN="$(prov_decor /run/systemd/system)"
+have_systemd() { [[ -d "$SYSTEMD_RUN" ]] && command -v systemctl >/dev/null 2>&1; }
 
 consequence_of() { # consequence_of <unité> — ce que coûte son absence
   case "$1" in
@@ -48,9 +47,8 @@ consequence_of() { # consequence_of <unité> — ce que coûte son absence
 
 # le conteneur tient ses services par supervise.sh ; pendant le boot (superviseur absent) l'état vérifiable est « en place »
 check_container_services() {
-  local dir="${LCARS_HELPERS_DIR:-$PROV_ROOT}" sup
+  local dir="$HELPERS_DIR" sup="$HELPERS_DIR/supervise.sh"
   local e prog rel unit sup_vivant=0
-  sup="${LCARS_SUPERVISE_BIN:-$dir/supervise.sh}"
   if [[ -x "$sup" ]]; then
     p_ok "superviseur posé ($sup) — ce que « Restart= » fait sur un poste"
   else
@@ -72,7 +70,7 @@ check_container_services() {
   done
 }
 
-restarts_of() { "$SYSTEMCTL" show -p NRestarts --value "$1.service" 2>/dev/null; }
+restarts_of() { systemctl show -p NRestarts --value "$1.service" 2>/dev/null; }
 
 loop_hint() { # loop_hint <unité> — pourquoi elle boucle, dans les termes de l'opérateur
   case "$1" in
@@ -88,7 +86,7 @@ loop_hint() { # loop_hint <unité> — pourquoi elle boucle, dans les termes de 
 unit_cause() { # unit_cause <unité> → « — <cause> », la dernière erreur du journal quand systemd la garde
   local u="$1" hint line
   hint="$(loop_hint "$u")"
-  line="$($SYSTEMCTL --version >/dev/null 2>&1 \
+  line="$(systemctl --version >/dev/null 2>&1 \
     && journalctl -u "$u.service" -n 30 --no-pager 2>/dev/null \
        | grep -oE '(OSError|Error|error|Errno [0-9]+)[^"]*' | tail -1 || true)"
   if [[ -n "$line" ]]; then
@@ -99,8 +97,7 @@ unit_cause() { # unit_cause <unité> → « — <cause> », la dernière erreur 
 }
 
 forge_url() { # forge_url → vide tant que 48-forge-host n'a pas annoncé d'adresse
-  local f="$PROV_TOKENS_DIR/forge.url"
-  if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]'; fi
+  if [[ -r "$PROV_FORGE_URL_FILE" ]]; then head -n1 "$PROV_FORGE_URL_FILE" | tr -d '[:space:]'; fi
 }
 
 # tout ce qu'un daemon lit et que l'installateur décide voyage par ici ; aucun défaut : la lib pose ces variables avant tout module
@@ -119,7 +116,8 @@ services_env_body() {
   echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"
   echo "LCARS_ROLES=\"$PROV_ROLES\""
   echo "LCARS_CATALOGUES_WORK=$PROV_CATALOGUES_WORK"
-  echo "TF_CLI_CONFIG_FILE=${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}/tofurc"
+  echo "LCARS_STORE_ROOT=$PROV_STORE_ROOT"
+  echo "TF_CLI_CONFIG_FILE=$PROV_TOFU_DIR/tofurc"
 }
 
 # pas de User= : la landing se dépose elle-même (setpriv) et garde ainsi le groupe lcars-console qui traverse les sockets
@@ -273,7 +271,7 @@ check() {
     verdict_check
   fi
   if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — aucune unité posée. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (30-wsl)"
+    p_warn "pas de systemd ici (systemctl absent, ou systemd n'est pas l'init : /run/systemd/system) — aucune unité posée. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (30-wsl)"
     verdict_check
   fi
   if [[ -s "$SERVICES_ENV" ]]; then
@@ -288,7 +286,7 @@ check() {
       p_drift "$(unit_path "$u") absente ou divergente"
       continue
     fi
-    if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
+    if systemctl is-active --quiet "$u.service" 2>/dev/null; then
       p_ok "$u.service actif"
     else
       p_drift "$u.service posé mais pas actif — $(consequence_of "$u")"
@@ -315,7 +313,7 @@ apply() {
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
     || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — la garde du siège refusera tout lancement sur cette machine"; verdict_apply; }
   if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — le siège et l'environnement sont posés, aucune unité ne l'est. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (30-wsl)"
+    p_warn "pas de systemd ici (systemctl absent, ou systemd n'est pas l'init : /run/systemd/system) — le siège et l'environnement sont posés, aucune unité ne l'est. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (30-wsl)"
     verdict_apply
   fi
 
@@ -324,26 +322,26 @@ apply() {
   for u in "${UNITS[@]}"; do
     # un daemon debout garde l'environnement de son démarrage : un services.env changé le relance aussi
     if unit_current "$u"; then
-      [[ "$env_change" -eq 1 ]] && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null && reecrites+=("$u")
+      [[ "$env_change" -eq 1 ]] && systemctl is-active --quiet "$u.service" 2>/dev/null && reecrites+=("$u")
       continue
     fi
     body="$(unit_body "$u")" \
       || { p_fail "unité inconnue: $u — aucun fichier écrit"; verdict_apply; }
-    if [[ -f "$(unit_path "$u")" ]] && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then reecrites+=("$u"); fi
+    if [[ -f "$(unit_path "$u")" ]] && systemctl is-active --quiet "$u.service" 2>/dev/null; then reecrites+=("$u"); fi
     write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" <<<"$body" \
       || { p_fail "unité non posée: $(unit_path "$u")"; verdict_apply; }
     reload=1
   done
-  [[ "$reload" -eq 1 ]] && { "$SYSTEMCTL" daemon-reload || p_warn "daemon-reload en échec"; }
+  [[ "$reload" -eq 1 ]] && { systemctl daemon-reload || p_warn "daemon-reload en échec"; }
   local -a was=()
   local i n n2
   for u in "${UNITS[@]}"; do
     was+=("$(restarts_of "$u")")
-    "$SYSTEMCTL" enable --now "$u.service" >/dev/null 2>&1 \
-      || p_fail "$u.service n'a pas démarré — « $SYSTEMCTL status $u.service » et « journalctl -u $u.service » disent pourquoi"
+    systemctl enable --now "$u.service" >/dev/null 2>&1 \
+      || p_fail "$u.service n'a pas démarré — « systemctl status $u.service » et « journalctl -u $u.service » disent pourquoi"
   done
   for u in "${reecrites[@]}"; do
-    if "$SYSTEMCTL" try-restart "$u.service" >/dev/null 2>&1 && "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
+    if systemctl try-restart "$u.service" >/dev/null 2>&1 && systemctl is-active --quiet "$u.service" 2>/dev/null; then
       p_chg "$u.service relancé sur l'unité ou l'environnement réécrit"
     else
       p_warn "$u.service : relance sur l'unité réécrite sans service debout derrière — le verdict ci-dessous le mesure"
@@ -357,7 +355,7 @@ apply() {
     n2="$(restarts_of "$u")"
     if [[ "${n2:-0}" -gt "${n:-0}" ]]; then
       p_fail "$u.service redémarre en boucle — $(loop_hint "$u")"
-    elif "$SYSTEMCTL" is-active --quiet "$u.service"; then
+    elif systemctl is-active --quiet "$u.service"; then
       if [[ "${n2:-0}" -gt "${was[$i]:-0}" ]]; then
         p_chg "$u.service debout, après $(( ${n2:-0} - ${was[$i]:-0} )) redémarrage(s) — il a attendu quelque chose"
       else
@@ -373,7 +371,7 @@ apply() {
 
 # une passe du convergeur dans l'environnement du daemon (env -i + services.env), pas celui de l'apply ; --once rend 1 sur dépendance absente, 2 sur configuration absente
 converge_humans_now() {
-  local conv="${LCARS_HUMAN_CONVERGER:-$HELPERS_DIR/human-converger.sh}"
+  local conv="$HELPERS_DIR/human-converger.sh"
   [[ -x "$conv" ]] || { p_warn "convergeur d'humains absent ($conv) — aucun humain ne sera matérialisé par cette passe"; return 0; }
   local avant apres nouveaux
   avant="$(fleet_humans | sort -u)"

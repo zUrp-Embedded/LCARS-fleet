@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/lib/enroll-catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-18
-# STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la derivation du roster ne demande pas de
+# STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la dérivation du roster, jouée contre une image doublée
 
 load ../refute
 
@@ -15,16 +15,17 @@ setup() {
   mkdir -p "$BIN" "$OUT"
   export PATH="$BIN:$PATH"
   export DOCKER_BIN="$BIN/docker"
+  export ROSTER="$BATS_TEST_TMPDIR/roster.json"
 
-  # La doublure trace son argv et rend un roster valide. `system_*` y est, parce que la ligne
-  # PROV_ROLES doit les remettre devant les roles metier.
-  cat > "$BIN/docker" <<SH
-#!/usr/bin/env bash
-printf '%s\n' "\$*" > "$BATS_TEST_TMPDIR/argv"
-cat <<'JSON'
+  # `system_*` est dans le roster : la ligne PROV_ROLES doit les remettre devant les rôles métier
+  cat > "$ROSTER" <<'JSON'
 {"org":"fleet","roles":["fleet_dev"],"system_roles":["system_architect"],
  "writers":["fleet_dev"],"judges":[],"externals":[]}
 JSON
+  cat > "$BIN/docker" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "$BATS_TEST_TMPDIR/argv"
+cat "\$ROSTER"
 SH
   chmod +x "$BIN/docker"
 }
@@ -78,3 +79,43 @@ SH
   [[ "$output" == *"--catalogue"* ]]
 }
 
+@test "--served est un argument inconnu, et rien n'est écrit" {
+  run "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2 --served "fleet_old"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"argument inconnu: --served"* ]]
+  [ ! -f "$OUT/roles.auto.tfvars.json" ]
+}
+
+@test "la ligne PROV_ROLES met les rôles système devant, sans doublon, et l'org suit" {
+  printf '%s\n' '{"org":"escadre","roles":["fleet_dev","system_architect","fleet_scribe"],"system_roles":["system_architect","system_chief"]}' > "$ROSTER"
+  run "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2
+  [ "$status" -eq 0 ]
+  [ "${lines[-2]}" = 'PROV_ROLES="system_architect system_chief fleet_dev fleet_scribe"' ]
+  [ "${lines[-1]}" = 'PROV_FORGE_ORG="escadre"' ]
+}
+
+@test "un roster sans rôle rend 2 sans rien écrire" {
+  printf '%s\n' '{"org":"fleet","roles":[],"system_roles":["system_architect"]}' > "$ROSTER"
+  run "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"roster illisible ou sans rôle"* ]]
+  [ ! -e "$OUT/roles.auto.tfvars.json" ]
+}
+
+@test "un roster illisible rend 2 sans rien écrire" {
+  printf 'pas du json\n' > "$ROSTER"
+  run "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"roster illisible ou sans rôle"* ]]
+  [ ! -e "$OUT/roles.auto.tfvars.json" ]
+}
+
+@test "le roster se lit sans python3 : un PATH qui ne le porte pas rend la ligne des rôles" {
+  local sans="$BATS_TEST_TMPDIR/sans-python" t
+  mkdir -p "$sans"
+  for t in bash dirname mv jq cat; do ln -s "$(command -v "$t")" "$sans/$t"; done
+  run env PATH="$sans" "$SUT" --tofu-dir "$OUT" --image lcars-fleet:2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'PROV_ROLES="system_architect fleet_dev"'* ]]
+  [ -f "$OUT/roles.auto.tfvars.json" ]
+}

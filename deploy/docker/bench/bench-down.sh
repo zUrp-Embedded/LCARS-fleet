@@ -34,11 +34,13 @@ done
 [[ -n "$PROJECT" ]] || { echo "bench-down : --project est obligatoire (aucun défaut, par choix)" >&2; exit 1; }
 [[ "$CONFIRM" -eq 1 ]] || { echo "bench-down : --yes requis — ceci efface les volumes de « $PROJECT »" >&2; exit 1; }
 
-# le compose du conteneur exige LCARS_STORE_PREFIX pour se lire, même pour un down
+# le compose du conteneur exige LCARS_STORE_PREFIX pour se lire, même pour un down, et les trois
+# compose lisent les constantes de l'installeur
 CONTAINER_PROJECT="${PROJECT}-fleet"
 export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
 # shellcheck source=../../lib/store.sh
 source "$DOCKER_DIR/../lib/store.sh"
+CONSTANTES="$DOCKER_DIR/../installer-constants.env"
 
 FORGE_PROJECT="${PROJECT}-forge"
 RUNNER_PROJECT="${PROJECT}-runner"
@@ -79,14 +81,14 @@ fi
 # le runner d'abord : il tient le réseau de la forge. runner-compose.yml exige LCARS_FORGE_URL même
 # pour un down, d'où une valeur factice
 echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
-LCARS_FORGE_URL="http://gitea:3000" "$DOCKER_BIN" compose -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
+LCARS_FORGE_URL="http://down.invalid" "$DOCKER_BIN" compose --env-file "$CONSTANTES" -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
   down -v --remove-orphans || true
 
 echo "[bench-down] destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
+"$DOCKER_BIN" compose --env-file "$CONSTANTES" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
+"$DOCKER_BIN" compose --env-file "$CONSTANTES" -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] destruction du magasin de « $PROJECT » ($(store_volume_names | tr '\n' ' ' | sed 's/ $//'))"
 store_destroy_volumes "$DOCKER_BIN" || echo "[bench-down] au moins un volume du magasin n'a pas pu être détruit" >&2

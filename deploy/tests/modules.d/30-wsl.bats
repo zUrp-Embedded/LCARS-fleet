@@ -6,6 +6,7 @@
 # STATUS: témoins du substrat WSL — wsl.conf clé par clé, C: sondé, hostname, snapd, gpg-agent, credsStore, docker.io
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -14,14 +15,15 @@ setup() {
   MOD="$BATS_TEST_DIRNAME/../../modules.d/30-wsl.sh"; [ -f "$MOD" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=30-wsl PROV_SUBSTRATE=wsl PROV_HUMAN=root PROV_FORGE_BASE=bob_9
-  export LCARS_WSL_CONF="$BATS_TEST_TMPDIR/wsl.conf"
-  export LCARS_C_DRIVE="$BATS_TEST_TMPDIR/absent-c"
-  export LCARS_DOCKER_MOUNT_CLI="$BATS_TEST_TMPDIR/desktop-cli"
+  decor_pose
+  WSL_CONF="$LCARS_DECOR_ROOT/etc/wsl.conf"
+  C_DRIVE="$LCARS_DECOR_ROOT/mnt/c"
+  DESKTOP_CLI="$LCARS_DECOR_ROOT/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"
   export HOME_DIR="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME_DIR"
   export INSTALLES="$BATS_TEST_TMPDIR/installes"; : > "$INSTALLES"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export STUB_HOSTNAME=bob-9
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  BIN="$DECOR_BIN"
   cat > "$BIN/dpkg-query" <<'EOF'
 #!/usr/bin/env bash
 pkg="${@: -1}"; grep -qx "$pkg" "$INSTALLES" && printf 'installed' || printf 'not-installed'
@@ -35,19 +37,16 @@ EOF
   printf '#!/usr/bin/env bash\n[[ "$1" == passwd ]] && printf "%%s:x:0:0::%s:/bin/bash\\n" "$2"\nexit 0\n' "$HOME_DIR" > "$BIN/getent"
   printf '#!/usr/bin/env bash\necho "$STUB_HOSTNAME"\n' > "$BIN/hostname"
   chmod 0755 "$BIN"/*
-  export PATH="$BIN:$PATH"
 }
 
-mod() {
-  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles : le module ne se joue pas ici"
-  run unshare -Ur bash "$MOD" "$@"
-}
+mod() { run unshare -Ur bash "$MOD" "$@"; }
 masque_pose() { mkdir -p "$HOME_DIR/.config/systemd/user"; ln -sf /dev/null "$HOME_DIR/.config/systemd/user/gpg-agent-ssh.socket"; }
-cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"K"=" {sub(/^[^=]*=/,""); print; exit}' "$LCARS_WSL_CONF"; }
+cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"K"=" {sub(/^[^=]*=/,""); print; exit}' "$WSL_CONF"; }
+desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "$DESKTOP_CLI"; chmod 0755 "$DESKTOP_CLI"; }
 
 @test "check : tout posé — snapd absent, masque gpg, wsl.conf conforme clé par clé, C: fermé, hostname du projet — conforme" {
   masque_pose
-  printf '[boot]\nsystemd=true\n[automount]\nenabled=false\nmountFsTab=true\n[interop]\nenabled=false\nappendWindowsPath=false\n[network]\nhostname=bob-9\n' > "$LCARS_WSL_CONF"
+  printf '[boot]\nsystemd=true\n[automount]\nenabled=false\nmountFsTab=true\n[interop]\nenabled=false\nappendWindowsPath=false\n[network]\nhostname=bob-9\n' > "$WSL_CONF"
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"snapd absent"*"gpg-agent-ssh.socket masqué (root)"*"[boot] systemd=true"*"[network] hostname=bob-9"*"C: fermé"* ]]
@@ -56,15 +55,15 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
 
 @test "check : sans wsl.conf, chaque clé de l'état-cible est un drift qui dit l'attendu ; C: ouvert et non conforme, le lockdown n'est pas armé" {
   masque_pose
-  mkdir -p "$LCARS_C_DRIVE"
+  mkdir -p "$C_DRIVE"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 30-wsl: $LCARS_WSL_CONF : [boot] systemd=<absent> — attendu true"*"[interop] enabled=<absent> — attendu false"*"[network] hostname=<absent> — attendu bob-9"* ]]
+  [[ "$output" == *"DRIFT 30-wsl: $WSL_CONF : [boot] systemd=<absent> — attendu true"*"[interop] enabled=<absent> — attendu false"*"[network] hostname=<absent> — attendu bob-9"* ]]
   [[ "$output" == *"C: OUVERT (sonde réelle) et wsl.conf non conforme — le lockdown n'est pas armé"* ]]
 }
 
 @test "apply : les clés se posent dans un wsl.conf existant, [user] et les clés de l'opérateur restent" {
-  printf '[user]\ndefault=bob\n\n[boot]\nsystemd=false\ncommand=/usr/bin/true\n\n[automount]\nenabled=true\noptions=metadata\n' > "$LCARS_WSL_CONF"
+  printf '[user]\ndefault=bob\n\n[boot]\nsystemd=false\ncommand=/usr/bin/true\n\n[automount]\nenabled=true\noptions=metadata\n' > "$WSL_CONF"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(cle user default)" = "bob" ]
@@ -76,22 +75,22 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
   [ "$(cle interop enabled)" = "false" ]
   [ "$(cle interop appendWindowsPath)" = "false" ]
   [ "$(cle network hostname)" = "bob-9" ]
-  [ "$(grep -c '^systemd=' "$LCARS_WSL_CONF")" -eq 1 ]
-  [ "$(head -1 "$LCARS_WSL_CONF")" = "[user]" ]
-  [[ "$output" == *"POSÉ  30-wsl: $LCARS_WSL_CONF"* ]]
+  [ "$(grep -c '^systemd=' "$WSL_CONF")" -eq 1 ]
+  [ "$(head -1 "$WSL_CONF")" = "[user]" ]
+  [[ "$output" == *"POSÉ  30-wsl: $WSL_CONF"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$LCARS_WSL_CONF conforme, clé par clé"* ]]
+  [[ "$output" == *"$WSL_CONF conforme, clé par clé"* ]]
 }
 
-@test "apply : sans wsl.conf, le fichier naît avec son en-tête et les six clés, en 0644 root" {
+@test "apply : sans wsl.conf, le fichier naît sous le décor avec son en-tête et les six clés, en 0644 root" {
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$(head -1 "$LCARS_WSL_CONF")" == "# /etc/wsl.conf — les clés ci-dessous sont tenues par LCARS"* ]]
+  [[ "$(head -1 "$WSL_CONF")" == "# /etc/wsl.conf — les clés ci-dessous sont tenues par LCARS"* ]]
   [ "$(cle boot systemd)" = "true" ]
   [ "$(cle interop appendWindowsPath)" = "false" ]
   [ "$(cle network hostname)" = "bob-9" ]
-  [ "$(stat -c '%a %U' "$LCARS_WSL_CONF")" = "644 $(id -un)" ]
+  [ "$(stat -c '%a %U' "$WSL_CONF")" = "644 $(id -un)" ]
   [[ "$output" == *"C: fermé (sonde réelle)"* ]]
 }
 
@@ -106,36 +105,37 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
 }
 
 @test "apply : C: encore ouvert après la pose est un avertissement qui dit le redémarrage, pas un échec" {
-  mkdir -p "$LCARS_C_DRIVE"
+  mkdir -p "$C_DRIVE"
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN  30-wsl: wsl.conf posé mais C: encore OUVERT — « wsl --shutdown »"* ]]
-  [ -z "$(ls -A "$LCARS_C_DRIVE")" ]
+  [ -z "$(ls -A "$C_DRIVE")" ]
 }
 
-@test "apply : snapd présent est purgé avec ses arbres, et le masque gpg de l'humain est posé" {
+@test "apply : snapd présent est purgé avec ses arbres du décor, et le masque gpg de l'humain est posé" {
   echo snapd > "$INSTALLES"
-  mkdir -p "$BATS_TEST_TMPDIR/snap/x" "$BATS_TEST_TMPDIR/var-snap"
-  LCARS_SNAP_DIRS="$BATS_TEST_TMPDIR/snap $BATS_TEST_TMPDIR/var-snap" mod apply
+  mkdir -p "$LCARS_DECOR_ROOT/snap/x" "$LCARS_DECOR_ROOT/var/snap" "$LCARS_DECOR_ROOT/var/lib/snapd"
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q '^APT:purge -y snapd' "$CALLS"
   [[ "$output" == *"POSÉ  30-wsl: snapd purgé"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/snap" ]
-  [ ! -e "$BATS_TEST_TMPDIR/var-snap" ]
+  [ ! -e "$LCARS_DECOR_ROOT/snap" ]
+  [ ! -e "$LCARS_DECOR_ROOT/var/snap" ]
+  [ ! -e "$LCARS_DECOR_ROOT/var/lib/snapd" ]
   [ "$(readlink "$HOME_DIR/.config/systemd/user/gpg-agent-ssh.socket")" = "/dev/null" ]
   mod check
   [[ "$output" == *"snapd absent"* ]]
 }
 
 @test "docker.io à côté de Docker Desktop : échec au check et à l'apply, le geste entier dit, rien n'est enlevé" {
-  echo docker.io > "$INSTALLES"; printf '#!/bin/sh\n' > "$LCARS_DOCKER_MOUNT_CLI"; chmod 0755 "$LCARS_DOCKER_MOUNT_CLI"
+  echo docker.io > "$INSTALLES"; desktop_monte
   mod check
   [ "$status" -eq 2 ]
   [[ "$output" == *"FAIL  30-wsl: docker.io est posé À CÔTÉ de Docker Desktop"*"apt purge docker.io containerd runc"*"WSL integration"*"dpkg --configure -a"* ]]
   mod apply
   [ "$status" -eq 1 ]
   refute grep -q '^APT:' "$CALLS"
-  rm -f "$LCARS_DOCKER_MOUNT_CLI"
+  rm -f "$DESKTOP_CLI"
   mod check
   [[ "$output" == *"docker.io (ou docker-ce) est le daemon, c'est voulu"* ]]
 }
@@ -165,7 +165,8 @@ cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local apres; apres="$(cat "$HOME_DIR/.docker/config.json")"
-  [[ "$apres" == *'"auths"'*'reg.example'* && "$apres" != *credsStore* ]]
+  [[ "$apres" == *'"auths"'*'reg.example'* ]]
+  [[ "$apres" != *credsStore* ]]
   [[ "$output" == *"credsStore retiré"*"docker login"* ]]
   printf '{"auths":{}}' > "$HOME_DIR/.docker/config.json"
   mod apply

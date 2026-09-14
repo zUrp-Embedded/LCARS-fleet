@@ -5,34 +5,38 @@
 # STATUS: ce qu'un kit doit porter, contre release.manifest et les listes de 62, vérifié avant que le tar ne ferme
 # USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
 
-[[ -n "${LCARS_KIT_VERIFY_LOADED:-}" ]] && return 0
-LCARS_KIT_VERIFY_LOADED=1
-
 kv_tableau() { # kv_tableau <fichier> <nom> → les éléments du tableau ; rc 1 si la liste ne se lit pas ou est vide
   local f="$1" n="$2" blk out
   blk="$(grep -E "^$n=\(.*\)\$" "$f" || true)"
   [[ -n "$blk" ]] || blk="$(sed -n "/^$n=(/,/^)/p" "$f")"
   [[ -n "$blk" ]] || return 1
-  out="$( set -u; HELPERS_DIR=/opt/lcars; LCARS_BASHRC=/etc/lcars/lcars.bashrc; export HELPERS_DIR LCARS_BASHRC
+  # les destinations ne se vérifient pas ici, seules les sources (premier mot) : les deux variables ont une valeur neutre
+  out="$( set -u; HELPERS_DIR=/kit; LCARS_BASHRC=/kit/lcars.bashrc; export HELPERS_DIR LCARS_BASHRC
           eval "$blk" && eval 'printf "%s\n" "${'"$n"'[@]}"' )" || return 1
   [[ -n "$out" ]] || return 1
   printf '%s\n' "$out"
 }
 
 kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si complet ; sinon 1, manques NOMMÉS
-  local stage="${1:?kit_verifie: <stage> manquant}"
-  local rel="${2:?kit_verifie: <release relative au stage> manquant — pack.sh la connaît, pas cette lib}"
+  local stage="$1" rel="$2"
   local manques=() n
   local manifest="$stage/deploy/system.manifest"
+  local constantes="$stage/deploy/installer-constants.env"
   local relman="$stage/runtime/etc/release.manifest"
   local mod62="$stage/deploy/modules.d/62-runtime-helpers.sh"
 
   local f
-  for f in "$manifest" "$relman" "$mod62"; do
+  for f in "$manifest" "$constantes" "$relman" "$mod62"; do
     [[ -r "$f" ]] || manques+=("le kit n'a pas ${f#"$stage"/} — ce n'est pas un kit")
   done
-  [[ -r "$stage/.source-revision" ]] \
-    || manques+=(".source-revision absent — l'install se croirait SOURCE et bâtirait dans le kit")
+  if [[ "${#manques[@]}" -gt 0 ]]; then kv_dire "${manques[@]}"; return 1; fi
+  local tampon
+  tampon="$(sed -n 's/^PROV_SOURCE_STAMP=//p' "$constantes" | tail -n1)"
+  if [[ -z "$tampon" ]]; then
+    manques+=("deploy/installer-constants.env ne déclare pas PROV_SOURCE_STAMP — le tampon de révision n'est pas vérifiable")
+  elif [[ ! -r "$stage/$tampon" ]]; then
+    manques+=("$tampon absent — l'install se croirait SOURCE et bâtirait dans le kit")
+  fi
   if [[ "${#manques[@]}" -gt 0 ]]; then kv_dire "${manques[@]}"; return 1; fi
 
   [[ -x "$stage/$rel" ]] \

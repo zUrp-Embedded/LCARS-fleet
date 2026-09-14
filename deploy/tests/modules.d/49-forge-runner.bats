@@ -6,57 +6,54 @@
 # STATUS: témoins de 49-forge-runner — l'enrôlement du runner CI, reporté, sauté, refusé ou posé
 
 load ../refute
+load ../support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   MODULE="$BATS_TEST_DIRNAME/../../modules.d/49-forge-runner.sh"; [ -f "$MODULE" ]
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN" "$BATS_TEST_TMPDIR/tokens"
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  DEPLOY="$BATS_TEST_DIRNAME/../.."
+  export PROVISION_LIB="$DEPLOY/lib/provision-lib.sh"
   export PROVISION_MODULE=49-forge-runner PROV_SUBSTRATE=wsl PROV_HUMAN=zoe
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
-  export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tokens/master"
-  printf 'MASTERTOK' > "$PROV_MASTER_TOKEN_FILE"
+  decor_pose
+  MASTER="$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token"
+  printf 'MASTERTOK' > "$MASTER"
+  forge_double_start
+  export FORGE_BASE_URL="$FORGE_DOUBLE_URL"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
-  export PATH="$BIN:$PATH"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/docker"; chmod +x "$BIN/docker"
-  export PROV_DOCKER_BIN="$BIN/docker"
+  # un daemon répond par le DOCKER_HOST hérité : la doublure rend 0 à « version »
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$DECOR_BIN/docker"; chmod +x "$DECOR_BIN/docker"
+  export PROV_DOCKER_BIN="$DECOR_BIN/docker" DOCKER_HOST=unix:///dev/null
 }
 
-stub_curl() { # stub_curl <corps runners | MUET> [ETEINTE]
-  cat > "$BIN/curl" <<EOF
-#!/usr/bin/env bash
-url=""
-for a in "\$@"; do case "\$a" in http*) url="\$a" ;; esac; done
-case "\$url" in
-  */api/v1/version)               [ '${2:-}' = ETEINTE ] && exit 22; printf '{"version":"1.26.1"}' ;;
-  */api/v1/admin/actions/runners) [ '$1' = MUET ] && exit 22; printf '%s' '$1' ;;
-  *)                              exit 22 ;;
-esac
-exit 0
-EOF
-  chmod +x "$BIN/curl"
+teardown() { forge_double_stop; }
+
+forge_runners() { # forge_runners <code> <corps> — la forge vivante, et sa liste de runners
+  forge_route GET /api/v1/version 200 '{"version":"1.26.1"}'
+  forge_route GET /api/v1/admin/actions/runners "$1" "$2"
 }
 
-stub_delegue() { # stub_delegue <rc> [ligne écrite sur stdout]
-  local d="$BATS_TEST_TMPDIR/repo/deploy/docker"
-  mkdir -p "$d" "$BATS_TEST_TMPDIR/repo/deploy/lib"
-  CALLS="$BATS_TEST_TMPDIR/runner.calls"; : > "$CALLS"
-  cat > "$d/forge-runner.sh" <<EOF
+stub_delegue() { # stub_delegue <rc> [ligne écrite sur stdout] — l'argv reçu, un argument par ligne
+  local d="$BATS_TEST_TMPDIR/repo/deploy"
+  mkdir -p "$d/docker" "$d/lib"
+  ARGV="$BATS_TEST_TMPDIR/runner.argv"
+  cat > "$d/docker/forge-runner.sh" <<EOF
 #!/usr/bin/env bash
-echo "\$*" >> "$CALLS"
+printf '%s\n' "\$@" >> "$ARGV"
 [ -n '${2:-}' ] && echo '${2:-}'
 exit $1
 EOF
-  chmod +x "$d/forge-runner.sh"
-  local cible="$BATS_TEST_TMPDIR/repo/deploy/lib/provision-lib.sh"
-  [ "$PROVISION_LIB" = "$cible" ] || cp "$(dirname "$PROVISION_LIB")"/*.sh "$BATS_TEST_TMPDIR/repo/deploy/lib/"
-  export PROVISION_LIB="$cible"
+  chmod +x "$d/docker/forge-runner.sh"
+  cp "$DEPLOY"/lib/*.sh "$d/lib/"
+  cp "$DEPLOY/installer-constants.env" "$DEPLOY/system.manifest" "$d/"
+  export PROVISION_LIB="$d/lib/provision-lib.sh"
 }
 
 mod() { run bash "$MODULE" "$1"; }
 
 @test "forge éteinte : l'enrôlement est reporté, ce n'est pas un échec ; le check n'y voit pas de dérive" {
-  stub_curl '{"runners":[],"total_count":0}' ETEINTE
+  export FORGE_BASE_URL=http://127.0.0.1:9
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN  49-forge-runner: forge du poste éteinte — enrôlement du runner reporté (48 la monte)"* ]]
@@ -65,64 +62,81 @@ mod() { run bash "$MODULE" "$1"; }
   [[ "$output" == *"OK    49-forge-runner: forge du poste éteinte — le runner n'est pas mesurable"* ]]
 }
 
-@test "un runner existe déjà : le délégué n'est pas rejoué, le check est vert" {
-  stub_curl '{"runners":[{"name":"r1"}],"total_count":1}'
+@test "un runner existe déjà : compté par l'API avec le jeton master en en-tête, le délégué n'est pas rejoué, le check est vert" {
+  forge_runners 200 '{"runners":[{"name":"r1"}],"total_count":1}'
   stub_delegue 0
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"1 runner(s) CI déjà enregistré(s)"* ]]
-  [ ! -s "$CALLS" ]
+  [ ! -e "$ARGV" ]
+  [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners") | .auth' | sort -u)" = '"token MASTERTOK"' ]
   mod check
   [ "$status" -eq 0 ]
   [[ "$output" == *"1 runner(s) CI enregistré(s)"* ]]
 }
 
 @test "jeton master absent : dit, et ce n'est pas un échec d'apply" {
-  stub_curl '{"runners":[],"total_count":0}'
+  forge_runners 200 '{"runners":[],"total_count":0}'
   stub_delegue 0
-  rm -f "$PROV_MASTER_TOKEN_FILE"
+  rm -f "$MASTER"
   mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"WARN  49-forge-runner: runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"* ]]
-  [ ! -s "$CALLS" ]
+  [[ "$output" == *"WARN  49-forge-runner: runner CI non enrôlable : aucun jeton master lisible ($MASTER)"* ]]
+  [ ! -e "$ARGV" ]
 }
 
 @test "le délégué refuse : drift, sa sortie remonte et reste lisible, sa ligne de commande n'est pas imprimée" {
-  stub_curl '{"runners":[],"total_count":0}'
+  forge_runners 200 '{"runners":[],"total_count":0}'
   stub_delegue 1 "REFUS : image(s) introuvable(s)"
   mod apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"REFUS : image(s) introuvable(s)"*"DRIFT 49-forge-runner: runner CI NON enrôlé (rc=1"* ]]
   [[ "$output" != *"FAIL"* ]]
   [[ "$output" != *"--forge-api"* ]]
-  [ -s "$CALLS" ]
+  [ -s "$ARGV" ]
   f="$(printf '%s\n' "$output" | sed -n 's/.*conservée : \([^ ]*\).*/\1/p' | tail -n1)"
   [ -s "$f" ]
 }
 
-@test "le délégué réussit : posé, il reçoit la forge, le jeton, le réseau, le projet et les labels ; le temporaire est retiré" {
-  stub_curl '{"runners":[],"total_count":0}'
+@test "le délégué réussit : posé, il reçoit la forge de la lib, le jeton, le réseau, le projet et les labels des constantes ; le temporaire est retiré" {
+  forge_runners 200 '{"runners":[],"total_count":0}'
   stub_delegue 0
-  PROV_FORGE_NET=bob_9-net PROV_RUNNER_PROJECT=bob_9-runner mod apply
+  PROV_FORGE_BASE=bob_9 mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"POSÉ  49-forge-runner: runner CI enrôlé"* ]]
-  grep -q -- "--forge-api http://forge.test/api/v1 --admin-token-file $PROV_MASTER_TOKEN_FILE --network bob_9-net --project bob_9-runner --labels shell:docker://alpine:3.20," "$CALLS"
+  local labels; labels="$(sed -n 's/^PROV_RUNNER_LABELS=//p' "$DEPLOY/installer-constants.env")"
+  [ -n "$labels" ]
+  [ "$(cat "$ARGV")" = "$(printf '%s\n' --forge-api "$FORGE_DOUBLE_URL/api/v1" --admin-token-file "$MASTER" \
+                          --network bob_9-forge_default --project bob_9-runner --labels "$labels")" ]
   [ -z "$(ls -A "$TMPDIR")" ]
 }
 
+@test "l'argv émis vers forge-runner.sh passe son vrai parseur : les labels arrivent à la vérification des images" {
+  forge_runners 200 '{"runners":[],"total_count":0}'
+  stub_delegue 0
+  mod apply
+  [ "$status" -eq 0 ]
+  local -a argv; mapfile -t argv < "$ARGV"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$DECOR_BIN/docker-sans-images"; chmod +x "$DECOR_BIN/docker-sans-images"
+  run env DOCKER_BIN="$DECOR_BIN/docker-sans-images" bash "$DEPLOY/docker/forge-runner.sh" "${argv[@]}"
+  [ "$status" -eq 1 ]
+  refute_out 'option inconnue|requis' <<<"$output"
+  [[ "$output" == *"REFUS : image(s) introuvable(s) sur ce daemon, et non tirables : alpine:3.20,docker:cli,catthehacker/ubuntu:act-latest"* ]]
+}
+
 @test "API muette : rien n'est conclu au check, et l'apply tente l'enrôlement" {
-  stub_curl MUET
+  forge_runners 500 '{"message":"panne"}'
   stub_delegue 0
   mod check
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN  49-forge-runner: runner CI non mesurable"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [ -s "$CALLS" ]
+  [ -s "$ARGV" ]
 }
 
 @test "aucun runner et forge vivante : le check le dit en drift" {
-  stub_curl '{"runners":[],"total_count":0}'
+  forge_runners 200 '{"runners":[],"total_count":0}'
   mod check
   [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT 49-forge-runner: aucun runner CI — la CI acceptera des jobs que rien ne servira"* ]]

@@ -43,7 +43,7 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 |---|---|
 | `fleet.env.template` | le catalogue des env vars du conteneur, à copier en `~/.lcars/fleet.env` |
 | `release.manifest` | ce qui part de `bin/` dans l'install (fichier, exec/noexec, `link`) — des données, pas du code |
-| `deploy-release.sh` (vit dans `deploy/lib/`) | depuis les sources : gate → `mix release` ; depuis un kit : la release du kit — puis pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
+| `deploy-release.sh` (vit dans `deploy/lib/`) | depuis les sources : `mix release` sur le checkout ; depuis un kit : la release que `pack.sh` a bâtie — puis bascule atomique sous `/opt/lcars/runtime` ; liens PATH, modes et élagage par `60-deploy` |
 | `enroll-catalogue.sh` (vit dans `deploy/lib/`) | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |
 | `provision-role-tokens.sh` (vit dans `services/`) | mint idempotent des jetons de rôle sur une forge, détenus par le service d'autorité |
 
@@ -55,13 +55,13 @@ launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/us
 (`fleet`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc
 le même endroit.
 
-`deploy/lib/deploy-release.sh` fait la procédure entière. Depuis les sources, il s'arrête sur un
-gate rouge : `mix gate` sur l'arbre source, puis `MIX_ENV=prod mix release`. Depuis un kit, la
-release est celle que `pack.sh` a bâtie après son gate : ni gate ni compilation. Puis swap atomique de `rel/` (la génération précédente reste
-en `.prev`), copie atomique de chaque entrée du manifest, template d'env, perms, symlinks. Il refuse
-de tourner en root (seule la pose demande des droits ; `deploy/modules.d/60-deploy.sh` le joue
-comme l'humain puis repose les liens). Sortie `3` = release posée, liens PATH incomplets : un fait
-que l'appelant qui câble les liens lui-même accepte, un refus sinon.
+`deploy/lib/deploy-release.sh` bâtit et bascule. Depuis les sources, `MIX_ENV=prod mix release` sur
+le checkout, sans gate. Depuis un kit, la release est celle que `pack.sh` a bâtie après son gate :
+ni gate ni compilation. Puis swap atomique de `rel/` (la génération précédente reste en `.prev`),
+copie atomique de chaque entrée du manifest (exécutable si elle est `exec`) et du template d'env.
+Il refuse de tourner en root : `deploy/modules.d/60-deploy.sh` le joue comme l'humain, puis pose
+les modes et les liens du PATH, et retire ce que le manifest ne nomme plus. Sortie `0` = release
+basculée, `1` = échec, rien d'utilisable posé.
 
 ⚠ `rel/` seul ne suffit pas : un deploy qui oublie `bin/` fait tourner le nouveau BEAM avec les
 vieux sandboxes. Le manifest est la seule liste de ce qui part.

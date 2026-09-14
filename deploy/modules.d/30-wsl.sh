@@ -15,7 +15,8 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-WSL_CONF="${LCARS_WSL_CONF:-/etc/wsl.conf}"
+WSL_CONF="$(prov_decor /etc/wsl.conf)"
+SNAP_DIRS=("$(prov_decor /snap)" "$(prov_decor /var/snap)" "$(prov_decor /var/lib/snapd)")
 HOSTNAME_CIBLE="${PROV_FORGE_BASE//_/-}"
 
 # section clé valeur — l'état-cible entier ; [interop] coupée = pas d'exécutable Windows depuis l'instance
@@ -60,7 +61,7 @@ wsl_conf_cible() { # le contenu de wsl.conf avec l'état-cible posé sur le fich
 
 # la sonde de C: mesure l'état réel : root écrit partout, l'humain dit si C: est ouvert
 c_drive_open() {
-  local c="${LCARS_C_DRIVE:-/mnt/c}"
+  local c; c="$(prov_decor /mnt/c)"
   [[ -d "$c" ]] || return 1
   local probe="$c/.lcars-lockdown-probe.$$"
   if as_human touch "$probe" 2>/dev/null; then
@@ -134,12 +135,11 @@ apply() {
   fi
   if pkg_installed snapd; then
     run_quiet env DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd || verdict_apply
-    # shellcheck disable=SC2086 # une liste de chemins, découpée à dessein
-    rm -rf ${LCARS_SNAP_DIRS:-/snap /var/snap /var/lib/snapd}
+    rm -rf "${SNAP_DIRS[@]}"
     if pkg_installed snapd; then
       p_fail "snapd toujours présent après purge"
     else
-      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "snapd purgé (+ ${LCARS_SNAP_DIRS:-/snap /var/snap /var/lib/snapd})"
+      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "snapd purgé (+ ${SNAP_DIRS[*]})"
     fi
   fi
   local home mask

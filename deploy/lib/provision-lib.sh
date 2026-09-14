@@ -6,75 +6,65 @@
 # STARDATE: 2026-09-12
 # STATUS: la bibliothèque des modules — défauts, verdicts, primitives convergentes et atomiques, sondes de la machine et de la forge
 
-[[ -n "${PROVISION_LIB_LOADED:-}" ]] && return 0
-PROVISION_LIB_LOADED=1
-
+_PROV_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=docker-endpoint.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-endpoint.sh"
+. "$_PROV_LIB_DIR/docker-endpoint.sh"
 
-PROV_ROOT_CANON=/opt/lcars
-if [[ -n "${PROV_ROOT:-}" && "${PROV_ROOT}" != "$PROV_ROOT_CANON" && -z "${BATS_TEST_TMPDIR:-}" ]]; then
-  printf 'ÉCHEC : PROV_ROOT est posé à « %s » dans l'"'"'environnement, et la racine du produit est fixe (%s).\n' \
-    "$PROV_ROOT" "$PROV_ROOT_CANON" >&2
-  printf '       LCARS ne s'"'"'installe que sur un terrain contrôlé — docker, WSL — où il impose son\n' >&2
-  printf '       arborescence. Le manifeste déclare mode et propriétaire sous cette racine ; la déplacer\n' >&2
-  printf '       rendrait fausse chaque mesure qui s'"'"'y réfère, sans que rien ne rougisse.\n' >&2
-  printf '       Pour poser ailleurs : un autre terrain, pas une autre racine.\n' >&2
-  exit 1
-fi
-: "${PROV_ROOT:=$PROV_ROOT_CANON}"
+PROV_CONSTANTS_FILE="$_PROV_LIB_DIR/../installer-constants.env"
+PROV_MANIFEST_FILE="$_PROV_LIB_DIR/../system.manifest"
 
-: "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/deploy-release.sh)
-: "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
-: "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
-: "${PROV_AUTHORITY_USER:=lcars-authority}"
+# chaque CLE=valeur devient une variable : le fichier est une donnée, jamais exécuté ; un chemin absolu
+# se lit sous LCARS_DECOR_ROOT, la racine qu'un témoin pose et qu'une machine laisse vide
+prov_load_constants() { # prov_load_constants <fichier>
+  local l k v
+  [[ -r "$1" ]] || { printf 'ÉCHEC : constantes de l'"'"'installeur illisibles : %s\n' "$1" >&2; exit 1; }
+  while IFS= read -r l || [[ -n "$l" ]]; do
+    k="${l%%=*}"; v="${l#*=}"
+    [[ "$k" != "$l" && "$k" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
+    [[ "$v" != /* ]] || v="${LCARS_DECOR_ROOT:-}$v"
+    printf -v "$k" '%s' "$v"
+  done < "$1"
+}
+prov_load_constants "$PROV_CONSTANTS_FILE"
 
-: "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
-: "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
-: "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
-: "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
-: "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
-: "${PROV_UID_MAP_FILE:=$PROV_TOKENS_DIR/forge-uid.map}"
+prov_canon() { printf '%s' "${1#"${LCARS_DECOR_ROOT:-}"}"; }   # le chemin tel que le manifeste le déclare
+prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin système, sous le décor s'il y en a un
 
-: "${PROV_FORGE_BASE:=lcars}"
-: "${PROV_FORGE_PROJECT:=${PROV_FORGE_BASE}-forge}"
-: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
-: "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
-: "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
-: "${PROV_CATALOGUES_DIR:=$PROV_ROOT/var/catalogues}"
-: "${PROV_LEGACY_CATALOGUES_DIR:=/home/catalogues}"
-: "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
-: "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
-: "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
-: "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
-: "${PROV_DECK_PORT:=20999}"
-: "${PROV_SSH_PORT:=2222}"
-: "${PROV_FORGE_HOST_PORT:=21000}"
-# une seule résolution des deux adresses, pour tous les modules : la forge montée (--bench) est celle
-# du poste, un FORGE_BASE_URL résiduel ne la remplace pas ; une forge fournie s'annonce à sa propre
-# adresse (FORGE_PUBLIC_URL, sinon la même), jamais à celle du poste
+: "${PROV_FORGE_BASE:=$PROV_FORGE_BASE_DEFAULT}"
+: "${PROV_FORGE_ORG:=$PROV_FORGE_ORG_DEFAULT}"
+: "${PROV_DECK_PORT:=$PROV_DECK_PORT_DEFAULT}"
+: "${PROV_SSH_PORT:=$PROV_SSH_PORT_DEFAULT}"
+: "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
+PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
+PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
+PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"
+
+# sous --bench (PROV_FORGE_MONTEE), la forge est celle du poste et un FORGE_BASE_URL résiduel n'y change
+# rien. Une forge fournie vient de FORGE_BASE_URL, ou du mode « fournie » que 48 grave dans forge.mode,
+# avec forge.url. Dans un conteneur sans forge fournie, l'adresse reste vide : le geste du produit la
+# lit dans forge.url. Partout ailleurs, la forge est celle du poste, sur la loopback au port choisi.
+_prov_lu() { head -n1 "$1" 2>/dev/null | tr -d '[:space:]' || true; }
 if [[ "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
-  PROV_FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
-  : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
-  : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
+  PROV_FORGE_DU_POSTE=1
+elif [[ -n "${FORGE_BASE_URL:-}" ]]; then
+  PROV_FORGE_DU_POSTE=0; PROV_FORGE_URL="$FORGE_BASE_URL"; PROV_FORGE_PUBLIC_URL="${FORGE_PUBLIC_URL:-}"
+elif [[ "$(_prov_lu "$PROV_FORGE_MODE_FILE")" == fournie ]]; then
+  PROV_FORGE_DU_POSTE=0; PROV_FORGE_URL="$(_prov_lu "$PROV_FORGE_URL_FILE")"; PROV_FORGE_PUBLIC_URL="$(_prov_lu "$PROV_FORGE_PUBLIC_URL_FILE")"
+elif [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" == docker ]]; then
+  PROV_FORGE_DU_POSTE=0; PROV_FORGE_URL=""; PROV_FORGE_PUBLIC_URL=""
 else
-  : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
-  if [[ -n "${FORGE_BASE_URL:-}" ]]; then
-    : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$PROV_FORGE_URL}}"
-  else
-    : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
-    : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
-  fi
+  PROV_FORGE_DU_POSTE=1
 fi
+if [[ "$PROV_FORGE_DU_POSTE" -eq 1 ]]; then
+  PROV_FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
+  PROV_FORGE_PUBLIC_URL="$(_prov_lu "$PROV_FORGE_PUBLIC_URL_FILE")"
+fi
+unset -f _prov_lu
 PROV_FORGE_URL="${PROV_FORGE_URL%/}"
 PROV_FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL%/}"
-: "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
+: "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 : "${PROV_DUMP_LINES:=40}"
-: "${PROV_ELIXIR_OTP_MAJOR:=27}"
-: "${PROV_ELIXIR_MIN:=1.20}"
-: "${PROV_ELIXIR_PIN:=1.20.4}"
-: "${PROV_ELIXIR_PIN_SHA256:=4389f216eec086b34a08d70a3eb0a649d00e6631987d1cbb649a2f81092f034c}"
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 
 PROV_MODULE_TAG="${PROVISION_MODULE:-$(basename "${0:-provision-lib}")}"
@@ -103,9 +93,7 @@ p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MO
 
 p_fact() { # p_fact <nom> <valeur…>
   [[ -n "${PROV_FACTS_FILE:-}" ]] || return 0
-  [[ "$#" -ge 2 ]] || return 0
   printf '%s=%s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_FACTS_FILE" || true
-  return 0
 }
 
 # le runner arme la garde (PROVISION_RUN) : un module qui meurt sans verdict rend 3, jamais un code lu comme un verdict
@@ -135,40 +123,52 @@ verdict_apply() {
   exit 0
 }
 
-_prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase reconnue
+_prov_phase_of() { # _prov_phase_of <fichier> -> le libellé de la dernière phase reconnue du build de la release
   local m
-  m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
+  m="$(grep -oE 'Compiling [0-9]+ files|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
   case "$m" in
-    "Compiling"*)        echo "compilation" ;;
-    "Running ExUnit")    echo "suite ExUnit (3000+ cas)" ;;
-    "Finished in "*)     echo "suite ExUnit terminée" ;;
-    "=== shell_gate"*)   echo "gate shell (python + bats)" ;;
-    "--- bats"*)         echo "gate shell (bats)" ;;
-    *"contracts.check green") echo "contrats" ;;
-    "lcars.topology")    echo "topologie" ;;
-    "Checking "*)        echo "dialyzer (construction du PLT)" ;;
-    "Total errors"*)     echo "dialyzer" ;;
-    "done (passed"*)     echo "dialyzer terminé" ;;
+    "Compiling"*)         echo "compilation" ;;
     "Release created at") echo "release posée" ;;
-    *)                   echo "démarrage" ;;
+    *)                    echo "démarrage" ;;
   esac
 }
 
 # Exécuter et qualifier sont deux gestes : run_capture exécute et rend le code, l'appelant pose le
 # verdict. run_quiet et run_step posent le verdict ordinaire — un échec est un FAIL, avec sa sortie.
-run_capture() { # run_capture <cmd…> — sur échec, la sortie reste dans PROV_LAST_OUT
-  local rc=0
+_prov_run() { # _prov_run <libellé ou vide> <cmd…> — avec un libellé, la phase et la durée à l'écran ; sur échec, la sortie reste dans PROV_LAST_OUT
+  local label="$1" rc=0; shift
   PROV_LAST_OUT=""
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
+    [[ -z "$label" ]] || p_step "$label"
     "$@" || rc=$?
-  else
+  elif [[ -z "$label" ]]; then
     PROV_LAST_OUT="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
     "$@" >"$PROV_LAST_OUT" 2>&1 || rc=$?
-    [[ "$rc" -ne 0 ]] || { rm -f "$PROV_LAST_OUT"; PROV_LAST_OUT=""; }
+  else
+    local t0="$SECONDS" phase="" prev="" el pid
+    PROV_LAST_OUT="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
+    "$@" >"$PROV_LAST_OUT" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+      phase="$(_prov_phase_of "$PROV_LAST_OUT")"
+      el="$(printf '%02d:%02d' "$(( (SECONDS - t0) / 60 ))" "$(( (SECONDS - t0) % 60 ))")"
+      if [[ -t 1 ]]; then
+        printf '\r\033[K%s>>%s    %s: %s · %s · %s' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase" "$el"
+      elif [[ "$phase" != "$prev" ]]; then
+        printf '%s>>%s    %s: %s · %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase"
+      fi
+      prev="$phase"
+      sleep 1
+    done
+    wait "$pid" || rc=$?
+    [[ -t 1 ]] && printf '\r\033[K'
   fi
+  if [[ "$rc" -eq 0 && -n "$PROV_LAST_OUT" ]]; then rm -f "$PROV_LAST_OUT"; PROV_LAST_OUT=""; fi
   PROV_LAST_RC="$rc"
   return "$rc"
 }
+
+run_capture() { _prov_run "" "$@"; }   # run_capture <cmd…>
 
 prov_dump_last() { # les dernières lignes de la sortie capturée ; le fichier est conservé
   [[ -n "${PROV_LAST_OUT:-}" && -f "$PROV_LAST_OUT" ]] || return 0
@@ -187,45 +187,11 @@ run_quiet() { # run_quiet <cmd…>
   return "$rc"
 }
 
-_run_watch() { # comme run_capture, avec la phase et la durée à l'écran
-  local label="$1"; shift
-  local rc=0
-  PROV_LAST_OUT=""
-  if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
-    p_step "$label"
-    "$@" || rc=$?
-    PROV_LAST_RC="$rc"
-    return "$rc"
-  fi
-  local t0="$SECONDS" phase="" prev="" el
-  PROV_LAST_OUT="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
-  "$@" >"$PROV_LAST_OUT" 2>&1 &
-  local pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    phase="$(_prov_phase_of "$PROV_LAST_OUT")"
-    el="$(printf '%02d:%02d' "$(( (SECONDS - t0) / 60 ))" "$(( (SECONDS - t0) % 60 ))")"
-    if [[ -t 1 ]]; then
-      printf '\r\033[K%s>>%s    %s: %s · %s · %s' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase" "$el"
-    elif [[ "$phase" != "$prev" ]]; then
-      printf '%s>>%s    %s: %s · %s\n' "$_PC" "$_PN" "$PROV_MODULE_TAG" "$label" "$phase"
-    fi
-    prev="$phase"
-    sleep 1
-  done
-  wait "$pid" || rc=$?
-  [[ -t 1 ]] && printf '\r\033[K'
-  [[ "$rc" -ne 0 ]] || { rm -f "$PROV_LAST_OUT"; PROV_LAST_OUT=""; }
-  PROV_LAST_RC="$rc"
-  return "$rc"
-}
-
 run_step() { # run_step [--ok N]… <label> -- <cmd…> — un code listé rend 0 sans verdict : l'appelant le qualifie sur PROV_LAST_RC
-  local ok_codes=()
-  while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
-  local label="$1"; shift
-  [[ "${1:-}" == "--" ]] && shift
-  local rc=0 c
-  _run_watch "$label" "$@" || rc=$?
+  local ok_codes=() label rc=0 c
+  while [[ "$1" == "--ok" ]]; do ok_codes+=("$2"); shift 2; done
+  label="$1"; shift 2
+  _prov_run "$label" "$@" || rc=$?
   for c in "${ok_codes[@]}"; do
     [[ "$rc" == "$c" ]] || continue
     [[ -z "$PROV_LAST_OUT" ]] || rm -f "$PROV_LAST_OUT"
@@ -258,11 +224,9 @@ prov_lock_path() {
   mkdir -p "$dir" || { p_fail "verrou : dossier impossible : $dir"; return 1; }
   chmod 0700 "$dir" || { p_fail "verrou : chmod 0700 refusé : $dir"; return 1; }
 
-  local owner mode
+  local owner
   owner="$(stat -c '%u' "$dir")" || { p_fail "verrou : stat impossible : $dir"; return 1; }
-  mode="$(stat -c '%a' "$dir")" || { p_fail "verrou : stat impossible : $dir"; return 1; }
   [[ "$owner" == "$uid" ]] || { p_fail "verrou : $dir appartient à l'uid $owner, pas à $uid"; return 1; }
-  [[ "$mode" == "700" ]] || { p_fail "verrou : $dir est en $mode, attendu 700"; return 1; }
 
   local lock="$dir/provision${scope:+.$scope}.lock"
   [[ -L "$lock" ]] && { p_fail "verrou : $lock est un symlink — refusé"; return 1; }
@@ -318,6 +282,7 @@ write_atomic() {
 
 prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
   local o="$1" g
+  [[ -z "$o" || -z "${LCARS_DECOR_ROOT:-}" ]] || { printf '%s:%s' "$(id -un)" "$(id -gn)"; return 0; }   # sous un décor, tout appartient à qui le joue
   [[ "$o" == *: ]] || { printf '%s' "$o"; return 0; }
   g="$(id -gn -- "${o%:}" 2>/dev/null)" || { printf '%s' "$o"; return 0; }
   printf '%s:%s' "${o%:}" "$g"
@@ -325,7 +290,7 @@ prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend 
 
 ensure_mode() {
   local path="$1" mode="$2" owner="${3:-}"
-  local cur_mode cur_owner want_owner changed=0
+  local cur_mode cur_owner changed=0
   owner="$(prov_owner "$owner")"
   prov_refuse_symlink_path "$path" || return 1
   [[ -e "$path" ]] || { p_fail "ensure_mode: absent: $path"; return 1; }
@@ -338,8 +303,7 @@ ensure_mode() {
   fi
   if [[ -n "$owner" ]]; then
     cur_owner="$(stat -c '%U:%G' "$path")"
-    want_owner="$owner"
-    if [[ "$cur_owner" != "$want_owner" ]]; then
+    if [[ "$cur_owner" != "$owner" ]]; then
       chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
       changed=1
     fi
@@ -382,14 +346,20 @@ prov_promote_dir() { # prov_promote_dir <échafaudage> <final> — un final exis
   return 0
 }
 
-prov_manifest_gid() {
-  local grp="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
-  [[ -r "$f" ]] || return 0
-  awk -v g="$grp" '{ c=$1; sub(/:.*/, "", c) } c=="group" && $2==g && $3!="-" { print $3; exit }' "$f"
+_prov_manifest_col() { # _prov_manifest_col <objet> <colonne> [type] [trait exclu] — la colonne de la première ligne qui déclare l'objet, hors « - »
+  awk -v p="$1" -v n="$2" -v type="${3:-}" -v sans="${4:-}" '
+    $1 ~ /^#/ { next }
+    { t=$1; sub(/:.*/, "", t); trait=$1; sub(/^[^:]*:?/, "", trait) }
+    (type == "" || t == type) && (sans == "" || trait != sans) && $2 == p && $n != "-" { print $n; exit }
+  ' "$PROV_MANIFEST_FILE"
 }
+prov_manifest_gid()       { _prov_manifest_col "$1" 3 group; }
+prov_manifest_mode()      { _prov_manifest_col "$(prov_canon "$1")" 3 "" unset; }
+prov_manifest_owner()     { _prov_manifest_col "$(prov_canon "$1")" 4; }
+prov_manifest_substrate() { _prov_manifest_col "$(prov_canon "$1")" 5; }
 
-prov_substrate_satisfait() { # <liste> [substrat] -> 0 si le substrat est couvert par la liste
-  local liste="$1" sub="${2:-${PROV_SUBSTRATE:-$(detect_substrate)}}" mot
+prov_substrate_satisfait() { # prov_substrate_satisfait <liste> <substrat> -> 0 si le substrat est couvert par la liste
+  local liste="$1" sub="$2" mot
   [[ "$liste" == any ]] && return 0
   liste="${liste//+/ }"
   for mot in $liste; do
@@ -398,31 +368,13 @@ prov_substrate_satisfait() { # <liste> [substrat] -> 0 si le substrat est couver
   return 1
 }
 
-prov_manifest_substrate() {
-  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
-  [[ -r "$f" ]] || return 0
-  awk -v p="$path" '$1 !~ /^#/ && $2==p { print $5; exit }' "$f"
-}
-
-prov_manifest_mode() {
-  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
-  [[ -r "$f" ]] || return 0
-  awk -v p="$path" '$1 !~ /^#/ && $1 !~ /(^|:)unset(:|$)/ && $2==p && $3!="-" { print $3; exit }' "$f"
-}
-prov_manifest_owner() {
-  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
-  [[ -r "$f" ]] || return 0
-  awk -v p="$path" '$1 !~ /^#/ && $2==p && $4!="-" { print $4; exit }' "$f"
-}
-
-ensure_group() {
-  local grp="$1" gid="${2:-}"
-  [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
+ensure_group() { # ensure_group <groupe> — le gid, s'il est fixé, vient de system.manifest
+  local grp="$1" gid
+  gid="$(prov_manifest_gid "$grp")"
   if ! getent group "$grp" >/dev/null; then
     local -a args=()
     [[ -n "$gid" ]] && args+=(-g "$gid")
     run_quiet groupadd "${args[@]}" "$grp" || return 1
-    getent group "$grp" >/dev/null || { p_fail "groupe $grp absent après groupadd"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp${gid:+ (gid $gid, table)}"
     return 0
   fi
@@ -445,7 +397,6 @@ ensure_member() {
   id "$user" >/dev/null 2>&1 || { p_fail "ensure_member: user inconnu: $user"; return 1; }
   if ! prov_in_group "$user" "$grp"; then
     run_quiet usermod -aG "$grp" "$user" || return 1
-    prov_in_group "$user" "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi
@@ -461,7 +412,6 @@ ensure_symlink() {
     return 1
   fi
   ln -sfn "$target" "$link" || { p_fail "ensure_symlink: ln refusé: $link"; return 1; }
-  [[ "$(readlink "$link")" == "$target" ]] || { p_fail "ensure_symlink: cible inattendue après ln: $link"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$link → $target"
 }
 
@@ -512,13 +462,10 @@ fetch_verify() {
 
 prov_journal_note() { # prov_journal_note <clef> <valeur…>
   [[ -n "${PROV_JOURNAL_ACC:-}" ]] || return 0
-  [[ "$#" -ge 2 ]] || return 0
   printf '%s %s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_JOURNAL_ACC" || true
-  return 0
 }
 
 prov_announce_credential() { # prov_announce_credential <libellé> <login> <secret>
-  [[ "$#" -ge 3 ]] || return 0
   if [[ -n "${PROV_ANNOUNCE_FILE:-}" ]]; then
     printf '%s\t%s\t%s\n' "$1" "$2" "$3" 2>/dev/null >> "$PROV_ANNOUNCE_FILE" || true
     return 0
@@ -526,18 +473,12 @@ prov_announce_credential() { # prov_announce_credential <libellé> <login> <secr
   prov_print_credentials <<< "$(printf '%s\t%s\t%s\n' "$1" "$2" "$3")"
 }
 
-_prov_pad() { # <texte> <colonnes>
-  local s="$1" n=$(( $2 - ${#1} ))
-  (( n < 0 )) && n=0
-  printf '%s%*s' "$s" "$n" ''
-}
-
 _prov_box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
 _prov_box_pad() { # <texte> <largeur>
   local p n; p="$(_prov_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
   printf '%s%*s' "$1" "$n" ''
 }
-prov_box_emit() {
+prov_box_emit() { # prov_box_emit [--rule] <titre> <ligne…>
   local _sep=0
   if [[ "${1:-}" == "--rule" ]]; then _sep=1; shift; fi
   local _title="$1"; shift
@@ -552,25 +493,17 @@ prov_box_emit() {
 }
 
 prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » sur stdin
-  local lbl login secret n=0
+  local lbl login secret
+  local -a lignes=()
   while IFS=$'\t' read -r lbl login secret; do
     [[ -n "$secret" ]] || continue
-    if [[ "$n" -eq 0 ]]; then
-      printf '\n'
-      printf '    ┌──────────────────────────────────────────────────────────────┐\n'
-      printf '    │  IDENTIFIANTS — à noter maintenant, ils ne seront pas redits  │\n'
-      printf '    ├──────────────────────────────────────────────────────────────┤\n'
-    else
-      printf '    │%s│\n' "$(_prov_pad '' 62)"
-    fi
-    n=$((n + 1))
-    printf '    │  %s│\n' "$(_prov_pad "$lbl" 60)"
-    printf '    │    login       : %s│\n' "$(_prov_pad "$login" 44)"
-    printf '    │    mot de passe: %s│\n' "$(_prov_pad "$secret" 44)"
+    [[ "${#lignes[@]}" -eq 0 ]] || lignes+=("")
+    lignes+=("  $lbl" "    login        : $login" "    mot de passe : $secret")
   done
-  [[ "$n" -eq 0 ]] && return 0
-  printf '    └──────────────────────────────────────────────────────────────┘\n\n'
-  return 0
+  [[ "${#lignes[@]}" -gt 0 ]] || return 0
+  echo ""
+  prov_box_emit --rule "  IDENTIFIANTS — à noter maintenant, ils ne seront pas redits" "${lignes[@]}"
+  echo ""
 }
 
 pkg_installed() { # pkg_installed <paquet> — 0 seulement s'il est REELLEMENT installe
@@ -631,7 +564,6 @@ PROV_LAST_RC=0
 PROV_LAST_OUT=""
 
 wsl_networking_mode() {
-  [[ -n "${LCARS_WSL_NETWORKING_MODE:-}" ]] && { echo "$LCARS_WSL_NETWORKING_MODE"; return 0; }
   local m
   m="$(wslinfo --networking-mode 2>/dev/null | tr -d '[:space:]')"
   [[ -n "$m" ]] && { echo "$m"; return 0; }
@@ -714,9 +646,8 @@ as_human() {
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 PROV_UID_MIN="" PROV_UID_MAX="" PROV_UID_BOUNDS_WHY=""
-_PROV_UID_BOUNDS_SAID=""
-prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 si les deux se lisent ; 1 sinon, remede dans PROV_UID_BOUNDS_WHY, dit une fois
-  local defs="${PASSWD_DEFS:-/etc/login.defs}" manque=""
+prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 si les deux se lisent ; 1 sinon, le remède dans PROV_UID_BOUNDS_WHY
+  local defs manque=""; defs="$(prov_decor /etc/login.defs)"
   PROV_UID_MIN="$(awk '$1 == "UID_MIN" {print $2; exit}' "$defs" 2>/dev/null || true)"
   PROV_UID_MAX="$(awk '$1 == "UID_MAX" {print $2; exit}' "$defs" 2>/dev/null || true)"
   [[ "$PROV_UID_MIN" =~ ^[0-9]+$ ]] || manque=UID_MIN
@@ -725,18 +656,13 @@ prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 
   PROV_UID_MIN="" PROV_UID_MAX=""
   # phrase identique à celle du protocole du produit (module-protocol.sh), que ses témoins épinglent sans accents
   PROV_UID_BOUNDS_WHY="la frontiere systeme/humain n'est pas etablie ($manque illisible dans $defs) — la borne est declaree par le systeme, pas par ce processus : repare $defs"
-  if [[ -z "$_PROV_UID_BOUNDS_SAID" ]]; then
-    _PROV_UID_BOUNDS_SAID=1
-    p_warn "$PROV_UID_BOUNDS_WHY"
-  fi
   return 1
 }
 
 prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
-  local f v
-  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  if [[ -r "$f" ]]; then
-    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+  local v
+  if [[ -r "$PROV_SEAT_UID_FILE" ]]; then
+    v="$(head -n1 -- "$PROV_SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
     [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
   fi
   v="${LCARS_SYSADMIN_UID:-}"
@@ -744,32 +670,19 @@ prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
   return 1
 }
 
-is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
-  local login="${1:-$PROV_HUMAN}" uid seat
-  uid="$(id -u -- "$login" 2>/dev/null || true)"
-  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
-  seat="$(prov_seat_uid)" || return 1
-  prov_uid_bounds || return 1
-  (( uid >= PROV_UID_MIN && uid <= PROV_UID_MAX )) && (( uid != seat ))
-}
-
 fleet_humans() {
   local seat
   seat="$(prov_seat_uid)" || {
-    echo "fleet_humans: siège non établi (ni ${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
+    echo "fleet_humans: siège non établi (ni $PROV_SEAT_UID_FILE, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
     return 1
   }
-  prov_uid_bounds || return 1
+  prov_uid_bounds || { echo "fleet_humans: $PROV_UID_BOUNDS_WHY" >&2; return 1; }
   awk -F: -v m="$PROV_UID_MIN" -v M="$PROV_UID_MAX" -v s="$seat" \
-      '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
+      '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "$(prov_decor /etc/passwd)"
 }
 
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
 product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
-
-PROV_SOURCE_STAMP=.source-revision
-
-PROV_HELPERS_STAMP="${LCARS_HELPERS_STAMP:-.helpers-revision}"
 
 prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou « inconnue »
   local root="${1:-$(repo_root)}" rev
@@ -787,10 +700,11 @@ prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou �
 
 PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_SSH_PORT PROV_FORGE_BASE)
 
-prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulement ce qui differe
-  local n out=""
+prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, les choix qui s'écartent de leur défaut
+  local n d out=""
   for n in "${PROV_REMEMBERED[@]}"; do
-    [[ -n "${!n:-}" ]] && out="$out ${n}=${!n}"
+    d="${n}_DEFAULT"
+    [[ "${!n}" == "${!d}" ]] || out="$out ${n}=${!n}"
   done
   printf '%s\n' "${out# }"
 }
@@ -820,14 +734,21 @@ prov_delivery() { # prov_delivery [racine] -> `binary` | `source`
 
 prov_delivery_is_binary() { [[ "$(prov_delivery "$@")" == "binary" ]]; }
 
-: "${PROV_CHANNEL_FILE_CANON:=/etc/lcars/channel}"  # le chemin que deploy/system.manifest declare (anchor)
-PROV_CHANNEL_FILE="${LCARS_CHANNEL_FILE:-$PROV_CHANNEL_FILE_CANON}"
+# mix release --overwrite laisse les lib/lcars_fleet-<ancienne> d'une assemblée précédente : celle qui démarre est dans start_erl.data
+release_app_dir() { # release_app_dir <racine de release> → lib/lcars_fleet-<vsn> de la version qui démarre
+  local root="$1" vsn d
+  vsn="$(awk '{print $2; exit}' "$root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$vsn" && -d "$root/lib/lcars_fleet-$vsn" ]]; then printf '%s\n' "$root/lib/lcars_fleet-$vsn"; return 0; fi
+  d=("$root"/lib/lcars_fleet-*)
+  [[ "${#d[@]}" -eq 1 && -d "${d[0]}" ]] && { printf '%s\n' "${d[0]}"; return 0; }
+  return 1
+}
 
 prov_channel() {
   local v
   PROV_CHANNEL=""
   if [[ ! -e "$PROV_CHANNEL_FILE" ]]; then
-    if [[ -d "$PROV_PREFIX" || -e "$PROV_ROOT/.source-revision" ]]; then PROV_CHANNEL=inconnu; printf 'inconnu\n'
+    if [[ -d "$PROV_PREFIX" || -e "$PROV_ROOT/$PROV_SOURCE_STAMP" ]]; then PROV_CHANNEL=inconnu; printf 'inconnu\n'
     else PROV_CHANNEL=aucun; printf 'aucun\n'; fi
     return 0
   fi
@@ -839,21 +760,18 @@ prov_channel() {
   return 1
 }
 
-prov_channel_write() {
-  case "${1:-}" in
-    source|kit) ;;
-    *) p_fail "prov_channel_write : « ${1:-} » n'est pas un canal (source|kit)"; return 1 ;;
-  esac
+prov_channel_write() { # prov_channel_write <source|kit>
   local mode owner
-  mode="$(prov_manifest_mode "$PROV_CHANNEL_FILE_CANON")"; : "${mode:=0644}"
-  owner="${LCARS_CHANNEL_OWNER:-$(prov_manifest_owner "$PROV_CHANNEL_FILE_CANON")}"; : "${owner:=root:root}"
+  mode="$(prov_manifest_mode "$PROV_CHANNEL_FILE")"
+  owner="$(prov_manifest_owner "$PROV_CHANNEL_FILE")"
   write_atomic "$PROV_CHANNEL_FILE" "$mode" "$owner" <<<"$1"
 }
 
 prov_channel_here() { if prov_delivery_is_binary "$@"; then printf 'kit\n'; else printf 'source\n'; fi; }
 
-prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
-  local a="${1%%+*}" b="${2%%+*}" root="${3:-$(repo_root)}"
+prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> → 0 si la source est un ancêtre strict de ce qui est posé · 1 sinon · 2 indéterminable
+  local a="${1%%+*}" b="${2%%+*}" root
+  root="$(repo_root)"
   [[ -n "$a" && -n "$b" && "$a" != "inconnue" && "$b" != "inconnue" ]] || return 2
   [[ "$a" == "$b" ]] && return 1
   git -C "$root" cat-file -e "$a^{commit}" 2>/dev/null || return 2
@@ -867,12 +785,9 @@ prov_seat_from_map() { # le login du siege enregistre, ou vide
   awk -F'\t' '$1 == 1 { print $3; exit }' "$PROV_UID_MAP_FILE" 2>/dev/null
 }
 
-prov_seat_record() { # prov_seat_record <login> <uid>
-  local login="${1:?prov_seat_record: login requis}" uid="${2:?prov_seat_record: uid requis}"
-  [[ -n "$(prov_seat_from_map)" ]] && return 0
-  mkdir -p "$(dirname "$PROV_UID_MAP_FILE")" 2>/dev/null || true
-  printf '1\t%s\t%s\n' "$uid" "$login" >> "$PROV_UID_MAP_FILE" 2>/dev/null || return 1
-  chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
+prov_seat_record() { # prov_seat_record <login> <uid> — la ligne du siège, sur une carte qui n'en porte pas
+  printf '1\t%s\t%s\n' "$2" "$1" >> "$PROV_UID_MAP_FILE" 2>/dev/null || return 1
+  chmod 0640 "$PROV_UID_MAP_FILE"
 }
 
 env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
@@ -892,78 +807,84 @@ arch_tag() {
   esac
 }
 
-forge_curl() {
-  local tokfile="$1" tok=""; shift
-  tok="$(read_token "$tokfile")"
-  { [[ -n "$tok" ]] && printf 'header = "Authorization: token %s"\n' "$tok" || true; } \
-    | curl -K - "$@"
-}
-
 read_token() { # read_token <fichier> — le jeton sans blancs, ou rien : jamais un message, jamais un echec
   [[ -n "${1:-}" && -r "$1" ]] && tr -d '[:space:]' < "$1"
   return 0
 }
 
+# forge_api <méthode> <url> <sortie> [--token-file <f> | --basic <login> <f>] [--json <filtre jq> [--arg <nom> <valeur> | --rawfile <nom> <f>]…] [option curl…]
+#   → le code HTTP sur stdout ; rend 0 pour un 2xx · 3 pour un 3xx · 4 pour un 4xx · 5 pour un 5xx · 1 sans réponse
+# Aucun secret dans un argv ni dans l'environnement d'un enfant : un secret se lit dans un fichier ou
+# un descripteur (<(printf '%s' "$pw")), l'en-tête d'authentification arrive à curl par son entrée
+# (-H @-), le corps de --json sort de « jq -n ». Toute autre option va telle quelle à curl, après les défauts.
+forge_api() {
+  local method="$1" url="$2" out="$3" auth="" filtre="" code tok pw; shift 3
+  local -a jq_args=() curl_args=(-sS -m 15)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --token-file) tok="$(read_token "$2")"; [[ -z "$tok" ]] || auth="token $tok"; shift 2 ;;
+      --basic)      pw=""; IFS= read -r pw < "$3" || true
+                    auth="Basic $(printf '%s:%s' "$2" "$pw" | base64 -w0)"; shift 3 ;;
+      --json)       filtre="$2"; shift 2 ;;
+      --arg)        jq_args+=(--arg "$2" "$3"); shift 3 ;;
+      --rawfile)    jq_args+=(--rawfile "$2" "$3"); shift 3 ;;
+      *)            curl_args+=("$1"); shift ;;
+    esac
+  done
+  # la substitution du corps vit sur la ligne de curl : ailleurs, son descripteur serait fermé avant la lecture
+  if [[ -n "$filtre" ]]; then
+    code="$( { [[ -z "$auth" ]] || printf 'Authorization: %s\n' "$auth"; } \
+      | curl "${curl_args[@]}" -H @- -H 'Content-Type: application/json' --data-binary @<(jq -cn "${jq_args[@]}" "$filtre") \
+          -X "$method" -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || true
+  else
+    code="$( { [[ -z "$auth" ]] || printf 'Authorization: %s\n' "$auth"; } \
+      | curl "${curl_args[@]}" -H @- -X "$method" -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || true
+  fi
+  printf '%s\n' "${code:-000}"
+  case "$code" in
+    2??) return 0 ;;
+    3??) return 3 ;;
+    4??) return 4 ;;
+    5??) return 5 ;;
+    *)   return 1 ;;
+  esac
+}
+
+forge_repond() { # forge_repond <url> <délai en s> → 0 si /api/v1/version rend une réponse 2xx ou 3xx (une redirection vers https est une forge vivante)
+  local rc=0
+  forge_api GET "$1/api/v1/version" /dev/null -m "$2" >/dev/null || rc=$?
+  [[ "$rc" -eq 0 || "$rc" -eq 3 ]]
+}
+
+forge_up() { forge_repond "$PROV_FORGE_URL" 5; }   # la forge de cette installation répond
+
 prov_forge_seat_login() {
-  [[ -s "$PROV_MASTER_TOKEN_FILE" && -n "${PROV_FORGE_URL:-}" ]] || return 0
-  forge_curl "$PROV_MASTER_TOKEN_FILE" -sS -m 15 "${PROV_FORGE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
-    | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true
+  [[ -s "$PROV_MASTER_TOKEN_FILE" && -n "$PROV_FORGE_URL" ]] || return 0
+  local body; body="$(mktemp "${TMPDIR:-/tmp}/prov-forge.XXXXXX")"
+  if forge_api GET "$PROV_FORGE_URL/api/v1/admin/users?limit=50" "$body" --token-file "$PROV_MASTER_TOKEN_FILE" >/dev/null; then
+    jq -r 'map(select(.id == 1)) | .[0].login // empty' "$body" 2>/dev/null || true
+  fi
+  rm -f "$body"
 }
 
 PROV_SEAT_BINDING=""
 PROV_SEAT_LOGIN=""
 PROV_SEAT_SOURCE=""
-prov_seat_binding() { # prov_seat_binding [candidat_unix]
-  local candidat="${1:-}" durable source
-
-  PROV_SEAT_BINDING=""
-  PROV_SEAT_LOGIN=""
-  PROV_SEAT_SOURCE=""
-
+prov_seat_binding() { # prov_seat_binding <candidat unix> → PROV_SEAT_BINDING agree | diverge | seeded
+  local candidat="$1" durable source=table
   durable="$(prov_seat_from_map)"
-  source=table
   if [[ -z "$durable" ]]; then
     durable="$(prov_forge_seat_login)"
     source=forge
   fi
-
-  if [[ -n "$durable" && -n "$candidat" ]]; then
-    PROV_SEAT_LOGIN="$durable"
-    PROV_SEAT_SOURCE="$source"
-    if [[ "$durable" == "$candidat" ]]; then PROV_SEAT_BINDING=agree; else PROV_SEAT_BINDING=diverge; fi
-  elif [[ -n "$durable" ]]; then
-    PROV_SEAT_LOGIN="$durable"; PROV_SEAT_SOURCE="$source"; PROV_SEAT_BINDING=derived
-  elif [[ -n "$candidat" ]]; then
+  if [[ -z "$durable" ]]; then
     PROV_SEAT_LOGIN="$candidat"; PROV_SEAT_SOURCE=candidat; PROV_SEAT_BINDING=seeded
   else
-    PROV_SEAT_BINDING=unknown
+    PROV_SEAT_LOGIN="$durable"; PROV_SEAT_SOURCE="$source"
+    if [[ "$durable" == "$candidat" ]]; then PROV_SEAT_BINDING=agree; else PROV_SEAT_BINDING=diverge; fi
   fi
-
-  return 0
 }
 
 prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la copie posée
   [[ "$(repo_root)" == "${PROV_ROOT}" ]]
-}
-
-prov_roles() {
-  local out="$PROV_ROLES" root
-  local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
-  local entry="${PROV_LCARS_CLI:-}" c
-  if [[ -z "$entry" ]]; then
-    for c in "$PROV_LINK_DIR/lcars" "$(product_tree)/bin/lcars"; do
-      [[ -r "$c" ]] && { entry="$c"; break; }
-    done
-  fi
-
-  if [[ -n "$entry" && -r "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
-    for root in "$PROV_CATALOGUES_DIR"/*/; do
-      [[ -f "${root}catalogue.yaml" ]] || continue
-      out="$out $(LCARS_FLEET_BIN="$bin" bash "$entry" tool roles-tfvars "${root%/}" 2>/dev/null \
-                  | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
-    done
-  fi
-
-  # shellcheck disable=SC2086 # eclatement voulu : une entree par mot
-  printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }

@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/racine_jetons.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
-# STATUS: bats tests — les HUIT defauts de la racine des jetons s'accordent, dans trois langages
+# STATUS: bats tests — les defauts de la racine des jetons du runtime s'accordent avec la constante de l'installeur, dans trois langages
 
 # shellcheck disable=SC2016
 
@@ -45,11 +45,6 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
     [ "$vu" = "$ATTENDU" ] || { echo "${cle##*|} dans $(basename "$f") : « $vu » ≠ « $ATTENDU »"; bad=1; }
   done
   [ "$bad" -eq 0 ]
-}
-
-@test "BASH : le verbe \`accept\` aussi — il lit les memes jetons" {
-  local vu; vu="$(racine_de "$R/deploy/accept" 'LCARS_PRIVATE_DIR:-[^}]*')"
-  [ "$vu" = "$ATTENDU" ]
 }
 
 @test "PYTHON : les deux defauts de l'executeur de catalogue s'accordent" {

@@ -12,13 +12,12 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
-TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
-AUTHORITY_ASK_BIN="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
-HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
+HELPERS_DIR="$PROV_ROOT"
+TOOLCHAIN_BIN="$PROV_LINK_DIR/lcars-toolchain-converge"
+AUTHORITY_ASK_BIN="$PROV_LINK_DIR/lcars-authority-ask"
+HELPERS_OWNER="$(prov_owner root:root)"
 SRC_DIR="$(product_tree)/services"
 BIN_SRC_DIR="$(product_tree)/bin"
-TTYD_BIN="${LCARS_TTYD_BIN:-ttyd}"
 owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
 
 HELPERS=(
@@ -36,16 +35,16 @@ HELPERS=(
   privileged-executor.py
   supervise.sh
 )
-SKEL_FILE="${LCARS_SKEL_FILE:-/etc/skel/.bashrc}"
-BASH_BASHRC="${LCARS_BASH_BASHRC:-/etc/bash.bashrc}"
-LCARS_BASHRC="${LCARS_BASHRC_FILE:-/etc/lcars/lcars.bashrc}"
+SKEL_FILE="$(prov_decor /etc/skel/.bashrc)"
+BASH_BASHRC="$(prov_decor /etc/bash.bashrc)"
+LCARS_BASHRC="$(prov_decor /etc/lcars/lcars.bashrc)"
 DATA=(
   "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
   "lcars.bashrc $LCARS_BASHRC 0644"
 )
 
-XTERM_VERSION="${LCARS_XTERM_VERSION:-5.5.0}"
-XTERM_FIT_VERSION="${LCARS_XTERM_FIT_VERSION:-0.10.0}"
+XTERM_VERSION=5.5.0
+XTERM_FIT_VERSION=0.10.0
 XTERM_JS_SHA256=1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495
 XTERM_CSS_SHA256=ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6
 XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089
@@ -71,8 +70,8 @@ EMBEDDED_EXCLUDE=(
   --exclude=crash.log
 )
 # le tampon des auxiliaires n'est pas .source-revision, le discriminant de livraison que prov_delivery lit à la même racine
-helpers_stamp() { echo "$EMBEDDED_FLEET/${PROV_HELPERS_STAMP:-.helpers-revision}"; }
-copie_delivery_stamp() { echo "$EMBEDDED_FLEET/${PROV_SOURCE_STAMP:-.source-revision}"; }
+helpers_stamp() { echo "$EMBEDDED_FLEET/$PROV_HELPERS_STAMP"; }
+copie_delivery_stamp() { echo "$EMBEDDED_FLEET/$PROV_SOURCE_STAMP"; }
 posed_rev() { # posed_rev → la révision d'où sort ce qui est posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
@@ -161,8 +160,8 @@ check() {
       *) p_warn "auxiliaires posés depuis $posed, cet arbre est $src — parenté indéterminable (pas de git, ou révision inconnue de ce clone)" ;;
     esac
   fi
-  if command -v "$TTYD_BIN" >/dev/null; then
-    p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))"
+  if command -v ttyd >/dev/null; then
+    p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
   else
     p_drift "ttyd absent — la console web n'a aucun serveur derrière sa socket (page noire)"
   fi
@@ -252,8 +251,8 @@ apply() {
   if prov_rev_is_behind "$src" "$posed"; then
     p_warn "retour en arrière : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ancêtre — ce qui suit remplace du code par du code plus ancien, convergeur d'humains compris"
   fi
-  if command -v "$TTYD_BIN" >/dev/null; then
-    p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))"
+  if command -v ttyd >/dev/null; then
+    p_ok "ttyd présent ($(ttyd --version 2>&1 | head -1))"
   else
     p_fail "ttyd absent — la console web n'aurait aucun serveur derrière sa socket (page noire) ; 10-packages le pose"
     verdict_apply

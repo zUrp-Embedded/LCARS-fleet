@@ -6,6 +6,7 @@
 # STATUS: témoins de deploy/accept — la mesure des runners (fait contre non-mesure) et le démarrage de la fleet sous l'humain
 
 load refute
+load support/decor
 
 setup() {
   local _v
@@ -13,9 +14,14 @@ setup() {
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   SRC="$BATS_TEST_DIRNAME/../accept"; [ -f "$SRC" ]
   SANDBOX="$BATS_TEST_TMPDIR/tree"
-  mkdir -p "$SANDBOX/deploy" "$SANDBOX/runtime/services"
+  mkdir -p "$SANDBOX/deploy/lib" "$SANDBOX/runtime/services"
+  cp "$BATS_TEST_DIRNAME/../lib/provision-lib.sh" "$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh" "$SANDBOX/deploy/lib/"
+  cp "$BATS_TEST_DIRNAME/../installer-constants.env" "$BATS_TEST_DIRNAME/../system.manifest" "$SANDBOX/deploy/"
   MOD="$SANDBOX/deploy/accept"
   sed "/^printf '\\\\n  %sACCEPTATION/,\$d" "$SRC" > "$MOD"
+  decor_pose
+  TOKENS="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
+  ANNOUNCE="$BATS_TEST_TMPDIR/annonce"
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${LCARS_BUILTIN_HUMAN:-lcars}"' > "$SANDBOX/runtime/services/forge-gestures.sh"
   chmod 0755 "$SANDBOX/runtime/services/forge-gestures.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
@@ -27,6 +33,8 @@ setup() {
   chmod 0755 "$BINDIR"/*
   printf 'export PATH="%s:/usr/bin:/bin"\n' "$BINDIR" > "$HOME_DIR/.bash_profile"
 }
+
+teardown() { forge_double_stop; }
 
 # la doublure de fleet écrit encore après « BEAM vivant » : c'est la fenêtre où un grep -q sous pipefail tuait le producteur
 fleet_stub() { # fleet_stub <vivant|mort|start-casse>
@@ -55,13 +63,10 @@ fleet_stub() { # fleet_stub <vivant|mort|start-casse>
 joue() { run env PATH="$BINDIR:$PATH" HOME="$HOME_DIR" \
   bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; check_fleet_start; printf 'COMPTEURS F=%s S=%s H=%s\n' \"\$FAILED\" \"\$SKIPPED\" \"\$HELD\""; }
 
-curl_stub() { # curl_stub — lit CURL_CODE, CURL_CORPS, CURL_RC de l'environnement
-  printf '%s\n' '#!/usr/bin/env bash' \
-    'cat >/dev/null 2>&1 || true' \
-    'printf "%s" "${CURL_CORPS:-}"' \
-    'for a in "$@"; do case "$a" in *%{http_code}*) printf "\n%s" "${CURL_CODE:-000}";; esac; done' \
-    'exit "${CURL_RC:-0}"' > "$BINDIR/curl"
-  chmod 0755 "$BINDIR/curl"
+accept_joue() { # accept_joue <check> [option d'accept…] — le script sourcé sous le décor, puis un contrôle et les compteurs
+  local check="$1"; shift
+  run env PATH="$DECOR_BIN:$BINDIR:/usr/bin:/bin" \
+    bash -c "set -euo pipefail; source '$MOD' $* >/dev/null 2>&1; $check; printf 'COMPTEURS F=%s S=%s H=%s\n' \"\$FAILED\" \"\$SKIPPED\" \"\$HELD\""
 }
 
 modele() { # modele <sous-arbre de runtime> <label> — un modèle de projet qui demande ce label
@@ -75,21 +80,70 @@ modele_de_projet() { # la release posée demande « shell » ; sa génération d
   modele tmp/Fixture/priv-decor fixture-label
 }
 
-joue_ci() { # joue_ci <code http> <corps> [rc de curl] — --forge-url par la porte du script, une variable serait écrasée
-  curl_stub
-  local priv="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$priv"
-  printf 'jeton-de-decor\n' > "$priv/forge-master.token"
+joue_ci() { # joue_ci <code http> <corps> — la forge locale sert les runners ; --forge-url par la porte du script
+  forge_double_start
+  forge_route GET /api/v1/admin/actions/runners "$1" "$2"
+  printf 'jeton-de-decor\n' > "$TOKENS/forge-master.token"
   [[ -n "${SANS_MODELE:-}" ]] || modele_de_projet
-  run env PATH="$BINDIR:/usr/bin:/bin" \
-    LCARS_PRIVATE_DIR="$priv" \
-    CURL_CODE="$1" CURL_CORPS="$2" CURL_RC="${3:-0}" \
-    bash -c "set -euo pipefail; source '$MOD' --forge-url http://forge.decor >/dev/null 2>&1; check_ci; printf 'COMPTEURS F=%s S=%s H=%s\n' \"\$FAILED\" \"\$SKIPPED\" \"\$HELD\""
+  accept_joue check_ci --forge-url "${URL_FORGE:-$FORGE_DOUBLE_URL}"
 }
 
 @test "check_ci : une forge injoignable est sautée, jamais comptée comme zéro runner" {
-  joue_ci 000 "" 7
+  URL_FORGE=http://127.0.0.1:1 joue_ci 200 '{"total_count":0,"runners":[]}'
   [[ "$output" == *"COMPTEURS F=0 S=1 H=0"* ]]
+  [[ "$output" == *"(HTTP 000)"* ]]
   refute_out "aucun runner" <<<"$output"
+}
+
+@test "check_ci : l'API admin des runners est lue avec le jeton master du décor" {
+  joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
+  [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners") | .auth')" = '"token jeton-de-decor"' ]
+}
+
+@test "check_ci : sans --forge-url, l'adresse de la forge est celle du fichier forge.url du décor" {
+  forge_double_start
+  forge_route GET /api/v1/admin/actions/runners 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
+  printf '%s\n' "$FORGE_DOUBLE_URL" > "$TOKENS/forge.url"
+  printf 'jeton-de-decor\n' > "$TOKENS/forge-master.token"
+  modele_de_projet
+  accept_joue check_ci
+  [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]]
+  [ "$(forge_requests '.path' | wc -l)" -eq 1 ]
+}
+
+@test "check_forge_login : un identifiant annoncé s'authentifie en Basic contre la forge" {
+  forge_double_start
+  forge_route GET /api/v1/user 200 '{"login":"alice"}'
+  printf 'forge\talice\tmot de passe "fort"\n' > "$ANNOUNCE"
+  accept_joue check_forge_login --announce-file "$ANNOUNCE" --forge-url "$FORGE_DOUBLE_URL"
+  [[ "$output" == *"OUI   forge : « alice » s'authentifie avec le mot de passe annoncé"* ]]
+  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth')" = '"basic alice:mot de passe \"fort\""' ]
+}
+
+@test "check_forge_login : un identifiant que la forge refuse est un échec qui nomme le code HTTP" {
+  forge_double_start
+  forge_route GET /api/v1/user 401 '{"message":"user does not exist"}'
+  printf 'forge\talice\tfaux\n' > "$ANNOUNCE"
+  accept_joue check_forge_login --announce-file "$ANNOUNCE" --forge-url "$FORGE_DOUBLE_URL"
+  [[ "$output" == *"NON   forge : « alice » ne s'authentifie pas (HTTP 401)"* ]]
+  [[ "$output" == *"COMPTEURS F=1 S=0 H=0"* ]]
+}
+
+@test "aucun secret dans l'argv ni l'environnement d'un enfant : ni le mot de passe annoncé, ni le jeton master" {
+  espion_enfants curl base64 tr
+  forge_double_start
+  forge_route GET /api/v1/user 200 '{"login":"alice"}'
+  forge_route GET /api/v1/admin/actions/runners 200 '{"total_count":0,"runners":[]}'
+  printf 'forge\talice\tmdp-annonce\n' > "$ANNOUNCE"
+  printf 'jeton-de-decor\n' > "$TOKENS/forge-master.token"
+  accept_joue 'check_forge_login; check_ci' --announce-file "$ANNOUNCE" --forge-url "$FORGE_DOUBLE_URL"
+  [ "$(forge_requests '.path' | wc -l)" -eq 2 ]
+  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r .)" = "basic alice:mdp-annonce" ]
+  [ "$(grep -c '^ARGV curl ' "$DECOR_ENFANTS")" -eq 2 ]
+  grep -q '^ARGV base64 ' "$DECOR_ENFANTS"
+  refute grep -q 'mdp-annonce' "$DECOR_ENFANTS"
+  refute grep -qF "$(printf 'alice:mdp-annonce' | base64 -w0)" "$DECOR_ENFANTS"
+  refute grep -q 'jeton-de-decor' "$DECOR_ENFANTS"
 }
 
 @test "check_ci : un jeton hors portée site-admin est sauté, et le refus nomme le code HTTP" {

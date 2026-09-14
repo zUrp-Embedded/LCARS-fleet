@@ -18,5 +18,4 @@ exec env \
   FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
   LCARS_PRIVATE_DIR="${PROV_TOKENS_DIR:-}" \
   LCARS_CATALOGUES_DIR="${PROV_CATALOGUES_DIR:-}" \
-  LCARS_LEGACY_CATALOGUES_DIR="${PROV_LEGACY_CATALOGUES_DIR:-}" \
   bash "$(product_tree)/services/forge.d/catalogues.sh" "${1:?usage: 50-catalogues.sh <check|apply>}"

@@ -3,9 +3,10 @@
 # SOURCE: deploy/tests/modules.d/12-docker-engine.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: témoins de 12-docker-engine — docker-ce posé une fois sur linux dédié, le daemon constaté ensuite
+# STATUS: témoins de 12-docker-engine — docker-ce posé une fois sur linux dédié, le daemon constaté ensuite, la source apt sous le décor
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -14,9 +15,17 @@ setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=12-docker-engine PROV_SUBSTRATE=linux
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   MOD="$BATS_TEST_TMPDIR/mod.sh"; sed '/^case "${1:?usage/,$d' "$SRC" > "$MOD"
   TRACE="$BATS_TEST_TMPDIR/trace"
+
+  decor_pose
+  KEY="$LCARS_DECOR_ROOT/etc/apt/keyrings/docker.asc"
+  LIST="$LCARS_DECOR_ROOT/etc/apt/sources.list.d/docker.list"
+  mkdir -p "$(dirname "$LIST")"
+  printf '#!/usr/bin/env bash\nexit "${STUB_CURL_RC:-0}"\n' > "$DECOR_BIN/curl"
+  printf '#!/usr/bin/env bash\necho amd64\n' > "$DECOR_BIN/dpkg"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\nexit "${STUB_APT_RC:-0}"\n' "$TRACE" > "$DECOR_BIN/apt-get"
+  chmod 0755 "$DECOR_BIN"/*
 }
 
 # mod <état du daemon : repond|refuse|arrete|absent> <corps> — source le module avec des doublures qui tracent
@@ -35,6 +44,16 @@ mod() {
     apt_ensure() { echo \"APT \$*\" >> '$TRACE'; return 0; }
     sleep() { :; }
     $2"
+}
+
+# os_release <ID> <VERSION_CODENAME> — la distribution du décor
+os_release() { printf 'ID=%s\nVERSION_CODENAME=%s\n' "$1" "$2" > "$LCARS_DECOR_ROOT/etc/os-release"; }
+
+# depot — joue ensure_docker_repo ; le téléchargement vérifié est la frontière, il pose une clé et se note
+depot() {
+  run bash -c "set -uo pipefail; source '$MOD' >/dev/null 2>&1
+    fetch_verify() { echo FETCH >> '$TRACE'; mkdir -p \"\$(dirname \"\$3\")\"; echo CLE-LCARS > \"\$3\"; }
+    ensure_docker_repo"
 }
 
 @test "en-tête : linux seul, après 10-packages, sous root" {
@@ -122,12 +141,70 @@ mod() {
   [ ! -e "$TRACE" ]
 }
 
-@test "le dépôt : distribution hors ubuntu et debian refusée, rien posé" {
-  run env LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
-      bash -c "source '$MOD' >/dev/null 2>&1
-    os_field() { case \"\$1\" in ID) echo arch ;; VERSION_CODENAME) echo rolling ;; esac; }
-    ensure_docker_repo"
+@test "dépôt docker : une distribution que l'upstream ne publie pas est refusée, rien n'est posé" {
+  os_release arch rolling
+  depot
   [ "$status" -ne 0 ]
-  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
-  [[ "$output" == *"ubuntu et debian"* ]]
+  [[ "$output" == *"« arch »"*"ubuntu et debian"* ]]
+  [ ! -e "$LIST" ]
+  [ ! -e "$KEY" ]
+}
+
+@test "dépôt docker : sans VERSION_CODENAME la suite est indérivable, et le refus le dit" {
+  os_release ubuntu ""
+  depot
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"VERSION_CODENAME"* ]]
+  [ ! -e "$LIST" ]
+}
+
+@test "dépôt docker : une suite absente chez Docker refuse avant la clé et la source" {
+  # la sonde réseau passe avant la pose : un refus qui laisserait la source armerait un apt-get update cassé
+  os_release ubuntu suite-qui-nexiste-pas
+  STUB_CURL_RC=22 depot
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"suite-qui-nexiste-pas"* ]]
+  [ ! -e "$TRACE" ]
+  [ ! -e "$LIST" ]
+  [ ! -e "$KEY" ]
+}
+
+@test "dépôt docker : la source est dérivée de l'id, du codename et de l'architecture, sous le décor" {
+  os_release debian trixie
+  depot
+  [ "$status" -eq 0 ]
+  run cat "$LIST"
+  [ "$output" = "deb [arch=amd64 signed-by=$KEY] https://download.docker.com/linux/debian trixie stable" ]
+}
+
+@test "dépôt docker : un sha GPG exporté ne change pas le pin — une clé qui n'est pas celle du pin se retélécharge" {
+  # la clé posée est vide et l'environnement annonce le sha du vide : seul le pin du module décide
+  mkdir -p "$(dirname "$KEY")"; : > "$KEY"
+  os_release ubuntu resolute
+  LCARS_DOCKER_GPG_SHA256="$(printf '' | sha256sum | awk '{print $1}')" depot
+  [ "$status" -eq 0 ]
+  grep -qx FETCH "$TRACE"
+}
+
+@test "dépôt docker : sur refus d'apt-get update, la source et la clé qui étaient là sont restaurées telles quelles" {
+  mkdir -p "$(dirname "$KEY")"
+  echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$LIST"
+  echo "CLE-DE-L-OPERATEUR" > "$KEY"
+  os_release debian trixie
+  STUB_APT_RC=100 depot
+  [ "$status" -ne 0 ]
+  [ "$(cat "$LIST")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
+  [ "$(cat "$KEY")" = "CLE-DE-L-OPERATEUR" ]
+  [[ "$output" == *"restauré"* ]]
+}
+
+@test "dépôt docker : sur refus d'apt-get update, ce que la passe a posé est retiré, et le refus le dit" {
+  # sans ce sens, un module qui ne toucherait plus à rien passerait le cas de la restauration
+  os_release debian trixie
+  STUB_APT_RC=100 depot
+  [ "$status" -ne 0 ]
+  grep -qx FETCH "$TRACE"
+  [ ! -e "$LIST" ]
+  [ ! -e "$KEY" ]
+  [[ "$output" == *"n'était là avant"* ]]
 }

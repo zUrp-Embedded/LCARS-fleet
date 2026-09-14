@@ -28,10 +28,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 
-PROJECT="lcars"
-FORGE_PORT="21000"
-DECK_PORT="20999"
-SSH_PORT="2222"
+# shellcheck source=../../lib/provision-lib.sh
+source "$DOCKER_DIR/../lib/provision-lib.sh"
+# shellcheck source=../../lib/store.sh
+source "$DOCKER_DIR/../lib/store.sh"
+# shellcheck source=../../lib/forge-bootstrap.sh
+source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
+
+PROJECT="$PROV_FORGE_BASE_DEFAULT"
+FORGE_PORT="$PROV_FORGE_HOST_PORT_DEFAULT"
+DECK_PORT="$PROV_DECK_PORT_DEFAULT"
+SSH_PORT="$PROV_SSH_PORT_DEFAULT"
 BIND="0.0.0.0"
 ADVERTISE=""
 IMAGE="lcars-fleet:local"
@@ -68,15 +75,10 @@ RUNNER_PROJECT="${PROJECT}-runner"
 FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
 FORGE_NET="${FORGE_PROJECT}_default"
 CONTAINER="${CONTAINER_PROJECT}-lcars-1"
-COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
+RACINE_CONTENEUR="$(prov_canon "$PROV_ROOT")"
+GESTES="$RACINE_CONTENEUR/forge-gestures.sh"
+COMPOSE_ARGS=(--env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
 ADMIRAL="admiral"
-
-# shellcheck source=../../lib/provision-lib.sh
-source "$DOCKER_DIR/../lib/provision-lib.sh"
-# shellcheck source=../../lib/store.sh
-source "$DOCKER_DIR/../lib/store.sh"
-# shellcheck source=../../lib/forge-bootstrap.sh
-source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
 
 case "$BIND" in
   0.0.0.0|::|"*") PROBE_HOST="127.0.0.1" ;;
@@ -112,7 +114,7 @@ attendre_healthy() {
 }
 
 # ─── Le terrain ─────────────────────────────────────────────────────────────────────────────────
-for _outil in curl python3 git; do
+for _outil in curl jq git; do
   command -v "$_outil" >/dev/null 2>&1 || die "$_outil requis sur ce poste (le banc lit la forge par son API et sème sa source)" 1
 done
 PROV_DOCKER_BIN="$DOCKER_BIN"
@@ -173,8 +175,8 @@ say "conteneur : projet $CONTAINER_PROJECT, image $IMAGE, bind $BIND"
 # geste deck-oidc sème les deux écritures de la loopback.
 quiet env LCARS_IMAGE="$IMAGE" \
     LCARS_ADMIRAL="$ADMIRAL" \
-    FORGE_BASE_URL="http://gitea:3000" \
-    LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
+    FORGE_BASE_URL="$PROV_FORGE_INTERNAL_URL" \
+    LCARS_SOURCE_REMOTE="$PROV_FORGE_INTERNAL_URL/$PROV_FORGE_ORG_DEFAULT/lcars.git" \
     LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="$FORGE_URL" \
@@ -202,9 +204,13 @@ case "$(forge_admin_ensure "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "$ADMIRAL
 esac
 MASTER_TOKEN="$(forge_master_token "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "bench-$(date +%s)")" \
   || die "la forge n'a pas rendu de jeton master" 4
-forge_token_ok "$FORGE_LOCAL_URL" "$MASTER_TOKEN" || die "le jeton master ne s'authentifie pas" 4
+# les jetons de l'hôte vivent dans des fichiers d'un dossier 0700 : forge_api et forge-runner les lisent, jamais un argv
+JETONS="$(mktemp -d "${TMPDIR:-/tmp}/bench-up-jetons.XXXXXX")"
+trap 'rm -rf "$JETONS"' EXIT
+printf '%s\n' "$MASTER_TOKEN" > "$JETONS/master"
+forge_token_ok "$FORGE_LOCAL_URL" "$JETONS/master" || die "le jeton master ne s'authentifie pas" 4
 say "jeton master minté"
-SEED_PW="$(in_container cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
+SEED_PW="$(in_container cat "$(prov_canon "$PROV_FORGE_SEED_FILE")" 2>/dev/null | tr -d '\r\n' || true)"
 if [[ -z "$SEED_PW" ]]; then
   SEED_PW="$(forge_seed_new)"; say "seed de banc généré"
 else
@@ -215,25 +221,26 @@ fi
 ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
 ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" --tofu-dir "$ENROLL_DIR" --image "$IMAGE" 2>/dev/null)" \
   || die "dérivation du roster en échec (enroll-catalogue.sh, image $IMAGE)" 4
-ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"; ORG="${ORG:-fleet}"
+ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"; ORG="${ORG:-$PROV_FORGE_ORG_DEFAULT}"
 say "roster dérivé du catalogue $(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_ROLES=//p') · org $ORG"
-d cp "$ENROLL_DIR/roles.auto.tfvars.json" "$CONTAINER:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" \
+d cp "$ENROLL_DIR/roles.auto.tfvars.json" "$CONTAINER:$RACINE_CONTENEUR/services/forge-recipe/roles.auto.tfvars.json" \
   || die "roster non déposé dans la recette de $CONTAINER" 4
 rm -rf "$ENROLL_DIR"
 
-printf '%s' "$MASTER_TOKEN" | in_container /opt/lcars/forge-gestures.sh config-token || die "jeton master refusé par le conteneur" 4
-printf '%s' "$SEED_PW"      | in_container /opt/lcars/forge-gestures.sh config-seed  || die "seed non posé dans le conteneur" 4
+printf '%s' "$MASTER_TOKEN" | in_container "$GESTES" config-token || die "jeton master refusé par le conteneur" 4
+printf '%s' "$SEED_PW"      | in_container "$GESTES" config-seed  || die "seed non posé dans le conteneur" 4
 quiet d exec -i -u root -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN@lcars.local" \
-    "$CONTAINER" /opt/lcars/forge-gestures.sh apply < /dev/null \
-  || die "structure de la forge en échec dans $CONTAINER (rejouer : docker exec -u root $CONTAINER /opt/lcars/forge-gestures.sh apply)" 4
+    "$CONTAINER" "$GESTES" apply < /dev/null \
+  || die "structure de la forge en échec dans $CONTAINER (rejouer : docker exec -u root $CONTAINER $GESTES apply)" 4
 say "structure posée par le conteneur (org $ORG, teams, comptes, adhésions, dépôt modèle)"
 
-HUMAN_TOKEN="$(bench_human_seed "$FORGE_LOCAL_URL" "$MASTER_TOKEN" "$HUMAN" "$HUMAN_PW")" \
+HUMAN_TOKEN="$(bench_human_seed "$FORGE_LOCAL_URL" "$JETONS/master" "$HUMAN" "$HUMAN_PW")" \
   || die "humain $HUMAN : mot de passe, adminité ou jeton opérateur refusés par la forge" 5
 say "humain $HUMAN : mot de passe de banc posé, site-admin, jeton opérateur minté"
 
 charte_out="$(d exec "$CONTAINER" bash -c \
-    'cd /opt/lcars/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIRAL"'" --check' 2>&1)" || true
+    'cd "$1/services/forge-recipe" && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "$2" --check' \
+    _ "$RACINE_CONTENEUR" "$ADMIRAL" 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -z "$l" ]] || say "charte: $l"; done
 
 # ─── La relance : le geste tokens minte les jetons de rôle, le convergeur matérialise l'humain ──
@@ -262,17 +269,18 @@ if [[ "$WITH_CREDS" -eq 1 ]]; then
 fi
 
 # ─── Le semis des dépôts : la source que le conteneur clone, à la révision de l'image ──────────
-SYS_TOKEN="$(in_container cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
+SYS_TOKEN="$(in_container cat "$(prov_canon "$PROV_SYSTEM_TOKEN_FILE")" 2>/dev/null | tr -d '[:space:]' || true)"
 [[ -n "$SYS_TOKEN" ]] || die "jeton système absent après la relance — le banc n'est pas prêt (docker logs $CONTAINER)" 6
+printf '%s\n' "$SYS_TOKEN" > "$JETONS/system"
 git_forge() {
   GIT_CONFIG_COUNT=1 \
-  GIT_CONFIG_KEY_0="http.${FORGE_LOCAL_URL%/}/.extraheader" \
+  GIT_CONFIG_KEY_0="http.$FORGE_LOCAL_URL/.extraheader" \
   GIT_CONFIG_VALUE_0="Authorization: token ${SYS_TOKEN}" \
   git "$@"
 }
-printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "POST"\ndata = "{\\"name\\":\\"lcars\\",\\"description\\":\\"LCARS — la source du conteneur\\",\\"private\\":false,\\"auto_init\\":false}"\n' "$SYS_TOKEN" \
-  | curl -K - -s -m 10 -o /dev/null "$FORGE_LOCAL_URL/api/v1/orgs/$ORG/repos" 2>/dev/null || true
-LCARS_REMOTE="${FORGE_LOCAL_URL%/}/$ORG/lcars.git"
+forge_api POST "$FORGE_LOCAL_URL/api/v1/orgs/$ORG/repos" /dev/null --token-file "$JETONS/system" -m 10 \
+  --json '{name: "lcars", description: "LCARS — la source du conteneur", private: false, auto_init: false}' >/dev/null || true
+LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/lcars.git"
 [[ -n "$IMAGE_REV" && "$IMAGE_REV" != "unknown" ]] \
   || die "$ORG/lcars : l'image $IMAGE ne porte pas de révision (label OCI) — le banc ne sème pas un code qu'il ne peut pas nommer" 7
 if [[ -d "$REPO_ROOT/.git" ]]; then
@@ -281,7 +289,7 @@ if [[ -d "$REPO_ROOT/.git" ]]; then
   SEED_DIR="$REPO_ROOT"; SEED_REF="$IMAGE_REV"; SEED_DIT="révision de l'image : $IMAGE_REV"
 else
   # un kit n'a pas d'historique : sa révision est dans .source-revision, et le semis est un commit unique bâti de son arbre
-  KIT_REV="$(tr -d '[:space:]' < "$REPO_ROOT/.source-revision" 2>/dev/null || true)"
+  KIT_REV="$(tr -d '[:space:]' < "$REPO_ROOT/$PROV_SOURCE_STAMP" 2>/dev/null || true)"
   [[ -n "$KIT_REV" && ( "$IMAGE_REV" == "$KIT_REV"* || "$KIT_REV" == "$IMAGE_REV"* ) ]] \
     || die "$ORG/lcars : ce kit atteste « ${KIT_REV:-aucune révision} » et l'image $IMAGE porte $IMAGE_REV — le banc sème le code du conteneur ; prendre le kit de cette image" 7
   SEED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lcars-seed.XXXXXX")"
@@ -305,7 +313,7 @@ say "$ORG/lcars : main poussé ($SEED_DIT)"
 # se réaligne sur le main poussé, sous le compte qui le possède
 SOURCE_IN="${LCARS_SOURCE_DIR:-/home/projects/LCARS}"
 SOURCE_OWNER="$(in_container stat -c %U "$SOURCE_IN" 2>/dev/null | tr -d '[:space:]' || true)"
-SOURCE_REMOTE_IN="http://gitea:3000/$ORG/lcars.git"
+SOURCE_REMOTE_IN="$PROV_FORGE_INTERNAL_URL/$ORG/lcars.git"
 if [[ -n "$SOURCE_OWNER" && "$SOURCE_OWNER" != "UNKNOWN" ]]; then
   quiet d exec -i -u "$SOURCE_OWNER" "$CONTAINER" \
       git -C "$SOURCE_IN" fetch -q --depth 1 "$SOURCE_REMOTE_IN" main < /dev/null \
@@ -327,46 +335,40 @@ else
 fi
 
 # ─── L'état du conteneur, le runner, la fleet ───────────────────────────────────────────────────
-ROLE_TOKENS="$(in_container bash -c 'ls /opt/lcars/var/tokens/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
+TOKENS_IN="$(prov_canon "$PROV_TOKENS_DIR")"
+# shellcheck disable=SC2016 # $1 est l'argument du bash du conteneur
+ROLE_TOKENS="$(in_container bash -c 'ls "$1"/*.gitea_token 2>/dev/null | wc -l' _ "$TOKENS_IN" || echo 0)"
 CREDS_OK="$(as_human bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non' || echo non)"
 CONTAINER_PROV_RC="$(in_container cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$CONTAINER_PROV_RC" =~ ^[0-9]+$ ]] || CONTAINER_PROV_RC=""
 CONTAINER_PROV_OK=1
 case "$CONTAINER_PROV_RC" in
   0)  CONTAINER_PROV_STATE="convergé" ;;
-  2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER /opt/lcars/deploy/provision doctor le nomme)" ;;
+  2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor le nomme)" ;;
   "") CONTAINER_PROV_STATE="non mesuré — /run/lcars-forge.rc illisible dans le conteneur (il n'a peut-être pas fini de converger)" ;;
-  *)  CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER /opt/lcars/deploy/provision doctor)"
+  *)  CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor)"
       CONTAINER_PROV_OK=0 ;;
 esac
 
 RUNNER_STATE="non démarré"
 RUNNER_SERT=0
-[[ -n "$RUNNER_LABELS" ]] || RUNNER_LABELS="shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
+[[ -n "$RUNNER_LABELS" ]] || RUNNER_LABELS="$PROV_RUNNER_LABELS"
 if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
 else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
-  # les jetons passent à forge-runner par des fichiers 0600, jamais par son argv
-  RUNNER_SECRETS="$(mktemp -d "${TMPDIR:-/tmp}/bench-up-jetons.XXXXXX")"
-  trap 'rm -rf "$RUNNER_SECRETS"' EXIT
-  printf '%s\n' "$MASTER_TOKEN" > "$RUNNER_SECRETS/master"
-  in_container /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 > "$RUNNER_SECRETS/reg" || true
+  in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" || true
   reg_args=()
-  [[ -z "$(tr -d '[:space:]' < "$RUNNER_SECRETS/reg")" ]] || reg_args=(--reg-token-file "$RUNNER_SECRETS/reg")
+  [[ -z "$(tr -d '[:space:]' < "$JETONS/reg")" ]] || reg_args=(--reg-token-file "$JETONS/reg")
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
-       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$RUNNER_SECRETS/master" \
+       --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" \
        ${reg_args[@]+"${reg_args[@]}"} \
        --instance-url "http://${JOB_HOST}:${FORGE_PORT}" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" >"$RUNNER_LOG" 2>&1; then
-    RUNNERS="$(printf 'header = "Authorization: token %s"\n' "$MASTER_TOKEN" \
-      | curl -K - -s -m 5 "$FORGE_LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null \
-      | python3 -c 'import json,sys
-try:
-    d = json.load(sys.stdin)
-    rs = d.get("runners", d if isinstance(d, list) else [])
-    print(len(rs))
-except Exception: print(0)' 2>/dev/null || echo 0)"
+    RUNNERS_BODY="$(mktemp "${TMPDIR:-/tmp}/bench-up-runners.XXXXXX")"
+    forge_api GET "$FORGE_LOCAL_URL/api/v1/admin/actions/runners" "$RUNNERS_BODY" --token-file "$JETONS/master" -m 5 >/dev/null || true
+    RUNNERS="$(jq 'if type == "array" then length else (.runners // []) | length end' "$RUNNERS_BODY" 2>/dev/null || echo 0)"
+    rm -f "$RUNNERS_BODY"
     if [[ "${RUNNERS:-0}" -gt 0 ]]; then
       RUNNER_VER="$(d exec "${RUNNER_PROJECT}-act-1" gitea-runner --version 2>/dev/null | head -1 || true)"
       RUNNER_IMG="$(d inspect "${RUNNER_PROJECT}-act-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
@@ -426,7 +428,7 @@ fi
 say "  image     : $IMAGE"
 say "  révision  : $IMAGE_REV_STATE"
 say "  runner    : $RUNNER_STATE"
-say "  jetons    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
+say "  jetons    : $ROLE_TOKENS fichiers dans $TOKENS_IN"
 say "  creds     : $CREDS_OK"
 say "  fleet     : $FLEET_STATE"
 say "  converge  : $CONTAINER_PROV_STATE"

@@ -18,7 +18,7 @@ setup() {
 
 # La majeure de chacun des trois. Chaque extraction est nommee : une seule qui rate rendrait une
 # chaine VIDE, et deux vides sont EGAUX — un mur vert sur n'importe quelle derive.
-maj_module()   { sed -n 's/^NODE_VERSION="${LCARS_NODE_VERSION:-\([0-9]\+\)\..*/\1/p' "$MOD"; }
+maj_module()   { sed -n 's/^NODE_VERSION=\([0-9]\+\)\..*/\1/p' "$MOD"; }
 maj_workflow() { sed -n 's/^ *node-version: *\([0-9]\+\) *$/\1/p' "$SITE_WF"; }
 
 @test "les deux producteurs de la doc sont sur la MEME majeure de node — le poste (16) et le site en ligne" {
@@ -35,7 +35,7 @@ maj_workflow() { sed -n 's/^ *node-version: *\([0-9]\+\) *$/\1/p' "$SITE_WF"; }
 
 @test "le pin du poste est un patch EXACT — un sha256 ne verifie pas une balise mouvante" {
   local v
-  v="$(sed -n 's/^NODE_VERSION="${LCARS_NODE_VERSION:-\([0-9.]\+\)}".*/\1/p' "$MOD")"
+  v="$(sed -n 's/^NODE_VERSION=\([0-9.]\+\)$/\1/p' "$MOD")"
   [ -n "$v" ] || { echo "extraction ratee : NODE_VERSION dans $MOD"; return 1; }
   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || { echo "NODE_VERSION « $v » n'est pas un patch complet — l'URL du tarball ne se composerait pas"; return 1; }

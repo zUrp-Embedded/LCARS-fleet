@@ -96,8 +96,8 @@ case "${1:-help}" in
   help|-h|--help) usage; exit 0 ;;
 esac
 
-# shellcheck source=lib/docker-endpoint.sh
-. "$SCRIPT_DIR/deploy/lib/docker-endpoint.sh"
+# shellcheck source=lib/provision-lib.sh
+. "$SCRIPT_DIR/deploy/lib/provision-lib.sh"
 fail() { printf 'container: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 docker_endpoint || fail "$PROV_DOCKER_WHY" \
   "Rien n'a été construit, rien n'a été démarré. « container help » marche sans docker."
@@ -110,11 +110,15 @@ COMPOSE=($PROV_COMPOSE_CMD)
 [[ -f "$COMPOSE_FILE" ]] || { echo "container: compose introuvable: $COMPOSE_FILE (checkout incomplet ?)" >&2; exit 1; }
 
 export LCARS_STORE_PREFIX="$PROJECT"
+RACINE_CONTENEUR="$(prov_canon "$PROV_ROOT")"
 
 # ─── La conf par projet, côté hôte ──────────────────────────────────────────────────────────────
 CONTAINER_CONF_DIR="${LCARS_CONTAINER_CONF_DIR:-$HOME/.lcars/container}"
 CONF_ENV="$CONTAINER_CONF_DIR/$PROJECT.env"
 CONF_SECRETS="$CONTAINER_CONF_DIR/$PROJECT.secrets"
+# côté hôte, les secrets portent le nom qu'ils ont dans le conteneur
+CONF_MASTER_TOKEN="$CONF_SECRETS/$(basename "$PROV_MASTER_TOKEN_FILE")"
+CONF_SEED="$CONF_SECRETS/$(basename "$PROV_FORGE_SEED_FILE")"
 CONF_KEYS=(FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID LCARS_SSH_AUTHORIZED_KEYS
            LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HOSTNAME LCARS_DECK_ORIGINS
            LCARS_HUMAN LCARS_SOURCE_REMOTE LCARS_SOURCE_REF)
@@ -139,14 +143,14 @@ ensure_secrets() {
   _SECRETS_OK=1
   install -d -m 0700 "$CONTAINER_CONF_DIR" "$CONF_SECRETS"
   local f
-  for f in forge-master.token forge-seed.pass; do
-    [[ -e "$CONF_SECRETS/$f" ]] || ( umask 077; : > "$CONF_SECRETS/$f" )
+  for f in "$CONF_MASTER_TOKEN" "$CONF_SEED"; do
+    [[ -e "$f" ]] || ( umask 077; : > "$f" )
   done
-  export LCARS_CONTAINER_SECRETS="$CONF_SECRETS"
+  export LCARS_CONTAINER_MASTER_TOKEN="$CONF_MASTER_TOKEN" LCARS_CONTAINER_SEED="$CONF_SEED"
 }
 # lire l'instance ne prépare rien sur l'hôte : l'override des secrets et leurs fichiers ne servent qu'à la pose
-compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
-compose_pose() { ensure_secrets; "${COMPOSE[@]}" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
+compose() { "${COMPOSE[@]}" --env-file "$PROV_CONSTANTS_FILE" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
+compose_pose() { ensure_secrets; "${COMPOSE[@]}" --env-file "$PROV_CONSTANTS_FILE" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
 load_conf
 
 # ─── Les gardes du projet ───────────────────────────────────────────────────────────────────────
@@ -167,12 +171,12 @@ assert_home_volume_kept() {
   local id cible cle actuel attendu
   id="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | head -n1)" || return 0
   [[ -n "$id" ]] || return 0
-  for cible in /home:lcars-home /opt/lcars/var:lcars-var; do
+  for cible in /home:lcars-home "$RACINE_CONTENEUR/var:lcars-var"; do
     cle="${cible#*:}"; cible="${cible%%:*}"
     actuel="$("$DOCKER" inspect "$id" --format "{{range .Mounts}}{{if eq .Destination \"$cible\"}}{{.Name}}{{end}}{{end}}" 2>/dev/null)" || continue
     [[ -n "$actuel" ]] || continue
     attendu="$(compose config --format json 2>/dev/null \
-      | python3 -c "import json,sys; print(json.load(sys.stdin)['volumes']['$cle']['name'])" 2>/dev/null)" || continue
+      | jq -r --arg v "$cle" '.volumes[$v].name // empty' 2>/dev/null)" || continue
     [[ -n "$attendu" && "$actuel" != "$attendu" ]] || continue
     fail "le projet « $PROJECT » monte $cible depuis le volume « $actuel », et ce compose le monterait depuis « $attendu » — un up le recréerait sur un volume vide" \
          "garder les données : docker run --rm -v $actuel:/from -v $attendu:/to alpine cp -a /from/. /to/ — ou les jeter : deploy/container -p $PROJECT reset — puis up"
@@ -240,7 +244,7 @@ cmd_up() {
   assert_home_volume_kept
   store_ensure_volumes "$DOCKER" || { echo "container: magasin non posé — up annulé" >&2; exit 1; }
   if [[ -z "${LCARS_DECK_ORIGINS:-}" ]]; then
-    local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" _h _p
+    local _bind="$LCARS_LANDING_PORT_BIND" _h _p
     _p="${_bind##*:}"; _h="${_bind%:*}"; [[ "$_h" == "0.0.0.0" || "$_h" == "$_bind" ]] && _h=127.0.0.1
     export LCARS_DECK_ORIGINS="http://$_h:$_p,http://localhost:$_p"
   fi
@@ -316,23 +320,29 @@ cmd_shell() { compose exec -it -u "$(humain_cible)" lcars bash; }
 # ─── La forge fournie : config, gestes ──────────────────────────────────────────────────────────
 gesture() { # gesture <geste> — le secret, s'il y en a un, arrive sur stdin
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
-    compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"
-  elif [[ -x /opt/lcars/forge-gestures.sh ]]; then
-    /opt/lcars/forge-gestures.sh "$1"
+    compose exec -T -u root lcars "$RACINE_CONTENEUR/forge-gestures.sh" "$1"
+  elif [[ -x "$PROV_ROOT/forge-gestures.sh" ]]; then
+    "$PROV_ROOT/forge-gestures.sh" "$1"
   else
-    echo "container: le geste « $1 » n'a nulle part où tourner — ni conteneur lcars, ni /opt/lcars/forge-gestures.sh" >&2
+    echo "container: le geste « $1 » n'a nulle part où tourner — ni conteneur lcars, ni $PROV_ROOT/forge-gestures.sh" >&2
     echo "     Sur un poste, « bash install.sh --workstation » le pose (62-runtime-helpers)." >&2
     return 1
   fi
 }
 
+poser_secret() { # poser_secret <fichier> <valeur> — une valeur vide ne touche pas le fichier
+  [[ -n "$2" ]] || return 0
+  ( umask 077; printf '%s\n' "$2" > "$1.tmp" ) && mv -f "$1.tmp" "$1"
+  echo "container config: $(basename "$1") posé ($CONF_SECRETS, lisible par cet utilisateur seul) — le conteneur l'importe et le vérifie au boot"
+}
+
 cmd_config() {
-  local token="${FORGE_ADMIN_TOKEN:-}" seed="${FORGE_SEED_PASSWORD:-}" k v line
+  local token="${FORGE_ADMIN_TOKEN:-}" seed="${FORGE_SEED_PASSWORD:-}" k
   if [[ "${#CONF_GIVEN[@]}" -eq 0 && -z "$token" && -z "$seed" ]]; then
     echo "container config: la configuration de l'instance « $PROJECT », côté hôte ($CONTAINER_CONF_DIR) :"
     if [[ -s "$CONF_ENV" ]]; then sed 's/^/  /' "$CONF_ENV"; else echo "  (aucun env posé — les défauts du compose valent)"; fi
-    for k in forge-master.token:FORGE_ADMIN_TOKEN forge-seed.pass:FORGE_SEED_PASSWORD; do
-      if [[ -s "$CONF_SECRETS/${k%%:*}" ]]; then echo "  ${k#*:}=<posé>"; else echo "  ${k#*:}=<absent>"; fi
+    for k in "$CONF_MASTER_TOKEN:FORGE_ADMIN_TOKEN" "$CONF_SEED:FORGE_SEED_PASSWORD"; do
+      if [[ -s "${k%:*}" ]]; then echo "  ${k##*:}=<posé>"; else echo "  ${k##*:}=<absent>"; fi
     done
     { echo ""
       echo "  Ce que LCARS ne peut pas deviner se pose en variables d'env de cette commande :"
@@ -349,12 +359,8 @@ cmd_config() {
   fi
   install -d -m 0700 "$CONTAINER_CONF_DIR" "$CONF_SECRETS"
   conf_ecrire --dire
-  local f
-  for f in forge-master.token:"$token" forge-seed.pass:"$seed"; do
-    v="${f#*:}"; [[ -n "$v" ]] || continue
-    ( umask 077; printf '%s\n' "$v" > "$CONF_SECRETS/${f%%:*}.tmp" ) && mv -f "$CONF_SECRETS/${f%%:*}.tmp" "$CONF_SECRETS/${f%%:*}"
-    echo "container config: ${f%%:*} posé ($CONF_SECRETS, lisible par cet utilisateur seul) — le conteneur l'importe et le vérifie au boot"
-  done
+  poser_secret "$CONF_MASTER_TOKEN" "$token"
+  poser_secret "$CONF_SEED" "$seed"
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
     if [[ -n "$token" ]]; then printf '%s' "$token" | gesture config-token || exit 1; fi
     if [[ -n "$seed" ]]; then printf '%s' "$seed" | gesture config-seed || exit 1; fi
@@ -394,7 +400,7 @@ conf_ecrire() { # conf_ecrire [--dire] — ce que l'appelant a donné dans l'env
 
 cmd_forge_apply() {
   printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
-    lcars /opt/lcars/forge-gestures.sh apply \
+    lcars "$RACINE_CONTENEUR/forge-gestures.sh" apply \
     || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
   echo ""
   echo "container forge-apply: structure posée. Rejouable — un second passage importe ce qui existe."
@@ -416,7 +422,7 @@ cmd_status() {
   boot="$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" || boot=""
   prov="$(compose exec -T lcars cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]')" || prov=""
   hum="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hum=""
-  tampon="$(compose exec -T lcars cat /opt/lcars/.verified 2>/dev/null | tr -d '[:space:]')" || tampon=""
+  tampon="$(compose exec -T lcars cat "$RACINE_CONTENEUR/.verified" 2>/dev/null | tr -d '[:space:]')" || tampon=""
   local p="deploy/container -p $PROJECT" relancer="deploy/container -p $PROJECT up --force-recreate"
   [[ "$(project_config_files)" != *docker-compose.bench.yml* ]] || relancer="deploy/container --forge-project ${PROJECT%-fleet} --bench up"
   echo "container status ($PROJECT)"
@@ -439,7 +445,7 @@ cmd_status() {
     "") : ;;
     *) echo "  humains     : aucun humain de fleet — un humain s'inscrit sur la forge, team « humans »" ;;
   esac
-  local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" deck_http
+  local _bind="$LCARS_LANDING_PORT_BIND" deck_http
   deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${_bind/0.0.0.0/127.0.0.1}/auth/login" 2>/dev/null || echo 000)"
   case "$deck_http" in
     2*|3*) echo "  deck        : répond sur http://$_bind (HTTP $deck_http)" ;;
@@ -536,7 +542,7 @@ deux premières sont la même forge vue par deux observateurs.
        · Docker Desktop (WSL2, macOS) → http://host.docker.internal:<port publié>
        · Docker natif (Linux)         → host.docker.internal n'existe pas sans « extra_hosts:
          host-gateway », que ce compose ne déclare pas : attacher le conteneur au réseau de la
-         forge et viser le nom de service avec son port interne, http://gitea:3000.
+         forge et viser le nom de service avec son port interne, $PROV_FORGE_INTERNAL_URL.
   2. Son adresse vue du navigateur  → FORGE_PUBLIC_URL=http://<adresse tapée>:<port>
      Celle des retours OAuth2 du deck. Elle défaute sur la précédente, et ce défaut n'est juste
      que si les deux observateurs voient la même adresse — sur un poste de travail, jamais.
@@ -569,14 +575,15 @@ EOF
 
 # ─── Défauts et dispatch ────────────────────────────────────────────────────────────────────────
 # les défauts viennent après load_conf : posés avant, ils masqueraient le fichier de conf du projet
-: "${LCARS_SSH_PORT:=127.0.0.1:2222}"
+: "${LCARS_SSH_PORT:=127.0.0.1:$PROV_SSH_PORT_DEFAULT}"
+: "${LCARS_LANDING_PORT_BIND:=127.0.0.1:$PROV_DECK_PORT_DEFAULT}"
 image_defaut() {
   if "$DOCKER" image inspect lcars-fleet:local >/dev/null 2>&1; then echo lcars-fleet:local
   else sed -nE 's/^[[:space:]]*image: "\$\{LCARS_IMAGE:-([^}]+)\}".*$/\1/p' "$COMPOSE_FILE" | head -n1
   fi
 }
 : "${LCARS_IMAGE:=$(image_defaut)}"
-export LCARS_SSH_PORT LCARS_IMAGE
+export LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE
 
 case "${1:-help}" in
   build)  shift; cmd_build "$@" ;;

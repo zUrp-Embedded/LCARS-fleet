@@ -288,9 +288,17 @@ PROVISION="$SCRIPT_DIR/deploy/provision"
   echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est la source."
   exit 1
 }
+[[ -r "$SCRIPT_DIR/deploy/installer-constants.env" ]] || {
+  echo "  ${R}constantes de l'installeur introuvables : $SCRIPT_DIR/deploy/installer-constants.env${N}"
+  echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est la source."
+  exit 1
+}
+# les constantes de l'installeur se lisent dans l'arbre, comme une donnée ; avant lui, seule l'aide en cite
+constante() { sed -n "s/^$1=//p" "$SCRIPT_DIR/deploy/installer-constants.env"; }
+RACINE="$(constante PROV_ROOT)"
 case "$PROVENANCE" in
   source)  SOURCE_LIGNE="clone git · branche $(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo inconnue) · commit $(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo inconnu)" ;;
-  kit)     SOURCE_LIGNE="archive (kit) · révision $(cat "$SCRIPT_DIR/.source-revision" 2>/dev/null || echo inconnue)" ;;
+  kit)     SOURCE_LIGNE="archive (kit) · révision $(cat "$SCRIPT_DIR/$(constante PROV_SOURCE_STAMP)" 2>/dev/null || echo inconnue)" ;;
   release) SOURCE_LIGNE="release $LCARS_DOOR_VERSION · kit dans $SCRIPT_DIR" ;;
 esac
 
@@ -344,7 +352,8 @@ case "$(fait docker)" in
           fi ;;
 esac
 
-OUTILS_REQUIS="git curl"; [[ "$MODE" != "workstation" ]] || OUTILS_REQUIS="git curl sudo"
+# jq lit l'API de la forge depuis l'hôte du conteneur ; dans ce système, 10-packages le pose
+OUTILS_REQUIS="git curl jq"; [[ "$MODE" != "workstation" ]] || OUTILS_REQUIS="git curl sudo"
 OUTILS_MANQUANTS=""
 for t in $OUTILS_REQUIS; do
   case "$(fait "$t")" in oui|root) ;; *) OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t" ;; esac
@@ -401,7 +410,7 @@ if [[ "$MODE" == "workstation" ]]; then
     wsl) ;;
     linux)
       [[ "$(fait consent)" == "env" ]] || stop \
-        "${R}Linux natif sans déclaration.${N} L'installation dans ce système possède la machine (/etc, /opt/lcars," \
+        "${R}Linux natif sans déclaration.${N} L'installation dans ce système possède la machine (/etc, $RACINE," \
         "des groupes, des comptes) et ne se désinstalle pas : elle est réservée à une machine dédiée." \
         "Pour la déclarer dédiée, à chaque passe :  LCARS_ALLOW_ANY_HOST=1 $PORTE_CMD --workstation" \
         "Sinon, le conteneur ne touche à rien :      $PORTE_CMD" ;;
@@ -465,10 +474,10 @@ if [[ "$MODE" == "container" ]]; then
 EOF
 else
   if [[ "$SUBSTRATE" == "wsl" ]]; then
-    MODIFIE="/etc/wsl.conf, /opt/lcars, un groupe système, des paquets apt"
+    MODIFIE="/etc/wsl.conf, $RACINE, un groupe système, des paquets apt"
     RETOUR="aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"
   else
-    MODIFIE="/opt/lcars, un groupe système, des paquets apt, docker-ce si aucun daemon ne répond"
+    MODIFIE="$RACINE, un groupe système, des paquets apt, docker-ce si aucun daemon ne répond"
     RETOUR="aucun désinstalleur : la machine se réinstalle"
   fi
   cat <<EOF

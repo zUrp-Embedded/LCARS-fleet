@@ -6,6 +6,7 @@
 # STATUS: témoins de 61-forge-structure — les préconditions, le roster dérivé de la release, la recette jouée sur une copie, le verdict lu dans la sortie de tofu
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -15,36 +16,37 @@ setup() {
   RACINE="$BATS_TEST_TMPDIR/racine"
   mkdir -p "$RACINE/deploy/lib" "$RACINE/runtime/services/forge-recipe/instance"
   cp "$BATS_TEST_DIRNAME"/../../lib/*.sh "$RACINE/deploy/lib/"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$BATS_TEST_DIRNAME/../../system.manifest" "$RACINE/deploy/"
   printf 'terraform {}\n' > "$RACINE/runtime/services/forge-recipe/versions.tf"
   printf 'terraform {}\n' > "$RACINE/runtime/services/forge-recipe/instance/versions.tf"
   mkdir -p "$RACINE/runtime/services/forge-recipe/.terraform"
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
-  export PROVISION_MODULE=61-forge-structure PROV_SUBSTRATE=linux PROV_AUTHORITY_USER=root
+  export PROVISION_MODULE=61-forge-structure PROV_SUBSTRATE=linux
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$PROV_TOKENS_DIR"
-  export PROV_MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"; printf 'tok\n' > "$PROV_MASTER_TOKEN_FILE"
-  export PROV_PREFIX="$BATS_TEST_TMPDIR/prefix"
-  mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin"; printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"; chmod 0755 "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/tofu"; mkdir -p "$LCARS_TOFU_DIR"; printf 'x\n' > "$LCARS_TOFU_DIR/tofurc"
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
+  decor_pose
+  TOKENS="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
+  MASTER="$TOKENS/forge-master.token"; printf 'tok\n' > "$MASTER"
+  PREFIX="$LCARS_DECOR_ROOT/opt/lcars/runtime"
+  mkdir -p "$PREFIX/rel/lcars_fleet/bin"; printf '#!/bin/sh\n' > "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"; chmod 0755 "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  TOFU_DIR="$LCARS_DECOR_ROOT/opt/lcars/tofu"; mkdir -p "$TOFU_DIR"; printf 'x\n' > "$TOFU_DIR/tofurc"
+  forge_double_start
+  forge_route GET /api/v1/version 200 '{"version":"1.24.0"}'
+  # sans forge fournie, la forge est celle du poste : la loopback au port choisi, celui de la forge locale
+  export PROV_FORGE_HOST_PORT="${FORGE_DOUBLE_URL##*:}"
+  POSTE="http://127.0.0.1:$PROV_FORGE_HOST_PORT"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export GESTE_ENV="$BATS_TEST_TMPDIR/geste.env"; : > "$GESTE_ENV"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN" "$BATS_TEST_TMPDIR/hors-path"; export PATH="$BIN:$PATH"
+  BIN="$DECOR_BIN"
   # tofu vit hors du PATH (sous apt, DPkg::Path n'a pas /usr/local/bin) ; un tofu et un mix du PATH sont des pièges
-  export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/hors-path/tofu"
-  cat > "$LCARS_TOFU_BIN" <<'EOF'
+  TOFU_BIN="$LCARS_DECOR_ROOT/usr/local/bin/tofu"
+  cat > "$TOFU_BIN" <<'EOF'
 #!/usr/bin/env bash
 echo "TOFU $PWD $*" >> "$CALLS"
 [[ -z "${STUB_INIT_KO:-}" ]] || { echo "init: provider introuvable dans le miroir" >&2; exit 1; }
 EOF
   printf '#!/usr/bin/env bash\necho "PIEGE tofu du PATH $*" >> "$CALLS"; exit 127\n' > "$BIN/tofu"
   printf '#!/usr/bin/env bash\necho "PIEGE mix $*" >> "$CALLS"; exit 127\n' > "$BIN/mix"
-  cat > "$BIN/curl" <<'EOF'
-#!/usr/bin/env bash
-[[ "${STUB_FORGE_UP:-1}" == 1 ]] && exit 0 || exit 7
-EOF
   cat > "$RACINE/deploy/lib/enroll-catalogue.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "ENROLL $* TOOL_EVAL=${LCARS_TOOL_EVAL:-}" >> "$CALLS"
@@ -64,43 +66,45 @@ case "${STUB_GESTE:-pose}" in
   echec)  echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
 esac
 EOF
-  chmod 0755 "$BIN"/* "$LCARS_TOFU_BIN" "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
+  chmod 0755 "$BIN"/* "$TOFU_BIN" "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"
 }
+
+teardown() { forge_double_stop; }
 
 mod() { run bash "$MOD" "$@"; }
 copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enroll.*' -o -name 'prov-recipe.*' -o -name 'prov-tofu.*' \); }
 
 @test "check : forge muette — un drift qui renvoie à 48, rien d'autre n'est sondé" {
-  STUB_FORGE_UP=0 mod check
+  PROV_FORGE_HOST_PORT=9 mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 61-forge-structure: forge muette (http://127.0.0.1:21000) — rien à structurer tant que 48-forge-host"* ]]
+  [[ "$output" == *"DRIFT 61-forge-structure: forge muette (http://127.0.0.1:9) — rien à structurer tant que 48-forge-host"* ]]
   [[ "$output" != *"release"* ]]
 }
 
 @test "check : forge vivante sans autorité, sans release, sans tofu — trois drifts qui nomment leur poseur" {
-  rm -f "$PROV_MASTER_TOKEN_FILE" "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet" "$LCARS_TOFU_BIN"
+  rm -f "$MASTER" "$PREFIX/rel/lcars_fleet/bin/lcars_fleet" "$TOFU_BIN"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"* ]]
-  [[ "$output" == *"release absente ($PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy ne l'a pas posée"* ]]
-  [[ "$output" == *"tofu absent ($LCARS_TOFU_BIN) — 46-tofu le pose"* ]]
+  [[ "$output" == *"aucune autorité de création ($MASTER) — 48-forge-host la minte"* ]]
+  [[ "$output" == *"release absente ($PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy ne l'a pas posée"* ]]
+  [[ "$output" == *"tofu absent ($TOFU_BIN) — 46-tofu le pose"* ]]
 }
 
 @test "check : tout en place — conforme, et la structure elle-même est renvoyée à 63" {
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"forge vivante"*"autorité de création présente"*"release posée"*"tofu présent"*"sondée compte par compte par 63-forge-tokens"* ]]
+  [[ "$output" == *"forge vivante ($POSTE)"*"autorité de création présente"*"release posée"*"tofu présent"*"sondée compte par compte par 63-forge-tokens"* ]]
 }
 
 @test "apply : forge muette — échec, aucun geste" {
-  STUB_FORGE_UP=0 mod apply
+  PROV_FORGE_HOST_PORT=9 mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  61-forge-structure: forge muette (http://127.0.0.1:21000)"* ]]
+  [[ "$output" == *"FAIL  61-forge-structure: forge muette (http://127.0.0.1:9)"* ]]
   [ ! -s "$CALLS" ]
 }
 
 @test "apply : sans autorité de création — échec qui nomme 48, aucun geste" {
-  rm -f "$PROV_MASTER_TOKEN_FILE"
+  rm -f "$MASTER"
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  61-forge-structure: aucune autorité de création"*"48-forge-host la minte"* ]]
@@ -108,50 +112,60 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
 }
 
 @test "apply : sans tofu — échec qui nomme 46, aucun geste" {
-  rm -f "$LCARS_TOFU_BIN"
+  rm -f "$TOFU_BIN"
   mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  61-forge-structure: tofu absent ($LCARS_TOFU_BIN) — 46-tofu le pose"* ]]
+  [[ "$output" == *"FAIL  61-forge-structure: tofu absent ($TOFU_BIN) — 46-tofu le pose"* ]]
   [ ! -s "$CALLS" ]
 }
 
 @test "apply : sans release posée — échec qui nomme 60 et le chemin, aucun geste" {
-  rm -f "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  rm -f "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
   mod apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"aucune release exécutable posée ($PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy n'a pas abouti"* ]]
+  [[ "$output" == *"aucune release exécutable posée ($PREFIX/rel/lcars_fleet/bin/lcars_fleet) — 60-deploy n'a pas abouti"* ]]
   [ ! -s "$CALLS" ]
 }
 
-@test "apply : le geste reçoit l'organisation, le dossier de travail tofu et les fichiers d'autorité que l'installeur a posés" {
-  export PROV_FORGE_ORG=flotte-temoin PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/travail-tofu"
-  export PROV_FORGE_SEED_FILE="$PROV_TOKENS_DIR/semence-temoin.pass"
+@test "apply : le geste reçoit l'organisation choisie, le dossier de travail tofu et les fichiers d'autorité des constantes" {
+  export PROV_FORGE_ORG=flotte-temoin
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qxF "LCARS_FORGE_ORG=flotte-temoin" "$GESTE_ENV"
-  grep -qxF "LCARS_CATALOGUES_WORK=$BATS_TEST_TMPDIR/travail-tofu" "$GESTE_ENV"
-  grep -qxF "LCARS_MASTER_TOKEN_FILE=$PROV_MASTER_TOKEN_FILE" "$GESTE_ENV"
-  grep -qxF "LCARS_FORGE_SEED_FILE=$PROV_TOKENS_DIR/semence-temoin.pass" "$GESTE_ENV"
+  grep -qxF "LCARS_CATALOGUES_WORK=$LCARS_DECOR_ROOT/opt/lcars/var/tofu" "$GESTE_ENV"
+  grep -qxF "LCARS_MASTER_TOKEN_FILE=$MASTER" "$GESTE_ENV"
+  grep -qxF "LCARS_FORGE_SEED_FILE=$TOKENS/forge-seed.pass" "$GESTE_ENV"
 }
 
-@test "apply : le roster est dérivé de la release sous l'humain en mode outil, déposé dans une copie de la recette initialisée hors-ligne, le geste reçoit la forge et l'autorité, les copies partent, la pose est comptée" {
+@test "apply : le roster est déposé dans une copie de la recette initialisée hors-ligne, le geste reçoit la forge et l'autorité, les copies partent, la pose est comptée" {
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "^ENROLL --tofu-dir $TMPDIR/prov-enroll\..* --release $PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet TOOL_EVAL=1$" "$CALLS"
   [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/ ]* init -input=false -no-color$" "$CALLS")" -eq 1 ]
   [ "$(grep -c "^TOFU $TMPDIR/prov-recipe\.[^/]*/instance init -input=false -no-color$" "$CALLS")" -eq 1 ]
   grep -q '^GESTE apply$' "$CALLS"
-  grep -q "^FORGE_BASE_URL=http://127.0.0.1:21000$" "$GESTE_ENV"
-  grep -q "^LCARS_PRIVATE_DIR=$PROV_TOKENS_DIR$" "$GESTE_ENV"
+  grep -q "^FORGE_BASE_URL=$POSTE$" "$GESTE_ENV"
+  grep -q "^LCARS_PRIVATE_DIR=$TOKENS$" "$GESTE_ENV"
   grep -q "^LCARS_RECIPE_DIR=$TMPDIR/prov-recipe\." "$GESTE_ENV"
   grep -q "^LCARS_DEMO_CATALOGUE=$RACINE/catalogues/web-demo$" "$GESTE_ENV"
-  grep -q "^TF_CLI_CONFIG_FILE=$LCARS_TOFU_DIR/tofurc$" "$GESTE_ENV"
+  grep -q "^TF_CLI_CONFIG_FILE=$TOFU_DIR/tofurc$" "$GESTE_ENV"
   grep -q '^recette: instance roles.auto.tfvars.json versions.tf $' "$GESTE_ENV"
   refute grep -q '^LCARS_BUILTIN_HUMAN=' "$GESTE_ENV"
   refute grep -q '^PIEGE' "$CALLS"
   [ -z "$(copies_restantes)" ]
   [ ! -e "$RACINE/runtime/services/forge-recipe/roles.auto.tfvars.json" ]
   [[ "$output" == *"POSÉ  61-forge-structure: structure de la forge posée — 63-forge-tokens peut minter les jetons de rôle"* ]]
+}
+
+@test "apply : le roster est dérivé de la release par enroll-catalogue.sh appelé nu — le mode outil est l'affaire du délégué" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "ENROLL --tofu-dir $TMPDIR/prov-enroll\.[^ ]* --release $PREFIX/rel/lcars_fleet/bin/lcars_fleet TOOL_EVAL=" "$CALLS"
+}
+
+@test "apply : une forge fournie est celle que le geste structure, son adresse sans barre finale" {
+  FORGE_BASE_URL="$FORGE_DOUBLE_URL/" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "FORGE_BASE_URL=$FORGE_DOUBLE_URL" "$GESTE_ENV"
 }
 
 @test "apply : une recette qui n'a rien bougé est conforme, rien n'est compté" {

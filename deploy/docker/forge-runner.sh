@@ -20,18 +20,20 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/provision-lib.sh
+. "$HERE/../lib/provision-lib.sh"
 # réseau et projet n'ont pas de défaut : un défaut qui viserait un autre déploiement enrôlerait le
 # runner à côté de sa forge, et la CI resterait muette sans une ligne pour le dire
-FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://gitea:3000" ; NETWORK=""
+FORGE_API="" ; TOKEN_FILE="" ; INSTANCE_URL="$PROV_FORGE_INTERNAL_URL" ; NETWORK=""
 PROJECT="" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
-LABELS="${LCARS_RUNNER_LABELS:-}"
+LABELS=""
 ACCEPT_GENERIC=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-api)    FORGE_API="${2:?}"; shift 2 ;;
     # les jetons arrivent par fichier : un argv se lit dans /proc par tout l'hôte
-    --admin-token-file) TOKEN="$(tr -d '[:space:]' < "${2:?}")"; shift 2 ;;
+    --admin-token-file) TOKEN_FILE="${2:?}"; shift 2 ;;
     --reg-token-file)   REG_GIVEN="$(tr -d '[:space:]' < "${2:?}")"; shift 2 ;;
     --instance-url) INSTANCE_URL="${2:?}"; shift 2 ;;
     --network)      NETWORK="${2:?}"; shift 2 ;;
@@ -42,21 +44,18 @@ while [[ $# -gt 0 ]]; do
     *) echo "forge-runner : option inconnue : $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "forge-runner : --forge-api et --admin-token-file (non vide) requis" >&2; exit 1; }
+[[ -n "$FORGE_API" && -n "$(read_token "$TOKEN_FILE")" ]] || { echo "forge-runner : --forge-api et --admin-token-file (non vide) requis" >&2; exit 1; }
 [[ -n "$NETWORK" && -n "$PROJECT" ]] || { echo "forge-runner : --network et --project requis (le réseau compose de la forge visée)" >&2; exit 1; }
-
-# le jeton passe à curl par sa config sur stdin : jamais en argv, que /proc expose à tout l'hôte
-forge_curl() { printf 'header = "Authorization: token %s"\n' "$TOKEN" | curl -K - "$@"; }
 
 say() { echo "[forge-runner] $*"; }
 
 check_labels() {
   if [[ -z "$LABELS" ]]; then
     [[ "$ACCEPT_GENERIC" -eq 1 ]] && { say "labels : défaut générique accepté (--accept-generic) — ce runner ne sait pas jouer mix gate"; return 0; }
-    cat >&2 <<'EOM'
+    cat >&2 <<EOM
 [forge-runner] REFUS : aucun --labels, donc le défaut de runner-compose.yml — un défaut subi, et un
 [forge-runner]   runner qui sert un label non voulu a l'air vert. Sorties :
-[forge-runner]     forge-runner.sh … --labels "shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
+[forge-runner]     forge-runner.sh … --labels "$PROV_RUNNER_LABELS"
 [forge-runner]     --accept-generic, pour un banc qui ne veut que la CI du modèle de projet (une décision).
 EOM
     exit 1
@@ -92,8 +91,10 @@ if [[ -n "${REG_GIVEN:-}" ]]; then
   REG="$REG_GIVEN"
   say "jeton d'enregistrement fourni (--reg-token-file), pas d'appel API"
 else
-  REG=$(forge_curl -s -m 10 -X POST "$FORGE_API/admin/actions/runners/registration-token" \
-        | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+  REG_BODY="$(mktemp)"
+  forge_api POST "$FORGE_API/admin/actions/runners/registration-token" "$REG_BODY" --token-file "$TOKEN_FILE" -m 10 >/dev/null || true
+  REG="$(jq -r '.token // empty' "$REG_BODY" 2>/dev/null || true)"
+  rm -f "$REG_BODY"
 fi
 [[ -n "$REG" ]] || {
   say "la forge n'a pas rendu de jeton d'enregistrement (portée du jeton ? --reg-token-file)"
@@ -136,11 +137,11 @@ printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_R
 RUNNER_ENV_DOWN="$GEN/runner-down.env"
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "$INSTANCE_URL" " " > "$RUNNER_ENV_DOWN"
 
-"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
+"$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
 pose_runner() {
-  "$DOCKER_BIN" compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start \
+  "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start \
     && "$DOCKER_BIN" cp "$GEN/config.yaml" "$PROJECT-act-1:/data/bench-config.yaml" \
-    && "$DOCKER_BIN" compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
+    && "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
 }
 pose_runner || { say "ÉCHEC : le runner ne se monte pas (compose ou copie de sa config, sortie au-dessus)"; exit 3; }
 say "runner lancé (projet $PROJECT, réseau $NETWORK, config copiée dans le volume)"
@@ -189,10 +190,9 @@ PROBE_HTTP=""
 for _ in $(seq 1 20); do
   sleep 3
   body="$(mktemp)"
-  PROBE_HTTP=$(forge_curl -s -m 5 -o "$body" -w '%{http_code}' \
-               "$FORGE_API/admin/actions/runners" 2>/dev/null || echo 000)
+  PROBE_HTTP="$(forge_api GET "$FORGE_API/admin/actions/runners" "$body" --token-file "$TOKEN_FILE" -m 5)" || true
   if [[ "$PROBE_HTTP" == "200" ]]; then
-    n=$(python3 -c "import json,sys;print(len(json.load(open('$body')).get('runners') or []))" 2>/dev/null || echo 0)
+    n="$(jq '.runners // [] | length' "$body" 2>/dev/null || echo 0)"
     rm -f "$body"
     [[ "${n:-0}" -ge 1 ]] && { SEEN=1; say "enregistré : la forge liste $n runner(s)"; break; }
   else
@@ -219,11 +219,10 @@ if [[ -n "$VERIFY_REPO" ]]; then
   # 20 min : le premier job servi à un runner neuf peut être le gate complet du dépôt lcars
   for _ in $(seq 1 200); do
     sleep 6
-    st=$(forge_curl -s -m 6 "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" \
-         | python3 -c "
-import json,sys
-d=json.load(sys.stdin); runs=d.get('workflow_runs') or []
-print(runs[0].get('status','') if runs else '')" 2>/dev/null || true)
+    body="$(mktemp)"
+    forge_api GET "$FORGE_API/repos/$VERIFY_REPO/actions/tasks" "$body" --token-file "$TOKEN_FILE" -m 6 >/dev/null || true
+    st="$(jq -r '(.workflow_runs // [])[0].status // empty' "$body" 2>/dev/null || true)"
+    rm -f "$body"
     case "$st" in
       success) ok=1; break ;;
       failure|cancelled) say "ÉCHEC : le job de vérification finit en $st"; exit 4 ;;

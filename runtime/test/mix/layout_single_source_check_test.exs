@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
   @moduledoc """
-  Synthetic-repository tests for platform, runtime, face and catalogue root checks.
+  Synthetic-repository tests for platform, runtime, face, catalogue root and secrets
+  directory checks.
   Layout declarations live under runtime; sibling deploy fixtures exercise scoped
   mirrors. Named exemptions, prefix boundaries and composed authorities are tested.
 
@@ -222,7 +223,7 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
          "D=\"${LCARS_DEMO_CATALOGUE:-#{shipped}/web-demo}\"\n" <>
            "I=\"${LCARS_CATALOGUES_DIR:-#{installed}}\"\n"},
         {"deploy/system.manifest", "dir #{installed} 0755 root root\n"},
-        {"deploy/lib/provision-lib.sh", ": \"${PROV_CATALOGUES_DIR:=#{installed}}\"\n"}
+        {"deploy/installer-constants.env", "PROV_CATALOGUES_DIR=#{installed}\n"}
       ]
     end
 
@@ -256,6 +257,29 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
       assert Enum.any?(ev, &(&1 =~ "system.manifest"))
     end
 
+    test "⚠ LA CONSTANTE DE L'INSTALLEUR QUI DERIVE est nommee — un defaut dans la lib n'en tient pas lieu" do
+      fichiers =
+        Enum.map(miroirs("/opt/lcars/catalogues", "/opt/lcars/var/catalogues"), fn
+          {"deploy/installer-constants.env", _} ->
+            {"deploy/installer-constants.env", "PROV_CATALOGUES_DIR=/opt/lcars/ailleurs\n"}
+
+          autre ->
+            autre
+        end)
+
+      root =
+        depot(
+          fichiers: [
+            {"deploy/lib/provision-lib.sh",
+             ": \"${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}\"\n"}
+            | fichiers
+          ]
+        )
+
+      assert %{status: :fail, evidence: ["../deploy/installer-constants.env"]} =
+               SingleSource.check_catalogue_roots_single_source(root)
+    end
+
     test "une autorite illisible fait ECHOUER, elle ne fait pas « rien a comparer »" do
       root =
         depot(
@@ -272,6 +296,42 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
                SingleSource.check_catalogue_roots_single_source(root)
 
       assert note =~ "nothing was compared"
+    end
+  end
+
+  describe "layout.private_dir_single_source — un repertoire de secrets, un seul chemin" do
+    @jetons "/opt/lcars/var/tokens"
+
+    defp porteurs(constante) do
+      [
+        {"runtime/lib/fleet/credentials/role_token.ex",
+         "defmodule Fleet.Credentials.RoleToken do\n  @default_dir \"#{@jetons}\"\nend\n"},
+        {"deploy/installer-constants.env",
+         "PROV_ROOT=/opt/lcars\nPROV_TOKENS_DIR=#{constante}\n"},
+        {"runtime/services/lib/module-protocol.sh", ": \"${LCARS_PRIVATE_DIR:=#{@jetons}}\"\n"},
+        {"deploy/system.manifest", "dir #{@jetons} 0710 lcars-authority:fleet any\n"}
+      ]
+    end
+
+    test "les trois porteurs d'accord et le manifeste qui cree le chemin → vert" do
+      root = depot(fichiers: porteurs(@jetons))
+
+      assert %{status: :pass, note: note} = SingleSource.check_private_dir_single_source(root)
+      assert note =~ "3 declaration(s) agree"
+    end
+
+    test "⚠ LA CONSTANTE DE L'INSTALLEUR QUI DERIVE est nommee — un defaut dans la lib n'en tient pas lieu" do
+      root =
+        depot(
+          fichiers: [
+            {"deploy/lib/provision-lib.sh", ": \"${PROV_TOKENS_DIR:=#{@jetons}}\"\n"},
+            {"deploy/accept", "PRIVATE_DIR=\"${LCARS_PRIVATE_DIR:-#{@jetons}}\"\n"}
+            | porteurs("/opt/lcars/var/ailleurs")
+          ]
+        )
+
+      assert %{status: :fail, note: note} = SingleSource.check_private_dir_single_source(root)
+      assert note =~ "installer-constants.env (the installer constant): /opt/lcars/var/ailleurs"
     end
   end
 end

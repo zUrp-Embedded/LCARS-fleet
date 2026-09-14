@@ -6,6 +6,7 @@
 # STATUS: témoins du runner — sélection par en-têtes, dispatch d'identité, codes de verdict, journal
 
 load refute
+load support/decor
 
 setup() {
   # rien de l'environnement du lanceur ne doit décider d'un cas : ni un port, ni une forge, ni un siège
@@ -17,7 +18,7 @@ setup() {
   MODULES="$SRC/modules.d"
   SANDBOX="$BATS_TEST_TMPDIR/prov"
   mkdir -p "$SANDBOX/lib" "$SANDBOX/modules.d"
-  cp "$SRC/provision" "$SANDBOX/provision"
+  cp "$SRC/provision" "$SRC/installer-constants.env" "$SRC/system.manifest" "$SANDBOX/"
   cp "$SRC/lib/provision-lib.sh" "$SRC/lib/provision-audit.sh" "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
@@ -25,7 +26,8 @@ setup() {
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 0700 "$XDG_RUNTIME_DIR"
-  export LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/install.journal"
+  decor_pose
+  JOURNAL="$LCARS_DECOR_ROOT/opt/lcars/var/install.journal"
 }
 
 stub_module() { # stub_module <NN-nom> <APPLY-ON> <CHECK-ON> <NEEDS> [variable du rc]
@@ -387,7 +389,8 @@ EOF
   [ "$status" -eq 0 ]
   run "$SANDBOX/provision" list --port-forge 80
   [ "$status" -eq 1 ]
-  [[ "$output" == *"--port-forge : 80 hors plage"*"lcars-system"* ]]
+  [[ "$output" == *"--port-forge : 80 hors plage"*"son compte de service, ne peut pas binder"* ]]
+  printf '%s\n' "$output" | refute_out 'lcars-system'
   run "$SANDBOX/provision" list --port-ssh pasunport
   [ "$status" -eq 1 ]
   [[ "$output" == *"--port-ssh : « pasunport » n'est pas un nombre"* ]]
@@ -408,7 +411,7 @@ EOF
   run "$SANDBOX/provision" apply --substrate wsl --port-deck 20997
   [ "$status" -eq 0 ]
   grep -qx "deck=20997" "$RUN_LOG"
-  grep -q "^params .*PROV_DECK_PORT=20997" "$LCARS_JOURNAL_FILE"
+  grep -q "^params .*PROV_DECK_PORT=20997" "$JOURNAL"
   : > "$RUN_LOG"
   run "$SANDBOX/provision" doctor --substrate wsl
   [ "$status" -eq 0 ]
@@ -419,16 +422,54 @@ EOF
   grep -qx "deck=20990" "$RUN_LOG"
 }
 
-@test "apply écrit le journal de la machine et additionne les inventaires apt des passes" {
-  lib_module 20-okstub 'p_ok "converge"'
-  printf 'apt_installed  curl git\nposed_at      2026-01-01T00:00:00Z\n' > "$LCARS_JOURNAL_FILE"
+@test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {
+  # un défaut écrit au journal deviendrait un choix : la passe suivante ne distinguerait plus l'opérateur de l'usine
+  lib_module 50-ports 'p_ok "ok"'
   run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 0 ]
-  grep -q "^substrate     wsl$" "$LCARS_JOURNAL_FILE"
-  grep -q "^modules       total=1 ok=1 drift=0 failed=0$" "$LCARS_JOURNAL_FILE"
-  grep -q "^apt_installed .*curl git" "$LCARS_JOURNAL_FILE"
-  [ "$(grep -c "^posed_at" "$LCARS_JOURNAL_FILE")" = "1" ]
-  refute grep -q "2026-01-01T00:00:00Z" "$LCARS_JOURNAL_FILE"
+  grep -qx 'params *' "$JOURNAL"
+  run "$SANDBOX/provision" apply --substrate wsl --port-deck 3000
+  [ "$status" -eq 0 ]
+  grep -qx 'params *PROV_DECK_PORT=3000' "$JOURNAL"
+  run "$SANDBOX/provision" apply --substrate wsl
+  [ "$status" -eq 0 ]
+  grep -qx 'params *PROV_DECK_PORT=3000' "$JOURNAL"
+  run "$SANDBOX/provision" apply --substrate wsl --port-deck "$(sed -n 's/^PROV_DECK_PORT_DEFAULT=//p' "$SRC/installer-constants.env")"
+  [ "$status" -eq 0 ]
+  grep -qx 'params *' "$JOURNAL"
+}
+
+@test "apply écrit le journal de la machine sous le décor et additionne les inventaires apt des passes" {
+  lib_module 20-okstub 'p_ok "converge"'
+  mkdir -p "$(dirname "$JOURNAL")"
+  printf 'apt_installed  curl git\nposed_at      2026-01-01T00:00:00Z\n' > "$JOURNAL"
+  run "$SANDBOX/provision" apply --substrate wsl
+  [ "$status" -eq 0 ]
+  grep -q "^substrate     wsl$" "$JOURNAL"
+  grep -q "^modules       total=1 ok=1 drift=0 failed=0$" "$JOURNAL"
+  grep -q "^apt_installed .*curl git" "$JOURNAL"
+  [ "$(grep -c "^posed_at" "$JOURNAL")" = "1" ]
+  refute grep -q "2026-01-01T00:00:00Z" "$JOURNAL"
+}
+
+@test "en root sous un décor, le runner refuse avant tout module, et dit de retirer LCARS_DECOR_ROOT" {
+  # sous root, le décor déplacerait les chemins et laisserait useradd, apt, systemctl et docker agir sur la machine
+  stub_module 10-rootstub "wsl linux" "wsl linux" root
+  run unshare -Ur "$SANDBOX/provision" doctor --substrate wsl
+  [ "$status" -eq 1 ]
+  [ ! -s "$RUN_LOG" ]
+  [[ "$output" == *"LCARS_DECOR_ROOT est posée et le runner tourne en root"*"Retirer LCARS_DECOR_ROOT de l'environnement"* ]]
+  run env -u LCARS_DECOR_ROOT unshare -Ur "$SANDBOX/provision" list --substrate wsl
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"10-rootstub"* ]]
+}
+
+@test "un corpus sans le fichier des constantes est refusé, et le fichier est nommé" {
+  stub_module 10-x any any human
+  rm "$SANDBOX/installer-constants.env"
+  run "$SANDBOX/provision" list --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"constantes de l'installeur illisibles : $SANDBOX/lib/../installer-constants.env"* ]]
 }
 
 @test "le fd du verrou n'est pas légué au module" {

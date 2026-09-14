@@ -43,3 +43,10 @@ un invariant que le code ne peut pas tenir seul. Une assertion par ligne : dans 
 b` n'échoue que si `b` échoue (invariant I22 de `idiom_walls.bats`). Les doublures notent leur argv dans
 un fichier et rendent vite ; un secret ne passe jamais en argv. `refute.bash` est à la racine ; les
 sous-dossiers font `load ../refute`.
+
+Un témoin ne lit jamais les fichiers de la machine qui joue la porte : il pose `LCARS_DECOR_ROOT`,
+sous lequel la lib lit tout chemin de `deploy/installer-constants.env` et tout chemin système
+(`prov_decor`), et il double les binaires par un PATH de décor. `support/decor.bash` pose ce décor
+(`decor_pose`), lance une forge HTTP locale (`forge_double_start`, `support/forge_double.py`) pour
+les gestes qui parlent à l'API, et note l'argv et l'environnement des commandes qu'un secret pourrait
+traverser (`espion_enfants`) ; `support/` porte l'outillage, pas des témoins.

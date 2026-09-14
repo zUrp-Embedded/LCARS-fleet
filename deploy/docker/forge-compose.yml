@@ -8,8 +8,8 @@
 # projet compose, ses volumes n'appartiennent qu'à elle et aucune commande de `container` ne les
 # atteint.
 #
-#   docker compose -f deploy/docker/forge-compose.yml -p <projet>-forge up -d
-#   docker compose -f deploy/docker/forge-compose.yml -p <projet>-forge down -v
+#   docker compose --env-file deploy/installer-constants.env -f deploy/docker/forge-compose.yml -p <projet>-forge up -d
+#   docker compose --env-file deploy/installer-constants.env -f deploy/docker/forge-compose.yml -p <projet>-forge down -v
 #
 # ROOT_URL veut un port nu et `ports` une adresse de bind complète : une seule variable pour les
 # deux donnerait `http://127.0.0.1:127.0.0.1:3301/` et Gitea refuserait de démarrer.
@@ -22,7 +22,7 @@ services:
     image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
     hostname: devforge
     environment:
-      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://gitea:3000/}"
+      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent — les constantes de l'installeur, par --env-file}/}"
       GITEA__server__HTTP_PORT: "3000"
       # sans ce verrou, une forge vierge sert l'assistant /install : `/` répond 200, l'API 404, rien n'est automatisable
       GITEA__security__INSTALL_LOCK: "true"

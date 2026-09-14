@@ -6,6 +6,7 @@
 # STATUS: témoins du délégué du poste — escalade, canal, kit, provisionnement, acceptation, sortie
 
 load refute
+load support/decor
 
 setup() {
   local _v
@@ -14,11 +15,20 @@ setup() {
   unset SUDO_USER
   SRC="$BATS_TEST_DIRNAME/../workstation"
   [ -f "$SRC" ]
+  VRAI_CURL="$(command -v curl)"
+  decor_pose
+}
+
+teardown() { forge_double_stop; }
+
+deploy_copie() { # deploy_copie <dossier deploy> — le délégué, sa lib et les données qu'elle lit
+  cp "$SRC" "$1/workstation"; cp -a "$BATS_TEST_DIRNAME/../lib" "$1/lib"
+  cp "$BATS_TEST_DIRNAME/../installer-constants.env" "$BATS_TEST_DIRNAME/../system.manifest" "$1/"
 }
 
 arbre() { # arbre <faits…> — le deploy/ factice ; les faits sont ceux que provision doctor rendra
   local d="$BATS_TEST_TMPDIR/arbre/deploy"; rm -rf "$BATS_TEST_TMPDIR/arbre"; mkdir -p "$d"
-  cp "$SRC" "$d/workstation"; cp -a "$BATS_TEST_DIRNAME/../lib" "$d/lib"
+  deploy_copie "$d"
   { echo '#!/usr/bin/env bash'
     echo 'echo "PROVISION:$*" >> "${TRACE:?}"'
     echo 'if [[ "$1" == apply ]]; then [[ "$*" == *--only* ]] || exit "${PROVISION_RC:-0}"; exit 0; fi'
@@ -38,7 +48,6 @@ arbre() { # arbre <faits…> — le deploy/ factice ; les faits sont ceux que pr
   export TRACE="$BATS_TEST_TMPDIR/trace"; : > "$TRACE"
   export PATH="$BINDIR:$PATH"
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   WS="$d/workstation"
 }
@@ -48,7 +57,7 @@ kit() { # kit <nom> [--sans-sha256|--sha256-faux] — un kit.tar.gz (lcars_insta
   local st="$BATS_TEST_TMPDIR/stage-$nom"
   mkdir -p "$st/lcars_install/deploy"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
-  cp "$SRC" "$st/lcars_install/deploy/workstation"; cp -a "$BATS_TEST_DIRNAME/../lib" "$st/lcars_install/deploy/lib"
+  deploy_copie "$st/lcars_install/deploy"
   { echo '#!/usr/bin/env bash'
     echo 'echo "KIT-PROVISION:$*" >> "${TRACE:?}"'
     echo '[[ -z "${PROV_FACTS_FILE:-}" || -z "${KIT_FACTS:-}" ]] || printf "%s\n" "$KIT_FACTS" > "$PROV_FACTS_FILE"'
@@ -262,26 +271,25 @@ root() {
   [[ "$output" != *"wsl --shutdown"* ]]
 }
 
-banc() { # banc — le décor du contrat de banc : getent, chpasswd et curl doublés, adresse et jeton de la forge posés
+banc() { # banc [code du PATCH] — le décor du contrat de banc : getent et chpasswd doublés, curl noté, la forge locale, son adresse et le jeton master
   local hroot="$BATS_TEST_TMPDIR/hroot"; mkdir -p "$hroot"
   printf '#!/usr/bin/env bash\n[[ "$1" == passwd ]] && printf "%%s:x:0:0::%s:/bin/bash\\n" "$2"\nexit 0\n' "$hroot" > "$BINDIR/getent"
   printf '#!/usr/bin/env bash\ncat >> "%s"\n' "$TRACE" > "$BINDIR/chpasswd"
+  # un curl qui note son argv puis joue le vrai : un secret passé en argv s'y lirait
   cat > "$BINDIR/curl" <<EOF
 #!/usr/bin/env bash
-cfg=""; for a in "\$@"; do [[ "\$a" == "-K" ]] && cfg="\$(cat)"; done
-url="\${@: -1}"
-echo "CURL:\$* | \$(tr '\n' ' ' <<<"\$cfg")" >> "$TRACE"
-case "\$url" in
-  */api/v1/admin/users/*)   [[ " \$* " == *" -w "* ]] && printf '%s' "\${STUB_PATCH_CODE:-200}"; exit 0 ;;
-  */api/v1/users/*/tokens)  printf '{"sha1":"OP-TOKEN"}'; exit 0 ;;
-  */api/v1/users/*)         printf '{"is_admin":true}'; exit 0 ;;
-esac
-exit 0
+printf '%s\n' "\$*" >> '$BATS_TEST_TMPDIR/curl.argv'
+exec '$VRAI_CURL' "\$@"
 EOF
   chmod 0755 "$BINDIR/getent" "$BINDIR/chpasswd" "$BINDIR/curl"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens" PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tokens/forge-master.token"
-  mkdir -p "$PROV_TOKENS_DIR"
-  echo "http://127.0.0.1:20090" > "$PROV_TOKENS_DIR/forge.url"; echo "tok-master" > "$PROV_MASTER_TOKEN_FILE"
+  [[ -n "${FORGE_DOUBLE_PID:-}" ]] || forge_double_start
+  : > "$FORGE_DOUBLE_DIR/routes"
+  forge_route PATCH /api/v1/admin/users/root "${1:-200}" '{}'
+  forge_route GET /api/v1/users/root 200 '{"is_admin":true}'
+  forge_route GET /api/v1/user 200 '{"login":"root"}'
+  forge_route POST /api/v1/users/root/tokens 201 '{"sha1":"OP-TOKEN"}'
+  local tokens="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
+  echo "$FORGE_DOUBLE_URL" > "$tokens/forge.url"; echo "tok-master" > "$tokens/forge-master.token"
   HROOT="$hroot"
 }
 
@@ -291,8 +299,11 @@ EOF
   LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root LCARS_CREDS_SRC="$BATS_TEST_TMPDIR/absent.json" SUDO_USER=root root
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx 'root:toto32toto32' "$TRACE"
-  grep -q 'admin/users/root | header = "Authorization: token tok-master".*"password\\":\\"toto32toto32\\".*"admin\\":true' "$TRACE"
-  refute grep -qE 'CURL:[^|]*(tok-master|toto32toto32)' "$TRACE"
+  [ "$(forge_requests 'select(.method == "PATCH") | .auth')" = '"token tok-master"' ]
+  [ "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | [.password, .admin] | @csv')" = '"\"toto32toto32\",true"' ]
+  [ "$(forge_requests 'select(.method == "POST") | .auth')" = '"basic root:toto32toto32"' ]
+  [ -s "$BATS_TEST_TMPDIR/curl.argv" ]
+  refute grep -qE 'tok-master|toto32toto32' "$BATS_TEST_TMPDIR/curl.argv"
   [ "$(cat "$HROOT/.gitea_token")" = "OP-TOKEN" ]
   [ "$(stat -c %a "$HROOT/.gitea_token")" = "600" ]
   [[ "$output" == *"banc : mot de passe unix posé sur « root »"*"« root » sur la forge — mot de passe de banc, site-admin, jeton opérateur"*"creds claude non posées chez « root »"*"n'en a pas"*"/login"* ]]
@@ -311,9 +322,9 @@ EOF
   LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc : « root » n'existe pas encore sur cette machine"* ]]
-  refute grep -q 'CURL:' "$TRACE"
-  banc
-  STUB_PATCH_CODE=403 LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
+  [ ! -s "$FORGE_DOUBLE_DIR/requests.jsonl" ]
+  banc 403
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=root root
   [ "$status" -eq 0 ]
   [[ "$output" == *"refuse le compte « root » (HTTP 403)"*"« root » non semé sur la forge"* ]]
   [ ! -e "$HROOT/.gitea_token" ]
@@ -325,7 +336,8 @@ EOF
   LCARS_BUILTIN_HUMAN=root root
   [ "$status" -eq 0 ]
   [[ "$output" != *"banc :"* ]]
-  refute grep -q 'CURL:\|toto32toto32' "$TRACE"
+  [ ! -s "$FORGE_DOUBLE_DIR/requests.jsonl" ]
+  refute grep -q 'toto32toto32' "$TRACE"
 }
 
 # ─── le kit ─────────────────────────────────────────────────────────────────────────────────────

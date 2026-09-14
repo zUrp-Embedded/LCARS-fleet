@@ -20,6 +20,8 @@
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
+# shellcheck source=lib/provision-lib.sh
+. deploy/lib/provision-lib.sh
 
 PUBLISH=0
 IMAGE=1
@@ -116,7 +118,7 @@ mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive en échec"
 _rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
   || die "révision indéterminable — le paquet serait intraçable"
-printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
+printf '%s\n' "$_rev" > "$STAGE/$ROOT/$PROV_SOURCE_STAMP"
 say "révision estampillée : $_rev"
 mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
 cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
@@ -140,7 +142,8 @@ for _f in "$OUT" "${OUT}.sha256"; do
   [[ -f "$_f" ]] || continue
   ln -f "$_f" "$DIST/$(basename "$_f")"
 done
-for _f in deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json; do
+# le compose lit les constantes de l'installeur : elles voyagent à côté de lui
+for _f in deploy/docker/docker-compose.yml deploy/docker/lcars-hardened-seccomp.json deploy/installer-constants.env; do
   [[ -f "$_f" ]] || die "artefact de la version introuvable : $_f"
   cp -f "$_f" "$DIST/$(basename "$_f")"
 done
@@ -162,8 +165,6 @@ say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) f
 # l'image : le kit posé par les mêmes modules dans un conteneur (provision apply puis doctor, stages du Dockerfile)
 IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
 if [[ "$IMAGE" -eq 1 ]]; then
-  # shellcheck source=lib/docker-endpoint.sh
-  . deploy/lib/docker-endpoint.sh
   docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
   say "image → $IMAGE_NAME:$TAG (le kit posé par les modules, puis leur doctor)…"
   "$PROV_DOCKER_BIN" build \
@@ -190,7 +191,10 @@ _tok_state="absent"
 [[ -n "$TOKEN" ]] && _tok_state="trouvé"
 say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 [[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (portées write:repository + write:package)"
-FP_TOKEN="$TOKEN" fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$(git rev-parse HEAD)" \
+# la publication lit le jeton dans un fichier : 0600 dans l'étage, retiré avec lui à la sortie
+export FP_TOKEN_FILE="$STAGE/.jeton-de-publication"
+( umask 077; printf '%s\n' "$TOKEN" > "$FP_TOKEN_FILE" )
+fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$(git rev-parse HEAD)" \
   || die "publication refusée avant tout envoi — voir ci-dessus"
 if [[ "$IMAGE" -eq 1 ]]; then
   [[ -n "$IMAGE_REMOTE" ]] || die "--publish : l'image n'a pas de nom de registre (forge ou owner indéterminés à la génération de l'installeur)"
@@ -210,6 +214,6 @@ if [[ "$IMAGE" -eq 1 ]]; then
   say "image publiée : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
-FP_TOKEN="$TOKEN" FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
+FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" \
   || die "publication interrompue — voir ci-dessus"
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

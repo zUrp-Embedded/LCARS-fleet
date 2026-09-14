@@ -85,7 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
-    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
+    constants_path = Path.expand("../deploy/installer-constants.env", root)
 
     # Absence of deploy skips both Terraform and deploy lists, even though forge.tf is in-tree.
     # A present tree with unreadable anchors fails; the token-minter list is always required.
@@ -108,11 +108,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
            "its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
-         read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
-         "add/remove the role in PROV_ROLES (the floor the workstation installer hands the " <>
-           "token minter as LCARS_ROLES; the minter adds the release roster and the installed " <>
-           "catalogues' rosters, and the container passes no floor)"}
+        {"installer-constants.env PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
+         read_list(constants_path, ~r/^PROV_ROLES=(.*)$/m, :plain),
+         "add/remove the role in PROV_ROLES of deploy/installer-constants.env (the floor the " <>
+           "workstation installer hands the token minter as LCARS_ROLES; the minter adds the " <>
+           "release roster and the installed catalogues' rosters, and the container passes no " <>
+           "floor)"}
       ]
 
     {lists, skipped} = split_out_of_scope(lists)
@@ -362,10 +363,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Container init needs zones before provisioning runs; native provisioning carries its own table.
-  # Read only mode-2775 rows, excluding other provisioned directories.
+  # Read only mode-2775 rows, excluding other provisioned directories. A row names its system path
+  # through `$(prov_decor <path>)`; the canonical path is its argument.
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
-         [_ | _] = rows <- Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
+         [_ | _] = rows <-
+           Regex.scan(~r/^\s*"\$\(prov_decor\s+"?(\/[^"\s)]+)"?\)\s+2775\s/m, content) do
       rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
     else
       _ -> nil
@@ -472,17 +475,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Compare Layout literals with CLI and provisioning shell defaults, excluding env overrides.
-  # No deploy tree skips its mirror; a present tree with a missing anchor fails.
+  # Compare Layout literals with CLI shell defaults and the installer constant, excluding env
+  # overrides. No deploy tree skips its mirror; a present tree with a missing anchor fails.
   @doc false
   @spec check_catalogue_paths_locked(String.t()) :: Support.result()
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
-    lib = "../deploy/lib/provision-lib.sh"
+    constants = "../deploy/installer-constants.env"
     layout_src = read_or_empty(root, layout)
     cli_src = read_or_empty(root, cli)
-    lib_src = read_or_empty(root, lib)
+    constants_src = read_or_empty(root, constants)
 
     # Read declared path literals so this comparison does not depend on loaded runtime values.
     attrs =
@@ -501,29 +504,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         }
       end
 
-    # Shell assignment (:=) and fallback (:-) carry the same default value.
     deploy? = File.dir?(Path.expand("../deploy", root))
 
     sources =
-      [{cli, cli_src, expected || %{}}] ++
-        if deploy?, do: [{lib, lib_src, lib_expected(expected)}], else: []
+      [{cli, &shell_default(cli_src, &1), expected || %{}}] ++
+        if deploy?,
+          do: [{constants, &installer_constant(constants_src, &1), lib_expected(expected)}],
+          else: []
 
     mismatches =
-      for {file, src, wanted} <- sources,
+      for {file, read, wanted} <- sources,
           {var, want} <- wanted,
-          got = resolved_default(src, var),
+          got = read.(var),
           got != want,
-          do: "#{var}: #{file} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
+          do: "#{var}: #{file} says #{inspect(got)}, #{layout} says #{inspect(want)}"
 
     missing =
-      for {file, src, wanted} <- sources,
+      for {file, read, wanted} <- sources,
           {var, _} <- wanted,
-          is_nil(shell_default(src, var)),
+          is_nil(read.(var)),
           do: "#{var} (#{file})"
 
     measured_verdict("catalogue.install_paths_locked", %{
       remediation:
-        "make bin/lcars and deploy/lib/provision-lib.sh agree with Fleet.Layout (@platform_root, " <>
+        "make bin/lcars and deploy/installer-constants.env agree with Fleet.Layout (@platform_root, " <>
           "@catalogues_dirname, @installed_catalogues_root) — provisioning that converges a " <>
           "directory the runtime does not read reports every catalogue installed and serves none",
       broken:
@@ -534,16 +538,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         if(missing == [],
           do: Enum.sort(mismatches),
           else: [
-            "no shell default for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
+            "no declaration for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
               "the path"
           ]
         ),
       note:
         "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}" <>
           if(deploy?,
-            do: " and #{lib}",
+            do: " and #{constants}",
             else:
-              " · #{lib} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
+              " · #{constants} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
           )
     })
   end
@@ -564,6 +568,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
+  # Shell assignment (:=) and fallback (:-) carry the same default value.
   defp shell_default(source, var) do
     case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
       [_, default] -> default
@@ -571,13 +576,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Le defaut, RESOLU quand il est derive : `$PROV_ROOT/var/catalogues` vaut ce que la racine vaut,
-  # et la racine est ecrite UNE fois (`PROV_ROOT_CANON`, lot 0). Une declaration derivee est une
-  # declaration, pas un desaccord — `Support.shell_defaults/1`. Un litteral se resout a lui-meme.
-  defp resolved_default(source, var) do
-    case shell_default(source, var) do
+  # La lib lit ce fichier comme une donnée : la valeur se compare telle qu'écrite, sans expansion.
+  defp installer_constant(source, var) do
+    case Regex.run(~r/^#{var}=(.*)$/m, source) do
+      [_, value] -> value
       nil -> nil
-      raw -> Support.resolve_shell(Support.shell_defaults(source), raw)
     end
   end
 end

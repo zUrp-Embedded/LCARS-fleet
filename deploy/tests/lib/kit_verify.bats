@@ -9,33 +9,36 @@
 setup() {
   LIB="$BATS_TEST_DIRNAME/../../lib/kit-verify.sh"
   [ -f "$LIB" ]
-  K="$BATS_TEST_TMPDIR/kit"
+  # la lib se joue en sous-shell, seule : pack.sh la source sans que rien ne garantisse provision-lib avant elle
+  LIBS=". '$LIB'"
   local D="$BATS_TEST_DIRNAME/../.."
+  STAMP="$(sed -n 's/^PROV_SOURCE_STAMP=//p' "$D/installer-constants.env")"
+  [ -n "$STAMP" ]
+  K="$BATS_TEST_TMPDIR/kit"
   mkdir -p "$K/deploy/modules.d" "$K/runtime/etc" "$K/runtime/bin" "$K/runtime/services" \
            "$K/runtime/_build/prod/rel/lcars_fleet/bin" "$K/assets/github.io/dist" \
            "$K/assets/avatars" "$K/assets/favicon"
-  cp "$D/system.manifest" "$K/deploy/system.manifest"
+  cp "$D/system.manifest" "$D/installer-constants.env" "$K/deploy/"
   cp "$D/modules.d/62-runtime-helpers.sh" "$K/deploy/modules.d/"
   cp "$D/../runtime/etc/release.manifest" "$K/runtime/etc/release.manifest"
   cp "$D/../runtime/etc/fleet.env.template" "$K/runtime/etc/fleet.env.template"
-  echo deadbeef > "$K/.source-revision"
+  echo deadbeef > "$K/$STAMP"
   printf '#!/bin/sh\n' > "$K/runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
   chmod +x "$K/runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
   printf '<html></html>' > "$K/assets/github.io/dist/index.html"
   local n
   while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/bin/$n"; done \
     < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$K/runtime/etc/release.manifest")
-  # la lib se joue en sous-shell : un « . "$LIB" » à chemin calculé serait un SC1090 que le plancher du gate refuse
   while read -r n; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \
-    < <(bash -c ". '$LIB'; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" || true)
+    < <(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" || true)
   while read -r n _; do [[ -n "$n" ]] && : > "$K/runtime/services/$n"; done \
-    < <(bash -c ". '$LIB'; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' DATA" || true)
+    < <(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' DATA" || true)
   : > "$K/runtime/bin/lcars-toolchain-converge"; : > "$K/runtime/bin/lcars-authority-ask"
   : > "$K/runtime/services/lcars.bashrc"
 }
 
 REL_KIT=runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet
-verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
+verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
 
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   head -6 "$LIB" | grep -q '^# SOURCE:'
@@ -49,11 +52,32 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
   [ "$status" -eq 0 ] || { echo "un kit COMPLET est refuse :"; echo "$output"; return 1; }
 }
 
-@test "KIT : sans .source-revision, il est REFUSE — l'install se croirait SOURCE" {
-  rm -f "$K/.source-revision"
+@test "KIT : sans son tampon de révision, il est refusé en le nommant — l'install se croirait source" {
+  rm -f "$K/$STAMP"
   verifie
-  [ "$status" -ne 0 ] || { echo "un kit sans .source-revision est accepte"; return 1; }
-  [[ "$output" == *"source-revision"* ]] || { echo "le manque n'est pas nomme : $output"; return 1; }
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$STAMP absent"* ]]
+}
+
+@test "KIT : le nom du tampon se lit dans les constantes du kit — un kit qui en déclare un autre est refusé sur celui-là" {
+  sed "s/^PROV_SOURCE_STAMP=.*/PROV_SOURCE_STAMP=.tampon-du-kit/" "$BATS_TEST_DIRNAME/../../installer-constants.env" > "$K/deploy/installer-constants.env"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *".tampon-du-kit absent"* ]]
+}
+
+@test "KIT : sans le fichier des constantes, ce n'est pas un kit, et le refus le nomme" {
+  rm -f "$K/deploy/installer-constants.env"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"le kit n'a pas deploy/installer-constants.env — ce n'est pas un kit"* ]]
+}
+
+@test "KIT : des constantes sans PROV_SOURCE_STAMP sont un refus nommé, jamais une vérification vide" {
+  grep -v '^PROV_SOURCE_STAMP=' "$BATS_TEST_DIRNAME/../../installer-constants.env" > "$K/deploy/installer-constants.env"
+  verifie
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ne déclare pas PROV_SOURCE_STAMP"* ]]
 }
 
 @test "KIT : sans la release batie, il est REFUSE — git archive ne l'emporte pas" {
@@ -72,7 +96,7 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
 
 @test "KIT : un bin que release.manifest NOMME et qui manque est vu, et NOMME" {
   local premier; premier="$(awk 'NF && $1 !~ /^#/ { print $1; exit }' "$K/runtime/etc/release.manifest")"
-  [ -n "$premier" ] || skip "release.manifest est vide"
+  [ -n "$premier" ]
   rm -f "$K/runtime/bin/$premier"
   verifie
   [ "$status" -ne 0 ] || { echo "un bin declare et absent est accepte"; return 1; }
@@ -81,7 +105,7 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
 
 @test "KIT : un auxiliaire que 62-runtime-helpers EMBARQUE et qui manque est vu, et NOMME" {
   local premier
-  premier="$(bash -c ". '$LIB'; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" | head -1)"
+  premier="$(bash -c "$LIBS; kv_tableau '$K/deploy/modules.d/62-runtime-helpers.sh' HELPERS" | head -1)"
   [ -n "$premier" ]
   rm -f "$K/runtime/services/$premier"
   verifie
@@ -119,7 +143,7 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
 
 @test "kv_tableau : une liste sur une ligne se lit seule, le code qui la suit n'est pas exécuté" {
   printf 'HELPERS=(a b)\necho EFFET-DE-BORD\nDATA=(\n  "c d"\n)\n' > "$BATS_TEST_TMPDIR/mod.sh"
-  run bash -c ". '$LIB'; kv_tableau '$BATS_TEST_TMPDIR/mod.sh' HELPERS"
+  run bash -c "$LIBS; kv_tableau '$BATS_TEST_TMPDIR/mod.sh' HELPERS"
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'a\nb')" ]
 }
@@ -140,7 +164,7 @@ verifie() { run bash -c ". '$LIB'; kit_verifie '$K' '$REL_KIT'"; }
 }
 
 @test "KIT : le refus DIT que le tar n'a pas ete scelle, et ou chercher" {
-  rm -f "$K/.source-revision"
+  rm -f "$K/$STAMP"
   verifie
   [[ "$output" == *"tar"* ]] || { echo "le refus ne dit pas ce qui n'a pas eu lieu : $output"; return 1; }
   [[ "$output" == *"listes"* ]] || { echo "le refus ne dit pas ou chercher : $output"; return 1; }

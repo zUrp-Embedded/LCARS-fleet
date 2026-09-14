@@ -6,12 +6,27 @@
 # STATUS: bats tests for deploy/container config|status — la conf de l'instance vit COTE HOTE, le verdict se lit de l'hote
 
 load refute
+load support/decor
 
 setup() {
+  decor_pose
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  SRC="$REPO/deploy/container"
+  # un arbre dont les constantes portent des ports et des noms de secrets que rien d'autre n'écrit
+  ARBRE="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$ARBRE/deploy/docker" "$ARBRE/deploy/lib"
+  cp "$REPO/deploy/container" "$ARBRE/deploy/"
+  cp "$REPO/deploy/lib/provision-lib.sh" "$REPO/deploy/lib/docker-endpoint.sh" "$REPO/deploy/lib/store.sh" "$ARBRE/deploy/lib/"
+  cp "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" "$ARBRE/deploy/docker/"
+  CONSTANTES="$ARBRE/deploy/installer-constants.env"
+  { grep -vE '^(PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_MASTER_TOKEN_FILE|PROV_FORGE_SEED_FILE)=' "$REPO/deploy/installer-constants.env"
+    printf '%s\n' PROV_SSH_PORT_DEFAULT=4222 PROV_DECK_PORT_DEFAULT=4999 \
+      PROV_MASTER_TOKEN_FILE=/opt/lcars/var/tokens/maitre-temoin.token PROV_FORGE_SEED_FILE=/opt/lcars/var/tokens/graine-temoin.pass
+  } > "$CONSTANTES"
+  SRC="$ARBRE/deploy/container"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"; : > "$CALLS"
+  # le up émis est relu par compose lui-même, sans daemon : son rendu JSON est gardé
+  local real_docker; real_docker="$(command -v docker)"
   cat > "$BINDIR/docker" <<EOS
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
@@ -19,7 +34,14 @@ case "\$1 \$2" in
   "compose version") exit 0 ;;
 esac
 if [[ "\$*" == *" ps -q lcars"* ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
-if [[ "\$*" == *" up -d"* ]]; then printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"; printf '%s %s %s\n' "\${FORGE_BASE_URL-}" "\${LCARS_ADMIRAL-}" "\${LCARS_CONTAINER_SECRETS-}" > "$BATS_TEST_TMPDIR/env.seen"; exit 0; fi
+if [[ "\$*" == *" up -d"* ]]; then
+  printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"
+  printf '%s %s\n' "\${FORGE_BASE_URL-}" "\${LCARS_ADMIRAL-}" > "$BATS_TEST_TMPDIR/env.seen"
+  env | grep -E '^(LCARS_SSH_PORT|LCARS_LANDING_PORT_BIND)=' | sort > "$BATS_TEST_TMPDIR/binds.seen"
+  a=("\$@"); n=0; while [[ "\${a[\$n]}" != up ]]; do n=\$((n + 1)); done
+  DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" "$real_docker" "\${a[@]:0:\$n}" config --format json > "$BATS_TEST_TMPDIR/rendu.json" 2>&1
+  exit 0
+fi
 if [[ "\$1" == inspect ]]; then
   case "\$3" in
     *State.Status*)   echo "\${STUB_STATE:-running}" ;;
@@ -49,6 +71,32 @@ EOS
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
 }
 
+@test "chaque appel compose de container lit les constantes de l'installeur" {
+  export STUB_IDS=c0ffee STUB_PROV=0
+  FORGE_ADMIN_TOKEN=tok LCARS_ADMIRAL=zoe run bash "$SRC" config
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run bash "$SRC" status
+  LCARS_UP_VERDICT_TIMEOUT=5 run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run bash "$SRC" down
+  [ "$status" -eq 0 ]
+  local ligne f n=0
+  while IFS= read -r ligne; do
+    n=$((n + 1))
+    [[ "$ligne" == "compose --env-file "* ]] || { echo "sans --env-file : $ligne"; return 1; }
+    f="${ligne#compose --env-file }"
+    [ "$(readlink -f "${f%% *}")" = "$CONSTANTES" ]
+  done < <(grep '^compose ' "$CALLS" | grep -vx 'compose version')
+  [ "$n" -gt 0 ]
+}
+
+@test "up : sans bind donné, ssh et deck se publient sur la loopback aux ports des constantes, exportés à compose" {
+  LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$BATS_TEST_TMPDIR/binds.seen")" = $'LCARS_LANDING_PORT_BIND=127.0.0.1:4999\nLCARS_SSH_PORT=127.0.0.1:4222' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:4999,http://localhost:4999" ]
+}
+
 @test "config : sans variable, montre ce qui est pose et ne touche rien" {
   run bash "$SRC" config
   [ "$status" -eq 0 ]
@@ -73,12 +121,12 @@ EOS
   grep -qx 'FORGE_BASE_URL=http://forge:3000' "$ENV_FILE"
 }
 
-@test "config : les secrets sont des FICHIERS 0600 de l'hote, montes par l'override compose" {
+@test "config : les secrets sont des FICHIERS 0600 de l'hote, nommes comme les constantes nomment ceux du conteneur" {
   FORGE_ADMIN_TOKEN=tok-master FORGE_SEED_PASSWORD=s33d run bash "$SRC" config
   [ "$status" -eq 0 ]
-  [ "$(cat "$SECRETS/forge-master.token")" = tok-master ]
-  [ "$(cat "$SECRETS/forge-seed.pass")" = s33d ]
-  [ "$(stat -c %a "$SECRETS/forge-master.token")" = 600 ]
+  [ "$(cat "$SECRETS/maitre-temoin.token")" = tok-master ]
+  [ "$(cat "$SECRETS/graine-temoin.pass")" = s33d ]
+  [ "$(stat -c %a "$SECRETS/maitre-temoin.token")" = 600 ]
   [ "$(stat -c %a "$SECRETS")" = 700 ]
   # le secret ne va PAS dans le fichier d'env, ni dans la sortie
   [ ! -e "$ENV_FILE" ] || refute grep -q 'tok-master' "$ENV_FILE"
@@ -93,7 +141,7 @@ EOS
   [ "$status" -eq 0 ]
   [ -e "$BATS_TEST_TMPDIR/pushed.token" ] || { echo "$output"; cat "$CALLS"; false; }
   [ "$(cat "$BATS_TEST_TMPDIR/pushed.token")" = tok-2 ]
-  [ "$(cat "$SECRETS/forge-master.token")" = tok-2 ]
+  [ "$(cat "$SECRETS/maitre-temoin.token")" = tok-2 ]
   [[ "$output" == *"up --force-recreate"* ]]
 }
 
@@ -110,25 +158,27 @@ EOS
   # `docker image inspect` rend 0 sur la doublure : up passe jusqu'au compose, qui note son env
   FORGE_BASE_URL=http://appelant:3000 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
   [ "$status" -eq 0 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/env.seen")" = "http://appelant:3000 zoe $SECRETS" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/env.seen")" = "http://appelant:3000 zoe" ]
   [[ "$output" == *"image depuis-fichier:1"* ]]
 }
 
-@test "status et down ne préparent rien sur l'hôte ; up passe l'override des secrets, et ses fichiers existent (vides = rien)" {
+@test "status et down ne préparent rien sur l'hôte" {
   run bash "$SRC" status
   [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
   run bash "$SRC" down
   [ "$status" -eq 0 ]
   refute grep -q 'docker-compose.secrets.yml' "$CALLS"
   [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
+}
+
+@test "up : compose lit l'override des secrets et monte les deux fichiers de l'hôte, posés vides (vide = rien)" {
   LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
-  [ "$status" -eq 0 ]
-  grep -q -- '-f .*docker-compose.secrets.yml -p lcars-fleet up' "$CALLS"
-  [ -e "$SECRETS/forge-master.token" ]
-  [ ! -s "$SECRETS/forge-master.token" ]
-  [ -e "$SECRETS/forge-seed.pass" ]
-  grep -q 'LCARS_CONTAINER_SECRETS' "$REPO/deploy/docker/docker-compose.secrets.yml"
-  grep -q '/run/secrets\|forge_master_token' "$REPO/deploy/docker/docker-compose.secrets.yml"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -c '[.secrets.forge_master_token.file, .secrets.forge_seed_password.file]' "$BATS_TEST_TMPDIR/rendu.json")" \
+    = "[\"$SECRETS/maitre-temoin.token\",\"$SECRETS/graine-temoin.pass\"]" ] || { cat "$BATS_TEST_TMPDIR/rendu.json"; return 1; }
+  [ -e "$SECRETS/maitre-temoin.token" ]
+  [ ! -s "$SECRETS/maitre-temoin.token" ]
+  [ -e "$SECRETS/graine-temoin.pass" ]
 }
 
 @test "status : sans conteneur, rc 2 et le geste nomme" {

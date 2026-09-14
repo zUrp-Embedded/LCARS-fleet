@@ -59,15 +59,16 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 2: aucun fichier dans la portee de provision-lib ne RECOPIE un defaut qu'elle pose" {
-  local lib="$REPO/deploy/lib/provision-lib.sh"
+  local lib="$REPO/deploy/lib/provision-lib.sh" constantes="$REPO/deploy/installer-constants.env"
   [ -r "$lib" ] || { echo "provision-lib.sh introuvable : $lib" >&2; return 1; }
 
-  # Les noms poses a une valeur NON VIDE. `sed` sur la forme `: "${X:=valeur}"`.
+  # les noms que la lib pose : les constantes, et ses défauts `: "${X:=valeur}"`
   local poseurs
-  poseurs="$(sed 's/#.*//' "$lib" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{(PROV_[A-Z_]+):=(.+)\}"[[:space:]]*$/\1/p' | sort -u)"
-  [ -n "$poseurs" ] || { echo "aucun poseur lu dans la lib — l'instrument est casse" >&2; return 1; }
-  [ "$(printf '%s\n' "$poseurs" | wc -l)" -ge 15 ] || {
-    echo "seulement $(printf '%s\n' "$poseurs" | wc -l) poseurs lus — le motif ne suit plus la lib" >&2; return 1; }
+  poseurs="$( { sed -nE 's/^(PROV_[A-Z0-9_]+)=.+$/\1/p' "$constantes"
+                sed 's/#.*//' "$lib" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{(PROV_[A-Z_]+):=(.+)\}"[[:space:]]*$/\1/p'; } | sort -u)"
+  [ -n "$poseurs" ] || { echo "aucun poseur lu dans la lib ni dans les constantes — l'instrument est casse" >&2; return 1; }
+  printf '%s\n' "$poseurs" | grep -qx PROV_TOKENS_DIR || { echo "PROV_TOKENS_DIR n'est plus lu parmi les poseurs — l'instrument ne suit plus les constantes" >&2; return 1; }
+  printf '%s\n' "$poseurs" | grep -qx PROV_DECK_PORT || { echo "PROV_DECK_PORT n'est plus lu parmi les poseurs — l'instrument ne suit plus la lib" >&2; return 1; }
 
   # La portee : les fichiers qui sourcent la lib, PLUS le runner qui la source lui-meme.
   local portee
@@ -79,8 +80,7 @@ code_of() { sed 's/#.*//' "$1"; }
   local f n src rompu=0
   while read -r f; do
     [ -r "$f" ] || continue
-    # ⚠ LE POSEUR NE VAUT QU'APRES LE `source`. Une lecture au-dessus de cette ligne est VIVANTE, et
-    # l'ignorer accuserait un repli legitime — la faute symetrique de celle qu'on repare.
+    # le poseur ne vaut qu'après le `source` : une lecture au-dessus est vivante
     src="$(grep -nE '^[[:space:]]*(\.|source)[[:space:]].*(PROVISION_LIB|provision-lib)' "$f" | head -1 | cut -d: -f1)"
     [ -n "$src" ] || continue
     while IFS=: read -r n _; do
@@ -123,17 +123,15 @@ code_of() { sed 's/#.*//' "$1"; }
   }
 }
 
-@test "MUR 4: le port du deck a UNE declaration, et les copies s'accordent" {
+@test "MUR 4: le port du deck a UNE declaration, et les copies du runtime et de l'image s'accordent" {
   local attendu
-  attendu="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
-             | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_DECK_PORT:=([0-9]+)\}".*$/\1/p' | head -n1)"
+  attendu="$(sed -nE 's/^PROV_DECK_PORT_DEFAULT=([0-9]+)$/\1/p' "$REPO/deploy/installer-constants.env")"
   [[ "$attendu" =~ ^[0-9]+$ ]] || {
-    echo "MUR 4 — PROV_DECK_PORT illisible dans provision-lib.sh : l'autorite ne se lit plus" >&2
+    echo "MUR 4 — PROV_DECK_PORT_DEFAULT illisible dans installer-constants.env : l'autorite ne se lit plus" >&2
     return 1
   }
 
-  # Chaque miroir avec SON geste. Un nombre present ailleurs dans le fichier ne doit pas suffire —
-  # `MUR 4 bis` d'`adminite_walls` a coute cette lecon le meme jour.
+  # chaque miroir avec son geste : un nombre présent ailleurs dans le fichier ne suffit pas
   local rompu=0
   check() { # check <fichier> <motif etendu> <ce que c'est>
     local f="$REPO/$1"
@@ -148,13 +146,11 @@ code_of() { sed 's/#.*//' "$1"; }
   check runtime/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
   check runtime/services/container/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail conteneur"
   check runtime/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
-  check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
-  check deploy/docker/bench/bench-up.sh          "DECK_PORT=\"$attendu\""     "le banc"
-  check deploy/docker/bench/bench-swap-image.sh  "DECK_PORT=\"$attendu\""     "le banc"
+  check deploy/docker/docker-compose.yml "\\\$\{PROV_DECK_PORT_DEFAULT:\?[^}]*\}\"$" "la publication du port, lue dans les constantes"
 
   [ "$rompu" -eq 0 ] || {
-    echo "L'autorite est PROV_DECK_PORT dans provision-lib.sh — les copies la suivent." >&2
+    echo "L'autorite est PROV_DECK_PORT_DEFAULT dans installer-constants.env — les copies la suivent." >&2
     return 1
   }
 }
@@ -164,26 +160,23 @@ code_of() { sed 's/#.*//' "$1"; }
     "runtime/bin/fleet"
     "runtime/config/runtime.exs"
     "runtime/services/human-converger.sh"
-    "deploy/modules.d/64-services.sh"
-    "runtime/services/container/boot.sh"
-    "deploy/lib/provision-lib.sh"
+    "runtime/services/container/init.sh"
+    "runtime/services/lib/human-protocol.sh"
   )
-  # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la
-  # forme BEAM `System.get_env("LCARS_SEAT_UID_FILE", "<X>")`.
-  local f vus=() v
+  # les chemins déclarés : la constante de l'installeur, la forme shell `${LCARS_SEAT_UID_FILE:-<X>}`
+  # et la forme BEAM `System.get_env("LCARS_SEAT_UID_FILE", "<X>")`
+  local f vus=() v lus
+  v="$(sed -n 's/^PROV_SEAT_UID_FILE=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$v" ] || { echo "MUR 5 — PROV_SEAT_UID_FILE illisible dans installer-constants.env" >&2; return 1; }
+  vus+=("$v")
   for f in "${sites[@]}"; do
     [ -r "$REPO/$f" ] || { echo "MUR 5 rompu — $f illisible" >&2; return 1; }
-    while read -r v; do [ -n "$v" ] && vus+=("$v"); done < <(
-      sed 's/#.*//' "$REPO/$f" \
-        | sed -nE -e 's/.*LCARS_SEAT_UID_FILE:-([^}]+)\}.*/\1/p' \
-                  -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p'
-    )
+    lus="$(sed 's/#.*//' "$REPO/$f" \
+             | sed -nE -e 's/.*LCARS_SEAT_UID_FILE:-([^}]+)\}.*/\1/p' \
+                       -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p')"
+    [ -n "$lus" ] || { echo "MUR 5 — aucune declaration lue dans $f : l'instrument ne lit plus la forme" >&2; return 1; }
+    while read -r v; do [ -n "$v" ] && vus+=("$v"); done <<<"$lus"
   done
-  [ "${#vus[@]}" -ge 6 ] || {
-    echo "MUR 5 — seulement ${#vus[@]} declarations lues sur ${#sites[@]} fichiers : l'instrument ne lit plus la forme" >&2
-    printf '   vu: %s\n' "${vus[@]}" >&2
-    return 1
-  }
   local distinctes; distinctes="$(printf '%s\n' "${vus[@]}" | sort -u)"
   [ "$(printf '%s\n' "$distinctes" | wc -l)" -eq 1 ] || {
     echo "MUR 5 rompu — ${#vus[@]} declarations, PLUSIEURS chemins :" >&2
@@ -200,9 +193,8 @@ code_of() { sed 's/#.*//' "$1"; }
 
 @test "MUR 6: le groupe de traversee des consoles a UNE declaration, nom ET gid" {
   local nom gid
-  nom="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
-         | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_CONSOLE_GROUP:=([a-z0-9_-]+)\}".*$/\1/p' | head -n1)"
-  [ -n "$nom" ] || { echo "MUR 6 — PROV_CONSOLE_GROUP illisible dans provision-lib.sh" >&2; return 1; }
+  nom="$(sed -nE 's/^PROV_CONSOLE_GROUP=([a-z0-9_-]+)$/\1/p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$nom" ] || { echo "MUR 6 — PROV_CONSOLE_GROUP illisible dans installer-constants.env" >&2; return 1; }
   # Le gid vient du manifeste, seul endroit ou le groupe est DECLARE avec son numero.
   gid="$(sed -nE "s/^group[[:space:]]+${nom}[[:space:]]+([0-9]+)[[:space:]].*/\1/p" "$REPO/deploy/system.manifest" | head -n1)"
   [[ "$gid" =~ ^[0-9]+$ ]] || {
@@ -221,7 +213,7 @@ code_of() { sed 's/#.*//' "$1"; }
   need deploy/modules.d/20-groups.sh "ensure_group \"\\\$PROV_CONSOLE_GROUP\""    "la creation sur le rail natif"
   need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
-  [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
+  [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans installer-constants.env." >&2; return 1; }
 }
 
 @test "MUR 7: ce que l'installeur DECIDE et qu'un daemon lit voyage par la table de transport" {
@@ -251,7 +243,8 @@ code_of() { sed 's/#.*//' "$1"; }
       # posee par le daemon lui-meme (assignation dont la droite ne se relit pas) : pas une lecture
       if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" | sed "s/.*$v=//" | grep -qv "$v"; then continue; fi
       j="$(jumeau "$v")"; [ -n "$j" ] || continue
-      grep -qE "^[[:space:]]*:[[:space:]]*\"\\\$\{$j:=" "$lib" || continue   # pas decidee par l'installeur
+      # décidée par l'installeur : un défaut de la lib, ou une constante qui n'est pas un chemin canonique (ceux-là s'accordent par les murs de chemins)
+      grep -qE "^[[:space:]]*:[[:space:]]*\"\\\$\{$j:=|^$j=[^/]" "$lib" "$REPO/deploy/installer-constants.env" || continue
       decidees="$decidees$v\n"
       printf '%s\n' "$table" | grep -qx "$v" || lus="$lus$v (daemon $d)\n"
     done
@@ -311,29 +304,15 @@ code_of() { sed 's/#.*//' "$1"; }
   }
 }
 
-@test "MUR 9: le chemin du magasin s'accorde partout avec celui que le compose declare" {
-  # ⚠ LA REGLE EXISTE DEJA, ECRITE ET GARDEE — SUR UN FICHIER SUR CINQ. `store_volumes.bats` dit :
-  # « store.sh possede les NOMS, le compose possede le CHEMIN. Un `/var/lib/lcars` en dur dans un
-  # script serait une seconde verite, et c'est celle qu'on ne relit pas qui derive. » Son assertion
-  # ne porte que sur `store.sh`. Mesure du 2026-08-28 : TROIS autres scripts portent le chemin
-  # (`bin/lcars-toolchain-converge`, `services/forge-gestures.sh`, `deploy/lib/provision-lib.sh`),
-  # plus le manifeste. Une regle gardee sur un cinquieme de son sujet est le verrou partiel du §22.
-  #
-  # ⚠ ET J'AI FAILLI L'ENFREINDRE. Le balayage derive m'a fait conclure « la racine n'a aucun
-  # foyer » et j'ai declare un `LCARS_STORE_ROOT_DEFAULT` dans `store.sh` — exactement la seconde
-  # verite que la regle interdit. C'est le temoin existant qui m'a arrete, en rougissant. Le
-  # balayage voit les COPIES ; il ne voit pas qui a deja ete DESIGNE.
-  #
-  # CE MUR N'INVENTE DONC AUCUNE AUTORITE : il consomme celle que la regle designe (le compose) et
-  # l'etend aux porteurs que le temoin d'origine ne regardait pas. Rien n'est retire : ce qui se
-  # verifie est l'ACCORD.
-  local compose="$REPO/deploy/docker/docker-compose.yml"
+@test "MUR 9: le chemin du magasin s'accorde partout avec celui que les constantes de l'installeur declarent" {
+  # store.sh possède les noms, installer-constants.env le chemin ; le mur vérifie l'accord de tous les
+  # porteurs du dépôt, runtime compris, qui garde ses propres copies
   local lib="$REPO/deploy/lib/store.sh"
-  [ -r "$compose" ] && [ -r "$lib" ] || { echo "MUR 9 — compose ou store.sh illisible" >&2; return 1; }
+  [ -r "$lib" ] || { echo "MUR 9 — store.sh illisible" >&2; return 1; }
 
   local racine
-  racine="$(sed -nE 's/^[[:space:]]*LCARS_STORE_ROOT:[[:space:]]*([^[:space:]]+)[[:space:]]*$/\1/p' "$compose" | head -n1)"
-  [ -n "$racine" ] || { echo "MUR 9 — le compose ne declare plus LCARS_STORE_ROOT : l'autorite est illisible" >&2; return 1; }
+  racine="$(sed -n 's/^PROV_STORE_ROOT=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$racine" ] || { echo "MUR 9 — installer-constants.env ne declare plus PROV_STORE_ROOT : l'autorite est illisible" >&2; return 1; }
 
   local natures
   natures="$(sed -n '/^LCARS_STORE_TREES=(/,/^)/p' "$lib" | sed -nE 's/^  ([a-z]+)\b.*/\1/p')"
@@ -384,32 +363,19 @@ PYX
 }
 
 @test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
-  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `deploy/lib/deploy-release.sh` et `provision-lib.sh`
-  # declarent le prefixe chacun de leur cote ; `.claude/hooks/runtime-guard.sh` REFUSE les ecritures
-  # dans l'arbre d'install, en le nommant. Si le prefixe bougeait sans que le hook suive, la garde
-  # cesserait de proteger l'install reelle — sans un mot, et c'est le pire mode : elle continuerait
-  # de dire non sur un chemin que plus personne n'utilise.
-  #
-  # ⚠ AUCUNE AUTORITE N'EST DESIGNEE, et on ne s'en invente pas. `60-deploy` passe `PROV_PREFIX` a
-  # `install.sh`, donc `provision-lib` est en amont — mais `install.sh` joue aussi SEUL, avec son
-  # propre repli. Ce qui se verifie est donc l'ACCORD, comme pour `/home/private`. Une designation
-  # pourra s'ajouter ; l'inventer ici serait une decision que personne n'a prise.
-  local inst="$REPO/deploy/lib/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  # la garde `.claude/hooks/runtime-guard.sh` refuse les écritures dans l'arbre d'install en le
+  # nommant : un préfixe qui bouge sans elle la laisserait garder un chemin que personne n'utilise
+  local lib="$REPO/deploy/lib/provision-lib.sh"
   local guard="$REPO/../.claude/hooks/runtime-guard.sh"
-  [ -r "$inst" ] && [ -r "$lib" ] || { echo "MUR 10 — install.sh ou provision-lib.sh illisible" >&2; return 1; }
+  [ -r "$lib" ] || { echo "MUR 10 — provision-lib.sh illisible" >&2; return 1; }
 
   local a b
-  a="$(sed 's/#.*//' "$inst" | sed -nE 's/.*LCARS_INSTALL_PREFIX:-([^}]+)\}.*/\1/p' | head -n1)"
-  # ⚠ LU RESOLU, PAS EN TEXTE. Depuis que la racine est nommee UNE fois (`PROV_ROOT`), ce repli est
-  # DERIVE : `$PROV_ROOT/runtime`. Comparer son TEXTE a celui d'install.sh rendrait « deux prefixes
-  # declares » sur deux declarations parfaitement d'accord — et la seule facon de faire taire ce
-  # mur serait de regraver le litteral ici, c'est-a-dire d'ajouter la copie qu'il traque. L'idiome
-  # est celui d'`authority_walls.bats` : sourcer dans un env vierge et lire la valeur.
+  a="$(sed -n 's/^PROV_PREFIX=//p' "$REPO/deploy/installer-constants.env")"
   b="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
-  [ -n "$a" ] || { echo "MUR 10 — le repli de LCARS_INSTALL_PREFIX ne se lit plus dans install.sh" >&2; return 1; }
-  [ -n "$b" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus dans provision-lib.sh" >&2; return 1; }
+  [ -n "$a" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus dans installer-constants.env" >&2; return 1; }
+  [ -n "$b" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus par provision-lib.sh" >&2; return 1; }
   [ "$a" = "$b" ] || {
-    echo "MUR 10 rompu — deux prefixes declares : install.sh dit « $a », provision-lib.sh dit « $b »" >&2
+    echo "MUR 10 rompu — la lib charge « $b », les constantes declarent « $a »" >&2
     return 1
   }
 
@@ -520,28 +486,18 @@ PYX
   [ "$rompu" -eq 0 ] || return 1
 }
 
-@test "MUR 12: tout fichier grave sous le repertoire des secrets est un fichier que provision-lib DERIVE" {
-  # ⚠ LA DERIVATION EXISTE DEJA, ET SEPT SITES LA CONTOURNENT. `provision-lib.sh` compose les
-  # chemins des secrets depuis `$PROV_TOKENS_DIR` — le seed, le jeton master, la carte d'uid, le
-  # jeton systeme. Sept fichiers gravent le chemin complet a la place : l'entrypoint (deux fois),
-  # `catalogue-executor.py`, `human-converger.sh`, deux bancs, un message d'`enroll-catalogue`.
-  #
-  # CE MUR NE LEUR RETIRE RIEN — ils tournent hors de la portee de la lib et leur repli est leur
-  # seule source (mesure du §7b : `provision-lib` n'exporte pas, et ces scripts sont des enfants).
-  # Ce qu'il exige est que le NOM DE FICHIER grave soit un nom que la lib derive. Un secret qui
-  # apparaitrait sous un nom que le provisionnement ne compose nulle part serait un fichier que
-  # personne ne cree, lu par quelqu'un qui l'attend.
-  local lib="$REPO/deploy/lib/provision-lib.sh"
+@test "MUR 12: tout fichier grave sous le repertoire des secrets est un fichier que les constantes de l'installeur declarent" {
+  # un secret qui apparaîtrait sous un nom que le provisionnement ne déclare nulle part serait un
+  # fichier que personne ne crée, lu par quelqu'un qui l'attend ; les porteurs du runtime gardent
+  # leurs chemins complets, ce mur exige que leur nom de fichier soit déclaré
+  local lib="$REPO/deploy/lib/provision-lib.sh" constantes="$REPO/deploy/installer-constants.env"
   [ -r "$lib" ] || { echo "MUR 12 — provision-lib.sh introuvable" >&2; return 1; }
 
-  # Les noms DERIVES, lus a la source. `$PROV_SYSTEM_ACCOUNT.gitea_token` est une composition : on
-  # garde son suffixe, parce que le compte, lui, est verrouille ailleurs (forge.system_account).
-  local derives
-  derives="$(sed 's/#.*//' "$lib" \
-             | sed -nE 's@.*PROV_[A-Z_]+:=\$PROV_TOKENS_DIR/([A-Za-z0-9_.$-]+).*@\1@p' \
-             | sed -E 's@^\$[A-Z_]+@@' | sort -u)"
-  [ "$(printf '%s\n' "$derives" | grep -c .)" -ge 3 ] || {
-    echo "MUR 12 — moins de 3 chemins derives lus dans provision-lib : l'instrument est casse" >&2
+  local derives jetons
+  jetons="$(sed -n 's/^PROV_TOKENS_DIR=//p' "$constantes")"
+  derives="$(sed -nE "s@^PROV_[A-Z0-9_]+=${jetons//\//\\/}/([A-Za-z0-9_.-]+)\$@\1@p" "$constantes" | sort -u)"
+  [ -n "$derives" ] || {
+    echo "MUR 12 — aucun fichier declare sous $jetons dans installer-constants.env : l'instrument est casse" >&2
     return 1
   }
 
@@ -550,10 +506,6 @@ PYX
   local hors_derivation="forge-role-passwords.json"
 
   : > "$BATS_TEST_TMPDIR/sec"
-  # ⚠ LE REPERTOIRE SE DEMANDE, IL NE SE GRAVE PLUS. Il valait `/home/private` en dur ici, aux trois
-  # endroits de ce mur ; depuis que la racine est unique il derive (`$PROV_ROOT/var/tokens`), et un
-  # littéral fige laisse le balayage sans AUCUN porteur — la garde d'instrument rougit alors sur un
-  # dépôt sain. Sourcer la lib, c'est lire le meme fait que le code qu'on mesure.
   local secdir
   secdir="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
   [ -n "$secdir" ] || { echo "MUR 12 — PROV_TOKENS_DIR ne se lit plus dans provision-lib" >&2; return 1; }
@@ -589,32 +541,27 @@ PYX
     printf '%s\n' "$derives" | grep -qx "$nom" && continue
     printf '%s\n' "$derives" | grep -q -- "\\${nom##*.}\$" && [ "${nom#*.}" = "gitea_token" ] && continue
     printf '%s\n' $hors_derivation | grep -qx "$nom" && continue
-    echo "MUR 12 rompu — $secdir/$nom est grave, mais provision-lib ne compose ce nom nulle part" >&2
+    echo "MUR 12 rompu — $secdir/$nom est grave, mais installer-constants.env ne declare ce nom nulle part" >&2
     rompu=1
   done < <(sort -u "$BATS_TEST_TMPDIR/sec")
   [ "$rompu" -eq 0 ] || return 1
 }
 
 @test "MUR 13: le compte de service du deck — un nom, et les replis qui le nomment derivent" {
-  # `lcars-system` est le compte SANS shell et SANS home sous lequel tourne le deck du conteneur. Il
-  # a ete cree le 2026-08-26 pour sortir le deck de `nobody`, dont le groupe `nogroup` est partage
-  # par `sync`, `_apt` et `dhcpcd` — le fichier d'identification OIDC du deck s'y posait en
-  # `0640 root:nogroup`, donc un demon reseau le lisait. C'est MON compte, propage sans verrou.
-  #
-  # ⚠ ET SES DEUX REPLIS NE DISAIENT PAS LA MEME CHOSE. `21-service-accounts` (qui CREE le compte)
-  # derive le groupe du user ; `66-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
-  # seul faisait creer un groupe d'un cote et chown vers un autre — un groupe inexistant, un deck
-  # qui sert 503, et la cause dans un autre module.
+  # le groupe du compte porte le secret OIDC du deck : un groupe qui ne dérive pas du compte se
+  # crée d'un côté et se chown de l'autre, et le deck sert 503 avec la cause dans un autre module
   local nom
-  nom="$(sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
-         | sed -nE 's@^SYSTEM_USER="\$\{PROV_SYSTEM_USER:-([a-z0-9_-]+)\}".*@\1@p' | head -n1)"
-  [ -n "$nom" ] || { echo "MUR 13 — le nom du compte ne se lit plus dans 21-service-accounts" >&2; return 1; }
+  nom="$(sed -nE 's/^PROV_SYSTEM_USER=([a-z0-9_-]+)$/\1/p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$nom" ] || { echo "MUR 13 — PROV_SYSTEM_USER ne se lit plus dans installer-constants.env" >&2; return 1; }
 
   local rompu=0
   # (1) Le groupe se DERIVE du compte partout, il ne se grave pas.
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
-    | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
+    | grep -qE '^SYSTEM_GROUP="\$PROV_SYSTEM_USER"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
+  sed 's/#.*//' "$REPO/deploy/modules.d/66-deck-oidc.sh" \
+    | grep -qE 'LCARS_SYSTEM_GROUP="\$\{PROV_SYSTEM_USER:-\}"' || {
+      echo "MUR 13 rompu — 66-deck-oidc ne transmet plus le compte comme groupe" >&2; rompu=1; }
   sed 's/#.*//' "$REPO/runtime/services/forge.d/deck-oidc.sh" \
     | grep -qE 'LCARS_SYSTEM_GROUP:-\$\{LCARS_SYSTEM_USER:-'"$nom"'\}' || {
       echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
@@ -897,26 +844,28 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 }
 
 @test "MUR 17: l'image et le port SSH du conteneur ont UNE declaration dans deploy/container, et le compose replie sur la meme valeur" {
-  # deploy/container pose et EXPORTE (compose est un fils). Le compose unique se joue aussi nu (le
-  # banc, un pull a la main) : son repli SSH est celui de container, et son image par defaut est une
-  # release publiee — container pose l'image locale de dev par-dessus.
+  # deploy/container pose et exporte (compose est un fils) ; le compose se joue aussi nu, avec les
+  # constantes : son repli SSH est celui de container, et son image par défaut est une release publiée
   local container="$REPO/deploy/container" compose="$REPO/deploy/docker/docker-compose.yml"
   local port img
   port="$(sed 's/#.*//' "$container" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_SSH_PORT:=([^}]+)\}".*$/\1/p' | head -n1)"
   img="$(sed 's/#.*//' "$container"  | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_IMAGE:=([^}]+)\}".*$/\1/p' | head -n1)"
-  [ -n "$port" ] && [ -n "$img" ] || { echo "MUR 17 — LCARS_SSH_PORT ou LCARS_IMAGE sans declaration \`: \"\${X:=…}\"\` dans deploy/container" >&2; return 1; }
+  [ -n "$port" ] || { echo "MUR 17 — LCARS_SSH_PORT sans declaration \`: \"\${X:=…}\"\` dans deploy/container" >&2; return 1; }
+  [ -n "$img" ] || { echo "MUR 17 — LCARS_IMAGE sans declaration \`: \"\${X:=…}\"\` dans deploy/container" >&2; return 1; }
+  [ "$port" = "127.0.0.1:\$PROV_SSH_PORT_DEFAULT" ] || { echo "MUR 17 rompu — deploy/container ne lit pas le port SSH dans les constantes : « $port »" >&2; return 1; }
 
   local rompu=0 code
   code="$(sed 's/#.*//' "$container")"
   grep -qE '\$\{LCARS_(IMAGE|SSH_PORT):-' <<<"$code" && { echo "MUR 17 rompu — deploy/container porte un repli \${LCARS_IMAGE:-…} ou \${LCARS_SSH_PORT:-…} a cote de sa declaration" >&2; rompu=1; }
   [ "$(grep -cF -- "$img" <<<"$code")" -eq 1 ]  || { echo "MUR 17 rompu — « $img » ecrit plus d'une fois dans deploy/container" >&2; rompu=1; }
   [ "$(grep -cF -- "$port" <<<"$code")" -eq 1 ] || { echo "MUR 17 rompu — « $port » ecrit plus d'une fois dans deploy/container" >&2; rompu=1; }
-  grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$container" && grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$container" \
-    || { echo "MUR 17 rompu — LCARS_SSH_PORT / LCARS_IMAGE non exportees par deploy/container : compose ne les verra pas" >&2; rompu=1; }
-  grep -qF -- "\${LCARS_SSH_PORT:-$port}:22" "$compose" || { echo "MUR 17 rompu — docker-compose.yml ne replie pas LCARS_SSH_PORT sur « $port »" >&2; rompu=1; }
+  grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$container" || { echo "MUR 17 rompu — LCARS_SSH_PORT non exportee par deploy/container : compose ne la verra pas" >&2; rompu=1; }
+  grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$container" || { echo "MUR 17 rompu — LCARS_IMAGE non exportee par deploy/container : compose ne la verra pas" >&2; rompu=1; }
+  grep -qF -- '${LCARS_SSH_PORT:-127.0.0.1:${PROV_SSH_PORT_DEFAULT:?' "$compose" || { echo "MUR 17 rompu — docker-compose.yml ne replie pas LCARS_SSH_PORT sur 127.0.0.1 et la constante" >&2; rompu=1; }
   # une release : un tag qui commence par un chiffre, ou par v puis un chiffre, après le dernier / — jamais :main ni :latest ni un nom nu
   grep -qE 'image: "\$\{LCARS_IMAGE:-[^} ]*/[^}/:]+:v?[0-9][^}/:]*\}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut une release taguee" >&2; rompu=1; }
   grep -qE 'image: "\$\{LCARS_IMAGE:-[^}]*:(main|latest)\}"' "$compose" && { echo "MUR 17 rompu — l'image par defaut vise une tete de branche" >&2; rompu=1; }
-  grep -qE "^#   LCARS_SSH_PORT .*défaut $port\)" "$container" || { echo "MUR 17 rompu — l'aide de container n'annonce pas « $port » pour LCARS_SSH_PORT" >&2; rompu=1; }
+  local annonce; annonce="127.0.0.1:$(sed -n 's/^PROV_SSH_PORT_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  grep -qE "^#   LCARS_SSH_PORT .*défaut $annonce\)" "$container" || { echo "MUR 17 rompu — l'aide de container n'annonce pas « $annonce » pour LCARS_SSH_PORT" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — le compose la lit et replie sur la meme valeur." >&2; return 1; }
 }

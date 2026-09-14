@@ -6,13 +6,25 @@
 # STATUS: témoins de bench-swap-image.sh — joué contre une doublure docker : projet, drapeaux, override de banc, verdicts
 
 load ../../refute
+load ../../support/decor
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../docker/bench/bench-swap-image.sh"
-  [ -f "$SUT" ]
+  decor_pose
+  # un arbre dont les constantes portent des défauts que rien d'autre n'écrit : le script qui les rend les a lus
+  local vrai="$BATS_TEST_DIRNAME/../../.." cles='PROV_FORGE_BASE_DEFAULT|PROV_FORGE_ORG_DEFAULT|PROV_FORGE_HOST_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_SSH_PORT_DEFAULT|PROV_FORGE_INTERNAL_URL'
+  ARBRE="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$ARBRE/deploy/docker/bench" "$ARBRE/deploy/lib"
+  cp "$vrai/docker/bench/bench-swap-image.sh" "$ARBRE/deploy/docker/bench/"
+  cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$vrai/lib/forge-bootstrap.sh" "$ARBRE/deploy/lib/"
+  CONSTANTES="$ARBRE/deploy/installer-constants.env"
+  { grep -vE "^($cles)=" "$vrai/installer-constants.env"
+    printf '%s\n' PROV_FORGE_BASE_DEFAULT=banc-temoin PROV_FORGE_ORG_DEFAULT=flotte-temoin PROV_FORGE_HOST_PORT_DEFAULT=4100 \
+      PROV_DECK_PORT_DEFAULT=4999 PROV_SSH_PORT_DEFAULT=4222 PROV_FORGE_INTERNAL_URL=http://forge-temoin:3000
+  } > "$CONSTANTES"
+  SUT="$ARBRE/deploy/docker/bench/bench-swap-image.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
-  export NETWORKS="lcars-forge_default bt-forge_default"
+  export NETWORKS="banc-temoin-forge_default bt-forge_default"
   export TOKENS_TAR="$BATS_TEST_TMPDIR/tokens.tar" CREDS_TAR="$BATS_TEST_TMPDIR/creds.tar"
   mkdir -p "$BATS_TEST_TMPDIR/t/tokens"; : > "$BATS_TEST_TMPDIR/t/tokens/fleet_engineer.gitea_token"
   tar -C "$BATS_TEST_TMPDIR/t" -cf "$TOKENS_TAR" tokens
@@ -47,11 +59,21 @@ run_swap() { run bash "$SUT" --image lcars-fleet:neuve --advertise 10.0.0.9 "$@"
   refute grep -q '^DOCKER:rm' "$CALLS"
 }
 
-@test "le projet par défaut est lcars, celui que « container --bench » et install.sh créent" {
+@test "le projet par défaut est la base des constantes, celle que « container --bench » et install.sh créent" {
   run_swap
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx 'DOCKER:network inspect lcars-forge_default' "$CALLS"
-  grep -qx 'DOCKER:rm -f lcars-fleet-lcars-1' "$CALLS"
+  grep -qx 'DOCKER:network inspect banc-temoin-forge_default' "$CALLS"
+  grep -qx 'DOCKER:rm -f banc-temoin-fleet-lcars-1' "$CALLS"
+}
+
+@test "sans drapeau, ports et forge interne viennent des constantes, et arrivent dans l'environnement de compose" {
+  run_swap
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'ENV:LCARS_SSH_PORT=0.0.0.0:4222' "$CALLS"
+  grep -qx 'ENV:LCARS_LANDING_PORT_BIND=0.0.0.0:4999' "$CALLS"
+  grep -qx 'ENV:FORGE_PUBLIC_URL=http://10.0.0.9:4100' "$CALLS"
+  grep -qx 'ENV:FORGE_BASE_URL=http://forge-temoin:3000' "$CALLS"
+  grep -qx 'ENV:LCARS_SOURCE_REMOTE=http://forge-temoin:3000/flotte-temoin/lcars.git' "$CALLS"
 }
 
 @test "les drapeaux de container et de bench-up sont acceptés, et arrivent dans l'environnement de compose" {
@@ -66,11 +88,15 @@ run_swap() { run bash "$SUT" --image lcars-fleet:neuve --advertise 10.0.0.9 "$@"
   refute grep -q '^ENV:LCARS_BIND=' "$CALLS"
 }
 
-@test "le conteneur est recréé avec l'override de banc : bench-down et container le reconnaissent encore" {
+@test "le conteneur est recréé avec les constantes et l'override de banc : bench-down et container le reconnaissent encore" {
   run_swap --forge-project bt
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qE '^DOCKER:compose -f [^ ]+/docker-compose.yml -f [^ ]+/docker-compose.bench.yml -p bt-fleet create lcars$' "$CALLS"
-  grep -qE '^DOCKER:compose -f [^ ]+/docker-compose.yml -f [^ ]+/docker-compose.bench.yml -p bt-fleet start lcars$' "$CALLS"
+  grep -qxE "DOCKER:compose --env-file [^ ]+ -f $ARBRE/deploy/docker/docker-compose.yml -f $ARBRE/deploy/docker/docker-compose.bench.yml -p bt-fleet create lcars" "$CALLS"
+  grep -qxE "DOCKER:compose --env-file [^ ]+ -f $ARBRE/deploy/docker/docker-compose.yml -f $ARBRE/deploy/docker/docker-compose.bench.yml -p bt-fleet start lcars" "$CALLS"
+  local f
+  for f in $(grep -oE '^DOCKER:compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
+    [ "$(readlink -f "$f")" = "$CONSTANTES" ]
+  done
   refute grep -q '^DOCKER:network connect' "$CALLS"
 }
 
@@ -92,7 +118,8 @@ run_swap() { run bash "$SUT" --image lcars-fleet:neuve --advertise 10.0.0.9 "$@"
   run_swap
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"image     : lcars-fleet:neuve   (révision cafe1234)"* ]]
-  [[ "$output" == *"jetons    : 1 fichiers"* ]]
+  # sous un décor, le dossier des jetons lu dans le conteneur reste son chemin canonique
+  [[ "$output" == *"jetons    : 1 fichiers dans /opt/lcars/var/tokens"$'\n'* ]]
   [[ "$output" == *"creds     : oui"* ]]
 }
 

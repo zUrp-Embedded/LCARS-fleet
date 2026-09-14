@@ -36,7 +36,8 @@ code() {
     "$BATS_TEST_DIRNAME"/../../../runtime/services/human.d/*.sh \
     "$BATS_TEST_DIRNAME"/../../../runtime/services/forge.d/*.sh \
     ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
-    "$BATS_TEST_DIRNAME"/../../lib/*.sh 2>/dev/null
+    "$BATS_TEST_DIRNAME"/../../lib/*.sh \
+    "$BATS_TEST_DIRNAME"/../../installer-constants.env 2>/dev/null
 }
 
 _bins_du_rail=()
@@ -51,17 +52,14 @@ posed() {
   code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
-          `# ⚠ LA NORMALISATION D'ELIXIR EST PARTIE AVEC SON OBJET. Elle ramenait` \
-          `# \`/opt/elixir-$PROV_ELIXIR_VERSION\` sur le joker de la table ; le precompile pinne a` \
-          `# ete remplace par le paquet apt de la distro, donc plus aucun module ne nomme ce chemin.` \
-          `# Une normalisation qui survit a l'objet qu'elle normalise est un decor : elle fait croire` \
-          `# que la sonde couvre un cas que le code ne produit plus.` \
           -e 's#/opt/node-[^ ]*#/opt/node-<version>#' \
           `# le joker de l'humain s'ecrit <humain> dans la prose du code et <human> dans la table :` \
           `# deux orthographes pour UN meme fait. La table gagne — code et identifiants en anglais.` \
           -e 's#<humain>#<human>#' \
     | sort -u
 }
+
+lib() { env -i PATH="$PATH" bash -c ". '$BATS_TEST_DIRNAME/../../lib/provision-lib.sh' >/dev/null 2>&1; $1"; }   # lib <code> — joué après la lib, sans décor
 
 covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'il est exempte
   local p="$1" r
@@ -197,41 +195,31 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 @test "un GID absent de la table reste FLOTTANT — on ne l'invente pas" {
   # La table dit ce qu'on a le droit de poser ; elle ne fabrique pas de numero. Un groupe qu'elle
   # ne nomme pas doit passer par `groupadd` nu, sans `-g`.
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  eval "$(sed -n '/^prov_manifest_gid()/,/^}$/p' "$lib")"
-  # ⚠ PORTANT, malgre le signalement : la fonction eval-uee lit `$PROVISION_LIB` pour retrouver la
-  # table. Verifie par mutation — un chemin bidon fait rougir ce temoin.
-  # shellcheck disable=SC2034 # lu a l'interieur de l'`eval`, invisible a l'analyse statique
-  PROVISION_LIB="$lib"
-  run prov_manifest_gid "groupe-que-la-table-ne-nomme-pas"
+  run lib 'prov_manifest_gid groupe-que-la-table-ne-nomme-pas'
+  [ "$status" -eq 0 ]
   [ -z "$output" ]
-  run prov_manifest_gid "fleet"
+  run lib 'prov_manifest_gid fleet'
   [ "$output" = "2000" ]
 }
 
 @test "LA TABLE A DEUX LECTEURS DE PLUS — mode et proprietaire — et ce sont les POSEURS qui les lisent (lot 15)" {
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  eval "$(sed -n '/^prov_manifest_mode()/,/^}$/p' "$lib")"
-  eval "$(sed -n '/^prov_manifest_owner()/,/^}$/p' "$lib")"
-  # shellcheck disable=SC2034 # lu a l'interieur de l'`eval`, invisible a l'analyse statique
-  PROVISION_LIB="$lib"
-  run prov_manifest_mode /opt/lcars/share/avatars
+  run lib 'prov_manifest_mode /opt/lcars/share/avatars'
   [ "$output" = "0755" ]
-  run prov_manifest_owner /opt/lcars/share/avatars
+  run lib 'prov_manifest_owner /opt/lcars/share/avatars'
   [ "$output" = "root:root" ]
-  run prov_manifest_mode /opt/lcars/tofu/providers
+  run lib 'prov_manifest_mode /opt/lcars/tofu/providers'
   [ "$output" = "0755" ]
-  run prov_manifest_owner /opt/lcars/var/tokens
+  run lib 'prov_manifest_owner /opt/lcars/var/tokens'
   [ "$output" = "lcars-authority:fleet" ]
-  run prov_manifest_mode /chemin/que/la/table/ne/nomme/pas
+  run lib 'prov_manifest_mode /chemin/que/la/table/ne/nomme/pas'
   [ -z "$output" ]
   # `unset` : MODE OBSERVE, jamais affirme — le lecteur rend VIDE, donc aucun poseur ne compare
-  run prov_manifest_mode '/home/<human>/.claude'
+  run lib "prov_manifest_mode '/home/<human>/.claude'"
   [ -z "$output" ]
   # `-` est une colonne absente, pas une valeur : un lien n'a ni mode ni proprietaire
-  run prov_manifest_mode /usr/local/bin/lcars
+  run lib 'prov_manifest_mode /usr/local/bin/lcars'
   [ -z "$output" ]
-  run prov_manifest_owner /usr/local/bin/lcars
+  run lib 'prov_manifest_owner /usr/local/bin/lcars'
   [ -z "$output" ]
   # et les deux poseurs les lisent — sur le code, pas sur la prose
   local m

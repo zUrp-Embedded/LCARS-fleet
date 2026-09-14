@@ -13,15 +13,13 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
 AUTHORITY_USER="$PROV_AUTHORITY_USER"
-AUTHORITY_GROUP="${PROV_AUTHORITY_GROUP:-$AUTHORITY_USER}"
-SYSTEM_USER="${PROV_SYSTEM_USER:-lcars-system}"
-SYSTEM_GROUP="${PROV_SYSTEM_GROUP:-$SYSTEM_USER}"
-NOLOGIN="${LCARS_NOLOGIN:-/usr/sbin/nologin}"
+AUTHORITY_GROUP="$PROV_AUTHORITY_USER"
+SYSTEM_USER="$PROV_SYSTEM_USER"
+SYSTEM_GROUP="$PROV_SYSTEM_USER"
+NOLOGIN=/usr/sbin/nologin
 
-USERADD="${LCARS_USERADD:-useradd}"
-USERMOD="${LCARS_USERMOD:-usermod}"
-PASSWD_FILE="${LCARS_PASSWD_FILE:-/etc/passwd}"
-GROUP_FILE="${LCARS_GROUP_FILE:-/etc/group}"
+PASSWD_FILE="$(prov_decor /etc/passwd)"
+GROUP_FILE="$(prov_decor /etc/group)"
 
 account_exists() { awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$PASSWD_FILE"; }
 shell_of()       { awk -F: -v n="$1" '$1==n {print $7; exit}' "$PASSWD_FILE"; }
@@ -63,7 +61,7 @@ check() {
      && prov_in_group "$AUTHORITY_USER" "$PROV_FLEET_GROUP"; then
     p_ok "$AUTHORITY_USER ∈ $PROV_FLEET_GROUP (traversée de l'install RO)"
   elif account_exists "$AUTHORITY_USER"; then
-    p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser /opt/lcars/runtime, et « catalogue install » échouera sur un refus qui accuse le catalogue"
+    p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser $PROV_PREFIX, et « catalogue install » échouera sur un refus qui accuse le catalogue"
   fi
 
   if getent group "$SYSTEM_GROUP" >/dev/null 2>&1; then
@@ -99,7 +97,7 @@ apply() {
 
   if ! account_exists "$AUTHORITY_USER"; then
     # --system : uid sous UID_MIN, donc bin/fleet refuse une fleet sous ce compte, gratuitement
-    if run_capture "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
+    if run_capture useradd --system --no-create-home --shell "$NOLOGIN" \
                  -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $AUTHORITY_USER"
     else
@@ -110,7 +108,7 @@ apply() {
   fi
 
   if [[ "$(shell_of "$AUTHORITY_USER")" != "$NOLOGIN" ]]; then
-    if run_capture "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
+    if run_capture usermod -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "$AUTHORITY_USER -> $NOLOGIN"
     else
@@ -120,7 +118,7 @@ apply() {
   fi
 
   if [[ "$(primary_group_of "$AUTHORITY_USER")" != "$AUTHORITY_GROUP" ]]; then
-    if run_capture "$USERMOD" -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
+    if run_capture usermod -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $AUTHORITY_USER -> $AUTHORITY_GROUP"
     else
       p_fail "$AUTHORITY_USER : groupe primaire non convergé vers $AUTHORITY_GROUP"
@@ -135,7 +133,7 @@ apply() {
   ensure_group "$SYSTEM_GROUP" || verdict_apply
 
   if ! account_exists "$SYSTEM_USER"; then
-    if run_capture "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
+    if run_capture useradd --system --no-create-home --shell "$NOLOGIN" \
                  -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "compte de service $SYSTEM_USER"
     else
@@ -146,7 +144,7 @@ apply() {
   fi
 
   if [[ "$(shell_of "$SYSTEM_USER")" != "$NOLOGIN" ]]; then
-    if run_capture "$USERMOD" -s "$NOLOGIN" -- "$SYSTEM_USER"; then
+    if run_capture usermod -s "$NOLOGIN" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "$SYSTEM_USER -> $NOLOGIN"
     else
@@ -156,7 +154,7 @@ apply() {
   fi
 
   if [[ "$(primary_group_of "$SYSTEM_USER")" != "$SYSTEM_GROUP" ]]; then
-    if run_capture "$USERMOD" -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
+    if run_capture usermod -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $SYSTEM_USER -> $SYSTEM_GROUP"
     else
       p_fail "$SYSTEM_USER : groupe primaire non convergé vers $SYSTEM_GROUP"

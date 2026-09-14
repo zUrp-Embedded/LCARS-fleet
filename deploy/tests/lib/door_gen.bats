@@ -71,7 +71,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ -x "$porte" ]
 }
 
-@test "install.sh.sha256 est JUSTE — c'est ce que quelqu'un compare a ce qui lui est servi (§ 07.8)" {
+@test "install.sh.sha256 est JUSTE — c'est ce que quelqu'un compare a ce qui lui est servi" {
   gen; [ "$status" -eq 0 ]
   [ -f "$DIST/install.sh.sha256" ]
   ( cd "$DIST" && sha256sum -c --quiet --strict install.sh.sha256 )
@@ -92,18 +92,36 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
 }
 
-@test "REFUS : un tiroir vide, un gabarit sans marqueur, un tag ou une base mal formes — rien n'est ecrit" {
+@test "un tiroir vide est un refus, rien n'est écrit" {
   rm -f "$DIST"/*
-  gen; [ "$status" -eq 1 ]; [[ "$output" == *"aucun artefact"* ]]; [ ! -f "$DIST/install.sh" ]
-  printf 'kit\n' > "$DIST/k.tar.gz"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun artefact"* ]]
+  [ ! -f "$DIST/install.sh" ]
+}
+
+@test "un tiroir absent rend « aucun artefact », et rien n'est créé" {
+  rm -rf "$DIST"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun artefact dans $DIST"* ]]
+  [ ! -e "$DIST" ]
+}
+
+@test "un gabarit sans marqueur est un refus qui compte le marqueur, rien n'est écrit" {
   local mutile="$BATS_TEST_TMPDIR/gabarit-mutile.sh"
   grep -v '@@DOOR_PUBKEY@@' "$TEMPLATE" > "$mutile"
   run env LCARS_DOOR_TEMPLATE="$mutile" bash "$GEN" 0.9.0 https://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"0 fois @@DOOR_PUBKEY@@"* ]]; [ ! -f "$DIST/install.sh" ]
-  run bash "$GEN" 'v0.9.0; rm -rf /' https://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"tag"* ]]; [ ! -f "$DIST/install.sh" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"0 fois @@DOOR_PUBKEY@@"* ]]
+  [ ! -f "$DIST/install.sh" ]
+}
+
+@test "une base qui n'est pas une URL http(s) est un refus, rien n'est écrit" {
   run bash "$GEN" 0.9.0 ftp://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"http(s)"* ]]; [ ! -f "$DIST/install.sh" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"http(s)"* ]]
+  [ ! -f "$DIST/install.sh" ]
 }
 
 @test "le generateur ne SUBSTITUE pas, il rebatit : une base qui porte & ou \\ est recopiee telle quelle" {

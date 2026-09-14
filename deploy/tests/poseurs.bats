@@ -56,19 +56,21 @@ setup() {
 
 @test "C4 : le contenu de /usr/share/lcars est rendu a root, pas laisse a l'operateur" {
   local mod="$MODS/44-media.sh"
-  # 1. un chown vers root:root porte sur l'arbre des medias, quelle que soit sa forme
-  grep -qE 'chown (-[hR] )*root:root' "$mod" \
-    || { echo "plus aucun chown vers root:root dans 44-media : le contenu garderait l'identite de la source (« cp -a » la preserve)"; return 1; }
-  # 2. il est CONDITIONNEL — il ne touche que ce qui devie
-  grep -qE '! -user root -o ! -group root' "$mod" \
+  # 1. le propriétaire de l'arbre est celui que la table déclare, et la table dit root:root
+  grep -qE '^dir +/opt/lcars/share +[0-7]+ +root:root ' "$DEPLOY/system.manifest" \
+    || { echo "la table ne déclare plus /opt/lcars/share à root:root : le contenu garderait l'identite de la source (« cp -a » la preserve)"; return 1; }
+  grep -qF 'MEDIA_OWNER="$(prov_owner "$(prov_manifest_owner "$MEDIA_ROOT")")"' "$mod" \
+    || { echo "le propriétaire de 44-media ne vient plus de la table"; return 1; }
+  # 2. le chown est CONDITIONNEL — il ne touche que ce qui devie
+  grep -qF '! -user "${MEDIA_OWNER%%:*}" -o ! -group "${MEDIA_OWNER##*:}"' "$mod" \
     || { echo "le chown de 44-media n'est plus filtre : il touchera tout l'arbre a chaque apply (ctime), et le module comptera une mutation sur un arbre identique"; return 1; }
-  grep -qE 'chown -h root:root' "$mod" \
+  grep -qF 'chown -h "$MEDIA_OWNER"' "$mod" \
     || { echo "le chown de 44-media n'est plus en -h : il suivrait les liens (chown root sur une cible arbitraire) et ne convergerait jamais"; return 1; }
   local n_chmod n_chown
   n_chmod="$(grep -n 'media_modes "$MEDIA_ROOT"' "$mod" | tail -1 | cut -d: -f1)"
-  n_chown="$(grep -nE 'exec chown (-[hR] )*root:root' "$mod" | head -1 | cut -d: -f1)"
+  n_chown="$(grep -nF 'exec chown -h "$MEDIA_OWNER"' "$mod" | head -1 | cut -d: -f1)"
   [ -n "$n_chmod" ] || { echo "aucun appel « media_modes \"\$MEDIA_ROOT\" » dans 44-media : les modes ne sont plus poses, ou la fonction a change de nom"; return 1; }
-  [ -n "$n_chown" ] || { echo "aucun chown vers root:root dans 44-media"; return 1; }
+  [ -n "$n_chown" ] || { echo "aucun chown vers le propriétaire de la table dans 44-media"; return 1; }
   [ "$n_chmod" -lt "$n_chown" ] \
     || { echo "le chown (l. $n_chown) precede la pose des modes (l. $n_chmod) — l'ordre dit l'intention"; return 1; }
 }

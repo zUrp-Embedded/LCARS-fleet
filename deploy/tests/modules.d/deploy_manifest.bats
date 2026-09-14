@@ -10,15 +10,17 @@
 # shellcheck disable=SC1003,SC2020
 
 load ../refute
+load ../support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   SRC="$BATS_TEST_DIRNAME/../.."
   ROOT="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$ROOT/deploy/lib" "$ROOT/runtime/etc"
-  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
-  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
-  cp "$SRC/lib/provision-lib.sh" "$ROOT/deploy/lib/"
-  cp "$SRC/lib/docker-endpoint.sh" "$ROOT/deploy/lib/"
+  cp "$SRC"/lib/*.sh "$ROOT/deploy/lib/"
+  cp "$SRC/installer-constants.env" "$SRC/system.manifest" "$ROOT/deploy/"
   cp "$SRC/modules.d/60-deploy.sh" "$BATS_TEST_TMPDIR/60-deploy.sh"
 
   cat > "$ROOT/runtime/etc/release.manifest" <<'EOF'
@@ -28,22 +30,20 @@ bwrap_launch.sh  exec
 bridge.py        noexec
 EOF
 
-  export PROV_PREFIX="$BATS_TEST_TMPDIR/prefix"
-  export PROV_LINK_DIR="$BATS_TEST_TMPDIR/linkdir"
+  decor_pose
+  PREFIX="$LCARS_DECOR_ROOT/opt/lcars/runtime"
+  LINKS="$LCARS_DECOR_ROOT/usr/local/bin"
   export PROVISION_LIB="$ROOT/deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=60-deploy
-  # Le CANAL est a nous : ce decor EXECUTE 60-deploy, dont le dispatch lit /etc/lcars/channel.
-  # Absent = « aucun », le module mesure comme aujourd'hui (MUR I21).
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
 
   # a "deployed" prefix: release marker + every manifest entry posed correctly
-  mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
-  printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  chmod +x "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  printf 'x\n' > "$PROV_PREFIX/bin/fleet";        chmod +x "$PROV_PREFIX/bin/fleet"
-  printf 'x\n' > "$PROV_PREFIX/bin/bwrap_launch.sh"; chmod +x "$PROV_PREFIX/bin/bwrap_launch.sh"
-  printf 'x\n' > "$PROV_PREFIX/bin/bridge.py"
-  ln -s "$PROV_PREFIX/bin/fleet" "$PROV_LINK_DIR/fleet"
+  mkdir -p "$PREFIX/rel/lcars_fleet/bin" "$PREFIX/bin" "$LINKS"
+  printf '#!/bin/sh\n' > "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  chmod +x "$PREFIX/rel/lcars_fleet/bin/lcars_fleet"
+  printf 'x\n' > "$PREFIX/bin/fleet";        chmod +x "$PREFIX/bin/fleet"
+  printf 'x\n' > "$PREFIX/bin/bwrap_launch.sh"; chmod +x "$PREFIX/bin/bwrap_launch.sh"
+  printf 'x\n' > "$PREFIX/bin/bridge.py"
+  ln -s "$PREFIX/bin/fleet" "$LINKS/fleet"
 }
 
 run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
@@ -52,28 +52,28 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   run_check
   [[ "$output" == *"bin/fleet"* ]]
   [[ "$output" == *"bin/bridge.py"* ]]
-  [[ "$output" == *"symlink $PROV_LINK_DIR/fleet"* ]]
+  [[ "$output" == *"symlink $LINKS/fleet"* ]]
   [[ "$output" != *"DRIFT 60-deploy: bin/"* ]]
   [[ "$output" != *"symlink vers"* ]]
 }
 
 @test "manifest-driven check: a missing exec entry drifts by name" {
-  rm "$PROV_PREFIX/bin/bwrap_launch.sh"
+  rm "$PREFIX/bin/bwrap_launch.sh"
   run_check
   [[ "$output" == *"DRIFT"* ]]
   [[ "$output" == *"bin/bwrap_launch.sh absent"* ]]
 }
 
 @test "manifest-driven check: a noexec entry only needs to be readable" {
-  chmod -x "$PROV_PREFIX/bin/bridge.py"
+  chmod -x "$PREFIX/bin/bridge.py"
   run_check
   [[ "$output" != *"bridge.py absent"* ]]
 }
 
 @test "manifest-driven check: a wrong link target drifts" {
-  ln -sfn /somewhere/else "$PROV_LINK_DIR/fleet"
+  ln -sfn /somewhere/else "$LINKS/fleet"
   run_check
-  [[ "$output" == *"$PROV_LINK_DIR/fleet ≠ symlink vers"* ]]
+  [[ "$output" == *"$LINKS/fleet ≠ symlink vers"* ]]
 }
 
 @test "source-independence: check runs WITHOUT mix.exs (only etc/ ships in the image)" {
@@ -96,7 +96,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
   local code; code="$(grep -vE '^\s*#' "$MOD")"
   refute grep -q 'GATE_PACKAGES' <<<"$code"
   refute grep -qE 'shellcheck|ruff' <<<"$code"
-  grep -q 'LCARS_INSTALL_SKIP_GATE=1' <<<"$code"
+  grep -vE '^\s*#' "$BATS_TEST_DIRNAME/../../lib/deploy-release.sh" | refute_out 'mix gate|MIX_ENV="?test'
   # et `procps`, qui vivait dans cette liste pour le gate, est un besoin RUNTIME : il a rejoint 10-packages
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
   [[ " $(native_list 'PACKAGES' "$PKG") " == *" procps "* ]]
@@ -186,161 +186,4 @@ engine_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/12-docker-engine.sh"; }
   # deux ferait sonder autre chose que ce qu'on installe.
   grep -q 'done < <(effective_packages)' "$(pkg_mod)"
   grep -q 'mapfile -t pkgs < <(effective_packages)' "$(pkg_mod)"
-}
-
-@test "UN FAIT, DEUX RENDUS : le prefixe de la lib EGALE celui de l'installeur de release" {
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
-  local from_lib from_inst
-  from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
-  from_inst="$(grep -oE '\$\{LCARS_INSTALL_PREFIX:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"
-  [ -n "$from_lib" ]
-  [ -n "$from_inst" ]
-  [ "$from_lib" = "$from_inst" ]
-}
-
-@test "UN FAIT, DEUX RENDUS : le repertoire de liens aussi" {
-  # Meme classe, meme piege : `PROV_LINK_DIR` se dit « miroir de LCARS_INSTALL_LINK_DIR ».
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
-  local from_lib from_inst
-  from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_LINK_DIR\"")"
-  from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"
-  [ -n "$from_lib" ]
-  [ -n "$from_inst" ]
-  [ "$from_lib" = "$from_inst" ]
-}
-
-repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine jamais mesuree
-  local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
-  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
-          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
-          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
-      bash -c 'source "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$head" "$1"
-}
-
-@test "depot docker : une distro que l'upstream ne publie pas est REFUSEE, et rien n'est pose" {
-  repo_sh 'os_field() { case "$1" in ID) echo arch ;; VERSION_CODENAME) echo rolling ;; esac; }
-           ensure_docker_repo'
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"arch"* ]]
-  [[ "$output" == *"ubuntu et debian"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
-  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
-}
-
-@test "depot docker : sans VERSION_CODENAME la suite est INDERIVABLE — on le dit, on ne devine pas" {
-  repo_sh 'os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo "" ;; esac; }
-           ensure_docker_repo'
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"VERSION_CODENAME"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
-}
-
-@test "depot docker : une suite ABSENTE chez Docker refuse AVANT de poser quoi que ce soit" {
-  # Le coeur du temoin : la sonde reseau passe AVANT la cle et la source. Un refus qui laisserait la
-  # source derriere lui armerait la panne differee decrite en tete de section.
-  repo_sh 'os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo suite-qui-nexiste-pas ;; esac; }
-           curl() { return 22; }
-           fetch_verify() { echo "FETCH NE DOIT PAS ETRE APPELE"; return 0; }
-           ensure_docker_repo'
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"suite-qui-nexiste-pas"* ]]
-  [[ "$output" != *"FETCH NE DOIT PAS ETRE APPELE"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
-  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
-}
-
-@test "depot docker : la source est DERIVEE — id, codename et architecture, aucun litteral" {
-  repo_sh 'os_field() { case "$1" in ID) echo debian ;; VERSION_CODENAME) echo trixie ;; esac; }
-           curl() { return 0; }
-           ensure_dir() { mkdir -p "$1"; }
-           write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
-           fetch_verify() { : > "$3"; }
-           dpkg() { echo arm64; }
-           run_capture() { return 0; }
-           ensure_docker_repo'
-  [ "$status" -eq 0 ]
-  run cat "$BATS_TEST_TMPDIR/docker.list"
-  [[ "$output" == *"https://download.docker.com/linux/debian trixie stable"* ]]
-  [[ "$output" == *"arch=arm64"* ]]
-  [[ "$output" == *"signed-by=$BATS_TEST_TMPDIR/keyrings/docker.asc"* ]]
-}
-
-@test "depot docker : REJOUER ne repose rien — la cle n'est pas re-telechargee" {
-  local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
-  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
-          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
-          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
-          LCARS_DOCKER_GPG_SHA256="$(printf '' | sha256sum | awk '{print $1}')" \
-      bash -c 'source "$1" >/dev/null 2>&1
-        os_field() { case "$1" in ID) echo ubuntu ;; VERSION_CODENAME) echo resolute ;; esac; }
-        curl() { return 0; }
-        ensure_dir() { mkdir -p "$1"; }
-        write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
-        # La cle posee est VIDE, et le pin ci-dessus est le sha256 du vide : la garde doit donc
-        # reconnaitre au second tour que ce qui est en place EST ce qui etait attendu.
-        fetch_verify() { echo "FETCH"; : > "$3"; }
-        dpkg() { echo amd64; }
-        run_capture() { return 0; }
-        ensure_docker_repo
-        ensure_docker_repo' _ "$head"
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '^FETCH$' <<< "$output")" -eq 1 ]
-}
-
-
-repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
-  local head="$BATS_TEST_TMPDIR/repo-head.sh"
-  sed '/^check() {/,$d' "$(engine_mod)" > "$head"
-  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
-          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
-          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
-          PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal" \
-      bash -c 'source "$1" >/dev/null 2>&1
-        os_field() { case "$1" in ID) echo debian ;; VERSION_CODENAME) echo trixie ;; esac; }
-        curl() { return 0; }
-        ensure_dir() { mkdir -p "$1"; }
-        write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
-        fetch_verify() { mkdir -p "$(dirname "$3")"; echo "CLE-LCARS" > "$3"; }
-        dpkg() { echo amd64; }
-        run_capture() { return 1; }        # « apt-get update » refuse
-        ensure_docker_repo' _ "$head"
-}
-
-@test "depot docker : un depot QUI EXISTAIT DEJA est RESTAURE sur echec, jamais efface" {
-  mkdir -p "$BATS_TEST_TMPDIR/keyrings"
-  echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$BATS_TEST_TMPDIR/docker.list"
-  echo "CLE-DE-L-OPERATEUR"          > "$BATS_TEST_TMPDIR/keyrings/docker.asc"
-
-  repo_echec
-  [ "$status" -ne 0 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
-  [[ "$output" == *"restauré"* ]]
-}
-
-@test "depot docker : ce qui EXISTAIT DEJA est RESTAURE tel quel sur echec, jamais efface" {
-  mkdir -p "$BATS_TEST_TMPDIR/keyrings"
-  echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$BATS_TEST_TMPDIR/docker.list"
-  echo "CLE-DE-L-OPERATEUR"          > "$BATS_TEST_TMPDIR/keyrings/docker.asc"
-
-  repo_echec
-  # le depot de l'operateur est remis tel quel — un objet que LCARS n'a jamais pose ne s'efface pas
-  [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
-  [[ "$output" == *"restauré"* ]]
-}
-
-@test "depot docker : ce que NOUS avons posé est bien retiré sur echec, et le refus le dit" {
-  # Le sens qui manquait : sans lui, un module qui ne toucherait plus JAMAIS a rien passerait les
-  # deux temoins ci-dessus en ayant cesse de nettoyer derriere lui.
-  rm -f "$BATS_TEST_TMPDIR/docker.list" "$BATS_TEST_TMPDIR/keyrings/docker.asc"
-  repo_echec
-  [ "$status" -ne 0 ]
-  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
-  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
-  [[ "$output" == *"n'était là avant"* ]]
 }

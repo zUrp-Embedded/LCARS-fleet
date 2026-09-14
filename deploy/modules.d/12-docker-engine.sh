@@ -19,14 +19,16 @@ set -euo pipefail
 
 ENGINE_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
-DOCKER_KEYRING="${LCARS_DOCKER_KEYRING:-/etc/apt/keyrings/docker.asc}"
-DOCKER_LIST="${LCARS_DOCKER_LIST:-/etc/apt/sources.list.d/docker.list}"
+DOCKER_KEYRING="$(prov_decor /etc/apt/keyrings/docker.asc)"
+DOCKER_LIST="$(prov_decor /etc/apt/sources.list.d/docker.list)"
 # la même clé sert les dépôts ubuntu et debian (même sha256 aux deux URL)
-DOCKER_GPG_SHA256="${LCARS_DOCKER_GPG_SHA256:-1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570}"
+DOCKER_GPG_SHA256=1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
 
 os_field() { # os_field <clef de /etc/os-release>
-  [[ -r /etc/os-release ]] || return 1
-  ( . /etc/os-release 2>/dev/null; printf '%s' "${!1:-}" )
+  local f; f="$(prov_decor /etc/os-release)"
+  [[ -r "$f" ]] || return 1
+  # shellcheck source=/dev/null
+  ( . "$f" 2>/dev/null; printf '%s' "${!1:-}" )
 }
 
 engine_installed() { pkg_installed docker-ce; }
@@ -107,16 +109,16 @@ etat_daemon() {
   ETAT=""; ETAT_WHY=""
   if docker_endpoint >/dev/null 2>&1; then
     ETAT=repond
-  elif [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+  elif [[ "$PROV_DOCKER_DENIED" == "1" ]]; then
     ETAT=refuse; ETAT_WHY="$PROV_DOCKER_WHY"
   elif engine_installed; then
     ETAT=arrete; ETAT_WHY="docker-ce est posé mais aucun daemon ne répond — démarrer le service : systemctl start docker"
   else
-    ETAT=absent; ETAT_WHY="${PROV_DOCKER_WHY:-aucun daemon docker}"
+    ETAT=absent; ETAT_WHY="$PROV_DOCKER_WHY"
   fi
 }
 
-endpoint() { printf '%s' "${PROV_DOCKER_HOST:-${DOCKER_HOST:-endpoint par défaut}}"; }
+endpoint() { printf '%s' "$PROV_DOCKER_HOST"; }
 
 check() {
   etat_daemon

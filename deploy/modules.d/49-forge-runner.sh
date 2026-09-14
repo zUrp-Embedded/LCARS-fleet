@@ -12,18 +12,17 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-LOCAL_URL="$PROV_FORGE_URL"
-# pas de label elixir : le servir demanderait une image locale que cette installation ne construit pas
-: "${PROV_RUNNER_LABELS:=shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
-
-forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; }
-
 ci_runner_count() { # ci_runner_count → le nombre de runners enregistrés, ou 1 si la forge ne répond pas
-  local body
+  local body rc=0
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] || return 1
-  body="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -s -m 10 "$LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
-  [[ -n "$body" ]] || return 1
-  printf '%s' "$body" | jq -r '.total_count // empty' 2>/dev/null
+  body="$(mktemp "${TMPDIR:-/tmp}/forge-runners.XXXXXX")"
+  if forge_api GET "$PROV_FORGE_URL/api/v1/admin/actions/runners" "$body" --token-file "$PROV_MASTER_TOKEN_FILE" -m 10 >/dev/null; then
+    jq -er '.total_count' "$body" 2>/dev/null || rc=1
+  else
+    rc=1
+  fi
+  rm -f "$body"
+  return "$rc"
 }
 
 converge_ci_runner() {
@@ -43,10 +42,9 @@ converge_ci_runner() {
   local rc=0
   DOCKER_BIN="$PROV_DOCKER_BIN" \
     run_capture bash "$(repo_root)/deploy/docker/forge-runner.sh" \
-      --forge-api "$LOCAL_URL/api/v1" --admin-token-file "$PROV_MASTER_TOKEN_FILE" \
+      --forge-api "$PROV_FORGE_URL/api/v1" --admin-token-file "$PROV_MASTER_TOKEN_FILE" \
       --network "$PROV_FORGE_NET" --project "$PROV_RUNNER_PROJECT" \
-      ${PROV_RUNNER_LABELS:+--labels "$PROV_RUNNER_LABELS"} \
-      ${PROV_RUNNER_ACCEPT_GENERIC:+--accept-generic} || rc=$?
+      --labels "$PROV_RUNNER_LABELS" || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"

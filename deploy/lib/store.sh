@@ -11,20 +11,14 @@ LCARS_STORE_TREES=(
   state        # env.d/ et egress.d/ — ETAT CONVERGE, pas un artefact. Petit, et sa perte est MUETTE.
 )
 
-store_volume_name() {
+store_volume_names() { # store_volume_names → un volume par nature, au nom du projet compose
   if [[ -z "${LCARS_STORE_PREFIX:-}" ]]; then
     echo "store : LCARS_STORE_PREFIX absent — le nom du projet compose est l'identité d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
     return 1
   fi
-  [[ -n "${1:-}" ]] || { echo "store_volume_name: nature attendue (cache|toolchains|sysroots|state)" >&2; return 1; }
-  printf '%s-%s' "$LCARS_STORE_PREFIX" "$1"
-}
-
-store_volume_names() {
-  local nature name
+  local nature
   for nature in "${LCARS_STORE_TREES[@]}"; do
-    name="$(store_volume_name "$nature")" || return 1
-    printf '%s\n' "$name"
+    printf '%s-%s\n' "$LCARS_STORE_PREFIX" "$nature"
   done
 }
 

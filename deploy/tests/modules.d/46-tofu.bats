@@ -6,6 +6,7 @@
 # STATUS: témoins de 46-tofu — le binaire épinglé, le miroir hors-ligne refait sur le verdict d'un init, la copie jetable
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -16,29 +17,25 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=46-tofu PROV_SUBSTRATE=linux
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
-  export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/usr/tofu"
-  export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/tofu"
-  export LCARS_TOFU_OWNER; LCARS_TOFU_OWNER="$(id -un):$(id -gn)"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"
+  decor_pose
+  TOFU_BIN="$LCARS_DECOR_ROOT/usr/local/bin/tofu"
+  TOFU_DIR="$LCARS_DECOR_ROOT/opt/lcars/tofu"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
   export STUB_STATE="$BATS_TEST_TMPDIR/state"; mkdir -p "$STUB_STATE"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
-  printf '#!/usr/bin/env bash\necho "${STUB_ARCH:-amd64}"\n' > "$BIN/dpkg"
-  cat > "$BIN/curl" <<'EOF'
+  printf '#!/usr/bin/env bash\necho "${STUB_ARCH:-amd64}"\n' > "$DECOR_BIN/dpkg"
+  cat > "$DECOR_BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "CURL $*" >> "$CALLS"
 while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && { printf 'pas un zip' > "$2"; exit 0; }; shift; done
 exit 1
 EOF
-  chmod 0755 "$BIN"/*
-  export PATH="$BIN:$PATH"
+  chmod 0755 "$DECOR_BIN"/*
 }
 
 tofu_double() { # tofu_double [version] — la doublure au chemin de l'ancre
-  mkdir -p "$(dirname "$LCARS_TOFU_BIN")"
-  cat > "$LCARS_TOFU_BIN" <<EOF
+  mkdir -p "$(dirname "$TOFU_BIN")"
+  cat > "$TOFU_BIN" <<EOF
 #!/usr/bin/env bash
 echo "\$PWD \$*" >> "\$CALLS"
 case "\${1:-}" in
@@ -48,7 +45,7 @@ case "\${1:-}" in
              mkdir -p "\${@: -1}/registry.opentofu.org/x" && touch "\$STUB_STATE/mirrored" ;;
 esac
 EOF
-  chmod 0755 "$LCARS_TOFU_BIN"
+  chmod 0755 "$TOFU_BIN"
 }
 mod() { run bash "$MOD" "$@"; }
 copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-recipe.*'; }
@@ -56,35 +53,35 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
 @test "check : tofu et miroir absents — deux drifts qui disent la conséquence" {
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 46-tofu: $LCARS_TOFU_BIN absent — la structure de la forge se pose avec tofu"* ]]
-  [[ "$output" == *"DRIFT 46-tofu: miroir de providers absent ($LCARS_TOFU_DIR) — tofu irait les chercher sur le réseau"* ]]
+  [[ "$output" == *"DRIFT 46-tofu: $TOFU_BIN absent — la structure de la forge se pose avec tofu"* ]]
+  [[ "$output" == *"DRIFT 46-tofu: miroir de providers absent ($TOFU_DIR) — tofu irait les chercher sur le réseau"* ]]
 }
 
 @test "check : une autre version est un drift contre l'épingle" {
   tofu_double 1.6.0
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"tofu 1.6.0 ≠ version épinglée 1.12.3 ($LCARS_TOFU_BIN)"* ]]
+  [[ "$output" == *"tofu 1.6.0 ≠ version épinglée 1.12.3 ($TOFU_BIN)"* ]]
 }
 
 @test "check : la version épinglée est posée" {
   tofu_double
   mod check
-  [[ "$output" == *"OK    46-tofu: tofu 1.12.3 posé ($LCARS_TOFU_BIN)"* ]]
+  [[ "$output" == *"OK    46-tofu: tofu 1.12.3 posé ($TOFU_BIN)"* ]]
   [[ "$output" != *"version épinglée"* ]]
 }
 
 @test "check : l'ancre, tofu/ et tofu/providers se relisent contre la table — 0700 est un drift nommé, 0755 est conforme" {
   local me; me="$(id -un):$(id -gn)"
-  tofu_double; chmod 0700 "$LCARS_TOFU_BIN"
-  mkdir -p "$LCARS_TOFU_DIR/providers"; printf 'x\n' > "$LCARS_TOFU_DIR/tofurc"
-  chmod 0755 "$LCARS_TOFU_DIR"; chmod 0700 "$LCARS_TOFU_DIR/providers"
+  tofu_double; chmod 0700 "$TOFU_BIN"
+  mkdir -p "$TOFU_DIR/providers"; printf 'x\n' > "$TOFU_DIR/tofurc"
+  chmod 0755 "$TOFU_DIR"; chmod 0700 "$TOFU_DIR/providers"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"$LCARS_TOFU_BIN : 700 $me ≠ 755 $me (deploy/system.manifest)"* ]]
-  [[ "$output" == *"$LCARS_TOFU_DIR/providers : 700 $me ≠ 755 $me"* ]]
-  [[ "$output" == *"$LCARS_TOFU_DIR 755 $me (table)"* ]]
-  chmod 0755 "$LCARS_TOFU_BIN" "$LCARS_TOFU_DIR/providers"
+  [[ "$output" == *"$TOFU_BIN : 700 $me ≠ 755 $me (deploy/system.manifest)"* ]]
+  [[ "$output" == *"$TOFU_DIR/providers : 700 $me ≠ 755 $me"* ]]
+  [[ "$output" == *"$TOFU_DIR 755 $me (table)"* ]]
+  chmod 0755 "$TOFU_BIN" "$TOFU_DIR/providers"
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
@@ -95,9 +92,9 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(grep -c ' providers mirror -platform=linux_amd64 ' "$CALLS")" -eq 2 ]
   [ "$(grep -c ' init -input=false' "$CALLS")" -eq 4 ]
-  grep -q "^ *path *= \"$LCARS_TOFU_DIR/providers\"" "$LCARS_TOFU_DIR/tofurc"
-  [ -d "$LCARS_TOFU_DIR/providers/registry.opentofu.org" ]
-  [[ "$output" == *"POSÉ  46-tofu: miroir de providers hors-ligne ($LCARS_TOFU_DIR/providers)"* ]]
+  grep -q "^ *path *= \"$TOFU_DIR/providers\"" "$TOFU_DIR/tofurc"
+  [ -d "$TOFU_DIR/providers/registry.opentofu.org" ]
+  [[ "$output" == *"POSÉ  46-tofu: miroir de providers hors-ligne ($TOFU_DIR/providers)"* ]]
   : > "$CALLS"
   mod apply
   [ "$status" -eq 0 ]
@@ -145,13 +142,13 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
 }
 
 @test "apply : les modes de l'ancre et du miroir convergent à ceux de la table" {
-  tofu_double; chmod 0700 "$LCARS_TOFU_BIN"
-  mkdir -p "$LCARS_TOFU_DIR/providers"; chmod 0700 "$LCARS_TOFU_DIR" "$LCARS_TOFU_DIR/providers"
+  tofu_double; chmod 0700 "$TOFU_BIN"
+  mkdir -p "$TOFU_DIR/providers"; chmod 0700 "$TOFU_DIR" "$TOFU_DIR/providers"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(stat -c %a "$LCARS_TOFU_BIN")" = 755 ]
-  [ "$(stat -c %a "$LCARS_TOFU_DIR")" = 755 ]
-  [ "$(stat -c %a "$LCARS_TOFU_DIR/providers")" = 755 ]
+  [ "$(stat -c %a "$TOFU_BIN")" = 755 ]
+  [ "$(stat -c %a "$TOFU_DIR")" = 755 ]
+  [ "$(stat -c %a "$TOFU_DIR/providers")" = 755 ]
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
@@ -175,6 +172,6 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 -name 'lcars-tofu-re
   mod apply
   [ "$status" -eq 1 ]
   grep -q 'CURL .*tofu_1.12.3_linux_amd64.zip' "$CALLS"
-  [ ! -e "$LCARS_TOFU_BIN" ]
+  [ ! -e "$TOFU_BIN" ]
   [[ "$output" == *"FAIL"* ]]
 }

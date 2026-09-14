@@ -58,15 +58,6 @@ prune_intrus() { # prune_intrus — retire les intrus des deux côtés, une lign
   return 0
 }
 
-# mix release --overwrite laisse les lib/lcars_fleet-<ancienne> d'une assemblée précédente : celle qui démarre est dans start_erl.data
-release_app_dir() { # release_app_dir <racine de release> → lib/lcars_fleet-<vsn> de la version qui démarre
-  local root="$1" vsn d
-  vsn="$(awk '{print $2; exit}' "$root/releases/start_erl.data" 2>/dev/null || true)"
-  if [[ -n "$vsn" && -d "$root/lib/lcars_fleet-$vsn" ]]; then printf '%s\n' "$root/lib/lcars_fleet-$vsn"; return 0; fi
-  d=("$root"/lib/lcars_fleet-*)
-  [[ "${#d[@]}" -eq 1 && -d "${d[0]}" ]] && { printf '%s\n' "${d[0]}"; return 0; }
-  return 1
-}
 build_sha() {
   local d; d="$(release_app_dir "$PREFIX_REL" || true)"
   [[ -n "$d" && -f "$d/priv/api/build_info.txt" ]] || return 0
@@ -88,15 +79,18 @@ source_build() { # source_build → la révision que porte la source, vide si ru
 }
 meme_build() { [[ -n "$1" && -n "$2" && ( "$1" == "$2"* || "$2" == "$1"* ) ]]; }
 
+PREFIX_OWNER="$(prov_owner "root:$PROV_FLEET_GROUP")"
+BUILDER_OWNER="$(prov_owner "$PROV_HUMAN:$PROV_FLEET_GROUP")"
+
 prefix_verrouille() {
-  [[ "$(stat -c '%U:%G %a' "$PROV_PREFIX" 2>/dev/null)" == "root:$PROV_FLEET_GROUP 750" ]] || return 1
-  [[ -z "$(find "$PROV_PREFIX" \( ! -user root -o ! -group "$PROV_FLEET_GROUP" -o -perm /o=rwx -o -perm /g=w \) -print -quit 2>/dev/null)" ]]
+  [[ "$(stat -c '%U:%G %a' "$PROV_PREFIX" 2>/dev/null)" == "$PREFIX_OWNER 750" ]] || return 1
+  [[ -z "$(find "$PROV_PREFIX" \( ! -user "${PREFIX_OWNER%%:*}" -o ! -group "${PREFIX_OWNER##*:}" -o -perm /o=rwx -o -perm /g=w \) -print -quit 2>/dev/null)" ]]
 }
 verrouiller_prefix() {
   prefix_verrouille && return 0
-  chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown de $PROV_PREFIX"; return 1; }
-  chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod de $PROV_PREFIX"; return 1; }
-  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "prefix verrouillé : $PROV_PREFIX (root:$PROV_FLEET_GROUP 750)"
+  chown -R "$PREFIX_OWNER" "$PROV_PREFIX" || { p_fail "re-verrouillage chown de $PROV_PREFIX"; return 1; }
+  chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"   || { p_fail "re-verrouillage chmod de $PROV_PREFIX"; return 1; }
+  PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "prefix verrouillé : $PROV_PREFIX ($PREFIX_OWNER 750)"
 }
 
 check() {
@@ -115,10 +109,10 @@ check() {
   fi
   local cur
   cur="$(stat -c '%U:%G %a' "$PROV_PREFIX")"
-  if [[ "$cur" == "root:$PROV_FLEET_GROUP 750" ]]; then
+  if [[ "$cur" == "$PREFIX_OWNER 750" ]]; then
     p_ok "verrou RO du prefix ($cur)"
   else
-    p_drift "prefix non verrouillé : $cur ≠ root:$PROV_FLEET_GROUP 750"
+    p_drift "prefix non verrouillé : $cur ≠ $PREFIX_OWNER 750"
   fi
   local name mode is_link
   while read -r name mode is_link; do
@@ -188,8 +182,8 @@ apply() {
   if pgrep -f "$(prov_pgrep_pattern "$PREFIX_REL")" >/dev/null 2>&1; then
     p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet stop && fleet start » pour prendre le nouveau build"
   fi
-  ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
-  chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
+  ensure_dir "$PROV_PREFIX" 0750 "$BUILDER_OWNER" || verdict_apply
+  chown -R "$BUILDER_OWNER" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
   if prov_delivery_is_binary; then
     p_ok "outillage mix non posé — livraison binaire, la release est déjà bâtie"
   else
@@ -197,14 +191,10 @@ apply() {
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
   fi
-  # LCARS_INSTALL_SKIP_GATE : l'installation compile et pose, l'attestation de la source vient de la CI et de pack.sh
   local etape="build de la release"
   ! prov_delivery_is_binary || etape="pose de la release depuis le kit"
-  run_step --ok 3 "$etape" -- \
-    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \
-      LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" \
+  run_step "$etape" -- as_human env LCARS_RUNTIME_DIR="$RUNTIME_DIR" bash "$(dirname "$PROVISION_LIB")/deploy-release.sh" \
     || { p_warn "$PROV_PREFIX reste déverrouillé pour inspection"; verdict_apply; }
-  [[ "$PROV_LAST_RC" -ne 3 ]] || p_warn "deploy-release.sh signale un lien du PATH manquant (rc 3) — reposé ci-dessous"
   release_present || { p_fail "deploy-release.sh vert mais release absente ($PREFIX_REL) — incohérence à inspecter"; verdict_apply; }
   verrouiller_prefix || verdict_apply
   local name _mode is_link
@@ -215,7 +205,7 @@ apply() {
   prune_intrus || verdict_apply
   poser_canal || verdict_apply
   PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + /usr/local/bin câblé"
+  p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + $PROV_LINK_DIR câblé"
   verdict_apply
 }
 

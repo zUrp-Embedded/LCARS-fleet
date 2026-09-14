@@ -168,7 +168,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     defp miroirs_compte(nom, tf) do
       [
         {"runtime/services/forge-recipe/forge.tf", tf},
-        {"deploy/lib/provision-lib.sh", ~s[: "${PROV_SYSTEM_ACCOUNT:=#{nom}}"\n]},
+        {"deploy/installer-constants.env", "PROV_SYSTEM_ACCOUNT=#{nom}\n"},
         {"runtime/services/forge-recipe/provision-forge-charte.sh", ~s[m="#{nom}:avatar.png"\n]},
         {"runtime/services/human-converger.sh", ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
         {"runtime/services/forge-gestures.sh", ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
@@ -217,6 +217,24 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
                SingleSource.check_system_account_single_source(root)
 
       assert note =~ "bin/lcars"
+    end
+
+    test "⚠ LA CONSTANTE DE L'INSTALLEUR QUI DERIVE est nommee — un defaut dans la lib n'en tient pas lieu" do
+      reste =
+        Enum.reject(miroirs_compte(@compte, @tf_sans_defaut), fn {r, _} ->
+          r == "deploy/installer-constants.env"
+        end)
+
+      root =
+        depot([
+          identite(@compte),
+          {"deploy/lib/provision-lib.sh", ~s[: "${PROV_SYSTEM_ACCOUNT:=#{@compte}}"\n]},
+          {"deploy/installer-constants.env", "PROV_SYSTEM_ACCOUNT=autre_compte\n"}
+          | reste
+        ])
+
+      assert %{status: :fail, evidence: ["../deploy/installer-constants.env"]} =
+               SingleSource.check_system_account_single_source(root)
     end
 
     test "une autorite illisible fait ECHOUER — tous les miroirs passeraient par defaut" do

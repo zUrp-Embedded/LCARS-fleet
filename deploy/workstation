@@ -161,9 +161,9 @@ bench_seed() {
   else
     echo "  banc : mot de passe unix non posé sur « $human » (chpasswd a refusé)"
   fi
-  url="$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)"
+  url="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
   if [[ -n "$url" && -s "$PROV_MASTER_TOKEN_FILE" ]] \
-     && tok="$(bench_human_seed "$url" "$(read_token "$PROV_MASTER_TOKEN_FILE")" "$human" "$(bench_human_password)")"; then
+     && tok="$(bench_human_seed "$url" "$PROV_MASTER_TOKEN_FILE" "$human" "$(bench_human_password)")"; then
     # un fichier temporaire puis install : install ne relit pas un stdin sur une destination déjà là
     tmp="$(mktemp "${TMPDIR:-/tmp}/lcars-op-token.XXXXXX")"
     printf '%s\n' "$tok" > "$tmp"

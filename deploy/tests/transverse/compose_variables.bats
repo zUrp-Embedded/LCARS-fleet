@@ -10,7 +10,7 @@ setup() {
   COMPOSES=("$D/docker/docker-compose.yml" "$D/docker/docker-compose.bench.yml" "$D/docker/docker-compose.secrets.yml"
             "$D/docker/forge-compose.yml" "$D/docker/runner-compose.yml")
   POSEURS=("$D/container" "$D/docker/bench/bench-up.sh" "$D/docker/bench/bench-swap-image.sh" "$D/docker/bench/bench-down.sh"
-           "$D/docker/forge-runner.sh" "$D/lib/forge-bootstrap.sh" "$D/lib/store.sh")
+           "$D/docker/forge-runner.sh" "$D/lib/forge-bootstrap.sh" "$D/lib/store.sh" "$D/installer-constants.env")
 }
 
 sans_commentaires() { sed 's/#.*//' "$@"; }

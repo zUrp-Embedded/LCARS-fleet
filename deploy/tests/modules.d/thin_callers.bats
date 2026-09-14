@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=integration
 # SOURCE: deploy/tests/modules.d/thin_callers.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
@@ -51,4 +51,23 @@ setup() {
     [[ "$output" == *"geste:"*"verbe:check"* ]] || { echo "$m : $output" >&2; return 1; }
     [[ "$output" != *"unbound"* ]]
   done
+}
+
+@test "le groupe du deck est le compte système, et les injections retirées (bind, mots de passe, catalogues d'héritage) n'atteignent plus le geste" {
+  local lib="$BATS_TEST_TMPDIR/lib.sh" root="$BATS_TEST_TMPDIR/root" g m
+  mkdir -p "$root/runtime/services/forge.d" "$root/runtime/services/lib"
+  printf '%s\n' "repo_root() { printf '%s' '$root'; }" "product_tree() { printf '%s' '$root/runtime'; }" "advertise_addr() { :; }" > "$lib"
+  : > "$root/runtime/services/lib/module-protocol.sh"
+  for g in catalogues tokens deck-oidc; do
+    printf '%s\n' '#!/usr/bin/env bash' 'env | grep "^LCARS_" | sort' > "$root/runtime/services/forge.d/$g.sh"
+  done
+  for m in 50-catalogues 63-forge-tokens 66-deck-oidc; do
+    run env -i PATH="$PATH" PROVISION_LIB="$lib" PROV_SYSTEM_USER=compte-sys PROV_SYSTEM_GROUP=groupe-injecte \
+      PROV_DECK_BIND=10.9.9.9 PROV_PASSWORDS_FILE=/injecte/passwords.json PROV_LEGACY_CATALOGUES_DIR=/injecte/catalogues \
+      bash "$MODS/$m.sh" check
+    [ "$status" -eq 0 ]
+    refute_out '^LCARS_(DECK_BIND|PASSWORDS_FILE|LEGACY_CATALOGUES_DIR)=|injecte' <<<"$output"
+  done
+  # la sortie qui reste est celle de 66, le dernier appelant joué
+  grep -qx 'LCARS_SYSTEM_GROUP=compte-sys' <<<"$output"
 }

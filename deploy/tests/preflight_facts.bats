@@ -6,6 +6,7 @@
 # STATUS: témoins de 00-preflight — les faits que l'installeur lit, et les verdicts qui ne bougent pas
 
 load refute
+load support/decor
 
 setup() {
   # le décor possède l'environnement : toute la famille est effacée, pas les noms connus
@@ -20,12 +21,14 @@ setup() {
   [ -f "$LIB" ]
   FACTS="$BATS_TEST_TMPDIR/facts"
 
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  decor_pose
+  BIN="$DECOR_BIN"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/docker"; chmod 0755 "$BIN/docker"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
-  export LCARS_APT_HISTORY="$BATS_TEST_TMPDIR/apt-history.log"
-  export LCARS_PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
-  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\n' > "$LCARS_PASSWD_FILE"
+  CHANNEL="$LCARS_DECOR_ROOT/etc/lcars/channel"
+  APT_HISTORY="$LCARS_DECOR_ROOT/var/log/apt/history.log"
+  mkdir -p "$(dirname "$APT_HISTORY")"
+  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\n' > "$LCARS_DECOR_ROOT/etc/passwd"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
 }
 
 teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
@@ -34,7 +37,6 @@ preflight() { # preflight <substrat> [VAR=val…]
   local sub="$1"; shift
   run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight \
       PROV_SUBSTRATE="$sub" PROV_DOCKER_BIN="$BIN/docker" \
-      LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
       PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" \
       "$@" bash "$MOD" check
 }
@@ -89,7 +91,7 @@ listen_on() { # listen_on <port> — un processus python qui écoute quelques se
 CONTRAT="os distro distro_version noyau cpu systemd bash arch ram_mb disque_mb utilisateur groupes
 substrat consent wsl2 userns_knob docker docker_bin docker_host docker_server docker_flavor docker_why
 compose compose_why forge_fournie forge_joignable port_forge port_deck port_ssh projet projet_pris
-apt_installs comptes_humains sudo curl git channel channel_tree"
+apt_installs comptes_humains sudo curl git jq channel channel_tree"
 
 faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est posé ; vide seulement s'il est admis vide
   local f
@@ -119,8 +121,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
 
 @test "sans PROV_FACTS_FILE le module ne change rien" {
   run env PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight PROV_SUBSTRATE=docker \
-      PROV_DOCKER_BIN="$BIN/docker" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
-      bash "$MOD" check
+      PROV_DOCKER_BIN="$BIN/docker" bash "$MOD" check
   [ ! -e "$FACTS" ]
 }
 
@@ -133,7 +134,8 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
 
 
 @test "le système est décrit : distribution, noyau, cœurs, systemd, utilisateur et groupes" {
-  preflight docker LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR"
+  mkdir -p "$LCARS_DECOR_ROOT/run/systemd/system"
+  preflight docker
   [ -n "$(fact distro)" ]
   [ -n "$(fact noyau)" ]
   [ "$(fact cpu)" -ge 1 ]
@@ -149,8 +151,8 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   [[ "$output" == *"WARN  00-preflight: FORGE_BASE_URL (http://ancienne-forge:9999) est ignorée"* ]]
 }
 
-@test "systemd : le fait suit le répertoire de systemd — absent, « non »" {
-  preflight docker LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR/pas-de-systemd"
+@test "systemd : le fait suit le répertoire de systemd du décor — absent, « non »" {
+  preflight docker
   [ "$(fact systemd)" = non ]
 }
 
@@ -169,7 +171,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
 
 @test "linux sans déclaration : à l'apply le refus rend 1, le code d'un échec d'apply" {
   run env PROV_FACTS_FILE="$FACTS" PROVISION_LIB="$LIB" PROVISION_MODULE=00-preflight \
-      PROV_SUBSTRATE=linux PROV_DOCKER_BIN="$BIN/docker" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_SUBSTRATE=linux PROV_DOCKER_BIN="$BIN/docker" \
       PATH="$BIN:/usr/sbin:/usr/bin:/sbin:/bin" bash "$MOD" apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL"*"Linux natif sans déclaration"* ]]
@@ -308,8 +310,8 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
   local p; p="$(free_port)"
   ss_muet "$p"
   listen_on "$p"
-  printf 'LCARS_LANDING_PORT=%s\n' "$p" > "$BATS_TEST_TMPDIR/services.env"
-  preflight wsl PROV_DECK_PORT="$p" LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/services.env"
+  printf 'LCARS_LANDING_PORT=%s\n' "$p" > "$LCARS_DECOR_ROOT/etc/lcars/services.env"
+  preflight wsl PROV_DECK_PORT="$p"
   kill "$LISTENER" 2>/dev/null || true
   [ "$(fact port_deck)" = "$p nous lcars-landing (service)" ]
   [[ "$output" != *"port $p"*"pris"* ]]
@@ -337,7 +339,7 @@ faits_poses() { # faits_poses <faits admis vides> — chaque fait du contrat est
 
 
 @test "les paquets installés après la naissance de l'instance sont listés, sans les mises à jour ni les dépendances" {
-  cat > "$LCARS_APT_HISTORY" <<'EOF'
+  cat > "$APT_HISTORY" <<'EOF'
 
 Start-Date: 2026-04-20  18:06:23
 Commandline: apt-get install ubuntu-wsl
@@ -359,7 +361,7 @@ EOF
 }
 
 @test "une instance sans installation après sa naissance rend un fait vide" {
-  cat > "$LCARS_APT_HISTORY" <<'EOF'
+  cat > "$APT_HISTORY" <<'EOF'
 
 Start-Date: 2026-04-20  18:06:23
 Commandline: apt-get install ubuntu-wsl
@@ -371,7 +373,7 @@ EOF
 }
 
 @test "une naissance d'instance que le système ne sait pas donner rend inconnu, jamais l'image entière" {
-  cat > "$LCARS_APT_HISTORY" <<'EOF'
+  cat > "$APT_HISTORY" <<'EOF'
 
 Start-Date: 2026-04-20  18:06:23
 Commandline: apt-get install ubuntu-wsl
@@ -389,10 +391,18 @@ EOF
   [ "$(fact apt_installs)" = "sans-objet" ]
 }
 
-@test "les comptes humains sont ceux au-dessus de l'uid 1000, nobody exclu" {
-  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nnobody:x:65534:65534::/:/usr/sbin/nologin\n' > "$LCARS_PASSWD_FILE"
+@test "les comptes humains sont ceux que login.defs borne, UID_MAX compris" {
+  # une frontière déplacée par l'administrateur déplace le fait : 1000 et 60000 ne sont pas des constantes
+  printf 'UID_MIN\t2000\nUID_MAX\t3000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
+  printf 'root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/bin/bash\ncarol:x:2000:2000::/home/carol:/bin/bash\ndave:x:3000:3000::/home/dave:/bin/bash\neve:x:3001:3001::/home/eve:/bin/bash\nnobody:x:65534:65534::/:/usr/sbin/nologin\n' > "$LCARS_DECOR_ROOT/etc/passwd"
   preflight wsl
-  [ "$(fact comptes_humains)" = "bob,alice" ]
+  [ "$(fact comptes_humains)" = "carol,dave" ]
+}
+
+@test "login.defs illisible : le fait des comptes humains reste vide, jamais deviné" {
+  rm "$LCARS_DECOR_ROOT/etc/login.defs"
+  preflight wsl
+  grep -qx 'comptes_humains=' "$FACTS"
 }
 
 
@@ -413,25 +423,39 @@ EOF
 @test "le canal dit qui a posé, ou aucun ; l'arbre dit ce qu'il poserait" {
   local v
   for v in source kit; do
-    mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
+    printf '%s\n' "$v" > "$CHANNEL"
     preflight linux LCARS_ALLOW_ANY_HOST=1
     [ "$(fact channel)" = "$v" ]
   done
-  rm -f "$LCARS_CHANNEL_FILE"
+  rm -f "$CHANNEL"
   preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$(fact channel)" = "aucun" ]
   [ "$(fact channel_tree)" = "source" ]
 }
 
 @test "un canal illisible est un échec qui compte, et le fait dit invalide" {
-  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'snap\n' > "$LCARS_CHANNEL_FILE"
+  printf 'snap\n' > "$CHANNEL"
   preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$status" -eq 2 ]
   [ "$(fact channel)" = "invalide" ]
 }
 
 @test "un produit posé sans tampon rend inconnu" {
-  mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  preflight linux LCARS_ALLOW_ANY_HOST=1 PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/runtime"
+  preflight linux LCARS_ALLOW_ANY_HOST=1
   [ "$(fact channel)" = "inconnu" ]
+}
+
+@test "jq présent : le fait dit oui" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/jq"; chmod 0755 "$BIN/jq"
+  preflight docker
+  [ "$(fact jq)" = oui ]
+}
+
+@test "jq absent : le fait le dit, en avertissement et sans dérive" {
+  # ce système le pose lui-même (10-packages) : seul le conteneur l'exige, et install.sh en décide
+  preflight docker PATH="$BIN:$(path_sans jq)"
+  [ "$(fact jq)" = absent ]
+  [[ "$output" == *"WARN  00-preflight: jq absent"* ]]
+  printf '%s\n' "$output" | refute_out 'DRIFT.*jq'
 }

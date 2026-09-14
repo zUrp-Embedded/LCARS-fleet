@@ -164,21 +164,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
-  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION. provision-lib compose `$PROV_ROOT/var/catalogues`
-  # depuis une racine ecrite UNE fois ; on accepte la forme que la lib PORTE si elle se resout a la
-  # valeur de l'autorite — sinon on exige le litteral, et le miroir rougit en nommant le fichier.
-  defp lib_installed_form(root, installed) do
-    with {:ok, lib_src} <- File.read(Path.expand("../deploy/lib/provision-lib.sh", root)),
-         {raw, ^installed} <- Support.shell_default_resolved(lib_src, "PROV_CATALOGUES_DIR") do
-      raw
-    else
-      _ -> installed
-    end
-  end
-
   @doc """
   Compares Layout's shipped and installed catalogue roots with six named source
-  patterns in CLI, forge gestures, manifest and provisioning defaults.
+  patterns in CLI, forge gestures, manifest and installer constants.
 
   Shipped seeds and the installed cache serve different purposes; both creators
   and readers must agree. Scope is decided per mirror. This checks expected source
@@ -225,7 +213,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       }
     else
       shipped = Path.join(platform, dirname)
-      lib_installed_form = lib_installed_form(root, installed)
 
       mirrors = [
         {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
@@ -241,9 +228,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         # de l'image d'avant etait un jumeau ; il n'y a plus de second createur a tenir d'accord.
         {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
-        {"../deploy/lib/provision-lib.sh",
-         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(lib_installed_form)}\}"/,
-         "the provisioning default"}
+        {"../deploy/installer-constants.env",
+         ~r/^PROV_CATALOGUES_DIR=#{Regex.escape(installed)}$/m, "the installer constant"}
       ]
 
       {checked, skipped} =
@@ -286,8 +272,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   The manifest confirms the agreed path through a dir row when deploy is present;
   it does not define the directory's semantic name.
 
-  Four holders are listed. A single substitution pass resolves provisioning
-  defaults; unknown variables remain literal. Missing/unreadable files are dropped
+  Three holders are listed, each read as a literal. Missing/unreadable files are dropped
   from the comparison, while readable files lacking their anchor fail. Fewer than
   two readable declarations and no broken anchors returns an explicit skip.
 
@@ -308,42 +293,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     [
       {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
-      {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
-       "the provisioning default"},
-      {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
-       "the acceptance gate's default"},
+      {"../deploy/installer-constants.env", ~r/^PROV_TOKENS_DIR=(.+)$/m,
+       "the installer constant"},
       {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
        "the product module protocol's default"}
     ]
   end
 
-  # One-pass expansion handles derived provisioning defaults without interpreting shell.
-  defp prov_defaults(root) do
-    case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
-      {:ok, src} -> Support.shell_defaults(src)
-      _ -> %{}
-    end
-  end
-
   defp private_dir_declarations(root) do
-    defauts = prov_defaults(root)
-
     {in_scope, out} =
       Enum.split_with(private_dir_holders(), fn {rel, _, _} ->
         mirror_scope(rel, root) == :required
       end)
 
-    results = Enum.map(in_scope, &read_private_dir_holder(&1, root, defauts))
+    results = Enum.map(in_scope, &read_private_dir_holder(&1, root))
 
     {for({:ok, rel, what, v} <- results, do: {rel, what, v}),
      for({:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}),
      out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()}
   end
 
-  defp read_private_dir_holder({rel, rx, what}, root, defauts) do
+  defp read_private_dir_holder({rel, rx, what}, root) do
     with {:ok, body} <- File.read(Path.expand(rel, root)),
          [_, v] <- Regex.run(rx, code_of(body)) do
-      {:ok, rel, what, Support.resolve_shell(defauts, v)}
+      {:ok, rel, what, v}
     else
       {:error, _} -> {:absent, rel, what}
       _ -> {:unreadable, rel, what}
@@ -476,8 +449,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
-        {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
-         "the provisioning default (its token file derives from it)"},
+        {"../deploy/installer-constants.env", ~r/^PROV_SYSTEM_ACCOUNT=#{e}$/m,
+         "the installer constant"},
         {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
         {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,

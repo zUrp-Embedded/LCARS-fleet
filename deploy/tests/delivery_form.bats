@@ -8,28 +8,28 @@
 # shellcheck disable=SC2030,SC2031
 
 load refute
+load support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   DEPLOY="$BATS_TEST_DIRNAME/.."
   # Un FAUX arbre source, parce que `repo_root()` se derive de l'emplacement de la lib : c'est cette
   # racine-la que le discriminant interroge, et c'est donc la seule qu'un temoin ait a fabriquer.
   RACINE="$BATS_TEST_TMPDIR/racine"
   mkdir -p "$RACINE/deploy"
   cp -r "$DEPLOY/lib" "$RACINE/deploy/lib"
+  cp "$DEPLOY/installer-constants.env" "$DEPLOY/system.manifest" "$RACINE/deploy/"
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
 
   STAMP="$RACINE/.source-revision"
-  # Le CANAL est a nous, meme quand on ne le lit pas : un temoin qui joue un module lecteur du
-  # canal ne lit jamais celui de la machine (MUR I21).
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"
-  export PROV_ROOT="$BATS_TEST_TMPDIR/opt-lcars"
-  mkdir -p "$PROV_ROOT"
-
-  export PROV_LINK_DIR="$BATS_TEST_TMPDIR/link"
-  export LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
-  [[ "$LCARS_ELIXIR_PREFIX" == "$BATS_TEST_TMPDIR"/* ]] \
-    || { echo "couture Elixir hors du tmp du test : $LCARS_ELIXIR_PREFIX — le module viserait la vraie machine"; return 1; }
-  mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt"
+  # le canal, les liens, l'Elixir posé : tout se lit sous le décor, jamais sur la machine
+  decor_pose
+  CHANNEL="$LCARS_DECOR_ROOT/etc/lcars/channel"
+  LINK_DIR="$LCARS_DECOR_ROOT/usr/local/bin"
+  ELIXIR_PREFIX="$LCARS_DECOR_ROOT/opt/elixir-"
+  mkdir -p "$LCARS_DECOR_ROOT/opt"
 }
 
 # La livraison BINAIRE se declare : `pack.sh` ecrit le tampon a la racine du paquet.
@@ -55,7 +55,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 
 @test "DISCRIMINANT : le nom du tampon ne se surcharge pas — pack, kit-verify, deploy-release et l'installeur écrivent tous .source-revision" {
   printf 'x\n' > "$RACINE/.autre-tampon"
-  LCARS_SOURCE_STAMP=.autre-tampon run lib 'prov_delivery'
+  PROV_SOURCE_STAMP=.autre-tampon run lib 'prov_delivery'
   [ "$output" = source ]
 }
 
@@ -92,7 +92,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 
 @test "TOOLCHAIN : livraison binaire — le nettoyage des reliquats PASSE QUAND MEME" {
   paquet
-  ln -sf "${LCARS_ELIXIR_PREFIX}1.14.0/bin/elixir" "$PROV_LINK_DIR/elixir"
+  ln -sf "${ELIXIR_PREFIX}1.14.0/bin/elixir" "$LINK_DIR/elixir"
   toolchain check
   [[ "$output" == *"toolchain non requise"* ]]
   [[ "$output" == *"DEVANT apt"* ]]   # le nettoyage a bien ete evalue, pas saute
@@ -114,20 +114,21 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 @test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme erlang, et elixir n'y entre PLUS par apt" {
   checkout                                   # livraison source : le module travaille
   export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal"
-  # Le pin est DEJA pose sous la couture : le module prend la branche « deja pose » et ne telecharge
-  # rien — un temoin ne sort jamais sur le reseau.
-  local pin; pin="$(sed -n 's/^: "${PROV_ELIXIR_PIN:=\([^}]*\)}".*/\1/p' "$PROVISION_LIB")"
+  # Le pin est DEJA pose sous le décor : le module prend la branche « deja pose » et ne telecharge
+  # rien — un temoin ne sort jamais sur le reseau. Un erl doublé répond la majeure du plancher.
+  local pin otp
+  pin="$(sed -n 's/^PROV_ELIXIR_PIN=//p' "$DEPLOY/installer-constants.env")"
+  otp="$(sed -n 's/^PROV_ELIXIR_OTP_MAJOR=//p' "$DEPLOY/installer-constants.env")"
   [ -n "$pin" ]
-  mkdir -p "${LCARS_ELIXIR_PREFIX}${pin}/bin"
-  printf '#!/usr/bin/env bash\necho "%s"\n' "$pin" > "${LCARS_ELIXIR_PREFIX}${pin}/bin/elixir"
-  chmod 0755 "${LCARS_ELIXIR_PREFIX}${pin}/bin/elixir"
+  printf '#!/usr/bin/env bash\necho "%s"\n' "$otp" > "$DECOR_BIN/erl"; chmod 0755 "$DECOR_BIN/erl"
+  mkdir -p "${ELIXIR_PREFIX}${pin}/bin"
+  printf '#!/usr/bin/env bash\necho "%s"\n' "$pin" > "${ELIXIR_PREFIX}${pin}/bin/elixir"
+  chmod 0755 "${ELIXIR_PREFIX}${pin}/bin/elixir"
   local b; for b in elixirc mix iex; do
-    printf '#!/usr/bin/env bash\nexit 0\n' > "${LCARS_ELIXIR_PREFIX}${pin}/bin/$b"
-    chmod 0755 "${LCARS_ELIXIR_PREFIX}${pin}/bin/$b"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${ELIXIR_PREFIX}${pin}/bin/$b"
+    chmod 0755 "${ELIXIR_PREFIX}${pin}/bin/$b"
   done
   run env PROVISION_LIB="$PROVISION_LIB" PROV_JOURNAL_ACC="$PROV_JOURNAL_ACC" \
-          PROV_LINK_DIR="$PROV_LINK_DIR" LCARS_ELIXIR_PREFIX="$LCARS_ELIXIR_PREFIX" \
-          PROV_ELIXIR_OTP_MAJOR=1 PROV_ELIXIR_MIN=0.0.1 \
       bash "$DEPLOY/modules.d/15-toolchain.sh" apply
   grep -q '^apt_already .*erlang' "$PROV_JOURNAL_ACC"
   [[ "$output" == *"déjà posé"* ]]
@@ -155,7 +156,7 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   # la garde est AVANT le test de npm, sinon elle ne sert a rien
   local n_bin n_npm
   n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
-  n_npm="$(grep -n 'command -v "\$NPM_BIN"' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_npm="$(grep -n 'command -v npm' <<<"$bloc" | head -1 | cut -d: -f1)"
   [ -n "$n_bin" ]
   [ -n "$n_npm" ]
   [ "$n_bin" -lt "$n_npm" ]
@@ -205,14 +206,13 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
 canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la racine du decor
   local m="$BATS_TEST_TMPDIR/60.sh"
   sed '/^case "${1:?usage/,$d' "$DEPLOY/modules.d/60-deploy.sh" > "$m"
-  run env LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel" LCARS_CHANNEL_OWNER="$(id -un):$(id -gn)" \
-      PROVISION_MODULE=60-deploy XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR" \
+  run env PROVISION_MODULE=60-deploy XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR" \
       bash -c "set -euo pipefail; mkdir -p '$RACINE/runtime/etc'; . '$m' >/dev/null 2>&1; $1"
 }
 
 @test "CANAL : 60-deploy ecrit KIT d'une livraison binaire, SOURCE d'un checkout — le MEME discriminant, pas un second" {
-  paquet;   canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "kit" ]
-  checkout; canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "source" ]
+  paquet;   canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$CHANNEL")" = "kit" ]
+  checkout; canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$CHANNEL")" = "source" ]
   # et la decision vit dans la LIB (prov_channel_here : binaire -> kit, sinon source), lue aussi par
   # le preflight et workstation — jamais le tampon par son nom (meme regle que 15/16)
   local corps; corps="$(sed -n '/^poser_canal()/,/^}/p' "$DEPLOY/modules.d/60-deploy.sh")"

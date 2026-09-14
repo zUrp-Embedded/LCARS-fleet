@@ -8,7 +8,6 @@
 # shellcheck disable=SC2016
 
 setup() {
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   ARBRES=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin")
   mapfile -t CODE < <(

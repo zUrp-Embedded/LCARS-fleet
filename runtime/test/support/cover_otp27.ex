@@ -2,7 +2,7 @@ defmodule Fleet.Test.CoverOtp27 do
   @moduledoc """
   L'outil de couverture de `mix test --cover` sur ce depot, tant que le parc est en OTP 27.
 
-  ⚠ POURQUOI CE MODULE EXISTE. Sous OTP 27, `cover` fait CRASHER le cover-compile de douze modules
+  ⚠ POURQUOI CE MODULE EXISTE. Sous OTP 27, `cover` fait CRASHER le cover-compile de certains modules
   de `lib/` (erlang/otp#11524 : le passe `sys_coverage` nomme ses variables temporaires `_1`,
   `_2`… — des noms VALIDES en Erlang, qui entrent en collision avec les temporaires que le
   compilateur Elixir genere pour `expr in liste`). Le correctif — `cov1`, `cov2`…, des noms qu'une
@@ -26,7 +26,7 @@ defmodule Fleet.Test.CoverOtp27 do
   `otp27_refused:` de `mix.exs`, supprimer ce fichier et son temoin. `Mix.Tasks.Test.Coverage`
   reprend la main, sans trou.
 
-  ⚠ CE QUI N'EST PAS MESURE EST DIT. Les douze modules refuses sont imprimes a chaque run, sous le
+  ⚠ CE QUI N'EST PAS MESURE EST DIT. Les modules refuses sont imprimes a chaque run, sous le
   total. Sept d'entre eux GARDENT quelque chose (confinement, allowlist des opts de spawn,
   vocabulaire des verdicts, champs proteges de la forge) : le total ne les contient pas, et le
   lecteur doit le savoir. « Non mesure » et « couvert » ne sont pas la meme ligne.
@@ -61,7 +61,7 @@ defmodule Fleet.Test.CoverOtp27 do
   @spec probe(Path.t()) :: [module()]
   def probe(ebin) do
     # ⚠ ZERO BEAM N'EST PAS « ZERO REFUS ». Un chemin faux rendrait une liste vide, la confrontation
-    # dirait que les douze declares ne crashent plus, et la suite mesurerait rien en le disant a
+    # dirait que les declares ne crashent plus, et la suite mesurerait rien en le disant a
     # l'envers. Un ebin vide est une panne d'instrument.
     if Path.wildcard(Path.join(ebin, "*.beam")) == [] do
       Mix.raise(

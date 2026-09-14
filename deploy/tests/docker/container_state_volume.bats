@@ -11,10 +11,33 @@ setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
   DEV="$DOCKER/docker-compose.yml"
   PROTO="$DOCKER/../../runtime/services/lib/module-protocol.sh"
+  CONSTANTES="$DOCKER/../installer-constants.env"
+  [ -r "$CONSTANTES" ]
 }
-env_of() { sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1; }
-mounts_of() { sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+).*$/\1/p'; }
+constante() { sed -n "s/^$1=//p" "$CONSTANTES"; }
+resout() { # resout <texte> — chaque ${PROV_…} du compose remplacé par sa valeur dans les constantes, comme --env-file
+  local t="$1"
+  while [[ "$t" =~ \$\{(PROV_[A-Z0-9_]+)[^}]*\} ]]; do
+    t="${t/"${BASH_REMATCH[0]}"/$(constante "${BASH_REMATCH[1]}")}"
+  done
+  printf '%s\n' "$t"
+}
+env_of() { resout "$(sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1)"; }
+mounts_of() {
+  local m
+  while read -r m; do resout "$m"; done \
+    < <(sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+|\$\{[^}]+\}[^:]*).*$/\1/p')
+}
 under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]] && return 0; done < <(mounts_of "$2"); return 1; }
+
+@test "GARDE D'INSTRUMENT : mounts_of lit chaque montage nommé du compose, ceux écrits par une constante compris" {
+  local m
+  m="$(mounts_of "$DEV")"
+  [ -n "$m" ] || { echo "aucun montage lu dans $DEV : chaque « sous un volume » ci-dessous serait faux" >&2; return 1; }
+  [ "$(grep -c . <<<"$m")" -eq "$(sed 's/#.*//' "$DEV" | grep -cE '^[[:space:]]+-[[:space:]]+lcars-[a-z]+:')" ]
+  grep -qx "$(constante PROV_ROOT)/var" <<<"$m"
+  grep -qx "$(constante PROV_STORE_ROOT)/state" <<<"$m"
+}
 
 @test "le client OAuth2 du deck est sous un volume du compose" {
   local dev

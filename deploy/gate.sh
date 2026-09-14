@@ -150,7 +150,7 @@ fi
 echo "--- GO-7 : en-têtes déclaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
 
 # copie assumée du bloc de runtime/test/shell_gate.sh : sans elle, l'environnement du lanceur
-# (FORGE_BASE_URL exporté par provision --env, un LCARS_SEAT_UID_FILE posé à la main, PROV_FLEET_GROUP
+# (FORGE_BASE_URL exporté par provision --env, un LCARS_DECOR_ROOT posé à la main, PROV_FLEET_GROUP
 # qui voyage par services.env) retunerait la mesure ; installer_gate.bats tient l'accord des copies
 BATS_ENV=()
 while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(

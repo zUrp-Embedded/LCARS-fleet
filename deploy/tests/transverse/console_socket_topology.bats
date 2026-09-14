@@ -10,7 +10,6 @@
 load ../refute
 
 setup() {
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   SRC="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
   LANDING="$BATS_TEST_DIRNAME/../../../runtime/services/console-landing.sh"
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
@@ -223,8 +222,10 @@ EOF
   refute grep -q "^ttyd" "$CALLS"
 }
 
-ports_of() {
-  grep -oE '^\s*- "[^"]+"' "$1" | grep -oE ':[0-9]+"$' | tr -d ':"' | sort -u
+ports_of() { # ports_of <compose> — les ports du conteneur publiés, le compose rendu avec les constantes de l'installeur, sans daemon
+  env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" LCARS_STORE_PREFIX=temoin \
+    docker compose --env-file "$BATS_TEST_DIRNAME/../../installer-constants.env" -f "$1" -p temoin config --format json \
+    | jq -r '.services[].ports[]? | .target' | sort -u
 }
 
 @test "6-072: the compose publishes no RANGE of ports" {

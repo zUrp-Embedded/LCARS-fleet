@@ -18,11 +18,15 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 
-PROJECT="lcars"
-# mêmes défauts que bench-up.sh : des ports différents republieraient le conteneur ailleurs que sa forge ne l'annonce
-FORGE_PORT="21000"
-DECK_PORT="20999"
-SSH_PORT="2222"
+# shellcheck source=../../lib/provision-lib.sh
+source "$DOCKER_DIR/../lib/provision-lib.sh"
+# shellcheck source=../../lib/forge-bootstrap.sh
+source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
+
+PROJECT="$PROV_FORGE_BASE_DEFAULT"
+FORGE_PORT="$PROV_FORGE_HOST_PORT_DEFAULT"
+DECK_PORT="$PROV_DECK_PORT_DEFAULT"
+SSH_PORT="$PROV_SSH_PORT_DEFAULT"
 BIND="0.0.0.0"
 ADVERTISE=""
 IMAGE=""
@@ -52,13 +56,9 @@ CONTAINER_PROJECT="${PROJECT}-fleet"
 FORGE_PROJECT="${PROJECT}-forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 CONTAINER="${CONTAINER_PROJECT}-lcars-1"
-COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
+COMPOSE_ARGS=(--env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/docker-compose.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$CONTAINER_PROJECT")
 
 export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
-# shellcheck source=../../lib/provision-lib.sh
-source "$DOCKER_DIR/../lib/provision-lib.sh"
-# shellcheck source=../../lib/forge-bootstrap.sh
-source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
 if [[ -z "${ADVERTISE:-}" ]]; then advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"; fi
 FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 
@@ -85,8 +85,8 @@ say "banc $PROJECT — le conteneur passe sur $IMAGE (forge, semis et jetons pr�
 # et « gitea » résout avant le premier boot
 env LCARS_IMAGE="$IMAGE" \
     LCARS_ADMIRAL="admiral" \
-    FORGE_BASE_URL="http://gitea:3000" \
-    LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
+    FORGE_BASE_URL="$PROV_FORGE_INTERNAL_URL" \
+    LCARS_SOURCE_REMOTE="$PROV_FORGE_INTERNAL_URL/$PROV_FORGE_ORG_DEFAULT/lcars.git" \
     LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \
     FORGE_PUBLIC_URL="$FORGE_URL" \
@@ -127,7 +127,8 @@ say "relance pour que le geste tokens minte les jetons de rôle sur la graine ex
 "$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
 wait_healthy || die "le conteneur ne redevient pas healthy après relance" 3
 
-ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
+TOKENS_IN="$(prov_canon "$PROV_TOKENS_DIR")"
+ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:$TOKENS_IN" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun jeton de rôle après relance — le conteneur ne voit pas la graine de la forge" 6
 
 CREDS_SIZE="$("$DOCKER_BIN" cp "$CONTAINER:/home/$HUMAN/.claude/.credentials.json" - 2>/dev/null \
@@ -146,7 +147,7 @@ say "─────────────────────────
 say "conteneur remplacé"
 say "  image     : $IMAGE   (révision $REVISION)"
 say "  forge     : $FORGE_URL   (préservée — ni resemée ni redémarrée)"
-say "  jetons    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
+say "  jetons    : $ROLE_TOKENS fichiers dans $TOKENS_IN"
 say "  creds     : $CREDS_OK"
 say "  la fleet n'est pas démarrée : docker exec -u $HUMAN $CONTAINER bash -lc 'fleet start'"
 say "─────────────────────────────────────────────────────────"

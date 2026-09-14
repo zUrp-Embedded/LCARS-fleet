@@ -18,10 +18,18 @@ setup() {
   # PRESENT : les conteneurs du daemon ; VOLUMES : ses volumes ; FLEET_FILES : les fichiers compose
   # inscrits sur le conteneur du projet <base>-fleet
   export PRESENT="" VOLUMES="" FLEET_FILES="/r/deploy/docker/docker-compose.yml,/r/deploy/docker/docker-compose.bench.yml"
+  # un down émis est relu par compose lui-même, sans daemon : ses fichiers, ses constantes et son environnement suffisent-ils ?
+  REAL_DOCKER="$(command -v docker)"
+  export REAL_DOCKER NO_DAEMON="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock"
 
   cat > "$BINDIR/dockerstub" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$CALLS"
+if [[ "$1" == compose && "$*" == *" down -v --remove-orphans" ]]; then
+  if err="$(DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-3}" config -q 2>&1)"; then echo "LU:${*: -4:1}" >> "$CALLS"
+  else echo "ILLISIBLE:${*: -4:1}: $err" >> "$CALLS"
+  fi
+fi
 case "$*" in
   "ps -aq --filter label=com.docker.compose.project=bt-fleet")
     for n in $PRESENT; do [[ "$n" == bt-fleet-* ]] && echo "id-$n"; done; exit 0 ;;
@@ -147,13 +155,17 @@ idx_of() {
   refute grep -q -- "down -v" "$CALLS"
 }
 
-@test "chaque fichier compose nommé par bench-down existe à côté de lui" {
-  local here docker_dir f n=0
-  here="$(cd "$(dirname "$SRC")" && pwd)"; docker_dir="$(cd "$here/.." && pwd)"
-  while read -r f; do
-    n=$((n + 1))
-    f="${f//\$HERE/$here}"; f="${f//\$DOCKER_DIR/$docker_dir}"
-    [ -f "$f" ] || { echo "fichier compose nommé mais absent : $f"; return 1; }
-  done < <(grep -oE -- '-f "\$(HERE|DOCKER_DIR)/[^"]+"' "$SRC" | sed -E 's/^-f "//; s/"$//')
-  [ "$n" -eq 3 ]
+@test "les trois down se lisent par compose : les constantes de l'installeur, et une adresse factice pour le runner" {
+  PRESENT="bt-fleet-lcars-1 bt-runner-act-1 bt-forge-gitea-1" run_down
+
+  [ "$status" -eq 0 ]
+  refute grep -q '^ILLISIBLE:' "$CALLS"
+  grep -qx 'LU:bt-runner' "$CALLS"
+  grep -qx 'LU:bt-fleet' "$CALLS"
+  grep -qx 'LU:bt-forge' "$CALLS"
+  local constantes f; constantes="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/installer-constants.env"
+  [ "$(grep -c -- '^compose --env-file ' "$CALLS")" -eq 3 ]
+  for f in $(grep -oE -- '^compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
+    [ "$(readlink -f "$f")" = "$constantes" ]
+  done
 }

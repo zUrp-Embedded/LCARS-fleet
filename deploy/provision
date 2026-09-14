@@ -51,6 +51,8 @@ die()   { echo "provision: $*" >&2; exit 1; }
 
 [[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
 [[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
+[[ "$EUID" -ne 0 || -z "${LCARS_DECOR_ROOT:-}" ]] \
+  || die "LCARS_DECOR_ROOT est posée et le runner tourne en root : ce décor de témoin déplace les chemins, pas les comptes, les paquets, les services ni docker. Retirer LCARS_DECOR_ROOT de l'environnement (sudo -E, profil du shell), puis relancer."
 
 # ─── Args ───────────────────────────────────────────────────────────────────────────────────────
 CMD="${1:-}"; shift || true
@@ -65,7 +67,7 @@ declare -a ONLY=()
 # que le sous-shell et le refus s'imprimerait sans refuser
 valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] || die "$2 : « $1 » n'est pas un nombre"
-  (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous « lcars-system », ne peut pas binder)"
+  (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous son compte de service, ne peut pas binder)"
 }
 
 valid_project() {
@@ -106,9 +108,12 @@ if [[ -n "$ENV_FILE" ]]; then
 fi
 
 # Les paramètres retenus par la machine (ligne `params` de son journal) : lus après les drapeaux,
-# avant les défauts de la lib — un drapeau explicite gagne, le défaut d'usine perd.
+# avant les défauts de la lib — un drapeau explicite gagne, le défaut d'usine perd. Le chemin du
+# journal se lit dans le fichier des constantes, que la lib n'a pas encore chargé.
 _journal_params() {
-  local f="${LCARS_JOURNAL_FILE:-${PROV_ROOT:-/opt/lcars}/var/install.journal}" ligne kv k v
+  local f ligne kv k v
+  # illisible, le refus revient à la lib, qui le nomme
+  f="${LCARS_DECOR_ROOT:-}$(sed -n 's/^PROV_JOURNAL_FILE=//p' "$DEPLOY_DIR/installer-constants.env" 2>/dev/null)" || return 0
   [[ -r "$f" ]] || return 0
   ligne="$(sed -n 's/^params  *//p' "$f" | head -1)" || return 0
   for kv in $ligne; do
@@ -228,9 +233,6 @@ if [[ "$CMD" == "apply" ]]; then
 fi
 
 # ─── Le journal de cette machine ────────────────────────────────────────────────────────────────
-JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
-MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
-
 # shellcheck source=lib/provision-audit.sh
 . "$(dirname "$PROVISION_LIB")/provision-audit.sh"
 
@@ -308,10 +310,10 @@ else
   # avec ceux des passes précédentes, le reste décrit cette passe.
   if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" ]]; then
     _journal_ancien=""
-    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already) ' "$JOURNAL_FILE" || true)"
-    if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
+    [[ -r "$PROV_JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already) ' "$PROV_JOURNAL_FILE" || true)"
+    if mkdir -p "$(dirname "$PROV_JOURNAL_FILE")" 2>/dev/null; then
       {
-        echo "# SOURCE: $JOURNAL_FILE"
+        echo "# SOURCE: $PROV_JOURNAL_FILE"
         echo "# STATUS: mesure, pas declaration — ce qui a été posé sur cette machine ; deploy/system.manifest dit ce qui peut l'être."
         echo "# apt_installed / apt_already : la distinction n'est connaissable qu'avant l'install."
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -326,11 +328,11 @@ else
                      n=split(acc[k], w, " "); delete seen; out=""
                      for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }
                      printf "%-13s%s\n", k, out } }' | sort
-      } > "$JOURNAL_FILE" 2>/dev/null \
-        && chmod 0644 "$JOURNAL_FILE" 2>/dev/null \
-        || echo "  ${_PA}journal NON écrit ($JOURNAL_FILE) — l'install est faite, sa trace ne l'est pas${_PN}"
+      } > "$PROV_JOURNAL_FILE" 2>/dev/null \
+        && chmod 0644 "$PROV_JOURNAL_FILE" 2>/dev/null \
+        || echo "  ${_PA}journal NON écrit ($PROV_JOURNAL_FILE) — l'install est faite, sa trace ne l'est pas${_PN}"
     else
-      echo "  ${_PA}journal NON écrit : $(dirname "$JOURNAL_FILE") inaccessible${_PN}"
+      echo "  ${_PA}journal NON écrit : $(dirname "$PROV_JOURNAL_FILE") inaccessible${_PN}"
     fi
     rm -f "$PROV_JOURNAL_ACC"
   fi

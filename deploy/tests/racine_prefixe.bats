@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/racine_prefixe.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
-# STATUS: mur — le prefixe d'install RO a UNE valeur, et onze sites la disent
+# STATUS: mur — le prefixe d'install RO a une valeur, celle des constantes de l'installeur, et le runtime la dit
 
 load refute
 
@@ -25,8 +25,6 @@ porteurs_de_release() {
 }
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {
-  # `deploy/lib/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
-  # systeme). Un mur qui accepterait moins que ce que le produit exige mesurerait autre chose.
   [[ "$ATTENDU" == /*/* ]] || { echo "prefixe inexploitable : « $ATTENDU »" >&2; return 1; }
   [ -n "$BIN_REL" ]
 }

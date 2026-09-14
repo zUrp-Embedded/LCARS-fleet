@@ -17,11 +17,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# shellcheck source=lib/provision-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/provision-lib.sh"
+
 # le nom de l'humain de fleet se demande au geste de forge, il ne se reçoit pas
 FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../runtime/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
-PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
-[[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
+[[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
 
 _G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'
 [[ -t 1 ]] || { _G="" ; _R="" ; _A="" ; _N="" ; }
@@ -35,13 +37,12 @@ skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
 # 1. se connecter à la forge : on s'authentifie vraiment, avec chaque identifiant annoncé par la passe
 check_forge_login() {
   local _label login pw code tested=0
-  [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PRIVATE_DIR/forge.url)"; return; }
+  [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PROV_FORGE_URL_FILE)"; return; }
   [[ -s "$ANNOUNCE" ]] || { skip "forge : aucun identifiant annoncé par cette passe — rien à vérifier"; return; }
   while IFS=$'\t' read -r _label login pw; do
     [[ -n "$pw" ]] || continue
     tested=$((tested + 1))
-    code="$(printf 'user = "%s:%s"\n' "$login" "$pw" \
-            | curl -K - -s -o /dev/null -w '%{http_code}' -m 15 "$FORGE_URL/api/v1/user" 2>/dev/null || true)"
+    code="$(forge_api GET "$FORGE_URL/api/v1/user" /dev/null --basic "$login" <(printf '%s' "$pw"))" || true
     if [[ "$code" == "200" ]]; then
       ok "forge : « $login » s'authentifie avec le mot de passe annoncé"
     else
@@ -67,7 +68,7 @@ labels_demandes() { # labels_demandes → les runs-on du modèle de projet de l'
   grep -hoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "${wfs[@]}" 2>/dev/null | sort -u
 }
 check_ci() {
-  local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
+  local tokfile="$PROV_MASTER_TOKEN_FILE" body n served want manquants=""
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
   if [[ ! -r "$tokfile" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
@@ -77,13 +78,13 @@ check_ci() {
     fi
     return
   fi
-  local code
-  body="$(printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$tokfile")" \
-          | curl -K - -s -m 15 -w '\n%{http_code}' "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
-  code="${body##*$'\n'}"
-  body="${body%$'\n'*}"
+  local code out
+  out="$(mktemp "${TMPDIR:-/tmp}/accept-runners.XXXXXX")"
+  code="$(forge_api GET "$FORGE_URL/api/v1/admin/actions/runners" "$out" --token-file "$tokfile")" || true
+  body="$(cat "$out")"
+  rm -f "$out"
   if [[ "$code" != "200" ]]; then
-    skip "CI : l'API admin des runners n'a pas répondu (HTTP ${code:-aucune}) — jeton hors portée site-admin, forge muette ou injoignable : rien n'est conclu, ni dans un sens ni dans l'autre"
+    skip "CI : l'API admin des runners n'a pas répondu (HTTP $code) — jeton hors portée site-admin, forge muette ou injoignable : rien n'est conclu, ni dans un sens ni dans l'autre"
     return
   fi
   n="$(printf '%s' "$body" | jq -er '.total_count' 2>/dev/null)" || {
@@ -100,10 +101,10 @@ check_ci() {
   [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans les workflows du modèle de projet — le contrôle des labels serait vide, donc faux"; return; }
   local w
   for w in $want; do
-    [[ " $served " == *" $w "* ]] || missing="$missing $w"
+    [[ " $served " == *" $w "* ]] || manquants="$manquants $w"
   done
-  if [[ -n "$missing" ]]; then
-    no "CI : $n runner(s), mais aucun ne sert :$missing — les jobs d'un projet qui les demandent attendraient sans fin (servis : ${served:-aucun})"
+  if [[ -n "$manquants" ]]; then
+    no "CI : $n runner(s), mais aucun ne sert :$manquants — les jobs d'un projet qui les demandent attendraient sans fin (servis : ${served:-aucun})"
   else
     ok "CI : $n runner(s) servant les labels que le modèle de projet livré demande (${want//$'\n'/ })"
   fi

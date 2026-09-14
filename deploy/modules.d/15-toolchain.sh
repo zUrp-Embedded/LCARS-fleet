@@ -2,13 +2,13 @@
 # SOURCE: deploy/modules.d/15-toolchain.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: la toolchain de build — Erlang/OTP par apt, Elixir par le zip officiel épinglé ; deux planchers
+# STATUS: la toolchain de build — Erlang/OTP par apt, au plancher de sa majeure ; Elixir par le zip officiel épinglé
 # APPLY-ON: wsl linux docker
 # CHECK-ON: wsl linux docker
 # NEEDS: root
 #
 # Elixir vient du zip précompilé officiel (un par majeure OTP), épinglé par version et sha256 dans
-# la lib : la distro LTS sert une minor qu'Elixir ne corrige plus. Erlang reste celui de la distro
+# installer-constants.env : la distro LTS sert une minor qu'Elixir ne corrige plus. Erlang reste celui de la distro
 # tant que sa majeure est dans la fenêtre du pin. Le module retire les arbres /opt/elixir-* d'une
 # autre version et les liens de PROV_LINK_DIR qui pointent ailleurs que sur le pin — jamais un lien
 # de l'opérateur (c'est la cible du lien qui décide), jamais un paquet apt. Une livraison binaire
@@ -22,9 +22,9 @@ otp_release() { erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_relea
 elixir_version() { elixir --short-version 2>/dev/null || echo absent; }
 
 ELIXIR_BINS=(elixir elixirc mix iex)
-: "${LCARS_ELIXIR_PREFIX:=/opt/elixir-}"
-ELIXIR_HOME="${LCARS_ELIXIR_HOME:-${LCARS_ELIXIR_PREFIX}${PROV_ELIXIR_PIN}}"
-ELIXIR_ZIP_URL="${LCARS_ELIXIR_ZIP_URL:-https://github.com/elixir-lang/elixir/releases/download/v${PROV_ELIXIR_PIN}/elixir-otp-${PROV_ELIXIR_OTP_MAJOR}.zip}"
+ELIXIR_PREFIX="$(prov_decor /opt/elixir-)"
+ELIXIR_HOME="${ELIXIR_PREFIX}${PROV_ELIXIR_PIN}"
+ELIXIR_ZIP_URL="https://github.com/elixir-lang/elixir/releases/download/v${PROV_ELIXIR_PIN}/elixir-otp-${PROV_ELIXIR_OTP_MAJOR}.zip"
 
 elixir_version_posee() {
   [[ -x "$ELIXIR_HOME/bin/elixir" ]] || return 0
@@ -36,7 +36,7 @@ elixir_links_ours() { # les liens de PROV_LINK_DIR qui pointent sous notre préf
   for b in "${ELIXIR_BINS[@]}"; do
     [[ -L "$PROV_LINK_DIR/$b" ]] || continue
     t="$(readlink -m "$PROV_LINK_DIR/$b" 2>/dev/null || true)"
-    [[ "$t" == "$LCARS_ELIXIR_PREFIX"*/* ]] && printf '%s\n' "$PROV_LINK_DIR/$b"
+    [[ "$t" == "$ELIXIR_PREFIX"*/* ]] && printf '%s\n' "$PROV_LINK_DIR/$b"
   done
   return 0
 }
@@ -53,7 +53,7 @@ elixir_links_stale() { # ceux des nôtres qui ne pointent pas sur l'arbre du pin
 # un glob sans correspondance rend son propre motif : sans -d, un rm -rf recevrait « /opt/elixir-* »
 elixir_trees() {
   local d
-  for d in "$LCARS_ELIXIR_PREFIX"*; do
+  for d in "$ELIXIR_PREFIX"*; do
     [[ -d "$d" ]] && printf '%s\n' "$d"
   done
   return 0
@@ -68,16 +68,6 @@ elixir_trees_other() {
 elixir_built_for() {
   elixir --version 2>/dev/null \
     | sed -n 's/.*compiled with Erlang\/OTP \([0-9]\+\).*/\1/p' | head -1
-}
-
-# majeure puis mineure, en numérique : « 1.9 » > « 1.18 » en lexicographique
-elixir_meets_floor() { # elixir_meets_floor <version lue> <plancher M.m>
-  local have="$1" floor="$2" h_maj h_min f_maj f_min
-  h_maj="${have%%.*}"; h_min="${have#*.}"; h_min="${h_min%%.*}"
-  f_maj="${floor%%.*}"; f_min="${floor#*.}"; f_min="${f_min%%.*}"
-  [[ "$h_maj" =~ ^[0-9]+$ && "$h_min" =~ ^[0-9]+$ ]] || return 1
-  (( h_maj > f_maj )) && return 0
-  (( h_maj == f_maj && h_min >= f_min ))
 }
 
 rien_a_batir() { prov_delivery_is_binary; }
@@ -102,8 +92,6 @@ check() {
     check_reliquats
     verdict_check
   fi
-  elixir_meets_floor "$PROV_ELIXIR_PIN" "$PROV_ELIXIR_MIN" \
-    || p_fail "pin Elixir $PROV_ELIXIR_PIN SOUS le plancher $PROV_ELIXIR_MIN — les deux vivent dans provision-lib.sh, à accorder"
   if command -v erl >/dev/null; then
     local otp; otp="$(otp_release)"
     if [[ "$otp" -ge "$PROV_ELIXIR_OTP_MAJOR" ]]; then
@@ -160,8 +148,6 @@ apply() {
     p_ok "plancher OTP/Elixir non vérifié — la release embarque son ERTS, rien ne compile ici"
     verdict_apply
   fi
-  elixir_meets_floor "$PROV_ELIXIR_PIN" "$PROV_ELIXIR_MIN" \
-    || { p_fail "pin Elixir $PROV_ELIXIR_PIN SOUS le plancher $PROV_ELIXIR_MIN — les deux vivent dans provision-lib.sh, à accorder"; verdict_apply; }
 
   if ! command -v erl >/dev/null || [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]]; then
     apt_ensure erlang || verdict_apply
@@ -211,7 +197,7 @@ apply() {
     if [[ -n "$built" && "$built" != "$otp" ]]; then
       p_fail "Elixir $ev compilé pour OTP $built, VM OTP $otp — le zip du pin n'est pas celui de cette majeure OTP"
     else
-      p_ok "Erlang/OTP $otp, Elixir $ev ($ELIXIR_HOME ; planchers $PROV_ELIXIR_OTP_MAJOR / $PROV_ELIXIR_MIN)"
+      p_ok "Erlang/OTP $otp, Elixir $ev ($ELIXIR_HOME ; plancher OTP $PROV_ELIXIR_OTP_MAJOR)"
     fi
   fi
   verdict_apply

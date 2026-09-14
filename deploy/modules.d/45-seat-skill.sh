@@ -17,7 +17,7 @@ SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 HUMAN_UID="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
 est_le_siege() { [[ "$HUMAN_UID" == "$SYSADMIN_UID" ]]; }
 pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"; }
-siege_home() { echo "${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"; }
+siege_home() { getent passwd -- "$PROV_HUMAN" | cut -d: -f6 || true; }   # un compte inconnu rend un home vide, que l'apply nomme
 skill_pose() { local d; d="$(siege_home)/.claude/skills/system-issues"; [[ -s "$d/SKILL.md" && -x "$d/list.sh" ]]; }
 
 check() {

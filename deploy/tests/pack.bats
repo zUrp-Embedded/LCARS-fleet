@@ -18,7 +18,7 @@ setup() {
            "$R/assets/avatars" "$R/assets/favicon" "$R/assets/github.io"
   cp "$SRC" "$R/deploy/pack.sh"
   cp "$RACINE_REELLE"/deploy/lib/*.sh "$R/deploy/lib/"
-  cp "$RACINE_REELLE/deploy/system.manifest" "$R/deploy/system.manifest"
+  cp "$RACINE_REELLE/deploy/system.manifest" "$RACINE_REELLE/deploy/installer-constants.env" "$R/deploy/"
   cp "$RACINE_REELLE/deploy/modules.d/62-runtime-helpers.sh" "$R/deploy/modules.d/"
   cp "$RACINE_REELLE/install.sh" "$R/install.sh"
   cp "$RACINE_REELLE/runtime/etc/release.manifest" "$RACINE_REELLE/runtime/etc/fleet.env.template" "$R/runtime/etc/"
@@ -63,15 +63,23 @@ EOF
   ARCH="$(uname -m)"
 }
 
+teardown() {
+  [[ -z "${SRV_PID:-}" ]] || { kill "$SRV_PID" 2>/dev/null || true; wait "$SRV_PID" 2>/dev/null || true; }
+}
+
 pack() { run bash "$R/deploy/pack.sh" "$@"; }
 
 forge_qui_repond() { # une forge Gitea doublée : le tag n'existe pas (ou FORGE_TAG_CODE), le commit est là, la release se crée
   cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
-cat >/dev/null
-out=""; m=GET; url=""; prev=""
-for a in "$@"; do case "$prev" in -o) out="$a" ;; -X) m="$a" ;; esac; [[ "$a" == http* ]] && url="$a"; prev="$a"; done
+out=""; m=GET; url=""; prev=""; entete=""
+for a in "$@"; do case "$prev" in -o) out="$a" ;; -X) m="$a" ;; -H) [[ "$a" != @- ]] || entete="$(cat)" ;; esac; [[ "$a" == http* ]] && url="$a"; prev="$a"; done
 echo "CURL $m $url" >> "$CALLS"
+# ce que curl reçoit du jeton : son entrée, son argv, son environnement, et le fichier nommé par FP_TOKEN_FILE
+printf '%s\n' "$entete" >> "$CALLS.entetes"
+printf '%s\n' "$*" >> "$CALLS.argv"
+env >> "$CALLS.env"
+printf '%s %s\n' "$(stat -c %a "${FP_TOKEN_FILE:-}" 2>/dev/null)" "${FP_TOKEN_FILE:-}" >> "$CALLS.fichier"
 case "$m $url" in
   "GET "*/releases/tags/*) printf '{}' > "$out"; printf '%s' "${FORGE_TAG_CODE:-404}" ;;
   "GET "*/git/commits/*)   printf '{}' > "$out"; printf 200 ;;
@@ -136,7 +144,6 @@ publier() { # publier — une publication complète vers une forge https doublé
 }
 
 @test "lancé en root : refus avant le gate" {
-  unshare -Ur true 2>/dev/null || skip "user namespaces indisponibles"
   run unshare -Ur bash "$R/deploy/pack.sh" --no-image
   [ "$status" -eq 1 ]
   [[ "$output" == *"ne se lance pas en root"* ]]
@@ -219,16 +226,44 @@ publier() { # publier — une publication complète vers une forge https doublé
   grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
 }
 
+publier_par_fichier() { # publier_par_fichier — la publication complète, le jeton de l'opérateur donné par LCARS_PACK_TOKEN_FILE
+  JETON="jeton-du-fichier-de-l-operateur"
+  printf '%s\n' "$JETON" > "$BATS_TEST_TMPDIR/jeton-operateur"
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet \
+    LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/jeton-operateur" bash "$R/deploy/pack.sh" --publish
+}
+
+@test "--publish : chaque appel à la forge reçoit le jeton par l'entrée de curl, ni par son argv ni par son environnement" {
+  forge_qui_repond; docker_double
+  publier_par_fichier
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c '^CURL' "$CALLS")" -gt 0 ]
+  [ "$(grep -cx "Authorization: token $JETON" "$CALLS.entetes")" -eq "$(grep -c '^CURL' "$CALLS")" ]
+  refute grep -q "$JETON" "$CALLS.argv"
+  refute grep -q "$JETON" "$CALLS.env"
+}
+
+@test "--publish : le fichier du jeton lu par la publication est en 0600 et disparaît avec l'étage" {
+  forge_qui_repond; docker_double
+  publier_par_fichier
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local mode fichier
+  read -r mode fichier < <(sort -u "$CALLS.fichier")
+  [ "$(sort -u "$CALLS.fichier" | wc -l)" -eq 1 ]
+  [ "$mode" = 600 ]
+  [[ "$fichier" != "$BATS_TEST_TMPDIR/jeton-operateur" ]]
+  [ ! -e "$fichier" ]
+}
+
 @test "le tiroir produit par pack, servi, est retrouvé par son propre installeur : kit nommé, téléchargé, sha256 vérifié" {
   mkdir -p "$LCARS_PACK_DIR/dist"
   local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
   python3 -m http.server --bind 127.0.0.1 "$port" --directory "$LCARS_PACK_DIR/dist" >/dev/null 2>&1 3>&- &
-  local srv=$!
+  SRV_PID=$!
   LCARS_DOOR_BASE="http://127.0.0.1:$port/v9.9" LCARS_PACK_TAG=v9.9 pack --no-image
-  [ "$status" -eq 0 ] || { kill "$srv"; echo "$output"; return 1; }
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run env HOME="$BATS_TEST_TMPDIR/home" LCARS_DOOR_INSECURE_HTTP=1 PATH=/usr/bin:/bin \
     bash -c "cat '$LCARS_PACK_DIR/dist/v9.9/install.sh' | bash -s -- --workstation"
-  kill "$srv" 2>/dev/null || true
   [[ "$output" == *"lcars-fleet-v9.9-otp27-$ARCH.tar.gz : téléchargé, sha256 vérifié"* ]]
 }
 
@@ -261,6 +296,12 @@ publier() { # publier — une publication complète vers une forge https doublé
   grep -q '^mix deps.get$' "$CALLS"
   grep -q '^mix release --overwrite$' "$CALLS"
   [[ "$output" == *"pack: --no-image : pas d'image"*"pack: sans --publish : le tar et l'installeur restent dans $dist"* ]]
+}
+
+@test "le tiroir de la version porte les constantes de l'installeur, que son compose lit" {
+  LCARS_PACK_TAG=v9.9 pack --no-image
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  cmp "$R/deploy/installer-constants.env" "$LCARS_PACK_DIR/dist/v9.9/installer-constants.env"
 }
 
 @test "sans tag, la version est <AAAA-MM-JJ>-<sha> et le kit se nomme d'elle" {
@@ -305,6 +346,7 @@ publier() { # publier — une publication complète vers une forge https doublé
   LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
   [ "$status" -eq 1 ]
   [[ "$output" == *"jeton : absent"*"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE"* ]]
+  refute grep -q '^CURL' "$CALLS"
   local sentinelle="s3cr3t-de-forge-a-ne-jamais-imprimer"
   : > "$CALLS"
   LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN="$sentinelle" pack --no-image --publish

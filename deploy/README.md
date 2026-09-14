@@ -88,7 +88,7 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 |---|---|
 | `provision-lib.sh` | le protocole des modules : verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), verrou, apt, `as_human`, les défauts `PROV_*` |
 | `docker-endpoint.sh` | le substrat et le daemon docker : une CLI du PATH, une socket, un verdict qui nomme le geste manquant |
-| `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, posée sous le préfixe et câblée |
+| `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, basculée sous le préfixe ; liens, modes et élagage par `60-deploy` |
 | `kit-verify.sh` | ce qu'un kit doit porter, contre `system.manifest`, `release.manifest` et les listes de 62 |
 | `door-gen.sh` | l'installeur d'une version : le gabarit `install.sh` avec sa base, sa clé et sa table de sommes |
 | `forge-publish.sh` | la release sur la forge : brouillon sur le commit, assets, publication ; une release existante est un refus |

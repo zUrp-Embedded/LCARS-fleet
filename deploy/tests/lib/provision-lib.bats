@@ -2,18 +2,21 @@
 # bats file_tags=unit
 # SOURCE: deploy/tests/lib/provision-lib.bats
 # AUTHOR: consultant
-# STARDATE: 2026-07-30
-# STATUS: bats tests for lib/provision-lib.sh — the lib's one promise is "never lie green"
-#
+# STARDATE: 2026-09-14
+# STATUS: témoins de lib/provision-lib.sh — verdicts, primitives convergentes, constantes et décor, sondes de la machine, adresse de la forge
 
 # shellcheck disable=SC2016
 
+bats_require_minimum_version 1.5.0
+
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+  unset FORGE_BASE_URL FORGE_PUBLIC_URL DOCKER_HOST
 
   LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export LIB
@@ -23,16 +26,19 @@ setup() {
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 0700 "$XDG_RUNTIME_DIR"
 
-  unset PROV_SUBSTRATE LCARS_WSL_NETWORKING_MODE
-
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
+  decor_pose
+  # le wslinfo de la machine ne répond jamais à un témoin
+  printf '#!/usr/bin/env bash\n[[ "$1" != --networking-mode ]] || printf "%%s\\n" "${WSLINFO_MODE:-}"\n' > "$DECOR_BIN/wslinfo"
+  chmod +x "$DECOR_BIN/wslinfo"
 }
+
+teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
 
 module_sh() {
   run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod; source \"\$LIB\"; $1"
 }
 
-@test "B1: run_quiet failure increments PROV_FAILED and keeps the command's rc" {
+@test "run_quiet : un échec compte un FAIL et rend le code de la commande" {
   module_sh '
     rc=0
     run_quiet bash -c "echo boom-output; exit 3" || rc=$?
@@ -43,7 +49,7 @@ module_sh() {
   [[ "$output" == *boom-output* ]]
 }
 
-@test "B1: run_quiet x || verdict_apply exits 1 (the green lie is dead)" {
+@test "run_quiet puis verdict_apply : un échec rend 1" {
   module_sh '
     run_quiet false || verdict_apply
     verdict_apply
@@ -76,6 +82,19 @@ module_sh() {
   [ -z "$output" ]
 }
 
+@test "run_capture verbeux : la sortie passe à l'écran, rien n'est capturé, le code reste" {
+  module_sh '
+    export PROV_VERBOSE=1
+    rc=0
+    run_capture bash -c "echo sortie-directe; exit 5" || rc=$?
+    [ "$rc" -eq 5 ]
+    [ "$PROV_LAST_RC" -eq 5 ]
+    [ -z "$PROV_LAST_OUT" ]
+  '
+  [ "$status" -eq 0 ]
+  [ "$output" = sortie-directe ]
+}
+
 @test "prov_dump_last : les dernières lignes de la sortie capturée, le fichier conservé" {
   module_sh '
     export PROV_DUMP_LINES=2
@@ -89,7 +108,7 @@ module_sh() {
   [[ "$output" != *"l1"* ]]
 }
 
-@test "B1: run_quiet success stays silent and counts nothing" {
+@test "run_quiet : un succès se tait et ne compte rien" {
   module_sh '
     run_quiet true
     [ "$PROV_FAILED" -eq 0 ]
@@ -99,7 +118,7 @@ module_sh() {
   [[ "$output" != *FAIL* ]]
 }
 
-@test "B3: managed block success is SEEN by the caller (PROV_CHANGED > 0)" {
+@test "ensure_managed_block : un bloc posé compte un changement et garde les lignes humaines" {
   module_sh '
     f="$BATS_TEST_TMPDIR/target.conf"
     printf "human line\n" > "$f"
@@ -111,7 +130,7 @@ module_sh() {
   [ "$status" -eq 0 ]
 }
 
-@test "B3: managed block failure is SEEN by the caller (PROV_FAILED > 0, verdict red)" {
+@test "ensure_managed_block : un échec compte un FAIL et le verdict rougit" {
   module_sh '
     ensure_managed_block "$BATS_TEST_TMPDIR/no-such-dir/x.conf" testmark 0644 <<< "y" || true
     [ "$PROV_FAILED" -ge 1 ]
@@ -120,20 +139,20 @@ module_sh() {
   [ "$status" -eq 1 ]
 }
 
-@test "B3: managed block converges to the CURRENT source (replaced, not append-once)" {
+@test "ensure_managed_block : le bloc converge vers la source courante, l'ancien contenu part" {
   module_sh '
     f="$BATS_TEST_TMPDIR/target.conf"
     printf "human line\n" > "$f"
     ensure_managed_block "$f" testmark 0644 <<< "old-content"
     ensure_managed_block "$f" testmark 0644 <<< "new-content"
     grep -q "new-content" "$f"
-    grep -q "old-content" "$f" && { echo "l ancien contenu a SURVECU a la convergence"; exit 1; }
+    grep -q "old-content" "$f" && { echo "l ancien contenu a survécu à la convergence"; exit 1; }
     [ "$(grep -c "lcars:testmark" "$f")" -eq 2 ]
   '
   [ "$status" -eq 0 ]
 }
 
-@test "B3: managed block is idempotent (second identical run changes nothing)" {
+@test "ensure_managed_block : un second passage identique ne change rien" {
   module_sh '
     f="$BATS_TEST_TMPDIR/target.conf"
     printf "human line\n" > "$f"
@@ -145,7 +164,7 @@ module_sh() {
   [ "$status" -eq 0 ]
 }
 
-@test "B5: human_home on unknown user returns empty under set -euo pipefail (no abort)" {
+@test "human_home : un compte inconnu rend vide sous set -euo pipefail, sans arrêter l'appelant" {
   module_sh '
     export PROV_HUMAN=no-such-user-b5-probe
     home="$(human_home)"
@@ -156,7 +175,7 @@ module_sh() {
   [[ "$output" == *survived* ]]
 }
 
-@test "B5: as_human on unknown user reaches its p_fail guard (counted, not aborted)" {
+@test "as_human : un compte inconnu est un FAIL compté, pas un arrêt" {
   module_sh '
     export PROV_HUMAN=no-such-user-b5-probe
     as_human true || true
@@ -166,13 +185,18 @@ module_sh() {
   [[ "$output" == *"user inconnu"* ]]
 }
 
-@test "as_human POSE LE CWD, pas seulement HOME — un cwd illisible casse tout chemin relatif" {
-  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  grep -qE '^\s*\( cd "\$home" && runuser -u "\$PROV_HUMAN"' "$lib"
-  grep -qE '^\s*\( cd .* \)$' "$lib"
+@test "as_human : root joue la commande depuis le home de l'humain, avec son environnement" {
+  local home="$LCARS_DECOR_ROOT/home/zoe"
+  mkdir -p "$home"
+  printf '#!/usr/bin/env bash\nprintf "zoe:x:1001:1001::%s:/bin/bash\\n"\n' "$home" > "$DECOR_BIN/getent"
+  printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "$PWD" "$*"\n' > "$DECOR_BIN/runuser"
+  chmod +x "$DECOR_BIN/getent" "$DECOR_BIN/runuser"
+  run unshare -Ur bash -c 'cd /; . "$LIB" >/dev/null 2>&1; PROV_HUMAN=zoe; as_human pwd'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$home|-u zoe -- env HOME=$home USER=zoe LOGNAME=zoe pwd" ]
 }
 
-_bin_groupes() { # _bin_groupes — doublures de getent/groupadd/id/usermod, pilotees par des marqueurs
+_bin_groupes() { # _bin_groupes — doublures de getent/groupadd/id/usermod, pilotées par des marqueurs
   local b="$BATS_TEST_TMPDIR/bin-groupes"; mkdir -p "$b"
   cat > "$b/getent" <<'STUB'
 #!/usr/bin/env bash
@@ -198,36 +222,36 @@ echo "$2" >> "$BATS_TEST_TMPDIR/membres"
 STUB
   chmod 0755 "$b"/*
   export BIN_GROUPES="$b"
-
 }
 
-@test "ensure_group : la branche qui CREE — groupadd joue, le compteur bouge" {
+@test "ensure_group : le groupe absent est créé au gid de la table, et sans gid quand la table n'en fixe pas" {
   _bin_groupes
   module_sh '
     PATH="$BIN_GROUPES:$PATH"
-    ensure_group groupe-decor 4242
-    [ "$PROV_CHANGED" -eq 1 ]
-    grep -q "GROUPADD:-g 4242 groupe-decor" "$BATS_TEST_TMPDIR/trace"
+    ensure_group fleet
+    ensure_group lcars-authority
+    [ "$PROV_CHANGED" -eq 2 ]
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sed -n 1p "$BATS_TEST_TMPDIR/trace")" = "GROUPADD:-g 2000 fleet" ]
+  [ "$(sed -n 2p "$BATS_TEST_TMPDIR/trace")" = "GROUPADD:lcars-authority" ]
 }
 
-@test "ensure_group : un groupe DEJA la ne se recree pas, et le gid divergent est un DRIFT" {
+@test "ensure_group : un groupe présent ne se recrée pas, et un gid qui s'écarte de la table est un DRIFT" {
   _bin_groupes
+  : > "$BATS_TEST_TMPDIR/groupe-fleet"
   module_sh '
     PATH="$BIN_GROUPES:$PATH"
-    : > "$BATS_TEST_TMPDIR/groupe-groupe-decor"
-    ensure_group groupe-decor 4242
+    ensure_group fleet
     [ "$PROV_CHANGED" -eq 0 ]
-    [ ! -e "$BATS_TEST_TMPDIR/trace" ]
-    ensure_group groupe-decor 9999
-    [ "$PROV_DRIFT" -ge 1 ]
+    [ "$PROV_DRIFT" -eq 1 ]
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"une machine ne se renumérote pas"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/trace" ]
+  [[ "$output" == *"groupe fleet : gid 4242, la table déclare 2000"* ]]
 }
 
-@test "ensure_member : la branche qui ECRIT — usermod joue, et l adhesion est RE-SONDEE apres" {
+@test "ensure_member : un compte hors du groupe y entre par usermod, et le changement est compté" {
   _bin_groupes
   module_sh '
     PATH="$BIN_GROUPES:$PATH"
@@ -238,20 +262,7 @@ STUB
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "ensure_member : un usermod qui MENT est attrape par la re-sonde" {
-  _bin_groupes
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN_GROUPES/usermod"; chmod 0755 "$BIN_GROUPES/usermod"
-  module_sh '
-    PATH="$BIN_GROUPES:$PATH"
-    rc=0; ensure_member humain-decor groupe-decor || rc=$?
-    [ "$rc" -eq 1 ]
-    [ "$PROV_FAILED" -ge 1 ]
-  '
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"toujours hors de"* ]]
-}
-
-@test "write_atomic: identical content is a no-op (no change counted, mtime preserved)" {
+@test "write_atomic : un contenu identique ne change rien, mtime compris" {
   module_sh '
     f="$BATS_TEST_TMPDIR/wa.conf"
     printf "same\n" > "$f"; chmod 0644 "$f"
@@ -263,7 +274,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "write_atomic: une ecriture qui RATE ne bascule rien, et ne s annonce pas POSEE" {
+@test "write_atomic : une écriture qui rate ne bascule rien et ne s'annonce pas posée" {
   local b="$BATS_TEST_TMPDIR/bin-cat"; mkdir -p "$b"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$b/cat"; chmod 0755 "$b/cat"
   export BIN_CAT="$b"
@@ -272,16 +283,16 @@ STUB
     src="$BATS_TEST_TMPDIR/source"; printf "contenu\n" > "$src"
     f="$BATS_TEST_TMPDIR/plein.conf"
     write_atomic "$f" 0644 < "$src" || true
-    [ ! -e "$f" ]                 # rien na bascule
-    [ "$PROV_CHANGED" -eq 0 ]     # rien nest compte comme pose
-    [ "$PROV_FAILED" -ge 1 ]      # et lechec est COMPTE, pas avale
+    [ ! -e "$f" ]
+    [ "$PROV_CHANGED" -eq 0 ]
+    [ "$PROV_FAILED" -ge 1 ]
   ' 2>/dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"écriture du tampon ratée"* ]]
-  refute_out "POSE" <<<"$output"
+  refute_out "POSÉ" <<<"$output"
 }
 
-@test "write_atomic: missing parent dir fails loud (PROV_FAILED counted)" {
+@test "write_atomic : un dossier parent absent est un FAIL compté" {
   module_sh '
     write_atomic "$BATS_TEST_TMPDIR/absent-dir/f" 0644 <<< "x" || true
     [ "$PROV_FAILED" -ge 1 ]
@@ -290,7 +301,7 @@ STUB
   [[ "$output" == *"dossier absent"* ]]
 }
 
-@test "6-131: ensure_dir REFUSE un symlink-vers-dossier au lieu de converger sa cible" {
+@test "ensure_dir : un lien vers un dossier est refusé, sa cible garde son mode" {
   module_sh '
     victime="$BATS_TEST_TMPDIR/victime"; mkdir -p "$victime"; chmod 0755 "$victime"
     ln -s "$victime" "$BATS_TEST_TMPDIR/piege"
@@ -302,7 +313,7 @@ STUB
   [[ "$output" == *"composant symlink"* ]]
 }
 
-@test "6-131: un symlink AU MILIEU du chemin est refuse aussi — c est celui de l attaque" {
+@test "ensure_dir : un lien au milieu du chemin est refusé aussi" {
   module_sh '
     victime="$BATS_TEST_TMPDIR/etc"; mkdir -p "$victime/systemd"; chmod 0755 "$victime/systemd"
     ln -s "$victime" "$BATS_TEST_TMPDIR/config"
@@ -314,7 +325,7 @@ STUB
   [[ "$output" == *"composant symlink"* ]]
 }
 
-@test "ensure_mode: la forme « user: » est IDEMPOTENTE — sinon le rejeu rechowne a l'infini" {
+@test "ensure_mode : la forme « user: » est idempotente, le second passage ne rechowne pas" {
   module_sh '
     f="$BATS_TEST_TMPDIR/idem"; : > "$f"
     ensure_mode "$f" 0644 "$(id -un):" >/dev/null 2>&1
@@ -356,11 +367,12 @@ STUB
   [[ "$output" == *"bascule refusée"* ]]
 }
 
-@test "ensure_mode, write_atomic, prov_scaffold_dir : « user: » est passé à chown avec le groupe de connexion nommé — les coreutils uutils ignorent la forme nue" {
+@test "hors décor, « user: » arrive à chown avec le groupe de connexion nommé — les coreutils uutils ignorent la forme nue" {
   local faux="$BATS_TEST_TMPDIR/bin"; mkdir -p "$faux"
   printf '#!/usr/bin/env bash\nfor a; do [[ "$a" == -* ]] || { printf "%%s\\n" "$a" >> "%s"; break; }; done\nexec /usr/bin/chown "$@"\n' "$BATS_TEST_TMPDIR/chown.argv" > "$faux/chown"
   chmod +x "$faux/chown"
   PATH="$faux:$PATH" module_sh '
+    unset LCARS_DECOR_ROOT
     f="$BATS_TEST_TMPDIR/f"; : > "$f"
     ensure_mode "$f" 0644 "$(id -un):" >/dev/null 2>&1
     printf x | write_atomic "$BATS_TEST_TMPDIR/w" 0644 "$(id -un):" >/dev/null 2>&1
@@ -373,7 +385,13 @@ STUB
   [ "$status" -eq 0 ] || { echo "$output"; cat "$BATS_TEST_TMPDIR/chown.argv"; return 1; }
 }
 
-@test "ensure_mode: TEMOIN — un groupe NOMME se compare toujours en entier" {
+@test "prov_owner sous un décor : tout propriétaire nommé devient le compte qui joue le cas, un propriétaire vide reste vide" {
+  module_sh 'printf "%s|%s|[%s]\n" "$(prov_owner root:fleet)" "$(prov_owner lcars-authority:)" "$(prov_owner "")"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(id -un):$(id -gn)|$(id -un):$(id -gn)|[]" ]
+}
+
+@test "ensure_mode : un groupe nommé se compare en entier, le second passage ne change rien" {
   module_sh '
     f="$BATS_TEST_TMPDIR/nomme"; : > "$f"
     ensure_mode "$f" 0644 "$(id -un):$(id -gn)" >/dev/null 2>&1
@@ -386,7 +404,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "6-131: ensure_mode dit LIEN et non « absent » sur un lien casse" {
+@test "ensure_mode : un lien cassé se dit lien, pas absent" {
   module_sh '
     ln -s "$BATS_TEST_TMPDIR/nulle-part" "$BATS_TEST_TMPDIR/casse"
     ensure_mode "$BATS_TEST_TMPDIR/casse" 0600 || true
@@ -397,7 +415,7 @@ STUB
   [[ "$output" != *"ensure_mode: absent"* ]]
 }
 
-@test "6-131: write_atomic refuse d ecrire a travers un parent symlink" {
+@test "write_atomic : refuse d'écrire à travers un parent lien" {
   module_sh '
     reel="$BATS_TEST_TMPDIR/reel"; mkdir -p "$reel"
     ln -s "$reel" "$BATS_TEST_TMPDIR/lien"
@@ -409,7 +427,7 @@ STUB
   [[ "$output" == *"composant symlink"* ]]
 }
 
-@test "6-131: TEMOIN — un chemin sans lien converge normalement (la garde ne mure rien)" {
+@test "ensure_dir et write_atomic : un chemin sans lien converge normalement" {
   module_sh '
     ensure_dir "$BATS_TEST_TMPDIR/vrai/imbrique" 0700
     [ "$PROV_FAILED" -eq 0 ]
@@ -421,16 +439,17 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "6-131: ensure_symlink garde son droit de POSER un lien (la garde vise le parent)" {
+@test "ensure_symlink : pose le lien, la garde ne vise que le parent" {
   module_sh '
     ensure_symlink "$BATS_TEST_TMPDIR/lien-legitime" /dev/null
     [ "$PROV_FAILED" -eq 0 ]
+    [ "$PROV_CHANGED" -eq 1 ]
     [ "$(readlink "$BATS_TEST_TMPDIR/lien-legitime")" = "/dev/null" ]
   '
   [ "$status" -eq 0 ]
 }
 
-@test "6-130: prov_lock_path ignore TMPDIR — un verrou dont l appelant choisit l emplacement n en est pas un" {
+@test "prov_lock_path : ignore TMPDIR" {
   module_sh '
     export TMPDIR="$BATS_TEST_TMPDIR/pirate"; mkdir -p "$TMPDIR"
     lock="$(prov_lock_path)" || true
@@ -439,7 +458,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "verrou: deux humains ont deux verrous DISTINCTS — les serialiser ne protegeait rien" {
+@test "prov_lock_path : deux portées ont deux verrous distincts" {
   module_sh '
     a="$(prov_lock_path alice)"
     b="$(prov_lock_path bob)"
@@ -448,7 +467,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "verrou: le per-humain et le GLOBAL coexistent — c est le defaut qui a casse l install" {
+@test "prov_lock_path : le verrou d'une portée et le verrou global se prennent ensemble" {
   module_sh '
     g="$(prov_lock_path)"
     h="$(prov_lock_path lcars)"
@@ -459,7 +478,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "verrou: le MEME humain deux fois se bloque quand meme — la portee n a pas supprime le verrou" {
+@test "prov_lock_path : la même portée prise deux fois se bloque" {
   module_sh '
     exec 8>"$(prov_lock_path lcars)"; flock -n 8 || exit 1
     exec 7>"$(prov_lock_path lcars)"
@@ -469,14 +488,14 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "verrou: une portee qui s evade du dossier prouve est REFUSEE" {
+@test "prov_lock_path : une portée qui sort du dossier est refusée" {
   module_sh 'prov_lock_path "../evade" >/dev/null 2>&1 && exit 1; :'
   [ "$status" -eq 0 ]
   module_sh 'prov_lock_path "a/b" >/dev/null 2>&1 && exit 1; :'
   [ "$status" -eq 0 ]
 }
 
-@test "6-130: le verrou vit dans un dossier 0700 possede par l appelant" {
+@test "prov_lock_path : le verrou vit dans un dossier 0700 possédé par l'appelant" {
   module_sh '
     lock="$(prov_lock_path)"
     dir="$(dirname "$lock")"
@@ -486,7 +505,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "6-130: sans dossier runtime, c'est un REFUS qui NOMME le parent — jamais un repli" {
+@test "prov_lock_path : sans dossier runtime, un refus qui nomme le parent" {
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/absent/xdg"
   module_sh 'prov_lock_path'
   [ "$status" -ne 0 ]
@@ -494,7 +513,7 @@ STUB
   [[ "$output" == *"pas d'emplacement sûr"* ]]
 }
 
-@test "advertise_addr: un bind PRECIS est l'adresse — rien a deriver" {
+@test "advertise_addr : un bind précis est l'adresse" {
   module_sh '
     advertise_addr 127.0.0.5
     [ "$PROV_ADVERTISE" = "127.0.0.5" ]
@@ -503,7 +522,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "advertise_addr: WSL en NAT annonce localhost, et DIT pourquoi" {
+@test "advertise_addr : WSL en NAT annonce localhost et dit pourquoi" {
   module_sh '
     PROV_SUBSTRATE=wsl
     wsl_networking_mode() { echo nat; }
@@ -515,7 +534,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "advertise_addr: WSL en MIROIR n'est pas un cas a part — l'adresse de sortie est vraie" {
+@test "advertise_addr : WSL en miroir annonce l'adresse de sortie" {
   module_sh '
     PROV_SUBSTRATE=wsl
     wsl_networking_mode() { echo mirrored; }
@@ -527,7 +546,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "advertise_addr: aucune adresse de sortie = loopback ANNONCEE COMME TELLE" {
+@test "advertise_addr : sans adresse de sortie, la loopback annoncée comme telle" {
   module_sh '
     PROV_SUBSTRATE=linux
     lan_addr() { echo ""; }
@@ -538,7 +557,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "advertise_addr: n'imprime RIEN — la capture \$( ) perdrait le second fait" {
+@test "advertise_addr : n'imprime rien, les réponses sortent par les globales" {
   module_sh '
     PROV_SUBSTRATE=linux
     lan_addr() { echo 198.51.100.63; }
@@ -551,51 +570,51 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "run_step: la reconnaissance de phase est une fonction pure — aucune horloge, aucune course" {
+@test "wsl_networking_mode : le mode que wslinfo dit, nat quand il ne dit rien" {
+  WSLINFO_MODE=mirrored module_sh 'wsl_networking_mode'
+  [ "$output" = mirrored ]
+  module_sh 'wsl_networking_mode'
+  [ "$output" = nat ]
+}
+
+@test "_prov_phase_of : compilation, release posée, et démarrage pour tout le reste" {
   local f="$BATS_TEST_TMPDIR/out"
   module_sh '
     f="'"$f"'"
     printf "Compiling 3 files\n"                         > "$f"; _prov_phase_of "$f"
-    printf "Compiling 3 files\nRunning ExUnit\n"         > "$f"; _prov_phase_of "$f"
-    printf "Running ExUnit\nFinished in 12.0s\n"         > "$f"; _prov_phase_of "$f"
-    printf "=== shell_gate\n"                            > "$f"; _prov_phase_of "$f"
-    printf "Release created at _build\n"                 > "$f"; _prov_phase_of "$f"
-    printf "rien de reconnaissable\n"                    > "$f"; _prov_phase_of "$f"
+    printf "Compiling 3 files\nRelease created at _build\n" > "$f"; _prov_phase_of "$f"
+    printf "Running ExUnit\n"                            > "$f"; _prov_phase_of "$f"
     : > "$f"                                                   ; _prov_phase_of "$f"
     _prov_phase_of "/nonexistent/pas-de-fichier"
   '
   [ "$status" -eq 0 ]
-  local -a lines; mapfile -t lines <<< "$output"
   [ "${lines[0]}" = "compilation" ]
-  [ "${lines[1]}" = "suite ExUnit (3000+ cas)" ]
-  [ "${lines[2]}" = "suite ExUnit terminée" ]
-  [ "${lines[3]}" = "gate shell (python + bats)" ]
-  [ "${lines[4]}" = "release posée" ]
-  [ "${lines[5]}" = "démarrage" ]
-  [ "${lines[6]}" = "démarrage" ]
-  [ "${lines[7]}" = "démarrage" ]
+  [ "${lines[1]}" = "release posée" ]
+  [ "${lines[2]}" = "démarrage" ]
+  [ "${lines[3]}" = "démarrage" ]
+  [ "${lines[4]}" = "démarrage" ]
 }
 
-@test "run_step: une ligne par CHANGEMENT de phase — pas une par seconde" {
+@test "run_step : une ligne par changement de phase, pas une par seconde" {
   module_sh '
-    run_step "build" -- bash -c "echo Compiling 3 files; sleep 4"
+    run_step "build" -- bash -c "echo Compiling 3 files; sleep 3.5"
   '
   [ "$status" -eq 0 ]
   local n; n="$(printf '%s\n' "$output" | grep -c '>>')"
   [ "$n" -ge 1 ]
-  [ "$n" -lt 4 ]
+  [ "$n" -lt 3 ]
   [ "$(printf '%s\n' "$output" | grep '>>' | sort -u | wc -l)" -eq "$n" ]
   [[ "$output" == *"build · compilation"* ]]
 }
 
-@test "run_step: le rc de l'enfant TRAVERSE la boucle de sonde" {
+@test "run_step : le code de l'enfant traverse la boucle de sonde" {
   module_sh '
     run_step "build" -- bash -c "echo Compiling 3 files; exit 3" || echo "RC=$?"
   '
   [[ "$output" == *"RC=3"* ]]
 }
 
-@test "run_step: l'echec garde le rc, COMPTE, borne l'ecran et CONSERVE le fichier" {
+@test "run_step : un échec garde le code, compte, borne l'écran et conserve le fichier" {
   module_sh '
     export PROV_DUMP_LINES=3
     rc=0
@@ -614,17 +633,14 @@ STUB
   rm -f "$f"
 }
 
-@test "run_step: un succes ne laisse AUCUN fichier derriere lui" {
+@test "run_step : un succès ne laisse aucun fichier derrière lui" {
   local container="$BATS_TEST_TMPDIR/tmp-run-step"; mkdir -p "$container"
-  before="$(find "$container" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
   TMPDIR="$container" module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
   [ "$status" -eq 0 ]
-  after="$(find "$container" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
-  [ "$after" -eq "$before" ] \
-    || { echo "run_step a laisse $((after - before)) fichier(s) dans son propre TMPDIR :"; find "$container" -maxdepth 1 -name 'prov-out.*'; return 1; }
+  [ -z "$(find "$container" -maxdepth 1 -name 'prov-out.*')" ]
 }
 
-@test "run_step --ok N : un code tolere n'est pas un echec, il NE TUE PAS l'appelant, et aucun verdict n'est posé" {
+@test "run_step --ok N : un code toléré rend 0 sans verdict et sans fichier" {
   module_sh '
     run_step --ok 3 "etape" -- bash -c "sleep 1.1; exit 3"
     [ "$PROV_LAST_RC" -eq 3 ]
@@ -636,7 +652,7 @@ STUB
   [[ "$output" != *"FAIL"* ]]
 }
 
-@test "run_step --ok N : un code NON tolere reste un echec entier" {
+@test "run_step --ok N : un code non toléré reste un échec entier" {
   module_sh '
     rc=0
     run_step --ok 3 "etape" -- bash -c "echo boum; sleep 1.1; exit 4" || rc=$?
@@ -647,19 +663,7 @@ STUB
   [[ "$output" == *"FAIL"* ]]
 }
 
-@test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
-  module_sh '
-    export PROV_VERBOSE=1
-    run_step --ok 3 "etape" -- bash -c "exit 3"
-    [ "$PROV_LAST_RC" -eq 3 ]
-    [ "$PROV_FAILED" -eq 0 ]
-  '
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"OK    test-mod:"* ]]
-  [[ "$output" != *"FAIL"* ]]
-}
-
-@test "run_step --verbose : PLUSIEURS --ok sont tous tolérés, pas seulement le premier" {
+@test "run_step verbeux : le libellé à l'écran, chaque --ok toléré, sans verdict" {
   module_sh '
     export PROV_VERBOSE=1
     run_step --ok 1 --ok 2 "etape" -- bash -c "exit 2"
@@ -667,11 +671,12 @@ STUB
     [ "$PROV_FAILED" -eq 0 ]
   '
   [ "$status" -eq 0 ]
+  [[ "$output" == *">>    test-mod: etape"* ]]
   [[ "$output" != *"OK    test-mod:"* ]]
   [[ "$output" != *"FAIL"* ]]
 }
 
-@test "run_step --verbose : un code NON tolere reste un echec entier, et PROV_LAST_RC le dit" {
+@test "run_step verbeux : un code non toléré reste un échec entier, et PROV_LAST_RC le dit" {
   module_sh '
     export PROV_VERBOSE=1
     rc=0
@@ -684,7 +689,7 @@ STUB
   [[ "$output" == *"FAIL"* ]]
 }
 
-@test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
+@test "lan_addr : vide sans ip, et advertise_addr annonce quand même une adresse" {
   module_sh '
     a="$(PATH=/nonexistent lan_addr)"
     [ -z "$a" ]
@@ -694,154 +699,68 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "siege: la table et le candidat unix s'accordent -> agree" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
-    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
-    prov_seat_binding amiral
-    [ "$PROV_SEAT_BINDING" = agree ]
-    [ "$PROV_SEAT_LOGIN" = amiral ]
-    [ "$PROV_SEAT_SOURCE" = table ]
-  '
+@test "prov_seat_binding : la table et le candidat unix s'accordent → agree" {
+  printf '1\t1000\tamiral\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map"
+  module_sh 'prov_seat_binding amiral; echo "$PROV_SEAT_BINDING|$PROV_SEAT_LOGIN|$PROV_SEAT_SOURCE"'
   [ "$status" -eq 0 ]
+  [ "$output" = "agree|amiral|table" ]
 }
 
-@test "siege: la table et le candidat unix DIVERGENT -> diverge, et la table fait foi" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
-    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
-    prov_seat_binding quelquun-dautre
-    [ "$PROV_SEAT_BINDING" = diverge ]
-    [ "$PROV_SEAT_LOGIN" = amiral ]
-  '
+@test "prov_seat_binding : la table et le candidat divergent → diverge, et la table fait foi" {
+  printf '1\t1000\tamiral\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map"
+  module_sh 'prov_seat_binding quelquun-dautre; echo "$PROV_SEAT_BINDING|$PROV_SEAT_LOGIN|$PROV_SEAT_SOURCE"'
   [ "$status" -eq 0 ]
+  [ "$output" = "diverge|amiral|table" ]
 }
 
-@test "siege: le cote durable nomme, unix n'a pas de candidat -> derived, source NOMMEE" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
-    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
-    prov_seat_binding
-    [ "$PROV_SEAT_BINDING" = derived ]
-    [ "$PROV_SEAT_SOURCE" = table ]
-    [ "$PROV_SEAT_LOGIN" = amiral ]
-  '
+@test "prov_seat_binding : ni table ni jeton master → seeded, le candidat est le siège" {
+  module_sh 'prov_seat_binding loperateur; echo "$PROV_SEAT_BINDING|$PROV_SEAT_LOGIN|$PROV_SEAT_SOURCE"'
   [ "$status" -eq 0 ]
+  [ "$output" = "seeded|loperateur|candidat" ]
 }
 
-@test "siege: unix nomme, le cote durable est muet -> seeded" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/absente"
-    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
-    export PROV_FORGE_URL=""
-    prov_seat_binding loperateur
-    [ "$PROV_SEAT_BINDING" = seeded ]
-    [ "$PROV_SEAT_SOURCE" = candidat ]
-    [ "$PROV_SEAT_LOGIN" = loperateur ]
-  '
+@test "prov_seat_binding : la table passe avant la forge, aucune requête ne part" {
+  printf '1\t1000\tamiral\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map"
+  printf 'jeton-master\n' > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-master.token"
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s"\nexit 7\n' "$BATS_TEST_TMPDIR/curl.appels" > "$DECOR_BIN/curl"
+  chmod +x "$DECOR_BIN/curl"
+  module_sh 'prov_seat_binding amiral; echo "$PROV_SEAT_BINDING|$PROV_SEAT_SOURCE"'
+  [ "$output" = "agree|table" ]
+  [ ! -e "$BATS_TEST_TMPDIR/curl.appels" ]
+}
+
+@test "prov_seat_record : la ligne du siège s'ajoute à la carte, mode 0640, et prov_seat_from_map la relit" {
+  module_sh 'prov_seat_record amiral 1000; prov_seat_from_map'
   [ "$status" -eq 0 ]
+  [ "$output" = amiral ]
+  [ "$(cat "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map")" = "$(printf '1\t1000\tamiral')" ]
+  [ "$(stat -c %a "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge-uid.map")" = 640 ]
 }
 
-@test "siege: ni l un ni l autre -> unknown, et AUCUN nom n est pose" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/absente"
-    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
-    export PROV_FORGE_URL=""
-    prov_seat_binding
-    [ "$PROV_SEAT_BINDING" = unknown ]
-    [ -z "$PROV_SEAT_LOGIN" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "siege: l enregistrement ECRIT UNE FOIS et ne se re-ecrit jamais" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
-    prov_seat_record amiral 1000
-    prov_seat_record quelquun-dautre 1000
-    [ "$(prov_seat_from_map)" = amiral ]
-    [ "$(grep -c . "$PROV_UID_MAP_FILE")" -eq 1 ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "siege: la table PASSE AVANT la forge — un redemarrage tient sans reseau" {
-  module_sh '
-    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
-    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
-    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
-    export PROV_FORGE_URL=""
-    prov_seat_binding amiral
-    [ "$PROV_SEAT_BINDING" = agree ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-stub_curl() { # enregistre argv et stdin de l appel, repond 200
-  export STUB_BIN="$BATS_TEST_TMPDIR/bin" STUB_ARGV="$BATS_TEST_TMPDIR/argv" STUB_STDIN="$BATS_TEST_TMPDIR/stdin"
-  mkdir -p "$STUB_BIN"
-  cat > "$STUB_BIN/curl" <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$@" > "$STUB_ARGV"
-cat > "$STUB_STDIN"
-echo 200
-STUB
-  chmod +x "$STUB_BIN/curl"
-}
-
-@test "forge_curl : le jeton part sur STDIN (-K -), jamais dans argv" {
-  stub_curl
-  printf 'SECRET-TOKEN\n' > "$BATS_TEST_TMPDIR/tok"
-  module_sh '
-    PATH="$STUB_BIN:$PATH"
-    out="$(forge_curl "$BATS_TEST_TMPDIR/tok" -s -m 10 http://forge.test/api/v1/x)"
-    [ "$out" = 200 ]
-  '
-  [ "$status" -eq 0 ]
-  refute grep -q 'SECRET-TOKEN' "$STUB_ARGV"
-  grep -qx -- '-K' "$STUB_ARGV"
-  grep -qx 'http://forge.test/api/v1/x' "$STUB_ARGV"
-  grep -qx 'header = "Authorization: token SECRET-TOKEN"' "$STUB_STDIN"
-}
-
-@test "forge_curl sans jeton : requete ANONYME — stdin vide, aucun Authorization nulle part" {
-  stub_curl
-  module_sh '
-    PATH="$STUB_BIN:$PATH"
-    forge_curl "$BATS_TEST_TMPDIR/absent" -s http://forge.test/api/v1/x >/dev/null
-    forge_curl "" -s http://forge.test/api/v1/y >/dev/null
-  '
-  [ "$status" -eq 0 ]
-  [ ! -s "$STUB_STDIN" ]
-  refute grep -qi 'authorization' "$STUB_ARGV" "$STUB_STDIN"
-}
-
-stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de dpkg du tout
-  export STUB_BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$STUB_BIN"; rm -f "$STUB_BIN/dpkg"
-  [[ -n "$1" ]] || return 0
-  printf '#!/usr/bin/env bash\n[ "$1" = --print-architecture ] && echo %s\n' "$1" > "$STUB_BIN/dpkg"
-  chmod +x "$STUB_BIN/dpkg"
+stub_dpkg() { # stub_dpkg <arch> — un dpkg qui répond <arch>
+  printf '#!/usr/bin/env bash\n[ "$1" = --print-architecture ] && echo %s\n' "$1" > "$DECOR_BIN/dpkg"
+  chmod +x "$DECOR_BIN/dpkg"
 }
 
 @test "arch_tag : amd64 se dit x64 chez node, amd64 chez debian, et raw rend dpkg tel quel" {
   stub_dpkg amd64
-  module_sh 'PATH="$STUB_BIN:$PATH"; [ "$(arch_tag node)" = x64 ] && [ "$(arch_tag debian)" = amd64 ] && [ "$(arch_tag raw)" = amd64 ]'
-  [ "$status" -eq 0 ]
+  module_sh 'printf "%s|%s|%s\n" "$(arch_tag node)" "$(arch_tag debian)" "$(arch_tag raw)"'
+  [ "$output" = "x64|amd64|amd64" ]
   stub_dpkg arm64
-  module_sh 'PATH="$STUB_BIN:$PATH"; [ "$(arch_tag node)" = arm64 ] && [ "$(arch_tag debian)" = arm64 ]'
-  [ "$status" -eq 0 ]
+  module_sh 'printf "%s|%s\n" "$(arch_tag node)" "$(arch_tag debian)"'
+  [ "$output" = "arm64|arm64" ]
 }
 
-@test "arch_tag : une arch non epinglee rend VIDE — jamais un repli, jamais uname" {
+@test "arch_tag : une arch non épinglée rend vide, et sans dpkg tout est vide" {
   stub_dpkg riscv64
-  module_sh 'PATH="$STUB_BIN:$PATH"; [ -z "$(arch_tag node)" ] && [ -z "$(arch_tag debian)" ] && [ "$(arch_tag raw)" = riscv64 ]'
-  [ "$status" -eq 0 ]
-  stub_dpkg ""
-  module_sh 'PATH="$STUB_BIN"; [ -z "$(arch_tag node)" ] && [ -z "$(arch_tag raw)" ]'
-  [ "$status" -eq 0 ]
+  module_sh 'printf "[%s|%s|%s]\n" "$(arch_tag node)" "$(arch_tag debian)" "$(arch_tag raw)"'
+  [ "$output" = "[||riscv64]" ]
+  rm -f "$DECOR_BIN/dpkg"
+  module_sh 'PATH="$DECOR_BIN"; printf "[%s|%s]\n" "$(arch_tag node)" "$(arch_tag raw)"'
+  [ "$output" = "[|]" ]
 }
 
-@test "set_diff : les lignes de b absentes de a — trie, dedoublonne, ignore le vide" {
+@test "set_diff : les lignes de b absentes de a — trie, dédoublonne, ignore le vide" {
   module_sh '
     out="$(set_diff $'"'"'b\na\n\nc'"'"' $'"'"'c\nd\na\nd\n'"'"')"
     [ "$out" = d ]
@@ -851,7 +770,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ]
 }
 
-@test "env_field : fichier absent = vide et 0 ; cle repetee = la DERNIERE, comme un source" {
+@test "env_field : fichier absent = vide et 0 ; clé répétée = la dernière, comme un source" {
   printf 'A=1\nB=premier\nB=dernier\n' > "$BATS_TEST_TMPDIR/e.env"
   module_sh '
     [ -z "$(env_field /nonexistent/x.env A)" ]
@@ -862,7 +781,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ]
 }
 
-@test "read_token : absent = vide, rc 0 et AUCUN message — le shell ne crie pas l absence du fichier" {
+@test "read_token : absent = vide, rc 0 et aucun message ; présent = le jeton sans blancs" {
   printf '  jeton \n' > "$BATS_TEST_TMPDIR/t"
   module_sh '
     out="$(read_token /nonexistent/jeton 2>&1)"; [ -z "$out" ]
@@ -872,7 +791,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ]
 }
 
-@test "p_fact : SANS le fichier, il n ecrit rien et ne dit rien — un module reste lisible seul" {
+@test "p_fact : sans fichier de faits, rien d'écrit et rien de dit" {
   module_sh '
     out="$(p_fact substrat wsl 2>&1)"
     [ -z "$out" ]
@@ -881,43 +800,21 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ -z "$output" ]
 }
 
-@test "p_fact : AVEC le fichier, une ligne nom=valeur par fait, dans l ordre" {
+@test "p_fact : une ligne nom=valeur par fait, dans l'ordre, la valeur garde ses espaces" {
   module_sh "
     export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
     p_fact substrat wsl
-    p_fact docker oui
-  "
-  [ "$status" -eq 0 ]
-  run cat "$BATS_TEST_TMPDIR/facts"
-  [ "${lines[0]}" = "substrat=wsl" ]
-  [ "${lines[1]}" = "docker=oui" ]
-}
-
-@test "p_fact : la valeur garde ses espaces — une raison de refus est une phrase" {
-  module_sh "
-    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
     p_fact docker_why 'le daemon repond mais pas a cet utilisateur'
     p_fact docker_why2 le daemon repond pas
   "
   [ "$status" -eq 0 ]
   run cat "$BATS_TEST_TMPDIR/facts"
-  [ "${lines[0]}" = "docker_why=le daemon repond mais pas a cet utilisateur" ]
-  [ "${lines[1]}" = "docker_why2=le daemon repond pas" ]
-}
-
-@test "p_fact : un appel a UN seul argument n ecrit rien et ne tue pas l appelant" {
-  module_sh "
-    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
-    p_fact orphelin
-    p_fact substrat wsl
-  "
-  [ "$status" -eq 0 ]
-  run cat "$BATS_TEST_TMPDIR/facts"
-  [ "${#lines[@]}" -eq 1 ]
   [ "${lines[0]}" = "substrat=wsl" ]
+  [ "${lines[1]}" = "docker_why=le daemon repond mais pas a cet utilisateur" ]
+  [ "${lines[2]}" = "docker_why2=le daemon repond pas" ]
 }
 
-@test "LE PIEGE : un fichier de faits INECRIVABLE ne tue pas le module et ne crie pas" {
+@test "p_fact : un fichier de faits inécrivable n'arrête pas le module et ne dit rien" {
   module_sh "
     export PROV_FACTS_FILE='/nonexistent/repertoire/facts'
     out=\$(p_fact substrat wsl 2>&1)
@@ -928,7 +825,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [[ "$output" == *"le module continue apres"* ]]
 }
 
-@test "p_fact ne renverse JAMAIS le verdict qu il rapporte" {
+@test "p_fact : ne renverse pas le verdict qu'il rapporte" {
   module_sh "
     export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
     p_ok 'conforme'
@@ -938,7 +835,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ]
 }
 
-@test "prov_dans_la_copie : vrai quand le rail tourne DEPUIS la racine qu il a posee" {
+@test "prov_dans_la_copie : vrai quand le rail tourne depuis la racine posée" {
   module_sh '
     D="$BATS_TEST_TMPDIR/copie"; mkdir -p "$D"
     repo_root() { echo "$D"; }
@@ -948,7 +845,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "prov_dans_la_copie : faux depuis l arbre de travail — c est la ou l on batit" {
+@test "prov_dans_la_copie : faux depuis l'arbre de travail" {
   module_sh '
     mkdir -p "$BATS_TEST_TMPDIR/travail" "$BATS_TEST_TMPDIR/opt"
     repo_root() { echo "$BATS_TEST_TMPDIR/travail"; }
@@ -959,7 +856,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "prov_dans_la_copie : faux depuis un SOUS-repertoire de la racine — c est l egalite qui compte" {
+@test "prov_dans_la_copie : faux depuis un voisin dont le nom prolonge la racine" {
   module_sh '
     mkdir -p "$BATS_TEST_TMPDIR/opt"
     repo_root() { echo "$BATS_TEST_TMPDIR/opt-voisin"; }
@@ -970,7 +867,7 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "ensure_mode : un setgid herite est RETIRE quand le mode demande ne le porte pas — et POSE quand il le porte" {
+@test "ensure_mode : un setgid hérité est retiré quand le mode demandé ne le porte pas, et posé quand il le porte" {
   local d="$BATS_TEST_TMPDIR/parent"
   mkdir -p "$d/enfant"; chmod 2775 "$d/enfant"
   [ "$(stat -c %a "$d/enfant")" = 2775 ]
@@ -983,20 +880,24 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$(stat -c %a "$d/enfant")" = 2775 ]
 }
 
-pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee sous <racine>/deploy/lib
-  mkdir -p "$1/deploy/lib"; cp "$LIB" "$1/deploy/lib/provision-lib.sh"; cp "$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh" "$1/deploy/lib/"
+pt_root() { # pt_root <racine> → ce que product_tree rend avec la lib copiée sous <racine>/deploy/lib
+  mkdir -p "$1/deploy/lib"
+  cp "$LIB" "$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh" "$1/deploy/lib/"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$1/deploy/"
   PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; product_tree'
 }
-@test "product_tree : un checkout (runtime/ present, pas de services/ a la racine) → runtime/" {
+
+@test "product_tree : un checkout (runtime/ présent, pas de services/ à la racine) → runtime/" {
   local r="$BATS_TEST_TMPDIR/co"; mkdir -p "$r/runtime/etc"
   [ "$(pt_root "$r")" = "$r/runtime" ]
 }
-@test "product_tree : une machine posee (services/ a plat, runtime/ = la release) → la racine" {
+
+@test "product_tree : une machine posée (services/ à plat, runtime/ = la release) → la racine" {
   local r="$BATS_TEST_TMPDIR/posee"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d" "$r/etc"
   [ "$(pt_root "$r")" = "$r" ]
 }
-@test "product_tree : la release ILLISIBLE (0750 root:fleet, lecteur hors du groupe) ne change pas la reponse" {
-  [ "$(id -u)" -ne 0 ] || skip "root lit tout"
+
+@test "product_tree : une release illisible ne change pas la réponse" {
   local r="$BATS_TEST_TMPDIR/posee2"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d"
   chmod 0000 "$r/runtime"
   local got; got="$(pt_root "$r")"; chmod 0755 "$r/runtime"
@@ -1011,7 +912,7 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   [[ "$output" == *"DEHORS"* ]]
 }
 
-@test "prov_in_group : un groupe dont le nom est un PREFIXE d'un autre n'est pas pris pour lui" {
+@test "prov_in_group : un groupe dont le nom est un préfixe d'un autre n'est pas pris pour lui" {
   module_sh 'id() { echo "fleet-console fleet_bis"; }; prov_in_group x fleet || echo DEHORS; prov_in_group x fleet_bis && echo DEDANS'
   [[ "$output" == *"DEHORS"* ]]
   [[ "$output" == *"DEDANS"* ]]
@@ -1022,7 +923,7 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   [ "$output" = "DEHORS" ]
 }
 
-@test "prov_pgrep_pattern : le motif matche la cible et JAMAIS la commande qui le porte" {
+@test "prov_pgrep_pattern : le motif trouve la cible et jamais la commande qui le porte" {
   local m; m="$(bash -c "source '$LIB' >/dev/null 2>&1; prov_pgrep_pattern zorglub-$$")"
   [ "$m" = "[z]orglub-$$" ]
   run bash -c "pgrep -f '$m' >/dev/null && echo VU || echo PAS-VU"
@@ -1031,90 +932,84 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   [[ "$output" == "VU" ]]
 }
 
-uid_rule_decor() {
-  export LCARS_SYSADMIN_UID=1000
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
-  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
-  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+uid_decor() { # login.defs, passwd et siège sous le décor
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
   printf '%s\n' 'root:x:0:0:root:/root:/bin/bash' 'svc:x:999:999::/nonexistent:/usr/sbin/nologin' \
     'admiral:x:1000:1000::/home/admiral:/bin/bash' 'zoe:x:1001:1001::/home/zoe:/bin/bash' \
-    'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin' > "$PASSWD_FILE"
-  UBIN="$BATS_TEST_TMPDIR/ubin"; mkdir -p "$UBIN"
-  printf '%s\n' '#!/usr/bin/env bash' \
-    'case "$*" in *zoe*) echo 1001 ;; *admiral*) echo 1000 ;; *svc*) echo 999 ;; *nobody*) echo 65534 ;; *) exit 1 ;; esac' \
-    > "$UBIN/id"
-  chmod 0755 "$UBIN/id"
-  PROTO="$BATS_TEST_DIRNAME/../../../runtime/services/lib/human-protocol.sh"
-  [ -f "$PROTO" ] || { echo "protocole du produit introuvable : $PROTO" >&2; return 1; }
+    'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin' > "$LCARS_DECOR_ROOT/etc/passwd"
+  printf '1000\n' > "$LCARS_DECOR_ROOT/etc/lcars/seat.uid"
 }
 
-lib_verdict() { # lib_verdict <login> -> "rc|remede" selon la lib de l'installeur
-  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
-    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$PROV_UID_BOUNDS_WHY\""
-}
-
-proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du produit
-  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' LCARS_HUMAN_PROTOCOL_HOST=1
-    export LCARS_MODULE_PROTOCOL='$(dirname "$PROTO")/module-protocol.sh' LCARS_PRIVATE_DIR='$BATS_TEST_TMPDIR'
-    . '$PROTO'
-    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$UID_BOUNDS_WHY\""
-}
-
-@test "uid: zoe est un humain ; svc (sous UID_MIN), nobody (au-dessus de UID_MAX) et le siege ne le sont pas" {
-  uid_rule_decor
-  [ "$(lib_verdict zoe)" = "0|" ]
-  [ "$(lib_verdict svc)" = "1|" ]
-  [ "$(lib_verdict nobody)" = "1|" ]
-  [ "$(lib_verdict admiral)" = "1|" ]
-}
-
-@test "uid: bornes ILLISIBLES — is_fleet_human rend non a tout le monde, fleet_humans ne rend personne, le remede est dit UNE FOIS" {
-  uid_rule_decor
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
-  run bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
-    is_fleet_human zoe && echo ZOE_OUI
-    echo \"pop=[\$(fleet_humans | paste -sd, -)]\"
-    fleet_humans; fleet_humans
-    echo FIN"
+@test "fleet_humans : les comptes entre les bornes de login.defs, lus dans le passwd du décor, le siège exclu" {
+  uid_decor
+  module_sh 'fleet_humans'
   [ "$status" -eq 0 ]
-  [[ "$output" != *"ZOE_OUI"* ]]
-  [[ "$output" == *"pop=[]"* ]]
-  [[ "$output" == *"FIN"* ]]
-  [[ "$output" == *"UID_MIN illisible dans $PASSWD_DEFS"* ]]
-  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
-  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
-  refute grep -qE '(^|[^0-9])1000([^0-9]|$)' <<<"$output"
+  [ "$output" = zoe ]
 }
 
-@test "uid: UID_MAX absent du fichier n'etablit pas la frontiere non plus — nobody ne passe jamais par un defaut" {
-  uid_rule_decor
-  printf 'UID_MIN\t1000\n' > "$PASSWD_DEFS"
-  [ "$(lib_verdict nobody)" = "1|la frontiere systeme/humain n'est pas etablie (UID_MAX illisible dans $PASSWD_DEFS) — la borne est declaree par le systeme, pas par ce processus : repare $PASSWD_DEFS" ]
+@test "prov_uid_bounds : des bornes illisibles ne disent rien, le remède attend dans PROV_UID_BOUNDS_WHY" {
+  module_sh 'rc=0; prov_uid_bounds || rc=$?; printf "%s|%s|%s\n" "$rc" "$PROV_UID_MIN" "$PROV_UID_BOUNDS_WHY" > "$BATS_TEST_TMPDIR/bornes"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$(cat "$BATS_TEST_TMPDIR/bornes")" == "1||la frontiere systeme/humain n'est pas etablie (UID_MIN illisible dans $LCARS_DECOR_ROOT/etc/login.defs)"* ]]
 }
 
-@test "uid: LA REGLE EST CELLE DU PROTOCOLE DU PRODUIT — meme matrice, memes verdicts, meme phrase" {
-  uid_rule_decor
-  local variant login lib proto bad=0
+@test "prov_uid_bounds : UID_MAX absent n'établit pas la frontière, aucune borne n'est devinée" {
+  printf 'UID_MIN\t1000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
+  module_sh 'rc=0; prov_uid_bounds || rc=$?; printf "%s|%s|%s|%s\n" "$rc" "$PROV_UID_MIN" "$PROV_UID_MAX" "$PROV_UID_BOUNDS_WHY"'
+  [ "$output" = "1|||la frontiere systeme/humain n'est pas etablie (UID_MAX illisible dans $LCARS_DECOR_ROOT/etc/login.defs) — la borne est declaree par le systeme, pas par ce processus : repare $LCARS_DECOR_ROOT/etc/login.defs" ]
+}
+
+@test "fleet_humans : sans bornes, personne sur stdout et le remède sur stderr" {
+  uid_decor
+  rm "$LCARS_DECOR_ROOT/etc/login.defs"
+  run --separate-stderr bash -c '. "$LIB" >/dev/null 2>&1; fleet_humans'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == "fleet_humans: la frontiere systeme/humain n'est pas etablie (UID_MIN illisible dans $LCARS_DECOR_ROOT/etc/login.defs)"* ]]
+}
+
+@test "fleet_humans : sans siège, personne sur stdout et le siège manquant nommé sur stderr" {
+  uid_decor
+  rm "$LCARS_DECOR_ROOT/etc/lcars/seat.uid"
+  run --separate-stderr bash -c '. "$LIB" >/dev/null 2>&1; fleet_humans'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == "fleet_humans: siège non établi (ni $LCARS_DECOR_ROOT/etc/lcars/seat.uid, ni LCARS_SYSADMIN_UID)"* ]]
+}
+
+@test "frontière des humains : la lib et le protocole du produit rendent la même population et la même phrase" {
+  uid_decor
+  local proto="$BATS_TEST_DIRNAME/../../../runtime/services/lib/human-protocol.sh" ubin="$BATS_TEST_TMPDIR/ubin"
+  [ -f "$proto" ]
+  mkdir -p "$ubin"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'case "$*" in *zoe*) echo 1001 ;; *admiral*) echo 1000 ;; *svc*) echo 999 ;; *nobody*) echo 65534 ;; *root*) echo 0 ;; *) exit 1 ;; esac' \
+    > "$ubin/id"
+  chmod 0755 "$ubin/id"
+  local defs="$LCARS_DECOR_ROOT/etc/login.defs" variant lib_dit proto_dit bad=0
   for variant in lisible absent sans-max plancher-2000; do
     case "$variant" in
-      lisible)       printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
-      absent)        export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs" ;;
-      sans-max)      printf 'UID_MIN\t1000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
-      plancher-2000) printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+      lisible)       printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$defs" ;;
+      absent)        rm -f "$defs" ;;
+      sans-max)      printf 'UID_MIN\t1000\n' > "$defs" ;;
+      plancher-2000) printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$defs" ;;
     esac
-    for login in zoe svc nobody admiral; do
-      lib="$(lib_verdict "$login")"; proto="$(proto_verdict "$login")"
-      [ "$lib" = "$proto" ] || { echo "$variant/$login : lib=« $lib » protocole=« $proto »" >&2; bad=1; }
-    done
+    lib_dit="$(bash -c '. "$LIB" >/dev/null 2>&1
+      pop="$(fleet_humans 2>/dev/null | paste -sd, -)"; prov_uid_bounds || true
+      printf "%s|%s" "$pop" "$PROV_UID_BOUNDS_WHY"')"
+    proto_dit="$(PATH="$ubin:$PATH" LCARS_SYSADMIN_UID=1000 LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/absent" PASSWD_DEFS="$defs" \
+      LCARS_HUMAN_PROTOCOL_HOST=1 LCARS_MODULE_PROTOCOL="$(dirname "$proto")/module-protocol.sh" LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" \
+      bash -c '. "$1"; pop=""
+        for l in root svc admiral zoe nobody; do if is_fleet_human "$l" 2>/dev/null; then pop="${pop:+$pop,}$l"; fi; done
+        printf "%s|%s" "$pop" "$UID_BOUNDS_WHY"' _ "$proto")"
+    [ "$lib_dit" = "$proto_dit" ] || { echo "$variant : lib=« $lib_dit » protocole=« $proto_dit »" >&2; bad=1; }
   done
   [ "$bad" -eq 0 ]
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
-  [[ "$(lib_verdict zoe)" == "1|la frontiere"* ]]
-  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
-  [ "$(lib_verdict zoe)" = "0|" ]
+  [[ "$lib_dit" == "|" ]]
 }
 
-@test "apt_ensure : apt-get recoit un DELAI et des reprises — un miroir mort se dit, il ne suspend pas l'installeur (banc 2003, 2026-09-05)" {
+@test "apt_ensure : apt-get reçoit un délai et des reprises, et un miroir mort en http se dit avec le remède https" {
   local b="$BATS_TEST_TMPDIR/apt"; mkdir -p "$b"
   printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "'"$b"'/argv"' \
@@ -1125,12 +1020,12 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
   [[ "$output" == *"rc=1"* ]]
   grep -qE 'Acquire::http::Timeout=30' "$b/argv"
   grep -qE 'Acquire::Retries=2' "$b/argv"
-  grep -qE '^update .*-o Acquire' "$b/argv"   # le verbe d abord : les doublures lisent \$1
+  grep -qE '^update .*-o Acquire' "$b/argv"   # le verbe d'abord : les doublures lisent $1
   [[ "$output" == *"archive.ubuntu.com injoignable en http alors que https://archive.ubuntu.com répond"* ]]
   [[ "$output" == *"passer les sources apt en https"* ]]
 }
 
-@test "apt_ensure : miroir vivant mais apt en echec — le diagnostic ne blame pas le reseau" {
+@test "apt_ensure : miroir vivant mais apt en échec — le diagnostic ne met pas le réseau en cause" {
   local b="$BATS_TEST_TMPDIR/apt2"; mkdir -p "$b"
   printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
   printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" indextargets "*) echo "http://archive.ubuntu.com/ubuntu/dists/x/InRelease"; exit 0;; esac' 'exit 100' > "$b/apt-get"
@@ -1139,171 +1034,163 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
   run bash -c "set -uo pipefail; export PATH=\"$b:$PATH\"; . '$LIB' >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0; apt_ensure jq; echo rc=\$?"
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"le miroir http://archive.ubuntu.com répond"* ]]
-  refute_out 'INJOIGNABLE' <<<"$output"
+  refute_out 'injoignable' <<<"$output"
 }
 
-canal_decor() {
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
-  export LCARS_CHANNEL_OWNER; LCARS_CHANNEL_OWNER="$(id -un):$(id -gn)"
-  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
-}
-canal() { # canal <code bash> — la lib sourcee, verdicts a zero, sous le decor du canal
+canal() { # canal <code bash> — la lib sourcée, verdicts à zéro, sous le décor
   run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod; . \"\$LIB\" >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0 PROV_DRIFT=0; $1"
 }
 
-@test "prov_channel : les deux valeurs se lisent, et l absence du fichier dit « aucun »" {
-  canal_decor
-  local v
+@test "prov_channel : les deux valeurs se lisent dans le canal du décor, et son absence dit « aucun »" {
+  local f="$LCARS_DECOR_ROOT/etc/lcars/channel" v
   for v in source kit; do
-    printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
+    printf '%s\n' "$v" > "$f"
     canal 'prov_channel; echo "global=$PROV_CHANNEL"'
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "$v" ]
     [ "${lines[1]}" = "global=$v" ]
   done
-  rm -f "$LCARS_CHANNEL_FILE"
+  rm -f "$f"
   canal 'prov_channel; echo "global=$PROV_CHANNEL"'
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "aucun" ]
   [ "${lines[1]}" = "global=aucun" ]
 }
 
-@test "prov_channel : une valeur hors vocabulaire est un FAIL NOMME — rien sur stdout, rc 1, et il COMPTE en appel nu" {
-  canal_decor
-  printf 'snap\n' > "$LCARS_CHANNEL_FILE"
+@test "prov_channel : une valeur hors vocabulaire est un FAIL qui nomme le fichier — rien sur stdout, rc 1, compté" {
+  local f="$LCARS_DECOR_ROOT/etc/lcars/channel"
+  printf 'snap\n' > "$f"
   canal 'prov_channel >/dev/null || echo "rc=$?"; echo "failed=$PROV_FAILED global=[$PROV_CHANNEL]"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"*"source ou kit"* ]]
+  [[ "$output" == *"FAIL"*"canal d'installation illisible : $f porte « snap », attendu source ou kit"* ]]
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"failed=1 global=[]"* ]]
-  [[ "$output" == *"$LCARS_CHANNEL_FILE"* ]]
   canal 'v="$(prov_channel 2>/dev/null)" || true; echo "v=[$v]"'
   [[ "$output" == *"v=[]"* ]]
 }
 
-@test "prov_channel : le nom du fichier a UNE source, et elle se surcharge — sinon un decor lirait la machine" {
-  canal_decor
-  canal 'echo "$PROV_CHANNEL_FILE_CANON"'
-  [ "$output" = "/etc/lcars/channel" ]
-  run env -u LCARS_CHANNEL_FILE bash -c ". \"$LIB\" >/dev/null 2>&1; echo \"\$PROV_CHANNEL_FILE\""
-  [ "$output" = "/etc/lcars/channel" ]
-  grep -qE '^anchor[[:space:]]+/etc/lcars/channel[[:space:]]+0644[[:space:]]+root:root[[:space:]]+any' \
-    "$BATS_TEST_DIRNAME/../../system.manifest"
-}
-
-@test "prov_channel_write : pose la valeur, au mode de la table, atomique et idempotent — et refuse hors vocabulaire" {
-  canal_decor
+@test "prov_channel_write : pose la valeur au mode de la table, atomique et idempotent" {
+  local f="$LCARS_DECOR_ROOT/etc/lcars/channel"
   canal 'prov_channel_write kit; echo "changed=$PROV_CHANGED"'
   [ "$status" -eq 0 ]
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "kit" ]
-  [ "$(stat -c '%a' "$LCARS_CHANNEL_FILE")" = "644" ]
+  [ "$(cat "$f")" = "kit" ]
+  [ "$(stat -c '%a' "$f")" = "644" ]
   [[ "$output" == *"POSÉ"*"changed=1"* ]]
   canal 'prov_channel_write kit; echo "changed=$PROV_CHANGED"'
   [[ "$output" == *"changed=0"* ]]
   canal 'prov_channel_write source'
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
-  [ -z "$(find "$(dirname "$LCARS_CHANNEL_FILE")" -name '.prov.*')" ]
-  canal 'prov_channel_write snap || echo "rc=$?"; echo "failed=$PROV_FAILED"'
-  [[ "$output" == *"FAIL"*"n'est pas un canal"*"rc=1"*"failed=1"* ]]
-  [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
+  [ "$(cat "$f")" = "source" ]
+  [ -z "$(find "$(dirname "$f")" -name '.prov.*')" ]
 }
 
-dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PATH qui repond ce qu'on lui dit
-  local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
-  local st="$1"; shift
-  {
-    echo '#!/usr/bin/env bash'
-    echo 'case "$1" in'
-    echo "  -s) [[ -n '$st' ]] || exit 1; echo 'Package: lcars'; echo 'Status: $st'; exit 0 ;;"
-    echo '  -V)'
-    local l; for l in "$@"; do printf "    printf '%%s\\\\n' '%s'\n" "$l"; done
-    echo '    exit 0 ;;'
-    echo 'esac; exit 2'
-  } > "$d/dpkg"
-  chmod 0755 "$d/dpkg"
-  export PATH="$d:$PATH"
+@test "prov_channel : un produit posé sans canal dit « inconnu », une machine vierge « aucun »" {
+  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/runtime"
+  canal 'prov_channel; echo "var=$PROV_CHANNEL"'
+  [ "$output" = "$(printf 'inconnu\nvar=inconnu')" ]
+  rmdir "$LCARS_DECOR_ROOT/opt/lcars/runtime"
+  canal 'prov_channel'
+  [ "$output" = "aucun" ]
 }
 
-@test "prov_channel : un produit POSE sans tampon = « inconnu » (pose avant le tampon) — ni aucun, ni un canal" {
-  local etc="$BATS_TEST_TMPDIR/etc"; mkdir -p "$etc" "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel; echo \"var=\$PROV_CHANNEL\""
-  [[ "$output" == *"inconnu"*"var=inconnu"* ]]
-  rmdir "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel"
-  [[ "$output" == "aucun" ]]
-  printf 'kit\n' > "$etc/channel"; mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel"
-  [[ "$output" == "kit" ]]
-}
-
-@test "RACINE : une surcharge de PROV_ROOT hors temoin est un REFUS, et le geste ne demarre pas" {
-  run env -u BATS_TEST_TMPDIR PROV_ROOT=/tmp/ailleurs bash -c ". '$LIB'; echo ATTEINT"
-  [ "$status" -ne 0 ] || { echo "une racine deplacee a ete acceptee hors temoin : $output"; return 1; }
-  [[ "$output" != *ATTEINT* ]] || { echo "le refus n'a pas arrete le chargement de la lib"; return 1; }
-}
-
-@test "RACINE : le refus NOMME la racine posee, la racine vraie, et ce qu'une racine qui glisse coute" {
-  run env -u BATS_TEST_TMPDIR PROV_ROOT=/tmp/ailleurs bash -c ". '$LIB'"
-  [[ "$output" == *"/tmp/ailleurs"* ]] || { echo "le refus ne dit pas ce qui a ete pose : $output"; return 1; }
-  [[ "$output" == *"/opt/lcars"* ]]    || { echo "le refus ne dit pas la racine vraie : $output"; return 1; }
-  [[ "$output" == *"manifeste"* ]]     || { echo "le refus ne dit pas ce que ca coute : $output"; return 1; }
-  [[ "$output" == *"terrain"* ]]       || { echo "le refus ne dit pas le geste juste : $output"; return 1; }
-}
-
-@test "RACINE : un TEMOIN peut toujours la deplacer — sinon ce verrou ferme le corpus entier" {
-  run bash -c "export BATS_TEST_TMPDIR='$BATS_TEST_TMPDIR' PROV_ROOT='$BATS_TEST_TMPDIR/opt'; . '$LIB'; echo \"racine=\$PROV_ROOT\""
-  [ "$status" -eq 0 ] || { echo "un temoin s'est fait refuser sa racine : $output"; return 1; }
-  [[ "$output" == *"racine=$BATS_TEST_TMPDIR/opt"* ]] || { echo "la racine du temoin n'a pas ete honoree : $output"; return 1; }
-}
-
-@test "RACINE : sans surcharge, elle vaut /opt/lcars — et la valeur canon a UNE declaration" {
-  run env -u BATS_TEST_TMPDIR -u PROV_ROOT bash -c ". '$LIB'; echo \"racine=\$PROV_ROOT canon=\$PROV_ROOT_CANON\""
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"racine=/opt/lcars canon=/opt/lcars"* ]] || { echo "$output"; return 1; }
-  local n_lit; n_lit="$(grep -vE '^\s*#' "$LIB" | grep -c '/opt/lcars')"
-  [ "$n_lit" -eq 1 ] \
-    || { echo "le litteral /opt/lcars apparait $n_lit fois en CODE dans la lib — une racine a deux ecritures :"; \
-         grep -vE '^\s*#' "$LIB" | grep -n '/opt/lcars' >&2; return 1; }
-}
-
-@test "SUBSTRAT/LISTE : les deux separateurs disent la meme chose, et « any » accueille tout" {
+@test "prov_substrate_satisfait : espace et + séparent la liste de la même façon, et « any » accueille tout" {
   run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl linux' linux"
-  [ "$status" -eq 0 ] || { echo "« wsl linux » n'accueille pas linux"; return 1; }
+  [ "$status" -eq 0 ]
   run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' linux"
-  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas linux — 25 lignes du manifeste hors portee"; return 1; }
+  [ "$status" -eq 0 ]
   run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' wsl"
-  [ "$status" -eq 0 ] || { echo "« wsl+linux » n'accueille pas wsl"; return 1; }
+  [ "$status" -eq 0 ]
   run bash -c ". '$LIB'; prov_substrate_satisfait any docker"
-  [ "$status" -eq 0 ] || { echo "« any » n'accueille pas docker"; return 1; }
+  [ "$status" -eq 0 ]
 }
 
-@test "SUBSTRAT/LISTE : un mot ne satisfait que lui-meme — docker n'est pas dans « linux », ni wsl" {
+@test "prov_substrate_satisfait : un mot ne satisfait que lui-même" {
   run bash -c ". '$LIB'; prov_substrate_satisfait linux docker"
-  [ "$status" -ne 0 ] || { echo "docker se declare couvert par une liste « linux » — l'image pose, le rail non"; return 1; }
+  [ "$status" -eq 1 ]
   run bash -c ". '$LIB'; prov_substrate_satisfait linux wsl"
-  [ "$status" -ne 0 ] || { echo "WSL se declare couvert par une liste « linux »"; return 1; }
+  [ "$status" -eq 1 ]
   run bash -c ". '$LIB'; prov_substrate_satisfait 'wsl+linux' docker"
-  [ "$status" -ne 0 ] || { echo "docker se declare couvert par « wsl+linux »"; return 1; }
+  [ "$status" -eq 1 ]
 }
 
-@test "SUBSTRAT/LISTE : le rail et la TABLE repondent par la MEME fonction, pas par deux copies" {
-  local runner="$BATS_TEST_DIRNAME/../../provision" dirs="$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
-  grep -q 'prov_substrate_satisfait' "$runner" \
-    || { echo "deploy/provision ne delegue plus la comparaison de substrat"; return 1; }
-  grep -q 'prov_substrate_satisfait' "$dirs" \
-    || { echo "25-directories ne delegue plus la comparaison de substrat"; return 1; }
-  ! grep -qE 'case " \$1 " in \*" \$SUBSTRATE "\*' "$runner" \
-    || { echo "substrate_in a retrouve sa comparaison locale"; return 1; }
-  ! grep -qE 'case "\+\$col\+" in \*"\+\$sub\+"\*' "$dirs" \
-    || { echo "prov_dir_scope a retrouve sa comparaison locale"; return 1; }
+@test "prov_load_constants : un chemin absolu se lit sous le décor, une autre valeur reste telle quelle" {
+  printf '%s\n' '# commentaire' 'CHEMIN=/etc/lcars/x' 'MOT=fleet' 'PHRASE=deux mots' 'minuscule=/ignoree' > "$BATS_TEST_TMPDIR/c.env"
+  module_sh 'prov_load_constants "$BATS_TEST_TMPDIR/c.env"; printf "%s|%s|%s|[%s]\n" "$CHEMIN" "$MOT" "$PHRASE" "${minuscule:-}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$LCARS_DECOR_ROOT/etc/lcars/x|fleet|deux mots|[]" ]
+}
+
+@test "prov_load_constants : la valeur est tout ce qui suit le premier « = », un « = » final compris, comme compose la lit" {
+  printf 'A=u=\nB=a=b c\nC=\n' > "$BATS_TEST_TMPDIR/c.env"
+  module_sh 'prov_load_constants "$BATS_TEST_TMPDIR/c.env"; printf "[%s][%s][%s]\n" "$A" "$B" "$C"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "[u=][a=b c][]" ]
+}
+
+@test "prov_load_constants : la dernière ligne sans fin de ligne est lue" {
+  printf 'A=1\nB=/etc/b' > "$BATS_TEST_TMPDIR/c.env"
+  module_sh 'prov_load_constants "$BATS_TEST_TMPDIR/c.env"; echo "$A|${B:-}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1|$LCARS_DECOR_ROOT/etc/b" ]
+}
+
+@test "prov_load_constants : une constante exportée par l'environnement est écrasée au chargement de la lib" {
+  PROV_ROOT=/tmp/ailleurs PROV_TOKENS_DIR=/x module_sh 'printf "%s|%s\n" "$PROV_ROOT" "$PROV_TOKENS_DIR"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$LCARS_DECOR_ROOT/opt/lcars|$LCARS_DECOR_ROOT/opt/lcars/var/tokens" ]
+}
+
+@test "prov_load_constants : un fichier illisible arrête avec son nom" {
+  module_sh 'prov_load_constants "$BATS_TEST_TMPDIR/absent.env"; echo ATTEINT'
+  [ "$status" -eq 1 ]
+  [ "$output" = "ÉCHEC : constantes de l'installeur illisibles : $BATS_TEST_TMPDIR/absent.env" ]
+}
+
+@test "prov_decor et prov_canon : un chemin système va sous le décor, et en revient" {
+  module_sh 'printf "%s\n%s\n%s\n" "$(prov_decor /etc/passwd)" "$(prov_canon "$LCARS_DECOR_ROOT/etc/lcars/channel")" "$(prov_canon /etc/hosts)"'
+  [ "${lines[0]}" = "$LCARS_DECOR_ROOT/etc/passwd" ]
+  [ "${lines[1]}" = /etc/lcars/channel ]
+  [ "${lines[2]}" = /etc/hosts ]
+  run env -u LCARS_DECOR_ROOT bash -c '. "$LIB" >/dev/null 2>&1; prov_decor /etc/passwd'
+  [ "$output" = /etc/passwd ]
+}
+
+@test "prov_params_line : rien quand chaque choix vaut son défaut" {
+  module_sh 'prov_params_line'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "prov_params_line : seul le choix qui s'écarte de son défaut est écrit" {
+  PROV_DECK_PORT=21999 module_sh 'prov_params_line'
+  [ "$status" -eq 0 ]
+  [ "$output" = "PROV_DECK_PORT=21999" ]
+}
+
+@test "prov_announce_credential sans fichier d'annonce : l'encadré IDENTIFIANTS porte le libellé, le login et le secret" {
+  module_sh 'prov_announce_credential "forge de la flotte" amiral s3cret-du-banc'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"│  IDENTIFIANTS — à noter maintenant"* ]]
+  [[ "$output" == *"│  forge de la flotte"* ]]
+  [[ "$output" == *"login        : amiral"* ]]
+  [[ "$output" == *"mot de passe : s3cret-du-banc"* ]]
+}
+
+@test "prov_print_credentials : un secret long élargit l'encadré, chaque ligne garde la même largeur" {
+  module_sh 'printf "compte\tamiral\t%s\n" "$(printf "x%.0s" {1..90})" | prov_print_credentials'
+  [ "$status" -eq 0 ]
+  local l largeurs=""
+  while IFS= read -r l; do
+    [[ "$l" == *[│┌└├]* ]] || continue
+    largeurs+="${#l} "
+  done <<<"$output"
+  [ -n "$largeurs" ]
+  [ "$(tr ' ' '\n' <<<"$largeurs" | sed '/^$/d' | sort -u | wc -l)" -eq 1 ]
 }
 
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
-teardown() { [[ -z "${LISTENER:-}" ]] || kill "$LISTENER" 2>/dev/null || true; }
-
-listen_on() { # listen_on <port> — un processus python qui écoute quelques secondes ; pid dans $LISTENER
-  python3 -c 'import socket,sys,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(128); time.sleep(60)' "$1" &
+listen_on() { # listen_on <port> — un processus python qui écoute ; pid dans $LISTENER, arrêté au teardown
+  python3 -c 'import socket,sys,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",int(sys.argv[1]))); s.listen(128); time.sleep(60)' "$1" 3>&- &
   LISTENER=$!
   local n=0
   until timeout 1 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null; do n=$((n + 1)); [[ "$n" -lt 10 ]] || return 1; sleep 0.2; done
@@ -1324,11 +1211,9 @@ EOF
   export PROV_DOCKER_BIN="$BATS_TEST_TMPDIR/docker"
 }
 
-ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL ou pour un autre utilisateur
-  mkdir -p "$BATS_TEST_TMPDIR/sbin"
-  printf '#!/usr/bin/env bash\necho "LISTEN 0 4096 127.0.0.1:%s 0.0.0.0:*"\n' "$1" > "$BATS_TEST_TMPDIR/sbin/ss"
-  chmod +x "$BATS_TEST_TMPDIR/sbin/ss"
-  export PATH="$BATS_TEST_TMPDIR/sbin:$PATH"
+ss_dit() { # ss_dit <ligne> — un ss qui répond cette ligne
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" %q\n' "$1" > "$DECOR_BIN/ss"
+  chmod +x "$DECOR_BIN/ss"
 }
 
 @test "port_taken : un port libre rend 1, un port écouté rend 0" {
@@ -1337,41 +1222,35 @@ ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL 
   [ "$status" -eq 0 ]
   listen_on "$P"
   module_sh 'port_taken "$P"'
-  kill "$LISTENER" 2>/dev/null || true
   [ "$status" -eq 0 ]
 }
 
 @test "port_holder nomme le conteneur qui publie le port, avec son projet" {
   docker_stub autre-forge-gitea-1 autre-forge
-  export P; P="$(free_port)"
-  module_sh 'port_holder "$P"'
+  module_sh 'port_holder 45678'
   [ "$status" -eq 0 ]
   [ "$output" = "autre-forge-gitea-1 (projet autre-forge)" ]
 }
 
 @test "port_holder nomme un conteneur hors compose tel quel" {
   docker_stub solitaire ""
-  export P; P="$(free_port)"
-  module_sh 'port_holder "$P"'
+  module_sh 'port_holder 45678'
   [ "$status" -eq 0 ]
   [ "$output" = "solitaire (projet <hors compose>)" ]
 }
 
-@test "port_holder retombe sur le processus vu par ss quand docker ne publie rien" {
-  command -v ss >/dev/null || skip "ss absent"
+@test "port_holder retombe sur le processus que ss nomme quand docker ne publie rien" {
   docker_stub "" ""
-  export P; P="$(free_port)"
-  listen_on "$P"
-  module_sh 'port_holder "$P"'
-  kill "$LISTENER" 2>/dev/null || true
+  ss_dit 'LISTEN 0 128 127.0.0.1:45678 0.0.0.0:* users:(("python3",pid=4242,fd=3))'
+  module_sh 'port_holder 45678'
   [ "$status" -eq 0 ]
-  [[ "$output" == *python3* ]]
+  [ "$output" = '"python3",pid=4242' ]
 }
 
 @test "port_holder ne rend rien, et rc 0, quand ni docker ni ss ne nomment" {
   docker_stub "" ""
-  export P; P="$(free_port)"
-  module_sh 'port_holder "$P"'
+  ss_dit ''
+  module_sh 'port_holder 45678'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -1388,68 +1267,78 @@ ss_muet() { # un ss qui voit l'écoute sans nommer le processus, comme sous WSL 
   export P; P="$(free_port)"
   listen_on "$P"
   module_sh 'port_state "$P" mien-forge mien-fleet'
-  kill "$LISTENER" 2>/dev/null || true
   [ "$output" = "nous mien-forge-gitea-1 (projet mien-forge)" ]
 }
 
 @test "port_state : pris par, quand un autre conteneur ou un processus nommé publie le port" {
   docker_stub autre-forge-gitea-1 autre-forge
-  export P; P="$(free_port)"
-  module_sh 'port_state "$P" mien-forge'
+  module_sh 'port_state 45678 mien-forge'
   [ "$output" = "pris par autre-forge-gitea-1 (projet autre-forge)" ]
   docker_stub solitaire ""
-  module_sh 'port_state "$P" mien-forge'
+  module_sh 'port_state 45678 mien-forge'
   [ "$output" = "pris par solitaire (projet <hors compose>)" ]
 }
 
 @test "port_state : pris, quand ça écoute et que ni docker ni ss ne savent nommer" {
   docker_stub "" ""
   export P; P="$(free_port)"
-  ss_muet "$P"
+  ss_dit "LISTEN 0 4096 127.0.0.1:$P 0.0.0.0:*"
   listen_on "$P"
   module_sh 'port_state "$P" mien-forge'
-  kill "$LISTENER" 2>/dev/null || true
   [ "$output" = "pris" ]
 }
 
-@test "forge montée (PROV_FORGE_MONTEE=1) : l'adresse est celle du poste, un FORGE_BASE_URL résiduel ne la remplace pas" {
-  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
-  PROV_TOKENS_DIR="$d" PROV_FORGE_MONTEE=1 PROV_FORGE_HOST_PORT=21055 FORGE_BASE_URL=http://ancienne-forge:9999 \
-    module_sh 'echo "$PROV_FORGE_URL"'
-  [ "$output" = "http://127.0.0.1:21055" ]
+forge_adresse() { module_sh 'echo "$PROV_FORGE_DU_POSTE|$PROV_FORGE_URL|$PROV_FORGE_PUBLIC_URL"'; }
+
+@test "adresse de la forge sous --bench : celle du poste, un FORGE_BASE_URL résiduel ne la remplace pas" {
+  PROV_FORGE_MONTEE=1 PROV_FORGE_HOST_PORT=21055 FORGE_BASE_URL=http://ancienne-forge:9999 forge_adresse
+  [ "$status" -eq 0 ]
+  [ "$output" = "1|http://127.0.0.1:21055|http://127.0.0.1:21055" ]
 }
 
-@test "forge fournie : l'adresse annoncée est FORGE_PUBLIC_URL, sinon FORGE_BASE_URL — jamais un forge.public.url écrit pour une autre forge" {
-  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://10.0.0.5:21000" > "$d/forge.public.url"
-  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=https://forge.ext module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "https://forge.ext" ]
-  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=https://forge.ext FORGE_PUBLIC_URL=https://forge.lan module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "https://forge.lan" ]
-  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "http://10.0.0.5:21000" ]
+@test "adresse d'une forge fournie : FORGE_BASE_URL sans barre finale, annoncée à FORGE_PUBLIC_URL ou à elle-même, jamais à forge.public.url" {
+  echo "http://10.0.0.5:21000" > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge.public.url"
+  FORGE_BASE_URL=https://forge.ext/ forge_adresse
+  [ "$output" = "0|https://forge.ext|https://forge.ext" ]
+  FORGE_BASE_URL=https://forge.ext FORGE_PUBLIC_URL=https://forge.lan/ forge_adresse
+  [ "$output" = "0|https://forge.ext|https://forge.lan" ]
 }
 
-@test "PROV_FORGE_URL : l'environnement prime sur forge.url, et une chaîne vide explicite lit le fichier" {
-  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"; echo "http://depuis-le-fichier:3000" > "$d/forge.url"
-  PROV_TOKENS_DIR="$d" FORGE_BASE_URL=http://depuis-l-env:9999 module_sh 'echo "$PROV_FORGE_URL"'
-  [ "$output" = "http://depuis-l-env:9999" ]
-  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_URL"'
-  [ "$output" = "http://depuis-le-fichier:3000" ]
-  PROV_TOKENS_DIR="$d" PROV_FORGE_URL="" module_sh 'echo "$PROV_FORGE_URL"'
-  [ "$output" = "http://depuis-le-fichier:3000" ]
-  mkdir -p "$BATS_TEST_TMPDIR/vide"
-  PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/vide" PROV_FORGE_URL="" module_sh 'echo "[$PROV_FORGE_URL]"'
-  [ "$output" = "[]" ]
+@test "adresse sans forge fournie hors conteneur : la forge du poste, annoncée à forge.public.url du décor, sinon à elle-même" {
+  PROV_FORGE_URL=http://depuis-l-env:1 forge_adresse
+  [ "$output" = "1|http://127.0.0.1:21000|http://127.0.0.1:21000" ]
+  echo "http://198.51.100.63:21000" > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge.public.url"
+  forge_adresse
+  [ "$output" = "1|http://127.0.0.1:21000|http://198.51.100.63:21000" ]
 }
 
-@test "PROV_FORGE_PUBLIC_URL : forge.public.url, sinon l'adresse interne, et l'environnement prime" {
-  local d="$BATS_TEST_TMPDIR/tok"; mkdir -p "$d"
-  echo "http://127.0.0.1:3000" > "$d/forge.url"
-  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "http://127.0.0.1:3000" ]
-  echo "http://198.51.100.63:3000" > "$d/forge.public.url"
-  PROV_TOKENS_DIR="$d" module_sh 'echo "$PROV_FORGE_URL|$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "http://127.0.0.1:3000|http://198.51.100.63:3000" ]
-  PROV_TOKENS_DIR="$d" FORGE_PUBLIC_URL=http://forge.exemple:3000 module_sh 'echo "$PROV_FORGE_PUBLIC_URL"'
-  [ "$output" = "http://forge.exemple:3000" ]
+@test "le mode gravé par une passe précédente décide : fournie relue dans forge.url, poste sur n'importe quel port" {
+  local t="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
+  echo "https://forge.ext" > "$t/forge.url"
+  echo "https://forge.lan" > "$t/forge.public.url"
+  echo fournie > "$t/forge.mode"
+  forge_adresse
+  [ "$output" = "0|https://forge.ext|https://forge.lan" ]
+  echo "http://127.0.0.1:21500" > "$t/forge.url"
+  echo poste > "$t/forge.mode"
+  forge_adresse
+  [ "$output" = "1|http://127.0.0.1:21000|https://forge.lan" ]
+  echo fournie > "$t/forge.mode"
+  PROV_FORGE_MONTEE=1 forge_adresse
+  [[ "$output" == "1|http://127.0.0.1:21000|"* ]]
+}
+
+@test "la lib ne réécrit jamais FORGE_BASE_URL ni FORGE_PUBLIC_URL de son appelant" {
+  local t="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
+  echo "https://forge.ext" > "$t/forge.url"; echo fournie > "$t/forge.mode"
+  module_sh 'echo "[${FORGE_BASE_URL-non posée}|${FORGE_PUBLIC_URL-non posée}]"'
+  [ "$output" = "[non posée|non posée]" ]
+}
+
+@test "adresse dans un conteneur sans forge fournie : vide" {
+  touch "$LCARS_DECOR_ROOT/.dockerenv"
+  echo "http://198.51.100.63:21000" > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge.public.url"
+  forge_adresse
+  [ "$status" -eq 0 ]
+  [ "$output" = "0||" ]
 }

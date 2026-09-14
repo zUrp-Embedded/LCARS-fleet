@@ -32,8 +32,8 @@ appel() { run bash -c ". '$SUT' >/dev/null 2>&1; build_release '$RT' 2>&1"; }
   [ "$status" -eq 0 ]
 }
 
-@test "PAQUET : le marqueur .source-revision DIT paquet — reutilisation sans gate" {
-  printf 'abcd1234\n' > "$RT/../.source-revision"
+@test "PAQUET : le tampon de révision DIT paquet — réutilisation sans compilation" {
+  printf 'abcd1234\n' > "$RT/../$(grep '^PROV_SOURCE_STAMP=' "$BATS_TEST_DIRNAME/../../installer-constants.env" | cut -d= -f2)"
   appel
   [ "$status" -eq 0 ]
   [[ "$output" == *"kit — release bâtie par pack.sh"* ]]
@@ -50,7 +50,7 @@ appel() { run bash -c ". '$SUT' >/dev/null 2>&1; build_release '$RT' 2>&1"; }
   depot > /dev/null; atteste "deadbeef"
   appel
   [[ "$output" == *"n'atteste pas cette source"* ]]
-  [[ "$output" != *"ni gate ni compilation"* ]]
+  [[ "$output" != *"rien à compiler"* ]]
 }
 
 @test "CLONE SALE : le sha correspond mais l'arbre est modifie — pas de reutilisation" {
@@ -72,11 +72,11 @@ appel() { run bash -c ". '$SUT' >/dev/null 2>&1; build_release '$RT' 2>&1"; }
   printf 'sha=deadbeef1\n' > "$REL/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
   atteste "$sha"
   printf '15.2 1.0.0\n' > "$REL/releases/start_erl.data"
-  run bash -c "source '$SUT' >/dev/null 2>&1 || true; release_app_dir '$REL'"
+  run bash -c ". '$BATS_TEST_DIRNAME/../../lib/provision-lib.sh'; release_app_dir '$REL'"
   [ "$status" -eq 0 ]
   [[ "$output" == "$REL/lib/lcars_fleet-1.0.0" ]]
   rm -f "$REL/releases/start_erl.data"
-  run bash -c "source '$SUT' >/dev/null 2>&1 || true; release_app_dir '$REL'"
+  run bash -c ". '$BATS_TEST_DIRNAME/../../lib/provision-lib.sh'; release_app_dir '$REL'"
   [ "$status" -ne 0 ]
   [ -z "$output" ]
 }

@@ -199,11 +199,11 @@ path_sans() { # path_sans <outil> → un dossier
 @test "l'environnement du lanceur est neutralisé, et le dire fait partie du geste" {
   temoin x.bats unit '@test "faux" { true; }'
   stub_bats 0
-  run env PROV_FLEET_GROUP=piege LCARS_SEAT_UID_FILE=/x bash "$DECOR/gate.sh"
+  run env PROV_FLEET_GROUP=piege LCARS_DECOR_ROOT=/x bash "$DECOR/gate.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"neutralisée"* ]]
   [[ "$output" == *"PROV_FLEET_GROUP"* ]]
-  [[ "$output" == *"LCARS_SEAT_UID_FILE"* ]]
+  [[ "$output" == *"LCARS_DECOR_ROOT"* ]]
 }
 
 @test "la seconde copie du bloc de neutralisation s'accorde avec celle de shell_gate.sh" {

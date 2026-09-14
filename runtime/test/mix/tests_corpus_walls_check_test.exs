@@ -63,6 +63,27 @@ defmodule Mix.Tasks.Lcars.Contracts.TestsCorpusWallsCheckTest do
       assert %{status: :pass, evidence: []} = Tests.check_witness_naming(root)
     end
 
+    test "⚠ LA ZONE `support/` DE deploy/tests EST EPARGNEE AUSSI — l'arbre frere n'est pas plus profond" do
+      root =
+        depot(
+          fichiers: [
+            {"deploy/tests/install.bats", "@test \"x\" { true; }\n"},
+            {"deploy/tests/support/decor.bash", "decor() { :; }\n"},
+            {"deploy/tests/support/forge_double.py", "print('forge')\n"}
+          ]
+        )
+
+      assert %{status: :pass, evidence: [], note: note} = Tests.check_witness_naming(root)
+      assert note =~ "1 temoins"
+    end
+
+    test "hors de sa zone, un outil de deploy/tests est nomme par son chemin relatif" do
+      root = depot(fichiers: [{"deploy/tests/lib/decor.bash", "decor() { :; }\n"}])
+
+      assert %{status: :fail, evidence: [ev]} = Tests.check_witness_naming(root)
+      assert ev =~ ~r"^\.\./deploy/tests/lib/decor\.bash : "
+    end
+
     test "arbre VIDE → INSTRUMENT BROKEN, jamais un vert propre" do
       assert %{status: :fail, evidence: [ev]} = Tests.check_witness_naming(depot([]))
       assert ev =~ "INSTRUMENT BROKEN"

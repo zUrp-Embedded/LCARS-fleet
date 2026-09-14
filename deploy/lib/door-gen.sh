@@ -16,10 +16,8 @@ say() { echo "door-gen: $*" >&2; }
 die() { echo "door-gen: ERREUR — $*" >&2; exit 1; }
 
 [[ "$EUID" -ne 0 ]] || die "door-gen ne se lance pas en root : son auto-test lance l'installeur généré, qui refuse root"
-[[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "tag « $TAG » : lettres, chiffres, . _ - seulement"
 [[ "$BASE" == https://* || "$BASE" == http://* ]] || die "base « $BASE » : une URL http(s) — install.sh n'accepte http que sous LCARS_DOOR_INSECURE_HTTP=1"
 [[ -f "$TEMPLATE" ]] || die "gabarit introuvable : $TEMPLATE"
-[[ -d "$DIST" ]] || die "tiroir introuvable : $DIST"
 
 for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_IMAGE DOOR_SUMS_BEGIN DOOR_SUMS_END; do
   n="$(grep -c "@@$m@@" "$TEMPLATE" || true)"

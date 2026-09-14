@@ -12,28 +12,16 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-: "${PROV_FORGE_HOST_PORT:=21000}"
-# la même dérivation que 48-forge-host : forge.url est un effet de 48, pas une entrée
-if [[ "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
-  FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
-elif [[ -n "${FORGE_BASE_URL:-}" ]]; then
-  FORGE_URL="${FORGE_BASE_URL%/}"
-else
-  FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
-fi
 RELEASE_BIN="$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-TOFU_BIN="${LCARS_TOFU_BIN:-/usr/local/bin/tofu}"
-TOFU_RC="${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}/tofurc"
-
-forge_up() { curl -fsS -m 5 -o /dev/null "$FORGE_URL/api/v1/version" 2>/dev/null; }
+TOFU_RC="$PROV_TOFU_DIR/tofurc"
 
 # la conformité de la structure se sonde compte par compte dans 63-forge-tokens ; ici, les préconditions du geste
 check() {
   if ! forge_up; then
-    p_drift "forge muette ($FORGE_URL) — rien à structurer tant que 48-forge-host ne l'a pas relevée"
+    p_drift "forge muette ($PROV_FORGE_URL) — rien à structurer tant que 48-forge-host ne l'a pas relevée"
     verdict_check
   fi
-  p_ok "forge vivante ($FORGE_URL)"
+  p_ok "forge vivante ($PROV_FORGE_URL)"
   if [[ -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)"
   else
@@ -44,20 +32,20 @@ check() {
   else
     p_drift "release absente ($RELEASE_BIN) — 60-deploy ne l'a pas posée, le roster ne peut pas se dériver"
   fi
-  if [[ -x "$TOFU_BIN" ]]; then
-    p_ok "tofu présent ($TOFU_BIN)"
+  if [[ -x "$PROV_TOFU_BIN" ]]; then
+    p_ok "tofu présent ($PROV_TOFU_BIN)"
   else
-    p_drift "tofu absent ($TOFU_BIN) — 46-tofu le pose"
+    p_drift "tofu absent ($PROV_TOFU_BIN) — 46-tofu le pose"
   fi
   p_ok "la structure elle-même est sondée compte par compte par 63-forge-tokens"
   verdict_check
 }
 
 apply() {
-  forge_up || { p_fail "forge muette ($FORGE_URL) — 48-forge-host la monte ou la relève, ce module la structure"; verdict_apply; }
+  forge_up || { p_fail "forge muette ($PROV_FORGE_URL) — 48-forge-host la monte ou la relève, ce module la structure"; verdict_apply; }
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] \
     || { p_fail "aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"; verdict_apply; }
-  [[ -x "$TOFU_BIN" ]] || { p_fail "tofu absent ($TOFU_BIN) — 46-tofu le pose"; verdict_apply; }
+  [[ -x "$PROV_TOFU_BIN" ]] || { p_fail "tofu absent ($PROV_TOFU_BIN) — 46-tofu le pose"; verdict_apply; }
   [[ -x "$RELEASE_BIN" ]] || {
     p_fail "aucune release exécutable posée ($RELEASE_BIN) — 60-deploy n'a pas abouti"
     p_fail "  le roster du catalogue s'en dérive — sans elle, la structure serait posée sans comptes"
@@ -68,7 +56,7 @@ apply() {
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
   chown "$PROV_HUMAN" "$enroll" \
     || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue, dérivé de la release ($RELEASE_BIN)" -- as_human env LCARS_TOOL_EVAL=1 "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
+  run_step "roster du catalogue, dérivé de la release ($RELEASE_BIN)" -- as_human "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
     || { rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
@@ -82,7 +70,7 @@ apply() {
   rm -rf "$recipe/.terraform" "$recipe/instance/.terraform"
   local m
   for m in instance .; do
-    TF_CLI_CONFIG_FILE="$TOFU_RC" run_capture env -C "$recipe/$m" "$TOFU_BIN" init -input=false -no-color \
+    TF_CLI_CONFIG_FILE="$TOFU_RC" run_capture env -C "$recipe/$m" "$PROV_TOFU_BIN" init -input=false -no-color \
       || { p_fail "recette non initialisable ($m) — le miroir de providers de 46-tofu ne couvre pas cette recette"; prov_dump_last; rm -rf "$recipe" "$enroll"; verdict_apply; }
   done
 
@@ -96,7 +84,7 @@ apply() {
     LCARS_FORGE_ORG="$PROV_FORGE_ORG" \
     LCARS_CATALOGUES_WORK="$PROV_CATALOGUES_WORK" \
     LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
-    FORGE_BASE_URL="$FORGE_URL" \
+    FORGE_BASE_URL="$PROV_FORGE_URL" \
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
     TF_CLI_CONFIG_FILE="$TOFU_RC" \

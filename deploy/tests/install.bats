@@ -33,7 +33,7 @@ _faits_sains=(git=oui curl=oui sudo=oui docker=oui docker_bin=/usr/bin/docker do
   distro=Ubuntu distro_version=26.04 noyau=6.6.0 arch=x86_64 cpu=4 ram_mb=8192 disque_mb=102400 systemd=oui
   utilisateur=temoin groupes=temoin,sudo,docker forge_fournie= forge_joignable=sans-objet
   "port_forge=21000 libre" "port_deck=20999 libre" "port_ssh=2222 libre" projet=lcars projet_pris=
-  apt_installs= comptes_humains=temoin channel=aucun channel_tree=source)
+  apt_installs= comptes_humains=temoin channel=aucun channel_tree=source jq=oui)
 
 _faux_provision() { # _faux_provision <arbre> [nom=valeur…] — le doctor écrit ces faits, et rien d'autre
   local arbre="$1"; shift
@@ -52,6 +52,7 @@ _arbre() { # _arbre [nom=valeur…] -> un arbre « kit » (sans .git) avec dél�
   local a="$BATS_TEST_TMPDIR/arbre"
   rm -rf "$a"; mkdir -p "$a/deploy/docker/bench"
   cp "$SRC" "$a/install.sh"
+  cp "$REPO/deploy/installer-constants.env" "$a/deploy/"
   printf 'cafe1234\n' > "$a/.source-revision"
   _faux_provision "$a" "${_faits_sains[@]}" "$@"
   printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"; env | grep -E "^(PROV_FORGE_MONTEE|LCARS_BUILTIN_HUMAN)=" | sort\n' > "$a/deploy/workstation"
@@ -187,10 +188,20 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 @test "sans fait rendu, l'installeur s'arrête et montre le rapport du préflight" {
   local a="$BATS_TEST_TMPDIR/arbre"; rm -rf "$a"; mkdir -p "$a/deploy"
   cp "$SRC" "$a/install.sh"
+  cp "$REPO/deploy/installer-constants.env" "$a/deploy/"
   printf '#!/usr/bin/env bash\necho "le doctor est mort"; exit 3\n' > "$a/deploy/provision"; chmod 0755 "$a/deploy/provision"
   porte "$a" --check
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucun fait"*"le doctor est mort"* ]]
+}
+
+@test "un arbre sans le fichier des constantes est incomplet, et le nom du fichier est dit" {
+  local a; a="$(_arbre)"
+  rm "$a/deploy/installer-constants.env"
+  porte "$a" --bench --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"constantes de l'installeur introuvables : $a/deploy/installer-constants.env"*"L'arbre est incomplet"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
 }
 
 
@@ -203,7 +214,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"Système    Ubuntu 26.04 sous WSL2 · noyau 6.6.0 · systemd actif"* ]]
   [[ "$output" == *"x86_64 · 4 cœurs · 8 Go de RAM · 100 Go libres sur /"* ]]
   [[ "$output" == *"utilisateur temoin · groupes sudo, docker"* ]]
-  [[ "$output" == *"Outils     git, curl présents"* ]]   # sudo n'est requis que par --workstation
+  [[ "$output" == *"Outils     git, curl, jq présents"* ]]   # sudo n'est requis que par --workstation, jq que par le conteneur
   [[ "$output" == *"Forge      aucune"* ]]
   porte "$a" --workstation --check
   [[ "$output" == *"Outils     git, curl, sudo présents"* ]]
@@ -310,7 +321,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   local a; a="$(_arbre substrat=linux consent=none)"
   porte "$a" --bench --workstation
   [ "$status" -eq 1 ]
-  [[ "$output" == *"sans déclaration"*"LCARS_ALLOW_ANY_HOST=1"*"--workstation"* ]]
+  [[ "$output" == *"sans déclaration"*"(/etc, /opt/lcars,"*"LCARS_ALLOW_ANY_HOST=1"*"--workstation"* ]]
   a="$(_arbre substrat=linux consent=env)"
   porte "$a" --bench --workstation --check
   [ "$status" -eq 0 ]
@@ -355,6 +366,18 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
   [[ "$output" == *"Outils manquants : git"* ]]
 }
 
+@test "jq absent : arrête le conteneur avant la confirmation en le nommant, laisse passer le système qui le pose" {
+  local a; a="$(_arbre jq=absent)"
+  porte "$a" --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Outils manquants : jq"* ]]
+  refute_out "Entrée pour continuer" <<<"$output"
+  refute_out "CONTAINER:" <<<"$output"
+  porte "$a" --bench --workstation
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WORKSTATION:up"* ]]
+}
+
 @test "le canal : un autre canal en place arrête --workstation, illisible aussi ; aucun ou inconnu continuent" {
   local a; a="$(_arbre channel=kit channel_tree=source)"
   porte "$a" --bench --workstation
@@ -386,11 +409,11 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 @test "--workstation : sa grille, avec /etc/wsl.conf sous WSL et la machine sur Linux" {
   local a; a="$(_arbre)"
   porte "$a" --bench --workstation --check
-  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
+  [[ "$output" == *"Installation dans ce système"*"Modifie    /etc/wsl.conf, /opt/lcars, un groupe système"*"Requiert   sudo, demandé une fois"*"wsl --unregister"* ]]
   [[ "$output" == *"Pour installer en conteneur à la place :"* ]]
   a="$(_arbre substrat=linux consent=env)"
   porte "$a" --bench --workstation --check
-  [[ "$output" == *"la machine se réinstalle"* ]]
+  [[ "$output" == *"Modifie    /opt/lcars, un groupe système"*"la machine se réinstalle"* ]]
 }
 
 @test "--check s'arrête après la grille, rien n'est appelé" {
@@ -530,6 +553,7 @@ porte() { # porte <arbre> [args…] — sans terminal : une session à part, std
 _dist() { # _dist [nom=valeur…] — le tiroir dist/ de la version $TAG : un kit avec un préflight qui dicte ses faits
   local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
   rm -rf "$d" "$st"; mkdir -p "$d" "$st/lcars_install/deploy/docker/bench"
+  cp "$REPO/deploy/installer-constants.env" "$st/lcars_install/deploy/"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
   _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
   printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$st/lcars_install/deploy/workstation"

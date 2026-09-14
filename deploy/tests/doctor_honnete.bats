@@ -8,8 +8,13 @@
 # shellcheck disable=SC2030,SC2031
 
 load refute
+load support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+  decor_pose
   DEPLOY="$BATS_TEST_DIRNAME/.."
   LIB="$DEPLOY/lib/provision-lib.sh"
   RUNNER="$DEPLOY/provision"
@@ -104,33 +109,49 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 }
 
 
-params() {
+params() { # _journal_params du runner, joué seul, sur le journal du décor
   local f="$BATS_TEST_TMPDIR/params.sh"
-  { sed -n '/^_journal_params()/,/^}$/p' "$RUNNER"
+  { printf 'DEPLOY_DIR=%q\n' "$DEPLOY"
+    sed -n '/^_journal_params()/,/^}$/p' "$RUNNER"
     echo '_journal_params'
     echo 'printf "%s|%s|%s\n" "${PROV_DECK_PORT:-}" "${PROV_FORGE_BASE:-}" "${PROV_ONLY:-}"'
   } > "$f"
   bash "$f"
 }
 
-journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
+JOURNAL_DECOR=opt/lcars/var/install.journal
+journal() { mkdir -p "$(dirname "$LCARS_DECOR_ROOT/$JOURNAL_DECOR")"; printf '%s\n' "$@" > "$LCARS_DECOR_ROOT/$JOURNAL_DECOR"; }
 
 @test "MEMOIRE : un port passe a l'apply survit au doctor sans drapeau" {
   journal 'posed_at      2026-09-01' 'params        PROV_DECK_PORT=20997' 'substrate     wsl'
-  LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" run params
+  run params
   [[ "$output" == "20997|"* ]]
 }
 
 @test "MEMOIRE : un drapeau EXPLICITE gagne toujours sur la memoire" {
   journal 'params        PROV_DECK_PORT=20997'
-  LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" PROV_DECK_PORT=21001 run params
+  PROV_DECK_PORT=21001 run params
   [[ "$output" == "21001|"* ]]
 }
 
 @test "MEMOIRE : sans journal, rien n'est invente" {
-  rm -f "$BATS_TEST_TMPDIR/journal"
-  LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" run params
+  run params
   [ "$output" = "||" ]
+}
+
+@test "MEMOIRE : sans choix de l'opérateur, la ligne params est vide" {
+  run bash -c '. "$1" >/dev/null 2>&1; prov_params_line' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+}
+
+@test "MEMOIRE : un choix hors défaut s'écrit seul, un choix égal à son défaut ne s'écrit pas" {
+  # un défaut écrit au journal deviendrait un choix, relu comme tel à la passe suivante
+  run env PROV_DECK_PORT=3000 bash -c '. "$1" >/dev/null 2>&1; prov_params_line' _ "$LIB"
+  [ "$output" = "PROV_DECK_PORT=3000" ]
+  run env PROV_DECK_PORT="$(sed -n 's/^PROV_DECK_PORT_DEFAULT=//p' "$DEPLOY/installer-constants.env")" \
+      bash -c '. "$1" >/dev/null 2>&1; prov_params_line' _ "$LIB"
+  [ "$output" = "" ]
 }
 
 @test "MEMOIRE : la liste est FERMEE — un drapeau du geste n'est pas un fait de la machine" {

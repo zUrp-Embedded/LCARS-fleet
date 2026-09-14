@@ -6,8 +6,35 @@
 # STATUS: bats tests for deploy/container — a project NAME is not proof you are talking about the same container
 
 load refute
+load support/decor
+
+# sans_outil <outil> : un dossier qui porte tout le PATH de la machine sauf <outil>
+sans_outil() {
+  local d="$BATS_FILE_TMPDIR/sans-$1" dir f n
+  local -A vu=()
+  local -a dirs liens=()
+  mkdir -p "$d"
+  IFS=: read -ra dirs <<<"$PATH"
+  for dir in "${dirs[@]}"; do
+    for f in "$dir"/*; do
+      n="${f##*/}"
+      [[ -f "$f" && -x "$f" && -z "${vu[$n]:-}" ]] || continue
+      case "$n" in "$1"|"$1".*) continue ;; esac
+      vu[$n]=1; liens+=("$f")
+    done
+  done
+  ln -s -t "$d" "${liens[@]}"
+  printf '%s\n' "$d"
+}
+
+setup_file() {
+  SANS_DOCKER="$(sans_outil docker)"
+  SANS_PYTHON3="$(sans_outil python3)"
+  export SANS_DOCKER SANS_PYTHON3
+}
 
 setup() {
+  decor_pose
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SRC="$REPO/deploy/container"
   CF="$REPO/deploy/docker/docker-compose.yml"
@@ -125,7 +152,6 @@ seed_project() {
 }
 
 @test "reset NAMES the project it is about to destroy" {
-  command -v setsid >/dev/null || skip "setsid absent: cannot detach the tty without risking a hang"
   seed_project "$CF"
 
   # The empty answer takes the abort path. What is pinned is the QUESTION — a destruction prompt
@@ -157,7 +183,9 @@ seed_project() {
 # shellcheck disable=SC2016 # motif `grep` : `${PROJECT}` doit atteindre grep tel quel
 @test "up refuse une instance dont /home vit sur un autre volume que celui du compose — jamais un /home vide en silence" {
   seed_project "$CF"
-  STUB_HOME_VOLUME=lcars-fleet_home STUB_COMPOSE_HOME=lcars-fleet_lcars-home run bash "$SRC" up
+  # le rendu de compose se lit par jq : un poste sans python3 garde la garde
+  export PATH="$BINDIR:$DECOR_BIN:$SANS_PYTHON3"
+  STUB_HOME_VOLUME=lcars-fleet_home STUB_COMPOSE_HOME=lcars-fleet_lcars-home LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
   [ "$status" -eq 1 ]
   [[ "$output" == *"lcars-fleet_home"*"lcars-fleet_lcars-home"*"volume vide"* ]]
   [[ "$output" == *"reset"* ]]
@@ -192,10 +220,10 @@ seed_project() {
   [[ "$output" == *"-p attend un nom de projet"* ]]
 }
 
-@test "help works with NO docker at all, and is not truncated" {
+@test "help works with NO docker at all, is not truncated, and creates no secrets file" {
   # Help is the one command that must survive a machine without docker — it is what you read to
   # find out what is missing.
-  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
+  run env PATH="$SANS_DOCKER" timeout 15 bash "$SRC" help
 
   [ "$status" -eq 0 ]
   # First line of the block and last line of the block: the extraction is anchored on content, so
@@ -204,6 +232,7 @@ seed_project() {
   [[ "$output" == *"EXIT :"* ]]
   # And the -p contract is documented where an operator looks for it.
   [[ "$output" == *"LCARS_PROJECT"* ]]
+  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
 }
 
 
@@ -272,22 +301,15 @@ seed_project() {
 }
 
 @test "l'aide ne promet plus une forge que l'operateur devrait apporter" {
-  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
+  run env PATH="$SANS_DOCKER" timeout 15 bash "$SRC" help
   [[ "$output" == *"--bench"* ]]
   [[ "$output" != *"LCARS ne la"$'\n'*"fabrique pas"* ]]
   [[ "$output" != *"ne la fabrique pas"* ]]
 }
 
-@test "l'aide se rend sans docker ni sonde, et ne crée aucun fichier de secrets" {
-  run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"USAGE"*"--bench"*"EXIT"* ]]
-  [ ! -e "$LCARS_CONTAINER_CONF_DIR" ]
-}
-
 @test "up --bench : exec du banc avec la base du projet, l'image et les ports traduits" {
   local bench="$BATS_TEST_TMPDIR/arbre/deploy/docker/bench"; mkdir -p "$bench" "$BATS_TEST_TMPDIR/arbre/deploy/lib" "$BATS_TEST_TMPDIR/arbre/deploy/docker"
-  cp "$SRC" "$BATS_TEST_TMPDIR/arbre/deploy/container"; cp -a "$REPO/deploy/lib/." "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
+  cp "$SRC" "$REPO/deploy/installer-constants.env" "$BATS_TEST_TMPDIR/arbre/deploy/"; cp -a "$REPO/deploy/lib/." "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
   cp "$CF" "$REPO/deploy/docker/docker-compose.secrets.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
   printf '#!/usr/bin/env bash\necho "BENCH:$*"; echo "DOCKER_BIN=$DOCKER_BIN"\n' > "$bench/bench-up.sh"; chmod 0755 "$bench/bench-up.sh"
   LCARS_IMAGE=lcars-fleet:9 run bash "$BATS_TEST_TMPDIR/arbre/deploy/container" --forge-project bob_10 --port-forge 20100 --port-deck 20101 --port-ssh 20102 --bench up

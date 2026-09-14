@@ -19,7 +19,7 @@ set -euo pipefail
 # jour et dépendances automatiques, sous la forme « nom (date) », une par ligne.
 apt_installs_depuis() {
   local depuis="$1" f
-  for f in "${LCARS_APT_HISTORY:-/var/log/apt/history.log}"*; do
+  for f in "$(prov_decor /var/log/apt/history.log)"*; do
     [[ -r "$f" ]] || continue
     case "$f" in *.gz) zcat "$f" ;; *) cat "$f" ;; esac
   done 2>/dev/null | awk -v depuis="$depuis" '
@@ -58,7 +58,7 @@ check() {
   p_fact distro_version "$distro_version"
   p_fact noyau "$(uname -r)"
   p_fact cpu "$(nproc 2>/dev/null || echo 1)"
-  if [[ -d "${LCARS_SYSTEMD_RUN:-/run/systemd/system}" ]]; then p_fact systemd oui; else p_fact systemd non; fi
+  if [[ -d "$(prov_decor /run/systemd/system)" ]]; then p_fact systemd oui; else p_fact systemd non; fi
 
   p_fact bash "$BASH_VERSION"
   if [[ "${BASH_VERSINFO[0]}" -gt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 ) ]]; then
@@ -121,7 +121,7 @@ check() {
       p_warn "Linux natif déclaré dédié (LCARS_ALLOW_ANY_HOST) — ce provisionnement possède la machine et n'a pas de désinstalleur"
     else
       p_fact consent none
-      p_fail "Linux natif sans déclaration : LCARS s'installe sur un terrain dédié, qu'il possède (/etc, /opt/lcars, groupes, comptes) et qui se refait plutôt qu'il ne se désinstalle. Pour déclarer cette machine dédiée : LCARS_ALLOW_ANY_HOST=1. Sinon : une distribution WSL2, ou le conteneur (bash install.sh)"
+      p_fail "Linux natif sans déclaration : LCARS s'installe sur un terrain dédié, qu'il possède (/etc, $PROV_ROOT, groupes, comptes) et qui se refait plutôt qu'il ne se désinstalle. Pour déclarer cette machine dédiée : LCARS_ALLOW_ANY_HOST=1. Sinon : une distribution WSL2, ou le conteneur (bash install.sh)"
     fi
   else
     p_fact consent sans-objet
@@ -163,13 +163,13 @@ check() {
     fi
     p_fact docker oui
     p_fact docker_bin "$PROV_DOCKER_BIN"
-    p_fact docker_host "${PROV_DOCKER_HOST:-${DOCKER_HOST:-}}"
+    p_fact docker_host "$PROV_DOCKER_HOST"
     p_fact docker_server "${serveur%%|*}"
     p_fact docker_flavor "$saveur"
     p_fact docker_why ""
-    p_ok "docker répond (serveur ${serveur%%|*}, ${PROV_DOCKER_HOST:-${DOCKER_HOST:-endpoint par défaut}})"
+    p_ok "docker répond (serveur ${serveur%%|*}, $PROV_DOCKER_HOST)"
   else
-    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then p_fact docker refuse; else p_fact docker absent; fi
+    if [[ "$PROV_DOCKER_DENIED" == "1" ]]; then p_fact docker refuse; else p_fact docker absent; fi
     p_fact docker_bin ""
     p_fact docker_host ""
     p_fact docker_server ""
@@ -217,7 +217,7 @@ check() {
   # ─── Les ports et le projet compose ───────────────────────────────────────────────────────────
   local base="$PROV_FORGE_BASE" nom port etat landing
   local -a miens=("$PROV_FORGE_PROJECT" "$base-fleet" "$PROV_RUNNER_PROJECT")
-  landing="$(env_field "${LCARS_SERVICES_ENV:-/etc/lcars/services.env}" LCARS_LANDING_PORT)"
+  landing="$(env_field "$PROV_SERVICES_ENV" LCARS_LANDING_PORT)"
   for nom in forge:"$PROV_FORGE_HOST_PORT" deck:"$PROV_DECK_PORT" ssh:"$PROV_SSH_PORT"; do
     port="${nom#*:}"
     etat="$(port_state "$port" "${miens[@]}")"
@@ -246,7 +246,12 @@ check() {
       p_fact apt_installs inconnu
     fi
   fi
-  p_fact comptes_humains "$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1}' "${LCARS_PASSWD_FILE:-/etc/passwd}" 2>/dev/null | paste -sd, -)"
+  # la frontière système/humain est celle de la lib : login.defs, bornes comprises ; illisible, le fait reste vide
+  local humains=""
+  if prov_uid_bounds; then
+    humains="$(awk -F: -v m="$PROV_UID_MIN" -v M="$PROV_UID_MAX" '$3+0 >= m && $3+0 <= M {print $1}' "$(prov_decor /etc/passwd)" 2>/dev/null | paste -sd, -)"
+  fi
+  p_fact comptes_humains "$humains"
 
   # ─── sudo ─────────────────────────────────────────────────────────────────────────────────────
   if [[ "$EUID" -eq 0 ]]; then
@@ -284,6 +289,14 @@ check() {
       p_drift "$tool absent — apt-get install -y $tool"
     fi
   done
+  # jq lit l'API de la forge : requis sur l'hôte du conteneur et du banc ; dans ce système, 10-packages le pose
+  if command -v jq >/dev/null; then
+    p_fact jq oui
+    p_ok "jq présent"
+  else
+    p_fact jq absent
+    p_warn "jq absent — requis pour l'installation en conteneur et le banc : apt-get install -y jq"
+  fi
 
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=unit
 # SOURCE: deploy/tests/transverse/store_volumes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
@@ -24,12 +24,13 @@ setup() {
   export LCARS_STORE_PREFIX="testproj"
 }
 
-store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed 's/^\s*- //'; }
+store_mounts() { grep -oE '^\s*- lcars-[a-z]+:\$\{PROV_STORE_ROOT:\?[^}]*\}/[a-z.]+' "$1" | sed 's/^\s*- //'; }
 
 @test "chaque nature declaree par store.sh est montee par le compose — aucun orphelin" {
   local nature
+  [ "$(store_mounts "$COMPOSE" | wc -l)" -eq "${#LCARS_STORE_TREES[@]}" ]
   for nature in "${LCARS_STORE_TREES[@]}"; do
-    grep -q "^\s*- lcars-${nature}:/var/lib/lcars/${nature}\$" "$COMPOSE" \
+    store_mounts "$COMPOSE" | grep -qE "^lcars-${nature}:.*\}/${nature}\$" \
       || { echo "nature declaree et JAMAIS montee : $nature"; return 1; }
   done
 }
@@ -50,7 +51,8 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   unset LCARS_STORE_PREFIX
   run store_volume_names
   [ "$status" -ne 0 ]
-  [[ "$output" == *"LCARS_STORE_PREFIX"* ]]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == *"LCARS_STORE_PREFIX absent"* ]]
   # RIEN d'ecrit : une liste partielle ferait croire a un appelant qui detruit qu'il a fini.
   [[ "$output" != *"-cache"* ]]
 }
@@ -85,10 +87,13 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   done < <(store_mounts "$COMPOSE")
 }
 
-@test "le chemin du magasin est ecrit par le compose SEUL, jamais par un script" {
-  # store.sh possede les NOMS, le compose possede le CHEMIN.
-  grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE"
-  refute grep -q "/var/lib/lcars" "$STORE_LIB"
+@test "le chemin du magasin est déclaré par les constantes et lu par le compose, jamais écrit par un script" {
+  # store.sh possède les noms, les constantes possèdent le chemin
+  local racine; racine="$(grep '^PROV_STORE_ROOT=' "$DEPLOY/installer-constants.env" | cut -d= -f2)"
+  [ -n "$racine" ]
+  grep -qF 'LCARS_STORE_ROOT: "${PROV_STORE_ROOT:?' "$COMPOSE"
+  refute grep -qF "$racine" "$COMPOSE"
+  refute grep -qF "$racine" "$STORE_LIB"
 }
 
 @test "store_ensure_volumes cree TOUS les volumes, et rejouer ne casse rien" {
@@ -151,8 +156,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
   local f
-  # lot 9 (DI-05) : chez `container` le projet EST celui du conteneur ; sur le banc c'est `<N>-fleet`,
-  # derive de la base — le prefixe suit le projet du conteneur dans les deux cas
+  # chez `container` le projet est celui du conteneur ; sur le banc c'est `<N>-fleet`, dérivé de la base
   grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
     || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
   for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do

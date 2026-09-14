@@ -14,7 +14,8 @@
   [ -n "$body" ]
   # Les deux chemins, et la condition qui les separe.
   grep -q 'compose ps -q lcars' <<<"$body"
-  grep -q '/opt/lcars/forge-gestures.sh' <<<"$body"
+  grep -qF '"$RACINE_CONTENEUR/forge-gestures.sh"' <<<"$body"
+  grep -qF '[[ -x "$PROV_ROOT/forge-gestures.sh" ]]' <<<"$body"
   # ⚠ ET AUCUN `sudo` : la promesse auditee de ce rail est de n'en jamais demander. Un operateur
   # sans droit sur le fichier doit se faire REFUSER par eux, pas les contourner.
   refute grep -q 'sudo' <<<"$body"

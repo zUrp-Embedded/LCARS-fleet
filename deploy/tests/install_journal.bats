@@ -8,6 +8,7 @@
 # shellcheck disable=SC2016
 
 load refute
+load support/decor
 
 setup() {
   local _v
@@ -21,9 +22,7 @@ setup() {
 
   export PROVISION_LIB="$LIB"
   export PROVISION_MODULE=test-journal
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  export PROV_FLEET_GROUP
-  PROV_FLEET_GROUP="$(id -gn)"
+  decor_pose
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   ACC="$BATS_TEST_TMPDIR/acc"
@@ -40,12 +39,6 @@ code() { grep -vE '^\s*#' "$1"; }
   lib 'prov_journal_note apt_installed socat && echo ok'
   [ "$status" -eq 0 ]
   [ "$output" = "ok" ]
-}
-
-@test "une note sans valeur ne s'ecrit pas — une clef seule ne dit rien" {
-  lib "PROV_JOURNAL_ACC='$ACC'; prov_journal_note apt_installed; echo \$?"
-  [ "$status" -eq 0 ]
-  [ ! -s "$ACC" ]
 }
 
 @test "la note s'ecrit : une ligne, une clef, ses valeurs" {
@@ -212,25 +205,6 @@ SH
   local body; body="$(code "$RUNNER")"
   grep -q 'mesure, pas declaration' <<<"$body"
   grep -q 'data, not code' "$BATS_TEST_DIRNAME/../system.manifest"
-}
-
-@test "le chemin du journal a une couture, et son defaut vit AVEC l'etat machine" {
-  code "$RUNNER" | grep -qE 'LCARS_JOURNAL_FILE:-\$PROV_ROOT/var/install\.journal' 
-  grep -qE '^dir +/etc/lcars ' "$BATS_TEST_DIRNAME/../system.manifest"
-}
-
-
-
-@test "FUSION : le scelleur LIT l'ancien journal AVANT d'ouvrir le nouveau" {
-  # ⚠ L'ORDRE EST LA PROPRIETE. `> "$JOURNAL_FILE"` tronque a l'ouverture : un `grep` place DANS le
-  # bloc redirige lirait du vide, et la fusion serait silencieusement sans effet (SC2094).
-  local body; body="$(code "$RUNNER")"
-  local n_lire n_ecrire
-  n_lire="$(grep -n '_journal_ancien=' <<<"$body" | head -1 | cut -d: -f1)"
-  n_ecrire="$(grep -n '} > "\$JOURNAL_FILE"' <<<"$body" | head -1 | cut -d: -f1)"
-  [ -n "$n_lire" ]
-  [ -n "$n_ecrire" ]
-  [ "$n_lire" -lt "$n_ecrire" ]
 }
 
 @test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {

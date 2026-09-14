@@ -11,6 +11,7 @@
 # shellcheck disable=SC2034
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -22,32 +23,27 @@ setup() {
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=64-services
-  export LCARS_SYSTEMD_DIR="$BATS_TEST_TMPDIR/etc/systemd/system"
-  export LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/etc/lcars/services.env"
-  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
-  export LCARS_SERVICES_OWNER
-  LCARS_SERVICES_OWNER="$(id -un):$(id -gn)"
+  decor_pose
+  UNITDIR="$LCARS_DECOR_ROOT/etc/systemd/system"
+  ENVF="$LCARS_DECOR_ROOT/etc/lcars/services.env"
+  SEAT="$LCARS_DECOR_ROOT/etc/lcars/seat.uid"
+  HELPERS="$LCARS_DECOR_ROOT/opt/lcars"
   export LCARS_SERVICES_SETTLE=0
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN
   PROV_HUMAN="$(id -un)"
   export LCARS_SYSADMIN_UID
   LCARS_SYSADMIN_UID="$(id -u)"
-  export PROV_FLEET_GROUP
-  PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  PASSWD_FILE="$LCARS_DECOR_ROOT/etc/passwd"
   printf 'root:x:0:0:root:/root:/bin/bash\n%s:x:%s:%s::%s:/bin/bash\nzoe:x:4242:4242::/home/zoe:/bin/bash\n' \
     "$(id -un)" "$(id -u)" "$(id -g)" "$HOME" > "$PASSWD_FILE"
-  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
-  printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$PASSWD_DEFS"
+  printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$LCARS_DECOR_ROOT/etc/login.defs"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
-  mkdir -p "$LCARS_SYSTEMD_DIR" "$PROV_TOKENS_DIR"
-  echo "http://127.0.0.1:3000" > "$PROV_TOKENS_DIR/forge.url"
+  mkdir -p "$UNITDIR"
+  echo "http://127.0.0.1:3000" > "$LCARS_DECOR_ROOT/opt/lcars/var/tokens/forge.url"
 
-  BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
+  BINDIR="$DECOR_BIN"
   CALLS="$BATS_TEST_TMPDIR/systemctl.calls"
   ACTIVE="$BATS_TEST_TMPDIR/active"; echo 0 > "$ACTIVE"
   RESTARTS="$BATS_TEST_TMPDIR/restarts.d"; mkdir -p "$RESTARTS"
@@ -64,13 +60,13 @@ echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "try-restart" && -f "$RESTART_TUE" ]] && echo 1 > "$ACTIVE"
 exit 0
 EOF
-  export LCARS_SYSTEMD_RUN="$BATS_TEST_TMPDIR/run-systemd"; mkdir -p "$LCARS_SYSTEMD_RUN"
+  # systemd est l'init du décor : /run/systemd/system existe
+  SYSTEMD_RUN="$LCARS_DECOR_ROOT/run/systemd/system"; mkdir -p "$SYSTEMD_RUN"
   chmod 0755 "$BINDIR/systemctl"
-  export LCARS_SYSTEMCTL="$BINDIR/systemctl"
-  export PATH="$BINDIR:$PATH"
 }
 
 mod() { run bash "$MOD" "$1"; }
+sans_systemd() { rm -rf "$SYSTEMD_RUN"; }
 
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS + les trois en-tetes de module" {
   run head -9 "$MOD"
@@ -84,55 +80,60 @@ mod() { run bash "$MOD" "$1"; }
 }
 
 @test "sans systemd, on ne pose RIEN et on le DIT — un fichier d'unite sans init est un decor" {
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"pas de systemd"* ]]
-  [ ! -e "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
+  [ ! -e "$UNITDIR/lcars-landing.service" ]
 }
 
 @test "apply POSE les deux unites et l'environnement" {
   mod apply
-  [ -f "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
-  [ -f "$LCARS_SYSTEMD_DIR/lcars-converger.service" ]
-  [ -s "$LCARS_SERVICES_ENV" ]
-  grep -q "^FORGE_BASE_URL=http://127.0.0.1:3000$" "$LCARS_SERVICES_ENV"
+  [ -f "$UNITDIR/lcars-landing.service" ]
+  [ -f "$UNITDIR/lcars-converger.service" ]
+  [ -s "$ENVF" ]
+  grep -q "^FORGE_BASE_URL=http://127.0.0.1:3000$" "$ENVF"
 }
 
 @test "l'environnement porte ce qu'un DAEMON ne peut pas heriter" {
   mod apply
-  grep -q "^LCARS_FORGE_ORG=" "$LCARS_SERVICES_ENV"
-  grep -q "^LCARS_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
-  refute grep -q "^PROV_" "$LCARS_SERVICES_ENV"
+  grep -q "^LCARS_FORGE_ORG=" "$ENVF"
+  grep -q "^LCARS_HUMANS_TEAM=" "$ENVF"
+  refute grep -q "^PROV_" "$ENVF"
 }
 
 @test "l'exécuteur de catalogue reçoit le dossier de travail tofu et le miroir de providers que 25 et 46 posent" {
-  export PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/opt/lcars/var/tofu" LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/lcars/tofu"
   mod apply
-  grep -qxF "LCARS_CATALOGUES_WORK=$BATS_TEST_TMPDIR/opt/lcars/var/tofu" "$LCARS_SERVICES_ENV"
-  grep -qxF "TF_CLI_CONFIG_FILE=$BATS_TEST_TMPDIR/opt/lcars/tofu/tofurc" "$LCARS_SERVICES_ENV"
+  grep -qxF "LCARS_CATALOGUES_WORK=$LCARS_DECOR_ROOT/opt/lcars/var/tofu" "$ENVF"
+  grep -qxF "TF_CLI_CONFIG_FILE=$LCARS_DECOR_ROOT/opt/lcars/tofu/tofurc" "$ENVF"
+}
+
+@test "les daemons reçoivent la racine du magasin de la constante — sans elle, le produit retombe sur un défaut à lui" {
+  mod apply
+  [ "$status" -eq 0 ]
+  grep -qxF "LCARS_STORE_ROOT=$LCARS_DECOR_ROOT/var/lib/lcars" "$ENVF"
 }
 
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
   export LCARS_SYSADMIN_UID=1007
   mod apply
   [ "$status" -eq 0 ]
-  grep -qx 'LCARS_SYSADMIN_UID=1007' "$LCARS_SERVICES_ENV"
-  refute grep -q 'LCARS_SYSADMIN_UID=1000' "$LCARS_SERVICES_ENV"
+  grep -qx 'LCARS_SYSADMIN_UID=1007' "$ENVF"
+  refute grep -q 'LCARS_SYSADMIN_UID=1000' "$ENVF"
 }
 
 @test "l'uid du siege est POSE dans un fichier que le garde ne peut pas reecrire" {
   export LCARS_SYSADMIN_UID=1007
   mod apply
   [ "$status" -eq 0 ]
-  [ -f "$LCARS_SEAT_UID_FILE" ]
-  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
-  [ "$(stat -c '%a' "$LCARS_SEAT_UID_FILE")" = "644" ]
+  [ -f "$SEAT" ]
+  [ "$(cat "$SEAT")" = "1007" ]
+  [ "$(stat -c '%a' "$SEAT")" = "644" ]
 }
 
 @test "le check DERIVE quand le fichier de siege manque — le garde y retombe sur son litteral" {
   mod apply
-  rm -f "$LCARS_SEAT_UID_FILE"
+  rm -f "$SEAT"
   mod check
   [ "$status" -eq 1 ]
   printf '%s\n' "$output" | grep -qE '^DRIFT .*seat\.uid absent'
@@ -141,7 +142,7 @@ mod() { run bash "$MOD" "$1"; }
 @test "un fichier de siege qui CONTREDIT services.env est un ECHEC, pas une derive" {
   export LCARS_SYSADMIN_UID=1007
   mod apply
-  echo 2008 > "$LCARS_SEAT_UID_FILE"
+  echo 2008 > "$SEAT"
   mod check
   [ "$status" -ne 0 ]
   printf '%s\n' "$output" | grep -qE '^FAIL .*ne réservent pas le même uid'
@@ -152,7 +153,7 @@ mod() { run bash "$MOD" "$1"; }
   mod apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"LCARS_SYSADMIN_UID non posé"* ]]
-  [ ! -e "$LCARS_SERVICES_ENV" ]
+  [ ! -e "$ENVF" ]
 }
 
 @test "le check NOMME le siege qu'il reserve, au lieu de le supposer" {
@@ -172,7 +173,7 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "un environnement SANS ligne de siege derive — le champ absent n'est pas un champ vert" {
   mod apply
-  sed -i '/^LCARS_SYSADMIN_UID=/d' "$LCARS_SERVICES_ENV"
+  sed -i '/^LCARS_SYSADMIN_UID=/d' "$ENVF"
   mod check
   [ "$status" -eq 1 ]
   printf '%s\n' "$output" | grep -qE '^DRIFT .*aucun LCARS_SYSADMIN_UID'
@@ -180,14 +181,14 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "la landing demarre EN PREMIER PLAN — sinon systemd lit un service mort en une seconde" {
   mod apply
-  grep -q -- "ExecStart=$LCARS_HELPERS_DIR/console-landing.sh --foreground" "$LCARS_SYSTEMD_DIR/lcars-landing.service"
-  grep -q "^Restart=always$" "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  grep -q -- "ExecStart=$HELPERS/console-landing.sh --foreground" "$UNITDIR/lcars-landing.service"
+  grep -q "^Restart=always$" "$UNITDIR/lcars-landing.service"
 }
 
 @test "AUCUNE unite ne pose User= — la landing se depose ELLE-MEME, avec son groupe de console" {
   mod apply
-  refute grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-landing.service"
-  refute grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+  refute grep -q "^User=" "$UNITDIR/lcars-landing.service"
+  refute grep -q "^User=" "$UNITDIR/lcars-converger.service"
 }
 
 @test "daemon-reload passe AVANT enable — systemd sert l'unite qu'il a en memoire" {
@@ -209,21 +210,21 @@ mod() { run bash "$MOD" "$1"; }
 @test "un services.env changé relance les unités debout, même sans unité réécrite ; inchangé, rien n'est relancé" {
   mod apply
   : > "$CALLS"
-  PROV_HUMANS_TEAM=equipage mod apply
+  PROV_FORGE_ORG=equipage mod apply
   [ "$status" -eq 0 ]
-  grep -q "LCARS_HUMANS_TEAM=equipage" "$LCARS_SERVICES_ENV"
+  grep -q "LCARS_FORGE_ORG=equipage" "$ENVF"
   grep -q -- "systemctl try-restart lcars-landing.service" "$CALLS"
   grep -q -- "systemctl try-restart lcars-converger.service" "$CALLS"
   [[ "$output" == *"relancé sur l'unité ou l'environnement réécrit"* ]]
   : > "$CALLS"
-  PROV_HUMANS_TEAM=equipage mod apply
+  PROV_FORGE_ORG=equipage mod apply
   refute grep -q "try-restart" "$CALLS"
 }
 
 @test "une unité réécrite sous un service debout est relancée ; une unité neuve ou identique ne l'est pas" {
   mod apply
   refute grep -q "try-restart" "$CALLS"
-  printf '[Unit]\nDescription=ancienne\n' > "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  printf '[Unit]\nDescription=ancienne\n' > "$UNITDIR/lcars-landing.service"
   : > "$CALLS"
   mod apply
   [ "$status" -eq 0 ]
@@ -231,7 +232,7 @@ mod() { run bash "$MOD" "$1"; }
   [ "$(grep -c "try-restart" "$CALLS")" -eq 1 ]
   [[ "$output" == *"POSÉ  64-services: lcars-landing.service relancé sur l'unité ou l'environnement réécrit"* ]]
   echo 1 > "$ACTIVE"
-  printf '[Unit]\nDescription=ancienne\n' > "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+  printf '[Unit]\nDescription=ancienne\n' > "$UNITDIR/lcars-converger.service"
   : > "$CALLS"
   mod apply
   refute grep -q "try-restart" "$CALLS"
@@ -239,7 +240,7 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "une relance qui ne laisse pas le service debout est dite, pas annoncée comme faite" {
   mod apply
-  printf '[Unit]\nDescription=ancienne\n' > "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  printf '[Unit]\nDescription=ancienne\n' > "$UNITDIR/lcars-landing.service"
   : > "$RESTART_TUE"
   mod apply
   [ "$status" -eq 1 ]
@@ -276,7 +277,7 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "une unite modifiee A LA MAIN est un DRIFT — la source de verite est le module" {
   mod apply
-  echo "# bricolage" >> "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+  echo "# bricolage" >> "$UNITDIR/lcars-converger.service"
   echo 0 > "$ACTIVE"
   mod check
   [ "$status" -eq 1 ]
@@ -292,27 +293,27 @@ mod() { run bash "$MOD" "$1"; }
 @test "le port du deck choisi atteint le DAEMON, pas seulement les callbacks OIDC" {
   export PROV_DECK_PORT=20997
   mod apply
-  grep -qx 'LCARS_LANDING_PORT=20997' "$LCARS_SERVICES_ENV"
-  grep -q 'sur :20997' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
+  grep -qx 'LCARS_LANDING_PORT=20997' "$ENVF"
+  grep -q 'sur :20997' "$UNITDIR/lcars-landing.service"
 }
 
 @test "sans choix, le deck garde son port par defaut" {
   mod apply
-  grep -qx 'LCARS_LANDING_PORT=20999' "$LCARS_SERVICES_ENV"
+  grep -qx 'LCARS_LANDING_PORT=20999' "$ENVF"
 }
 
 @test "un port arbitraire TRAVERSE jusqu'au fichier d'environnement" {
   export PROV_DECK_PORT=31337
   mod apply
-  grep -qx 'LCARS_LANDING_PORT=31337' "$LCARS_SERVICES_ENV"
-  refute grep -q '20999' "$LCARS_SERVICES_ENV"
+  grep -qx 'LCARS_LANDING_PORT=31337' "$ENVF"
+  refute grep -q '20999' "$ENVF"
 }
 
 @test "l'echec devient TERMINAL — sans borne, aucun observateur ne peut voir un service echouer" {
   mod apply
-  grep -q '^StartLimitIntervalSec=' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
-  grep -q '^StartLimitBurst=' "$LCARS_SYSTEMD_DIR/lcars-landing.service"
-  grep -q '^StartLimitBurst=' "$LCARS_SYSTEMD_DIR/lcars-converger.service"
+  grep -q '^StartLimitIntervalSec=' "$UNITDIR/lcars-landing.service"
+  grep -q '^StartLimitBurst=' "$UNITDIR/lcars-landing.service"
+  grep -q '^StartLimitBurst=' "$UNITDIR/lcars-converger.service"
 }
 
 @test "un service qui BOUCLE VRAIMENT (le compteur grimpe encore) fait echouer l'apply" {
@@ -373,8 +374,9 @@ time.sleep(120)
   [[ "$output" != *"lcars-converger.service redémarre en boucle — le port"* ]]
 }
 
-stub_converger() { # stub_converger <rc> [<ligne passwd a creer>…]
-  export LCARS_HUMAN_CONVERGER="$BATS_TEST_TMPDIR/conv.sh"
+stub_converger() { # stub_converger <rc> [<ligne passwd a creer>…] — le convergeur à sa place sous la racine
+  local conv="$HELPERS/human-converger.sh"
+  mkdir -p "$HELPERS"
   CONV_ENV="$BATS_TEST_TMPDIR/conv.env"
   local rc="$1"; shift
   {
@@ -383,12 +385,11 @@ stub_converger() { # stub_converger <rc> [<ligne passwd a creer>…]
     printf '%s\n' "printf 'ARGS=%s\\n' \"\$*\" >> '$CONV_ENV'"
     local l; for l in "$@"; do printf '%s\n' "printf '%s\\n' '$l' >> '$PASSWD_FILE'"; done
     printf '%s\n' "exit $rc"
-  } > "$LCARS_HUMAN_CONVERGER"
-  chmod 0755 "$LCARS_HUMAN_CONVERGER"
+  } > "$conv"
+  chmod 0755 "$conv"
 }
 
 humans_are() {
-  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
   printf 'root:x:0:0:root:/root:/bin/bash\n' > "$PASSWD_FILE"
   printf 'siege:x:1000:1000::/home/siege:/bin/bash\n' >> "$PASSWD_FILE"
   local l; for l in "$@"; do printf '%s\n' "$l" >> "$PASSWD_FILE"; done
@@ -462,8 +463,8 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 @test "un environnement de services NON POSE arrete l'apply AVANT la passe — pas de garde en double" {
   humans_are
   stub_converger 0
-  rm -rf "$BATS_TEST_TMPDIR/etc/lcars"
-  : > "$BATS_TEST_TMPDIR/etc/lcars"
+  rm -rf "$LCARS_DECOR_ROOT/etc/lcars"
+  : > "$LCARS_DECOR_ROOT/etc/lcars"
   mod apply
   [ "$status" -ne 0 ]
   [ ! -f "$BATS_TEST_TMPDIR/conv.env" ]
@@ -471,7 +472,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 
 @test "check SANS systemd sonde quand meme la population — le cas exact du conteneur" {
   humans_are
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   container_services_present
   mod check
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
@@ -480,26 +481,25 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 
 @test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {
   humans_are
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   container_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
 }
 
-container_services_present() {
-  local d="$BATS_TEST_TMPDIR/helpers" p
-  mkdir -p "$d"
+container_services_present() { # le superviseur et les programmes qu'il tient, sous la racine
+  local p
+  mkdir -p "$HELPERS"
   for p in supervise.sh console-landing.sh human-converger.sh catalogue-executor.py privileged-executor.py; do
-    printf '#!/bin/sh\n' > "$d/$p"
-    chmod 0755 "$d/$p"
+    printf '#!/bin/sh\n' > "$HELPERS/$p"
+    chmod 0755 "$HELPERS/$p"
   done
-  export LCARS_HELPERS_DIR="$d" LCARS_SUPERVISE_BIN="$d/supervise.sh"
 }
 
 @test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   container_services_present
   mod check
   [ "$status" -eq 0 ]
@@ -542,23 +542,24 @@ container_services_present() {
 
 @test "forge_url : sans forge.url, vide et 0 — une adresse pas encore annoncee n'est pas un echec" {
   eval "$(sed -n '/^forge_url()/,/^}/p' "$MOD")"
-  PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
+  PROV_FORGE_URL_FILE="$BATS_TEST_TMPDIR/tokens/forge.url"
   run forge_url
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-  mkdir -p "$PROV_TOKENS_DIR"; printf 'http://forge.test:3000\n' > "$PROV_TOKENS_DIR/forge.url"
+  mkdir -p "$BATS_TEST_TMPDIR/tokens"; printf 'http://forge.test:3000\n' > "$PROV_FORGE_URL_FILE"
   run forge_url
   [ "$status" -eq 0 ]
   [ "$output" = "http://forge.test:3000" ]
 }
 
 @test "check : un services.env illisible ne rend pas « aucun LCARS_SYSADMIN_UID » — non sondable, dit sans drift" {
-  [ "$(id -u)" -ne 0 ] || skip "root lit tout : l'illisible ne se joue pas ici"
+  # joué par un compte qui ne lit pas un 0000
+  [ "$(id -u)" -ne 0 ]
   mod apply
-  chmod 0000 "$LCARS_SERVICES_ENV"
+  chmod 0000 "$ENVF"
   mod check
-  chmod 0640 "$LCARS_SERVICES_ENV"
-  [[ "$output" == *"WARN  64-services: LCARS_SYSADMIN_UID non sondable — $LCARS_SERVICES_ENV"* ]]
+  chmod 0640 "$ENVF"
+  [[ "$output" == *"WARN  64-services: LCARS_SYSADMIN_UID non sondable — $ENVF"* ]]
   [[ "$output" != *"aucun LCARS_SYSADMIN_UID"* ]]
 }
 
@@ -571,14 +572,14 @@ container_services_present() {
 }
 
 @test "WSL sans systemd ACTIF : on ne cherche pas un superviseur de conteneur" {
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   PROV_SUBSTRATE=wsl mod check
   [[ "$output" == *"pas de systemd"* ]]
   [[ "$output" != *"superviseur"* ]]
 }
 
 @test "TEMOIN DU TEMOIN : sur DOCKER, c'est bien le superviseur qu'on regarde" {
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   PROV_SUBSTRATE=docker mod check
   [[ "$output" == *"superviseur"* ]]
 }
@@ -594,12 +595,12 @@ container_services_present() {
 }
 
 @test "sans systemd, seat.uid et services.env sont POSES quand meme — seules les unites s'abstiennent" {
-  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  sans_systemd
   export LCARS_SYSADMIN_UID=1007
   mod apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"pas de systemd"* ]]
-  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
-  grep -q '^LCARS_SYSADMIN_UID=1007$' "$LCARS_SERVICES_ENV"
-  [ ! -e "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
+  [ "$(cat "$SEAT")" = "1007" ]
+  grep -q '^LCARS_SYSADMIN_UID=1007$' "$ENVF"
+  [ ! -e "$UNITDIR/lcars-landing.service" ]
 }
