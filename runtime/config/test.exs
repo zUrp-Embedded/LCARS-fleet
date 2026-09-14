@@ -27,6 +27,13 @@ config :lcars_fleet, :media_root, Path.expand("../../assets", __DIR__)
 # An inert launch baseline prevents accidental real launches when tests restore global config.
 config :lcars_fleet, spawner_launch_backend: Fleet.Spawner.LaunchBackend.StubBackend
 
+# Stand in for the vendor binary: the suite must not require ~/.local/bin/claude of whoever runs
+# it. `true` exits at once, so a launch that ever reached it would end instead of starting a vendor.
+config :lcars_fleet,
+  spawner_claude_bin:
+    System.find_executable("true") ||
+      raise("config/test.exs: no `true` executable on PATH to stand in for the claude binary")
+
 # Explicit nil disables the spawn-time :catalogue default and its real skills tree.
 config :lcars_fleet, spawner_skills_root: nil
 

@@ -127,13 +127,32 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
   # Bind authentication carries a directory path, not a token in the launch environment.
   defp put_auth_mode(env), do: Map.put(env, "LCARS_AUTH_MODE", "bind")
 
+  # spawner_claude_bin replaces the per-human lookup the way spawner_claude_dir replaces the
+  # passwd home: config/test.exs sets it so the suite does not depend on who runs it. No
+  # config/runtime.exs reader sets it; production resolves the human's ~/.local/bin/claude.
   defp maybe_put_vendor_bin(env, human) do
+    case Application.get_env(:lcars_fleet, :spawner_claude_bin) do
+      nil -> Map.put(env, "LCARS_VENDOR_BIN", claude_bin_for!(human))
+      bin -> Map.put(env, "LCARS_VENDOR_BIN", configured_claude_bin!(bin))
+    end
+  end
+
+  defp claude_bin_for!(human) do
     case claude_bin_in_home(human) do
       bin when is_binary(bin) ->
-        Map.put(env, "LCARS_VENDOR_BIN", bin)
+        bin
 
       nil ->
         raise "vendor: claude binary not found in ~/.local/bin of #{inspect(human)} (fail-loud)"
+    end
+  end
+
+  defp configured_claude_bin!(bin) do
+    if is_binary(bin) and File.regular?(bin) do
+      bin
+    else
+      raise "vendor: :spawner_claude_bin is #{inspect(bin)}, not an existing file — set it to " <>
+              "the claude binary, or remove it to resolve ~/.local/bin/claude (fail-loud)"
     end
   end
 
