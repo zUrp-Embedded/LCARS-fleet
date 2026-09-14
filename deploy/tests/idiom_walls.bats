@@ -46,13 +46,18 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
 
 @test "MUR I2: aucun en-tête d'authentification à jeton ne s'écrit hors de forge_api — ni en argv, ni dans l'environnement d'un enfant" {
   # forge_api compose l'en-tête dans son propre shell et le passe à curl sur l'entrée : la chaîne
-  # « Authorization: token » écrite ailleurs est un jeton en argv ou dans l'environnement d'un enfant
+  # « Authorization: token » écrite ailleurs est un jeton en argv ou dans l'environnement d'un enfant.
+  # Exception : bench-up.sh écrit l'en-tête de git dans un fichier de configuration 0600 que git inclut.
   local root f hits=0 pop=0 first
   root="$(cd "$DEPLOY/.." && pwd)"
   while IFS= read -r f; do
     IFS= read -r first < "$f" || true
     case "$f" in *.sh) ;; *) [[ "$first" =~ ^#!.*bash ]] || continue ;; esac
     pop=$((pop + 1))
+    if [[ "${f#"$root"/}" == deploy/docker/bench/bench-up.sh ]]; then
+      code "$f" | grep -q 'include.path=\$JETONS/git-forge' || { echo "MUR I2 : l'exception de bench-up.sh ne passe plus par son fichier de configuration" >&2; hits=$((hits + 1)); }
+      continue
+    fi
     if code "$f" | grep -q 'Authorization: token'; then
       echo "MUR I2 rompu — ${f#"$root"/} :" >&2; code "$f" | grep -n 'Authorization: token' >&2; hits=$((hits + 1))
     fi

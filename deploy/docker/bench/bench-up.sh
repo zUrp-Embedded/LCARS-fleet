@@ -258,12 +258,14 @@ esac
 RUNNER_SERT=0
 if [[ "$WITH_RUNNER" -eq 0 ]]; then
   RUNNER_STATE="non démarré (--no-runner) — aucun workflow CI ne tournera sur ce banc, par choix"
+elif ! JOB_URL="$(job_forge_url "$FORGE_PORT" "$ADVERTISE")"; then
+  RUNNER_STATE="absent — aucune adresse de cette machine ne joint la forge depuis un job CI (adresse annoncée : $ADVERTISE) ; --advertise <adresse de l'hôte> la donne"
 else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
   ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
   if "$DOCKER_DIR/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
-       --instance-url "$(job_forge_url "$FORGE_PORT" "$ADVERTISE")" --network "$FORGE_NET" \
+       --instance-url "$JOB_URL" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then
     RUNNER_SERT=1
     RUNNER_STATE="enregistré — labels : $RUNNER_LABELS"

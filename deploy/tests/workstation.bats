@@ -236,15 +236,6 @@ canal() { printf '%s\n' "$1" > "$LCARS_DECOR_ROOT/etc/lcars/channel"; }   # cana
   sans_faits_restants
 }
 
-@test "un canal inconnu (produit posé sans tampon) laisse passer un checkout" {
-  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
-  arbre
-  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/runtime"
-  ws
-  [ "$status" -eq 0 ]
-  grep -q '^SUDO:' "$TRACE"
-}
-
 # ─── les refus que la mesure porte déjà : avant l'escalade ──────────────────────────────────────
 
 @test "un préflight qui refuse le terrain (Linux non déclaré, plancher en dérive) sort avant sudo en citant son constat" {

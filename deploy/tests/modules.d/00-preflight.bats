@@ -600,12 +600,6 @@ EOF
   [ "$(fact channel)" = "invalide" ]
 }
 
-@test "un produit posé sans tampon rend inconnu" {
-  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/runtime"
-  preflight linux LCARS_ALLOW_ANY_HOST=1
-  [ "$(fact channel)" = "inconnu" ]
-}
-
 @test "jq présent : le fait dit oui" {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/jq"; chmod 0755 "$BIN/jq"
   preflight docker

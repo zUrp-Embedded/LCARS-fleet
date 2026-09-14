@@ -86,7 +86,7 @@ refuser_melange() {
   local machine=invalide
   if prov_channel >/dev/null 2>&1; then machine="$PROV_CHANNEL"; fi
   case "$machine" in
-    ""|aucun|inconnu|"$1") return 0 ;;
+    aucun|"$1") return 0 ;;
     invalide) fail "le canal d'installation de cette machine est illisible ($PROV_CHANNEL_FILE) — rien n'a été posé" \
                    "à corriger, ou à retirer si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
   esac

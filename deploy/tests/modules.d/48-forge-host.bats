@@ -76,6 +76,10 @@ routes() {
 
 mod() { run unshare -Ur bash "$SRC" "$@"; }
 
+# le mot de passe part à la forge dans le corps d'un PATCH ; la promotion est un PATCH sans mot de passe
+mots_de_passe_poses() { forge_requests "select(.method == \"PATCH\" and .path == \"/api/v1/admin/users/$ME\") | .body | fromjson | .password // empty" | jq -r .; }
+promotions() { forge_requests 'select(.method == "PATCH") | select((.body | fromjson | .password) == null)'; }
+
 
 @test "publiée sur toutes les adresses par défaut, l'adresse annoncée compose l'URL publique" {
   mod check
@@ -198,21 +202,23 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
 
 @test "l'administrateur est l'humain de la passe, sauf si la table des uid nomme déjà le siège" {
   mod apply
-  grep -q "user create .* _ $ME\$" "$CALLS"
+  grep -q "user create --username $ME --random-password " "$CALLS"
   : > "$CALLS"; rm -f "$TOKENS"/*
   printf '1\t0\troot\n' > "$MAP"
   SEAT=root routes
   mod apply
-  grep -q 'user create .* _ root$' "$CALLS"
+  grep -q 'user create --username root --random-password ' "$CALLS"
 }
 
-@test "premier apply : compte créé avec un mot de passe de dix lettres annoncé, jeton master et seed posés en 0600" {
+@test "premier apply : compte créé avec un mot de passe de dix lettres posé par l'API et annoncé, jeton master et seed posés en 0600" {
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local pw; pw="$(sed -n 's/^PW=//p' "$CALLS" | head -1)"
-  refute grep -q "DOCKER:.*$pw" "$CALLS"
+  local pw; pw="$(mots_de_passe_poses)"
   [[ "$pw" =~ ^[A-Za-z]{10}$ ]]
+  # ni l'argv de docker ou de curl, ni l'environnement d'un enfant ne le portent
+  refute grep -q "$pw" "$CALLS"
+  [ "$(forge_requests "select(.method == \"PATCH\") | .auth" | sort -u)" = '"token tok-master"' ]
   grep -q "forge du poste — compte d'administration	$ME	$pw" "$PROV_ANNOUNCE_FILE"
   [[ "$output" != *"$pw"* ]]
   [ "$(cat "$TOKENS/forge-master.token")" = "tok-master" ]
@@ -226,7 +232,8 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   unset PROV_ANNOUNCE_FILE
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local pw; pw="$(sed -n 's/^PW=//p' "$CALLS" | head -1)"
+  local pw; pw="$(mots_de_passe_poses)"
+  [ -n "$pw" ]
   [[ "$output" == *"IDENTIFIANTS"*"$ME"*"$pw"* ]]
 }
 
@@ -247,7 +254,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists [name: $ME]" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"compte « $ME » déjà présent"*"PROV_FORGE_ADMIN_RESET=1"* ]]
-  refute grep -q 'user change-password' "$CALLS"
+  [ -z "$(mots_de_passe_poses)" ]
   [ -s "$TOKENS/forge-master.token" ]
 }
 
@@ -262,34 +269,34 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   LCARS_BENCH=1 mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "user create .* _ $ME\$" "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
+  grep -q "user create --username $ME " "$CALLS"
+  [ "$(mots_de_passe_poses)" = toto123456 ]
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
-  : > "$CALLS"; rm -f "$TOKENS"/* "$PROV_ANNOUNCE_FILE"
+  : > "$CALLS"; : > "$FORGE_DOUBLE_DIR/requests.jsonl"; rm -f "$TOKENS"/* "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists" mod apply
   [ "$status" -eq 0 ]
-  grep -q "user change-password .* _ $ME\$" "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
+  [ "$(mots_de_passe_poses)" = toto123456 ]
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
-  : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
+  : > "$CALLS"; : > "$FORGE_DOUBLE_DIR/requests.jsonl"; rm -f "$PROV_ANNOUNCE_FILE"
   LCARS_BENCH=1 mod apply
   [ "$status" -eq 0 ]
   refute grep -q 'user create' "$CALLS"
-  grep -q "user change-password .* _ $ME\$" "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
+  [ "$(mots_de_passe_poses)" = toto123456 ]
   grep -q "$ME	toto123456" "$PROV_ANNOUNCE_FILE"
 }
 
 @test "PROV_FORGE_ADMIN_RESET pose un mot de passe neuf et l'annonce, jamais sur un compte tout juste créé" {
   export PROV_ANNOUNCE_FILE="$BATS_TEST_TMPDIR/creds"
   PROV_FORGE_ADMIN_RESET=1 mod apply
-  refute grep -q 'user change-password' "$CALLS"
-  : > "$CALLS"; rm -f "$PROV_ANNOUNCE_FILE"
+  # le compte créé reçoit un seul mot de passe, celui de sa création
+  [ "$(mots_de_passe_poses | wc -l)" -eq 1 ]
+  local premier; premier="$(mots_de_passe_poses)"
+  : > "$CALLS"; : > "$FORGE_DOUBLE_DIR/requests.jsonl"; rm -f "$PROV_ANNOUNCE_FILE"
   PROV_FORGE_ADMIN_RESET=1 mod apply
   [ "$status" -eq 0 ]
-  grep -q "user change-password .* _ $ME\$" "$CALLS"
-  grep -qE '^PW=[A-Za-z]{10}$' "$CALLS"
-  grep -q "$ME	" "$PROV_ANNOUNCE_FILE"
+  [[ "$(mots_de_passe_poses)" =~ ^[A-Za-z]{10}$ ]]
+  [ "$(mots_de_passe_poses)" != "$premier" ]
+  grep -q "$ME	$(mots_de_passe_poses)" "$PROV_ANNOUNCE_FILE"
 }
 
 
@@ -306,7 +313,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   UP=0 routes
   STUB_PORTS="" STUB_PUBLISH=bob_9-forge-gitea-1 STUB_INSPECT_PROJECT=bob_9-forge STUB_NAME=forge-renommee-1 mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q '^DOCKER:exec -e PW -u git forge-renommee-1 ' "$CALLS"
+  grep -q '^DOCKER:exec -u git forge-renommee-1 gitea admin user create ' "$CALLS"
   grep -q '^DOCKER:exec -u git forge-renommee-1 gitea admin user generate-access-token' "$CALLS"
 }
 
@@ -328,7 +335,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   : > "$FORGE_DOUBLE_DIR/requests.jsonl"
   mod apply
   [[ "$output" == *"WARN"*"adminité de « $ME » non mesurable"* ]]
-  [ -z "$(forge_requests 'select(.method == "PATCH")')" ]
+  [ -z "$(promotions)" ]
 }
 
 @test "l'adminité se lit avec le jeton : un compte admin est dit, rien n'est promu" {
@@ -336,7 +343,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"« $ME » administre la forge"* ]]
   [ "$(forge_requests "select(.path == \"/api/v1/users/$ME\") | .auth" | sort -u)" = '"token tok-master"' ]
-  [ -z "$(forge_requests 'select(.method == "PATCH")')" ]
+  [ -z "$(promotions)" ]
 }
 
 @test "un simple compte est promu par un PATCH JSON (admin, login_name, source_id), jeton en en-tête et jamais en argv" {
@@ -346,7 +353,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"« $ME » promu administrateur"* ]]
-  local patch; patch="$(forge_requests 'select(.method == "PATCH")')"
+  local patch; patch="$(promotions)"
   [ "$(jq -r .path <<<"$patch")" = "/api/v1/admin/users/$ME" ]
   [ "$(jq -r .auth <<<"$patch")" = "token tok-master" ]
   [ "$(jq -r .ctype <<<"$patch")" = "application/json" ]
@@ -374,7 +381,7 @@ mod() { run unshare -Ur bash "$SRC" "$@"; }
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"WARN"*"adminité de « $ME » non mesurable"* ]]
-  [ -z "$(forge_requests 'select(.method == "PATCH")')" ]
+  [ -z "$(promotions)" ]
 }
 
 @test "sans jeton, l'adminité est inconnue et rien n'est tenté" {

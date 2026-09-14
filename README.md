@@ -114,7 +114,7 @@ il pose la chaîne Elixir/OTP et Node aux versions épinglées par le provisionn
 runtime ; les dépendances se tirent de hex.pm, que la machine joint directement (`sudo` ne transmet
 aucune variable de proxy). En mode conteneur, l'image doit être sur le daemon avant `install.sh`.
 `deploy/container build` la bâtit sur le poste, depuis un arbre commité : il joue `deploy/pack.sh`,
-qui demande la chaîne Elixir/OTP, node, bats et shellcheck, et joue le gate complet. Une image
+qui demande la chaîne Elixir/OTP, node, bats, shellcheck et docker buildx, et joue le gate complet. Une image
 publiée se tire, et `install.sh` la reçoit par la même variable, dans le même shell :
 
 ```bash
@@ -394,7 +394,7 @@ it installs the Elixir/OTP toolchain and Node at the versions pinned by the prov
 the runtime; the dependencies come from hex.pm, which the machine reaches directly (`sudo` passes
 no proxy variable). In container mode, the image must be on the daemon before `install.sh`.
 `deploy/container build` builds it on the workstation, from a committed tree: it runs
-`deploy/pack.sh`, which needs the Elixir/OTP toolchain, node, bats and shellcheck, and runs the
+`deploy/pack.sh`, which needs the Elixir/OTP toolchain, node, bats, shellcheck and docker buildx, and runs the
 full gate. A published image is pulled, and `install.sh` receives it through the same variable, in
 the same shell:
 

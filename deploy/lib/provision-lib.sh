@@ -35,8 +35,8 @@ prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin syst
 : "${PROV_DECK_PORT:=$PROV_DECK_PORT_DEFAULT}"
 : "${PROV_SSH_PORT:=$PROV_SSH_PORT_DEFAULT}"
 : "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
-# LCARS_BUILTIN_HUMAN posé, même vide, est un choix explicite : il gagne sur l'humain que le journal retient
-PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
+# LCARS_BUILTIN_HUMAN est un choix explicite : il gagne sur l'humain que le journal retient (deploy/provision traduit « - » en aucun)
+PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
 PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
 PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
 PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"

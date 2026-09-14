@@ -278,8 +278,6 @@ check() {
   p_fact channel "$canal"
   if [[ "$canal" == aucun ]]; then
     p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $(prov_channel_here) »"
-  elif [[ "$canal" == inconnu ]]; then
-    p_warn "canal d'installation inconnu : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) ; un kit ou une source le reprend et l'écrit"
   elif [[ "$canal" != invalide ]]; then
     p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
   fi

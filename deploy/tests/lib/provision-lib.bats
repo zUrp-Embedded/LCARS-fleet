@@ -1165,13 +1165,11 @@ canal() { # canal <code bash> — la lib sourcée, verdicts à zéro, sous le d�
   [ "$output" = "PROV_DECK_PORT=21999" ]
 }
 
-@test "humain de démonstration : LCARS_BUILTIN_HUMAN gagne sur celui du journal, et posé vide il le retire" {
+@test "humain de démonstration : LCARS_BUILTIN_HUMAN gagne sur celui du journal" {
   PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
   [ "$output" = "[lcars] PROV_BUILTIN_HUMAN=lcars" ]
   LCARS_BUILTIN_HUMAN=zoe PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s]" "$PROV_BUILTIN_HUMAN"'
   [ "$output" = "[zoe]" ]
-  LCARS_BUILTIN_HUMAN='' PROV_BUILTIN_HUMAN=lcars module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
-  [ "$output" = "[] " ]
 }
 
 @test "prov_announce_credential sans fichier d'annonce : l'encadré IDENTIFIANTS porte le libellé, le login et le secret" {

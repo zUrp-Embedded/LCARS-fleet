@@ -401,7 +401,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   grep -qE "forge-gestures.sh config-seed <<< [A-Za-z0-9]{20}" "$CALLS"
   grep -q "ENROLL:--tofu-dir .* --image lcars-fleet:9" "$CALLS"
   refute grep -q 'ENROLL:.*--repo' "$CALLS"
-  grep -qF 'DOCKER:exec -i -u root bt-fleet-lcars-1 install -m 0644 -o root -g root /dev/stdin /opt/lcars/services/forge-recipe/roles.auto.tfvars.json <<< {"roles":[]}' "$CALLS"
+  local depot; depot="$(grep -F 'DOCKER:exec -i -u root bt-fleet-lcars-1 sh -c ' "$CALLS" | grep -F 'roles.auto.tfvars.json')"
+  [[ "$depot" == *" sh /opt/lcars/services/forge-recipe/roles.auto.tfvars.json <<< {\"roles\":[]}" ]]
   grep -q "DOCKER:exec -i -u root -e LCARS_BUILTIN_HUMAN=lcars -e LCARS_BUILTIN_EMAIL=lcars@lcars.local bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" "$CALLS"
   refute grep -qE 'DOCKER:[^<]*MASTER' "$CALLS"
 }
@@ -653,4 +654,11 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   local fichiers; fichiers="$(sed -n 's/^RUNNER-FILE:[^ ]* mode=600 dossier=700 //p' "$CALLS")"
   [ "$(grep -c "^$T/bench-up-jetons\.[^/]*/" <<<"$fichiers")" -eq 2 ]
   [ "$(find "$T" -name 'bench-up-jetons.*' | wc -l)" -eq 0 ]
+}
+
+@test "hors WSL, une adresse annoncée de loopback n'enrôle aucun runner : le banc le dit PAS PRÊT, en nommant --advertise" {
+  PROV_SUBSTRATE=linux run_bench --advertise 127.0.0.1
+  [ "$status" -eq 6 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"runner    : absent — aucune adresse de cette machine ne joint la forge depuis un job CI (adresse annoncée : 127.0.0.1) ; --advertise"* ]]
+  refute grep -q '^RUNNER:' "$CALLS"
 }

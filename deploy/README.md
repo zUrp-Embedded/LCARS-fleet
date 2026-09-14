@@ -123,8 +123,9 @@ conteneur), et `bench/` : `bench-up.sh`, `bench-down.sh --project <nom> --yes`,
 lui-même les deux gates avant d'empaqueter. Le tag est celui de git quand HEAD en porte un, sinon
 `<AAAA-MM-JJ>-<sha>` (`LCARS_PACK_TAG` le pose). La forge, le propriétaire et le dépôt se lisent dans
 `LCARS_PACK_FORGE`, `LCARS_PACK_OWNER` et `LCARS_PACK_REPO`, et à défaut se dérivent d'un `origin` en
-http(s) ; une forge de publication est en https. Le jeton vient de `LCARS_PACK_TOKEN` ou de
-`LCARS_PACK_TOKEN_FILE`, portées `write:repository` et `write:package`, jamais en argv.
+http(s) ; une forge de publication est en https. Le jeton se lit dans le fichier
+`LCARS_PACK_TOKEN_FILE`, portées `write:repository` et `write:package`, jamais en argv ni dans
+l'environnement, dont héritent le gate et npm.
 L'installeur généré nomme l'image de la version (`<registre>/<owner>/<repo>:<tag>`) et la tire avant
 `container up` quand elle manque au daemon ; le registre est `LCARS_PACK_REGISTRY`, par défaut
 `ghcr.io` pour une forge GitHub et l'hôte de la forge sinon. `LCARS_MINISIGN_PUBKEY` et

@@ -205,10 +205,9 @@ amorcer_forge() {
   p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
   if [[ "${LCARS_BENCH:-}" == "1" ]]; then pw="$(bench_admiral_password)"; else pw="$(new_password)"; fi
   err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
-  COMPTE="$(forge_admin_ensure "$PROV_DOCKER_BIN" "$CONTENEUR" "$PROV_FORGE_ADMIN" "$pw" 2>"$err")" || COMPTE=refus
+  COMPTE="$(forge_admin_ensure "$PROV_DOCKER_BIN" "$CONTENEUR" "$PROV_FORGE_ADMIN" 2>"$err")" || COMPTE=refus
   case "$COMPTE" in
-    cree)
-      announce_password "$PROV_FORGE_ADMIN" "$pw" ;;
+    cree) ;;
     present)
       p_ok "compte « $PROV_FORGE_ADMIN » déjà présent (son mot de passe est un hash, il n'est pas relisible)" ;;
     *)
@@ -222,6 +221,13 @@ amorcer_forge() {
     || { p_fail "la forge n'a rendu aucun jeton master pour $PROV_FORGE_ADMIN"; verdict_apply; }
   write_atomic "$PROV_MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" || verdict_apply
   p_chg "autorité de création posée ($PROV_MASTER_TOKEN_FILE, $PROV_AUTHORITY_USER seul)"
+  # un compte créé porte un mot de passe aléatoire que personne ne connaît : celui qu'on annonce se pose par l'API
+  [[ "$COMPTE" == cree ]] || return 0
+  if forge_admin_password "$PROV_FORGE_URL" "$PROV_MASTER_TOKEN_FILE" "$PROV_FORGE_ADMIN" "$pw"; then
+    announce_password "$PROV_FORGE_ADMIN" "$pw"
+  else
+    p_fail "mot de passe de « $PROV_FORGE_ADMIN » non posé sur le compte créé (refus ci-dessus)"
+  fi
 }
 
 # le mot de passe voulu pour un compte qui existait déjà : celui du contrat en banc, un neuf sur demande (PROV_FORGE_ADMIN_RESET)
@@ -236,7 +242,7 @@ reposer_mot_de_passe() {
     [[ "$COMPTE" != present ]] || p_warn "pour obtenir un mot de passe : « PROV_FORGE_ADMIN_RESET=1 » sur un apply en pose un neuf et l'affiche"
     return 0
   fi
-  if forge_admin_password "$PROV_DOCKER_BIN" "$CONTENEUR" "$PROV_FORGE_ADMIN" "$pw"; then
+  if forge_admin_password "$PROV_FORGE_URL" "$PROV_MASTER_TOKEN_FILE" "$PROV_FORGE_ADMIN" "$pw"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     announce_password "$PROV_FORGE_ADMIN" "$pw"
   elif [[ "${LCARS_BENCH:-}" == "1" ]]; then

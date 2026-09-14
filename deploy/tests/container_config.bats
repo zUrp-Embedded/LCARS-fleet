@@ -65,7 +65,7 @@ if [[ "\$*" == *" exec -it -u "* ]]; then echo "SHELL \$*"; exit 0; fi
 all="\$*"   # \${*##…} s'appliquerait a CHAQUE parametre, pas a la ligne
 if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR/pushed.\${all##* config-}"; exit 0; fi
 if [[ "\$all" == *"forge-gestures.sh apply" ]]; then cat > "$BATS_TEST_TMPDIR/pushed.apply"; exit 0; fi
-if [[ "\$all" == *" install -m 0644 "* ]]; then cat > "$BATS_TEST_TMPDIR/roster.seen"; exit 0; fi
+if [[ "\$all" == *" sh -c "*"forge-recipe/roles.auto.tfvars.json" ]]; then cat > "$BATS_TEST_TMPDIR/roster.seen"; exit 0; fi
 # source-push : le script bash du conteneur est joué, contre des outils doublés qui notent leur argv
 if [[ "\$all" == *" exec -T lcars bash -c "* ]]; then
   a=("\$@"); n=0; while [[ "\${a[\$n]}" != -c ]]; do n=\$((n + 1)); done
@@ -534,7 +534,7 @@ FAKE
   grep -q "^ENROLL --tofu-dir .* --image sha256:image-temoin$" "$CALLS"
   [ "$(cat "$BATS_TEST_TMPDIR/roster.seen")" = '{"roles":["temoin"]}' ]
   local pose recette
-  pose="$(grep -n "exec -T -u root lcars install -m 0644 -o root -g root /dev/stdin /opt/lcars/services/forge-recipe/roles.auto.tfvars.json" "$CALLS" | cut -d: -f1)"
+  pose="$(grep -n "exec -T -u root lcars sh -c .* sh /opt/lcars/services/forge-recipe/roles.auto.tfvars.json$" "$CALLS" | cut -d: -f1)"
   recette="$(grep -n "exec -T -u root lcars /opt/lcars/forge-gestures.sh apply" "$CALLS" | cut -d: -f1)"
   [ -n "$pose" ]
   [ -n "$recette" ]
