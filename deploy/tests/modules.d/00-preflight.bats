@@ -810,6 +810,31 @@ EOF
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
+@test "le refus de canal nomme la pose que la machine retient et le geste qui refait le terrain, par substrat — jamais « il est jetable » sans geste" {
+  printf 'source\n' > "$CHANNEL"
+  mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/var"
+  printf '%s\n' '# SOURCE: /opt/lcars/var/install.journal' 'posed_at      2026-09-14T19:40:26Z' 'source_rev    67bc5b40' > "$LCARS_DECOR_ROOT/opt/lcars/var/install.journal"
+  # une copie en kit : son tampon de révision en fait une livraison binaire
+  local deploy; deploy="$(cd "$(dirname "$MOD")/.." && pwd)"
+  local kit="$BATS_TEST_TMPDIR/kit"
+  mkdir -p "$kit/deploy/modules.d" "$kit/deploy/lib"
+  cp "$MOD" "$kit/deploy/modules.d/"
+  cp "$deploy"/lib/*.sh "$kit/deploy/lib/"
+  cp "$deploy/installer-constants.env" "$deploy/system.manifest" "$kit/deploy/"
+  echo cafe1234 > "$kit/$(sed -n 's/^PROV_SOURCE_STAMP=//p' "$deploy/installer-constants.env")"
+  MOD="$kit/deploy/modules.d/00-preflight.sh" LIB="$kit/deploy/lib/provision-lib.sh"
+  preflight linux LCARS_ALLOW_ANY_HOST=1
+  local sortie_linux="$output" rc_linux="$status"
+  preflight wsl
+  [ "$rc_linux" -eq 2 ]
+  [[ "$sortie_linux" == *"installée par « source », et cet arbre poserait « kit »"*"(pose retenue par la machine : révision 67bc5b40, le 2026-09-14)"* ]]
+  [[ "$sortie_linux" == *"deploy/workstation up, depuis le checkout qui l'a posée ou un autre clone du dépôt"* ]]
+  [[ "$sortie_linux" == *"refaire le terrain, sans désinstalleur : la machine se réinstalle, et cet installeur s'y joue"* ]]
+  refute_out 'jetable' <<<"$sortie_linux"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"la distribution se recrée (côté Windows : wsl --unregister <distro>"* ]]
+}
+
 @test "un canal illisible est un échec qui compte, et le fait dit invalide" {
   printf 'snap\n' > "$CHANNEL"
   preflight linux LCARS_ALLOW_ANY_HOST=1

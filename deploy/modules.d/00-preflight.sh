@@ -269,6 +269,32 @@ mesure_declaration() {
 
 # ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ─────────────────────────────
 # le fichier de canal est 0644 dans /etc/lcars 0755 (system.manifest) : le compte de l'opérateur le lit
+
+# la machine ne retient pas le chemin du checkout ou du kit qui l'a posée ; son journal (0644) en retient la
+# révision et la date
+pose_retenue() { # pose_retenue → « révision R, le AAAA-MM-JJ » lu dans le journal, ou rien
+  local rev quand
+  rev="$(sed -n 's/^source_rev  *//p' "$PROV_JOURNAL_FILE" 2>/dev/null | head -n1)"
+  quand="$(sed -n 's/^posed_at  *//p' "$PROV_JOURNAL_FILE" 2>/dev/null | head -n1)"
+  [[ -z "$rev" ]] || printf 'révision %s%s' "$rev" "${quand:+, le ${quand%%T*}}"
+}
+
+refus_de_canal() { # refus_de_canal <canal de la machine> <canal de cet arbre> — le FAIL, avec les deux gestes jouables
+  local canal="$1" ici="$2" pose meme refaire
+  pose="$(pose_retenue)"
+  if [[ "$canal" == kit ]]; then
+    meme="deploy/workstation up --from <kit.tar.gz>, avec le kit de la version voulue"
+  else
+    meme="deploy/workstation up, depuis le checkout qui l'a posée ou un autre clone du dépôt"
+  fi
+  [[ -z "$pose" ]] || pose=" (pose retenue par la machine : $pose)"
+  case "$PROV_SUBSTRATE" in
+    wsl) refaire="la distribution se recrée (côté Windows : wsl --unregister <distro>, puis une distribution neuve), et cet installeur s'y joue" ;;
+    *)   refaire="la machine se réinstalle, et cet installeur s'y joue" ;;
+  esac
+  p_fail "cette machine est installée par « $canal », et cet arbre poserait « $ici » — un canal ne se pose pas sur un autre$pose. Mise à jour par le même canal : $meme. Ou refaire le terrain, sans désinstalleur : $refaire"
+}
+
 mesure_canal() {
   local ici; ici="$(prov_channel_here)"
   p_fact channel_tree "$ici"
@@ -281,7 +307,7 @@ mesure_canal() {
     aucun)    p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $ici »" ;;
     "$ici")   p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE)" ;;
     invalide) ;;
-    *)        p_fail "cette machine est installée par « $canal », et cet arbre poserait « $ici » — un canal ne se pose pas sur un autre : mise à jour par le même canal ($([[ "$canal" == kit ]] && echo "deploy/workstation up --from <kit.tar.gz>" || echo "deploy/workstation up, depuis un checkout")), ou refaire le terrain, il est jetable" ;;
+    *)        refus_de_canal "$canal" "$ici" ;;
   esac
 }
 
