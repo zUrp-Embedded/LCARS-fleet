@@ -733,6 +733,48 @@ FAKE
   [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
 }
 
+# B1 — la sortie de `lcars tool catalogue-source web-demo` relevée sur banc (v0.9-beta2) et rejouée
+# sur le release : le journal Elixir sur stderr, une ligne vide puis une ligne `[info]`, et la
+# réponse seule sur stdout. Lus ensemble, la première ligne est vide et la réponse juste est refusée.
+_porte_bavarde() { # <stdout de la porte>
+  cat > "$BIN/entrypoint" <<FAKE
+#!/usr/bin/env bash
+[[ "\$1" == tool ]] && shift
+printf '%s\n' "\$*" >> "$ENTRY_LOG"
+case "\$1" in
+  catalogue-source)
+    printf '\n20:26:15.108 [info] CatalogueDeposits: admiral/fleet declares '"'"'fleet'"'"', the catalogue carried by the release. It is installed by construction\n' >&2
+    printf '%b' '$1'
+    ;;
+  roles-tfvars) echo '{"org":"cat","roles":["cat_dev"]}' ;;
+esac
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+}
+
+@test "install: le journal du release sur stderr ne prend pas la place de la réponse lue sur stdout (B1)" {
+  setup_install
+  _porte_bavarde 'alice/cat main deadbeef\n'
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cat <- alice/cat (main@deadbeef)"* ]]
+  grep -q "clone .*--branch main http://forge.test/alice/cat.git" "$GIT_LOG"
+  # une réponse exploitable ne montre pas le journal à l'opérateur
+  refute grep -q 'CatalogueDeposits' <<<"$output"
+}
+
+@test "install: une porte qui rend 0 sans réponse montre son journal avec le refus (B1)" {
+  setup_install
+  _porte_bavarde ''
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0 sans reponse exploitable"* ]]
+  [[ "$output" == *"Recu : RIEN"* ]]
+  [[ "$output" == *"[info] CatalogueDeposits"* ]]
+  [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
+}
+
 
 setup_material() {
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"

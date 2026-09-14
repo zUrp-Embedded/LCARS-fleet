@@ -517,11 +517,21 @@ cmd_install() {
   [[ -n "$sys_tok_value" ]] \
     || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
 
-  local src rc=0
+  # ⚠ LA REPONSE SE LIT SUR STDOUT SEUL. Le journal du release part sur stderr
+  # (`Fleet.ReleaseDoor.claim_stdout!`), et il parle pendant la resolution : un depot qui declare le
+  # catalogue livre y laisse une ligne `[info]`, precedee d'une ligne vide. Lus ensemble, journal et
+  # reponse donnent une premiere ligne vide, et la reponse juste est refusee. Stderr est garde a part
+  # et montre quand la porte refuse ou ne repond pas ; sur une reponse exploitable, il ne dit rien a
+  # l'operateur.
+  local src rc=0 src_err="" err_file
+  err_file="$(mktemp)" || die "install: fichier temporaire impossible a creer (mktemp) — le disque ou \$TMPDIR refuse l'ecriture"
   src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
-         tool catalogue-source "$name" 2>&1)" || rc=$?
+         tool catalogue-source "$name" 2>"$err_file")" || rc=$?
+  src_err="$(cat "$err_file")"
+  rm -f "$err_file"
   if [[ "$rc" -ne 0 ]]; then
-    printf '%s\n' "$src" >&2
+    [[ -z "$src" ]] || printf '%s\n' "$src" >&2
+    [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
     die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
   fi
   local repo branch sha
@@ -532,7 +542,7 @@ cmd_install() {
   # controle, les trois champs vides construisent une URL a partir de rien, git echoue dessus, et le
   # refus cite l'erreur d'un outil auquel on a passe du vide : il accuse l'outil.
   if [[ -z "$repo" || -z "$branch" || -z "$sha" ]]; then
-    printf '%s\n' "$src" >&2
+    [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
     die "install: $name — la porte de resolution a rendu 0 sans reponse exploitable.
   Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
     [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
