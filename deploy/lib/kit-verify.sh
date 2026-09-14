@@ -2,7 +2,7 @@
 # SOURCE: deploy/lib/kit-verify.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-08
-# STATUS: ce qu'un kit doit porter, contre release.manifest et les listes des constantes que pose 62, vérifié avant que le tar ne ferme
+# STATUS: ce qu'un kit doit porter — manifestes et constantes, tampon de révision, release, doc bâtie, entrées de release.manifest, listes des constantes que pose 62, médias — vérifié avant que le tar ne ferme
 # USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
 
 kv_constante() { sed -n "s/^$2=//p" "$1" | tail -n1; }   # kv_constante <fichier des constantes> <clé> → la valeur, lue comme une donnée

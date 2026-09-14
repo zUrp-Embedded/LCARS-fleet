@@ -2,7 +2,7 @@
 # SOURCE: deploy/lib/provision-audit.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: l'audit de la machine (`provision audit`) de `provision`, sourcé par lui
+# STATUS: `provision audit` — ce qui est apparu sur la machine entre deux instantanés et que system.manifest ne déclare pas ; sourcé par provision
 
 audit_run() {
   local avant="${1:-}" apres="${2:-}"

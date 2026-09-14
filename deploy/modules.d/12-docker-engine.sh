@@ -9,7 +9,7 @@
 # AFTER: 10-packages
 #
 # Sous WSL le daemon vient de Docker Desktop, dans le conteneur on est déjà dedans : ce module ne
-# vit que sur le substrat linux. Il pose docker-ce par confort, une fois. Un daemon qui répond est
+# vit que sur le substrat linux. Il pose docker-ce une fois. Un daemon qui répond est
 # conforme ; un daemon qui refuse l'utilisateur, ou un moteur posé (docker-ce ou docker.io) dont le
 # service est arrêté, se disent sans que rien ne soit reposé.
 

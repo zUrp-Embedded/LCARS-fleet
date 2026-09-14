@@ -5,13 +5,13 @@
 # STATUS: la release du runtime — bâtie depuis les sources par mix release, ou reprise du kit, puis basculée sous le préfixe
 #
 # ENV   LCARS_RUNTIME_DIR   l'arbre du runtime à poser (60-deploy le passe)
-# EXIT  0 posée · 1 échec, rien d'utilisable posé
+# EXIT  0 posée · 1 échec, nommé sur stderr ; la génération précédente de rel/ reste en .prev
 #
 # Jouée par 60-deploy sous l'humain qui bâtit ; 60 pose ensuite les modes, les liens du PATH et
 # retire ce que le manifeste ne nomme plus. Le build ne joue pas le gate : un kit porte la release que
 # pack.sh a bâtie après le sien ; depuis un clone, la release est bâtie sur le checkout tel qu'il est.
-# Sur une livraison source, « mix deps.get » tire hex.pm sous ce compte : un proxy se déclare dans son
-# environnement, sudo n'en transmet aucun.
+# Sur une livraison source, 60 tire l'outillage mix (hex, rebar) et « mix deps.get » tire hex.pm, sous
+# ce compte : la machine joint hex.pm directement, sudo ne transmet aucune variable de proxy.
 set -euo pipefail
 
 # shellcheck source=provision-lib.sh

@@ -2,7 +2,9 @@
 # SOURCE: deploy/lib/door-gen.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-05
-# STATUS: le generateur de la porte d'une VERSION — le gabarit install.sh, constantes remplies, table des sha256
+# STATUS: l'installeur d'une version — le gabarit install.sh avec sa version, sa base, sa clé, son image et la table des sha256 du tiroir
+# USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ou <tiroir>/minisign.pub)
+# EXIT  : 0 install.sh et install.sh.sha256 écrits dans le tiroir · 1 refus, l'installeur n'est pas écrit
 
 set -euo pipefail
 

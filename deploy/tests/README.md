@@ -1,7 +1,7 @@
 # deploy/tests — les témoins de l'installeur
 
 **Date** : 2026-08-30
-**Dernière révision** : 2026-09-12 (trois couches, jouées par `deploy/gate.sh`)
+**Dernière révision** : 2026-09-14
 **Statut** : actif — pointeurs, pas un contrat
 **Référencé par** : `runtime/test/README.md`
 
@@ -41,8 +41,9 @@ Un cas mesure une chose observable : ce qu'un script affiche, rend ou pose. Un `
 source n'est pas un témoin du comportement ; il n'a sa place que dans la couche `structure`, pour
 un invariant que le code ne peut pas tenir seul. Une assertion par ligne : dans un cas bats, `a &&
 b` n'échoue que si `b` échoue (invariant I22 de `idiom_walls.bats`). Les doublures notent leur argv dans
-un fichier et rendent vite ; un secret ne passe jamais en argv. `refute.bash` est à la racine ; les
-sous-dossiers font `load ../refute`.
+un fichier et rendent vite ; un secret ne passe jamais en argv. `refute.bash` est à la racine du
+corpus, et un témoin le charge par son chemin relatif (`load refute`, `load ../refute`,
+`load ../../refute`).
 
 Un témoin ne lit jamais les fichiers de la machine qui joue la porte : il pose `LCARS_DECOR_ROOT`,
 sous lequel la lib lit tout chemin de `deploy/installer-constants.env` et tout chemin système

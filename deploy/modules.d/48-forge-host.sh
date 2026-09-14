@@ -8,9 +8,10 @@
 # NEEDS: root
 # AFTER: 44-media
 #
-# FORGE_BASE_URL posée : la forge est fournie, rien n'est monté, docker n'est pas requis ; sinon
-# (ou PROV_FORGE_MONTEE=1, ce que --bench pose) le conteneur est monté ici. Amorçage, jeton master,
-# promotion de l'administrateur et seed sont les mêmes dans les deux cas.
+# FORGE_BASE_URL posée, ou une forge déjà gravée « fournie » : rien n'est monté, docker n'est pas
+# requis, et le jeton master s'écrit à la main. Sinon, ou sous PROV_FORGE_MONTEE=1 (ce que --bench
+# pose), la forge du poste est montée et amorcée ici (compte d'administration, jeton master).
+# Adresses, forme, promotion de l'administrateur, seed et siège sont les mêmes dans les deux cas.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -186,7 +187,7 @@ monter_forge() { # la forge du poste : refus d'un port tenu par un autre, montag
   if [[ "$was_up" -eq 0 && "$etat" == pris* ]]; then
     holder="${etat#pris}"; holder="${holder# par }"
     p_fail "port $PROV_FORGE_HOST_PORT déjà pris${holder:+ par $holder}, et ce n'est pas la forge de LCARS (elle ne répond pas sur $PROV_FORGE_URL)"
-    p_fail "en choisir un autre : PROV_FORGE_HOST_PORT=<port> — ou libérer celui-ci"
+    p_fail "en choisir un autre : « --port-forge <port> » — ou libérer celui-ci"
     verdict_apply
   fi
   [[ "$was_up" -eq 1 ]] \

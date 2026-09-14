@@ -1,7 +1,7 @@
 # etc/ — lancement et release
 
 **Date**: 2026-05-10
-**Last revised**: 2026-09-04
+**Last revised**: 2026-09-14
 **Status**: active — the launch (`bin/fleet`) and release substrate of `runtime/`
 **Referenced by**: `runtime/CLAUDE.md`
 
@@ -56,12 +56,12 @@ launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/us
 le même endroit.
 
 `deploy/lib/deploy-release.sh` bâtit et bascule. Depuis les sources, `MIX_ENV=prod mix release` sur
-le checkout, sans gate. Depuis un kit, la release est celle que `pack.sh` a bâtie après son gate :
+le checkout, sans gate, avec les dépendances tirées de hex.pm. Depuis un kit, la release est celle que `pack.sh` a bâtie après son gate :
 ni gate ni compilation. Puis swap atomique de `rel/` (la génération précédente reste en `.prev`),
 copie atomique de chaque entrée du manifest (exécutable si elle est `exec`) et du template d'env.
 Il refuse de tourner en root : `deploy/modules.d/60-deploy.sh` le joue comme l'humain, puis pose
 les modes et les liens du PATH, et retire ce que le manifest ne nomme plus. Sortie `0` = release
-basculée, `1` = échec, rien d'utilisable posé.
+basculée, `1` = échec nommé sur stderr.
 
 ⚠ `rel/` seul ne suffit pas : un deploy qui oublie `bin/` fait tourner le nouveau BEAM avec les
 vieux sandboxes. Le manifest est la seule liste de ce qui part.

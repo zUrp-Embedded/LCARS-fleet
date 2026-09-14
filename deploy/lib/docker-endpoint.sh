@@ -4,7 +4,7 @@
 # SOURCE: deploy/lib/docker-endpoint.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: le substrat (docker, wsl, linux) et le daemon docker — une CLI du PATH, une socket, un verdict qui nomme le geste
+# STATUS: le substrat (docker, wsl, linux) et le daemon docker — une CLI, le DOCKER_HOST de l'environnement s'il répond, sinon la socket système, un verdict qui nomme le geste
 #
 # Sourcée par provision-lib.sh. Rend ses réponses par PROV_DOCKER_* ; docker_endpoint exporte
 # DOCKER_HOST quand un daemon répond. Les chemins système se lisent sous LCARS_DECOR_ROOT.

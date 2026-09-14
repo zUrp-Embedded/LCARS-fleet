@@ -4,7 +4,7 @@
 # SOURCE: deploy/lib/provision-lib.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: la bibliothèque des modules — défauts, verdicts, primitives convergentes et atomiques, sondes de la machine et de la forge
+# STATUS: la bibliothèque des modules — constantes de l'installeur et choix de l'opérateur, verdicts, primitives convergentes et atomiques, client de forge, lanceur de gestes, sondes de la machine et de la forge
 
 _PROV_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=docker-endpoint.sh

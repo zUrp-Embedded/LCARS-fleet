@@ -4,21 +4,24 @@
 # STARDATE: 2026-09-12
 # STATUS: le banc — forge jetable, conteneur, structure, humain de démonstration, runner, fleet
 #
-# USAGE : bench-up.sh [--forge-project lcars] [--port-forge 21000] [--port-deck 20999] [--port-ssh 2222]
+# USAGE : bench-up.sh [--forge-project <base>] [--port-forge N] [--port-deck N] [--port-ssh N]
 #                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>] [--image lcars-fleet:local]
 #                     [--creds-from ~/.claude/.credentials.json] [--no-creds]
 #                     [--runner-labels <liste>] [--no-runner] [--human lcars]
 #
-#   Le banc monte une forge Gitea jetable (projet <base>-forge), crée le conteneur (<base>-fleet)
-#   attaché à son réseau, y pose la structure de la forge, l'humain de démonstration et ses
-#   jetons, enrôle un runner CI (<base>-runner) et démarre la fleet. Les mots de passe sont ceux
-#   du contrat de banc : admiral / toto123456, lcars / toto32toto32 — publics, jetables. L'humain
-#   de démonstration est site-admin de la forge : ce banc ne mesure pas ce que la team humans
-#   autorise à un compte ordinaire. Un projet de ce nom qui ne porte pas le marqueur du banc
+#   Sans --forge-project ni option de port, la base et les ports sont les défauts de
+#   deploy/installer-constants.env. Le banc monte une forge Gitea jetable (projet <base>-forge),
+#   crée le conteneur (<base>-fleet) attaché à son réseau, y pose la structure de la forge,
+#   l'humain de démonstration et ses jetons, sème le dépôt de la source à la révision de l'image,
+#   enrôle un runner CI (<base>-runner) et démarre la fleet. Les mots de passe sont ceux du contrat
+#   de banc : admiral / toto123456, lcars / toto32toto32 — publics, jetables. L'humain de
+#   démonstration est site-admin de la forge : ce banc ne mesure pas ce que la team humans autorise
+#   à un compte ordinaire. Un projet de ce nom qui ne porte pas le marqueur du banc
 #   (label lcars.bench=<base>) est refusé avant tout.
 #
 # EXIT  : 0 banc prêt (« banc PRÊT », ou « banc PRÊT sans CI » sous --no-runner) · 1 arguments,
-#         dépendance, ou projet qui n'est pas ce banc · 2 la forge ne monte pas · 3 le conteneur ne
+#         outil ou image absents, docker muet, port tenu, banc déjà monté, ou projet qui n'est pas
+#         ce banc · 2 la forge ne monte pas · 3 le conteneur ne
 #         monte pas · 4 amorçage de la forge · 5 humain ou credentials · 6 le banc n'est pas prêt
 #         (jeton système absent après la relance, runner demandé qui ne sert pas, conteneur en échec
 #         de convergence) · 7 la source ne se sème pas (révision de l'image, push, alignement du

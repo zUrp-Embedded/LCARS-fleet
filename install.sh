@@ -6,19 +6,20 @@
 #
 #     install.sh — l'installeur de LCARS-FLEET.
 #
-#     Il mesure la machine, montre ce qu'il va faire, puis délègue. Le système n'est modifié qu'après
-#     le bilan, et ce script ne demande jamais sudo lui-même. Le script d'une release, pipé ou avec
-#     --from-release, télécharge d'abord le kit de sa version, le vérifie et le détare dans
-#     ~/.lcars/kits/.
+#     Il mesure la machine, montre ce qu'il va faire, marque une pause (Entrée pour continuer,
+#     Ctrl+C pour annuler ; sans terminal, il continue en le disant), puis délègue. Le système n'est
+#     modifié qu'après cette pause, et ce script ne demande jamais sudo lui-même. Le script d'une
+#     release, pipé ou avec --from-release, télécharge d'abord le kit de sa version, le vérifie et le
+#     détare dans ~/.lcars/kits/.
 #
 #       (sans option)   LCARS tourne dans un conteneur Docker. Rien hors de Docker.
 #       --workstation   LCARS s'installe dans ce système : une distribution WSL2, ou une machine
 #                       Linux dédiée déclarée par LCARS_ALLOW_ANY_HOST=1. Ce mode possède /etc,
-#                       /opt/lcars, des groupes et des paquets ; un terrain se refait, il ne se
-#                       désinstalle pas.
+#                       la racine de LCARS, des groupes, des comptes et des paquets ; un terrain se
+#                       refait, il ne se désinstalle pas.
 #       --bench         l'installeur monte lui-même la forge, son runner CI et un compte de
-#                       démonstration. Sans ce drapeau, une forge existante est requise
-#                       (FORGE_BASE_URL).
+#                       démonstration ; en conteneur, jq est requis sur cette machine. Sans ce
+#                       drapeau, une forge existante est requise (FORGE_BASE_URL).
 #       --check         mesure et affiche, ne modifie rien (--doctor est le même drapeau). Un refus
 #                       du bilan sort en 1 avant la grille ; avec --workstation, un terrain que le
 #                       préflight refuse en est un.
@@ -30,15 +31,16 @@
 #       --substrate S   le substrat attendu : wsl, linux ou docker ; un substrat que la mesure
 #                       contredit est refusé.
 #       --forge-project N   la base des projets compose (défaut lcars) : N-forge, N-runner, N-fleet.
-#       --port-forge N  le port de la forge montée par --bench (défaut 21000).
-#       --port-deck N   le port du deck (défaut 20999).
-#       --port-ssh N    le port SSH du conteneur (défaut 2222) ; sans objet avec --workstation.
+#       --port-forge N  le port de la forge montée, avec --bench seulement.
+#       --port-deck N   le port du deck.
+#       --port-ssh N    le port SSH du conteneur ; refusé avec --workstation.
+#                       Le bilan affiche chaque port retenu, défaut compris.
 #       --env FICHIER   passé au provisionnement et à la mesure (--workstation).
 #       --human USER, --only MODULE   passés au provisionnement (--workstation).
 #       --version       la version de ce script.
 #       -h, --help      cette aide.
 #
-#     Relancer est toujours sûr : l'état est celui du système, mesuré à chaque passage.
+#     Relancer reprend depuis la mesure : l'état est celui du système, lu à chaque passage.
 #
 # --- END HEADER ---
 
@@ -289,7 +291,7 @@ arbre_incomplet() { stop "${R}L'arbre est incomplet : $1.${N}" "Ce n'est pas doc
 [[ -x "$DELEGUE" ]]   || arbre_incomplet "$DELEGUE absent ou non exécutable"
 [[ -r "$SCRIPT_DIR/deploy/installer-constants.env" ]] \
   || arbre_incomplet "constantes de l'installeur introuvables : $SCRIPT_DIR/deploy/installer-constants.env"
-# les constantes de l'installeur se lisent dans l'arbre, comme une donnée ; avant lui, seule l'aide en cite
+# les constantes de l'installeur se lisent dans l'arbre, comme une donnée
 constante() { sed -n "s/^$1=//p" "$SCRIPT_DIR/deploy/installer-constants.env"; }
 RACINE="$(constante PROV_ROOT)"
 case "$PROVENANCE" in

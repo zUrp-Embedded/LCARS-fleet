@@ -4,19 +4,21 @@
 # STARDATE: 2026-09-12
 # STATUS: le lanceur de la version — gate, release, doc, kit tar, installeur de la version, image docker, et leur publication depuis le poste
 # USAGE : deploy/pack.sh            gate + release + doc + tar + installeur + image : dans le tiroir et le daemon, rien n'en sort
-#         deploy/pack.sh --publish  … puis la release de la forge (tout le tiroir) et l'image au registre
+#         deploy/pack.sh --publish  … puis l'image au registre et la release de la forge (tout le tiroir)
 #         deploy/pack.sh --no-image pas d'image (un poste sans docker produit quand même son kit)
+#         Se lance hors root, sur un arbre commité.
 # ENV   : LCARS_PACK_DIR      le tiroir des paquets (défaut : lcars-packs à côté du checkout)
 #         LCARS_PACK_TAG      le tag de la version (défaut : le tag git de HEAD, sinon <AAAA-MM-JJ>-<sha>)
 #         LCARS_PACK_IMAGE    le nom local de l'image (défaut lcars-fleet : tags <tag> et local)
-#         LCARS_PACK_REGISTRY le registre du --publish (défaut : l'hôte de la forge, ou ghcr.io chez GitHub)
-#         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge du --publish quand origin n'est pas http
+#         LCARS_PACK_REGISTRY le registre du --publish (défaut : ghcr.io chez GitHub, l'hôte de la forge sinon)
+#         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge, le propriétaire et le dépôt de la
+#                             version (défaut : ceux d'un origin en http ou https)
 #         LCARS_PACK_TOKEN, LCARS_PACK_TOKEN_FILE   le jeton du --publish (write:repository et write:package)
 #         LCARS_SITE_BASE     la base d'URL de la doc, la même que 44-media
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
-#         LCARS_MINISIGN_PUBKEY   la clé publique inscrite dans l'installeur, si le tiroir porte la signature du kit
-# PRÉ-REQUIS : erl, mix, npm — un poste en livraison source les a tous
-# EXIT  : 0 la version est dans le tiroir · 1 gate rouge, build ou doc en échec, kit incomplet, publication refusée
+# PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; docker, sauf --no-image
+# EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
+#         inconnue), gate rouge, build ou doc en échec, kit incomplet, docker injoignable, publication refusée
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."

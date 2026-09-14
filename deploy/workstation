@@ -5,7 +5,8 @@
 # STATUS: le délégué du poste — escalade, provisionnement, acceptation, depuis ce checkout ou un kit
 #
 # USAGE  deploy/workstation <commande> [options]
-#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options de provision] — pose, puis accepte
+#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options de provision] — mesure, escalade
+#           par sudo une fois, pose, puis accepte ; un terrain que le préflight refuse s'arrête avant sudo
 #   doctor  [options de provision] — la sonde seule, sans escalade
 #
 #   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
@@ -14,7 +15,7 @@
 #   Un canal ne se pose pas sur un autre : une machine installée par kit refuse un checkout, et
 #   inversement — mise à jour par le même canal, ou le terrain se refait.
 #
-#   EXIT  0 convergé · 2 appliqué, drift résiduel · 1 échec du provisionnement ou de l'acceptation
+#   EXIT  0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, échec du provisionnement ou de l'acceptation
 
 set -euo pipefail
 

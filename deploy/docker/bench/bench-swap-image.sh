@@ -4,15 +4,18 @@
 # STARDATE: 2026-09-13
 # STATUS: remplace l'image du conteneur d'un banc déjà semé — la forge, son semis et ses jetons restent
 #
-# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--forge-project lcars] [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
-#                             [--port-forge 21000] [--port-deck 20999] [--port-ssh 2222]
+# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--forge-project <base>] [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
+#                             [--port-forge N] [--port-deck N] [--port-ssh N]
 #                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human lcars]
-# EXIT  : 0 conteneur remplacé · 1 arguments, dépendance, ou projet qui n'est pas ce banc · 3 le conteneur
-#         ne monte pas · 5 credentials · 6 aucun jeton de rôle après la relance
+# EXIT  : 0 conteneur remplacé · 1 arguments, image inconnue du daemon, docker muet, forge du banc absente,
+#         ou projet qui n'est pas ce banc · 3 le conteneur ne monte pas · 5 credentials · 6 aucun jeton
+#         de rôle après la relance
 #
-# Détruit le conteneur LCARS et lui seul, après avoir vu la forge du banc et le marqueur de chaque
-# objet de ses projets : ses volumes restent, ce qui vit hors d'eux (pods en vol, journaux BEAM)
-# part avec. Ne démarre pas la fleet : le verdict final le rappelle.
+# Sans --forge-project ni option de port, la base et les ports sont les défauts de
+# deploy/installer-constants.env, ceux de bench-up.sh. Détruit le conteneur LCARS et lui seul, après
+# avoir vu la forge du banc et le marqueur de chaque objet de ses projets : ses volumes restent, ce
+# qui vit hors d'eux (pods en vol, journaux BEAM) part avec. Ne démarre pas la fleet : le verdict
+# final le rappelle.
 
 set -euo pipefail
 

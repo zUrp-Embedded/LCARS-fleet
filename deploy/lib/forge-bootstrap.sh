@@ -4,8 +4,8 @@
 # STARDATE: 2026-09-12
 # STATUS: l'amorçage d'une forge Gitea — montage, compte d'administration, jeton master, seed, humain de banc
 #
-# Sourcée après provision-lib.sh, par 48-forge-host (poste) et par le banc (conteneur) : une seule
-# forme pour les deux. L'API passe par forge_api ; la CLI gitea reçoit le mot de passe par une
+# Sourcée après provision-lib.sh, par 48-forge-host et workstation (poste) et par le banc
+# (conteneur) : une seule forme pour les deux. L'API passe par forge_api ; la CLI gitea reçoit le mot de passe par une
 # variable transmise à docker exec (-e PW), gitea n'ayant pas d'entrée stdin pour un mot de passe.
 
 : "${LCARS_BENCH_ADMIRAL_PW:=toto123456}"

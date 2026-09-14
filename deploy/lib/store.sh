@@ -2,7 +2,7 @@
 # SOURCE: deploy/lib/store.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
-# STATUS: les volumes du MAGASIN : ce qui coute du temps a refabriquer
+# STATUS: les volumes du magasin d'une instance — ce qui coûte du temps à refabriquer, hors du projet compose
 
 LCARS_STORE_TREES=(
   cache        # npm, pip, cargo, hex — perdre coute de la BANDE PASSANTE. Purgeable de routine.

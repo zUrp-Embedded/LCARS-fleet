@@ -2,7 +2,7 @@
 # SOURCE: deploy/docker/forge-runner.sh
 # AUTHOR: consultant
 # STARDATE: 2026-09-13
-# STATUS: l'enrôlement d'un runner CI sur la forge jetable — jeton d'enregistrement, réseau de la forge, images des labels, preuve par la forge
+# STATUS: l'enrôlement d'un runner CI sur une forge montée par l'installeur (poste ou banc) — jeton d'enregistrement, réseau de la forge, images des labels, preuve par la forge
 #
 # USAGE : forge-runner.sh --forge-api <url-api avec /api/v1> --admin-token-file <chemin>
 #                         --network <réseau compose de la forge> --project <projet compose du runner>
@@ -11,7 +11,7 @@
 #   --instance-url   défaut : l'adresse interne de la forge, PROV_FORGE_INTERNAL_URL
 #   --labels         défaut : PROV_RUNNER_LABELS ; chaque image docker:// nommée est vérifiée, puis semée
 #   --bench          le runner d'un banc : lui et ses volumes portent le marqueur lcars.bench=<base> (runner-compose.bench.yml)
-# EXIT  : 0 runner enregistré · 1 arguments, ou label dont l'image est introuvable · 2 la forge ne rend pas
+# EXIT  : 0 runner enregistré, ou enregistrement que la portée du jeton ne permet pas de vérifier (dit) · 1 arguments, ou label dont l'image est introuvable · 2 la forge ne rend pas
 #         de jeton d'enregistrement · 3 le runner ne se monte pas, son daemon embarqué ne répond pas, une
 #         image n'y est pas semée, ou la forge ne le liste pas
 #

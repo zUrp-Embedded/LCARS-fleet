@@ -2,14 +2,15 @@
 # SOURCE: deploy/modules.d/30-wsl.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: le substrat WSL — wsl.conf clé par clé (C: fermé, interop coupée, systemd, hostname), snapd purgé, gpg-agent masqué
+# STATUS: le substrat WSL — wsl.conf clé par clé (C: fermé, interop coupée, systemd, hostname), snapd purgé, gpg-agent masqué, credsStore retiré, docker.io à côté de Docker Desktop refusé
 # APPLY-ON: wsl
 # CHECK-ON: wsl
 # NEEDS: root
 #
 # wsl.conf est le fichier de l'instance : chaque clé de l'état-cible s'y pose, le reste du fichier
 # ([user] compris) est conservé. Il ne prend effet qu'après « wsl --shutdown » ; la sonde de C:
-# mesure l'état réel, pas la configuration. Le hostname de l'instance prend la base du projet.
+# mesure l'état réel, pas la configuration. Le hostname de l'instance prend la base du projet ; une
+# base qui n'est pas une étiquette DNS est refusée, et la clé n'est pas posée.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

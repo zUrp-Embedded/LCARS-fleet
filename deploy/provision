@@ -11,7 +11,7 @@
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
 #
-#   apply    converge la machine : chaque module joue check, fix, re-check
+#   apply    converge la machine, en root : chaque module joue check, fix, re-check
 #   doctor   sonde seule — le même check que l'apply
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
@@ -31,14 +31,17 @@
 #   --substrate S    wsl, linux ou docker : celui que ce système mesure (docker si /.dockerenv ou
 #                    LCARS_DOCKER=1, wsl sous un noyau Microsoft, linux sinon) ; un autre est refusé,
 #                    sauf par list, qui lit les en-têtes du substrat nommé
-#   --only M         ce module seulement, répétable — nom complet ou préfixe numérique
+#   --only M         ce module seulement, répétable — nom complet ou préfixe numérique ; apply joue
+#                    le préflight en plus
 #   --human USER     l'humain que les modules servent (défaut : SUDO_USER, sinon l'appelant)
-#   --env FILE       fichier KEY=VALUE sourcé avant tout
+#   --env FILE       fichier KEY=VALUE sourcé et exporté avant la lib ; les constantes de
+#                    deploy/installer-constants.env ne s'y règlent pas
 #   --port-forge N   ce que la machine publie ; retenu dans son journal pour les passes suivantes
 #   --port-deck N
 #   --port-ssh N
-#   --forge-project NOM   la base des projets compose : NOM-forge, NOM-runner
-#   --verbose
+#   --forge-project NOM   la base des projets compose (NOM-forge, NOM-runner) et du nom d'hôte
+#                    WSL ; une étiquette DNS, retenue dans le journal
+#   --verbose, -v
 #   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|ERROR par module
 
 set -euo pipefail

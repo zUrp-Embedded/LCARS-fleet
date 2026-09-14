@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/21-service-accounts.sh
 # AUTHOR: bob
 # STARDATE: 2026-08-25
-# STATUS: les comptes système des services de la machine — sans shell ni home, aucun humain ici
+# STATUS: les comptes système des services de la machine — sans shell ni home, aucun humain ici ; un compte existant qui s'en écarte est refusé et nommé, jamais corrigé
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root

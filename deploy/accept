@@ -4,7 +4,7 @@
 # STARDATE: 2026-09-14
 # STATUS: l'acceptation d'une installation : ce qu'un opérateur peut en faire — se connecter à la forge, faire fusionner une PR, démarrer la fleet
 # USAGE : accept --announce-file <chemin> [--forge-url URL]
-# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une manque · 2 argument inconnu
+# EXIT  : 0 rien de faux constaté (une capacité sautée n'est pas établie, et c'est dit) · 1 au moins une capacité manque · 2 argument inconnu
 
 set -euo pipefail
 
