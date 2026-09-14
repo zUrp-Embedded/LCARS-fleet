@@ -5,14 +5,11 @@
 # STATUS: l'amorçage d'une forge Gitea — montage, compte d'administration, jeton master, seed, humain de banc
 #
 # Sourcée après provision-lib.sh, par 48-forge-host et workstation (poste) et par le banc
-# (conteneur) : une seule forme pour les deux. L'API passe par forge_api ; la CLI gitea reçoit le mot de passe par une
-# variable transmise à docker exec (-e PW), gitea n'ayant pas d'entrée stdin pour un mot de passe.
+# (conteneur) : une seule forme pour les deux. La CLI gitea ne reçoit aucun mot de passe : elle le
+# porterait dans l'argv d'un processus que tout l'hôte lit ; il se pose par forge_api.
 
-: "${LCARS_BENCH_ADMIRAL_PW:=toto123456}"
-: "${LCARS_BENCH_HUMAN_PW:=toto32toto32}"
-
-bench_admiral_password() { printf '%s\n' "$LCARS_BENCH_ADMIRAL_PW"; }
-bench_human_password()   { printf '%s\n' "$LCARS_BENCH_HUMAN_PW"; }
+bench_admiral_password() { printf '%s\n' toto123456; }
+bench_human_password()   { printf '%s\n' toto32toto32; }
 
 forge_mount() { # forge_mount <docker> <compose> <projet> <port> <bind> <url publique> [<base du banc>] — le banc empile sa surcouche marquée
   local docker="$1" compose="$2" projet="$3" port="$4" bind="$5" root="$6" banc="${7:-}"
@@ -31,12 +28,11 @@ forge_wait() { # forge_wait <url> [essais] → 0 quand /api/v1/version répond
   return 1
 }
 
-forge_admin_ensure() { # forge_admin_ensure <docker> <conteneur> <login> <mot de passe> → imprime « cree » ou « present »
-  local docker="$1" conteneur="$2" login="$3" pw="$4" err rc=0
+forge_admin_ensure() { # forge_admin_ensure <docker> <conteneur> <login> → imprime « cree » ou « present » ; le mot de passe se pose ensuite par forge_admin_password
+  local docker="$1" conteneur="$2" login="$3" err rc=0
   err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
-  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
-      'gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false' \
-      _ "$login" >/dev/null 2>"$err" || rc=$?
+  "$docker" exec -u git "$conteneur" gitea admin user create --username "$login" --random-password \
+      --email "$login@lcars.local" --admin --must-change-password=false >/dev/null 2>"$err" || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     rm -f "$err"; echo cree; return 0
   fi
@@ -48,11 +44,12 @@ forge_admin_ensure() { # forge_admin_ensure <docker> <conteneur> <login> <mot de
   return 1
 }
 
-forge_admin_password() { # forge_admin_password <docker> <conteneur> <login> <mot de passe> — rotation
-  local docker="$1" conteneur="$2" login="$3" pw="$4"
-  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
-      'gitea admin user change-password --username "$1" --password "$PW" --must-change-password=false' \
-      _ "$login" >/dev/null 2>&1
+forge_admin_password() { # forge_admin_password <url> <fichier du jeton master> <login> <mot de passe> — mot de passe et adminité ; un refus rend 1 et nomme le code HTTP
+  local code
+  code="$(forge_api PATCH "$1/api/v1/admin/users/$3" /dev/null --token-file "$2" -m 10 \
+            --json '{login_name: $l, source_id: 0, password: $pw, must_change_password: false, admin: true}' \
+            --arg l "$3" --rawfile pw <(printf '%s' "$4"))" \
+    || { echo "la forge refuse le compte « $3 » (HTTP $code)" >&2; return 1; }
 }
 
 forge_master_token() { # forge_master_token <docker> <conteneur> <login> [nom] → imprime le jeton
@@ -71,12 +68,9 @@ forge_token_ok() { # forge_token_ok <url> <fichier du jeton> → 0 si le jeton s
 
 bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] → mot de passe, site-admin, imprime un jeton opérateur
   # un jeton posé qui s'authentifie encore est rendu tel quel : chaque passe en minterait un de plus sur la forge
-  local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" code is_admin body sha
+  local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" is_admin body sha
+  forge_admin_password "$url" "$tokfile" "$humain" "$pw" || return 1
   body="$(mktemp "${TMPDIR:-/tmp}/forge-bench.XXXXXX")"
-  code="$(forge_api PATCH "$url/api/v1/admin/users/$humain" /dev/null --token-file "$tokfile" -m 10 \
-            --json '{login_name: $l, source_id: 0, password: $pw, must_change_password: false, admin: true}' \
-            --arg l "$humain" --rawfile pw <(printf '%s' "$pw"))" \
-    || { echo "la forge refuse le compte « $humain » (HTTP $code)" >&2; rm -f "$body"; return 1; }
   forge_api GET "$url/api/v1/users/$humain" "$body" --token-file "$tokfile" -m 5 >/dev/null || true
   is_admin="$(jq -r '.is_admin' "$body" 2>/dev/null || echo "?")"
   [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin après la promotion (is_admin=$is_admin)" >&2; rm -f "$body"; return 1; }

@@ -3,9 +3,8 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-08
 # STATUS: ce qu'un kit doit porter — manifestes et constantes, tampon de révision, release, doc bâtie, entrées de release.manifest, listes des constantes que pose 62, médias — vérifié avant que le tar ne ferme
-# USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
-
-kv_constante() { sed -n "s/^$2=//p" "$1" | tail -n1; }   # kv_constante <fichier des constantes> <clé> → la valeur, lue comme une donnée
+# USAGE : . kit-verify.sh (après provision-lib.sh) ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
+# Les constantes lues sont celles du kit, par env_field : une donnée, jamais sourcée.
 
 kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si complet ; sinon 1, manques NOMMÉS
   local stage="$1" rel="$2"
@@ -20,7 +19,7 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
   done
   if [[ "${#manques[@]}" -gt 0 ]]; then kv_dire "${manques[@]}"; return 1; fi
   local tampon
-  tampon="$(kv_constante "$constantes" PROV_SOURCE_STAMP)"
+  tampon="$(env_field "$constantes" PROV_SOURCE_STAMP)"
   if [[ -z "$tampon" ]]; then
     manques+=("deploy/installer-constants.env ne déclare pas PROV_SOURCE_STAMP — le tampon de révision n'est pas vérifiable")
   elif [[ ! -r "$stage/$tampon" ]]; then
@@ -33,20 +32,17 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
   [[ -s "$stage/assets/github.io/dist/index.html" ]] \
     || manques+=("la doc bâtie manque (assets/github.io/dist/index.html) — un kit sans sa doc est une demi-livraison")
 
-  if [[ -r "$relman" ]]; then
-    while read -r name _; do
-      [[ -n "$name" ]] || continue
-      [[ -r "$stage/runtime/bin/$name" ]] \
-        || manques+=("release.manifest nomme bin/$name, absent du kit")
-    done < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$relman")
-  fi
+  while read -r name _; do
+    [[ -r "$stage/runtime/bin/$name" ]] \
+      || manques+=("release.manifest nomme bin/$name, absent du kit")
+  done < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$relman")
   [[ -r "$stage/runtime/etc/fleet.env.template" ]] \
     || manques+=("runtime/etc/fleet.env.template absent — le provisionnement en dérive l'environnement")
 
   local cle h
   local -a liste
   for cle in PROV_HELPERS PROV_HELPERS_DATA PROV_SHELL_RC; do
-    read -ra liste <<<"$(kv_constante "$constantes" "$cle")"
+    read -ra liste <<<"$(env_field "$constantes" "$cle")"
     if [[ "${#liste[@]}" -eq 0 ]]; then
       manques+=("deploy/installer-constants.env ne déclare pas $cle — ce que 62-runtime-helpers en pose n'est pas vérifié")
       continue

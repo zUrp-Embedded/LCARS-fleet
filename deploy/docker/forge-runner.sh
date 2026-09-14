@@ -14,7 +14,7 @@
 #   --bench          le runner d'un banc : lui et ses volumes portent le marqueur lcars.bench=<base> (runner-compose.bench.yml)
 # EXIT  : 0 runner enregistré, ou enregistrement que la portée du jeton ne permet pas de vérifier (dit) · 1 arguments, ou label dont l'image est introuvable · 2 la forge ne rend pas
 #         de jeton d'enregistrement · 3 le runner ne se monte pas, son daemon embarqué ne répond pas, une
-#         image n'y est pas semée, ou la forge ne le liste pas
+#         image n'y est pas semée, ou la forge ne liste pas ce runner (l'id que son enregistrement écrit)
 #
 # Rejouable après chaque destruction de la forge : l'identité d'un runner appairé à une forge morte
 # survit dans le volume du projet, d'où le `down -v` avant chaque pose.
@@ -93,22 +93,33 @@ say "jeton d'enregistrement prêt (${#REG} caractères)"
 
 COMPOSE_FICHIERS=(-f "$HERE/runner-compose.yml" -f "$HERE/runner-network.yml")
 [[ -z "$BENCH" ]] || COMPOSE_FICHIERS+=(-f "$HERE/runner-compose.bench.yml")
-compose_runner() { LCARS_BENCH_BASE="$BENCH" "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" "${COMPOSE_FICHIERS[@]}" -p "$PROJECT" "$@"; }
+# le volume du runner : son état d'enregistrement, et le jeton d'enregistrement le temps qu'il le lise
+ETAT_RUNNER=/data/.runner
+JETON_RUNNER=/data/.jeton-enregistrement
+compose_runner() {
+  LCARS_BENCH_BASE="$BENCH" LCARS_RUNNER_NETWORK="$NETWORK" LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_LABELS="$LABELS" LCARS_RUNNER_TOKEN_FILE="$JETON_RUNNER" \
+    "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" "${COMPOSE_FICHIERS[@]}" -p "$PROJECT" "$@"
+}
 
-LCARS_RUNNER_NETWORK="$NETWORK" compose_runner down -v >/dev/null 2>&1 || true
-# le jeton d'enregistrement passe par l'environnement de compose, par exception à la règle de la lib :
-# l'image le lit dans son environnement au premier démarrage, compose le recopie dans le Config.Env
-# du conteneur, lisible de qui parle au daemon — qui tient déjà la forge et le runner ; un fichier
-# monté à la place devrait survivre à la pose pour chaque redémarrage du conteneur
-LCARS_RUNNER_NETWORK="$NETWORK" LCARS_FORGE_URL="$INSTANCE_URL" LCARS_RUNNER_TOKEN="$REG" LCARS_RUNNER_LABELS="$LABELS" \
-  compose_runner up -d \
-  || { say "ÉCHEC : le runner ne se monte pas (sortie de compose au-dessus)"; exit 3; }
+compose_runner down -v >/dev/null 2>&1 || true
+compose_runner create || { say "ÉCHEC : le runner ne se crée pas (sortie de compose au-dessus)"; exit 3; }
+C="$(compose_runner ps -aq act)"
+[[ -n "$C" ]] || { say "ÉCHEC : compose a créé le runner du projet $PROJECT et ne le rend pas (compose ps -aq act)"; exit 3; }
+# le jeton entre dans le volume avant le premier démarrage, au compte de l'image rootless (uid 1000) :
+# ni argv, ni environnement du conteneur
+PLI="$(mktemp -d)"
+( umask 077; printf '%s' "$REG" > "$PLI/${JETON_RUNNER##*/}" )
+RC_JETON=0
+tar -C "$PLI" --owner=1000 --group=1000 -cf - "${JETON_RUNNER##*/}" | "$DOCKER_BIN" cp - "$C:${JETON_RUNNER%/*}" || RC_JETON=$?
+rm -rf "$PLI"
+[[ "$RC_JETON" -eq 0 ]] || { say "ÉCHEC : le jeton d'enregistrement n'entre pas dans le runner ($JETON_RUNNER)"; exit 3; }
+compose_runner start || { say "ÉCHEC : le runner ne démarre pas (sortie de compose au-dessus)"; exit 3; }
 say "runner lancé (projet $PROJECT, réseau $NETWORK)"
 
 # le daemon embarqué du runner démarre vide : les images publiques, il les tire ; les images
 # locales que pack.sh pose sans les publier, il ne peut pas les connaître — elles sont semées
 seed_dind_images() {
-  local c="$PROJECT-act-1" out="" entry image
+  local c="$C" out="" entry image
   dind_a() { [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$1" 2>/dev/null)" ]]; }
   for _ in $(seq 1 30); do
     out="$("$DOCKER_BIN" exec "$c" docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
@@ -141,28 +152,39 @@ seed_dind_images() {
 }
 seed_dind_images
 
-# la preuve d'enregistrement est la liste de la forge, pas le journal du runner
+# la preuve d'enregistrement : l'id que ce runner écrit en s'enregistrant, lu dans la liste de la forge ;
+# une liste non vide ne prouve rien, un runner d'avant hors ligne y figure encore
 SEEN=0
 PROBE_HTTP=""
+ID=""
 BODY="$(mktemp)"
 for _ in $(seq 1 20); do
   sleep 3
+  if [[ -z "$ID" ]]; then
+    ID="$("$DOCKER_BIN" exec "$C" cat "$ETAT_RUNNER" 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)"
+    [[ "$ID" =~ ^[0-9]+$ ]] || { ID=""; continue; }
+    "$DOCKER_BIN" exec "$C" rm -f "$JETON_RUNNER" || say "le jeton d'enregistrement reste dans le volume du runner ($JETON_RUNNER)"
+  fi
   PROBE_HTTP="$(forge_api GET "$FORGE_API/admin/actions/runners" "$BODY" --token-file "$TOKEN_FILE" -m 5)" || true
   [[ ! "$PROBE_HTTP" =~ ^(401|403)$ ]] || break
   [[ "$PROBE_HTTP" == "200" ]] || continue
-  n="$(jq '.runners // [] | length' "$BODY" 2>/dev/null || echo 0)"
-  [[ "${n:-0}" -ge 1 ]] && { SEEN=1; say "enregistré : la forge liste $n runner(s)"; break; }
+  if jq -e --argjson id "$ID" '.runners // [] | any(.id == $id)' "$BODY" >/dev/null 2>&1; then
+    SEEN=1; say "enregistré : la forge liste ce runner (id $ID)"; break
+  fi
 done
 rm -f "$BODY"
 
 if [[ "$SEEN" -ne 1 ]]; then
+  if [[ -z "$ID" ]]; then
+    say "ÉCHEC : le runner ne s'est pas enregistré après 60 s ($ETAT_RUNNER absent) — $DOCKER_BIN logs $C dit pourquoi"
+    exit 3
+  fi
   if [[ "$PROBE_HTTP" =~ ^(401|403)$ ]]; then
-    say "NON VÉRIFIÉ (HTTP $PROBE_HTTP sur /admin/actions/runners — portée du jeton) : le runner est"
-    say "  peut-être enregistré, cette sonde ne peut pas le dire. À vérifier :"
-    say "    $DOCKER_BIN logs ${PROJECT}-act-1 | grep -i 'registered successfully'"
+    say "NON VÉRIFIÉ (HTTP $PROBE_HTTP sur /admin/actions/runners — portée du jeton) : le runner s'est enregistré"
+    say "  (id $ID), cette sonde ne peut pas dire que la forge le liste."
     exit 0
   fi
-  say "ÉCHEC : la forge ne liste aucun runner après 60 s (HTTP ${PROBE_HTTP:-?})"
+  say "ÉCHEC : la forge ne liste pas ce runner (id $ID) après 60 s (HTTP ${PROBE_HTTP:-?})"
   exit 3
 fi
 

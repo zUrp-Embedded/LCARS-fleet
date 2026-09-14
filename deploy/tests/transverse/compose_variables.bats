@@ -49,7 +49,7 @@ conf_keys() { sed -n '/^CONF_KEYS=(/,/)/p' "$D/container" | tr ' ()' '\n\n\n' | 
   posees="$(
     { sed -n '/^bench_conteneur_monte()/,/^}/p' "$D/lib/bench.sh"
       grep -E '^[[:space:]]*export ' "$D/lib/bench.sh"
-      grep -E '^LCARS_[A-Z_]+="' "$D/docker/forge-runner.sh"
+      grep -E '^[[:space:]]*LCARS_[A-Z_]+="' "$D/docker/forge-runner.sh"
     } | grep -oE '(^|[[:space:]])[A-Z][A-Z0-9_]+=' | tr -d ' ='
   )"
   [ "$(sort -u <<<"$posees" | grep -c .)" -ge 10 ] || { echo "moins de 10 variables posées — l'instrument ne lit plus les appelants" >&2; echo "$posees" >&2; return 1; }

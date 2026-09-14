@@ -5,10 +5,10 @@
 # STATUS: les volumes du magasin d'une instance — ce qui coûte du temps à refabriquer, hors du projet compose
 
 LCARS_STORE_TREES=(
-  cache        # npm, pip, cargo, hex — perdre coute de la BANDE PASSANTE. Purgeable de routine.
-  toolchains   # crosstool-NG, SDK embarques — perdre coute des HEURES. Ne se purge pas a la legere.
-  sysroots     # images disque amont extraites — perdre coute un telechargement de plusieurs Go.
-  state        # env.d/ et egress.d/ — ETAT CONVERGE, pas un artefact. Petit, et sa perte est MUETTE.
+  cache        # npm, pip, cargo, hex : se retélécharge, se purge sans dommage
+  toolchains   # crosstool-NG, SDK embarqués : des heures de construction
+  sysroots     # images disque amont extraites : plusieurs Go à retélécharger
+  state        # env.d/ et egress.d/ : l'état convergé, dont la perte ne se signale pas
 )
 
 store_volume_names() { # store_volume_names → un volume par nature, au nom du projet compose

@@ -50,9 +50,13 @@ setup() {
   export UP_RC="$BATS_TEST_TMPDIR/up_rc";   echo 0 > "$UP_RC"
   export DIND_OUT="$BATS_TEST_TMPDIR/dind"; echo "27.0.0" > "$DIND_OUT"
   export DIND_CHARGE="$BATS_TEST_TMPDIR/dind-charge"
+  # l'id que le runner écrit en s'enregistrant ; vide, il ne s'enregistre pas
+  export RUNNER_ID="$BATS_TEST_TMPDIR/runner-id"; echo 7 > "$RUNNER_ID"
   # le compose de la pose est relu par compose lui-même, sans daemon, et son rendu JSON gardé ;
-  # l'environnement qu'il reçoit est noté, et l'arbre de TMPDIR listé au même instant
+  # l'environnement qu'il reçoit est noté, et l'arbre de TMPDIR listé au même instant ; ce que docker cp
+  # dépose dans le conteneur est détaré sous PORTE
   export RENDU="$BATS_TEST_TMPDIR/rendu.json" NO_DAEMON="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock"
+  export PORTE="$BATS_TEST_TMPDIR/porte-du-conteneur"; mkdir -p "$PORTE"
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
   REAL_DOCKER="$(command -v docker)"; REAL_CURL="$(command -v curl)"
   export REAL_DOCKER REAL_CURL
@@ -60,13 +64,19 @@ setup() {
   cat > "$BINDIR/dockerstub" <<'EOF'
 #!/usr/bin/env bash
 echo "DOCKER:$*" >> "$CALLS"
+env | grep -E '^LCARS_(FORGE_URL|RUNNER_[A-Z_]+)=' | sort | sed 's/^/ENV:/' >> "$CALLS"
 case "$*" in
   "image inspect "*)                    exit 0 ;;
-  "compose "*" up -d")
-    env | grep -E '^LCARS_(FORGE_URL|RUNNER_[A-Z]+)=' | sort | sed 's/^/ENV:/' >> "$CALLS"
+  "compose "*" create")
     grep -rl 'REG-' "$TMPDIR" 2>/dev/null | sed 's/^/FICHIER-A-JETON:/' >> "$CALLS"
-    DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-2}" config --format json > "$RENDU" 2>&1
+    DOCKER_HOST="$NO_DAEMON" "$REAL_DOCKER" "${@:1:$#-1}" config --format json > "$RENDU" 2>&1
     exit "$(cat "$UP_RC")" ;;
+  "compose "*" ps -aq act")             echo cid-du-runner; exit 0 ;;
+  "cp - cid-du-runner:/data")
+    cat > "$PORTE.tar"
+    tar -tvf "$PORTE.tar" --numeric-owner > "$PORTE.liste"
+    tar -xf "$PORTE.tar" -C "$PORTE"; exit 0 ;;
+  "exec cid-du-runner cat /data/.runner") [[ -s "$RUNNER_ID" ]] || exit 1; printf '{"id":%s,"token":"secret-du-runner"}\n' "$(cat "$RUNNER_ID")"; exit 0 ;;
   "exec "*" docker version "*)          cat "$DIND_OUT"; exit 0 ;;
   "exec -i "*" docker load")            : > "$DIND_CHARGE"; exit 0 ;;
   # outil-local:9 n'est dans le daemon du runner qu'une fois chargée depuis la machine
@@ -90,10 +100,11 @@ EOF
 
 teardown() { forge_double_stop; }
 
-# une route posée par un cas passe devant : la première qui répond sert
+# une route posée par un cas passe devant : la première qui répond sert ; la forge liste un runner
+# d'avant hors ligne, et celui que cette pose enregistre (id 7)
 routes_nominales() {
   forge_route POST /api/v1/admin/actions/runners/registration-token 200 '{"token":"REG-API"}'
-  forge_route GET /api/v1/admin/actions/runners 200 '{"runners":[{"id":1}]}'
+  forge_route GET /api/v1/admin/actions/runners 200 '{"runners":[{"id":1,"status":"offline"},{"id":7}]}'
 }
 
 run_runner() {
@@ -118,15 +129,32 @@ run_runner() {
   [[ "$output" == *"--admin-token-file (non vide) requis"* ]]
 }
 
-@test "--reg-token-file : aucun appel à l'API d'enregistrement, le jeton arrive à compose par son environnement et aucun fichier ne le porte" {
+@test "--reg-token-file : aucun appel à l'API d'enregistrement ; le jeton entre dans le volume du runner, 0600 au compte de l'image, ni dans l'environnement de compose ni dans le conteneur rendu" {
   routes_nominales
   run_runner --reg-token-file "$REGF"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"jeton d'enregistrement fourni (--reg-token-file)"* ]]
   forge_requests '.path' | refute_out 'registration-token'
-  grep -qx 'ENV:LCARS_RUNNER_TOKEN=REG-FILE' "$CALLS"
+  [ "$(cat "$PORTE/.jeton-enregistrement")" = REG-FILE ]
+  grep -qE '^-rw------- 1000/1000 +8 .* \.jeton-enregistrement$' "$PORTE.liste" || { cat "$PORTE.liste"; return 1; }
+  [ "$(jq -r '.services.act.environment.GITEA_RUNNER_REGISTRATION_TOKEN_FILE' "$RENDU")" = /data/.jeton-enregistrement ]
+  refute grep -q 'REG-FILE' "$RENDU"
+  grep -E '^(ENV|DOCKER):' "$CALLS" | refute_out 'REG-FILE|ADMIN-TOK'
   refute grep -q '^FICHIER-A-JETON:' "$CALLS"
-  refute grep -qE '^DOCKER:.*(REG-FILE|ADMIN-TOK)' "$CALLS"
+}
+
+@test "le jeton d'enregistrement se retire du volume du runner dès que son enregistrement est lu, après le démarrage" {
+  routes_nominales
+  run_runner --reg-token-file "$REGF"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local depot demarre retrait
+  depot="$(grep -n '^DOCKER:cp - cid-du-runner:/data$' "$CALLS" | cut -d: -f1)"
+  demarre="$(grep -n '^DOCKER:compose .* start$' "$CALLS" | cut -d: -f1)"
+  retrait="$(grep -n '^DOCKER:exec cid-du-runner rm -f /data/.jeton-enregistrement$' "$CALLS" | cut -d: -f1)"
+  [ -n "$depot" ]
+  [ -n "$retrait" ]
+  [ "$depot" -lt "$demarre" ]
+  [ "$demarre" -lt "$retrait" ]
 }
 
 @test "sans fichier de jeton d'enregistrement : la forge le mint sur le jeton admin reçu en en-tête, et jq le lit" {
@@ -134,7 +162,7 @@ run_runner() {
   run_runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners/registration-token") | [.method, .auth]')" = '["POST","token ADMIN-TOK"]' ]
-  grep -qx 'ENV:LCARS_RUNNER_TOKEN=REG-API' "$CALLS"
+  [ "$(cat "$PORTE/.jeton-enregistrement")" = REG-API ]
   grep '^CURL-ARGV:' "$CALLS" | refute_out 'ADMIN-TOK'
 }
 
@@ -149,9 +177,9 @@ run_runner() {
   routes_nominales
   run_runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(grep -c '^DOCKER:compose ' "$CALLS")" -eq 2 ]
   grep -q '^DOCKER:compose .* -p bt-runner down -v$' "$CALLS"
-  grep -q '^DOCKER:compose .* -p bt-runner up -d$' "$CALLS"
+  grep -q '^DOCKER:compose .* -p bt-runner create$' "$CALLS"
+  grep -q '^DOCKER:compose .* -p bt-runner start$' "$CALLS"
   local f
   for f in $(grep -oE '^DOCKER:compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
     [ "$(readlink -f "$f")" = "$CONSTANTES" ]
@@ -166,7 +194,9 @@ run_runner() {
   [ "$(jq -r '.services.act.environment.GITEA_INSTANCE_URL' "$RENDU")" = http://host.docker.internal:21000 ] || { cat "$RENDU"; return 1; }
   [ "$(jq -c '.networks.default | [.name, .external]' "$RENDU")" = '["bt-forge_default",true]' ]
   [ "$(jq -r '.services.act.environment.CONFIG_FILE // "absent"' "$RENDU")" = absent ]
-  refute grep -q '^DOCKER:cp ' "$CALLS"
+  # la seule copie vers le conteneur est le jeton d'enregistrement
+  [ "$(grep -c '^DOCKER:cp ' "$CALLS")" -eq 1 ]
+  [ "$(tar -tf "$PORTE.tar")" = .jeton-enregistrement ]
 }
 
 @test "--bench : la surcouche de banc marque le runner et ses volumes ; sans lui, aucun label, même sous un LCARS_BENCH_BASE de l'environnement" {
@@ -216,12 +246,13 @@ run_runner() {
   refute grep -q '^DOCKER:compose' "$CALLS"
 }
 
-@test "compose ne monte pas le runner : sortie 3, dite" {
+@test "compose ne crée pas le runner : sortie 3, dite, et aucun jeton déposé" {
   routes_nominales
   echo 1 > "$UP_RC"
   run_runner
   [ "$status" -eq 3 ]
-  [[ "$output" == *"le runner ne se monte pas"* ]]
+  [[ "$output" == *"le runner ne se crée pas"* ]]
+  refute grep -q '^DOCKER:cp ' "$CALLS"
 }
 
 @test "le daemon embarqué ne répond pas : sortie 3, et aucune image n'est semée" {
@@ -238,8 +269,8 @@ run_runner() {
   run bash "$SRC" --forge-api "$FORGE_API" --admin-token-file "$ADMIN" --network bt-forge_default --project bt-runner \
     --labels "shell:docker://alpine:3.20,outil:docker://outil-local:9,hote:host"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx 'DOCKER:exec bt-runner-act-1 docker image inspect -f {{.Id}} alpine:3.20' "$CALLS"
-  grep -qx 'DOCKER:exec bt-runner-act-1 docker image inspect -f {{.Id}} outil-local:9' "$CALLS"
+  grep -qx 'DOCKER:exec cid-du-runner docker image inspect -f {{.Id}} alpine:3.20' "$CALLS"
+  grep -qx 'DOCKER:exec cid-du-runner docker image inspect -f {{.Id}} outil-local:9' "$CALLS"
   grep -qx 'DOCKER:save outil-local:9' "$CALLS"
   refute grep -q '^DOCKER:save alpine' "$CALLS"
   [[ "$output" == *"image locale semée dans le daemon du runner : outil-local:9"* ]]
@@ -247,19 +278,28 @@ run_runner() {
   refute grep -q 'inspect -f {{.Id}} hote' "$CALLS"
 }
 
-@test "la forge ne liste aucun runner : sortie 3, après une liste lue sur le jeton admin" {
-  forge_route GET /api/v1/admin/actions/runners 200 '{"runners":[]}'
+@test "la forge liste d'autres runners, pas celui-ci : sortie 3 qui nomme son id, après une liste lue sur le jeton admin" {
+  forge_route GET /api/v1/admin/actions/runners 200 '{"runners":[{"id":1,"status":"offline"}]}'
   routes_nominales
   run_runner
   [ "$status" -eq 3 ]
-  [[ "$output" == *"la forge ne liste aucun runner"* ]]
+  [[ "$output" == *"la forge ne liste pas ce runner (id 7)"* ]]
   [ "$(forge_requests 'select(.path == "/api/v1/admin/actions/runners") | .auth' | sort -u)" = '"token ADMIN-TOK"' ]
 }
 
-@test "la liste des runners refusée au jeton (403) : non vérifié, dit, sortie 0" {
+@test "un runner qui ne s'enregistre pas n'écrit pas son état : sortie 3, et la liste de la forge n'est pas lue comme une preuve" {
+  : > "$RUNNER_ID"
+  routes_nominales
+  run_runner
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"le runner ne s'est pas enregistré après 60 s (/data/.runner absent)"* ]]
+  [[ "$output" != *"enregistré : la forge liste"* ]]
+}
+
+@test "la liste des runners refusée au jeton (403) : l'enregistrement lu est dit, non vérifié par la forge, sortie 0" {
   forge_route GET /api/v1/admin/actions/runners 403 '{"message":"forbidden"}'
   routes_nominales
   run_runner
   [ "$status" -eq 0 ]
-  [[ "$output" == *"NON VÉRIFIÉ (HTTP 403"* ]]
+  [[ "$output" == *"NON VÉRIFIÉ (HTTP 403"*"(id 7)"* ]]
 }

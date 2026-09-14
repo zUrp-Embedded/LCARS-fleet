@@ -30,6 +30,7 @@ setup() {
   cat > "$BINDIR/docker" <<EOS
 #!/usr/bin/env bash
 echo "\$*" >> "$CALLS"
+env | grep -E '^FORGE_(ADMIN_TOKEN|SEED_PASSWORD)=' >> "$BATS_TEST_TMPDIR/env-docker" || true
 case "\$1 \$2" in
   "compose version") exit 0 ;;
 esac
@@ -43,8 +44,11 @@ if [[ "\$*" == *" up -d"* ]]; then
   DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" "$real_docker" "\${a[@]:0:\$n}" config --format json > "$BATS_TEST_TMPDIR/rendu.json" 2>&1
   exit 0
 fi
+if [[ "\$1 \$2" == "ps -aq" ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
+if [[ "\$1 \$3" == "inspect --format" ]]; then echo "\${STUB_CONFIG_FILES:-}"; exit 0; fi
 if [[ "\$1" == inspect ]]; then
   case "\$3" in
+    "{{.Config.Image}}") echo "lcars-fleet:banc" ;;
     *State.Status*)   echo "\${STUB_STATE:-running}" ;;
     *Health*)         echo "\${STUB_HEALTH:-healthy}" ;;
     *revision*)       echo "\${STUB_REV:-}" ;;
@@ -60,7 +64,13 @@ if [[ "\$*" == *"cat /run/lcars-seat.login"* ]];   then [[ -n "\${STUB_SEAT:-}" 
 if [[ "\$*" == *" exec -it -u "* ]]; then echo "SHELL \$*"; exit 0; fi
 all="\$*"   # \${*##…} s'appliquerait a CHAQUE parametre, pas a la ligne
 if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR/pushed.\${all##* config-}"; exit 0; fi
+if [[ "\$all" == *"forge-gestures.sh apply" ]]; then cat > "$BATS_TEST_TMPDIR/pushed.apply"; exit 0; fi
 if [[ "\$all" == *" install -m 0644 "* ]]; then cat > "$BATS_TEST_TMPDIR/roster.seen"; exit 0; fi
+# source-push : le script bash du conteneur est joué, contre des outils doublés qui notent leur argv
+if [[ "\$all" == *" exec -T lcars bash -c "* ]]; then
+  a=("\$@"); n=0; while [[ "\${a[\$n]}" != -c ]]; do n=\$((n + 1)); done
+  PATH="$BATS_TEST_TMPDIR/conteneur-bin:\$PATH" bash "\${a[@]:\$n}"; exit \$?
+fi
 exit 0
 EOS
   chmod 0755 "$BINDIR/docker"
@@ -71,7 +81,7 @@ EOS
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_PROV_ANCIEN STUB_HUM STUB_TAMPON STUB_DECK_HTTP STUB_SEAT LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND LCARS_IMAGE LCARS_HUMAN
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_CONTAINER_CONF_DIR/lcars-fleet.secrets"
@@ -303,14 +313,21 @@ sain() { export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_DECK_HTTP=302 STUB_T
   [ "$(grep -c 'boot en cours depuis' <<<"$output")" -eq 15 ]
 }
 
-@test "up d'une image publiée avant le renommage du verdict : lcars-provision.rc est lu, l'attente s'arrête" {
+@test "une image qui publie son verdict dans lcars-provision.rc : l'attente s'arrête, un 0 n'est jamais « gestes convergés » et status reste dégradé" {
   sain
   unset STUB_PROV
-  export STUB_PROV_ANCIEN=2
+  export STUB_PROV_ANCIEN=0
   run bash "$SRC" up
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"drift résiduel"* ]]
+  [[ "$output" == *"forge       : aucun geste en échec — cette image publie son verdict sans distinguer un drift"* ]]
+  [[ "$output" != *"gestes convergés"* ]]
   [[ "$output" != *"boot en cours depuis"* ]]
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+  export STUB_PROV_ANCIEN=1
+  run bash "$SRC" status
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"échec d'un geste (rc=1)"* ]]
 }
 
 @test "up avec des clés ssh multi-lignes : le conteneur les reçoit, up rend status, et la conf ne les retient pas" {
@@ -402,8 +419,9 @@ EOS
   local names
   names="$(sed -n '/^# ENV (optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"
   [ "$(grep -c . <<<"$names")" -ge 8 ] || { echo "moins de 8 variables lues dans l'aide — l'instrument ne lit plus le bloc ENV" >&2; return 1; }
+  # la liste des clés de conf et l'aide ne lisent rien : elles ne comptent pas comme lecture
   local code
-  code="$(cat "$SRC" "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" \
+  code="$(sed '/^CONF_KEYS=(/,/)/d' "$SRC" | cat - "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" \
               "$REPO/deploy/lib/store.sh" "$REPO/deploy/lib/docker-endpoint.sh" | grep -vE '^\s*#')"
   local n bad=0
   while read -r n; do
@@ -526,4 +544,84 @@ FAKE
   [ "$status" -eq 1 ]
   [[ "$output" == *"refus-temoin"*"roster des rôles non posé"* ]]
   refute grep -q "forge-gestures.sh apply" "$CALLS"
+}
+
+@test "forge-apply : le jeton master part par l'entrée de la recette, jamais dans l'environnement de docker ni de la dérivation" {
+  printf '#!/usr/bin/env bash\nenv | grep -E "^FORGE_(ADMIN_TOKEN|SEED_PASSWORD)=" >> "%s/env-docker"\nwhile [[ $# -gt 0 ]]; do [[ "$1" == --tofu-dir ]] && dir="$2"; shift; done\necho "{}" > "$dir/roles.auto.tfvars.json"\n' \
+    "$BATS_TEST_TMPDIR" > "$ARBRE/deploy/lib/enroll-catalogue.sh"
+  chmod +x "$ARBRE/deploy/lib/enroll-catalogue.sh"
+  export STUB_IDS=c0ffee
+  FORGE_ADMIN_TOKEN=tok-secret FORGE_SEED_PASSWORD=graine-secrete run bash "$SRC" forge-apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$BATS_TEST_TMPDIR/pushed.apply")" = tok-secret ]
+  [ ! -s "$BATS_TEST_TMPDIR/env-docker" ]
+}
+
+@test "forge-apply : sans jq sur l'hôte, le refus nomme jq avant de demander le roster à l'image" {
+  cp "$REPO/deploy/lib/enroll-catalogue.sh" "$ARBRE/deploy/lib/"
+  local sans="$BATS_TEST_TMPDIR/sans-jq" dir f n
+  mkdir -p "$sans"
+  IFS=: read -ra dirs <<<"$PATH"
+  for dir in "${dirs[@]}"; do
+    for f in "$dir"/*; do
+      n="${f##*/}"
+      [[ -f "$f" && -x "$f" && "$n" != jq && ! -e "$sans/$n" ]] || continue
+      ln -s "$f" "$sans/$n"
+    done
+  done
+  export STUB_IDS=c0ffee
+  PATH="$sans" run bash "$SRC" forge-apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"jq requis sur cette machine"*"roster des rôles non posé"* ]]
+  refute grep -q ' run --rm ' "$CALLS"
+  refute grep -q "forge-gestures.sh apply" "$CALLS"
+}
+
+@test "forge-apply réussi nomme le geste qui pose jetons, catalogues et deck sur la structure : la recréation du conteneur" {
+  printf '#!/usr/bin/env bash\nwhile [[ $# -gt 0 ]]; do [[ "$1" == --tofu-dir ]] && dir="$2"; shift; done\necho "{}" > "$dir/roles.auto.tfvars.json"\n' > "$ARBRE/deploy/lib/enroll-catalogue.sh"
+  chmod +x "$ARBRE/deploy/lib/enroll-catalogue.sh"
+  export STUB_IDS=c0ffee
+  run bash "$SRC" forge-apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"jetons de rôle"*"deploy/container -p lcars-fleet up --force-recreate"* ]]
+  [[ "$output" != *"ce que le conteneur voit de sa forge maintenant"* ]]
+}
+
+@test "source-push : le compte et le groupe arrivent au bash du conteneur en arguments — un login qui porte un guillemet reste un login" {
+  mkdir -p "$BATS_TEST_TMPDIR/conteneur-bin" "$BATS_TEST_TMPDIR/clone/.git"
+  local o
+  for o in chown mv rm git; do
+    printf '#!/usr/bin/env bash\necho "%s $*" >> "%s/conteneur.calls"\n' "$o" "$BATS_TEST_TMPDIR" > "$BATS_TEST_TMPDIR/conteneur-bin/$o"
+    chmod +x "$BATS_TEST_TMPDIR/conteneur-bin/$o"
+  done
+  export STUB_IDS=c0ffee
+  LCARS_HUMAN="o'brien" run bash "$SRC" source-push "$BATS_TEST_TMPDIR/clone"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "chown -R o'brien:fleet /home/projects/.LCARS.incoming" "$BATS_TEST_TMPDIR/conteneur.calls"
+  grep -qx "mv -T /home/projects/.LCARS.incoming /home/projects/LCARS" "$BATS_TEST_TMPDIR/conteneur.calls"
+}
+
+@test "pull sans image nommée vise l'image du compose, même quand lcars-fleet:local est sur ce daemon" {
+  run bash "$SRC" pull
+  grep -qx 'pull ghcr.io/zurp-embedded/lcars-fleet:v0.9-beta' "$CALLS" || { cat "$CALLS"; return 1; }
+  refute grep -qx 'pull lcars-fleet:local' "$CALLS"
+}
+
+@test "up pose le magasin du projet avant de créer le conteneur : compose refuse un volume externe absent" {
+  sain
+  run bash "$SRC" -p mon-instance up
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local v magasin up
+  for v in cache toolchains sysroots state; do grep -qx "volume create mon-instance-$v" "$CALLS"; done
+  magasin="$(grep -n '^volume create mon-instance-cache$' "$CALLS" | cut -d: -f1)"
+  up="$(grep -n -- '-p mon-instance up -d' "$CALLS" | cut -d: -f1)"
+  [ "$magasin" -lt "$up" ]
+}
+
+@test "status d'un banc : la recréation se fait par bench-swap-image sur l'image qui tourne, jamais par un up simple ni par --bench up" {
+  export STUB_IDS=c0ffee STUB_BOOT=awaiting-config STUB_CONFIG_FILES="x/docker-compose.yml,x/docker-compose.bench.yml"
+  run bash "$SRC" -p bt-fleet status
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"deploy/docker/bench/bench-swap-image.sh --forge-project bt --image lcars-fleet:banc"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"--bench up"* ]]
 }

@@ -4,10 +4,8 @@
 # STATUS: le runner CI de la forge jetable — un projet compose à lui, enrôlé par forge-runner.sh
 #
 # Un job de CI exécute du code arbitraire : dans son propre projet compose, le runner se détruit
-# et se repose sans toucher à l'instance ni à la forge.
-#
-#   POST /api/v1/admin/actions/runners/registration-token   (site-admin) rend le jeton du premier démarrage
-#   LCARS_FORGE_URL=<forge> LCARS_RUNNER_TOKEN=<jeton> docker compose --env-file deploy/installer-constants.env -f deploy/docker/runner-compose.yml -p <projet>-runner up -d
+# et se repose sans toucher à l'instance ni à la forge. Il se pose par forge-runner.sh, avec
+# runner-network.yml : le jeton d'enregistrement entre dans le volume data avant le premier démarrage.
 
 name: lcars-runner
 
@@ -23,7 +21,8 @@ services:
     hostname: lcars-runner
     environment:
       GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:-}"
-      GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
+      # l'image lit le jeton dans ce fichier au premier démarrage, jamais dans son environnement
+      GITEA_RUNNER_REGISTRATION_TOKEN_FILE: "${LCARS_RUNNER_TOKEN_FILE:-}"
       GITEA_RUNNER_NAME: lcars-runner
       GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-${PROV_RUNNER_LABELS:?PROV_RUNNER_LABELS absent — les constantes de l'installeur, par --env-file}}"
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"

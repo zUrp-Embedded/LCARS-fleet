@@ -1,18 +1,15 @@
 # SOURCE: deploy/docker/forge-compose.yml
 # AUTHOR: consultant
 # STARDATE: 2026-09-12
-# STATUS: la forge jetable du banc — un projet compose à elle, montée par bench-up.sh et par 48-forge-host
+# STATUS: la forge Gitea montée par l'installeur — celle d'un poste (48-forge-host) ou d'un banc (bench-up.sh), dans un projet compose à elle
 #
-# Ce n'est pas le déploiement d'une forge de production : en production, la forge est fournie
-# (FORGE_BASE_URL et un jeton master), LCARS vérifie qu'elle tient le contrat. Dans son propre
-# projet compose, ses volumes n'appartiennent qu'à elle et aucune commande de `container` ne les
-# atteint.
+# Dans son propre projet compose, ses volumes n'appartiennent qu'à elle et aucune commande de
+# `container` ne les atteint. forge_mount (lib/forge-bootstrap.sh) la monte ; à la main :
 #
 #   docker compose --env-file deploy/installer-constants.env -f deploy/docker/forge-compose.yml -p <projet>-forge up -d
-#   docker compose --env-file deploy/installer-constants.env -f deploy/docker/forge-compose.yml -p <projet>-forge down -v
 #
 # ROOT_URL veut un port nu et `ports` une adresse de bind complète : une seule variable pour les
-# deux donnerait `http://127.0.0.1:127.0.0.1:3301/` et Gitea refuserait de démarrer.
+# deux donnerait `http://127.0.0.1:127.0.0.1:<port>/` et Gitea refuserait de démarrer.
 
 name: lcars-devforge
 
@@ -35,7 +32,7 @@ services:
       # et la porte d'adoption cherche l'arbre. `_0x2E_` écrit le point d'une section INI dans un nom de variable
       GITEA__repository_0x2E_upload__ENABLED: "false"
     ports:
-      - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-3300}:3000"
+      - "${LCARS_DEVFORGE_BIND:-127.0.0.1}:${LCARS_DEVFORGE_PORT:-${PROV_FORGE_HOST_PORT_DEFAULT:?PROV_FORGE_HOST_PORT_DEFAULT absent — les constantes de l'installeur, par --env-file}}:3000"
     volumes:
       - data:/var/lib/gitea
       - config:/etc/gitea

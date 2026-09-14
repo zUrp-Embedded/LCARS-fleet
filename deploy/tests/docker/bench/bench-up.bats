@@ -68,6 +68,7 @@ setup() {
   export ACCEPTED_TOKEN="$BATS_TEST_TMPDIR/accepte";    echo "MASTER" > "$ACCEPTED_TOKEN"
   export SYS_TOKEN_OUT="$BATS_TEST_TMPDIR/sys";         echo "SYS-TOKEN" > "$SYS_TOKEN_OUT"
   export PROV_RC_OUT="$BATS_TEST_TMPDIR/prov_rc";       echo "0" > "$PROV_RC_OUT"
+  export PROV_ANCIEN_OUT="$BATS_TEST_TMPDIR/prov_ancien"; : > "$PROV_ANCIEN_OUT"
   export HUMAN_RC="$BATS_TEST_TMPDIR/human_rc";         echo "0" > "$HUMAN_RC"
   export CREATE_RC="$BATS_TEST_TMPDIR/create_rc";       echo "0" > "$CREATE_RC"
   export FLEET_RC="$BATS_TEST_TMPDIR/fleet_rc";         echo "0" > "$FLEET_RC"
@@ -100,7 +101,7 @@ FAKE
 echo "ENROLL:$*" >> "$CALLS"
 dir=""; while [[ $# -gt 0 ]]; do [[ "$1" == --tofu-dir ]] && dir="$2"; shift; done
 echo '{"roles":[]}' > "$dir/roles.auto.tfvars.json"
-printf 'PROV_ROLES="system_architect fleet_engineer"\nPROV_FORGE_ORG="fleet"\n'
+printf '[enroll-catalogue] rôles     : system_architect fleet_engineer\n[enroll-catalogue] org       : %s\n' "${ORG_ROSTER:-fleet}"
 FAKE
   chmod 0755 "$DOCKER_D/forge-runner.sh" "$ROOT/deploy/lib/enroll-catalogue.sh"
 
@@ -110,7 +111,6 @@ FAKE
 argv="$*"
 stdin=""; [[ -p /dev/stdin || -f /dev/stdin ]] && stdin="$(cat)"
 echo "DOCKER:$argv${stdin:+ <<< $stdin}" >> "$CALLS"
-[[ -z "${PW-}" ]] || echo "PW=$PW" >> "$CALLS"
 objets() {
   local o nom type marque ligne
   for o in $OBJETS; do
@@ -142,6 +142,7 @@ case "$argv" in
   *"*.gitea_token"*)             echo 9; exit 0 ;;
   *"credentials.json"*)          [[ "$argv" == *"mkdir"* ]] && { touch "$CREDS_POSED"; exit 0; }; [[ -e "$CREDS_POSED" ]] && echo oui || echo non; exit 0 ;;
   *"lcars-forge.rc"*)        cat "$PROV_RC_OUT"; exit 0 ;;
+  *"lcars-provision.rc"*)    [[ -s "$PROV_ANCIEN_OUT" ]] || exit 1; cat "$PROV_ANCIEN_OUT"; exit 0 ;;
   *"forge-gestures.sh runner-token"*) echo REG-TOKEN-TEMOIN; exit 0 ;;
   *" env "*"fleet start")        exit "$(cat "$FLEET_RC")" ;;
 esac
@@ -174,9 +175,12 @@ esac
 printf '%s' "$rep" > "$out"
 [[ -z "$fmt" ]] || printf '%s' "$code"
 FAKE
+  # git note son argv et son environnement ; un fichier inclus par -c include.path est noté avec son mode
   cat > "$BINDIR/git" <<'FAKE'
 #!/usr/bin/env bash
-echo "GIT:$* | ${GIT_CONFIG_KEY_0:-}=${GIT_CONFIG_VALUE_0:-}" >> "$CALLS"
+echo "GIT:$*" >> "$CALLS"
+env | sed 's/^/GIT-ENV:/' >> "$CALLS"
+[[ "$1 $2" != "-c include.path="* ]] || { f="${2#include.path=}"; echo "GIT-INCLUDE:$(stat -c %a "$f") $f"; sed 's/^/GIT-INCLUDE-LIGNE:/' "$f"; } >> "$CALLS"
 case "$*" in
   *"rev-parse -q --verify"*) exit "$(cat "$REV_OK")" ;;
   *"rev-parse HEAD"*)        echo "kitcommit1"; exit 0 ;;
@@ -190,7 +194,6 @@ FAKE
   export PATH="$BINDIR:$DECOR_BIN:$SANS_PYTHON3"
   export DOCKER_BIN=dockerstub DOCKER_HOST=unix:///dev/null
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
-  unset LCARS_BENCH_ADMIRAL_PW LCARS_BENCH_HUMAN_PW
 }
 
 run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
@@ -226,6 +229,38 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRÊT"*"non mesuré"* ]]
+}
+
+@test "une image qui publie son verdict dans lcars-provision.rc : un échec y est lu, un 0 est dit sans distinction du drift, jamais « convergé »" {
+  : > "$PROV_RC_OUT"
+  echo 0 > "$PROV_ANCIEN_OUT"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"converge  : aucun geste en échec — cette image publie son verdict sans distinguer un drift"* ]]
+  [[ "$output" != *"converge  : convergé"* ]]
+  echo 1 > "$PROV_ANCIEN_OUT"
+  run_bench --no-runner
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"converge  : en échec (rc=1)"* ]]
+}
+
+@test "l'org du roster nomme le dépôt semé ; un roster sans org sème dans l'org par défaut des constantes" {
+  ORG_ROSTER=escadre run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "push -q http://127.0.0.1:$BF/escadre/lcars.git " "$CALLS"
+  [[ "$output" == *"roster dérivé du catalogue de l'image (system_architect fleet_engineer) · org escadre"* ]]
+  : > "$CALLS"
+  ORG_ROSTER="<non déclarée>" run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "push -q http://127.0.0.1:$BF/fleet/lcars.git " "$CALLS"
+}
+
+@test "le jeton système absent du conteneur après la relance : arrêt en 6, aucun push" {
+  : > "$SYS_TOKEN_OUT"
+  run_bench --no-runner
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"jeton système absent après la relance"* ]]
+  refute grep -q 'GIT:.*push' "$CALLS"
 }
 
 @test "--no-runner porte son propre verdict, jamais celui du banc complet" {
@@ -322,25 +357,33 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 }
 
 
-@test "la forge monte avec port, bind et URL racine, puis admiral est créé avec le mot de passe du contrat, unix et forge" {
+@test "la forge monte avec port, bind et URL racine, puis admiral est créé sans mot de passe dans la CLI de la forge, et reçoit celui du contrat par l'API au jeton master" {
   run_bench --no-runner --advertise 10.0.0.9
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q "DOCKER:compose -f .*forge-compose.yml -f .*forge-compose.bench.yml -p bt-forge up -d" "$CALLS"
   grep -qx "LCARS_DEVFORGE_PORT=$BF" "$CALLS"
   grep -q "DOCKER:exec -i -u root bt-fleet-lcars-1 chpasswd <<< admiral:toto123456" "$CALLS"
-  grep -q 'DOCKER:exec -e PW -u git bt-forge-gitea-1 sh -c gitea admin user create .* _ admiral$' "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
-  refute grep -q 'DOCKER:[^<]*toto123456' "$CALLS"
-  [[ "$output" == *"compte admiral créé"* ]]
+  grep -qx 'DOCKER:exec -u git bt-forge-gitea-1 gitea admin user create --username admiral --random-password --email admiral@lcars.local --admin --must-change-password=false' "$CALLS"
+  local patch; patch="$(grep "^CURL:PATCH http://127.0.0.1:$BF/api/v1/admin/users/admiral | Authorization: token MASTER | " "$CALLS")"
+  [ "$(jq -c '{password, admin}' <<<"${patch##* | }")" = '{"password":"toto123456","admin":true}' ]
+  grep -E '^(DOCKER|CURL-ARGV):' "$CALLS" | grep -v '<<<' | refute_out 'toto123456'
+  [[ "$output" == *"compte admiral créé"*"mot de passe de banc posé sur admiral"* ]]
 }
 
-@test "admiral déjà présent : mot de passe de banc reposé, et l'amorçage continue" {
+@test "admiral déjà présent : le mot de passe du contrat est reposé par l'API, et l'amorçage continue" {
   echo 1 > "$CREATE_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q 'user change-password .* _ admiral$' "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
-  [[ "$output" == *"compte admiral déjà présent — mot de passe de banc reposé"* ]]
+  grep -q "^CURL:PATCH http://127.0.0.1:$BF/api/v1/admin/users/admiral | Authorization: token MASTER | " "$CALLS"
+  [[ "$output" == *"compte admiral déjà présent"*"mot de passe de banc posé sur admiral"* ]]
+}
+
+@test "la forge refuse le mot de passe d'admiral : arrêt en 4 qui le nomme, avant le conteneur" {
+  echo 403 > "$PATCH_CODE"
+  run_bench --no-runner
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"la forge refuse le compte « admiral » (HTTP 403)"*"mot de passe de banc de admiral non posé"* ]]
+  refute grep -q 'config-token' "$CALLS"
 }
 
 @test "sans jeton master rendu par la forge, le banc s'arrête en 4 et le dit" {
@@ -404,11 +447,15 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 
 # ─── le semis des dépôts ────────────────────────────────────────────────────────────────────────
 
-@test "le semis pousse la révision de l'image sur main, avec le jeton système dans l'environnement de git, jamais dans l'argv, et sans --force" {
-  run_bench --no-runner
+@test "le semis pousse la révision de l'image sur main, le jeton système dans un fichier de configuration 0600 inclus par git, ni dans son argv ni dans son environnement, et sans --force" {
+  local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
+  TMPDIR="$T" run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "GIT:-C $ROOT push -q http://127.0.0.1:$BF/fleet/lcars.git deadbeef1:refs/heads/main | http.http://127.0.0.1:$BF/.extraheader=Authorization: token SYS-TOKEN" "$CALLS"
-  refute grep -qE 'GIT:[^|]*SYS-TOKEN' "$CALLS"
+  grep -qE "^GIT:-c include.path=$T/bench-up-jetons\.[^/]+/git-forge -C $ROOT push -q http://127.0.0.1:$BF/fleet/lcars.git deadbeef1:refs/heads/main$" "$CALLS"
+  grep -qE "^GIT-INCLUDE:600 $T/bench-up-jetons\." "$CALLS"
+  [ "$(grep '^GIT-INCLUDE-LIGNE:' "$CALLS" | sort -u)" = "$(printf 'GIT-INCLUDE-LIGNE:\textraHeader = Authorization: token SYS-TOKEN\nGIT-INCLUDE-LIGNE:[http "http://127.0.0.1:%s/"]' "$BF" | sort)" ]
+  grep -E '^(GIT|GIT-ENV|DOCKER|CURL-ARGV):' "$CALLS" | refute_out 'SYS-TOKEN'
+  [ "$(find "$T" -name 'bench-up-jetons.*' | wc -l)" -eq 0 ]
   refute grep -q 'push -q --force' "$CALLS"
   [[ "$output" == *"main poussé (révision de l'image : deadbeef1)"* ]]
   refute grep -q 'GIT:.* ops:ops' "$CALLS"
@@ -419,7 +466,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   echo "0123456789abcdef" > "$REMOTE_MAIN"; echo 1 > "$ANCESTOR_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "GIT:-C $ROOT -c core.hooksPath=/dev/null push -q --force" "$CALLS"
+  grep -qE "^GIT:-c include.path=[^ ]+ -C $ROOT -c core.hooksPath=/dev/null push -q --force " "$CALLS"
   [[ "$output" == *"main existe déjà sur la forge de banc (012345678)"*"poussé de force"* ]]
 }
 
@@ -513,6 +560,12 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qE "^DOCKER:compose --env-file [^ ]+ -f $DOCKER_D/docker-compose.yml -f $DOCKER_D/docker-compose.bench.yml -p bt-fleet up -d --no-build lcars$" "$CALLS"
   grep -qx 'LCARS_BENCH_BASE=bt' "$CALLS"
+  # compose refuse un volume externe absent : le magasin du projet du conteneur existe avant le up
+  local magasin up
+  magasin="$(grep -n '^DOCKER:volume create bt-fleet-cache$' "$CALLS" | cut -d: -f1)"
+  up="$(grep -n -- '-p bt-fleet up -d' "$CALLS" | cut -d: -f1)"
+  [ -n "$magasin" ]
+  [ "$magasin" -lt "$up" ]
   local f
   for f in $(grep -oE '^DOCKER:compose --env-file [^ ]+' "$CALLS" | cut -d' ' -f3); do
     [ "$(readlink -f "$f")" = "$CONSTANTES" ]

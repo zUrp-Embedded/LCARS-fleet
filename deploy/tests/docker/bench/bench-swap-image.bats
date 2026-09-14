@@ -49,7 +49,7 @@ case "$*" in
   *" up -d --no-build lcars") env | grep '^LCARS_\|^FORGE_' | sort | sed 's/^/ENV:/' >> "$CALLS"; exit 0 ;;
   "inspect -f {{.State.Health.Status}}"*) echo healthy; exit 0 ;;
   *"*.gitea_token"*)                       echo "$JETONS"; exit 0 ;;
-  "inspect -f {{range .Config.Env}}"*)     echo "LCARS_IMAGE_REVISION=cafe1234"; exit 0 ;;
+  "image inspect -f {{index .Config.Labels \"org.opencontainers.image.revision\"}} lcars-fleet:neuve") echo cafe1234; exit 0 ;;
 esac
 exit 0
 EOF

@@ -22,17 +22,37 @@ setup() {
   [ -f "$LIB" ]
   decor_pose
   CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
+  # docker exec joue réellement ce qui part au conteneur : ses options d'environnement s'appliquent, et
+  # la commande s'exécute contre un gitea doublé qui note son argv et son environnement
+  CONTENEUR_BIN="$BATS_TEST_TMPDIR/conteneur-bin"; mkdir -p "$CONTENEUR_BIN"
   cat > "$DECOR_BIN/docker" <<EOF
 #!/usr/bin/env bash
 echo "DOCKER:\$*" >> "$CALLS"
-env | grep '^LCARS_DEVFORGE_\|^LCARS_BENCH_BASE=\|^PW=' | sort >> "$CALLS"
+env | grep '^LCARS_DEVFORGE_\|^LCARS_BENCH_BASE=' | sort >> "$CALLS"
+if [[ "\$1" == exec ]]; then
+  shift
+  while [[ "\$1" == -* ]]; do
+    case "\$1" in
+      -e) [[ "\$2" == *=* ]] && export "\$2"; shift 2 ;;
+      -u) shift 2 ;;
+      *)  shift ;;
+    esac
+  done
+  shift
+  PATH="$CONTENEUR_BIN:\$PATH" exec "\$@"
+fi
+exit "\${STUB_DOCKER_RC:-0}"
+EOF
+  cat > "$CONTENEUR_BIN/gitea" <<EOF
+#!/usr/bin/env bash
+{ printf 'GITEA-ARGV:%s\n' "\$*"; env | sed 's/^/GITEA-ENV:/'; } >> "$CALLS"
 case "\$*" in
   *"user create"*)  [[ -z "\${STUB_CREATE_ERR:-}" ]] || echo "\$STUB_CREATE_ERR" >&2; exit "\${STUB_CREATE_RC:-0}" ;;
   *"generate-access-token"*) printf '%s\n' "\${STUB_TOKEN-tok-123}"; exit 0 ;;
 esac
-exit "\${STUB_DOCKER_RC:-0}"
+exit 0
 EOF
-  chmod 0755 "$DECOR_BIN/docker"
+  chmod 0755 "$DECOR_BIN/docker" "$CONTENEUR_BIN/gitea"
   printf 'tok-master\n' > "$BATS_TEST_TMPDIR/master"
 }
 
@@ -91,27 +111,42 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   [ "$(forge_requests '.path' | wc -l)" -eq 2 ]
 }
 
-@test "forge_admin_ensure : crée le compte admin, ou dit qu'il est présent, ou rend l'erreur de la forge ; le mot de passe voyage par l'environnement" {
-  lib 'forge_admin_ensure docker gitea-1 bob s3cret'
+@test "forge_admin_ensure : le gitea du conteneur crée l'admin sur un mot de passe aléatoire, sans mot de passe dans son argv ni son environnement" {
+  lib 'forge_admin_ensure docker gitea-1 bob'
   [ "$status" -eq 0 ]
   [ "$output" = "cree" ]
-  grep -q 'DOCKER:exec -e PW -u git gitea-1 sh -c gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false _ bob' "$CALLS"
-  grep -qx 'PW=s3cret' "$CALLS"
-  refute grep -q 'DOCKER:.*s3cret' "$CALLS"
-  STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists [name: bob]" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
+  grep -qx 'GITEA-ARGV:admin user create --username bob --random-password --email bob@lcars.local --admin --must-change-password=false' "$CALLS"
+  refute grep -qE '^GITEA-(ARGV:.*--password|ENV:PW=)' "$CALLS"
+}
+
+@test "forge_admin_ensure : un compte déjà là est « present », une autre erreur de la forge est rendue" {
+  STUB_CREATE_RC=1 STUB_CREATE_ERR="user already exists [name: bob]" lib 'forge_admin_ensure docker gitea-1 bob'
   [ "$status" -eq 0 ]
   [ "$output" = "present" ]
-  STUB_CREATE_RC=1 STUB_CREATE_ERR="database is locked" lib 'forge_admin_ensure docker gitea-1 bob s3cret'
+  STUB_CREATE_RC=1 STUB_CREATE_ERR="database is locked" lib 'forge_admin_ensure docker gitea-1 bob'
   [ "$status" -eq 1 ]
   [[ "$output" == *"database is locked"* ]]
 }
 
-@test "forge_admin_password : rotation par la CLI de la forge, sans changement forcé" {
-  lib 'forge_admin_password docker gitea-1 admiral toto123456'
-  [ "$status" -eq 0 ]
-  grep -q 'DOCKER:exec -e PW -u git gitea-1 sh -c gitea admin user change-password --username "$1" --password "$PW" --must-change-password=false _ admiral' "$CALLS"
-  grep -qx 'PW=toto123456' "$CALLS"
-  refute grep -q 'DOCKER:.*toto123456' "$CALLS"
+@test "forge_admin_password : mot de passe et adminité par un PATCH au jeton master, le secret hors de l'argv et de l'environnement des enfants" {
+  forge_double_start
+  forge_route PATCH /api/v1/admin/users/admiral 200 '{"login":"admiral"}'
+  espion_enfants curl jq docker
+  lib 'forge_admin_password "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" admiral '"'"'mot"de\passe'"'"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(forge_requests '.auth' | jq -r .)" = "token tok-master" ]
+  [ "$(forge_requests '.body | fromjson')" = '{"login_name":"admiral","source_id":0,"password":"mot\"de\\passe","must_change_password":false,"admin":true}' ]
+  refute grep -q '^ARGV docker' "$DECOR_ENFANTS"
+  refute grep -qF 'mot"de' "$DECOR_ENFANTS"
+  refute grep -qF tok-master "$DECOR_ENFANTS"
+}
+
+@test "forge_admin_password : un refus de la forge rend 1 et nomme le code HTTP" {
+  forge_double_start
+  forge_route PATCH /api/v1/admin/users/admiral 403 '{"message":"forbidden"}'
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; forge_admin_password \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" admiral pw"
+  [ "$status" -eq 1 ]
+  [ "$stderr" = "la forge refuse le compte « admiral » (HTTP 403)" ]
 }
 
 @test "forge_master_token : rend le jeton minté, et 1 quand la forge n'en rend aucun" {
@@ -235,14 +270,6 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   [ "$stderr" = "la forge n'a pas rendu de jeton opérateur pour « lcars » :" ]
-}
-
-@test "les mots de passe du banc sont ceux du contrat, et une variable les remplace" {
-  lib 'bench_admiral_password; bench_human_password'
-  [ "${lines[0]}" = "toto123456" ]
-  [ "${lines[1]}" = "toto32toto32" ]
-  LCARS_BENCH_ADMIRAL_PW=autre lib 'bench_admiral_password'
-  [ "$output" = "autre" ]
 }
 
 @test "bench_human_seed : un jeton posé qui s'authentifie encore est rendu tel quel, aucun jeton n'est minté" {

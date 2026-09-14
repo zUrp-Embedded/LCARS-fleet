@@ -15,9 +15,9 @@ setup() {
   [ -f "$CF" ]
   # des valeurs que rien d'autre n'écrit : un compose qui les rend les a lues dans le fichier donné
   CONST="$BATS_TEST_TMPDIR/installer-constants.env"
-  local cles='PROV_STORE_ROOT|PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS'
+  local cles='PROV_STORE_ROOT|PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_FORGE_HOST_PORT_DEFAULT|PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS'
   { grep -vE "^($cles)=" "$DOCKER/../installer-constants.env"
-    printf '%s\n' PROV_STORE_ROOT=/srv/magasin-temoin PROV_SSH_PORT_DEFAULT=4222 PROV_DECK_PORT_DEFAULT=4999 \
+    printf '%s\n' PROV_STORE_ROOT=/srv/magasin-temoin PROV_SSH_PORT_DEFAULT=4222 PROV_DECK_PORT_DEFAULT=4999 PROV_FORGE_HOST_PORT_DEFAULT=4300 \
       PROV_FORGE_INTERNAL_URL=http://forge-temoin:3000 PROV_RUNNER_LABELS=shell:docker://alpine:temoin
   } > "$CONST"
 }
@@ -95,6 +95,8 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local j="$output"
   [ "$(jq -c '[.services.lcars.ports[] | [.host_ip, .published, .target]]' <<<"$j")" = '[["127.0.0.1","4222",22],["127.0.0.1","4999",4999]]' ]
+  # le port visé dans le conteneur est celui où le deck écoute
+  [ "$(jq -r '.services.lcars.environment.LCARS_LANDING_PORT' <<<"$j")" = 4999 ]
   [ "$(jq -r '.services.lcars.environment.LCARS_STORE_ROOT' <<<"$j")" = /srv/magasin-temoin ]
   [ "$(jq -c '[.services.lcars.volumes[] | select(.source | startswith("lcars-cache", "lcars-toolchains", "lcars-sysroots", "lcars-state")) | .target]' <<<"$j")" \
     = '["/srv/magasin-temoin/cache","/srv/magasin-temoin/toolchains","/srv/magasin-temoin/sysroots","/srv/magasin-temoin/state"]' ]
@@ -109,10 +111,11 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   grep -q "^${nommee% absent}=" "$DOCKER/../installer-constants.env"
 }
 
-@test "forge-compose.yml rend ROOT_URL sur l'adresse interne des constantes quand LCARS_DEVFORGE_ROOT_URL manque" {
+@test "forge-compose.yml rend ROOT_URL sur l'adresse interne et publie sur la loopback au port de forge des constantes, quand rien ne les pose" {
   run rendu docker compose --env-file "$CONST" -f "$DOCKER/forge-compose.yml" -p f config --format json
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq -r '.services.gitea.environment.GITEA__server__ROOT_URL' <<<"$output")" = http://forge-temoin:3000/ ]
+  [ "$(jq -c '[.services.gitea.ports[] | [.host_ip, .published, .target]]' <<<"$output")" = '[["127.0.0.1","4300",3000]]' ]
 }
 
 @test "runner-compose.yml se lit sans adresse de forge, et rend les labels des constantes quand LCARS_RUNNER_LABELS manque" {

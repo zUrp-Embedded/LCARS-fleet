@@ -63,9 +63,7 @@ bench_relance
 ROLE_TOKENS="$(bench_jetons_de_role)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun jeton de rôle après relance — le conteneur ne voit pas la graine de la forge" 6
 
-REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null \
-            | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1 || true)"
-
+REVISION="$(bench_revision "$IMAGE")"
 say "─────────────────────────────────────────────────────────"
 say "conteneur remplacé"
 say "  image     : $IMAGE   (révision ${REVISION:-inconnue})"

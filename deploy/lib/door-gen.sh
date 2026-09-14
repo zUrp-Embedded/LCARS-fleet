@@ -3,7 +3,7 @@
 # AUTHOR: bob
 # STARDATE: 2026-09-05
 # STATUS: l'installeur d'une version — le gabarit install.sh avec sa version, sa base, sa clé, son image et la table des sha256 du tiroir
-# USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ou <tiroir>/minisign.pub ; une clé fait vérifier la signature de chaque kit, minisign requis)
+# USAGE : door-gen.sh <tag> <base> <tiroir>   (LCARS_DOOR_IMAGE, LCARS_MINISIGN_PUBKEY ; une clé fait vérifier la signature de chaque kit, minisign requis)
 # ENV   : LCARS_DOOR_TEMPLATE  le gabarit lu (défaut : install.sh à la racine de cet arbre)
 # EXIT  : 0 install.sh et install.sh.sha256 écrits dans le tiroir · 1 refus, l'installeur n'est pas écrit
 
@@ -22,15 +22,7 @@ die() { echo "door-gen: ERREUR — $*" >&2; exit 1; }
 [[ "$BASE" == https://* || "$BASE" == http://* ]] || die "base « $BASE » : une URL http(s) — install.sh n'accepte http que sous LCARS_DOOR_INSECURE_HTTP=1"
 [[ -f "$TEMPLATE" ]] || die "gabarit introuvable : $TEMPLATE"
 
-for m in DOOR_VERSION DOOR_BASE DOOR_PUBKEY DOOR_IMAGE DOOR_SUMS_BEGIN DOOR_SUMS_END; do
-  n="$(grep -c "@@$m@@" "$TEMPLATE" || true)"
-  [[ "$n" -eq 1 ]] || die "le gabarit porte $n fois @@$m@@ (attendu : 1) — $TEMPLATE n'est pas le gabarit d'install.sh"
-done
-
 PUBKEY="${LCARS_MINISIGN_PUBKEY:-}"
-if [[ -z "$PUBKEY" && -f "$DIST/minisign.pub" ]]; then
-  PUBKEY="$(grep -v '^untrusted comment' "$DIST/minisign.pub" | head -1 || true)"
-fi
 # une clé inscrite fait exiger une signature à l'installeur : un kit sans .minisig, ou signé d'une autre clé, il le refuserait
 if [[ -n "$PUBKEY" ]]; then
   [[ "$PUBKEY" =~ ^[A-Za-z0-9+/=]+$ ]] || die "clé publique illisible (base64 attendu) : « $PUBKEY »"
@@ -43,12 +35,11 @@ if [[ -n "$PUBKEY" ]]; then
       || die "la signature de $(basename "$_k") ne se vérifie pas avec la clé publique fournie : l'installeur refuserait ce kit — le signer avec la clé secrète de cette clé"
   done
 else
-  say "aucune clé publique (LCARS_MINISIGN_PUBKEY, ou $DIST/minisign.pub) — l'installeur dira « provenance NON vérifiée (sha256 seul) »"
+  say "aucune clé publique (LCARS_MINISIGN_PUBKEY) — l'installeur dira « provenance NON vérifiée (sha256 seul) »"
 fi
 
 mapfile -t ARTEFACTS < <(
-  find "$DIST" -maxdepth 1 -type f \
-    ! -name 'install.sh' ! -name '*.sha256' ! -name '*.minisig' ! -name 'minisign.pub' \
+  find "$DIST" -maxdepth 1 -type f ! -name 'install.sh' ! -name '*.sha256' ! -name '*.minisig' \
     -printf '%f\n' 2>/dev/null | LC_ALL=C sort
 )
 [[ "${#ARTEFACTS[@]}" -gt 0 ]] || die "aucun artefact dans $DIST — rien à inscrire dans la table de sommes"
@@ -78,6 +69,6 @@ _dit="$(bash "$OUT.tmp" --version 2>/dev/null || true)"
 mv "$OUT.tmp" "$OUT"
 ( cd "$DIST" && sha256sum install.sh > install.sh.sha256 )
 
-_cle="ABSENTE"; [[ -z "$PUBKEY" ]] || _cle="presente"
+_cle="absente"; [[ -z "$PUBKEY" ]] || _cle="présente"
 say "install.sh $TAG : $OUT — base $BASE, ${#ARTEFACTS[@]} artefact(s) dans la table, clé $_cle"
 say "sha256 de l'installeur : $(cut -d' ' -f1 < "$DIST/install.sh.sha256")  ($DIST/install.sh.sha256)"

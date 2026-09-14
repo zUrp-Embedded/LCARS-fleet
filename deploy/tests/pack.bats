@@ -74,11 +74,10 @@ forge_qui_repond() { # une forge Gitea doublée : le tag n'existe pas (ou FORGE_
 out=""; m=GET; url=""; prev=""; entete=""
 for a in "$@"; do case "$prev" in -o) out="$a" ;; -X) m="$a" ;; -H) [[ "$a" != @- ]] || entete="$(cat)" ;; esac; [[ "$a" == http* ]] && url="$a"; prev="$a"; done
 echo "CURL $m $url" >> "$CALLS"
-# ce que curl reçoit du jeton : son entrée, son argv, son environnement, et le fichier nommé par FP_TOKEN_FILE
+# ce que curl reçoit du jeton : son entrée, son argv, son environnement
 printf '%s\n' "$entete" >> "$CALLS.entetes"
 printf '%s\n' "$*" >> "$CALLS.argv"
 env >> "$CALLS.env"
-printf '%s %s\n' "$(stat -c %a "${FP_TOKEN_FILE:-}" 2>/dev/null)" "${FP_TOKEN_FILE:-}" >> "$CALLS.fichier"
 case "$m $url" in
   "GET "*/releases/tags/*) printf '{}' > "$out"; printf '%s' "${FORGE_TAG_CODE:-404}" ;;
   "GET "*/git/commits/*)   printf '{}' > "$out"; printf 200 ;;
@@ -114,6 +113,7 @@ case "$1" in
       *) echo "Get https://registre: dial tcp: i/o timeout" >&2; exit 1 ;;
     esac ;;
   push) exit "${STUB_PUSH_RC:-0}" ;;
+  buildx) [[ -z "${STUB_SANS_BUILDX:-}" ]] || { echo "docker: 'buildx' is not a docker command." >&2; exit 1; } ;;
 esac
 exit 0
 EOF
@@ -121,9 +121,11 @@ EOF
   export DOCKER_HOST=unix:///daemon-double
 }
 
-publier() { # publier — une publication complète vers une forge https doublée ; les doublures se règlent par l'environnement de l'appel
-  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN=jeton-du-temoin \
-    bash "$R/deploy/pack.sh" --publish
+publier() { # publier — une publication complète vers une forge https doublée, le jeton de l'opérateur dans un fichier ; les doublures se règlent par l'environnement de l'appel
+  JETON="jeton-du-fichier-de-l-operateur"
+  printf '%s\n' "$JETON" > "$BATS_TEST_TMPDIR/jeton-operateur"
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet \
+    LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/jeton-operateur" bash "$R/deploy/pack.sh" --publish
 }
 
 @test "un arbre modifié est refusé avant tout — ni gate, ni release" {
@@ -168,7 +170,7 @@ publier() { # publier — une publication complète vers une forge https doublé
 
 @test "origin en http : --publish est refusé avant le gate, et un tiroir local le dit sans refuser" {
   git -C "$R" remote add origin http://10.42.0.118:80/fleet/lcars
-  LCARS_PACK_TAG=v9.9 LCARS_PACK_TOKEN=t pack --no-image --publish
+  LCARS_PACK_TAG=v9.9 pack --no-image --publish
   [ "$status" -eq 1 ]
   [[ "$output" == *"n'est pas en https"*"LCARS_PACK_FORGE=https://"* ]]
   [ ! -s "$GATE_LOG" ]
@@ -229,7 +231,7 @@ publier() { # publier — une publication complète vers une forge https doublé
   local l_push l_post
   l_push="$(grep -n '^DOCKER push' "$CALLS" | cut -d: -f1)"; l_post="$(grep -n '^CURL POST .*/releases$' "$CALLS" | cut -d: -f1)"
   [ "$l_push" -lt "$l_post" ]
-  [[ "$output" != *"jeton-du-temoin"* ]]
+  [[ "$output" != *"$JETON"* ]]
   grep -q '^DOOR_IMAGE="forge.decor/fleet/lcars-fleet:v9.9"' "$LCARS_PACK_DIR/dist/v9.9/install.sh"
   # l'image se bâtit depuis le kit posé dans l'étage : son Dockerfile, et l'arbre du kit pour contexte
   local build; build="$(grep '^DOCKER build ' "$CALLS")"
@@ -294,33 +296,37 @@ publier() { # publier — une publication complète vers une forge https doublé
   [[ "$output" == *"image tirable sans identifiants : forge.decor/fleet/lcars-fleet:v9.9"* ]]
 }
 
-publier_par_fichier() { # publier_par_fichier — la publication complète, le jeton de l'opérateur donné par LCARS_PACK_TOKEN_FILE
-  JETON="jeton-du-fichier-de-l-operateur"
-  printf '%s\n' "$JETON" > "$BATS_TEST_TMPDIR/jeton-operateur"
-  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet \
-    LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/jeton-operateur" bash "$R/deploy/pack.sh" --publish
-}
-
-@test "--publish : chaque appel à la forge reçoit le jeton par l'entrée de curl, ni par son argv ni par son environnement" {
+@test "--publish : chaque appel à la forge reçoit le jeton par l'entrée de curl, le registre par celle de docker login ; ni argv ni environnement" {
   forge_qui_repond; docker_double
-  publier_par_fichier
+  sed -i 's/^  login)   cat >\/dev\/null ;;$/  login)   cat >> "$CALLS.login" ;;/' "$BIN/docker"
+  publier
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(grep -c '^CURL' "$CALLS")" -gt 0 ]
   [ "$(grep -cx "Authorization: token $JETON" "$CALLS.entetes")" -eq "$(grep -c '^CURL' "$CALLS")" ]
+  [ "$(cat "$CALLS.login")" = "$JETON" ]
   refute grep -q "$JETON" "$CALLS.argv"
   refute grep -q "$JETON" "$CALLS.env"
+  refute grep -q "$JETON" "$CALLS"
 }
 
-@test "--publish : le fichier du jeton lu par la publication est en 0600 et disparaît avec l'étage" {
-  forge_qui_repond; docker_double
-  publier_par_fichier
+@test "--publish : un jeton donné par l'environnement est refusé avant le gate, et le refus nomme le fichier qui le remplace" {
+  printf '#!/usr/bin/env bash\nenv >> "$CALLS.env-npm"\n' > "$BIN/npm"
+  LCARS_PACK_TOKEN=jeton-par-environnement LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"LCARS_PACK_TOKEN n'est pas lu"*"LCARS_PACK_TOKEN_FILE=<fichier>"* ]]
+  [ ! -s "$GATE_LOG" ]
+  [ ! -e "$CALLS.env-npm" ]
+}
+
+@test "l'image demandée sans buildx sur le daemon : refus avant le gate qui le nomme ; --no-image passe" {
+  docker_double
+  STUB_SANS_BUILDX=1 LCARS_PACK_TAG=v9.9 pack
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker buildx absent"*"--no-image"* ]]
+  [ ! -s "$GATE_LOG" ]
+  refute grep -q '^DOCKER build ' "$CALLS"
+  STUB_SANS_BUILDX=1 LCARS_PACK_TAG=v9.9 pack --no-image
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local mode fichier
-  read -r mode fichier < <(sort -u "$CALLS.fichier")
-  [ "$(sort -u "$CALLS.fichier" | wc -l)" -eq 1 ]
-  [ "$mode" = 600 ]
-  [[ "$fichier" != "$BATS_TEST_TMPDIR/jeton-operateur" ]]
-  [ ! -e "$fichier" ]
 }
 
 @test "le tiroir produit par pack, servi, est retrouvé par son propre installeur : kit nommé, téléchargé, sha256 vérifié" {
@@ -448,14 +454,19 @@ publier_par_fichier() { # publier_par_fichier — la publication complète, le j
   [[ "$output" == *"release attestée : build $HEAD_SHA"* ]]
 }
 
-@test "--publish : sans jeton, refus qui nomme les deux sources ; avec un jeton, son état est dit et jamais sa valeur" {
+@test "--publish : sans fichier de jeton, ou un fichier vide, refus qui le nomme ; avec un jeton, son état est dit et jamais sa valeur" {
   LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
   [ "$status" -eq 1 ]
-  [[ "$output" == *"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE"* ]]
+  [[ "$output" == *"pack: ERREUR — --publish : aucun jeton — LCARS_PACK_TOKEN_FILE=<fichier>"* ]]
   refute grep -q '^CURL' "$CALLS"
+  : > "$BATS_TEST_TMPDIR/vide"
+  LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/vide" LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet pack --no-image --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun jeton"* ]]
   local sentinelle="s3cr3t-de-forge-a-ne-jamais-imprimer"
+  printf '%s\n' "$sentinelle" > "$BATS_TEST_TMPDIR/jeton"
   : > "$CALLS"
-  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN="$sentinelle" pack --no-image --publish
+  LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://forge.decor LCARS_PACK_OWNER=fleet LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/jeton" pack --no-image --publish
   [ "$status" -eq 1 ]
   [[ "$output" == *"jeton trouvé"*"publication refusée avant tout envoi"* ]]
   [[ "$output" != *"$sentinelle"* ]]

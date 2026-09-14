@@ -5,7 +5,8 @@
 # STATUS: détruit un banc complet, volumes compris — le runner, le conteneur, la forge, le magasin
 #
 # USAGE : bench-down.sh --project <base> --yes
-# EXIT  : 0 détruit · 1 arguments, docker muet, ou ce qui porte ce nom n'est pas un banc · 2 rien à détruire sous ce nom
+# EXIT  : 0 détruit, relu après les retraits · 1 arguments, docker muet, ou ce qui porte ce nom n'est pas un banc ·
+#         2 rien à détruire sous ce nom · 3 un objet du banc reste après les retraits, ou docker ne le dit plus (nommés)
 #
 # Un banc = trois projets compose dérivés de la base : <base>-fleet (le conteneur), <base>-forge,
 # <base>-runner, plus le magasin <base>-fleet-*. Aucun défaut de projet : ce geste efface des
@@ -35,11 +36,16 @@ done
 [[ "$CONFIRM" -eq 1 ]] || die "--yes requis — ceci efface les volumes de « $PROJECT »" 1
 bench_projets
 
+magasin_present() { # magasin_present → les volumes du magasin de ce banc que docker porte ; 1 si docker ne répond pas
+  local volumes
+  volumes="$("$DOCKER_BIN" volume ls --format '{{.Name}}')" || return 1
+  grep -xF -f <(store_volume_names) <<<"$volumes" || true
+}
+
 OBJETS="$(bench_objets)" \
   || die "docker ne rend pas les objets des projets $CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT — rien n'est détruit sur un état non lu" 1
-VOLUMES="$("$DOCKER_BIN" volume ls --format '{{.Name}}')" \
+MAGASIN="$(magasin_present)" \
   || die "docker ne rend pas la liste des volumes — rien n'est détruit sur un état non lu" 1
-MAGASIN="$(grep -xF -f <(store_volume_names) <<<"$VOLUMES" || true)"
 
 [[ -n "$OBJETS" || -n "$MAGASIN" ]] \
   || die "aucun conteneur ni volume du banc « $PROJECT » ($CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT, magasin) — rien à détruire" 2
@@ -68,6 +74,21 @@ say "destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
 say "destruction du magasin de « $PROJECT » ($(store_volume_names | tr '\n' ' ' | sed 's/ $//'))"
-store_destroy_volumes "$DOCKER_BIN" || say "au moins un volume du magasin n'a pas pu être détruit" >&2
+store_destroy_volumes "$DOCKER_BIN" || true
 
+# un retrait refusé (volume encore monté, daemon qui échoue) ne se lit pas dans les codes de compose : le banc se relit
+RESTES="$(bench_objets)" \
+  || die "docker ne rend plus les objets du banc — la destruction n'est pas vérifiée : docker compose ls, docker volume ls" 3
+RESTES_MAGASIN="$(magasin_present)" \
+  || die "docker ne rend plus la liste des volumes — la destruction du magasin n'est pas vérifiée : docker volume ls" 3
+if [[ -n "$RESTES$RESTES_MAGASIN" ]]; then
+  {
+    say "banc « $PROJECT » NON détruit — ces objets restent après les retraits :"
+    [[ -z "$RESTES" ]] || awk -v n="$BENCH_NOM" '{ printf "[%s]   %s %s (projet %s)\n", n, $2, $3, $1 }' <<<"$RESTES"
+    [[ -z "$RESTES_MAGASIN" ]] || sed "s/^/[$BENCH_NOM]   volume /; s/$/ (magasin)/" <<<"$RESTES_MAGASIN"
+    say "  Un volume encore monté se libère en retirant son conteneur : docker ps -a --filter volume=<volume>, puis"
+    say "  bench-down.sh --project $PROJECT --yes à nouveau."
+  } >&2
+  exit 3
+fi
 say "banc « $PROJECT » détruit"

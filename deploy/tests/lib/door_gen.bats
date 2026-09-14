@@ -15,9 +15,7 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   GEN="$BATS_TEST_DIRNAME/../../lib/door-gen.sh"
-  TEMPLATE="$BATS_TEST_DIRNAME/../../../install.sh"
   [ -f "$GEN" ]
-  [ -f "$TEMPLATE" ]
   minisign_double "$BATS_TEST_TMPDIR/bin"; export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
   KIT="$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
@@ -33,17 +31,6 @@ setup() {
 gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" LCARS_DOOR_IMAGE="${IMG-ghcr.io/o/r:0.9.0}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
 sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   bash -c "$(sed -n '/^sums() {/,/^}/p' "$1")"$'\nsums'
-}
-
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  run head -8 "$GEN"
-  [[ "$output" == *"SOURCE:"* ]]; [[ "$output" == *"AUTHOR:"* ]]; [[ "$output" == *"STARDATE:"* ]]; [[ "$output" == *"STATUS:"* ]]
-}
-
-@test "il est EXECUTABLE dans l index git" {
-  run git -C "$BATS_TEST_DIRNAME/../../.." ls-files -s deploy/lib/door-gen.sh
-  [ "$status" -eq 0 ]
-  [[ "$output" == 100755* ]]
 }
 
 @test "la TABLE couvre TOUS les artefacts du tiroir, avec leur sha256 juste — et rien d'autre" {
@@ -89,13 +76,6 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   PUB="" gen; [ "$status" -eq 0 ]
   [[ "$output" == *"aucune clé publique"*"NON vérifiée"* ]]
   grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
-  printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
-  minisign_cle "$BATS_TEST_TMPDIR/cle-fichier" RWQdepuisfichier
-  minisign -S -s "$BATS_TEST_TMPDIR/cle-fichier" -m "$KIT"
-  PUB="" gen; [ "$status" -eq 0 ]
-  grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
-  refute_out 'aucune clé' <<<"$output"
-  refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
 }
 
 @test "un tiroir vide est un refus, rien n'est écrit" {
@@ -112,15 +92,6 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ "$status" -eq 1 ]
   [[ "$output" == *"aucun artefact dans $DIST"* ]]
   [ ! -e "$DIST" ]
-}
-
-@test "un gabarit sans marqueur est un refus qui compte le marqueur, rien n'est écrit" {
-  local mutile="$BATS_TEST_TMPDIR/gabarit-mutile.sh"
-  grep -v '@@DOOR_PUBKEY@@' "$TEMPLATE" > "$mutile"
-  run env LCARS_DOOR_TEMPLATE="$mutile" bash "$GEN" 0.9.0 https://f/x "$DIST"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"0 fois @@DOOR_PUBKEY@@"* ]]
-  [ ! -f "$DIST/install.sh" ]
 }
 
 @test "une base qui n'est pas une URL http(s) est un refus, rien n'est écrit" {

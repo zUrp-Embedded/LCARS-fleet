@@ -23,13 +23,10 @@ fp_release_body() { # fp_release_body <tiroir> <sha du commit> <base des assets>
   printf '```\n'
 }
 
-fp_dialect() {
+fp_dialect() { # fp_dialect <url de la forge> → github | gitea, lu sur l'hôte seul
   local u="${1%/}" hote
-  u="${u,,}"                       # l'hôte est insensible à la casse (RFC 3986 § 3.2.2)
-  u="${u#*://}"                    # le schéma s'il y en a un
-  u="${u%%/*}"                     # tout ce qui suit l'hôte : chemin, requête, fragment
-  hote="${u##*@}"                  # les identifiants d'un remote authentifié
-  hote="${hote%%:*}"               # le port
+  u="${u,,}"; u="${u#*://}"; u="${u%%/*}"
+  hote="${u##*@}"; hote="${hote%%:*}"
   case "$hote" in
     github.com|www.github.com|api.github.com|uploads.github.com) echo github ;;
     *) echo gitea ;;

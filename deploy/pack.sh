@@ -14,18 +14,21 @@
 #         LCARS_PACK_REGISTRY le registre du --publish (défaut : ghcr.io chez GitHub, l'hôte de la forge sinon)
 #         LCARS_PACK_FORGE, LCARS_PACK_OWNER, LCARS_PACK_REPO   la forge, le propriétaire et le dépôt de la
 #                             version (défaut : ceux d'un origin en http ou https)
-#         LCARS_PACK_TOKEN, LCARS_PACK_TOKEN_FILE   le jeton du --publish (write:repository et write:package)
+#         LCARS_PACK_TOKEN_FILE  le fichier du jeton du --publish (write:repository et write:package), lu par
+#                             curl et par docker login sur leur entrée ; un jeton ne s'accepte pas par l'environnement,
+#                             dont héritent le gate, npm et leurs scripts
 #         LCARS_SITE_BASE     la base d'URL de la doc, la même que 44-media
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
 #         LCARS_MINISIGN_PUBKEY, LCARS_MINISIGN_SECKEY   la clé publique inscrite dans l'installeur et le fichier de la clé
 #                             secrète qui signe le kit : l'une ne va pas sans l'autre
+#         Le gabarit de l'installeur est toujours install.sh de cet arbre.
 # PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; claude dans ~/.local/bin, que
 #         la suite ExUnit du runtime exige de qui la joue ; bats et shellcheck, que la porte
 #         de l'installeur exige ; docker compose, sans lequel cette porte saute les témoins des composes et les
-#         compte ; docker, sauf --no-image ; jq avec --publish ; minisign avec les clés
+#         compte ; docker et son plugin buildx, sauf --no-image ; jq avec --publish ; minisign avec les clés
 # EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
-#         inconnue), gate rouge, build ou doc en échec, kit incomplet, docker injoignable, publication refusée
-#         (dont une image du tag déjà publiée à une autre révision)
+#         inconnue, jeton par l'environnement), gate rouge, build ou doc en échec, kit incomplet, docker injoignable
+#         ou sans buildx, publication refusée (dont une image du tag déjà publiée à une autre révision)
 
 set -euo pipefail
 SELF="$(readlink -f "$0")"
@@ -48,6 +51,8 @@ say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 
 [[ "$EUID" -ne 0 ]] || die "pack.sh ne se lance pas en root : l'installeur généré refuse root, et le build se fait sous l'humain"
+[[ -z "${LCARS_PACK_TOKEN+x}" ]] \
+  || die "LCARS_PACK_TOKEN n'est pas lu : le gate, npm et leurs scripts en hériteraient — le jeton se donne par fichier, LCARS_PACK_TOKEN_FILE=<fichier>"
 
 # le gate et la release lisent l'arbre, git archive lit HEAD : un fichier modifié ou non suivi donnerait deux codes dans un paquet
 _etat="$(git status --porcelain 2>/dev/null)" || die "pas un dépôt git — le kit est un git archive de HEAD"
@@ -85,6 +90,12 @@ if [[ -n "$MINISIGN_PUBKEY$MINISIGN_SECKEY" ]]; then
     || die "LCARS_MINISIGN_PUBKEY et LCARS_MINISIGN_SECKEY vont ensemble : l'installeur vérifie avec la clé publique la signature que la clé secrète produit"
   [[ -r "$MINISIGN_SECKEY" ]] || die "clé secrète minisign illisible : $MINISIGN_SECKEY"
   command -v minisign >/dev/null 2>&1 || die "minisign absent — il signe le kit que la clé publique fait vérifier"
+fi
+# l'image se bâtit sans attestation (--provenance, --sbom), que seul le constructeur buildx accepte
+if [[ "$IMAGE" -eq 1 ]]; then
+  docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
+  "$PROV_DOCKER_BIN" buildx version >/dev/null 2>&1 \
+    || die "docker buildx absent — l'image se bâtit par lui (Docker Desktop l'inclut ; sur linux : apt install docker-buildx-plugin) ; « --no-image » pour le kit seul"
 fi
 ARCH="$(uname -m)"
 OTP="$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0)"
@@ -169,7 +180,8 @@ if [[ -n "$MINISIGN_SECKEY" ]]; then
   say "kit signé : $DIST/${NAME}.tar.gz.minisig"
 fi
 say "installeur de la version → $DIST/install.sh (base $DOOR_BASE${IMAGE_REMOTE:+, image $IMAGE_REMOTE})…"
-LCARS_MINISIGN_PUBKEY="$MINISIGN_PUBKEY" LCARS_DOOR_IMAGE="$IMAGE_REMOTE" bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null \
+LCARS_DOOR_TEMPLATE="$PWD/install.sh" LCARS_MINISIGN_PUBKEY="$MINISIGN_PUBKEY" LCARS_DOOR_IMAGE="$IMAGE_REMOTE" \
+  bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null \
   || die "installeur de la version non généré"
 say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, installeur compris)"
 
@@ -178,7 +190,6 @@ say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) f
 # de registre (Portainer) ne savent pas demander
 IMAGE_NAME="${LCARS_PACK_IMAGE:-lcars-fleet}"
 if [[ "$IMAGE" -eq 1 ]]; then
-  docker_endpoint || die "docker injoignable — $PROV_DOCKER_WHY ; « --no-image » pour le kit seul"
   say "image → $IMAGE_NAME:$TAG (le kit posé par les modules, puis leur doctor)…"
   "$PROV_DOCKER_BIN" build \
       -f "$STAGE/$ROOT/deploy/docker/Dockerfile" \
@@ -196,18 +207,15 @@ fi
 
 # la release se mesure avant l'image : un refus de la forge ne doit pas laisser une image publiée sans sa release
 [[ -n "$FORGE" && -n "$OWNER" ]] || die "--publish : forge ou owner indéterminables (origin n'est pas http) — LCARS_PACK_FORGE et LCARS_PACK_OWNER les posent"
-TOKEN="${LCARS_PACK_TOKEN:-}"
-[[ -n "$TOKEN" || -z "${LCARS_PACK_TOKEN_FILE:-}" ]] || TOKEN="$(cat "$LCARS_PACK_TOKEN_FILE" 2>/dev/null || true)"
-[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (portées write:repository + write:package)"
+FP_TOKEN_FILE="${LCARS_PACK_TOKEN_FILE:-}"
+[[ -n "$(read_token "$FP_TOKEN_FILE")" ]] \
+  || die "--publish : aucun jeton — LCARS_PACK_TOKEN_FILE=<fichier> (portées write:repository + write:package), lisible et non vide"
 say "publication : forge $FORGE · jeton trouvé"
-# la publication lit le jeton dans un fichier : 0600 dans l'étage, retiré avec lui à la sortie
-export FP_TOKEN_FILE="$STAGE/.jeton-de-publication"
-( umask 077; printf '%s\n' "$TOKEN" > "$FP_TOKEN_FILE" )
 fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$COMMIT" \
   || die "publication refusée avant tout envoi — voir ci-dessus"
 if [[ "$IMAGE" -eq 1 ]]; then
   _registry="${IMAGE_REMOTE%%/*}"
-  printf '%s' "$TOKEN" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
+  read_token "$FP_TOKEN_FILE" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
   trap 'rm -rf "$STAGE"; "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true' EXIT
   _rc=0; _insp="$("$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" || _rc=$?

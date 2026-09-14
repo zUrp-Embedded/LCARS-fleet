@@ -271,11 +271,12 @@ arbre_container() {
   grep -qF -- "-p lcars-fleet logs -f --tail 20 lcars" "$CALLS"
 }
 
-@test "un banc ne se recrée pas par un up simple : il sortirait du réseau de sa forge" {
+@test "un banc ne se recrée pas par un up simple : le remède mène à bench-swap-image, ou à bench-down puis --bench up — jamais à un --bench up sur le banc qui existe" {
   seed_project "$CF,$REPO/deploy/docker/docker-compose.bench.yml"
-  run bash "$SRC" -p lcars-fleet up
+  LCARS_IMAGE=lcars-fleet:9 run bash "$SRC" -p lcars-fleet up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"est un banc"*"--forge-project lcars --bench up"* ]]
+  [[ "$output" == *"est un banc"*"remplacer son conteneur : deploy/docker/bench/bench-swap-image.sh --forge-project lcars --image lcars-fleet:9"* ]]
+  [[ "$output" == *"le remonter en entier : deploy/docker/bench/bench-down.sh --project lcars --yes, puis deploy/container --forge-project lcars --bench up"* ]]
   refute grep -q -- ' up -d' "$CALLS"
 }
 

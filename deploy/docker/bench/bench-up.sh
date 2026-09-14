@@ -74,10 +74,11 @@ for _outil in curl jq git; do
 done
 PROV_DOCKER_BIN="$DOCKER_BIN"
 docker_endpoint || die "$PROV_DOCKER_WHY" 1
-DOCKER_BIN="$PROV_DOCKER_BIN"
+# la CLI qui a répondu à la sonde sert aussi aux enfants : enroll-catalogue et forge-runner la lisent
+export DOCKER_BIN="$PROV_DOCKER_BIN"
 d image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement : $IMAGE — la tirer (deploy/container pull) ou la bâtir (deploy/pack.sh)" 1
-IMAGE_REV="$(d image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE" 2>/dev/null || true)"
+IMAGE_REV="$(bench_revision "$IMAGE")"
 [[ -n "$IMAGE_REV" && "$IMAGE_REV" != "unknown" ]] \
   || die "l'image $IMAGE ne porte pas de révision (label OCI) — le banc ne sème pas un code qu'il ne peut pas nommer" 7
 OBJETS="$(bench_objets)" \
@@ -119,21 +120,22 @@ bench_mot_de_passe "$ADMIRAL" "$ADMIRAL_PW"
 
 # ─── L'amorçage : admin, jeton, seed, structure, humain ─────────────────────────────────────────
 say "amorçage de la forge : compte $ADMIRAL, jeton master, seed"
-case "$(forge_admin_ensure "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "$ADMIRAL_PW")" in
+case "$(forge_admin_ensure "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL")" in
   cree)    say "compte $ADMIRAL créé (site-admin de la forge)" ;;
-  present) forge_admin_password "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "$ADMIRAL_PW" \
-             || die "rotation du mot de passe de $ADMIRAL impossible" 4
-           say "compte $ADMIRAL déjà présent — mot de passe de banc reposé" ;;
+  present) say "compte $ADMIRAL déjà présent" ;;
   *)       die "création du compte $ADMIRAL impossible" 4 ;;
 esac
 MASTER_TOKEN="$(forge_master_token "$DOCKER_BIN" "$FORGE_CONTAINER" "$ADMIRAL" "bench-$(date +%s)")" \
   || die "la forge n'a pas rendu de jeton master" 4
-# les jetons de l'hôte vivent dans des fichiers 0600 d'un dossier 0700 : forge_api et forge-runner les lisent, jamais un argv
+# les secrets de l'hôte vivent dans des fichiers 0600 d'un dossier 0700 : forge_api, git et forge-runner les lisent, jamais un argv
 JETONS="$(mktemp -d "${TMPDIR:-/tmp}/bench-up-jetons.XXXXXX")"
 trap 'rm -rf "$JETONS"' EXIT
 ( umask 077; printf '%s\n' "$MASTER_TOKEN" > "$JETONS/master" )
 forge_token_ok "$FORGE_LOCAL_URL" "$JETONS/master" || die "le jeton master ne s'authentifie pas" 4
 say "jeton master minté"
+forge_admin_password "$FORGE_LOCAL_URL" "$JETONS/master" "$ADMIRAL" "$ADMIRAL_PW" \
+  || die "mot de passe de banc de $ADMIRAL non posé" 4
+say "mot de passe de banc posé sur $ADMIRAL"
 SEED_PW="$(in_container cat "$(prov_canon "$PROV_FORGE_SEED_FILE")" 2>/dev/null | tr -d '\r\n' || true)"
 if [[ -z "$SEED_PW" ]]; then
   SEED_PW="$(forge_seed_new)"; say "seed de banc généré"
@@ -145,8 +147,9 @@ fi
 ROSTER_RC=0; ENROLL_OUT="$(prov_roster_conteneur "$IMAGE" in_container)" || ROSTER_RC=$?
 [[ "$ROSTER_RC" -ne 1 ]] || die "dérivation du roster en échec (enroll-catalogue.sh, image $IMAGE)" 4
 [[ "$ROSTER_RC" -eq 0 ]] || die "roster non déposé dans la recette de $CONTAINER" 4
-ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"; ORG="${ORG:-$PROV_FORGE_ORG_DEFAULT}"
-say "roster dérivé du catalogue $(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_ROLES=//p') · org $ORG"
+# une org non déclarée par le roster est celle que la recette prend par défaut
+ORG="$(sed -n 's/^\[enroll-catalogue\] org *: \([A-Za-z0-9_.-]\{1,\}\)$/\1/p' <<<"$ENROLL_OUT")"; ORG="${ORG:-$PROV_FORGE_ORG_DEFAULT}"
+say "roster dérivé du catalogue de l'image ($(sed -n 's/^\[enroll-catalogue\] rôles *: //p' <<<"$ENROLL_OUT")) · org $ORG"
 
 printf '%s' "$MASTER_TOKEN" | in_container "$GESTES" config-token || die "jeton master refusé par le conteneur" 4
 printf '%s' "$SEED_PW"      | in_container "$GESTES" config-seed  || die "seed non posé dans le conteneur" 4
@@ -176,14 +179,15 @@ bench_mot_de_passe "$HUMAN" "$HUMAN_PW"
 bench_creds
 
 # ─── Le semis des dépôts : la source que le conteneur clone, à la révision de l'image ──────────
-SYS_TOKEN="$(in_container cat "$(prov_canon "$PROV_SYSTEM_TOKEN_FILE")" 2>/dev/null | tr -d '[:space:]' || true)"
-[[ -n "$SYS_TOKEN" ]] || die "jeton système absent après la relance — le banc n'est pas prêt (docker logs $CONTAINER)" 6
-git_forge() {
-  GIT_CONFIG_COUNT=1 \
-  GIT_CONFIG_KEY_0="http.$FORGE_LOCAL_URL/.extraheader" \
-  GIT_CONFIG_VALUE_0="Authorization: token ${SYS_TOKEN}" \
-  git "$@"
-}
+( umask 077
+  { printf '[http "%s/"]\n\textraHeader = Authorization: token ' "$FORGE_LOCAL_URL"
+    in_container cat "$(prov_canon "$PROV_SYSTEM_TOKEN_FILE")" 2>/dev/null | tr -d '[:space:]'
+    printf '\n'
+  } > "$JETONS/git-forge" ) || true
+grep -q 'token [^[:space:]]' "$JETONS/git-forge" \
+  || die "jeton système absent après la relance — le banc n'est pas prêt (docker logs $CONTAINER)" 6
+# le jeton système atteint git par un fichier de configuration 0600 : ni argv, ni environnement
+git_forge() { git -c "include.path=$JETONS/git-forge" "$@"; }
 LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/lcars.git"
 if [[ -d "$REPO_ROOT/.git" ]]; then
   git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
@@ -230,15 +234,25 @@ fi
 
 # ─── L'état du conteneur, le runner, la fleet ───────────────────────────────────────────────────
 ROLE_TOKENS="$(bench_jetons_de_role)"
-CONTAINER_PROV_RC="$(in_container cat /run/lcars-forge.rc 2>/dev/null | tr -d '[:space:]' || true)"
-[[ "$CONTAINER_PROV_RC" =~ ^[0-9]+$ ]] || CONTAINER_PROV_RC=""
+verdict_conteneur() { # verdict_conteneur <fichier du conteneur> → le code publié, ou rien
+  local v; v="$(in_container cat "$1" 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ ! "$v" =~ ^[0-9]+$ ]] || printf '%s\n' "$v"
+}
+# une image qui n'écrit que lcars-provision.rc y rend 0 sur un geste en drift : seul un échec s'y distingue
+VERDICT_FICHIER=/run/lcars-forge.rc
+CONTAINER_PROV_RC="$(verdict_conteneur "$VERDICT_FICHIER")"
+if [[ -z "$CONTAINER_PROV_RC" ]]; then
+  VERDICT_FICHIER=/run/lcars-provision.rc
+  CONTAINER_PROV_RC="$(verdict_conteneur "$VERDICT_FICHIER")"
+fi
 CONTAINER_PROV_OK=1
-case "$CONTAINER_PROV_RC" in
-  0)  CONTAINER_PROV_STATE="convergé" ;;
-  2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor le nomme)" ;;
-  "") CONTAINER_PROV_STATE="non mesuré — /run/lcars-forge.rc illisible dans le conteneur (il n'a peut-être pas fini de converger)" ;;
-  *)  CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor)"
-      CONTAINER_PROV_OK=0 ;;
+case "$VERDICT_FICHIER:$CONTAINER_PROV_RC" in
+  */lcars-provision.rc:0) CONTAINER_PROV_STATE="aucun geste en échec — cette image publie son verdict sans distinguer un drift (docker logs $CONTAINER nomme les gestes en drift)" ;;
+  *:0)  CONTAINER_PROV_STATE="convergé" ;;
+  *:2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor le nomme)" ;;
+  *:)   CONTAINER_PROV_STATE="non mesuré — ni /run/lcars-forge.rc ni /run/lcars-provision.rc ne se lisent dans le conteneur (il n'a peut-être pas fini de converger)" ;;
+  *)    CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien (docker exec $CONTAINER $RACINE_CONTENEUR/deploy/provision doctor)"
+        CONTAINER_PROV_OK=0 ;;
 esac
 
 RUNNER_SERT=0
@@ -247,7 +261,7 @@ if [[ "$WITH_RUNNER" -eq 0 ]]; then
 else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
   ( umask 077; in_container "$GESTES" runner-token < /dev/null 2>/dev/null | tail -1 > "$JETONS/reg" ) || true
-  if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
+  if "$DOCKER_DIR/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" --admin-token-file "$JETONS/master" --reg-token-file "$JETONS/reg" \
        --instance-url "$(job_forge_url "$FORGE_PORT" "$ADVERTISE")" --network "$FORGE_NET" \
        --project "$RUNNER_PROJECT" --labels "$RUNNER_LABELS" --bench "$PROJECT" >"$RUNNER_LOG" 2>&1; then

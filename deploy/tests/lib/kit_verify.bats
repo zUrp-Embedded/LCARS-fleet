@@ -9,8 +9,8 @@
 setup() {
   LIB="$BATS_TEST_DIRNAME/../../lib/kit-verify.sh"
   [ -f "$LIB" ]
-  # la lib se joue en sous-shell, seule : pack.sh la source sans que rien ne garantisse provision-lib avant elle
-  LIBS=". '$LIB'"
+  # la lib se joue en sous-shell après provision-lib, dans l'ordre où pack.sh les source
+  LIBS=". '$BATS_TEST_DIRNAME/../../lib/provision-lib.sh'; . '$LIB'"
   local D="$BATS_TEST_DIRNAME/../.."
   STAMP="$(sed -n 's/^PROV_SOURCE_STAMP=//p' "$D/installer-constants.env")"
   [ -n "$STAMP" ]

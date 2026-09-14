@@ -38,6 +38,8 @@ services:
       # les listeners écoutent sur toutes les interfaces du conteneur ; la frontière est la
       # publication compose ci-dessous, sur la loopback de l'hôte
       LCARS_BIND_HOST: 0.0.0.0
+      # le deck écoute dans le conteneur au port que la publication ci-dessous vise
+      LCARS_LANDING_PORT: "${PROV_DECK_PORT_DEFAULT:?PROV_DECK_PORT_DEFAULT absent}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # sans défaut : c'est la seule variable par laquelle le conteneur écrit sur une forge
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"

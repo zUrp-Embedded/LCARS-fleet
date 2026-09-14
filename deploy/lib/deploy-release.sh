@@ -19,8 +19,8 @@ set -euo pipefail
 # shellcheck source=provision-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/provision-lib.sh"
 
-say() { echo "install: $*" >&2; }
-die() { echo "install: ERREUR — $*" >&2; exit 1; }
+say() { echo "deploy-release: $*" >&2; }
+die() { echo "deploy-release: ERREUR — $*" >&2; exit 1; }
 
 atomic_swap_dir() { # atomic_swap_dir <source> <destination> — la destination précédente est gardée en .prev
   local src="$1" dst="$2"
@@ -48,7 +48,7 @@ build_release() {
   local rel="$runtime_dir/_build/prod/rel/lcars_fleet"
   if [[ -x "$rel/bin/lcars_fleet" ]]; then
     if [[ -f "$runtime_dir/../$PROV_SOURCE_STAMP" ]]; then
-      echo "install: kit — release bâtie par pack.sh, déjà passée au gate : rien à compiler" >&2
+      echo "deploy-release: kit — release bâtie par pack.sh, déjà passée au gate : rien à compiler" >&2
       return 0
     fi
     local src_sha built_sha m
@@ -57,10 +57,10 @@ build_release() {
     [[ -n "$m" && -f "$m/priv/api/build_info.txt" ]] && built_sha="$(sed -n 's/^sha=//p' "$m/priv/api/build_info.txt" 2>/dev/null | head -1)"
     if [[ -n "$src_sha" && "$src_sha" == "${built_sha:-}" ]] \
        && git -C "$runtime_dir" diff --quiet HEAD -- . 2>/dev/null; then
-      echo "install: release déjà bâtie et attestée ($src_sha, arbre propre) — rien à compiler" >&2
+      echo "deploy-release: release déjà bâtie et attestée ($src_sha, arbre propre) — rien à compiler" >&2
       return 0
     fi
-    echo "install: un _build/prod/rel existe mais n'atteste pas cette source (build ${built_sha:-inconnu} vs HEAD ${src_sha:-inconnu}) — rebâti" >&2
+    echo "deploy-release: un _build/prod/rel existe mais n'atteste pas cette source (build ${built_sha:-inconnu} vs HEAD ${src_sha:-inconnu}) — rebâti" >&2
   fi
 
   (

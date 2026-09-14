@@ -103,12 +103,12 @@ bench_refus_etrangers() { # bench_refus_etrangers <étrangers> <remède> — l'a
   exit 1
 }
 
-quiet() { # quiet <cmd…> — la sortie n'apparaît que si la commande échoue (40 dernières lignes)
-  local out rc=0; out="$(mktemp "${TMPDIR:-/tmp}/$BENCH_NOM.XXXXXX")"
-  "$@" > "$out" 2>&1 || rc=$?
-  [[ "$rc" -eq 0 ]] || tail -n 40 "$out" >&2
-  rm -f "$out"
-  return "$rc"
+quiet() { # quiet <cmd…> — la sortie n'apparaît que si la commande échoue, par la capture de la lib
+  run_capture "$@" || { local rc=$?; prov_dump_last; return "$rc"; }
+}
+
+bench_revision() { # bench_revision <image> → la révision que pack.sh inscrit dans le label OCI de l'image, ou rien
+  "$DOCKER_BIN" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1" 2>/dev/null || true
 }
 
 # le deck compare exactement l'entrée annoncée à son client OAuth2 : seule celle-là est nommée, le
