@@ -335,7 +335,7 @@ printf "%s  %s\n" "$somme" "$copie/kit.tar.gz" | sha256sum -c --quiet --strict >
   || { echo "  $archive ne porte plus la somme inscrite dans l'\''installeur : root ne le détare pas, rien n'\''est fait ; relancer l'\''installeur." >&2; exit 1; }
 tar --no-same-owner -xzf "$copie/kit.tar.gz" -C "$copie" \
   || { echo "  la copie de $archive ne se détare pas : rien n'\''est fait." >&2; exit 1; }
-bash "$copie/lcars_install/install.sh" "$@"'
+LCARS_KIT_OPERATEUR="${archive%/*}/lcars_install" bash "$copie/lcars_install/install.sh" "$@"'
 # Les choix de l'opérateur vivent dans ses variables ; sudo ne les transmet pas, la relance les reçoit en options.
 choix_options() { # choix_options → CHOIX, les choix de l'opérateur en options
   CHOIX=()
@@ -392,7 +392,7 @@ suite_root() { # la relance en root : la mesure root décide seule, puis le dél
   echo ""
   [[ "$PREFLIGHT_RC" -eq 0 ]] || stop "${R}La mesure en root refuse ce terrain.${N} Ce qu'elle constate :" "$(constat)"
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/workstation doctor"
+    echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : $ARBRE_DIT/deploy/workstation doctor"
     echo ""
     exit 0
   fi
@@ -450,6 +450,11 @@ else
   PROVENANCE=kit
 fi
 DELEGUE="$SCRIPT_DIR/deploy/$MODE"
+# une commande donnée à l'opérateur se joue depuis n'importe quel dossier, dans l'arbre qui lui reste : pipée, le
+# kit détaré sous ~/.lcars/kits/ ; en root, la copie vérifiée d'un kit part à la sortie, le kit détaré de son compte reste
+ARBRE_OPERATEUR="$SCRIPT_DIR"
+[[ "$SCRIPT_DIR" != */lcars-kit.??????/lcars_install || -z "${LCARS_KIT_OPERATEUR:-}" ]] || ARBRE_OPERATEUR="$LCARS_KIT_OPERATEUR"
+ARBRE_DIT="$(printf '%q' "$ARBRE_OPERATEUR")"
 # le délégué ne part qu'après la pause : son absence se dit avant tout ; celle du runner, la mesure la dit
 [[ -x "$DELEGUE" ]] || stop "${R}L'arbre est incomplet : $DELEGUE absent ou non exécutable.${N}" "Ce n'est pas docker qui manque, c'est la source."
 
@@ -613,7 +618,7 @@ fi
 BASE_PROJET="$(ou "$(fait projet)")"
 if [[ "$MODE" == "container" && -n "$(fait projet_pris)" ]]; then
   IMAGE_DITE="${DOOR_IMAGE:-${LCARS_IMAGE:-}}"
-  TIRER=""; [[ "$PROVENANCE" != release || -z "$DOOR_IMAGE" ]] || TIRER="LCARS_IMAGE=$DOOR_IMAGE deploy/container pull && "
+  TIRER=""; [[ "$PROVENANCE" != release || -z "$DOOR_IMAGE" ]] || TIRER="LCARS_IMAGE=$DOOR_IMAGE $ARBRE_DIT/deploy/container pull && "
   PROJET_DIT=""; [[ "${#PROJET_PORTS[@]}" -eq 0 ]] || PROJET_DIT="$(printf ' %q' "${PROJET_PORTS[@]}")"
   if [[ ",$(fait projet_pris)," != *",$BASE_PROJET-fleet,"* ]]; then
     stop "${R}Un projet compose « $(fait projet_pris) » existe déjà sur ce daemon, sous la base « $BASE_PROJET ».${N}" \
@@ -621,12 +626,12 @@ if [[ "$MODE" == "container" && -n "$(fait projet_pris)" ]]; then
   elif [[ "$WITH_BENCH" -eq 1 ]]; then
     stop "${R}Le banc « $BASE_PROJET » existe déjà sur ce daemon ($(fait projet_pris)).${N} L'installeur ne pose pas un banc sur un autre." \
          "Le mettre à jour, la forge, ses jetons et les volumes gardés :" \
-         "  ${TIRER}deploy/docker/bench/bench-swap-image.sh --image ${IMAGE_DITE:-<image>}$PROJET_DIT" \
+         "  ${TIRER}$ARBRE_DIT/deploy/docker/bench/bench-swap-image.sh --image ${IMAGE_DITE:-<image>}$PROJET_DIT" \
          "Un second banc à côté : la même commande, avec --forge-project <autre base>."
   else
     stop "${R}L'instance « $BASE_PROJET-fleet » existe déjà sur ce daemon.${N} L'installeur ne pose pas une instance sur une autre." \
          "La mettre à jour, volumes et magasin gardés :" \
-         "  ${TIRER}${IMAGE_DITE:+LCARS_IMAGE=$IMAGE_DITE }deploy/container -p $BASE_PROJET-fleet up" \
+         "  ${TIRER}${IMAGE_DITE:+LCARS_IMAGE=$IMAGE_DITE }$ARBRE_DIT/deploy/container -p $BASE_PROJET-fleet up" \
          "Une seconde instance à côté : la même commande, avec --forge-project <autre base>."
   fi
 fi
@@ -658,19 +663,21 @@ if [[ "$MODE" == "container" && "$PROVENANCE" == "release" && -n "$DOOR_IMAGE" ]
 fi
 if [[ "$MODE" == "container" ]]; then
   if [[ "$WITH_BENCH" -eq 1 ]]; then
-    RETOUR="deploy/docker/bench/bench-down.sh --project $BASE_PROJET --yes : le conteneur, la forge, le runner et le magasin"
+    RETOUR="$ARBRE_DIT/deploy/docker/bench/bench-down.sh --project $BASE_PROJET --yes : le conteneur, la forge, le runner et le magasin"
   else
-    RETOUR="deploy/container -p $BASE_PROJET-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"
+    RETOUR="$ARBRE_DIT/deploy/container -p $BASE_PROJET-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"
   fi
   # mesuré sur .63 (docker natif, beta2) : banc 93 à 107 s image présente, 125 s tirage compris ; instance
-  # seule 7 s image présente ; le tirage anonyme de l'image, 16 à 31 s
+  # seule 7 s image présente, sans la structure de la forge fournie (forge-apply, qui la suit) ; le tirage
+  # anonyme de l'image, 16 à 31 s. Rien n'est mesuré sous WSL et Docker Desktop (2001).
+  HORS=""
   if [[ "$WITH_BENCH" -eq 1 ]]; then DUREE_LA="~1 min 30"; DUREE_TIRER="~2 min"
-  else DUREE_LA="moins d'une minute"; DUREE_TIRER="~1 min"
+  else DUREE_LA="moins d'une minute"; DUREE_TIRER="~1 min"; HORS=", hors structure de la forge"
   fi
   case "$IMAGE_ETAT" in
-    presente) DUREE="durée $DUREE_LA, l'image est sur ce daemon" ;;
-    a_tirer)  DUREE="durée $DUREE_TIRER, tirage de l'image compris" ;;
-    *)        DUREE="durée $DUREE_LA image présente, $DUREE_TIRER à tirer" ;;
+    presente) DUREE="durée $DUREE_LA, l'image est sur ce daemon$HORS" ;;
+    a_tirer)  DUREE="durée $DUREE_TIRER, tirage de l'image compris$HORS" ;;
+    *)        DUREE="durée $DUREE_LA image présente, $DUREE_TIRER à tirer$HORS" ;;
   esac
   cat <<EOF
   ${W}Installation en conteneur${N} — LCARS tourne dans Docker, la distribution
@@ -678,7 +685,7 @@ if [[ "$MODE" == "container" ]]; then
     Modifie    Docker : un conteneur et deux volumes au projet $BASE_PROJET-fleet, le magasin $BASE_PROJET-fleet-*
     Requiert   docker · la forge (ci-dessus)
     Espace     ~3 Go · $DUREE · ports $(ou "$PORT_DECK") (deck), $(ou "$PORT_SSH") (ssh)
-    Statut     deploy/container -p $BASE_PROJET-fleet status
+    Statut     $ARBRE_DIT/deploy/container -p $BASE_PROJET-fleet status
     Retour     $RETOUR
 EOF
   # l'installation dans ce système n'est proposée qu'à une machine que ce canal peut poser
@@ -718,7 +725,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo ""
     relance_root
   fi
-  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : deploy/container -p $BASE_PROJET-fleet status"
+  echo "  ${W}--check${N} : rien n'est fait. Pour un déploiement existant : $ARBRE_DIT/deploy/container -p $BASE_PROJET-fleet status"
   echo ""
   exit 0
 fi

@@ -239,7 +239,17 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"converge  : appliqué avec drift résiduel — un geste manque, rien n'est cassé :"$'\n'"              tokens : AUCUN runner CI enregistré sur cette forge"$'\n'"              (le détail et son remède : docker logs bt-fleet-lcars-1)"* ]] || { echo "$output"; return 1; }
   refute_out 'provision doctor|tout job reste' <<<"$output"
   grep -qx 'DOCKER:logs --since 2026-09-14T22:45:50.339480853Z bt-fleet-lcars-1' "$CALLS"
-  [[ "$output" == *"statut    : deploy/container -p bt-fleet status"$'\n'"[bench-up]   détruire  : deploy/docker/bench/bench-down.sh --project bt --yes"* ]]
+  [[ "$output" == *"statut    : $ROOT/deploy/container -p bt-fleet status"$'\n'"[bench-up]   détruire  : $ROOT/deploy/docker/bench/bench-down.sh --project bt --yes"* ]]
+  # à qui a pipé l'installeur, le dossier courant n'est pas le kit : chaque commande se joue depuis n'importe où
+  local statut detruire
+  statut="$(sed -n 's/^\[bench-up\]   statut    : //p' <<<"$output")"
+  detruire="$(sed -n 's/^\[bench-up\]   détruire  : //p' <<<"$output")"
+  printf '#!/usr/bin/env bash\necho "JOUE:${0##*/} $*"\n' > "$ROOT/deploy/container"
+  cp "$ROOT/deploy/container" "$BENCH/bench-down.sh"
+  chmod 0755 "$ROOT/deploy/container" "$BENCH/bench-down.sh"
+  run bash -c "cd / && $statut && $detruire"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "JOUE:container -p bt-fleet status"$'\n'"JOUE:bench-down.sh --project bt --yes" ]
 }
 
 @test "le runner s'enrôle avant la relance : le boot qui publie le verdict lu par le banc et par status le voit" {

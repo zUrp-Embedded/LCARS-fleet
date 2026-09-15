@@ -526,7 +526,7 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   local a; a="$(_arbre projet_pris=lcars-fleet forge_fournie=https://forge.example.net forge_joignable=oui)"
   LCARS_IMAGE=lcars-fleet:neuve porte "$a" --port-deck 20091
   [ "$status" -eq 1 ]
-  [[ "$output" == *"L'instance « lcars-fleet » existe déjà"*"volumes et magasin gardés"*"LCARS_IMAGE=lcars-fleet:neuve deploy/container -p lcars-fleet up"* ]]
+  [[ "$output" == *"L'instance « lcars-fleet » existe déjà"*"volumes et magasin gardés"*"LCARS_IMAGE=lcars-fleet:neuve $a/deploy/container -p lcars-fleet up"* ]]
   refute_out 'reset|CONTAINER:' <<<"$output"
   # sans forge indiquée, la mise à jour de l'instance vient avant la demande d'une forge
   a="$(_arbre projet_pris=lcars-fleet)"
@@ -537,7 +537,7 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   a="$(_arbre projet_pris=lcars-fleet,lcars-forge,lcars-runner)"
   porte "$a" --bench --forge-project lcars
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Le banc « lcars » existe déjà"*"deploy/docker/bench/bench-swap-image.sh --image <image> --forge-project lcars"* ]]
+  [[ "$output" == *"Le banc « lcars » existe déjà"*"$a/deploy/docker/bench/bench-swap-image.sh --image <image> --forge-project lcars"* ]]
   refute_out 'bench-down|CONTAINER:' <<<"$output"
 }
 
@@ -546,7 +546,7 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker" projet_pris=lcars-fleet forge_fournie=https://forge.example.net forge_joignable=oui
   pipee
   [ "$status" -eq 1 ]
-  [[ "$output" == *"LCARS_IMAGE=ghcr.io/o/r:$TAG deploy/container pull && LCARS_IMAGE=ghcr.io/o/r:$TAG deploy/container -p lcars-fleet up"* ]]
+  [[ "$output" == *"LCARS_IMAGE=ghcr.io/o/r:$TAG $KITS/lcars_install/deploy/container pull && LCARS_IMAGE=ghcr.io/o/r:$TAG $KITS/lcars_install/deploy/container -p lcars-fleet up"* ]]
 }
 
 @test "un projet d'une autre installation sous la même base arrête le mode conteneur, pas le mode système" {
@@ -669,12 +669,12 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   local a; a="$(_arbre projet=bob_10)"
   porte "$a" --bench --forge-project bob_10 --check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Retour     deploy/docker/bench/bench-down.sh --project bob_10 --yes : le conteneur, la forge, le runner et le magasin"* ]]
+  [[ "$output" == *"Retour     $a/deploy/docker/bench/bench-down.sh --project bob_10 --yes : le conteneur, la forge, le runner et le magasin"* ]]
   refute_out 'reset' <<<"$output"
   a="$(_arbre projet=bob_10 forge_fournie=https://forge.example.net forge_joignable=oui)"
   porte "$a" --forge-project bob_10 --check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Retour     deploy/container -p bob_10-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"* ]]
+  [[ "$output" == *"Retour     $a/deploy/container -p bob_10-fleet reset, 30 s : le conteneur et ses volumes ; le magasin reste"* ]]
   refute_out 'bench-down' <<<"$output"
 }
 
@@ -1165,17 +1165,44 @@ EOF
   pipee --bench --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"Espace     ~3 Go · durée ~2 min, tirage de l'image compris · ports"* ]]
-  [[ "$output" == *"Statut     deploy/container -p lcars-fleet status"$'\n'"    Retour     deploy/docker/bench/bench-down.sh --project lcars --yes"* ]]
-  [[ "$output" == *"--check : rien n'est fait. Pour un déploiement existant : deploy/container -p lcars-fleet status"* ]]
+  [[ "$output" == *"Statut     $KITS/lcars_install/deploy/container -p lcars-fleet status"$'\n'"    Retour     $KITS/lcars_install/deploy/docker/bench/bench-down.sh --project lcars --yes"* ]]
+  [[ "$output" == *"--check : rien n'est fait. Pour un déploiement existant : $KITS/lcars_install/deploy/container -p lcars-fleet status"* ]]
   refute_out '15 min' <<<"$output"
   _daemon_avec_image oui
   pipee --bench --check
-  [[ "$output" == *"durée ~1 min 30, l'image est sur ce daemon"* ]]
+  [[ "$output" == *"durée ~1 min 30, l'image est sur ce daemon · ports"* ]]
+  # le banc pose la structure de sa forge dans sa durée ; une instance seule la laisse à forge-apply, qui la suit
+  refute_out 'hors structure' <<<"$output"
   # hors release, l'image n'est pas nommée : les deux durées
   local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
   porte "$a" --check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"durée moins d'une minute image présente, ~1 min à tirer"* ]]
+  [[ "$output" == *"durée moins d'une minute image présente, ~1 min à tirer, hors structure de la forge"* ]]
+}
+
+@test "pipée, chaque commande donnée à l'opérateur porte le chemin du kit et se joue depuis n'importe quel dossier : statut, retour, --check, et la sonde du système après sudo" {
+  _daemon_avec_image oui
+  IMAGE_PORTE="ghcr.io/o/r:$TAG" _release "docker_bin=$BINDIR/docker" forge_fournie=https://forge.example.net forge_joignable=oui
+  pipee
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pipee --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local statut retour check
+  statut="$(sed -n 's/^    Statut     //p' <<<"$output")"
+  retour="$(sed -n 's/^    Retour     \(.*\), 30 s : .*$/\1/p' <<<"$output")"
+  check="$(sed -n "s/^.*--check : rien n'est fait. Pour un déploiement existant : //p" <<<"$output")"
+  [ "$statut" = "$KITS/lcars_install/deploy/container -p lcars-fleet status" ]
+  [ "$check" = "$statut" ]
+  run bash -c "cd / && $statut && $retour"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "IMAGE:"$'\n'"CONTAINER:-p lcars-fleet status"$'\n'"IMAGE:"$'\n'"CONTAINER:-p lcars-fleet reset" ]
+  # après sudo, root joue une copie vérifiée du kit, qu'il retire à la sortie : la sonde nommée est celle du kit de l'opérateur
+  pipee --workstation --check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  check="$(sed -n "s/^.*--check : rien n'est fait. Pour un déploiement existant : //p" <<<"$output")"
+  [ "$check" = "$KITS/lcars_install/deploy/workstation doctor" ] || { echo "$output"; return 1; }
+  run bash -c "cd / && $check"
+  [[ "$output" == "WORKSTATION:doctor"* ]]
 }
 
 @test "une commande proposée par la porte pipée porte l'adresse de sa release ; l'installation dans ce système n'est proposée qu'à une machine que ce canal peut poser" {
