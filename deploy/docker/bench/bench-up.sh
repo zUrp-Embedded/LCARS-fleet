@@ -275,7 +275,7 @@ if [[ -z "$CONTAINER_PROV_RC" ]]; then
 fi
 CONTAINER_PROV_OK=1
 gestes_dits() { # gestes_dits → « : » puis un geste en défaut par ligne, lus au journal du dernier démarrage ; sans eux, où les lire
-  local defauts; defauts="$(bench_gestes_en_defaut)"
+  local defauts; defauts="$(gestes_en_defaut "$DOCKER_BIN" "$CONTAINER")"
   if [[ -n "$defauts" ]]; then
     printf ' :\n%s\n              (le détail et son remède : docker logs %s)' "$(sed 's/^/              /' <<<"$defauts")" "$CONTAINER"
   else

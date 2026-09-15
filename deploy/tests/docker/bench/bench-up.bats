@@ -267,12 +267,16 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 }
 
 # bats test_tags=structure
-@test "le PRÊT et status lisent les gestes en défaut par la même expression" {
-  local lib="$BATS_TEST_DIRNAME/../../../lib/bench.sh" cont="$BATS_TEST_DIRNAME/../../../container" e1 e2
-  e1="$(grep -oE "sed -n 's/\^\\\\\[\\\\\(container-init[^']*'" "$lib")"
-  e2="$(grep -oE "sed -n 's/\^\\\\\[\\\\\(container-init[^']*'" "$cont")"
-  [ -n "$e1" ]
-  [ "$e1" = "$e2" ]
+@test "la lecture des gestes en défaut a une seule écriture dans l'installeur : la lib du banc, que le PRÊT et status appellent" {
+  local deploy; deploy="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  local ecritures definitions
+  # toute lecture du journal de boot qui trie ses lignes de geste, hors des témoins
+  ecritures="$(grep -rlE 'container-init.*forge.*DRIFT' "$deploy" --exclude-dir=tests || true)"
+  [ "$ecritures" = "$deploy/lib/bench.sh" ] || { echo "lecture du journal de boot écrite ailleurs : $ecritures"; return 1; }
+  definitions="$(grep -rlE '^[[:space:]]*gestes_en_defaut\(\)' "$deploy" --exclude-dir=tests || true)"
+  [ "$definitions" = "$deploy/lib/bench.sh" ] || { echo "gestes_en_defaut défini ailleurs : $definitions"; return 1; }
+  grep -qE 'gestes_en_defaut "\$DOCKER" "\$1"' "$deploy/container"
+  grep -qE 'gestes_en_defaut "\$DOCKER_BIN" "\$CONTAINER"' "$deploy/docker/bench/bench-up.sh"
 }
 
 @test "un verdict de conteneur illisible est une non-mesure, dite, pas un échec" {

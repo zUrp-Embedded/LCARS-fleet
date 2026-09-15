@@ -7,7 +7,7 @@
 # STATUS: la lib des scripts de banc — options et projets, marqueur, conteneur, attente, credentials, relance
 #
 # Sourcée par docker/bench/bench-up.sh, bench-swap-image.sh et bench-down.sh, qui posent BENCH_NOM
-# avant. Un banc est une base : les projets compose <base>-fleet, <base>-forge et <base>-runner, et
+# avant ; et par deploy/container, dans un sous-shell, pour la seule lecture des gestes en défaut. Un banc est une base : les projets compose <base>-fleet, <base>-forge et <base>-runner, et
 # le magasin <base>-fleet-*. Chaque conteneur et volume de ces projets porte le label
 # lcars.bench=<base> ; un script de banc ne réutilise ni ne détruit un objet qui ne le porte pas.
 
@@ -170,12 +170,12 @@ bench_creds() { # bench_creds — les credentials claude chez l'humain ; absente
 
 # le boot préfixe chaque ligne d'un geste ([container-init], [forge.d]) et ses lignes DRIFT et FAIL nomment le
 # geste ; seules celles du démarrage en cours comptent : le journal d'un conteneur relancé garde les boots d'avant.
-# La même lecture que « deploy/container status » (gestes_en_defaut), que bench-up.bats tient d'accord.
-bench_gestes_en_defaut() { # bench_gestes_en_defaut → « <geste> : <constat> » par geste en drift ou en échec au dernier démarrage, sans le remède
+# Écrite une fois : le PRÊT du banc la lit, et « deploy/container status », qui source cette lib pour elle.
+gestes_en_defaut() { # gestes_en_defaut <docker> <conteneur> → « <geste> : <constat> » par geste en drift ou en échec au dernier démarrage, sans le remède
   local debut
-  debut="$("$DOCKER_BIN" inspect -f '{{.State.StartedAt}}' "$CONTAINER" 2>/dev/null)" || return 0
+  debut="$("$1" inspect -f '{{.State.StartedAt}}' "$2" 2>/dev/null)" || return 0
   [[ -n "$debut" ]] || return 0
-  "$DOCKER_BIN" logs --since "$debut" "$CONTAINER" 2>&1 \
+  "$1" logs --since "$debut" "$2" 2>&1 \
     | sed -n 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
     | sed 's/ — .*$//' | awk '!vu[$0]++' || true
 }

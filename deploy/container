@@ -399,15 +399,14 @@ verdict_forge() { # verdict_forge → VERDICT_FORGE, le code publié ou vide ; V
   [[ -z "$VERDICT_FORGE" ]] || VERDICT_SANS_DRIFT=1
 }
 
-# le boot préfixe chaque ligne d'un geste ([container-init], [forge.d]) et ses lignes DRIFT et FAIL nomment le
-# geste ; seules celles du démarrage en cours comptent : le journal d'un conteneur relancé garde les boots d'avant
-gestes_en_defaut() { # gestes_en_defaut <id> → « <geste> : <constat> » par geste en drift ou en échec au dernier démarrage, sans le remède
-  local debut
-  debut="$("$DOCKER" inspect -f '{{.State.StartedAt}}' "$1" 2>/dev/null)" || return 0
-  [[ -n "$debut" ]] || return 0
-  "$DOCKER" logs --since "$debut" "$1" 2>&1 \
-    | sed -n 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
-    | sed 's/ — .*$//' | awk '!vu[$0]++' || true
+# les gestes en défaut au dernier démarrage se lisent comme le PRÊT du banc les lit : une seule écriture, dans la
+# lib du banc, sourcée dans un sous-shell — ses défauts de banc (PROJECT, HUMAN, IMAGE…) ne touchent pas cette instance
+gestes_en_defaut_de() { # gestes_en_defaut_de <id> → « <geste> : <constat> » par geste en drift ou en échec, sans le remède
+  (
+    # shellcheck source=lib/bench.sh
+    . "$SCRIPT_DIR/deploy/lib/bench.sh"
+    gestes_en_defaut "$DOCKER" "$1"
+  )
 }
 
 humain_cible() { # le compte d'une console : LCARS_HUMAN s'il est donné, sinon le siège de l'instance
@@ -530,7 +529,7 @@ cmd_status() {
     *)               echo "  boot        : $boot" ;;
   esac
   local defauts=""
-  [[ "$prov" == 0 || -z "$prov" ]] || defauts="$(gestes_en_defaut "$id")"
+  [[ "$prov" == 0 || -z "$prov" ]] || defauts="$(gestes_en_defaut_de "$id")"
   case "$VERDICT_SANS_DRIFT:$prov" in
     1:0) echo "  forge       : aucun geste en échec — cette image publie son verdict sans distinguer un drift ; « $p logs » nomme les gestes en drift" ;;
     *:0) echo "  forge       : gestes convergés (jetons, catalogues, branche ops, client OAuth2)" ;;

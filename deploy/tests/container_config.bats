@@ -15,7 +15,8 @@ setup() {
   ARBRE="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$ARBRE/deploy/docker" "$ARBRE/deploy/lib"
   cp "$REPO/deploy/container" "$ARBRE/deploy/"
-  cp "$REPO/deploy/lib/provision-lib.sh" "$REPO/deploy/lib/docker-endpoint.sh" "$REPO/deploy/lib/store.sh" "$ARBRE/deploy/lib/"
+  cp "$REPO/deploy/lib/provision-lib.sh" "$REPO/deploy/lib/docker-endpoint.sh" "$REPO/deploy/lib/store.sh" \
+     "$REPO/deploy/lib/bench.sh" "$REPO/deploy/lib/forge-bootstrap.sh" "$ARBRE/deploy/lib/"
   cp "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" "$ARBRE/deploy/docker/"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_MASTER_TOKEN_FILE|PROV_FORGE_SEED_FILE)=' "$REPO/deploy/installer-constants.env"
