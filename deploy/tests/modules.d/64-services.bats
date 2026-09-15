@@ -755,3 +755,23 @@ container_services_present() { # le superviseur et les programmes qu'il tient, s
   grep -q '^LCARS_SYSADMIN_UID=1007$' "$ENVF"
   [ ! -e "$UNITDIR/lcars-landing.service" ]
 }
+
+@test "une console née sans locale est retirée à l'apply, une console qui la porte reste — le convergeur relance la première" {
+  humans_are
+  stub_converger 0
+  sleep 300 & local sans=$!
+  sleep 300 & local avec=$!
+  mkdir -p "$LCARS_DECOR_ROOT/proc/$sans" "$LCARS_DECOR_ROOT/proc/$avec"
+  printf 'HOME=/home/x\0PATH=/usr/bin\0' > "$LCARS_DECOR_ROOT/proc/$sans/environ"
+  printf 'HOME=/home/x\0LANG=C.UTF-8\0' > "$LCARS_DECOR_ROOT/proc/$avec/environ"
+  printf '#!/usr/bin/env bash\n[[ "$*" == "-x ttyd" ]] && printf "%%s\\n" %s %s\n' "$sans" "$avec" > "$BINDIR/pgrep"; chmod 0755 "$BINDIR/pgrep"
+  mod apply
+  local vivant_sans=0 vivant_avec=0
+  kill -0 "$sans" 2>/dev/null && vivant_sans=1
+  kill -0 "$avec" 2>/dev/null && vivant_avec=1
+  kill "$sans" "$avec" 2>/dev/null || true; wait "$sans" "$avec" 2>/dev/null || true
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$vivant_sans" -eq 0 ]
+  [ "$vivant_avec" -eq 1 ]
+  [[ "$output" == *"1 console(s) nées sans locale retirée(s)"* ]]
+}

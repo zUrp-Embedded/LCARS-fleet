@@ -289,6 +289,7 @@ apply() {
   [[ "$reload" -eq 1 ]] && { systemctl daemon-reload || p_warn "daemon-reload en échec"; }
   # la passe précède le daemon : deux convergeurs ne tournent jamais ensemble
   converge_humans_now
+  consoles_sans_locale_relancees
   for u in "${UNITS[@]}"; do
     systemctl enable --now "$u.service" >/dev/null 2>&1 \
       || p_fail "$u.service n'a pas démarré — « systemctl status $u.service » et « journalctl -u $u.service » disent pourquoi"
@@ -316,6 +317,18 @@ apply() {
   done
   probe_fleet_humans
   verdict_apply
+}
+
+# une console vivante n'est pas relancée par le convergeur : celle que la passe de l'installeur a fait naître sans
+# locale (console.sh ne la posait pas encore) garde des « _ » à la place des accents ; retirée, le convergeur la relance
+consoles_sans_locale_relancees() {
+  local pid n=0
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    grep -qz '^LANG=' "$(prov_decor /proc)/$pid/environ" 2>/dev/null && continue
+    kill "$pid" 2>/dev/null && n=$((n + 1))
+  done < <(pgrep -x ttyd 2>/dev/null || true)
+  [[ "$n" -eq 0 ]] || p_chg "$n console(s) nées sans locale retirée(s) — le convergeur les relance au tour suivant, avec la leur"
 }
 
 # une passe du convergeur dans l'environnement du daemon (env -i + services.env), pas celui de l'apply ; --once rend 1 sur dépendance absente, 2 sur configuration absente

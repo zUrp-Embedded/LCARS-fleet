@@ -30,6 +30,11 @@ set -euo pipefail
 HUMAN=""
 FOREGROUND=0
 ALL=0
+# LA LOCALE DES CONSOLES, POSEE ICI ET NULLE PART AILLEURS : ttyd, le tmux de la console et le `tmux attach`
+# d'un pod en heritent. Un client tmux sans locale UTF-8 rend chaque accent en « _ », a la saisie comme a
+# l'affichage. L'appelant ne la garantit pas : le daemon la tient de systemd ou de l'image, mais la passe de
+# l'installeur (env -i) n'en porte aucune, et ses consoles survivent au demarrage du daemon.
+CONSOLE_LOCALE="LANG=C.UTF-8"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -229,7 +234,7 @@ launch_one() {
 
   # `-f` : sans cette config, tmux possede l'ecran et le scrollback du navigateur ne voit RIEN.
   tmux_conf="${LCARS_CONSOLE_TMUX_CONF:-/opt/lcars/console.tmux.conf}"
-  tmux_args=(-u)
+  tmux_args=()
   [[ -r "$tmux_conf" ]] && tmux_args+=(-f "$tmux_conf")
 
   local sock_dir sock
@@ -267,7 +272,7 @@ launch_one() {
   # LIMITE CONNUE, NON MITIGEE : deux onglets sur la meme console partagent la session tmux, et tmux
   # clampe l'affichage a la taille du plus PETIT client. Le `-m 1` qui l'eviterait refuserait aussi
   # le nouvel onglet tant que l'ancien traine au rechargement.
-  cmd=(env "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
+  cmd=(env "$CONSOLE_LOCALE" "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
        ttyd --writable -i "$sock" -H X-LCARS-Human -t titleFixed="LCARS console — $human"
        -t fontSize=15 -t 'theme={"background":"#000000","foreground":"#FF9900"}'
        tmux "${tmux_args[@]}" new-session -A -s console)
@@ -319,7 +324,7 @@ launch_pod_console() {
 
   rm -f "$sock"
 
-  local cmd=(env "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
+  local cmd=(env "$CONSOLE_LOCALE" "HOME=$home_dir" "USER=$human" "LOGNAME=$human" "SHELL=$login_shell"
              ttyd --writable --url-arg -i "$sock" -H X-LCARS-Human
              -t titleFixed="LCARS pod — $human" -t fontSize=15
              -t 'theme={"background":"#000000","foreground":"#FF9900"}'
