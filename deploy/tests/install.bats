@@ -413,6 +413,17 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
 }
 
+@test "docker refusé à l'utilisateur n'arrête pas l'installation dans ce système : root s'en sert et le vérifie après sudo" {
+  # banc .63 : docker posé par 12 sur une machine vierge, l'utilisateur hors du groupe docker ; la relance
+  # de l'installeur s'arrêtait avant la grille sur un accès dont seul root a besoin
+  local a; a="$(_arbre docker=refuse "docker_why=la socket est root:docker")"
+  porte "$a" --bench --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Docker     refusé à « temoin » · root s'en sert, vérifié après sudo"* ]]
+  refute_out 'refuse cet utilisateur' <<<"$output"
+  [[ "$output" == *"WORKSTATION:up"* ]]
+}
+
 @test "sur Linux dédié, docker absent arrête le conteneur et passe pour le système, qui le posera" {
   local a; a="$(_arbre substrat=linux consent=env docker=absent "docker_why=aucun daemon")"
   porte "$a" --bench

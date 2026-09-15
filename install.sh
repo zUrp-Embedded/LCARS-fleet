@@ -511,7 +511,12 @@ case "$(fait docker)" in
           [[ -z "$(fait docker_host_ecarte)" ]] \
             || echo "             ${R}DOCKER_HOST=$(fait docker_host_ecarte) ne répond pas${N} : la socket par défaut sert à sa place"
           [[ "$(fait compose)" != "non" ]] || echo "             ${R}compose absent${N} — $(fait compose_why)" ;;
-  refuse) echo "  ${W}Docker${N}     ${R}accès refusé${N} — $(fait docker_why)" ;;
+  # dans ce système, root se sert du daemon (la forge, le runner) : l'utilisateur n'a pas à y accéder, root le vérifie
+  refuse) if [[ "$MODE" == "workstation" ]]; then
+            echo "  ${W}Docker${N}     refusé à « $(ou "$(fait utilisateur)") » · root s'en sert, vérifié après sudo"
+          else
+            echo "  ${W}Docker${N}     ${R}accès refusé${N} — $(fait docker_why)"
+          fi ;;
   *)      if [[ "$SUBSTRATE" == "linux" && "$MODE" == "workstation" ]]; then
             echo "  ${W}Docker${N}     absent · sera posé par l'installation (docker-ce, dépôt download.docker.com)"
           else
@@ -588,7 +593,9 @@ if [[ "$MODE" == "workstation" ]]; then
   esac
 fi
 if [[ "$DOCKER_OK" -eq 0 ]]; then
-  if [[ "$(fait docker)" == "refuse" ]]; then
+  if [[ "$(fait docker)" == "refuse" && "$MODE" == "workstation" ]]; then
+    : # refusé à l'utilisateur dans ce système : root le mesure après sudo, la grille l'a dit (banc .63, poste neuf relancé)
+  elif [[ "$(fait docker)" == "refuse" ]]; then
     stop "${R}Docker répond mais refuse cet utilisateur.${N}" "$(fait docker_why)"
   elif [[ "$SUBSTRATE" == "wsl" ]]; then
     stop "${R}Docker est absent.${N} Les deux installations en ont besoin : la forge est un conteneur." \
