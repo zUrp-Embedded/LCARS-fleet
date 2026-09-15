@@ -23,6 +23,8 @@ setup() {
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=61-forge-structure PROV_SUBSTRATE=linux
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
+  # le siège du décor est le compte qui joue le témoin : provision le pose toujours avant les modules
+  export LCARS_SYSADMIN_UID; LCARS_SYSADMIN_UID="$(id -u)"
   decor_pose
   TOKENS="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"
   MASTER="$TOKENS/forge-master.token"; printf 'tok\n' > "$MASTER"
@@ -171,6 +173,20 @@ copies_restantes() { find "$TMPDIR" -mindepth 1 -maxdepth 1 \( -name 'prov-enrol
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx "ENROLL --tofu-dir $TMPDIR/prov-enroll\.[^ ]* --release $PREFIX/rel/lcars_fleet/bin/lcars_fleet TOOL_EVAL=" "$CALLS"
+}
+
+@test "apply : sous un --human qui n'est pas le siège, le roster se dérive quand même sous le siège — l'humain n'entre dans fleet que par le convergeur" {
+  PROV_HUMAN=personne-hors-fleet mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "ENROLL --tofu-dir $TMPDIR/prov-enroll\.[^ ]* --release $PREFIX/rel/lcars_fleet/bin/lcars_fleet TOOL_EVAL=" "$CALLS"
+  [[ "$output" != *"personne-hors-fleet"* ]]
+}
+
+@test "apply : un siège sans compte est un échec nommé avant le roster" {
+  LCARS_SYSADMIN_UID=4294967000 mod apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"siège introuvable (uid 4294967000) — le roster se dérive sous lui"* ]]
+  refute grep -q '^ENROLL' "$CALLS"
 }
 
 @test "apply : une forge fournie est celle que le geste structure, son adresse sans barre finale" {

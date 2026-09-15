@@ -93,8 +93,8 @@ RC_FILE="${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}"
 # le verdict publié : le pire rencontré — un échec l'emporte sur un drift, un drift (init compris) sur 0
 prov_rc=0
 [[ "$init_rc" -ne 2 ]] || prov_rc=2
-# Les jetons de role d'abord (le geste `tokens` lit le siege pour sonder son onboardabilite), puis
-# les trois autres.
+# Les jetons de role d'abord (le geste `tokens` sonde aussi le compte forge du siege, que ce boot
+# nomme par LCARS_LOGIN), puis les trois autres.
 for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \

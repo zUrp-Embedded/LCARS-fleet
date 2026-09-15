@@ -28,6 +28,9 @@ check() {
   verdict_check
 }
 
+SIEGE=""
+as_siege() { PROV_HUMAN="$SIEGE" as_human "$@"; } # la commande sous le compte du siège, que 20-groups met dans fleet
+
 apply() {
   forge_up || { p_fail "forge muette ($PROV_FORGE_URL) — 48-forge-host la monte ou la relève, ce module la structure"; verdict_apply; }
   [[ -s "$PROV_MASTER_TOKEN_FILE" ]] || { p_fail "aucune autorité de création ($PROV_MASTER_TOKEN_FILE) — 48-forge-host la minte"; verdict_apply; }
@@ -35,11 +38,15 @@ apply() {
   [[ -x "$RELEASE_BIN" ]] || { p_fail "aucune release exécutable posée ($RELEASE_BIN) — 60-deploy n'a pas abouti, et le roster s'en dérive"; verdict_apply; }
   ensure_dir "$PROV_FORGE_STATE_DIR" "$(prov_manifest_mode "$PROV_FORGE_STATE_DIR")" "$(prov_manifest_owner "$PROV_FORGE_STATE_DIR")" || verdict_apply
 
-  # la release refuse de s'évaluer sous le siège (GUARD B) : le roster se dérive sous l'humain, en mode outil
+  # le roster se dérive hors de root, en mode outil (sans les gardes d'uid), sous le siège : 20-groups le met
+  # dans fleet, qui ouvre la release ; un --human qui n'est pas le siège n'y entre que par le convergeur
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
-  chown "$PROV_HUMAN" "$enroll" \
-    || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue, dérivé de la release ($RELEASE_BIN)" -- as_human "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
+  SIEGE="$(getent passwd "$LCARS_SYSADMIN_UID" | cut -d: -f1 || true)"
+  [[ -n "$SIEGE" ]] \
+    || { p_fail "siège introuvable (uid $LCARS_SYSADMIN_UID) — le roster se dérive sous lui"; rm -rf "$enroll"; verdict_apply; }
+  chown "$SIEGE" "$enroll" \
+    || { p_fail "dossier de roster non cédé à $SIEGE ($enroll)"; rm -rf "$enroll"; verdict_apply; }
+  run_step "roster du catalogue, dérivé de la release ($RELEASE_BIN)" -- as_siege "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" --release "$RELEASE_BIN" \
     || { rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
