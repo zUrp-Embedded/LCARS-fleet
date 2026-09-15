@@ -288,8 +288,11 @@ refus_de_canal() { # refus_de_canal <canal de la machine> <canal de cet arbre> �
     meme="deploy/workstation up, depuis le checkout qui l'a posée ou un autre clone du dépôt"
   fi
   [[ -z "$pose" ]] || pose=" (pose retenue par la machine : $pose)"
+  # la phase sans privilège connaît la distribution par WSL_DISTRO_NAME, que sudo ne transmet pas
+  local distro='<distro>'
+  [[ -z "${WSL_DISTRO_NAME:-}" ]] || distro="\"$WSL_DISTRO_NAME\""
   case "$PROV_SUBSTRATE" in
-    wsl) refaire="la distribution se recrée (côté Windows : wsl --unregister <distro>, puis une distribution neuve), et cet installeur s'y joue" ;;
+    wsl) refaire="la distribution se recrée (côté Windows : wsl --unregister $distro, puis une distribution neuve), et cet installeur s'y joue" ;;
     *)   refaire="la machine se réinstalle, et cet installeur s'y joue" ;;
   esac
   p_fail "cette machine est installée par « $canal », et cet arbre poserait « $ici » — un canal ne se pose pas sur un autre$pose. Mise à jour par le même canal : $meme. Ou refaire le terrain, sans désinstalleur : $refaire"

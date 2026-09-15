@@ -13,7 +13,8 @@ setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_|DOCKER_)' || true)
-  unset SUDO_USER
+  # WSL_DISTRO_NAME est celui de la machine qui joue la porte : un cas qui le lit le pose lui-même
+  unset SUDO_USER WSL_DISTRO_NAME
   # la révision de l'arbre, que le runner exporte avant tout module
   export PROV_SOURCE_REV=cafe1234
 
@@ -833,6 +834,11 @@ EOF
   refute_out 'jetable' <<<"$sortie_linux"
   [ "$status" -eq 2 ]
   [[ "$output" == *"la distribution se recrée (côté Windows : wsl --unregister <distro>"* ]]
+  # la distribution connue de la phase sans privilège est nommée dans le geste, prêt à coller
+  preflight wsl WSL_DISTRO_NAME=Ubuntu-24.04
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"la distribution se recrée (côté Windows : wsl --unregister \"Ubuntu-24.04\", puis une distribution neuve)"* ]]
+  refute_out '<distro>' <<<"$output"
 }
 
 @test "un canal illisible est un échec qui compte, et le fait dit invalide" {

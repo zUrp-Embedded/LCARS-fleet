@@ -698,7 +698,9 @@ EOF
 else
   if [[ "$SUBSTRATE" == "wsl" ]]; then
     MODIFIE="/etc/wsl.conf, $RACINE, des groupes et des comptes de service, des paquets apt, ~/.config, ~/.docker et ~/.claude de l'utilisateur"
-    RETOUR="aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"
+    # sans privilège, la distribution se connaît par WSL_DISTRO_NAME ; sudo ne la transmet pas
+    DISTRO='<distro>'; [[ -z "${WSL_DISTRO_NAME:-}" ]] || DISTRO="\"$WSL_DISTRO_NAME\""
+    RETOUR="aucun désinstalleur : la distribution se recrée (wsl --unregister $DISTRO)"
     # la forge montée et son runner vivent dans le daemon de Docker Desktop, hors de la distribution
     [[ "$WITH_BENCH" -eq 0 ]] \
       || RETOUR+=" ; la forge et le runner restent dans Docker Desktop : docker compose -p $BASE_PROJET-forge down -v, docker compose -p $BASE_PROJET-runner down -v"

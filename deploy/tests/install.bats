@@ -14,6 +14,8 @@ setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_|DOCKER_)' || true)
+  # la distribution de la machine qui joue la porte : un cas qui la lit la pose lui-même
+  unset WSL_DISTRO_NAME
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SRC="$REPO/install.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
@@ -688,6 +690,10 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
   [ "$status" -eq 0 ]
   [[ "$output" == *"Retour     aucun désinstalleur : la distribution se recrée (wsl --unregister <distro>)"$'\n'* ]]
   refute_out 'down -v' <<<"$output"
+  # la distribution que la phase sans privilège connaît est nommée, prête à coller
+  WSL_DISTRO_NAME=Ubuntu-24.04 porte "$a" --workstation --forge-project bob_10 --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retour     aucun désinstalleur : la distribution se recrée (wsl --unregister \"Ubuntu-24.04\")"$'\n'* ]]
 }
 
 @test "--workstation : sa grille, root par sudo après la pause, /etc/wsl.conf sous WSL et la machine sur Linux — et rien de ce que fait le conteneur" {
