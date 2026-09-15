@@ -63,9 +63,13 @@ forge_installed() {
   count="$(printf '%s' "$body" | jq -r '.data | length')"
   [[ -n "$total" && "$count" -lt "$total" ]] && return 3
 
-  local name full url code declared drc
-  while read -r name full url; do
+  local name full url vide code declared drc
+  while read -r name full url vide; do
     [[ -n "$name" ]] || continue
+    # ⚠ `empty` EST EN RETARD SUR LE PUSH : Gitea le laisse vrai une seconde ou plus apres le premier
+    # push (mesure sur 1.26, banc 2002). Lu seul, il faisait passer un catalogue juste installe pour
+    # absent, et `apply` retirait son materiel. Un depot dit vide qui porte une tete n'est pas vide.
+    [[ "$vide" != true || -n "$(remote_head "$url")" ]] || continue
 
     drc=0
     declared="$(declared_name "$full")" || drc=$?
@@ -92,8 +96,8 @@ forge_installed() {
     esac
   done <<< "$(printf '%s' "$body" \
     | jq -r --arg store "$STORE_REPO" \
-           '.data[]? | select(.name == $store) | select(.empty != true)
-            | "\(.owner.login) \(.full_name) \(.clone_url)"')"
+           '.data[]? | select(.name == $store)
+            | "\(.owner.login) \(.full_name) \(.clone_url) \(.empty == true)"')"
 }
 
 # Le `name:` que le depot `$1` (`<owner>/<repo>`) declare. rc=0 avec le nom sur stdout · rc=1 pas de
@@ -136,7 +140,7 @@ local_installed() {
 # depot, quel que soit son nom — la coder en dur ferait dependre la convergence d'une convention que
 # le proprietaire du catalogue n'a jamais promise.
 remote_head() { GIT_TERMINAL_PROMPT=0 git ls-remote "$1" HEAD 2>/dev/null | awk 'NR==1{print $1}'; }
-local_head()  { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
+local_head()  { git -c safe.directory="$1" -C "$1" rev-parse HEAD 2>/dev/null || true; }
 
 # ⚠ UN RELIQUAT QUE LE PRODUIT NE PEUT PAS RETIRER SE DIT — c'est la seule chose qu'on puisse en
 # faire honnetement. Le cache vivait en `/home/catalogues` jusqu'au 2026-09-01 ; `/home` est sorti du
@@ -254,8 +258,11 @@ apply() {
       # `fetch` + `reset --hard` et PAS `pull` : le cache n'a pas d'historique a preserver, et un
       # `pull` sur un depot reecrit cote proprietaire s'arrete sur un conflit de merge qu'aucun
       # humain ne viendra resoudre ici.
-      if GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch --quiet --depth 1 origin HEAD \
-         && git -C "$dir" reset --quiet --hard FETCH_HEAD; then
+      # le cache appartient au compte d'autorite : git joue en root le refuse sans `safe.directory`,
+      # et ce qu'il y ecrit revient ensuite au proprietaire du cache
+      if GIT_TERMINAL_PROMPT=0 git -c safe.directory="$dir" -C "$dir" fetch --quiet --depth 1 origin HEAD \
+         && git -c safe.directory="$dir" -C "$dir" reset --quiet --hard FETCH_HEAD; then
+        [[ "$EUID" -ne 0 ]] || chown -R --reference="$LCARS_CATALOGUES_DIR" "$dir"
         p_ok "catalogue $name converge ($(local_head "$dir" | cut -c1-8))"
       else
         p_drift "catalogue $name : fetch impossible depuis $url — materiel laisse EN L'ETAT"

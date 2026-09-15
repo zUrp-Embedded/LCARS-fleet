@@ -241,6 +241,17 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     assert {:ok, %{}} == list([repo("alice/vide", %{"empty" => true})])
   end
 
+  test "un depot dit VIDE qui porte son manifeste est liste — Gitea met « empty » a jour apres le premier push" do
+    assert {:ok, found} =
+             list(
+               [repo("alice/web", %{"empty" => true})],
+               %{"alice/web" => "name: web\n"},
+               %{{"alice/web", "main"} => "s1"}
+             )
+
+    assert %{"web" => %{repo: "alice/web"}} = found
+  end
+
   test "DEUX depots du meme nom : refus, et les DEUX sont nommes" do
     assert {:error, {:duplicate_catalogues, dups}} =
              list(

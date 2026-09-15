@@ -108,7 +108,7 @@ fake_git() {
 printf '%s\n' "$*" >> "$GIT_TRACE_FILE"
 case "$1" in
   clone) mkdir -p "${@: -1}/.git"; printf 'api_version: 1\nname: x\n' > "${@: -1}/catalogue.yaml"; exit 0 ;;
-  ls-remote) echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef	HEAD"; exit 0 ;;
+  ls-remote) [[ -n "${STUB_SANS_TETE:-}" ]] || echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef	HEAD"; exit 0 ;;
 esac
 # `-C <dir> rev-parse HEAD`
 [[ "$*" == *rev-parse* ]] && { echo "0000000000000000000000000000000000000000"; exit 0; }
@@ -181,11 +181,28 @@ json_one() {
 
 @test "un depot VIDE ne signe rien — une org creee sans sa source est un install interrompu" {
   fake_forge '{"data":[{"name":"_catalogue","full_name":"web/_catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/_catalogue.git"}]}'
+  export FAKE_ORGS="web" STUB_SANS_TETE=1
   fake_git
+  seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
+  [[ "$output" == *"la forge ne l'installe plus"* ]]
   [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
+}
+
+@test "un depot dit VIDE qui porte une tete est installe : Gitea met « empty » a jour apres le premier push" {
+  # banc 2002 : juste apres « lcars catalogue install », la recherche disait encore empty=true, et
+  # l'apply suivant retirait le materiel du catalogue qu'on venait d'installer
+  fake_forge '{"data":[{"name":"_catalogue","full_name":"web/_catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/_catalogue.git"}]}'
+  export FAKE_ORGS="web"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" != *"la forge ne l'installe plus"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "un repertoire local SANS manifeste n'est pas un catalogue — ni compte, ni supprime" {

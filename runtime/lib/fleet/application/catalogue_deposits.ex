@@ -65,10 +65,9 @@ defmodule Fleet.Application.CatalogueDeposits do
     repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
     files_mod = Keyword.get(opts, :forge_files, Fleet.Forge.Client.Files)
 
-    classified =
-      repos
-      |> Enum.reject(&empty?/1)
-      |> Enum.flat_map(&classify(&1, repo_mod, files_mod, opts))
+    # Gitea's `empty` flag lags the first push by a second or more, so it is not read: a truly
+    # empty repo answers 404 on its manifest and is dropped by classify/4 like any repo without one.
+    classified = Enum.flat_map(repos, &classify(&1, repo_mod, files_mod, opts))
 
     stores = pick_stores(for {:store, name, repo} <- classified, do: {name, repo})
 
@@ -97,9 +96,6 @@ defmodule Fleet.Application.CatalogueDeposits do
         {name, chosen}
     end)
   end
-
-  defp empty?(%{"empty" => true}), do: true
-  defp empty?(_), do: false
 
   defp classify(repo, repo_mod, files_mod, opts) when is_map(repo) do
     case Payload.full_name(repo) do
