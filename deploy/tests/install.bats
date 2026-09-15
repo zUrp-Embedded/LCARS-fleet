@@ -626,14 +626,35 @@ vrai_poste() { # vrai_poste <arbre> — le vrai délégué du poste et sa lib da
 @test "les choix de l'opérateur passent à sudo en options, aucune variable ne le traverse, et le délégué en root les reçoit" {
   local a; a="$(_arbre forge_fournie=https://forge.example.net forge_joignable=oui)"
   FORGE_BASE_URL=https://forge.example.net FORGE_PUBLIC_URL=https://forge.public.example LCARS_BUILTIN_HUMAN=demo \
-    PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret porte "$a" --workstation
+    PROV_FORGE_ADMIN_RESET=1 FORGE_ADMIN_TOKEN=tres-secret porte "$a" --workstation --bench
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --apres-pause --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --apres-pause --docker-host unix:///var/run/docker.sock --forge https://forge.example.net --forge-publique https://forge.public.example --humain-demo demo --forge-admin-reset" ]
   refute grep -qE '^SUDO:.* [A-Z_]+=' "$BATS_TEST_TMPDIR/sudo.calls"
   [[ "$output" == *"ENV:DOCKER_HOST=unix:///var/run/docker.sock"*"ENV:FORGE_BASE_URL=https://forge.example.net"*"ENV:FORGE_PUBLIC_URL=https://forge.public.example"*"ENV:LCARS_BUILTIN_HUMAN=demo"*"ENV:PROV_FORGE_ADMIN_RESET=1"*"ENV:SUDO_USER=$(id -un)"* ]]
   refute_out 'tres-secret' <<<"$output"
 }
 
+
+@test "--humain-demo sans --bench est refusé avant toute mesure, en option comme en variable, dans les deux modes ; avec --bench, il passe à la relance" {
+  local a; a="$(_arbre forge_fournie=https://forge.maison forge_joignable=oui)"
+  local depart
+  for depart in "--workstation --humain-demo alice" "--humain-demo alice"; do
+    # shellcheck disable=SC2086 # les options sont des mots
+    FORGE_BASE_URL=https://forge.maison porte "$a" $depart
+    [ "$status" -eq 1 ] || { echo "$depart : $output"; return 1; }
+    [[ "$output" == *"--humain-demo « alice » (LCARS_BUILTIN_HUMAN) n'a d'objet qu'avec --bench"*"celui d'une forge fournie compris"*"la même commande avec --bench, ou sans --humain-demo"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+    [ ! -e "$BATS_TEST_TMPDIR/sudo.calls" ]
+  done
+  LCARS_BUILTIN_HUMAN=alice porte "$a" --workstation
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--humain-demo « alice » (LCARS_BUILTIN_HUMAN) n'a d'objet qu'avec --bench"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/provision.calls" ]
+  porte "$a" --workstation --bench --humain-demo alice
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $a/install.sh --workstation --bench --apres-pause --docker-host unix:///var/run/docker.sock --humain-demo alice" ] || { sudo_ligne; return 1; }
+  [[ "$output" == *"ENV:LCARS_BUILTIN_HUMAN=alice"* ]]
+}
 
 @test "sans --workstation le mode est le conteneur : sa grille, et l'autre mode nommé" {
   local a; a="$(_arbre projet=bob_10)"

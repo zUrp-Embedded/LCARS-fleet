@@ -505,14 +505,59 @@ EOF
   [ ! -e "$HROOT/.gitea_token" ]
 }
 
-@test "root, hors banc : l'humain de démonstration n'est pas semé même s'il est nommé" {
+@test "root, hors banc : un humain de démonstration nommé est refusé avant la mesure — rien n'est posé ni semé" {
   arbre
   banc
   LCARS_BUILTIN_HUMAN=root root
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"banc :"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--humain-demo « root » (LCARS_BUILTIN_HUMAN) sans --bench"*"site-admin"*"Rien n'a été fait."* ]]
+  [[ "$output" == *"pour un banc : la même commande avec --bench ; pour un poste : sans --humain-demo"* ]]
+  [[ "$output" != *"banc : mot de passe"* ]]
   [ ! -s "$FORGE_DOUBLE_DIR/requests.jsonl" ]
+  refute grep -qE '^(PROVISION|ACCEPT):' "$TRACE"
   refute grep -q 'toto32toto32' "$TRACE"
+}
+
+@test "--humain-demo sans --bench : refus en une phrase avant la mesure et avant sudo, en up comme en doctor ; avec --bench, la suite part" {
+  [ "$(id -u)" -ne 0 ] || skip "à jouer sans privilège"
+  arbre
+  ws --forge https://forge.maison --humain-demo alice
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--humain-demo « alice » (LCARS_BUILTIN_HUMAN) sans --bench"*"celui d'une forge fournie compris"* ]]
+  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+  run setsid -w bash "$WS" doctor --humain-demo alice < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--humain-demo « alice » (LCARS_BUILTIN_HUMAN) sans --bench"* ]]
+  refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+  ws --bench --humain-demo alice
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(sudo_ligne)" = "bash $WS up --bench --humain-demo alice --docker-host unix:///var/run/docker.sock" ] || { sudo_ligne; return 1; }
+}
+
+@test "un humain de démonstration retenu au journal par une passe --bench : une passe sans --bench est refusée, avant sudo et en root ; avec --bench, elle part" {
+  arbre
+  local journal="$LCARS_DECOR_ROOT/opt/lcars/var/install.journal"
+  mkdir -p "${journal%/*}"
+  printf '%s\n' '# SOURCE: /opt/lcars/var/install.journal' 'params        PROV_DECK_PORT=20991 PROV_BUILTIN_HUMAN=lcars' > "$journal"
+  if [ "$(id -u)" -ne 0 ]; then
+    ws --forge https://forge.maison
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"le journal de cette machine ($journal) retient l'humain de démonstration « lcars » d'une passe --bench"*"site-admin, hors banc"* ]]
+    refute grep -qE '^(SUDO|PROVISION):' "$TRACE"
+  fi
+  root --forge https://forge.maison
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"retient l'humain de démonstration « lcars »"*"une machine de banc se reprend avec --bench"* ]]
+  refute grep -qE '^PROVISION:' "$TRACE"
+  root --bench
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^PROVISION:apply ' "$TRACE"
+  # un journal sans humain retenu ne refuse rien
+  : > "$TRACE"
+  printf '%s\n' 'params        PROV_DECK_PORT=20991' > "$journal"
+  root
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^PROVISION:apply ' "$TRACE"
 }
 
 # ─── le kit ─────────────────────────────────────────────────────────────────────────────────────

@@ -55,7 +55,8 @@
 #       --docker-host URL    le daemon docker que la mesure sans privilège a vu répondre.
 #       --linux-dedie   la déclaration LCARS_ALLOW_ANY_HOST=1.
 #       --forge URL, --forge-publique URL   FORGE_BASE_URL et FORGE_PUBLIC_URL.
-#       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut lcars).
+#       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut lcars) ;
+#                       refusé sans --bench.
 #       --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1 : un mot de passe neuf pour l'administrateur
 #                       de la forge du poste.
 #       --apres-pause   la grille et la pause ont eu lieu avant sudo ; sans elle, l'installeur lancé
@@ -174,6 +175,9 @@ else
 fi
 [[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
   || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
+# la structure de la forge fait site-admin l'humain de démonstration : hors banc, elle promouvrait un compte tiers
+[[ "$WITH_BENCH" -eq 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] \
+  || { echo "  --humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) n'a d'objet qu'avec --bench : la structure de la forge fait cet humain site-admin, et hors banc elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait : la même commande avec --bench, ou sans --humain-demo." >&2; exit 1; }
 
 # ─── outils ───────────────────────────────────────────────────────────────────────────────────
 FACTS_FILE=""
