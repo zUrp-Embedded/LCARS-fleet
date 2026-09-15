@@ -241,8 +241,28 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   [ "$status" -eq 1 ]
   [ -z "$output" ]
   [[ "$stderr" == "« lcars » n'est pas site-admin (is_admin=false) : son adminité est posée par la structure de la forge (gitea_user.human)"* ]]
-  [[ "$stderr" == *"LCARS_BUILTIN_HUMAN=lcars"*"deploy/provision apply --only 61-forge-structure"*"forge-gestures.sh apply"* ]]
   [ -z "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | select(has("admin"))')" ]
+}
+
+@test "bench_human_seed : le geste qui rejoue la structure se tape tel qu'imprimé — docker exec avec l'humain dans le conteneur du banc, le délégué du poste sous --bench sinon" {
+  forge_double_start
+  routes_du_banc false
+  local ws; ws="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/workstation"
+  # le poste : sudo ne transmet pas LCARS_BUILTIN_HUMAN, le délégué la reçoit en option
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw \"\$BATS_TEST_TMPDIR/jeton\""
+  [ "$status" -eq 1 ]
+  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "$ws up --bench --humain-demo lcars --only 61-forge-structure" ] || { echo "$stderr"; return 1; }
+  # le conteneur du banc : chemin des gestes, root, et l'humain passé à docker exec
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw '' bt-fleet-lcars-1"
+  [ "$status" -eq 1 ]
+  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "docker exec -u root -e LCARS_BUILTIN_HUMAN=lcars bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" ] || { echo "$stderr"; return 1; }
+  # joué tel quel contre le docker de décor : l'humain arrive dans l'environnement de la commande du conteneur
+  local geste; geste="$(sed -n 's/^.* :  //p' <<<"$stderr")"
+  printf '#!/usr/bin/env bash\necho "GESTES:$*:LCARS_BUILTIN_HUMAN=$LCARS_BUILTIN_HUMAN" >> %q\n' "$CALLS" > "$CONTENEUR_BIN/forge-gestures.sh"
+  chmod 0755 "$CONTENEUR_BIN/forge-gestures.sh"
+  run bash -c "${geste/\/opt\/lcars\/forge-gestures.sh/forge-gestures.sh}"
+  [ "$status" -eq 0 ]
+  grep -qx 'GESTES:apply:LCARS_BUILTIN_HUMAN=lcars' "$CALLS"
 }
 
 @test "bench_human_seed : un mot de passe que la forge refuse en Basic est nommé, rien n'est rendu" {

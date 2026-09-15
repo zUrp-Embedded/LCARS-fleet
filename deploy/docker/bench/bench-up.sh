@@ -155,10 +155,10 @@ printf '%s' "$MASTER_TOKEN" | in_container "$GESTES" config-token || die "jeton 
 printf '%s' "$SEED_PW"      | in_container "$GESTES" config-seed  || die "seed non posé dans le conteneur" 4
 quiet d exec -i -u root -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN@lcars.local" \
     "$CONTAINER" "$GESTES" apply < /dev/null \
-  || die "structure de la forge en échec dans $CONTAINER (rejouer : docker exec -u root $CONTAINER $GESTES apply)" 4
+  || die "structure de la forge en échec dans $CONTAINER — rejouer :  $(bench_structure_geste "$HUMAN" "$CONTAINER")" 4
 say "structure posée par le conteneur (org $ORG, teams, comptes, adhésions, dépôt modèle)"
 
-HUMAN_TOKEN="$(bench_human_seed "$FORGE_LOCAL_URL" "$JETONS/master" "$HUMAN" "$HUMAN_PW")" \
+HUMAN_TOKEN="$(bench_human_seed "$FORGE_LOCAL_URL" "$JETONS/master" "$HUMAN" "$HUMAN_PW" "" "$CONTAINER")" \
   || die "humain $HUMAN : mot de passe, adminité ou jeton opérateur refusés par la forge" 5
 say "humain $HUMAN : mot de passe de banc posé, site-admin, jeton opérateur minté"
 

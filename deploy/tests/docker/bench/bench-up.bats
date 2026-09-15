@@ -147,6 +147,7 @@ case "$argv" in
   *"lcars-forge.rc"*)        cat "$PROV_RC_OUT"; exit 0 ;;
   *"lcars-provision.rc"*)    [[ -s "$PROV_ANCIEN_OUT" ]] || exit 1; cat "$PROV_ANCIEN_OUT"; exit 0 ;;
   *"forge-gestures.sh runner-token"*) echo REG-TOKEN-TEMOIN; exit 0 ;;
+  *"forge-gestures.sh apply")    exit "${GESTES_APPLY_RC:-0}" ;;
   *" env "*"fleet start")        exit "$(cat "$FLEET_RC")" ;;
 esac
 exit 0
@@ -173,7 +174,7 @@ case "$method $url" in
   "GET "*/api/v1/user)              [[ "$hdr" == "Authorization: token $(cat "$ACCEPTED_TOKEN")" || "$hdr" == "Authorization: Basic "* ]] || code=401 ;;
   "PATCH "*/api/v1/admin/users/*)   code="$(cat "$PATCH_CODE")" ;;
   "POST "*/api/v1/users/*/tokens)   code=201; rep='{"sha1":"OP-TOKEN"}' ;;
-  "GET "*/api/v1/users/*)           rep='{"is_admin":true}' ;;
+  "GET "*/api/v1/users/*)           rep="{\"is_admin\":${IS_ADMIN:-true}}" ;;
 esac
 printf '%s' "$rep" > "$out"
 [[ -z "$fmt" ]] || printf '%s' "$code"
@@ -703,4 +704,13 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 6 ] || { echo "$output"; return 1; }
   [[ "$output" == *"runner    : absent — aucune adresse de cette machine ne joint la forge depuis un job CI (adresse annoncée : 127.0.0.1) ; --advertise"* ]]
   refute grep -q '^RUNNER:' "$CALLS"
+}
+
+@test "structure en échec, ou humain que la structure n'a pas fait site-admin : le geste qui la rejoue porte l'humain, le conteneur et le chemin des gestes" {
+  GESTES_APPLY_RC=1 run_bench --no-runner --human zoe
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"structure de la forge en échec dans bt-fleet-lcars-1 — rejouer :  docker exec -u root -e LCARS_BUILTIN_HUMAN=zoe bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply"* ]] || { echo "$output"; return 1; }
+  IS_ADMIN=false run_bench --no-runner --human zoe
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"« zoe » n'est pas site-admin (is_admin=false)"*"rejouer la structure pour lui :  docker exec -u root -e LCARS_BUILTIN_HUMAN=zoe bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply"* ]] || { echo "$output"; return 1; }
 }

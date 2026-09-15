@@ -68,16 +68,27 @@ forge_token_ok() { # forge_token_ok <url> <fichier du jeton> → 0 si le jeton s
   forge_api GET "$1/api/v1/user" /dev/null --token-file "$2" -m 5 >/dev/null
 }
 
-bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] → mot de passe, adminité vérifiée, imprime un jeton opérateur
+_FORGE_BOOTSTRAP_DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# sur un poste, sudo ne transmet pas LCARS_BUILTIN_HUMAN : le délégué la reçoit en option et la relance lui-même
+bench_structure_geste() { # bench_structure_geste <humain> [conteneur] → la commande qui rejoue la structure de la forge pour cet humain, à taper telle quelle : dans le conteneur du banc s'il est nommé, sur le poste sinon
+  if [[ -n "${2:-}" ]]; then
+    printf 'docker exec -u root -e LCARS_BUILTIN_HUMAN=%q %q %q apply\n' "$1" "$2" "$(prov_canon "$PROV_ROOT")/forge-gestures.sh"
+  else
+    printf '%q up --bench --humain-demo %q --only 61-forge-structure\n' "$_FORGE_BOOTSTRAP_DEPLOY_DIR/workstation" "$1"
+  fi
+}
+
+bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] [conteneur du banc] → mot de passe, adminité vérifiée, imprime un jeton opérateur
   # un jeton posé qui s'authentifie encore est rendu tel quel : chaque passe en minterait un de plus sur la forge
   # l'adminité de l'humain de démonstration a une seule main, la recette (gitea_user.human, que
   # 61-forge-structure réapplique à chaque passe) : le banc la lit au jeton master, il ne la pose pas
-  local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" is_admin body sha
+  local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" conteneur="${6:-}" is_admin body sha
   forge_account_password "$url" "$tokfile" "$humain" "$pw" || return 1
   body="$(mktemp "${TMPDIR:-/tmp}/forge-bench.XXXXXX")"
   forge_api GET "$url/api/v1/users/$humain" "$body" --token-file "$tokfile" -m 5 >/dev/null || true
   is_admin="$(jq -r '.is_admin' "$body" 2>/dev/null || echo "?")"
-  [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin (is_admin=$is_admin) : son adminité est posée par la structure de la forge (gitea_user.human), qui ne l'a pas appliquée à cet humain — rejouer la structure avec LCARS_BUILTIN_HUMAN=$humain (poste : « sudo deploy/provision apply --only 61-forge-structure » ; conteneur : « forge-gestures.sh apply »)" >&2; rm -f "$body"; return 1; }
+  [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin (is_admin=$is_admin) : son adminité est posée par la structure de la forge (gitea_user.human), qui ne l'a pas appliquée à cet humain — rejouer la structure pour lui :  $(bench_structure_geste "$humain" "$conteneur")" >&2; rm -f "$body"; return 1; }
   forge_api GET "$url/api/v1/user" /dev/null --basic "$humain" <(printf '%s' "$pw") -m 5 >/dev/null \
     || { echo "« $humain » ne s'authentifie pas avec le mot de passe posé" >&2; rm -f "$body"; return 1; }
   if [[ -s "$pose" ]] && forge_token_ok "$url" "$pose"; then
