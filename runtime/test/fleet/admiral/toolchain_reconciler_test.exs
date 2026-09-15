@@ -287,6 +287,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
         end)
 
       assert_receive :privileged_called
+
       # banc 2002 : la ligne « la passe suivante réessaiera » précédait celle du gel et la contredisait
       assert log =~ "gelé"
       refute log =~ "réessaiera"
