@@ -18,7 +18,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in -K) [[ "$2" == - ]] && cfg="$(cat)"; shift ;; http*) url="$1" ;; esac
   shift
 done
-[[ "$cfg" == *'Authorization: token TOK-SYSTEME'* ]] || { echo "curl: pas de jeton système dans la configuration" >&2; exit 22; }
+# une lecture sans configuration est anonyme : servie seulement si la doublure dit le dépôt public
+if [[ -z "$cfg" ]]; then
+  [[ "${STUB_DEPOT_PUBLIC:-}" == 1 ]] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+else
+  [[ "$cfg" == *'Authorization: token TOK-SYSTEME'* ]] || { echo "curl: pas de jeton système dans la configuration" >&2; exit 22; }
+fi
 case "$url" in
   *issues*) echo '[{"number":12,"created_at":"2026-08-19T00:00:00Z","title":"pod en échec"}]' ;;
   *pulls*)  echo '[{"number":7,"created_at":"2026-08-19T00:00:00Z","title":"[toolchain] python","base":{"ref":"tool_request"}}]' ;;
@@ -47,12 +52,21 @@ EOF
   [ "$(grep -c -- ' -K - ' "$CALLS")" -eq 2 ]
 }
 
-@test "sans jeton de forge : refus nommé, pas une liste vide, curl n'est pas appelé" {
+@test "l'autorité refuse le jeton (le siège, hors de la team humans) : la lecture se fait en anonyme, et le script le dit" {
+  printf '#!/usr/bin/env bash\necho "autorité : refus" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
+  STUB_DEPOT_PUBLIC=1 run "$LIST"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"pas de jeton de forge pour ce compte"*"lecture anonyme de fleet/lcars"* ]]
+  [[ "$output" == *"#12"*"pod en échec"* ]]
+  [[ "$output" == *"!7"*"[toolchain] python"* ]]
+  refute grep -q -- ' -K ' "$CALLS"
+}
+
+@test "sans jeton, un dépôt qui ne se lit pas en anonyme : refus nommé et code non nul, jamais une liste vide" {
   printf '#!/usr/bin/env bash\necho "autorité : refus" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
   run "$LIST"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"pas de jeton de forge"* ]]
-  [ ! -s "$CALLS" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lecture anonyme refusée : fleet/lcars ne se lit pas sans jeton"* ]]
 }
 
 @test "client d'autorité absent : le refus le nomme" {
