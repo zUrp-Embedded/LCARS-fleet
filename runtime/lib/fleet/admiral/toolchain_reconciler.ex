@@ -268,6 +268,10 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         _ = write_marker(head)
         {:ok, :converged, head}
 
+      {:error, {:converger_failed, 2, _}} = err ->
+        # the freeze is logged by reconcile_pass/1: a "next pass retries" line here would contradict it
+        err
+
       {:error, reason} ->
         Logger.error(
           "ToolchainReconciler: le convergeur a REFUSÉ #{head} (#{inspect(reason)}) — le SHA " <>

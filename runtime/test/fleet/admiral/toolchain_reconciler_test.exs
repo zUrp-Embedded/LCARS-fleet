@@ -281,8 +281,15 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
          %{server: server} do
       fake_privileged([executor_reply(2), "OK:sha-2"])
 
-      assert {:error, {:converger_failed, 2, ""}} = R.check_now(server)
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:converger_failed, 2, ""}} = R.check_now(server)
+        end)
+
       assert_receive :privileged_called
+      # banc 2002 : la ligne « la passe suivante réessaiera » précédait celle du gel et la contredisait
+      assert log =~ "gelé"
+      refute log =~ "réessaiera"
 
       assert {:error, {:manifest_rejected, "sha-1"}} = R.check_now(server)
       refute_received :privileged_called
