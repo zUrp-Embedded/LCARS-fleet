@@ -85,9 +85,10 @@ sans_root() {
   chmod 000 "$LCARS_MASTER_TOKEN_FILE"
   run bash "$MODULE" check
   local moi; moi="$(id -un)"
-  [[ "$output" == *"autorité de création présent mais illisible pour $moi ($LCARS_MASTER_TOKEN_FILE, $moi:$(id -gn), mode 0)"* ]]
-  [[ "$output" == *"runners CI non sondables — jeton master présent mais illisible"* ]]
-  [[ "$output" == *"relance la sonde sous sudo"* ]]
+  [[ "$output" == *"autorité de création présente mais illisible pour $moi ($LCARS_MASTER_TOKEN_FILE, $moi:$(id -gn), mode 0) — rien n'est conclu sur son contenu ; sur un poste, la sonde se rejoue sous sudo pour le mesurer"* ]]
+  [[ "$output" == *"runners CI non sondables — jeton master présent mais illisible pour $moi"* ]]
+  [[ "$output" != *"autorité de création présent mais"* ]]
+  [[ "$output" != *"relance"* ]]
   [[ "$output" != *"pas d'autorité de création"* ]]
   [[ "$output" != *"jeton master absent"* ]]
 }

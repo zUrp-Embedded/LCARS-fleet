@@ -110,11 +110,14 @@ token_state() { # <fichier> -> present | empty | unreadable | absent | unmeasura
   printf '%s' "$st"
 }
 # La phrase d'un jeton qu'on ne peut pas ouvrir : ce qui est mesure (proprietaire, mode) et le geste.
-token_unreadable_why() { # <fichier>
-  local owner_mode
+# Le sujet vient de l'appelant, l'accord aussi (`f` : « autorite … presente », `m` : « jeton … present »).
+# Le geste ne vaut que sur un poste : dans le conteneur, le doctor tourne deja en root.
+token_unreadable_why() { # <fichier> <f|m>
+  local owner_mode accord=présent
+  [[ "${2:-m}" == f ]] && accord=présente
   owner_mode="$(stat -c '%U:%G, mode %a' -- "$1" 2>/dev/null || true)"
-  printf 'présent mais illisible pour %s (%s, %s) — rien n'"'"'est conclu sur son contenu ; relance la sonde sous sudo pour le mesurer' \
-    "$(id -un 2>/dev/null || echo "ce compte")" "$1" "${owner_mode:-propriétaire et mode illisibles}"
+  printf '%s mais illisible pour %s (%s, %s) — rien n'"'"'est conclu sur son contenu ; sur un poste, la sonde se rejoue sous sudo pour le mesurer' \
+    "$accord" "$(id -un 2>/dev/null || echo "ce compte")" "$1" "${owner_mode:-propriétaire et mode illisibles}"
 }
 MASTER_POSE_GESTE="sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
 
@@ -122,7 +125,7 @@ check_master_authority() {
   local f="$LCARS_MASTER_TOKEN_FILE"
   case "$(token_state "$f")" in
     present)      p_ok "autorité de création présente ($f) — un catalogue de plus s'enrôle sans geste d'opérateur" ;;
-    unreadable)   p_warn "autorité de création $(token_unreadable_why "$f")" ;;
+    unreadable)   p_warn "autorité de création $(token_unreadable_why "$f" f)" ;;
     unmeasurable) p_warn "autorité de création $(prov_state_why unmeasurable "$f")" ;;
     empty)        p_warn "autorité de création VIDE ($f) — le fichier existe sans jeton : tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la reposer, $MASTER_POSE_GESTE" ;;
     *)            p_warn "pas d'autorité de création ($f absent) — LCARS tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la poser, $MASTER_POSE_GESTE" ;;
@@ -294,7 +297,7 @@ check_ci_runner() {
   local body n labels
   case "$(token_state "$LCARS_MASTER_TOKEN_FILE")" in
     present)      ;;
-    unreadable)   p_warn "runners CI non sondables — jeton master $(token_unreadable_why "$LCARS_MASTER_TOKEN_FILE")"; return 0 ;;
+    unreadable)   p_warn "runners CI non sondables — jeton master $(token_unreadable_why "$LCARS_MASTER_TOKEN_FILE" m)"; return 0 ;;
     unmeasurable) p_warn "runners CI non sondables — jeton master $(prov_state_why unmeasurable "$LCARS_MASTER_TOKEN_FILE")"; return 0 ;;
     empty)        p_warn "runners CI non sondables (jeton master VIDE : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu. Pour le reposer, $MASTER_POSE_GESTE"; return 0 ;;
     *)            p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"; return 0 ;;
@@ -357,7 +360,7 @@ check() {
       # « tokens absents/invalides » : le drift apparaissait sans sudo et disparaissait avec, sur des
       # jetons parfaitement valides. Une sonde qui ne peut pas ouvrir ce qu'elle mesure ne mesure
       # rien — elle se mesure elle-meme.
-      p_warn "role-tokens NON SONDABLES — aucun jeton de $LCARS_PRIVATE_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $LCARS_AUTHORITY_USER) ; relance sous sudo pour conclure"
+      p_warn "role-tokens NON SONDABLES — aucun jeton de $LCARS_PRIVATE_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $LCARS_AUTHORITY_USER) ; sur un poste, la sonde se rejoue sous sudo pour conclure"
     else
       p_drift "role-tokens absents/invalides (sonde A4 --check) — l'apply les re-mint"
     fi
