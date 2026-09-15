@@ -85,9 +85,9 @@ need_cli() {
   local vu="$LCARS_CLI"
   [[ -n "$vu" ]] || vu="ni « lcars » sur le PATH, ni ${LCARS_LINK_DIR:-/usr/local/bin}/lcars, ni $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/lcars"
   die "portes outil du release introuvables ($vu).
-  Ce script les appelle pour resoudre, verifier et enroler un catalogue (« lcars tool … »). Sur un
+  Ce script les appelle pour résoudre, vérifier et enrôler un catalogue (« lcars tool … »). Sur un
   poste, « deploy/workstation up » pose la CLI ; dans un conteneur, l'image la porte.
-  « LCARS_CLI=<chemin> » designe une CLI posee ailleurs."
+  « LCARS_CLI=<chemin> » désigne une CLI posée ailleurs."
 }
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
@@ -539,7 +539,7 @@ cmd_install() {
   # et montre quand la porte refuse ou ne repond pas ; sur une reponse exploitable, il ne dit rien a
   # l'operateur.
   local src rc=0 src_err="" err_file
-  err_file="$(mktemp)" || die "install: fichier temporaire impossible a creer (mktemp) — le disque ou \$TMPDIR refuse l'ecriture"
+  err_file="$(mktemp)" || die "install: fichier temporaire impossible à créer (mktemp) — le disque ou \$TMPDIR refuse l'écriture"
   src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
          tool catalogue-source "$name" 2>"$err_file")" || rc=$?
   src_err="$(cat "$err_file")"
