@@ -63,6 +63,13 @@ REV="$(git rev-parse --short=8 HEAD)"
 VERSION="$(date +%Y-%m-%d)"
 TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${REV}")}"
 [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "tag « $TAG » : lettres, chiffres, . _ - seulement (il nomme le kit, l'image et la release)"
+# le compose du kit tire l'image de ce tag sous « pull_policy: missing », qui ne rafraîchit jamais un tag déjà là :
+# un tag de version est immuable, un nom de tête de branche avance
+case "$TAG" in
+  main|master|latest|HEAD) _tete=1 ;;
+  *) _tete=0; git show-ref --verify --quiet "refs/heads/$TAG" && _tete=1 ;;
+esac
+[[ "$_tete" -eq 0 ]] || die "tag « $TAG » : c'est un nom de tête (main, master, latest, ou une branche de ce dépôt), qui avance — le compose du kit tire son image sous « pull_policy: missing » et ne la rafraîchirait jamais. Un tag de version est immuable : LCARS_PACK_TAG=<version>, ou un tag git sur HEAD"
 
 # la forge de la version, tirée d'origin : l'installeur y prendra son kit, la publication y posera la release
 _o="$(git remote get-url origin 2>/dev/null || true)"; _o="${_o%/}"; _o="${_o%.git}"; _f="" _ow="" _re=""

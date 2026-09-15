@@ -152,6 +152,28 @@ publier() { # publier — une publication complète vers une forge https doublé
   [ ! -s "$GATE_LOG" ]
 }
 
+@test "un tag qui nomme une tête (main, master, latest, une branche du dépôt) est refusé avant le gate : le compose du kit ne rafraîchirait jamais son image" {
+  local t
+  git -C "$R" branch release-courante
+  for t in main master latest HEAD release-courante; do
+    : > "$GATE_LOG"
+    LCARS_PACK_TAG="$t" pack --no-image
+    [ "$status" -eq 1 ] || { echo "$t : $output"; return 1; }
+    [[ "$output" == *"tag « $t » : c'est un nom de tête"*"pull_policy: missing"*"LCARS_PACK_TAG=<version>"* ]]
+    [ ! -s "$GATE_LOG" ]
+  done
+  # un tag git posé sur HEAD sous un nom de branche est refusé de même
+  git -C "$R" tag release-courante
+  pack --no-image
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tag « release-courante » : c'est un nom de tête"* ]]
+  [ ! -s "$GATE_LOG" ]
+  # une version passe le refus et atteint le gate
+  git -C "$R" tag -d release-courante >/dev/null
+  STUB_GATE_RC=1 LCARS_PACK_TAG=v9.7 pack --no-image
+  [ -s "$GATE_LOG" ]
+}
+
 @test "lancé en root : refus avant le gate" {
   run unshare -Ur bash "$R/deploy/pack.sh" --no-image
   [ "$status" -eq 1 ]
