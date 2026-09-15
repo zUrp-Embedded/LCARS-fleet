@@ -30,8 +30,10 @@
 # Options : --avatars-dir DIR (défaut : $LCARS_MEDIA_ROOT/avatars, soit /opt/lcars/share/avatars —
 #           ce que l'installation a POSÉ depuis assets/) · --org NAME (défaut fleet ; --org "" pour
 #           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le delta simple,
-#           `admiral.png`. Absent = aucun avatar posé sur un compte humain).
-#           Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
+#           `admiral.png`. Absent = aucun avatar posé sur un compte humain) ·
+#           --catalogue-avatars DIR (les avatars d'un catalogue, nommés par rôle : `<role>.png` va au
+#           compte `<org>_<role>` ; un dossier absent ou vide n'ajoute rien).
+#           Le mapping compte→fichier du catalogue de référence est une DONNÉE (tableau ENTRIES ci-dessous).
 # EXIT : 0 = tout posé/valide · 1 = usage/dépendance · 2 = au moins une entrée en échec.
 
 set -euo pipefail

@@ -126,10 +126,36 @@ run_avatars() {
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "SOURCE: runtime/services/forge-recipe/provision-forge-charte.sh" ]]
   [[ "${lines[-1]}" == "EXIT : 0 = tout posé/valide"* ]]
-  # autant de lignes que l'en-tete du script en porte, sans une ligne de code
-  local attendu; attendu="$(awk 'NR == 1 { next } !/^#/ { exit } { n++ } END { print n }' "$SCRIPT")"
-  [ "$(printf '%s\n' "$output" | wc -l)" -eq "$attendu" ]
   [[ "$output" != *"set -euo pipefail"* ]]
+}
+
+@test "aide: elle cite chaque option que le script accepte, et n'en cite aucune qu'il refuse (m-15)" {
+  # Ce que le script ACCEPTE se mesure en le jouant : une option inconnue sort en 1 sur « option
+  # inconnue » avant tout reseau ; une option connue passe l'analyse et s'arrete plus loin, sur ce
+  # qui manque au decor (forge, jeton).
+  run "$SCRIPT" --help
+  [ "$status" -eq 0 ]
+  local aide="$output" opt acceptees=() citees
+  mapfile -t citees < <(grep -oE -- '--[a-z][a-z-]+' <<<"$aide" | sort -u)
+  [ "${#citees[@]}" -ge 6 ]
+  accepte() { # accepte <option> -> 0 si l'analyse des arguments la prend
+    # sans forge ni medias, le script s'arrete avant tout reseau, meme sous `--forge valeur`
+    run env -u FORGE_BASE_URL -u FORGE_ADMIN_TOKEN LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/nulle-part" "$SCRIPT" "$1" valeur
+    [[ "$output" != *"option inconnue: $1"* ]]
+  }
+  # le temoin du temoin : une option que le script ne connait pas est bien refusee
+  if accepte --option-qui-n-existe-pas; then echo "instrument casse : une option inconnue passe pour acceptee" >&2; return 1; fi
+  for opt in "${citees[@]}"; do
+    accepte "$opt" || { echo "l'aide cite $opt, que le script refuse" >&2; return 1; }
+  done
+  # et dans l'autre sens : chaque option du `case` des arguments, jouee, est acceptee ET citee
+  mapfile -t acceptees < <(sed -n '/^while \[\[ \$# -gt 0 \]\]; do/,/^done/p' "$SCRIPT" | grep -oE -- '--[a-z][a-z-]+\)' | tr -d ')' | sort -u)
+  [ "${#acceptees[@]}" -ge 6 ]
+  for opt in "${acceptees[@]}"; do
+    [[ "$opt" == --help ]] && continue
+    accepte "$opt" || { echo "$opt est dans le case mais refusee au jeu — l'instrument ne lit plus le bon bloc" >&2; return 1; }
+    grep -qF -- "$opt" <<<"$aide" || { echo "le script accepte $opt, l'aide ne le cite pas" >&2; return 1; }
+  done
 }
 
 @test "aide: un en-tete qui grandit est imprime entier — la fin se lit au bloc, pas a un numero de ligne (RT-C-39)" {
