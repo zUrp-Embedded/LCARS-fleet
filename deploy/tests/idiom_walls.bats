@@ -68,6 +68,54 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   refute grep -q 'Authorization: token' <<<'      --token-file) tok="$(read_token "$2")"; [[ -z "$tok" ]] || auth="token $tok"; shift 2 ;;'
 }
 
+# A-118, le jumeau du mur produit (`runtime/test/services/idiom_walls.bats`) : un mot de passe voyage
+# comme un jeton. TROIS FORMES, UN SEUL VERDICT (`i2_user_hit`) :
+#   - `-u`/`--user` dont la valeur porte `:$` — sur toute commande, ligne de continuation comprise ;
+#   - sur une ligne `curl`, `-u`/`--user` suivi d'une variable, quelle que soit sa forme : quotee en
+#     morceaux (`"$a":"$b"`), portee par une variable (`--user "$creds"`), ou options collees (`-su`) ;
+#   - un identifiant dans l'URL, `://…:$…@`.
+# La deuxieme forme exige `curl` sur la ligne : `sort -u "$f"`, `runuser -u "$login"`, `pkill -u` sont
+# des `-u` suivis d'une variable qui ne portent aucun secret. La forme sure est la ligne
+# `user = "<compte>:<secret>"` d'une config lue sur stdin (`curl -K -`).
+I2U_COLON="(^|[[:space:]])(-u|--user)(=|[[:space:]]+)[\"']?[^\"'[:space:]]*:\\\$"
+I2U_CURL_LINE='(^|[^[:alnum:]_-])curl([[:space:]]|$)'
+I2U_CURL_VAR="(^|[[:space:]])(-[A-Za-z]*u|--user)(=|[[:space:]]+)[\"']?\\\$"
+I2U_URL="://[^[:space:]\"'/@]*:\\\$[^[:space:]\"'/@]*@"
+i2_user_hit() { # stdin : du code -> les lignes fautives, rc 0 s'il y en a
+  local c hits
+  c="$(cat)"
+  hits="$(grep -E -- "$I2U_COLON|$I2U_URL" <<<"$c"; grep -E -- "$I2U_CURL_LINE" <<<"$c" | grep -E -- "$I2U_CURL_VAR")" || true
+  [[ -n "$hits" ]] && printf '%s\n' "$hits"
+}
+
+@test "MUR I2: aucun identifiant compte:secret ne passe par argv (curl -u / --user, URL)" {
+  local root f hits=0 pop=0 first
+  root="$(cd "$DEPLOY/.." && pwd)"
+  while IFS= read -r f; do
+    IFS= read -r first < "$f" || true
+    case "$f" in *.sh) ;; *) [[ "$first" =~ ^#!.*bash ]] || continue ;; esac
+    pop=$((pop + 1))
+    if code "$f" | i2_user_hit >/dev/null; then
+      echo "MUR I2 rompu — ${f#"$root"/} : $(code "$f" | i2_user_hit | head -1)" >&2; hits=$((hits + 1))
+    fi
+  done < <({ find "$root/deploy" -type f -not -path '*/tests/*'; echo "$root/install.sh"; } | sort)
+  [ "$hits" -eq 0 ]
+  [ "$pop" -ge 25 ] || { echo "instrument casse : $pop script(s) lu(s)" >&2; return 1; }
+  # le mur mord les formes interdites, dont les quatre de la relecture hostile du 2026-09-15 (m-8)…
+  i2_user_hit <<<'    code="$(curl -sS -o /dev/null -X PUT -u "$acct:$seed" "$url")"'
+  i2_user_hit <<<'  curl --user=admin:$PASS "$url"'
+  i2_user_hit <<<'  curl -u "$acct":"$seed" "$url"'
+  i2_user_hit <<<'  creds="$a:$b"; curl --user "$creds" "$u"'
+  i2_user_hit <<<'  curl -su "$acct:$seed" "$u"'
+  i2_user_hit <<<'  curl "https://$acct:$seed@forge/api"'
+  # … et laisse passer la config sur stdin, ainsi qu'un `-u` qui n'est pas un identifiant
+  refute i2_user_hit <<<'  printf '"'"'user = "%s:%s"\n'"'"' "$acct" "$seed" | curl -K - -X PUT "$url"'
+  refute i2_user_hit <<<'  sort -u "$f"'
+  refute i2_user_hit <<<'  runuser -u "$login" -- true'
+  refute i2_user_hit <<<'  docker run --rm -u "$(id -u):$(id -g)" "$image"'
+  refute i2_user_hit <<<'  curl -fsS "http://$host:$port/api/v1/version"'
+}
+
 I3_AWK='
   FNR==1 { fn="" }
   /^[a-z_][a-z0-9_]*\(\)[ \t]*\{/ { fn=$1; sub(/\(\).*/, "", fn); last=""; next }
