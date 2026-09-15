@@ -656,9 +656,8 @@ cmd_install() {
   if [[ "$materiel" -eq 0 ]]; then
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
   else
-    echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
-    echo "  il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »" >&2
-    echo "  son squelette de projet n'est donc pas lisible : ses projets naitront de celui du catalogue livre" >&2
+    # la forge porte l'installation, mais cette machine ne sert pas encore le catalogue : ce n'est pas un succes
+    die "install: $name est posé sur la forge (org, comptes, source), mais son matériel local n'a pas pu être posé dans ${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues} (cause au-dessus) — tant qu'il manque, ses projets naissent du squelette du catalogue livré. Il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »"
   fi
 }
 

@@ -361,16 +361,18 @@ FAKE
 }
 
 
-@test "install: materiel local en echec — le dire, ne pas defaire ce qui est bon" {
+@test "install: materiel local en echec — le dire en echec, ne pas defaire ce qui est bon" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
-  # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
+  # serait perdre le travail utile pour une moitie rattrapable au prochain boot. Rendre 0 ferait
+  # dire « installe » a une machine qui ne sert pas le catalogue (banc beta3, deux rails).
   setup_install
   # Un cache impossible a ecrire : le parent est un FICHIER.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/pas-un-dossier/sub"
   : > "$BATS_TEST_TMPDIR/pas-un-dossier"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
-  [[ "$output" == *"INSTALLE sur la forge"* ]]
+  [ "$status" -eq 1 ] || { echo "rc=$status"; echo "$output"; return 1; }
+  [[ "$output" == *"est posé sur la forge (org, comptes, source), mais son matériel local n'a pas pu être posé"* ]]
   [[ "$output" == *"prochain démarrage du conteneur"* ]]
   [[ "$output" == *"deploy/workstation up"* ]]
   grep -q 'push .*cat/_catalogue' "$GIT_LOG"

@@ -190,7 +190,7 @@ host_keys() {
 layout() {
   ensure_dir /opt/lcars/var                     0755 root:root || true
   ensure_dir "$LCARS_PRIVATE_DIR"                 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir "$LCARS_CATALOGUES_DIR"             0750 "root:$LCARS_FLEET_GROUP" || true
+  ensure_dir "$LCARS_CATALOGUES_DIR"             0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
   ensure_dir "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}" 0700 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" || true
   ensure_dir /var/lib/lcars                     0755 root:root || true
   ensure_dir /var/tmp/lcars                     0755 root:root || true

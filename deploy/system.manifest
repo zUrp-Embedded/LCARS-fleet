@@ -39,7 +39,8 @@ dir       /opt/lcars/share/doc                         0755  root:root          
 anchor    /opt/lcars/share/.doc-revision               0644  root:root           any
 # 0710 : le groupe traverse (forge.url en 0644 s'ouvre par son chemin), il ne liste pas, les secrets restent 0600
 dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
-dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
+# le matériel des catalogues : « lcars catalogue install » le clone sous le compte d'autorité, le groupe le lit
+dir       /opt/lcars/var/catalogues                    0750  lcars-authority:fleet  any
 # la racine du magasin : ses natures sont celles de deploy/lib/store.sh
 dir       /var/lib/lcars                              0755  root:root           any
 

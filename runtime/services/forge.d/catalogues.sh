@@ -268,6 +268,9 @@ apply() {
     # entier. `mv` dans le meme systeme de fichiers est un rename atomique.
     rm -rf "$dir.tmp"
     if GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 "$url" "$dir.tmp"; then
+      # un clone joue en root prend le proprietaire du cache : l'installation, sous le compte
+      # d'autorite, doit pouvoir le remplacer
+      [[ "$EUID" -ne 0 ]] || chown -R --reference="$LCARS_CATALOGUES_DIR" "$dir.tmp"
       rm -rf "$dir"
       mv "$dir.tmp" "$dir"
       p_ok "catalogue $name clone depuis $url"
