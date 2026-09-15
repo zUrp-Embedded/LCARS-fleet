@@ -1097,8 +1097,9 @@ EOF
   [[ "$output" == *"Source     release $TAG · kit dans $KITS/lcars_install"* ]]
   [[ "$(sudo_ligne)" == "bash -c set -eu"*" lcars-kit $ARCHIVE $SOMME --workstation --bench --apres-pause --docker-host unix:///var/run/docker.sock" ]]
   [[ "$output" == *"WORKSTATION:up --faits "*" --bench"* ]]
-  # le délégué joue d'un dossier que root a créé pour lui seul, sous TMPDIR, et que la sortie retire
-  [[ "$output" == *"COPIE:$TMPDIR/lcars-kit."??????" 700"* ]]
+  # le délégué joue d'un dossier que root a créé, sous TMPDIR, et que la sortie retire : lisible par les gestes
+  # joués sous l'humain (60-deploy pose la release sous lui — refusé en 700 sur une machine vierge), écrit par root seul
+  [[ "$output" == *"COPIE:$TMPDIR/lcars-kit."??????" 755"* ]]
   [ -z "$(compgen -G "$TMPDIR/lcars-kit.*" || true)" ]
   # sans clé : la porte le dit, et continue
   [[ "$output" == *"provenance non vérifiée (sha256 seul)"* ]]

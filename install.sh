@@ -335,6 +335,7 @@ printf "%s  %s\n" "$somme" "$copie/kit.tar.gz" | sha256sum -c --quiet --strict >
   || { echo "  $archive ne porte plus la somme inscrite dans l'\''installeur : root ne le détare pas, rien n'\''est fait ; relancer l'\''installeur." >&2; exit 1; }
 tar --no-same-owner -xzf "$copie/kit.tar.gz" -C "$copie" \
   || { echo "  la copie de $archive ne se détare pas : rien n'\''est fait." >&2; exit 1; }
+chmod 0755 "$copie"   # vérifiée et détarée : lisible par les gestes joués sous l humain (60-deploy), modifiable par root seul
 LCARS_KIT_OPERATEUR="${archive%/*}/lcars_install" bash "$copie/lcars_install/install.sh" "$@"'
 # Les choix de l'opérateur vivent dans ses variables ; sudo ne les transmet pas, la relance les reçoit en options.
 choix_options() { # choix_options → CHOIX, les choix de l'opérateur en options
