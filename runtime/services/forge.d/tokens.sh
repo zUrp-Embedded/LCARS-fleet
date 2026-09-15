@@ -279,11 +279,8 @@ check_members_visible() {
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est celui de la structure, qui les publicise juste après elle : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
   fi
 
-  # Le compte que nomme `LCARS_LOGIN` n'est pas de cette population, et aucune adhésion ne se sonde
-  # pour lui : c'est le siège, l'admin du système, que les deux rails posent sous ce nom (le poste :
-  # le compte qui installe ; le conteneur : `/run/lcars-seat.login`). La fleet lui est fermée (GUARD B)
-  # et le convergeur ne le matérialise jamais (GUARD A) : il n'a rien à faire dans la team humans.
-  # `check_seat_account` dit ce qui le concerne.
+  # Le compte que nomme `LCARS_LOGIN` n'est pas de cette population : `check_login_account` dit ce
+  # qui le concerne, selon qu'il est le siège ou une personne de fleet.
 }
 
 
@@ -368,24 +365,90 @@ check() {
     p_fail "script A4 introuvable/inexécutable : $A4_SCRIPT (checkout incomplet ?)"
   fi
 
-  check_seat_account
+  check_login_account
   check_members_visible
   verdict_check
 }
 
-# LE SIÈGE sur la forge. `LCARS_LOGIN` nomme l'admin du système : sur un poste, le compte qui
-# installe (`PROV_HUMAN`), sous le nom duquel 48-forge-host crée l'administrateur de la forge ; dans
-# le conteneur, le siège résolu par l'init (la table des uid, sinon le compte #1 de la forge). Ce
-# n'est pas une personne de fleet : la fleet lui est fermée (GUARD B), le convergeur ne le
+# `LCARS_LOGIN` EST L'HUMAIN DE LA PASSE, PAS LE SIÈGE PAR CONSTRUCTION. Sur un poste c'est
+# `PROV_HUMAN` : le compte qui installe, ou celui que `--human` nomme. Dans le conteneur, le boot le
+# pose au siège. Le siège se lit donc à sa source, et le login nommé ne l'est que s'il L'EST :
+#   - l'uid du siège, dans `LCARS_SEAT_UID_FILE` (`/etc/lcars/seat.uid`), sinon `LCARS_SYSADMIN_UID`
+#     — la lecture de l'installeur et de `human-protocol.sh`, dans le même ordre ;
+#   - le login du siège que l'init du conteneur écrit dans `LCARS_SEAT_LOGIN_FILE`
+#     (`/run/lcars-seat.login`).
+seat_uid_here() { # -> l'uid du siège, ou rien
+  local v f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  if [[ -r "$f" ]]; then
+    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
+  fi
+  v="${LCARS_SYSADMIN_UID:-}"
+  [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v"
+  return 0
+}
+login_is_seat() { # <login> -> 0 si ce login est le siège de la machine
+  local login="$1" f="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}" seat uid
+  if [[ -r "$f" ]]; then
+    seat="$(tr -d '[:space:]' < "$f" 2>/dev/null || true)"
+    [[ -n "$seat" && "$login" == "$seat" ]] && return 0
+  fi
+  seat="$(seat_uid_here)"
+  [[ -n "$seat" ]] || return 1
+  uid="$(id -u -- "$login" 2>/dev/null)" || return 1
+  [[ "$uid" == "$seat" ]]
+}
+
+check_login_account() {
+  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nommé (LCARS_LOGIN) — aucun compte forge ne se sonde ici"; return 0; }
+  if login_is_seat "$LCARS_LOGIN"; then
+    check_seat_account
+  else
+    check_person_account
+  fi
+}
+
+# LE SIÈGE sur la forge : l'admin du système. La fleet lui est fermée (GUARD B), le convergeur ne le
 # matérialise pas (GUARD A), et il n'entre dans aucune team — ni humans, ni une autre. Ce qui se
 # sonde ici est son compte, et rien de son adhésion : un siège hors de l'org est l'état attendu.
+# Ce geste ne crée pas ce compte : son absence est un WARN qui nomme le geste qui le crée.
 check_seat_account() {
-  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun siège nommé (LCARS_LOGIN) — son compte forge ne se sonde pas ici"; return 0; }
   if ! account_exists "$LCARS_LOGIN"; then
-    p_drift "compte forge absent pour « $LCARS_LOGIN », l'admin du système — l'onboarding projet échouera (human_not_provisioned) : l'administrateur de la forge porte ce login ; il s'inscrit une fois sur la forge sous ce nom"
+    p_warn "compte forge absent pour « $LCARS_LOGIN », le siège (l'admin du système) — ce geste ne le crée pas. Sur un poste dont la forge est montée, « deploy/workstation up » le crée (module 48-forge-host) ; sur une forge fournie, et dans un conteneur, c'est le compte n°1 de la forge, posé par son opérateur"
     return 0
   fi
   p_ok "compte forge du siège « $LCARS_LOGIN », l'admin du système — il n'entre dans aucune team de la forge, et la fleet ne tourne jamais sous lui"
+}
+
+# UNE PERSONNE DE FLEET sur la forge. Le rail pose les AUTORITÉS — siège, admin de forge, jeton
+# master, comptes de service ; les PERSONNES s'inscrivent sur la forge, et un propriétaire d'org les
+# ajoute à la team humans. Une personne sans compte, hors de l'org, ou dont l'adhésion est privée
+# est donc un état qu'aucun apply ne converge : un WARN, jamais un DRIFT. Seul le jeton système
+# absent, que l'apply minte, est un DRIFT. L'appartenance se sonde au niveau de l'ORG (204/404,
+# lisible par le jeton système) : `GET /teams/<id>/members/<u>` est 403 pour lui, Gitea réservant
+# la lecture d'une team à ses membres et aux propriétaires.
+check_person_account() {
+  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
+  if ! account_exists "$LCARS_LOGIN"; then
+    p_warn "compte forge absent pour « $LCARS_LOGIN », une personne de fleet — l'apply ne crée pas le compte d'une personne : elle s'inscrit sur la forge sous ce nom, puis un propriétaire de l'org $LCARS_FORGE_ORG l'ajoute à la team humans"
+    return 0
+  fi
+  p_ok "compte forge de « $LCARS_LOGIN », une personne de fleet"
+  case "$(prov_file_state "$tokfile")" in
+    present) ;;
+    absent)  p_drift "jeton système ABSENT ($tokfile) — l'apply le minte dès que le seed est posé ; adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG non sondable en attendant"; return 0 ;;
+    *)       p_warn  "jeton système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG non sondable"; return 0 ;;
+  esac
+  code="$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$LCARS_LOGIN")"
+  case "$code" in
+    204) if [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/public_members/$LCARS_LOGIN")" == 204 ]]; then
+           p_ok "« $LCARS_LOGIN » membre de l'org $LCARS_FORGE_ORG, adhésion visible"
+         else
+           p_warn "adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG privée — un geste de la personne, hors de portée de l'apply : profil forge → Organizations → $LCARS_FORGE_ORG → visible"
+         fi ;;
+    404) p_warn "« $LCARS_LOGIN » n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire de l'org n'a pas ajouté ce compte à la team humans ; l'apply ne pose pas les personnes" ;;
+    *)   p_warn "adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG NON VÉRIFIABLE (HTTP ${code:-sans réponse}) — rien n'est conclu ; portée du jeton système ?" ;;
+  esac
 }
 
 apply() {
