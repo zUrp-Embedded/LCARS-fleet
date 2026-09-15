@@ -346,7 +346,7 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   [[ "$output" == *"Outils     git, curl, jq présents"* ]]   # sudo n'est requis que dans ce système, jq qu'en conteneur
   [[ "$output" == *"Forge      aucune"* ]]
   porte "$a" --workstation --check
-  [[ "$output" == *"Outils     git, curl, sudo présents"* ]]
+  [[ "$output" == *"Outils     curl, sudo présents"* ]]
 }
 
 @test "un utilisateur hors de sudo, docker et fleet voit le bilan, et le bilan le dit" {
@@ -599,6 +599,17 @@ root_de_namespace() { # root_de_namespace → UNSHARE, ou le cas sauté
   done
   porte "$a" --bench --workstation
   [ "$status" -eq 0 ]
+  [[ "$output" == *"WORKSTATION:up"* ]]
+}
+
+@test "git absent : arrête le conteneur, qui pousse depuis l'hôte ; laisse passer le système, que 10-packages équipe (machine vierge, banc .63)" {
+  local a; a="$(_arbre git=absent)"
+  porte "$a" --bench
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Outils manquants : git"* ]]
+  porte "$a" --bench --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute_out 'Outils manquants' <<<"$output"
   [[ "$output" == *"WORKSTATION:up"* ]]
 }
 

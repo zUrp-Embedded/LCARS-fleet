@@ -519,8 +519,8 @@ case "$(fait docker)" in
           fi ;;
 esac
 
-# en conteneur, le banc et forge-apply lisent l'API de la forge par jq depuis l'hôte ; dans ce système, 10-packages le pose
-if [[ "$MODE" != workstation ]]; then OUTILS_REQUIS="git curl jq"; elif [[ "$EUID" -eq 0 ]]; then OUTILS_REQUIS="git curl"; else OUTILS_REQUIS="git curl sudo"; fi
+# en conteneur, le banc et forge-apply lisent l'API de la forge par jq et poussent par git depuis l'hôte ; dans ce système, 10-packages pose les deux (sur une machine vierge, les exiger avant ferait installer à la main ce que l'installation pose)
+if [[ "$MODE" != workstation ]]; then OUTILS_REQUIS="git curl jq"; elif [[ "$EUID" -eq 0 ]]; then OUTILS_REQUIS="curl"; else OUTILS_REQUIS="curl sudo"; fi
 OUTILS_MANQUANTS=""
 for t in $OUTILS_REQUIS; do
   [[ "$(fait "$t")" == oui ]] || OUTILS_MANQUANTS="${OUTILS_MANQUANTS:+$OUTILS_MANQUANTS, }$t"
