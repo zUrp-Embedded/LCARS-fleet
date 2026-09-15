@@ -608,17 +608,26 @@ EOF
 # refuse. `revoke_absent` est extrait (il vit apres le garde de sourcing) et `revoke_human`, qui
 # touche gpasswd/pkill/usermod, est double : ce qui se mesure est QUI serait revoque et ce qui est dit.
 #
-# Le `sudo` du decor repond comme le vrai en `LC_ALL=C` (mesure dans l'image) : rc 0 dans les deux
-# cas, et la phrase porte le verdict. Les logins qui ont une regle a leur nom sont dans SUDOERS_RULES.
+# Le `sudo` du decor n'accepte qu'UNE forme, `-n -l -U <login> /bin/sh` sous `LC_ALL=C` : toute autre
+# est consignee dans SUDO_FORMES et rend 64, et chaque temoin exige ce journal vide. Il repond
+# ensuite selon SUDO_TABLE (`login:rc`, rc du vrai sudo mesure dans l'image, sudo 1.9.17p2 : groupe
+# sudo et `ALL=(ALL) ALL` rendent 0 ; regle etroite, regle vers un autre compte que root, membre de
+# wheel et aucune regle rendent 1). Un login hors de la table rend 1. Il ne lit jamais le seul
+# dernier argument : ce serait `/bin/sh` pour tout le monde.
 sudo_stub() {
   cat > "$BATS_TEST_TMPDIR/sudo" <<'EOF'
 #!/usr/bin/env bash
-login="${@: -1}"
-if [[ " ${SUDOERS_RULES:-} " == *" $login "* ]]; then
-  printf 'User %s may run the following commands on decor:\n    (ALL) ALL\n' "$login"
-else
-  printf 'User %s is not allowed to run sudo on decor.\n' "$login"
+if [[ "$#" -ne 5 || "$1" != -n || "$2" != -l || "$3" != -U || -z "$4" || "$5" != /bin/sh || "${LC_ALL:-}" != C ]]; then
+  printf 'LC_ALL=%s %s\n' "${LC_ALL:-}" "$*" >> "$SUDO_FORMES"
+  exit 64
 fi
+for entree in ${SUDO_TABLE:-}; do
+  if [[ "${entree%%:*}" == "$4" ]]; then
+    [[ "${entree#*:}" == 0 ]] && { echo /bin/sh; exit 0; }
+    exit 1
+  fi
+done
+exit 1
 EOF
   chmod 0755 "$BATS_TEST_TMPDIR/sudo"
 }
@@ -629,49 +638,74 @@ revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent 
   [ -s "$fn" ] || { echo "revoke_absent introuvable dans $SUT" >&2; return 1; }
   sudo_stub
   REVOQUES="$BATS_TEST_TMPDIR/revoques.log"; : > "$REVOQUES"
+  SUDO_FORMES="$BATS_TEST_TMPDIR/sudo-formes.log"; : > "$SUDO_FORMES"
   run bash -c "
     set -uo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
     export LCARS_SYSADMIN_UID=1000 LCARS_SUDO_BIN=\"\${LCARS_SUDO_BIN:-$BATS_TEST_TMPDIR/sudo}\"
+    export SUDO_FORMES='$SUDO_FORMES' SUDO_TABLE='${SUDO_TABLE:-}'
     source '$SUT'
     revoke_human() { echo \"REVOKE \$1\" >> '$REVOQUES'; }
     source '$fn'
     $1"
 }
 
-@test "revocation: un membre du groupe sudo absent de la team n'est PAS revoque — refus nomme, une fois par processus" {
-  passwd_fixture
-  GROUP_FILE="$BATS_TEST_TMPDIR/group"
-  printf 'fleet:x:2000:alice,bob,carol\nsudo:x:27:root,bob\n' > "$GROUP_FILE"
-  revoke_with 'revoke_absent alice; revoke_absent alice'
+@test "revocation: la doublure de sudo refuse toute autre forme que -n -l -U <login> /bin/sh, et repond selon sa table" {
+  sudo_stub
+  export SUDO_FORMES="$BATS_TEST_TMPDIR/sudo-formes.log" SUDO_TABLE="bob:0 carol:1"; : > "$SUDO_FORMES"
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U bob /bin/sh
   [ "$status" -eq 0 ]
-  refute grep -qx 'REVOKE bob' "$REVOQUES"
-  grep -qx 'REVOKE carol' "$REVOQUES"
-  [ "$(grep -c 'REFUS de revoquer bob' <<<"$output")" -eq 1 ]
-  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (membre du groupe sudo) : absent de fleet/humans"*"gpasswd -d bob fleet"* ]]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U carol /bin/sh
+  [ "$status" -eq 1 ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U dave /bin/sh
+  [ "$status" -eq 1 ]
+  [ ! -s "$SUDO_FORMES" ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U bob
+  [ "$status" -eq 64 ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -l -U bob /bin/sh
+  [ "$status" -eq 64 ]
+  run env LC_ALL=fr_FR.UTF-8 "$BATS_TEST_TMPDIR/sudo" -n -l -U bob /bin/sh
+  [ "$status" -eq 64 ]
+  [ "$(wc -l < "$SUDO_FORMES")" -eq 3 ]
 }
 
-@test "revocation: le siege d'hier, sudoer par une regle a son nom et membre d'aucun groupe, n'est PAS revoque" {
-  # Le siege d'aujourd'hui est 1000 (GUARD A) ; `bob` (1002) a installe avant lui, par une regle
-  # sudoers et non par un groupe, et il est reste dans fleet.
+@test "revocation: un compte a qui sudo ouvre un shell root, absent de la team, n'est PAS revoque — refus nomme, une fois par processus" {
+  # Le siege d'aujourd'hui est 1000 (GUARD A) ; `bob` (1002) administre la machine, par le groupe
+  # sudo ou par une regle a son nom : pour sudo, c'est la meme reponse.
   passwd_fixture; group_fixture "alice,bob,carol"
-  SUDOERS_RULES=bob revoke_with 'revoke_absent alice'
+  SUDO_TABLE="bob:0 carol:1" revoke_with 'revoke_absent alice; revoke_absent alice'
   [ "$status" -eq 0 ]
+  [ ! -s "$SUDO_FORMES" ]
   refute grep -qx 'REVOKE bob' "$REVOQUES"
   grep -qx 'REVOKE carol' "$REVOQUES"
-  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (regle sudoers a son nom)"* ]]
+  [ "$(grep -c 'REFUS de révoquer bob' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"REFUS de révoquer bob — compte d'administration de la machine (sudo lui ouvre un shell root) : absent de fleet/humans, il garde son groupe fleet, son shell et ses processus."*"« sudo gpasswd -d bob fleet » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"* ]]
 }
 
-@test "revocation: sans sudo sur la machine, les groupes d'administration suffisent au refus, et un membre ordinaire reste revoque" {
+@test "revocation: une regle sudoers etroite ne sauve pas — le compte est revoque, meme membre de wheel ou d'admin" {
+  # carol : `ALL=(root) NOPASSWD: /usr/bin/systemctl …` et membre de wheel ; dave : une regle vers
+  # `lcars-authority` et membre d'admin. Aucun des deux n'ouvre de shell root.
+  passwd_fixture
+  printf 'dave:x:1004:1004::/home/dave:/bin/bash\n' >> "$PASSWD_FILE"
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:alice,carol,dave\nwheel:x:10:carol\nadmin:x:11:dave\n' > "$GROUP_FILE"
+  SUDO_TABLE="carol:1 dave:1" revoke_with 'revoke_absent alice'
+  [ "$status" -eq 0 ]
+  [ ! -s "$SUDO_FORMES" ]
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  grep -qx 'REVOKE dave' "$REVOQUES"
+  refute grep -q 'REFUS de' <<<"$output"
+}
+
+@test "revocation: sans sudo sur la machine, aucun compte n'est epargne — un membre du groupe sudo est revoque" {
   passwd_fixture
   GROUP_FILE="$BATS_TEST_TMPDIR/group"
-  printf 'fleet:x:2000:alice,bob,carol\nwheel:x:10:bob\n' > "$GROUP_FILE"
-  LCARS_SUDO_BIN="$BATS_TEST_TMPDIR/aucun-sudo" SUDOERS_RULES=carol revoke_with 'revoke_absent alice'
+  printf 'fleet:x:2000:alice,bob,carol\nsudo:x:27:bob\n' > "$GROUP_FILE"
+  LCARS_SUDO_BIN="$BATS_TEST_TMPDIR/aucun-sudo" revoke_with 'revoke_absent alice'
   [ "$status" -eq 0 ]
-  refute grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE bob' "$REVOQUES"
   grep -qx 'REVOKE carol' "$REVOQUES"
-  [[ "$output" == *"REFUS de revoquer bob — compte d'administration de la machine (membre du groupe wheel)"* ]]
-  refute grep -q 'REFUS de revoquer carol' <<<"$output"
+  refute grep -q 'REFUS de' <<<"$output"
 }
 
 # ─── LE RATTRAPAGE : LE CONVERGEUR SEUL REMET UN HUMAIN DE LA FORGE DANS FLEET ──────────────────

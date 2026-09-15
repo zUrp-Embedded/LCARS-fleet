@@ -218,27 +218,20 @@ group_members() { members_of "$GROUP"; } # group_members -> les membres du group
 # sudoer mis dans fleet a la main. Sur eux, `nologin` et le kill fermeraient la machine sur son
 # administrateur. Le convergeur refuse, le dit une fois par processus, et nomme le geste manuel.
 #
-# Deux lectures, et la seconde couvre ce que la premiere ne voit pas : les groupes d'administration
-# usuels (`sudo`, `admin`, `wheel`), et la regle sudoers au nom du compte, que root lit par
-# `sudo -l -U` (une regle `bob ALL=(ALL) ALL` ne met bob dans aucun groupe).
-# La sortie se lit en `LC_ALL=C` : c'est la phrase de sudo qui porte le verdict, pas son code.
-SUDOER_GROUPS="${LCARS_SUDOER_GROUPS:-sudo admin wheel}"
+# UNE QUESTION, UNE SEULE : ce compte peut-il ouvrir un shell root ? Root la pose a sudo sous la
+# forme `sudo -n -l -U <login> /bin/sh`, et c'est le CODE qui porte le verdict (0 : permis). Elle
+# couvre `%sudo`, `%admin`, `%wheel` et toute regle au nom du compte. Ni le nom d'un groupe (`wheel`
+# ne donne rien sur Debian ni Ubuntu), ni `sudo -l -U <login>` sans commande, qui repond « may run »
+# pour toute regle, meme etroite (`systemctl restart …`) ou vers un autre compte que root : une
+# delegation etroite n'administre pas la machine, et ce compte se revoque comme les autres.
+# Sans sudo sur la machine, aucun compte de la plage des humains n'ouvre de shell root par lui.
 SUDO_BIN="${LCARS_SUDO_BIN:-sudo}"
 declare -A MACHINE_ADMINS_SPARED=()
 
 machine_admin_why() { # machine_admin_why <login> -> la raison s'il administre la machine, rien sinon
-  local login=$1 g members out
-  for g in $SUDOER_GROUPS; do
-    members="$(members_of "$g")"
-    if grep -qxF -- "$login" <<<"$members"; then
-      printf 'membre du groupe %s\n' "$g"
-      return 0
-    fi
-  done
   command -v "$SUDO_BIN" >/dev/null 2>&1 || return 0
-  out="$(LC_ALL=C "$SUDO_BIN" -n -l -U "$login" 2>/dev/null || true)"
-  if [[ "$out" == *"may run the following commands"* ]]; then
-    printf 'regle sudoers a son nom\n'
+  if LC_ALL=C "$SUDO_BIN" -n -l -U "$1" /bin/sh >/dev/null 2>&1; then
+    printf 'sudo lui ouvre un shell root\n'
   fi
   return 0
 }
@@ -246,7 +239,7 @@ machine_admin_why() { # machine_admin_why <login> -> la raison s'il administre l
 spare_machine_admin() { # spare_machine_admin <login> <raison> — le refus, dit une fois par processus
   [[ -z "${MACHINE_ADMINS_SPARED[$1]:-}" ]] || return 0
   MACHINE_ADMINS_SPARED[$1]=1
-  err "REFUS de revoquer $1 — compte d'administration de la machine ($2) : absent de $ORG/$TEAM, il garde son groupe $GROUP, son shell et ses process. Le retirer de $GROUP est un geste d'administrateur : gpasswd -d $1 $GROUP"
+  err "REFUS de révoquer $1 — compte d'administration de la machine ($2) : absent de $ORG/$TEAM, il garde son groupe $GROUP, son shell et ses processus. Le retirer de $GROUP est un geste d'administrateur : « sudo gpasswd -d $1 $GROUP » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"
 }
 
 in_group() { group_members | grep -qxF -- "$1"; }
