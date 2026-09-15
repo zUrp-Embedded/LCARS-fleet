@@ -34,8 +34,8 @@
 #   Sans option de port, les ports sont les défauts de deploy/installer-constants.env.
 #
 # ENV (optionnels) :
-#   LCARS_IMAGE                image de l'instance (défaut : lcars-fleet:local si présente, sinon celle du compose ;
-#                              pull : celle du compose, un tag local ne se tire pas)
+#   LCARS_IMAGE                image de l'instance (défaut : celle du compose — lcars-fleet:local dans un checkout,
+#                              l'image de sa version dans un kit ; pull refuse lcars-fleet:local, qu'aucun registre ne porte)
 #   LCARS_HUMAN                compte de shell et de source-push (défaut : le siège de l'instance)
 #   LCARS_ADMIRAL              login du siège, quand la forge ne le donne pas encore
 #   LCARS_UID                  uid du sysadmin (défaut 1000)
@@ -76,6 +76,7 @@ SOURCE_DANS_CONTENEUR=/home/projects/LCARS
 WITH_BENCH=0
 FORGE_PORT=""
 declare -a PORTS=()   # ce que --bench transmet au banc
+declare -a OPTIONS=("$@")   # les options de l'appel, avant la commande : un remède les rejoue
 
 # shellcheck source=lib/store.sh
 . "$SCRIPT_DIR/deploy/lib/store.sh"
@@ -103,6 +104,7 @@ while [[ $# -gt 0 ]]; do
     *) break ;;
   esac
 done
+OPTIONS=(${OPTIONS[@]+"${OPTIONS[@]:0:$((${#OPTIONS[@]} - $#))}"})
 [[ -z "$FORGE_PORT" || "$WITH_BENCH" -eq 1 ]] \
   || { echo "container: --port-forge n'a d'objet qu'avec --bench — sans lui la forge est fournie (FORGE_BASE_URL)" >&2; exit 1; }
 
@@ -319,16 +321,27 @@ remede_banc() { # remede_banc <image> — le geste qui recrée le conteneur d'un
     "${PROJECT%-fleet}" "$1"
 }
 
+commande_dite() { # commande_dite <commande…> → « deploy/container <options de l'appel> <commande…> », à rejouer telle quelle
+  printf 'deploy/container'
+  [[ "${#OPTIONS[@]}" -eq 0 ]] || printf ' %q' "${OPTIONS[@]}"
+  printf ' %s' "$@"
+}
+
 cmd_up() {
   local img="$LCARS_IMAGE"
   if ! "$DOCKER" image inspect "$img" >/dev/null 2>&1; then
+    local up; up="$(commande_dite up "$@")"
     echo "container: image « $img » absente — un up ne la fabrique pas." >&2
     if [[ "$img" == lcars-fleet:local ]]; then
-      echo "   une version publiée : LCARS_IMAGE=<registre/image:tag> deploy/container pull, puis le même up avec LCARS_IMAGE" >&2
+      # l'image qu'un checkout bâtit : aucun registre ne la porte, pull la refuse
+      echo "   la bâtir (deploy/pack.sh : gate, kit, image — plusieurs minutes), puis démarrer :  $(commande_dite build) && $up" >&2
+      echo "   ou une version publiée : LCARS_IMAGE=<registre/image:tag> deploy/container pull, puis le même up avec LCARS_IMAGE" >&2
     else
-      echo "   la tirer   : deploy/container pull        (LCARS_IMAGE=<registre/image:tag> pour une autre)" >&2
+      # une image donnée dans l'environnement ne se retient qu'au up : pull la reçoit par la même variable
+      local var=""; [[ -z "${CONF_GIVEN[LCARS_IMAGE]+x}" ]] || var="LCARS_IMAGE=$(printf '%q' "$img") "
+      echo "   la tirer, puis démarrer :  ${var}$(commande_dite pull) && ${var}$up" >&2
+      echo "   ou la bâtir : deploy/container build (deploy/pack.sh : gate, kit, image — plusieurs minutes)" >&2
     fi
-    echo "   la bâtir   : deploy/container build       (deploy/pack.sh : gate, kit, image — plusieurs minutes)" >&2
     exit 1
   fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
@@ -656,15 +669,13 @@ if [[ -z "${LCARS_SSH_PORT-}" || -z "${LCARS_LANDING_PORT_BIND-}" ]]; then
 fi
 : "${LCARS_SSH_PORT:=127.0.0.1:$PROV_SSH_PORT_DEFAULT}"
 : "${LCARS_LANDING_PORT_BIND:=127.0.0.1:$PROV_DECK_PORT_DEFAULT}"
-image_defaut() { # image_defaut <commande> — pull vise l'image du compose : un tag local ne se tire d'aucun registre
-  if [[ "$1" != pull ]] && "$DOCKER" image inspect lcars-fleet:local >/dev/null 2>&1; then echo lcars-fleet:local
-  else compose config --images 2>/dev/null | head -n1
-  fi
-}
-: "${LCARS_IMAGE:=$(image_defaut "$1")}"
+# l'image que le compose nomme : dans un checkout, lcars-fleet:local, qu'il bâtit ; dans un kit, celle que pack.sh
+# y a inscrite, même quand le daemon porte un lcars-fleet:local d'un autre arbre
+image_defaut() { compose config --images 2>/dev/null | head -n1; }
+: "${LCARS_IMAGE:=$(image_defaut)}"
 export LCARS_SSH_PORT LCARS_LANDING_PORT_BIND LCARS_IMAGE
 case "$1:$LCARS_IMAGE" in
-  up:|pull:) fail "$1: aucune image nommée — ni lcars-fleet:local sur ce daemon, ni celle du compose (« compose config --images » ne la rend pas)" \
+  up:|pull:) fail "$1: aucune image nommée — le compose n'en rend aucune (« compose config --images »)" \
                "LCARS_IMAGE=<registre/image:tag> deploy/container $1" ;;
   pull:lcars-fleet:local) fail "pull: lcars-fleet:local est l'image qu'un checkout bâtit, aucun registre ne la porte — le compose d'un kit nomme l'image de sa version" \
                "LCARS_IMAGE=<registre/image:tag> deploy/container pull — ou « deploy/container build » pour la bâtir ici" ;;

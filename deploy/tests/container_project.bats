@@ -326,9 +326,72 @@ arbre_container() {
   seed_project "$CF"
   STUB_NO_IMAGE=1 run bash "$SRC" up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"image « lcars-fleet:local » absente"*"LCARS_IMAGE=<registre/image:tag> deploy/container pull"*"deploy/container build"* ]]
-  refute_out 'la tirer   : deploy/container pull' <<<"$output"
+  [[ "$output" == *"image « lcars-fleet:local » absente"*"deploy/container build && deploy/container up"*"LCARS_IMAGE=<registre/image:tag> deploy/container pull"* ]]
+  refute_out 'deploy/container pull &&' <<<"$output"
   refute grep -qE "compose .* up|build" "$CALLS"
+}
+
+# daemon_double — un daemon de décor : une image existe si son nom est un fichier de $IMAGES ; « compose up » démarre
+# le conteneur, qui publie un verdict de forge convergé ; compose config --images est rendu par le vrai docker, sans daemon
+daemon_double() {
+  IMAGES="$BATS_TEST_TMPDIR/images"; mkdir -p "$IMAGES"
+  local real_docker; real_docker="$(PATH="${PATH//"$BINDIR:"/}" command -v docker)"
+  cat > "$BINDIR/docker" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$CALLS"
+if [[ "\$*" == *" config --images" ]]; then DOCKER_HOST="unix://$BATS_TEST_TMPDIR/aucun-daemon.sock" exec "$real_docker" "\$@"; fi
+case "\$*" in
+  "compose version"*) exit 0 ;;
+  "image inspect "*)  [[ -e "$IMAGES/\${*: -1}" ]]; exit ;;
+  *" up -d --no-build"*) : > "$BATS_TEST_TMPDIR/demarre" ;;
+  *" ps -q lcars"*)   [[ ! -e "$BATS_TEST_TMPDIR/demarre" ]] || echo c0ffee ;;
+  *"cat /run/lcars-forge.rc") echo 0 ;;
+  *"cat /run/lcars-seat.login") echo admiral ;;
+  "inspect -f {{.State.Status}} c0ffee") echo running ;;
+esac
+exit 0
+EOF
+  chmod 0755 "$BINDIR/docker"
+}
+
+@test "up depuis un checkout sans image : le premier remède, suivi tel qu'imprimé, mène à une instance démarrée" {
+  arbre_container
+  daemon_double
+  # la bâtisse de décor : pack.sh pose l'image que le checkout nomme
+  printf '#!/usr/bin/env bash\necho "PACK:$*"\n: > %q\n' "$IMAGES/lcars-fleet:local" > "$ARBRE/deploy/pack.sh"; chmod 0755 "$ARBRE/deploy/pack.sh"
+  local cmd="deploy/container -p lcars-fleet up" suite n
+  suite="$cmd"
+  for n in 1 2 3; do
+    run bash -c "cd '$ARBRE' && $cmd" < /dev/null
+    [ "$status" -ne 0 ] || break
+    cmd="$(sed -n 's/^.* : \{2,\}//p' <<<"$output" | head -1)"
+    [ -n "$cmd" ] || { echo "refus sans remède, après : $suite"; echo "$output"; return 1; }
+    suite+=" → $cmd"
+  done
+  [ "$status" -eq 0 ] || { echo "les remèdes ne mènent à aucun passage : $suite"; echo "$output"; return 1; }
+  [ "$suite" = "deploy/container -p lcars-fleet up → deploy/container -p lcars-fleet build && deploy/container -p lcars-fleet up" ] || { echo "$suite"; return 1; }
+  [[ "$output" == *"PACK:"*"container up (lcars-fleet) : image lcars-fleet:local"* ]]
+  refute grep -qE '^pull' "$CALLS"
+}
+
+@test "depuis un kit, l'image que pack.sh inscrit dans le compose gagne, même quand le daemon porte lcars-fleet:local" {
+  arbre_container
+  daemon_double
+  sed -i 's|${LCARS_IMAGE:-lcars-fleet:local}|${LCARS_IMAGE:-registre.exemple/lcars-fleet:v9}|' "$ARBRE/deploy/docker/docker-compose.yml"
+  : > "$IMAGES/lcars-fleet:local"
+  run bash "$ARBRE/deploy/container" up < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"image « registre.exemple/lcars-fleet:v9 » absente"*"la tirer, puis démarrer :  deploy/container pull && deploy/container up"* ]]
+  refute grep -q ' up -d' "$CALLS"
+  mkdir -p "$IMAGES/registre.exemple"; : > "$IMAGES/registre.exemple/lcars-fleet:v9"
+  run bash "$ARBRE/deploy/container" up < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"container up (lcars-fleet) : image registre.exemple/lcars-fleet:v9"* ]]
+  # donnée dans l'environnement, l'image voyage aussi dans le remède : pull la reçoit par la même variable
+  rm -f "$BATS_TEST_TMPDIR/demarre"
+  LCARS_IMAGE=registre.exemple/lcars-fleet:v10 run bash "$ARBRE/deploy/container" --forge-project bob_9 up < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la tirer, puis démarrer :  LCARS_IMAGE=registre.exemple/lcars-fleet:v10 deploy/container --forge-project bob_9 pull && LCARS_IMAGE=registre.exemple/lcars-fleet:v10 deploy/container --forge-project bob_9 up"* ]]
 }
 
 @test "up et pull sans image lisible (compose ne rend pas celle du compose) : refus qui nomme LCARS_IMAGE, jamais une image vide" {
