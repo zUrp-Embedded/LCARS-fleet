@@ -115,7 +115,7 @@ EOF
   run "$SUT" deadbeef
   exec 8>&-
   [[ "$status" -eq 4 ]]
-  [[ "$output" == *"tourne deja"* ]]
+  [[ "$output" == *"tourne déjà"* ]]
   [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
   [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
@@ -347,7 +347,7 @@ EOF
   run "$SUT" deadbeef
   # 4 et pas 1 : une forge muette est un echec passager, pas un appel mal forme.
   [[ "$status" -eq 4 ]]
-  [[ "$output" == *"tete de"* ]]
+  [[ "$output" == *"tête de"* ]]
   [[ "$output" == *"introuvable"* ]]
 }
 
@@ -475,7 +475,7 @@ EOS
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\nsysroot:\n  arch: arm64\n  keyring: %s\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' "$BATS_TEST_TMPDIR/absent.gpg" | base64 -w0)"
   run "$SUT" deadbeef
   [[ "$status" -eq 1 ]]
-  [[ "$output" == *"keyring de la cible absent ou illisible sur l'hote"* ]]
+  [[ "$output" == *"keyring de la cible absent ou illisible sur l'hôte"* ]]
   [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
 
@@ -484,4 +484,104 @@ EOS
   run "$SUT" deadbeef
   [[ "$status" -eq 2 ]]
   [[ "$output" == *"non declare"* ]]
+}
+
+# ─── LA FORGE EN HTTP, TELLE QUE `curl` LA REND, ET LE VRAI `jq` ─────────────────────────────────
+#
+# La doublure suit la semantique de curl sur les options que le convergeur passe : `-f` supprime le
+# corps d'une reponse >= 400 et rend 22 en disant le code sur stderr ; sans `-f`, le corps sort et
+# le code est 0 ; `-w` ecrit son format (`%{stderr}` bascule sur stderr, `%{http_code}` rend le code)
+# dans les deux cas ; `-K -` consomme stdin. Les routes sont une table « motif<TAB>code<TAB>corps ».
+# `jq` est le VRAI : un corps HTML ou un message d'erreur JSON y rencontre sa semantique reelle, et
+# aucun temoin ne decide sur le texte d'un filtre.
+stub_forge_http() { # stub_forge_http <fichier de routes>
+  rm -f "$BATS_TEST_TMPDIR/bin/jq"
+  command -v jq >/dev/null || skip "jq absent de la machine : ces temoins exigent le vrai"
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!/usr/bin/env bash
+fail=0 fmt="" url=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    -f|--fail) fail=1 ;;
+    -w) fmt="\$2"; shift ;;
+    -K) [[ "\$2" == - ]] && cat >/dev/null; shift ;;
+    -m) shift ;;
+    http*) url="\$1" ;;
+  esac
+  shift
+done
+code=404 body='<!DOCTYPE html><html><body>404 Not Found</body></html>'
+while IFS=\$'\t' read -r motif c b; do
+  if [[ "\$url" == \$motif ]]; then code="\$c"; body="\$b"; break; fi
+done < '$1'
+ecrire_format() {
+  [[ -n "\$fmt" ]] || return 0
+  local out="\${fmt//%\{http_code\}/\$code}"
+  if [[ "\$out" == *'%{stderr}'* ]]; then printf '%b' "\${out//%\{stderr\}/}" >&2; else printf '%b' "\$out"; fi
+}
+if [[ "\$code" -ge 400 && "\$fail" -eq 1 ]]; then
+  echo "curl: (22) The requested URL returned error: \$code" >&2
+  ecrire_format
+  exit 22
+fi
+printf '%s\n' "\$body"
+ecrire_format
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+}
+
+routes() { # routes <motif|code|corps>… -> le chemin du fichier de routes
+  local f="$BATS_TEST_TMPDIR/routes" l
+  : > "$f"
+  for l in "$@"; do printf '%s\n' "$l" | tr '|' '\t' >> "$f"; done
+  printf '%s' "$f"
+}
+
+TETE='*/branches/tool_request|200|{"commit":{"id":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}}'
+
+@test "LISTE: ops/toolchains.d absent au SHA (404 HTML) — liste vide, sortie 0, SHA note" {
+  # Le dernier manifeste et son `.gitkeep` retires : il ne reste rien a appliquer, et une sortie 4
+  # a chaque tick ne noterait jamais ce SHA. Sans `-f`, le corps HTML part dans `jq` et sort en 4.
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|404|<!DOCTYPE html><html><body>404 Not Found</body></html>')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"aucun dossier ops/toolchains.d sur fleet/lcars au sha deadbeef — aucun manifeste à appliquer"* ]]
+  [[ "$(cat "$LCARS_STORE_ROOT/state/egress.d/.applied")" == "deadbeef" ]]
+  printf '%s\n' "$output" | refute_out 'parse error|illisible'
+}
+
+@test "JETON: un 401 sur la tete sort en 1 et nomme FORGE_TOKEN — un refus n'est pas une panne passagere" {
+  # Sans `-f`, le message d'erreur JSON part dans `jq`, la tete est vide, et la sortie est 4.
+  export FORGE_TOKEN=jeton-refuse
+  stub_forge_http "$(routes '*/branches/tool_request|401|{"message":"user does not exist [uid: 0, name: ]"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"la forge refuse le jeton du convergeur (HTTP 401) en lisant la tête de « tool_request » sur fleet/lcars — rien n'est appliqué. FORGE_TOKEN est invalide ou ne donne pas la lecture de ce dépôt"* ]]
+  printf '%s\n' "$output" | refute_out 'jeton-refuse'
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "JETON: un 403 anonyme sur la liste sort en 1 et dit que FORGE_TOKEN manque" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|403|{"message":"forbidden"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"la forge refuse la lecture anonyme (HTTP 403) de la liste des manifestes sur fleet/lcars"*"poser FORGE_TOKEN"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "LISTE: une autre erreur de lecture (500) garde 4 — ni vide ni refus" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|500|<html>500</html>')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "LISTE: un corps 200 qui n'est pas une liste garde 4" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|200|{"message":"pas une liste"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }

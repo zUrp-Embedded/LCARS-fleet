@@ -16,7 +16,8 @@
 #   Lit `ops/toolchains.d/*.yaml` du depot ops AU SHA donne, et applique chaque manifeste.
 #   Idempotent : rejouer applique le meme etat. Un ecosysteme deja pose est saute.
 #
-# EXIT : 0 tout applique · 1 usage/dependance manquante (keyring de la cible compris)
+# EXIT : 0 tout applique (aucun dossier `ops/toolchains.d` au SHA compris : rien a appliquer)
+#      · 1 usage/dependance manquante (keyring de la cible compris, jeton refuse par la forge compris)
 #      · 2 manifeste refuse (forme, motif) · 3 une application a echoue
 #      · 4 echec passager avant d'appliquer : forge illisible, ou verrou tenu par une autre convergence
 #
@@ -56,33 +57,60 @@ mkdir -p "$(dirname "$LOCK")" "$WORK"
 exec 9>"$LOCK" || die 1 "verrou inouvrable ($LOCK)"
 # Un verrou tenu n'est pas un etat applique : sortir 0 ferait noter le SHA par-dessus une convergence
 # qui peut encore echouer.
-flock -n 9 || die 4 "une convergence tourne deja — celle-ci n'applique rien, la passe suivante reessaiera"
+flock -n 9 || die 4 "une convergence tourne déjà — celle-ci n'applique rien, la passe suivante réessaiera"
 
 [[ -n "$FORGE" ]] || die 1 "FORGE_BASE_URL absent — impossible de lire le manifeste"
 
 # ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV se lit dans `/proc/<pid>/cmdline`. Le tube
 # ferme la fuite.
 # `-f` : une reponse d'erreur de la forge est un echec de lecture, pas un corps a interpreter. Sans
-# lui, `{"message":…}` part dans `jq` et devient un faux manifeste.
-api() {
+# lui, `{"message":…}` part dans `jq` et devient un faux manifeste. Et c'est l'echec de `api` LUI-MEME
+# qui autorise a lire le code HTTP : un corps rendu n'est jamais relu comme un refus ou une absence.
+# Le code arrive sur stderr (`%{stderr}`), dans un fichier du dossier de travail que le verrou
+# reserve a cette passe ; le reste de stderr (la phrase de curl) repart vers le journal.
+API_STATUS="$WORK/.forge-read.status"
+api() { # api <chemin> -> le corps sur stdout ; en echec, `api_code` rend le code HTTP (000 : pas de reponse)
+  local rc=0
   if [[ -n "$TOKEN" ]]; then
     printf 'header = "Authorization: token %s"\n' "$TOKEN" \
-      | curl -sS -m 30 -K - -f "$FORGE/api/v1$1"
+      | curl -sS -m 30 -K - -f -w '%{stderr}lcars-http=%{http_code}\n' "$FORGE/api/v1$1" 2>"$API_STATUS" || rc=$?
   else
-    curl -sS -m 30 -f "$FORGE/api/v1$1"
+    curl -sS -m 30 -f -w '%{stderr}lcars-http=%{http_code}\n' "$FORGE/api/v1$1" 2>"$API_STATUS" || rc=$?
   fi
+  grep -v '^lcars-http=' "$API_STATUS" >&2 || true
+  return "$rc"
+}
+api_code() { sed -n 's/^lcars-http=//p' "$API_STATUS" 2>/dev/null | tail -n1; }
+
+# Un refus d'authentification n'est pas une panne passagere : rejouer au tick suivant rend le meme
+# refus. Il sort en 1 (dependance) en nommant le jeton, et non en 4.
+die_if_token_refused() { # die_if_token_refused <code> <ce qui etait lu>
+  case "$1" in
+    401|403)
+      if [[ -n "$TOKEN" ]]; then
+        die 1 "la forge refuse le jeton du convergeur (HTTP $1) en lisant $2 sur $OPS_REPO — rien n'est appliqué. FORGE_TOKEN est invalide ou ne donne pas la lecture de ce dépôt : le remplacer par un jeton qui lit $OPS_REPO"
+      else
+        die 1 "la forge refuse la lecture anonyme (HTTP $1) de $2 sur $OPS_REPO — rien n'est appliqué. Sans FORGE_TOKEN, ce dépôt doit être lisible anonymement ; sinon, poser FORGE_TOKEN, un jeton qui lit $OPS_REPO"
+      fi ;;
+  esac
+  return 0
 }
 
 # ⚠ UN LITTERAL, JAMAIS UNE VARIABLE : `toolchain.branch_single_source` exige que chaque lecteur
 # shell en porte la COPIE et refuse tout reglage. Reglable, il ouvrirait la borne qui empeche
 # d'installer en root un manifeste que personne n'a signe.
 BRANCH="tool_request"
-head_of_branch() {
-  api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
+head_of_branch() { # rc 0 lue · 2 la lecture a echoue (api_code dit pourquoi) · autre : corps illisible
+  local body
+  body="$(api "/repos/$OPS_REPO/branches/$BRANCH")" || return 2
+  jq -r '.commit.id // empty' <<< "$body"
 }
-HEAD_SHA="$(head_of_branch)" || HEAD_SHA=""
+hrc=0
+HEAD_SHA="$(head_of_branch)" || hrc=$?
+[[ "$hrc" -ne 2 ]] || die_if_token_refused "$(api_code)" "la tête de « $BRANCH »"
+[[ "$hrc" -eq 0 ]] || HEAD_SHA=""
 [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
-  || die 4 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
+  || die 4 "tête de « $BRANCH » introuvable sur $OPS_REPO — rien n'est appliqué (la forge répond-elle ?)"
 [[ "${HEAD_SHA:0:${#SHA}}" == "$SHA" ]] \
   || die 1 "sha '$SHA' n'est PAS la tete de la branche protegee « $BRANCH » ($HEAD_SHA) — refuse. Un manifeste ne s'applique qu'a la revision qu'un humain a signee sur cette branche."
 
@@ -90,9 +118,13 @@ HEAD_SHA="$(head_of_branch)" || HEAD_SHA=""
 # constat d'ecart du reconciliateur et cette lecture : un merge qui atterrit entre les deux serait
 # applique SANS que le SHA note lui corresponde.
 # Une liste illisible n'est pas une liste vide : « aucun manifeste » ferait sortir 0 et noter le SHA.
-list_manifests() {
-  api "/repos/$OPS_REPO/contents/ops/toolchains.d?ref=$SHA" \
-    | jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else error("pas une liste") end'
+# Un dossier ABSENT au SHA, lui, en est une : la forge rend 404 sur le chemin, alors que la tete vient
+# d'etre lue sur ce depot et que ce SHA en est la tete. Il ne reste aucun manifeste a appliquer (le
+# dernier et son `.gitkeep` retires, ou une branche posee sans ce dossier) : 0, et le SHA se note.
+list_manifests() { # rc 0 lue · 2 la lecture a echoue (api_code dit pourquoi) · autre : pas une liste
+  local body
+  body="$(api "/repos/$OPS_REPO/contents/ops/toolchains.d?ref=$SHA")" || return 2
+  jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else error("pas une liste") end' <<< "$body"
 }
 
 # `-e` : un `.content` absent rend `null`, que `base64 -d` decode sans erreur en octets — un
@@ -319,7 +351,7 @@ validate_manifest() { # validate_manifest <yaml> <eco>
     [[ -n "$v" ]] || die 2 "keyring de la cible non declare dans le manifeste de '$2'"
     # Le manifeste NOMME un fichier de l'hote : son absence est un defaut de la machine, que la pose
     # du fichier repare sans nouveau merge. En 2, la tete resterait gelee apres la reparation.
-    [[ -r "$v" ]] || die 1 "keyring de la cible absent ou illisible sur l'hote: '$v' — poser ce fichier, la passe suivante reprendra"
+    [[ -r "$v" ]] || die 1 "keyring de la cible absent ou illisible sur l'hôte : '$v' — ce fichier se pose sur l'hôte, la passe suivante reprendra"
   fi
 
   if grep -q '^installer:' <<< "$1"; then
@@ -330,8 +362,15 @@ validate_manifest() { # validate_manifest <yaml> <eco>
 }
 
 rc=0
-manifests="$(list_manifests)" \
-  || die 4 "liste des manifestes illisible sur $OPS_REPO au sha $SHA — rien n'est applique (la forge repond-elle ?)"
+lrc=0
+manifests="$(list_manifests)" || lrc=$?
+if [[ "$lrc" -eq 2 && "$(api_code)" == 404 ]]; then
+  manifests=""
+  echo "toolchain-converger: aucun dossier ops/toolchains.d sur $OPS_REPO au sha $SHA — aucun manifeste à appliquer"
+elif [[ "$lrc" -ne 0 ]]; then
+  [[ "$lrc" -ne 2 ]] || die_if_token_refused "$(api_code)" "la liste des manifestes"
+  die 4 "liste des manifestes illisible sur $OPS_REPO au sha $SHA — rien n'est appliqué (la forge répond-elle ?)"
+fi
 for path in $manifests; do
   eco="$(basename "$path" .yaml)"
   safe_eco "$eco" || die 2 "nom d'ecosysteme refuse: '$eco'"
@@ -344,7 +383,7 @@ for path in $manifests; do
   [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
 
   yaml="$(fetch_manifest "$path")" \
-    || die 4 "manifeste $path illisible sur $OPS_REPO au sha $SHA — rien de plus n'est applique (la forge repond-elle ?)"
+    || die 4 "manifeste $path illisible sur $OPS_REPO au sha $SHA — rien de plus n'est appliqué (la forge répond-elle ?)"
   validate_manifest "$yaml" "$eco"
 
   # ⚠ JAMAIS EN CONDITION D'UN `if` NI D'UNE LISTE `||` : bash y ignore `set -e` jusque dans le
