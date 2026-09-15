@@ -15,15 +15,18 @@ set -euo pipefail
 # la team de la forge. Ce module n'y met que le siège, le compte de l'uid LCARS_SYSADMIN_UID que provision
 # établit depuis le compte qui l'a lancé (jamais depuis --human), et que le convergeur ne touche jamais (GUARD A).
 # Le siège en a besoin pour traverser le dossier des jetons : le skill system-issues y lit forge.url.
-[[ "${LCARS_SYSADMIN_UID:-}" =~ ^[0-9]+$ ]] \
-  || p_die "LCARS_SYSADMIN_UID absent ou non numérique (« ${LCARS_SYSADMIN_UID:-} ») : provision l'établit depuis le compte qui le lance — ce module se joue par ./provision"
-SEAT_LOGIN="$(getent passwd | awk -F: -v u="$LCARS_SYSADMIN_UID" '$3 == u {print $1; exit}' || true)"
+# lu après le mode : un mode inconnu se refuse avant toute lecture
+lire_siege() {
+  [[ "${LCARS_SYSADMIN_UID:-}" =~ ^[0-9]+$ ]] \
+    || p_die "LCARS_SYSADMIN_UID absent ou non numérique (« ${LCARS_SYSADMIN_UID:-} ») : provision l'établit depuis le compte qui le lance — ce module se joue par ./provision"
+  SEAT_LOGIN="$(getent passwd | awk -F: -v u="$LCARS_SYSADMIN_UID" '$3 == u {print $1; exit}' || true)"
+  SIEGE_INCONNU="siège inconnu du système : aucun compte ne porte l'uid $LCARS_SYSADMIN_UID (LCARS_SYSADMIN_UID)"
+}
 
 # root n'est l'humain d'aucune passe : le siège root (le doctor du conteneur par « docker exec », une session
 # root) passe outre les permissions de groupe, et fleet ne lui donne rien
 siege_est_root() { [[ "$LCARS_SYSADMIN_UID" == 0 ]]; }
 SIEGE_ROOT="le siège est root (uid 0) : fleet ne lui donne rien, son appartenance ne se mesure ni ne se pose"
-SIEGE_INCONNU="siège inconnu du système : aucun compte ne porte l'uid $LCARS_SYSADMIN_UID (LCARS_SYSADMIN_UID)"
 
 # l'humain de la passe (--human) qui n'est pas le siège : son appartenance n'est pas l'affaire de ce module
 humain_hors_siege() {
@@ -69,4 +72,4 @@ apply() {
   verdict_apply
 }
 
-case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac
+case "${1:-}" in check|apply) lire_siege; "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

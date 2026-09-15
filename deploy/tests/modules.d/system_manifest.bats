@@ -18,7 +18,8 @@ setup() {
   awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"||c=="dir"{print $2}' "$BATS_TEST_TMPDIR/rows" | sort -u > "$ROOTS"
 
   EXEMPT="$BATS_TEST_TMPDIR/exempt"
-  printf '%s\n' /usr/local/bin /etc/systemd/system /etc/tmpfiles.d /home/projects/LCARS > "$EXEMPT"
+  # /run/lcars-seat.login : écrit par l'init du conteneur (services/container/, hors du code lu ici) ; forge.d/tokens.sh le lit
+  printf '%s\n' /usr/local/bin /etc/systemd/system /etc/tmpfiles.d /home/projects/LCARS /run/lcars-seat.login > "$EXEMPT"
 }
 
 # Les lignes de donnees du manifeste : ni commentaire, ni vide.
