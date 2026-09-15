@@ -110,10 +110,9 @@ resource "gitea_user" "system_role" {
 # commentaire. Le BADGE de starfleet, lui, est pose par `provision-forge-charte.sh` sur le master
 # (option `--admiral`) : le nom n'est pas sur la forge, la charte y est.
 
-# ⚠ `count`, ET C'EST LA CONSEQUENCE DU COMMENTAIRE CI-DESSOUS (⚖ user 2026-08-30) : « CE COMPTE
-# N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait creer a son
-# installation […] les vraies personnes ont des comptes a leur nom ». Une ressource inconditionnelle
-# semerait ce compte sur TOUT deploiement. `builtin_human` vide (le defaut) = aucun compte : un
+# ⚠ `count`, ET C'EST LA CONSEQUENCE DU COMMENTAIRE CI-DESSOUS (⚖ user 2026-08-30) : CE COMPTE
+# N'EST PAS UNE PERSONNE — c'est l'humain de demonstration d'un banc, et les vraies personnes ont des
+# comptes a leur nom. Une ressource inconditionnelle semerait ce compte sur TOUT deploiement. `builtin_human` vide (le defaut) = aucun compte : un
 # deploiement de travail pose les autorites, pas les humains.
 resource "gitea_user" "human" {
   count                = var.builtin_human == "" ? 0 : 1
@@ -125,10 +124,9 @@ resource "gitea_user" "human" {
   # `false`, et c'est un CORRECTIF (⚖ arbitrage user 2026-08-11) : pas de `must_change_password =
   # true` au motif que « l'humain pose son propre secret au 1er login ».
   #
-  # CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
-  # créer À SON INSTALLATION — celui que l'opérateur pose quand il prépare la forge qu'on lui
-  # demande. Les vraies personnes ont des comptes à leur nom, et elles n'existent pas encore
-  # (enrollment). Le réglage attendrait donc un premier login que personne ne fait, et il
+  # CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, c'est l'humain de démonstration, un admin de
+  # LCARS que cette recette pose pour essayer LCARS sans enrôler personne. Les vraies personnes ont
+  # des comptes à leur nom, et elles n'existent pas encore (enrollment). Le réglage attendrait donc un premier login que personne ne fait, et il
   # n'est pas inerte : il ferme le compte en attendant — le banc devrait le lever à chaque nuke, une
   # installation réelle l'oublierait simplement.
   must_change_password = false
@@ -137,12 +135,14 @@ resource "gitea_user" "human" {
   #
   #   · L'ADMIN DE LCARS — les droits d'administration que la fleet voit. Il est porté par un compte
   #     SITE-ADMIN de la forge, et c'est `is_admin` que lit la porte de `lcars catalogue install`
-  #     (`catalogue-executor.py`, `forge_is_admin`). L'humain de démonstration est un admin de LCARS :
-  #     il tient la place du compte admin que Gitea fait créer à son installation (ci-dessus).
-  #   · L'ADMIN DU SYSTÈME — le siège (`admiral`), par défaut root ou le premier compte Linux de la
-  #     machine (`/etc/lcars/seat.uid`). Il administre la machine ; sur la forge, il détient le
-  #     compte d'administration que l'installeur crée HORS de cette recette (le jeton master, le
-  #     break-glass). La garde du siège lui refuse la fleet : son adminité ne passe jamais par elle.
+  #     (`catalogue-executor.py`, `forge_is_admin`). L'humain de démonstration est un admin de LCARS,
+  #     et cette recette le pose.
+  #   · L'ADMIN DU SYSTÈME — le siège (`/etc/lcars/seat.uid`) : sur un poste, le compte qui installe
+  #     (celui qui lance sudo) ; dans un conteneur, le compte n°1 de la forge (`admiral` au banc).
+  #     Il administre la machine ; sur la forge, il porte le compte d'administration, posé HORS de
+  #     cette recette (par l'installeur sur un poste dont la forge est montée, par l'opérateur de la
+  #     forge sinon), avec le jeton master et le break-glass. La garde du siège lui refuse la fleet :
+  #     son adminité ne passe jamais par elle.
   #
   # CETTE LIGNE EST LA SEULE MAIN QUI POSE L'ADMINITÉ DE CE COMPTE. Tofu la réapplique à chaque
   # passe de 61-forge-structure : une autre main (le banc) qui la poserait aussi serait défaite ici

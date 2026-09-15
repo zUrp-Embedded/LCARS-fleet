@@ -362,10 +362,11 @@ resource "gitea_team_membership" "externals" {
   depends_on = [gitea_user.role]
 }
 
-# LE COMPTE BUILT-IN, et il n'est PAS une personne : il tient le siège du compte que l'admin d'une
-# forge crée à son installation. Sa raison d'être aujourd'hui est un TUTORIEL — il donne à l'admiral
-# une cible sur laquelle exercer la promotion (`is_admin` sur la forge → onglet admin du deck à la
-# session suivante), sans avoir à enrôler une vraie personne pour essayer.
+# L'HUMAIN DE DÉMONSTRATION, et il n'est PAS une personne : c'est un admin de LCARS que cette recette
+# pose (site-admin de la forge, `instance/accounts.tf`), pour essayer LCARS sur un banc sans enrôler
+# une vraie personne. Il n'est pas le siège : le siège est l'admin du système — le compte qui
+# installe sur un poste, le compte n°1 de la forge dans un conteneur —, il porte le compte
+# d'administration de la forge, et la fleet lui est fermée.
 #
 # `count` et pas une ressource inconditionnelle : `humans` n'existe que dans l'org système (cf. la
 # table plus haut), donc l'adhésion la suit. Une org de catalogue n'a ni la team ni ce compte.
