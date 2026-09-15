@@ -15,6 +15,8 @@
 #   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet).
 #   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`).
 #   - les cles d'hote SSH, PERSISTANTES dans le volume `/home`.
+#   - `forge.url` du repertoire des jetons, depuis `FORGE_BASE_URL` : l'adresse qu'une session ssh
+#     du siege lit, puisqu'elle n'herite pas de l'environnement du service.
 #   - le LAYOUT du volume : ce que `25-directories` pose dans l'image et sur un poste, repose ici
 #     sur les volumes du conteneur — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
 #     skill du siege, `pilot.assignee`. Les memes chemins, modes et proprietaires que la table de
@@ -32,6 +34,9 @@
 
 set -euo pipefail
 : "${LCARS_MODULE_TAG:=container-init}"
+# L'adresse de la forge TELLE QUE L'ENVIRONNEMENT LA DONNE, lue AVANT le protocole : celui-ci la
+# complete depuis `forge.url`, le fichier que `forge_url_file` pose.
+FORGE_URL_ENV="${FORGE_BASE_URL:-}"
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/module-protocol.sh}"
 
@@ -223,6 +228,27 @@ store() {
   store_tree sysroots   0755 root:root
   store_tree state      2775 "root:$LCARS_FLEET_GROUP"
 }
+# ─── L'ADRESSE DE LA FORGE, LISIBLE PAR LE SIEGE ───────────────────────────────────────────────
+# Une session ouverte par ssh n'herite pas de l'environnement du service : sshd ne transmet pas
+# `FORGE_BASE_URL`. Le skill du siege (`system-issues`) lit alors `forge.url` du repertoire des
+# jetons, le fichier que l'installeur pose sur un poste : 0644, dans un dossier 0710 que le groupe
+# fleet traverse, et le siege est dans fleet (`seat_create`). L'init le pose ici depuis
+# l'environnement. Sans adresse, il le retire : le protocole des gestes le lirait sinon comme
+# l'adresse courante, et une forge retiree de la configuration resterait visee.
+forge_url_file() {
+  local f="$LCARS_PRIVATE_DIR/forge.url"
+  if [[ -n "$FORGE_URL_ENV" ]]; then
+    write_atomic "$f" 0644 "root:$LCARS_FLEET_GROUP" <<<"$FORGE_URL_ENV" || true   # un echec est deja compte
+  elif [[ -e "$f" || -L "$f" ]]; then
+    if rm -f -- "$f"; then
+      p_chg "$f retiré — FORGE_BASE_URL n'est plus posé, aucune adresse de forge n'est gardée"
+    else
+      p_fail "$f NON retiré — les gestes de forge viseraient encore l'adresse qu'il porte"
+    fi
+  fi
+  return 0
+}
+
 # `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
 seat_extras() {
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
@@ -294,6 +320,7 @@ cmd_apply() {
   source_trees
   host_keys
   layout
+  forge_url_file
   seat_extras
   verdict_apply
 }

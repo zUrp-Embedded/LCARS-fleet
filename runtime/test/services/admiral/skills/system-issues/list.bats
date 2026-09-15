@@ -85,12 +85,24 @@ EOF
   [ "$(grep -c 'http://gitea:3000/api/v1/' "$CALLS")" -eq 2 ]
 }
 
-@test "aucune adresse : le refus nomme le fichier par défaut du poste et la variable du conteneur, curl n'est pas appelé" {
-  [[ ! -e /opt/lcars/var/tokens/forge.url ]] || skip "cette machine porte /opt/lcars/var/tokens/forge.url : le défaut y trouverait une adresse"
-  unset LCARS_FORGE_URL FORGE_BASE_URL LCARS_PRIVATE_DIR
+@test "aucune adresse : le refus nomme le fichier cherché, le geste de chaque rail, et curl n'est pas appelé" {
+  # La racine privée pointe sur un dossier VIDE : le cas se joue aussi sur un poste posé, dont
+  # /opt/lcars/var/tokens/forge.url donnerait une adresse au défaut.
+  unset LCARS_FORGE_URL FORGE_BASE_URL
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens-vide"; mkdir -p "$LCARS_PRIVATE_DIR"
   run "$LIST"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"/opt/lcars/var/tokens/forge.url"* ]]
-  [[ "$output" == *"FORGE_BASE_URL"* ]]
+  [[ "$output" == *"ni $LCARS_PRIVATE_DIR/forge.url lisible"* ]]
+  [[ "$output" == *"Sur un poste, « deploy/workstation up » écrit ce fichier ; dans un conteneur, son démarrage l'écrit depuis FORGE_BASE_URL"* ]]
   [ ! -s "$CALLS" ]
+}
+
+@test "le défaut du fichier est le répertoire des jetons de l'installation, celui que l'init du conteneur écrit" {
+  # Une session ssh ne porte pas LCARS_PRIVATE_DIR : le défaut de list.sh et celui du protocole des
+  # modules (que l'init applique) doivent désigner le même dossier.
+  local defaut_list defaut_protocole
+  defaut_list="$(sed -n 's|^FORGE_URL_FILE="\${LCARS_PRIVATE_DIR:-\([^}]*\)}/forge.url"$|\1|p' "$LIST")"
+  defaut_protocole="$(sed -n 's|^: "\${LCARS_PRIVATE_DIR:=\([^}]*\)}"$|\1|p' "$BATS_TEST_DIRNAME/../../../../../services/lib/module-protocol.sh")"
+  [ -n "$defaut_list" ]
+  [ "$defaut_list" = "$defaut_protocole" ]
 }

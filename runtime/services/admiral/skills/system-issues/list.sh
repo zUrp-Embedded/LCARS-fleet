@@ -13,10 +13,12 @@
 
 set -euo pipefail
 
-# L'adresse de la forge, là où la session du siège la trouve : `FORGE_BASE_URL` dans le conteneur
-# (l'environnement du service, qu'un « docker exec » hérite), sinon le fichier que l'installeur grave
-# sur un poste, `forge.url` du répertoire des jetons (0644, dans un dossier que le groupe fleet
-# traverse). Même ordre que le protocole des gestes de forge.
+# L'adresse de la forge, là où la session du siège la trouve : `FORGE_BASE_URL` s'il est dans
+# l'environnement (une session « docker exec » l'hérite du service), sinon `forge.url` du répertoire
+# des jetons (0644, dans un dossier que le groupe fleet traverse, et le siège est dans fleet). Ce
+# fichier est posé sur les deux rails : par l'installeur sur un poste, par l'init du démarrage dans un
+# conteneur — une session ssh n'hérite pas de l'environnement du service. Même ordre que le protocole
+# des gestes de forge.
 FORGE_URL_FILE="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}/forge.url"
 FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/dev/null | tr -d '[:space:]' || true)}}"
 # ⚠ LE JETON SYSTEME, PAS LE MASTER, ET C'EST UNE CORRECTION DE PRIVILEGE. Ce script ne fait que
@@ -43,7 +45,7 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 # pendant que les demandes atterrissent dans une autre.
 BRANCH="tool_request"
 
-[[ -n "$FORGE_URL" ]] || { echo "system-issues: adresse de la forge inconnue — ni FORGE_BASE_URL dans l'environnement, ni $FORGE_URL_FILE lisible. Sur un poste, « deploy/workstation up » écrit ce fichier ; dans un conteneur, une session ouverte par « docker exec » hérite FORGE_BASE_URL du service ; ailleurs, « FORGE_BASE_URL=<url> » devant la commande" >&2; exit 1; }
+[[ -n "$FORGE_URL" ]] || { echo "system-issues: adresse de la forge inconnue — ni FORGE_BASE_URL dans l'environnement, ni $FORGE_URL_FILE lisible. Sur un poste, « deploy/workstation up » écrit ce fichier ; dans un conteneur, son démarrage l'écrit depuis FORGE_BASE_URL (« FORGE_BASE_URL=<url> deploy/container config » depuis l'hôte, puis « deploy/container up ») ; ailleurs, « FORGE_BASE_URL=<url> » devant la commande" >&2; exit 1; }
 [[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorité absent ($AUTHORITY_ASK) — sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte" >&2; exit 1; }
 
 # La cause du refus est deja imprimee en francais par le client, sur stderr. La reformuler ici la
