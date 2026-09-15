@@ -175,9 +175,9 @@ else
 fi
 [[ "$WITH_BENCH" -eq 1 || " ${PROJET_PORTS[*]:-} " != *" --port-forge "* ]] \
   || { echo "  --port-forge n'a d'objet qu'avec --bench : sans lui la forge est fournie (FORGE_BASE_URL), son port n'est pas celui de ce projet." >&2; exit 1; }
-# la structure de la forge fait site-admin l'humain de démonstration : hors banc, elle promouvrait un compte tiers
+# la structure de la forge rend site-admin l'humain de démonstration : hors banc, elle promouvrait un compte tiers
 [[ "$WITH_BENCH" -eq 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] \
-  || { echo "  --humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) n'a d'objet qu'avec --bench : la structure de la forge fait cet humain site-admin, et hors banc elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait : la même commande avec --bench, ou sans --humain-demo." >&2; exit 1; }
+  || { echo "  --humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) n'a d'objet qu'avec --bench : la structure de la forge rend cet humain site-admin, et hors banc elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait : la même commande avec --bench, ou sans --humain-demo." >&2; exit 1; }
 
 # ─── outils ───────────────────────────────────────────────────────────────────────────────────
 FACTS_FILE=""

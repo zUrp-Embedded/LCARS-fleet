@@ -29,7 +29,7 @@
 #   --forge URL          FORGE_BASE_URL        --forge-publique URL   FORGE_PUBLIC_URL
 #   --humain-demo NOM    LCARS_BUILTIN_HUMAN (défaut lcars sous --bench) ; refusé sans --bench, comme une passe sans
 #                        --bench sur une machine dont le journal retient l'humain d'un banc : la structure de la
-#                        forge fait cet humain site-admin
+#                        forge rend cet humain site-admin
 #   --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1
 #
 #   EXIT  up      0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, sudo impossible, échec
@@ -77,10 +77,10 @@ lire_options() { # lire_options <options…> — les choix de l'opérateur devie
       *)                ARGS+=("$1"); MESURE+=("$1"); shift ;;
     esac
   done
-  # la structure de la forge fait site-admin l'humain qu'elle nomme, et importe un compte existant de ce nom :
+  # la structure de la forge rend site-admin l'humain qu'elle nomme, et importe un compte existant de ce nom :
   # hors banc, elle promouvrait un compte tiers, celui d'une forge fournie compris
   [[ -z "${LCARS_BUILTIN_HUMAN:-}" || "${LCARS_BENCH:-}" == 1 ]] \
-    || fail "--humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) sans --bench : l'humain de démonstration est celui d'un banc, et la structure de la forge le fait site-admin — hors banc, elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait." \
+    || fail "--humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) sans --bench : l'humain de démonstration est celui d'un banc, et la structure de la forge le rend site-admin — hors banc, elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait." \
             "pour un banc : la même commande avec --bench ; pour un poste : sans --humain-demo"
   [[ "${LCARS_BENCH:-}" != 1 ]] || export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
 }
