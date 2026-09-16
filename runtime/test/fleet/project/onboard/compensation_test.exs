@@ -8,6 +8,7 @@ defmodule Fleet.Project.OnboardCompensationTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Project.Onboard, as: ProjectOnboard
+  alias Fleet.Project.Onboard.Faces
 
   @moduletag :tmp_dir
 
@@ -448,6 +449,33 @@ defmodule Fleet.Project.OnboardCompensationTest do
 
       assert face_mode(Path.join(o[:workshop_root], "rejoint")) == 0o2775
       assert face_mode(Path.join(o[:ops_root], "rejoint")) == 0o2755
+    end
+
+    # A chmod clamps the mask of any ACL the deployment placed on the face, so a conforming mode is
+    # measured and left alone. ctime moves on a metadata write and on that write only; the second
+    # assertion is the control that proves the instrument can see a write at all.
+    defp ctime(dir), do: dir |> then(&System.cmd("stat", ["-c", "%.9Z", &1])) |> elem(0)
+
+    test "un mode deja conforme n'est pas reecrit", %{tmp_dir: tmp} do
+      dir = Path.join(tmp, "face")
+      File.mkdir_p!(dir)
+      File.chmod!(dir, 0o2775)
+      avant = ctime(dir)
+
+      assert :ok = Faces.chmod_face(dir, 0o2775)
+      assert ctime(dir) == avant
+      assert face_mode(dir) == 0o2775
+
+      assert :ok = Faces.chmod_face(dir, 0o2755)
+      assert ctime(dir) != avant
+      assert face_mode(dir) == 0o2755
+    end
+
+    test "un dossier illisible est un refus nomme, jamais un mode pose a l'aveugle", %{
+      tmp_dir: tmp
+    } do
+      assert {:error, {:face_mode_unreadable, _dir, :enoent}} =
+               Faces.chmod_face(Path.join(tmp, "absente"), 0o2775)
     end
   end
 end

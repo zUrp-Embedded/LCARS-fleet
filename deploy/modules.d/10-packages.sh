@@ -16,9 +16,10 @@ set -euo pipefail
 # `procps` : pgrep/pkill, lus par 60, le convergeur et 64. `python3-venv` : PEP 668 est actif, pip
 # hors venv échoue par conception ; build-essential, python3-dev, pkg-config, libssl-dev : les
 # extensions C, node-gyp et les crates -sys que les pods compilent. `xz-utils` : 16-node détare un
-# .tar.xz, et xz n'est que de priorité standard.
+# .tar.xz, et xz n'est que de priorité standard. `acl` : 30-wsl ouvre les projets au compte de
+# Windows par une entrée nominative, et Ubuntu ne pose pas setfacl.
 PACKAGES=(
-  tmux bubblewrap git curl jq unzip xz-utils ca-certificates python3 socat
+  tmux bubblewrap git curl jq unzip xz-utils ca-certificates python3 socat acl
   git-filter-repo gh
   util-linux-extra sudo
   procps

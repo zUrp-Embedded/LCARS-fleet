@@ -224,9 +224,22 @@ defmodule Fleet.Project.Onboard.Faces do
     end
   end
 
+  # Measure before writing: a chmod on a directory carrying an ACL clamps that ACL's mask down to
+  # the group bits, and the deployment grants named accounts access to the face roots that way.
+  # Re-onboarding a project must not silently revoke access the runtime never granted.
   @doc false
   @spec chmod_face(String.t(), non_neg_integer()) :: :ok | {:error, term()}
   def chmod_face(dir, mode) do
+    case File.stat(dir) do
+      {:ok, %File.Stat{mode: current}} ->
+        if Bitwise.band(current, 0o7777) == mode, do: :ok, else: write_face_mode(dir, mode)
+
+      {:error, reason} ->
+        {:error, {:face_mode_unreadable, dir, reason}}
+    end
+  end
+
+  defp write_face_mode(dir, mode) do
     case File.chmod(dir, mode) do
       :ok -> :ok
       {:error, reason} -> {:error, {:face_mode_failed, dir, mode, reason}}

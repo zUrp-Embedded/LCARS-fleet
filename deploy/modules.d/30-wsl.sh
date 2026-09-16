@@ -2,11 +2,11 @@
 # SOURCE: deploy/modules.d/30-wsl.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-09-12
-# STATUS: le substrat WSL — wsl.conf clé par clé (C: fermé, interop coupée, systemd, hostname), snapd purgé, gpg-agent masqué, credsStore retiré, docker.io à côté de Docker Desktop refusé
+# STATUS: le substrat WSL — wsl.conf clé par clé (C: fermé, interop coupée, systemd, hostname), les projets ouverts au compte de Windows, snapd purgé, gpg-agent masqué, credsStore retiré, docker.io à côté de Docker Desktop refusé
 # APPLY-ON: wsl
 # CHECK-ON: wsl
 # NEEDS: root
-# AFTER: 10-packages
+# AFTER: 10-packages 25-directories
 #
 # wsl.conf est le fichier de l'instance : chaque clé de l'état-cible s'y pose, le reste du fichier
 # ([user] compris) est conservé. Il ne prend effet qu'après « wsl --shutdown » ; la sonde de C:
@@ -105,6 +105,79 @@ wsl_conf_report() { # chaque clé de l'état-cible contre le fichier → 0 si to
   [[ "$conforme" -eq 1 ]]
 }
 
+# ─── les projets vus de Windows ─────────────────────────────────────────────────────────────────
+#
+# Un projet appartient à l'humain de la fleet qui l'a créé, et le groupe fleet n'y a que la lecture :
+# c'est l'isolation voulue entre humains. Windows ouvre les fichiers de l'instance sous le compte que
+# wsl.conf déclare ([user] default), avec ses groupes — mesuré. Une entrée nominative pour ce seul
+# compte, posée en accès et par défaut sur chaque racine de face, lui rend l'écriture sans ouvrir
+# quoi que ce soit au groupe ; tout projet né ensuite en hérite. Ce geste n'a de sens que sous WSL :
+# ailleurs, personne n'ouvre ces fichiers depuis un autre système.
+ACL_DROITS=rwx
+
+compte_windows() { # le compte sous lequel Windows ouvre les fichiers, ou rien (l'appelant le dit)
+  local c
+  c="$(ini_get "$WSL_CONF" user default)"
+  if [[ -z "$c" ]]; then
+    # wsl.conf ne nomme personne : WSL prendra le compte par défaut du distro, que ce fichier ne dit
+    # pas. Le siège est le meilleur candidat — c'est le compte qui installe, et l'uid 1000 du distro.
+    [[ "${LCARS_SYSADMIN_UID:-}" =~ ^[0-9]+$ ]] || return 0
+    c="$(getent passwd | awk -F: -v u="$LCARS_SYSADMIN_UID" '$3 == u {print $1; exit}' || true)"
+  fi
+  [[ -n "$c" ]] && getent passwd "$c" >/dev/null 2>&1 || return 0
+  printf '%s\n' "$c"
+}
+
+# les racines de face se lisent dans le manifeste : ce module n'en tient pas une copie de plus
+faces_declarees() {
+  awk '$1 == "dir" && $2 ~ /^\/home\/projects(\.[a-z]+)?$/ { print $2 }' "$PROV_MANIFEST_FILE"
+}
+
+acl_posee() { # acl_posee <chemin> <compte> → 0 si l'entrée d'accès ET celle par défaut sont là
+  local lu
+  lu="$(getfacl -pcE -- "$1" 2>/dev/null)" || return 1
+  grep -qx "user:$2:$ACL_DROITS" <<<"$lu" && grep -qx "default:user:$2:$ACL_DROITS" <<<"$lu"
+}
+
+projets_report() { # projets_report <check|apply> — chaque racine de face contre l'entrée du compte
+  local verbe="$1" compte racine chemin
+  compte="$(compte_windows)"
+  if [[ -z "$compte" ]]; then
+    p_warn "compte de Windows inconnu : wsl.conf ne porte pas [user] default et aucun compte ne répond à l'uid du siège — les projets resteront en lecture seule depuis Windows"
+    return 0
+  fi
+  if ! command -v setfacl >/dev/null 2>&1; then
+    if [[ "$verbe" == apply ]]; then
+      p_fail "setfacl absent (paquet acl, que 10-packages pose) — l'accès de « $compte » aux projets ne se pose pas"
+    else
+      p_drift "setfacl absent (paquet acl, que 10-packages pose) — l'accès de « $compte » aux projets ne se mesure ni ne se pose"
+    fi
+    return 0
+  fi
+  while read -r racine; do
+    chemin="$(prov_decor "$racine")"
+    if [[ ! -d "$chemin" ]]; then
+      # une racine que 25-directories n'a pas posée est son affaire, pas la nôtre : dite, jamais
+      # comptée en dérive à l'apply, où une dérive ferait rendre 2 à un module qui a tout fait
+      if [[ "$verbe" == apply ]]; then
+        p_warn "$chemin absent — 25-directories le pose, l'accès de « $compte » se posera à la passe suivante"
+      else
+        p_drift "$chemin absent — 25-directories le pose, l'accès de « $compte » se posera ensuite"
+      fi
+    elif acl_posee "$chemin" "$compte"; then
+      p_ok "$chemin : « $compte » y écrit (ACL nominative, accès et défaut)"
+    elif [[ "$verbe" != apply ]]; then
+      p_drift "$chemin : « $compte » (le compte de Windows) n'y écrit pas — ACL nominative absente"
+    elif setfacl -m "u:$compte:$ACL_DROITS" -m "d:u:$compte:$ACL_DROITS" -- "$chemin"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1))
+      p_chg "$chemin : « $compte » y écrit désormais — les projets nés ensuite en héritent, le groupe fleet reste en lecture"
+    else
+      p_fail "$chemin : ACL refusée pour « $compte » (setfacl) — ce système de fichiers porte-t-il les ACL ?"
+    fi
+  done < <(faces_declarees)
+  return 0
+}
+
 check() {
   if docker_io_next_to_desktop; then
     p_drift "$DOCKER_IO_DESKTOP_GESTE"
@@ -124,6 +197,7 @@ check() {
   else
     p_drift "gpg-agent-ssh.socket non masqué pour $PROV_HUMAN (race shutdown WSL2 → sessions user cassées)"
   fi
+  projets_report check
   local conforme=1 c=0; wsl_conf_report || conforme=0
   c_drive_open || c=$?
   if [[ "$c" -eq 0 && "$conforme" -eq 1 ]]; then
@@ -174,6 +248,8 @@ apply() {
     rm -f "$dtmp"
     p_warn "credsStore retiré de $dcfg — il désignait un helper Windows (.exe) que la coupure de l'interop rendra inexécutable. Les registres publics restent joignables ; un registre privé redemandera un « docker login »"
   fi
+
+  projets_report apply
 
   # wsl.conf en dernier : rien n'arme le redémarrage tant que le reste n'est pas posé
   local cible; cible="$(wsl_conf_cible)"

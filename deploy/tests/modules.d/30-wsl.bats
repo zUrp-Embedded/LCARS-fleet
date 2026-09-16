@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/modules.d/30-wsl.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-12
-# STATUS: témoins du substrat WSL — wsl.conf clé par clé, C: sondé, hostname, snapd, gpg-agent, credsStore, docker.io
+# STATUS: témoins du substrat WSL — wsl.conf clé par clé, C: sondé, hostname, les projets ouverts au compte de Windows, snapd, gpg-agent, credsStore, docker.io
 
 load ../refute
 load ../support/decor
@@ -42,15 +42,23 @@ EOF
 
 mod() { run unshare -Ur bash "$MOD" "$@"; }
 masque_pose() { mkdir -p "$HOME_DIR/.config/systemd/user"; ln -sf /dev/null "$HOME_DIR/.config/systemd/user/gpg-agent-ssh.socket"; }
+# les racines de face, telles que 25-directories les pose avant que ce module se joue
+faces_posees() { mkdir -p "$LCARS_DECOR_ROOT"/home/projects{,.ops,.workshop}; }
+# posée dans le même espace d'uid que le module : « root » y désigne le compte qui joue les témoins
+acl_pose() { unshare -Ur setfacl -m u:root:rwx -m d:u:root:rwx "$@"; }
+acl_lue() { unshare -Ur getfacl -pcE "$1"; }
 cle() { awk -v S="$1" -v K="$2" '/^\[/{s=$0; gsub(/[][]/,"",s)} s==S && $0 ~ "^"K"=" {sub(/^[^=]*=/,""); print; exit}' "$WSL_CONF"; }
 desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "$DESKTOP_CLI"; chmod 0755 "$DESKTOP_CLI"; }
 
 @test "check : tout posé — snapd absent, masque gpg, wsl.conf conforme clé par clé, C: fermé, hostname du projet — conforme" {
   masque_pose
-  printf '[boot]\nsystemd=true\n[automount]\nenabled=false\nmountFsTab=true\n[interop]\nenabled=false\nappendWindowsPath=false\n[network]\nhostname=bob-9\n' > "$WSL_CONF"
+  faces_posees
+  acl_pose "$LCARS_DECOR_ROOT"/home/projects{,.ops,.workshop}
+  printf '[user]\ndefault=root\n[boot]\nsystemd=true\n[automount]\nenabled=false\nmountFsTab=true\n[interop]\nenabled=false\nappendWindowsPath=false\n[network]\nhostname=bob-9\n' > "$WSL_CONF"
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"snapd absent"*"gpg-agent-ssh.socket masqué (root)"*"[boot] systemd=true"*"[network] hostname=bob-9"*"C: fermé"* ]]
+  [[ "$output" == *"/home/projects.workshop : « root » y écrit (ACL nominative, accès et défaut)"* ]]
   [[ "$output" != *"WARN"* ]]
 }
 
@@ -196,4 +204,61 @@ desktop_monte() { mkdir -p "$(dirname "$DESKTOP_CLI")"; printf '#!/bin/sh\n' > "
   rm -f "$HOME_DIR/.docker/config.json"
   mod apply
   [ ! -e "$HOME_DIR/.docker/config.json" ]
+}
+
+@test "les projets : sans ACL, chaque racine de face est une dérive qui nomme le compte de Windows" {
+  faces_posees
+  printf '[user]\ndefault=root\n' > "$WSL_CONF"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 30-wsl: $LCARS_DECOR_ROOT/home/projects : « root » (le compte de Windows) n'y écrit pas — ACL nominative absente"* ]]
+  [[ "$output" == *"$LCARS_DECOR_ROOT/home/projects.ops : « root »"*"$LCARS_DECOR_ROOT/home/projects.workshop : « root »"* ]]
+}
+
+@test "les projets : l'apply pose l'entrée en accès ET par défaut, ce qui naît ensuite en hérite, le groupe ne gagne rien, la seconde passe ne repose rien" {
+  faces_posees
+  chmod 2775 "$LCARS_DECOR_ROOT/home/projects"
+  printf '[user]\ndefault=root\n' > "$WSL_CONF"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"POSÉ  30-wsl: $LCARS_DECOR_ROOT/home/projects : « root » y écrit désormais"* ]]
+  local lue; lue="$(acl_lue "$LCARS_DECOR_ROOT/home/projects")"
+  [[ "$lue" == *"user:root:rwx"*"default:user:root:rwx"* ]]
+  [[ "$lue" == *"group::rwx"* ]]
+  [[ "$lue" == *"other::r-x"* ]]
+  unshare -Ur mkdir "$LCARS_DECOR_ROOT/home/projects/neuf"
+  [[ "$(acl_lue "$LCARS_DECOR_ROOT/home/projects/neuf")" == *"user:root:rwx"*"default:user:root:rwx"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  refute_out 'y écrit désormais' <<<"$output"
+  [[ "$output" == *"OK    30-wsl: $LCARS_DECOR_ROOT/home/projects : « root » y écrit"* ]]
+}
+
+@test "les projets : wsl.conf qui ne nomme personne et pas de siège — dit, et rien n'est posé à l'aveugle" {
+  faces_posees
+  printf '[boot]\nsystemd=true\n' > "$WSL_CONF"
+  mod check
+  [[ "$output" == *"WARN  30-wsl: compte de Windows inconnu"*"lecture seule depuis Windows"* ]] || { echo "$output"; return 1; }
+  refute_out "ACL nominative absente" <<<"$output"
+  refute_out "user:root:rwx" <<<"$(acl_lue "$LCARS_DECOR_ROOT/home/projects")"
+}
+
+@test "les projets : sans [user] default, le siège prend sa place" {
+  faces_posees
+  printf '#!/usr/bin/env bash\nprintf "root:x:0:0::%%s:/bin/bash\\n" "$HOME_DIR"\nexit 0\n' > "$BIN/getent"
+  chmod 0755 "$BIN/getent"
+  printf '[boot]\nsystemd=true\n' > "$WSL_CONF"
+  LCARS_SYSADMIN_UID=0 mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_DECOR_ROOT/home/projects : « root » (le compte de Windows) n'y écrit pas"* ]] || { echo "$output"; return 1; }
+}
+
+@test "les projets : un setfacl qui refuse est un échec nommé, jamais un silence" {
+  faces_posees
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/setfacl"
+  chmod 0755 "$BIN/setfacl"
+  printf '[user]\ndefault=root\n' > "$WSL_CONF"
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  30-wsl: $LCARS_DECOR_ROOT/home/projects : ACL refusée pour « root » (setfacl)"* ]]
 }
