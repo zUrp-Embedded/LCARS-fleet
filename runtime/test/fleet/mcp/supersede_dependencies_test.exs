@@ -43,8 +43,31 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:error, {:http, 500, "boom"}}
 
-    def post_comment(_repo, n, _body, _opts) do
-      send(self(), {:comment, n})
+    def post_comment(_repo, n, body, _opts) do
+      send(self(), {:comment, n, body})
+      {:ok, :posted}
+    end
+
+    def close_issue(_repo, n, _opts) do
+      send(self(), {:close, n})
+      {:ok, :closed}
+    end
+  end
+
+  # Gitea 1.26 rend 500, PAS 409, quand l'arete est deja la (mesure du 2026-09-16, banc 2002).
+  defmodule AlreadyForge do
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
+    def issue_blocks(_repo, _n, _opts), do: {:ok, []}
+    def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
+
+    def add_issue_dependency(_repo, _n, _b, _opts),
+      do:
+        {:error,
+         {:http, 500,
+          %{"message" => "issue dependency does already exist [issue id: 2, dep id: 3]"}}}
+
+    def post_comment(_repo, n, body, _opts) do
+      send(self(), {:comment, n, body})
       {:ok, :posted}
     end
 
@@ -110,12 +133,29 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
     end
   end
 
-  describe "when the rewiring cannot be done" do
-    test "the old ticket stays OPEN and the result says so — loud beats wrong" do
+  # ⚠ CE TEMOIN DISAIT L'INVERSE, ET LA MESURE DU BANC A TRANCHE. Un retrait qui s'arrete sur une
+  # arete laisse le ticket remplace OUVERT : la fleet le redispatche, et la meme brique est livree
+  # deux fois — cinq supersedes en echec sur un projet du banc beta, deux livraisons jumelles. Un
+  # zombie coute un lot entier, une arete non portee coute une ligne a reposer. Le retrait va donc
+  # au bout, et l'arete qu'il n'a pas pu porter est DITE sur le ticket.
+  describe "quand une arete ne peut pas etre portee" do
+    test "le retrait va au bout, et l'arete non portee est dite sur le ticket" do
       result = retire(RefusingForge)
 
-      refute_received {:close, 16}
-      assert result["supersede_warning"] =~ "encore ouvert"
+      assert_received {:close, 16}
+      assert %{"supersedes" => 16} = result
+      refute Map.has_key?(result, "supersede_warning")
+      assert_received {:comment, 16, corps}
+      assert corps =~ "NON portée"
+      assert corps =~ "#4"
+    end
+
+    test "500 « does already exist » : l'arete EST portee, et rien ne se dit" do
+      retire(AlreadyForge)
+
+      assert_received {:close, 16}
+      assert_received {:comment, 16, corps}
+      refute corps =~ "NON portée"
     end
   end
 
