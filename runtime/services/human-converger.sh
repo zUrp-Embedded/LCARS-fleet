@@ -330,8 +330,8 @@ team_id() {
 # fois installe, si on supprime deploy/, il doit rien se passer ». Un convergeur qui crierait
 # toutes les trente secondes apres `deploy/provision`, c'est le contraire de rien.
 #
-# ⚠ UN SEUL CHEMIN VERS L'ETAT PER-HUMAIN : celui-ci. L'installeur ne joue AUCUN module
-# `NEEDS: human` — deux chemins vers un etat (le premier humain a l'apply, les suivants ici), c'est
+# ⚠ UN SEUL CHEMIN VERS L'ETAT PER-HUMAIN : celui-ci. L'installeur ne joue AUCUN module de
+# `human.d` — deux chemins vers un etat (le premier humain a l'apply, les suivants ici), c'est
 # celui qu'on ne relit pas qui derive. ⚖ user : « pas besoin d'avoir du code en + pour faire ce que
 # le service qu'on pose fait a son premier tour ».
 #
@@ -363,7 +363,7 @@ converge_human() { # converge_human <login>
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
 
   # ⚠ LES MODULES SE JOUENT SOUS L'IDENTITE DE L'HUMAIN, PAS SOUS CELLE DE CE SERVICE. Ils
-  # portent `NEEDS: human` et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
+  # agissent sur une PERSONNE, et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
   # dans son home, HOME/USER/LOGNAME poses. Ce service les sourcait en ROOT — mesure du 2026-09-04,
   # banc bob_1, la premiere fois qu'ils ont tourne ici : `~/.lcars` de l'humain cree root:root,
   # son `fleet.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur

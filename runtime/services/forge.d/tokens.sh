@@ -3,9 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — forge : SONDE de la structure (territoire OpenTofu) + jambe tokens (A4)
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
 # Ce geste est joue par le boot du conteneur et, sur un poste, par 63-forge-tokens (un appelant
@@ -240,8 +240,8 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # un membre qui se cache que pour quelqu'un qui n'est PAS membre (mesuré : `chief` membre caché 404,
 # `nonmember` 404). Les traiter pareil produisait une consigne inapplicable — « rends ton adhésion
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
-# team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
-# membre / 404 non-membre) et c'est la sonde qui manquait.
+# team — un compte avec un jeton et aucune adhésion. `members/<u>` les sépare (204 membre /
+# 404 non-membre), et c'est cette séparation qui rend la consigne applicable.
 member_state() { # $1=compte → visible | hidden | absent | unknown
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
   [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
@@ -260,8 +260,9 @@ members_in_state() { # $1=état recherché, $2=liste → sous-liste
 
 members_hidden() { members_in_state hidden "$1"; }
 
-# Elle sonde donc le ROSTER SYSTÈME seul : `$LCARS_ROLES` est le plancher (avant que `prov_roles` n'y
-# ajoute les catalogues), et c'est exactement la population de l'org système. La visibilité d'une org
+# Elle sonde donc le ROSTER SYSTÈME seul : `$LCARS_ROLES` est le plancher que l'appelant apporte,
+# avant que les catalogues installés n'y ajoutent les leurs (`roles_of_machine`, plus haut), et c'est
+# exactement la population de l'org système. La visibilité d'une org
 # de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
 check_members_visible() {
   local hidden absent unknown org_accounts="$ROLES $LCARS_SYSTEM_ACCOUNT"

@@ -3,9 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — pose le client OAuth2 du deck du conteneur + son fichier de config
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
 

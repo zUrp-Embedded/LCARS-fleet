@@ -3,9 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — la boite aux lettres du rail d'outillage : UNE branche, sur LE depot ops
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 #
 # ─── ORPHELINE, ET AUCUNE API NE SAIT LA FAIRE ─────────────────────────────────────────────────
 # `POST /repos/<r>/branches` exige `old_ref_name` : il rend une branche FILLE de ce qu'on lui

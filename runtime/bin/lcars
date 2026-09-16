@@ -54,8 +54,9 @@ USAGE
   $PROG tool {verify|roles|roles-tfvars|catalogue-root|catalogue-source} [arguments]
       Les PORTES OUTIL du release — des evaluations d'une ligne, sous un uid sans pouvoir quand
       l'appelant est root : verify <root> · roles [root] · roles-tfvars [root] · catalogue-root ·
-      catalogue-source <nom>. \`forge-gestures.sh\` et l'installeur (\`prov_roles\`) les appellent
-      ici ; le boot de l'image (container/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
+      catalogue-source <nom>. \`forge-gestures.sh\`, le geste des jetons et l'enrolement d'un
+      catalogue (\`deploy/lib/enroll-catalogue.sh\`) les appellent ici ; le boot de l'image
+      (container/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
       la fleet.
 
   $PROG catalogue list
@@ -364,16 +365,6 @@ cmd_catalogue_verify() {
   cat_verify_root "$root"
 }
 
-# Le nom DECLARE par le catalogue, lu a la racine de son manifeste. Cle de premier niveau, donc
-# ancree en COLONNE 0 : un `name:` indente appartient a autre chose.
-cat_declared_name() { # $1=racine -> le nom, ou 1
-  local m="$1/catalogue.yaml" n
-  [[ -r "$m" ]] || return 1
-  n="$(sed -n 's/^name:[[:space:]]*\([a-z0-9][a-z0-9-]*\)[[:space:]]*$/\1/p' "$m" | head -1)"
-  [[ -n "$n" ]] || return 1
-  printf '%s' "$n"
-}
-
 # Cette commande ne detient rien : elle DEMANDE a un service par une socket unix, qui pose la
 # question a la forge et agit. Ce defaut est une COPIE de l'adresse que porte `system.manifest` —
 # les deux bougent ensemble, ou le geste frappe une porte absente et accuse le service d'etre eteint.
@@ -541,18 +532,15 @@ cmd_project() {
 
 # ─── LES PORTES OUTIL DU RELEASE ────────────────────────────────────────────────────────────────
 #
-# ⚖ user 2026-09-04 (chantier deploy-independance, A7 / lot 6). Quatre `lcars_fleet eval` d'une
-# ligne vivaient dans le PID 1 du conteneur (`deploy/docker/entrypoint.sh verify|roles-tfvars|
-# catalogue-root|catalogue-source`), et `forge-gestures.sh` — un service du produit, sur les DEUX
-# rails — allait les chercher la-bas, en devinant le chemin de l'entrypoint (`_entrypoint_path`).
-# Un geste du produit qui execute le PID 1 de l'image pour evaluer une fonction du release : la
-# porte etait au mauvais endroit. Elle est ici, dans la CLI du produit, posee sur les deux rails
-# (`/usr/local/bin/lcars`). Le boot du conteneur (`services/container/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
-# de l'image, le banc s'en sert) et delegue ici.
+# ⚖ user 2026-09-04 : ces portes vivent DANS LA CLI DU PRODUIT, posee sur les deux rails
+# (`/usr/local/bin/lcars`), et nulle part ailleurs. Un geste du produit qui devrait executer le PID 1
+# de l'image pour evaluer une fonction du release aurait sa porte au mauvais endroit. Le boot du
+# conteneur garde les MOTS (`docker run IMAGE roles-tfvars` est l'API de l'image, le banc s'en sert)
+# et delegue ici.
 #
 # ⚠ SOUS UN UID SANS POUVOIR quand on est root. Ces evaluations chargent le release et son
 # catalogue — du code — et un appelant root (le boot, un geste de forge) ne doit pas les executer
-# comme root : `nobody:fleet`, comme l'entrypoint le faisait. Sous un humain, l'uid courant.
+# comme root : `nobody:fleet`. Sous un humain, l'uid courant.
 # `LCARS_TOOL_EVAL=1` est le seam du release pour un OUTIL : `runtime.exs` ne monte pas de fleet.
 _tool_run() { # _tool_run <expression elixir>
   local bin; bin="$(_release_bin)"

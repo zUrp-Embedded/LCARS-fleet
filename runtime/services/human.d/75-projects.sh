@@ -3,10 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — les faces locales des projets, convergees depuis la forge
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 50-catalogues 63-forge-tokens 70-human
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$LCARS_LOGIN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet.env` qui porte l'adresse de la forge et le jeton.

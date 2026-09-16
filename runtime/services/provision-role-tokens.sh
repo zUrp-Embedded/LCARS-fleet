@@ -28,10 +28,11 @@
 #
 # USAGE :
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
-#                                                            # les 6 roles + le systeme = A4 complet
+#                                                            # les roles du defaut + le systeme
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 #   provision-role-tokens.sh --help                          # cette aide
-# Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : les 6) ·
+# Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : la liste
+#           de `ROLES` plus bas ; l'appelant passe celle de la machine, catalogues installes compris) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
 #             fichier ; aucun usager dans la recette) · --owner USER (defaut lcars-authority) ·
 #           --token-name NAME (defaut lcars-fleet) · -h|--help

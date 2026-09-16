@@ -3,9 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — le materiel des catalogues INSTALLES, converge depuis la forge
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
 # la lecture et le clone se font en anonyme. Un conteneur qui n'a jamais recu `container config`
@@ -143,10 +143,10 @@ remote_head() { GIT_TERMINAL_PROMPT=0 git ls-remote "$1" HEAD 2>/dev/null | awk 
 local_head()  { git -c safe.directory="$1" -C "$1" rev-parse HEAD 2>/dev/null || true; }
 
 # ⚠ UN RELIQUAT QUE LE PRODUIT NE PEUT PAS RETIRER SE DIT — c'est la seule chose qu'on puisse en
-# faire honnetement. Le cache vivait en `/home/catalogues` jusqu'au 2026-09-01 ; `/home` est sorti du
-# perimetre entier, donc aucun geste du rail n'y touchera plus. Se taire laisserait un arbre orphelin
-# de plusieurs centaines de mega sur une machine dont l'operateur croit que le produit gere ses
-# chemins. Ce n'est PAS un drift : un drift promet qu'`apply` converge, et `apply` ne le fera jamais.
+# faire honnetement. Aucun geste du rail ne touche a `/home`, donc un cache de catalogues laisse
+# la-bas y restera : se taire laisserait un arbre orphelin de plusieurs centaines de mega sur une
+# machine dont l'operateur croit que le produit gere ses chemins. Ce n'est PAS un drift : un drift
+# promet qu'`apply` converge, et `apply` ne le fera jamais.
 LEGACY_CATALOGUES_DIR="$LCARS_LEGACY_CATALOGUES_DIR"
 
 say_leftover() {

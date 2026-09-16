@@ -233,7 +233,7 @@ if config_env() != :test and not tool_mode? do
       workflow_workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
   end
 
-  # Workspaces are per-pod; the retired shared LCARS_WORKSPACES_ROOT has no reader.
+  # Workspaces are per-pod: no shared root is configurable here, and none is read.
 
   # Use AggregateDispatcher through the shutdown seam; tests keep their NoOp default.
   # The launcher reads this same grace value and adds its own wait margin.
@@ -257,7 +257,7 @@ if config_env() != :test and not tool_mode? do
   # Project incidents use project.card_failed/project.declaration_invalid events and immediate
   # incident routes in events.yaml; do not add a parallel Project -> Pilot function seam.
 
-  # API has only an AF_UNIX control socket; the retired LCARS_API_PORT configures no listener.
+  # API listens on an AF_UNIX control socket ONLY: no TCP port is configurable here.
 
   # Control writes use a per-human home socket outside the pod's mounted home.
   # An explicit LCARS_API_SOCK overrides that location; this assignment does not validate it.
@@ -331,8 +331,9 @@ if config_env() != :test and not tool_mode? do
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
   end
 
-  # Do not restore the retired human-team preflight knob: onboarding writes as the system
-  # account, and creating an issue on a public repository does not establish team membership.
+  # No preflight gates the human team here, and adding one would measure nothing: onboarding
+  # writes as the system account, and creating an issue on a public repository does not establish
+  # team membership.
 
   # Routing uses scoped wfmap/stage labels; type labels are presentation.
 

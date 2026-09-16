@@ -3,10 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — enrôlement per-humain : ~/.lcars, ~/pods, env seed-once, sondes creds (instruct-only)
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 20-groups
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
 # L'hote nomme le protocole per-humain (LCARS_HUMAN_PROTOCOL) : le convergeur, ou un temoin. Le

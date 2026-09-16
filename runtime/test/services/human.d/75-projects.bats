@@ -200,7 +200,7 @@ EOF
   [[ "$output" != *"FAIL"* ]]
 }
 
-# ─── la garde qui manquait : tous les `# NEEDS: human` ne parlent pas du meme humain ─────────────
+# ─── la garde qui manquait : tous les modules per-humain ne parlent pas du meme humain ───────────
 
 @test "le sysadmin n'est pas un humain de fleet : le module passe son tour, conforme" {
   # LE PIEGE MESURE. L'entrypoint conteneur joue le cycle de boot avec `--human <sysadmin>` (uid

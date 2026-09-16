@@ -3,10 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — binaire claude PER-HUMAIN (~/.local/bin) via l'installer officiel
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 20-groups
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 # ⚠ TOUTE MACHINERIE AJOUTÉE ICI DOUBLE LA SIENNE ET NE PEUT QUE DIVERGER D'ELLE. L'installeur
 # vérifie son sha256 contre un manifeste signé, nettoie derrière lui sur CHAQUE branche d'échec,
 # installe pour l'utilisateur courant et nomme ses morts (dont l'OOM killer). Un staging, un

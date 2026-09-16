@@ -322,8 +322,8 @@ LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
    && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
   # ⚠ `setpriv` PARCE QUE CE RAIL N'A PAS SYSTEMD. Sur le poste, `User=` de l'unite fait ce drop ;
-  # ici l'entrypoint est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter du
-  # root de l'entrypoint — il detient les secrets de la forge et n'a aucun privilege a exercer.
+  # ici ce boot est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter de son
+  # root — il detient les secrets de la forge et n'a aucun privilege a exercer.
   # Le `setpriv` est DANS la commande supervisée, pas autour du superviseur : celui-ci doit rester
   # root pour pouvoir relancer, et c'est l'ENFANT qui descend — exactement ce que `User=` fait dans
   # l'unité systemd du rail poste, où systemd reste root et le service non.
@@ -331,7 +331,7 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # `User=`, et elle manquait. `lcars_socket.py` cree le dossier de socket AVEC L'UID DU SERVICE :
   # un service qui vient de DROPPER ne peut rien creer sous `/run/lcars` (root:root 0755). Sur le
   # poste, `25-directories` pose ce dossier et l'unite porte `User=` — deux moities d'un seul geste,
-  # tenues par deux acteurs. Ici l'entrypoint est le seul acteur, et il n'en tenait qu'une.
+  # tenues par deux acteurs. Ici ce boot est le seul acteur, et il n'en tenait qu'une.
   #
   # Les services qui restent root creent le leur tout seuls : ils masquaient le trou. Celui-ci, non.
   # Mesure .63 du 2026-08-30 : « PermissionError: [Errno 13] … '/run/lcars/authority' », cinq
