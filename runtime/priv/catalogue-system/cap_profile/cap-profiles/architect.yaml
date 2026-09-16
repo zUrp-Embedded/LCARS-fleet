@@ -11,11 +11,20 @@ metadata:
   # Under bwrap, HOME=pod_dir -> claude reads pod_dir/.claude, never the human's ~/.claude,
   # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
   containment: bwrap
-  # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
-  # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
-  # `vendor-only` : leur matiere de reference arrive par leur brief, leur lot, ou la face montee.
-  # C'est une DECLARATION, pas une derivation : le jour ou un producteur en a besoin, il le dit.
-  network: egress
+  # AVEC starfleet, LE SECOND ROLE OUVERT, et pour la meme raison : il parle a un humain, il cadre,
+  # il arbitre, il VA CHERCHER. `egress` ne lui donnait que les hotes du vendor — mesure sur banc le
+  # 2026-09-16 : toute lecture de page rendait « proxy refused the connection », et seule la
+  # recherche passait, parce qu'elle sort par l'API du vendor. Un role qui cherche sur le web ne
+  # peut pas declarer d'avance les pages qu'il lira ; une liste d'hotes deplace la friction sur
+  # l'humain au lieu de la supprimer (⚖ arbitrage user 2026-09-05, repris ici).
+  #
+  # Ce que ca NE retire PAS : le pod reste scelle (aucun namespace reseau), sort par son proxy
+  # CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste refusee.
+  #
+  # Tous les autres roles restent au defaut `vendor-only` : leur matiere de reference arrive par
+  # leur brief, leur lot, ou la face montee. C'est une DECLARATION, pas une derivation : le jour ou
+  # un producteur en a besoin, il le dit.
+  network: open
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
   # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la
@@ -139,6 +148,10 @@ spec:
       # les producers butent dessus (anticiper une toolchain, un essai voulu par l'humain). La
       # demande reste une PR vers `tool_request` qu'un admin signe — le grant n'installe rien.
       - mcp__fleet__scratch           # gare une note dans le scratchpad de l'atelier (ajout seul, pousse)
+      # Publier l'atelier : le systeme indexe, commit et pousse. Un pod ne pousse pas (git_ops_denied),
+      # et avant cet outil un document n'atteignait la forge que balaye par la note `scratch`
+      # suivante — ou jamais. `scratch` = une pensee dans le flux ; celui-ci = un document fini.
+      - mcp__fleet__workshop_publish
       - mcp__fleet__toolchain_request
     disallowedTools:
       # snake_case: server-side API tools. Declared here, enforced by the vendor — cf. the
