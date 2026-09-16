@@ -172,8 +172,10 @@ apply_start_flags() {
   return 0
 }
 
-# Le siege vit dans un fichier `root:root` que le garde ne peut pas reecrire, et le FICHIER GAGNE sur
-# la variable : sans cette precedence, il suffirait de reposer la variable pour desarmer la garde.
+# LA PREMIERE DES DEUX POLITIQUES DU SIEGE (l'autre est `seat_uid` du protocole des modules) : ici,
+# le FICHIER SEUL fait foi. Aucune variable n'est lue — pas meme en repli — parce que ce lanceur
+# REFUSE un lancement : s'il acceptait `LCARS_SYSADMIN_UID`, il suffirait de la reposer pour
+# desarmer la garde. Le fichier est `root:root`, hors de portee de celui qu'il arrete.
 # AUCUN REPLI — fichier absent ou illisible = machine NON PROVISIONNEE, un etat et pas une valeur.
 seat_uid() {
   local f v

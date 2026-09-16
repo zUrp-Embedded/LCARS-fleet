@@ -1017,6 +1017,36 @@ uid_decor() { # login.defs, passwd et siège sous le décor
   [[ "$lib_dit" == "|" ]]
 }
 
+# ⚠ DEUX POLITIQUES ASSUMÉES, ET C'EST LA SECONDE QUI S'ÉCRIT DEUX FOIS. Celle des gardes qui
+# REFUSENT un lancement (`bin/fleet`, GUARD B du BEAM) lit le fichier SEUL. Celle qui décide d'une
+# POPULATION — ici, et `seat_uid` du protocole du produit — lit le fichier PUIS la variable. La lib
+# de l'installeur ne source pas le protocole du produit (elle en importerait tous les défauts) :
+# l'accord des deux écritures se mesure, il ne se suppose pas.
+@test "le siège : la lib et le protocole du produit lisent le MÊME uid, dans le même ordre" {
+  local proto="$BATS_TEST_DIRNAME/../../../runtime/services/lib/module-protocol.sh"
+  [ -f "$proto" ]
+  local f="$BATS_TEST_TMPDIR/seat.uid" cas lib_dit proto_dit bad=0
+  for cas in "fichier+variable" "fichier seul" "variable seule" "fichier illisible" "rien"; do
+    case "$cas" in
+      "fichier+variable") echo 1000 > "$f"; export LCARS_SYSADMIN_UID=2000 ;;
+      "fichier seul")     echo 1000 > "$f"; unset LCARS_SYSADMIN_UID ;;
+      "variable seule")   rm -f "$f";       export LCARS_SYSADMIN_UID=2000 ;;
+      "fichier illisible") printf 'pasunuid
+' > "$f"; export LCARS_SYSADMIN_UID=2000 ;;
+      "rien")             rm -f "$f";       unset LCARS_SYSADMIN_UID ;;
+    esac
+    lib_dit="$(PROV_SEAT_UID_FILE="$f" bash -c '. "$LIB" >/dev/null 2>&1
+      PROV_SEAT_UID_FILE="'"$f"'"; prov_seat_uid || printf "<rien>"')"
+    proto_dit="$(LCARS_SEAT_UID_FILE="$f" LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR"       bash -c '. "$1" >/dev/null 2>&1; v="$(seat_uid)"; printf "%s" "${v:-<rien>}"' _ "$proto")"
+    [ "$lib_dit" = "$proto_dit" ] || { echo "$cas : lib=« $lib_dit » protocole=« $proto_dit »" >&2; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+  # GARDE D'INSTRUMENT : les deux disent bien QUELQUE CHOSE quand le fichier porte un uid
+  echo 1234 > "$f"
+  [ "$(LCARS_SEAT_UID_FILE="$f" LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" bash -c '. "$1" >/dev/null 2>&1; seat_uid' _ "$proto")" = 1234 ]
+  unset LCARS_SYSADMIN_UID
+}
+
 @test "apt_ensure : apt-get reçoit un délai et des reprises, et un miroir mort en http se dit avec le remède https" {
   local b="$BATS_TEST_TMPDIR/apt"; mkdir -p "$b"
   printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"

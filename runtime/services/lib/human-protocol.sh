@@ -42,20 +42,8 @@ fi
 # ─── Les lectures de la personne ───────────────────────────────────────────────────────────────
 human_home() { [[ -n "${LCARS_LOGIN:-}" ]] || return 0; getent passwd "$LCARS_LOGIN" | cut -d: -f6 || true; }
 
-# Le siege se lit dans son fichier (`LCARS_SEAT_UID_FILE`), sinon dans `LCARS_SYSADMIN_UID` — la
-# meme lecture, dans le meme ordre, que l'installeur : un seul siege sur la machine, quel que soit
-# celui qui le lit.
-seat_uid() { # rend l'uid du siege, ou rien
-  local f v
-  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  if [[ -r "$f" ]]; then
-    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
-    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
-  fi
-  v="${LCARS_SYSADMIN_UID:-}"
-  [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
-  return 0
-}
+# `seat_uid` vient du protocole des modules, source ci-dessus : un seul siege sur la machine, une
+# seule lecture, quel que soit celui qui la fait.
 
 # ─── La frontiere systeme/humain ───────────────────────────────────────────────────────────────
 # Les bornes se LISENT dans `login.defs` (`PASSWD_DEFS`, le meme nom que `console-humans.sh`,

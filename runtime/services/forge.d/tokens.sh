@@ -387,27 +387,16 @@ check() {
 # `LCARS_LOGIN` EST L'HUMAIN DE LA PASSE, PAS LE SIÈGE PAR CONSTRUCTION. Sur un poste c'est
 # `PROV_HUMAN` : le compte qui installe, ou celui que `--human` nomme. Dans le conteneur, le boot le
 # pose au siège. Le siège se lit donc à sa source, et le login nommé ne l'est que s'il L'EST :
-#   - l'uid du siège, dans `LCARS_SEAT_UID_FILE` (`/etc/lcars/seat.uid`), sinon `LCARS_SYSADMIN_UID`
-#     — la lecture de l'installeur et de `human-protocol.sh`, dans le même ordre ;
+#   - l'uid du siège, par `seat_uid` du protocole — la politique de population, écrite une fois ;
 #   - le login du siège que l'init du conteneur écrit dans `LCARS_SEAT_LOGIN_FILE`
 #     (`/run/lcars-seat.login`).
-seat_uid_here() { # -> l'uid du siège, ou rien
-  local v f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  if [[ -r "$f" ]]; then
-    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
-    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
-  fi
-  v="${LCARS_SYSADMIN_UID:-}"
-  [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v"
-  return 0
-}
 login_is_seat() { # <login> -> 0 si ce login est le siège de la machine
   local login="$1" f="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}" seat uid
   if [[ -r "$f" ]]; then
     seat="$(tr -d '[:space:]' < "$f" 2>/dev/null || true)"
     [[ -n "$seat" && "$login" == "$seat" ]] && return 0
   fi
-  seat="$(seat_uid_here)"
+  seat="$(seat_uid)"
   [[ -n "$seat" ]] || return 1
   uid="$(id -u -- "$login" 2>/dev/null)" || return 1
   [[ "$uid" == "$seat" ]]

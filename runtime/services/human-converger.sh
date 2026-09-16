@@ -42,8 +42,8 @@ HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # Le revoquer poserait `nologin` sur le sysadmin et fermerait la machine sur lui — l'enfermement
 # dehors.
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-SYSADMIN_UID="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
-[[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || SYSADMIN_UID="${LCARS_SYSADMIN_UID:-}"
+# L'uid se lit par `seat_uid` du protocole, source plus bas : ce daemon n'en tient pas une copie.
+SYSADMIN_UID=""
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -78,6 +78,8 @@ LCARS_MODULE_TAG="lcars-converger"
 # shellcheck source=lib/human-protocol.sh
 . "$HUMAN_PROTOCOL"
 unset LCARS_HUMAN_PROTOCOL_HOST
+# GUARD A lit le siege par la politique du protocole (fichier, puis LCARS_SYSADMIN_UID).
+SYSADMIN_UID="$(seat_uid)"
 
 # ─── L'ADMISSION ────────────────────────────────────────────────────────────────────────────────
 # Ces trois predicats decident si un login de la forge devient un user Linux. C'est la seule partie

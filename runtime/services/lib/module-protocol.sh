@@ -95,6 +95,31 @@ if [[ -n "${LCARS_MODULE_RUN:-}" ]]; then
   unset LCARS_MODULE_RUN
 fi
 
+# ─── LE SIEGE : DEUX POLITIQUES ASSUMEES, ET CELLE-CI EST LA SECONDE ───────────────────────────
+#
+# Qui REFUSE UN LANCEMENT lit le fichier SEUL et meurt sans lui (`bin/fleet`, GUARD B du BEAM) :
+# reposer une variable d'environnement suffirait sinon a desarmer la garde.
+#
+# Qui decide d'une POPULATION lit le fichier, puis `LCARS_SYSADMIN_UID` — c'est cette fonction. Le
+# repli sert la ou le fichier n'est pas encore pose : l'installeur avant la fin de sa passe, et le
+# boot du conteneur, qui exporte l'uid du siege qu'il vient de creer. Une population mesuree sans
+# siege compterait l'administrateur de la machine parmi les humains de la fleet.
+#
+# Elle vit ICI et pas chez chaque lecteur : le convergeur, les gestes de forge et le protocole des
+# personnes la lisent tous du meme endroit. L'installeur en tient le jumeau (`prov_seat_uid`), que
+# son mur compare a celle-ci.
+seat_uid() { # -> l'uid du siege, ou rien (l'appelant dit ce que « rien » lui fait)
+  local f v
+  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  if [[ -r "$f" ]]; then
+    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
+  fi
+  v="${LCARS_SYSADMIN_UID:-}"
+  [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v"
+  return 0
+}
+
 # ─── Les lectures ──────────────────────────────────────────────────────────────────────────────
 # Un champ d'un fichier d'environnement (`CLE=valeur`, la derniere occurrence gagne) — jamais un
 # `source` : un fichier d'env n'est pas du code qu'on execute sous root.

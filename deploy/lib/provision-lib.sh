@@ -684,6 +684,11 @@ prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 
   return 1
 }
 
+# LE JUMEAU DE `seat_uid` DU PROTOCOLE DU PRODUIT (runtime/services/lib/module-protocol.sh) : la
+# politique de POPULATION — le fichier, puis `LCARS_SYSADMIN_UID`. L'installeur ne source pas le
+# protocole du produit (il en importerait tous les défauts), d'où deux écritures ; leur accord est
+# tenu par un témoin, pas par la mémoire de qui les lit. L'autre politique, celle des gardes qui
+# REFUSENT un lancement, lit le fichier seul et ne s'écrit pas ici.
 prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
   local v
   if [[ -r "$PROV_SEAT_UID_FILE" ]]; then
