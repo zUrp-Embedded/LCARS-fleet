@@ -101,3 +101,30 @@ joue() { # joue <racine> <module> <verbe>
   joue "$ROOT" 66-deck-oidc check
   grep -qx "LCARS_ADVERTISE=$annonce" <<<"$output"
 }
+
+# ⚠ CE QUI MEURT AVANT LE PROTOCOLE N'A AUCUNE GARDE — et c'est le cas d'une release absente. Le
+# geste sort alors en 127 (script introuvable) ou en 1 (protocole illisible) : deux codes que le
+# lanceur relayait tels quels, donc lus « échec applicatif ». La lib refuse maintenant AVANT de
+# lancer ce qu'elle ne peut pas lire, et sa propre garde rend 3 sur un code hors du vocabulaire.
+@test "release absente : le lanceur refuse AVANT de lancer, en nommant les deux fichiers" {
+  racine_doublee 'verdict_check'
+  rm -f "$ROOT/runtime/services/forge.d/tokens.sh"
+  joue "$ROOT" 63-forge-tokens apply
+  [ "$status" -eq 1 ] || { echo "rc=$status — $output" >&2; return 1; }
+  [[ "$output" == *"FAIL 63-forge-tokens: geste « tokens » injouable"* ]] || [[ "$output" == *"geste « tokens » injouable"* ]]
+  [[ "$output" == *"tokens.sh"* ]]
+  refute_out "ERREUR" <<<"$output"
+
+  racine_doublee 'verdict_check'
+  rm -f "$ROOT/runtime/services/lib/module-protocol.sh"
+  joue "$ROOT" 63-forge-tokens check
+  [ "$status" -eq 2 ] || { echo "rc=$status — $output" >&2; return 1; }
+  [[ "$output" == *"injouable"*"module-protocol.sh"* ]]
+}
+
+@test "un code hors du vocabulaire du protocole (0-3) est une mort : la garde du module rend 3" {
+  racine_doublee 'exit 127'
+  joue "$ROOT" 63-forge-tokens apply
+  [ "$status" -eq 3 ] || { echo "rc=$status — $output" >&2; return 1; }
+  [[ "$output" == *"ERREUR 63-forge-tokens: mort avant de rendre son verdict (rc=127)"* ]]
+}

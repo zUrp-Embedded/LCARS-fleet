@@ -101,7 +101,6 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 | fichier | rôle |
 |---|---|
 | `provision-lib.sh` | le protocole des modules : les constantes de `installer-constants.env` et les choix de l'opérateur, verdicts (`p_ok`, `p_chg`, `p_drift`, `p_warn`, `p_fail`), poses atomiques (`ensure_dir`, `ensure_mode`, `write_atomic`), lecture de `system.manifest`, verrou, apt, `as_human`, `forge_api` (le client de forge : jeton lu dans un fichier et passé sur stdin), la table de traduction vers les noms `LCARS_*` du produit et `prov_geste`, le lanceur des gestes de `runtime/services/forge.d` (50, 63, 65, 66) |
-| `geste-protocol.sh` | le protocole que `prov_geste` donne à un geste : celui du produit, dont les sorties de verdict se marquent |
 | `docker-endpoint.sh` | le substrat et le daemon docker : une CLI, le `DOCKER_HOST` de l'environnement s'il répond, sinon la socket système et l'adresse écartée rendue pour être dite, un verdict qui nomme le geste manquant |
 | `deploy-release.sh` | la release du runtime, bâtie ou reprise du kit, basculée sous le préfixe ; liens, modes et élagage par `60-deploy` |
 | `kit-verify.sh` | ce qu'un kit doit porter : tampon de révision, release, doc bâtie, entrées de `release.manifest`, listes que 62 pose (`PROV_HELPERS`, `PROV_HELPERS_DATA`, `PROV_SHELL_RC` des constantes), médias |

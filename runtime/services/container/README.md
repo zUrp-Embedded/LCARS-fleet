@@ -12,7 +12,7 @@ d'elle-même, sans l'installeur.
 
 | geste | ce qu'il fait |
 |---|---|
-| `boot.sh` | le BOOT du conteneur, PID 1 sous `tini` (`ENTRYPOINT` du Dockerfile) : joue `init.sh apply`, les quatre gestes de `../forge.d/` (`tokens`, `catalogues`, `ops-branch`, `deck-oidc`), le convergeur d'humains, la console et le deck, les deux exécuteurs, puis `exec sshd`. Ses mots (`verify`, `roles`, `roles-tfvars`, `catalogue-root`, `catalogue-source`) sont l'API de l'image et délèguent à `lcars tool` ; `forge-apply` joue `forge-gestures apply` dans le conteneur |
+| `boot.sh` | le BOOT du conteneur, PID 1 sous `tini` (`ENTRYPOINT` du Dockerfile) : joue `init.sh apply`, les quatre gestes de `../forge.d/` dans l'ordre du poste (`catalogues`, `tokens`, `ops-branch`, `deck-oidc`), le convergeur d'humains, la console et le deck, les deux exécuteurs, puis `exec sshd`. Ses mots (`verify`, `roles`, `roles-tfvars`, `catalogue-root`, `catalogue-source`) sont l'API de l'image et délèguent à `lcars tool` ; `forge-apply` joue `forge-gestures apply` dans le conteneur |
 | `init.sh` | l'init de l'INSTANCE : le siège (résolu puis créé), l'adresse de la forge (`forge.url`, lisible par une session ssh), les zones de face, la source et le corpus ops, les clés d'hôte SSH, le layout du volume et du magasin, la skill du siège, `pilot.assignee` — idempotent, ce qu'une instance neuve doit avoir sur son volume |
 
 ## Le protocole

@@ -68,6 +68,9 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
   local chemins var val ov
   chemins="$( {
     sed 's/#.*//' "$INIT" | grep -oE '(ensure_dir|write_atomic) +"?/[^" ]+' | sed -E 's/^[a-z_]+ +"?//'
+    # le layout de l'init est une TABLE (« chemin mode proprietaire ») et non plus une suite
+    # d'appels : ses chemins absolus se lisent la, sinon ce mur ne balaie plus que la moitie du fichier
+    sed -n '/^layout_table() {/,/^}/p' "$INIT" | sed 's/#.*//' | grep -oE '"/[^" ]+' | tr -d '"'
     sed 's/#.*//' "$INIT" | grep -oE '\$\{LCARS_[A-Z_]+:-/[^}]+\}' | sed -E 's/^\$\{[A-Z_]+:-//; s/\}$//'
     while IFS='=' read -r var val; do
       [ -n "$var" ] || continue

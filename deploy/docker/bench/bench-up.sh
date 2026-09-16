@@ -286,6 +286,8 @@ case "$VERDICT_FICHIER:$CONTAINER_PROV_RC" in
   */lcars-provision.rc:0) CONTAINER_PROV_STATE="aucun geste en échec — cette image publie son verdict sans distinguer un drift (docker logs $CONTAINER nomme les gestes en drift)" ;;
   *:0)  CONTAINER_PROV_STATE="convergé" ;;
   *:2)  CONTAINER_PROV_STATE="appliqué avec drift résiduel — un geste manque, rien n'est cassé$(gestes_dits)" ;;
+  *:3)  CONTAINER_PROV_STATE="un geste est MORT avant de rendre son verdict — rien n'a été conclu$(gestes_dits)"
+        CONTAINER_PROV_OK=0 ;;
   *:)   CONTAINER_PROV_STATE="non mesuré — ni /run/lcars-forge.rc ni /run/lcars-provision.rc ne se lisent dans le conteneur (il n'a peut-être pas fini de converger)" ;;
   *)    CONTAINER_PROV_STATE="en échec (rc=$CONTAINER_PROV_RC) — le conteneur tourne et ne produira rien$(gestes_dits)"
         CONTAINER_PROV_OK=0 ;;

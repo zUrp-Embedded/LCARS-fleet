@@ -67,6 +67,7 @@ setup() {
   # avait un defaut.
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
   {
+    sed -n '/^etat_ecrit() {/,/^}/p' "$SRC"
     sed -n '/^publier_verdicts() {/,/^}/p' "$SRC"
     sed -n '/^CONVERGER_BIN=/,/^# ─── 3bis/p' "$SRC" | sed '$d'
     # Le site d'appel reel est juste apres le bloc, hors des deux plages.

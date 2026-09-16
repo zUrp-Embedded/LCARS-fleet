@@ -87,9 +87,11 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
   [[ "$output" == *"UID_MIN illisible dans $PASSWD_DEFS"* ]]
   [[ "$output" == *"pas par ce processus : repare $PASSWD_DEFS"* ]]
-  # Le mot est celui du BEAM : « the bound is declared by the system, not by this process: fix … »
-  grep -q 'declared by the system, not by this process' "$BATS_TEST_DIRNAME/../../../config/runtime.exs"
-  grep -q 'R-no-uid-min' "$BATS_TEST_DIRNAME/../../../config/runtime.exs"
+  # Le mot est celui du BEAM : « the bound is declared by the system, not by this process: fix … ».
+  # Il vit dans GUARD B (Fleet.BootGuard), que config/runtime.exs appelle.
+  local garde="$BATS_TEST_DIRNAME/../../../lib/fleet/boot_guard.ex"
+  grep -q 'declared by the system, not by this process' "$garde"
+  grep -q 'R-no-uid-min' "$garde"
 }
 
 @test "UID_MAX ABSENT du fichier : la frontiere n'est pas etablie non plus, et le message nomme UID_MAX" {

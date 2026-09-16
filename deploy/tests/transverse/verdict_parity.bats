@@ -42,12 +42,55 @@ verdict_product()   { bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1; LCARS_FAILE
   [ "$(verdict_product check 1 1)" = 2 ]
 }
 
-@test "3 n'est le verdict d'aucun dialecte : la garde de l'installeur le rend à une mort sous set -e, le protocole seul rend le code brut" {
+@test "3 n'est le verdict d'aucun dialecte : armées, les deux gardes le rendent à une mort sous set -e" {
   run env PROVISION_RUN=1 bash -c "set -e; . '$INSTALLER' >/dev/null 2>&1; false"
   [ "$status" -eq 3 ]
-  # le protocole ne pose aucune garde : le lanceur de gestes (prov_geste) la pose pour lui
+  [[ "$output" == *"mort avant de rendre son verdict"* ]]
+  run env LCARS_MODULE_RUN=1 bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; false"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"mort avant de rendre son verdict"* ]]
+}
+
+@test "la garde ne se pose QUE si le lanceur l'arme, et elle ne s'hérite pas" {
   run bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; false"
   [ "$status" -eq 1 ]
+  run bash -c "set -e; . '$INSTALLER' >/dev/null 2>&1; false"
+  [ "$status" -eq 1 ]
+  # ⚠ ARMÉE PUIS DÉSARMÉE, ET L'ENFANT DOIT SOURCER LE PROTOCOLE POUR QUE ÇA VEUILLE DIRE QUELQUE
+  # CHOSE : un enfant qui ne le source pas ne pose aucune garde de toute façon, et le cas serait
+  # vert sans rien mesurer. Ici l'enfant le source : s'il héritait de LCARS_MODULE_RUN, son `exit 2`
+  # deviendrait 3.
+  run env LCARS_MODULE_RUN=1 bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; LCARS_VERDICT_RENDERED=1; bash -c \". '$PRODUCT' >/dev/null 2>&1; exit 2\""
+  [ "$status" -eq 2 ] || { echo "$output" >&2; return 1; }
+  refute_out "mort avant de rendre son verdict" <<<"$output"
+  # le même pour l'installeur
+  run env PROVISION_RUN=1 bash -c "set -e; . '$INSTALLER' >/dev/null 2>&1; PROV_VERDICT_RENDERED=1; bash -c \". '$INSTALLER' >/dev/null 2>&1; exit 2\""
+  [ "$status" -eq 2 ] || { echo "$output" >&2; return 1; }
+}
+
+@test "un verdict rendu gagne sur la garde, des deux côtés — y compris le FATAL, qui reste 1" {
+  run env LCARS_MODULE_RUN=1 bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; LCARS_DRIFT=1; verdict_apply"
+  [ "$status" -eq 2 ]
+  run env PROVISION_RUN=1 bash -c "set -e; . '$INSTALLER' >/dev/null 2>&1; PROV_DRIFT=1; verdict_apply"
+  [ "$status" -eq 2 ]
+  run env LCARS_MODULE_RUN=1 bash -c "set -e; . '$PRODUCT' >/dev/null 2>&1; p_die 'refus'"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FATAL"* ]]
+  refute_out "mort avant de rendre son verdict" <<<"$output"
+}
+
+# Les gestes du produit portent le MEME dispatch, et ils sont joués sous la garde (LCARS_MODULE_RUN) :
+# un `exit 2` nu au lieu du FATAL y deviendrait 3, « mort avant verdict », pour un verbe mal tapé.
+@test "un mode inconnu est refusé par chaque GESTE du produit, en FATAL (1) — jamais une mort, jamais un verdict" {
+  local g name
+  for g in "$REPO"/runtime/services/forge.d/*.sh; do
+    name="$(basename "$g" .sh)"
+    run env LCARS_MODULE_PROTOCOL="$PRODUCT" LCARS_MODULE_TAG="$name" LCARS_MODULE_RUN=1 \
+        LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" bash "$g" verbe-qui-n-existe-pas
+    [ "$status" -eq 1 ] || { echo "$name : rc=$status — $output" >&2; return 1; }
+    [[ "$output" == *"FATAL $name: mode inconnu"* ]] || { echo "$name : $output" >&2; return 1; }
+    refute_out "mort avant de rendre son verdict" <<<"$output"
+  done
 }
 
 @test "un mode inconnu est refusé par chaque module qui porte son dispatch, en FATAL avant toute mesure : jamais une fonction de la lib jouée sous son nom" {

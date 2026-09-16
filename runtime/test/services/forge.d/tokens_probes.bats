@@ -291,3 +291,29 @@ EOF2
   grep -qx -- '--master-token-file' "$ARGV"
   grep -qx -- "$BATS_TEST_TMPDIR/tokens/forge-master.token" "$ARGV"
 }
+
+# ⚠ UN ROSTER VIDE N'EST PAS « ZERO ROLE A POSER ». Les roles viennent de la release et des
+# catalogues installes ; aucune liste n'est gravee dans ce geste. Quand la lecture n'aboutit pas —
+# release absente, `jq` absent, catalogues pas encore poses — le geste doit REFUSER en le nommant.
+# Il MOURAIT : `grep -v '^$'` rend 1 sur une entree vide, donc sous `pipefail` la resolution du
+# roster tuait le geste en rc 1, qui se lit « echec d'application » chez son appelant.
+@test "roster vide : refus nomme, en check comme en apply — jamais une mort, jamais un mint sur une liste devinee" {
+  stub_curl '{"login":"zoe","restricted":false}'
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"
+
+  run bash "$MODULE" check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucun rôle lisible"* ]]
+  [[ "$output" == *"roster deviné"* ]]
+
+  run bash "$MODULE" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun rôle lisible"* ]]
+}
+
+@test "roster lisible : le geste passe le refus et va mesurer plus loin" {
+  stub_curl '{"login":"zoe","restricted":false}'
+  run bash "$MODULE" check
+  [[ "$output" != *"aucun rôle lisible"* ]]
+  [[ "$output" == *"zoe non restreint"* ]]
+}

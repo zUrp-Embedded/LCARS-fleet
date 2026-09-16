@@ -38,13 +38,26 @@ roles_of_machine() {
       done
     fi
   fi
-  printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
+  # `awk NF` et non `grep -v '^$'` : un roster vide fait rendre 1 a grep, donc sous `pipefail` une
+  # MORT du geste la ou il doit rendre un refus nomme. Une liste vide est un etat, pas une panne.
+  printf '%s\n' $out | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
 # Le roster est resolu UNE fois ici et non a chaque usage : entre
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
 # deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
 ROLES="$(roles_of_machine)"
 ACCOUNTS="$ROLES $LCARS_SYSTEM_ACCOUNT"
+
+# Aucun plancher de roles n'est grave ici : les roles viennent de la release et des catalogues
+# installes, lus par `lcars tool roles`. Un roster vide n'est donc pas « zero role a poser » — la
+# release porte son propre catalogue, lu sans argument — c'est une lecture qui n'a pas abouti : la
+# CLI est absente ou illisible, `jq` manque, la release ne repond pas. Le geste le dit et s'arrete
+# la, plutot que de converger une forge sur une liste devinee.
+roster_vide() { # roster_vide <check|apply> — ne rend la main que si le roster porte au moins un role
+  [[ -z "$ROLES" ]] || return 0
+  p_fail "aucun rôle lisible — la release et les catalogues installés les déclarent (« lcars tool roles-tfvars »), et rien n'est minté sur un roster deviné. Sur un poste, le module des catalogues (50) précède celui des jetons (63) ; dans un conteneur, le geste « catalogues » précède « tokens » au boot"
+  if [[ "$1" == apply ]]; then verdict_apply; else verdict_check; fi
+}
 
 # La forme se teste ICI, pas chez l'appelant : `curl` accepte un « host:port » nu et lui prefixe
 # `http://`, alors que le runtime concatene `base_url` verbatim (Fleet.Forge.Client.Transport) et
@@ -329,6 +342,7 @@ check() {
        verdict_check ;;
   esac
   p_ok "forge joignable ($FORGE_BASE_URL)"
+  roster_vide check
   check_ci_runner
   probe_registration
   [[ -n "$LCARS_LOGIN" ]] && probe_restricted "$LCARS_LOGIN"
@@ -463,6 +477,7 @@ apply() {
     2) p_drift "forge injoignable : $FORGE_BASE_URL — tokens non convergés (relance quand elle répond)"
        verdict_apply ;;
   esac
+  roster_vide apply
 
   # DANS L'APPLY : le boot du conteneur et l'installeur du poste jouent `apply`, jamais `check`. Une sonde qui ne
   # vivrait que dans le check ne parlerait a personne au demarrage, c'est-a-dire au seul moment ou

@@ -742,18 +742,28 @@ prov_product_env() { # prov_product_env → PROV_PRODUCT_ENV, un « NOM=valeur �
 }
 
 # prov_geste <geste> <check|apply> [NOM=valeur…] — joue runtime/services/forge.d/<geste>.sh sous le protocole du
-# produit et sort de son code. Le geste source le protocole intermédiaire geste-protocol.sh, qui marque une sortie
-# venue de verdict_* ou de p_die ; toute autre sortie (set -e) laisse la garde du module rendre 3.
+# produit et sort de son code. La garde du produit (LCARS_MODULE_RUN) rend 3 sur une mort avant verdict : le code
+# qui remonte EST un verdict, quel qu'il soit, et le module ne le rejuge pas.
 prov_geste() {
-  local geste="$1" verbe="$2" rc=0; shift 2
+  local geste="$1" verbe="$2" rc=0 arbre protocole script; shift 2
   prov_product_env
-  PROV_GESTE_RENDU="$(mktemp "${TMPDIR:-/tmp}/prov-geste.XXXXXX")"
+  arbre="$(product_tree)"
+  protocole="$arbre/services/lib/module-protocol.sh"
+  script="$arbre/services/forge.d/$geste.sh"
+  # Ce qui manque AVANT le lancement se dit ici : plus bas, un geste absent sort en 127 et un
+  # protocole illisible en 1, deux codes qu'aucun verdict n'explique.
+  if [[ ! -r "$script" || ! -r "$protocole" ]]; then
+    p_fail "geste « $geste » injouable : $script ou $protocole illisible — la release n'est pas posée (checkout incomplet, ou module 60 non joué)"
+    if [[ "$verbe" == apply ]]; then verdict_apply; else verdict_check; fi
+  fi
   env "${PROV_PRODUCT_ENV[@]}" "$@" \
-    LCARS_MODULE_PROTOCOL="$_PROV_LIB_DIR/geste-protocol.sh" LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
-    PROV_GESTE_PROTOCOLE="$(product_tree)/services/lib/module-protocol.sh" PROV_GESTE_RENDU="$PROV_GESTE_RENDU" \
-    bash "$(product_tree)/services/forge.d/$geste.sh" "$verbe" || rc=$?
-  [[ ! -s "$PROV_GESTE_RENDU" ]] || PROV_VERDICT_RENDERED=1
-  rm -f "$PROV_GESTE_RENDU"
+    LCARS_MODULE_PROTOCOL="$protocole" LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
+    LCARS_MODULE_RUN=1 \
+    bash "$script" "$verbe" || rc=$?
+  # Le vocabulaire du protocole va de 0 a 3 : ces codes-la SONT des verdicts (3 = la garde du geste
+  # a parlé), et ce module les relaie. Au-delà, le geste est mort sans qu'aucune garde ne l'ait vu :
+  # la garde de CE module rend 3 à sa place, plutôt qu'un code brut lu comme un échec.
+  [[ "$rc" -le 3 ]] && PROV_VERDICT_RENDERED=1
   exit "$rc"
 }
 

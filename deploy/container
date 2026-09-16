@@ -535,6 +535,9 @@ cmd_status() {
     *:0) echo "  forge       : gestes convergés (jetons, catalogues, branche ops, client OAuth2)" ;;
     *:2) if [[ -n "$defauts" ]]; then echo "  forge       : drift résiduel — un geste manque, rien n'est cassé :"
          else echo "  forge       : drift résiduel — un geste manque ; « $p logs » nomme lequel"; fi ;;
+    # 3 n'est le verdict de personne : un geste est MORT sans rien conclure, et l'appeler « échec »
+    # ferait croire à une mesure qui n'a pas eu lieu
+    *:3) echo "  forge       : un geste est MORT avant de rendre son verdict — rien n'a été conclu sur cette machine ; « $p logs » porte la ligne ERREUR qui le nomme" ;;
     *:)  : ;;
     *)   if [[ -n "$defauts" ]]; then echo "  forge       : échec d'un geste (rc=$prov) — le conteneur tourne et ne produira rien :"
          else echo "  forge       : échec d'un geste (rc=$prov) — le conteneur tourne et ne produira rien ; « $p logs »"; fi ;;

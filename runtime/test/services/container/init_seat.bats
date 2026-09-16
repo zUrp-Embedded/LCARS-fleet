@@ -78,9 +78,11 @@ seat_login() { cat "$LCARS_SEAT_LOGIN_FILE" 2>/dev/null || true; }
   [ "$(cat "$LCARS_SEAT_UID_FILE")" = 1005 ]
 }
 
-@test "siege : ni semence, ni table, ni forge → rc 3, jamais un nom invente" {
+@test "siege : ni semence, ni table, ni forge → rc 4 (en attente de configuration), jamais un nom invente" {
   seat
-  [ "$status" -eq 3 ]
+  # 4 et non 3 : 3 est la mort avant verdict, et le boot en ferait « init plante » au lieu de
+  # « en attente de configuration » — deux conduites opposees pour le meme conteneur
+  [ "$status" -eq 4 ]
   [[ "$output" == *"IMPOSSIBLE a determiner"* ]]
   [ ! -s "$MAP" ]
   [ ! -e "$LCARS_SEAT_LOGIN_FILE" ]
@@ -91,7 +93,7 @@ seat_login() { cat "$LCARS_SEAT_LOGIN_FILE" 2>/dev/null || true; }
   export FORGE_BASE_URL="http://forge:3000"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 7' > "$BIN/curl"; chmod 0755 "$BIN/curl"
   seat
-  [ "$status" -eq 3 ]
+  [ "$status" -eq 4 ]
   [[ "$output" == *"forge muette"* ]]
   [ ! -e "$LCARS_SEAT_LOGIN_FILE" ]
 }
@@ -129,4 +131,19 @@ seat_login() { cat "$LCARS_SEAT_LOGIN_FILE" 2>/dev/null || true; }
   [ "$status" -eq 0 ]
   [ "$(seat_login)" = zoe ]
   [[ "$output" != *"DIVERGENCE"* ]]
+}
+
+# ⚠ LE NOM DU SIEGE EST LU PAR LE BOOT JUSTE APRES, et un echec d'ecriture y passait en silence :
+# c'est le boot qui le rattrapait trois etapes plus loin, par un « incoherent » qui ne dit pas d'ou
+# il vient. Un echec de publication SE COMPTE ici, avec le nom du fichier.
+@test "le nom du siege qu'on ne peut pas ecrire est un ECHEC nomme, pas un silence" {
+  local ferme="$BATS_TEST_TMPDIR/ferme"
+  mkdir -p "$ferme"; chmod 0500 "$ferme"
+  export LCARS_SEAT_LOGIN_FILE="$ferme/lcars-seat.login"
+  export LCARS_ADMIRAL=amiral
+  seat
+  [ "$status" -eq 1 ] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"FAIL"*"$LCARS_SEAT_LOGIN_FILE NON pose"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"sous quel nom jouer les gestes de forge"* ]]
+  chmod 0700 "$ferme"
 }

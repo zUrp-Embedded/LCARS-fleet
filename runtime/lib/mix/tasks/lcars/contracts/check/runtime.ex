@@ -464,18 +464,30 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # Require the anti-root marker with root surviving comment stripping.
-  # The check does not inspect the guard's condition or establish refusal at boot.
+  # Two halves, and one alone is a hollow green: the guard must CARRY its refusal (Fleet.BootGuard)
+  # and the boot must CALL it (config/runtime.exs). A module nobody wires leaves the machine open,
+  # and a call to a guard that refuses nothing is decoration. The check reads markers surviving
+  # comment stripping; it inspects neither the condition nor the refusal at boot.
   @doc false
   @spec check_no_root_runtime_guard(String.t()) :: Support.result()
   def check_no_root_runtime_guard(root) do
-    presence_check(root, %{
-      id: "runtime.no_root_boot_guard",
-      remediation: "R-no-root-runtime",
-      file: "config/runtime.exs",
-      pattern: ~r/R-no-root-runtime/,
-      confirm: ~r/root/,
-      missing: "no anti-root self-check at boot (FORGE-D1)",
+    carries? =
+      Support.code_match?(root, "lib/fleet/boot_guard.ex", ~r/R-no-root-runtime/, ~r/root/)
+
+    wired? = Support.code_match?(root, "config/runtime.exs", ~r/BootGuard\.verify/, nil)
+
+    Support.measured_verdict("runtime.no_root_boot_guard", %{
+      remediation:
+        "R-no-root-runtime: keep the refusal in lib/fleet/boot_guard.ex AND the call " <>
+          "`Fleet.BootGuard.verify()` in config/runtime.exs — both, or the guard is decoration",
+      findings:
+        if(carries?, do: [], else: ["lib/fleet/boot_guard.ex : no anti-root refusal (FORGE-D1)"]) ++
+          if(wired?,
+            do: [],
+            else: [
+              "config/runtime.exs : the boot does not call Fleet.BootGuard.verify (FORGE-D1)"
+            ]
+          ),
       note:
         "the daemon must refuse getuid()==0 at boot (boot guard) — a dev/manual run as root resolves ~/.gitea_token to /root's admin token (FORGE-D1)"
     })

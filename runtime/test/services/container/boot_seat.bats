@@ -118,9 +118,9 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
   local src="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
-  # Lot 6 : la derivation est dans `container/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
-  # code et reste debout.
-  grep -qE '^\s*3\) say "conteneur EN ATTENTE DE CONFIGURATION' <<<"$code"
+  # La derivation est dans `container/init.sh seat` (rc 4 = indeterminable : 3 appartient a la garde
+  # du protocole, la mort avant verdict) ; l'entrypoint lit ce code et reste debout.
+  grep -qE '^\s*4\) say "conteneur EN ATTENTE DE CONFIGURATION' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"
   # ⚠ CE COMMENTAIRE DISAIT « la negation s'ecrit `!`, terminale sous `set -e` », ET IL ETAIT FAUX
   # DEUX FOIS : cette ligne n'est pas terminale (une assertion la suit), et `!` est de toute facon

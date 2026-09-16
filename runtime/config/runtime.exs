@@ -52,99 +52,13 @@ if config_env() != :test and is_binary(forge_base) do
 end
 
 if config_env() != :test and not tool_mode? do
-  # R-no-root-runtime / GUARD B: reject root, the reserved sysadmin seat and UIDs outside
-  # the declared human range. Apply in dev as well as prod for manual launches.
-  # This is cooperative launch hygiene, not an anti-adversary boundary. Failed id execution
-  # is recorded for refusal after reading the machine policy files below.
-  uid_reading =
-    try do
-      case System.cmd("id", ["-u"]) do
-        {out, 0} -> String.trim(out)
-        {out, code} -> {:unreadable, "`id -u` exited #{code}: #{String.trim(out)}"}
-      end
-    rescue
-      e -> {:unreadable, Exception.message(e)}
-    end
-
-  # Read the seat from the provisioned file, with no numeric fallback. The old process-env
-  # value could redefine the seat. LCARS_SEAT_UID_FILE remains a test path override;
-  # this reader does not verify file ownership or prevent a caller selecting another file.
-  seat_uid_path = System.get_env("LCARS_SEAT_UID_FILE", "/etc/lcars/seat.uid")
-
-  sysadmin_uid =
-    with {:ok, body} <- File.read(seat_uid_path),
-         trimmed <- String.trim(body),
-         {n, ""} when n >= 0 <- Integer.parse(trimmed) do
-      Integer.to_string(n)
-    else
-      _ ->
-        raise "R-no-seat: the seat UID could not be established (#{seat_uid_path} missing or not " <>
-                "an integer) — GUARD B refuses a boot it cannot verify. This machine is not " <>
-                "installed: on a workstation, `deploy/workstation up` sets it; in a container, the boot " <>
-                "init sets it (`deploy/container config` from the host, then `deploy/container up`)."
-    end
-
-  # Read both UID_MIN and UID_MAX from login.defs, like bin/fleet, console/human convergence
-  # and provisioning. Missing bounds refuse; PASSWD_DEFS is the shared test path override.
-  # Matching uses the first column-zero declaration's digit prefix; it does not validate
-  # the entire line or min/max ordering. Unparseable successful id output passes the case below.
-  uid_bounds_path = System.get_env("PASSWD_DEFS", "/etc/login.defs")
-
-  no_uid_bound = fn name ->
-    raise "R-no-uid-min: the system/human boundary could not be established (#{name} " <>
-            "unreadable in #{uid_bounds_path}) — GUARD B refuses a boot it cannot verify. The " <>
-            "bound is declared by the system, not by this process: fix #{uid_bounds_path}."
-  end
-
-  login_defs =
-    case File.read(uid_bounds_path) do
-      {:ok, body} -> body
-      _ -> no_uid_bound.("UID_MIN")
-    end
-
-  uid_bound = fn name ->
-    with [_, raw] <- Regex.run(~r/^#{name}\s+(\d+)/m, login_defs),
-         {n, ""} <- Integer.parse(raw) do
-      n
-    else
-      _ -> no_uid_bound.(name)
-    end
-  end
-
-  uid_min = uid_bound.("UID_MIN")
-  uid_max = uid_bound.("UID_MAX")
-
-  case uid_reading do
-    "0" ->
-      raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
-              "(launch under your human UID via bin/fleet, never as root)"
-
-    uid when uid == sysadmin_uid ->
-      raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
-              "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
-              "pods, the exact inverse of the sandbox. The seat administers the machine; a fleet human " <>
-              "runs the fleet (bin/fleet under a worker account)."
-
-    {:unreadable, why} ->
-      raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
-              "guard refuses a boot it cannot verify (launch via bin/fleet)"
-
-    uid when is_binary(uid) ->
-      case Integer.parse(uid) do
-        {n, ""} when n < uid_min ->
-          raise "R-no-root-runtime: the fleet daemon refuses to run under a SYSTEM account " <>
-                  "(uid #{n} < UID_MIN #{uid_min}) — the fleet runs under a HUMAN uid " <>
-                  "(launch via bin/fleet under a worker account)"
-
-        {n, ""} when n > uid_max ->
-          raise "R-no-root-runtime: the fleet daemon refuses to run under an account ABOVE the " <>
-                  "human range (uid #{n} > UID_MAX #{uid_max}) — `nobody` and the high service " <>
-                  "uids are not fleet humans; the fleet runs under a HUMAN uid (launch via " <>
-                  "bin/fleet under a worker account)"
-
-        _human_or_unparseable ->
-          :ok
-      end
+  # R-no-root-runtime / GUARD B: reject root, the reserved sysadmin seat and UIDs outside the
+  # declared human range. Applies in dev as well as prod, for manual launches. The judgement and
+  # its two machine facts live in Fleet.BootGuard, which its witnesses drive branch by branch; this
+  # file only raises what it returns, so the guard has ONE implementation and no second reading.
+  case Fleet.BootGuard.verify() do
+    :ok -> :ok
+    {:error, message} -> raise message
   end
 
   # LCARS_HOST_BOOT=1 explicitly selects host boot; otherwise MCP gets :pod and refuses.

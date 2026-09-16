@@ -167,7 +167,8 @@ bash_code() {
 @test "MUR 5: le chemin du fichier de siege est le MEME partout, et le manifeste pose celui-la" {
   local sites=(
     "runtime/bin/fleet"
-    "runtime/config/runtime.exs"
+    # le BEAM lit le siege dans Fleet.BootGuard (GUARD B), que config/runtime.exs appelle
+    "runtime/lib/fleet/boot_guard.ex"
     "runtime/services/human-converger.sh"
     "runtime/services/container/init.sh"
     "runtime/services/lib/human-protocol.sh"
@@ -182,7 +183,8 @@ bash_code() {
     [ -r "$REPO/$f" ] || { echo "MUR 5 rompu — $f illisible" >&2; return 1; }
     lus="$(sed 's/#.*//' "$REPO/$f" \
              | sed -nE -e 's/.*LCARS_SEAT_UID_FILE:-([^}]+)\}.*/\1/p' \
-                       -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p')"
+                       -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p' \
+                       -e 's/.*@seat_path_default "([^"]+)".*/\1/p')"
     [ -n "$lus" ] || { echo "MUR 5 — aucune declaration lue dans $f : l'instrument ne lit plus la forme" >&2; return 1; }
     while read -r v; do [ -n "$v" ] && vus+=("$v"); done <<<"$lus"
   done

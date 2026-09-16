@@ -364,7 +364,7 @@ status_debug_visibility() {
 
   if [[ -z "$beam_pid" || ! -r "$env_file" ]]; then
     echo "fleet: visibilite debug : indeterminee (environnement du BEAM illisible)"
-  elif tr '\0' '\n' < "$env_file" 2>/dev/null | grep -qx 'LCARS_DEBUG_VISIBILITY=1'; then
+  elif grep -qx 'LCARS_DEBUG_VISIBILITY=1' <<<"$(tr '\0' '\n' < "$env_file" 2>/dev/null)"; then
     echo "fleet: visibilite debug : ON (pods spawnes pendant cette vie visibles dans Claude Desktop)"
   else
     echo "fleet: visibilite debug : off (relancer avec 'fleet start --debug' pour l'activer)"

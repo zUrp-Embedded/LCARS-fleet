@@ -31,4 +31,4 @@ nommant sa cause — un geste nu n'a pas d'hôte.
 Les hôtes : `deploy/modules.d/50-catalogues.sh`, `63-forge-tokens.sh`, `65-ops-branch.sh`,
 `66-deck-oidc.sh` sur un poste (ils passent ce que l'installeur sait de mieux — l'adresse
 annoncée, le plancher de rôles) ; le boot du conteneur (`../container/boot.sh`), à chaque démarrage, dans cet ordre :
-`tokens`, `catalogues`, `ops-branch`, `deck-oidc`.
+`catalogues`, `tokens`, `ops-branch`, `deck-oidc` — l'ordre du poste (modules 50, 63, 65, 66), parce que les rôles à minter viennent des catalogues installés.

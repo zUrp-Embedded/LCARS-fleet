@@ -242,7 +242,9 @@ spare_machine_admin() { # spare_machine_admin <login> <raison> — le refus, dit
   err "REFUS de révoquer $1 — compte d'administration de la machine ($2) : absent de $ORG/$TEAM, il garde son groupe $GROUP, son shell et ses processus. Le retirer de $GROUP est un geste d'administrateur : « sudo gpasswd -d $1 $GROUP » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"
 }
 
-in_group() { group_members | grep -qxF -- "$1"; }
+# `<<<` et non un tuyau : `grep -q` sort au premier match et fermerait le tuyau sur un producteur
+# qui ecrit encore — sous `pipefail`, 141, c'est-a-dire « pas membre » sur un membre.
+in_group() { grep -qxF -- "$1" <<<"$(group_members)"; }
 
 uid_of() { awk -F: -v n="$1" '$1==n {print $3; exit}' "${PASSWD_FILE:-/etc/passwd}"; }
 
@@ -277,7 +279,7 @@ absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par 
   [[ "$#" -gt 0 ]] || return 0
   local login
   while IFS= read -r login; do
-    printf '%s\n' "$@" | grep -qxF -- "$login" && continue
+    grep -qxF -- "$login" <<<"$(printf '%s\n' "$@")" && continue
     printf '%s\n' "$login"
   done < <(converged_humans)
   return 0
@@ -383,17 +385,20 @@ converge_human() { # converge_human <login>
     # forme que ses temoins. Ce service ne definit plus rien : il nomme l'humain, le module, et
     # le fichier. Vide si l'hote n'en a pas (un decor qui ne joue que cette fonction) : c'est
     # alors la garde du module qui parle, et elle nomme sa cause.
+    # LCARS_MODULE_RUN arme la garde du protocole : un module qui meurt sous `set -e` sortait du
+    # code de la commande qui a echoue, et un 2 passait ici pour un drift acceptable — toutes les
+    # 30 s, en silence. Une mort rend 3, et 3 n'est le drift de personne.
     if [[ -n "$home" ]]; then
       ( cd "$home" && runuser -u "$login" -- \
           env HOME="$home" USER="$login" LOGNAME="$login" \
-              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" \
+              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" LCARS_MODULE_RUN=1 \
               LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}" \
               bash -c 'set -euo pipefail; . "$1" apply' _ "$m"
       ) >"${out:-/dev/null}" 2>&1 || rc=$?
     else
       (
         set -euo pipefail
-        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag"
+        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" LCARS_MODULE_RUN=1
         export LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}"
         # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
         . "$m" apply
@@ -401,7 +406,11 @@ converge_human() { # converge_human <login>
     fi
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
       rc_all=1
-      err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
+      if [[ "$rc" -eq 3 ]]; then
+        err "$login : $(basename "$m" .sh) MORT avant de rendre son verdict — rien n'a ete conclu ; les 15 dernieres lignes :"
+      else
+        err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
+      fi
       [[ -n "$out" ]] && tail -n 15 "$out" | while IFS= read -r l; do err "  | $l"; done
     fi
   done

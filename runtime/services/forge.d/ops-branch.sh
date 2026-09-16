@@ -160,5 +160,5 @@ apply() {
 case "${1:?usage: 65-ops-branch.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
-  *) echo "65-ops-branch.sh: verbe inconnu: $1" >&2; exit 2 ;;
+  *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

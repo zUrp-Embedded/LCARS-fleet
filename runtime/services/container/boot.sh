@@ -54,31 +54,56 @@ esac
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
 # ─── 1. L'INIT DE L'INSTANCE — COTE PRODUIT ─────────────────────────────────────────────────────
 #
-# `container/init.sh` rend 3 quand le conteneur n'a rien pour determiner son siege : c'est l'etat
+# `container/init.sh` rend 4 quand le conteneur n'a rien pour determiner son siege : c'est l'etat
 # « en attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
+# 3 reste ce qu'il est partout ailleurs : la mort avant verdict, que la garde du protocole rend.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
+# Un chemin en dur rend le bloc des gestes intestable, et un temoin qui ne peut pas le jouer ne dit
+# rien de ce qu'il fait quand un geste meurt.
+GESTES_DIR="${LCARS_FORGE_GESTURES_DIR:-/opt/lcars/services/forge.d}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 # /run n'est pas un tmpfs dans un conteneur : un `docker restart` garde les verdicts du boot précédent,
 # que « container status » lirait comme l'état présent. Chaque boot part d'un /run vide de ses verdicts.
-rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
 say() { echo "[container-boot] $*"; }
+# Un etat de boot qu'on ne peut ni retirer ni ecrire se DIT : son lecteur (« container status »)
+# prendrait celui du boot precedent pour l'etat present, et personne ne saurait que le fichier ment.
+etat_ecrit() { # etat_ecrit <fichier> <contenu> — 0 ecrit · 1 dit pourquoi il ne l'est pas
+  if ! printf '%s\n' "$2" > "$1" 2>/dev/null; then
+    say "verdict NON publie dans $1 — « container status » lira l'etat du boot precedent, ou rien"
+    return 1
+  fi
+  # Le contenu est publie : un mode qui ne se pose pas se dit pour ce qu'il est, pas pour une
+  # non-publication — le lecteur non privilegie pourrait ne pas l'ouvrir, le fichier est juste.
+  chmod 0644 "$1" 2>/dev/null \
+    || say "$1 publie, mais son mode n'a pas ete pose — un lecteur non privilegie pourrait ne pas l'ouvrir"
+  return 0
+}
+for _f in "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"; do
+  rm -f "$_f" 2>/dev/null \
+    || say "verdict du boot precedent NON retire ($_f) — « container status » pourrait le lire comme l'etat present"
+done
+unset _f
 [[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
   echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
 }
 init_rc=0
-LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
+LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_RUN=1 \
+  bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
 case "$init_rc" in
   0) say "init de l'instance : converge" ;;
   2) say "init de l'instance : APPLIQUE, DRIFT RESIDUEL — un geste manque, rien n'est casse" ;;
-  3) say "conteneur EN ATTENTE DE CONFIGURATION — il reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
-     printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+  3) say "init de l'instance : MORT avant de rendre son verdict — rien n'a ete conclu, les lignes [container-init] ci-dessus disent ou ; le conteneur reste debout pour etre lu, aucun service n'est demarre"
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" init-failed || true
+     exec sleep infinity ;;
+  4) say "conteneur EN ATTENTE DE CONFIGURATION — il reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" awaiting-config || true
      exec sleep infinity ;;
   *) say "init de l'instance : ECHEC (rc=$init_rc) — le conteneur reste debout pour etre lu, aucun service n'est demarre"
-     printf 'init-failed\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" init-failed || true
      exec sleep infinity ;;
 esac
 LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
@@ -86,24 +111,34 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 
 # ─── 2. LES GESTES DE FORGE ──────────────────────────────────────────────────────────────────────
 #
-# Les quatre gestes du produit (`forge.d/`) : jetons de role, cache des catalogues, branche ops,
+# Les quatre gestes du produit (`forge.d/`) : cache des catalogues, jetons de role, branche ops,
 # client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
 RC_FILE="${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}"
-# le verdict publié : le pire rencontré — un échec l'emporte sur un drift, un drift (init compris) sur 0
+# le verdict publié : le PREMIER état non conclusif rencontré tient — un échec ou une mort (3)
+# l'emportent sur un drift, un drift (init compris) sur 0, et aucun des deux ne s'efface l'un l'autre
 prov_rc=0
 [[ "$init_rc" -ne 2 ]] || prov_rc=2
-# Les jetons de role d'abord (le geste `tokens` sonde aussi le compte forge du siege, que ce boot
-# nomme par LCARS_LOGIN), puis les trois autres.
-for gesture in tokens catalogues ops-branch deck-oidc; do
+# L'ORDRE EST CELUI DU POSTE (modules 50, 63, 65, 66), et il porte une dependance : les roles a
+# minter viennent des catalogues installes, donc `catalogues` precede `tokens`. Le geste `tokens`
+# sonde aussi le compte forge du siege, que ce boot nomme par LCARS_LOGIN.
+# LCARS_MODULE_RUN arme la garde du protocole : une mort avant verdict rend 3, jamais 1 ou 2, qui se
+# lisent comme des verdicts.
+for gesture in catalogues tokens ops-branch deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
-    bash "/opt/lcars/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+    LCARS_MODULE_RUN=1 \
+    bash "$GESTES_DIR/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
     2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant"
        [[ "$prov_rc" -ne 0 ]] || prov_rc=2 ;;
-    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme" ; prov_rc=$g_rc ;;
+    # 3 et un echec sont tous deux non nuls, et le PREMIER rencontre reste : une mort n'efface pas
+    # un echec deja rendu, un echec n'efface pas une mort. Seul un drift (2) se laisse remplacer.
+    3) say "geste de forge « $gesture » : MORT avant de rendre son verdict — rien n'a ete conclu, les lignes [forge.d] ci-dessus disent ou ; le conteneur demarre quand meme"
+       [[ "$prov_rc" -ne 0 && "$prov_rc" -ne 2 ]] || prov_rc=3 ;;
+    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme"
+       [[ "$prov_rc" -ne 0 && "$prov_rc" -ne 2 ]] || prov_rc=$g_rc ;;
   esac
 done
 
@@ -115,12 +150,8 @@ done
 # forcerait son lecteur à distinguer « pas encore écrit » de « tout va bien », c'est-à-dire à deviner
 # exactement ce que ce fichier existe pour dire.
 publier_verdicts() {
-  [[ -n "${humans_rc:-}" ]] && {
-    printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
-    chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
-  }
-  printf '%s\n' "$prov_rc" > "$RC_FILE" 2>/dev/null || true
-  chmod 0644 "$RC_FILE" 2>/dev/null || true
+  [[ -z "${humans_rc:-}" ]] || etat_ecrit "$HUMANS_RC_FILE" "$humans_rc" || true
+  etat_ecrit "$RC_FILE" "$prov_rc" || true
 }
 
 # ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────

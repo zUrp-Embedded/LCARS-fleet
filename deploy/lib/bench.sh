@@ -176,7 +176,8 @@ gestes_en_defaut() { # gestes_en_defaut <docker> <conteneur> → « <geste> : <c
   debut="$("$1" inspect -f '{{.State.StartedAt}}' "$2" 2>/dev/null)" || return 0
   [[ -n "$debut" ]] || return 0
   "$1" logs --since "$debut" "$2" 2>&1 \
-    | sed -n 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
+    | sed -n -e 's/^\[\(container-init\|forge\.d\)\] \(DRIFT\|FAIL \) \([^:]*\): \(.*\)$/\3 : \4/p' \
+             -e 's/^\[\(container-init\|forge\.d\)\] ERREUR \([^:]*\): \(.*\)$/\2 : MORT avant verdict — \3/p' \
     | sed 's/ — .*$//' | awk '!vu[$0]++' || true
 }
 

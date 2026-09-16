@@ -227,3 +227,70 @@ i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs 
   trouve="$(i20_hits "$decor/e.txt")"
   [ -z "$trouve" ] || { echo "instrument casse : le mur mord sur une exclusion :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
 }
+
+# ─── MUR I16 (produit) : AUCUN PIPELINE NE FINIT SUR `grep -q` ─────────────────────────────────
+#
+# `grep -q` sort au premier match et ferme le tuyau : le producteur qui ecrit encore prend SIGPIPE,
+# et sous `pipefail` le pipeline rend 141 — « rien trouve » alors que tout y etait. La forme sure
+# capture puis teste (`<<<"$(…)"`, `[[ -n "$(…)" ]]`, `case`, `grep -c`). JUMEAU du MUR I16 de
+# `deploy/tests/idiom_walls.bats` : celui-la lit deploy/, celui-ci le shell du produit — services/
+# et bin/. Sans jumeau, la forme revient par la porte que personne ne garde.
+# Le motif voit aussi ce qui se glisse entre le tuyau et `grep` (`LC_ALL=C`, `command`) et la
+# graphie longue de `-q` : trois evasions mesurees d'une meme forme.
+I16_RE='(^|[^|])\|[[:space:]]*([A-Za-z_]+=[^[:space:]]+[[:space:]]+|command[[:space:]]+)*grep[[:space:]]+(-[A-Za-z]*q|--quiet)'
+
+@test "MUR I16 (produit) : aucun pipeline ne finit sur grep -q — capturer, puis tester" {
+  local root f hits=0 pop=0 lu
+  root="$(cd "$SERVICES/../.." && pwd)"
+  local -a autres=()
+  # tout le shell du produit : `services/` (SOURCES), la recette de forge, les skills, et `bin/`
+  mapfile -t autres < <(grep -lE '^#!.*(bash|[^a-z]sh)([[:space:]]|$)' \
+    "$root"/runtime/bin/* "$root"/runtime/services/forge-recipe/*.sh \
+    "$root"/runtime/services/admiral/skills/*/*.sh 2>/dev/null || true)
+  [ "${#autres[@]}" -ge 13 ] || { echo "perimetre hors services/ : ${#autres[@]} script(s) — le mur ne balaie plus ce qu'il annonce" >&2; return 1; }
+  for f in "${SOURCES[@]}" "${autres[@]}"; do
+    pop=$((pop + 1))
+    # `<<<` et non un tuyau : ce mur ne s'ecrit pas dans l'idiome qu'il bannit
+    lu="$(code "$f")"
+    if grep -qE "$I16_RE" <<<"$lu"; then
+      echo "MUR I16 rompu — ${f#"$root"/} :" >&2
+      grep -nE "$I16_RE" <<<"$lu" >&2
+      hits=$((hits + 1))
+    fi
+  done
+  [ "$hits" -eq 0 ]
+  # GARDE D'INSTRUMENT : le perimetre reel est de 31 fichiers ; l'amputer de la moitie ne doit pas
+  # laisser ce mur vert.
+  [ "$pop" -ge 30 ] || { echo "instrument casse : $pop script(s) balayes, 30 au moins attendus" >&2; return 1; }
+  # le mur mord : les graphies de la forme fragile sont vues, evasions comprises
+  grep -qE "$I16_RE" <<<'  if id -nG "$u" | tr " " "\n" | grep -qx "$g"; then'
+  grep -qE "$I16_RE" <<<'  curl -s "$url" | grep -q "^204$"'
+  grep -qE "$I16_RE" <<<'  printf "%s\n" "${a[@]}"|grep -qxF -- "$l"'
+  grep -qE "$I16_RE" <<<'  cat "$f" | LC_ALL=C grep -q x'
+  grep -qE "$I16_RE" <<<'  cat "$f" | grep --quiet x'
+  # … et les formes sures ne sont pas prises pour elle
+  refute grep -qE "$I16_RE" <<<'  grep -qxF -- "$1" <<<"$(group_members)"'
+  refute grep -qE "$I16_RE" <<<'  ensure_x || grep -q y "$f"'
+  refute grep -qE "$I16_RE" <<<'  n="$(printf "%s\n" "${a[@]}" | grep -c x)"'
+}
+
+# ─── MUR I21 (produit) : UN LANCEUR DE MODULE ARME LA GARDE ────────────────────────────────────
+#
+# Le protocole ne pose son piege de sortie que si celui qui LANCE le module l'arme
+# (LCARS_MODULE_RUN). Un lanceur qui oublie de l'armer laisse une mort sous `set -e` sortir en 1 ou
+# 2, c'est-a-dire se faire lire comme un verdict : « echec » ou « drift residuel » sur un module qui
+# n'a rien conclu. Les lanceurs du produit sont nommes ici — il y en a trois, et un quatrieme qui
+# arriverait sans armer doit rougir.
+@test "MUR I21 (produit) : le boot (init + gestes) et le convergeur arment la garde du protocole" {
+  local root; root="$(cd "$SERVICES/../.." && pwd)"
+  local boot="$SERVICES/container/boot.sh" conv="$SERVICES/human-converger.sh" n
+  [ -f "$boot" ] && [ -f "$conv" ]
+  # le boot : l'init de l'instance ET la boucle des gestes
+  n="$(grep -c 'LCARS_MODULE_RUN=1' <<<"$(code "$boot")")"
+  [ "$n" -ge 2 ] || { echo "boot.sh : $n lanceur(s) arme(s), 2 attendus (init + gestes)" >&2; return 1; }
+  # le convergeur : les deux branches du rail per-humain (avec home par runuser, et sans home)
+  n="$(grep -c 'LCARS_MODULE_RUN=1' <<<"$(code "$conv")")"
+  [ "$n" -ge 2 ] || { echo "human-converger.sh : $n branche(s) armee(s), 2 attendues" >&2; return 1; }
+  # GARDE D'INSTRUMENT : le nom de la variable est celui que le protocole lit, pas un mot d'ici
+  grep -q 'LCARS_MODULE_RUN' "$SERVICES/lib/module-protocol.sh"
+}

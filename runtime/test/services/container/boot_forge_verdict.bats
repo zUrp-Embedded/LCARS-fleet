@@ -11,8 +11,12 @@ setup() {
   export LCARS_FORGE_RC_FILE="$BATS_TEST_TMPDIR/forge.rc"
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
   {
-    printf '%s\n' 'say() { echo "[boot] $*"; }' 'MODULE_PROTOCOL=/dev/null' 'LCARS_ADMIRAL=admiral'
-    sed -n '/^RC_FILE=/,/^done$/p' "$SRC" | sed "s#/opt/lcars/services/forge.d/#$FORGE_D/#"
+    printf '%s\n' 'say() { echo "[boot] $*"; }' 'MODULE_PROTOCOL=/dev/null' 'LCARS_ADMIRAL=admiral' \
+      "GESTES_DIR='$FORGE_D'"
+    # `etat_ecrit` porte la publication : sans elle, le bloc extrait ne publierait rien et les
+    # temoins mesureraient leur propre mise en scene.
+    sed -n '/^etat_ecrit() {/,/^}/p' "$SRC"
+    sed -n '/^RC_FILE=/,/^done$/p' "$SRC"
     sed -n '/^publier_verdicts() {/,/^}/p' "$SRC"
     printf '%s\n' 'publier_verdicts'
   } > "$BLOC"

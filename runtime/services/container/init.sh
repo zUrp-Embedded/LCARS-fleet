@@ -29,7 +29,7 @@
 #
 # VERDICT : le protocole des modules. `apply` rend 0 converge, 2 drift residuel, 1 echec ; `secrets`
 # et `store` rejouent une seule de ses parts (l'import des secrets, le magasin) avec le meme verdict.
-# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 3 quand le conteneur
+# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 4 quand le conteneur
 # n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
@@ -89,8 +89,13 @@ seat_resolve() { # -> SEAT_LOGIN pose ; rc 0 resolu · 3 indeterminable · 1 div
     return 3
   fi
   seat_record "$SEAT_LOGIN" "$LCARS_UID" || p_warn "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
-  mkdir -p "$(dirname "$SEAT_LOGIN_FILE")" 2>/dev/null || true
-  printf '%s\n' "$SEAT_LOGIN" > "$SEAT_LOGIN_FILE" && chmod 0644 "$SEAT_LOGIN_FILE"
+  # Le nom du siege est lu par le boot juste apres : un echec d'ecriture ici se COMPTE, il ne se
+  # laisse pas rattraper trois etapes plus loin par un « incoherent » qui ne dit pas d'ou il vient.
+  if mkdir -p "$(dirname "$SEAT_LOGIN_FILE")" 2>/dev/null \
+     && printf '%s\n' "$SEAT_LOGIN" > "$SEAT_LOGIN_FILE" && chmod 0644 "$SEAT_LOGIN_FILE"; then
+    return 0
+  fi
+  p_fail "$SEAT_LOGIN_FILE NON pose — le boot ne saura pas sous quel nom jouer les gestes de forge"
   return 0
 }
 seat_uid_file() {
@@ -106,10 +111,10 @@ seat_create() {
     useradd -m -u "$LCARS_UID" -s /bin/bash "$SEAT_LOGIN" || { p_fail "siege : useradd $SEAT_LOGIN (uid $LCARS_UID) refuse"; return 1; }
     LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "sysadmin $SEAT_LOGIN cree (uid $LCARS_UID)"
   fi
-  if getent group sudo >/dev/null 2>&1 && ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx sudo; then
+  if getent group sudo >/dev/null 2>&1 && [[ " $(id -nG "$SEAT_LOGIN" 2>/dev/null) " != *" sudo "* ]]; then
     usermod -aG sudo "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ sudo" || p_warn "« $SEAT_LOGIN » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
   fi
-  if ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx "$LCARS_FLEET_GROUP"; then
+  if [[ " $(id -nG "$SEAT_LOGIN" 2>/dev/null) " != *" $LCARS_FLEET_GROUP "* ]]; then
     usermod -aG "$LCARS_FLEET_GROUP" "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ $LCARS_FLEET_GROUP" || p_fail "$SEAT_LOGIN ∉ $LCARS_FLEET_GROUP"
   fi
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
@@ -187,20 +192,31 @@ host_keys() {
 # ─── LE LAYOUT DU VOLUME ───────────────────────────────────────────────────────────────────────
 # Les memes chemins, modes et proprietaires que `deploy/system.manifest` declare en substrat `any`
 # ou `docker` — c'est le contrat entre les deux rails ; `verify` le mesure au build de l'image.
+# UNE TABLE, ET UN SEUL `|| true`. Le protocole COMPTE les echecs (`p_fail`), mais ce module tourne
+# sous `set -e` : sans `|| true`, errexit emporte le module au premier dossier refuse, et c'est lui
+# qui decide a la place du compteur. La regle etait recopiee a chaque ligne — treize fois, et la
+# quatorzieme oubliee ne se serait vue qu'en production.
+layout_table() { # chemin mode proprietaire — les memes que deploy/system.manifest declare
+  printf '%s\n' \
+    "/opt/lcars/var 0755 root:root" \
+    "$LCARS_PRIVATE_DIR 0710 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "$LCARS_CATALOGUES_DIR 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu} 0700 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
+    "/var/lib/lcars 0755 root:root" \
+    "/var/tmp/lcars 0755 root:root" \
+    "/var/tmp/lcars/toolchain-work 0700 root:root" \
+    "/etc/lcars 0755 root:root" \
+    "/run/lcars 0755 root:root" \
+    "/run/lcars/toolchain 2775 root:$LCARS_FLEET_GROUP" \
+    "/run/lcars/authority 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "/run/lcars/privileged 0750 root:$LCARS_FLEET_GROUP" \
+    "/run/lock/lcars 0700 root:root"
+}
 layout() {
-  ensure_dir /opt/lcars/var                     0755 root:root || true
-  ensure_dir "$LCARS_PRIVATE_DIR"                 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir "$LCARS_CATALOGUES_DIR"             0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}" 0700 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" || true
-  ensure_dir /var/lib/lcars                     0755 root:root || true
-  ensure_dir /var/tmp/lcars                     0755 root:root || true
-  ensure_dir /var/tmp/lcars/toolchain-work      0700 root:root || true
-  ensure_dir /etc/lcars                         0755 root:root || true
-  ensure_dir /run/lcars                         0755 root:root || true
-  ensure_dir /run/lcars/toolchain               2775 "root:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lcars/authority               0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lcars/privileged              0750 "root:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lock/lcars                    0700 root:root || true
+  local path mode owner
+  while read -r path mode owner; do
+    ensure_dir "$path" "$mode" "$owner" || true   # p_fail a deja compte : errexit ne decide de rien
+  done < <(layout_table)
   store
 }
 # ─── LE MAGASIN ────────────────────────────────────────────────────────────────────────────────
@@ -269,8 +285,15 @@ seat_extras() {
 
 cmd_seat() {
   local rc=0; seat_resolve || rc=$?
-  [[ "$rc" -eq 0 ]] && seat_uid_file
-  exit "$rc"
+  # 3 appartient a la garde du protocole (mort avant verdict) : l'attente de configuration, qui est
+  # un etat de ce module, sort en 4 — le meme code que l'apply rend pour le meme etat.
+  LCARS_VERDICT_RENDERED=1
+  [[ "$rc" -ne 3 ]] || exit 4
+  [[ "$rc" -eq 0 ]] || exit "$rc"
+  seat_uid_file
+  # ET C'EST LE COMPTEUR QUI CONCLUT : un siege resolu dont le NOM ou l'UID n'a pas pu etre publie
+  # sortait en 0, et le boot enchainait sur des fichiers qui n'existent pas.
+  verdict_apply
 }
 # ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets COTE HOTE ; le compose les monte sous
 # /run/secrets ; l'instance les IMPORTE dans son repertoire prive au boot — une fois, et a nouveau
@@ -311,7 +334,10 @@ cmd_apply() {
   local rc=0; seat_resolve || rc=$?
   case "$rc" in
     0) : ;;
-    3) exit 3 ;;
+    # L'ATTENTE DE CONFIGURATION EST UN ETAT DE CE MODULE, PAS UN VERDICT DU PROTOCOLE, et elle a
+    # son code a elle : 3 appartient a la garde (mort avant verdict), et les confondre ferait dormir
+    # le conteneur sur un init qui a plante. Le verdict se marque : la garde n'a rien a rattraper.
+    3) LCARS_VERDICT_RENDERED=1; exit 4 ;;
     *) verdict_apply ;;
   esac
   seat_uid_file

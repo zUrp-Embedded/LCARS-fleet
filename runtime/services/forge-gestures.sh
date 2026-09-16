@@ -283,8 +283,12 @@ demote_creator_from_owners() { # $1=org  $2=jeton master
   [[ -n "$master" ]] || return 0
   [[ " $owners " == *" $master "* ]] || return 0   # deja retire : rien a dire
 
-  if hcurl "$tok" -sS -m 15 -o /dev/null -w '%{http_code}' \
-       -X DELETE "$api/teams/$tid/members/$master" 2>/dev/null | grep -q '^204$'; then
+  # capturer puis tester : `| grep -q` ferme le tuyau au premier match, et sous `pipefail` le SIGPIPE
+  # du producteur rend 141 — un retrait reussi lu comme un refus
+  local code
+  code="$(hcurl "$tok" -sS -m 15 -o /dev/null -w '%{http_code}' \
+       -X DELETE "$api/teams/$tid/members/$master" 2>/dev/null || true)"
+  if [[ "$code" == 204 ]]; then
     echo "forge-gestures: $master retire des Owners de $org — il l'etait par creation, pas par decision ($SYSTEM_ACCOUNT reste proprietaire ; le site-admin est intact)"
   else
     echo "forge-gestures: retrait de $master des Owners de $org REFUSE — la liste garde son proprietaire de creation" >&2

@@ -64,7 +64,7 @@ HELP_FLAT="${HELP_FLAT//]/}"
 
 MISSING=()
 for flag in "${REQUIRED[@]}"; do
-  printf '%s' "$HELP_FLAT" | grep -qE -- "(^|[[:space:]])${flag}([[:space:],=]|$)" || MISSING+=("$flag")
+  grep -qE -- "(^|[[:space:]])${flag}([[:space:],=]|\$)" <<<"$HELP_FLAT" || MISSING+=("$flag")
 done
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then

@@ -63,13 +63,37 @@ p_chg()  { printf 'POSÉ  %s: %s\n' "$LCARS_MODULE_TAG" "$*"; return 0; }
 p_drift(){ printf 'DRIFT %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; LCARS_DRIFT=$((LCARS_DRIFT + 1)); }
 p_warn() { printf 'WARN  %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; }
 p_fail() { printf 'FAIL  %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; LCARS_FAILED=$((LCARS_FAILED + 1)); }
-p_die()  { printf 'FATAL %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; exit 1; }
+p_die()  { LCARS_VERDICT_RENDERED=1; printf 'FATAL %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; exit 1; }
 
 # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel (un geste manque, pas
 # une panne). `check` rend 2 sur un echec et 1 sur un drift — le code du doctor, lu comme tel par
 # celui qui appelle (l'installeur, ou le boot du conteneur).
-verdict_apply() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 1; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 2; exit 0; }
-verdict_check() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 2; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 1; exit 0; }
+verdict_apply() { LCARS_VERDICT_RENDERED=1; [[ "$LCARS_FAILED" -gt 0 ]] && exit 1; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 2; exit 0; }
+verdict_check() { LCARS_VERDICT_RENDERED=1; [[ "$LCARS_FAILED" -gt 0 ]] && exit 2; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 1; exit 0; }
+
+# ─── LES CODES DU PROTOCOLE, ET LA MORT AVANT VERDICT ──────────────────────────────────────────
+# 0, 1 et 2 sont des VERDICTS, rendus par `verdict_apply` ou `verdict_check` ; 1 l'est aussi par
+# `p_die`. 3 N'EST LE VERDICT DE PERSONNE : c'est la mort avant verdict. Un module qui meurt sous
+# `set -e` sort du code de la commande qui a echoue, et 1 ou 2 se liraient « echec » ou « drift
+# residuel » alors que RIEN n'a ete conclu. AU-DESSUS DE 3, un module peut nommer un etat qui lui
+# appartient (`container/init.sh` rend 4 : « en attente de configuration ») — jamais 3, jamais un
+# code de verdict.
+#
+# Celui qui LANCE le module arme la garde (LCARS_MODULE_RUN) ; elle se desarme aussitot, pour
+# qu'aucun processus enfant qui sourcerait ce protocole n'en herite. L'installeur a la sienne, de
+# meme forme (`deploy/lib/provision-lib.sh`, PROVISION_RUN) : elle couvre ce qui meurt AVANT que le
+# geste ait source ce fichier — le geste absent, le protocole illisible.
+LCARS_VERDICT_RENDERED=0
+_lcars_exit_guard() {
+  local rc=$?
+  [[ "$LCARS_VERDICT_RENDERED" -eq 1 ]] && return 0
+  printf 'ERREUR %s: mort avant de rendre son verdict (rc=%d)\n' "$LCARS_MODULE_TAG" "$rc" >&2
+  exit 3
+}
+if [[ -n "${LCARS_MODULE_RUN:-}" ]]; then
+  trap _lcars_exit_guard EXIT
+  unset LCARS_MODULE_RUN
+fi
 
 # ─── Les lectures ──────────────────────────────────────────────────────────────────────────────
 # Un champ d'un fichier d'environnement (`CLE=valeur`, la derniere occurrence gagne) — jamais un
