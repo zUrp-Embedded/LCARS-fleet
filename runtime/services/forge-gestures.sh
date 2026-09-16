@@ -15,9 +15,6 @@
 #   apply          joue la recette avec le jeton master lu sur STDIN, à défaut celui que la
 #                  machine détient, et le seed posé : l'org SYSTÈME (sans rôle métier), son dépôt,
 #                  puis le catalogue de la release, installé comme n'importe quel catalogue.
-#   toolchain-protection <login-du-siege> [admins...]
-#                  pose la protection de branche du depot ops. Le login du siege est VARIABLE,
-#                  jamais en dur. SANS status check : l'allumage se fait en deux temps.
 #   install <nom>  installe ou MET A JOUR le catalogue <nom> depuis le depot que la forge porte —
 #                  ou depuis la release, pour le catalogue qu'elle embarque. Jamais declenche par
 #                  le boot.
@@ -58,7 +55,14 @@ SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 # ramasser un site-admin.
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
-RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/services/forge-recipe}"
+# LA RECETTE ET SON ETAT. `LCARS_RECIPE_DIR` est le dossier ou l'appelant veut le play du systeme
+# joue — sur un poste, la copie que fait 61-forge-structure, avec l'etat de la passe precedente
+# (garde dans PROV_FORGE_STATE_DIR). Sans lui (le conteneur), la recette de l'image est un GABARIT :
+# elle vit hors des volumes, un etat qu'on y ecrirait mourrait avec l'image, et la passe suivante
+# recreerait ce qui existe (409 sur le depot). Le play se fait alors dans le dossier de travail
+# persistant (`$CATALOGUE_WORK/_system`), seme depuis le gabarit, comme le play d'un catalogue.
+RECIPE_SOURCE="${LCARS_RECIPE_SOURCE:-/opt/lcars/services/forge-recipe}"
+RECIPE_DIR="${LCARS_RECIPE_DIR:-$RECIPE_SOURCE}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
 # que le verrou d'apply y vit — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
@@ -185,51 +189,6 @@ with_apply_lock() {
   "$@"
 }
 
-# ─── ensure_ops_repo — LE DEPOT DU SYSADMIN ─────────────────────────────────────────────────────
-#
-# Le runtime le LIT sans que rien ne le CREE : la recette tofu fait les orgs, les comptes et les
-# teams, pas les depots.
-#
-# `auto_init` VRAI : le depot nait avec un `main` et son README, qui disent ce qu'il est. Mesure du
-# 2026-09-16 (banc 2002) : un depot d'org VIDE accepte un push ; « Push to create is not enabled for
-# organizations » est la reponse a un push vers un depot ABSENT, pas vers un depot vide.
-ensure_ops_repo() { # $1=org  $2=jeton master
-  local org="$1" tok="$2"
-  # ⚠ DEUX LIGNES, ET CE N'EST PAS DU STYLE : `local a=… b="${a#…}"` NE VOIT PAS `a` — bash expanse
-  # toute la ligne AVANT d'assigner. Sous `set -u`, c'est un « unbound variable » qui tue le script
-  # au milieu d'un apply, en pointant une ligne qui a l'air juste.
-  local repo="${LCARS_OPS_REPO:-$org/_ops}"
-  local name="${repo#*/}"
-
-  local code
-  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
-    | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 \
-      "${FORGE_BASE_URL%/}/api/v1/repos/$repo" 2>/dev/null || true)"
-  if [[ "$code" == "200" ]]; then
-    echo "forge-gestures: depot ops $repo deja la"
-    return 0
-  fi
-
-  # ⚠ LA RELECTURE FAIT FOI, PAS LE CODE DU POST : Gitea rend des codes qui varient selon la
-  # version, donc on POST au mieux puis on REDEMANDE.
-  printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
-    | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
-      -d "{\"name\":\"${name}\",\"private\":false,\"auto_init\":true,\"default_branch\":\"main\",\"description\":\"Depot du sysadmin : escalades, demandes d'outillage, registre d'incidents.\"}" \
-      "${FORGE_BASE_URL%/}/api/v1/orgs/${org}/repos" 2>/dev/null || true
-
-  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
-    | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 \
-      "${FORGE_BASE_URL%/}/api/v1/repos/$repo" 2>/dev/null || true)"
-  if [[ "$code" == "200" ]]; then
-    echo "forge-gestures: depot ops $repo cree (auto_init, branche main)"
-  else
-    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `65-ops-branch` le
-    # dira en derive au passage suivant — ce qui est exactement son travail.
-    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 65-ops-branch le dira en derive" >&2
-  fi
-  return 0
-}
-
 publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
   local org="$1" tok="$2" seed="$3" acct code posed=0 skipped=0
   local -a members=()
@@ -301,6 +260,30 @@ demote_creator_from_owners() { # $1=org  $2=jeton master
   fi
 }
 
+# Le dossier du play systeme, seme depuis le gabarit de la recette : l'etat de la passe precedente
+# (racine et instance/) survit a la copie, le reste est recopie a neuf — meme discipline que le
+# dossier d'un catalogue dans `cmd_install`, pour la meme raison (un etat perdu re-importe la forge,
+# et ce qui ne s'importe pas se recree).
+seed_system_play() { # $1=dossier du play
+  local play="$1" keep m f
+  mkdir -p "$play/instance"
+  keep="$(mktemp -d)"
+  for m in . instance; do
+    for f in terraform.tfstate terraform.tfstate.backup; do
+      [[ -f "$play/$m/$f" ]] && { mkdir -p "$keep/$m"; cp "$play/$m/$f" "$keep/$m/$f"; }
+    done
+  done
+  cp -r "$RECIPE_SOURCE/." "$play/" || die "apply : gabarit de recette non copiable ($RECIPE_SOURCE)"
+  rm -rf "$play/.terraform" "$play/instance/.terraform"
+  rm -f "$play"/terraform.tfstate* "$play"/instance/terraform.tfstate*
+  for m in . instance; do
+    for f in terraform.tfstate terraform.tfstate.backup; do
+      [[ -f "$keep/$m/$f" ]] && mv "$keep/$m/$f" "$play/$m/$f"
+    done
+  done
+  rm -rf "$keep"
+}
+
 cmd_apply() {
   local tok seed
   # Le jeton donne a la main l'emporte sur celui que le conteneur garde ; le SEED, lui, n'a pas de
@@ -327,6 +310,15 @@ cmd_apply() {
   # La release est demandee UNE fois par geste : chaque porte `tool` la demarre.
   REFERENCE_CATALOGUE="$(reference_catalogue_root)"
 
+  # LE SIEGE SIGNE LES DEMANDES D'OUTILLAGE : le master — le compte du jeton, n°1 de la forge, celui
+  # qui installe. Resolu ici, jamais devine, et passe a la recette qui pose la protection de
+  # `tool_request` avec lui pour seul approbateur (`forge-recipe/ops.tf`). Un manifeste d'outillage
+  # est applique par root sur le conteneur : le signer est l'affaire de l'admin du systeme.
+  local siege
+  siege="$(hcurl "$tok" -sS -m 15 "${FORGE_BASE_URL%/}/api/v1/user" 2>/dev/null | jq -r '.login // empty' 2>/dev/null || true)"
+  [[ -n "$siege" ]] \
+    || die "apply : la forge ne dit pas a qui appartient le jeton master (/api/v1/user) — la protection de tool_request n'aurait aucun approbateur, RIEN n'est pose"
+
   export TF_VAR_gitea_url="$FORGE_BASE_URL"
   export TF_VAR_gitea_token="$tok"
   export TF_VAR_seed_password="$seed"
@@ -344,20 +336,25 @@ cmd_apply() {
   # catalogue standard compris, juste apres. Les `-var` l'emportent sur `roles.auto.tfvars.json`,
   # qui porte l'org et les roles du catalogue standard : ce fichier reste la, il nomme le compte
   # systeme (`system_account`, sans defaut par contrat).
+  local play="$RECIPE_DIR"
+  if [[ -z "${LCARS_RECIPE_DIR:-}" ]]; then
+    play="$CATALOGUE_WORK/_system"
+    seed_system_play "$play"
+  fi
+
   local m
   local -a vars
   for m in instance .; do
     vars=()
     [[ "$m" == instance ]] \
-      || vars=(-var "org=$SYSTEM_ORG" -var 'roles=[]' -var 'writers=[]' -var 'judges=[]' -var 'externals=[]')
+      || vars=(-var "org=$SYSTEM_ORG" -var 'roles=[]' -var 'writers=[]' -var 'judges=[]' -var 'externals=[]'
+               -var "approvers=$(jq -cn --arg s "$siege" '[$s]')")
     echo "forge-gestures: apply $m${vars[0]:+ (org $SYSTEM_ORG, sans role metier)}"
-    ( cd "$RECIPE_DIR/$m" && tofu init -input=false -no-color >/dev/null ) \
+    ( cd "$play/$m" && tofu init -input=false -no-color >/dev/null ) \
       || die "init $m en echec — le miroir de providers (TF_CLI_CONFIG_FILE) couvre-t-il cette recette ?"
-    ( cd "$RECIPE_DIR/$m" && tofu apply -auto-approve -input=false -no-color ${vars[@]+"${vars[@]}"} ) \
+    ( cd "$play/$m" && tofu apply -auto-approve -input=false -no-color ${vars[@]+"${vars[@]}"} ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
-
-  ensure_ops_repo "$SYSTEM_ORG" "$tok"
 
   publicize_org_members "$SYSTEM_ORG" "$tok" "$seed"
 
@@ -485,45 +482,6 @@ seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message
 # ⚠ LE JETON DE RUNNER N'ENTRE PAS DANS LA RECETTE, et c'est un choix : le provider sait le produire,
 # mais une data source ECRIT sa valeur dans le tfstate — un credential dans un fichier d'etat, pour
 # un objet qui n'est meme pas de la structure. C'est une LECTURE a usage unique.
-#
-# ─── toolchain-protection — LE GESTE D'INSTALLATION du rail toolchain (⚖ user) ──────────────────
-# `dismiss_stale_approvals` : un re-push tue l'approbation, et c'est la seule propriete qu'aucun
-# test ni ACL ne porte. SANS status check, parce que l'allumage est en DEUX temps — le contexte
-# viendra AVEC son job.
-#
-# ⚠ CE GESTE ET LA CONFIG :toolchain_auto_merge VONT ENSEMBLE, JAMAIS L'UN SANS L'AUTRE : armer
-# l'auto-merge sur une branche sans protection, c'est « conditions remplies » tout de suite, donc
-# un merge sans signature avec le convergeur derriere.
-cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-approbateurs...]
-  need_forge_url
-  [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
-  local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorité — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
-
-  # ⚠ LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` : cette ligne en est une
-  # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Rendu reglable ICI seulement, il
-  # poserait la protection sur une branche pendant que le reconciliateur en interrogerait une autre.
-  local repo="${LCARS_OPS_REPO:-lcars/_ops}" branch="tool_request"
-  local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
-
-  hcurl "$tok" -sS -m 15 -o /dev/null -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
-
-  local got
-  got="$(hcurl "$tok" -sS -m 15     "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections/$branch" 2>/dev/null || true)"
-
-  local ra ds
-  ra="$(jq -r '.required_approvals // empty' <<< "$got" 2>/dev/null || true)"
-  ds="$(jq -r '.dismiss_stale_approvals // empty' <<< "$got" 2>/dev/null || true)"
-
-  if [[ "$ra" == "1" && "$ds" == "true" ]]; then
-    echo "forge-gestures: protection VERIFIEE par relecture sur $repo:$branch (required_approvals=1, dismiss_stale, approbateurs: $approvers)"
-    echo "  -> ACTIVER l'auto-merge maintenant que la protection TIENT :"
-    echo "     config :lcars_fleet, :toolchain_auto_merge, true   (runtime.exs / env du deploy)"
-  else
-    echo "relecture: $got" >&2
-    die "toolchain-protection: la protection n'est PAS en place sur $repo:$branch — NE PAS activer :toolchain_auto_merge"
-  fi
-}
 
 cmd_runner_token() {
   need_forge_url
@@ -557,6 +515,13 @@ cmd_runner_token() {
 cmd_install() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "install: nom de catalogue requis"
+  # LES NOMS DU SYSTEME NE SE PORTENT PAS : l'org systeme, et tout nom qui commence par `_` (ce que
+  # la fleet pose elle-meme : `_ops`, `_catalogue`). Un catalogue de ce nom poserait ses projets dans
+  # l'org du systeme, ou son magasin la ou le systeme ecrit. Meme regle cote runtime pour les projets
+  # (`Fleet.Project.Onboard.Refute.refute_system_name/2`).
+  case "$name" in
+    _*|"$SYSTEM_ORG") die "install: « $name » est un nom du systeme (l'org systeme « $SYSTEM_ORG », ou un nom qui commence par « _ ») — un catalogue ne le porte pas, RIEN n'a ete pose" ;;
+  esac
   need_forge_url
   need_cli
 
@@ -823,11 +788,10 @@ case "${1:-}" in
   apply)        with_apply_lock cmd_apply ;;
   install)      shift; with_apply_lock cmd_install "$@" ;;
   runner-token) cmd_runner_token ;;
-  toolchain-protection) shift; cmd_toolchain_protection "$@" ;;
   # ⚠ CE VERBE EXISTE POUR QU'AUCUN APPELANT N'AIT A RECOPIER LE DEFAUT. Le nom du compte integre a
   # UN auteur — la ligne `TF_VAR_builtin_human` ci-dessus — et un second litteral ailleurs ne reste
   # d'accord avec elle que jusqu'au jour ou l'un des deux bouge. `25-directories` et `deploy/accept`
   # le DEMANDENT ici.
   builtin-human) printf "%s\n" "$BUILTIN_HUMAN" ;;
-  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection|builtin-human)" >&2; exit 1 ;;
+  *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|builtin-human)" >&2; exit 1 ;;
 esac

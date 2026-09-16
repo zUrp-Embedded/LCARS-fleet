@@ -446,6 +446,37 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       assert settle(name).sync_pending == true
     end
 
+    test "sync: the registry branch does NOT exist → named at the FIRST failure, with the gesture that lays it",
+         %{tmp_dir: tmp} do
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!(
+            {Reg,
+             [
+               name: name,
+               wal_path: Path.join(tmp, "incidents.json"),
+               sync_debounce_ms: 5,
+               retry_ms: 60_000,
+               get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+               put_file_fun: fn _r, _p, _c, _o ->
+                 {:error, {:http, 404, "branch does not exist"}}
+               end
+             ]}
+          )
+
+          Reg.note("wake:p:dead", %{"pod" => "p"}, server: name)
+          Process.sleep(60)
+          _ = settle(name)
+        end)
+
+      assert log =~ "does NOT exist"
+      assert log =~ "forge-gestures apply"
+      refute log =~ "forge unreachable"
+      assert settle(name).sync_pending == true
+    end
+
     test "boot: forge file CORRUPT (present but not a JSON map) → treated empty, LOUD",
          %{tmp_dir: tmp} do
       # Assert scheduled recovery as well as the log: logging then accepting empty

@@ -99,6 +99,7 @@ services_env_body() {
   echo "# Un daemon n'hérite d'aucun shell : ce qu'il lui faut est ici, dérivé du provisionnement."
   echo "FORGE_BASE_URL=$(forge_url)"
   echo "LCARS_FORGE_ORG=$PROV_FORGE_ORG"
+  echo "LCARS_OPS_REPO=$PROV_OPS_REPO"
   echo "LCARS_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "LCARS_FLEET_GROUP=$PROV_FLEET_GROUP"
   echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"

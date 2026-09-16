@@ -52,7 +52,7 @@ declare_couvre() {
       container/init.sh)          continue ;;  # boot.sh
       forge.d/catalogues.sh)      continue ;;  # 50-catalogues
       forge.d/deck-oidc.sh)       continue ;;  # 66-deck-oidc
-      forge.d/ops-branch.sh)      continue ;;  # 65-ops-branch
+      forge.d/ops-repo.sh)      continue ;;  # 65-ops-repo
       forge.d/tokens.sh)          continue ;;  # 63-forge-tokens
       human.d/40-claude-bin.sh)   continue ;;  # 60-deploy (convergeur d'humains)
       human.d/70-human.sh)        continue ;;  # 60-deploy, provision-lib

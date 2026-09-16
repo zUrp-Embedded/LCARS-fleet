@@ -454,17 +454,39 @@ defmodule Fleet.Project.OnboardCompensationTest do
     # A chmod clamps the mask of any ACL the deployment placed on the face, so a conforming mode is
     # measured and left alone. ctime moves on a metadata write and on that write only; the second
     # assertion is the control that proves the instrument can see a write at all.
-    defp ctime(dir), do: dir |> then(&System.cmd("stat", ["-c", "%.9Z", &1])) |> elem(0)
+    defp ctime(dir),
+      do: dir |> then(&System.cmd("stat", ["-c", "%.9Z", &1])) |> elem(0) |> String.trim()
+
+    # ⚠ THE FILE SYSTEM CLOCK ADVANCES IN TICKS, and both halves of this test depend on it. Two
+    # metadata writes inside one tick carry the SAME ctime: without waiting, a spurious chmod would
+    # be invisible AND a real one could look like no write at all (measured under load, both
+    # timestamps equal to the nanosecond). Waiting on a neighbouring file leaves `dir` untouched.
+    defp apres_le_tick(voisin, stamp, restant \\ 2_000) do
+      sentinelle = Path.join(voisin, ".tick")
+      File.touch!(sentinelle)
+      bouge? = ctime(sentinelle) != stamp
+      File.rm!(sentinelle)
+
+      cond do
+        bouge? -> :ok
+        restant == 0 -> flunk("l'horloge du systeme de fichiers n'a pas avance en 2 s")
+        true -> Process.sleep(1) && apres_le_tick(voisin, stamp, restant - 1)
+      end
+    end
 
     test "un mode deja conforme n'est pas reecrit", %{tmp_dir: tmp} do
       dir = Path.join(tmp, "face")
       File.mkdir_p!(dir)
       File.chmod!(dir, 0o2775)
       avant = ctime(dir)
+      # passe la graduation : toute écriture qui suit porterait un ctime différent de `avant`
+      apres_le_tick(tmp, avant)
 
       assert :ok = Faces.chmod_face(dir, 0o2775)
       assert ctime(dir) == avant
       assert face_mode(dir) == 0o2775
+
+      apres_le_tick(tmp, ctime(dir))
 
       assert :ok = Faces.chmod_face(dir, 0o2755)
       assert ctime(dir) != avant

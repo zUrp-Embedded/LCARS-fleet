@@ -44,7 +44,7 @@ geste() {
 
 tous_les_gestes() { # les quatre, chacun rendant son verdict
   local g
-  for g in catalogues tokens ops-branch deck-oidc; do geste "$g" 'verdict_apply'; done
+  for g in catalogues tokens ops-repo deck-oidc; do geste "$g" 'verdict_apply'; done
 }
 
 bloc() {
@@ -71,7 +71,7 @@ bloc() {
 @test "l'ordre est celui du poste : les catalogues AVANT les jetons, puis la branche ops et le client du deck" {
   tous_les_gestes
   bloc
-  [ "$(tr '\n' ' ' < "$JOUES")" = "catalogues tokens ops-branch deck-oidc " ]
+  [ "$(tr '\n' ' ' < "$JOUES")" = "catalogues tokens ops-repo deck-oidc " ]
 }
 
 @test "un geste qui MEURT avant son verdict rend 3, et le boot le nomme — jamais « drift residuel »" {
@@ -88,9 +88,9 @@ bloc() {
 
 @test "un drift residuel se dit comme tel et laisse le conteneur demarrer" {
   tous_les_gestes
-  geste ops-branch 'LCARS_DRIFT=1; verdict_apply'
+  geste ops-repo 'LCARS_DRIFT=1; verdict_apply'
   bloc
-  grep -q 'geste de forge « ops-branch » : drift residuel' "$JOURNAL"
+  grep -q 'geste de forge « ops-repo » : drift residuel' "$JOURNAL"
   grep -q '^prov_rc=2$' "$JOURNAL"
 }
 

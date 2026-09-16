@@ -16,7 +16,7 @@
 #     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
 #     +-----------------------------------------------------------+
 #     | MODULE: PRE-COMMIT        | SUBSYSTEM: GIT-HOOKS / QA     |
-#     | LICENSE: AGPL-3           | STARDATE: 2026.247             |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.260             |
 #     +-------------------------+---------------------------------+
 #
 # pre-commit — date auto-update + GO-7 header enforcement
@@ -193,6 +193,11 @@ is_ipc_exception() {
     [[ "$1" == *"/sp_builder/"*.md ]] && return 0
     [[ "$1" == *"/subagent-templates/"*.md ]] && return 0
     [[ "$1" == *"/modop-bundles/"*"/sp.md" ]] && return 0
+    # LES SEMENCES DU DEPOT DU SYSTEME (`forge-recipe/ops/`) : ce ne sont pas des documents de CE
+    # depot, ce sont les fichiers que la recette POUSSE sur la forge — le README que lit un humain
+    # sur `<org systeme>/_ops`, et celui qu'il lit avant de signer une demande d'outillage. Un
+    # en-tete de lignage LCARS y parlerait d'un depot que ce lecteur-la n'a pas sous les yeux.
+    [[ "$1" == *"/forge-recipe/ops/"*.md ]] && return 0
     return 1
 }
 

@@ -22,9 +22,9 @@ setup() {
   } > "$BLOC"
 }
 
-gestes() { # gestes <rc tokens> <rc catalogues> <rc ops-branch> <rc deck-oidc>
+gestes() { # gestes <rc tokens> <rc catalogues> <rc ops-repo> <rc deck-oidc>
   local g rc i=1
-  for g in tokens catalogues ops-branch deck-oidc; do
+  for g in tokens catalogues ops-repo deck-oidc; do
     rc="${!i}"; i=$((i + 1))
     printf '#!/usr/bin/env bash\nexit %s\n' "$rc" > "$FORGE_D/$g.sh"
   done

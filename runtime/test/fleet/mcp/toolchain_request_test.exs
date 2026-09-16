@@ -144,7 +144,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       expected = Fleet.Toolchain.branch_for_pod(pod)
       assert_received {:create_branch, _repo, ^expected, _base}
-      assert String.starts_with?(expected, "lcars/toolchain-pod-")
+      assert String.starts_with?(expected, "tool_request-pod-")
 
       # Le préfixe SÉPARE : deux clés d'espaces de noms indépendants ne peuvent pas atterrir sur
       # une même branche et s'écraser l'une l'autre.

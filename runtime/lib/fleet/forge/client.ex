@@ -48,6 +48,10 @@ defmodule Fleet.Forge.Client do
 
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Repo
+  @doc "Deletes a branch: `{:ok, :deleted}`, `{:ok, :absent}` on 404, other errors propagate."
+  @spec delete_branch(String.t(), String.t(), Keyword.t()) ::
+          {:ok, :deleted | :absent} | {:error, term()}
+  defdelegate delete_branch(repo, branch, opts), to: Repo
 
   # ForgeWriter's default names this facade; extracting Files must preserve its seam exports.
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::

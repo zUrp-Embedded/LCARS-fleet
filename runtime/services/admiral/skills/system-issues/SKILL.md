@@ -1,6 +1,6 @@
 ---
 name: system-issues
-description: Liste la boîte de réception sysadmin — les issues error_system du dépôt ops et les PR d'outillage en attente de signature vers la branche sysadmin. À lancer en début de séance.
+description: Liste la boîte de réception sysadmin — les issues error_system du dépôt ops et les PR d'outillage en attente de signature vers la branche tool_request. À lancer en début de séance.
 ---
 
 # system-issues — la boîte de réception d'admiral
@@ -9,7 +9,7 @@ Lance `~/.claude/skills/system-issues/list.sh`. Deux lectures, dans l'ordre :
 
 1. **les issues `error_system`** du dépôt ops (`lcars/_ops`) — les défauts du système que la
    fleet a remontés (le détail est dans chaque ticket) ;
-2. **les PR ouvertes vers `sysadmin`** — les demandes d'outillage des pods qui attendent la
+2. **les PR ouvertes vers `tool_request`** — les demandes d'outillage des pods qui attendent la
    signature d'un admin (l'approbation se fait sur la forge, pas ici).
 
 Le script fait **deux lectures d'un dépôt public**, avec le **jeton système** du conteneur

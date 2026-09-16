@@ -35,6 +35,11 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       send(:persistent_term.get({__MODULE__, :test_pid}), {:commented, repo, n, body})
       {:ok, %{}}
     end
+
+    def delete_branch(repo, branch, _opts) do
+      send(:persistent_term.get({__MODULE__, :test_pid}), {:deleted, repo, branch})
+      :persistent_term.get({__MODULE__, :delete_result}, {:ok, :deleted})
+    end
   end
 
   defmodule ForgeDown do
@@ -50,6 +55,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     :persistent_term.put({ForgeUp, :head}, "sha-1")
     :persistent_term.put({ForgeUp, :test_pid}, self())
     :persistent_term.put({ForgeUp, :prs}, [])
+    :persistent_term.put({ForgeUp, :delete_result}, {:ok, :deleted})
 
     prev_forge = Application.get_env(:lcars_fleet, :admiral_forge_client)
     prev_conv = Application.get_env(:lcars_fleet, :toolchain_converger)
@@ -212,9 +218,91 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
           state: "open",
           merged: false,
           base_ref: Fleet.Toolchain.branch(),
+          head_ref: Fleet.Toolchain.branch_for("wi-42"),
           body: "demande\n" <> Fleet.Toolchain.workitem_marker("fleet/morse", 42)
         ] ++ faits
       )
+    end
+
+    # La branche de demande est la SEULE que le runtime cree sur le depot systeme, et elle part avec
+    # sa PR (⚖ user 2026-09-16 : « pas laisser le systeme creer des branches a l'envie »).
+    test "PR MERGEE + branche appliquee => la branche de demande est SUPPRIMEE du depot systeme",
+         %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
+
+      assert {:ok, :converged, _} = R.check_now(server)
+      assert_received {:deleted, repo, "tool_request-wi-42"}
+      assert repo == Fleet.Toolchain.ops_repo()
+    end
+
+    test "PR FERMEE SANS MERGE => la branche de demande est supprimee aussi", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
+
+      assert {:ok, _, _} = R.check_now(server)
+      assert_received {:deleted, _, "tool_request-wi-42"}
+    end
+
+    test "PR MERGEE mais NON appliquee => la branche RESTE (le drain n'a pas eu lieu)", %{
+      server: server
+    } do
+      converger_result({:error, :boom})
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
+
+      assert {:error, :boom} = R.check_now(server)
+      refute_received {:deleted, _, _}
+    end
+
+    test "PR OUVERTE => la branche reste", %{server: server} do
+      :persistent_term.put({ForgeUp, :prs}, [pr()])
+      assert {:ok, _, _} = R.check_now(server)
+      refute_received {:deleted, _, _}
+    end
+
+    test "une tete HORS de la famille tool_request-* n'est JAMAIS supprimee, drainee ou non", %{
+      server: server
+    } do
+      :persistent_term.put({ForgeUp, :prs}, [
+        pr(state: "closed", merged: false, head_ref: "feature/quelque-chose"),
+        pr(state: "closed", merged: false, head_ref: Fleet.Toolchain.branch())
+      ])
+
+      assert {:ok, _, _} = R.check_now(server)
+      assert_received {:removed, "fleet/morse", 42, _}
+      refute_received {:deleted, _, _}
+    end
+
+    test "une suppression refusee par la forge est dite, le drain a eu lieu, et ne se rejoue pas",
+         %{server: server} do
+      :persistent_term.put({ForgeUp, :delete_result}, {:error, {:http, 500, "boom"}})
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, _, _} = R.check_now(server) end)
+      assert_received {:removed, "fleet/morse", 42, _}
+      assert_received {:deleted, _, "tool_request-wi-42"}
+      assert log =~ "NON supprimée"
+      assert log =~ "à supprimer à la main"
+    end
+
+    # La liste des PR est `state=all` : une PR historique repasse a chaque tick. Sans verrou sur
+    # son issue, elle est deja drainee — aucun DELETE, aucune ligne de journal.
+    test "une PR deja drainee (verrou absent de l'issue) ne provoque ni DELETE ni journal a chaque tick",
+         %{server: server} do
+      :persistent_term.put({ForgeUp, :issue_labels}, [])
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, _, _} = R.check_now(server) end)
+      refute_received {:removed, _, _, _}
+      refute_received {:deleted, _, _}
+      refute log =~ "supprimée"
+    end
+
+    test "une branche deja absente au drain n'est pas annoncee supprimee", %{server: server} do
+      :persistent_term.put({ForgeUp, :delete_result}, {:ok, :absent})
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert {:ok, _, _} = R.check_now(server) end)
+      assert_received {:deleted, _, "tool_request-wi-42"}
+      refute log =~ "supprimée ("
     end
 
     test "PR MERGEE + branche appliquee => verrou retire + commentaire", %{server: server} do

@@ -88,7 +88,7 @@ et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de
 | 62-runtime-helpers | wsl linux docker | any | les auxiliaires du runtime sur la machine : services, binaires du PATH, arbres embarqués à plat sous la racine de LCARS, client de terminal épinglé, réglage de shell (`/etc/skel/.bashrc`, PATH `~/.local/bin` dans `/etc/bash.bashrc`) |
 | 63-forge-tokens | wsl linux | wsl linux | les jetons de rôle — un appelant mince de `runtime/services/forge.d/tokens.sh` |
 | 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (un service debout est relancé quand son unité, l'environnement, ou ce qu'il charge et que 62 a posé, a changé depuis son démarrage) et une passe du convergeur d'humains tant que son daemon ne tourne pas ; en conteneur, le superviseur et ses programmes sont sondés à la place |
-| 65-ops-branch | wsl linux | wsl linux | la branche d'outillage sur le dépôt ops — un appelant mince de `runtime/services/forge.d/ops-branch.sh` |
+| 65-ops-repo | wsl linux | wsl linux | le dépôt du système (`lcars/_ops` : branches `tool_request` et `incidents`, protection) — un appelant mince de `runtime/services/forge.d/ops-repo.sh`, qui VÉRIFIE ce que la recette de 61 a posé |
 | 66-deck-oidc | wsl linux | wsl linux | le client OAuth2 du deck et son fichier sous `/etc/lcars` — un appelant mince de `runtime/services/forge.d/deck-oidc.sh` |
 
 Dans l'image docker, les mêmes modules jouent `provision apply --substrate docker` depuis le kit

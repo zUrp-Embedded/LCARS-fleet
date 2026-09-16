@@ -39,8 +39,8 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
 
     defp cinq_miroirs(contenu) do
       for rel <- [
-            "runtime/services/forge.d/ops-branch.sh",
-            "runtime/services/forge-gestures.sh",
+            "runtime/services/forge.d/ops-repo.sh",
+            "runtime/services/forge-recipe/ops.tf",
             "runtime/services/admiral/skills/system-issues/list.sh",
             "runtime/bin/lcars-toolchain-converge",
             "runtime/services/privileged-executor.py"
@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       assert %{status: :fail, evidence: ev} =
                SingleSource.check_toolchain_branch_single_source(root)
 
-      assert Enum.any?(ev, &(&1 =~ "ops-branch.sh"))
+      assert Enum.any?(ev, &(&1 =~ "ops-repo.sh"))
     end
 
     test "⚠ UN REGLAGE REND LA BRANCHE TUNABLE — et c'est une borne de SECURITE qui tombe" do
@@ -100,7 +100,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
   end
 
   describe "toolchain.ops_repo_single_source — le depot et sa branche sont deux moities d'une adresse" do
-    @ops "fleet/ops"
+    @ops "lcars/_ops"
 
     defp autorite_ops(defaut),
       do:
@@ -110,8 +110,14 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
            "end\n"}
 
     defp miroirs_ops(depot_nom) do
+      [_org, depot] = String.split(depot_nom, "/", parts: 2)
+
       [
-        {"runtime/services/forge-gestures.sh", ~s[R="${LCARS_OPS_REPO:-#{depot_nom}}"\n]},
+        {"runtime/services/forge.d/ops-repo.sh",
+         ~s[: "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/#{depot}}"\n]},
+        {"runtime/services/admiral/skills/system-issues/list.sh",
+         ~s[R="${LCARS_OPS_REPO:-#{depot_nom}}"\n]},
+        {"runtime/bin/lcars-toolchain-converge", ~s[R="${LCARS_OPS_REPO:-#{depot_nom}}"\n]},
         {"runtime/services/privileged-executor.py",
          ~s[r = os.environ.get("LCARS_OPS_REPO", "#{depot_nom}")\n]}
       ]
@@ -123,14 +129,16 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
 
     test "un miroir qui a derive est nomme" do
-      [gestes, exec] = miroirs_ops(@ops)
+      [geste, skill, conv, exec] = miroirs_ops(@ops)
       {rel, _} = exec
 
       root =
         depot([
           autorite_ops(@ops),
-          gestes,
-          {rel, ~s[r = os.environ.get("LCARS_OPS_REPO", "fleet/autre")\n]}
+          geste,
+          skill,
+          conv,
+          {rel, ~s[r = os.environ.get("LCARS_OPS_REPO", "lcars/autre")\n]}
         ])
 
       assert %{status: :fail, evidence: ev} = SingleSource.check_ops_repo_single_source(root)

@@ -29,8 +29,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "services/forge.d/ops-branch.sh",
-      "services/forge-gestures.sh",
+      "services/forge.d/ops-repo.sh",
+      # The recipe lays the branch and its protection; the gesture only verifies.
+      "services/forge-recipe/ops.tf",
       "services/admiral/skills/system-issues/list.sh",
       # The converger's accepted branch and the executor's requested branch must agree.
       "bin/lcars-toolchain-converge",
@@ -796,7 +797,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   Repository and branch are separate parts of the executor/converger address;
   the branch check does not cover this value.
 
-  Only source defaults in forge-gestures.sh and privileged-executor.py are checked,
+  Only source defaults in the ops-repo gesture, the seat skill, the converger and the executor are checked,
   not effective environment values or the existence of the repository.
   """
   @spec check_ops_repo_single_source(String.t()) :: Support.result()
@@ -833,9 +834,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     else
       e = Regex.escape(expected)
 
+      # The gesture and the protocol DERIVE the repo from the org (an org the installer renamed
+      # takes its repository along); only the repository half is a literal there.
+      repo_half = expected |> String.split("/", parts: 2) |> List.last() |> Regex.escape()
+
       mirrors = [
-        {"services/forge-gestures.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
-         "the forge gesture's ops-repo fallback"},
+        {"services/forge.d/ops-repo.sh",
+         ~r/LCARS_OPS_REPO:=\$\{LCARS_FORGE_ORG\}\/#{repo_half}\}/,
+         "the ops-repo gesture's fallback (derived from the org)"},
+        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
+         "the seat skill's fallback"},
+        {"bin/lcars-toolchain-converge", ~r/LCARS_OPS_REPO:-#{e}\}/,
+         "the toolchain converger's fallback"},
         {"services/privileged-executor.py", ~r/os\.environ\.get\("LCARS_OPS_REPO",\s*"#{e}"\)/,
          "the root executor's ops-repo fallback"}
       ]

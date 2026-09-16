@@ -39,6 +39,13 @@ if forge_opts != [] do
   config :lcars_fleet, :pilot_forge, forge_opts
 end
 
+# The system repository lives in the system org: the machine names both (services.env, loaded by
+# bin/fleet), and an org the installer renamed takes its repository along. The literal is the same
+# default as the shell protocol's — MUR 19 holds them equal.
+config :lcars_fleet,
+  pilot_ops_repo:
+    System.get_env("LCARS_OPS_REPO") || "#{System.get_env("LCARS_FORGE_ORG", "lcars")}/_ops"
+
 # Eval tools that create projects also push, unlike reconciliation of existing branches.
 # Configure git auth outside tool_mode so these tools receive the same account identity.
 # This block stores the account name; ForgeAuth requests its token when needed.

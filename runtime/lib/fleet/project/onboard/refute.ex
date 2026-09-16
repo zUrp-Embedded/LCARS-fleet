@@ -49,25 +49,33 @@ defmodule Fleet.Project.Onboard.Refute do
   end
 
   @doc """
-  Refuses the reserved store destination before creation.
-
-  An absent repository has no manifest to inspect. Its address must still be reserved:
-  a later catalogue install can force-push there, so checking current forge absence is insufficient.
+  Refuses a name the system keeps for itself: the system org's name (read from the system
+  repository address — a project there would live in the org that carries no project), and any
+  `_`-prefixed name (what the fleet posts under its own hand: the catalogue store, the system
+  repository). The charset gate already refuses `_`; it is named here so the refusal says WHY,
+  not just "invalid". Every onboarding door passes through `Onboard.admit/3`, which asks this.
   """
-  @spec refute_store_address(String.t(), String.t()) ::
-          :ok | {:error, {:store_address, String.t(), String.t()}}
-  def refute_store_address(full_name, name) do
-    store = Fleet.Catalogue.store_repo()
+  @spec refute_system_name(String.t(), String.t()) ::
+          :ok | {:error, {:system_name, String.t(), String.t()}}
+  def refute_system_name(full_name, name) do
+    system_org = Fleet.Toolchain.ops_repo() |> String.split("/", parts: 2) |> hd()
 
-    if name == store do
-      {:error,
-       {:store_address, full_name,
-        "'#{name}' is the repo name the fleet pushes a catalogue's source under, so " <>
-          "'#{full_name}' is where `catalogue install` force-pushes. A project adopted there is a " <>
-          "project the next install overwrites without a word. Rename the local project and adopt " <>
-          "it again."}}
-    else
-      :ok
+    cond do
+      String.starts_with?(name, "_") ->
+        {:error,
+         {:system_name, full_name,
+          "'#{name}' begins with `_`: a name the system keeps for what it posts itself — the " <>
+            "catalogue store `#{Fleet.Catalogue.store_repo()}`, the system repository. A project " <>
+            "there is a project the next install overwrites without a word. Rename it and try again."}}
+
+      name == system_org ->
+        {:error,
+         {:system_name, full_name,
+          "'#{name}' is the SYSTEM org's name (it carries the fleet's identity and its own " <>
+            "repositories, never a project). A project cannot carry it. Rename it and try again."}}
+
+      true ->
+        :ok
     end
   end
 

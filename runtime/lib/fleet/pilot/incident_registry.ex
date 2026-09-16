@@ -311,13 +311,30 @@ defmodule Fleet.Pilot.IncidentRegistry do
       {:error, reason} ->
         fails = state.forge_fails + 1
 
-        # Log the third failure and every twentieth retry. WAL safety depends on
-        # earlier writes succeeding, despite the unconditional wording of this log.
-        if fails == @forge_fail_threshold or rem(fails, 20) == 0 do
-          Logger.error(
-            "IncidentRegistry: backing-store forge unreachable for #{fails} attempts (#{inspect(reason)}) " <>
-              "— fail-LOUD. Data SAFE in the local WAL (#{state.wal_path}); re-sync when forge returns."
-          )
+        # Log the third failure and every twentieth retry — and a MISSING BRANCH at the first one:
+        # that is not a forge outage, it is a forge the recipe has not laid, and its remedy is a
+        # gesture, not patience. WAL safety depends on earlier writes succeeding, despite the
+        # unconditional wording of this log.
+        cond do
+          match?({:registry_branch_missing, _, _}, reason) and
+              (fails == 1 or rem(fails, 20) == 0) ->
+            {:registry_branch_missing, repo, branch} = reason
+
+            Logger.error(
+              "IncidentRegistry: branch #{branch} of #{repo} does NOT exist (or the repository itself, " <>
+                "or it is invisible to the system token) — the forge recipe lays it " <>
+                "(`forge-gestures apply` / `deploy/workstation up`); nothing is written until it does " <>
+                "(attempt #{fails}). Data SAFE in the local WAL (#{state.wal_path})."
+            )
+
+          fails == @forge_fail_threshold or rem(fails, 20) == 0 ->
+            Logger.error(
+              "IncidentRegistry: backing-store forge unreachable for #{fails} attempts (#{inspect(reason)}) " <>
+                "— fail-LOUD. Data SAFE in the local WAL (#{state.wal_path}); re-sync when forge returns."
+            )
+
+          true ->
+            :ok
         end
 
         Process.send_after(self(), :sync_forge, retry_ms(state.opts))

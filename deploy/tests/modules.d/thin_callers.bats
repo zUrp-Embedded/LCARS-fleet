@@ -13,7 +13,7 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   DEPLOY="$BATS_TEST_DIRNAME/../.."
-  CALLERS=(50-catalogues:catalogues 63-forge-tokens:tokens 65-ops-branch:ops-branch 66-deck-oidc:deck-oidc)
+  CALLERS=(50-catalogues:catalogues 63-forge-tokens:tokens 65-ops-repo:ops-repo 66-deck-oidc:deck-oidc)
   decor_pose
   export PROV_SUBSTRATE=linux PROV_HUMAN=humain-du-poste PROVISION_RUN=1
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"
@@ -64,9 +64,9 @@ joue() { # joue <racine> <module> <verbe>
   joue "$ROOT" 66-deck-oidc apply
   [ "$status" -eq 1 ]
   refute_out 'mort avant' <<<"$output"
-  joue "$ROOT" 65-ops-branch check
+  joue "$ROOT" 65-ops-repo check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FATAL 65-ops-branch: verbe refusé"* ]]
+  [[ "$output" == *"FATAL 65-ops-repo: verbe refusé"* ]]
   refute_out 'mort avant' <<<"$output"
 }
 

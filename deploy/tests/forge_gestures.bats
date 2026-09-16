@@ -60,9 +60,12 @@ FAKE
   cat > "$BIN/jq" <<FAKE
 #!/usr/bin/env bash
 # Assez de jq pour les DEUX questions posees : le jeton d'enregistrement, et le login de l'id 1.
-body="\$(cat)"
+# « jq -n » ne lit pas son entree : sous un terminal, un « cat » inconditionnel attendrait une ligne tapee
+body=""; [[ " \$* " == *" -n "* || " \$* " == *" -cn "* ]] || body="\$(cat)"
 case "\$*" in
   *'.id == 1'*) cat "$BATS_TEST_TMPDIR/master.out" 2>/dev/null || true ;;
+  *'.login'*)   echo "le-siege" ;;
+  *'[\$s]'*)    echo '["le-siege"]' ;;
   *) [[ "\$body" =~ \"token\":\"([^\"]*)\" ]] && printf '%s\n' "\${BASH_REMATCH[1]}" ;;
 esac
 FAKE

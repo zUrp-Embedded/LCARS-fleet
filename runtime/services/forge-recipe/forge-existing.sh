@@ -36,6 +36,10 @@ FORGE="$(q gitea_url)"; FORGE="${FORGE%/}"
 ORG="$(q org)"
 USERS="$(q users)"
 TEAMS="$(q teams)"
+REPO="$(q repo)"
+BRANCHES="$(q branches)"
+FILES="$(q files)"
+PROTECTION="$(q protection)"
 
 [[ -n "$FORGE" ]] || { echo "forge-existing: gitea_url manquant dans la requete" >&2; exit 1; }
 
@@ -102,6 +106,49 @@ ORG_ID=""
 if [[ -n "$ORG" ]]; then
   ORG_ID="$(probe_id "orgs/$ORG" "org $ORG")"
   [[ -n "$ORG_ID" ]] && add "org:$ORG" "$ORG_ID"
+fi
+
+# A branch has no numeric id: only its existence is asked. 0 present, 1 absent, exit on anything else.
+probe_exists() { # $1=api path  $2=label for the error message
+  local code
+  code="$(forge_curl -o /dev/null -w '%{http_code}' "$FORGE/api/v1/$1")" || {
+    echo "forge-existing: la forge ne repond pas ($2)" >&2; exit 1; }
+  case "$code" in
+    200) return 0 ;;
+    404) return 1 ;;
+    *)   echo "forge-existing: HTTP $code sur $2 -- ni present ni absent, on refuse de conclure" >&2
+         exit 1 ;;
+  esac
+}
+
+# ─── the system repository and its branches ────────────────────────────────────────────────────
+# Public reads. The branch import id is `<repo id>/<name>`, the shape the provider gives a branch it
+# created (measured). Only asked for on the system org play: the query is empty otherwise.
+if [[ -n "$REPO" && -n "$ORG_ID" ]]; then
+  REPO_ID="$(probe_id "repos/$ORG/$REPO" "repo $ORG/$REPO")"
+  if [[ -n "$REPO_ID" ]]; then
+    add "repo:$REPO" "$REPO_ID"
+    IFS=',' read -r -a _branches <<< "$BRANCHES"
+    for b in "${_branches[@]}"; do
+      [[ -n "$b" ]] || continue
+      probe_exists "repos/$ORG/$REPO/branches/$b" "branch $b" && add "branch:$b" "$REPO_ID/$b"
+    done
+    # files: `<branch>:<path>`, imported as `<org>/<repo>/<branch>/<path with / encoded>` — the
+    # protected branch refuses a commit from the master once the protection exists, so a file the
+    # forge already holds MUST be imported, never re-created.
+    IFS=',' read -r -a _files <<< "$FILES"
+    for f in "${_files[@]}"; do
+      [[ -n "$f" ]] || continue
+      fb="${f%%:*}"; fp="${f#*:}"
+      probe_exists "repos/$ORG/$REPO/contents/$fp?ref=$fb" "file $fb:$fp" \
+        && add "file:$f" "$ORG/$REPO/$fb/${fp//\//%2F}"
+    done
+    # the protection needs authority to be read: the master token is the caller's (TF_VAR_gitea_token)
+    if [[ -n "$PROTECTION" ]]; then
+      probe_exists "repos/$ORG/$REPO/branch_protections/$PROTECTION" "protection $PROTECTION" \
+        && add "protection:$PROTECTION" "$ORG/$REPO/$PROTECTION"
+    fi
+  fi
 fi
 
 # ─── teams ───────────────────────────────────────────────────────────────────────────────────────

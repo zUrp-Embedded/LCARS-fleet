@@ -58,20 +58,38 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
     end
   end
 
-  describe "refute_store_address/2 — la question posee a un depot qui n'existe pas encore" do
+  describe "refute_system_name/2 — les noms que le systeme garde pour lui" do
     test "l'adresse du magasin est refusee, et le refus dit ce qui l'ecraserait" do
       store = Fleet.Catalogue.store_repo()
 
-      assert {:error, {:store_address, full, why}} =
-               ProjectOnboard.refute_store_address("web/#{store}", store)
+      assert {:error, {:system_name, full, why}} =
+               ProjectOnboard.refute_system_name("web/#{store}", store)
 
       assert full == "web/#{store}"
-      assert why =~ "force-pushes"
+      assert why =~ "overwrites"
+    end
+
+    test "tout nom qui commence par `_` est refuse — c'est la famille des depots du systeme" do
+      assert {:error, {:system_name, _, why}} =
+               ProjectOnboard.refute_system_name("web/_ops", "_ops")
+
+      assert why =~ "begins with `_`"
+    end
+
+    test "le nom de l'org systeme est refuse comme nom de projet, et le refus dit pourquoi" do
+      [org, _] = String.split(Fleet.Toolchain.ops_repo(), "/", parts: 2)
+
+      assert {:error, {:system_name, full, why}} =
+               ProjectOnboard.refute_system_name("fleet/#{org}", org)
+
+      assert full == "fleet/#{org}"
+      assert why =~ "SYSTEM org"
     end
 
     test "tout autre nom passe" do
-      assert :ok = ProjectOnboard.refute_store_address("web/catalogue", "catalogue")
-      assert :ok = ProjectOnboard.refute_store_address("web/vitrine", "vitrine")
+      assert :ok = ProjectOnboard.refute_system_name("web/catalogue", "catalogue")
+      assert :ok = ProjectOnboard.refute_system_name("web/vitrine", "vitrine")
+      assert :ok = ProjectOnboard.refute_system_name("fleet/lcars-fleet", "lcars-fleet")
     end
   end
 
@@ -88,13 +106,19 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
       assert door_preamble("migrate") =~ "refute_store(full_name, opts)"
     end
 
-    test "`adopt_project/2` refuse l'ADRESSE, parce qu'il n'y a rien a interroger" do
+    test "`adopt_project/2` passe par l'admission, qui refuse les noms du systeme — il n'y a rien a interroger" do
       corps = door_preamble("adopt_project")
 
-      assert corps =~ "refute_store_address(full_name, name)"
+      assert corps =~ "Onboard.admit(org, name, opts)"
 
       # A new destination has no manifest; probing it would admit a not_found and miss the reservation.
       refute corps =~ "refute_store(full_name"
+    end
+
+    test "`admit/3` — la porte commune — refuse les noms du systeme pour les trois verbes" do
+      src = File.read!("lib/fleet/project/onboard.ex")
+      [_, admit] = String.split(src, "def admit(org, name, opts)", parts: 2)
+      assert String.slice(admit, 0, 400) =~ "refute_system_name("
     end
 
     defp door_preamble(verb) do

@@ -20,6 +20,11 @@ data "external" "forge" {
     org       = var.org
     users     = join(",", var.roles)
     teams     = join(",", keys(local.teams))
+    # le dépôt du système et ses branches, sur l'org système seule (sinon vide : pas de sonde)
+    repo      = local.system_play ? var.system_repo : ""
+    branches  = local.system_play ? "tool_request,incidents" : ""
+    files     = local.system_play ? "main:README.md,tool_request:README.md,tool_request:ops/toolchains.d/.gitkeep,incidents:work/README.md" : ""
+    protection = local.system_play ? "tool_request" : ""
   }
 }
 
@@ -35,6 +40,19 @@ locals {
   # produit aucun import. C'est la forme qui rend un import FACULTATIF, et elle vaut aussi pour une
   # ressource non indexée — `to` n'a alors pas besoin de `each.key` (mesuré 2026-08-16).
   existing_org = { for k, v in local.existing : trimprefix(k, "org:") => v if startswith(k, "org:") }
+
+  # Le dépôt du système (id numérique), ses branches (`<id du dépôt>/<nom>`), ses fichiers
+  # (`<org>/<dépôt>/<branche>/<chemin encodé>`) et la protection (`<org>/<dépôt>/<règle>`) — les
+  # formes que le provider rend à la création, mesurées. ⚠ LES FICHIERS DE LA BRANCHE PROTÉGÉE
+  # S'IMPORTENT, ET CE N'EST PAS DU CONFORT : une fois la protection posée, le master ne peut plus y
+  # commiter (« user cannot commit to repo », mesuré à état perdu sur le banc 2002) — un fichier
+  # non importé serait « à créer », et l'apply mourrait dessus.
+  existing_repo     = { for k, v in local.existing : trimprefix(k, "repo:") => v if startswith(k, "repo:") }
+  existing_branches = { for k, v in local.existing : trimprefix(k, "branch:") => v if startswith(k, "branch:") }
+  existing_files    = { for k, v in local.existing : trimprefix(k, "file:") => v if startswith(k, "file:") }
+  existing_tool_request = { for k, v in local.existing_branches : k => v if k == "tool_request" }
+  existing_incidents    = { for k, v in local.existing_branches : k => v if k == "incidents" }
+  existing_protection   = { for k, v in local.existing : trimprefix(k, "protection:") => v if startswith(k, "protection:") }
 }
 
 # ⚠ LES IDENTIFIANTS SONT NUMÉRIQUES, POUR LES TROIS TYPES. Le provider convertit l'id d'import en
@@ -60,6 +78,54 @@ import {
 import {
   for_each = local.existing_teams
   to       = gitea_team.this[each.key]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_repo
+  to       = gitea_repository.ops[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_tool_request
+  to       = gitea_repository_branch.tool_request[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_incidents
+  to       = gitea_repository_branch.incidents[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "main:README.md" }
+  to       = gitea_repository_file.ops_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "tool_request:README.md" }
+  to       = gitea_repository_file.tool_request_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "tool_request:ops/toolchains.d/.gitkeep" }
+  to       = gitea_repository_file.tool_request_keep[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "incidents:work/README.md" }
+  to       = gitea_repository_file.incidents_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_protection
+  to       = gitea_repository_branch_protection.tool_request[0]
   id       = each.value
 }
 

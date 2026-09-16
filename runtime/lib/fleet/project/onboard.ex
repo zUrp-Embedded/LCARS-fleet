@@ -182,7 +182,10 @@ defmodule Fleet.Project.Onboard do
   # Each entry point resolves its org before calling this; forge I/O belongs after admission.
   @spec admit(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def admit(org, name, opts) when is_binary(org) and is_binary(name) do
+    # The system names come BEFORE the charset: `_ops` must be refused as a system name, not as a
+    # charset error, so the refusal says why.
     with :ok <- require_installed(org),
+         :ok <- Fleet.Project.Onboard.Refute.refute_system_name("#{org}/#{name}", name),
          :ok <- validate_name(name) do
       Fleet.Project.Declaration.refute_unloadable_card("#{org}/#{name}", opts)
     end

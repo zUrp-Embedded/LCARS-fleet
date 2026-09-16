@@ -105,6 +105,7 @@ flowchart TB
     Fleet_Project --> Fleet_EventRouter
     Fleet_Project --> Fleet_Forge
     Fleet_Project --> Fleet_Spawner
+    Fleet_Project --> Fleet_Toolchain
     Fleet_Project --> Fleet_Workflow
     Fleet_ProjectBootstrap --> Fleet_CapProfile
     Fleet_ProjectBootstrap --> Fleet_Credentials

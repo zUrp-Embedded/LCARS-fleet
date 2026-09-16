@@ -486,7 +486,7 @@ cmd_forge_apply() {
     || { echo "container forge-apply: échec — rien n'est supposé, la sortie ci-dessus nomme l'étape" >&2; exit 1; }
   echo ""
   echo "container forge-apply: structure posée. Rejouable : un second passage ne recrée rien de ce qui existe."
-  echo "  Les jetons de rôle, les catalogues, la branche ops et le client OAuth2 du deck se posent au démarrage du conteneur,"
+  echo "  Les jetons de rôle, les catalogues et le client OAuth2 du deck se posent au démarrage du conteneur (le dépôt du système, posé ici, y est vérifié),"
   echo "  sur cette structure :  deploy/container -p $PROJECT up --force-recreate"
 }
 

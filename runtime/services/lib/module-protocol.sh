@@ -43,6 +43,10 @@ LCARS_CHANGED=0
 : "${LCARS_MASTER_TOKEN_FILE:=$LCARS_PRIVATE_DIR/forge-master.token}"
 : "${LCARS_FORGE_SEED_FILE:=$LCARS_PRIVATE_DIR/forge-seed.pass}"
 : "${LCARS_FORGE_ORG:=lcars}"
+# Le depot du systeme vit dans l'org systeme : derive, pour qu'une org renommee par l'installeur
+# emmene son depot. L'installeur le transporte aussi (services.env) pour les daemons qui ne
+# sourcent pas ce protocole ; le runtime le lit dans `runtime.exs`.
+: "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/_ops}"
 : "${LCARS_HUMANS_TEAM:=humans}"
 : "${LCARS_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
 : "${LCARS_LEGACY_CATALOGUES_DIR:=/home/catalogues}"

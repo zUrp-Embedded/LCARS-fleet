@@ -80,7 +80,11 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -t 0 ]] || cat >/dev/null
 echo "CURL:$method ${url#http://forge.test}" >> "$CALLS"
-case "$url" in */members|*/teams|*/admin/users*) rep='[]' ;; *) rep='' ;; esac
+case "$url" in
+  */members|*/teams|*/admin/users*) rep='[]' ;;
+  */api/v1/user) [[ -n "${STUB_SANS_SIEGE:-}" ]] && rep='' || rep='{"login":"le-siege"}' ;;
+  *) rep='' ;;
+esac
 if [[ -n "$out" && "$out" != /dev/null ]]; then printf '%s' "$rep" > "$out"; elif [[ -z "$out" ]]; then printf '%s' "$rep"; fi
 [[ -z "$fmt" ]] || printf '200'
 EOF
@@ -104,18 +108,47 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qx "TOFU:recette/instance apply -auto-approve -input=false -no-color" "$CALLS"
-  grep -qx "TOFU:recette apply -auto-approve -input=false -no-color -var org=lcars -var roles=\[\] -var writers=\[\] -var judges=\[\] -var externals=\[\]" "$CALLS"
+  grep -qx "TOFU:recette apply -auto-approve -input=false -no-color -var org=lcars -var roles=\[\] -var writers=\[\] -var judges=\[\] -var externals=\[\] -var approvers=\[\"le-siege\"\]" "$CALLS"
   # le tfvars du roster reste : il nomme le compte systeme, sans defaut par contrat
   [ -f "$LCARS_RECIPE_DIR/roles.auto.tfvars.json" ]
   [[ "$output" == *"apply . (org lcars, sans role metier)"* ]]
 }
 
-@test "apply : l'org systeme est LCARS_FORGE_ORG quand l'installeur la nomme, et le depot systeme la suit" {
+@test "apply : l'org systeme est LCARS_FORGE_ORG quand l'installeur la nomme" {
   LCARS_FORGE_ORG=flotte apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q "^TOFU:recette apply .* -var org=flotte " "$CALLS"
-  grep -qx "CURL:GET /api/v1/repos/flotte/_ops" "$CALLS"
-  [[ "$output" == *"depot ops flotte/_ops deja la"* ]]
+}
+
+@test "apply : le depot du systeme n'est PAS cree par le geste — la recette le pose ; le siege, resolu par /api/v1/user, est son approbateur" {
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "^CURL:POST /api/v1/orgs/lcars/repos" "$CALLS"
+  refute grep -q "^CURL:GET /api/v1/repos/lcars/_ops" "$CALLS"
+  grep -qx "CURL:GET /api/v1/user" "$CALLS"
+  grep -q '^TOFU:recette apply .* -var approvers=\["le-siege"\]$' "$CALLS"
+  # le play du catalogue ne recoit pas d'approbateurs : il ne pose aucun depot
+  refute grep -q "^TOFU:tofu/fleet apply .*approvers" "$CALLS"
+}
+
+@test "apply : un jeton dont la forge ne dit pas le proprietaire est un refus NOMME avant toute recette — la protection n'aurait aucun approbateur" {
+  STUB_SANS_SIEGE=1 apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la forge ne dit pas a qui appartient le jeton master (/api/v1/user) — la protection de tool_request n'aurait aucun approbateur, RIEN n'est pose"* ]]
+  refute grep -q "^TOFU:" "$CALLS"
+}
+
+@test "install : les noms du systeme sont refuses — l'org systeme, et tout nom qui commence par _" {
+  install lcars
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« lcars » est un nom du systeme (l'org systeme « lcars », ou un nom qui commence par « _ ») — un catalogue ne le porte pas, RIEN n'a ete pose"* ]]
+  refute grep -q "^TOFU:\|^CLI:" "$CALLS"
+  install _ops
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« _ops » est un nom du systeme"* ]]
+  LCARS_FORGE_ORG=flotte install flotte
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« flotte » est un nom du systeme (l'org systeme « flotte »"* ]]
 }
 
 # ─── 2. puis le catalogue de la release, comme n'importe quel catalogue ─────────────────────────

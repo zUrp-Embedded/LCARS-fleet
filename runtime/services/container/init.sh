@@ -23,7 +23,7 @@
 #     l'installeur declare (`deploy/system.manifest`, substrat `any`) — par CONVENTION, pas par
 #     lecture : c'est le contrat entre les deux rails, et `verify` le mesure au build.
 #
-# CE QU'IL NE FAIT PAS : les gestes de FORGE (jetons, cache des catalogues, branche ops, client
+# CE QU'IL NE FAIT PAS : les gestes de FORGE (jetons, cache des catalogues, depot du systeme, client
 # OAuth2) — ce sont `forge.d/` et le minteur, joues par le boot APRES ce geste ; les humains — c'est
 # le convergeur ; les services — c'est le boot.
 #

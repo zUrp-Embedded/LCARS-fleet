@@ -140,7 +140,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     # Request server-side base filtering, then recheck the base locally.
     case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
-        Enum.each(prs, &maybe_drain(&1, branch, branch_result))
+        Enum.each(prs, &maybe_drain(&1, repo, branch, branch_result))
 
       {:error, reason} ->
         Logger.warning(
@@ -153,25 +153,54 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       Logger.warning("ToolchainReconciler: passe de drain en échec — #{Exception.message(e)}")
   end
 
-  defp maybe_drain(pr, branch, branch_result) do
+  defp maybe_drain(pr, repo, branch, branch_result) do
     with true <- Payload.base_ref(pr) == branch,
          {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
-      drain_outcome(pr_outcome(pr), {item_repo, item_issue, pr}, branch_result)
+      drain_outcome(pr_outcome(pr), {item_repo, item_issue, pr}, repo, branch_result)
     else
       _ -> :ok
     end
   end
 
-  defp drain_outcome(:open, _work_item, _branch_result), do: :ok
+  defp drain_outcome(:open, _work_item, _repo, _branch_result), do: :ok
 
-  defp drain_outcome(:merged, {item_repo, item_issue, pr}, branch_result) do
+  defp drain_outcome(:merged, {item_repo, item_issue, pr}, repo, branch_result) do
     if applied?(branch_result),
-      do: drain(item_repo, item_issue, pr, :merged),
+      do: drain(item_repo, item_issue, pr, :merged, repo),
       else: :ok
   end
 
-  defp drain_outcome(:refused, {item_repo, item_issue, pr}, _branch_result),
-    do: drain(item_repo, item_issue, pr, :refused)
+  defp drain_outcome(:refused, {item_repo, item_issue, pr}, repo, _branch_result),
+    do: drain(item_repo, item_issue, pr, :refused, repo)
+
+  # A request branch has done its work once its PR is drained. Leaving it would let the runtime
+  # grow branches on the system repo at will — measured on the beta bench (⚖ user 2026-09-16): the
+  # reconciler deletes what it created, and only that family (never the protected branch, never a
+  # branch of another origin). It runs ONCE, with the drain: the PR list is `state=all`, so a
+  # deletion retried at every tick would hit every historical PR every minute.
+  defp forget_request_branch(repo, pr) do
+    head = Payload.head_ref(pr)
+
+    if is_binary(head) and Fleet.Toolchain.request_branch?(head) do
+      case forge().delete_branch(repo, head, []) do
+        {:ok, :deleted} ->
+          Logger.info(
+            "ToolchainReconciler: branche de demande #{repo}:#{head} supprimée (PR ##{pr["number"]} drainée)"
+          )
+
+        {:ok, :absent} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "ToolchainReconciler: branche de demande #{repo}:#{head} NON supprimée " <>
+              "(#{inspect(reason)}) — le drain est fait et ne se rejoue pas : à supprimer à la main"
+          )
+      end
+    else
+      :ok
+    end
+  end
 
   defp pr_outcome(pr) do
     cond do
@@ -185,13 +214,13 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   defp applied?({:ok, :converged, _}), do: true
   defp applied?(_), do: false
 
-  defp drain(repo, issue, pr, why) do
+  defp drain(repo, issue, pr, why, ops_repo) do
     lock = Fleet.Toolchain.waiting_label()
 
     case forge().get_issue(repo, issue, []) do
       {:ok, payload} ->
         if lock in Payload.label_names(payload) do
-          do_drain(repo, issue, pr, why, lock)
+          do_drain(repo, issue, pr, why, lock, ops_repo)
         else
           :ok
         end
@@ -204,7 +233,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     end
   end
 
-  defp do_drain(repo, issue, pr, why, lock) do
+  defp do_drain(repo, issue, pr, why, lock, ops_repo) do
     case forge().remove_label(repo, issue, lock, []) do
       {:ok, _} ->
         # Removing the wait label makes the issue eligible for normal redispatch checks.
@@ -214,6 +243,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         Logger.info(
           "ToolchainReconciler: work-item #{repo}##{issue} drainé (#{why}, PR ##{pr["number"]})"
         )
+
+        forget_request_branch(ops_repo, pr)
 
       {:error, reason} ->
         Logger.warning(

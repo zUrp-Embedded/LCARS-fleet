@@ -11,7 +11,6 @@ defmodule Fleet.Project.Onboard.Adopt do
   alias Fleet.Project.GitOps
   alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
-  alias Fleet.Project.Onboard.Refute
   alias Fleet.Project.Onboard.Repo
   alias Fleet.Project.Onboard.Scaffold
 
@@ -34,7 +33,6 @@ defmodule Fleet.Project.Onboard.Adopt do
 
     with {:ok, org} <- Onboard.required_org(opts),
          full_name = "#{org}/#{name}",
-         :ok <- Refute.refute_store_address(full_name, name),
          :ok <- Onboard.admit(org, name, opts),
          :ok <- require_local_main(dirs.code),
          :ok <- Repo.ensure_catalogue_org_on_forge(org, opts),

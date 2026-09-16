@@ -54,8 +54,8 @@ Trois familles de modules sont **utilisées en prod** et vivent donc ici, dans l
 
 - `human.d/` — les modules per-humain, joués par `human-converger.sh` à chaque humain que la
   forge inscrit, sous l'identité de l'humain ;
-- `forge.d/` — les gestes de forge (jetons de rôle, cache des catalogues, branche ops, client
-  OAuth2 du deck), joués par le boot du conteneur, et par l'installeur à l'install (`deploy/modules.d/50-catalogues`, `63-forge-tokens`, `65-ops-branch`,
+- `forge.d/` — les gestes de forge (jetons de rôle, cache des catalogues, dépôt du système, client
+  OAuth2 du deck), joués par le boot du conteneur, et par l'installeur à l'install (`deploy/modules.d/50-catalogues`, `63-forge-tokens`, `65-ops-repo`,
   `66-deck-oidc` sont des appelants minces) ;
 - `container/` — l'init de l'instance et le boot du conteneur (`init.sh`, `boot.sh`, le PID 1 de l'image).
 

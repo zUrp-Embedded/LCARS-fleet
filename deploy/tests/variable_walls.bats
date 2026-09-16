@@ -685,7 +685,6 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     "runtime/services/catalogue-executor.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|l'exécuteur de catalogue"
     "runtime/services/console-deck.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|le deck"
     "runtime/lib/fleet/toolchain.ex|^  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, \"\([^/\"]*\)/[^\"]*\")\$|le dépôt système du runtime"
-    "runtime/services/forge.d/ops-branch.sh|^: \"\\\${LCARS_OPS_REPO:=\([^/}]*\)/[^}]*}\"\$|le geste ops-branch"
     "runtime/services/admiral/skills/system-issues/list.sh|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le skill du siège"
     "runtime/bin/lcars-toolchain-converge|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le convergeur d'outillage"
   )
@@ -696,6 +695,16 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : $qui ($f) ne porte plus la ligne attendue" >&2; return 1; }
     [ "$lu" = "$attendu" ] || manque="$manque\n  $qui ($f) : « $lu », attendu « $attendu »"
   done
+  # le runtime : hors de la table (sa ligne porte un « || » d'Elixir, que le séparateur mangerait)
+  lu="$(sed -n 's/.*System.get_env("LCARS_FORGE_ORG", "\([^"]*\)").*/\1/p' "$REPO/runtime/config/runtime.exs" | head -n1)"
+  [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : runtime.exs ne dérive plus le dépôt du système de l'org" >&2; return 1; }
+  [ "$lu" = "$attendu" ] || manque="$manque\n  le runtime (runtime/config/runtime.exs) : « $lu », attendu « $attendu »"
+
+  # le geste ops-repo et le protocole DÉRIVENT le dépôt de l'org : une org renommée l'emmène
+  grep -q '^: "\${LCARS_OPS_REPO:=\${LCARS_FORGE_ORG}/_ops}"$' "$REPO/runtime/services/forge.d/ops-repo.sh" \
+    || { echo "MUR 19 rompu — le geste ops-repo ne dérive plus le dépôt du système de l'org" >&2; return 1; }
+  grep -q '^: "\${LCARS_OPS_REPO:=\${LCARS_FORGE_ORG}/_ops}"$' "$REPO/runtime/services/lib/module-protocol.sh" \
+    || { echo "MUR 19 rompu — le protocole ne dérive plus le dépôt du système de l'org" >&2; return 1; }
   # la recette : le défaut de `system_org`, lu dans son bloc et pas ailleurs
   lu="$(awk '/^variable "system_org" \{/ { in_bloc = 1 } in_bloc && /^  default/ { gsub(/.*= *"|".*/, ""); print; exit }' \
         "$REPO/runtime/services/forge-recipe/forge.tf")"

@@ -189,7 +189,7 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 #
 # Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
 #   - « boite de reception » (l'inbox d'admiral, skill system-issues), « boite aux lettres »
-#     (la branche d'outillage, ops-branch) et « ta boîte » (les tickets d'un agent, vitrine MCP) ;
+#     (le dépôt du système, ops-repo) et « ta boîte » (les tickets d'un agent, vitrine MCP) ;
 #   - la boite FERMEE du siege reserve vulcan (« the box is closed », « closed box », « the box
 #     opens », « opening the box », « la boîte s'ouvre », « on ouvrira sa boite ») ;
 #   - `box-sizing` / `border-box` / `box-shadow` (le CSS du deck, dans console-deck.py) ;

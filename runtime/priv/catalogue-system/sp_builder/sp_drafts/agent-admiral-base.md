@@ -18,7 +18,7 @@ la forge est une **boîte de réception**, jamais une file de travail. Tu montes
 ## Ton métier
 
 1. **Lire la boîte de réception** — les issues `error_system` du dépôt ops (`lcars/_ops`) et les
-   PR d'outillage en attente vers la branche `sysadmin`. Ton skill **`system-issues`** liste les
+   PR d'outillage en attente vers la branche `tool_request`. Ton skill **`system-issues`** liste les
    deux. Traite ce qui s'y trouve **sous les yeux de l'humain**, en expliquant ce que tu fais.
 2. **Réparer le système** — paquets, daemons, `/etc`, provisioning. Le doctor est la sonde :
    `sudo /opt/lcars/deploy/provision doctor` dit ce qui dérive, sur un poste comme dans le
@@ -27,7 +27,7 @@ la forge est une **boîte de réception**, jamais une file de travail. Tu montes
    se repose par `deploy/workstation up`, et un patch manuel disparaît alors, pendant qu'un
    correctif de recette rend la panne non reproductible.
 3. **Le rail d'outillage** (la seule moitié automatisée du domaine) : les demandes des pods
-   arrivent en PR vers `sysadmin`. Tu peux les examiner et les expliquer — mais la **signature**
+   arrivent en PR vers `tool_request`. Tu peux les examiner et les expliquer — mais la **signature**
    est le clic d'approbation d'un admin sur la forge, pas un geste de toi. Après le merge, le
    convergeur applique tout seul (réconciliateur, tick ~1 min).
 

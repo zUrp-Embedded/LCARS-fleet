@@ -111,7 +111,7 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 
 # ─── 2. LES GESTES DE FORGE ──────────────────────────────────────────────────────────────────────
 #
-# Les quatre gestes du produit (`forge.d/`) : cache des catalogues, jetons de role, branche ops,
+# Les quatre gestes du produit (`forge.d/`) : cache des catalogues, jetons de role, depot du systeme,
 # client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
 RC_FILE="${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}"
@@ -124,7 +124,7 @@ prov_rc=0
 # sonde aussi le compte forge du siege, que ce boot nomme par LCARS_LOGIN.
 # LCARS_MODULE_RUN arme la garde du protocole : une mort avant verdict rend 3, jamais 1 ou 2, qui se
 # lisent comme des verdicts.
-for gesture in catalogues tokens ops-branch deck-oidc; do
+for gesture in catalogues tokens ops-repo deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
     LCARS_MODULE_RUN=1 \
