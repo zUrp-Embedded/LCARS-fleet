@@ -1041,6 +1041,18 @@ uid_decor() { # login.defs, passwd et siège sous le décor
     [ "$lib_dit" = "$proto_dit" ] || { echo "$cas : lib=« $lib_dit » protocole=« $proto_dit »" >&2; bad=1; }
   done
   [ "$bad" -eq 0 ]
+
+  # ⚠ LES VALEURS S'ACCORDENT, LES CODES NON, ET C'EST ECRIT DES DEUX COTES : sans siège, la lib
+  # rend 1 (ses appelants lisent le code) et le protocole rend 0 avec une valeur vide (les siens
+  # écrivent `v="$(seat_uid)"` sous `set -e`, où un code non nul les tuerait). Ce témoin épingle la
+  # différence : la changer d'un seul côté casserait l'un des deux rails en silence.
+  rm -f "$f"; unset LCARS_SYSADMIN_UID
+  run bash -c '. "$LIB" >/dev/null 2>&1; PROV_SEAT_UID_FILE="'"$f"'"; prov_seat_uid'
+  [ "$status" -eq 1 ]
+  run bash -c ". '$proto' >/dev/null 2>&1; seat_uid" 
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
   # GARDE D'INSTRUMENT : les deux disent bien QUELQUE CHOSE quand le fichier porte un uid
   echo 1234 > "$f"
   [ "$(LCARS_SEAT_UID_FILE="$f" LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" bash -c '. "$1" >/dev/null 2>&1; seat_uid' _ "$proto")" = 1234 ]

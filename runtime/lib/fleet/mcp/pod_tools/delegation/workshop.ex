@@ -3,11 +3,12 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   Workshop face: root/workspace resolution for lots and scratchpad, and the PUBLICATION of what a
   delegator wrote there.
 
-  A pod never pushes — `git_ops_denied: [push]` in every cap-profile, because publication is a
-  system act. Before this delegation, the only thing that pushed the workshop face was a scratchpad
-  note, whose commit swept along whatever was staged beside it: documents reached the forge as a
-  SIDE EFFECT of the next note, or never (measured 2026-09-16). `publish/2` is that act, named: the
-  runtime stages the face, commits it with the message the pod gives, and pushes.
+  A producer never pushes — `git_ops_denied: [push]` in its cap-profile, because publication is a
+  system act. Nothing published this face on PURPOSE: the runtime pushes it when onboarding
+  scaffolds it, and a scratchpad note pushed HEAD, sweeping along whatever was committed beside it.
+  A document therefore reached the forge as a SIDE EFFECT of the next note, or never (measured
+  2026-09-16). `publish/2` is that act, named: the runtime stages the face, commits it with the
+  message the pod gives, and pushes.
 
   The commit carries the system identity on BOTH sides, and a `Co-authored-by` trailer naming the
   role that asked: the signature says the runtime published, the trailer says who wrote. It is a runtime commit on a shared face,
@@ -20,6 +21,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   alias Fleet.Credentials.ForgeIdentity
   alias Fleet.MCP.PodTools.Delegation.Gate
   alias Fleet.Project.GitOps
+  alias Fleet.Workflow.Deliverable
 
   # Resolve the project's basename under workshop; this is a layout rule, not an authorization check.
   @doc false
@@ -34,10 +36,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   @doc """
   Publishes the project's workshop face: stage everything, commit under `message`, push.
 
-  A clean face publishes nothing and says so — that is a state, not a failure. Local writes stay
-  whatever happens: a push refused by the forge leaves the commit in place, and the next
-  publication carries it. The receipt names the files as Git saw them, so a pod reads what it
-  actually sent rather than what it meant to send.
+  LA MEME GARDE QUE POUR UN LIVRABLE court sur ce qui part (`Fleet.Workflow.DeliverableGate`) :
+  secrets connus, fichiers de credentials par leur nom, chemins de gouvernance. C'est un chemin
+  d'ecriture vers la forge declenche par un pod, et la face porte ce qu'un humain y a laisse — un
+  `.env`, une cle, un PDF prive. Un refus DEFAIT le commit et garde les fichiers : rien n'est
+  perdu, rien n'est publie.
+
+  Une face propre ne publie rien et le dit — sauf si un commit precedent n'a pas pu etre pousse,
+  auquel cas cette passe le pousse. Le recu nomme les fichiers tels que Git les a vus.
   """
   @spec publish(map(), String.t()) :: {:ok, map()} | {:error, term()}
   def publish(state, message) when is_binary(message) do
@@ -63,15 +69,22 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
     end
   end
 
-  defp publish_staged(_dir, _repo, _role, _message, []) do
-    {:ok,
-     %{
-       "ok" => true,
-       "published" => false,
-       "why" =>
-         "rien à publier : la face atelier est propre. Écris tes documents dans l'atelier du " <>
-           "projet, puis rappelle-moi."
-     }}
+  # Rien a indexer ne veut pas dire rien a publier : un commit qu'un push refuse a laisse en local
+  # part ici, sinon il attendrait qu'une autre ecriture passe par hasard.
+  defp publish_staged(dir, repo, _role, _message, []) do
+    if en_avance?(dir) do
+      {:ok, sha} = head_sha(dir)
+      publie(dir, repo, [], sha)
+    else
+      {:ok,
+       %{
+         "ok" => true,
+         "published" => false,
+         "why" =>
+           "rien à publier : la face atelier est propre, et la forge a déjà tout ce qu'elle porte. " <>
+             "Écris tes documents dans l'atelier du projet, puis rappelle-moi."
+       }}
+    end
   end
 
   defp publish_staged(dir, repo, role, message, files) do
@@ -97,29 +110,83 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
              auth: false
            ),
          {:ok, sha} <- head_sha(dir) do
-      {:ok, Map.merge(receipt(files, sha), pushed(dir, repo))}
+      publie(dir, repo, files, sha)
     end
   end
 
-  defp pushed(dir, repo) do
+  # LE MEME RAIL QU'UN LIVRABLE, ET C'EST LE POINT : `Deliverable.publish/1` verifie (ascendance,
+  # identite, secrets connus, fichiers de credentials, chemins de gouvernance) PUIS pousse. Ecrire
+  # ici une seconde garde, c'est ecrire une garde qui divergera.
+  #
+  # Les identites admises sont celle du systeme : ce commit est le sien, sur une face partagee.
+  defp publie(dir, repo, files, sha) do
+    case Deliverable.publish(%{
+           mode: :git_native,
+           workspace: dir,
+           base_sha: base_de(dir, sha),
+           allowed_emails: [ForgeIdentity.system_email()],
+           remote: "origin",
+           target_branch: Fleet.Layout.workshop_branch(),
+           push?: true
+         }) do
+      {:ok, %{pushed?: true}} ->
+        {:ok, Map.merge(receipt(files, sha), %{"pushed" => true})}
+
+      {:error, {:git_push_failed, _, _} = raison} ->
+        {:ok, Map.merge(receipt(files, sha), push_manque(repo, raison))}
+
+      {:error, {:git_push_exit, _} = raison} ->
+        {:ok, Map.merge(receipt(files, sha), push_manque(repo, raison))}
+
+      {:error, raison} ->
+        defaire(dir, repo, sha, raison)
+    end
+  end
+
+  # Sans parent (le premier commit d'une face), la plage est vide et la garde est vacante : c'est un
+  # etat, pas une dispense — il n'y a rien avant ce commit a mettre en regard.
+  defp base_de(dir, sha) do
+    case GitOps.read(["-C", dir, "rev-parse", "--verify", "-q", sha <> "^"], auth: false) do
+      {:ok, parent} -> parent
+      _ -> sha
+    end
+  end
+
+  # Un refus de la garde DEFAIT le commit et garde les fichiers : rien n'est perdu, rien n'est
+  # publie, et le pod lit ce qui l'a arrete.
+  defp defaire(dir, repo, sha, raison) do
+    _ = GitOps.run(["-C", dir, "reset", "--mixed", "-q", base_de(dir, sha)], auth: false)
+
+    Logger.warning(
+      "Delegation: publication d'atelier REFUSEE par la garde (#{repo}, #{inspect(raison)}) — " <>
+        "le commit est defait, les fichiers restent dans la face"
+    )
+
+    {:error, {:atelier_refuse, raison}}
+  end
+
+  defp push_manque(repo, raison) do
+    Logger.warning(
+      "Delegation: atelier COMMITE mais non publie (#{repo}) — #{inspect(raison)} ; " <>
+        "le commit reste dans la face locale et part a la publication suivante"
+    )
+
+    %{
+      "pushed" => false,
+      "why" =>
+        "commité localement, mais la forge n'a pas pris la publication — dis-le à ton humain " <>
+          "et rappelle-moi plus tard : rien n'est perdu, la prochaine publication l'emporte."
+    }
+  end
+
+  # 0 commit d'avance = la forge a tout ; un ref de suivi absent se lit comme « rien a pousser »,
+  # et la publication suivante le dira.
+  defp en_avance?(dir) do
     branch = Fleet.Layout.workshop_branch()
 
-    case GitOps.run(["-C", dir, "push", "origin", "HEAD:" <> branch], auth: true) do
-      :ok ->
-        %{"pushed" => true}
-
-      other ->
-        Logger.warning(
-          "Delegation: atelier COMMITE mais non publie (#{repo}) — #{inspect(other)} ; " <>
-            "le commit reste dans la face locale et partira a la prochaine publication"
-        )
-
-        %{
-          "pushed" => false,
-          "why" =>
-            "commité localement, mais la forge n'a pas pris la publication — dis-le à ton humain " <>
-              "et rappelle-moi plus tard : rien n'est perdu."
-        }
+    case GitOps.read(["-C", dir, "rev-list", "--count", "origin/#{branch}..HEAD"], auth: false) do
+      {:ok, n} -> n != "0"
+      _ -> false
     end
   end
 
@@ -128,9 +195,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   end
 
   # Names as Git staged them, so the receipt cannot claim a file the commit does not carry.
+  # `-z` : sans lui, Git CITE les noms non-ASCII ou a espaces (`"caf\303\251.md"`), et le recu
+  # nommerait un fichier qui n'existe pas sous ce nom-la.
   defp staged_files(dir) do
-    case GitOps.read(["-C", dir, "diff", "--cached", "--name-only"], auth: false) do
-      {:ok, out} -> {:ok, out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)}
+    case GitOps.read(["-C", dir, "diff", "--cached", "-z", "--name-only"], auth: false) do
+      {:ok, out} -> {:ok, String.split(out, <<0>>, trim: true)}
       other -> other
     end
   end

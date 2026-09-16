@@ -689,6 +689,9 @@ prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 
 # protocole du produit (il en importerait tous les défauts), d'où deux écritures ; leur accord est
 # tenu par un témoin, pas par la mémoire de qui les lit. L'autre politique, celle des gardes qui
 # REFUSENT un lancement, lit le fichier seul et ne s'écrit pas ici.
+# Elle rend 1 quand rien n'établit le siège, là où le jumeau du produit rend 0 et une valeur vide :
+# ici les appelants lisent le CODE (`prov_seat_uid || { … }`), là-bas la VALEUR, parce qu'un code non
+# nul dans `v="$(…)"` tuerait le module sous `set -e`. Deux contrats, une seule politique.
 prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
   local v
   if [[ -r "$PROV_SEAT_UID_FILE" ]]; then

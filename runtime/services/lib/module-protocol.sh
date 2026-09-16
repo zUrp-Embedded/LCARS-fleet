@@ -108,6 +108,10 @@ fi
 # Elle vit ICI et pas chez chaque lecteur : le convergeur, les gestes de forge et le protocole des
 # personnes la lisent tous du meme endroit. L'installeur en tient le jumeau (`prov_seat_uid`), que
 # son mur compare a celle-ci.
+# ⚠ ELLE REND TOUJOURS 0, LA OU LE JUMEAU DE L'INSTALLEUR (`prov_seat_uid`) REND 1 QUAND RIEN
+# N'ETABLIT LE SIEGE. Ce n'est pas un oubli : ici les appelants ecrivent `v="$(seat_uid)"` sous
+# `set -e`, ou un code non nul tuerait le module au lieu de lui laisser dire pourquoi. Le fait
+# « pas de siege » se lit donc a la valeur VIDE, et l'appelant en decide.
 seat_uid() { # -> l'uid du siege, ou rien (l'appelant dit ce que « rien » lui fait)
   local f v
   f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"

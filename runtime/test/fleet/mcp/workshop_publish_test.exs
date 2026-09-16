@@ -99,6 +99,54 @@ defmodule Fleet.MCP.WorkshopPublishTest do
     assert String.trim(out) =~ "LCARS-architect"
   end
 
+  # ⚠ CHEMIN D'ECRITURE VERS LA FORGE DECLENCHE PAR UN POD, et la face porte ce qu'un humain y a
+  # laisse. Sans garde, un `.env`, une cle privee ou une cle d'API trainant dans l'atelier partaient
+  # en clair sur la branche du projet, pour toujours. La garde du livrable court donc sur ce qui
+  # part ; un refus DEFAIT le commit et garde les fichiers.
+  test "un secret dans la face REFUSE la publication, defait le commit et garde les fichiers", %{
+    dir: dir
+  } do
+    File.write!(Path.join(dir, "note.md"), "cle : sk-ant-AAAABBBBCCCCDDDDEEEE\n")
+
+    assert {:error, {:atelier_refuse, {:secret_detected, "anthropic_key", _}}} =
+             publish("note: un jet")
+
+    # le commit est defait…
+    assert log(dir, "%s") == "base"
+    # … et le fichier est toujours la, avec son contenu
+    assert File.read!(Path.join(dir, "note.md")) =~ "sk-ant-"
+  end
+
+  test "un fichier de credentials par son NOM est refuse de la meme facon", %{dir: dir} do
+    File.write!(Path.join(dir, ".env"), "TOKEN=x\n")
+
+    assert {:error, {:atelier_refuse, {:secret_detected, "blacklisted_file", ".env"}}} =
+             publish("env: par erreur")
+
+    assert log(dir, "%s") == "base"
+  end
+
+  # ⚠ UN PUSH REFUSE LAISSAIT LE COMMIT EN LOCAL POUR TOUJOURS : la publication suivante, sur une
+  # face propre, repondait « rien a publier » et ne repoussait rien. Seule une note de scratchpad
+  # l'aurait emporte, par hasard.
+  test "un commit qu'un push a refuse part a la publication suivante, meme sans rien de neuf", %{
+    dir: dir,
+    bare: bare
+  } do
+    File.write!(Path.join(dir, "plan.md"), "# plan\n")
+    # la forge refuse : le remote pointe sur un chemin qui n'existe pas
+    {_, 0} = g(dir, ["remote", "set-url", "origin", Path.join(bare, "absent.git")])
+    assert {:ok, %{"published" => true, "pushed" => false}} = publish("plan: premier jet")
+
+    {_, 0} = g(dir, ["remote", "set-url", "origin", bare])
+    assert {:ok, recu} = publish("peu importe le message")
+    assert recu["published"] == true
+    assert recu["pushed"] == true
+
+    {out, 0} = git(["-C", bare, "log", "-1", "--format=%s", "workshop"])
+    assert String.trim(out) == "plan: premier jet"
+  end
+
   test "une face propre ne publie rien, et le dit — c'est un etat, pas un echec", %{dir: dir} do
     assert {:ok, recu} = publish("rien a dire")
     assert recu["published"] == false

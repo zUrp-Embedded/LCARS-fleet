@@ -225,97 +225,110 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     assert {:ok, :verified} = Gate.verify(dir, main_c1, @role_emails)
   end
 
-  # ⚠ LE RUNTIME ECRIT SUR LA FACE D'OU LE PRODUCTEUR LIVRE : une note de scratchpad, un scaffold
-  # d'onboarding. Le producteur les herite en alignant sa face, ne peut ni les retirer ni les
-  # signer, et les juger comme SON identite refusait sa livraison pour le commit d'un autre
+  # ⚠ LE RUNTIME ECRIT SUR LA FACE D'OU LE PRODUCTEUR LIVRE : une note de scratchpad, une
+  # publication d'atelier. Le producteur les herite en alignant sa face, ne peut ni les retirer ni
+  # les signer, et les juger comme SON identite refusait sa livraison pour le commit d'un autre
   # (mesure du 2026-09-16, ticket #1 du banc : « bad_identity : system_starfleet@lcars.local »).
-  test "un commit PUREMENT systeme dans la plage ne refuse pas la livraison", %{tmp_dir: tmp} do
-    {dir, base} = setup_repo(Path.join(tmp, "systeme"))
+  #
+  # CE QUI DECIDE EST UN FAIT DE LA FORGE : le commit y est deja (accessible depuis un ref de
+  # suivi). Une exemption fondee sur l'IDENTITE serait une chaine que le pod ecrit lui-meme —
+  # `git -c user.email=<systeme> commit` — et n'importe quel pod tenant Bash livrerait alors son
+  # travail sans son identite et sans son trailer.
+  defp publie(dir, bare, args) do
+    {_, 0} = g(dir, args)
+    {_, 0} = g(dir, ["push", "-q", bare, "HEAD:refs/heads/face"])
+    {_, 0} = g(dir, ["fetch", "-q", "origin"])
+  end
+
+  defp avec_origine(tmp, nom) do
+    bare = Path.join(tmp, nom <> ".git")
+    {_, 0} = System.cmd("git", ["init", "-q", "--bare", bare], stderr_to_stdout: true)
+    {dir, base} = setup_repo(Path.join(tmp, nom))
+    {_, 0} = g(dir, ["remote", "add", "origin", bare])
+    {dir, base, bare}
+  end
+
+  test "un commit DEJA SUR LA FORGE n'est pas juge — ni son identite, ni son trailer", %{
+    tmp_dir: tmp
+  } do
+    {dir, base, bare} = avec_origine(tmp, "publie")
     sys = ForgeIdentity.system_email()
     nom = ForgeIdentity.system_identity().name
 
-    {_, 0} =
-      g(dir, [
-        "-c",
-        "user.email=#{sys}",
-        "-c",
-        "user.name=#{nom}",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "chore(scratch): note d'atelier"
-      ])
+    publie(dir, bare, [
+      "-c",
+      "user.email=#{sys}",
+      "-c",
+      "user.name=#{nom}",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "chore(scratch): note d'atelier"
+    ])
 
-    commit_file(dir, "feature.py", "def blink(): pass", "feat: blink")
+    commit_file(
+      dir,
+      "feature.py",
+      "def blink(): pass",
+      "feat: blink\n\n" <> ForgeIdentity.coauthor_trailer("engineer")
+    )
 
     assert :ok = Gate.check_identity(dir, base, @role_emails)
-    assert {:ok, :verified} = Gate.verify(dir, base, @role_emails)
-  end
-
-  # LE PENDANT, ET SANS LUI LE PRECEDENT OUVRE UNE PORTE : l'identite du systeme n'est admise que
-  # sur les DEUX cotes. Un pod qui emprunte son nom pour signer son propre travail est exactement
-  # ce que cette garde existe pour voir.
-  test "l'identite du systeme d'UN SEUL cote est toujours jugee", %{tmp_dir: tmp} do
-    {dir, base} = setup_repo(Path.join(tmp, "emprunt"))
-    sys = ForgeIdentity.system_email()
-    File.write!(Path.join(dir, "x.py"), "x = 1")
-    {_, 0} = g(dir, ["add", "."])
-
-    # auteur = le systeme, committer = le pod : un travail de pod sous le nom du systeme
-    {_, 0} =
-      g(dir, [
-        "-c",
-        "user.email=intrus@ailleurs.test",
-        "-c",
-        "user.name=intrus",
-        "commit",
-        "-q",
-        "--author",
-        "Systeme <#{sys}>",
-        "-m",
-        "emprunt"
-      ])
-
-    assert {:error, {:bad_identity, bad}} = Gate.check_identity(dir, base, @role_emails)
-    assert "intrus@ailleurs.test" in bad
-  end
-
-  # MEME FAMILLE QUE L'IDENTITE : exiger le trailer du producteur sur le commit d'un autre refuse
-  # sa livraison pour une note qu'il n'a pas ecrite.
-  test "le trailer du producteur n'est pas exige sur un commit purement systeme", %{tmp_dir: tmp} do
-    {dir, base} = setup_repo(Path.join(tmp, "trailer-systeme"))
-    sys = ForgeIdentity.system_email()
-    nom = ForgeIdentity.system_identity().name
-
-    {_, 0} =
-      g(dir, [
-        "-c",
-        "user.email=#{sys}",
-        "-c",
-        "user.name=#{nom}",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "chore(scratch): note d'atelier"
-      ])
-
-    File.write!(Path.join(dir, "f.py"), "x = 1")
-    {_, 0} = g(dir, ["add", "."])
-
-    {_, 0} =
-      g(dir, [
-        "commit",
-        "-q",
-        "-m",
-        "feat: livrable\n\n" <> ForgeIdentity.coauthor_trailer("engineer")
-      ])
-
     assert :ok = Gate.check_coauthor_trailer(dir, base, "engineer")
   end
 
-  test "le commit du producteur SANS trailer reste refuse — l'exemption ne vaut que pour le systeme",
+  # LE PENDANT, ET C'EST LUI QUI FERME LE CONTOURNEMENT : le meme commit, signe du nom du systeme
+  # mais fabrique LOCALEMENT par le pod, est juge — il n'est sur aucune forge.
+  test "l'identite du systeme fabriquee par le pod NE passe PAS : elle n'est pas un fait de la forge",
+       %{tmp_dir: tmp} do
+    {dir, base, _bare} = avec_origine(tmp, "emprunt")
+    sys = ForgeIdentity.system_email()
+    nom = ForgeIdentity.system_identity().name
+    File.write!(Path.join(dir, "x.py"), "x = 1")
+    {_, 0} = g(dir, ["add", "."])
+
+    {_, 0} =
+      g(dir, [
+        "-c",
+        "user.email=#{sys}",
+        "-c",
+        "user.name=#{nom}",
+        "commit",
+        "-q",
+        "-m",
+        "chore(scratch): note d'atelier"
+      ])
+
+    assert {:error, {:bad_identity, [^sys]}} = Gate.check_identity(dir, base, @role_emails)
+
+    assert {:error, {:missing_coauthor_trailer, "engineer", [_ | _]}} =
+             Gate.check_coauthor_trailer(dir, base, "engineer")
+  end
+
+  test "sans ref de suivi, TOUTE la plage est jugee — l'exemption ne s'ouvre pas par defaut", %{
+    tmp_dir: tmp
+  } do
+    {dir, base} = setup_repo(Path.join(tmp, "sans-origine"))
+    sys = ForgeIdentity.system_email()
+
+    {_, 0} =
+      g(dir, [
+        "-c",
+        "user.email=#{sys}",
+        "-c",
+        "user.name=systeme",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "note"
+      ])
+
+    assert {:error, {:bad_identity, [^sys]}} = Gate.check_identity(dir, base, @role_emails)
+  end
+
+  test "le commit du producteur SANS trailer reste refuse",
        %{tmp_dir: tmp} do
     {dir, base} = setup_repo(Path.join(tmp, "trailer-absent"))
     commit_file(dir, "f.py", "x = 1", "feat: sans trailer")

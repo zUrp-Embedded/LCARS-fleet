@@ -18,8 +18,15 @@ metadata:
   # peut pas declarer d'avance les pages qu'il lira ; une liste d'hotes deplace la friction sur
   # l'humain au lieu de la supprimer (⚖ arbitrage user 2026-09-05, repris ici).
   #
-  # Ce que ca NE retire PAS : le pod reste scelle (aucun namespace reseau), sort par son proxy
-  # CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste refusee.
+  # Ce que ca NE retire PAS : le pod garde SON namespace reseau, sans aucune route vers l'exterieur ;
+  # il sort par son proxy CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste
+  # refusee.
+  #
+  # CE QUE CA RETIRE, ET IL FAUT LE SAVOIR : le mur d'hotes tenait aussi ce pod a l'ecart du
+  # loopback de la MACHINE (la forge, l'API du BEAM, le deck) et du LAN — le proxy compose depuis le
+  # reseau de l'hote, et `open` accepte n'importe quel hote et n'importe quel port. Un role ouvert
+  # peut donc joindre ce que la machine joint. C'est le prix assume ici pour un role qui parle a un
+  # humain ; un producteur ne l'a pas.
   #
   # Tous les autres roles restent au defaut `vendor-only` : leur matiere de reference arrive par
   # leur brief, leur lot, ou la face montee. C'est une DECLARATION, pas une derivation : le jour ou

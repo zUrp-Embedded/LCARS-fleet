@@ -118,19 +118,31 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc """
   Requires each FIRST-PARENT commit author and committer email to be allowed; empty range is valid.
 
-  A commit whose author AND committer are BOTH the system identity passes whatever `allowed` says.
-  The runtime writes on the shared faces a producer delivers from — workshop scratchpad notes,
-  onboarding scaffolds — and a producer inherits those commits by aligning its face. It can neither
-  remove them nor sign them, so judging them as ITS identity refuses a delivery for someone else's
-  commit (measured 2026-09-16: a scratchpad note refused the deliverable of a workshop ticket).
-  A commit carrying the system identity on ONE side only is still judged: a pod borrowing the
-  system's name for its own work is exactly what this check exists to see.
+  ALREADY-PUBLISHED commits are not judged. The runtime writes on the shared faces a producer
+  delivers from — a workshop scratchpad note, a publication of the face — and the producer inherits
+  those commits by aligning: it can neither remove them nor sign them, and judging them as ITS
+  identity refused a delivery for someone else's commit (measured 2026-09-16 on the bench).
+
+  What is skipped is decided by a FACT THE POD CANNOT PRODUCE: the commit is reachable from a
+  remote-tracking ref, i.e. the forge already has it. An identity-based exemption would not be that
+  fact — `user.email` is one `git -c` away for anyone holding Bash, so any pod could have signed its
+  own work with the runtime's name and delivered it unattributed.
+
+  A workspace without remote-tracking refs skips nothing, and the whole range is judged.
   """
   # A0: do not demand this producer's identity on commits imported from another merge parent.
   # First-parent ancestry is the chosen cut, not proof that other parents were previously gated.
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
-    case git(workspace, ["log", "--first-parent", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
+    case git(workspace, [
+           "log",
+           "--first-parent",
+           "#{base_sha}..HEAD",
+           # ce que la forge a deja : pas le travail de cette livraison, pas juge ici
+           "--not",
+           "--remotes=origin",
+           "--format=%ae%n%ce"
+         ]) do
       {out, 0} -> identity_verdict(out, allowed)
       {out, rc} -> {:error, classify_git_error(out, rc)}
     end
@@ -140,30 +152,20 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   defp identity_verdict(out, allowed) do
     allowed_set = MapSet.new(allowed)
-    system = ForgeIdentity.system_email()
 
-    bad =
+    emails =
       out
       # Remove only the record terminator so empty identity fields remain rejectable.
       |> String.replace_suffix("\n", "")
       |> String.split("\n")
       |> Enum.map(&String.trim/1)
-      # Two lines per commit (%ae then %ce): the pair is what decides, not each line alone.
-      |> Enum.chunk_every(2)
-      |> Enum.flat_map(&judge_commit(&1, allowed_set, system))
-      |> Enum.uniq()
 
     # Exact membership after trimming; an empty email is rejected unless the allowed set contains "".
-    case bad do
+    case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
       [] -> :ok
-      bad -> {:error, {:bad_identity, Enum.map(bad, &label_email/1)}}
+      bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
     end
   end
-
-  defp judge_commit([system, system], _allowed, system), do: []
-
-  defp judge_commit(pair, allowed, _system),
-    do: Enum.reject(pair, &MapSet.member?(allowed, &1))
 
   # Render rejected empty identity fields visibly.
   defp label_email(""), do: "<empty-email>"
@@ -173,9 +175,10 @@ defmodule Fleet.Workflow.DeliverableGate do
   Requires a Git-parsed Co-authored-by value starting with the expected LCARS-role name
   on each first-parent commit. The comparison is a prefix, not exact role/email authentication.
 
-  A PURE system commit is skipped, for the same reason as in `check_identity/3`: the runtime writes
-  on the shared faces a producer delivers from, and demanding this producer's trailer on someone
-  else's commit refuses a delivery for a note it did not write.
+  ALREADY-PUBLISHED commits are skipped, for the same reason as in `check_identity/3`: the runtime
+  writes on the shared faces a producer delivers from, and demanding this producer's trailer on
+  someone else's commit refuses a delivery for a note it did not write. Reachability from a
+  remote-tracking ref is the cut — a fact of the forge, not a string the pod can write.
   """
   # Same first-parent cut as identity so sibling producers need not carry this role's trailer.
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
@@ -192,15 +195,16 @@ defmodule Fleet.Workflow.DeliverableGate do
            "log",
            "--first-parent",
            "#{base_sha}..HEAD",
-           "--format=%H%x1f%ae%x1f%ce%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
+           # ce que la forge a deja : pas le travail de cette livraison, pas juge ici
+           "--not",
+           "--remotes=origin",
+           "--format=%H%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
          ]) do
       {out, 0} ->
-        systeme = ForgeIdentity.system_email()
-
         missing =
           out
           |> String.split(<<0>>, trim: true)
-          |> Enum.flat_map(&uncovered_sha(&1, needle, systeme))
+          |> Enum.flat_map(&uncovered_sha(&1, needle))
 
         case missing do
           [] -> :ok
@@ -329,12 +333,9 @@ defmodule Fleet.Workflow.DeliverableGate do
   defp matched_secret_kind({re, kind}, texte), do: if(Regex.match?(re, texte), do: kind)
 
   # Chunks without the expected separator are ignored, not reported as missing trailers.
-  defp uncovered_sha(chunk, needle, systeme) do
-    case String.split(chunk, <<0x1F>>, parts: 4) do
-      [_sha, ae, ce, _values] when ae == systeme and ce == systeme ->
-        []
-
-      [sha, _ae, _ce, values] ->
+  defp uncovered_sha(chunk, needle) do
+    case String.split(chunk, <<0x1F>>, parts: 2) do
+      [sha, values] ->
         couvert? =
           values
           |> String.split("\n", trim: true)

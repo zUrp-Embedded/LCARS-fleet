@@ -56,9 +56,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
   # A blank line before --- prevents a Setext heading. Use #### so manual triage can
   # group notes under ### headings without rewriting their blocks.
   #
-  # LE ROLE EST DANS LE TITRE parce que le COMMIT ne peut pas le porter : il est signe par le
-  # systeme des deux cotes (la garde du livrable refuserait sinon la livraison suivante faite depuis
-  # cette face). Sans ce mot, une note relue trois semaines plus tard n'a aucun auteur.
+  # LE ROLE EST DANS LE TITRE DU BLOC parce que c'est le seul endroit qui se lit SANS git — et une
+  # note relue trois semaines plus tard sans auteur ne vaut rien. Le commit le porte aussi (sujet et
+  # trailer) ; ce qui ne peut pas le porter, c'est sa SIGNATURE : elle reste celle du systeme, sinon
+  # la livraison suivante faite depuis cette face serait refusee dessus.
   defp scratch_block(role, note) do
     {{y, mo, d}, {h, mi, _s}} = :calendar.local_time()
 

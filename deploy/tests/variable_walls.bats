@@ -169,9 +169,9 @@ bash_code() {
     "runtime/bin/fleet"
     # le BEAM lit le siege dans Fleet.BootGuard (GUARD B), que config/runtime.exs appelle
     "runtime/lib/fleet/boot_guard.ex"
-    "runtime/services/human-converger.sh"
+    # la politique de POPULATION vit ici, une seule fois — c'est ce site que le mur doit voir
+    "runtime/services/lib/module-protocol.sh"
     "runtime/services/container/init.sh"
-    "runtime/services/lib/human-protocol.sh"
   )
   # les chemins déclarés : la constante de l'installeur, la forme shell `${LCARS_SEAT_UID_FILE:-<X>}`
   # et la forme BEAM `System.get_env("LCARS_SEAT_UID_FILE", "<X>")`
@@ -632,4 +632,37 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # suivante (v0.9-beta restée dans le kit de v0.9-beta2). Le kit reçoit l'image de sa version de pack.sh (pack.bats)
   grep -qF 'image: "${LCARS_IMAGE:-lcars-fleet:local}"' "$compose" || { echo "MUR 17 rompu — docker-compose.yml n'a pas pour image par defaut lcars-fleet:local, que pack.sh remplace par l'image de la version" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — le compose la lit et replie sur la meme valeur." >&2; return 1; }
+}
+
+# ⚠ MUR 18 — LA LECTURE DU SIÈGE TIENT SUR TROIS FAITS QUI NE SE VOIENT PAS ENSEMBLE. Le skill
+# `system-issues` du siège lit `forge.url` dans le dossier des jetons. Il ne peut le faire que si :
+# le dossier est TRAVERSABLE par le groupe fleet (0710, groupe fleet), le fichier est LISIBLE
+# (0644), et le siège EST dans fleet (20-groups l'y met, et ne met que lui). Retirer l'un des trois
+# ne casse rien de visible ici : c'est la boîte de réception d'un humain qui devient muette sur une
+# machine, et personne ne relie la cause à l'effet. Les trois se mesurent donc ensemble.
+@test "MUR 18: le siège lit forge.url — dossier traversable, fichier lisible, siège dans fleet" {
+  local manifeste="$REPO/deploy/system.manifest"
+  local jetons; jetons="$(sed -n 's/^PROV_TOKENS_DIR=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$jetons" ] || { echo "MUR 18 — PROV_TOKENS_DIR illisible dans installer-constants.env" >&2; return 1; }
+
+  # 1. le dossier : traversable par fleet, et non listable
+  local ligne; ligne="$(awk -v p="$jetons" '$1 == "dir" && $2 == p { print $3, $4 }' "$manifeste")"
+  [ "$ligne" = "0710 lcars-authority:fleet" ] \
+    || { echo "MUR 18 rompu — $jetons déclaré « $ligne », attendu « 0710 lcars-authority:fleet » : le siège ne traverse plus" >&2; return 1; }
+
+  # 2. le fichier : écrit 0644 au groupe fleet, sur LES DEUX rails (le poste et l'init du conteneur)
+  local poste conteneur
+  poste="$(grep -c 'write_atomic "\$PROV_FORGE_URL_FILE" 0644 "root:\$PROV_FLEET_GROUP"' "$REPO/deploy/modules.d/48-forge-host.sh")"
+  conteneur="$(grep -c 'write_atomic "\$f" 0644 "root:\$LCARS_FLEET_GROUP"' "$REPO/runtime/services/container/init.sh")"
+  [ "$poste" -ge 1 ] || { echo "MUR 18 rompu — le poste n'écrit plus forge.url en 0644 root:fleet" >&2; return 1; }
+  [ "$conteneur" -ge 1 ] || { echo "MUR 18 rompu — l'init du conteneur n'écrit plus forge.url en 0644 root:fleet" >&2; return 1; }
+
+  # 3. le siège dans fleet : 20-groups le pose, et le drift qu'il émet NOMME la conséquence
+  local groupes="$REPO/deploy/modules.d/20-groups.sh"
+  grep -q 'ne traverse pas \$PROV_TOKENS_DIR' "$groupes" \
+    || { echo "MUR 18 rompu — 20-groups ne relie plus l'appartenance du siège à la traversée du dossier des jetons" >&2; return 1; }
+
+  # 4. et c'est bien ce chemin que le skill lit — sinon les trois faits ci-dessus ne servent personne
+  grep -q 'LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens' "$REPO/runtime/services/admiral/skills/system-issues/list.sh" \
+    || { echo "MUR 18 rompu — le skill du siège ne lit plus forge.url dans le dossier des jetons" >&2; return 1; }
 }
