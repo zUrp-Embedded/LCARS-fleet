@@ -283,16 +283,24 @@ variable "system_org" {
   default     = "fleet"
 }
 
-# ⚠ PAS DE `ignore_changes = [permission]` ICI, ET C'EST UN CORRECTIF.
-# Le motif qu'il aurait, et qui reste vrai : Gitea 1.26 stocke l'accès en units_map et relit le champ
-# `permission` top-level en « none » (déprécié), donc le provider voit un drift perpétuel
-# write→none. Mais sur une team IMPORTÉE, la valeur planifiée d'un attribut ignoré est celle de
-# l'ÉTAT, soit « none » — et l'update part avec, ce que Gitea refuse : `permission mode invalid`,
-# les cinq teams d'un coup (mesuré 2026-08-16). Un garde-fou cosmétique transformerait l'import en
-# panne dure.
-# Le prix, mesuré et assumé : `permission` et `units` ne convergent jamais en lecture, donc chaque
-# apply annonce et rejoue un update par team. Il réussit, l'apply rend 0 — mais un plan VIDE est
-# impossible tant que le provider relit ce champ ainsi. C'est le bruit, pas la panne.
+# ⚠ LE BRUIT DES TEAMS EST UN DÉFAUT DU PROVIDER, PAS DE CETTE RECETTE — et aucune forme écrite ici
+# ne le supprime. Mesuré le 2026-09-16 sur une Gitea 1.26.1 et le provider 0.8.1 (la dernière
+# publiée), les cinq formes possibles :
+#
+#   1. `permission = "write"` (ce qui est écrit ici) : la forge STOCKE l'accès dans `units_map` et
+#      relit `permission` en « none ». Le provider voit donc un drift perpétuel write→none, et
+#      chaque apply rejoue un update par team. Il réussit : c'est du bruit, pas une panne.
+#   2. `units_map` déclaré en plus : sans effet, le drift porte sur `permission` lui-même.
+#   3. `permission = "none"` — ce que la forge stocke, et ce que la doc du provider annonce comme
+#      valeur admise : le PROVIDER refuse, « permission mode invalid ». L'API de la forge, elle,
+#      l'accepte (POST → 201, PATCH → 200, l'accès reste celui d'`units_map`).
+#   4. `units_map` SANS `permission` : même refus du provider.
+#   5. `lifecycle { ignore_changes = [permission] }` : le plan n'est pas vide pour autant, et le
+#      premier apply qui touche une team meurt sur le même « permission mode invalid ». Le
+#      garde-fou cosmétique transforme le bruit en panne dure.
+#
+# Un plan VIDE est donc hors d'atteinte tant que le provider valide `permission` contre un ensemble
+# plus étroit que sa propre documentation, et qu'il relit un champ que la forge n'écrit plus.
 resource "gitea_team" "this" {
   for_each                 = local.teams
   name                     = each.key
