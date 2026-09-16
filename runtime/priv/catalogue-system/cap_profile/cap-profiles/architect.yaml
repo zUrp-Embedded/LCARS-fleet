@@ -11,7 +11,8 @@ metadata:
   # Under bwrap, HOME=pod_dir -> claude reads pod_dir/.claude, never the human's ~/.claude,
   # so the contamination disappears at the root. Interactive via `lcars attach` (works on bwrap).
   containment: bwrap
-  # AVEC starfleet, LE SECOND ROLE OUVERT, et pour la meme raison : il parle a un humain, il cadre,
+  # LE PREMIER ROLE OUVERT APRES starfleet (2026-09-16), et pour la meme raison : il parle a un
+  # humain, il cadre,
   # il arbitre, il VA CHERCHER. `egress` ne lui donnait que les hotes du vendor — mesure sur banc le
   # 2026-09-16 : toute lecture de page rendait « proxy refused the connection », et seule la
   # recherche passait, parce qu'elle sort par l'API du vendor. Un role qui cherche sur le web ne
@@ -28,9 +29,11 @@ metadata:
   # peut donc joindre ce que la machine joint. C'est le prix assume ici pour un role qui parle a un
   # humain ; un producteur ne l'a pas.
   #
-  # Tous les autres roles restent au defaut `vendor-only` : leur matiere de reference arrive par
-  # leur brief, leur lot, ou la face montee. C'est une DECLARATION, pas une derivation : le jour ou
-  # un producteur en a besoin, il le dit.
+  # ⚠ CETTE PHRASE DISAIT « tous les autres roles restent au defaut vendor-only » : ce n'est plus
+  # vrai depuis le 2026-09-17 (⚖ user). TOUS les roles spawnables declarent `open`, chacun dans son
+  # fichier, et la mecanique d'egress reste entiere derriere. Ce qui ne change pas, c'est la forme :
+  # une DECLARATION par profil, pas une derivation : refermer un role, c'est une ligne dans SON
+  # fichier, et personne n'a a deviner ce que la fleet autorise.
   network: open
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.

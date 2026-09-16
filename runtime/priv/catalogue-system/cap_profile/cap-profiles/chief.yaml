@@ -53,6 +53,23 @@ metadata:
   name: chief
   # vitrine: Il fusionne | Le seul à exécuter le merge : il résout les conflits et scelle l'arbre. Un juge décide, lui exécute — les deux ne se confondent jamais.
   containment: bwrap
+  # ⚠ RESEAU OUVERT, PAR DECISION (⚖ user 2026-09-17) — et la mecanique d'egress reste ENTIERE.
+  # Mesure sur le banc beta : quatre roles butaient sur le proxy (`pypi.org`,
+  # `raw.githubusercontent.com`, `github.com`), et une liste d'hotes deplace la friction sur
+  # l'humain au lieu de la supprimer : un role qui cherche, construit ou verifie ne peut pas
+  # declarer d'avance ce qu'il lira.
+  #
+  # CE QUE CA NE RETIRE PAS : le pod garde SON namespace reseau, sans aucune route vers l'exterieur ;
+  # il sort par son proxy CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste
+  # refusee. Le mur, le proxy, les hotes du vendor, les hotes converges : tout est en place.
+  #
+  # CE QUE CA RETIRE, ET IL FAUT LE SAVOIR : le mur d'hotes tenait aussi ce pod a l'ecart du
+  # loopback de la MACHINE (la forge, l'API du BEAM, le deck) et du LAN — le proxy compose depuis le
+  # reseau de l'hote, et `open` accepte n'importe quel hote et n'importe quel port.
+  #
+  # REFERMER EST UNE LIGNE : `network: egress` ici, et `scope.egress_hosts` nomme les hotes. Le
+  # defaut du code reste `vendor-only`, ferme — c'est ce fichier qui ouvre, pas le moteur.
+  network: open
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID. 0..8 taken (vulcan holds the reserved seat 8).
   # SLOT ALPHA = MECANIQUE. Le slot est un nibble hex dans l'UUID de session, donc la

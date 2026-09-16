@@ -27,8 +27,11 @@ metadata:
   # CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste refusee. Le proxy passe
   # de mur a point d'observation, et `Egress.provision/3` en trace une ligne par vie de pod.
   #
-  # Tous les autres roles restent au defaut `vendor-only` : leur matiere de reference arrive par
-  # leur brief, leur lot, ou la face montee. C'est une DECLARATION, pas une derivation.
+  # ⚠ CETTE PHRASE DISAIT « tous les autres roles restent au defaut vendor-only » : ce n'est plus
+  # vrai depuis le 2026-09-17 (⚖ user). TOUS les roles spawnables declarent `open`, chacun dans son
+  # fichier, et la mecanique d'egress reste entiere derriere. Ce qui ne change pas, c'est la forme :
+  # une DECLARATION par profil, pas une derivation : refermer un role, c'est une ligne dans SON
+  # fichier, et personne n'a a deviner ce que la fleet autorise.
   network: open
   # Role identity (the metadata IS the single source of the WHAT): role_index = role slot in the
   # UUID — and 0 IS starfleet, the ONLY fleet-scoped pod (repo 0000 in its UUID, kill_class 0 →

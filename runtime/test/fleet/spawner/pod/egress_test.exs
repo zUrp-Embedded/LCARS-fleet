@@ -336,6 +336,54 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
   end
 
+  # ⚠ CE QUE LA DECISION DU 2026-09-17 A CHANGE, ET CE QU'ELLE N'A PAS TOUCHE. Tous les roles
+  # declarent `open` ; la mecanique reste entiere, et le DEFAUT du moteur reste ferme. Ces temoins
+  # tiennent les deux moities : ce que les profils disent, et ce que le code ferait sans eux.
+  describe "la politique reseau des roles — declaree par profil, jamais deduite" do
+    @profils_spawnables Path.wildcard("priv/catalogue*/cap_profile/cap-profiles/*.yaml")
+
+    test "tout profil SPAWNABLE declare `network: open` — et un siege reserve n'en declare aucune" do
+      {spawnables, sieges} =
+        Enum.split_with(@profils_spawnables, &(File.read!(&1) =~ ~r/^kind: CapabilityProfile$/m))
+
+      assert length(spawnables) >= 9,
+             "#{length(spawnables)} profils spawnables lus — l'instrument ne voit plus son sujet"
+
+      for f <- spawnables do
+        assert File.read!(f) =~ ~r/^  network: open$/m,
+               "#{Path.basename(f)} ne declare pas `network: open` : la decision est prise par " <>
+                 "PROFIL, et un role muet retomberait au defaut ferme sans que personne le dise"
+      end
+
+      for f <- sieges do
+        refute File.read!(f) =~ ~r/^  network:/m,
+               "#{Path.basename(f)} est un siege reserve : il ne tourne jamais, une politique " <>
+                 "reseau y decrirait un pod qui n'existe pas"
+      end
+    end
+
+    test "le DEFAUT du moteur reste ferme — c'est le profil qui ouvre, pas le code" do
+      assert Fleet.CapProfile.default_network() == "vendor-only"
+
+      # un profil qui ne dit rien ne recoit que les hotes de son vendor
+      muet = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r", "containment" => "bwrap"},
+        spec: %{}
+      }
+
+      assert Fleet.CapProfile.network(muet) == "vendor-only"
+    end
+
+    test "REFERMER est une ligne : un role qui declare `egress` retrouve son mur", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      assert Egress.allowlist(profile("egress"), launcher) == ["api.vendor.test"]
+      assert Egress.allowlist(profile("open"), launcher) == :open
+    end
+  end
+
   describe "network: open — the host wall goes, the seal stays" do
     setup do
       base = Path.join(System.tmp_dir!(), "lcars-egopen-#{System.pid()}")

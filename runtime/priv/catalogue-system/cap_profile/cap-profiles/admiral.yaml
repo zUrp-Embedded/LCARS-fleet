@@ -28,7 +28,9 @@ metadata:
   # Champ requis par le schema ; pour un pod hors sandbox il DOCUMENTE, il ne confine pas — le
   # mur d'egress est un objet bwrap (socket -> socat -> proxy), et ce pod n'en a aucun. `egress`
   # dit l'intention vraie : cet agent atteint la forge et le monde directement.
-  network: egress
+  # Meme mot que tous les autres roles depuis le 2026-09-17 (⚖ user), et ici il DOCUMENTE seulement :
+  # ce pod tourne hors sandbox, il n'a aucun mur a ouvrir.
+  network: open
   # Pas de compte forge de ROLE : les lectures de son skill `system-issues` passent par le JETON
   # SYSTEME du conteneur (0640 root:fleet) sur deux points d'entree PUBLICS du depot ops. Aucune
   # n'est site-admin, donc aucune n'a besoin d'une autorite — et ce siege n'en detient aucune : la
