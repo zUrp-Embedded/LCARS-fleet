@@ -55,6 +55,7 @@ defmodule Fleet.MCP.PodTools do
     "project_delete" => :mutation,
     "issue_status" => :read,
     "scratch" => :mutation,
+    "workshop_publish" => :mutation,
     "escalation_list" => :read,
     "card_list" => :read,
     "catalogue_list" => :read,
@@ -768,6 +769,38 @@ defmodule Fleet.MCP.PodTools do
         "note" => %{"type" => "string"}
       },
       "required" => ["note"]
+    })
+  end
+
+  deftool "workshop_publish" do
+    # credo:disable-for-next-line Credo.Check.Readability.MaxLineLength
+    # vitrine: Publie l'atelier du projet sur la forge : le systeme indexe, commit avec ton message et pousse.
+    meta do
+      name("Publish Workshop")
+
+      description(
+        "Publish what you wrote in your project's workshop face — the system stages it, commits " <>
+          "it under YOUR message and pushes it. USE IT when a document is worth keeping outside " <>
+          "this container: a spec, a plan, a backlog, a cadrage, a source you imported. " <>
+          "WHY IT EXISTS: a pod never pushes (publication is a system act), and nothing else " <>
+          "published this face — a document waited for the next `scratch` note to be swept along, " <>
+          "or stayed local forever. " <>
+          "`scratch` is for a thought in the flow; this is for a document you are done writing. " <>
+          "A clean face publishes nothing and says so. The receipt names the files as Git saw " <>
+          "them: read it, it says what you actually sent."
+      )
+    end
+
+    input_schema(%{
+      "type" => "object",
+      "properties" => %{
+        "message" => %{
+          "type" => "string",
+          "description" =>
+            "The commit message, in the project's language: what this publication carries."
+        }
+      },
+      "required" => ["message"]
     })
   end
 
@@ -1489,6 +1522,18 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("scratch", _bad, state) do
     {:error, {:invalid_arguments, "scratch attend `note` (string non vide)"}, state}
+  end
+
+  def handle_tool_call("workshop_publish", %{"message" => message}, state)
+      when is_binary(message) do
+    case Delegation.Workshop.publish(state, message) do
+      {:ok, result} -> {:ok, %{content: [json(result)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("workshop_publish", _bad, state) do
+    {:error, {:invalid_arguments, "workshop_publish attend `message` (string non vide)"}, state}
   end
 
   def handle_tool_call("escalation_list", _arguments, state) do

@@ -88,7 +88,7 @@ defmodule Mix.GateCompositionTest do
       end)
       |> Enum.frequencies()
 
-    assert exemptions == %{"lib/fleet/mcp/pod_tools.ex" => 13},
+    assert exemptions == %{"lib/fleet/mcp/pod_tools.ex" => 14},
            "les exemptions credo du depot ont bouge : #{inspect(exemptions)}. Chacune doit etre " <>
              "nominative ET adossee a un mur qui dit pourquoi la regle ne s'applique pas ici " <>
              "(ici : `mcp.vitrine_single_line`, pour une ligne que le build du site lit entiere)"

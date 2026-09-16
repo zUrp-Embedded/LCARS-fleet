@@ -40,12 +40,16 @@ defmodule Fleet.MCP.ScratchTest do
   end
 
   describe "the block" do
-    test "the stamp is a #### heading on LINE 2, carrying the year", %{dir: dir, path: path} do
-      # Include the year so a long-lived scratchpad distinguishes successive Januaries.
+    test "the stamp is a #### heading on LINE 2, carrying the year AND the role", %{
+      dir: dir,
+      path: path
+    } do
+      # Include the year so a long-lived scratchpad distinguishes successive Januaries, and the
+      # role because the commit cannot carry it: it is signed by the system on both sides.
       {:ok, _} = park("une note", dir)
       [_blank, second | _] = String.split(File.read!(path), "\n")
 
-      assert second =~ ~r/^#### \d{4}-\d{2}-\d{2} - \d{2}:\d{2}$/
+      assert second =~ ~r/^#### \d{4}-\d{2}-\d{2} - \d{2}:\d{2} — architect$/
     end
 
     test "the note keeps its line breaks — a block is not a flattened line", %{

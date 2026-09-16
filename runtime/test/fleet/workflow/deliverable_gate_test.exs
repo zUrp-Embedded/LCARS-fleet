@@ -2,6 +2,8 @@ defmodule Fleet.Workflow.DeliverableGateTest do
   # O5 gate checks on real isolated Git fixtures, without publication or global env mutation.
   use ExUnit.Case, async: true
 
+  alias Fleet.Credentials.ForgeIdentity
+
   alias Fleet.Workflow.DeliverableGate, as: Gate
 
   @moduletag :tmp_dir
@@ -221,6 +223,105 @@ defmodule Fleet.Workflow.DeliverableGateTest do
     # The rebase target remains an ancestor and passes verify; no push is exercised here.
     assert :ok = Gate.check_base_ancestor(dir, main_c1)
     assert {:ok, :verified} = Gate.verify(dir, main_c1, @role_emails)
+  end
+
+  # ⚠ LE RUNTIME ECRIT SUR LA FACE D'OU LE PRODUCTEUR LIVRE : une note de scratchpad, un scaffold
+  # d'onboarding. Le producteur les herite en alignant sa face, ne peut ni les retirer ni les
+  # signer, et les juger comme SON identite refusait sa livraison pour le commit d'un autre
+  # (mesure du 2026-09-16, ticket #1 du banc : « bad_identity : system_starfleet@lcars.local »).
+  test "un commit PUREMENT systeme dans la plage ne refuse pas la livraison", %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "systeme"))
+    sys = ForgeIdentity.system_email()
+    nom = ForgeIdentity.system_identity().name
+
+    {_, 0} =
+      g(dir, [
+        "-c",
+        "user.email=#{sys}",
+        "-c",
+        "user.name=#{nom}",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "chore(scratch): note d'atelier"
+      ])
+
+    commit_file(dir, "feature.py", "def blink(): pass", "feat: blink")
+
+    assert :ok = Gate.check_identity(dir, base, @role_emails)
+    assert {:ok, :verified} = Gate.verify(dir, base, @role_emails)
+  end
+
+  # LE PENDANT, ET SANS LUI LE PRECEDENT OUVRE UNE PORTE : l'identite du systeme n'est admise que
+  # sur les DEUX cotes. Un pod qui emprunte son nom pour signer son propre travail est exactement
+  # ce que cette garde existe pour voir.
+  test "l'identite du systeme d'UN SEUL cote est toujours jugee", %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "emprunt"))
+    sys = ForgeIdentity.system_email()
+    File.write!(Path.join(dir, "x.py"), "x = 1")
+    {_, 0} = g(dir, ["add", "."])
+
+    # auteur = le systeme, committer = le pod : un travail de pod sous le nom du systeme
+    {_, 0} =
+      g(dir, [
+        "-c",
+        "user.email=intrus@ailleurs.test",
+        "-c",
+        "user.name=intrus",
+        "commit",
+        "-q",
+        "--author",
+        "Systeme <#{sys}>",
+        "-m",
+        "emprunt"
+      ])
+
+    assert {:error, {:bad_identity, bad}} = Gate.check_identity(dir, base, @role_emails)
+    assert "intrus@ailleurs.test" in bad
+  end
+
+  # MEME FAMILLE QUE L'IDENTITE : exiger le trailer du producteur sur le commit d'un autre refuse
+  # sa livraison pour une note qu'il n'a pas ecrite.
+  test "le trailer du producteur n'est pas exige sur un commit purement systeme", %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "trailer-systeme"))
+    sys = ForgeIdentity.system_email()
+    nom = ForgeIdentity.system_identity().name
+
+    {_, 0} =
+      g(dir, [
+        "-c",
+        "user.email=#{sys}",
+        "-c",
+        "user.name=#{nom}",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "chore(scratch): note d'atelier"
+      ])
+
+    File.write!(Path.join(dir, "f.py"), "x = 1")
+    {_, 0} = g(dir, ["add", "."])
+
+    {_, 0} =
+      g(dir, [
+        "commit",
+        "-q",
+        "-m",
+        "feat: livrable\n\n" <> ForgeIdentity.coauthor_trailer("engineer")
+      ])
+
+    assert :ok = Gate.check_coauthor_trailer(dir, base, "engineer")
+  end
+
+  test "le commit du producteur SANS trailer reste refuse — l'exemption ne vaut que pour le systeme",
+       %{tmp_dir: tmp} do
+    {dir, base} = setup_repo(Path.join(tmp, "trailer-absent"))
+    commit_file(dir, "f.py", "x = 1", "feat: sans trailer")
+
+    assert {:error, {:missing_coauthor_trailer, "engineer", [_ | _]}} =
+             Gate.check_coauthor_trailer(dir, base, "engineer")
   end
 
   test "empty range (no new commit) → identity OK (vacuity), scan OK", %{tmp_dir: tmp} do

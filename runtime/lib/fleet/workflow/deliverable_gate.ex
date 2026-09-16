@@ -6,6 +6,8 @@ defmodule Fleet.Workflow.DeliverableGate do
   Secret scanning recognizes configured patterns only, with the limits described in scan_secrets/2.
   """
 
+  alias Fleet.Credentials.ForgeIdentity
+
   @git_timeout_ms 15_000
 
   # Distinctive prefixes reduce false positives at a blocking gate. Unprefixed 40-hex Gitea
@@ -115,6 +117,14 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   @doc """
   Requires each FIRST-PARENT commit author and committer email to be allowed; empty range is valid.
+
+  A commit whose author AND committer are BOTH the system identity passes whatever `allowed` says.
+  The runtime writes on the shared faces a producer delivers from — workshop scratchpad notes,
+  onboarding scaffolds — and a producer inherits those commits by aligning its face. It can neither
+  remove them nor sign them, so judging them as ITS identity refuses a delivery for someone else's
+  commit (measured 2026-09-16: a scratchpad note refused the deliverable of a workshop ticket).
+  A commit carrying the system identity on ONE side only is still judged: a pod borrowing the
+  system's name for its own work is exactly what this check exists to see.
   """
   # A0: do not demand this producer's identity on commits imported from another merge parent.
   # First-parent ancestry is the chosen cut, not proof that other parents were previously gated.
@@ -130,20 +140,30 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   defp identity_verdict(out, allowed) do
     allowed_set = MapSet.new(allowed)
+    system = ForgeIdentity.system_email()
 
-    emails =
+    bad =
       out
       # Remove only the record terminator so empty identity fields remain rejectable.
       |> String.replace_suffix("\n", "")
       |> String.split("\n")
       |> Enum.map(&String.trim/1)
+      # Two lines per commit (%ae then %ce): the pair is what decides, not each line alone.
+      |> Enum.chunk_every(2)
+      |> Enum.flat_map(&judge_commit(&1, allowed_set, system))
+      |> Enum.uniq()
 
     # Exact membership after trimming; an empty email is rejected unless the allowed set contains "".
-    case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
+    case bad do
       [] -> :ok
-      bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
+      bad -> {:error, {:bad_identity, Enum.map(bad, &label_email/1)}}
     end
   end
+
+  defp judge_commit([system, system], _allowed, system), do: []
+
+  defp judge_commit(pair, allowed, _system),
+    do: Enum.reject(pair, &MapSet.member?(allowed, &1))
 
   # Render rejected empty identity fields visibly.
   defp label_email(""), do: "<empty-email>"
@@ -152,13 +172,17 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc """
   Requires a Git-parsed Co-authored-by value starting with the expected LCARS-role name
   on each first-parent commit. The comparison is a prefix, not exact role/email authentication.
+
+  A PURE system commit is skipped, for the same reason as in `check_identity/3`: the runtime writes
+  on the shared faces a producer delivers from, and demanding this producer's trailer on someone
+  else's commit refuses a delivery for a note it did not write.
   """
   # Same first-parent cut as identity so sibling producers need not carry this role's trailer.
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
     # F-03: use Git's trailer parser rather than searching the whole commit message.
     needle =
-      Fleet.Credentials.ForgeIdentity.coauthor_trailer(expected_role)
+      ForgeIdentity.coauthor_trailer(expected_role)
       |> String.replace_prefix("Co-authored-by: ", "")
       |> String.split(" <")
       |> hd()
@@ -168,13 +192,15 @@ defmodule Fleet.Workflow.DeliverableGate do
            "log",
            "--first-parent",
            "#{base_sha}..HEAD",
-           "--format=%H%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
+           "--format=%H%x1f%ae%x1f%ce%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
          ]) do
       {out, 0} ->
+        systeme = ForgeIdentity.system_email()
+
         missing =
           out
           |> String.split(<<0>>, trim: true)
-          |> Enum.flat_map(&uncovered_sha(&1, needle))
+          |> Enum.flat_map(&uncovered_sha(&1, needle, systeme))
 
         case missing do
           [] -> :ok
@@ -303,9 +329,12 @@ defmodule Fleet.Workflow.DeliverableGate do
   defp matched_secret_kind({re, kind}, texte), do: if(Regex.match?(re, texte), do: kind)
 
   # Chunks without the expected separator are ignored, not reported as missing trailers.
-  defp uncovered_sha(chunk, needle) do
-    case String.split(chunk, <<0x1F>>, parts: 2) do
-      [sha, values] ->
+  defp uncovered_sha(chunk, needle, systeme) do
+    case String.split(chunk, <<0x1F>>, parts: 4) do
+      [_sha, ae, ce, _values] when ae == systeme and ce == systeme ->
+        []
+
+      [sha, _ae, _ce, values] ->
         couvert? =
           values
           |> String.split("\n", trim: true)
