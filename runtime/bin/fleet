@@ -19,8 +19,22 @@ ERL_COOKIE=""
 DIST_ON=""
 ENV_LOADED=""
 
+# DEUX FICHIERS, DANS CET ORDRE : celui de la MACHINE, puis celui de l'HUMAIN.
+#
+# Ce que l'installation decide — l'adresse de la forge, la racine du magasin, l'org, le groupe —
+# vit dans `/etc/lcars/services.env` (0640 root:fleet, ecrit par l'installeur, lu par les unites).
+# Un humain qui lance sa fleet a la main n'en heritait de RIEN : seuls les daemons le portaient, et
+# une fleet lancee par `fleet start` perdait en silence les montages du magasin, les hotes
+# converges de son egress et l'assignataire du pilote. Le fichier de l'humain passe APRES : ce qui
+# lui appartient gagne sur ce que la machine declare.
+#
+# Le fichier de la machine ne porte aucun secret (des chemins, des noms, des ports) et seul root
+# l'ecrit. Dans un conteneur il n'existe pas : l'image porte ces valeurs dans son environnement.
 load_env() {
   [[ -n "$ENV_LOADED" ]] && return 0
+  local machine_env="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+  # shellcheck source=/dev/null
+  if [[ -r "$machine_env" ]]; then set -a; . "$machine_env"; set +a; fi
   local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
   # shellcheck source=/dev/null
   if [[ -f "$env_file" ]]; then set -a; . "$env_file"; set +a; fi
@@ -193,8 +207,9 @@ cmd_start() {
   parse_start_opts "$@"
   set -- "${START_ARGS[@]}"
 
-  # GUARD B. Le siege ne peut PAS etre produit par une formule : le sysadmin est cree par l'entrypoint
-  # avec un uid EXPLICITE (`useradd -u ${LCARS_UID:-1000}`), hors du `forge_id + UID_OFFSET` par lequel
+  # GUARD B. Le siege ne peut PAS etre produit par une formule : le sysadmin est cree avec un uid
+  # EXPLICITE (`useradd -u ${LCARS_UID:-1000}` dans l'init de l'instance, le compte qui installe sur
+  # un poste), hors du `forge_id + UID_OFFSET` par lequel
   # le convergeur derive les humains — d'ou une condition, et non un intervalle.
   local _uid _uid_min _uid_max _missing _defs
   _uid="$(id -u)"

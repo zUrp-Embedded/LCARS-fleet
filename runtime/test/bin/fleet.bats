@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.258
+# STARDATE: 2026.259
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -670,4 +670,30 @@ make_fake_beam_bin() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"d4d23d792"* ]]
   [[ "$output" != *"9ee4a4bcd"* ]]
+}
+
+# ⚠ DEUX FICHIERS, ET L'ORDRE EST LE SUJET. Ce que l'installation décide pour la machine
+# (`/etc/lcars/services.env` : la forge, l'org, la racine du magasin) n'était lu que par les
+# daemons : une fleet lancée à la main par un humain n'avait pas `LCARS_STORE_ROOT`, et perdait en
+# silence les montages du magasin, les hôtes convergés de son egress et l'assignataire du pilote
+# (A-201). Elle le lit désormais AVANT le fichier de l'humain, qui garde le dernier mot.
+@test "l'environnement de la MACHINE est chargé, et celui de l'humain gagne dessus" {
+  local machine="$BATS_TEST_TMPDIR/services.env" humain="$BATS_TEST_TMPDIR/fleet.env"
+  printf 'LCARS_STORE_ROOT=/magasin/de/la/machine\nFORGE_BASE_URL=http://machine:3000\n' > "$machine"
+  printf 'FORGE_BASE_URL=http://choix-humain:3000\n' > "$humain"
+
+  run env LCARS_SERVICES_ENV="$machine" LCARS_FLEET_ENV="$humain" bash -c \
+    "source '$SCRIPT'; load_env; printf '%s|%s' \"\$LCARS_STORE_ROOT\" \"\$FORGE_BASE_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "/magasin/de/la/machine|http://choix-humain:3000" ]
+}
+
+@test "sans fichier de machine (le conteneur : l'image porte ses valeurs), rien ne casse" {
+  local humain="$BATS_TEST_TMPDIR/fleet.env"
+  printf 'FORGE_BASE_URL=http://image:3000\n' > "$humain"
+
+  run env LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/absent.env" LCARS_FLEET_ENV="$humain" bash -c \
+    "source '$SCRIPT'; load_env; printf '%s|%s' \"\${LCARS_STORE_ROOT:-<vide>}\" \"\$FORGE_BASE_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "<vide>|http://image:3000" ]
 }

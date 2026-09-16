@@ -27,7 +27,12 @@
 
 set -euo pipefail
 
-STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
+# AUCUN DEFAUT RECOPIE : la racine du magasin est un fait de la machine, que l'installation ecrit
+# une fois (`/etc/lcars/services.env`, que l'unite de ce geste porte). La deviner ici ferait
+# travailler ce convergeur dans un magasin que personne d'autre ne regarde.
+STORE="${LCARS_STORE_ROOT:-}"
+[[ -n "$STORE" ]] \
+  || { echo "lcars-toolchain-converge: LCARS_STORE_ROOT non posé — l'unité du geste le porte (depuis /etc/lcars/services.env) ; à la main, « LCARS_STORE_ROOT=<racine> » devant la commande" >&2; exit 1; }
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
 # `FORGE_TOKEN` est une entree EXPLICITE posee sur l'unite, jamais un chemin que ce script irait
