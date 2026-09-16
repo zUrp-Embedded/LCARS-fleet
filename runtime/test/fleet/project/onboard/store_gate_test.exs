@@ -35,7 +35,7 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
       assert {:error, {:repo_is_catalogue_store, "web/_catalogue", why}} =
                ProjectOnboard.refute_store("web/_catalogue", forge_files: StoreFiles)
 
-      assert why =~ "STORE of the catalogue 'web'"
+      assert why =~ "declares itself the catalogue 'web'"
       assert why =~ "lcars catalogue install web"
     end
 
@@ -54,19 +54,20 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
                ProjectOnboard.refute_store("web/vitrine", forge_files: MuteFiles)
 
       assert why =~ "unknown whether this repo is a catalogue's store"
-      refute why =~ "STORE of the catalogue"
+      refute why =~ "declares itself the catalogue"
     end
   end
 
   describe "refute_system_name/2 — les noms que le systeme garde pour lui" do
     test "l'adresse du magasin est refusee, et le refus dit ce qui l'ecraserait" do
-      store = Fleet.Catalogue.store_repo()
+      store = Fleet.Catalogue.store_name()
 
       assert {:error, {:system_name, full, why}} =
                ProjectOnboard.refute_system_name("web/#{store}", store)
 
       assert full == "web/#{store}"
       assert why =~ "overwrites"
+      assert why =~ Fleet.Catalogue.store_repo()
     end
 
     test "tout nom qui commence par `_` est refuse — c'est la famille des depots du systeme" do

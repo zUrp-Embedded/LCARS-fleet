@@ -27,6 +27,16 @@ variable "system_repo" {
   default     = "_ops"
 }
 
+# LE MAGASIN DES CATALOGUES : une branche par catalogue installé (⚖ user 2026-09-16). Ce dépôt est le
+# seul endroit où la question « quels catalogues sont installés ? » se pose — une liste de branches,
+# pas une recherche sur tous les dépôts de la forge. `Fleet.Catalogue.store_repo/0` en est l'autorité
+# côté produit, `catalogue install` écrit ses branches, le geste `catalogues` les lit.
+variable "store_repo" {
+  type        = string
+  description = "Le magasin des catalogues dans l'org système — une branche par catalogue installé"
+  default     = "_catalogues"
+}
+
 # LES APPROBATEURS DE `tool_request` : le siège — le master, compte n°1 de la forge, celui qui
 # installe. `cmd_apply` le résout par `/api/v1/user` avec le jeton master et le passe ici. PAS la
 # team `humans` : un manifeste d'outillage est appliqué par root sur le conteneur, et signer ça est
@@ -65,6 +75,43 @@ resource "gitea_repository" "ops" {
   # dépôts de l'org), et lit la protection de `tool_request` en tant que propriétaire de l'org
   # (`Owners`) — le geste `ops-repo` en dépend. L'arête dit l'ordre.
   depends_on = [gitea_team_membership.owner]
+}
+
+resource "gitea_repository" "catalogues" {
+  count          = local.system_play ? 1 : 0
+  username       = gitea_org.this.name
+  name           = var.store_repo
+  description    = "Le magasin des catalogues installés : une branche par catalogue, poussée par « lcars catalogue install »."
+  private        = false
+  auto_init      = true
+  default_branch = "main"
+  # ⚠ `has_issues` / `has_pull_requests` NE SONT PAS DÉCLARÉS, et ce n'est pas un oubli : ce dépôt
+  # n'est un lieu de travail pour personne, mais la forge ne reprend pas ces deux réglages (mesuré
+  # sur le banc 2002 : posés `false`, relus `true`, replanifiés à chaque passe — même défaut que
+  # `has_wiki` sur `_ops`). Un plan qui ment à chaque apply coûte plus cher que deux onglets que
+  # personne n'ouvre.
+  ignore_whitespace_conflicts = false
+
+  lifecycle {
+    ignore_changes = [migration_mirror_interval]
+  }
+
+  depends_on = [gitea_team_membership.owner]
+}
+
+resource "gitea_repository_file" "catalogues_readme" {
+  count          = local.system_play ? 1 : 0
+  username       = gitea_org.this.name
+  name           = gitea_repository.catalogues[0].name
+  branch         = "main"
+  file_path      = "README.md"
+  content        = file("${path.module}/ops/catalogues.README.md")
+  commit_message = "catalogues: ce que ce dépôt est, et qui y écrit"
+  overwrite      = true
+
+  lifecycle {
+    ignore_changes = [encoding, overwrite, commit_message]
+  }
 }
 
 resource "gitea_repository_file" "ops_readme" {

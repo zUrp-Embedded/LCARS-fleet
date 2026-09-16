@@ -88,18 +88,23 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     assert Map.keys(found) == ["web-demo"]
   end
 
-  test "le STORE d'un catalogue installe n'est pas un depot" do
-    assert {:ok, found} =
-             list(
-               [repo("web/_catalogue"), repo("web/autre-chose")],
-               %{"web/_catalogue" => "name: web\n", "web/autre-chose" => "name: web-bis\n"},
-               %{{"web/autre-chose", "main"} => "sha2"}
-             )
+  describe "un depot est un depot OU QU'IL SOIT — l'installe se lit ailleurs" do
+    # ⚠ CE MODULE NE CLASSE PLUS AUCUN MAGASIN (⚖ user 2026-09-16) : ce qui est INSTALLE, ce sont les
+    # branches du magasin des catalogues (`Fleet.Application.CatalogueStores`), et rien d'autre. Un
+    # depot dans une org qui porte son nom etait autrefois « le magasin de ce catalogue » ; c'est
+    # desormais un depot comme un autre, et son adresse ne decide plus de son sort.
+    test "un depot dans une org qui porte son nom est un depot, pas un magasin" do
+      assert {:ok, found} =
+               list(
+                 [repo("web/source"), repo("web/autre-chose")],
+                 %{"web/source" => "name: web\n", "web/autre-chose" => "name: web-bis\n"},
+                 %{{"web/source", "main"} => "sha1", {"web/autre-chose", "main"} => "sha2"}
+               )
 
-    assert Map.keys(found) == ["web-bis"]
-  end
+      assert Map.keys(found) |> Enum.sort() == ["web", "web-bis"]
+      assert %{"web" => %{repo: "web/source", owner: "web"}} = found
+    end
 
-  describe "le store se reconnait a `owner == manifest.name`, jamais au nom du depot" do
     test "un depot d'utilisateur NOMME `catalogue` est un depot comme un autre" do
       # Use bare catalogue, not _catalogue: repo-name exclusion once hid ordinary user deposits.
       assert {:ok, found} =
@@ -112,7 +117,7 @@ defmodule Fleet.Application.CatalogueDepositsTest do
       assert %{"mobile" => %{repo: "bob/catalogue", owner: "bob"}} = found
     end
 
-    test "un depot A L'ADRESSE d'un store, mais qui declare un AUTRE nom, reste un depot" do
+    test "un depot A L'ADRESSE d'un ancien magasin reste un depot, quel que soit son manifeste" do
       assert {:ok, found} =
                list(
                  [repo("web/_catalogue")],
@@ -121,28 +126,6 @@ defmodule Fleet.Application.CatalogueDepositsTest do
                )
 
       assert %{"autre-chose" => %{repo: "web/_catalogue"}} = found
-    end
-
-    test "`split/2` rend les DEUX moities d'une seule classification" do
-      repos = [repo("web/_catalogue"), repo("alice/mob"), repo("bob/catalogue")]
-
-      manifests = %{
-        "web/_catalogue" => "name: web\n",
-        "alice/mob" => "name: mobile\n",
-        "bob/catalogue" => "name: notes\n"
-      }
-
-      assert {:ok, deposits, stores} =
-               CatalogueDeposits.split(repos,
-                 forge_repo: FakeRepo,
-                 forge_files: FakeFiles,
-                 manifests: manifests,
-                 shas: %{{"alice/mob", "main"} => "s1", {"bob/catalogue", "main"} => "s2"}
-               )
-
-      assert Enum.sort(Map.keys(deposits)) == ["mobile", "notes"]
-      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
-      assert Map.keys(stores) == ["web"]
     end
   end
 
@@ -158,37 +141,6 @@ defmodule Fleet.Application.CatalogueDepositsTest do
                )
 
       assert %{"bob" => %{repo: "bob/mon-catalogue", owner: "bob"}} = found
-    end
-
-    test "TEMOIN de non-vacuite : sous une ORG, la meme forme EST un magasin" do
-      assert {:ok, deposits, stores} =
-               CatalogueDeposits.split([repo("web/_catalogue")],
-                 forge_repo: FakeRepo,
-                 forge_files: FakeFiles,
-                 manifests: %{"web/_catalogue" => "name: web\n"},
-                 orgs: %{"web" => true}
-               )
-
-      assert deposits == %{}
-      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
-    end
-  end
-
-  describe "deux depots qui revendiquent le MEME magasin" do
-    test "le choix est DETERMINISTE et il est DIT — jamais « le dernier vu »" do
-      # Checks the selected store for this input order, not warning emission or order independence.
-      assert {:ok, _deposits, stores} =
-               CatalogueDeposits.split(
-                 [repo("web/_catalogue"), repo("web/vieux-magasin")],
-                 forge_repo: FakeRepo,
-                 forge_files: FakeFiles,
-                 manifests: %{
-                   "web/_catalogue" => "name: web\n",
-                   "web/vieux-magasin" => "name: web\n"
-                 }
-               )
-
-      assert %{"web" => %{"full_name" => "web/_catalogue"}} = stores
     end
   end
 
@@ -252,16 +204,35 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     assert %{"web" => %{repo: "alice/web"}} = found
   end
 
-  test "DEUX depots du meme nom : refus, et les DEUX sont nommes" do
-    assert {:error, {:duplicate_catalogues, dups}} =
-             list(
-               [repo("alice/web"), repo("bob/web")],
-               %{"alice/web" => "name: web\n", "bob/web" => "name: web\n"},
-               %{{"alice/web", "main"} => "s1", {"bob/web", "main"} => "s2"}
-             )
+  # ⚠ UN NOM AMBIGU TOMBE SEUL, ET LES AUTRES RESTENT. Refuser toute la liste rendait `catalogue
+  # list` et `catalogue source` muets pour TOUS les catalogues des qu'un seul nom etait revendique
+  # deux fois — et sur une forge qui garde le magasin d'une installation precedente, c'est le cas
+  # ordinaire (relecture hostile du 2026-09-17).
+  test "DEUX depots du meme nom : ce nom tombe, il est DIT, et les autres catalogues restent lisibles" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, found} =
+                 list(
+                   [repo("alice/web"), repo("bob/web"), repo("carol/mob")],
+                   %{
+                     "alice/web" => "name: web\n",
+                     "bob/web" => "name: web\n",
+                     "carol/mob" => "name: mobile\n"
+                   },
+                   %{
+                     {"alice/web", "main"} => "s1",
+                     {"bob/web", "main"} => "s2",
+                     {"carol/mob", "main"} => "s3"
+                   }
+                 )
 
-    assert [{"web", repos}] = dups
-    assert Enum.sort(repos) == ["alice/web", "bob/web"]
+        assert Map.keys(found) == ["mobile"]
+      end)
+
+    assert log =~ "declare the catalogue 'web'"
+    assert log =~ "alice/web"
+    assert log =~ "bob/web"
+    assert log =~ "AMBIGUOUS"
   end
 
   test "un manifeste ILLISIBLE fait tomber SON depot, pas la liste" do

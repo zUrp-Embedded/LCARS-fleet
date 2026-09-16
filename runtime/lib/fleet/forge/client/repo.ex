@@ -134,35 +134,6 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Returns `%{sha, message}` for callers tracking a catalogue projection's source.
-  The store is a fresh commit, so different HEADs need not mean different content.
-  On the 2026-08-16 Gitea 1.26.1 bench, `/git/trees/{sha}` echoed the input SHA and
-  `/git/commits/{sha}` reported the commit SHA as tree.sha; neither supplied the needed tree hash.
-  `push_store` therefore writes `Source-Commit:` in the message. Parsing that trailer and
-  treating its absence as unknown belong to the caller; this function returns the raw message.
-  A missing message defaults to "", but present values are unchecked. HTTP 404 becomes :not_found.
-  """
-  @spec branch_commit(String.t(), String.t(), Keyword.t()) ::
-          {:ok, %{sha: String.t(), message: String.t()}} | {:error, term()}
-  def branch_commit(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
-    with {:ok, config} <- resolve_config(opts) do
-      case http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
-        {:ok, %{"commit" => %{"id" => sha} = c}} when is_binary(sha) ->
-          {:ok, %{sha: sha, message: Map.get(c, "message", "")}}
-
-        {:ok, _} ->
-          {:error, :no_branch_sha}
-
-        {:error, {:http, 404, _}} ->
-          {:error, :not_found}
-
-        {:error, _} = err ->
-          err
-      end
-    end
-  end
-
-  @doc """
   Returns a binary default branch, including an empty string; no main-branch policy is enforced here.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
@@ -179,7 +150,7 @@ defmodule Fleet.Forge.Client.Repo do
 
   @doc """
   Returns a binary branch tip for the seal's provenance check, without SHA format validation.
-  Unlike branch_commit/3, HTTP 404 retains the transport error shape.
+  HTTP 404 retains the transport error shape, unlike the readers that map it to `:not_found`.
   """
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def branch_head(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -192,6 +163,41 @@ defmodule Fleet.Forge.Client.Repo do
       other -> {:error, {:branch_head_unexpected, other}}
     end
   end
+
+  @doc """
+  Lists every branch as `%{name, sha, message}`, paginated. HTTP 404 (no such repository) becomes
+  `:not_found`, which a caller distinguishes from a repository that simply holds no branch.
+
+  This is what answers "which catalogues are installed": one question about one repository,
+  instead of a search across every visible repository. The head's commit message travels with it
+  (measured on the 1.26.1 bench: the listing carries `commit.message`), so a catalogue store's
+  `Source-Commit:` trailer needs no second read. A missing message is `""`.
+
+  ⚠ WHY A TRAILER AND NOT A CONTENT HASH: a catalogue store is a FRESH commit at every projection,
+  so two HEADs differ even when their trees are identical. On the 2026-08-16 Gitea 1.26.1 bench,
+  `/git/trees/{sha}` echoed the input SHA and `/git/commits/{sha}` reported the commit SHA as
+  tree.sha; neither supplied a usable tree hash. `push_store` therefore writes `Source-Commit:` in
+  the message, and freshness compares that.
+  Entries without a readable name or head are dropped — a listing that cannot be believed in part
+  is not a reason to refuse the rest.
+  """
+  @spec list_branches(String.t(), Keyword.t()) ::
+          {:ok, [%{name: String.t(), sha: String.t(), message: String.t()}]} | {:error, term()}
+  def list_branches(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      case paginate(config, "/repos/#{encode_repo(repo)}/branches", "") do
+        {:ok, items} -> {:ok, Enum.flat_map(items, &branch_entry/1)}
+        {:error, {:http, 404, _}} -> {:error, :not_found}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  defp branch_entry(%{"name" => name, "commit" => %{"id" => sha} = commit})
+       when is_binary(name) and is_binary(sha),
+       do: [%{name: name, sha: sha, message: Map.get(commit, "message", "")}]
+
+  defp branch_entry(_), do: []
 
   @doc """
   HTTP success => true, HTTP 404 => false; other errors propagate.

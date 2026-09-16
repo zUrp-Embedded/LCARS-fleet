@@ -53,6 +53,13 @@ defmodule Fleet.Forge.Client do
           {:ok, :deleted | :absent} | {:error, term()}
   defdelegate delete_branch(repo, branch, opts), to: Repo
 
+  @doc """
+  Lists a repository's branches as `%{name, sha, message}`; `:not_found` when it is absent.
+  """
+  @spec list_branches(String.t(), Keyword.t()) ::
+          {:ok, [%{name: String.t(), sha: String.t(), message: String.t()}]} | {:error, term()}
+  defdelegate list_branches(repo, opts), to: Repo
+
   # ForgeWriter's default names this facade; extracting Files must preserve its seam exports.
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, term()} | {:error, term()}

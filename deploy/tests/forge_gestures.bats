@@ -361,7 +361,8 @@ FAKE
   [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
   [ "$(sed -n '4p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
   grep -q "$LCARS_CATALOGUES_WORK/cat" "$TOFU_LOG"
-  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
+  # le magasin : SA branche du depot du systeme, jamais un depot par catalogue
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/cat' "$GIT_LOG"
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
@@ -369,7 +370,7 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
   [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-  grep -q "clone .*http://forge.test/cat/_catalogue.git" "$GIT_LOG"
+  grep -q "clone --quiet --depth 1 --branch cat http://forge.test/lcars/_catalogues.git" "$GIT_LOG"
   [[ "$output" == *"materiel pose"* ]]
 }
 
@@ -385,10 +386,10 @@ FAKE
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 1 ] || { echo "rc=$status"; echo "$output"; return 1; }
-  [[ "$output" == *"est posé sur la forge (org, comptes, source), mais son matériel local n'a pas pu être posé"* ]]
+  [[ "$output" == *"est posé sur la forge (org, comptes, source sur lcars/_catalogues:cat), mais son matériel local n'a pas pu être posé"* ]]
   [[ "$output" == *"prochain démarrage du conteneur"* ]]
   [[ "$output" == *"deploy/workstation up"* ]]
-  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/cat' "$GIT_LOG"
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {
@@ -483,7 +484,7 @@ FAKE
   # Aucun push de la demo. Le magasin du catalogue de la release, lui, EST pousse : c'est une
   # installation, pas un depot chez le master.
   refute grep -q 'push .*web-demo' "$GIT_LOG"
-  grep -q 'push -q --force http://forge.test/fleet/_catalogue.git main' "$GIT_LOG"
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/fleet' "$GIT_LOG"
 }
 
 @test "apply: SANS catalogue de demonstration dans l'image, l'apply ne dit rien" {

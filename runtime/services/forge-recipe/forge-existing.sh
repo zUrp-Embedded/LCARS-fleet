@@ -37,6 +37,7 @@ ORG="$(q org)"
 USERS="$(q users)"
 TEAMS="$(q teams)"
 REPO="$(q repo)"
+STORE="$(q store)"
 BRANCHES="$(q branches)"
 FILES="$(q files)"
 PROTECTION="$(q protection)"
@@ -148,6 +149,18 @@ if [[ -n "$REPO" && -n "$ORG_ID" ]]; then
       probe_exists "repos/$ORG/$REPO/branch_protections/$PROTECTION" "protection $PROTECTION" \
         && add "protection:$PROTECTION" "$ORG/$REPO/$PROTECTION"
     fi
+  fi
+fi
+
+# ─── the catalogue store ────────────────────────────────────────────────────────────────────────
+# One repository, one branch per installed catalogue. Only its existence and its README are imported:
+# the branches are pushed by `catalogue install`, never declared by this recipe.
+if [[ -n "$STORE" && -n "$ORG_ID" ]]; then
+  STORE_ID="$(probe_id "repos/$ORG/$STORE" "repo $ORG/$STORE")"
+  if [[ -n "$STORE_ID" ]]; then
+    add "store:$STORE" "$STORE_ID"
+    probe_exists "repos/$ORG/$STORE/contents/README.md?ref=main" "file store-main:README.md" \
+      && add "file:store-main:README.md" "$ORG/$STORE/main/README.md"
   fi
 fi
 

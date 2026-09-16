@@ -1,8 +1,10 @@
 defmodule Fleet.Project.Onboard.Refute do
   @moduledoc """
-  Guards against treating a catalogue store as a project.
-  Existing repositories are classified by manifest identity; new destinations by the
-  reserved store address, where a later catalogue installation can force-push.
+  Guards against treating a catalogue store as a project, and against names the system keeps.
+
+  Existing repositories are classified by manifest identity: a repository whose `catalogue.yaml`
+  declares its own owner is a catalogue's source, not a project. New destinations are judged by
+  name: `_`-prefixed names and the system org's name belong to the system.
   """
 
   alias Fleet.Project.Onboard.Repo
@@ -26,10 +28,11 @@ defmodule Fleet.Project.Onboard.Refute do
       {:ok, ^owner} ->
         {:error,
          {:repo_is_catalogue_store, full_name,
-          "'#{full_name}' is the STORE of the catalogue '#{owner}' — the source the fleet pushed " <>
-            "into its own org, not a project. Laying project faces on it would write a project " <>
-            "declaration into a catalogue's source, and every later pass would then read it as a " <>
-            "project. To (re)install that catalogue, inside the container: " <>
+          "'#{full_name}' declares itself the catalogue '#{owner}' — it is a catalogue's SOURCE, " <>
+            "not a project. Laying project faces on it would write a project declaration into a " <>
+            "catalogue's source, and every later pass would then read it as a project. The fleet " <>
+            "keeps what it installed in `#{Fleet.Catalogue.store_repo()}`, one branch per " <>
+            "catalogue; to (re)install this one, inside the container: " <>
             "`lcars catalogue install #{owner}`."}}
 
       {:ok, _other} ->
@@ -65,8 +68,9 @@ defmodule Fleet.Project.Onboard.Refute do
         {:error,
          {:system_name, full_name,
           "'#{name}' begins with `_`: a name the system keeps for what it posts itself — the " <>
-            "catalogue store `#{Fleet.Catalogue.store_repo()}`, the system repository. A project " <>
-            "there is a project the next install overwrites without a word. Rename it and try again."}}
+            "catalogue store `#{Fleet.Catalogue.store_repo()}`, the system repository `_ops`. A " <>
+            "project there is a project the next install overwrites without a word. Rename it and " <>
+            "try again."}}
 
       name == system_org ->
         {:error,

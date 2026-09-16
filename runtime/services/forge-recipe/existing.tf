@@ -21,9 +21,10 @@ data "external" "forge" {
     users     = join(",", var.roles)
     teams     = join(",", keys(local.teams))
     # le dépôt du système et ses branches, sur l'org système seule (sinon vide : pas de sonde)
-    repo      = local.system_play ? var.system_repo : ""
-    branches  = local.system_play ? "tool_request,incidents" : ""
-    files     = local.system_play ? "main:README.md,tool_request:README.md,tool_request:ops/toolchains.d/.gitkeep,incidents:work/README.md" : ""
+    repo       = local.system_play ? var.system_repo : ""
+    store      = local.system_play ? var.store_repo : ""
+    branches   = local.system_play ? "tool_request,incidents" : ""
+    files      = local.system_play ? "main:README.md,tool_request:README.md,tool_request:ops/toolchains.d/.gitkeep,incidents:work/README.md" : ""
     protection = local.system_play ? "tool_request" : ""
   }
 }
@@ -47,9 +48,10 @@ locals {
   # S'IMPORTENT, ET CE N'EST PAS DU CONFORT : une fois la protection posée, le master ne peut plus y
   # commiter (« user cannot commit to repo », mesuré à état perdu sur le banc 2002) — un fichier
   # non importé serait « à créer », et l'apply mourrait dessus.
-  existing_repo     = { for k, v in local.existing : trimprefix(k, "repo:") => v if startswith(k, "repo:") }
-  existing_branches = { for k, v in local.existing : trimprefix(k, "branch:") => v if startswith(k, "branch:") }
-  existing_files    = { for k, v in local.existing : trimprefix(k, "file:") => v if startswith(k, "file:") }
+  existing_repo         = { for k, v in local.existing : trimprefix(k, "repo:") => v if startswith(k, "repo:") }
+  existing_store        = { for k, v in local.existing : trimprefix(k, "store:") => v if startswith(k, "store:") }
+  existing_branches     = { for k, v in local.existing : trimprefix(k, "branch:") => v if startswith(k, "branch:") }
+  existing_files        = { for k, v in local.existing : trimprefix(k, "file:") => v if startswith(k, "file:") }
   existing_tool_request = { for k, v in local.existing_branches : k => v if k == "tool_request" }
   existing_incidents    = { for k, v in local.existing_branches : k => v if k == "incidents" }
   existing_protection   = { for k, v in local.existing : trimprefix(k, "protection:") => v if startswith(k, "protection:") }
@@ -84,6 +86,18 @@ import {
 import {
   for_each = local.existing_repo
   to       = gitea_repository.ops[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_store
+  to       = gitea_repository.catalogues[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "store-main:README.md" }
+  to       = gitea_repository_file.catalogues_readme[0]
   id       = each.value
 }
 

@@ -695,6 +695,11 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : $qui ($f) ne porte plus la ligne attendue" >&2; return 1; }
     [ "$lu" = "$attendu" ] || manque="$manque\n  $qui ($f) : « $lu », attendu « $attendu »"
   done
+  # le produit : `Fleet.Catalogue` porte le même défaut, pour l'org où vit le magasin des catalogues
+  lu="$(sed -n 's/^  @system_org_default "\([^"]*\)"$/\1/p' "$REPO/runtime/lib/fleet/catalogue.ex" | head -n1)"
+  [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : Fleet.Catalogue ne déclare plus @system_org_default" >&2; return 1; }
+  [ "$lu" = "$attendu" ] || manque="$manque\n  Fleet.Catalogue (runtime/lib/fleet/catalogue.ex) : « $lu », attendu « $attendu »"
+
   # le runtime : hors de la table (sa ligne porte un « || » d'Elixir, que le séparateur mangerait)
   lu="$(sed -n 's/.*System.get_env("LCARS_FORGE_ORG", "\([^"]*\)").*/\1/p' "$REPO/runtime/config/runtime.exs" | head -n1)"
   [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : runtime.exs ne dérive plus le dépôt du système de l'org" >&2; return 1; }

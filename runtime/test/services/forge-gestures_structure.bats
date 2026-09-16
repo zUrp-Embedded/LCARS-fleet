@@ -80,13 +80,16 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -t 0 ]] || cat >/dev/null
 echo "CURL:$method ${url#http://forge.test}" >> "$CALLS"
+code=200
 case "$url" in
   */members|*/teams|*/admin/users*) rep='[]' ;;
   */api/v1/user) [[ -n "${STUB_SANS_SIEGE:-}" ]] && rep='' || rep='{"login":"le-siege"}' ;;
+  # le magasin des catalogues : pose par la recette, SONDE par le geste
+  */api/v1/repos/*/_catalogues) rep=''; [[ -z "${STUB_SANS_MAGASIN:-}" ]] || code=404 ;;
   *) rep='' ;;
 esac
 if [[ -n "$out" && "$out" != /dev/null ]]; then printf '%s' "$rep" > "$out"; elif [[ -z "$out" ]]; then printf '%s' "$rep"; fi
-[[ -z "$fmt" ]] || printf '200'
+[[ -z "$fmt" ]] || printf '%s' "$code"
 EOF
   cat > "$BIN/git" <<'EOF'
 #!/usr/bin/env bash
@@ -170,14 +173,16 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   catalogue="$(grep -n "^TOFU:tofu/fleet apply" "$CALLS" | cut -d: -f1)"
   [ "$systeme" -lt "$catalogue" ]
   [[ "$output" == *"fleet <- la release ($RELEASE_CAT)"* ]]
-  [[ "$output" == *"fleet installe (org, comptes, teams, sa source dans fleet/_catalogue) — le materiel est celui de la release"* ]]
+  [[ "$output" == *"fleet installe (org, comptes, teams, sa source sur lcars/_catalogues:fleet) — le materiel est celui de la release"* ]]
 }
 
-@test "apply : le magasin du catalogue de la release recoit la projection — le depot _catalogue de SON org, poussee de force, sans trailer quand la revision est inconnue, avec quand l'image la porte" {
+@test "apply : le magasin du catalogue de la release recoit la projection — SA BRANCHE du magasin du systeme, poussee de force, sans trailer quand la revision est inconnue, avec quand l'image la porte" {
   apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "CURL:POST /api/v1/orgs/fleet/repos" "$CALLS"
-  grep -q "^GIT:push -q --force http://forge.test/fleet/_catalogue.git main$" "$CALLS"
+  # le magasin est POSE PAR LA RECETTE : le geste le SONDE, il ne le cree pas
+  grep -qx "CURL:GET /api/v1/repos/lcars/_catalogues" "$CALLS"
+  refute grep -q "^CURL:POST /api/v1/orgs/fleet/repos" "$CALLS"
+  grep -q "^GIT:push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/fleet$" "$CALLS"
   grep -q "^GIT:-c user.name=system_starfleet -c user.email=system_starfleet@lcars.local commit -q -m chore(catalogue): projection de fleet depuis sa source$" "$CALLS"
   refute grep -q "Source-Commit" "$CALLS"
   : > "$CALLS"
@@ -232,9 +237,16 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   grep -qx "CLI:tool catalogue-source web-demo" "$CALLS"
   grep -q "^GIT:clone --quiet --depth 1 --branch main http://forge.test/quelquun/web-demo.git " "$CALLS"
   grep -qx "TOFU:tofu/web-demo apply -auto-approve -input=false -no-color" "$CALLS"
-  grep -q "^GIT:clone --quiet --depth 1 http://forge.test/web-demo/_catalogue.git " "$CALLS"
+  grep -q "^GIT:clone --quiet --depth 1 --branch web-demo http://forge.test/lcars/_catalogues.git " "$CALLS"
   grep -q "commit -q -m chore(catalogue): projection de web-demo depuis sa source -m Source-Commit: deadbeefcafe$" "$CALLS"
   [[ "$output" == *"web-demo <- quelquun/web-demo (main@deadbeef)"* ]]
+}
+
+@test "magasin ABSENT : refus NOMME qui renvoie a la recette — l'org est posee, la source n'est nulle part" {
+  STUB_SANS_MAGASIN=1 install web-demo
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"le magasin des catalogues (lcars/_catalogues) ne repond pas (HTTP 404) — la recette de la forge le pose"*"web-demo n'est PAS installe"* ]]
+  refute grep -q "^GIT:push" "$CALLS"
 }
 
 @test "install <catalogue de la release> a la main : la meme voie que celle de l'apply, depuis la release" {

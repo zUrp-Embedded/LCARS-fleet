@@ -39,12 +39,15 @@ if forge_opts != [] do
   config :lcars_fleet, :pilot_forge, forge_opts
 end
 
-# The system repository lives in the system org: the machine names both (services.env, loaded by
-# bin/fleet), and an org the installer renamed takes its repository along. The literal is the same
-# default as the shell protocol's — MUR 19 holds them equal.
+# The system org carries the fleet's identity and the system's own repositories (`_ops`, the
+# catalogue store `_catalogues`): the machine names it (services.env, loaded by bin/fleet), and an
+# org the installer renamed takes its repositories along. The literal is the same default as the
+# shell protocol's — MUR 19 holds them equal.
+system_org = System.get_env("LCARS_FORGE_ORG", "lcars")
+
 config :lcars_fleet,
-  pilot_ops_repo:
-    System.get_env("LCARS_OPS_REPO") || "#{System.get_env("LCARS_FORGE_ORG", "lcars")}/_ops"
+  catalogue_system_org: system_org,
+  pilot_ops_repo: System.get_env("LCARS_OPS_REPO") || "#{system_org}/_ops"
 
 # Eval tools that create projects also push, unlike reconciliation of existing branches.
 # Configure git auth outside tool_mode so these tools receive the same account identity.

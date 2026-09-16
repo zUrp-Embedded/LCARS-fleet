@@ -25,7 +25,7 @@ setup() {
     grep -q "^$r {" "$TF" || { echo "manque : $r" >&2; return 1; }
   done
   n="$(grep -c '^  count *= local.system_play ? 1 : 0$' "$TF")"
-  [ "$n" -eq 8 ] || { echo "$n ressources conditionnees sur l'org systeme, attendu 8" >&2; return 1; }
+  [ "$n" -eq 10 ] || { echo "$n ressources conditionnees sur l'org systeme, attendu 10" >&2; return 1; }
   grep -q '^  system_play = var.org == var.system_org$' "$TF"
 }
 
@@ -62,6 +62,20 @@ setup() {
   grep -q 'system-incidents.json' "$RECIPE/ops/incidents.README.md"
 }
 
+# ⚠ LE MAGASIN DES CATALOGUES EST POSE PAR LA RECETTE, COMME `_ops` — et pour la meme raison : deux
+# poseurs pour un objet, c'est un objet que personne ne tient. Ce que la recette NE pose pas, ce sont
+# ses branches : elles arrivent par `catalogue install`, une par catalogue installe.
+@test "le magasin des catalogues est declare, avec son README, sur l'org systeme seule" {
+  grep -q '^resource "gitea_repository" "catalogues" {$' "$TF"
+  grep -q '^resource "gitea_repository_file" "catalogues_readme" {$' "$TF"
+  grep -A3 '^variable "store_repo" {' "$TF" | grep -q 'default     = "_catalogues"'
+  # le nom du depot est celui que le produit declare, et que les deux ecrivains shell recopient
+  grep -q '@store_name "_catalogues"' "$BATS_TEST_DIRNAME/../../../lib/fleet/catalogue.ex"
+  [ -f "$RECIPE/ops/catalogues.README.md" ]
+  # aucune branche de catalogue n'est declaree ici : elles viennent de `catalogue install`
+  ! grep -q 'gitea_repository_branch" "[a-z-]*catalogue' "$TF"
+}
+
 @test "le geste de forge ne pose plus le depot ni la protection : ni ensure_ops_repo ni toolchain-protection" {
   ! grep -q 'ensure_ops_repo\|toolchain-protection\|branch_protections' "$RECIPE/../forge-gestures.sh"
 }
@@ -73,10 +87,10 @@ setup() {
 @test "l'etat perdu se reconstruit : depot, branches, fichiers et protection sont sondes puis importes" {
   local ex="$RECIPE/existing.tf" sonde="$RECIPE/forge-existing.sh"
   # la sonde recoit ce qu'il faut chercher, sur l'org systeme SEULE
-  grep -q 'repo      = local.system_play ? var.system_repo : ""' "$ex"
-  grep -q 'branches  = local.system_play ? "tool_request,incidents" : ""' "$ex"
-  grep -q 'files     = local.system_play ?' "$ex"
-  grep -q 'protection = local.system_play ? "tool_request" : ""' "$ex"
+  grep -qE '^ +repo +=' "$ex" && grep -q 'local.system_play ? var.system_repo : ""' "$ex"
+  grep -q 'local.system_play ? "tool_request,incidents" : ""' "$ex"
+  grep -qE '^ +files +=' "$ex"
+  grep -q 'local.system_play ? "tool_request" : ""' "$ex"
   # et elle les rend, chacun sous la forme d'id que le provider attend
   grep -q 'add "repo:\$REPO" "\$REPO_ID"' "$sonde"
   grep -q 'add "branch:\$b" "\$REPO_ID/\$b"' "$sonde"
@@ -85,7 +99,9 @@ setup() {
   # un import par objet : le depot, deux branches, quatre fichiers, la protection
   local n
   n="$(grep -c 'to       = gitea_repository' "$ex")"
-  [ "$n" -eq 8 ] || { echo "$n imports vers des objets du depot, attendu 8" >&2; return 1; }
+  [ "$n" -eq 10 ] || { echo "$n imports vers des objets de depot, attendu 10" >&2; return 1; }
+  grep -q 'local.system_play ? var.store_repo : ""' "$ex"
+  grep -q 'add "store:\$STORE" "\$STORE_ID"' "$sonde"
   # les attributs d'ecriture que le provider ne relit pas ne font pas rejouer un update
-  [ "$(grep -c 'ignore_changes = \[encoding, overwrite, commit_message\]' "$TF")" -eq 4 ]
+  [ "$(grep -c 'ignore_changes = \[encoding, overwrite, commit_message\]' "$TF")" -eq 5 ]
 }

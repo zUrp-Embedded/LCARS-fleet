@@ -1,20 +1,20 @@
 defmodule Fleet.Application.CatalogueLifecycle do
   @moduledoc """
-  Reports available/installed catalogue states from visible forge deposits and stores.
-  updatable is an installed qualifier, never an automatic update: installation is
-  an explicit admin action. No per-human activation state is represented.
+  Reports available/installed catalogue states from what the forge carries: the DEPOSITS a search
+  finds (what an author pushed) and the STORES the store repository's branches name (what is
+  installed). updatable is an installed qualifier, never an automatic update: installation is an
+  explicit admin action. No per-human activation state is represented.
 
-  A store, not merely an org or a repository name, determines installed; Deposits
-  classifies owner/name and org status, treating an unreadable owner type as store.
-  This does not prove local material is installed or usable. The bundled catalogue
-  is always reported installed after a successful listing.
+  A branch of the store repository, proven by its own manifest, is what determines installed. This
+  does not prove local material is installed or usable. The bundled catalogue is always reported
+  installed after a successful listing.
 
-  Missing deposit, missing source trailer or unreadable store head yields nil
-  freshness, not false. A missing/unreadable manifest can omit the store upstream.
+  Missing deposit, missing source trailer, or a store whose identity could not be proven, all
+  yield nil freshness — never false.
   """
 
   alias Fleet.Application.CatalogueDeposits
-  alias Fleet.Forge.Payload
+  alias Fleet.Application.CatalogueStores
 
   @bundled Fleet.Catalogue.bundled_name()
 
@@ -28,21 +28,22 @@ defmodule Fleet.Application.CatalogueLifecycle do
         }
 
   @doc """
-  Combines a single repo search and classification with subsequent store-head reads.
-  Search/duplicate errors propagate; sequential reads can straddle changes.
+  Combines the deposits (a repository search) with the stores (the store repository's branches).
+  Search/duplicate/listing errors propagate; sequential reads can straddle changes.
   """
   @spec states(keyword()) :: {:ok, %{String.t() => entry()}} | {:error, term()}
   def states(opts \\ []) do
     repo_mod = Keyword.get(opts, :forge_repo, Fleet.Forge.Client.Repo)
+    # The address the STORES WERE READ FROM, not the global default: one source per answer.
+    store_repo = Keyword.get(opts, :store_repo, Fleet.Catalogue.store_repo())
 
     with {:ok, repos} <- repo_mod.search_repos(opts),
-         {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
-      stores = candidates
-
+         {:ok, deposits} <- CatalogueDeposits.from_repos(repos, opts),
+         {:ok, stores} <- CatalogueStores.list(opts) do
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
 
-      {:ok, Map.new(names, &{&1, entry(&1, deposits[&1], stores[&1], repo_mod, opts)})}
+      {:ok, Map.new(names, &{&1, entry(&1, deposits[&1], stores[&1], store_repo)})}
     end
   end
 
@@ -60,13 +61,6 @@ defmodule Fleet.Application.CatalogueLifecycle do
       {:ok, entries} ->
         Enum.each(lines(entries), &IO.puts/1)
         System.halt(0)
-
-      {:error, {:duplicate_catalogues, dups}} ->
-        Enum.each(dups, fn {name, repos} ->
-          IO.puts(:stderr, "DUPLICATE #{name} #{Enum.join(Enum.sort(repos), " ")}")
-        end)
-
-        System.halt(3)
 
       {:error, reason} ->
         IO.puts(:stderr, "UNREACHABLE #{inspect(reason)}")
@@ -120,13 +114,6 @@ defmodule Fleet.Application.CatalogueLifecycle do
             System.halt(2)
         end
 
-      {:error, {:duplicate_catalogues, dups}} ->
-        Enum.each(dups, fn {n, repos} ->
-          IO.puts(:stderr, "DUPLICATE #{n} #{Enum.join(Enum.sort(repos), " ")}")
-        end)
-
-        System.halt(3)
-
       {:error, reason} ->
         IO.puts(:stderr, "UNREACHABLE #{inspect(reason)}")
         System.halt(1)
@@ -159,39 +146,27 @@ defmodule Fleet.Application.CatalogueLifecycle do
   defp line(name, %{state: :available, deposit: d}),
     do: "AVAILABLE #{name} #{d.repo}"
 
-  defp entry(@bundled, _deposit, _store, _repo_mod, _opts),
+  defp entry(@bundled, _deposit, _store, _store_repo),
     do: %{name: @bundled, state: :installed, updatable?: nil, deposit: nil, store: nil}
 
-  defp entry(name, deposit, nil, _repo_mod, _opts) when is_map(deposit),
+  defp entry(name, deposit, nil, _store_repo) when is_map(deposit),
     do: %{name: name, state: :available, updatable?: nil, deposit: deposit, store: nil}
 
-  defp entry(name, deposit, store, repo_mod, opts) when is_map(store) do
-    full = Payload.full_name(store)
-    branch = Payload.default_branch(store) || "main"
-
-    case repo_mod.branch_commit(full, branch, opts) do
-      {:ok, head} ->
-        %{
-          name: name,
-          state: :installed,
-          updatable?: updatable?(deposit, head),
-          deposit: deposit,
-          store: full
-        }
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "CatalogueLifecycle: #{full} exists but its head could not be read (#{inspect(reason)}) " <>
-            "— reported INSTALLED, up-to-dateness unknown."
-        )
-
-        %{name: name, state: :installed, updatable?: nil, deposit: deposit, store: full}
-    end
+  # A store carries its branch head AND that head's message from the listing: one read answered it
+  # for every catalogue, where one read per store used to. Freshness still compares the trailer.
+  defp entry(name, deposit, %{branch: branch} = store, store_repo) do
+    %{
+      name: name,
+      state: :installed,
+      # An unproven store cannot be compared: its manifest could not be read, so freshness is
+      # unknown rather than false.
+      updatable?: if(Map.get(store, :proven?, true), do: updatable?(deposit, store), else: nil),
+      deposit: deposit,
+      store: "#{store_repo}:#{branch}"
+    }
   end
 
   # Fallback for no usable deposit/store; a store without a deposit matches the prior clause.
-  defp entry(name, _deposit, _store, _repo_mod, _opts),
+  defp entry(name, _deposit, _store, _store_repo),
     do: %{name: name, state: :available, updatable?: nil, deposit: nil, store: nil}
 end

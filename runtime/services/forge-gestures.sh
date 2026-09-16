@@ -67,10 +67,14 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-$RECIPE_SOURCE}"
 # que le verrou d'apply y vit — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
 CATALOGUE_WORK="${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}"
-# Le nom vit ici parce que ce fichier est ce qui ECRIT le magasin : une adresse appartient a celui
-# qui pose. Rien ne se DECIDE en la lisant. Le `_` initial est de l'UX (⚖ user) : il separe a l'oeil
-# ce que la fleet pose de ce qu'un humain depose.
-STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
+# LE MAGASIN DES CATALOGUES : UN DEPOT, UNE BRANCHE PAR CATALOGUE (⚖ user 2026-09-16). Il vit dans
+# l'org SYSTEME — tout ce qui est systeme y vit —, et « quels catalogues sont installes » devient UNE
+# question a la forge (les branches de ce depot) la ou c'etait une recherche sur tous les depots
+# visibles. Le `_` initial est de l'UX (⚖ user) : il separe a l'oeil ce que la fleet pose de ce qu'un
+# humain depose. Le nom vit ici parce que ce fichier est ce qui ECRIT le magasin ; `Fleet.Catalogue`
+# en est l'autorite cote produit, et un temoin tient les trois d'accord.
+STORE_REPO="${LCARS_STORE_REPO:-_catalogues}"
+STORE_FULL="$SYSTEM_ORG/$STORE_REPO"
 # La CLI posee vit dans le repertoire des liens (`PROV_LINK_DIR` de l'installeur, meme defaut que
 # `lib/module-protocol.sh`). Ce script tourne depuis DEUX places : l'arbre embarque
 # (`/opt/lcars/services/`, un checkout), ou `bin/` est son voisin, et la copie a plat
@@ -690,15 +694,15 @@ cmd_install() {
   # systeme, pour la meme raison (cf. `demote_creator_from_owners`).
   demote_creator_from_owners "$name" "$tok"
 
-  # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
-  #    sans sa source est un install interrompu, et aucun conteneur ne peut servir un catalogue dont le
-  #    materiel n'est nulle part.
+  # 6. Le STORE : la source sur SA branche du magasin des catalogues. C'est LUI qui signe
+  #    l'installation — une org sans sa source est un install interrompu, et aucun conteneur ne peut
+  #    servir un catalogue dont le materiel n'est nulle part.
   push_store "$name" "$src" "$tok" "$sha"
 
   # Le catalogue de la release n'a pas de materiel a poser : la release EST son materiel. Le geste
   # du boot (`forge.d/catalogues.sh`) le sait par son nom et ne clone pas son magasin.
   if [[ -n "$embarque" && "$name" == "$embarque" ]]; then
-    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO) — le materiel est celui de la release"
+    echo "forge-gestures: $name installe (org, comptes, teams, sa source sur $STORE_FULL:$name) — le materiel est celui de la release"
     return 0
   fi
 
@@ -716,10 +720,10 @@ cmd_install() {
   install_material "$name" "$src" && materiel=0
 
   if [[ "$materiel" -eq 0 ]]; then
-    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
+    echo "forge-gestures: $name installe (org, comptes, teams, sa source sur $STORE_FULL:$name, materiel pose)"
   else
     # la forge porte l'installation, mais cette machine ne sert pas encore le catalogue : ce n'est pas un succes
-    die "install: $name est posé sur la forge (org, comptes, source), mais son matériel local n'a pas pu être posé dans ${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues} (cause au-dessus) — tant qu'il manque, ses projets naissent du squelette du catalogue livré. Il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »"
+    die "install: $name est posé sur la forge (org, comptes, source sur $STORE_FULL:$name), mais son matériel local n'a pas pu être posé dans ${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues} (cause au-dessus) — tant qu'il manque, ses projets naissent du squelette du catalogue livré. Il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »"
   fi
 }
 
@@ -734,8 +738,8 @@ install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite
   local dir="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}/$name"
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
-  GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \
-    "${FORGE_BASE_URL%/}/${name}/${STORE_REPO}.git" "$dir.tmp" || { rm -rf "$dir.tmp"; return 1; }
+  GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 --branch "$name" \
+    "${FORGE_BASE_URL%/}/${STORE_FULL}.git" "$dir.tmp" || { rm -rf "$dir.tmp"; return 1; }
   rm -rf "$dir"
   mv "$dir.tmp" "$dir"
 }
@@ -749,12 +753,18 @@ install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite
 # DISPO ». La forge ne donne pas non plus de hash de CONTENU exploitable.
 push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
   local name="$1" tree="$2" tok="$3" src_sha="${4:-}"
-  local url="${FORGE_BASE_URL%/}/${name}/${STORE_REPO}.git"
+  local url="${FORGE_BASE_URL%/}/${STORE_FULL}.git"
 
-  printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
-    | curl -sS -K - -o /dev/null -m 20 -X POST -H 'Content-Type: application/json' \
-      -d "{\"name\":\"${STORE_REPO}\",\"private\":false,\"auto_init\":false}" \
-      "${FORGE_BASE_URL%/}/api/v1/orgs/${name}/repos" || true
+  # ⚠ LE DEPOT EST POSE PAR LA RECETTE, PAS ICI : un geste qui creerait le magasin du systeme
+  # laisserait deux poseurs pour un objet (cf. `_ops`, lot 3). Absent, on REFUSE en le nommant —
+  # pousser une branche sur un depot qui n'existe pas rend « Push to create is not enabled for
+  # organizations », un message qui parle d'un reglage alors que le fait est qu'il n'y a rien.
+  local code
+  code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
+    | curl -sS -K - -o /dev/null -w '%{http_code}' -m 15 \
+      "${FORGE_BASE_URL%/}/api/v1/repos/$STORE_FULL" 2>/dev/null || true)"
+  [[ "$code" == "200" ]] \
+    || die "install: le magasin des catalogues ($STORE_FULL) ne repond pas (HTTP ${code:-aucune reponse}) — la recette de la forge le pose ; l'org de $name est posee, mais sa source n'est nulle part et $name n'est PAS installe"
 
   local stage; stage="$(mktemp -d)"
   cp -r "$tree/." "$stage/"
@@ -768,8 +778,8 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
     && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
        GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
        GIT_CONFIG_VALUE_0="Authorization: token $tok" \
-       git push -q --force "$url" main ) \
-    || { rm -rf "$stage"; die "install: source NON poussee dans $name/$STORE_REPO — l'org est posee mais le catalogue n'est PAS installe"; }
+       git push -q --force "$url" "HEAD:refs/heads/$name" ) \
+    || { rm -rf "$stage"; die "install: source NON poussee sur $STORE_FULL:$name — l'org est posee mais le catalogue n'est PAS installe"; }
   rm -rf "$stage"
 }
 

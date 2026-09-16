@@ -1710,7 +1710,7 @@ defmodule Fleet.Forge.ClientTest do
 
   # Les consommateurs catalogue utilisent l'existence de l'org ; ce lecteur ne prouve ni
   # provisioning complet ni santé du catalogue. Une panne reste distincte d'un 404.
-  describe "org_exists?/2 — la signature d'un catalogue installe" do
+  describe "org_exists?/2 — l'org d'un catalogue, sans laquelle un projet n'a nulle part ou naitre" do
     test "org presente → {:ok, true}" do
       handlers = %{{"GET", "/api/v1/orgs/fleet"} => {200, %{"username" => "fleet"}}}
       assert {:ok, true} = ForgeClient.Repo.org_exists?("fleet", opts(handlers))
