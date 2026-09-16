@@ -49,7 +49,7 @@ des témoins exécutés est la seule source de vérité pour compter et comparer
 
 Une ligne par témoin, `module`, `nom`, `état`, `async`, `temps_us`, `fichier`
 (`test/support/time_formatter.ex`). Deux manifestes se diffent sur les deux premières colonnes.
-Mesuré le 2026-09-06 : 138 modules `async: false` font 266 s de mur sur 317, et vingt d'entre eux
+Mesuré le 2026-09-06 : 138 modules `async: false` font 266 s de mur sur 317 (320 aujourd'hui), et vingt d'entre eux
 en font 84 %.
 
 Cette forme est **vérifiée à l'échelle du dossier** par `tests.dirs_mirror_source`

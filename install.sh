@@ -402,9 +402,12 @@ suite_root() { # la relance en root : la mesure root décide seule, puis le dél
   if [[ "$DRY_RUN" -eq 1 ]]; then
     # la commande dite refait sa mesure : les choix reçus en options la suivent, les faits de cette passe non
     choix_options
-    # la copie vérifiée d'un kit est retirée à la sortie : son chemin ne se rejoue pas
+    # LE CHEMIN IMPRIME EST RELATIF A UNE COPIE QUI PART. Le kit vérifié est retiré par root à sa
+    # sortie : ni son chemin absolu (qui n'existera plus) ni ce chemin relatif (dont le dossier
+    # n'existera plus) ne se rejouent. La commande dit donc CE QUI SERAIT FAIT, et la phrase qui la
+    # précède dit comment la rejouer — en relançant l'installation, seul geste qui refasse le kit.
     [[ "$SCRIPT_DIR" != */lcars-kit.??????/lcars_install ]] \
-      || { echo "  Depuis le kit vérifié, dont root retire la copie à la sortie :"; DELEGUE="deploy/$MODE"; }
+      || { echo "  Depuis la copie vérifiée du kit, que root retire à sa sortie — ni ce dossier ni son chemin ne survivent, et la commande ci-dessous se rejoue en relançant l'installation :"; DELEGUE="deploy/$MODE"; }
     sortie_dite "$DELEGUE" up ${suite[@]+"${suite[@]}"} ${CHOIX[@]+"${CHOIX[@]}"}
   fi
   # le délégué reçoit les faits et les retire à sa sortie

@@ -27,8 +27,8 @@
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
-# et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
+# L'hote nomme le protocole (LCARS_MODULE_PROTOCOL) : le boot du conteneur, un module de
+# l'installeur, ou un temoin. Le contrat de ce dialecte est dans le fichier source.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
@@ -67,7 +67,7 @@ create_branch() {
   local tokfile="$LCARS_SYSTEM_TOKEN_FILE" tok
   tok="$(read_token "$tokfile")"
   [[ -n "$tok" ]] || {
-    p_drift "jeton systeme pas encore la ($tokfile) — 63-forge-tokens le minte quand la forge est semee ; la branche se posera a la convergence suivante"
+    p_drift "jeton système pas encore là ($tokfile) — le geste des jetons le minte quand la forge est semée (sur un poste, « deploy/workstation up » ; dans un conteneur, son démarrage) ; la branche se posera à la convergence suivante"
     return 0; }
 
   # La distinction ne se lit PAS sur la sonde de branche : sur un depot absent, l'API rend 404 sur la
@@ -152,12 +152,12 @@ apply() {
        p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
-    *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par le conteneur) ; la branche se posera a la convergence suivante" ;;
+    *) p_drift "forge injoignable — la branche n'est pas posée. La forge est montée par l'installation sur un poste, ou fournie à l'instance ; la branche se posera à la convergence suivante" ;;
   esac
   verdict_apply
 }
 
-case "${1:?usage: 65-ops-branch.sh <check|apply>}" in
+case "${1:?usage: ops-branch.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

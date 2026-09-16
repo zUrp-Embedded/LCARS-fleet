@@ -18,7 +18,11 @@ Une app Elixir/OTP unique, `:lcars_fleet`, qui lance, surveille et récolte des 
 seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de vérité.
 
 `runtime/` est un logiciel distinct de `deploy/`, l'installeur, qui a sa propre porte
-(`deploy/gate.sh`) et sa carte (`deploy/README.md`). Rien ici ne parle de l'installation.
+(`deploy/gate.sh`) et sa carte (`deploy/README.md`). Mais les deux se touchent, et le nier envoie
+chaque session chercher ailleurs : `services/` porte les gestes que l'installeur JOUE (forge.d,
+human.d, l'init du conteneur), leur protocole (`services/lib/module-protocol.sh`) est le dialecte
+que les deux rails partagent, et `Fleet.BootGuard` lit les faits que l'installation pose sur la
+machine. Ce qui n'est pas ici : les modules de l'installeur, sa lib, ses terrains.
 
 ## Où sont les choses
 
@@ -35,7 +39,7 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `priv/memory-x/` | Memory-X, feature gelée (prototype d'origine + profils v2.5, dont la conformité n'est tenue que par des témoins `skip`), lue par rien |
 | `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
 | `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
-| `test/` | ExUnit (285 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
+| `test/` | ExUnit (320 fichiers), bats des launchers et services (50), python du bridge MCP (4), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
 | `git-hooks/` | pre-commit (stardate, en-têtes GO-7) et pre-push (pas de force-push sur les faces publiées) ; à installer par `install-hooks.sh` |
 
 ## Build, test, gate
@@ -141,7 +145,9 @@ pod → pilot enrichi, est un relais fonctionnel : ne pas le « simplifier ».
 Trois fichiers, dans cet ordre : `config/config.exs`, `config/<env>.exs`, `config/runtime.exs`.
 `runtime.exs` lit les env vars de l'humain (`~/.lcars/fleet.env`) et **tout son corps est sous
 `if config_env() != :test`** : hors de ce garde, `mix test` ouvrirait un port et le boot casserait.
-Toute config runtime nouvelle reste dans le garde.
+Toute config runtime nouvelle reste dans le garde. Le boot y appelle `Fleet.BootGuard.verify/1`
+(GUARD B : ni root, ni le siège, ni un uid hors des bornes du système) et lève ce qu'il rend — le
+jugement vit dans le module, que ses témoins jouent branche par branche, jamais ici.
 
 Toute la config vit sous `:lcars_fleet`, la clé préfixée par son domaine
 (`api_http_port`, `spawner_launch_backend`). Le préfixe évite une collision réelle entre `api` et

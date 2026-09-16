@@ -164,7 +164,7 @@ mix gate
 ├─ compile --warnings-as-errors   # + le compilateur boundary (arêtes montantes = build cassé)
 ├─ test                            # ExUnit — baseline hermétique (REST Plug.Test, spawn StubBackend) ; les tests transport/launcher ouvrent de vraies sockets/pods
 ├─ tests hors-mix                  # bridge MCP stdio (python) + tests bats des launchers (bwrap/claude)
-├─ lcars.contracts.check          # contrats inter-modules — 20 invariants à cliquet
+├─ lcars.contracts.check          # contrats inter-modules — 75 murs à cliquet
 ├─ lcars.topology --check         # fraîcheur de la carte générée (lib/fleet/README.md ≡ use Boundary)
 └─ dialyzer                        # strict (unmatched_returns, error_handling, extra_return…)
 ```

@@ -446,12 +446,18 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   esac
 }
 
+# Le remede depend du RAIL, et un seul des deux a systemd : dans un conteneur, le superviseur du
+# demarrage tient ce service, et « systemctl » n'y designe rien. Nommer le geste de l'autre rail
+# envoie chercher une commande qui n'existe pas sur la machine ou on la lit.
 _die_executor_absent() {
+  local remede="    sudo systemctl status lcars-catalogue
+    sudo systemctl start  lcars-catalogue"
+  [[ ! -r /run/lcars-boot.state && ! -f /.dockerenv ]] || remede="    le superviseur du démarrage le relance ; « docker logs <conteneur> » dit pourquoi il est tombé
+    depuis l'hôte : « deploy/container status », puis « deploy/container up » si l'instance est à terre"
   die "catalogue install: le service qui execute ce geste ne tourne pas.
   Ce n'est pas un refus : la porte est fermee, pas gardee. « $_CATALOGUE_SOCKET » est absent ou
   injoignable. C'est un geste SYSTEME, pas un geste d'admin de forge :
-    sudo systemctl status lcars-catalogue
-    sudo systemctl start  lcars-catalogue"
+$remede"
 }
 
 cmd_catalogue_install() {

@@ -68,7 +68,11 @@ EOF
   [[ "$output" == *"DRIFT"* ]]
   [[ "$output" == *"pas encore"* ]]
   # Le message dit QUI le posera et QUAND ca se fermera — sans ca, « pas encore » est une excuse.
-  [[ "$output" == *"63-forge-tokens"* ]]
+  # Il nomme le GESTE, pas un module de l'installeur : ce geste se joue aussi au demarrage d'un
+  # conteneur, ou aucun module de l'installeur ne tourne.
+  [[ "$output" == *"le geste des jetons"* ]]
+  [[ "$output" == *"convergence suivante"* ]]
+  refute_out '63-forge-tokens' <<<"$output"
   [[ "$output" == *"convergence suivante"* ]]
 }
 

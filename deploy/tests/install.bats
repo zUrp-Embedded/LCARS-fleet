@@ -1342,7 +1342,9 @@ EOF
   pipee --workstation --bench
   [ "$status" -eq 0 ]
   pipee --workstation --bench --dry-run
-  [[ "$output" == *"déjà là, sha256 vérifié, rien n'est téléchargé"*"Depuis le kit vérifié, dont root retire la copie à la sortie :"*"La commande serait :"$'\n'"    deploy/workstation up --bench" ]]
+  # le chemin imprimé est relatif à une copie qui part : la phrase dit comment rejouer, elle ne
+  # promet pas que ce chemin sera là
+  [[ "$output" == *"déjà là, sha256 vérifié, rien n'est téléchargé"*"ni ce dossier ni son chemin ne survivent, et la commande ci-dessous se rejoue en relançant l'installation :"*"La commande serait :"$'\n'"    deploy/workstation up --bench" ]]
   refute_out 'lcars-kit\.|--faits' <<<"$output"
 }
 

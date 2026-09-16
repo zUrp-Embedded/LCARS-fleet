@@ -12,9 +12,8 @@
 # C'est aussi son `~/.lcars/fleet.env` qui porte l'adresse de la forge et le jeton.
 
 set -euo pipefail
-# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
-# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
-# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# L'hote nomme le protocole per-humain (LCARS_HUMAN_PROTOCOL) : le convergeur, ou un temoin. Le
+# contrat de ce dialecte est dans le fichier source, il ne se recopie pas ici.
 # shellcheck source=../lib/human-protocol.sh
 . "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 

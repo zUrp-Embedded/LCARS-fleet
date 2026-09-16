@@ -9,8 +9,8 @@
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
-# et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
+# L'hote nomme le protocole (LCARS_MODULE_PROTOCOL) : le boot du conteneur, un module de
+# l'installeur, ou un temoin. Le contrat de ce dialecte est dans le fichier source.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
@@ -184,7 +184,7 @@ apply() {
     verdict_apply
   fi
   if [[ ! -r "$TOKEN_FILE" ]]; then
-    p_drift "$TOKEN_FILE absent — 63-forge-tokens n'a pas encore minté le token système ; client OAuth2 NON posé"
+    p_drift "$TOKEN_FILE absent — le geste des jetons n'a pas encore minté le jeton système ; client OAuth2 NON posé, il se posera à la convergence suivante"
     verdict_apply
   fi
 
@@ -256,7 +256,7 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 66-deck-oidc.sh <check|apply>}" in
+case "${1:?usage: deck-oidc.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
