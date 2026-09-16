@@ -31,8 +31,8 @@ api_version: 1
 # projects), so a name assigned at install time would differ between two containers holding this same
 # catalogue. Kebab-case, no `_`: the underscore separates the halves of a role login.
 #
-# `fleet` and not `lcars`: on the forge, `lcars` is taken by LCARS's own repository, and an org
-# `lcars` holding a repo `lcars` reads as a mistake. `fleet/lcars` is what the forge already shows.
+# `fleet` and not `lcars`: on the forge, `lcars` is the SYSTEM org — identity (team humans) and the
+# system repositories (`_ops`). A catalogue names the org of its projects, and the system is not one.
 name: fleet
 
 # La carte qu'un projet prend quand il n'en declare aucune. Aucune propriete ne la distingue de ses

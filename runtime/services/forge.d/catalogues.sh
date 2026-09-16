@@ -29,6 +29,26 @@ MANIFEST="catalogue.yaml"
 # plus dans la reponse et ne parie jamais le materiel du conteneur sur une supposition.
 STORE_QUERY="catalogue"
 
+# LE CATALOGUE DE LA RELEASE N'EST PAS SUIVI ICI. Son magasin est sur la forge — il s'installe comme
+# les autres (`forge-gestures apply`) —, mais son materiel est la release elle-meme, et
+# `Fleet.Catalogue` ignore un dossier installe de ce nom : le cloner poserait un arbre mort. Son nom
+# se demande a la release (`lcars tool catalogue-root`, puis le `name:` du manifeste, colonne zero).
+# Sans reponse, rien n'est exclu et c'est DIT : un arbre mort de plus n'est pas une panne.
+_lcars_cli() {
+  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
+  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
+  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
+}
+bundled_name() {
+  local cli root
+  cli="$(_lcars_cli)"
+  [[ -r "$cli" ]] || return 0
+  root="$(bash "$cli" tool catalogue-root 2>/dev/null | tail -n1)" || root=""
+  [[ -n "$root" && -r "$root/$MANIFEST" ]] || return 0
+  awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, ""); sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' "$root/$MANIFEST"
+}
+BUNDLED="$(bundled_name)"
+
 #   * l'IDENTITE — `manifest.name == owner`. C'est ce qui decide. Un depot pose a l'adresse d'un
 #     magasin, dans une org, mais qui ne se declare pas au nom de cette org, n'est pas le magasin de
 #     ce catalogue : le cloner le servirait sous un nom qu'il ne revendique pas, et le roster du
@@ -66,6 +86,8 @@ forge_installed() {
   local name full url vide code declared drc
   while read -r name full url vide; do
     [[ -n "$name" ]] || continue
+    # le magasin du catalogue de la release : present sur la forge, jamais du materiel a poser ici
+    [[ -z "$BUNDLED" || "$name" != "$BUNDLED" ]] || continue
     # ⚠ `empty` EST EN RETARD SUR LE PUSH : Gitea le laisse vrai une seconde ou plus apres le premier
     # push (mesure sur 1.26, banc 2002). Lu seul, il faisait passer un catalogue juste installe pour
     # absent, et `apply` retirait son materiel. Un depot dit vide qui porte une tete n'est pas vide.
@@ -175,6 +197,7 @@ forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, sel
 
 check() {
   say_leftover
+  [[ -n "$BUNDLED" ]] || p_warn "nom du catalogue de la release inconnu (« lcars tool catalogue-root » ne repond pas) — son magasin, s'il est sur la forge, sera suivi comme un catalogue installe"
   if [[ -z "$FORGE_BASE_URL" ]]; then
     forge_inconnue check
     verdict_check
@@ -223,6 +246,7 @@ apply() {
   # Dit AUSSI a l'apply : c'est le geste que l'operateur lance apres une mise a jour, donc celui ou
   # le demenagement vient d'avoir lieu. Le taire ici le reserverait a qui pense a jouer un doctor.
   say_leftover
+  [[ -n "$BUNDLED" ]] || p_warn "nom du catalogue de la release inconnu (« lcars tool catalogue-root » ne repond pas) — son magasin, s'il est sur la forge, sera suivi comme un catalogue installe"
   [[ -n "$FORGE_BASE_URL" ]] || { forge_inconnue apply; verdict_apply; }
 
   local signed rc=0

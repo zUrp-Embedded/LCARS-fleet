@@ -13,12 +13,14 @@
 #   builtin-human  imprime le nom du compte integre. Ce fichier en est l'AUTORITE ; le verbe existe
 #                  pour que ses appelants le DEMANDENT au lieu d'en recopier le defaut.
 #   apply          joue la recette avec le jeton master lu sur STDIN, à défaut celui que la
-#                  machine détient, et le seed posé.
+#                  machine détient, et le seed posé : l'org SYSTÈME (sans rôle métier), son dépôt,
+#                  puis le catalogue de la release, installé comme n'importe quel catalogue.
 #   toolchain-protection <login-du-siege> [admins...]
 #                  pose la protection de branche du depot ops. Le login du siege est VARIABLE,
 #                  jamais en dur. SANS status check : l'allumage se fait en deux temps.
-#   install <nom>  installe ou MET A JOUR le catalogue <nom> depuis le depot que la forge porte.
-#                  Jamais declenche par le boot.
+#   install <nom>  installe ou MET A JOUR le catalogue <nom> depuis le depot que la forge porte —
+#                  ou depuis la release, pour le catalogue qu'elle embarque. Jamais declenche par
+#                  le boot.
 #   runner-token   minte un jeton d'ENREGISTREMENT de runner et l'imprime. Credential a usage
 #                  unique : sortie sur stdout, il ne se pose nulle part.
 #
@@ -39,6 +41,10 @@ BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
 # Les deux projections de catalogue lisent le compte système ici ; le contrat
 # `forge.system_account_single_source` tient ce défaut d'accord avec `Fleet.Credentials.ForgeIdentity`.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
+# L'org SYSTEME : l'identite (team `humans`) et le depot du systeme (`_ops`). Les projets vivent
+# dans l'org de leur catalogue. Meme defaut que `system_org` de la recette, `LCARS_FORGE_ORG` du
+# protocole et `PROV_FORGE_ORG_DEFAULT` de l'installeur — un mur bats tient les quatre d'accord.
+SYSTEM_ORG="${LCARS_FORGE_ORG:-lcars}"
 # Le détenteur des secrets de forge : le compte que `put_secret` pose sur ce qu'il écrit, le seul qui
 # ouvrira ces fichiers (`PROV_AUTHORITY_USER` de `deploy/installer-constants.env` sur un poste).
 AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
@@ -184,15 +190,15 @@ with_apply_lock() {
 # Le runtime le LIT sans que rien ne le CREE : la recette tofu fait les orgs, les comptes et les
 # teams, pas les depots.
 #
-# ⚠ `auto_init` VRAI : un depot vide n'a pas de branche, et on pousse SUR une branche. Sans branche
-# par defaut la forge repond « Push to create is not enabled for organizations » — un message qui
-# parle d'un reglage alors que le fait est « il n'y a rien ou pousser ».
+# `auto_init` VRAI : le depot nait avec un `main` et son README, qui disent ce qu'il est. Mesure du
+# 2026-09-16 (banc 2002) : un depot d'org VIDE accepte un push ; « Push to create is not enabled for
+# organizations » est la reponse a un push vers un depot ABSENT, pas vers un depot vide.
 ensure_ops_repo() { # $1=org  $2=jeton master
   local org="$1" tok="$2"
   # ⚠ DEUX LIGNES, ET CE N'EST PAS DU STYLE : `local a=… b="${a#…}"` NE VOIT PAS `a` — bash expanse
   # toute la ligne AVANT d'assigner. Sous `set -u`, c'est un « unbound variable » qui tue le script
   # au milieu d'un apply, en pointant une ligne qui a l'air juste.
-  local repo="${LCARS_OPS_REPO:-$org/lcars}"
+  local repo="${LCARS_OPS_REPO:-$org/_ops}"
   local name="${repo#*/}"
 
   local code
@@ -314,6 +320,13 @@ cmd_apply() {
     exit 1
   fi
 
+  # UN SEUL JETON POUR TOUT LE GESTE : celui de stdin l'emporte, et `cmd_install`, joue plus bas,
+  # le prend ici plutot que de relire le fichier — sinon deux autorites dans un geste, et un fichier
+  # absent ou perime ferait echouer le catalogue apres que l'org systeme est posee.
+  MASTER_TOKEN_OVERRIDE="$tok"
+  # La release est demandee UNE fois par geste : chaque porte `tool` la demarre.
+  REFERENCE_CATALOGUE="$(reference_catalogue_root)"
+
   export TF_VAR_gitea_url="$FORGE_BASE_URL"
   export TF_VAR_gitea_token="$tok"
   export TF_VAR_seed_password="$seed"
@@ -323,20 +336,41 @@ cmd_apply() {
 
   # L'ORDRE EST UN INVARIANT, pas une preference : `instance/` porte les comptes partages, et une
   # adhesion peut nommer un compte qu'elle ne cree pas, jamais un compte qui n'existe pas.
+  #
+  # ⚠ LE PLAY `.` EST CELUI DE L'ORG SYSTEME, ET ELLE N'A AUCUN ROLE METIER (⚖ user 2026-09-16,
+  # option B) : elle porte l'identite (`humans`), le compte systeme dans `system` et `Owners`, et
+  # les depots du systeme. Le rail d'outillage et le registre d'incidents ecrivent sous le compte
+  # systeme ; les roles metier ecrivent dans l'org de LEUR catalogue, posee par `cmd_install` — le
+  # catalogue standard compris, juste apres. Les `-var` l'emportent sur `roles.auto.tfvars.json`,
+  # qui porte l'org et les roles du catalogue standard : ce fichier reste la, il nomme le compte
+  # systeme (`system_account`, sans defaut par contrat).
   local m
+  local -a vars
   for m in instance .; do
-    echo "forge-gestures: apply $m"
+    vars=()
+    [[ "$m" == instance ]] \
+      || vars=(-var "org=$SYSTEM_ORG" -var 'roles=[]' -var 'writers=[]' -var 'judges=[]' -var 'externals=[]')
+    echo "forge-gestures: apply $m${vars[0]:+ (org $SYSTEM_ORG, sans role metier)}"
     ( cd "$RECIPE_DIR/$m" && tofu init -input=false -no-color >/dev/null ) \
       || die "init $m en echec — le miroir de providers (TF_CLI_CONFIG_FILE) couvre-t-il cette recette ?"
-    ( cd "$RECIPE_DIR/$m" && tofu apply -auto-approve -input=false -no-color ) \
+    ( cd "$RECIPE_DIR/$m" && tofu apply -auto-approve -input=false -no-color ${vars[@]+"${vars[@]}"} ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
 
-  ensure_ops_repo "${LCARS_FORGE_ORG:-fleet}" "$tok"
+  ensure_ops_repo "$SYSTEM_ORG" "$tok"
 
-  publicize_org_members "${LCARS_FORGE_ORG:-fleet}" "$tok" "$seed"
+  publicize_org_members "$SYSTEM_ORG" "$tok" "$seed"
 
-  demote_creator_from_owners "${LCARS_FORGE_ORG:-fleet}" "$tok"
+  demote_creator_from_owners "$SYSTEM_ORG" "$tok"
+
+  # LE CATALOGUE STANDARD S'INSTALLE COMME N'IMPORTE QUEL CATALOGUE : son org, ses comptes de role,
+  # ses teams, sa source dans son magasin. Il etait « installe » gratuitement tant que son org etait
+  # l'org systeme ; il ne l'est plus, et une forge sans lui n'accueille aucun projet.
+  local embarque
+  embarque="$(bundled_catalogue_name)"
+  [[ -n "$embarque" ]] \
+    || die "apply : la release ne nomme pas son catalogue — la structure est posee, mais AUCUNE org de projets ne l'est (« lcars tool catalogue-root » ne repond pas)"
+  cmd_install "$embarque"
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
@@ -380,18 +414,31 @@ reference_catalogue_root() {
   printf '%s' "$root"
 }
 
-# ─── LE GESTE, POUR LES DEUX ────────────────────────────────────────────────────────────────────
 # LE NOM VIENT DU MANIFESTE, jamais du repertoire. Un arbre range sous `catalogues/web-demo` qui
 # declarerait `name: autre` serait pousse sous `web-demo` et n'apparaitrait JAMAIS dans
-# `catalogue list`, qui indexe par identite declaree. Meme regle qu'a l'install, meme colonne zero.
+# `catalogue list`, qui indexe par identite declaree. Meme regle a l'install et au depot, meme
+# colonne zero. Rend vide si l'arbre ne declare rien.
+catalogue_name_of() { # $1=arbre
+  awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
+                  sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' \
+      "$1/catalogue.yaml" 2>/dev/null || true
+}
+
+# Le nom du catalogue que la release embarque — l'org de ses projets. Vide si la release ne dit
+# pas ou il vit, ou si son manifeste ne declare rien : l'appelant nomme alors ce qui manque.
+bundled_catalogue_name() {
+  local root; root="$(reference_catalogue_root 2>/dev/null)"
+  [[ -n "$root" ]] || return 0
+  catalogue_name_of "$root"
+}
+
+# ─── LE GESTE, POUR LES DEUX ────────────────────────────────────────────────────────────────────
 seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message)
   local tok="$1" tree="$2" kind="$3"
   [[ -d "$tree" ]] || return 0
 
   local name
-  name="$(awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
-                          sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' \
-          "$tree/catalogue.yaml" 2>/dev/null || true)"
+  name="$(catalogue_name_of "$tree")"
   if [[ -z "$name" ]]; then
     echo "forge-gestures: $tree ne declare pas de \`name:\` en colonne zero — $kind NON depose" >&2
     return 0
@@ -456,7 +503,7 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   # ⚠ LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` : cette ligne en est une
   # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Rendu reglable ICI seulement, il
   # poserait la protection sur une branche pendant que le reconciliateur en interrogerait une autre.
-  local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="tool_request"
+  local repo="${LCARS_OPS_REPO:-lcars/_ops}" branch="tool_request"
   local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
 
   hcurl "$tok" -sS -m 15 -o /dev/null -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
@@ -513,87 +560,110 @@ cmd_install() {
   need_forge_url
   need_cli
 
-  local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  # Le jeton : celui du geste appelant (`cmd_apply` l'a lu sur stdin ou dans le fichier), sinon le
+  # fichier — jamais les deux dans un meme geste.
+  local tok="${MASTER_TOKEN_OVERRIDE:-}"
+  [[ -n "$tok" ]] || tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || die "install: pas d'autorité — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
   [[ -n "$seed" ]] || die "install: pas de seed — sur un poste, « deploy/workstation up » le pose ; pour un conteneur, « FORGE_SEED_PASSWORD=<mot de passe> deploy/container config » depuis l'hôte"
+  [[ -n "$REFERENCE_CATALOGUE" ]] || REFERENCE_CATALOGUE="$(reference_catalogue_root)"
 
-  # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
-  #    avec son code — on ne traduit pas, on relaie.
-  #
-  #    ⚠ LE JETON SYSTEME, PAS LE MASTER, ET CE N'EST PAS UNE PREFERENCE : la porte tourne en
-  #    `nobody` parce que c'est une LECTURE, et le jeton master lui est illisible. Le refus de
-  #    permission remonterait alors en « pas de source installable » — le mauvais diagnostic pour
-  #    le mauvais probleme. Un depot de catalogue est public, donc le jeton systeme suffit ; donner le
-  #    site-admin a une lecture lui accorderait un pouvoir sans usage.
-  #
-  # ⚠ LA VALEUR PART PAR L'ENVIRONNEMENT : `/proc/<pid>/environ` n'est lisible que par le
-  # proprietaire et root, un argv l'est par tout le monde.
-  local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
-  [[ -r "$sys_token" ]] \
-    || die "install: $sys_token illisible — cette machine n'a pas encore de jeton système : sur un poste, « deploy/workstation up » le minte ; dans un conteneur, le démarrage le minte (« deploy/container up » depuis l'hôte)"
-  local sys_tok_value; sys_tok_value="$(tr -d '[:space:]' < "$sys_token")"
-  [[ -n "$sys_tok_value" ]] \
-    || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
+  # 0. LE CATALOGUE DE LA RELEASE S'INSTALLE COMME LES AUTRES — org, comptes de role, teams, sa
+  #    source dans son magasin —, a une difference pres : sa source est l'arbre que la release porte,
+  #    pas un depot de la forge (`tool catalogue-source` le refuse a dessein, exit 4), et son materiel
+  #    local reste celui de la release (`Fleet.Catalogue` ignore un dossier installe de ce nom).
+  #    Il etait « installe » gratuitement tant que son org etait l'org systeme ; il ne l'est plus.
+  local src sha="" work="" embarque
+  embarque="$(bundled_catalogue_name)"
+  if [[ -n "$embarque" && "$name" == "$embarque" ]]; then
+    src="$(reference_catalogue_root)"
+    [[ -n "$src" && -d "$src" ]] \
+      || die "install: $name est le catalogue de la release, et la release ne dit pas ou il vit (« lcars tool catalogue-root ») — RIEN de ce catalogue n'a ete pose"
+    # La revision de la release, quand la machine la connait (l'image d'un conteneur la porte).
+    # Sans elle la projection n'a pas de trailer `Source-Commit`, et rien ne la compare : le
+    # catalogue de la release n'a pas de « mise a jour disponible », il change avec la release.
+    sha="${LCARS_IMAGE_REVISION:-}"
+    echo "forge-gestures: $name <- la release ($src${sha:+ @ ${sha:0:8}})"
+  else
+    # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
+    #    avec son code — on ne traduit pas, on relaie.
+    #
+    #    ⚠ LE JETON SYSTEME, PAS LE MASTER, ET CE N'EST PAS UNE PREFERENCE : la porte tourne en
+    #    `nobody` parce que c'est une LECTURE, et le jeton master lui est illisible. Le refus de
+    #    permission remonterait alors en « pas de source installable » — le mauvais diagnostic pour
+    #    le mauvais probleme. Un depot de catalogue est public, donc le jeton systeme suffit ; donner le
+    #    site-admin a une lecture lui accorderait un pouvoir sans usage.
+    #
+    # ⚠ LA VALEUR PART PAR L'ENVIRONNEMENT : `/proc/<pid>/environ` n'est lisible que par le
+    # proprietaire et root, un argv l'est par tout le monde.
+    local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
+    [[ -r "$sys_token" ]] \
+      || die "install: $sys_token illisible — cette machine n'a pas encore de jeton système : sur un poste, « deploy/workstation up » le minte ; dans un conteneur, le démarrage le minte (« deploy/container up » depuis l'hôte)"
+    local sys_tok_value; sys_tok_value="$(tr -d '[:space:]' < "$sys_token")"
+    [[ -n "$sys_tok_value" ]] \
+      || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
 
-  # ⚠ LA REPONSE SE LIT SUR STDOUT SEUL. Le journal du release part sur stderr
-  # (`Fleet.ReleaseDoor.claim_stdout!`), et il parle pendant la resolution : un depot qui declare le
-  # catalogue livre y laisse une ligne `[info]`, precedee d'une ligne vide. Lus ensemble, journal et
-  # reponse donnent une premiere ligne vide, et la reponse juste est refusee. Stderr est garde a part
-  # et montre quand la porte refuse ou ne repond pas ; sur une reponse exploitable, il ne dit rien a
-  # l'operateur.
-  local src rc=0 src_err="" err_file
-  err_file="$(mktemp)" || die "install: fichier temporaire impossible à créer (mktemp) — le disque ou \$TMPDIR refuse l'écriture"
-  src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
-         tool catalogue-source "$name" 2>"$err_file")" || rc=$?
-  src_err="$(cat "$err_file")"
-  rm -f "$err_file"
-  if [[ "$rc" -ne 0 ]]; then
-    [[ -z "$src" ]] || printf '%s\n' "$src" >&2
-    [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
-    die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
+    # ⚠ LA REPONSE SE LIT SUR STDOUT SEUL. Le journal du release part sur stderr
+    # (`Fleet.ReleaseDoor.claim_stdout!`), et il parle pendant la resolution : un depot qui declare le
+    # catalogue livre y laisse une ligne `[info]`, precedee d'une ligne vide. Lus ensemble, journal et
+    # reponse donnent une premiere ligne vide, et la reponse juste est refusee. Stderr est garde a part
+    # et montre quand la porte refuse ou ne repond pas ; sur une reponse exploitable, il ne dit rien a
+    # l'operateur.
+    local src rc=0 src_err="" err_file
+    err_file="$(mktemp)" || die "install: fichier temporaire impossible à créer (mktemp) — le disque ou \$TMPDIR refuse l'écriture"
+    src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
+           tool catalogue-source "$name" 2>"$err_file")" || rc=$?
+    src_err="$(cat "$err_file")"
+    rm -f "$err_file"
+    if [[ "$rc" -ne 0 ]]; then
+      [[ -z "$src" ]] || printf '%s\n' "$src" >&2
+      [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
+      die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
+    fi
+    local repo branch sha
+    read -r repo branch sha <<< "$src"
+
+    # ⚠ UN CODE DE SORTIE 0 N'EST PAS UNE REPONSE : aucune branche de la porte ne rend 0 sans imprimer,
+    # donc un 0 MUET vient de ce qui a repondu A SA PLACE — et c'est ca qu'il faut nommer. Sans ce
+    # controle, les trois champs vides construisent une URL a partir de rien, git echoue dessus, et le
+    # refus cite l'erreur d'un outil auquel on a passe du vide : il accuse l'outil.
+    if [[ -z "$repo" || -z "$branch" || -z "$sha" ]]; then
+      [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
+      die "install: $name — la porte de resolution a rendu 0 sans reponse exploitable.
+    Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
+      [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
+    Ce n'est pas un refus de la forge : un refus porte un code de sortie et une phrase. Un zero muet
+    vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « lcars » designe
+    ($LCARS_CLI) et ce que « lcars tool catalogue-source $name » imprime a la main."
+    fi
+
+    echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
+
+    # 2. Le materiel, clone dans un jetable. Le jeton voyage par l'ENVIRON de git (extraheader),
+    #    jamais dans l'URL : `/proc/<pid>/cmdline` est lisible par tout le monde, `environ` non.
+    local work; work="$(mktemp -d)"
+    # ⚠ `mktemp -d` REND 0700, ET LES PORTES QUI LISENT CE CLONE TOURNENT EN `nobody` : elles ne
+    # peuvent pas traverser un repertoire que seul root ouvre, et le refus remonte alors en « refus de
+    # catalogue » sur un catalogue parfaitement valide. Rien de secret n'atterrit ici — le materiel est
+    # public, et le jeton voyage par l'ENVIRON de git, jamais dans le `.git/config` du clone.
+    chmod 0755 "$work"
+    # SC2064 : on veut la valeur d'ICI, pas celle du moment ou le trap se declenche.
+    # shellcheck disable=SC2064
+    trap "rm -rf '$work'" EXIT
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
+    GIT_CONFIG_VALUE_0="Authorization: token $tok" \
+      git clone --quiet --depth 1 --branch "$branch" "${FORGE_BASE_URL%/}/${repo}.git" "$work/src" \
+      || die "install: clone de $repo impossible"
+    src="$work/src"
   fi
-  local repo branch sha
-  read -r repo branch sha <<< "$src"
-
-  # ⚠ UN CODE DE SORTIE 0 N'EST PAS UNE REPONSE : aucune branche de la porte ne rend 0 sans imprimer,
-  # donc un 0 MUET vient de ce qui a repondu A SA PLACE — et c'est ca qu'il faut nommer. Sans ce
-  # controle, les trois champs vides construisent une URL a partir de rien, git echoue dessus, et le
-  # refus cite l'erreur d'un outil auquel on a passe du vide : il accuse l'outil.
-  if [[ -z "$repo" || -z "$branch" || -z "$sha" ]]; then
-    [[ -z "$src_err" ]] || printf '%s\n' "$src_err" >&2
-    die "install: $name — la porte de resolution a rendu 0 sans reponse exploitable.
-  Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
-    [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
-  Ce n'est pas un refus de la forge : un refus porte un code de sortie et une phrase. Un zero muet
-  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « lcars » designe
-  ($LCARS_CLI) et ce que « lcars tool catalogue-source $name » imprime a la main."
-  fi
-
-  echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
-
-  # 2. Le materiel, clone dans un jetable. Le jeton voyage par l'ENVIRON de git (extraheader),
-  #    jamais dans l'URL : `/proc/<pid>/cmdline` est lisible par tout le monde, `environ` non.
-  local work; work="$(mktemp -d)"
-  # ⚠ `mktemp -d` REND 0700, ET LES PORTES QUI LISENT CE CLONE TOURNENT EN `nobody` : elles ne
-  # peuvent pas traverser un repertoire que seul root ouvre, et le refus remonte alors en « refus de
-  # catalogue » sur un catalogue parfaitement valide. Rien de secret n'atterrit ici — le materiel est
-  # public, et le jeton voyage par l'ENVIRON de git, jamais dans le `.git/config` du clone.
-  chmod 0755 "$work"
-  # SC2064 : on veut la valeur d'ICI, pas celle du moment ou le trap se declenche.
-  # shellcheck disable=SC2064
-  trap "rm -rf '$work'" EXIT
-  GIT_TERMINAL_PROMPT=0 \
-  GIT_CONFIG_COUNT=1 \
-  GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
-  GIT_CONFIG_VALUE_0="Authorization: token $tok" \
-    git clone --quiet --depth 1 --branch "$branch" "${FORGE_BASE_URL%/}/${repo}.git" "$work/src" \
-    || die "install: clone de $repo impossible"
 
   # 3. LE MEME CONTROLE QUE LE BOOT, avant de toucher la forge. Un catalogue incoherent refuse ici
   #    coute un message ; installe, il coute un boot qui refuse ou un dispatch qui boucle, loin de
   #    sa cause.
-  tool verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
+  tool verify "$src" || die "install: $name ne passe pas la verification — RIEN de ce catalogue n'a ete pose"
 
   # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
   local dir="$CATALOGUE_WORK/$name"
@@ -624,8 +694,8 @@ cmd_install() {
   # Les avatars sont nommes par le ROLE, donc la recette n'a aucune table a tenir pour un catalogue
   # tiers. Facultatif : sans eux, les comptes restent en identicon.
   rm -rf "$dir/catalogue-avatars"
-  [[ -d "$work/src/avatars" ]] && cp -r "$work/src/avatars" "$dir/catalogue-avatars"
-  tool roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
+  [[ -d "$src/avatars" ]] && cp -r "$src/avatars" "$dir/catalogue-avatars"
+  tool roles-tfvars "$src" > "$dir/roles.auto.tfvars.json" \
     || die "install: roster non derive depuis $name"
 
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une
@@ -637,12 +707,35 @@ cmd_install() {
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 
+  # ⚠ RIEN A ROOT SOUS LE DOSSIER DE TRAVAIL. `install` se joue sous le compte d'autorite (l'executeur
+  # de catalogue), `apply` en root — et `apply` installe le catalogue de la release par cette meme
+  # fonction. Ce que root vient d'ecrire ici (recette copiee, etat tofu, providers) est rendu au
+  # compte d'autorite, sinon son prochain `catalogue install` de ce nom ne relit ni ne reecrit son
+  # etat, et tofu re-importe la forge a chaque passe. Meme garde que `put_secret` : `chown` n'est
+  # tente que par root, tout appelant reel de `apply` l'est, un temoin ne l'est pas.
+  if [[ "$(id -u)" -eq 0 ]]; then
+    chown -R "$AUTHORITY_USER:$(id -g "$AUTHORITY_USER")" "$dir" \
+      || die "install: $dir n'a pas pu etre rendu a $AUTHORITY_USER — son prochain « catalogue install $name » ne verrait pas cet etat"
+  fi
+
   publicize_org_members "$name" "$tok" "$seed"
+
+  # Le master a cree l'org avec son jeton, Gitea en fait un Owner par effet de bord ; la recette a
+  # mis le compte systeme dans `Owners`, et c'est lui le proprietaire — meme regle que pour l'org
+  # systeme, pour la meme raison (cf. `demote_creator_from_owners`).
+  demote_creator_from_owners "$name" "$tok"
 
   # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
   #    sans sa source est un install interrompu, et aucun conteneur ne peut servir un catalogue dont le
   #    materiel n'est nulle part.
-  push_store "$name" "$work/src" "$tok" "$sha"
+  push_store "$name" "$src" "$tok" "$sha"
+
+  # Le catalogue de la release n'a pas de materiel a poser : la release EST son materiel. Le geste
+  # du boot (`forge.d/catalogues.sh`) le sait par son nom et ne clone pas son magasin.
+  if [[ -n "$embarque" && "$name" == "$embarque" ]]; then
+    echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO) — le materiel est celui de la release"
+    return 0
+  fi
 
   # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Le boot suivant le reposerait de toute facon, mais la
   #    commande rendrait alors la main sur un conteneur qui ne sert pas encore ce qu'il vient
@@ -655,7 +748,7 @@ cmd_install() {
   #    catalogue qui livre son propre arbre et dont le materiel n'est pas pose voit donc ses projets
   #    naitre du squelette d'un voisin — c'est ce que le message d'echec ci-dessous doit dire.
   local materiel=1
-  install_material "$name" "$work/src" && materiel=0
+  install_material "$name" "$src" && materiel=0
 
   if [[ "$materiel" -eq 0 ]]; then
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
@@ -705,8 +798,8 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
     && git init -q -b main \
     && git add -A \
     && git -c "user.name=$SYSTEM_ACCOUNT" -c "user.email=$SYSTEM_EMAIL" \
-         commit -q -m "chore(catalogue): projection de $name depuis son depot" \
-                   -m "Source-Commit: $src_sha" \
+         commit -q -m "chore(catalogue): projection de $name depuis sa source" \
+                   ${src_sha:+-m "Source-Commit: $src_sha"} \
     && GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
        GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
        GIT_CONFIG_VALUE_0="Authorization: token $tok" \

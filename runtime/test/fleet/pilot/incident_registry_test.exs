@@ -661,7 +661,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                  end
                )
 
-      assert_received {:issue, "fleet/lcars", title, iopts}
+      assert_received {:issue, "lcars/_ops", title, iopts}
       # "récurrence" pins the FR user-facing sysadmin issue title (Escalation).
       assert title =~ "récurrence"
       # This fixture has no seat projection: omit assignment rather than sending nil.
@@ -669,7 +669,7 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       refute Keyword.has_key?(iopts, :labels)
       refute Keyword.has_key?(iopts, :assignees)
       # The durable label is set by NAME on the created issue.
-      assert_received {:label, "fleet/lcars", 1, "error_system"}
+      assert_received {:label, "lcars/_ops", 1, "error_system"}
     end
 
     test "recurrence UNDER cooldown → {:escalation_suppressed, N}, NO new issue (escalation memory)",

@@ -20,7 +20,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   defp listing_org_placeholder do
     case Onboard.installed_orgs() do
       [org | _] -> org
-      [] -> "fleet"
+      [] -> Fleet.Catalogue.bundled_name()
     end
   end
 

@@ -29,7 +29,7 @@ setup() {
 
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   export LCARS_MODULE_TAG=63-forge-tokens
-  printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"
+  printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"org\":\"fleet\",\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"
   chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
   VRAI_ID="$(command -v id)"
   cat > "$BIN/id" <<EOF
@@ -78,9 +78,12 @@ case "\$url" in
   */user/sign_up)                printf '<form><input name="user_name"></form>' ;;
   */api/v1/users/$1)             [[ '$2' == oui ]] || exit 22; [[ \$o -eq 1 ]] || printf '{"login":"$1","restricted":false}' ;;
   */api/v1/users/*)              [[ \$o -eq 1 ]] || printf '{}' ;;
-  */orgs/fleet/members/$1)       case '$3' in absent) code 404 ;; *) code 204 ;; esac ;;
-  */orgs/fleet/public_members/$1) case '$3' in visible) code 204 ;; *) code 404 ;; esac ;;
-  */orgs/fleet/members/*|*/orgs/fleet/public_members/*) code 204 ;;
+  */orgs/lcars/members/$1)       case '$3' in absent) code 404 ;; *) code 204 ;; esac ;;
+  */orgs/lcars/public_members/$1) case '$3' in visible) code 204 ;; *) code 404 ;; esac ;;
+  # un role n'est JAMAIS membre de l'org systeme ; dans l'org de son catalogue, il l'est sauf mise en scene
+  */orgs/lcars/members/fleet_engineer|*/orgs/lcars/members/system_architect) code 404 ;;
+  */orgs/fleet/members/fleet_engineer) [[ -z "\${ROLE_HORS_ORG:-}" ]] && code 204 || code 404 ;;
+  */orgs/*/members/*|*/orgs/*/public_members/*) code 204 ;;
   *)                             exit 22 ;;
 esac
 exit 0
@@ -150,13 +153,30 @@ pas_de_team_promise() {
   pas_de_team_promise
 }
 
+# ─── les comptes de role, dans l'org de LEUR catalogue ──────────────────────────────────────────
+
+@test "les roles se sondent dans l'org de leur catalogue, le compte systeme dans l'org systeme : un role absent de l'org systeme n'est PAS un drift" {
+  poste zoe; stub_forge zoe oui visible
+  run bash "$MODULE" check
+  [[ "$output" == *"adhésions org visibles (comptes machine)"* ]]
+  [[ "$output" != *"SANS adhésion"* ]]
+  [ "$(grep -c '^DRIFT' <<<"$output")" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "un role absent de l'org de son catalogue est un drift qui nomme l'org, le role et le geste qui le repose" {
+  poste zoe; stub_forge zoe oui visible
+  ROLE_HORS_ORG=1 run bash "$MODULE" check
+  [[ "$output" == *"DRIFT 63-forge-tokens: comptes SANS adhésion à l'org fleet : fleet_engineer — jeton valide, zéro droit d'écriture."*"« lcars catalogue install fleet » la rejoue"* ]]
+  [[ "$output" != *"à l'org lcars : fleet_engineer"* ]]
+}
+
 # ─── une personne de fleet ──────────────────────────────────────────────────────────────────────
 
 @test "poste, --human zoe : une personne de fleet, jamais « le siège » ni « l'admin du système »" {
   poste zoe; stub_forge zoe oui visible
   run bash "$MODULE" check
   [[ "$output" == *"OK    63-forge-tokens: compte forge de « zoe », une personne de fleet"* ]]
-  [[ "$output" == *"OK    63-forge-tokens: « zoe » membre de l'org fleet, adhésion visible"* ]]
+  [[ "$output" == *"OK    63-forge-tokens: « zoe » membre de l'org lcars, adhésion visible"* ]]
   [[ "$output" != *"siège « zoe »"* ]]
   [[ "$output" != *"l'admin du système"* ]]
 }
@@ -164,7 +184,7 @@ pas_de_team_promise() {
 @test "poste, --human zoe absente de la forge : WARN, l'apply ne crée pas le compte d'une personne" {
   poste zoe; stub_forge zoe non absent
   run bash "$MODULE" check
-  [[ "$output" == *"WARN  63-forge-tokens: compte forge absent pour « zoe », une personne de fleet — l'apply ne crée pas le compte d'une personne : elle s'inscrit sur la forge sous ce nom, puis un propriétaire de l'org fleet l'ajoute à la team humans"* ]]
+  [[ "$output" == *"WARN  63-forge-tokens: compte forge absent pour « zoe », une personne de fleet — l'apply ne crée pas le compte d'une personne : elle s'inscrit sur la forge sous ce nom, puis un propriétaire de l'org lcars l'ajoute à la team humans"* ]]
   [[ "$output" != *"DRIFT 63-forge-tokens: compte forge absent"* ]]
   [[ "$output" != *"le siège"* ]]
 }
@@ -172,14 +192,14 @@ pas_de_team_promise() {
 @test "poste, --human zoe hors de l'org : WARN, l'apply ne pose pas les personnes" {
   poste zoe; stub_forge zoe oui absent
   run bash "$MODULE" check
-  [[ "$output" == *"WARN  63-forge-tokens: « zoe » n'est pas membre de l'org fleet — état normal tant qu'un propriétaire de l'org n'a pas ajouté ce compte à la team humans ; l'apply ne pose pas les personnes"* ]]
+  [[ "$output" == *"WARN  63-forge-tokens: « zoe » n'est pas membre de l'org lcars — état normal tant qu'un propriétaire de l'org n'a pas ajouté ce compte à la team humans ; l'apply ne pose pas les personnes"* ]]
   [[ "$output" != *"DRIFT 63-forge-tokens: « zoe »"* ]]
 }
 
 @test "poste, --human zoe membre caché : WARN, un geste de la personne" {
   poste zoe; stub_forge zoe oui hidden
   run bash "$MODULE" check
-  [[ "$output" == *"WARN  63-forge-tokens: adhésion de « zoe » à l'org fleet privée — un geste de la personne, hors de portée de l'apply"* ]]
+  [[ "$output" == *"WARN  63-forge-tokens: adhésion de « zoe » à l'org lcars privée — un geste de la personne, hors de portée de l'apply"* ]]
 }
 
 @test "conteneur, zoe n'est pas le siège écrit par l'init : une personne de fleet" {
@@ -187,7 +207,7 @@ pas_de_team_promise() {
   stub_forge zoe oui absent
   run bash "$MODULE" check
   [[ "$output" == *"compte forge de « zoe », une personne de fleet"* ]]
-  [[ "$output" == *"« zoe » n'est pas membre de l'org fleet"* ]]
+  [[ "$output" == *"« zoe » n'est pas membre de l'org lcars"* ]]
   [[ "$output" != *"siège « zoe »"* ]]
 }
 

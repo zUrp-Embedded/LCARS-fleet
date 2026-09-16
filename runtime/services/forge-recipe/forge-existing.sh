@@ -18,7 +18,7 @@
 # on either stream, is reported by tofu as a failure of the whole plan.
 #
 #   in : {"gitea_url":…, "org":…, "users":"a,b,c", "teams":"x,y"}
-#   out: {"user:a":"13", "org:fleet":"10", "team:x":"4"}    -- only what EXISTS
+#   out: {"user:a":"13", "org:lcars":"10", "team:x":"4"}    -- only what EXISTS
 #
 # THE IDS ARE NUMERIC BECAUSE THE PROVIDER MAKES THEM SO: it converts an import id to an integer,
 # so importing by login fails with `user not found with id 0` (measured 2026-08-16). A login is a

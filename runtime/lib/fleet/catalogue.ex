@@ -107,7 +107,8 @@ defmodule Fleet.Catalogue do
     |> Enum.filter(&File.dir?/1)
   end
 
-  # Forge organisation name: fleet/lcars distinguishes the catalogue from LCARS's repository.
+  # Forge organisation of this catalogue's projects. The system org (`lcars`, PROV_FORGE_ORG_DEFAULT)
+  # is distinct: it carries identity and the system repositories, never a project.
   @bundled_name "fleet"
 
   @doc """

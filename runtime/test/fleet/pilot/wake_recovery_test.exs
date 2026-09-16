@@ -117,7 +117,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
              WakeRecovery.wake("pod-x", fn -> send(pid, :respawn) end, opts)
 
     assert_received :respawn
-    assert_received {:issue, "fleet/lcars", title, iopts}
+    assert_received {:issue, "lcars/_ops", title, iopts}
     # "re-roll échoué" pins the FR user-facing sysadmin issue title (Escalation).
     assert title =~ "re-roll échoué"
 
@@ -125,7 +125,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     # With no seat projection, assignment is omitted in this fixture.
     refute Keyword.has_key?(iopts, :labels)
     refute Keyword.has_key?(iopts, :assignees)
-    assert_received {:label, "fleet/lcars", 1, "error_system"}
+    assert_received {:label, "lcars/_ops", 1, "error_system"}
   end
 
   test "fail + ALREADY SEEN → DIRECT :recurrence escalation (no re-roll)" do
@@ -144,7 +144,7 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert {:error, {:escalated, :dead}} =
              WakeRecovery.wake("pod-y", fn -> flunk("no re-roll when already seen") end, opts)
 
-    assert_received {:issue, "fleet/lcars", title, _iopts}
+    assert_received {:issue, "lcars/_ops", title, _iopts}
     # "récurrence" pins the FR user-facing sysadmin issue title (Escalation).
     assert title =~ "récurrence"
   end
@@ -200,9 +200,9 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     assert_received :with_assignee
 
     # The fallback omits assignment and creation labels; label the returned issue.
-    assert_received {:fallback, "fleet/lcars", fb_opts}
+    assert_received {:fallback, "lcars/_ops", fb_opts}
     refute Keyword.has_key?(fb_opts, :labels)
     refute fb_opts[:assignees]
-    assert_received {:label, "fleet/lcars", 7, "error_system"}
+    assert_received {:label, "lcars/_ops", 7, "error_system"}
   end
 end

@@ -26,25 +26,40 @@ _lcars_cli() {
   if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
   printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
 }
-roles_of_machine() {
-  local out="${LCARS_ROLES:-}" cli root
+# LES ROSTERS, PAR ORG. Une ligne « <org> <login>… » par catalogue (celui de la release, puis chaque
+# catalogue installe), et le plancher `LCARS_ROLES` de l'appelant sur la ligne de la release. Un
+# compte de role est membre de l'org de SON catalogue — sa recette le place dans ses teams — et de
+# nulle part ailleurs : l'org systeme n'a aucun role metier (⚖ user 2026-09-16, option B). Une ligne
+# dont l'org est vide est un roster que la release n'a pas su lire : ses comptes se mintent, leur
+# adhesion ne se sonde pas.
+org_rosters() {
+  local cli root
   cli="$(_lcars_cli)"
   if [[ -r "$cli" ]] && command -v jq >/dev/null; then
-    out="$out $(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
+    printf '%s %s\n' \
+      "$(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '.org // ""' 2>/dev/null || true)" \
+      "${LCARS_ROLES:-} $(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     if [[ -d "$LCARS_CATALOGUES_DIR" ]]; then
       for root in "$LCARS_CATALOGUES_DIR"/*/; do
         [[ -f "${root}catalogue.yaml" ]] || continue
-        out="$out $(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
+        printf '%s %s\n' \
+          "$(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '.org // ""' 2>/dev/null || true)" \
+          "$(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
       done
     fi
+  else
+    printf '%s %s\n' "" "${LCARS_ROLES:-}"
   fi
+}
+roles_of_machine() { # → tous les logins de role, dedoublonnes, sans leur org
   # `awk NF` et non `grep -v '^$'` : un roster vide fait rendre 1 a grep, donc sous `pipefail` une
   # MORT du geste la ou il doit rendre un refus nomme. Une liste vide est un etat, pas une panne.
-  printf '%s\n' $out | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//'
+  printf '%s\n' "$ROSTERS" | cut -d' ' -f2- | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
-# Le roster est resolu UNE fois ici et non a chaque usage : entre
-# deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
-# deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
+# Les rosters sont resolus UNE fois ici et non a chaque usage : entre deux appels d'un meme cycle la
+# liste ne doit pas bouger, sinon la sonde et le mint travaillent sur deux ensembles differents et le
+# rapport parle d'un etat que personne n'a converge.
+ROSTERS="$(org_rosters)"
 ROLES="$(roles_of_machine)"
 ACCOUNTS="$ROLES $LCARS_SYSTEM_ACCOUNT"
 
@@ -242,31 +257,30 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
 # team — un compte avec un jeton et aucune adhésion. `members/<u>` les sépare (204 membre /
 # 404 non-membre), et c'est cette séparation qui rend la consigne applicable.
-member_state() { # $1=compte → visible | hidden | absent | unknown
+member_state() { # $1=org  $2=compte → visible | hidden | absent | unknown
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
-  [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
-  if [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/public_members/$1")" == "204" ]]; then
+  [[ "$(forge_code "/orgs/$1/members/$2")" == "204" ]] || { printf 'absent'; return; }
+  if [[ "$(forge_code "/orgs/$1/public_members/$2")" == "204" ]]; then
     printf 'visible'
   else
     printf 'hidden'
   fi
 }
 
-members_in_state() { # $1=état recherché, $2=liste → sous-liste
+members_in_state() { # $1=état recherché, $2=org, $3=liste → sous-liste
   local acct out=""
-  for acct in $2; do [[ "$(member_state "$acct")" == "$1" ]] && out="$out $acct"; done
+  for acct in $3; do [[ "$(member_state "$2" "$acct")" == "$1" ]] && out="$out $acct"; done
   printf '%s' "${out# }"
 }
 
-members_hidden() { members_in_state hidden "$1"; }
-
-# Elle sonde donc le ROSTER SYSTÈME seul : `$LCARS_ROLES` est le plancher que l'appelant apporte,
-# avant que les catalogues installés n'y ajoutent les leurs (`roles_of_machine`, plus haut), et c'est
-# exactement la population de l'org système. La visibilité d'une org
-# de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
+# Chaque compte se sonde dans SON org : le compte systeme dans l'org systeme (il en est proprietaire,
+# la recette l'y met), chaque role dans l'org du catalogue dont le roster le nomme (`ROSTERS`). Un
+# role metier n'est membre d'AUCUNE autre org, et l'org systeme n'a aucun role : le chercher la
+# produirait un drift permanent contre la decision. La visibilite est posee par le geste qui cree les
+# comptes (`apply` pour l'org systeme, `catalogue install` pour chaque catalogue).
 check_members_visible() {
-  local hidden absent unknown org_accounts="$ROLES $LCARS_SYSTEM_ACCOUNT"
-  unknown="$(members_in_state unknown "$org_accounts")"
+  local hidden="" absent="" unknown org roles ligne
+  unknown="$(members_in_state unknown "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
   if [[ -n "$unknown" ]]; then
     # ⚠ DEUX CAUSES SOUS UN SEUL MESSAGE, ET ELLES N'APPELLENT PAS LE MEME VERDICT. Jeton ABSENT :
     # l'apply le minte, c'est un drift. Jeton PRESENT mais illisible par CE compte : rien n'a été
@@ -279,12 +293,29 @@ check_members_visible() {
     return 0
   fi
 
-  absent="$(members_in_state absent "$org_accounts")"
-  hidden="$(members_hidden "$org_accounts")"
-
-  # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
-  [[ -n "$absent" ]] && p_drift \
-    "comptes SANS adhésion à l'org :$(printf ' %s' $absent) — jeton valide, zéro droit d'écriture. La recette ne les place dans aucune team (vérifier les listes writers/judges/externals)"
+  local a h
+  a="$(members_in_state absent "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
+  h="$(members_in_state hidden "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
+  [[ -z "$a" ]] || p_drift "compte système $a SANS adhésion à l'org système $LCARS_FORGE_ORG — la recette l'y met (team system, Owners) : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
+  hidden="$h"
+  while IFS= read -r ligne; do
+    org="${ligne%% *}"; roles="${ligne#* }"
+    [[ "$org" != "$ligne" ]] || roles=""
+    [[ -n "$roles" && "$roles" != " " ]] || continue
+    if [[ -z "$org" ]]; then
+      # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
+      p_warn "adhésions de$(printf ' %s' $roles) NON sondées — leur roster ne nomme pas son org (la release ne l'a pas rendu)"
+      continue
+    fi
+    a="$(members_in_state absent "$org" "$roles")"
+    h="$(members_in_state hidden "$org" "$roles")"
+    # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
+    [[ -z "$a" ]] || p_drift \
+      "comptes SANS adhésion à l'org $org :$(printf ' %s' $a) — jeton valide, zéro droit d'écriture. La recette de ce catalogue ne les place dans aucune team (vérifier les listes writers/judges/externals) ; « lcars catalogue install $org » la rejoue"
+    absent="$absent $a"; hidden="$hidden $h"
+  done <<< "$ROSTERS"
+  # shellcheck disable=SC2086 # meme liste, l'eclatement dedoublonne
+  hidden="$(printf '%s\n' $hidden | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"

@@ -57,9 +57,9 @@ OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json"
 #
 # ⚠ UNE SEULE PAIRE DE VARIABLES NOMME CETTE EQUIPE, ET LES DEUX PORTES EN DERIVENT. Un literal ici
 # et une paire chez le convergeur, c'est un renommage d'org qui casse en SILENCE et dans UN SEUL
-# sens : la forge emet `<org>:humans`, cette page compare a `fleet:humans` et REFUSE tout humain non
+# sens : la forge emet `<org>:humans`, cette page compare a `lcars:humans` et REFUSE tout humain non
 # admin, pendant que le convergeur continue de creer leurs comptes.
-FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
+FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "lcars")
 HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("LCARS_HUMANS_TEAM", "humans"))
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
@@ -1352,7 +1352,7 @@ class Deck(BaseHTTPRequestHandler):
         # LU ICI, ET NULLE PART AILLEURS : c'est le seul endroit du deck ou un jeton d'acces existe.
         # Le lire plus tard couterait un credential de service stocke sur le conteneur — exactement ce
         # que ce lot passe son temps a retirer. Lu AVANT la porte : admiral (le master/sysadmin) est
-        # site-admin mais PAS dans fleet:humans — il entre par la porte ADMIN (is_admin), distincte
+        # site-admin mais PAS dans lcars:humans — il entre par la porte ADMIN (is_admin), distincte
         # de la porte worker. Une fois entre, tout est transparent : sa console tourne sous lui (uid
         # 1000, sudo -> root ; le deck ne fait que relayer un shell), Guard B lui interdit de lancer
         # une fleet, et is_admin lui donne l'onglet admin.
@@ -1493,7 +1493,7 @@ class Deck(BaseHTTPRequestHandler):
 
         # LE RELAIS EST DERRIERE LA PORTE, ET SON ORDRE DANS CETTE FONCTION EST LE CONTRAT. Tout ce
         # qui precede a deja etabli trois choses : une session Gitea valide, l'appartenance a
-        # `fleet:humans`, et un bloc local converge. Une cible atteinte ici l'est donc par quelqu'un
+        # `lcars:humans`, et un bloc local converge. Une cible atteinte ici l'est donc par quelqu'un
         # que la forge a nomme — c'est la « seule auth » : on ne redemande rien parce qu'on ne peut
         # plus arriver par ailleurs.
         # Le statique vit DERRIERE la porte, comme la page qui le charge : il n'a aucun usage pour

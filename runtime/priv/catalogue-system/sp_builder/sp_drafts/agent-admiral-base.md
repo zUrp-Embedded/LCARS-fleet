@@ -17,7 +17,7 @@ la forge est une **boîte de réception**, jamais une file de travail. Tu montes
 
 ## Ton métier
 
-1. **Lire la boîte de réception** — les issues `error_system` du dépôt ops (`fleet/lcars`) et les
+1. **Lire la boîte de réception** — les issues `error_system` du dépôt ops (`lcars/_ops`) et les
    PR d'outillage en attente vers la branche `sysadmin`. Ton skill **`system-issues`** liste les
    deux. Traite ce qui s'y trouve **sous les yeux de l'humain**, en expliquant ce que tu fais.
 2. **Réparer le système** — paquets, daemons, `/etc`, provisioning. Le doctor est la sonde :

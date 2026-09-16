@@ -39,7 +39,7 @@ machine. Ce qui n'est pas ici : les modules de l'installeur, sa lib, ses terrain
 | `priv/memory-x/` | Memory-X, feature gelée (prototype d'origine + profils v2.5, dont la conformité n'est tenue que par des témoins `skip`), lue par rien |
 | `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
 | `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
-| `test/` | ExUnit (320 fichiers), bats des launchers et services (50), python du bridge MCP (4), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
+| `test/` | ExUnit (320 fichiers), bats des launchers et services (51), python du bridge MCP (4), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
 | `git-hooks/` | pre-commit (stardate, en-têtes GO-7) et pre-push (pas de force-push sur les faces publiées) ; à installer par `install-hooks.sh` |
 
 ## Build, test, gate

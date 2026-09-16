@@ -32,7 +32,7 @@ setup() {
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   export LCARS_MODULE_TAG=63-forge-tokens
   # le roster vient du release par « lcars tool » : ici, une CLI de doublure qui rend un roster fixe
-  mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
+  mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"org\":\"fleet\",\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
   export FORGE_BASE_URL="http://forge.test"
   export LCARS_LOGIN="zoe"
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"

@@ -55,7 +55,7 @@ ROLES_SOCKET_PATH = os.environ.get(
 # laissant CE service lire le repertoire de la forge primaire — des gestes vises sur la seconde
 # forge presentant les jetons de la premiere.
 ROLE_TOKENS_DIR = os.environ.get("FORGE_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
-FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
+FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "lcars")
 HUMANS_TEAM = os.environ.get("LCARS_HUMANS_TEAM", "humans")
 
 # Un nom de compte de role est un nom de compte forge, et il devient un CHEMIN juste en dessous.

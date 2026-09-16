@@ -679,7 +679,7 @@ revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent 
   refute grep -qx 'REVOKE bob' "$REVOQUES"
   grep -qx 'REVOKE carol' "$REVOQUES"
   [ "$(grep -c 'REFUS de révoquer bob' <<<"$output")" -eq 1 ]
-  [[ "$output" == *"REFUS de révoquer bob — compte d'administration de la machine (sudo lui ouvre un shell root) : absent de fleet/humans, il garde son groupe fleet, son shell et ses processus."*"« sudo gpasswd -d bob fleet » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"* ]]
+  [[ "$output" == *"REFUS de révoquer bob — compte d'administration de la machine (sudo lui ouvre un shell root) : absent de lcars/humans, il garde son groupe fleet, son shell et ses processus."*"« sudo gpasswd -d bob fleet » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"* ]]
 }
 
 @test "revocation: une regle sudoers etroite ne sauve pas — le compte est revoque, meme membre de wheel ou d'admin" {
@@ -816,7 +816,7 @@ revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent 
 # demarraient sa console ; le troisieme faisait `continue`.
 #
 # Mesure du 2026-08-17 sur le banc `lcars-l6` : un compte cree A LA MAIN (uid 1042, groupe `fleet`,
-# shell `/bin/bash`) puis ajoute a `fleet:humans` traverse un tour complet EN SILENCE — pas de ligne
+# shell `/bin/bash`) puis ajoute a `lcars:humans` traverse un tour complet EN SILENCE — pas de ligne
 # dans le log, pas de repertoire dans `/run/lcars/console/`. Le deck lui affiche alors l'adresse d'un
 # terminal qui n'existe pas et le navigateur ecrit « [connexion impossible] ».
 #

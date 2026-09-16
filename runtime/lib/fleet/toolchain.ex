@@ -94,12 +94,12 @@ defmodule Fleet.Toolchain do
   end
 
   @doc """
-  Sysadmin repository: `:lcars_fleet, :pilot_ops_repo`, default `fleet/lcars`.
+  Sysadmin repository: `:lcars_fleet, :pilot_ops_repo`, default `lcars/_ops`.
   Keep this key/default aligned with IncidentRegistry.Escalation so requests and incidents
   reach the same repo. The reader is repeated because MCP cannot depend on Pilot.
   """
   @spec ops_repo() :: String.t()
-  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
+  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "lcars/_ops")
 
   @doc """
   Protected manifest branch, fixed by design as `tool_request`.

@@ -36,7 +36,7 @@ set -euo pipefail
 # second `source` dans le meme shell mourrait en « readonly variable ». Le gel du nom est tenu par
 # le contrat `toolchain.branch_single_source` et par ops-branch.bats, pas par l'attribut.
 OPS_BRANCH="tool_request"
-: "${LCARS_OPS_REPO:=fleet/lcars}"
+: "${LCARS_OPS_REPO:=lcars/_ops}"
 
 forge_repo_code() {
   forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \

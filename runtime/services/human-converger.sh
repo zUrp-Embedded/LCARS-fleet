@@ -23,7 +23,7 @@ ONCE=0
 FORGE="${FORGE_BASE_URL:-}"
 # Litteraux DUPLIQUES de `provision-lib.sh`, que ce script ne source pas : il tourne en boucle, hors
 # d'un cycle de provisionnement. C'est un temoin qui epingle leur egalite, faute de pouvoir la deriver.
-ORG="${LCARS_FORGE_ORG:-fleet}"
+ORG="${LCARS_FORGE_ORG:-lcars}"
 TEAM="${LCARS_HUMANS_TEAM:-humans}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"

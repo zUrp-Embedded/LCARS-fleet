@@ -56,7 +56,7 @@ EOF
   printf '#!/usr/bin/env bash\necho "autorité : refus" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
   STUB_DEPOT_PUBLIC=1 run "$LIST"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"pas de jeton de forge pour ce compte"*"lecture anonyme de fleet/lcars"* ]]
+  [[ "$output" == *"pas de jeton de forge pour ce compte"*"lecture anonyme de lcars/_ops"* ]]
   [[ "$output" == *"#12"*"pod en échec"* ]]
   [[ "$output" == *"!7"*"[toolchain] python"* ]]
   refute grep -q -- ' -K ' "$CALLS"
@@ -66,7 +66,7 @@ EOF
   printf '#!/usr/bin/env bash\necho "autorité : refus" >&2\nexit 1\n' > "$LCARS_AUTHORITY_ASK_BIN"
   run "$LIST"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"lecture anonyme refusée : fleet/lcars ne se lit pas sans jeton"* ]]
+  [[ "$output" == *"lecture anonyme refusée : lcars/_ops ne se lit pas sans jeton"* ]]
 }
 
 @test "client d'autorité absent : le refus le nomme" {
@@ -86,7 +86,7 @@ EOF
   printf 'http://forge.poste:3000\n' > "$LCARS_PRIVATE_DIR/forge.url"
   run "$LIST"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ "$(grep -c 'http://forge.poste:3000/api/v1/repos/fleet/lcars/' "$CALLS")" -eq 2 ]
+  [ "$(grep -c 'http://forge.poste:3000/api/v1/repos/lcars/_ops/' "$CALLS")" -eq 2 ]
 }
 
 @test "FORGE_BASE_URL de l'environnement (le conteneur) passe avant le fichier" {

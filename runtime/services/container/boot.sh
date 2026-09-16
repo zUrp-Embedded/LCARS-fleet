@@ -51,7 +51,7 @@ esac
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
-# fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
+# fleet sous cet uid, et les workers viennent du convergeur (forge lcars:humans, uid >= 1001).
 # ─── 1. L'INIT DE L'INSTANCE — COTE PRODUIT ─────────────────────────────────────────────────────
 #
 # `container/init.sh` rend 4 quand le conteneur n'a rien pour determiner son siege : c'est l'etat

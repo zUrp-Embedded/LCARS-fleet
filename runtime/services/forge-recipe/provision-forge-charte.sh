@@ -50,7 +50,7 @@ CHECK_ONLY=0
 # rôle canon (avec `admiral`) à porter `forge_identity: false`, et le catalogue dit pourquoi —
 # toutes ses écritures passent par le compte système, qui porte donc l'insigne de starfleet — pas
 # le favicon du produit, qui est celui de l'org.
-# L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
+# L'org du play porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 #
 # ⚠ CETTE LISTE N'EST PAS UN ROSTER, et ne doit pas le devenir. Elle porte un mapping compte→IMAGE :

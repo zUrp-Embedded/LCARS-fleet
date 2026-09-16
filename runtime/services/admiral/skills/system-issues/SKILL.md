@@ -7,13 +7,13 @@ description: Liste la boîte de réception sysadmin — les issues error_system 
 
 Lance `~/.claude/skills/system-issues/list.sh`. Deux lectures, dans l'ordre :
 
-1. **les issues `error_system`** du dépôt ops (`fleet/lcars`) — les défauts du système que la
+1. **les issues `error_system`** du dépôt ops (`lcars/_ops`) — les défauts du système que la
    fleet a remontés (le détail est dans chaque ticket) ;
 2. **les PR ouvertes vers `sysadmin`** — les demandes d'outillage des pods qui attendent la
    signature d'un admin (l'approbation se fait sur la forge, pas ici).
 
 Le script fait **deux lectures d'un dépôt public**, avec le **jeton système** du conteneur
-(`/opt/lcars/var/tokens/<compte-système>.gitea_token`) — jamais le master. Mesuré : `fleet/lcars` est
+(`/opt/lcars/var/tokens/<compte-système>.gitea_token`) — jamais le master. Mesuré : le dépôt système est
 public, et ses deux points d'entrée répondent même en anonyme. Aucune de ces lectures n'est
 site-admin, donc aucune n'a besoin d'une autorité.
 

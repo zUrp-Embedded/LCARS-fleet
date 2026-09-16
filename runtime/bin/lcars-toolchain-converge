@@ -33,7 +33,7 @@ set -euo pipefail
 STORE="${LCARS_STORE_ROOT:-}"
 [[ -n "$STORE" ]] \
   || { echo "lcars-toolchain-converge: LCARS_STORE_ROOT non posé — l'unité du geste le porte (depuis /etc/lcars/services.env) ; à la main, « LCARS_STORE_ROOT=<racine> » devant la commande" >&2; exit 1; }
-OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
+OPS_REPO="${LCARS_OPS_REPO:-lcars/_ops}"
 FORGE="${FORGE_BASE_URL:-}"
 # `FORGE_TOKEN` est une entree EXPLICITE posee sur l'unite, jamais un chemin que ce script irait
 # ouvrir : savoir OU trouver un secret, c'est deja avoir le droit de le lire.

@@ -666,3 +666,58 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   grep -q 'LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens' "$REPO/runtime/services/admiral/skills/system-issues/list.sh" \
     || { echo "MUR 18 rompu — le skill du siège ne lit plus forge.url dans le dossier des jetons" >&2; return 1; }
 }
+
+# ⚠ MUR 19 — L'ORG SYSTÈME A UN NOM, ÉCRIT HUIT FOIS. L'installeur le décide (`PROV_FORGE_ORG_DEFAULT`),
+# le protocole des gestes, les deux daemons python et le convergeur le lisent en `LCARS_FORGE_ORG` avec
+# un défaut, la recette le porte en `system_org`, le geste de forge en `SYSTEM_ORG`, et le dépôt système
+# (`Fleet.Toolchain.ops_repo/0`, ses copies shell) vit dans cette org. Aucun de ces lecteurs ne peut
+# dériver le nom d'un autre (un daemon en boucle ne source pas la lib de l'installeur ; tofu ne lit pas
+# l'env du produit), donc l'égalité se mesure. Une seule copie qui diverge, et la team `humans` ou le
+# dépôt `_ops` sont cherchés dans une org qui n'existe pas — sans qu'aucun message ne nomme la cause.
+@test "MUR 19: l'org système porte le même nom chez l'installeur, le protocole, la recette, le geste, les daemons et le dépôt système" {
+  local attendu; attendu="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$attendu" ] || { echo "MUR 19 — PROV_FORGE_ORG_DEFAULT illisible dans installer-constants.env" >&2; return 1; }
+
+  local -a lectures=(
+    "runtime/services/lib/module-protocol.sh|^: \"\\\${LCARS_FORGE_ORG:=\([^}]*\)}\"\$|le protocole des gestes"
+    "runtime/services/forge-gestures.sh|^SYSTEM_ORG=\"\\\${LCARS_FORGE_ORG:-\([^}]*\)}\"\$|le geste de forge"
+    "runtime/services/human-converger.sh|^ORG=\"\\\${LCARS_FORGE_ORG:-\([^}]*\)}\"\$|le convergeur d'humains"
+    "runtime/services/catalogue-executor.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|l'exécuteur de catalogue"
+    "runtime/services/console-deck.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|le deck"
+    "runtime/lib/fleet/toolchain.ex|^  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, \"\([^/\"]*\)/[^\"]*\")\$|le dépôt système du runtime"
+    "runtime/services/forge.d/ops-branch.sh|^: \"\\\${LCARS_OPS_REPO:=\([^/}]*\)/[^}]*}\"\$|le geste ops-branch"
+    "runtime/services/admiral/skills/system-issues/list.sh|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le skill du siège"
+    "runtime/bin/lcars-toolchain-converge|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le convergeur d'outillage"
+  )
+  local l f motif qui lu manque=""
+  for l in "${lectures[@]}"; do
+    IFS='|' read -r f motif qui <<<"$l"
+    lu="$(sed -n "s|$motif|\1|p" "$REPO/$f" | head -n1)"
+    [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : $qui ($f) ne porte plus la ligne attendue" >&2; return 1; }
+    [ "$lu" = "$attendu" ] || manque="$manque\n  $qui ($f) : « $lu », attendu « $attendu »"
+  done
+  # la recette : le défaut de `system_org`, lu dans son bloc et pas ailleurs
+  lu="$(awk '/^variable "system_org" \{/ { in_bloc = 1 } in_bloc && /^  default/ { gsub(/.*= *"|".*/, ""); print; exit }' \
+        "$REPO/runtime/services/forge-recipe/forge.tf")"
+  [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : la recette ne porte plus variable \"system_org\" avec un défaut" >&2; return 1; }
+  [ "$lu" = "$attendu" ] || manque="$manque\n  la recette (system_org) : « $lu », attendu « $attendu »"
+  [ -z "$manque" ] || { echo "MUR 19 rompu — des lecteurs de l'org système ne portent pas le nom que l'installeur décide :" >&2; printf '%b\n' "$manque" >&2; return 1; }
+}
+
+# ⚠ MUR 20 — LE CATALOGUE DE LA RELEASE A UN NOM, ET C'EST LE SIEN. `Fleet.Catalogue.bundled_name/0`
+# le gèle pour le runtime, `priv/catalogue/catalogue.yaml` le déclare, et l'installeur le recopie
+# (`PROV_BUNDLED_CATALOGUE`) parce qu'un compose de banc ne peut pas le demander à une release qui
+# n'est pas encore lancée. Ce n'est PAS l'org système (MUR 19) : un catalogue nomme l'org de ses projets.
+@test "MUR 20: le catalogue embarqué porte le même nom dans son manifeste, dans Fleet.Catalogue et chez l'installeur, et ce nom n'est pas l'org système" {
+  local manifeste runtime installeur systeme
+  manifeste="$(awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, ""); print; exit }' "$REPO/runtime/priv/catalogue/catalogue.yaml")"
+  runtime="$(sed -n 's/^  @bundled_name "\([^"]*\)"$/\1/p' "$REPO/runtime/lib/fleet/catalogue.ex")"
+  installeur="$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$REPO/deploy/installer-constants.env")"
+  systeme="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$manifeste" ] && [ -n "$runtime" ] && [ -n "$installeur" ] \
+    || { echo "MUR 20 — instrument cassé : manifeste « $manifeste », runtime « $runtime », installeur « $installeur »" >&2; return 1; }
+  [ "$manifeste" = "$runtime" ] && [ "$runtime" = "$installeur" ] \
+    || { echo "MUR 20 rompu — manifeste « $manifeste », Fleet.Catalogue « $runtime », PROV_BUNDLED_CATALOGUE « $installeur »" >&2; return 1; }
+  [ "$installeur" != "$systeme" ] \
+    || { echo "MUR 20 rompu — le catalogue embarqué porte le nom de l'org système « $systeme » : ses projets vivraient dans l'org du système" >&2; return 1; }
+}

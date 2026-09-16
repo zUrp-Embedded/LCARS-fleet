@@ -53,7 +53,7 @@ import {
 
 import {
   for_each = local.existing_org
-  to       = gitea_org.fleet
+  to       = gitea_org.this
   id       = each.value
 }
 

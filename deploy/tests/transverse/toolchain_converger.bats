@@ -546,7 +546,7 @@ TETE='*/branches/tool_request|200|{"commit":{"id":"deadbeefdeadbeefdeadbeefdeadb
   stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|404|<!DOCTYPE html><html><body>404 Not Found</body></html>')"
   run "$SUT" deadbeef
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"aucun dossier ops/toolchains.d sur fleet/lcars au sha deadbeef — aucun manifeste à appliquer"* ]]
+  [[ "$output" == *"aucun dossier ops/toolchains.d sur lcars/_ops au sha deadbeef — aucun manifeste à appliquer"* ]]
   [[ "$(cat "$LCARS_STORE_ROOT/state/egress.d/.applied")" == "deadbeef" ]]
   printf '%s\n' "$output" | refute_out 'parse error|illisible'
 }
@@ -557,7 +557,7 @@ TETE='*/branches/tool_request|200|{"commit":{"id":"deadbeefdeadbeefdeadbeefdeadb
   stub_forge_http "$(routes '*/branches/tool_request|401|{"message":"user does not exist [uid: 0, name: ]"}')"
   run "$SUT" deadbeef
   [[ "$status" -eq 1 ]]
-  [[ "$output" == *"la forge refuse le jeton du convergeur (HTTP 401) en lisant la tête de « tool_request » sur fleet/lcars — rien n'est appliqué. FORGE_TOKEN est invalide ou ne donne pas la lecture de ce dépôt"* ]]
+  [[ "$output" == *"la forge refuse le jeton du convergeur (HTTP 401) en lisant la tête de « tool_request » sur lcars/_ops — rien n'est appliqué. FORGE_TOKEN est invalide ou ne donne pas la lecture de ce dépôt"* ]]
   printf '%s\n' "$output" | refute_out 'jeton-refuse'
   [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
@@ -566,7 +566,7 @@ TETE='*/branches/tool_request|200|{"commit":{"id":"deadbeefdeadbeefdeadbeefdeadb
   stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|403|{"message":"forbidden"}')"
   run "$SUT" deadbeef
   [[ "$status" -eq 1 ]]
-  [[ "$output" == *"la forge refuse la lecture anonyme (HTTP 403) de la liste des manifestes sur fleet/lcars"*"poser FORGE_TOKEN"* ]]
+  [[ "$output" == *"la forge refuse la lecture anonyme (HTTP 403) de la liste des manifestes sur lcars/_ops"*"poser FORGE_TOKEN"* ]]
   [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
 

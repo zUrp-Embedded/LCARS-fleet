@@ -52,7 +52,7 @@ SOCKET_MODE = 0o660
 CONVERGE_BIN = os.environ.get(
     "LCARS_TOOLCHAIN_CONVERGE_BIN", "/usr/local/bin/lcars-toolchain-converge"
 )
-OPS_REPO = os.environ.get("LCARS_OPS_REPO", "fleet/lcars")
+OPS_REPO = os.environ.get("LCARS_OPS_REPO", "lcars/_ops")
 # ⚠ Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source` : reglable ici seulement, il ferait converger le conteneur sur une
 # branche pendant que les demandes atterrissent dans une autre.

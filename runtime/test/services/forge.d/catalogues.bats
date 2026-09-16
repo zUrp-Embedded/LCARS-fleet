@@ -35,6 +35,11 @@ setup() {
   export FORGE_BASE_URL="http://forge.invalid"
   mkdir -p "$LCARS_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+  # la release, doublee : elle nomme son catalogue (`fleet`), que ce geste ne suit jamais
+  RELEASE_CAT="$BATS_TEST_TMPDIR/release-catalogue"; mkdir -p "$RELEASE_CAT"
+  printf 'api_version: 1\nname: fleet\n' > "$RELEASE_CAT/catalogue.yaml"
+  printf '#!/usr/bin/env bash\n[[ "$1 $2" == "tool catalogue-root" ]] && printf "%%s\\n" "%s"\nexit 0\n' "$RELEASE_CAT" > "$BATS_TEST_TMPDIR/bin/lcars"
+  chmod +x "$BATS_TEST_TMPDIR/bin/lcars"; export LCARS_CLI="$BATS_TEST_TMPDIR/bin/lcars"
 }
 
 # La forge repond ce qu'on lui dit de repondre — TROIS endpoints : la recherche (corps JSON + header
@@ -231,6 +236,28 @@ json_one() {
   [ -d "$LCARS_CATALOGUES_DIR/web" ]
   [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/_catalogue.git $LCARS_CATALOGUES_DIR/web.tmp"* ]]
   [ ! -e "$LCARS_CATALOGUES_DIR/web.tmp" ]
+}
+
+@test "le magasin du catalogue de la release est sur la forge, et il n'est ni signe ni clone : la release est son materiel" {
+  fake_forge '{"data":[{"name":"_catalogue","full_name":"fleet/_catalogue","empty":false,"owner":{"login":"fleet"},"clone_url":"http://forge.invalid/fleet/_catalogue.git"},{"name":"_catalogue","full_name":"web/_catalogue","empty":false,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/_catalogue.git"}]}'
+  export FAKE_ORGS="fleet web"
+  fake_git
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
+  [ ! -e "$LCARS_CATALOGUES_DIR/fleet" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" != *"fleet/_catalogue"* ]]
+  [[ "$output" != *"catalogue fleet"* ]]
+  [[ "$output" != *"nom du catalogue de la release inconnu"* ]]
+
+  # sans release qui reponde, rien n'est exclu, et c'est dit : le magasin est suivi comme un installe
+  : > "$GIT_TRACE_FILE"; rm -rf "$LCARS_CATALOGUES_DIR/web"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$LCARS_CLI"
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WARN  50-catalogues: nom du catalogue de la release inconnu (« lcars tool catalogue-root » ne repond pas)"* ]]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"fleet/_catalogue"* ]]
 }
 
 @test "materiel present : fetch + reset --hard, JAMAIS pull" {

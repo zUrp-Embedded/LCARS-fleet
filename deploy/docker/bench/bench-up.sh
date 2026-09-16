@@ -147,8 +147,10 @@ fi
 ROSTER_RC=0; ENROLL_OUT="$(prov_roster_conteneur "$IMAGE" in_container)" || ROSTER_RC=$?
 [[ "$ROSTER_RC" -ne 1 ]] || die "dérivation du roster en échec (enroll-catalogue.sh, image $IMAGE)" 4
 [[ "$ROSTER_RC" -eq 0 ]] || die "roster non déposé dans la recette de $CONTAINER" 4
-# une org non déclarée par le roster est celle que la recette prend par défaut
-ORG="$(sed -n 's/^\[enroll-catalogue\] org *: \([A-Za-z0-9_.-]\{1,\}\)$/\1/p' <<<"$ENROLL_OUT")"; ORG="${ORG:-$PROV_FORGE_ORG_DEFAULT}"
+# l'org du roster est celle du catalogue de l'image, où le banc sème la source ; l'org système
+# (PROV_FORGE_ORG_DEFAULT) ne porte aucun projet, donc aucun repli sur elle : un roster muet est un refus
+ORG="$(sed -n 's/^\[enroll-catalogue\] org *: \([A-Za-z0-9_.-]\{1,\}\)$/\1/p' <<<"$ENROLL_OUT")"
+[[ -n "$ORG" ]] || die "le roster de l'image ne déclare pas d'org — le banc ne sait pas où semer la source (enroll-catalogue.sh, image $IMAGE)" 4
 say "roster dérivé du catalogue de l'image ($(sed -n 's/^\[enroll-catalogue\] rôles *: //p' <<<"$ENROLL_OUT")) · org $ORG"
 
 printf '%s' "$MASTER_TOKEN" | in_container "$GESTES" config-token || die "jeton master refusé par le conteneur" 4
@@ -216,6 +218,20 @@ grep -q 'token [^[:space:]]' "$JETONS/git-forge" \
 # le jeton système atteint git par un fichier de configuration 0600 : ni argv, ni environnement
 git_forge() { git -c "include.path=$JETONS/git-forge" "$@"; }
 LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/lcars.git"
+# le dépôt semé n'est plus le dépôt système (celui-là est <org système>/_ops, posé par la structure) :
+# plus rien ne le crée, le banc le fait lui-même, vide (un push sur un dépôt vide passe, sur un dépôt
+# absent la forge répond « Push to create is not enabled for organizations ») — jusqu'à ce que
+# l'adoption de la source par le système remplace ce semis
+code="$(forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/lcars" /dev/null --token-file "$JETONS/master" -m 10)" || {
+  [[ "$code" == 404 ]] || die "$ORG/lcars : la forge ne dit pas si le dépôt existe (HTTP $code) — rien n'est semé à l'aveugle" 7
+  forge_api POST "$FORGE_LOCAL_URL/api/v1/orgs/$ORG/repos" /dev/null --token-file "$JETONS/master" -m 20 \
+      --json '{name: $n, private: false, auto_init: false, description: "La source de LCARS-fleet, semée par le banc à la révision de son image."}' \
+      --arg n lcars >/dev/null || true
+  # la relecture fait foi, pas le code du POST
+  forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/lcars" /dev/null --token-file "$JETONS/master" -m 10 >/dev/null \
+    || die "$ORG/lcars : dépôt non créé — le banc n'a nulle part où semer la source" 7
+  say "$ORG/lcars : dépôt créé pour le semis"
+}
 if [[ -d "$REPO_ROOT/.git" ]]; then
   git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
     || die "$ORG/lcars : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
@@ -234,12 +250,12 @@ fi
 seed_hooks=(); seed_force=()
 remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
 if [[ -n "$remote_main" ]] && ! git -C "$SEED_DIR" merge-base --is-ancestor "$remote_main" "$SEED_REF" 2>/dev/null; then
-  # sur une forge neuve, c'est le main du dépôt modèle que la structure vient de poser
-  say "$ORG/lcars : le main posé à la création du dépôt (${remote_main:0:9}) est remplacé par le semis"
+  # un main déjà là : un banc rejoué sur une forge qui garde le semis d'avant (le dépôt naît vide sinon)
+  say "$ORG/lcars : le main déjà là (${remote_main:0:9}) est remplacé par le semis"
   seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
 fi
 PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${SEED_REF}:refs/heads/main" 2>&1)" \
-  || die "$ORG/lcars : main non poussé — c'est le dépôt ops de la fleet ; sans lui le banc n'a pas de code
+  || die "$ORG/lcars : main non poussé — c'est la source que le conteneur clone ; sans lui le banc n'a pas de code
   git a dit : $PUSH_ERR" 7
 [[ "$SEED_DIR" == "$REPO_ROOT" ]] || rm -rf "$SEED_DIR"
 say "$ORG/lcars : main poussé ($SEED_DIT)"

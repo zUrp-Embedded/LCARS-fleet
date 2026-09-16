@@ -83,6 +83,8 @@ setup() {
   # les objets des projets du banc, « <nom>:<c|v>:<marqueur> », rangés dans le projet que leur nom porte
   export OBJETS=""
   export SOURCE_OWNER_OUT="$BATS_TEST_TMPDIR/owner";    echo "admiral" > "$SOURCE_OWNER_OUT"
+  export REPO_SEME="$BATS_TEST_TMPDIR/repo_seme"
+  export REPO_CODE="$BATS_TEST_TMPDIR/repo_code";       : > "$REPO_CODE"
   export PORT_HOLDER="$BATS_TEST_TMPDIR/port_holder"
   export CREDS_POSED="$BATS_TEST_TMPDIR/creds_posed"
 
@@ -175,6 +177,9 @@ case "$method $url" in
   "PATCH "*/api/v1/admin/users/*)   code="$(cat "$PATCH_CODE")" ;;
   "POST "*/api/v1/users/*/tokens)   code=201; rep='{"sha1":"OP-TOKEN"}' ;;
   "GET "*/api/v1/users/*)           rep="{\"is_admin\":${IS_ADMIN:-true}}" ;;
+  # le dépôt semé : absent tant que le banc ne l'a pas créé, présent ensuite (la relecture fait foi)
+  "GET "*/api/v1/repos/*/lcars)     if [[ -s "$REPO_CODE" ]]; then code="$(cat "$REPO_CODE")"; else [[ -e "$REPO_SEME" ]] || code=404; fi ;;
+  "POST "*/api/v1/orgs/*/repos)     code=201; touch "$REPO_SEME" ;;
 esac
 printf '%s' "$rep" > "$out"
 [[ -z "$fmt" ]] || printf '%s' "$code"
@@ -299,15 +304,17 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [[ "$output" == *"converge  : en échec (rc=1)"* ]]
 }
 
-@test "l'org du roster nomme le dépôt semé ; un roster sans org sème dans l'org par défaut des constantes" {
+@test "l'org du roster nomme le dépôt semé ; un roster sans org est un arrêt en 4 — l'org système ne porte aucun projet, aucun repli sur elle" {
   ORG_ROSTER=escadre run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q "push -q http://127.0.0.1:$BF/escadre/lcars.git " "$CALLS"
   [[ "$output" == *"roster dérivé du catalogue de l'image (system_architect fleet_engineer) · org escadre"* ]]
   : > "$CALLS"
   ORG_ROSTER="<non déclarée>" run_bench --no-runner
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "push -q http://127.0.0.1:$BF/fleet/lcars.git " "$CALLS"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"le roster de l'image ne déclare pas d'org — le banc ne sait pas où semer la source"* ]]
+  refute grep -q 'GIT:.*push' "$CALLS"
+  refute grep -q "/$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$CONSTANTES")/lcars" "$CALLS"
 }
 
 @test "le jeton système absent du conteneur après la relance : arrêt en 6, aucun push" {
@@ -516,15 +523,44 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q 'push -q --force' "$CALLS"
   [[ "$output" == *"main poussé (révision de l'image : deadbeef1)"* ]]
   refute grep -q 'GIT:.* ops:ops' "$CALLS"
-  refute grep -q '^CURL:POST .*/repos' "$CALLS"
 }
 
-@test "le main que la structure a posé sur la forge neuve : le hook est levé et le push forcé, dit sans alarme" {
+# le dépôt semé n'est pas le dépôt système (<org système>/_ops, posé par la structure) : plus rien ne le
+# crée que le banc, et il le crée VIDE, avant le push, avec le jeton master — relu avant de conclure
+@test "le semis crée le dépôt s'il manque : sondé, créé vide avec le jeton master, relu, et le push vient après ; un dépôt déjà là n'est pas recréé" {
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars | Authorization: token MASTER |" "$CALLS"
+  grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos | Authorization: token MASTER | {\"name\":\"lcars\",\"private\":false,\"auto_init\":false," "$CALLS"
+  [ "$(grep -c "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars " "$CALLS")" -eq 2 ]
+  local creation push
+  creation="$(grep -n "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos " "$CALLS" | head -1 | cut -d: -f1)"
+  push="$(grep -n "push -q http://127.0.0.1:$BF/fleet/lcars.git " "$CALLS" | head -1 | cut -d: -f1)"
+  [ "$creation" -lt "$push" ]
+  [[ "$output" == *"fleet/lcars : dépôt créé pour le semis"* ]]
+  # déjà là : une sonde, aucune création
+  : > "$CALLS"; touch "$REPO_SEME"
+  run_bench --no-runner
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos " "$CALLS"
+  [[ "$output" != *"dépôt créé pour le semis"* ]]
+}
+
+@test "le semis ne conclut pas sur une forge qui ne dit ni présent ni absent : arrêt en 7 qui nomme le code, rien n'est créé ni poussé" {
+  echo 503 > "$REPO_CODE"
+  run_bench --no-runner
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"fleet/lcars : la forge ne dit pas si le dépôt existe (HTTP 503)"* ]]
+  refute grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos " "$CALLS"
+  refute grep -q 'GIT:.*push' "$CALLS"
+}
+
+@test "un main déjà là (banc rejoué sur la même forge) : le hook est levé et le push forcé, dit sans alarme" {
   echo "0123456789abcdef" > "$REMOTE_MAIN"; echo 1 > "$ANCESTOR_RC"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qE "^GIT:-c include.path=[^ ]+ -C $ROOT -c core.hooksPath=/dev/null push -q --force " "$CALLS"
-  [[ "$output" == *"fleet/lcars : le main posé à la création du dépôt (012345678) est remplacé par le semis"* ]]
+  [[ "$output" == *"fleet/lcars : le main déjà là (012345678) est remplacé par le semis"* ]]
   refute_out 'existe déjà|poussé de force' <<<"$output"
 }
 

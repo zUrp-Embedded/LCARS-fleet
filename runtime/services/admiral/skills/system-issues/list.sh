@@ -22,7 +22,7 @@ set -euo pipefail
 FORGE_URL_FILE="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}/forge.url"
 FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/dev/null | tr -d '[:space:]' || true)}}"
 # ⚠ LE JETON SYSTEME, PAS LE MASTER, ET C'EST UNE CORRECTION DE PRIVILEGE. Ce script ne fait que
-# DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : `fleet/lcars` est
+# DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : le dépôt système (`lcars/_ops`) est
 # `private=false, internal=false`, et ses deux points d'entree (`issues`, `pulls`) repondent 200 en
 # ANONYME. Aucune de ces lectures n'est site-admin.
 #
@@ -39,7 +39,7 @@ FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/
 # `roles.sock` : le service la porte a la forge A L'INSTANT du geste.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
-OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
+OPS_REPO="${LCARS_OPS_REPO:-lcars/_ops}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source`. Reglable a moitie, il ferait relever une boite aux lettres
 # pendant que les demandes atterrissent dans une autre.

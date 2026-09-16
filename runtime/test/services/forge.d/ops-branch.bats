@@ -190,7 +190,7 @@ EOF
 
 @test "le depot ops est CREE par l'amorcage — il etait lu par trois domaines et cree par aucun" {
   # ⚠ TROU MESURE LE 2026-08-22. `Fleet.Toolchain.ops_repo/0`, `IncidentRegistry.Escalation` et
-  # `pod_tools/delegation.ex` visent tous `fleet/lcars` ; le seul `create_repo` du runtime sert aux
+  # `pod_tools/delegation.ex` visent tous `lcars/_ops` ; le seul `create_repo` du runtime sert aux
   # depots de PROJET, et la recette tofu ne cree AUCUN depot. Resultat : derive a chaque passage sur
   # les deux substrats, et un 404 sur ce depot lu comme une panne de l'IncidentRegistry.
   local g="$BATS_TEST_DIRNAME/../../../services/forge-gestures.sh"

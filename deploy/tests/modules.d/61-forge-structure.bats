@@ -75,7 +75,7 @@ case "${STUB_GESTE:-pose}" in
   pose)    echo "Apply complete! Resources: 12 imported, 3 added, 0 changed, 0 destroyed." ;;
   importe) echo "Apply complete! Resources: 4 imported, 0 added, 0 changed, 0 destroyed." ;;
   rien)    echo "Apply complete! Resources: 0 added, 0 changed, 0 destroyed." ;;
-  echec)   echo "Error: gitea_org.fleet: 401 Unauthorized" >&2; exit 1 ;;
+  echec)   echo "Error: gitea_org.this: 401 Unauthorized" >&2; exit 1 ;;
 esac
 EOF
   chmod 0755 "$BIN"/* "$TOFU_BIN" "$RACINE/deploy/lib/enroll-catalogue.sh" "$RACINE/runtime/services/forge-gestures.sh"

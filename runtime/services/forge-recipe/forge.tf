@@ -2,7 +2,8 @@
 # LCARS Fleet — empreinte forge (structure déclarative)
 #
 # Provisionne la STRUCTURE d'une forge Gitea vierge pour accueillir une fleet :
-# comptes (système + rôles + humain), org `fleet`, teams + memberships.
+# comptes (système + rôles + humain), UNE org par play (`var.org` : l'org système, puis chaque
+# catalogue), teams + memberships.
 #
 # HORS de ce fichier, par choix :
 #   · les tokens runtime      → bin/provision-role-tokens.sh (le provider ne minte
@@ -162,7 +163,7 @@ variable "org" {
   default     = "fleet"
 }
 
-resource "gitea_org" "fleet" {
+resource "gitea_org" "this" {
   name       = var.org
   visibility = "public"
 
@@ -184,7 +185,7 @@ resource "gitea_org" "fleet" {
   # a ete retire des teams (cf. la cicatrice sur `gitea_team`) parce que Gitea relit `permission` en
   # `none` — une valeur INVALIDE en ecriture, que l'update renvoyait et que Gitea refusait. La
   # visibilite, elle, se relit `public`/`limited` : des valeurs valides. Plan apres ce bloc :
-  # `gitea_org.fleet` disparait du plan, l'org reste `limited`.
+  # `gitea_org.this` disparait du plan, l'org reste `limited`.
   lifecycle {
     ignore_changes = [visibility, repo_admin_change_team_access]
   }
@@ -246,8 +247,10 @@ locals {
   }
 
   # ⚠ `humans` N'EXISTE QUE DANS L'ORG SYSTÈME, et cette recette est jouée UNE FOIS PAR ORG — pour
-  # `fleet` par `cmd_apply`, puis pour chaque catalogue par `cmd_install`, qui la recopie dans le
-  # dossier du catalogue avec `var.org` = son nom.
+  # l'org système par `cmd_apply` (`-var org=<système>`, sans aucun rôle métier : le rail d'outillage
+  # et le registre d'incidents écrivent sous le compte système), puis pour chaque catalogue par
+  # `cmd_install`, qui la recopie dans le dossier du catalogue avec `var.org` = son nom — le catalogue
+  # standard `fleet` compris, installé depuis la release comme n'importe quel autre.
   #
   # POURQUOI ELLE N'A RIEN À FAIRE DANS UNE ORG DE CATALOGUE. Elle répondait à UNE question : le
   # préflight d'onboarding vérifiait l'adhésion de l'humain à `<catalogue>:humans` avant de créer un
@@ -275,12 +278,18 @@ locals {
 }
 
 # L'ORG SYSTÈME EST NOMMÉE, PAS DEVINÉE. Elle porte l'identité (`humans`, lue par le convergeur et
-# par le deck) ; les orgs de catalogue portent du travail. Une recette qui sert les deux a besoin de
-# savoir laquelle elle sert, et une variable le dit mieux qu'une convention de nommage.
+# par le deck) et le dépôt du système (`_ops`) ; les orgs de catalogue portent du travail. Une
+# recette qui sert les deux a besoin de savoir laquelle elle sert, et une variable le dit mieux
+# qu'une convention de nommage.
+#
+# ⚠ CE DÉFAUT A TROIS JUMEAUX, tenus par les murs de `deploy/tests/variable_walls.bats` :
+# `PROV_FORGE_ORG_DEFAULT` (installeur), `LCARS_FORGE_ORG` (`services/lib/module-protocol.sh`) et
+# l'org de `Fleet.Toolchain.ops_repo/0`. Le nom est réservé au système : aucun catalogue ni projet
+# ne le porte (⚖ user 2026-09-16, option B).
 variable "system_org" {
   type        = string
   description = "Org qui porte l'identité de la fleet — la seule à recevoir la team `humans`"
-  default     = "fleet"
+  default     = "lcars"
 }
 
 # ⚠ LE BRUIT DES TEAMS EST UN DÉFAUT DU PROVIDER, PAS DE CETTE RECETTE — et aucune forme écrite ici
@@ -304,7 +313,7 @@ variable "system_org" {
 resource "gitea_team" "this" {
   for_each                 = local.teams
   name                     = each.key
-  organisation             = gitea_org.fleet.name
+  organisation             = gitea_org.this.name
   permission               = each.value.permission
   can_create_repos         = each.value.can_create_repos
   include_all_repositories = true
@@ -389,7 +398,7 @@ resource "gitea_team_membership" "human" {
 
 # ⚠ LE COMPTE SYSTÈME N'EST MEMBRE D'AUCUNE TEAM, ET IL NE DOIT PAS LE DEVENIR.
 #
-# `fleet:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
+# `lcars:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
 # lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple. Une adhésion du
 # système à `humans` ferait exactement ça, pour un droit qu'il a déjà.
 #
@@ -414,8 +423,8 @@ resource "gitea_team_membership" "human" {
 # source serait lue au PLAN — c'est-à-dire avant que l'org existe, et l'apply mourrait sur une
 # forge vierge. Avec, la lecture est différée à l'apply, après la création.
 data "gitea_teams" "org" {
-  organisation = gitea_org.fleet.name
-  depends_on   = [gitea_org.fleet]
+  organisation = gitea_org.this.name
+  depends_on   = [gitea_org.this]
 }
 
 resource "gitea_team_membership" "owner" {

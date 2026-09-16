@@ -138,7 +138,7 @@ defmodule Fleet.ToolchainTest do
     end
 
     test "le dépôt est celui du domaine sysadmin, la branche n'est PAS `ops`" do
-      assert Toolchain.ops_repo() == "fleet/lcars"
+      assert Toolchain.ops_repo() == "lcars/_ops"
       assert Toolchain.branch() == "tool_request"
       refute Toolchain.branch() == "ops"
     end

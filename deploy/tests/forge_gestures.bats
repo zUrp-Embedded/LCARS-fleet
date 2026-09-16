@@ -82,11 +82,17 @@ FAKE
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
   ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
+  # le catalogue que la release embarque : `apply` l'installe comme n'importe quel catalogue, et sa
+  # source est cet arbre-ci ; un cas qui nomme LCARS_REFERENCE_CATALOGUE l'emporte sur cette porte
+  REFERENCE="$BATS_TEST_TMPDIR/release-catalogue"; mkdir -p "$REFERENCE"
+  printf 'api_version: 1\nname: fleet\n' > "$REFERENCE/catalogue.yaml"
+  export REFERENCE
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
 [[ "\$1" == tool ]] && shift   # la porte est « lcars tool <verbe> » (lot 6)
 printf '%s\n' "\$*" >> "$ENTRY_LOG"
 case "\$1" in
+  catalogue-root) printf '%s\n' "$REFERENCE" ;;
   catalogue-source)
     rc="\$(cat "$BATS_TEST_TMPDIR/src.rc" 2>/dev/null || echo 0)"
     [[ "\$rc" -eq 0 ]] || { echo "ABSENT \$2" >&2; exit "\$rc"; }
@@ -307,7 +313,9 @@ FAKE
   [[ "$output" == *"system_starfleet.gitea_token"* ]]
   [[ "$output" == *"deploy/workstation up"* ]]
   [[ "$output" == *"deploy/container up"* ]]
-  [ ! -s "$ENTRY_LOG" ]
+  # la seule porte jouee est la question « est-ce le catalogue de la release ? » ; aucune resolution
+  refute grep -q '^catalogue-source' "$ENTRY_LOG"
+  refute grep -q '^verify' "$ENTRY_LOG"
 }
 
 @test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
@@ -344,9 +352,11 @@ FAKE
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
-  [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
-  [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
+  # d'abord « est-ce le catalogue de la release ? » (son nom, demande a la release), puis la voie de la forge
+  [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-root" ]
+  [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
+  [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
+  [ "$(sed -n '4p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
   grep -q "$LCARS_CATALOGUES_WORK/cat" "$TOFU_LOG"
   grep -q 'push .*cat/_catalogue' "$GIT_LOG"
 }
@@ -467,9 +477,10 @@ FAKE
   LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
   [[ "$output" == *"web-demo NON depose"* ]]
-  # Aucun push : `git` n'a meme pas ete appele, donc son journal n'existe pas. Tester le CONTENU
-  # d'un fichier absent ferait echouer le temoin sur sa propre mise en scene et pas sur le sujet.
-  [ ! -s "$GIT_LOG" ]
+  # Aucun push de la demo. Le magasin du catalogue de la release, lui, EST pousse : c'est une
+  # installation, pas un depot chez le master.
+  refute grep -q 'push .*web-demo' "$GIT_LOG"
+  grep -q 'push -q --force http://forge.test/fleet/_catalogue.git main' "$GIT_LOG"
 }
 
 @test "apply: SANS catalogue de demonstration dans l'image, l'apply ne dit rien" {
@@ -508,7 +519,9 @@ FAKE
   [[ "$(cat "$GIT_LOG")" != *un-repertoire-mal-nomme* ]]
 }
 
-@test "apply: un arbre SANS \`name:\` en colonne zero n'est pas depose, et le refus le DIT" {
+@test "apply: un catalogue de release SANS \`name:\` en colonne zero ne s'installe pas — echec NOMME apres la structure, rien n'est pousse" {
+  # Le nom est l'org des projets : sans lui, l'installation n'a pas d'org a poser, et une forge sans
+  # org de projets n'accueille rien. Ce n'est plus « non depose », c'est un echec.
   setup_install
   ref="$BATS_TEST_TMPDIR/reference"
   mkdir -p "$ref"
@@ -517,8 +530,9 @@ FAKE
 
   LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
     run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ne declare pas de"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la release ne nomme pas son catalogue — la structure est posee, mais AUCUNE org de projets ne l'est"* ]]
+  grep -q "^apply $RECIPE\$" "$TOFU_LOG"
   [ ! -s "$GIT_LOG" ]
 }
 
@@ -545,12 +559,13 @@ FAKE
 }
 
 
-@test "le verrou est le dossier de travail lui-même : un apply n'y crée rien" {
+@test "le verrou est le dossier de travail lui-même : un apply n'y crée que le dossier du catalogue de la release, comme un install" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -z "$(ls -A "$LCARS_CATALOGUES_WORK")" ]
+  [ "$(ls -A "$LCARS_CATALOGUES_WORK")" = fleet ]
+  [ -f "$LCARS_CATALOGUES_WORK/fleet/roles.auto.tfvars.json" ]
 }
 
 # `apply` en root, `install` sous le compte d'autorité : un seul uid ne voit pas le passage. Le décor :
@@ -590,9 +605,12 @@ EOF
   _deux_identites '
 bash "$SCRIPT" apply </dev/null >/dev/null
 printf "a-root:[%s]\n" "$(find /opt/lcars/var/tofu -mindepth 1 -uid 0 | tr "\n" " ")"
+printf "catalogue-de-la-release:[%s]\n" "$(stat -c "%U:%G" /opt/lcars/var/tofu/fleet /opt/lcars/var/tofu/fleet/roles.auto.tfvars.json | sort -u | tr "\n" " ")"
 sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu"'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"a-root:[]"* ]]
+  [[ "$output" == *"a-root:[]"* ]] || { echo "$output"; return 1; }
+  # l'apply en root a installe le catalogue de la release, et l'a RENDU au compte d'autorite
+  [[ "$output" == *"catalogue-de-la-release:[autorite-double:autorite-double ]"* ]] || { echo "$output"; return 1; }
   [[ "$output" == *"verrou-tenu"* ]]
 }
 

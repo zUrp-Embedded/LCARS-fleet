@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   remain explicit overrides for splitting their destinations.
   """
   @spec ops_repo() :: String.t()
-  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
+  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "lcars/_ops")
 
   # Retry returned label errors immediately, without sleep.
   @label_attempts 3

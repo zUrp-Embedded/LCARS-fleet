@@ -51,7 +51,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Requests template generation with git content, labels and topics; owner defaults to `fleet`.
+  Requests template generation with git content, labels and topics; `opts[:org]` names the owner
+  and is required (a catalogue names the org of its projects; this client has no default).
   The 2026-07-18 forge bench copied those fields but not branch protection.
   Maps HTTP 404 to `:template_missing`, 409 to `:already_exists`, without checking existing state.
   """
@@ -61,7 +62,8 @@ defmodule Fleet.Forge.Client.Repo do
       when is_binary(template_repo) and is_binary(name) do
     with {:ok, config} <- resolve_config(opts) do
       body = %{
-        owner: Keyword.get(opts, :org, "fleet"),
+        # No default owner: the caller names the org, a catalogue does (Forge cannot read Catalogue).
+        owner: Keyword.fetch!(opts, :org),
         name: name,
         description: Keyword.get(opts, :description, ""),
         private: Keyword.get(opts, :private, false),
