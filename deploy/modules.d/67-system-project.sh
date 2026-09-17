@@ -54,13 +54,30 @@ usable() {
   return 0
 }
 
-# La sortie de la porte est UNE ligne : « ADOPTED <org>/<nom> », « ALREADY <org>/<nom> », ou un
-# refus sur stderr. On la relaie telle quelle : elle nomme son objet, et un module qui la
-# reformulerait perdrait l'adresse exacte.
+# ⚠ LE VERDICT EST SUR STDOUT, LE RESTE SUR STDERR, ET ON NE LES MELANGE PAS. La porte reclame
+# stdout pour elle seule (`ReleaseDoor.claim_stdout!`) precisement pour qu'une ligne de journal ne
+# passe pas devant : le BEAM en emet, et fusionner les deux flux mettait « [warning] Authority… »
+# avant « SEEDED … », donc aucun motif ne correspondait et le module rendait OK sur une ligne VIDE
+# (mesure du 2026-09-17, banc 2003). Le flux d'erreur sert a NOMMER une cause, jamais a lire un
+# verdict.
+#
+# La sortie de la porte est UNE ligne : « ADOPTED <org>/<nom> », « ALREADY <org>/<nom> »,
+# « SEEDED <org>/<nom> », ou un refus sur stderr. On la relaie telle quelle : elle nomme son objet,
+# et un module qui la reformulerait perdrait l'adresse exacte.
+porte_dit() { # porte_dit <arg…> → stdout de la porte dans PORTE_OUT, sa plainte dans PORTE_ERR ; rend son code
+  local err; err="$(mktemp)" || { p_fail "aucun fichier temporaire — la plainte de la porte serait perdue"; return 1; }
+  local rc=0
+  PORTE_OUT="$(as_siege "$CLI" project "$@" 2>"$err")" || rc=$?
+  PORTE_ERR="$(tail -n1 "$err" 2>/dev/null || true)"
+  rm -f "$err"
+  return "$rc"
+}
+
 jouer() { # jouer <verbe> — 0 conforme · 1 drift
   local out rc=0
   prov_product_env
-  out="$(as_siege "$CLI" project adopt-system --from "$(repo_root)" 2>&1)" || rc=$?
+  porte_dit adopt-system --from "$(repo_root)" || rc=$?
+  out="$PORTE_OUT"
 
   case "$rc" in
     0)
@@ -70,12 +87,14 @@ jouer() { # jouer <verbe> — 0 conforme · 1 drift
         # LE DEPOT A SON POSEUR : `61-forge-structure` joue le geste qui le crée et y pousse la
         # source, avec le jeton master. Ce module tient la FACE LOCALE, et le dit comme tel.
         SEEDED*)  p_ok "${out#SEEDED } : face de code en place — le dépôt est posé par la structure de la forge (61)" ;;
-        *)        p_ok "projet du système : $out" ;;
+        # une porte qui rend 0 SANS RIEN DIRE n'est pas une porte conforme : un statut nu ne dit
+        # rien a qui lit un journal, et c'est exactement ce qu'un flux fusionne produisait
+        *)        p_drift "verdict illisible du projet du système : « ${out:-<rien>} »${PORTE_ERR:+ — $PORTE_ERR}"; return 1 ;;
       esac
       return 0
       ;;
     *)
-      p_drift "projet du système NON publié — $(printf '%s' "$out" | tail -n1)"
+      p_drift "projet du système NON publié — ${PORTE_ERR:-${out:-aucune plainte}}"
       return 1
       ;;
   esac
@@ -88,8 +107,9 @@ check() {
   # répond — un module qui recomposerait l'adresse ici en aurait une seconde écriture.
   local out rc=0
   prov_product_env
-  out="$(as_siege "$CLI" project adopt-system --check --from "$(repo_root)" 2>&1)" || rc=$?
-  [[ "$rc" -eq 0 ]] || { p_fail "mesure du projet du système impossible — $(printf '%s' "$out" | tail -n1)"; verdict_check; }
+  porte_dit adopt-system --check --from "$(repo_root)" || rc=$?
+  out="$PORTE_OUT"
+  [[ "$rc" -eq 0 ]] || { p_fail "mesure du projet du système impossible — ${PORTE_ERR:-aucune plainte}"; verdict_check; }
 
   case "$out" in
     ALREADY*)    p_ok "${out#ALREADY } déjà publié" ;;
@@ -97,7 +117,7 @@ check() {
     ABSENT*)     p_drift "${out#ABSENT } absent de la forge — « lcars project adopt-system » le publie (l'apply de ce module le fait)" ;;
     NOSOURCE*)   p_warn "${out#NOSOURCE } : cette machine ne porte pas la source dont elle a été installée — rien à publier (kit sans arbre, ou clone jamais posé)" ;;
     UNREADABLE*) p_drift "état de ${out#UNREADABLE } NON mesurable — la forge n'a pas répondu, rien n'est conclu" ;;
-    *)           p_fail "mesure illisible du projet du système : $out" ;;
+    *)           p_fail "mesure illisible du projet du système : « ${out:-<rien>} »${PORTE_ERR:+ — $PORTE_ERR}" ;;
   esac
   verdict_check
 }

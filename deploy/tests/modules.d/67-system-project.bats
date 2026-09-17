@@ -39,11 +39,21 @@ setup() {
   cat > "$CLI" <<'EOF'
 #!/usr/bin/env bash
 echo "CLI:$* (uid=$(id -u))" >> "$CALLS"
+# ⚠ LE BEAM ECRIT SUR STDERR PENDANT QUE LA PORTE ECRIT SON VERDICT SUR STDOUT : si un temoin ne
+# reproduit pas ce bruit, il ne mesure pas ce qu'une machine fait (mesure du 2026-09-17, banc 2003)
+printf '%s\n' "${STUB_BRUIT:-19:40:20.292 [warning] Authority: pas de jeton pour \"system_starfleet\"}" >&2
 # la table de transport : ce que l'installeur DECIDE et que le produit lit
 echo "ENV:FORGE_BASE_URL=${FORGE_BASE_URL:-<absente>}" >> "$CALLS"
 [[ "${3:-}" != "--check" ]] || { printf '%s\n' "${STUB_CHECK:-ABSENT fleet/lcars-fleet}"; exit "${STUB_CHECK_RC:-0}"; }
-printf '%s\n' "${STUB_ADOPT:-ADOPTED fleet/lcars-fleet}"
-exit "${STUB_ADOPT_RC:-0}"
+# ⚠ LA PORTE REELLE ECRIT SON REFUS SUR STDERR (`IO.puts(:stderr, "REFUSED …")`) et son verdict sur
+# stdout : la doublure fait pareil, sinon le temoin mesure une porte qui n'existe pas
+if [[ "${STUB_ADOPT_RC:-0}" -ne 0 ]]; then
+  printf '%s\n' "${STUB_ADOPT:-REFUSED fleet/lcars-fleet}" >&2
+  exit "$STUB_ADOPT_RC"
+fi
+# STUB_MUET=1 : une porte qui rend 0 sans rien dire
+[[ "${STUB_MUET:-}" == 1 ]] || printf '%s\n' "${STUB_ADOPT:-ADOPTED fleet/lcars-fleet}"
+exit 0
 EOF
   chmod 0755 "$CLI"
 }
@@ -143,4 +153,32 @@ mod() { run bash "$MOD" "$@"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"siège non établi"*"elles ne se posent pas en root"* ]]
   [ ! -s "$CALLS" ]
+}
+
+@test "le verdict se lit sur STDOUT SEUL — une ligne de journal sur stderr ne passe pas devant" {
+  # mesure du 2026-09-17 (banc 2003) : les deux flux fusionnes mettaient « [warning] Authority… »
+  # avant « SEEDED … », aucun motif ne correspondait, et le module rendait OK sur une ligne VIDE
+  STUB_ADOPT="SEEDED fleet/lcars-fleet" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"face de code en place"* ]] || { echo "$output"; return 1; }
+  refute_out 'verdict illisible' <<<"$output"
+
+  STUB_CHECK="ABSENT fleet/lcars-fleet" mod check
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"absent de la forge"* ]] || { echo "$output"; return 1; }
+}
+
+@test "une porte qui rend 0 SANS RIEN DIRE est une DERIVE, jamais un conforme" {
+  # un statut nu ne dit rien a qui lit un journal ; c'est ce qu'un flux fusionne produisait
+  STUB_MUET=1 mod apply
+  [ "$status" -eq 2 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"verdict illisible du projet du système : « <rien> »"* ]] || { echo "$output"; return 1; }
+  # et la plainte de la porte est RELAYEE, parce que c'est la seule piece a charge
+  [[ "$output" == *"Authority"* ]] || { echo "$output"; return 1; }
+}
+
+@test "un refus nomme la PLAINTE de la porte, pas la derniere ligne d'un flux melange" {
+  STUB_ADOPT_RC=1 STUB_ADOPT="la porte refuse : arbre local sans main" mod apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"projet du système NON publié — la porte refuse : arbre local sans main"* ]] || { echo "$output"; return 1; }
 }
