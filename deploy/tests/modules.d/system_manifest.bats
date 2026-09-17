@@ -338,7 +338,11 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   poseur="$(env -i PATH="$PATH" HOME="$BATS_TEST_TMPDIR" bash -c '
     . "'"$BATS_TEST_DIRNAME"'/../../lib/provision-lib.sh" >/dev/null 2>&1
     PROV_SUBSTRATE=linux
-    '"$(sed -n '/^prov_runtime_dirs()/,/^}/p;/^prov_dirs()/,/^}/p' \
+    # TOUTES les fonctions `prov_*` du module, pas deux noms epingles : le poseur central a le
+    # droit de se lire en plusieurs fonctions, et une liste nominative ici rendait ce mur VERT
+    # en silence des qu une d elles etait extraite — `prov_dirs` appelait alors un nom inconnu et
+    # ne rendait plus les chemins qu il enumere (mesure du 2026-09-17).
+    '"$(sed -n '/^prov_[a-z_]*()/,/^}/p' \
           "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh")"'
     prov_dirs 2>/dev/null | awk "{print \$1}"
   ' 2>/dev/null)"

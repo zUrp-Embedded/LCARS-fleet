@@ -40,7 +40,17 @@ prov_runtime_dirs() {
     "$(prov_decor /run/lcars/toolchain)"
 }
 
+# Les trois racines de FACE, déclarées une fois : la table des dossiers les pose, et la déclaration
+# git les relit. Deux écritures d'une même liste dérivent, et c'est la seconde qui servait.
+prov_face_roots() {
+  printf '%s\n' \
+    "$(prov_decor /home/projects)" \
+    "$(prov_decor /home/projects.ops)" \
+    "$(prov_decor /home/projects.workshop)"
+}
+
 prov_dirs() {
+  prov_face_roots
   printf '%s\n' \
     "$PROV_ROOT" \
     "$PROV_ROOT/var" \
@@ -48,14 +58,63 @@ prov_dirs() {
     "$PROV_TOKENS_DIR" \
     "$PROV_CATALOGUES_DIR" \
     "$PROV_CATALOGUES_WORK" \
-    "$(prov_decor /home/projects)" \
-    "$(prov_decor /home/projects.ops)" \
-    "$(prov_decor /home/projects.workshop)" \
     "$PROV_STORE_ROOT" \
     "$(prov_decor /var/tmp/lcars)" \
     "$(prov_decor /var/tmp/lcars/toolchain-work)" \
     "$(prov_decor /etc/lcars)"
   prov_runtime_dirs
+}
+
+# ⚠ LES FACES SONT PARTAGÉES, ET GIT REFUSE CE QU'IL NE VOIT PAS COMME À SOI.
+#
+# Les trois racines de face (`/home/projects*`) sont `2775 root:fleet` : tout humain de la flotte y
+# écrit, c'est le design. Mais chaque projet y est POSSÉDÉ par l'humain qui l'a créé, et git refuse
+# toute commande sur un dépôt dont le propriétaire n'est pas l'appelant : « fatal: detected dubious
+# ownership ». Mesuré le 2026-09-17 sur LCARS-beta : un SECOND humain inscrit sur une fleet déjà
+# peuplée voyait `75-projects` échouer en « already_exists » sur chaque projet, parce que la porte
+# `reconcile` ne pouvait plus lire l'origin des faces pour prouver qu'elles étaient les siennes.
+#
+# La déclaration porte sur les RACINES, avec le joker que git accepte (mesuré : le chemin exact,
+# `<racine>/*` et `*` marchent tous les trois, sur git 2.53) — et surtout PAS `*`, qui désarmerait
+# la vérification sur toute la machine. Elle vit dans la config SYSTÈME parce que le fait est celui
+# de la machine, pas d'un compte : un `--global` par humain serait le même fait écrit N fois.
+#
+# Et on n'écrit QUE nos clés : `/etc/gitconfig` peut porter autre chose, et l'écraser en entier
+# prendrait un fichier dont ce module n'est pas l'auteur.
+git_faces() { prov_face_roots; }
+
+git_safe_declared() { git config --system --get-all safe.directory 2>/dev/null || true; }
+
+check_git_safe() {
+  command -v git >/dev/null || { p_drift "git absent — les faces partagées ne seront lisibles que par leur propriétaire (cf. 10-packages)"; return 0; }
+  local racine manquantes="" declarees
+  declarees="$(git_safe_declared)"
+  while read -r racine; do
+    [[ -n "$racine" ]] || continue
+    grep -qxF "$(prov_canon "$racine")/*" <<<"$declarees" || manquantes="$manquantes $(prov_canon "$racine")/*"
+  done < <(git_faces)
+  if [[ -n "$manquantes" ]]; then
+    p_drift "git safe.directory :$manquantes non déclaré(s) — un humain ne peut rien lire d'un projet qu'un AUTRE a créé (« dubious ownership »), et son provisionnement échoue"
+  else
+    p_ok "git safe.directory : les trois racines de face sont déclarées — un projet créé par un humain se lit par les autres"
+  fi
+}
+
+apply_git_safe() {
+  command -v git >/dev/null || { p_drift "git absent — les faces partagées ne seront lisibles que par leur propriétaire (cf. 10-packages)"; return 0; }
+  local racine valeur declarees avant="$PROV_CHANGED"
+  declarees="$(git_safe_declared)"
+  while read -r racine; do
+    [[ -n "$racine" ]] || continue
+    valeur="$(prov_canon "$racine")/*"
+    grep -qxF "$valeur" <<<"$declarees" && continue
+    if git config --system --add safe.directory "$valeur" 2>/dev/null; then
+      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "git safe.directory += $valeur"
+    else
+      p_fail "git safe.directory : « $valeur » non déclaré — un humain ne pourra rien lire d'un projet qu'un autre a créé"
+    fi
+  done < <(git_faces)
+  [[ "$PROV_CHANGED" -ne "$avant" ]] || p_ok "git safe.directory : les trois racines de face sont déclarées"
 }
 
 # lit des chemins sur stdin → « chemin mode propriétaire » ; le joker <human> vaut l'humain de la console
@@ -150,12 +209,14 @@ apply_tmpfiles() {
 check() {
   parcourir check
   check_tmpfiles
+  check_git_safe
   verdict_check
 }
 
 apply() {
   parcourir apply
   apply_tmpfiles || true
+  apply_git_safe || true
   verdict_apply
 }
 

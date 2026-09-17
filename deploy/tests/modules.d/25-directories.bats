@@ -35,6 +35,15 @@ setup() {
   # Le corps du module SANS sa dernière ligne, le dispatch : on appelle ses fonctions, on ne le lance pas.
   MOD="$BATS_TEST_TMPDIR/mod.sh"
   sed '$d' "$SRC" > "$MOD"
+
+  # ⚠ CE MODULE ÉCRIT DANS LA CONFIG GIT SYSTÈME. Sans cette ligne, un témoin joué entier toucherait
+  # le /etc/gitconfig de la machine qui le joue — ou échouerait faute de root, ce qui revient à
+  # mesurer le compte du testeur au lieu du module.
+  export GIT_CONFIG_SYSTEM="$BATS_TEST_TMPDIR/gitconfig"
+  # le décor part CONFORME, comme pour toute autre dimension du module : les trois racines de face
+  # y sont déclarées. Un témoin qui mesure ce fait-là repart d'un fichier vide.
+  printf '[safe]\n\tdirectory = /home/projects/*\n\tdirectory = /home/projects.ops/*\n\tdirectory = /home/projects.workshop/*\n' \
+    > "$GIT_CONFIG_SYSTEM"
 }
 
 # une fonction seule ne rend pas de verdict : la garde du runner n'est pas armée
@@ -313,4 +322,73 @@ check_on() {
   mod 'prov_container_volumes | sort'
   [ "$status" -eq 0 ]
   [ "$(sed "s|^$D||" <<<"$output")" = "$declares" ]
+}
+
+# ⚠ LES FACES SONT PARTAGÉES, ET GIT REFUSE CE QU'IL NE VOIT PAS COMME À SOI. Chaque projet sous
+# `/home/projects*` appartient à l'humain qui l'a créé ; un autre humain de la flotte reçoit
+# « fatal: detected dubious ownership » sur la moindre commande git. Mesuré le 2026-09-17 sur
+# LCARS-beta : un SECOND humain inscrit voyait son provisionnement échouer sur chaque projet, parce
+# que la porte `reconcile` ne pouvait plus lire l'origin des faces pour prouver qu'elles étaient les
+# siennes.
+#
+# `GIT_CONFIG_SYSTEM` pointe git vers un fichier du décor : ces témoins n'écrivent pas dans le
+# /etc/gitconfig de la machine qui les joue.
+@test "git safe.directory : les trois racines de face sont déclarées, et une seule fois" {
+  command -v git >/dev/null || skip "git absent"
+  : > "$GIT_CONFIG_SYSTEM"
+
+  mod 'apply_git_safe'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"git safe.directory += /home/projects/*"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"git safe.directory += /home/projects.ops/*"* ]]
+  [[ "$output" == *"git safe.directory += /home/projects.workshop/*"* ]]
+
+  # la valeur est celle que git accepte, et le décor n'y est PAS : c'est un fait de la machine
+  [ "$(git config --system --get-all safe.directory | sort | paste -sd' ')" \
+    = "/home/projects.ops/* /home/projects.workshop/* /home/projects/*" ]
+
+  # rejoué : rien de plus, et il le dit
+  mod 'apply_git_safe'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"+="* ]] || { echo "$output"; return 1; }
+  [ "$(git config --system --get-all safe.directory | wc -l)" -eq 3 ]
+}
+
+@test "git safe.directory : un check nomme ce qui manque — jamais un OK muet" {
+  command -v git >/dev/null || skip "git absent"
+  : > "$GIT_CONFIG_SYSTEM"
+
+  mod 'check_git_safe'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT"*"/home/projects/*"*"dubious ownership"* ]] || { echo "$output"; return 1; }
+
+  # une racine sur trois ne suffit pas : le drift nomme les deux autres, et plus la première
+  git config --system --add safe.directory '/home/projects/*'
+  mod 'check_git_safe'
+  [[ "$output" == *"/home/projects.ops/*"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"/home/projects.workshop/*"* ]]
+  refute_out ' /home/projects/\* ' <<<"$output"
+
+  # les trois : conforme
+  git config --system --add safe.directory '/home/projects.ops/*'
+  git config --system --add safe.directory '/home/projects.workshop/*'
+  mod 'check_git_safe'
+  [[ "$output" == *"OK"*"les trois racines de face sont déclarées"* ]] || { echo "$output"; return 1; }
+}
+
+@test "git safe.directory : « * » n'est JAMAIS posé — il désarmerait la vérification partout" {
+  command -v git >/dev/null || skip "git absent"
+  : > "$GIT_CONFIG_SYSTEM"
+  mod 'apply_git_safe'
+  [ "$status" -eq 0 ]
+  refute grep -qx 'directory = \*' "$GIT_CONFIG_SYSTEM"
+  [ -z "$(git config --system --get-all safe.directory | grep -x '\*' || true)" ]
+}
+
+@test "git safe.directory : git absent est un DRIFT qui le dit, jamais un silence" {
+  # le PATH se vide DANS la commande sourcée, pas autour : le harnais lui-même a besoin d'un PATH
+  local faux="$BATS_TEST_TMPDIR/sans-git"; mkdir -p "$faux"
+  mod "PATH='$faux' check_git_safe"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"DRIFT"*"git absent"* ]] || { echo "$output"; return 1; }
 }
