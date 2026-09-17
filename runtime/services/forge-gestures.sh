@@ -399,6 +399,7 @@ cmd_apply() {
     echo "forge-gestures: apply $m${vars[0]:+ (org $SYSTEM_ORG, sans role metier)}"
     ( cd "$play/$m" && tofu init -input=false -no-color >/dev/null ) \
       || die "init $m en echec — le miroir de providers (TF_CLI_CONFIG_FILE) couvre-t-il cette recette ?"
+    [[ "$m" != . ]] || etat_dune_autre_org "$play/$m"
     oublier_comptes_disparus "$play/$m" "$tok"
     ( cd "$play/$m" && tofu apply -auto-approve -input=false -no-color ${vars[@]+"${vars[@]}"} ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
@@ -420,6 +421,39 @@ cmd_apply() {
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
+}
+
+# ⚠ UN ETAT QUI DECRIT UNE AUTRE ORG N'EST PAS L'ETAT DE CE PLAY.
+#
+# Le play racine porte UNE org, celle du systeme. Quand cette org CHANGE DE NOM — ce que le lot 1 a
+# fait, `fleet` → `lcars` —, l'etat d'avant decrit un objet que ce play ne possede plus. Tofu, lui,
+# ne voit pas un renommage : il voit une ressource en trop, et la DETRUIT. Mesure du 2026-09-18 sur
+# LCARS-beta, mise a jour par-dessus l'instance :
+#
+#     Error: user is the last member of owner team [uid: 4]
+#
+# C'est la destruction de l'org `fleet` qui parlait — celle qui porte desormais les PROJETS, et le
+# travail qu'on voulait garder. Un etat perime ne justifie jamais de detruire ce qu'il decrit.
+#
+# On le MET DE COTE, on ne le supprime pas : le fichier reste a cote, date, et `existing.tf`
+# reimporte au tour suivant ce qui existe sous la NOUVELLE org. Rien n'est touche sur la forge.
+etat_dune_autre_org() { # etat_dune_autre_org <dossier du play racine>
+  local dir="$1"
+  local etat="$dir/terraform.tfstate"
+  [[ -r "$etat" ]] || return 0
+  command -v jq >/dev/null || return 0
+
+  local vue
+  vue="$(jq -r '[.resources[]? | select(.type == "gitea_org") | .instances[]?.attributes.name] | first // ""' \
+        "$etat" 2>/dev/null || true)"
+  [[ -n "$vue" && "$vue" != "$SYSTEM_ORG" ]] || return 0
+
+  local mis
+  mis="$etat.autre-org-$vue.$(date +%Y%m%dT%H%M%S)"
+  mv "$etat" "$mis" \
+    || die "apply : l'etat de ce play decrit l'org « $vue » et non « $SYSTEM_ORG », et il ne se met pas de cote ($mis) — le rejouer DETRUIRAIT « $vue »"
+  rm -f "$etat.backup"
+  echo "forge-gestures: l'etat decrivait l'org « $vue », ce play porte « $SYSTEM_ORG » — etat mis de cote ($mis) ; rien n'est touche sur la forge, la recette reimporte ce qui existe"
 }
 
 # ⚠ LE PENDANT DE L'IMPORT : OUBLIER CE QUE LA FORGE N'A PLUS.

@@ -460,3 +460,52 @@ etat_avec() { # etat_avec <dossier du play> <login>… — un tfstate qui NOMME 
   [[ "$output" == *"nomme un compte absent de la forge et ne sort pas de l'etat"* ]] || { echo "$output"; return 1; }
   refute grep -q "apply -auto-approve" "$CALLS"
 }
+
+# ─── 6. UN ETAT QUI DECRIT UNE AUTRE ORG ────────────────────────────────────────────────────────
+#
+# ⚠ TOFU NE VOIT PAS UN RENOMMAGE, IL VOIT UNE RESSOURCE EN TROP — et la DETRUIT. Quand l'org du
+# systeme a change de nom (lot 1, `fleet` → `lcars`), l'etat d'avant decrivait une org que ce play
+# ne possede plus. Mesure du 2026-09-18 sur LCARS-beta, mise a jour par-dessus l'instance :
+#
+#     Error: user is the last member of owner team [uid: 4]
+#
+# C'etait la destruction de l'org `fleet` qui parlait : celle qui porte desormais les PROJETS.
+
+etat_org() { # etat_org <dossier du play> <nom d org>
+  mkdir -p "$1"
+  printf '{"resources":[{"type":"gitea_org","name":"fleet","instances":[{"attributes":{"name":"%s"}}]}]}\n' \
+    "$2" > "$1/terraform.tfstate"
+  : > "$1/terraform.tfstate.backup"
+}
+
+@test "apply : un etat qui decrit une AUTRE org est mis de cote — rien n'est detruit sur la forge" {
+  etat_org "$LCARS_RECIPE_DIR" fleet
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+  [[ "$output" == *"l'etat decrivait l'org « fleet », ce play porte « lcars » — etat mis de cote"* ]] \
+    || { echo "$output"; return 1; }
+  # MIS DE COTE, pas supprime : le fichier est la, date, et le play repart d'un etat vierge
+  [ ! -f "$LCARS_RECIPE_DIR/terraform.tfstate" ]
+  ls "$LCARS_RECIPE_DIR"/terraform.tfstate.autre-org-fleet.* >/dev/null
+  [ ! -f "$LCARS_RECIPE_DIR/terraform.tfstate.backup" ]
+  # et AUCUN destroy : la recette est jouee normalement
+  grep -q "^TOFU:recette apply .* -var org=lcars " "$CALLS"
+  refute grep -q "destroy" "$CALLS"
+}
+
+@test "apply : un etat qui decrit NOTRE org reste en place — on ne jette pas un etat juste" {
+  etat_org "$LCARS_RECIPE_DIR" lcars
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$LCARS_RECIPE_DIR/terraform.tfstate" ]
+  refute_out "mis de cote" <<<"$output"
+}
+
+@test "apply : le play instance n'est PAS juge sur l'org — il ne porte que des comptes" {
+  # `instance/` pose les comptes partages, aucune org : lui appliquer cette regle le viderait
+  etat_org "$LCARS_RECIPE_DIR/instance" fleet
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$LCARS_RECIPE_DIR/instance/terraform.tfstate" ]
+}

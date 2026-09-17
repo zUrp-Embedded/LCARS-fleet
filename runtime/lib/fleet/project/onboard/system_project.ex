@@ -100,7 +100,14 @@ defmodule Fleet.Project.Onboard.SystemProject do
     with :ok <- copy_tree(from, code),
          :ok <- GitOps.run(["-C", code, "init", "-q", "-b", "main"], auth: false),
          :ok <- GitOps.run(["-C", code, "add", "-A"], auth: false),
-         :ok <- GitOps.run(["-C", code, "commit", "-q", "-m", kit_message(from)], auth: false),
+         # ⚠ L'IDENTITE DU COMMIT EST CELLE DE L'ONBOARDING, comme pour les trois faces. Sans elle,
+         # git prend celle du compte qui joue — et un siege qui n'a pas configure la sienne fait
+         # mourir le commit en « Author identity unknown » (mesure du 2026-09-18 sur LCARS-beta).
+         :ok <-
+           GitOps.run(["-C", code, "commit", "-q", "-m", kit_message(from)],
+             auth: false,
+             author: Onboard.Faces.onboard_author()
+           ),
          :ok <- point_origin(code, org, name) do
       Logger.info(
         "SystemProject: code face built at #{code} from the kit tree #{from} (one commit)."
