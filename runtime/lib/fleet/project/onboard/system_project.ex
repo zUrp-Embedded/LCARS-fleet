@@ -85,20 +85,34 @@ defmodule Fleet.Project.Onboard.SystemProject do
         {:error, {:not_adoptable, {:no_source_tree, from}}}
 
       true ->
-        clone_code_face(from, code)
+        clone_code_face(from, code, Keyword.get(opts, :org, Catalogue.bundled_name()), name)
     end
   end
 
-  defp clone_code_face(from, code) do
-    # `--no-hardlinks` : la face doit survivre a la suppression de l'arbre de l'operateur. Et pas
-    # d'`origin` local derriere : le remote de cette face est la forge, que l'adoption pose.
+  defp clone_code_face(from, code, org, name) do
+    # `--no-hardlinks` : la face doit survivre a la suppression de l'arbre de l'operateur. Et
+    # l'`origin` local qu'un clone laisse derriere ne reste pas : le remote de cette face est le
+    # depot de la forge, celui que le geste d'installation a pose.
     with :ok <- GitOps.run(["clone", "--no-hardlinks", from, code], auth: false),
          :ok <- ensure_main(code),
-         :ok <- GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false) do
+         :ok <- point_origin(code, org, name) do
       Logger.info("SystemProject: code face seeded at #{code} from #{from}.")
       :ok
     else
       {:error, reason} -> {:error, {:not_adoptable, {:seed_failed, code, reason}}}
+    end
+  end
+
+  # L'origin de la face : le depot de la forge quand on sait l'adresser, sinon AUCUN. Un origin qui
+  # pointe vers l'arbre d'un operateur survivrait a sa suppression et ferait croire a un amont.
+  defp point_origin(code, org, name) do
+    case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
+      %{url_prefix: base} when is_binary(base) and base != "" ->
+        url = "#{String.trim_trailing(base, "/")}/#{org}/#{name}.git"
+        GitOps.run(["-C", code, "remote", "set-url", "origin", url], auth: false)
+
+      _ ->
+        GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
     end
   end
 

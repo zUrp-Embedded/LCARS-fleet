@@ -415,9 +415,50 @@ cmd_apply() {
   [[ -n "$embarque" ]] \
     || die "apply : la release ne nomme pas son catalogue — la structure est posee, mais AUCUNE org de projets ne l'est (« lcars tool catalogue-root » ne repond pas)"
   cmd_install "$embarque"
+  seed_system_project "$tok" "$embarque"
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
+}
+
+# ⚠ LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE (⚖ user 2026-09-16), ET IL SE POSE ICI.
+#
+# Pas dans un module, pas par une porte du runtime : le projet doit ETRE LA, et c'est ce geste qui a
+# ce qu'il faut pour l'y mettre — le jeton master, l'adresse de la forge, et git. Une porte du
+# runtime aurait demande son jeton au rail d'autorite, qui ne sert QUE les humains de la flotte
+# (`not_a_worker`, mesure du 2026-09-17, banc 2003) : sur un poste neuf il n'y en a pas encore, et
+# « pas encore d'humain » n'est pas une raison pour que le projet n'existe pas.
+#
+# ⚠ ON NE POUSSE QU'UNE FOIS. Creer le depot puis y semer la source, c'est la premiere passe ; aux
+# suivantes, `main` est ce que le projet est devenu, et le remplacer par l'arbre d'installation
+# effacerait du travail. La seconde passe ne fait donc RIEN, et le dit.
+#
+# ⚠ ET LE NOM VIENT DE LA RELEASE (`Fleet.Layout.system_project/0`), jamais d'un litteral ici : deux
+# ecritures d'un meme nom derivent, et MUR 21 tient les lecteurs d'accord avec le layout.
+seed_system_project() { # $1=jeton master  $2=org du catalogue embarque
+  local tok="$1" org="$2" tree="${LCARS_SYSTEM_SOURCE:-}"
+
+  # Sans arbre a publier, rien a faire : un kit sans historique, ou un appelant qui ne le dit pas.
+  [[ -n "$tree" && -d "$tree/.git" ]] || return 0
+  [[ -n "$org" ]] || return 0
+
+  local nom; nom="$("$LCARS_CLI" tool system-project 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ -n "$nom" ]]     || { echo "forge-gestures: la release ne nomme pas le projet du systeme — il n'est pas pose (la structure, elle, l'est)" >&2; return 0; }
+
+  local full="$org/$nom" code
+  code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 "${FORGE_BASE_URL%/}/api/v1/repos/$full" 2>/dev/null || true)"
+  case "$code" in
+    200) echo "forge-gestures: $full est deja sur la forge — la source n'est PAS reecrite"; return 0 ;;
+    404) ;;
+    *)   die "apply : la forge ne dit pas si $full existe (HTTP ${code:-aucune reponse}) — le projet du systeme n'est pas pose a l'aveugle" ;;
+  esac
+
+  code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 20 -X POST        -H 'Content-Type: application/json'        -d "$(printf '{"name":"%s","private":false,"auto_init":false,"description":"La source dont cette machine a ete installee."}' "$nom")"        "${FORGE_BASE_URL%/}/api/v1/orgs/$org/repos" 2>/dev/null || true)"
+  [[ "$code" == "201" ]]     || die "apply : $full non cree (HTTP ${code:-aucune reponse}) — la fleet n'a pas sa propre source comme projet"
+
+  GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1     GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader"     GIT_CONFIG_VALUE_0="Authorization: token $tok"     git -C "$tree" push -q "${FORGE_BASE_URL%/}/${full}.git" "HEAD:refs/heads/main"     || die "apply : source NON poussee sur $full — le depot est cree et VIDE ; rejouer ce geste"
+
+  echo "forge-gestures: $full pose — la source dont cette machine a ete installee est un projet de sa fleet"
 }
 
 # ─── LA DEMO, DEPOSEE CHEZ LE MASTER ────────────────────────────────────────────────────────────

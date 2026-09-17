@@ -62,6 +62,7 @@ case "$2" in
   verify)           exit 0 ;;
   roles-tfvars)     printf '{"org":"%s","roles":[]}\n' "$(sed -n 's/^name: //p' "$3/catalogue.yaml")" ;;
   catalogue-source) printf 'quelquun/%s main deadbeefcafe\n' "$3" ;;
+  system-project)   printf 'lcars-fleet\n' ;;
 esac
 EOF
   cat > "$BIN/tofu" <<'EOF'
@@ -86,6 +87,9 @@ case "$url" in
   */api/v1/user) [[ -n "${STUB_SANS_SIEGE:-}" ]] && rep='' || rep='{"login":"le-siege"}' ;;
   # le magasin des catalogues : pose par la recette, SONDE par le geste
   */api/v1/repos/*/_catalogues) rep=''; [[ -z "${STUB_SANS_MAGASIN:-}" ]] || code=404 ;;
+  # le projet du systeme : ABSENT par defaut (une forge neuve), pose par le geste
+  */api/v1/repos/*/lcars-fleet) rep=''; code="${STUB_PROJET_CODE:-404}" ;;
+  */api/v1/orgs/*/repos)        rep=''; code="${STUB_CREATION_CODE:-201}" ;;
   # l'espace de noms partage : une org REPOND aux deux routes, un compte a `/users` seul
   */api/v1/orgs/*)  rep=''; [[ -z "${STUB_ORG_ABSENTE:-}" ]]   || code="${STUB_ORG_CODE:-404}" ;;
   */api/v1/users/*) rep=''; [[ -z "${STUB_SANS_HOMONYME:-}" ]] || code="${STUB_USER_CODE:-404}" ;;
@@ -330,4 +334,64 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   refute grep -q "CLI:tool catalogue-source" "$CALLS"
   grep -qx "TOFU:tofu/fleet apply -auto-approve -input=false -no-color" "$CALLS"
   [[ "$output" == *"le materiel est celui de la release"* ]]
+}
+
+# ─── 4. LE PROJET DU SYSTEME, POSE PAR CE GESTE ─────────────────────────────────────────────────
+#
+# ⚠ IL SE POSE ICI, ET PAS PAR UNE PORTE DU RUNTIME. La porte aurait demande son jeton au rail
+# d'autorite, qui ne sert QUE les humains de la flotte ; sur un poste neuf il n'y en a pas encore, et
+# « pas encore d'humain » n'est pas une raison pour que le projet n'existe pas. Ce geste, lui, a le
+# jeton master, l'adresse de la forge et git.
+
+@test "apply : le projet du systeme est pose dans l'org du catalogue embarque, et sa source y est poussee" {
+  LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" mkdir -p "$BATS_TEST_TMPDIR/source/.git"
+  LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+  # le NOM vient de la release, jamais d'un litteral du geste
+  grep -qx "CLI:tool system-project" "$CALLS"
+  # l'org est celle du catalogue embarque, PAS l'org systeme : elle ne porte aucun projet
+  grep -qx "CURL:GET /api/v1/repos/fleet/lcars-fleet" "$CALLS"
+  grep -qx "CURL:POST /api/v1/orgs/fleet/repos" "$CALLS"
+  refute grep -q "POST /api/v1/orgs/lcars/repos" "$CALLS"
+  grep -q "^GIT:-C $BATS_TEST_TMPDIR/source push -q .*/fleet/lcars-fleet.git HEAD:refs/heads/main" "$CALLS" \
+    || { grep '^GIT:' "$CALLS"; return 1; }
+  [[ "$output" == *"fleet/lcars-fleet pose"* ]]
+}
+
+@test "apply : un projet DEJA sur la forge n'est PAS reecrit — la seconde passe ne pousse rien" {
+  # `main` est ce que le projet est DEVENU : le remplacer par l'arbre d'installation effacerait du travail
+  LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" mkdir -p "$BATS_TEST_TMPDIR/source/.git"
+  STUB_PROJET_CODE=200 LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"fleet/lcars-fleet est deja sur la forge — la source n'est PAS reecrite"* ]]
+  refute grep -q "POST /api/v1/orgs/fleet/repos" "$CALLS"
+  refute grep -q "GIT:.*lcars-fleet.git" "$CALLS"
+}
+
+@test "apply : sans arbre a publier, le projet n'est pas pose — et la structure, elle, l'est" {
+  # un kit sans historique, ou un appelant qui ne dit pas d'ou vient la source
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "CLI:tool system-project" "$CALLS"
+  refute grep -q "POST /api/v1/orgs/fleet/repos" "$CALLS"
+  grep -q "^TOFU:recette apply .* -var org=lcars " "$CALLS"
+}
+
+@test "apply : une forge qui ne dit pas si le projet existe est un refus NOMME — rien n'est pose a l'aveugle" {
+  LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" mkdir -p "$BATS_TEST_TMPDIR/source/.git"
+  STUB_PROJET_CODE=500 LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la forge ne dit pas si fleet/lcars-fleet existe (HTTP 500)"* ]] || { echo "$output"; return 1; }
+  refute grep -q "POST /api/v1/orgs/fleet/repos" "$CALLS"
+}
+
+@test "apply : un depot cree mais une source NON poussee est un refus qui dit que le depot est vide" {
+  LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" mkdir -p "$BATS_TEST_TMPDIR/source/.git"
+  # SEUL le push du projet echoue : le reste du geste doit atteindre cette etape
+  printf '#!/usr/bin/env bash\necho "GIT:$*" >> "$CALLS"\n[[ "$*" != *lcars-fleet.git* ]] || exit 1\nexit 0\n' > "$BIN/git"
+  chmod 0755 "$BIN/git"
+  STUB_PROJET_CODE=404 LCARS_SYSTEM_SOURCE="$BATS_TEST_TMPDIR/source" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"source NON poussee sur fleet/lcars-fleet"*"le depot est cree et VIDE"* ]] || { echo "$output"; return 1; }
 }

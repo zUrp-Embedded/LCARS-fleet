@@ -737,6 +737,8 @@ fleet_humans() {
 }
 
 repo_root() { readlink -f "$_PROV_LIB_DIR/../.."; }
+# le meme arbre, sous un nom que la table de transport peut lire (elle rend des variables, pas des appels)
+PROV_SOURCE_DIR="$(repo_root)"
 product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
 # la traduction unique : le nom que lit le produit (runtime/services), puis le nom de l'installeur
@@ -756,6 +758,9 @@ PROV_PRODUCT_NAMES=(
   LCARS_LOGIN=PROV_HUMAN
   LCARS_BUILTIN_HUMAN=PROV_BUILTIN_HUMAN
   LCARS_CATALOGUES_DIR=PROV_CATALOGUES_DIR
+  # L'ARBRE DONT CETTE MACHINE EST INSTALLEE : le geste de forge en fait le projet du systeme sur la
+  # forge, et la porte du runtime en seme la face de code. Seul l'installeur sait ou il est.
+  LCARS_SYSTEM_SOURCE=PROV_SOURCE_DIR
   LCARS_CATALOGUES_WORK=PROV_CATALOGUES_WORK
   LCARS_LANDING_PORT=PROV_DECK_PORT
   LCARS_DECK_OIDC_FILE=PROV_DECK_OIDC_FILE

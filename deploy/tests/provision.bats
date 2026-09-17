@@ -511,7 +511,7 @@ EOF
   # ⚠ CE CAS JOUE LE VRAI PRÉFLIGHT, qui SONDE les ports de la machine : tout port qu'on ne nomme
   # pas est le défaut, et celui de la forge (21000) est tenu dès qu'un banc tourne sur cet hôte.
   # Sans les deux ports libres, ce témoin mesure la machine au lieu de mesurer la barrière.
-  local libre; libre() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
+  libre() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
   run env PATH="$DECOR_BIN:$sans" LCARS_ALLOW_ANY_HOST=1 "$SANDBOX/provision" apply --port-deck "$(libre)" --port-forge "$(libre)"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"=== 00-preflight (apply) ==="*"OK    00-preflight: arch"*"=== 10-packages (apply) ==="* ]]

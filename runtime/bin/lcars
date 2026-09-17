@@ -610,10 +610,14 @@ cmd_tool() {
       _tool_run "${fun}(${arg})" ;;
     catalogue-root)
       _tool_run 'IO.puts(Fleet.Catalogue.root())' ;;
+    system-project)
+      # le nom du projet du systeme, DECLARE par le layout : le geste de forge le demande ici
+      # plutot que de le recopier, sinon deux ecritures d'un meme nom derivent
+      _tool_run 'IO.puts(Fleet.Layout.system_project())' ;;
     catalogue-source)
       local name="${2:?tool catalogue-source: nom de catalogue requis}"
       _tool_run "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")" ;;
-    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>)" ;;
+    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project)" ;;
   esac
 }
 
