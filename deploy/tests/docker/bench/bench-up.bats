@@ -213,8 +213,8 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"[bench-up] banc PRÊT"* ]]
   [[ "$output" != *"PAS PRÊT"* ]]
-  [[ "$output" == *"fleet     : démarrée sous lcars (sans credentials claude"*"converge  : convergé"* ]]
-  [[ "$output" == *"forge     : "*"(admiral / toto123456 · lcars / toto32toto32)"* ]]
+  [[ "$output" == *"fleet     : démarrée sous ensign (sans credentials claude"*"converge  : convergé"* ]]
+  [[ "$output" == *"forge     : "*"(admiral / toto123456 · ensign / toto32toto32)"* ]]
 }
 
 @test "le conteneur publie un échec de convergence : PAS PRÊT, sortie 6, même avec un runner servi, et la fleet n'est pas lancée" {
@@ -314,7 +314,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 4 ]
   [[ "$output" == *"le roster de l'image ne déclare pas d'org — le banc ne sait pas où semer la source"* ]]
   refute grep -q 'GIT:.*push' "$CALLS"
-  refute grep -q "/$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$CONSTANTES")/lcars" "$CALLS"
+  refute grep -q "/$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$CONSTANTES")/lcars-fleet" "$CALLS"
 }
 
 @test "le jeton système absent du conteneur après la relance : arrêt en 6, aucun push" {
@@ -402,7 +402,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "un bind précis rend les deux adresses égales et referme le banc sur cette machine" {
   run_bench --no-runner --bind 127.0.0.5
   [[ "$output" == *"http://127.0.0.5:$BF"*"cette machine seulement"* ]]
-  [[ "$output" == *"ssh lcars@127.0.0.5 -p $BS"* ]]
+  [[ "$output" == *"ssh ensign@127.0.0.5 -p $BS"* ]]
 }
 
 @test "ouvert sur le réseau, le banc dit ce que ça coûte" {
@@ -465,22 +465,48 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   refute grep -q 'ENROLL:.*--repo' "$CALLS"
   local depot; depot="$(grep -F 'DOCKER:exec -i -u root bt-fleet-lcars-1 sh -c ' "$CALLS" | grep -F 'roles.auto.tfvars.json')"
   [[ "$depot" == *" sh /opt/lcars/services/forge-recipe/roles.auto.tfvars.json <<< {\"roles\":[]}" ]]
-  grep -q "DOCKER:exec -i -u root -e LCARS_BUILTIN_HUMAN=lcars -e LCARS_BUILTIN_EMAIL=lcars@lcars.local bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" "$CALLS"
+  grep -q "DOCKER:exec -i -u root -e LCARS_BUILTIN_HUMAN=ensign -e LCARS_BUILTIN_EMAIL=ensign@lcars.local bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" "$CALLS"
   refute grep -qE 'DOCKER:[^<]*MASTER' "$CALLS"
 }
 
 @test "l'humain du banc : mot de passe par l'API avec le jeton master en en-tête, site-admin lu et non posé (la structure le pose), jeton opérateur posé après la relance, mot de passe unix" {
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local patch; patch="$(grep "^CURL:PATCH http://127.0.0.1:$BF/api/v1/admin/users/lcars | Authorization: token MASTER | " "$CALLS")"
+  local patch; patch="$(grep "^CURL:PATCH http://127.0.0.1:$BF/api/v1/admin/users/ensign | Authorization: token MASTER | " "$CALLS")"
   [ "$(jq -c '{password, pose_admin: has("admin")}' <<<"${patch##* | }")" = '{"password":"toto32toto32","pose_admin":false}' ]
-  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/users/lcars | Authorization: token MASTER" "$CALLS"
+  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/users/ensign | Authorization: token MASTER" "$CALLS"
   grep '^CURL-ARGV:' "$CALLS" | refute_out 'MASTER|toto32toto32'
   local relance jeton; relance="$(grep -n '^DOCKER:restart' "$CALLS" | cut -d: -f1)"; jeton="$(grep -n 'gitea_token <<< OP-TOKEN' "$CALLS" | cut -d: -f1)"
   [ -n "$relance" ]
   [ -n "$jeton" ]
   [ "$relance" -lt "$jeton" ]
-  grep -q "chpasswd <<< lcars:toto32toto32" "$CALLS"
+  grep -q "chpasswd <<< ensign:toto32toto32" "$CALLS"
+}
+
+@test "--human qui porte le nom d'une org de la recette est refusé en 1, avant toute forge" {
+  # la même recette pose l'org système, l'org du catalogue embarqué et cet humain dans le MÊME plan
+  local org cat
+  org="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$CONSTANTES")"
+  cat="$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$CONSTANTES")"
+  [ -n "$org" ]
+  [ -n "$cat" ]
+
+  run_bench --no-runner --human "$org"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--human « $org » porte le nom de l'org systeme"* ]] || { echo "$output"; return 1; }
+  refute grep -q . "$CALLS"
+
+  : > "$CALLS"
+  run_bench --no-runner --human "$cat"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--human « $cat » porte le nom de l'org du catalogue embarque"* ]] || { echo "$output"; return 1; }
+  refute grep -q . "$CALLS"
+
+  # désarme : tout autre login monte le banc
+  : > "$CALLS"
+  run_bench --no-runner --human zoe
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "LCARS_BUILTIN_HUMAN=zoe" "$CALLS"
 }
 
 @test "l'humain absent du conteneur après la relance est un arrêt en 5 qui nomme le convergeur" {
@@ -498,7 +524,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench --no-runner --creds-from "$BATS_TEST_TMPDIR/creds.json"
   [ "$status" -eq 0 ]
   grep -q "credentials.json <<< CREDS-DE-DECOR" "$CALLS"
-  [[ "$output" == *"creds claude posées chez lcars"* ]]
+  [[ "$output" == *"creds claude posées chez ensign"* ]]
 }
 
 @test "--no-creds est un choix, dit comme tel, et rien n'est lu ni posé" {
@@ -597,21 +623,21 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 
 @test "la fleet démarre sous l'humain : sans credentials avec LCARS_START_WITHOUT_CLAUDE=1, avec credentials sans lui" {
   run_bench --no-runner
-  grep -q "DOCKER:exec -u lcars bt-fleet-lcars-1 env LCARS_START_WITHOUT_CLAUDE=1 fleet start" "$CALLS"
+  grep -q "DOCKER:exec -u ensign bt-fleet-lcars-1 env LCARS_START_WITHOUT_CLAUDE=1 fleet start" "$CALLS"
   printf 'CREDS\n' > "$BATS_TEST_TMPDIR/creds.json"; : > "$CALLS"
   run_bench --no-runner --creds-from "$BATS_TEST_TMPDIR/creds.json"
-  grep -q "DOCKER:exec -u lcars bt-fleet-lcars-1 env fleet start" "$CALLS"
+  grep -q "DOCKER:exec -u ensign bt-fleet-lcars-1 env fleet start" "$CALLS"
 }
 
 @test "une fleet qui ne démarre pas : banc PAS PRÊT, sortie 6, l'échec nommé — avec ou sans runner" {
   echo 1 > "$FLEET_RC"
   run_bench --no-runner
   [ "$status" -eq 6 ]
-  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous lcars"*"fleet     : « fleet start » a échoué sous lcars"*"détruire  :"*"banc incomplet"* ]]
+  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous ensign"*"fleet     : « fleet start » a échoué sous ensign"*"détruire  :"*"banc incomplet"* ]]
   [[ "$output" != *"banc PRÊT sans CI"* ]]
   run_bench
   [ "$status" -eq 6 ]
-  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous lcars"* ]]
+  [[ "$output" == *"banc PAS PRÊT — la fleet ne démarre pas sous ensign"* ]]
   [[ "$output" != *"[bench-up] banc PRÊT"$'\n'* ]]
 }
 

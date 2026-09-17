@@ -86,6 +86,9 @@ case "$url" in
   */api/v1/user) [[ -n "${STUB_SANS_SIEGE:-}" ]] && rep='' || rep='{"login":"le-siege"}' ;;
   # le magasin des catalogues : pose par la recette, SONDE par le geste
   */api/v1/repos/*/_catalogues) rep=''; [[ -z "${STUB_SANS_MAGASIN:-}" ]] || code=404 ;;
+  # l'espace de noms partage : une org REPOND aux deux routes, un compte a `/users` seul
+  */api/v1/orgs/*)  rep=''; [[ -z "${STUB_ORG_ABSENTE:-}" ]]   || code="${STUB_ORG_CODE:-404}" ;;
+  */api/v1/users/*) rep=''; [[ -z "${STUB_SANS_HOMONYME:-}" ]] || code="${STUB_USER_CODE:-404}" ;;
   *) rep='' ;;
 esac
 if [[ -n "$out" && "$out" != /dev/null ]]; then printf '%s' "$rep" > "$out"; elif [[ -z "$out" ]]; then printf '%s' "$rep"; fi
@@ -138,6 +141,78 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   STUB_SANS_SIEGE=1 apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"la forge ne dit pas a qui appartient le jeton master (/api/v1/user) — la protection de tool_request n'aurait aucun approbateur, RIEN n'est pose"* ]]
+  refute grep -q "^TOFU:" "$CALLS"
+}
+
+@test "apply : un COMPTE homonyme de l'org systeme est un refus NOMME avant toute recette — sur Gitea une org et un compte partagent l'espace de noms" {
+  STUB_ORG_ABSENTE=1 apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"un COMPTE nomme « lcars » existe deja sur cette forge"* ]]
+  [[ "$output" == *"RIEN n'a ete pose"* ]]
+  refute grep -q "^TOFU:" "$CALLS"
+  # la question se pose DEUX FOIS : /orgs ne rend 200 que pour une org, /users pour les deux
+  grep -qx "CURL:GET /api/v1/orgs/lcars" "$CALLS"
+  grep -qx "CURL:GET /api/v1/users/lcars" "$CALLS"
+}
+
+@test "apply : un nom que PERSONNE ne porte passe — le garde refuse un homonyme, pas une forge vierge" {
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^TOFU:recette apply .* -var org=lcars " "$CALLS"
+}
+
+@test "apply : une org systeme DEJA POSEE ne fait pas sonder les comptes — /orgs a repondu, la question est close" {
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "CURL:GET /api/v1/orgs/lcars" "$CALLS"
+  refute grep -qx "CURL:GET /api/v1/users/lcars" "$CALLS"
+}
+
+@test "apply : le compte et l'org nes du MEME plan ne peuvent pas porter le meme nom — la collision se lit sans reseau" {
+  # L'INCIDENT REEL (banc vierge, 2026-09-17) : ni l'org ni le compte n'existaient, et le meme apply
+  # posait les deux. Aucune sonde ne voit ca ; seule la comparaison de deux noms qu'on tient deja.
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_BUILTIN_HUMAN=lcars apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« lcars » est demande a la fois comme COMPTE et comme nom de l'org systeme"* ]] || { echo "$output"; return 1; }
+  refute grep -q "^TOFU:" "$CALLS"
+
+  # le compte SYSTEME est pose par le meme plan : meme collision, meme refus
+  : > "$CALLS"
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_SYSTEM_ACCOUNT=lcars apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« lcars » est demande a la fois comme COMPTE et comme nom de l'org systeme"* ]]
+  refute grep -q "^TOFU:" "$CALLS"
+
+  # deux COMPTES du meme nom, poses par le meme plan : refus aussi
+  : > "$CALLS"
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_BUILTIN_HUMAN=system_starfleet apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"s'appellent tous deux « system_starfleet »"* ]] || { echo "$output"; return 1; }
+  refute grep -q "^TOFU:" "$CALLS"
+
+  # desarme : un humain de demonstration d'un AUTRE nom passe, sur la meme forge vierge
+  : > "$CALLS"
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_BUILTIN_HUMAN=ensign apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^TOFU:recette apply .* -var org=lcars " "$CALLS"
+}
+
+@test "apply : une forge qui ne dit ni 200 ni 404 est un refus NOMME — un garde qui se desarme en silence ne garde rien" {
+  # un 500, un 403, une connexion coupee : lus comme « absent », ils rendraient le garde muet
+  local code
+  for code in 000 403 500; do
+    : > "$CALLS"
+    STUB_ORG_ABSENTE=1 STUB_ORG_CODE="$code" apply
+    [ "$status" -eq 1 ] || { echo "code $code : $output"; return 1; }
+    [[ "$output" == *"la forge ne dit pas si « lcars » est libre (/api/v1/orgs : HTTP"* ]] || { echo "$output"; return 1; }
+    refute grep -q "^TOFU:" "$CALLS"
+  done
+
+  # la seconde question a le meme regime : /users muet est fatal aussi
+  : > "$CALLS"
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 STUB_USER_CODE=500 apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la forge ne dit pas si « lcars » est libre (/api/v1/users : HTTP 500)"* ]] || { echo "$output"; return 1; }
   refute grep -q "^TOFU:" "$CALLS"
 }
 

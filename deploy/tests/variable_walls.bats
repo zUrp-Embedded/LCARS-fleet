@@ -764,3 +764,46 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ "$installeur" != "$systeme" ] \
     || { echo "MUR 20 rompu — le catalogue embarqué porte le nom de l'org système « $systeme » : ses projets vivraient dans l'org du système" >&2; return 1; }
 }
+
+# ⚠ MUR 23 — L'HUMAIN DE DÉMONSTRATION D'UN BANC EST UN COMPTE DE FORGE, ET SUR GITEA UNE ORG *EST*
+# UN UTILISATEUR : les deux partagent un espace de noms. La structure de la forge pose, dans LE MÊME
+# plan tofu, l'org système, l'org du catalogue embarqué, le compte système et cet humain. Deux d'entre
+# eux du même nom, et le plan meurt en « user already exists », sur une ligne qui parle d'org — mesuré
+# le 2026-09-17 sur un banc vierge. Ce mur tient les noms écartés à la source, une fois pour les deux
+# rails ; les refus de `provision-lib.sh`, `bench.sh` et `forge-gestures.sh` tiennent ce qu'un
+# opérateur tape, que ce mur ne voit pas.
+@test "MUR 23: l'humain de démonstration d'un banc ne porte aucun nom que la recette de la forge pose" {
+  local humain org catalogue compte
+  humain="$(sed -n 's/^PROV_BENCH_HUMAN_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  org="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  catalogue="$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$REPO/deploy/installer-constants.env")"
+  compte="$(sed -n 's/^SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-\([^}]*\)}"$/\1/p' "$REPO/runtime/services/forge-gestures.sh")"
+  [ -n "$humain" ] && [ -n "$org" ] && [ -n "$catalogue" ] && [ -n "$compte" ] \
+    || { echo "MUR 23 — instrument cassé : humain « $humain », org « $org », catalogue « $catalogue », compte « $compte »" >&2; return 1; }
+
+  local pris
+  for pris in "$org" "$catalogue" "$compte"; do
+    [ "$humain" != "$pris" ] \
+      || { echo "MUR 23 rompu — l'humain de démonstration « $humain » porte un nom que la recette pose : la structure de la forge mourrait en « user already exists »" >&2; return 1; }
+  done
+}
+
+# ⚠ MUR 23 (suite) — CE NOM S'ÉCRIT DANS DE LA PROSE, et une prose qui ment oriente tout le monde.
+# Les aides de `install.sh`, `deploy/workstation` et des scripts de banc annoncent le défaut à
+# l'opérateur ; `installer_constants.bats` ne balaie pas les valeurs d'un seul mot, donc rien
+# d'autre ne tient cette recopie.
+@test "MUR 23: toute aide qui annonce le défaut de l'humain de démonstration annonce la constante" {
+  local humain f ligne trouvees=0
+  humain="$(sed -n 's/^PROV_BENCH_HUMAN_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
+  [ -n "$humain" ]
+  for f in "$REPO/install.sh" "$REPO/deploy/workstation" "$REPO/deploy/docker/bench/bench-up.sh" \
+           "$REPO/deploy/docker/bench/bench-swap-image.sh"; do
+    while IFS= read -r ligne; do
+      trouvees=$((trouvees + 1))
+      [[ "$ligne" == *"$humain"* ]] \
+        || { echo "MUR 23 rompu — $f annonce un défaut qui n'est pas « $humain » :$ligne" >&2; return 1; }
+    done < <(grep -E '^#.*(--humain-demo.*défaut [a-z]+|\[--human [a-z]+\]|, [a-z]+ / toto)' "$f" || true)
+  done
+  [ "$trouvees" -ge 4 ] \
+    || { echo "MUR 23 — instrument cassé : $trouvees ligne(s) d'aide trouvée(s), au moins 4 attendues" >&2; return 1; }
+}

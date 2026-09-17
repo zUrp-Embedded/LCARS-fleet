@@ -186,6 +186,11 @@ case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (
 export PROV_SUBSTRATE="$SUBSTRATE"
 unset _mesure
 
+# Ce qui POSE refuse un nom demandé deux fois dans l'espace de noms de la forge ; ce qui LIT ne
+# refuse rien — la machine fautive est celle qu'on veut sonder. Le nom arrive par trois chemins,
+# et le journal en est un : une machine installée avant ce refus le rejouerait telle quelle.
+[[ "$CMD" != apply ]] || prov_refuse_homonymes || exit 1
+
 # l'uid du siège vient du compte qui a lancé le runner, jamais de --human
 if [[ -z "${LCARS_SYSADMIN_UID:-}" ]]; then
   _seat_login="${SUDO_USER:-$(id -un)}"

@@ -86,11 +86,12 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas installe ici.
 
-  $PROG project adopt-system
+  $PROG project adopt-system [--check]
       Publie l'arbre dont CETTE machine a ete installee comme projet de sa propre fleet :
       un depot sur la forge, ses trois faces, ses labels, sa protection. Le nom et l'org
       sont declares (`Fleet.Layout.system_project/0`, le catalogue embarque), pas devines.
       Se rejoue : une machine qui porte deja son projet le DIT et rend 0.
+      --check MESURE sans rien ecrire : le projet est la, absent, ou la source manque.
 
   $PROG project reconcile [check|apply]
       La forge dit quels projets existent, le disque suit. Sur un /home neuf — conteneur

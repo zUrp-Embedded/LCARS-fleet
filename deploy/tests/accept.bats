@@ -256,11 +256,11 @@ UN_RUNNER_SHELL='{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"she
 @test "sur un banc, la fleet démarre sous l'humain de démonstration, sans credentials claude, et reste debout" {
   fleet_stub mort
   # un autre humain de fleet le précède dans la table : c'est l'humain de démonstration qui est retenu
-  printf 'root:x:0:0::/root:/bin/bash\nsiege:x:1000:1000::/home/siege:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nlcars:x:1002:1002::%s:/bin/bash\n' "$HOME_DIR" > "$LCARS_DECOR_ROOT/etc/passwd"
-  printf 'alice\nlcars\n' > "$MEMBRES_FLEET"
-  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=lcars accept_joue
-  [[ "$output" == *"OUI   fleet : démarre et vivante sous « lcars », laissée debout"* ]]
-  [ "$(sort -u "$MARQUEUR.user")" = lcars ]
+  printf 'root:x:0:0::/root:/bin/bash\nsiege:x:1000:1000::/home/siege:/bin/bash\nalice:x:1001:1001::/home/alice:/bin/bash\nensign:x:1002:1002::%s:/bin/bash\n' "$HOME_DIR" > "$LCARS_DECOR_ROOT/etc/passwd"
+  printf 'alice\nensign\n' > "$MEMBRES_FLEET"
+  LCARS_BENCH=1 LCARS_BUILTIN_HUMAN=ensign accept_joue
+  [[ "$output" == *"OUI   fleet : démarre et vivante sous « ensign », laissée debout"* ]]
+  [ "$(sort -u "$MARQUEUR.user")" = ensign ]
   [ -e "$MARQUEUR" ]
   [ -e "$MARQUEUR.sans-claude" ]
 }

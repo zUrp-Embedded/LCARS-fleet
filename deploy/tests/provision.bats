@@ -725,6 +725,50 @@ EOF
   grep -qx "LCARS_BUILTIN_HUMAN=autre" "$RUN_LOG"
 }
 
+@test "un humain de démonstration qui porte le nom de l'org système est refusé — par le drapeau comme par le journal, avant tout module" {
+  # sur Gitea une org EST un utilisateur : les deux partagent un espace de noms. Sans ce refus, la
+  # structure de la forge meurt au milieu d'un plan tofu, sur une ligne qui parle d'org (mesuré le
+  # 2026-09-17 sur le banc 2003). Le journal compte autant que le drapeau : une machine installée
+  # avant ce refus le rejoue tel quel, et un changement de défaut ne la rattrape pas.
+  terrain wsl
+  lib_module 50-humain 'printf "joue=%s\\n" "$PROV_BUILTIN_HUMAN" >> "$RUN_LOG"; p_ok "ok"'
+  local org; org="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$SANDBOX/installer-constants.env")"
+  [ -n "$org" ]
+
+  run env "LCARS_BUILTIN_HUMAN=$org" "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« $org » porte le nom de l'org système"*"Rien n'a été fait"* ]] || { echo "$output"; return 1; }
+  refute grep -q . "$RUN_LOG"
+
+  # par le journal, sans aucun drapeau : le nom vient de la ligne `params` d'une passe d'avant
+  printf '%s\n' '# SOURCE: journal' "params        PROV_BUILTIN_HUMAN=$org" > "$JOURNAL"
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« $org » porte le nom de l'org système"* ]] || { echo "$output"; return 1; }
+  refute grep -q . "$RUN_LOG"
+
+  # l'org du catalogue EMBARQUE vit dans le meme espace de noms, et la meme recette la pose
+  local cat; cat="$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$SANDBOX/installer-constants.env")"
+  [ -n "$cat" ]
+  run env "LCARS_BUILTIN_HUMAN=$cat" "$SANDBOX/provision" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"« $cat » porte le nom de l'org du catalogue embarqué"* ]] || { echo "$output"; return 1; }
+
+  # CE QUI LIT NE REFUSE RIEN : la machine dont le journal retient le nom fautif est exactement
+  # celle qu'on veut sonder, et « doctor » est la sonde que le bandeau de l'installeur imprime
+  printf '%s\n' '# SOURCE: journal' "params        PROV_BUILTIN_HUMAN=$org" > "$JOURNAL"
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" list
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" doctor
+  [ "$status" -ne 1 ] || { echo "$output"; return 1; }
+
+  # desarme : tout autre nom passe, et le module joue
+  printf '%s\n' '# SOURCE: journal' 'params        PROV_BUILTIN_HUMAN=ensign' > "$JOURNAL"
+  run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "joue=ensign" "$RUN_LOG" || { cat "$RUN_LOG"; return 1; }
+}
+
 @test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {
   # un défaut écrit au journal deviendrait un choix : la passe suivante ne distinguerait plus l'opérateur de l'usine
   terrain wsl

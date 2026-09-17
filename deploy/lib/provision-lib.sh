@@ -39,6 +39,26 @@ prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin syst
 : "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
 # LCARS_BUILTIN_HUMAN est un choix explicite : il gagne sur l'humain que le journal retient
 PROV_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${PROV_BUILTIN_HUMAN:-$PROV_BUILTIN_HUMAN_DEFAULT}}"
+# ⚠ SUR GITEA, UNE ORG *EST* UN UTILISATEUR : les deux partagent un espace de noms, et l'org système
+# meurt en « user already exists » au milieu du plan tofu si un compte porte son nom — le MÊME plan
+# pose les deux, donc la collision naît sur une forge vierge, sans que rien ne préexiste.
+#
+# Ce n'est PAS un refus au sourcing. La lib est sourcée par tout ce qui lit la machine (`doctor`,
+# `list`, `mesure`, `accept`, `pack`), et une machine dont le journal retient le nom fautif est
+# exactement celle qu'on veut diagnostiquer : refuser de la SONDER n'aide personne. Le refus
+# appartient à ce qui POSE, et `deploy/provision apply` l'appelle avant tout module.
+prov_refuse_homonymes() { # prov_refuse_homonymes — rc 1 et un message si un nom est demandé deux fois
+  local pris
+  [[ -n "$PROV_BUILTIN_HUMAN" ]] || return 0
+  for pris in "$PROV_FORGE_ORG:l'org système" "$PROV_BUNDLED_CATALOGUE:l'org du catalogue embarqué"; do
+    [[ "$PROV_BUILTIN_HUMAN" == "${pris%%:*}" ]] || continue
+    printf 'ÉCHEC : l'"'"'humain de démonstration « %s » porte le nom de %s — sur Gitea une org et un compte partagent l'"'"'espace de noms, et la même recette pose les deux. La structure de la forge mourrait sur une ligne qui parle d'"'"'org. Rien n'"'"'a été fait.\n  → --humain-demo AUTRE_NOM, ou une autre org (PROV_FORGE_ORG).\n' \
+      "$PROV_BUILTIN_HUMAN" "${pris#*:}" >&2
+    return 1
+  done
+  return 0
+}
+
 PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
 PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
 PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"

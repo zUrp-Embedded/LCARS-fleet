@@ -154,6 +154,28 @@ read_stdin_secret() { # un secret arrive par un tube ; un terminal n'en porte pa
 # y expose le jeton le temps de l'appel. MUR I2 (idiom_walls, cote installeur ET cote produit).
 hcurl() { local tok="$1"; shift; printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" | curl -K - "$@"; }
 
+# nom_libre <jeton> <nom> — rc 0 si AUCUN compte ne porte ce nom, rc 1 s'il y en a un ; MEURT si la
+# forge ne repond ni 200 ni 404. La question se pose DEUX FOIS parce qu'une seule reponse ne suffit
+# pas : `/users/<nom>` rend 200 pour une org comme pour un compte, `/orgs/<nom>` ne rend 200 que
+# pour une org. Un org qui repond, c'est deja la notre et la question est close.
+# Tout autre code est FATAL, comme pour `probe_id` de la recette : un 500, un 403 ou une connexion
+# coupee lus comme « absent » desarment le garde en silence, et c'est le silence qui coute.
+nom_libre() { # nom_libre <jeton> <nom>
+  local tok="$1" nom="$2" code
+  code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 "${FORGE_BASE_URL%/}/api/v1/orgs/$nom" 2>/dev/null || true)"
+  case "$code" in
+    200) return 0 ;;
+    404) ;;
+    *)   die "la forge ne dit pas si « $nom » est libre (/api/v1/orgs : HTTP ${code:-aucune reponse}) — un espace de noms qu'on ne lit pas ne se pose pas a l'aveugle. RIEN n'a ete pose" ;;
+  esac
+  code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 "${FORGE_BASE_URL%/}/api/v1/users/$nom" 2>/dev/null || true)"
+  case "$code" in
+    404) return 0 ;;
+    200) return 1 ;;
+    *)   die "la forge ne dit pas si « $nom » est libre (/api/v1/users : HTTP ${code:-aucune reponse}) — un espace de noms qu'on ne lit pas ne se pose pas a l'aveugle. RIEN n'a ete pose" ;;
+  esac
+}
+
 cmd_config_token() {
   need_forge_url
   local tok; tok="$(read_stdin_secret)"
@@ -322,6 +344,27 @@ cmd_apply() {
   siege="$(hcurl "$tok" -sS -m 15 "${FORGE_BASE_URL%/}/api/v1/user" 2>/dev/null | jq -r '.login // empty' 2>/dev/null || true)"
   [[ -n "$siege" ]] \
     || die "apply : la forge ne dit pas a qui appartient le jeton master (/api/v1/user) — la protection de tool_request n'aurait aucun approbateur, RIEN n'est pose"
+
+  # ⚠ SUR GITEA, UNE ORG *EST* UN UTILISATEUR : les deux partagent un espace de noms, et l'org
+  # systeme meurt en « user already exists », au milieu d'un plan tofu, sur une ligne qui parle
+  # d'une org, des qu'un compte porte son nom. La collision a DEUX AGES, et un seul garde n'en
+  # voit qu'un :
+  #
+  #   1. DANS LE MEME PLAN. Mesure du 2026-09-17, banc VIERGE : `gitea_user.builtin` et
+  #      `gitea_org.this` sont joues par le meme apply, et l'humain de demonstration s'appelait
+  #      comme l'org systeme. Ni l'un ni l'autre n'existait avant : aucune sonde ne l'aurait vu.
+  #      Cette collision-la se lit SANS RESEAU, en comparant deux noms qu'on tient deja.
+  #   2. DEJA SUR LA FORGE. Un compte pose par une passe anterieure, ou par une personne.
+  local n
+  for n in "$BUILTIN_HUMAN" "$SYSTEM_ACCOUNT"; do
+    [[ "$n" != "$SYSTEM_ORG" ]] \
+      || die "apply : « $n » est demande a la fois comme COMPTE et comme nom de l'org systeme — sur Gitea une org et un compte partagent l'espace de noms, et le meme plan poserait les deux. RIEN n'a ete pose : nommer le compte autrement (LCARS_BUILTIN_HUMAN, LCARS_SYSTEM_ACCOUNT), ou l'org autrement (LCARS_FORGE_ORG)"
+  done
+  # deux COMPTES du meme nom dans le meme plan : le second meurt en 409, plus tard et plus loin
+  [[ -z "$BUILTIN_HUMAN" || "$BUILTIN_HUMAN" != "$SYSTEM_ACCOUNT" ]] \
+    || die "apply : l'humain de demonstration et le compte systeme s'appellent tous deux « $BUILTIN_HUMAN » — la meme recette pose les deux. RIEN n'a ete pose : nommer l'un des deux autrement (LCARS_BUILTIN_HUMAN, LCARS_SYSTEM_ACCOUNT)"
+  nom_libre "$tok" "$SYSTEM_ORG" \
+    || die "apply : un COMPTE nomme « $SYSTEM_ORG » existe deja sur cette forge, et l'org systeme doit porter ce nom — sur Gitea une org et un compte partagent l'espace de noms, l'un des deux doit ceder. RIEN n'a ete pose : renommer ou supprimer ce compte, ou nommer l'org autrement (PROV_FORGE_ORG)"
 
   export TF_VAR_gitea_url="$FORGE_BASE_URL"
   export TF_VAR_gitea_token="$tok"
@@ -537,6 +580,13 @@ cmd_install() {
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
   [[ -n "$seed" ]] || die "install: pas de seed — sur un poste, « deploy/workstation up » le pose ; pour un conteneur, « FORGE_SEED_PASSWORD=<mot de passe> deploy/container config » depuis l'hôte"
   [[ -n "$REFERENCE_CATALOGUE" ]] || REFERENCE_CATALOGUE="$(reference_catalogue_root)"
+
+  # L'org d'un catalogue vit dans LE MEME espace de noms que les comptes : le trou de l'org systeme
+  # est le meme une ligne plus bas. Et le compte systeme est pose par le meme plan que cette org.
+  [[ "$name" != "$SYSTEM_ACCOUNT" ]] \
+    || die "install: « $name » est le nom du compte systeme, que la meme recette pose — sur Gitea une org et un compte partagent l'espace de noms. RIEN n'a ete pose"
+  nom_libre "$tok" "$name" \
+    || die "install: un COMPTE nomme « $name » existe deja sur cette forge, et l'org de ce catalogue doit porter ce nom — sur Gitea une org et un compte partagent l'espace de noms, l'un des deux doit ceder. RIEN n'a ete pose"
 
   # 0. LE CATALOGUE DE LA RELEASE S'INSTALLE COMME LES AUTRES — org, comptes de role, teams, sa
   #    source dans son magasin —, a une difference pres : sa source est l'arbre que la release porte,

@@ -32,7 +32,10 @@ ADVERTISE_GUESSED=""
 IMAGE=""
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
-HUMAN="lcars"
+# le nom est une CONSTANTE de l'installeur, pas un choix du banc : les deux rails le lisent au meme
+# endroit, et il vaut « ensign » parce qu'il ne peut pas valoir « lcars » — celui-la nomme l'org
+# systeme, et sur Gitea une org et un compte partagent l'espace de noms
+HUMAN="$PROV_BENCH_HUMAN_DEFAULT"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 say() { printf '[%s] %s\n' "$BENCH_NOM" "$*"; }
@@ -49,9 +52,21 @@ bench_option() { # bench_option <arg…> — une option commune au banc et au sw
     --image)         IMAGE="${2:?--image attend une image}"; BENCH_LU=2 ;;
     --creds-from)    CREDS_FROM="${2:?--creds-from attend un fichier}"; BENCH_LU=2 ;;
     --no-creds)      WITH_CREDS=0; BENCH_LU=1 ;;
-    --human)         HUMAN="${2:?--human attend un login}"; BENCH_LU=2 ;;
+    --human)         HUMAN="${2:?--human attend un login}"; bench_humain_libre "$HUMAN"; BENCH_LU=2 ;;
     *)               die "option inconnue : $1" 1 ;;
   esac
+}
+
+# ⚠ SUR GITEA, UNE ORG *EST* UN UTILISATEUR. La structure de la forge pose l'org systeme, l'org du
+# catalogue embarque ET cet humain dans LE MEME plan tofu : deux d'entre eux du meme nom, et le plan
+# meurt en « user already exists », sur une ligne qui parle d'org (mesure du 2026-09-17, banc vierge).
+# Le refus est ici parce que `--human` entre par la ligne de commande, que le defaut ne protege pas.
+bench_humain_libre() { # bench_humain_libre <login>
+  local pris
+  for pris in "$PROV_FORGE_ORG_DEFAULT:l'org systeme" "$PROV_BUNDLED_CATALOGUE:l'org du catalogue embarque"; do
+    [[ "$1" == "${pris%%:*}" ]] || continue
+    die "--human « $1 » porte le nom de ${pris#*:} — sur Gitea une org et un compte partagent l'espace de noms, et la meme recette pose les deux. Rien n'a ete monte : un autre login." 1
+  done
 }
 
 bench_projets() { # bench_projets — les projets et le conteneur dérivés de la base ; exporte ce que les compose lisent

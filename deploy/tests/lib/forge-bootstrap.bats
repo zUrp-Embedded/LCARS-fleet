@@ -60,13 +60,13 @@ teardown() { forge_double_stop; }
 
 lib() { run bash -c "set -euo pipefail; source '$PROV_LIB'; source '$LIB'; $1"; }
 
-routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeton] — une forge qui accepte l'humain « lcars »
+routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeton] — une forge qui accepte l'humain « ensign »
   local is_admin="${1:-true}" basic="${2:-200}" jeton='{"sha1":"op-abc"}'
   [[ -z "${3:-}" ]] || jeton="$3"
-  forge_route PATCH /api/v1/admin/users/lcars 200 '{"login":"lcars"}'
-  forge_route GET /api/v1/users/lcars 200 "{\"login\":\"lcars\",\"is_admin\":$is_admin}"
-  forge_route GET /api/v1/user "$basic" '{"login":"lcars"}'
-  forge_route POST /api/v1/users/lcars/tokens 201 "$jeton"
+  forge_route PATCH /api/v1/admin/users/ensign 200 '{"login":"ensign"}'
+  forge_route GET /api/v1/users/ensign 200 "{\"login\":\"ensign\",\"is_admin\":$is_admin}"
+  forge_route GET /api/v1/user "$basic" '{"login":"ensign"}'
+  forge_route POST /api/v1/users/ensign/tokens 201 "$jeton"
 }
 
 @test "forge_mount : compose up -d avec le projet, et port, bind, url racine dans l'environnement" {
@@ -180,41 +180,41 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
 @test "bench_human_seed : PATCH JSON au jeton master — mot de passe, login_name, source_id, et aucune adminité : la recette seule la pose" {
   forge_double_start
   routes_du_banc
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  local patch='select(.method == "PATCH" and .path == "/api/v1/admin/users/lcars")'
+  local patch='select(.method == "PATCH" and .path == "/api/v1/admin/users/ensign")'
   [ "$(forge_requests "$patch | .auth" | jq -r .)" = "token tok-master" ]
   [ "$(forge_requests "$patch | .ctype" | jq -r .)" = application/json ]
-  [ "$(forge_requests "$patch | .body | fromjson")" = '{"login_name":"lcars","source_id":0,"password":"toto32toto32","must_change_password":false}' ]
+  [ "$(forge_requests "$patch | .body | fromjson")" = '{"login_name":"ensign","source_id":0,"password":"toto32toto32","must_change_password":false}' ]
 }
 
 @test "bench_human_seed : l'adminité lue au jeton master, le mot de passe éprouvé en Basic, le jeton opérateur minté en Basic et son sha1 rendu" {
   forge_double_start
   routes_du_banc
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$output" = "op-abc" ]
-  [ "$(forge_requests 'select(.path == "/api/v1/users/lcars") | .auth' | jq -r .)" = "token tok-master" ]
-  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r .)" = "basic lcars:toto32toto32" ]
-  [ "$(forge_requests 'select(.path == "/api/v1/users/lcars/tokens") | .auth' | jq -r .)" = "basic lcars:toto32toto32" ]
-  [[ "$(forge_requests 'select(.path == "/api/v1/users/lcars/tokens") | .body | fromjson | .name' | jq -r .)" == bench-operateur-* ]]
-  [ "$(forge_requests 'select(.path == "/api/v1/users/lcars/tokens") | .body | fromjson | .scopes')" = '["write:repository","write:issue","read:organization","read:user"]' ]
+  [ "$(forge_requests 'select(.path == "/api/v1/users/ensign") | .auth' | jq -r .)" = "token tok-master" ]
+  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r .)" = "basic ensign:toto32toto32" ]
+  [ "$(forge_requests 'select(.path == "/api/v1/users/ensign/tokens") | .auth' | jq -r .)" = "basic ensign:toto32toto32" ]
+  [[ "$(forge_requests 'select(.path == "/api/v1/users/ensign/tokens") | .body | fromjson | .name' | jq -r .)" == bench-operateur-* ]]
+  [ "$(forge_requests 'select(.path == "/api/v1/users/ensign/tokens") | .body | fromjson | .scopes')" = '["write:repository","write:issue","read:organization","read:user"]' ]
 }
 
 @test "bench_human_seed : un mot de passe avec guillemet et barre oblique inverse arrive tel quel" {
   forge_double_start
   routes_du_banc
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars '"'"'mot"de\passe'"'"
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign '"'"'mot"de\passe'"'"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | .password' | jq -r .)" = 'mot"de\passe' ]
-  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r .)" = 'basic lcars:mot"de\passe' ]
+  [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r .)" = 'basic ensign:mot"de\passe' ]
 }
 
 @test "bench_human_seed : ni le jeton master ni le mot de passe dans l'argv ou l'environnement d'un enfant" {
   forge_double_start
   routes_du_banc
   espion_enfants curl base64 jq tr
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   # le PATCH, la lecture de l'adminité, l'épreuve Basic et le jeton opérateur : quatre curl, et le jq du corps
   [ "$(grep -c '^ARGV curl ' "$DECOR_ENFANTS")" -eq 4 ]
@@ -222,25 +222,25 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   grep -q '^ARGV base64 ' "$DECOR_ENFANTS"
   refute grep -qF tok-master "$DECOR_ENFANTS"
   refute grep -qF toto32toto32 "$DECOR_ENFANTS"
-  refute grep -qF "$(printf 'lcars:toto32toto32' | base64 -w0)" "$DECOR_ENFANTS"
+  refute grep -qF "$(printf 'ensign:toto32toto32' | base64 -w0)" "$DECOR_ENFANTS"
 }
 
 @test "bench_human_seed : un PATCH refusé est nommé avec son code HTTP, rien n'est rendu" {
   forge_double_start
-  forge_route PATCH /api/v1/admin/users/lcars 403 '{"message":"forbidden"}'
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
+  forge_route PATCH /api/v1/admin/users/ensign 403 '{"message":"forbidden"}'
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "la forge refuse le compte « lcars » (HTTP 403)" ]
+  [ "$stderr" = "la forge refuse le compte « ensign » (HTTP 403)" ]
 }
 
 @test "bench_human_seed : un humain que la structure n'a pas fait site-admin est nommé avec is_admin et le geste qui la rejoue, rien n'est rendu" {
   forge_double_start
   routes_du_banc false
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [[ "$stderr" == "« lcars » n'est pas site-admin (is_admin=false) : son adminité est posée par la structure de la forge (gitea_user.human)"* ]]
+  [[ "$stderr" == "« ensign » n'est pas site-admin (is_admin=false) : son adminité est posée par la structure de la forge (gitea_user.human)"* ]]
   [ -z "$(forge_requests 'select(.method == "PATCH") | .body | fromjson | select(has("admin"))')" ]
 }
 
@@ -249,38 +249,38 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   routes_du_banc false
   local ws; ws="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/workstation"
   # le poste : sudo ne transmet pas LCARS_BUILTIN_HUMAN, le délégué la reçoit en option
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw \"\$BATS_TEST_TMPDIR/jeton\""
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw \"\$BATS_TEST_TMPDIR/jeton\""
   [ "$status" -eq 1 ]
-  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "$ws up --bench --humain-demo lcars --only 61-forge-structure" ] || { echo "$stderr"; return 1; }
+  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "$ws up --bench --humain-demo ensign --only 61-forge-structure" ] || { echo "$stderr"; return 1; }
   # le conteneur du banc : chemin des gestes, root, et l'humain passé à docker exec
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw '' bt-fleet-lcars-1"
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw '' bt-fleet-lcars-1"
   [ "$status" -eq 1 ]
-  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "docker exec -u root -e LCARS_BUILTIN_HUMAN=lcars bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" ] || { echo "$stderr"; return 1; }
+  [ "$(sed -n 's/^.* :  //p' <<<"$stderr")" = "docker exec -u root -e LCARS_BUILTIN_HUMAN=ensign bt-fleet-lcars-1 /opt/lcars/forge-gestures.sh apply" ] || { echo "$stderr"; return 1; }
   # joué tel quel contre le docker de décor : l'humain arrive dans l'environnement de la commande du conteneur
   local geste; geste="$(sed -n 's/^.* :  //p' <<<"$stderr")"
   printf '#!/usr/bin/env bash\necho "GESTES:$*:LCARS_BUILTIN_HUMAN=$LCARS_BUILTIN_HUMAN" >> %q\n' "$CALLS" > "$CONTENEUR_BIN/forge-gestures.sh"
   chmod 0755 "$CONTENEUR_BIN/forge-gestures.sh"
   run bash -c "${geste/\/opt\/lcars\/forge-gestures.sh/forge-gestures.sh}"
   [ "$status" -eq 0 ]
-  grep -qx 'GESTES:apply:LCARS_BUILTIN_HUMAN=lcars' "$CALLS"
+  grep -qx 'GESTES:apply:LCARS_BUILTIN_HUMAN=ensign' "$CALLS"
 }
 
 @test "bench_human_seed : un mot de passe que la forge refuse en Basic est nommé, rien n'est rendu" {
   forge_double_start
   routes_du_banc true 401
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "« lcars » ne s'authentifie pas avec le mot de passe posé" ]
+  [ "$stderr" = "« ensign » ne s'authentifie pas avec le mot de passe posé" ]
 }
 
 @test "bench_human_seed : une réponse sans sha1 est nommée avec le corps de la forge, rien n'est rendu" {
   forge_double_start
   routes_du_banc true 200 '{"message":"nope"}'
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "la forge n'a pas rendu de jeton opérateur pour « lcars » : {\"message\":\"nope\"}" ]
+  [ "$stderr" = "la forge n'a pas rendu de jeton opérateur pour « ensign » : {\"message\":\"nope\"}" ]
 }
 
 @test "bench_human_seed : une forge muette au jeton opérateur est nommée sans reprendre la réponse précédente" {
@@ -288,32 +288,32 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
   routes_du_banc
   printf '#!/usr/bin/env bash\n[[ "$*" != */tokens* ]] || exit 7\nexec %q "$@"\n' "$(PATH="${PATH#"$DECOR_BIN:"}" command -v curl)" > "$DECOR_BIN/curl"
   chmod 0755 "$DECOR_BIN/curl"
-  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" lcars pw"
+  run --separate-stderr bash -c "source '$PROV_LIB'; source '$LIB'; bench_human_seed \"\$FORGE_DOUBLE_URL\" \"\$BATS_TEST_TMPDIR/master\" ensign pw"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  [ "$stderr" = "la forge n'a pas rendu de jeton opérateur pour « lcars » :" ]
+  [ "$stderr" = "la forge n'a pas rendu de jeton opérateur pour « ensign » :" ]
 }
 
 @test "bench_human_seed : un jeton posé qui s'authentifie encore est rendu tel quel, aucun jeton n'est minté" {
   forge_double_start
   routes_du_banc
   printf 'op-pose\n' > "$BATS_TEST_TMPDIR/pose"
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/pose"'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32 "$BATS_TEST_TMPDIR/pose"'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$output" = "op-pose" ]
   [ "$(forge_requests 'select(.path == "/api/v1/user") | .auth' | jq -r . | tail -n1)" = "token op-pose" ]
-  [ -z "$(forge_requests 'select(.path == "/api/v1/users/lcars/tokens")')" ]
+  [ -z "$(forge_requests 'select(.path == "/api/v1/users/ensign/tokens")')" ]
 }
 
 @test "bench_human_seed : un jeton posé que la forge refuse est remplacé par un jeton minté" {
   forge_double_start
-  forge_route PATCH /api/v1/admin/users/lcars 200 '{"login":"lcars"}'
-  forge_route GET /api/v1/users/lcars 200 '{"login":"lcars","is_admin":true}'
-  forge_route GET /api/v1/user 200 x1 '{"login":"lcars"}'
+  forge_route PATCH /api/v1/admin/users/ensign 200 '{"login":"ensign"}'
+  forge_route GET /api/v1/users/ensign 200 '{"login":"ensign","is_admin":true}'
+  forge_route GET /api/v1/user 200 x1 '{"login":"ensign"}'
   forge_route GET /api/v1/user 401 '{"message":"unauthorized"}'
-  forge_route POST /api/v1/users/lcars/tokens 201 '{"sha1":"op-neuf"}'
+  forge_route POST /api/v1/users/ensign/tokens 201 '{"sha1":"op-neuf"}'
   printf 'op-revoque\n' > "$BATS_TEST_TMPDIR/pose"
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/pose"'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32 "$BATS_TEST_TMPDIR/pose"'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$output" = "op-neuf" ]
 }
@@ -321,7 +321,7 @@ routes_du_banc() { # routes_du_banc [is_admin] [code du Basic] [réponse du jeto
 @test "bench_human_seed : sans jeton posé à l'endroit nommé, un jeton est minté" {
   forge_double_start
   routes_du_banc
-  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" lcars toto32toto32 "$BATS_TEST_TMPDIR/absent"'
+  lib 'bench_human_seed "$FORGE_DOUBLE_URL" "$BATS_TEST_TMPDIR/master" ensign toto32toto32 "$BATS_TEST_TMPDIR/absent"'
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$output" = "op-abc" ]
 }
