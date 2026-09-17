@@ -159,7 +159,17 @@ EOF
     done
   done
   # l'installeur telecharge, puis echoue
-  printf '#!/usr/bin/env bash\ncat > "$3" <<SH\n#!/usr/bin/env bash\nexit 1\nSH\nexit 0\n' > "$BINDIR/curl"
+  # ⚠ LA CIBLE EST CELLE DE `-o`, PAS `$3`. Le geste appelle `curl -fsSL --proto '=https' -m N -o
+  # <fichier> <url>` : prendre `$3` ecrivait un fichier nomme « =https » dans le repertoire courant —
+  # et deux d'entre eux ont fini commites (2026-09-18).
+  cat > "$BINDIR/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] || exit 1
+printf '#!/usr/bin/env bash\nexit 1\n' > "$out"
+exit 0
+EOF
   chmod 0755 "$BINDIR/curl"
   run env PATH="$BINDIR:$sans" bash "$MOD" apply
 
@@ -170,7 +180,17 @@ EOF
 
 @test "installeur en echec avec zstd PRESENT : le refus reste court — on n'accuse pas un innocent" {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/zstd"; chmod 0755 "$BINDIR/zstd"
-  printf '#!/usr/bin/env bash\ncat > "$3" <<SH\n#!/usr/bin/env bash\nexit 1\nSH\nexit 0\n' > "$BINDIR/curl"
+  # ⚠ LA CIBLE EST CELLE DE `-o`, PAS `$3`. Le geste appelle `curl -fsSL --proto '=https' -m N -o
+  # <fichier> <url>` : prendre `$3` ecrivait un fichier nomme « =https » dans le repertoire courant —
+  # et deux d'entre eux ont fini commites (2026-09-18).
+  cat > "$BINDIR/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] || exit 1
+printf '#!/usr/bin/env bash\nexit 1\n' > "$out"
+exit 0
+EOF
   chmod 0755 "$BINDIR/curl"
   run_apply
 
