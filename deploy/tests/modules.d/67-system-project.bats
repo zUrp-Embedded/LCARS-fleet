@@ -76,6 +76,18 @@ mod() { run bash "$MOD" "$@"; }
   grep -q "^CLI:project adopt-system --check --from $racine (uid=" "$CALLS" || { cat "$CALLS"; return 1; }
 }
 
+@test "SEEDED : la face est en place et le module renvoie au poseur du dépôt, sans dérive" {
+  # le dépôt est créé et semé par `61-forge-structure`, qui joue le geste avec le jeton master ;
+  # ce module tient la FACE LOCALE, et une forge qu'il ne peut pas prouver n'est pas sa panne
+  STUB_ADOPT="SEEDED fleet/lcars-fleet" mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"OK    67-system-project: fleet/lcars-fleet : face de code en place — le dépôt est posé par la structure de la forge (61)"* ]] || { echo "$output"; return 1; }
+
+  STUB_CHECK="SEEDED fleet/lcars-fleet" mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"face de code en place"* ]]
+}
+
 @test "apply : un projet DÉJÀ publié est conforme — ce module se rejoue à chaque passe" {
   STUB_ADOPT="ALREADY fleet/lcars-fleet" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

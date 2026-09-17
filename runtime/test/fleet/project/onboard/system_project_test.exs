@@ -163,6 +163,37 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
     end
   end
 
+  describe "le depot a son poseur, et ce n'est pas cette porte" do
+    test "une forge qu'on ne peut ni joindre ni prouver rend `seeded` : la face est en place" do
+      # le jeton viendrait du rail d'autorite, qui ne sert QUE les humains de la flotte ; sur un
+      # poste neuf il n'y en a pas encore. Le depot, lui, est pose par `forge-gestures.sh apply`.
+      log =
+        capture_log(fn ->
+          assert {:ok, :seeded} =
+                   adopte(
+                     {:error,
+                      {:forge_preflight_failed, {:config, {:authority, "x", :not_a_worker}}}}
+                   )
+        end)
+
+      assert log =~ "code face in place"
+      assert log =~ "install gesture"
+      refute log =~ "NOT adopted"
+    end
+
+    test "une forge illisible rend `seeded` aussi — meme cause, meme regle" do
+      capture_log(fn ->
+        assert {:ok, :seeded} = adopte({:error, {:forge_unverifiable, {:http, 500, "boom"}}})
+      end)
+    end
+
+    test "tout AUTRE refus remonte : la regle ne couvre pas ce qu'elle ne nomme pas" do
+      raison = {:not_adoptable, {:no_local_main, "/ailleurs"}}
+      log = capture_log(fn -> assert {:error, ^raison} = adopte({:error, raison}) end)
+      assert log =~ "NOT adopted"
+    end
+  end
+
   describe "ce qui remonte, et ce qui est dit" do
     test "un arbre local sans `main` n'est pas publiable, et le refus nomme le repertoire" do
       raison = {:not_adoptable, {:no_local_main, "/home/projects/lcars-fleet"}}
@@ -174,8 +205,8 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       assert log =~ "the machine keeps its source"
     end
 
-    test "une forge illisible remonte — jamais un `already` qui ferait croire au travail fait" do
-      raison = {:forge_unverifiable, {:http, 500, "boom"}}
+    test "un refus de la forge ne devient JAMAIS un `already` qui ferait croire au travail fait" do
+      raison = {:repo_conflict, "autre chose"}
 
       capture_log(fn -> assert {:error, ^raison} = adopte({:error, raison}) end)
     end

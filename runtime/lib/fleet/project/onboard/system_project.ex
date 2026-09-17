@@ -30,7 +30,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
   require Logger
 
   @typedoc "What a pass did: the project was published, it was already there, or nothing was found."
-  @type outcome :: {:ok, :adopted | :already} | {:error, term()}
+  @type outcome :: {:ok, :adopted | :already | :seeded} | {:error, term()}
 
   @doc """
   Adopts the system project if the machine carries its source and the forge does not have it yet.
@@ -141,6 +141,20 @@ defmodule Fleet.Project.Onboard.SystemProject do
         Logger.info("SystemProject: #{org}/#{name} already on the forge — nothing to adopt.")
         {:ok, :already}
 
+      # ⚠ LE DEPOT A SON POSEUR, ET CE N'EST PAS CETTE PORTE. `forge-gestures.sh apply` le cree et y
+      # pousse la source pendant l'installation, avec le jeton master ; ici, le jeton viendrait du
+      # rail d'autorite, qui ne sert QUE les humains de la flotte — sur un poste neuf il n'y en a
+      # pas encore (`not_a_worker`, mesure du 2026-09-17, banc 2003). Une forge qu'on ne peut ni
+      # joindre ni prouver n'est donc PAS une panne de cette porte : la face est en place, et le
+      # depot est l'affaire du geste. Tout autre refus remonte.
+      {:error, {cause, _}} when cause in [:forge_preflight_failed, :forge_unverifiable] ->
+        Logger.info(
+          "SystemProject: #{org}/#{name} — code face in place; the repository is posed by the " <>
+            "install gesture (forge-gestures apply), which holds the master token."
+        )
+
+        {:ok, :seeded}
+
       {:error, reason} = err ->
         Logger.warning(
           "SystemProject: #{org}/#{name} NOT adopted (#{inspect(reason)}) — the machine keeps its " <>
@@ -169,7 +183,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
   here to publish), `:no_source` there is nothing to publish, and an error when the forge cannot
   be read: an unreadable forge carries no answer.
   """
-  @spec state(keyword()) :: {:ok, :present | :absent | :no_source} | {:error, term()}
+  @spec state(keyword()) :: {:ok, :present | :absent | :no_source | :seeded} | {:error, term()}
   def state(opts \\ []) do
     name = Keyword.get(opts, :name, Layout.system_project())
     org = Keyword.get(opts, :org, Catalogue.bundled_name())
@@ -184,18 +198,25 @@ defmodule Fleet.Project.Onboard.SystemProject do
         # une face absente que l'apply SEMERA n'est pas une machine sans source : ce qui manque est
         # le depot sur la forge, et `check` doit le dire comme tel — sinon le module 67 reste en
         # « rien a publier » sur une machine qui a tout ce qu'il faut.
-        from = Keyword.get(opts, :from)
+        if publiable?(dirs, opts), do: {:ok, :absent}, else: {:ok, :no_source}
 
-        cond do
-          File.dir?(Path.join(dirs.code, ".git")) -> {:ok, :absent}
-          is_binary(from) and File.dir?(Path.join(from, ".git")) -> {:ok, :absent}
-          true -> {:ok, :no_source}
-        end
+      # meme regle que pour l'adoption : une forge illisible ne dit rien de la FACE, qui est ce que
+      # cette porte tient. Le depot, lui, est mesure par le geste de structure.
+      {:error, {cause, _}} when cause in [:forge_preflight_failed, :forge_unverifiable] ->
+        if git_tree?(dirs.code), do: {:ok, :seeded}, else: {:ok, :no_source}
 
       {:error, _} = err ->
         err
     end
   end
+
+  # Y a-t-il de quoi publier : la face est deja un arbre git, ou l'appelant en nomme un a semer.
+  defp publiable?(dirs, opts) do
+    from = Keyword.get(opts, :from)
+    git_tree?(dirs.code) or (is_binary(from) and git_tree?(from))
+  end
+
+  defp git_tree?(dir), do: File.dir?(Path.join(dir, ".git"))
 
   @doc """
   Release door that MEASURES: prints one line and exits 0, whatever the state — a measure is not
@@ -209,6 +230,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
     case state(source_opts()) do
       {:ok, :present} -> IO.puts("ALREADY #{org}/#{name}")
+      {:ok, :seeded} -> IO.puts("SEEDED #{org}/#{name}")
       {:ok, :absent} -> IO.puts("ABSENT #{org}/#{name}")
       {:ok, :no_source} -> IO.puts("NOSOURCE #{org}/#{name}")
       {:error, reason} -> IO.puts("UNREADABLE #{org}/#{name} #{inspect(reason)}")
@@ -236,6 +258,10 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
       {:ok, :already} ->
         IO.puts("ALREADY #{org}/#{name}")
+        System.halt(0)
+
+      {:ok, :seeded} ->
+        IO.puts("SEEDED #{org}/#{name}")
         System.halt(0)
 
       {:error, reason} ->

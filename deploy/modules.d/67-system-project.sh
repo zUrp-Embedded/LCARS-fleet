@@ -67,6 +67,9 @@ jouer() { # jouer <verbe> — 0 conforme · 1 drift
       case "$out" in
         ADOPTED*) PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "${out#ADOPTED } publié — la source de cette machine est un projet de sa fleet" ;;
         ALREADY*) p_ok "${out#ALREADY } déjà publié" ;;
+        # LE DEPOT A SON POSEUR : `61-forge-structure` joue le geste qui le crée et y pousse la
+        # source, avec le jeton master. Ce module tient la FACE LOCALE, et le dit comme tel.
+        SEEDED*)  p_ok "${out#SEEDED } : face de code en place — le dépôt est posé par la structure de la forge (61)" ;;
         *)        p_ok "projet du système : $out" ;;
       esac
       return 0
@@ -90,6 +93,7 @@ check() {
 
   case "$out" in
     ALREADY*)    p_ok "${out#ALREADY } déjà publié" ;;
+    SEEDED*)     p_ok "${out#SEEDED } : face de code en place — le dépôt est posé par la structure de la forge (61)" ;;
     ABSENT*)     p_drift "${out#ABSENT } absent de la forge — « lcars project adopt-system » le publie (l'apply de ce module le fait)" ;;
     NOSOURCE*)   p_warn "${out#NOSOURCE } : cette machine ne porte pas la source dont elle a été installée — rien à publier (kit sans arbre, ou clone jamais posé)" ;;
     UNREADABLE*) p_drift "état de ${out#UNREADABLE } NON mesurable — la forge n'a pas répondu, rien n'est conclu" ;;
