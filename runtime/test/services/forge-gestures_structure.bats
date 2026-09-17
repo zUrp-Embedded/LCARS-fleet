@@ -395,3 +395,68 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"source NON poussee sur fleet/lcars-fleet"*"le depot est cree et VIDE"* ]] || { echo "$output"; return 1; }
 }
+
+# ─── 5. L'ETAT QUI NOMME UN COMPTE DISPARU ──────────────────────────────────────────────────────
+#
+# ⚠ LE PENDANT DE L'IMPORT. `existing.tf` reprend dans l'etat ce qui existe deja ; le cas MIROIR
+# n'avait rien. Le provider ne rafraichit pas un compte supprime de la forge, il MEURT dessus —
+# mesure du 2026-09-17 sur LCARS-beta, ou l'architecte avait retire le compte homonyme de l'org :
+#
+#     gitea_user.human[0]: Refreshing state... [id=2]
+#     Error: user not found with id 2
+#
+# Et il meurt au PLAN, donc avant que le moindre objet ne soit pose : l'installation entiere
+# s'arretait sur un compte que plus personne ne voulait.
+
+etat_avec() { # etat_avec <dossier du play> <login>… — un tfstate qui NOMME ces comptes
+  local dir="$1"; shift
+  mkdir -p "$dir"
+  local n=1 insts=""
+  for l in "$@"; do
+    insts="$insts${insts:+,}{\"index_key\":0,\"attributes\":{\"id\":\"$n\",\"username\":\"$l\"}}"
+    n=$((n + 1))
+  done
+  printf '{"resources":[{"type":"gitea_user","name":"human","instances":[%s]}]}\n' "$insts" \
+    > "$dir/terraform.tfstate"
+}
+
+@test "apply : un compte de l'etat que la forge n'a PLUS est retire, et la recette rejoue" {
+  etat_avec "$LCARS_RECIPE_DIR/instance" disparu
+  # `disparu` rend 404 sur /users ; tout le reste de la forge repond
+  STUB_SANS_HOMONYME=1 apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+  [[ "$output" == *"gitea_user.human[0] (« disparu ») n'est plus sur la forge — retire de l'etat"* ]] \
+    || { echo "$output"; return 1; }
+  # -F : l'adresse porte des crochets, qu'une expression reguliere lirait comme une classe
+  grep -qxF "TOFU:recette/instance state rm -no-color gitea_user.human[0]" "$CALLS" \
+    || { grep '^TOFU:' "$CALLS"; return 1; }
+  # et le play est joue APRES, pas a la place
+  grep -qx "TOFU:recette/instance apply -auto-approve -input=false -no-color" "$CALLS"
+}
+
+@test "apply : un compte TOUJOURS la n'est PAS retire — on n'oublie que sur un 404 franc" {
+  etat_avec "$LCARS_RECIPE_DIR/instance" toujours-la
+  apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "state rm" "$CALLS"
+  refute_out "n'est plus sur la forge" <<<"$output"
+}
+
+@test "apply : une forge qui ne dit NI 200 NI 404 ne fait oublier personne" {
+  # une forge qu'on lit mal n'autorise a effacer aucun etat : 500 laisse tout en place
+  etat_avec "$LCARS_RECIPE_DIR/instance" douteux
+  STUB_SANS_HOMONYME=1 STUB_USER_CODE=500 apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "state rm" "$CALLS"
+}
+
+@test "apply : un « state rm » qui echoue est un refus NOMME — le plan mourrait dessus" {
+  etat_avec "$LCARS_RECIPE_DIR/instance" disparu
+  printf '#!/usr/bin/env bash\necho "TOFU:${PWD#"$BATS_TEST_TMPDIR"/} $*" >> "$CALLS"\n[[ "$1" != "state" ]] || exit 1\n[[ "$1" != apply ]] || echo "Apply complete!"\n' > "$BIN/tofu"
+  chmod 0755 "$BIN/tofu"
+  STUB_SANS_HOMONYME=1 apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nomme un compte absent de la forge et ne sort pas de l'etat"* ]] || { echo "$output"; return 1; }
+  refute grep -q "apply -auto-approve" "$CALLS"
+}

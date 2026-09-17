@@ -399,6 +399,7 @@ cmd_apply() {
     echo "forge-gestures: apply $m${vars[0]:+ (org $SYSTEM_ORG, sans role metier)}"
     ( cd "$play/$m" && tofu init -input=false -no-color >/dev/null ) \
       || die "init $m en echec — le miroir de providers (TF_CLI_CONFIG_FILE) couvre-t-il cette recette ?"
+    oublier_comptes_disparus "$play/$m" "$tok"
     ( cd "$play/$m" && tofu apply -auto-approve -input=false -no-color ${vars[@]+"${vars[@]}"} ) \
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
@@ -419,6 +420,46 @@ cmd_apply() {
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
+}
+
+# ⚠ LE PENDANT DE L'IMPORT : OUBLIER CE QUE LA FORGE N'A PLUS.
+#
+# `existing.tf` reprend dans l'etat ce qui existe deja sur la forge. Le cas MIROIR n'avait rien : un
+# etat qui nomme un compte SUPPRIME de la forge. Le provider ne l'oublie pas au rafraichissement, il
+# MEURT dessus — mesure du 2026-09-17 sur LCARS-beta, ou l'architecte avait retire le compte
+# homonyme de l'org systeme :
+#
+#     gitea_user.human[0]: Refreshing state... [id=2]
+#     Error: user not found with id 2
+#
+# Et il meurt au PLAN, donc AVANT que le moindre objet ne soit pose : une installation entiere
+# s'arrete sur un compte que plus personne ne veut. Un etat qui nomme un objet absent est PERIME par
+# definition ; ce qui existe encore, `existing.tf` le reimporte au tour suivant.
+#
+# On ne retire QUE des comptes, et seulement sur un 404 FRANC : toute autre reponse laisse l'etat
+# tel quel, parce qu'une forge qu'on lit mal n'autorise a oublier personne.
+oublier_comptes_disparus() { # oublier_comptes_disparus <dossier du play> <jeton>
+  local dir="$1" tok="$2"
+  local etat="$dir/terraform.tfstate"
+  [[ -r "$etat" ]] || return 0
+  command -v jq >/dev/null || return 0
+
+  local adresse login code
+  while IFS=$'\t' read -r adresse login; do
+    [[ -n "$adresse" && -n "$login" ]] || continue
+    code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 \
+         "${FORGE_BASE_URL%/}/api/v1/users/$login" 2>/dev/null || true)"
+    [[ "$code" == "404" ]] || continue
+    echo "forge-gestures: $adresse (« $login ») n'est plus sur la forge — retire de l'etat ; la recette le reposera s'il est encore declare"
+    ( cd "$dir" && tofu state rm -no-color "$adresse" >/dev/null 2>&1 ) \
+      || die "apply : « $adresse » nomme un compte absent de la forge et ne sort pas de l'etat — le plan mourra dessus (« user not found »)"
+  done < <(jq -r '
+      .resources[]? | select(.type == "gitea_user")
+      | .name as $n | .instances[]?
+      | ((if .index_key == null then "gitea_user." + $n
+          else "gitea_user." + $n + "[" + (.index_key | tostring | if test("^[0-9]+$") then . else "\"" + . + "\"" end) + "]"
+          end)) + "\t" + (.attributes.username // "")
+    ' "$etat" 2>/dev/null || true)
 }
 
 # ⚠ LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE (⚖ user 2026-09-16), ET IL SE POSE ICI.

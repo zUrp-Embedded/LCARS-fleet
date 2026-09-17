@@ -74,19 +74,64 @@ defmodule Fleet.Project.Onboard.SystemProject do
     from = Keyword.get(opts, :from)
     code = Onboard.Faces.face_dirs(name, opts).code
 
+    org = Keyword.get(opts, :org, Catalogue.bundled_name())
+
     cond do
-      is_nil(from) ->
-        :ok
-
-      File.dir?(Path.join(code, ".git")) ->
-        :ok
-
-      not File.dir?(Path.join(from, ".git")) ->
-        {:error, {:not_adoptable, {:no_source_tree, from}}}
-
-      true ->
-        clone_code_face(from, code, Keyword.get(opts, :org, Catalogue.bundled_name()), name)
+      is_nil(from) -> :ok
+      File.dir?(Path.join(code, ".git")) -> :ok
+      File.dir?(Path.join(from, ".git")) -> clone_code_face(from, code, org, name)
+      arbre_non_vide?(from) -> commit_code_face(from, code, org, name)
+      true -> {:error, {:not_adoptable, {:no_source_tree, from}}}
     end
+  end
+
+  # Un repertoire VIDE n'est pas une source : sans ce garde, le commit du kit echouerait plus bas,
+  # et le refus parlerait de git au lieu de parler de l'arbre qu'on lui a donne.
+  defp arbre_non_vide?(from) do
+    match?({:ok, [_ | _]}, File.ls(from))
+  end
+
+  # ⚠ UN KIT N'A PAS D'HISTOIRE, ET CE N'EST PAS UNE PANNE (⚖ user 2026-09-16, lot 7). Une machine
+  # posee par kit (un tar, sans `.git`) porte quand meme sa propre source : un SEUL commit, « l'arbre
+  # qui a installe cette machine », a la revision que le kit estampille. Mesure du 2026-09-17 sur
+  # LCARS-beta, installee par kit : sans ce chemin, le module 67 derivait a chaque passe sur un
+  # `no_source_tree` qui accusait un arbre parfaitement present.
+  defp commit_code_face(from, code, org, name) do
+    with :ok <- copy_tree(from, code),
+         :ok <- GitOps.run(["-C", code, "init", "-q", "-b", "main"], auth: false),
+         :ok <- GitOps.run(["-C", code, "add", "-A"], auth: false),
+         :ok <- GitOps.run(["-C", code, "commit", "-q", "-m", kit_message(from)], auth: false),
+         :ok <- point_origin(code, org, name) do
+      Logger.info(
+        "SystemProject: code face built at #{code} from the kit tree #{from} (one commit)."
+      )
+
+      :ok
+    else
+      {:error, reason} -> {:error, {:not_adoptable, {:seed_failed, code, reason}}}
+    end
+  end
+
+  defp copy_tree(from, code) do
+    File.mkdir_p!(Path.dirname(code))
+
+    case File.cp_r(from, code) do
+      {:ok, _} -> :ok
+      {:error, reason, path} -> {:error, {:copy_failed, path, reason}}
+    end
+  end
+
+  # La revision que le kit estampille, quand il en porte une : elle fait la difference entre « la
+  # source de cette machine » et « un arbre ».
+  defp kit_message(from) do
+    rev =
+      case File.read(Path.join(from, ".source-revision")) do
+        {:ok, raw} -> String.trim(raw)
+        _ -> ""
+      end
+
+    "chore(system): the tree this machine was installed from" <>
+      if(rev == "", do: "", else: " (#{rev})")
   end
 
   defp clone_code_face(from, code, org, name) do
@@ -112,7 +157,12 @@ defmodule Fleet.Project.Onboard.SystemProject do
         GitOps.run(["-C", code, "remote", "set-url", "origin", url], auth: false)
 
       _ ->
-        GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
+        # RETIRER CE QUI N'EXISTE PAS EST UNE ERREUR POUR GIT, pas pour nous : un arbre fraichement
+        # initialise (le cas du kit) n'a aucun origin, et le refus parlerait alors de `remote`.
+        case GitOps.read(["-C", code, "remote", "get-url", "origin"], auth: false) do
+          {:ok, _} -> GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
+          {:error, _} -> :ok
+        end
     end
   end
 

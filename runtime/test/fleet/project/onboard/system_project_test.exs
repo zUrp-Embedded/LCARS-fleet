@@ -103,7 +103,7 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       refute File.regular?(Path.join(face, "FAIT"))
     end
 
-    test "un --from qui n'est pas un arbre git est un refus NOMME, et RIEN n'est publie", ctx do
+    test "un --from VIDE, ou absent, est un refus NOMME, et RIEN n'est publie", ctx do
       racine = Path.join(ctx.tmp_dir, "projects")
       source = Path.join(ctx.tmp_dir, "pas-un-depot")
       File.mkdir_p!(source)
@@ -117,6 +117,59 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       assert log =~ "NOT adopted"
       assert log =~ "code face could not be seeded"
       refute_received {:adopt, _, _}
+
+      # un chemin qui n'existe pas du tout dit la meme chose
+      absent = Path.join(ctx.tmp_dir, "nulle-part")
+
+      capture_log(fn ->
+        assert {:error, {:not_adoptable, {:no_source_tree, ^absent}}} =
+                 adopte({:ok, %{}}, from: absent, code_root: racine)
+      end)
+    end
+
+    # ⚠ UN KIT N'A PAS D'HISTOIRE, ET CE N'EST PAS UNE PANNE (⚖ user, lot 7). Mesure du 2026-09-17 :
+    # LCARS-beta est installee PAR KIT, et le module 67 y derivait a chaque passe sur un
+    # « no_source_tree » qui accusait un arbre parfaitement present.
+    test "un arbre SANS .git (un kit) devient la face en UN commit, a la revision estampillee",
+         ctx do
+      racine = Path.join(ctx.tmp_dir, "projects")
+      source = Path.join(ctx.tmp_dir, "kit")
+      File.mkdir_p!(Path.join(source, "deploy"))
+      File.write!(Path.join(source, "install.sh"), "#!/usr/bin/env bash\n")
+      File.write!(Path.join(source, ".source-revision"), "deadbeef\n")
+
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: source, code_root: racine)
+
+      face = Path.join(racine, Fleet.Layout.system_project())
+      assert File.regular?(Path.join(face, "install.sh"))
+      assert branche_courante(face) == "main"
+
+      {journal, 0} = System.cmd("git", ["-C", face, "log", "--oneline", "-99"])
+      assert [_une_seule] = String.split(String.trim(journal), "\n")
+      assert journal =~ "the tree this machine was installed from"
+      # la revision fait la difference entre « la source de cette machine » et « un arbre »
+      assert journal =~ "deadbeef"
+    end
+
+    test "un kit SANS estampille se seme quand meme — le commit ne nomme alors aucune revision",
+         ctx do
+      racine = Path.join(ctx.tmp_dir, "projects")
+      source = Path.join(ctx.tmp_dir, "kit")
+      File.mkdir_p!(source)
+      File.write!(Path.join(source, "install.sh"), "#!/usr/bin/env bash\n")
+
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: source, code_root: racine)
+
+      {journal, 0} =
+        System.cmd("git", [
+          "-C",
+          Path.join(racine, Fleet.Layout.system_project()),
+          "log",
+          "--oneline",
+          "-9"
+        ])
+
+      assert journal =~ "the tree this machine was installed from"
     end
 
     test "sans --from, rien n'est seme : la porte publie ce qui est deja la", ctx do
