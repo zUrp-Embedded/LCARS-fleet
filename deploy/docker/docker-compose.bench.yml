@@ -11,7 +11,7 @@ services:
       - devforge
     environment:
       FORGE_BASE_URL: "${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent — les constantes de l'installeur, par --env-file}"
-      LCARS_SOURCE_REMOTE: "${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent}/${PROV_BUNDLED_CATALOGUE:?PROV_BUNDLED_CATALOGUE absent}/lcars.git"
+      LCARS_SOURCE_REMOTE: "${PROV_FORGE_INTERNAL_URL:?PROV_FORGE_INTERNAL_URL absent}/${PROV_BUNDLED_CATALOGUE:?PROV_BUNDLED_CATALOGUE absent}/lcars-fleet.git"
     labels:
       lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent — la base du banc, posée par lib/bench.sh}"
 

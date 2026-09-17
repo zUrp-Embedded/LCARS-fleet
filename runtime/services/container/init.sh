@@ -143,7 +143,11 @@ faces() {
     || p_fail "zones de face NON posees"
 }
 source_trees() {
-  local src="${LCARS_SOURCE_DIR:-/home/projects/LCARS}" remote="${LCARS_SOURCE_REMOTE:-}" ref="${LCARS_SOURCE_REF:-}"
+  # ⚠ LA SOURCE EST LA FACE DE CODE D'UN PROJET, pas un arbre a cote (⚖ user 2026-09-16). Le nom
+  # vient de `Fleet.Layout.system_project/0` ; un mur bats tient ce defaut d'accord avec lui. Avant,
+  # cet arbre vivait sous `/home/projects/LCARS` et son depot s'appelait `<org>/lcars` : deux noms
+  # pour une chose, que rien ne tenait ensemble.
+  local src="${LCARS_SOURCE_DIR:-/home/projects/lcars-fleet}" remote="${LCARS_SOURCE_REMOTE:-}" ref="${LCARS_SOURCE_REF:-}"
   if [[ ! -d "$src/.git" && -n "$remote" ]]; then
     local -a args=(--depth 1); [[ -n "$ref" ]] && args+=(--branch "$ref")
     rm -rf "${src}.part"

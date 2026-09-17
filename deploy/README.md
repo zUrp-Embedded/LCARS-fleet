@@ -90,6 +90,7 @@ et y pose pour cela la chaîne Elixir et Node ; un kit, reconnu à son tampon de
 | 64-services | wsl linux | any | l'environnement des daemons, l'uid du siège, les quatre unités systemd (un service debout est relancé quand son unité, l'environnement, ou ce qu'il charge et que 62 a posé, a changé depuis son démarrage) et une passe du convergeur d'humains tant que son daemon ne tourne pas ; en conteneur, le superviseur et ses programmes sont sondés à la place |
 | 65-ops-repo | wsl linux | wsl linux | le dépôt du système (`lcars/_ops` : branches `tool_request` et `incidents`, protection) — un appelant mince de `runtime/services/forge.d/ops-repo.sh`, qui VÉRIFIE ce que la recette de 61 a posé |
 | 66-deck-oidc | wsl linux | wsl linux | le client OAuth2 du deck et son fichier sous `/etc/lcars` — un appelant mince de `runtime/services/forge.d/deck-oidc.sh` |
+| 67-system-project | wsl linux | wsl linux | LCARS publié comme projet de la fleet qu'il installe : l'arbre dont cette machine a été installée devient `<catalogue>/lcars-fleet` sur sa propre forge, avec ses trois faces. Appelle la porte du release (`lcars project adopt-system`), sous le siège — l'adoption est du runtime, et les faces appartiennent au groupe `fleet` |
 
 Dans l'image docker, les mêmes modules jouent `provision apply --substrate docker` depuis le kit
 (`docker/Dockerfile`), puis le stage `verify` joue le doctor sur le système de fichiers de l'image

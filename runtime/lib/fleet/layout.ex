@@ -51,9 +51,25 @@ defmodule Fleet.Layout do
   # Project faces include ops; the narrower producer-card enum excludes it.
   @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
 
+  # ⚠ LCARS IS A PROJECT OF THE FLEET IT INSTALLS (⚖ user 2026-09-16). The tree a machine was
+  # installed from is not a loose checkout beside the projects: it is the CODE FACE of a project
+  # like any other, adopted onto the forge with its ops and workshop faces. Naming it here is what
+  # keeps the container's clone, the installer's adoption and the forge repository at one address —
+  # they used to be `/home/projects/LCARS` on disk and `<org>/lcars` on the forge, two names for
+  # one thing, and nothing held them together.
+  @system_project "lcars-fleet"
+
   @doc "Root of the CODE face (`/home/projects`) — imposed container layout."
   @spec code_root() :: Path.t()
   def code_root, do: @code_root
+
+  @doc """
+  Name of the fleet's own project (`#{@system_project}`): the source a machine was installed from,
+  carried as a project of the catalogue that installs it. Its code face is `project_dir/1` of this
+  name, and its forge repository is that name in the standard catalogue's org.
+  """
+  @spec system_project() :: String.t()
+  def system_project, do: @system_project
 
   @doc "Branch of the CODE face (`main`) — pairs with `code_root/0`."
   @spec code_branch() :: String.t()

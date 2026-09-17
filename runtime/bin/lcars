@@ -86,6 +86,12 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas installe ici.
 
+  $PROG project adopt-system
+      Publie l'arbre dont CETTE machine a ete installee comme projet de sa propre fleet :
+      un depot sur la forge, ses trois faces, ses labels, sa protection. Le nom et l'org
+      sont declares (`Fleet.Layout.system_project/0`, le catalogue embarque), pas devines.
+      Se rejoue : une machine qui porte deja son projet le DIT et rend 0.
+
   $PROG project reconcile [check|apply]
       La forge dit quels projets existent, le disque suit. Sur un /home neuf — conteneur
       reinstalle, second humain qui arrive sur une fleet deja peuplee — les faces
@@ -521,12 +527,30 @@ cmd_project_reconcile() {
     "$bin" eval "Fleet.Project.Onboard.eval_reconcile(:$mode)"
 }
 
+# ⚠ LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE (⚖ user 2026-09-16). Cette porte publie l'arbre
+# dont CETTE machine a ete installee, sous le nom que `Fleet.Layout.system_project/0` declare et dans
+# l'org du catalogue embarque. Elle se REJOUE : une machine qui porte deja son projet rend 0 en le
+# disant, parce qu'un installeur et un boot la jouent a chaque passage.
+cmd_project_adopt_system() {
+  # `--check` MESURE et n'ecrit rien : c'est ce que le verbe `check` d'un module demande, et une
+  # mesure n'est pas un verdict (elle rend 0 quel que soit l'etat, en le NOMMANT).
+  local porte="eval_adopt"
+  [[ "${1:-}" != "--check" ]] || porte="eval_state"
+  local bin; bin="$(_release_bin)"
+  [[ -x "$bin" ]] || die "project adopt-system: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
+  _load_container_env
+
+  HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+    "$bin" eval "Fleet.Project.Onboard.SystemProject.$porte()"
+}
+
 cmd_project() {
   case "${1:-}" in
-    migrate)   shift; cmd_project_migrate "$@" ;;
-    reconcile) shift; cmd_project_reconcile "$@" ;;
-    "")        die "project: sous-commande requise (migrate|reconcile)" ;;
-    *)         die "project: sous-commande inconnue « $1 » (migrate|reconcile)" ;;
+    migrate)      shift; cmd_project_migrate "$@" ;;
+    reconcile)    shift; cmd_project_reconcile "$@" ;;
+    adopt-system) shift; cmd_project_adopt_system "$@" ;;
+    "")           die "project: sous-commande requise (migrate|reconcile|adopt-system)" ;;
+    *)            die "project: sous-commande inconnue « $1 » (migrate|reconcile|adopt-system)" ;;
   esac
 }
 

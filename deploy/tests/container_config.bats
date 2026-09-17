@@ -665,8 +665,8 @@ FAKE
   export STUB_IDS=c0ffee
   LCARS_HUMAN="o'brien" run bash "$SRC" source-push "$BATS_TEST_TMPDIR/clone"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "chown -R o'brien:fleet /home/projects/.LCARS.incoming" "$BATS_TEST_TMPDIR/conteneur.calls"
-  grep -qx "mv -T /home/projects/.LCARS.incoming /home/projects/LCARS" "$BATS_TEST_TMPDIR/conteneur.calls"
+  grep -qx "chown -R o'brien:fleet /home/projects/.lcars-fleet.incoming" "$BATS_TEST_TMPDIR/conteneur.calls"
+  grep -qx "mv -T /home/projects/.lcars-fleet.incoming /home/projects/lcars-fleet" "$BATS_TEST_TMPDIR/conteneur.calls"
 }
 
 @test "pull sans image nommée, depuis un kit, vise l'image que pack a inscrite au compose, même quand lcars-fleet:local est sur ce daemon" {

@@ -718,6 +718,35 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ -z "$manque" ] || { echo "MUR 19 rompu — des lecteurs de l'org système ne portent pas le nom que l'installeur décide :" >&2; printf '%b\n' "$manque" >&2; return 1; }
 }
 
+# ⚠ MUR 21 — LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE, ET CE PROJET A UN SEUL NOM. La source
+# dont une machine est installée est la FACE DE CODE d'un projet (`Fleet.Layout.system_project/0`),
+# pas un arbre posé à côté : son répertoire sur disque, le dépôt que le banc sème et l'adresse que
+# le conteneur clone sont le même objet. Avant, c'était `/home/projects/LCARS` sur disque et
+# `<org>/lcars` sur la forge — deux noms pour une chose, que rien ne tenait ensemble.
+@test "MUR 21: le projet du système porte le même nom dans le layout, l'init du conteneur, le rail conteneur et le banc" {
+  local attendu
+  attendu="$(sed -n 's/^  @system_project "\([^"]*\)"$/\1/p' "$REPO/runtime/lib/fleet/layout.ex")"
+  [ -n "$attendu" ] || { echo "MUR 21 — Fleet.Layout ne déclare plus @system_project" >&2; return 1; }
+
+  local -a lectures=(
+    "runtime/services/container/init.sh|^  local src=\"\\\${LCARS_SOURCE_DIR:-/home/projects/\([a-z0-9-]*\)}\".*\$|l'init du conteneur"
+    "deploy/container|^SOURCE_DANS_CONTENEUR=/home/projects/\([a-z0-9-]*\)\$|le rail conteneur"
+    "deploy/docker/bench/bench-up.sh|^SOURCE_IN=\"/home/projects/\([a-z0-9-]*\)\"\$|la source dans le conteneur du banc"
+    "deploy/docker/bench/bench-up.sh|^PROJET_SYSTEME=\([a-z0-9-]*\)\$|le dépôt semé par le banc"
+  )
+  local l f motif qui lu manque=""
+  for l in "${lectures[@]}"; do
+    IFS='|' read -r f motif qui <<<"$l"
+    lu="$(sed -n "s|$motif|\1|p" "$REPO/$f" | head -n1)"
+    [ -n "$lu" ] || { echo "MUR 21 — instrument cassé : $qui ($f) ne porte plus la ligne attendue" >&2; return 1; }
+    [ "$lu" = "$attendu" ] || manque="$manque\n  $qui ($f) : « $lu », attendu « $attendu »"
+  done
+  # le compose du banc clone ce dépôt : son URL porte le même nom
+  grep -q "/$attendu.git\"\$" "$REPO/deploy/docker/docker-compose.bench.yml" \
+    || { echo "MUR 21 rompu — le compose du banc ne clone pas « $attendu »" >&2; return 1; }
+  [ -z "$manque" ] || { echo "MUR 21 rompu — des lecteurs du projet du système ont dérivé :" >&2; printf '%b\n' "$manque" >&2; return 1; }
+}
+
 # ⚠ MUR 20 — LE CATALOGUE DE LA RELEASE A UN NOM, ET C'EST LE SIEN. `Fleet.Catalogue.bundled_name/0`
 # le gèle pour le runtime, `priv/catalogue/catalogue.yaml` le déclare, et l'installeur le recopie
 # (`PROV_BUNDLED_CATALOGUE`) parce qu'un compose de banc ne peut pas le demander à une release qui

@@ -178,7 +178,7 @@ case "$method $url" in
   "POST "*/api/v1/users/*/tokens)   code=201; rep='{"sha1":"OP-TOKEN"}' ;;
   "GET "*/api/v1/users/*)           rep="{\"is_admin\":${IS_ADMIN:-true}}" ;;
   # le dépôt semé : absent tant que le banc ne l'a pas créé, présent ensuite (la relecture fait foi)
-  "GET "*/api/v1/repos/*/lcars)     if [[ -s "$REPO_CODE" ]]; then code="$(cat "$REPO_CODE")"; else [[ -e "$REPO_SEME" ]] || code=404; fi ;;
+  "GET "*/api/v1/repos/*/lcars-fleet)     if [[ -s "$REPO_CODE" ]]; then code="$(cat "$REPO_CODE")"; else [[ -e "$REPO_SEME" ]] || code=404; fi ;;
   "POST "*/api/v1/orgs/*/repos)     code=201; touch "$REPO_SEME" ;;
 esac
 printf '%s' "$rep" > "$out"
@@ -307,7 +307,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "l'org du roster nomme le dépôt semé ; un roster sans org est un arrêt en 4 — l'org système ne porte aucun projet, aucun repli sur elle" {
   ORG_ROSTER=escadre run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "push -q http://127.0.0.1:$BF/escadre/lcars.git " "$CALLS"
+  grep -q "push -q http://127.0.0.1:$BF/escadre/lcars-fleet.git " "$CALLS"
   [[ "$output" == *"roster dérivé du catalogue de l'image (system_architect fleet_engineer) · org escadre"* ]]
   : > "$CALLS"
   ORG_ROSTER="<non déclarée>" run_bench --no-runner
@@ -515,7 +515,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   local T="$BATS_TEST_TMPDIR/tmpdir"; mkdir -p "$T"
   TMPDIR="$T" run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qE "^GIT:-c include.path=$T/bench-up-jetons\.[^/]+/git-forge -C $ROOT push -q http://127.0.0.1:$BF/fleet/lcars.git deadbeef1:refs/heads/main$" "$CALLS"
+  grep -qE "^GIT:-c include.path=$T/bench-up-jetons\.[^/]+/git-forge -C $ROOT push -q http://127.0.0.1:$BF/fleet/lcars-fleet.git deadbeef1:refs/heads/main$" "$CALLS"
   grep -qE "^GIT-INCLUDE:600 $T/bench-up-jetons\." "$CALLS"
   [ "$(grep '^GIT-INCLUDE-LIGNE:' "$CALLS" | sort -u)" = "$(printf 'GIT-INCLUDE-LIGNE:\textraHeader = Authorization: token SYS-TOKEN\nGIT-INCLUDE-LIGNE:[http "http://127.0.0.1:%s/"]' "$BF" | sort)" ]
   grep -E '^(GIT|GIT-ENV|DOCKER|CURL-ARGV):' "$CALLS" | refute_out 'SYS-TOKEN'
@@ -530,14 +530,14 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
 @test "le semis crée le dépôt s'il manque : sondé, créé vide avec le jeton master, relu, et le push vient après ; un dépôt déjà là n'est pas recréé" {
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars | Authorization: token MASTER |" "$CALLS"
-  grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos | Authorization: token MASTER | {\"name\":\"lcars\",\"private\":false,\"auto_init\":false," "$CALLS"
-  [ "$(grep -c "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars " "$CALLS")" -eq 2 ]
+  grep -q "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars-fleet | Authorization: token MASTER |" "$CALLS"
+  grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos | Authorization: token MASTER | {\"name\":\"lcars-fleet\",\"private\":false,\"auto_init\":false," "$CALLS"
+  [ "$(grep -c "^CURL:GET http://127.0.0.1:$BF/api/v1/repos/fleet/lcars-fleet " "$CALLS")" -eq 2 ]
   local creation push
   creation="$(grep -n "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos " "$CALLS" | head -1 | cut -d: -f1)"
-  push="$(grep -n "push -q http://127.0.0.1:$BF/fleet/lcars.git " "$CALLS" | head -1 | cut -d: -f1)"
+  push="$(grep -n "push -q http://127.0.0.1:$BF/fleet/lcars-fleet.git " "$CALLS" | head -1 | cut -d: -f1)"
   [ "$creation" -lt "$push" ]
-  [[ "$output" == *"fleet/lcars : dépôt créé pour le semis"* ]]
+  [[ "$output" == *"fleet/lcars-fleet : dépôt créé pour le semis"* ]]
   # déjà là : une sonde, aucune création
   : > "$CALLS"; touch "$REPO_SEME"
   run_bench --no-runner
@@ -550,7 +550,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   echo 503 > "$REPO_CODE"
   run_bench --no-runner
   [ "$status" -eq 7 ]
-  [[ "$output" == *"fleet/lcars : la forge ne dit pas si le dépôt existe (HTTP 503)"* ]]
+  [[ "$output" == *"fleet/lcars-fleet : la forge ne dit pas si le dépôt existe (HTTP 503)"* ]]
   refute grep -q "^CURL:POST http://127.0.0.1:$BF/api/v1/orgs/fleet/repos " "$CALLS"
   refute grep -q 'GIT:.*push' "$CALLS"
 }
@@ -560,7 +560,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qE "^GIT:-c include.path=[^ ]+ -C $ROOT -c core.hooksPath=/dev/null push -q --force " "$CALLS"
-  [[ "$output" == *"fleet/lcars : le main déjà là (012345678) est remplacé par le semis"* ]]
+  [[ "$output" == *"fleet/lcars-fleet : le main déjà là (012345678) est remplacé par le semis"* ]]
   refute_out 'existe déjà|poussé de force' <<<"$output"
 }
 
@@ -579,7 +579,7 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qE "GIT:--git-dir=[^ ]+/\.git --work-tree=$ROOT add -A" "$CALLS"
   grep -q "commit -q -m kit deadbeef1" "$CALLS"
-  grep -q "push -q http://127.0.0.1:$BF/fleet/lcars.git kitcommit1:refs/heads/main" "$CALLS"
+  grep -q "push -q http://127.0.0.1:$BF/fleet/lcars-fleet.git kitcommit1:refs/heads/main" "$CALLS"
   refute grep -q "rev-parse -q --verify" "$CALLS"
   [[ "$output" == *"main poussé (kit deadbeef1, un commit sans historique)"* ]]
 }
@@ -622,21 +622,21 @@ run_bench() { run bash "$SRC" --forge-project bt --image lcars-fleet:9 "$@"; }
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local push fetch reset
   push="$(grep -n 'GIT:.* push -q ' "$CALLS" | head -1 | cut -d: -f1)"
-  fetch="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/LCARS fetch -q --depth 1 http://forge-temoin:3000/fleet/lcars.git main' "$CALLS" | cut -d: -f1)"
-  reset="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/LCARS reset -q --hard FETCH_HEAD' "$CALLS" | cut -d: -f1)"
+  fetch="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/lcars-fleet fetch -q --depth 1 http://forge-temoin:3000/fleet/lcars-fleet.git main' "$CALLS" | cut -d: -f1)"
+  reset="$(grep -n 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git -C /home/projects/lcars-fleet reset -q --hard FETCH_HEAD' "$CALLS" | cut -d: -f1)"
   [ -n "$push" ]
   [ -n "$fetch" ]
   [ -n "$reset" ]
   [ "$push" -lt "$fetch" ]
   [ "$fetch" -lt "$reset" ]
-  [[ "$output" == *"source du conteneur alignée sur main (/home/projects/LCARS)"* ]]
+  [[ "$output" == *"source du conteneur alignée sur main (/home/projects/lcars-fleet)"* ]]
 }
 
 @test "sans clone dans le conteneur, la source y est clonée depuis main par admiral" {
   : > "$SOURCE_OWNER_OUT"
   run_bench --no-runner
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -q 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git clone -q --depth 1 http://forge-temoin:3000/fleet/lcars.git /home/projects/LCARS' "$CALLS"
+  grep -q 'DOCKER:exec -i -u admiral bt-fleet-lcars-1 git clone -q --depth 1 http://forge-temoin:3000/fleet/lcars-fleet.git /home/projects/lcars-fleet' "$CALLS"
   [[ "$output" == *"source du conteneur clonée depuis main"* ]]
 }
 

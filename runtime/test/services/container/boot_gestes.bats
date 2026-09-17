@@ -181,3 +181,89 @@ etat_bloc() { # etat_bloc <fichier> <contenu> [chemin d'un PATH doublé]
   grep -q "mode n'a pas ete pose" "$JOURNAL" || { cat "$JOURNAL"; return 1; }
   refute grep -q 'verdict NON publie' "$JOURNAL"
 }
+
+# ─── LE PROJET DU SYSTEME, PUBLIE AU BOOT ───────────────────────────────────────────────────────
+#
+# ⚠ LE BLOC EST EXTRAIT DU FICHIER ET JOUE, comme les gestes de forge au-dessus : un temoin de texte
+# epinglerait l'orthographe, pas ce que le bloc FAIT d'un code de retour. Ce qui se mesure ici : la
+# porte est jouee SOUS LE SIEGE (les faces appartiennent au groupe `fleet`), un echec ne tue pas le
+# boot, et une CLI absente ne fabrique pas un faux succes.
+
+bloc_projet() { # le bloc reel, dans un shell qui porte ses variables
+  BLOC_P="$BATS_TEST_TMPDIR/projet.sh"
+  {
+    printf '%s\n' 'say() { printf "[boot] %s\n" "$*"; }' 'prov_rc=0'
+    sed -n '/^PROJET_CLI=/,/^fi$/p' "$SRC"
+    printf '%s\n' 'echo "prov_rc=$prov_rc"'
+  } > "$BLOC_P"
+}
+
+@test "le bloc s'extrait et joue la porte du release — sinon les temoins suivants ne mesurent rien" {
+  bloc_projet
+  grep -q 'project adopt-system' "$BLOC_P"
+  grep -q 'setpriv --reuid' "$BLOC_P"
+}
+
+@test "la porte est jouee SOUS LE SIEGE, avec ses groupes — les faces appartiennent au groupe fleet" {
+  bloc_projet
+  cat > "$BATS_TEST_TMPDIR/setpriv" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TRACE"
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/setpriv"
+  export TRACE="$BATS_TEST_TMPDIR/trace"; : > "$TRACE"
+  printf '#!/usr/bin/env bash\necho "ADOPTED fleet/lcars-fleet"\n' > "$BATS_TEST_TMPDIR/lcars"
+  chmod +x "$BATS_TEST_TMPDIR/lcars"
+
+  PATH="$BATS_TEST_TMPDIR:$PATH" LCARS_CLI="$BATS_TEST_TMPDIR/lcars" LCARS_ADMIRAL=admiral \
+    run bash "$BLOC_P"
+  [ "$status" -eq 0 ]
+  grep -q -- "--reuid admiral" "$TRACE"
+  grep -q -- "--init-groups" "$TRACE"
+  [[ "$output" == *"prov_rc=0"* ]]
+}
+
+@test "ce que la porte imprime est relaye, prefixe, sans etre reformule" {
+  bloc_projet
+  printf '#!/usr/bin/env bash\necho "ALREADY fleet/lcars-fleet"\n' > "$BATS_TEST_TMPDIR/lcars"
+  chmod +x "$BATS_TEST_TMPDIR/lcars"
+  printf '#!/usr/bin/env bash\nshift 5\nexec "$@"\n' > "$BATS_TEST_TMPDIR/setpriv"
+  chmod +x "$BATS_TEST_TMPDIR/setpriv"
+
+  PATH="$BATS_TEST_TMPDIR:$PATH" LCARS_CLI="$BATS_TEST_TMPDIR/lcars" LCARS_ADMIRAL=admiral \
+    run bash "$BLOC_P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[projet-systeme] ALREADY fleet/lcars-fleet"* ]]
+  [[ "$output" == *"prov_rc=0"* ]]
+}
+
+@test "une porte en ECHEC laisse le conteneur demarrer, en drift — jamais un boot mort" {
+  bloc_projet
+  printf '#!/usr/bin/env bash\necho "REFUSED fleet/lcars-fleet {:not_adoptable, x}" >&2\nexit 1\n' > "$BATS_TEST_TMPDIR/lcars"
+  chmod +x "$BATS_TEST_TMPDIR/lcars"
+  printf '#!/usr/bin/env bash\nshift 5\nexec "$@"\n' > "$BATS_TEST_TMPDIR/setpriv"
+  chmod +x "$BATS_TEST_TMPDIR/setpriv"
+
+  PATH="$BATS_TEST_TMPDIR:$PATH" LCARS_CLI="$BATS_TEST_TMPDIR/lcars" LCARS_ADMIRAL=admiral \
+    run bash "$BLOC_P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[projet-systeme] REFUSED"* ]]
+  [[ "$output" == *"projet du systeme NON publie (rc=1)"* ]]
+  [[ "$output" == *"prov_rc=2"* ]]
+}
+
+@test "sans CLI, ou sans siege nomme, rien n'est joue et rien n'est invente" {
+  bloc_projet
+  PATH="$BATS_TEST_TMPDIR:$PATH" LCARS_CLI="$BATS_TEST_TMPDIR/pas-de-cli" LCARS_ADMIRAL=admiral \
+    run bash "$BLOC_P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rien a jouer"* ]]
+  [[ "$output" == *"prov_rc=0"* ]]
+
+  printf '#!/usr/bin/env bash\necho ADOPTED\n' > "$BATS_TEST_TMPDIR/lcars"; chmod +x "$BATS_TEST_TMPDIR/lcars"
+  PATH="$BATS_TEST_TMPDIR:$PATH" LCARS_CLI="$BATS_TEST_TMPDIR/lcars" LCARS_ADMIRAL="" \
+    run bash "$BLOC_P"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rien a jouer"* ]]
+}

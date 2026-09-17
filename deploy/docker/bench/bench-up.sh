@@ -217,30 +217,32 @@ grep -q 'token [^[:space:]]' "$JETONS/git-forge" \
   || die "jeton système absent après la relance — le banc n'est pas prêt (docker logs $CONTAINER)" 6
 # le jeton système atteint git par un fichier de configuration 0600 : ni argv, ni environnement
 git_forge() { git -c "include.path=$JETONS/git-forge" "$@"; }
-LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/lcars.git"
+# le projet du systeme (`Fleet.Layout.system_project/0`) : son depot porte son nom
+PROJET_SYSTEME=lcars-fleet
+LCARS_REMOTE="$FORGE_LOCAL_URL/$ORG/$PROJET_SYSTEME.git"
 # le dépôt semé n'est plus le dépôt système (celui-là est <org système>/_ops, posé par la structure) :
 # plus rien ne le crée, le banc le fait lui-même, vide (un push sur un dépôt vide passe, sur un dépôt
 # absent la forge répond « Push to create is not enabled for organizations ») — jusqu'à ce que
 # l'adoption de la source par le système remplace ce semis
-code="$(forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/lcars" /dev/null --token-file "$JETONS/master" -m 10)" || {
-  [[ "$code" == 404 ]] || die "$ORG/lcars : la forge ne dit pas si le dépôt existe (HTTP $code) — rien n'est semé à l'aveugle" 7
+code="$(forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/$PROJET_SYSTEME" /dev/null --token-file "$JETONS/master" -m 10)" || {
+  [[ "$code" == 404 ]] || die "$ORG/$PROJET_SYSTEME : la forge ne dit pas si le dépôt existe (HTTP $code) — rien n'est semé à l'aveugle" 7
   forge_api POST "$FORGE_LOCAL_URL/api/v1/orgs/$ORG/repos" /dev/null --token-file "$JETONS/master" -m 20 \
       --json '{name: $n, private: false, auto_init: false, description: "La source de LCARS-fleet, semée par le banc à la révision de son image."}' \
-      --arg n lcars >/dev/null || true
+      --arg n "$PROJET_SYSTEME" >/dev/null || true
   # la relecture fait foi, pas le code du POST
-  forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/lcars" /dev/null --token-file "$JETONS/master" -m 10 >/dev/null \
-    || die "$ORG/lcars : dépôt non créé — le banc n'a nulle part où semer la source" 7
-  say "$ORG/lcars : dépôt créé pour le semis"
+  forge_api GET "$FORGE_LOCAL_URL/api/v1/repos/$ORG/$PROJET_SYSTEME" /dev/null --token-file "$JETONS/master" -m 10 >/dev/null \
+    || die "$ORG/$PROJET_SYSTEME : dépôt non créé — le banc n'a nulle part où semer la source" 7
+  say "$ORG/$PROJET_SYSTEME : dépôt créé pour le semis"
 }
 if [[ -d "$REPO_ROOT/.git" ]]; then
   git -C "$REPO_ROOT" rev-parse -q --verify "${IMAGE_REV}^{commit}" >/dev/null 2>&1 \
-    || die "$ORG/lcars : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
+    || die "$ORG/$PROJET_SYSTEME : la révision de l'image ($IMAGE_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc sème le code du conteneur ; rebâtir l'image depuis ce clone" 7
   SEED_DIR="$REPO_ROOT"; SEED_REF="$IMAGE_REV"; SEED_DIT="révision de l'image : $IMAGE_REV"
 else
   # un kit n'a pas d'historique : sa révision est dans .source-revision, et le semis est un commit unique bâti de son arbre
   KIT_REV="$(tr -d '[:space:]' < "$REPO_ROOT/$PROV_SOURCE_STAMP" 2>/dev/null || true)"
   [[ -n "$KIT_REV" && ( "$IMAGE_REV" == "$KIT_REV"* || "$KIT_REV" == "$IMAGE_REV"* ) ]] \
-    || die "$ORG/lcars : ce kit atteste « ${KIT_REV:-aucune révision} » et l'image $IMAGE porte $IMAGE_REV — le banc sème le code du conteneur ; prendre le kit de cette image" 7
+    || die "$ORG/$PROJET_SYSTEME : ce kit atteste « ${KIT_REV:-aucune révision} » et l'image $IMAGE porte $IMAGE_REV — le banc sème le code du conteneur ; prendre le kit de cette image" 7
   SEED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/lcars-seed.XXXXXX")"
   git -C "$SEED_DIR" init -q
   git --git-dir="$SEED_DIR/.git" --work-tree="$REPO_ROOT" add -A
@@ -251,28 +253,28 @@ seed_hooks=(); seed_force=()
 remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
 if [[ -n "$remote_main" ]] && ! git -C "$SEED_DIR" merge-base --is-ancestor "$remote_main" "$SEED_REF" 2>/dev/null; then
   # un main déjà là : un banc rejoué sur une forge qui garde le semis d'avant (le dépôt naît vide sinon)
-  say "$ORG/lcars : le main déjà là (${remote_main:0:9}) est remplacé par le semis"
+  say "$ORG/$PROJET_SYSTEME : le main déjà là (${remote_main:0:9}) est remplacé par le semis"
   seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
 fi
 PUSH_ERR="$(git_forge -C "$SEED_DIR" ${seed_hooks[@]+"${seed_hooks[@]}"} push -q ${seed_force[@]+"${seed_force[@]}"} "$LCARS_REMOTE" "${SEED_REF}:refs/heads/main" 2>&1)" \
-  || die "$ORG/lcars : main non poussé — c'est la source que le conteneur clone ; sans lui le banc n'a pas de code
+  || die "$ORG/$PROJET_SYSTEME : main non poussé — c'est la source que le conteneur clone ; sans lui le banc n'a pas de code
   git a dit : $PUSH_ERR" 7
 [[ "$SEED_DIR" == "$REPO_ROOT" ]] || rm -rf "$SEED_DIR"
-say "$ORG/lcars : main poussé ($SEED_DIT)"
+say "$ORG/$PROJET_SYSTEME : main poussé ($SEED_DIT)"
 # la relance a cloné le dépôt tel que la structure l'a créé, avant le semis : le clone du conteneur
 # se réaligne sur le main poussé, sous le compte qui le possède
-SOURCE_IN="/home/projects/LCARS"
+SOURCE_IN="/home/projects/lcars-fleet"
 SOURCE_OWNER="$(in_container stat -c %U "$SOURCE_IN" 2>/dev/null | tr -d '[:space:]' || true)"
-SOURCE_REMOTE_IN="$PROV_FORGE_INTERNAL_URL/$ORG/lcars.git"
+SOURCE_REMOTE_IN="$PROV_FORGE_INTERNAL_URL/$ORG/$PROJET_SYSTEME.git"
 if [[ -n "$SOURCE_OWNER" && "$SOURCE_OWNER" != "UNKNOWN" ]]; then
   quiet d exec -i -u "$SOURCE_OWNER" "$CONTAINER" \
       git -C "$SOURCE_IN" fetch -q --depth 1 "$SOURCE_REMOTE_IN" main < /dev/null \
     && quiet d exec -i -u "$SOURCE_OWNER" "$CONTAINER" git -C "$SOURCE_IN" reset -q --hard FETCH_HEAD < /dev/null \
-    || die "$ORG/lcars : le clone du conteneur ($SOURCE_IN) ne se réaligne pas sur main — rejouer : docker exec -u $SOURCE_OWNER $CONTAINER git -C $SOURCE_IN pull" 7
+    || die "$ORG/$PROJET_SYSTEME : le clone du conteneur ($SOURCE_IN) ne se réaligne pas sur main — rejouer : docker exec -u $SOURCE_OWNER $CONTAINER git -C $SOURCE_IN pull" 7
   say "source du conteneur alignée sur main ($SOURCE_IN)"
 else
   quiet d exec -i -u "$ADMIRAL" "$CONTAINER" git clone -q --depth 1 "$SOURCE_REMOTE_IN" "$SOURCE_IN" < /dev/null \
-    || die "$ORG/lcars : aucun clone dans le conteneur et « git clone » y échoue ($SOURCE_IN)" 7
+    || die "$ORG/$PROJET_SYSTEME : aucun clone dans le conteneur et « git clone » y échoue ($SOURCE_IN)" 7
   say "source du conteneur clonée depuis main ($SOURCE_IN)"
 fi
 

@@ -142,6 +142,31 @@ for gesture in catalogues tokens ops-repo deck-oidc; do
   esac
 done
 
+# ─── LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE (⚖ user 2026-09-16) ─────────────────────────
+#
+# L'arbre dont ce conteneur a ete installe est la face de code d'un projet ; il se publie sur la
+# forge comme n'importe quel projet. Cela se joue APRES les gestes de forge (il faut l'org du
+# catalogue, les comptes et le jeton) et SOUS LE SIEGE, pas sous root : les faces appartiennent au
+# groupe `fleet`, et un git joue en root les poserait root:root.
+#
+# NON FATAL, meme regle que tout ce fichier : un conteneur sans son projet publie reste un conteneur
+# qui demarre, et la passe suivante le reposera. La porte est idempotente — « deja la » rend 0.
+PROJET_CLI="${LCARS_CLI:-/usr/local/bin/lcars}"
+PROJET_RC=0
+if [[ -x "$PROJET_CLI" && -n "$LCARS_ADMIRAL" ]]; then
+  # ⚠ `setpriv --init-groups` ET PAS UN `runuser` NU : la porte ecrit dans `/home/projects*`, dont
+  # le groupe est `fleet` — sans les groupes secondaires du siege, elle n'y entre pas.
+  adopt_out="$(setpriv --reuid "$LCARS_ADMIRAL" --regid "$LCARS_ADMIRAL" --init-groups \
+      env HOME="/home/$LCARS_ADMIRAL" "$PROJET_CLI" project adopt-system 2>&1)" || PROJET_RC=$?
+  printf '%s\n' "$adopt_out" | sed 's/^/[projet-systeme] /'
+  if [[ "$PROJET_RC" -ne 0 ]]; then
+    say "projet du systeme NON publie (rc=$PROJET_RC) — le conteneur demarre quand meme, la passe suivante reprendra"
+    [[ "$prov_rc" -ne 0 ]] || prov_rc=2
+  fi
+else
+  say "projet du systeme : rien a jouer (CLI $PROJET_CLI absente, ou siege non nomme)"
+fi
+
 # La publication descend donc APRÈS les deux mesures, et `lcars-forge.rc` s'écrit EN DERNIER :
 # sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
 # n'a plus à connaître l'ordre — c'est le producteur qui le tient.

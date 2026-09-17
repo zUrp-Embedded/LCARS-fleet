@@ -161,7 +161,7 @@ rendu() { env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="unix://$BATS_TEST_TMPDIR
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   local j="$output"
   [ "$(jq -r '.services.lcars.environment.FORGE_BASE_URL' <<<"$j")" = http://forge-temoin:3000 ]
-  [ "$(jq -r '.services.lcars.environment.LCARS_SOURCE_REMOTE' <<<"$j")" = "http://forge-temoin:3000/$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$CONST")/lcars.git" ]
+  [ "$(jq -r '.services.lcars.environment.LCARS_SOURCE_REMOTE' <<<"$j")" = "http://forge-temoin:3000/$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$CONST")/lcars-fleet.git" ]
   [ "$(jq -c '[.services.lcars.labels["lcars.bench"], .volumes["lcars-home"].labels["lcars.bench"], .volumes["lcars-var"].labels["lcars.bench"]]' <<<"$j")" = '["bt","bt","bt"]' ]
   [ "$(jq -c '.networks.devforge | [.name, .external]' <<<"$j")" = '["bt-forge_default",true]' ]
 }

@@ -22,7 +22,7 @@
 #                    réponse, jeton master site-admin, seed ; un geste par manque, sans docker
 #   forge-apply      pose la structure sur la forge fournie (OpenTofu tourne dans le conteneur)
 #   runner-token     le jeton d'enregistrement d'un runner CI
-#   source-push [DIR] copie un clone LCARS dans le conteneur (/home/projects/LCARS)
+#   source-push [DIR] copie un clone LCARS dans le conteneur (/home/projects/lcars-fleet)
 #   help             cette aide
 #
 #   -p, --project <p>    le projet compose visé (défaut lcars-fleet, ou LCARS_PROJECT) ; les gestes
@@ -72,7 +72,8 @@ BENCH_UP="$SCRIPT_DIR/deploy/docker/bench/bench-up.sh"
 PROJECT="${LCARS_PROJECT:-lcars-fleet}"
 # les secrets de l'appelant restent lisibles ici et ne descendent à aucun enfant : ils passent par stdin
 export -n FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
-SOURCE_DANS_CONTENEUR=/home/projects/LCARS
+# la face de code du projet du systeme dans le conteneur (`Fleet.Layout.system_project/0`)
+SOURCE_DANS_CONTENEUR=/home/projects/lcars-fleet
 WITH_BENCH=0
 FORGE_PORT=""
 declare -a PORTS=()   # ce que --bench transmet au banc
@@ -635,7 +636,7 @@ cmd_source_push() {
   [[ -d "$src/.git" ]] || { echo "container: $src n'est pas un clone git (pas de .git)" >&2; exit 1; }
   ctr="$(compose ps -q lcars)"
   [[ -n "$ctr" ]] || { echo "container: conteneur lcars absent — « deploy/container up » d'abord" >&2; exit 1; }
-  local human arrivee="${SOURCE_DANS_CONTENEUR%/*}/.LCARS.incoming"
+  local human arrivee="${SOURCE_DANS_CONTENEUR%/*}/.lcars-fleet.incoming"
   human="$(humain_cible)"
   echo "container: copie de $src → $SOURCE_DANS_CONTENEUR (historique git compris)…"
   compose exec -T lcars rm -rf "$arrivee"
