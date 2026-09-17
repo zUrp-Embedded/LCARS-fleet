@@ -199,6 +199,54 @@ resource "gitea_repository_file" "incidents_readme" {
   }
 }
 
+# ⚠ UN APPROBATEUR SANS ÉCRITURE N'EST PAS UN APPROBATEUR. Gitea EXIGE `write` sur le dépôt pour
+# retenir un compte dans `approval_whitelist_users` ; en dessous, il le RETIRE EN SILENCE et laisse
+# la whitelist activée et VIDE — donc une demande d'outil qu'aucune signature ne peut débloquer.
+# Mesuré le 2026-09-17 sur le banc 2003, sur les quatre niveaux : aucun accès (le siège est pourtant
+# site-admin de la forge) et `read` sont écartés, `write` et `admin` sont retenus. C'est `write`, le
+# plancher, et pas `admin` : un approbateur n'a pas à administrer ce qu'il signe.
+#
+# La portée est CE DÉPÔT, jamais l'org système : le siège n'en devient pas membre. Ce que `write`
+# ouvrirait par ailleurs — un push libre sur les autres branches — est refermé juste en dessous,
+# par la protection de `main` et de `incidents`.
+resource "gitea_repository_collaborator" "approvers" {
+  for_each   = local.system_play ? toset(var.approvers) : toset([])
+  owner      = gitea_org.this.name
+  repo       = gitea_repository.ops[0].name
+  username   = each.value
+  permission = "write"
+}
+
+# ⚠ `main` PORTE LE CONTRAT DU DÉPÔT, et `incidents` le registre que le pilote écrit. Ni l'un ni
+# l'autre ne se pousse à la main : le premier est semé par cette recette, le second par le runtime,
+# et un `write` accordé pour APPROUVER ne doit pas devenir un droit d'écrire partout. Pas
+# d'approbation exigée ici — ce n'est pas une boîte aux lettres à réviser, c'est une branche que
+# personne ne pousse : la liste de push vide dit exactement ça.
+resource "gitea_repository_branch_protection" "main" {
+  count                = local.system_play ? 1 : 0
+  username             = gitea_org.this.name
+  name                 = gitea_repository.ops[0].name
+  rule_name            = "main"
+  enable_push          = true
+  push_whitelist_users = var.approvers
+  # le compte systeme est proprietaire de l'org, donc admin du depot : sans ce verrou il passe outre
+  block_admin_merge_override = true
+  depends_on                 = [gitea_repository_file.ops_readme]
+}
+
+resource "gitea_repository_branch_protection" "incidents" {
+  count     = local.system_play ? 1 : 0
+  username  = gitea_org.this.name
+  name      = gitea_repository.ops[0].name
+  rule_name = gitea_repository_branch.incidents[0].name
+  # LE RUNTIME ÉCRIT ICI, par le compte système : c'est le registre des incidents du pilote, pas une
+  # branche de revue. La protection existe pour que le `write` d'un approbateur ne l'ouvre pas.
+  enable_push                = true
+  push_whitelist_users       = [var.system_account]
+  block_admin_merge_override = true
+  depends_on                 = [gitea_repository_file.incidents_readme]
+}
+
 # ⚠ LA PROTECTION ET LA CONFIG `:toolchain_auto_merge` VONT ENSEMBLE : armer l'auto-merge sur une
 # branche sans protection, c'est « conditions remplies » tout de suite, donc un merge sans signature
 # avec le convergeur derrière. `dismiss_stale_approvals` : un re-push tue l'approbation. Sans status

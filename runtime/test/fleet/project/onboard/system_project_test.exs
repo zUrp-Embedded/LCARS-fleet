@@ -50,6 +50,107 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
     end
   end
 
+  describe "la face de code, semee depuis l'arbre dont la machine a ete installee" do
+    @describetag :tmp_dir
+
+    defp arbre_git(dir, branche, marqueur \\ "FAIT") do
+      File.mkdir_p!(dir)
+      {_, 0} = System.cmd("git", ["-C", dir, "init", "-q", "-b", branche])
+      {_, 0} = System.cmd("git", ["-C", dir, "config", "user.email", "t@t"])
+      {_, 0} = System.cmd("git", ["-C", dir, "config", "user.name", "t"])
+      File.write!(Path.join(dir, marqueur), "la source\n")
+      {_, 0} = System.cmd("git", ["-C", dir, "add", "-A"])
+      {_, 0} = System.cmd("git", ["-C", dir, "commit", "-q", "-m", "source"])
+      dir
+    end
+
+    defp branche_courante(dir) do
+      {out, 0} = System.cmd("git", ["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"])
+      String.trim(out)
+    end
+
+    test "une face ABSENTE est semee : main a la revision installee, et aucun origin local",
+         ctx do
+      source = arbre_git(Path.join(ctx.tmp_dir, "src"), "passe16/ma-branche")
+      racine = Path.join(ctx.tmp_dir, "projects")
+
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: source, code_root: racine)
+
+      face = Path.join(racine, Fleet.Layout.system_project())
+      assert File.regular?(Path.join(face, "FAIT"))
+
+      # `main` porte la revision installee, meme si l'arbre de l'operateur est sur sa branche a lui
+      assert branche_courante(face) == "main"
+
+      # un origin vers un chemin local survivrait a l'adoption et pointerait vers l'arbre de quelqu'un
+      {sortie, code} =
+        System.cmd("git", ["-C", face, "remote", "get-url", "origin"], stderr_to_stdout: true)
+
+      assert code != 0
+      assert sortie =~ "origin"
+    end
+
+    test "un arbre DEJA la n'est jamais touche — semer par-dessus est la seule faute irreparable",
+         ctx do
+      source = arbre_git(Path.join(ctx.tmp_dir, "src"), "main")
+      racine = Path.join(ctx.tmp_dir, "projects")
+      face = arbre_git(Path.join(racine, Fleet.Layout.system_project()), "main", "DEJA-LA")
+      File.write!(Path.join(face, "LE-TRAVAIL-DE-QUELQUUN"), "ne pas ecraser\n")
+
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: source, code_root: racine)
+
+      assert File.regular?(Path.join(face, "LE-TRAVAIL-DE-QUELQUUN"))
+      refute File.regular?(Path.join(face, "FAIT"))
+    end
+
+    test "un --from qui n'est pas un arbre git est un refus NOMME, et RIEN n'est publie", ctx do
+      racine = Path.join(ctx.tmp_dir, "projects")
+      source = Path.join(ctx.tmp_dir, "pas-un-depot")
+      File.mkdir_p!(source)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:not_adoptable, {:no_source_tree, ^source}}} =
+                   adopte({:ok, %{}}, from: source, code_root: racine)
+        end)
+
+      assert log =~ "NOT adopted"
+      assert log =~ "code face could not be seeded"
+      refute_received {:adopt, _, _}
+    end
+
+    test "sans --from, rien n'est seme : la porte publie ce qui est deja la", ctx do
+      racine = Path.join(ctx.tmp_dir, "projects")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, code_root: racine)
+      refute File.dir?(racine)
+    end
+  end
+
+  describe "ce que `check` mesure d'une face absente" do
+    @describetag :tmp_dir
+
+    defp etat(opts), do: SystemProject.state([onboard_repo: __MODULE__.RepoAbsent] ++ opts)
+
+    defmodule RepoAbsent do
+      @moduledoc false
+      def require_forge_absent(_full, _opts), do: :ok
+    end
+
+    test "une face absente MAIS semable est « absent », pas « pas de source »", ctx do
+      source = Path.join(ctx.tmp_dir, "src")
+      File.mkdir_p!(Path.join(source, ".git"))
+      assert {:ok, :absent} = etat(from: source, code_root: Path.join(ctx.tmp_dir, "p"))
+    end
+
+    test "une face absente et RIEN a semer reste « pas de source » — on n'invente pas un arbre",
+         ctx do
+      assert {:ok, :no_source} = etat(code_root: Path.join(ctx.tmp_dir, "p"))
+
+      assert {:ok, :no_source} =
+               etat(from: Path.join(ctx.tmp_dir, "vide"), code_root: Path.join(ctx.tmp_dir, "p"))
+    end
+  end
+
   describe "une machine qui porte deja le projet" do
     test "le depot deja sur la forge est un `already`, jamais une panne — cette porte se rejoue" do
       log =

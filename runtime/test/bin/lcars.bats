@@ -174,3 +174,37 @@ J
   [[ "$output" == *"phase 1 faite"* ]]
   [[ "$output" != *"[!!]"* ]]
 }
+
+# ⚠ L'AIDE DE CE CLI EST UN HEREDOC NON PROTÉGÉ (`cat >&2 <<EOF`), parce qu'elle interpole `$PROG`.
+# Un accent grave non échappé y ouvre une SUBSTITUTION DE COMMANDE : le shell exécute ce qu'il y a
+# entre les deux et met sa sortie — vide — à la place. L'aide perd alors le fragment, et rien ne le
+# dit : elle s'imprime, elle a l'air normale, il manque juste un bout de phrase.
+#
+# Mesuré le 2026-09-17 : « sont declares (`Fleet.Layout.system_project/0`, le catalogue embarque) »
+# s'imprimait « sont declares (, le catalogue embarque) ». Le plancher shellcheck n'attrape que le
+# cas où le fragment contient aussi un `<` (qu'il lit comme une redirection) ; celui-là passait.
+@test "aide : aucun accent grave non echappe dans le heredoc — sinon l'aide mange son propre texte" {
+  local corps
+  corps="$(awk '/^usage\(\) \{$/,/^EOF$/' "$SCRIPT")"
+  [ -n "$corps" ]
+
+  # un accent grave ECHAPPE (\`) est le seul admis ; tout autre ouvre une substitution
+  local fautifs
+  fautifs="$(grep -n '`' <<<"$corps" | grep -v '\\`' || true)"
+  [ -z "$fautifs" ] || { echo "accents graves non echappes dans l'aide :"; echo "$fautifs"; return 1; }
+}
+
+@test "aide : chaque fragment entre accents graves SURVIT a l'impression — la mesure, pas la relecture" {
+  local rendu; rendu="$(bash "$SCRIPT" --help 2>&1)"
+  [ -n "$rendu" ]
+
+  # l'instrument : ce que la source annonce, et ce que l'aide imprime vraiment
+  local frag n=0
+  while IFS= read -r frag; do
+    n=$((n + 1))
+    [[ "$rendu" == *"$frag"* ]] \
+      || { echo "l'aide n'imprime pas « $frag » — un heredoc l'a substitue"; return 1; }
+  done < <(awk '/^usage\(\) \{$/,/^EOF$/' "$SCRIPT" | grep -o '\\`[^`]*\\`' | sed 's/\\`//g')
+
+  [ "$n" -ge 4 ] || { echo "instrument casse : $n fragment(s) trouve(s), au moins 4 attendus"; return 1; }
+}

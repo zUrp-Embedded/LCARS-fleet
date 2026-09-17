@@ -24,6 +24,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
   alias Fleet.Catalogue
   alias Fleet.Layout
+  alias Fleet.Project.GitOps
   alias Fleet.Project.Onboard
 
   require Logger
@@ -45,6 +46,72 @@ defmodule Fleet.Project.Onboard.SystemProject do
     org = Keyword.get(opts, :org, Catalogue.bundled_name())
     onboard = Keyword.get(opts, :onboard, Onboard)
 
+    case seed_code_face(name, opts) do
+      :ok ->
+        publish(name, org, onboard, opts)
+
+      {:error, reason} = err ->
+        Logger.warning(
+          "SystemProject: #{org}/#{name} NOT adopted (#{inspect(reason)}) — the code face could " <>
+            "not be seeded, and nothing was published."
+        )
+
+        err
+    end
+  end
+
+  # ⚠ LA FACE DE CODE EST UN FAIT DU LAYOUT, PAS DE L'INSTALLEUR. `/home/projects/<projet>` est fixé
+  # par `Fleet.Layout`, et le rail conteneur y clone la source à l'init. Le rail POSTE, lui, n'y
+  # mettait rien : la machine était installée depuis l'arbre de l'opérateur, et l'adoption refusait
+  # en `no_local_main` — mesuré le 2026-09-17 sur le banc 2003, où le module 67 restait en dérive à
+  # chaque passe. L'installeur sait D'OÙ vient sa source et le passe en `:from` ; où elle va reste
+  # une décision d'ici.
+  #
+  # UN ARBRE DÉJÀ LÀ N'EST JAMAIS TOUCHÉ : semer par-dessus le travail de quelqu'un est la seule
+  # faute irréparable de cette porte.
+  @spec seed_code_face(String.t(), keyword()) :: :ok | {:error, term()}
+  defp seed_code_face(name, opts) do
+    from = Keyword.get(opts, :from)
+    code = Onboard.Faces.face_dirs(name, opts).code
+
+    cond do
+      is_nil(from) ->
+        :ok
+
+      File.dir?(Path.join(code, ".git")) ->
+        :ok
+
+      not File.dir?(Path.join(from, ".git")) ->
+        {:error, {:not_adoptable, {:no_source_tree, from}}}
+
+      true ->
+        clone_code_face(from, code)
+    end
+  end
+
+  defp clone_code_face(from, code) do
+    # `--no-hardlinks` : la face doit survivre a la suppression de l'arbre de l'operateur. Et pas
+    # d'`origin` local derriere : le remote de cette face est la forge, que l'adoption pose.
+    with :ok <- GitOps.run(["clone", "--no-hardlinks", from, code], auth: false),
+         :ok <- ensure_main(code),
+         :ok <- GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false) do
+      Logger.info("SystemProject: code face seeded at #{code} from #{from}.")
+      :ok
+    else
+      {:error, reason} -> {:error, {:not_adoptable, {:seed_failed, code, reason}}}
+    end
+  end
+
+  # `main` de la face est la revision dont CETTE machine a ete installee : l'arbre de l'operateur
+  # est sur sa branche a lui, et un clone en herite. On nomme, on ne deplace rien.
+  defp ensure_main(code) do
+    case GitOps.read(["-C", code, "rev-parse", "--verify", "--quiet", "refs/heads/main"]) do
+      {:ok, _sha} -> :ok
+      {:error, _} -> GitOps.run(["-C", code, "switch", "-c", "main"], auth: false)
+    end
+  end
+
+  defp publish(name, org, onboard, opts) do
     case onboard.adopt_project(name, Keyword.merge(opts, org: org)) do
       {:ok, _result} ->
         Logger.info(
@@ -70,6 +137,15 @@ defmodule Fleet.Project.Onboard.SystemProject do
     end
   end
 
+  # L'arbre dont la machine a ete installee : seul l'installeur (ou l'init du conteneur) le sait, et
+  # il le passe par l'environnement parce que ces portes sont des `eval` sans argument.
+  defp source_opts do
+    case System.get_env("LCARS_SYSTEM_SOURCE") do
+      dir when is_binary(dir) and dir != "" -> [from: dir]
+      _ -> []
+    end
+  end
+
   @doc """
   Measures without writing: does the forge already carry the system project, and does this machine
   carry its source?
@@ -91,7 +167,16 @@ defmodule Fleet.Project.Onboard.SystemProject do
         {:ok, :present}
 
       :ok ->
-        if File.dir?(Path.join(dirs.code, ".git")), do: {:ok, :absent}, else: {:ok, :no_source}
+        # une face absente que l'apply SEMERA n'est pas une machine sans source : ce qui manque est
+        # le depot sur la forge, et `check` doit le dire comme tel — sinon le module 67 reste en
+        # « rien a publier » sur une machine qui a tout ce qu'il faut.
+        from = Keyword.get(opts, :from)
+
+        cond do
+          File.dir?(Path.join(dirs.code, ".git")) -> {:ok, :absent}
+          is_binary(from) and File.dir?(Path.join(from, ".git")) -> {:ok, :absent}
+          true -> {:ok, :no_source}
+        end
 
       {:error, _} = err ->
         err
@@ -108,7 +193,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
     name = Layout.system_project()
     org = Catalogue.bundled_name()
 
-    case state() do
+    case state(source_opts()) do
       {:ok, :present} -> IO.puts("ALREADY #{org}/#{name}")
       {:ok, :absent} -> IO.puts("ABSENT #{org}/#{name}")
       {:ok, :no_source} -> IO.puts("NOSOURCE #{org}/#{name}")
@@ -130,7 +215,7 @@ defmodule Fleet.Project.Onboard.SystemProject do
     name = Layout.system_project()
     org = Catalogue.bundled_name()
 
-    case adopt() do
+    case adopt(source_opts()) do
       {:ok, :adopted} ->
         IO.puts("ADOPTED #{org}/#{name}")
         System.halt(0)

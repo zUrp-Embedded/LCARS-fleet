@@ -86,12 +86,15 @@ USAGE
       moities, ou rien — un transfert seul laisse un projet qui marche par accident,
       via la redirection 301. REFUSE un catalogue qui n'est pas installe ici.
 
-  $PROG project adopt-system [--check]
+  $PROG project adopt-system [--check] [--from <arbre>]
       Publie l'arbre dont CETTE machine a ete installee comme projet de sa propre fleet :
       un depot sur la forge, ses trois faces, ses labels, sa protection. Le nom et l'org
-      sont declares (`Fleet.Layout.system_project/0`, le catalogue embarque), pas devines.
+      sont declares (\`Fleet.Layout.system_project/0\`, le catalogue embarque), pas devines.
       Se rejoue : une machine qui porte deja son projet le DIT et rend 0.
       --check MESURE sans rien ecrire : le projet est la, absent, ou la source manque.
+      --from <arbre> : l'arbre dont la machine a ete installee. La face de code du projet
+      (\`/home/projects/<nom>\`) s'en seme si elle n'existe pas — un arbre deja la n'est
+      jamais touche. Sans lui, une machine sans face de code n'a rien a publier.
 
   $PROG project reconcile [check|apply]
       La forge dit quels projets existent, le disque suit. Sur un /home neuf — conteneur
@@ -535,13 +538,27 @@ cmd_project_reconcile() {
 cmd_project_adopt_system() {
   # `--check` MESURE et n'ecrit rien : c'est ce que le verbe `check` d'un module demande, et une
   # mesure n'est pas un verdict (elle rend 0 quel que soit l'etat, en le NOMMANT).
-  local porte="eval_adopt"
-  [[ "${1:-}" != "--check" ]] || porte="eval_state"
+  #
+  # `--from <arbre>` : D'OU vient la source de cette machine. OU elle va reste une decision du
+  # layout (`/home/projects/<projet>`), jamais d'ici — le rail conteneur l'y clone a l'init, le rail
+  # POSTE n'y mettait rien et l'adoption refusait en `no_local_main`. Un arbre deja en place n'est
+  # jamais touche. Passe par l'environnement : ces portes sont des `eval` sans argument.
+  local porte="eval_adopt" source=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --check) porte="eval_state"; shift ;;
+      --from)  source="${2:?--from attend un repertoire}"; shift 2 ;;
+      *)       die "project adopt-system: option inconnue « $1 » (--check, --from <arbre>)" ;;
+    esac
+  done
+  [[ -z "$source" || -d "$source" ]] \
+    || die "project adopt-system: --from « $source » n'est pas un repertoire — la face de code se seme depuis un arbre git, rien n'a ete fait"
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "project adopt-system: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
   _load_container_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
+  LCARS_SYSTEM_SOURCE="$source" \
     "$bin" eval "Fleet.Project.Onboard.SystemProject.$porte()"
 }
 

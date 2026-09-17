@@ -57,6 +57,20 @@ mod() { run bash "$MOD" "$@"; }
   [[ "$output" == *"POSÉ  67-system-project: fleet/lcars-fleet publié — la source de cette machine est un projet de sa fleet"* ]]
 }
 
+@test "apply comme check passent l'ARBRE dont la machine a été installée — la face de code s'en sème" {
+  # `--from` dit D'OÙ vient la source ; OÙ elle va est une décision du layout, jamais du module.
+  # Sans lui, le rail POSTE n'a pas de face de code et l'adoption refuse en `no_local_main`.
+  local racine; racine="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q "^CLI:project adopt-system --from $racine (uid=" "$CALLS" || { cat "$CALLS"; return 1; }
+
+  # `check` MESURE : son verdict dépend de l'état, pas de ce témoin — c'est l'argv qui est tenu ici
+  : > "$CALLS"
+  mod check
+  grep -q "^CLI:project adopt-system --check --from $racine (uid=" "$CALLS" || { cat "$CALLS"; return 1; }
+}
+
 @test "apply : un projet DÉJÀ publié est conforme — ce module se rejoue à chaque passe" {
   STUB_ADOPT="ALREADY fleet/lcars-fleet" mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

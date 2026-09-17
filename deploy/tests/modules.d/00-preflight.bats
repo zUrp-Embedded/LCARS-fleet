@@ -521,7 +521,10 @@ landing_pid() { double systemctl "[[ \"\$*\" == 'show -p MainPID --value lcars-l
 @test "en root, le deck tenu par le processus principal de la landing est à ce projet : aucun refus" {
   ss_nomme 20999 4242
   landing_pid 4242
-  preflight wsl PROV_PHASE=root PROV_DECK_PORT=20999
+  # ⚠ TOUT PORT QUE CE TÉMOIN NE FIXE PAS EST LE VRAI PORT DE LA MACHINE : le préflight SONDE, et
+  # le défaut de la forge (21000) est tenu dès qu'un banc tourne sur cet hôte — ce qui est le cas
+  # normal ici. Sans ce port libre, le témoin mesure la machine au lieu de mesurer le préflight.
+  preflight wsl PROV_PHASE=root PROV_DECK_PORT=20999 PROV_FORGE_HOST_PORT="$(free_port)"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(fact port_deck)" = "20999 nous lcars-landing (service)" ]
   grep -q -- '-ltnp' "$BATS_TEST_TMPDIR/ss.args"
@@ -604,7 +607,9 @@ table_tcp() { # table_tcp <port> <uid> — /proc/net/tcp du décor : une écoute
   local p; p="$(free_port)"
   ss_nomme "$p" 4243
   listen_on "$p"
-  preflight wsl PROV_PHASE=root PROV_DECK_PORT="$p"
+  # les ports qu'un cas ne nomme pas restent ceux de la MACHINE : le défaut de la forge est tenu
+  # dès qu'un banc tourne sur cet hôte, et le préflight le refuserait a bon droit
+  preflight wsl PROV_PHASE=root PROV_DECK_PORT="$p" PROV_FORGE_HOST_PORT="$(free_port)"
   [ "$status" -eq 2 ]
   [[ "$output" == *"port $p (deck) tenu par python3 (pid 4243)"* ]]
   preflight wsl PROV_PHASE=root PROV_FORGE_HOST_PORT="$p" PROV_DECK_PORT="$(free_port)"
@@ -613,7 +618,7 @@ table_tcp() { # table_tcp <port> <uid> — /proc/net/tcp du décor : une écoute
   preflight wsl PROV_PHASE=root PROV_FORGE_HOST_PORT="$p" PROV_DECK_PORT="$(free_port)" FORGE_BASE_URL=http://forge.example
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -z "$(fact port_forge)" ]
-  preflight wsl PROV_PHASE=root PROV_SSH_PORT="$p" PROV_DECK_PORT="$(free_port)"
+  preflight wsl PROV_PHASE=root PROV_SSH_PORT="$p" PROV_DECK_PORT="$(free_port)" PROV_FORGE_HOST_PORT="$(free_port)"
   kill "$LISTENER" 2>/dev/null || true
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -z "$(fact port_ssh)" ]

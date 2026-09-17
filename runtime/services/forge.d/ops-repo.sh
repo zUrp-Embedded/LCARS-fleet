@@ -43,11 +43,11 @@ code_of() { # code_of <chemin d'API> → le code HTTP, ou vide si la forge ne re
 # Le code HTTP est lu AVEC le corps : la forge rend un JSON sur 404 (« The target couldn't be
 # found ») comme sur 200, et un corps seul ferait passer une protection ABSENTE pour une protection
 # AUTRE. Rendu : « <code> <corps> », code vide si la forge ne repond pas.
-protection_of() {
+protection_of() { # protection_of <branche>
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || return 0
   local out
   out="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 -w '\n%{http_code}' \
-       "${FORGE_BASE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branch_protections/$OPS_BRANCH" 2>/dev/null)" || return 0
+       "${FORGE_BASE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branch_protections/$1" 2>/dev/null)" || return 0
   printf '%s %s' "${out##*$'\n'}" "${out%$'\n'*}"
 }
 
@@ -85,7 +85,7 @@ mesure() {
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || {
     p_drift "protection de $LCARS_OPS_REPO:$OPS_BRANCH non sondable — jeton système absent ($LCARS_SYSTEM_TOKEN_FILE), le geste des jetons le minte"
     return 0; }
-  prot="$(protection_of)"; pcode="${prot%% *}"; prot="${prot#* }"
+  prot="$(protection_of "$OPS_BRANCH")"; pcode="${prot%% *}"; prot="${prot#* }"
   case "$pcode" in
     200) ;;
     404) p_drift "$LCARS_OPS_REPO:$OPS_BRANCH SANS protection — une PR d'outillage se mergerait sans signature ; $REMEDE"; return 0 ;;
@@ -94,12 +94,33 @@ mesure() {
   ra="$(jq -r '.required_approvals // empty' <<<"$prot" 2>/dev/null || true)"
   # pas `// empty` : en jq, `false // x` rend x — un `false` lu serait effacé
   ds="$(jq -r 'if .dismiss_stale_approvals == null then "" else (.dismiss_stale_approvals | tostring) end' <<<"$prot" 2>/dev/null || true)"
+  # ⚠ UNE WHITELIST ACTIVÉE ET VIDE EST UN PIÈGE, PAS UNE PROTECTION OUVERTE : plus aucune signature
+  # ne compte, donc plus aucune demande d'outillage ne passe. Gitea la vide EN SILENCE quand
+  # l'approbateur n'a pas `write` sur le dépôt (mesuré le 2026-09-17 : même site-admin ne suffit
+  # pas). C'est pour ça que la liste est lue, et pas seulement le nombre d'approbations.
   wl="$(jq -r '(.approvals_whitelist_username // []) | join(" ")' <<<"$prot" 2>/dev/null || true)"
-  if [[ "$ra" == "1" && "$ds" == "true" && -n "$wl" ]]; then
-    p_ok "$LCARS_OPS_REPO : dépôt, branches $OPS_BRANCH et $INCIDENTS_BRANCH, protection de $OPS_BRANCH (une approbation de : $wl, réapprobation à chaque push)"
-  else
+  if [[ "$ra" != "1" || "$ds" != "true" || -z "$wl" ]]; then
     p_drift "$LCARS_OPS_REPO:$OPS_BRANCH protégée AUTREMENT que la recette ne le dit (approbations « ${ra:-?} », réapprobation « ${ds:-?} », approbateurs « ${wl:-aucun} ») ; $REMEDE"
+    return 0
   fi
+
+  # `main` et `incidents` : le `write` qu'un approbateur reçoit pour SIGNER ne doit pas devenir un
+  # droit d'écrire partout. Sans ces deux protections, il l'est — et rien ne le dirait.
+  local b libre=""
+  for b in main "$INCIDENTS_BRANCH"; do
+    prot="$(protection_of "$b")"; pcode="${prot%% *}"
+    case "$pcode" in
+      200) ;;
+      404) libre="${libre:+$libre, }$b" ;;
+      *)   p_fail "protection de $LCARS_OPS_REPO:$b illisible (HTTP ${pcode:-sans réponse}) — rien n'est conclu"; return 0 ;;
+    esac
+  done
+  if [[ -n "$libre" ]]; then
+    p_drift "$LCARS_OPS_REPO : $libre SANS protection — les approbateurs de $OPS_BRANCH ont « write » sur ce dépôt pour pouvoir signer, et sans ces protections ce droit devient un push libre ; $REMEDE"
+    return 0
+  fi
+
+  p_ok "$LCARS_OPS_REPO : dépôt, branches $OPS_BRANCH et $INCIDENTS_BRANCH, protection de $OPS_BRANCH (une approbation de : $wl, réapprobation à chaque push), main et $INCIDENTS_BRANCH protégées"
 }
 
 pourquoi() { # pourquoi <branche> → ce qui manque sans elle

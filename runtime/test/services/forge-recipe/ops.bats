@@ -10,23 +10,58 @@
 # il tient la FORME qui a ete mesuree — ce que la recette declare, sous quelle condition, et ce
 # qu'elle ne declare pas.
 
+load ../../support/refute
+
 setup() {
   RECIPE="$BATS_TEST_DIRNAME/../../../services/forge-recipe"
   TF="$RECIPE/ops.tf"
   [ -f "$TF" ]
 }
 
-@test "le depot, deux branches, quatre fichiers et une protection sont declares — chacun conditionne sur l'org systeme" {
+@test "le depot, deux branches, quatre fichiers et trois protections sont declares — chacun conditionne sur l'org systeme" {
   local r n
   for r in 'resource "gitea_repository" "ops"' 'resource "gitea_repository_branch" "tool_request"' \
            'resource "gitea_repository_branch" "incidents"' 'resource "gitea_repository_file" "ops_readme"' \
            'resource "gitea_repository_file" "tool_request_readme"' 'resource "gitea_repository_file" "tool_request_keep"' \
-           'resource "gitea_repository_file" "incidents_readme"' 'resource "gitea_repository_branch_protection" "tool_request"'; do
+           'resource "gitea_repository_file" "incidents_readme"' 'resource "gitea_repository_branch_protection" "tool_request"' \
+           'resource "gitea_repository_branch_protection" "main"' 'resource "gitea_repository_branch_protection" "incidents"'; do
     grep -q "^$r {" "$TF" || { echo "manque : $r" >&2; return 1; }
   done
   n="$(grep -c '^  count *= local.system_play ? 1 : 0$' "$TF")"
-  [ "$n" -eq 10 ] || { echo "$n ressources conditionnees sur l'org systeme, attendu 10" >&2; return 1; }
+  [ "$n" -eq 12 ] || { echo "$n ressources conditionnees sur l'org systeme, attendu 12" >&2; return 1; }
+  # le collaborateur est conditionne par un `for_each` VIDE, pas par un `count` : meme regle,
+  # autre forme — sans elle, il se poserait sur l'org d'un catalogue, qui n'a pas de depot `_ops`
+  grep -q '^  for_each   = local.system_play ? toset(var.approvers) : toset(\[\])$' "$TF"
   grep -q '^  system_play = var.org == var.system_org$' "$TF"
+}
+
+# ⚠ GITEA EXIGE `write` SUR LE DEPOT POUR RETENIR UN APPROBATEUR. En dessous il le RETIRE EN
+# SILENCE et laisse la whitelist activee et VIDE : plus aucune signature ne compte, donc plus
+# aucune demande d'outillage ne passe. Mesure du 2026-09-17 (banc 2003, Gitea 1.26.1) sur les
+# quatre niveaux : aucun acces — le siege est pourtant site-admin — et `read` sont ecartes,
+# `write` et `admin` sont retenus. C'est `write` qui est pose : un approbateur n'administre pas
+# ce qu'il signe.
+@test "l'approbateur est collaborateur du depot en ECRITURE, et rien de plus" {
+  grep -q '^resource "gitea_repository_collaborator" "approvers" {' "$TF"
+  grep -q '^  permission = "write"$' "$TF"
+  refute grep -q '^  permission = "admin"$' "$TF"
+  # la portee est CE DEPOT, jamais l'org systeme : le siege n'en devient pas membre
+  refute grep -q 'gitea_team_membership.*approvers' "$TF"
+}
+
+# Ce que `write` ouvrirait par ailleurs — un push libre sur ce qui n'est pas protege — est referme
+# ici. Sans ces deux protections, le droit donne pour SIGNER devient un droit d'ecrire partout.
+@test "main et incidents sont protegees : le write d'un approbateur n'est pas un push libre" {
+  local bloc
+  bloc="$(awk '/^resource "gitea_repository_branch_protection" "main" \{/,/^\}/' "$TF")"
+  grep -q 'rule_name            = "main"' <<<"$bloc"
+  grep -q 'push_whitelist_users = var.approvers' <<<"$bloc"
+  grep -q 'block_admin_merge_override = true' <<<"$bloc"
+
+  # la branche du registre : le RUNTIME y ecrit, par le compte systeme — pas les approbateurs
+  bloc="$(awk '/^resource "gitea_repository_branch_protection" "incidents" \{/,/^\}/' "$TF")"
+  grep -q 'push_whitelist_users       = \[var.system_account\]' <<<"$bloc"
+  refute grep -q 'push_whitelist_users.*var.approvers' <<<"$bloc"
 }
 
 @test "les noms sont ceux que le runtime lit : _ops, tool_request, incidents, ops/toolchains.d, work/" {
@@ -90,16 +125,17 @@ setup() {
   grep -qE '^ +repo +=' "$ex" && grep -q 'local.system_play ? var.system_repo : ""' "$ex"
   grep -q 'local.system_play ? "tool_request,incidents" : ""' "$ex"
   grep -qE '^ +files +=' "$ex"
-  grep -q 'local.system_play ? "tool_request" : ""' "$ex"
+  # LES TROIS protections : `main` et `incidents` sont protegees depuis que l'approbateur a `write`
+  grep -q 'local.system_play ? "tool_request,main,incidents" : ""' "$ex"
   # et elle les rend, chacun sous la forme d'id que le provider attend
   grep -q 'add "repo:\$REPO" "\$REPO_ID"' "$sonde"
   grep -q 'add "branch:\$b" "\$REPO_ID/\$b"' "$sonde"
   grep -q 'add "file:\$f" "\$ORG/\$REPO/\$fb/\${fp//' "$sonde"
-  grep -q 'add "protection:\$PROTECTION" "\$ORG/\$REPO/\$PROTECTION"' "$sonde"
-  # un import par objet : le depot, deux branches, quatre fichiers, la protection
+  grep -q 'add "protection:\$pr" "\$ORG/\$REPO/\$pr"' "$sonde"
+  # un import par objet : le depot, deux branches, quatre fichiers, TROIS protections
   local n
   n="$(grep -c 'to       = gitea_repository' "$ex")"
-  [ "$n" -eq 10 ] || { echo "$n imports vers des objets de depot, attendu 10" >&2; return 1; }
+  [ "$n" -eq 12 ] || { echo "$n imports vers des objets de depot, attendu 12" >&2; return 1; }
   grep -q 'local.system_play ? var.store_repo : ""' "$ex"
   grep -q 'add "store:\$STORE" "\$STORE_ID"' "$sonde"
   # les attributs d'ecriture que le provider ne relit pas ne font pas rejouer un update

@@ -28,8 +28,10 @@ setup() {
   unset LCARS_OPS_REPO
 }
 
-# stub_forge <depot> <tool_request> <incidents> <protection JSON ou vide ou "000">
+# stub_forge <depot> <tool_request> <incidents> <protection JSON ou vide ou "000"> [main] [inc]
 # Les codes des sondes, dans l'ordre des questions ; la protection est un corps JSON (ou rien).
+# Les deux derniers sont les codes des protections de `main` et `incidents` — defaut 200, parce que
+# la recette les pose : un banc qui ne les aurait pas est le cas PARTICULIER, pas le decor normal.
 # ⚠ L'ORDRE DES MOTIFS EST LE TEMOIN : l'URL du depot est un prefixe de celles des branches et de la
 # protection ; les plus longues se testent en premier.
 stub_forge() {
@@ -45,6 +47,10 @@ echo "CURL:\$method \${url#http://forge.test}" >> "\$CALLS"
 code() { [[ \$w -eq 1 ]] && printf '%s' "\$1"; return 0; }
 case "\$url" in
   */api/v1/version)                              [[ "${FORGE_MUETTE:-}" == 1 ]] && exit 7; exit 0 ;;
+  */branch_protections/main)                     [[ '${5:-200}' == 000 ]] && exit 7
+                                                 if [[ '${5:-200}' == 200 ]]; then printf '{"branch_name":"main"}'; code "\$(printf '\\n200')"; else printf '{"message":"nope"}'; code "\$(printf '\\n${5:-200}')"; fi ;;
+  */branch_protections/incidents)                [[ '${6:-200}' == 000 ]] && exit 7
+                                                 if [[ '${6:-200}' == 200 ]]; then printf '{"branch_name":"incidents"}'; code "\$(printf '\\n200')"; else printf '{"message":"nope"}'; code "\$(printf '\\n${6:-200}')"; fi ;;
   */branch_protections/tool_request)             [[ '$4' == 000 ]] && exit 7
                                                  if [[ -n '$4' ]]; then printf '%s' '$4'; code "\$(printf '\\n200')"; else printf '{"message":"The target couldn'"'"'t be found."}'; code "\$(printf '\\n404')"; fi ;;
   */branches/tool_request)                       code '$2' ;;
@@ -66,7 +72,7 @@ rien_de_cree() {
   stub_forge 200 200 200 "$PROT"
   run bash "$MODULE" check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request (une approbation de : le-siege, réapprobation à chaque push)"* ]]
+  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request (une approbation de : le-siege, réapprobation à chaque push), main et incidents protégées"* ]]
   rien_de_cree
   : > "$CALLS"
   run bash "$MODULE" apply
@@ -174,4 +180,35 @@ rien_de_cree() {
   run bash -c "source <(sed -n '1,/^: \"\${LCARS_OPS_REPO/p' '$MODULE'); source <(sed -n '1,/^: \"\${LCARS_OPS_REPO/p' '$MODULE'); echo ok"
   [ "$status" -eq 0 ]
   [[ "$output" == *ok* ]]
+}
+
+@test "main ou incidents SANS protection : drift qui dit pourquoi le « write » d'un approbateur devient un push libre" {
+  # Gitea EXIGE `write` sur le depot pour retenir un approbateur dans la whitelist (mesure du
+  # 2026-09-17 : meme site-admin ne suffit pas). Ce droit, donne pour SIGNER, ouvre le push sur
+  # toute branche que rien ne protege — et sans ce drift, rien ne le dirait.
+  stub_forge 200 200 200 "$PROT" 404 200
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"DRIFT"*"lcars/_ops : main SANS protection"*"« write » sur ce dépôt pour pouvoir signer"* ]] || { echo "$output"; return 1; }
+  rien_de_cree
+
+  : > "$CALLS"
+  stub_forge 200 200 200 "$PROT" 200 404
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars/_ops : incidents SANS protection"* ]] || { echo "$output"; return 1; }
+
+  # les deux : une seule ligne qui les nomme toutes les deux
+  : > "$CALLS"
+  stub_forge 200 200 200 "$PROT" 404 404
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars/_ops : main, incidents SANS protection"* ]] || { echo "$output"; return 1; }
+}
+
+@test "une protection de main ILLISIBLE est un echec, jamais une absence : rien n'est conclu" {
+  stub_forge 200 200 200 "$PROT" 500 200
+  run bash "$MODULE" check
+  [ "$status" -eq 2 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"protection de lcars/_ops:main illisible (HTTP 500)"*"rien n'est conclu"* ]] || { echo "$output"; return 1; }
 }

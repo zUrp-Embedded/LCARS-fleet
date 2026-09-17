@@ -144,11 +144,15 @@ if [[ -n "$REPO" && -n "$ORG_ID" ]]; then
       probe_exists "repos/$ORG/$REPO/contents/$fp?ref=$fb" "file $fb:$fp" \
         && add "file:$f" "$ORG/$REPO/$fb/${fp//\//%2F}"
     done
-    # the protection needs authority to be read: the master token is the caller's (TF_VAR_gitea_token)
-    if [[ -n "$PROTECTION" ]]; then
-      probe_exists "repos/$ORG/$REPO/branch_protections/$PROTECTION" "protection $PROTECTION" \
-        && add "protection:$PROTECTION" "$ORG/$REPO/$PROTECTION"
-    fi
+    # the protections need authority to be read: the master token is the caller's (TF_VAR_gitea_token).
+    # A LIST, like branches and files: `main` and `incidents` are protected too, so that the `write`
+    # an approver needs to sign on `tool_request` does not become a free push everywhere else.
+    IFS=',' read -r -a _prots <<< "$PROTECTION"
+    for pr in ${_prots[@]+"${_prots[@]}"}; do
+      [[ -n "$pr" ]] || continue
+      probe_exists "repos/$ORG/$REPO/branch_protections/$pr" "protection $pr" \
+        && add "protection:$pr" "$ORG/$REPO/$pr"
+    done
   fi
 fi
 

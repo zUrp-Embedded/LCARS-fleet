@@ -13,6 +13,12 @@
 # protection, un architecte différé. La réécrire en shell serait une seconde implémentation d'un
 # geste que le produit tient déjà, et c'est exactement ce que ce chantier retire.
 #
+# ⚠ ET IL PASSE SA SOURCE, `--from $(repo_root)` : l'arbre dont cette machine a été installée. OÙ la
+# face de code va (`/home/projects/<projet>`) reste une décision de `Fleet.Layout` — la recomposer
+# ici en ferait une seconde écriture. Le rail conteneur clone cette face à l'init ; le rail POSTE
+# n'y mettait rien, et l'adoption refusait en `no_local_main` à chaque passe (mesuré le 2026-09-17,
+# banc 2003). Une face déjà en place n'est jamais touchée : la porte ne sème que dans le vide.
+#
 # ⚠ ET IL SE JOUE SOUS LE SIÈGE, PAS SOUS ROOT. La porte pose les trois faces locales sous
 # `/home/projects*`, qui appartiennent au groupe `fleet` : un git joué en root les poserait
 # root:root, et le propriétaire ne pourrait plus y écrire. Même règle que `75-projects` côté humain.
@@ -49,7 +55,7 @@ usable() {
 # reformulerait perdrait l'adresse exacte.
 jouer() { # jouer <verbe> — 0 conforme · 1 drift
   local out rc=0
-  out="$(as_siege "$CLI" project adopt-system 2>&1)" || rc=$?
+  out="$(as_siege "$CLI" project adopt-system --from "$(repo_root)" 2>&1)" || rc=$?
 
   case "$rc" in
     0)
@@ -73,7 +79,7 @@ check() {
   # la seule question mesurable sans écrire est « la forge le porte-t-elle ? », et c'est elle qui
   # répond — un module qui recomposerait l'adresse ici en aurait une seconde écriture.
   local out rc=0
-  out="$(as_siege "$CLI" project adopt-system --check 2>&1)" || rc=$?
+  out="$(as_siege "$CLI" project adopt-system --check --from "$(repo_root)" 2>&1)" || rc=$?
   [[ "$rc" -eq 0 ]] || { p_fail "mesure du projet du système impossible — $(printf '%s' "$out" | tail -n1)"; verdict_check; }
 
   case "$out" in

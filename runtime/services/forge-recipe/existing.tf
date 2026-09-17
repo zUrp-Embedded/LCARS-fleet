@@ -25,7 +25,7 @@ data "external" "forge" {
     store      = local.system_play ? var.store_repo : ""
     branches   = local.system_play ? "tool_request,incidents" : ""
     files      = local.system_play ? "main:README.md,tool_request:README.md,tool_request:ops/toolchains.d/.gitkeep,incidents:work/README.md" : ""
-    protection = local.system_play ? "tool_request" : ""
+    protection = local.system_play ? "tool_request,main,incidents" : ""
   }
 }
 
@@ -55,6 +55,10 @@ locals {
   existing_tool_request = { for k, v in local.existing_branches : k => v if k == "tool_request" }
   existing_incidents    = { for k, v in local.existing_branches : k => v if k == "incidents" }
   existing_protection   = { for k, v in local.existing : trimprefix(k, "protection:") => v if startswith(k, "protection:") }
+  # une carte par REGLE : un bloc `import` vise UNE ressource, et les trois protections en sont trois
+  existing_prot_request   = { for k, v in local.existing_protection : k => v if k == "tool_request" }
+  existing_prot_main      = { for k, v in local.existing_protection : k => v if k == "main" }
+  existing_prot_incidents = { for k, v in local.existing_protection : k => v if k == "incidents" }
 }
 
 # ⚠ LES IDENTIFIANTS SONT NUMÉRIQUES, POUR LES TROIS TYPES. Le provider convertit l'id d'import en
@@ -138,11 +142,27 @@ import {
 }
 
 import {
-  for_each = local.existing_protection
+  for_each = local.existing_prot_request
   to       = gitea_repository_branch_protection.tool_request[0]
   id       = each.value
 }
 
+import {
+  for_each = local.existing_prot_main
+  to       = gitea_repository_branch_protection.main[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_prot_incidents
+  to       = gitea_repository_branch_protection.incidents[0]
+  id       = each.value
+}
+
+# PAS D'IMPORT POUR LE COLLABORATEUR NON PLUS, et c'est mesuré : `PUT /repos/<o>/<r>/collaborators/
+# <login>` rend 204 sur un compte qui l'est déjà, et sur un changement de permission (2026-09-17,
+# banc 2003). Une ressource qui converge à la création n'a rien à importer.
+#
 # PAS D'IMPORT POUR LES ADHÉSIONS, et c'est mesuré, pas supposé. `PUT /teams/<id>/members/<login>`
 # rend 204 sur un membre qui l'est déjà, et le provider s'en contente : les 12
 # `gitea_team_membership` se « créent » sur une forge où elles existent toutes, sans une erreur
