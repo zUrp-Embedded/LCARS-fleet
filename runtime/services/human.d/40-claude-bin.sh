@@ -69,7 +69,16 @@ apply() {
   # tuer quoi que ce soit. Sans tty, l'installeur reste non interactif et rend un CODE.
   if ! run_quiet bash "$tmp/install.sh" </dev/null; then
     rm -rf "$tmp"
-    p_fail "installeur officiel en échec"
+    # ⚠ SA CAUSE LA PLUS FRÉQUENTE NE SE VOIT PAS DANS SA PLAINTE. L'installeur prend l'artefact
+    # COMPRESSÉ quand `zstd` est là, et le binaire NU sinon — 230 Mo. Sur un lien ordinaire le
+    # téléchargement n'aboutit pas, et il le dit en « somme de contrôle » sur un fichier qui
+    # n'existe même pas (mesuré le 2026-09-17 sur LCARS-beta : aucun humain n'avait `claude`).
+    # `10-packages` pose `zstd` ; une machine qui ne l'a pas mérite de l'entendre ici.
+    if ! command -v zstd >/dev/null 2>&1; then
+      p_fail "installeur officiel en échec, et « zstd » manque a cette machine — sans lui il telecharge le binaire NU (230 Mo) au lieu de l'artefact compresse, et sa plainte parle d'une somme de controle. Poser zstd (10-packages le declare), puis rejouer"
+    else
+      p_fail "installeur officiel en échec"
+    fi
     verdict_apply
   fi
   rm -rf "$tmp"

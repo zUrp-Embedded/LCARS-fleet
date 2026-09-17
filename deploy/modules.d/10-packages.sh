@@ -18,8 +18,14 @@ set -euo pipefail
 # extensions C, node-gyp et les crates -sys que les pods compilent. `xz-utils` : 16-node détare un
 # .tar.xz, et xz n'est que de priorité standard. `acl` : 30-wsl ouvre les projets au compte de
 # Windows par une entrée nominative, et Ubuntu ne pose pas setfacl.
+#
+# `zstd` : l'installeur OFFICIEL de claude (`40-claude-bin`, per-humain) télécharge l'artefact
+# COMPRESSÉ quand zstd est là, et le binaire NU sinon — 230 Mo. Mesure du 2026-09-17 sur LCARS-beta,
+# zstd absent, lien à ~540 ko/s : le téléchargement n'aboutit jamais, et l'échec se présente comme
+# une somme de contrôle fausse sur un fichier qui n'existe pas. Aucun humain n'avait `claude`.
+# Ce n'est pas un confort : c'est la différence entre une installation qui finit et une qui non.
 PACKAGES=(
-  tmux bubblewrap git curl jq unzip xz-utils ca-certificates python3 socat acl
+  tmux bubblewrap git curl jq unzip xz-utils zstd ca-certificates python3 socat acl
   git-filter-repo gh
   util-linux-extra sudo
   procps

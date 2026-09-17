@@ -141,6 +141,43 @@ EOF
   [ -f "$HOMEDIR/.local/bin/claude" ]
 }
 
+# ⚠ LA CAUSE LA PLUS FREQUENTE DE CET ECHEC NE SE VOIT PAS DANS SA PLAINTE. L'installeur officiel
+# prend l'artefact COMPRESSE quand `zstd` est la, et le binaire NU sinon — 230 Mo. Sur un lien
+# ordinaire il n'aboutit pas, et il le dit en « somme de controle » sur un fichier qui n'existe meme
+# pas. Mesure du 2026-09-17 sur LCARS-beta : aucun humain n'avait `claude`, et rien ne le disait.
+@test "installeur en echec avec zstd ABSENT : le refus NOMME zstd, sa consequence et le geste" {
+  # ⚠ L'ABSENCE SE CONSTRUIT, ELLE NE SE SUPPOSE PAS. Compter sur le fait que la machine du testeur
+  # n'a pas zstd, c'est mesurer cette machine : le jour ou elle l'aura, ce temoin tombera en
+  # accusant le module. Un PATH de liens vers TOUT sauf zstd rend l'absence deterministe.
+  local sans="$BATS_TEST_TMPDIR/sans-zstd" d f n; mkdir -p "$sans"
+  for d in /usr/bin /bin /usr/sbin /sbin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      n="${f##*/}"
+      [[ -x "$f" && "$n" != zstd && ! -e "$sans/$n" ]] || continue
+      ln -s "$f" "$sans/$n"
+    done
+  done
+  # l'installeur telecharge, puis echoue
+  printf '#!/usr/bin/env bash\ncat > "$3" <<SH\n#!/usr/bin/env bash\nexit 1\nSH\nexit 0\n' > "$BINDIR/curl"
+  chmod 0755 "$BINDIR/curl"
+  run env PATH="$BINDIR:$sans" bash "$MOD" apply
+
+  [[ "$output" == *"zstd"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"230 Mo"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"10-packages"* ]] || { echo "$output"; return 1; }
+}
+
+@test "installeur en echec avec zstd PRESENT : le refus reste court — on n'accuse pas un innocent" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/zstd"; chmod 0755 "$BINDIR/zstd"
+  printf '#!/usr/bin/env bash\ncat > "$3" <<SH\n#!/usr/bin/env bash\nexit 1\nSH\nexit 0\n' > "$BINDIR/curl"
+  chmod 0755 "$BINDIR/curl"
+  run_apply
+
+  [[ "$output" == *"installeur officiel en échec"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"zstd"* ]] || { echo "$output"; return 1; }
+}
+
 @test "aucune SOURCE alternative ne subsiste dans le module" {
   # Epingle la FORME, pas le comportement : ce qui a produit le defaut est une seconde source
   # preferee au reseau. Qu'elle ne puisse pas revenir par une variable oubliee se verifie ici.

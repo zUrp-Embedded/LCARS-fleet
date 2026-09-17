@@ -103,6 +103,17 @@ liste() { sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^PACKAGES=\(|^\)|^\s*#
   liste | grep -qx xz-utils
 }
 
+# ⚠ SANS `zstd`, L'INSTALLEUR OFFICIEL DE CLAUDE TÉLÉCHARGE 230 Mo DE BINAIRE NU. Il prend
+# l'artefact COMPRESSÉ quand zstd est là, et le brut sinon. Mesure du 2026-09-17 sur LCARS-beta,
+# zstd absent et lien à ~540 ko/s : le téléchargement n'aboutissait jamais, et l'échec se présentait
+# comme une somme de contrôle fausse sur un fichier qui n'existe pas. AUCUN humain n'avait `claude`.
+@test "zstd est dans la liste : l'installeur de claude prend l'artefact compressé quand il est là" {
+  local claude="$BATS_TEST_DIRNAME/../../../runtime/services/human.d/40-claude-bin.sh"
+  grep -q 'claude.ai/install.sh' "$claude" \
+    || { echo "40-claude-bin ne joue plus l'installeur officiel — ce cas n'a plus de sujet"; return 1; }
+  liste | grep -qx zstd
+}
+
 @test "apply : apt qui refuse est un échec, sans sonde derrière" {
   STUB_APT_RC=100 mod apply
   [ "$status" -eq 1 ]
