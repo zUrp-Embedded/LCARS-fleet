@@ -394,15 +394,45 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # The module lists the directories it poses in the body of `prov_dirs()`, modes live in
   # deploy/system.manifest. A row names its system path through `$(prov_decor <path>)`; the
   # canonical path is its argument.
+  # `prov_dirs` is the list posed on EVERY substrate. Its body may splice helpers, and those count
+  # too — pinning the single name made this guard blind the day a root moved into one, reporting it
+  # missing while the module still posed it (2026-09-17).
+  #
+  # `prov_runtime_dirs` is the exception, and not by name alone: it returns early off `docker`, so
+  # what it lists is NOT posed everywhere. A face root cited there would be absent from a container,
+  # which is precisely the hole this guard exists to catch.
+  @conditional_zone_list "prov_runtime_dirs"
+
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
          [_, body] <- Regex.run(~r/^prov_dirs\(\) \{\n(.*?)^\}/ms, content),
-         [_ | _] = rows <-
-           Regex.scan(~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m, body) do
-      rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
+         [_ | _] = rows <- zone_rows(body, content) do
+      rows |> Enum.uniq() |> Enum.sort()
     else
       _ -> nil
     end
+  end
+
+  # The paths a body names directly, plus those of every unconditional helper it splices.
+  defp zone_rows(body, content) do
+    direct =
+      ~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, p] -> p end)
+
+    spliced =
+      ~r/^\s*(prov_[a-z_]+)\s*$/m
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, name] -> name end)
+      |> Enum.reject(&(&1 == @conditional_zone_list))
+      |> Enum.flat_map(fn name ->
+        case Regex.run(~r/^#{name}\(\) \{\n(.*?)^\}/ms, content) do
+          [_, helper] -> zone_rows(helper, content)
+          _ -> []
+        end
+      end)
+
+    direct ++ spliced
   end
 
   # nil means unreadable file/anchor, distinct from a readable empty list.
