@@ -32,7 +32,11 @@ CLI="$PROV_LINK_DIR/lcars"
 # l'installation pose, puis `LCARS_SYSADMIN_UID`). Le recomposer ici en ferait une seconde lecture.
 SIEGE=""
 if _uid="$(prov_seat_uid)"; then SIEGE="$(getent passwd "$_uid" | cut -d: -f1 || true)"; fi
-as_siege() { PROV_HUMAN="$SIEGE" as_human "$@"; }
+# ⚠ ET IL PASSE LA TABLE DE TRANSPORT (MUR 7). La porte parle a la forge : sans `FORGE_BASE_URL`,
+# elle refuse en « missing :base_url » — mesure du 2026-09-17 sur le banc 2003, ou le semis de la
+# face avait reussi et l'adoption tombait juste apres. Ce que l'installeur DECIDE et que le produit
+# lit voyage par cette table, jamais par une variable recomposee ici.
+as_siege() { PROV_HUMAN="$SIEGE" as_human env ${PROV_PRODUCT_ENV[@]+"${PROV_PRODUCT_ENV[@]}"} "$@"; }
 
 usable() {
   if [[ -z "$SIEGE" ]]; then
@@ -55,6 +59,7 @@ usable() {
 # reformulerait perdrait l'adresse exacte.
 jouer() { # jouer <verbe> — 0 conforme · 1 drift
   local out rc=0
+  prov_product_env
   out="$(as_siege "$CLI" project adopt-system --from "$(repo_root)" 2>&1)" || rc=$?
 
   case "$rc" in
@@ -79,6 +84,7 @@ check() {
   # la seule question mesurable sans écrire est « la forge le porte-t-elle ? », et c'est elle qui
   # répond — un module qui recomposerait l'adresse ici en aurait une seconde écriture.
   local out rc=0
+  prov_product_env
   out="$(as_siege "$CLI" project adopt-system --check --from "$(repo_root)" 2>&1)" || rc=$?
   [[ "$rc" -eq 0 ]] || { p_fail "mesure du projet du système impossible — $(printf '%s' "$out" | tail -n1)"; verdict_check; }
 

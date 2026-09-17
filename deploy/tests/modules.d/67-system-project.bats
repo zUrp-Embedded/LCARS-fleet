@@ -39,6 +39,8 @@ setup() {
   cat > "$CLI" <<'EOF'
 #!/usr/bin/env bash
 echo "CLI:$* (uid=$(id -u))" >> "$CALLS"
+# la table de transport : ce que l'installeur DECIDE et que le produit lit
+echo "ENV:FORGE_BASE_URL=${FORGE_BASE_URL:-<absente>}" >> "$CALLS"
 [[ "${3:-}" != "--check" ]] || { printf '%s\n' "${STUB_CHECK:-ABSENT fleet/lcars-fleet}"; exit "${STUB_CHECK_RC:-0}"; }
 printf '%s\n' "${STUB_ADOPT:-ADOPTED fleet/lcars-fleet}"
 exit "${STUB_ADOPT_RC:-0}"
@@ -64,6 +66,9 @@ mod() { run bash "$MOD" "$@"; }
   mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q "^CLI:project adopt-system --from $racine (uid=" "$CALLS" || { cat "$CALLS"; return 1; }
+
+  # la porte PARLE à la forge : sans la table de transport elle refuse en « missing :base_url »
+  grep -q "^ENV:FORGE_BASE_URL=http" "$CALLS" || { cat "$CALLS"; return 1; }
 
   # `check` MESURE : son verdict dépend de l'état, pas de ce témoin — c'est l'argv qui est tenu ici
   : > "$CALLS"
