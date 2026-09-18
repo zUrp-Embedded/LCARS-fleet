@@ -103,6 +103,33 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       refute File.regular?(Path.join(face, "FAIT"))
     end
 
+    # ⚠ « DEJA LA » VAUT POUR DU TRAVAIL, PAS POUR UN DEMI-GESTE. Mesure du 2026-09-18 sur
+    # LCARS-beta : le commit du kit avait echoue faute d'identite git, la face gardait un `.git`
+    # SANS AUCUN COMMIT, et cette porte la voyait « deja la » — a chaque passe, pour toujours, avec
+    # un refus qui parlait d'un `main` manquant. Un depot sans commit n'est le travail de personne.
+    test "une face a MOITIE batie (un .git sans aucun commit) est TERMINEE, pas contournee",
+         ctx do
+      racine = Path.join(ctx.tmp_dir, "projects")
+      face = Path.join(racine, Fleet.Layout.system_project())
+      File.mkdir_p!(face)
+      {_, 0} = System.cmd("git", ["-C", face, "init", "-q", "-b", "main"])
+      File.write!(Path.join(face, "LA-SOURCE"), "posee par la passe d'avant\n")
+
+      source = Path.join(ctx.tmp_dir, "kit")
+      File.mkdir_p!(source)
+      File.write!(Path.join(source, ".source-revision"), "cafe1234\n")
+
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: source, code_root: racine)
+
+      {journal, 0} = System.cmd("git", ["-C", face, "log", "--oneline", "-9"])
+      assert [_un_seul] = String.split(String.trim(journal), "\n")
+      assert journal =~ "cafe1234"
+      # ce que la passe d'avant avait pose est DANS le commit, pas efface
+      {suivis, 0} = System.cmd("git", ["-C", face, "ls-files"])
+      assert suivis =~ "LA-SOURCE"
+      assert branche_courante(face) == "main"
+    end
+
     test "un --from VIDE, ou absent, est un refus NOMME, et RIEN n'est publie", ctx do
       racine = Path.join(ctx.tmp_dir, "projects")
       source = Path.join(ctx.tmp_dir, "pas-un-depot")

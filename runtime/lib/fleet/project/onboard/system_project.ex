@@ -78,7 +78,8 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
     cond do
       is_nil(from) -> :ok
-      File.dir?(Path.join(code, ".git")) -> :ok
+      depot_avec_travail?(code) -> :ok
+      depot_sans_commit?(code) -> finir_commit(code, from, org, name)
       File.dir?(Path.join(from, ".git")) -> clone_code_face(from, code, org, name)
       arbre_non_vide?(from) -> commit_code_face(from, code, org, name)
       true -> {:error, {:not_adoptable, {:no_source_tree, from}}}
@@ -89,6 +90,34 @@ defmodule Fleet.Project.Onboard.SystemProject do
   # et le refus parlerait de git au lieu de parler de l'arbre qu'on lui a donne.
   defp arbre_non_vide?(from) do
     match?({:ok, [_ | _]}, File.ls(from))
+  end
+
+  # ⚠ « UN ARBRE DEJA LA N'EST JAMAIS TOUCHE » VAUT POUR DU TRAVAIL, PAS POUR UN DEMI-GESTE. Un
+  # depot qui ne porte AUCUN commit n'est le travail de personne : c'est une passe qui s'est
+  # arretee entre `git init` et `git commit`. Mesure du 2026-09-18 sur LCARS-beta, ou le commit
+  # avait echoue faute d'identite : la face gardait un `.git` vide, et cette porte la voyait
+  # « deja la » — a chaque passe, pour toujours, avec un refus qui parlait de `main` manquant.
+  defp depot_avec_travail?(code) do
+    File.dir?(Path.join(code, ".git")) and
+      match?({:ok, _}, GitOps.read(["-C", code, "rev-parse", "--verify", "--quiet", "HEAD"]))
+  end
+
+  defp depot_sans_commit?(code), do: File.dir?(Path.join(code, ".git"))
+
+  defp finir_commit(code, from, org, name) do
+    with :ok <- GitOps.run(["-C", code, "add", "-A"], auth: false),
+         :ok <-
+           GitOps.run(["-C", code, "commit", "-q", "-m", kit_message(from || code)],
+             auth: false,
+             author: Onboard.Faces.onboard_author()
+           ),
+         :ok <- ensure_main(code),
+         :ok <- point_origin(code, org, name) do
+      Logger.info("SystemProject: half-built code face at #{code} completed (first commit).")
+      :ok
+    else
+      {:error, reason} -> {:error, {:not_adoptable, {:seed_failed, code, reason}}}
+    end
   end
 
   # ⚠ UN KIT N'A PAS D'HISTOIRE, ET CE N'EST PAS UNE PANNE (⚖ user 2026-09-16, lot 7). Une machine

@@ -269,7 +269,12 @@ resource "gitea_repository_branch_protection" "tool_request" {
   # cannot commit to repo »). Le compte système n'y est pas : le runtime n'entre que par une PR.
   enable_push          = true
   push_whitelist_users = var.approvers
-  depends_on           = [gitea_repository_file.tool_request_keep]
+  # ⚠ L'APPROBATEUR DOIT AVOIR SON `write` AVANT QUE LA PROTECTION NE SOIT POSEE. Gitea evalue la
+  # whitelist A L'ECRITURE : un nom sans acces au depot est retire en silence, et le collaborateur
+  # qui arrive ENSUITE ne la repare pas — il faut un second apply pour que la liste prenne. Mesure
+  # du 2026-09-18 sur LCARS-beta : `_ops` pose, `lordzurp` collaborateur, et la protection avec
+  # « approbateurs : aucun ».
+  depends_on = [gitea_repository_file.tool_request_keep, gitea_repository_collaborator.approvers]
 
   lifecycle {
     # SANS APPROBATEUR, LA PROTECTION EST OUVERTE : une liste vide veut dire « toute review d'un
