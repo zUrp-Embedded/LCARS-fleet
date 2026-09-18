@@ -128,6 +128,47 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
+  @doc """
+  Freezes the WORKSHOP face branch in its only mirror outside Elixir.
+
+  `Fleet.Layout` declares the three face branches; the deposit door writes on the workshop one and
+  carries the name. Same rule as the toolchain branch, for the same reason: a name half of the rail
+  can retune is a rail that splits in silence. The check requires a double-quoted literal and
+  rejects reading any BRANCH from the environment. Only the listed mirror is checked.
+  """
+  @spec check_workshop_branch_single_source(String.t()) :: Support.result()
+  def check_workshop_branch_single_source(root) do
+    mirrors = ["services/catalogue-executor.py"]
+
+    {checked, skipped} =
+      Enum.split_with(mirrors, fn rel -> mirror_scope(rel, root) == :required end)
+
+    id = "layout.workshop_branch_single_source"
+
+    remediation =
+      "copy the literal from `Fleet.Layout.workshop_branch/0` into the door, and never read it " <>
+        "from the environment — the deposit lands on that branch, and a tunable name lands it " <>
+        "elsewhere without a word"
+
+    expected =
+      source_literal(
+        root,
+        "lib/fleet/layout.ex",
+        ~r/@face_branches[^\n]*"workshop"\s*=>\s*"([^"]+)"/
+      )
+
+    cond do
+      checked == [] ->
+        out_of_scope(id, "no mirror tree present", skipped)
+
+      is_nil(expected) ->
+        unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@face_branches")
+
+      true ->
+        branch_verdict(id, remediation, expected, checked, skipped, root)
+    end
+  end
+
   defp branch_freeze_gap(rel, root, expected) do
     case File.read(Path.expand(rel, root)) do
       {:ok, body} -> branch_freeze_verdict(rel, body, expected)

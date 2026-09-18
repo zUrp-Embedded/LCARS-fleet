@@ -18,6 +18,7 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     "shell.sourcers_set_strict",
     "layout.face_roots_provisioned",
     "toolchain.branch_single_source",
+    "layout.workshop_branch_single_source",
     "bats.descriptions_inert",
     "site.build_inputs",
     "layout.private_dir_single_source"

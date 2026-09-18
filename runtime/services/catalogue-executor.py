@@ -109,8 +109,14 @@ DEPOSIT_PEER = os.environ.get("LCARS_DECK_USER", "lcars-system")
 # trois faces qui sont trois BRANCHES de ce depot (`lib/fleet/layout.ex`) ; la ready room est un
 # repertoire de la face workshop. Le chemin ne porte ni login ni horodatage : le commit porte deja
 # l'auteur et la date, les repeter dans le chemin serait une seconde verite qui derive.
-WORKSHOP_BRANCH = os.environ.get("LCARS_WORKSHOP_BRANCH", "workshop")
-READY_ROOM_DIR = os.environ.get("LCARS_READY_ROOM_DIR", "ready-room")
+# ⚠ LE NOM DE LA BRANCHE EST FIGE, ET IL NE SE LIT PAS DANS L'ENVIRONNEMENT. L'autorite est
+# `Fleet.Layout.workshop_branch/0` ; cette copie est un miroir, tenu par le mur
+# `layout.workshop_branch_single_source` — meme regle que la branche d'outillage, pour la meme
+# raison : un nom que la moitie du rail peut retuner est un rail qui se fend en silence.
+WORKSHOP_BRANCH = "workshop"
+# La ready room est un repertoire de cette face, et ce service en est le seul ecrivain : le nom vit
+# ICI, une fois. Le deck ne le recopie pas — il lit le chemin que ce service lui rend.
+READY_ROOM_DIR = "ready-room"
 # ⚠ L'ORG D'UN PROJET EST LE NOM DU CATALOGUE QUI LE DECLARE, et elle est fixee a vie. Le pod ne
 # rend que le slug : c'est ici qu'on retrouve l'org, en demandant a la forge lequel des catalogues
 # INSTALLES porte ce depot. Deviner l'org serait une table de correspondance, donc une seconde
@@ -458,28 +464,37 @@ def resolve_project(slug):
     return trouves[0]
 
 
-def blob_sha(repo, branch, path):
+def blob_sha(repo, branch, dossier, nom):
     """
-    Le sha du blob DEJA en place a ce chemin, ou None.
+    Le sha du blob DEJA en place dans `dossier`, ou None.
 
-    ⚠ PAR L'ARBRE, PAS PAR LE CONTENU. `GET /contents/<chemin>` rendrait le fichier lui-meme, encode :
-    demander si un fichier de 50 Mo existe en le TELECHARGEANT est le genre de detail qui ne se voit
-    qu'en production. L'arbre ne rend que des noms et des sha.
+    ⚠ LE LISTAGE DU REPERTOIRE, NI L'ARBRE NI LE CONTENU. Trois formes existaient, deux sont des
+    pieges : `GET /contents/<fichier>` rendrait le fichier ENCODE — demander si un fichier de 50 Mo
+    existe en le telechargeant ne se voit qu'en production ; `git/trees/<branche>?recursive` compte
+    TOUTE la face, se tronque au-dela d'une page, et rendrait alors « absent » pour un fichier bien
+    la — le remplacement se transformerait en `forge_refused:422` sur une face bien remplie. Le
+    listage d'un repertoire rend des noms et des sha, sans contenu, et ne parle que de la ready room.
+
+    Un dossier absent (404) rend None : c'est un premier depot, pas une panne.
     """
     owner, _, name = repo.partition("/")
     url = (f"{FORGE_BASE_URL.rstrip('/')}/api/v1/repos/"
-           f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/git/trees/"
-           f"{urllib.parse.quote(branch, safe='')}?recursive=true&per_page=1000")
+           f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/contents/"
+           f"{urllib.parse.quote(dossier)}?ref={urllib.parse.quote(branch, safe='')}")
     req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            arbre = json.load(resp)
+            entrees = json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
         raise
-    for entree in arbre.get("tree") or []:
-        if entree.get("path") == path and entree.get("type") == "blob":
+    # ⚠ UNE LISTE, PAS UN OBJET : la meme route rend un OBJET quand le chemin est un FICHIER. Si la
+    # ready room etait un fichier, on ne saurait pas quoi remplacer — et on ne le devine pas.
+    if not isinstance(entrees, list):
+        return None
+    for entree in entrees:
+        if entree.get("name") == nom and entree.get("type") == "file":
             return entree.get("sha")
     return None
 
@@ -679,7 +694,7 @@ def serve_deposit(conn):
             # distinguer un remplacement d'un ecrasement aveugle.
             if exc.code not in (409, 422):
                 raise
-            sha = blob_sha(repo, WORKSHOP_BRANCH, path)
+            sha = blob_sha(repo, WORKSHOP_BRANCH, READY_ROOM_DIR, name)
             if not sha:
                 raise
             log(f"depot: {path} existe deja dans {repo} — {login} le remplace")
@@ -688,6 +703,12 @@ def serve_deposit(conn):
         log(f"refus depot: {exc}")
         return done("FAIL:no_authority")
     except urllib.error.HTTPError as exc:
+        # ⚠ LE DEPOT EXISTE — `resolve_project` vient de le prouver. Un 404 ICI parle donc de la
+        # BRANCHE : la face workshop n'a jamais ete poussee. La cause se nomme, sinon l'operateur
+        # lit « la forge refuse » et cherche du cote du fichier.
+        if exc.code == 404:
+            log(f"refus depot: {repo} n'a pas de branche {WORKSHOP_BRANCH}")
+            return done("FAIL:no_workshop_branch")
         log(f"refus depot: la forge refuse {repo}/{path} (HTTP {exc.code})")
         return done(f"FAIL:forge_refused:{exc.code}")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:

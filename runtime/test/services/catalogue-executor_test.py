@@ -77,6 +77,10 @@ with open(SYSTEM_TOKEN, "w") as fh:
 REPOS = set()
 FICHIERS = {}
 ECRITS = []
+# Les GET recus (pour epingler que le service NE TELECHARGE PAS le fichier qu'il remplace)
+# et les depots dont la face workshop n'a jamais ete poussee.
+LUS = []
+SANS_WORKSHOP = set()
 
 # Le faux geste PARLE, et son code de sortie est pilotable : le relais de sa sortie et la remontee
 # de son code sont deux promesses distinctes de l'executeur.
@@ -104,14 +108,24 @@ class Forge(BaseHTTPRequestHandler):
         login = self.path.rsplit("/", 1)[-1]
         ASKED.append((login, self.headers.get("Authorization")))
         chemin = self.path.split("?")[0]
-        # L'ARBRE : des noms et des sha, jamais le contenu — demander si un fichier de 50 Mo existe
-        # en le telechargeant serait exactement le defaut que ce temoin doit interdire.
-        if "/git/trees/" in chemin:
+        LUS.append(self.path)
+        # LE LISTAGE D'UN REPERTOIRE : des noms et des sha, jamais de contenu. La forge rend une
+        # LISTE pour un repertoire et un OBJET pour un fichier — le banc rend les deux formes, sinon
+        # le service pourrait confondre les deux sans que rien ne rougisse.
+        if "/contents/" in chemin:
             bouts = chemin.strip("/").split("/")
             repo = "/".join(bouts[3:5])
-            arbre = [{"path": c, "type": "blob", "sha": v}
-                     for (r, c), v in FICHIERS.items() if r == repo]
-            b = json.dumps({"tree": arbre}).encode()
+            demande = chemin.split("/contents/", 1)[1]
+            if repo in SANS_WORKSHOP:
+                self.send_response(404); self.send_header("Content-Length", "0")
+                self.end_headers(); return
+            dedans = [{"name": c.split("/")[-1], "type": "file", "sha": v}
+                      for (r, c), v in FICHIERS.items()
+                      if r == repo and c.startswith(demande.rstrip("/") + "/")]
+            if not dedans and (repo, demande) not in FICHIERS:
+                self.send_response(404); self.send_header("Content-Length", "0")
+                self.end_headers(); return
+            b = json.dumps(dedans).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(b)))
             self.end_headers(); self.wfile.write(b); return
         # « CE DEPOT EXISTE-T-IL ? » — la resolution de l'org pose cette question a chaque catalogue.
@@ -179,7 +193,7 @@ class Forge(BaseHTTPRequestHandler):
                        "longueur_annoncee": length, "longueur_recue": len(brut)})
         if (self.headers.get("Authorization") or "").removeprefix("token ").strip() != SYSTEM_VALUE:
             return self._rendre(401)
-        if repo not in REPOS:
+        if repo not in REPOS or repo in SANS_WORKSHOP:
             return self._rendre(404)
         deja = FICHIERS.get((repo, chemin))
         if methode == "POST" and deja:
@@ -764,6 +778,38 @@ check(_v.startswith("OK:"), "depot: un nom deja pris est remplace — %s" % _v[:
 check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
       "depot: creation tentee, puis remplacement (%s)" % [e["methode"] for e in ECRITS])
 check(ECRITS[-1]["corps"].get("sha"), "depot: le remplacement porte le sha du blob en place")
+
+# ─── 10 bis (suite). LE REMPLACEMENT TIENT SUR UNE READY ROOM BIEN REMPLIE ──────────────────────
+#
+# ⚠ LE PIEGE QUE CE CAS FERME : chercher le sha du blob dans `git/trees/<branche>?recursive` compte
+# TOUTE la face et se tronque au-dela d'une page. Au-dela, le sha revenait « absent », le 422 du
+# depart etait relance, et l'operateur lisait `forge_refused:422` pour un fichier bien la. Le
+# listage du REPERTOIRE ne parle que de la ready room, et ne se tronque pas sur la taille de la face.
+for _i in range(1200):
+    FICHIERS[("reverse/samyang-reverse", "docs/note-%04d.md" % _i)] = "blob-%04d" % _i
+ECRITS.clear()
+LUS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"firmware v3")
+check(_v.startswith("OK:"),
+      "depot: le remplacement tient quand la face porte 1200 fichiers de plus — %s" % _v[:40])
+check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: et c'est bien un remplacement (%s)" % [e["methode"] for e in ECRITS])
+# ⚠ ET LE FICHIER N'EST JAMAIS TELECHARGE POUR SAVOIR S'IL EXISTE : on liste le repertoire, on ne
+# demande pas le blob. Un `GET /contents/ready-room/firmware.bin` ici rendrait 50 Mo en base64.
+check(not [u for u in LUS if "/contents/ready-room/firmware.bin" in u],
+      "depot: le sha vient du LISTAGE, jamais du contenu du fichier (%s)"
+      % [u for u in LUS if "/contents/" in u][:2])
+
+# ─── 10 bis (fin). UNE FACE WORKSHOP JAMAIS POUSSEE SE NOMME ────────────────────────────────────
+# Le depot existe — la resolution vient de le prouver. Un 404 a l'ecriture parle donc de la BRANCHE,
+# et le dire evite d'envoyer l'operateur chercher du cote du fichier.
+REPOS.add("reverse/sans-face")
+SANS_WORKSHOP.add("reverse/sans-face")
+_v = depose("alice", "sans-face")
+check(_v == "FAIL:no_workshop_branch",
+      "depot: un projet sans face workshop se nomme, au lieu de « la forge refuse » — %s" % _v)
+SANS_WORKSHOP.discard("reverse/sans-face")
+REPOS.discard("reverse/sans-face")
 
 # ─── 10 ter. LA ZONE DE TRANSIT EST UNE FRONTIERE ───────────────────────────────────────────────
 # ⚠ SANS CETTE GARDE, LA PORTE COMMITERAIT CE QU'ON LUI DESIGNE : elle tourne avec l'autorite du

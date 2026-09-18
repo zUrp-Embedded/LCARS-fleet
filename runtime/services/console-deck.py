@@ -140,9 +140,10 @@ DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 
 # Le temps d'un depot, pas celui d'une question : la porte pousse le fichier vers la forge pendant
 # que ce delai court.
 DEPOSIT_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_TIMEOUT", "600"))
-# Affiche, jamais decide : la porte lit les memes valeurs et tranche sur ce qu'elle lit, elle.
-WORKSHOP_BRANCH = os.environ.get("LCARS_WORKSHOP_BRANCH", "workshop")
-READY_ROOM_DIR = os.environ.get("LCARS_READY_ROOM_DIR", "ready-room")
+# ⚠ NI LA BRANCHE NI LE REPERTOIRE NE SONT RECOPIES ICI. Ce serveur ne decide pas de la
+# destination : il relaie, et la porte lui REND le depot et le chemin qu'elle a ecrits. Une copie de
+# plus du nom de la branche serait un miroir que rien ne tient — l'autorite est
+# `Fleet.Layout.workshop_branch/0`, et le seul miroir est la porte, tenu par un mur.
 # Les causes que la porte rend sont des JETONS ; les phrases sont ici, parce que c'est cette page
 # que l'operateur regarde. Une cause inconnue se montre telle quelle plutot que d'etre lissee en
 # « erreur » : un jeton qu'on n'a pas prevu se cherche dans les logs, une phrase vague ne se cherche
@@ -160,6 +161,7 @@ DEPOSIT_CAUSES = {
     "too_big": "fichier trop gros pour la boite de depot",
     "empty": "fichier vide",
     "unknown_project": "aucun catalogue installe ne porte ce projet sur la forge",
+    "no_workshop_branch": "ce projet n'a pas encore de face workshop sur la forge — rien n'est depose",
     "ambiguous_project": "ce nom de projet existe dans plusieurs catalogues — la porte ne choisit pas",
     "no_authority": "ce conteneur n'a pas de jeton utilisable pour deposer",
     "forge_unreachable": "la forge n'a pas repondu — rien n'est depose",
@@ -708,8 +710,7 @@ def state(only=None, admin=False, people=None):
     # LE PROJET, LUI, NE VOYAGE PAS ICI : la page le tire des pods qu'elle recoit deja, comme elle
     # en tire les groupes de sa barre laterale. Une seconde liste serait une seconde verite.
     return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin),
-            "deposit": {"max_bytes": DEPOSIT_MAX_BYTES, "branch": WORKSHOP_BRANCH,
-                        "dir": READY_ROOM_DIR}}
+            "deposit": {"max_bytes": DEPOSIT_MAX_BYTES}}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -1287,8 +1288,9 @@ function depositPanel(s) {
     wrap.appendChild(n);
     return wrap;
   }
-  n.innerHTML = "Le fichier part dans le dépôt du projet, branche <b>" + (cfg.branch || '?') +
-    "</b>, sous <b>" + (cfg.dir || '?') + "/</b>, avec <b>toi comme auteur du commit</b>. " +
+  n.innerHTML = "Le fichier part dans le dépôt du projet, <b>dans la ready room de sa face " +
+    "workshop</b>, avec <b>toi comme auteur du commit</b>. Le chemin exact est celui que la porte " +
+    "renvoie, et il s'affiche ici après le dépôt. " +
     "La poussée reste celle du compte système : ce conteneur n'a pas de jeton personnel. " +
     "C'est une <b>trace</b> de qui a déposé quoi, vérifiable dans l'historique.<br><br>" +
     "Taille maximale : <b>" + Math.floor(max / 1000000) + " Mo</b>. " +
