@@ -1017,4 +1017,74 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
     acc
   end
+
+  # ⚠ TROIS FACES, UN SEUL DEPOT. Elles sont trois branches ORPHELINES : aucun contenu ne traverse,
+  # mais un refspec LARGE rapatrie les OBJETS des deux autres au premier fetch nu. Une zone de
+  # depot sur workshop ferait alors porter chaque fichier par la face que les pods clonent a chaque
+  # tache et qui ne l'affichera jamais. Le defaut est silencieux : rien n'echoue, tout grossit.
+  @doc """
+  Checks the face builders of `Onboard.Faces` keep each face on ONE branch.
+
+  Reads that single file's AST: every `clone` argv carries `--single-branch`, `init_face` tracks
+  one branch (`remote add -t`), and `set_origin` can narrow `remote.origin.fetch`. It does not
+  follow callers and does not prove a branch is passed; a face built elsewhere escapes it.
+  """
+  @spec check_faces_single_branch(String.t()) :: Support.result()
+  def check_faces_single_branch(root) do
+    rel = "lib/fleet/project/onboard/faces.ex"
+    id = "project.faces_single_branch"
+
+    if File.regular?(Path.join(root, rel)) do
+      ast = Support.quoted!(root, rel)
+      bodies = ast |> collect(&face_def_body/1) |> Map.new()
+
+      Support.measured_verdict(id, %{
+        remediation:
+          "keep each face clone on its own branch: `--single-branch` on the clone, `-t <branch>` " <>
+            "on the remote add, and a narrowed `remote.origin.fetch` in set_origin — a wide " <>
+            "refspec drags the other two faces' objects into a face that never shows them",
+        findings:
+          (ast
+           |> collect(&wide_clone/1)
+           |> Enum.uniq()
+           |> Enum.sort()
+           |> Enum.map(&"#{rel}: #{&1}")) ++
+            face_token(rel, bodies, :init_face, ~s("-t"), "track a single branch (remote add -t)") ++
+            face_token(rel, bodies, :set_origin, "remote.origin.fetch", "narrow the face refspec"),
+        note: "#{map_size(bodies)} function(s) read in #{rel}"
+      })
+    else
+      Support.broken_result(id, rel)
+    end
+  end
+
+  defp wide_clone(list) when is_list(list) do
+    args = Enum.filter(list, &is_binary/1)
+
+    if List.first(args) == "clone" and "--single-branch" not in args,
+      do: "git " <> Enum.join(args, " ") <> " — WIDE refspec",
+      else: nil
+  end
+
+  defp wide_clone(_), do: nil
+
+  defp face_def_body({kind, _, [head, [do: body]]}) when kind in [:def, :defp] do
+    case def_name(head) do
+      nil -> nil
+      name -> {name, Macro.to_string(body)}
+    end
+  end
+
+  defp face_def_body(_), do: nil
+
+  # An absent function is a BROKEN measure, never a silent pass: the rule would stop applying.
+  defp face_token(rel, bodies, name, token, what) do
+    case Map.fetch(bodies, name) do
+      {:ok, body} ->
+        if String.contains?(body, token), do: [], else: ["#{rel}: #{name} does not #{what}"]
+
+      :error ->
+        ["#{rel}: #{name} NOT FOUND — this rule measures nothing"]
+    end
+  end
 end

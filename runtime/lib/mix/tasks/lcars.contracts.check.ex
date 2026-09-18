@@ -96,6 +96,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Catalogue.check_sp_adresser_un_agent(root),
         Artifact.check_sourcers_set_strict(root),
         Catalogue.check_face_roots_provisioned(root),
+        Runtime.check_faces_single_branch(root),
         SingleSource.check_toolchain_branch_single_source(root),
         SingleSource.check_catalogue_roots_single_source(root),
         SingleSource.check_private_dir_single_source(root),

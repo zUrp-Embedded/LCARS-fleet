@@ -98,7 +98,8 @@ defmodule Fleet.Project.Onboard.Adopt do
   defp finish_adopt(full_name, url, dirs, states, name, opts) do
     with :ok <- WriteSpacing.gap(opts),
          :ok <- Repo.seed_protocol_labels(full_name, opts),
-         :ok <- Faces.set_origin(dirs.code, url),
+         # la branche RESSERRE le refspec : une face ne porte que la sienne (cf. `Faces.clone_main`)
+         :ok <- Faces.set_origin(dirs.code, url, Layout.code_branch()),
          :ok <- Onboard.ensure_declaration(dirs.code, full_name, opts),
          :ok <-
            Onboard.ensure_ci_workflows(
@@ -149,7 +150,7 @@ defmodule Fleet.Project.Onboard.Adopt do
   end
 
   defp adopt_face(:present_git, url, dir, branch, _template, _name, _opts) do
-    with :ok <- Faces.set_origin(dir, url) do
+    with :ok <- Faces.set_origin(dir, url, branch) do
       Faces.publish_face(dir, branch)
     end
   end

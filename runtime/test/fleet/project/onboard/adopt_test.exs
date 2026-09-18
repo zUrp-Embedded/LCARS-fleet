@@ -137,6 +137,30 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     assert_received {:arch_ensured, "fleet/garage"}
   end
 
+  test "after adopt, each face fetches ITS OWN branch and no other", %{tmp_dir: tmp} do
+    o = opts(tmp)
+    build_local_main(o, "garage")
+
+    assert {:ok, _} = ProjectOnboard.adopt_project("garage", o)
+
+    # Les trois faces sont des branches ORPHELINES d'un seul depot : le graphe les separe, mais
+    # un refspec large ramenerait quand meme les OBJETS des deux autres au premier fetch nu.
+    for {root, branch} <- [
+          {o[:code_root], "main"},
+          {o[:ops_root], "ops"},
+          {o[:workshop_root], "workshop"}
+        ] do
+      dir = Path.join(root, "garage")
+
+      {out, 0} =
+        System.cmd("git", ["-C", dir, "config", "--get-all", "remote.origin.fetch"],
+          stderr_to_stdout: true
+        )
+
+      assert String.trim(out) == "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"
+    end
+  end
+
   test "a PRESENT ops git dir is pushed AS-IS (no scaffold over the user's work)",
        %{tmp_dir: tmp} do
     o = opts(tmp)

@@ -57,6 +57,93 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # Les trois faces sont trois branches ORPHELINES d'un seul depot : rien ne traverse par le graphe,
+  # mais un refspec LARGE rapatrie les objets des deux autres au premier fetch nu. Le defaut ne
+  # casse rien — il fait juste grossir la face que les pods clonent. D'ou un mur.
+  describe "project.faces_single_branch — une face ne ramene QUE sa branche" do
+    defp faces_root!(nom, corps) do
+      root = Fleet.TestEnv.tmp_path("faces-#{nom}")
+      dir = Path.join([root, "lib", "fleet", "project", "onboard"])
+      File.mkdir_p!(dir)
+      if corps, do: File.write!(Path.join(dir, "faces.ex"), corps)
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp faces_source(clone_args) do
+      """
+      defmodule Fleet.Project.Onboard.Faces do
+        def clone_main(url, dir), do: GitOps.run(#{clone_args}, auth: true)
+
+        def init_face(dir, url, branch) do
+          GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
+        end
+
+        def set_origin(dir, url, branch \\\\ nil) do
+          GitOps.run(["-C", dir, "config", "remote.origin.fetch", refspec(branch)], auth: false)
+        end
+      end
+      """
+    end
+
+    test "les trois gardes en place → pass" do
+      root =
+        faces_root!(
+          "ok",
+          faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        )
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "un clone SANS --single-branch → fail qui nomme l'argv" do
+      root = faces_root!("large", faces_source(~s(["clone", "--branch", "main", url, dir])))
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "WIDE refspec"))
+    end
+
+    test "init_face qui ne suit plus une seule branche → fail nomme" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace(~s("add", "-t", branch, "origin"), ~s("add", "origin"))
+
+      root = faces_root!("remote-large", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "init_face does not track a single branch"))
+    end
+
+    test "la fonction disparue → INSTRUMENT BROKEN, jamais un vert par absence" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace("def set_origin", "def point_origin")
+
+      root = faces_root!("disparue", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "set_origin NOT FOUND"))
+    end
+
+    test "source ABSENTE → INSTRUMENT BROKEN, pas un pass" do
+      root = faces_root!("vide", nil)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+  end
+
   # Use a directory as the unreadable target (:eisdir): unlike chmod 000, it also fails as root.
   describe "residue_check — un mur ne rend pas compte d'un fichier qu'il n'a pas lu" do
     setup do

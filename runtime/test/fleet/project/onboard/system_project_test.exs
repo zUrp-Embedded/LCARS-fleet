@@ -12,7 +12,10 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
     3. tout autre refus REMONTE, avec sa cause : une forge illisible n'est pas une forge qui ne
        porte rien, et un arbre local qui n'est pas publiable se dit au lieu d'etre invente.
   """
-  use ExUnit.Case, async: true
+  # ⚠ SERIAL : un temoin d'ici pose `:credentials_forge_auth` dans l'env de l'APPLICATION, qui est
+  # global. En async, tout autre temoin qui joue un git `auth: true` pendant ce temps recoit
+  # `{:error, :forge_auth_malformed}` et rougit ailleurs, sans rapport avec ce qu'il mesure.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

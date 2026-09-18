@@ -73,9 +73,31 @@ defmodule Fleet.Project.Onboard.Faces do
     end
   end
 
+  # ⚠ AVEC UNE BRANCHE, LE REFSPEC EST RESSERRE : une FACE ne porte que la sienne (cf. le bloc de
+  # `clone_main`). Sans elle — le cas d'un arbre de travail d'import, qui pousse trois branches
+  # depuis un seul clone — le refspec reste celui que git a pose.
   @doc false
-  @spec set_origin(String.t(), String.t()) :: :ok | {:error, term()}
-  def set_origin(dir, url) do
+  @spec set_origin(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def set_origin(dir, url, branch \\ nil) do
+    with :ok <- put_origin(dir, url) do
+      if branch do
+        GitOps.run(
+          [
+            "-C",
+            dir,
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"
+          ],
+          auth: false
+        )
+      else
+        :ok
+      end
+    end
+  end
+
+  defp put_origin(dir, url) do
     case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
       {:ok, _present} -> GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false)
       {:error, _} -> GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
@@ -170,11 +192,28 @@ defmodule Fleet.Project.Onboard.Faces do
     :ok
   end
 
+  # ⚠ `--single-branch` N'EST PAS UNE OPTIMISATION, C'EST CE QUI SEPARE LES TROIS FACES.
+  #
+  # Un projet a UN depot et trois faces, qui sont trois branches ORPHELINES de ce depot (aucun
+  # ancetre commun : `merge-base` ne rend rien, mesure du 2026-09-18 sur le banc 2004). Mais chaque
+  # face est un clone a part, et `--branch <face>` choisit seulement ce qui SORT dans le repertoire
+  # de travail : sans `--single-branch`, git configure `+refs/heads/*:refs/remotes/origin/*` et
+  # RAPATRIE LES OBJETS DE TOUTES LES BRANCHES.
+  #
+  # Mesure, meme jour, meme banc : 20 Mo pousses sur `workshop`, puis un `git fetch origin` nu dans
+  # la face CODE — elle passe de 456 KiB a 19,54 MiB, et le blob de workshop est dans sa base. Une
+  # zone de depot ou un humain verse des firmwares fait donc porter trois fois chaque fichier, dont
+  # une par la face que les pods clonent a chaque tache et qui ne l'affichera jamais.
+  #
+  # ⚠ ET CA NE COUPE RIEN : ce que la face code doit voir en plus — les branches de travail des pods
+  # — est cherche par un refspec EXPLICITE (`worktree_sync`, `refs/heads/lcars/issue-<n>-*:…`), et
+  # un refspec en ligne de commande l'emporte sur celui de la config. Sur les dix fetchs du runtime,
+  # huit nomment deja ce qu'ils veulent ; les deux `fetch origin` nus ne veulent que leur face.
   @doc false
   @spec clone_main(String.t(), String.t()) :: :ok | {:error, term()}
   def clone_main(url, proj_dir) do
     File.mkdir_p!(Path.dirname(proj_dir))
-    GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
+    GitOps.run(["clone", "--single-branch", "--branch", "main", url, proj_dir], auth: true)
   end
 
   @doc false
@@ -188,8 +227,11 @@ defmodule Fleet.Project.Onboard.Faces do
   def init_face(dir, url, branch) do
     File.mkdir_p!(Path.dirname(dir))
 
+    # `-t <branche>` : le pendant de `--single-branch` pour une face PUBLIEE et non clonee. Sans
+    # lui, `remote add` pose le refspec large, et le premier fetch rapatrie les deux autres faces —
+    # meme defaut, autre porte.
     with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false) do
-      GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
+      GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
     end
   end
 
@@ -208,7 +250,9 @@ defmodule Fleet.Project.Onboard.Faces do
       {:ok, true} ->
         File.mkdir_p!(Path.dirname(dir))
 
-        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true),
+        # `--single-branch` : cf. le bloc de `clone_main` — une face ne porte QUE sa branche.
+        with :ok <-
+               GitOps.run(["clone", "--single-branch", "--branch", branch, url, dir], auth: true),
              :ok <- chmod_face(dir, mode) do
           {:ok, :cloned}
         end
