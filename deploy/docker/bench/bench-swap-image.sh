@@ -6,7 +6,7 @@
 #
 # USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--forge-project <base>] [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
 #                             [--port-forge N] [--port-deck N] [--port-ssh N]
-#                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human ensign]
+#                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human captain]
 # EXIT  : 0 conteneur remplacé · 1 arguments, image inconnue du daemon, docker muet, forge du banc absente,
 #         ou projet qui n'est pas ce banc · 3 le conteneur ne monte pas · 5 credentials · 6 aucun jeton
 #         de rôle après la relance

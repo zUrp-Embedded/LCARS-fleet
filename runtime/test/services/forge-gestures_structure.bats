@@ -207,7 +207,7 @@ install() { run bash -c "source '$SCRIPT'; cmd_install '$1'" < /dev/null; }
 
   # desarme : un humain de demonstration d'un AUTRE nom passe, sur la meme forge vierge
   : > "$CALLS"
-  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_BUILTIN_HUMAN=ensign apply
+  STUB_ORG_ABSENTE=1 STUB_SANS_HOMONYME=1 LCARS_BUILTIN_HUMAN=captain apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q "^TOFU:recette apply .* -var org=lcars " "$CALLS"
 }
@@ -531,14 +531,14 @@ etat_org() { # etat_org <dossier du play> <nom d org>
 # ⚖ user 2026-09-18 : « une autre table tenue a la main va diverger, c'est perdu d'avance ».
 
 @test "apply : les site-admins ABSENTS de la team y entrent — la composition se derive, elle ne se declare pas" {
-  STUB_ADMINS='[{"login":"le-siege","is_admin":true,"active":true},{"login":"ensign","is_admin":true,"active":true}]' \
+  STUB_ADMINS='[{"login":"le-siege","is_admin":true,"active":true},{"login":"captain","is_admin":true,"active":true}]' \
     STUB_MEMBRES='[]' apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 
   grep -qx "CURL:PUT /api/v1/teams/9/members/le-siege" "$CALLS" || { grep '^CURL:' "$CALLS"; return 1; }
-  grep -qx "CURL:PUT /api/v1/teams/9/members/ensign" "$CALLS"
+  grep -qx "CURL:PUT /api/v1/teams/9/members/captain" "$CALLS"
   [[ "$output" == *"admins += le-siege (site-admin de la forge)"* ]]
-  [[ "$output" == *"admins += ensign (site-admin de la forge)"* ]]
+  [[ "$output" == *"admins += captain (site-admin de la forge)"* ]]
 }
 
 @test "apply : un membre qui n'est PLUS site-admin en SORT — sinon il approuverait encore" {

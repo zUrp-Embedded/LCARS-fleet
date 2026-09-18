@@ -55,7 +55,7 @@
 #       --docker-host URL    le daemon docker que la mesure sans privilège a vu répondre.
 #       --linux-dedie   la déclaration LCARS_ALLOW_ANY_HOST=1.
 #       --forge URL, --forge-publique URL   FORGE_BASE_URL et FORGE_PUBLIC_URL.
-#       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut ensign) ;
+#       --humain-demo NOM    LCARS_BUILTIN_HUMAN, l'humain de démonstration du banc (défaut captain) ;
 #                       refusé sans --bench.
 #       --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1 : un mot de passe neuf pour l'administrateur
 #                       de la forge du poste.

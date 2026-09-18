@@ -7,14 +7,14 @@
 # USAGE : bench-up.sh [--forge-project <base>] [--port-forge N] [--port-deck N] [--port-ssh N]
 #                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>] [--image lcars-fleet:local]
 #                     [--creds-from ~/.claude/.credentials.json] [--no-creds]
-#                     [--runner-labels <liste>] [--no-runner] [--human ensign]
+#                     [--runner-labels <liste>] [--no-runner] [--human captain]
 #
 #   Sans --forge-project ni option de port, la base et les ports sont les défauts de
 #   deploy/installer-constants.env. Le banc monte une forge Gitea jetable (projet <base>-forge),
 #   crée le conteneur (<base>-fleet) attaché à son réseau, y pose la structure de la forge,
 #   l'humain de démonstration et ses jetons, sème le dépôt de la source à la révision de l'image,
 #   enrôle un runner CI (<base>-runner) et démarre la fleet. Les mots de passe sont ceux du contrat
-#   de banc : admiral / toto123456, ensign / toto32toto32 — publics, jetables. L'humain de
+#   de banc : admiral / toto123456, captain / toto32toto32 — publics, jetables. L'humain de
 #   démonstration est site-admin de la forge : ce banc ne mesure pas ce que la team humans autorise
 #   à un compte ordinaire. Un projet de ce nom qui ne porte pas le marqueur du banc
 #   (label lcars.bench=<base>) est refusé avant tout.

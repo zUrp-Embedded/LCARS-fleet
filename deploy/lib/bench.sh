@@ -33,7 +33,7 @@ IMAGE=""
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
 # le nom est une CONSTANTE de l'installeur, pas un choix du banc : les deux rails le lisent au meme
-# endroit, et il vaut « ensign » parce qu'il ne peut pas valoir « lcars » — celui-la nomme l'org
+# endroit, et il vaut « captain » parce qu'il ne peut pas valoir « lcars » — celui-la nomme l'org
 # systeme, et sur Gitea une org et un compte partagent l'espace de noms
 HUMAN="$PROV_BENCH_HUMAN_DEFAULT"
 DOCKER_BIN="${DOCKER_BIN:-docker}"

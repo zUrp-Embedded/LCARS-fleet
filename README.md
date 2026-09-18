@@ -102,11 +102,11 @@ sur le verdict du banc et ses points d'entrée (extrait) :
 
 ```
 [bench-up] banc PRÊT
-[bench-up]   forge     : http://192.168.1.42:21000   (admiral / toto123456 · ensign / toto32toto32)
+[bench-up]   forge     : http://192.168.1.42:21000   (admiral / toto123456 · captain / toto32toto32)
 [bench-up]   deck      : http://192.168.1.42:20999
-[bench-up]   conteneur : lcars-fleet-lcars-1   ssh ensign@192.168.1.42 -p 2222
+[bench-up]   conteneur : lcars-fleet-lcars-1   ssh captain@192.168.1.42 -p 2222
 [bench-up]   runner    : enregistré — labels : shell:…,dood:…,ubuntu-latest:…
-[bench-up]   fleet     : démarrée sous ensign
+[bench-up]   fleet     : démarrée sous captain
 [bench-up]   détruire  : bench-down.sh --project lcars --yes
 ```
 
@@ -151,7 +151,7 @@ Avec `--bench`, deux comptes existent, et ils ne sont pas interchangeables.
 
 | compte | mot de passe | ce que c'est |
 |---|---|---|
-| `ensign` | `toto32toto32` | l'humain de la flotte : le compte d'usage. Il possède les projets, parle aux agents, a une console sur le tableau de bord |
+| `captain` | `toto32toto32` | l'humain de la flotte : le compte d'usage. Il possède les projets, parle aux agents, a une console sur le tableau de bord |
 | `admiral` | `toto123456` | l'administrateur système : il possède le conteneur (sudo) et a fondé la forge. Démarrer une flotte sous lui est refusé par construction |
 
 Dans le système (`--workstation --bench`), l'administrateur de la forge est le compte qui a lancé
@@ -390,11 +390,11 @@ ends on the bench verdict and its entry points (excerpt):
 
 ```
 [bench-up] banc PRÊT
-[bench-up]   forge     : http://192.168.1.42:21000   (admiral / toto123456 · ensign / toto32toto32)
+[bench-up]   forge     : http://192.168.1.42:21000   (admiral / toto123456 · captain / toto32toto32)
 [bench-up]   deck      : http://192.168.1.42:20999
-[bench-up]   conteneur : lcars-fleet-lcars-1   ssh ensign@192.168.1.42 -p 2222
+[bench-up]   conteneur : lcars-fleet-lcars-1   ssh captain@192.168.1.42 -p 2222
 [bench-up]   runner    : enregistré — labels : shell:…,dood:…,ubuntu-latest:…
-[bench-up]   fleet     : démarrée sous ensign
+[bench-up]   fleet     : démarrée sous captain
 [bench-up]   détruire  : bench-down.sh --project lcars --yes
 ```
 
@@ -440,7 +440,7 @@ With `--bench`, two accounts exist, and they are not interchangeable.
 
 | account | password | what it is |
 |---|---|---|
-| `ensign` | `toto32toto32` | the fleet's human: the everyday account. It owns the projects, talks to the agents, has a console on the dashboard |
+| `captain` | `toto32toto32` | the fleet's human: the everyday account. It owns the projects, talks to the agents, has a console on the dashboard |
 | `admiral` | `toto123456` | the system administrator: it owns the container (sudo) and founded the forge. Starting a fleet under it is refused by construction |
 
 Into the system (`--workstation --bench`), the forge administrator is the account that ran the

@@ -767,10 +767,10 @@ EOF
   [ "$status" -ne 1 ] || { echo "$output"; return 1; }
 
   # desarme : tout autre nom passe, et le module joue
-  printf '%s\n' '# SOURCE: journal' 'params        PROV_BUILTIN_HUMAN=ensign' > "$JOURNAL"
+  printf '%s\n' '# SOURCE: journal' 'params        PROV_BUILTIN_HUMAN=captain' > "$JOURNAL"
   run env -u LCARS_BUILTIN_HUMAN "$SANDBOX/provision" apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  grep -qx "joue=ensign" "$RUN_LOG" || { cat "$RUN_LOG"; return 1; }
+  grep -qx "joue=captain" "$RUN_LOG" || { cat "$RUN_LOG"; return 1; }
 }
 
 @test "la ligne params ne retient que les choix hors défaut : absente, posée, relue, retirée au défaut" {

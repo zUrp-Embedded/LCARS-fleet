@@ -1209,9 +1209,9 @@ canal() { # canal <code bash> — la lib sourcée, verdicts à zéro, sous le d�
 
 @test "humain de démonstration : LCARS_BUILTIN_HUMAN gagne sur celui du journal" {
   # le nom n'est pas « lcars » : ce nom est celui de l'org système, et la lib le refuse au sourcing
-  PROV_BUILTIN_HUMAN=ensign module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
-  [ "$output" = "[ensign] PROV_BUILTIN_HUMAN=ensign" ]
-  LCARS_BUILTIN_HUMAN=zoe PROV_BUILTIN_HUMAN=ensign module_sh 'printf "[%s]" "$PROV_BUILTIN_HUMAN"'
+  PROV_BUILTIN_HUMAN=captain module_sh 'printf "[%s] " "$PROV_BUILTIN_HUMAN"; prov_params_line'
+  [ "$output" = "[captain] PROV_BUILTIN_HUMAN=captain" ]
+  LCARS_BUILTIN_HUMAN=zoe PROV_BUILTIN_HUMAN=captain module_sh 'printf "[%s]" "$PROV_BUILTIN_HUMAN"'
   [ "$output" = "[zoe]" ]
 }
 

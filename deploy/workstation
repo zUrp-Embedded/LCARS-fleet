@@ -27,7 +27,7 @@
 #   --docker-host URL    DOCKER_HOST, le daemon que la mesure sans privilège a vu répondre
 #   --linux-dedie        LCARS_ALLOW_ANY_HOST=1
 #   --forge URL          FORGE_BASE_URL        --forge-publique URL   FORGE_PUBLIC_URL
-#   --humain-demo NOM    LCARS_BUILTIN_HUMAN (défaut ensign sous --bench) ; refusé sans --bench, comme une passe sans
+#   --humain-demo NOM    LCARS_BUILTIN_HUMAN (défaut captain sous --bench) ; refusé sans --bench, comme une passe sans
 #                        --bench sur une machine dont le journal retient l'humain d'un banc : la structure de la
 #                        forge rend cet humain site-admin
 #   --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1
