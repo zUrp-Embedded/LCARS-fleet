@@ -33,6 +33,7 @@ prov_runtime_dirs() {
     "/run/lcars/console 0711 root:root" \
     "/run/lcars/console/$h 2710 $h:$PROV_CONSOLE_GROUP" \
     "/run/lcars/authority 0750 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
+    "/run/lcars/deposit 0750 $PROV_AUTHORITY_USER:${PROV_AUTHORITY_GROUP:-$PROV_AUTHORITY_USER}" \
     "/run/lcars/privileged 0750 root:$PROV_FLEET_GROUP" \
     "/run/lcars/toolchain 2775 root:$PROV_FLEET_GROUP"
 }

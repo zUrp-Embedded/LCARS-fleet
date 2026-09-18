@@ -199,6 +199,7 @@ layout() {
   ensure_dir /run/lcars                         0755 root:root || true
   ensure_dir /run/lcars/toolchain               2775 "root:$LCARS_FLEET_GROUP" || true
   ensure_dir /run/lcars/authority               0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
+  ensure_dir /run/lcars/deposit                 0750 "$LCARS_AUTHORITY_USER:${LCARS_AUTHORITY_GROUP:-$LCARS_AUTHORITY_USER}" || true
   ensure_dir /run/lcars/privileged              0750 "root:$LCARS_FLEET_GROUP" || true
   ensure_dir /run/lock/lcars                    0700 root:root || true
   store

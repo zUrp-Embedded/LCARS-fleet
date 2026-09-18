@@ -249,8 +249,18 @@ ports_of() {
 }
 
 @test "the deck gains the console group and NOT fleet" {
-  grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
+  # DEUX GROUPES, ET LE SECOND EST VENU AVEC LA PORTE DE DEPOT : le deck relaie un fichier a la
+  # socket que le service d'autorite ouvre sur SON groupe. Ce qui est epingle n'est pas le nombre,
+  # c'est la LISTE — elle se compose de variables, et `fleet` n'y entre jamais : il porte la lecture
+  # de l'install et les jetons de role.
+  grep -q -- '--groups "$GROUPES"' "$LANDING"
+  grep -q 'GROUPES="$CONSOLE_GROUP"' "$LANDING"
+  grep -q 'GROUPES="$CONSOLE_GROUP,$DEPOSIT_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
+  refute grep -qE 'GROUPES=.*fleet' "$LANDING"
+  # ⚠ ET LE SECOND GROUPE NE TUE PAS LE DECK QUAND IL MANQUE : sans console le deck n'a plus de
+  # metier, sans porte de depot il perd un onglet. Le premier `getent` sort, le second parle.
+  grep -qE 'getent group "\$DEPOSIT_GROUP"' "$LANDING"
   grep -E '^[^#]*setpriv' "$LANDING" | refute_out '--init-groups'
 }
 

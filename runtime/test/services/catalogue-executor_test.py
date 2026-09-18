@@ -61,8 +61,14 @@ TOKEN = os.path.join(WORK, "master.token")
 GESTURES = os.path.join(WORK, "gestures.sh")
 
 TOKEN_VALUE = "banc-master-token"
+# Le jeton du compte SYSTEME est distinct du master : le service les lit dans deux fichiers, et un
+# depot ecrit avec le master passerait inapercu si le banc n'en avait qu'un.
+SYSTEM_VALUE = "banc-system-token"
 with open(TOKEN, "w") as fh:
     fh.write(TOKEN_VALUE + "\n")
+SYSTEM_TOKEN = os.path.join(WORK, "system.token")
+with open(SYSTEM_TOKEN, "w") as fh:
+    fh.write(SYSTEM_VALUE + "\n")
 
 # Le faux geste PARLE, et son code de sortie est pilotable : le relais de sa sortie et la remontee
 # de son code sont deux promesses distinctes de l'executeur.
@@ -80,6 +86,11 @@ os.chmod(GESTURES, 0o755)
 ADMINS = set()
 WORKERS = set()
 ASKED = []
+# La boite de depot : ce que la forge a recu, et un interrupteur pour jouer « depot absent ».
+POSTED = []
+CREES = []
+REPO_ABSENT = [False]
+ORG_ABSENTE = [False]
 
 
 class Forge(BaseHTTPRequestHandler):
@@ -88,6 +99,10 @@ class Forge(BaseHTTPRequestHandler):
     def do_GET(self):
         login = self.path.rsplit("/", 1)[-1]
         ASKED.append((login, self.headers.get("Authorization")))
+        # La sonde « ce depot existe-t-il ? » — `GET /repos/<owner>/<nom>`, sans `/contents/`.
+        if "/repos/" in self.path and "/contents/" not in self.path:
+            self.send_response(404 if REPO_ABSENT[0] else 200)
+            self.send_header("Content-Length", "0"); self.end_headers(); return
         # ⚠ ELLE REFUSE UN JETON QUI N'EST PAS LE SIEN, comme la vraie. Une forge de banc qui dit
         # « oui » a n'importe quel en-tete ne peut pas voir le cas du jeton vide ou revoque — et
         # c'est exactement le cas qui etait confondu avec « forge muette ».
@@ -112,6 +127,35 @@ class Forge(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):
+        # DEUX ROUTES D'ECRITURE : la creation du depot (`POST /orgs/<org>/repos`) et le depot d'un
+        # fichier (`POST /repos/<owner>/<nom>/contents/<chemin>`). La forge de banc note le corps
+        # entier — l'attribution est ce que ce verbe promet, et elle se lit LA, pas dans un log.
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+        if (self.headers.get("Authorization") or "").removeprefix("token ").strip() != SYSTEM_VALUE:
+            self.send_response(401); self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        if self.path.endswith("/repos") and "/orgs/" in self.path:
+            CREES.append(body)
+            if ORG_ABSENTE[0]:
+                self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers()
+                return
+            REPO_ABSENT[0] = False
+            self.send_response(201); self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        POSTED.append({"path": self.path, "body": body,
+                       "auth": self.headers.get("Authorization")})
+        if REPO_ABSENT[0]:
+            self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers()
+            return
+        out = json.dumps({"commit": {"sha": "cafe1234cafe1234cafe1234cafe1234cafe1234"}}).encode()
+        self.send_response(201)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
     def log_message(self, *a):
         pass
 
@@ -127,6 +171,12 @@ os.environ.update(
     # Un groupe qui n'existe pas : le banc n'est pas root, et l'executeur doit RESSERRER plutot que
     # d'ouvrir a un groupe qu'il n'a pas pu nommer.
     LCARS_FLEET_GROUP="lcars-banc-groupe-absent",
+    # LA BOITE DE DEPOT : son jeton est celui du compte SYSTEME, distinct du master — le banc les
+    # separe parce que le service les separe, et un depot ecrit avec le master passerait inapercu.
+    LCARS_SYSTEM_TOKEN_FILE=SYSTEM_TOKEN,
+    LCARS_READY_ROOM_REPO="fleet/ready-room",
+    LCARS_DEPOSIT_SOCKET=os.path.join(WORK, "deposit.sock"),
+    LCARS_CONSOLE_GROUP="lcars-banc-groupe-absent",
 )
 
 spec = importlib.util.spec_from_file_location("catexec", SRC)
@@ -580,6 +630,137 @@ try:
           "bind: le repertoire porte EXACTEMENT le mode de la table (0%o)" % (_st_dir.st_mode & 0o777))
 finally:
     _srv.close()
+
+# ─── 10. LA BOITE DE DEPOT — L'ATTRIBUTION EST CE QUE CE VERBE PROMET ───────────────────────────
+#
+# CE QUI EST EPINGLE ICI :
+#   · l'humain est l'AUTEUR du commit, le compte systeme est le COMMITTER et c'est lui qui pousse ;
+#   · le pair doit etre le DECK — le groupe de la socket borne qui frappe, il n'autorise personne ;
+#   · le login relaye est reverifie AUPRES DE LA FORGE, a l'instant du depot ;
+#   · le contenu est recoupe contre son empreinte, sinon rien n'est ecrit ;
+#   · les causes ne se melangent pas : « pas un humain », « depot absent », « pas d'autorite ».
+DEPOT = os.path.join(WORK, "deposit.sock")
+mod.DEPOSIT_SOCKET_PATH = DEPOT
+mod.SYSTEM_TOKEN_FILE = SYSTEM_TOKEN
+mod.READY_ROOM_REPO = "fleet/ready-room"
+# Le pair de cette porte est le DECK, et le banc n'a qu'un uid : le sien. On nomme donc le compte du
+# banc comme etant celui du deck — ce qui EPINGLE la regle « un seul compte relaie », et permet de
+# jouer le refus en la changeant.
+mod.DEPOSIT_PEER = MOI
+_srv_depot = mod.bind(DEPOT, "lcars-banc-groupe-absent")
+threading.Thread(target=mod.serve_forever, args=(_srv_depot, mod.serve_deposit),
+                 daemon=True).start()
+
+
+def depose(login, contenu, nom="note.md", empreinte=None, timeout=20):
+    """Un depot sur la porte, et son verdict. `empreinte` force une annonce fausse."""
+    import base64 as _b64
+    import hashlib as _h
+    brut = contenu if isinstance(contenu, bytes) else contenu.encode("utf-8")
+    digest = empreinte or _h.sha256(brut).hexdigest()
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.settimeout(timeout)
+    c.connect(DEPOT)
+    f = c.makefile("rw", encoding="utf-8", newline="\n")
+    f.write("deposit %s %s %s\n%s\n" % (login, digest, nom, _b64.b64encode(brut).decode("ascii")))
+    f.flush()
+    rep = (f.readline() or "").rstrip("\n")
+    c.close()
+    return rep
+
+
+WORKERS.add("alice")
+POSTED.clear()
+_v = depose("alice", "bonjour la ready room\n")
+check(_v.startswith("OK:"), "depot: un humain de l'equipe depose — %s" % _v[:60])
+check(len(POSTED) == 1, "depot: la forge a recu UNE ecriture (%d)" % len(POSTED))
+if POSTED:
+    _corps = POSTED[0]["body"]
+    check(_corps.get("author", {}).get("name") == "alice",
+          "depot: l'AUTEUR du commit est l'humain (%s)" % _corps.get("author"))
+    check(_corps.get("author", {}).get("email") == "alice@lcars.local",
+          "depot: son adresse est celle de son compte forge — c'est ce qui rattache le commit")
+    check(_corps.get("committer", {}).get("name") == "system_starfleet",
+          "depot: le COMMITTER est le compte systeme, celui qui pousse (%s)"
+          % _corps.get("committer"))
+    check(POSTED[0]["auth"] == "token " + SYSTEM_VALUE,
+          "depot: la poussee presente le jeton SYSTEME, pas le master")
+    check("Deposited-by: alice" in _corps.get("message", ""),
+          "depot: la remorque nomme le deposant — seconde trace, lisible sans la forge")
+    check("/contents/alice/" in POSTED[0]["path"],
+          "depot: le chemin est sous le login du deposant (%s)" % POSTED[0]["path"])
+    check(POSTED[0]["path"].rstrip("/").endswith("-note.md"),
+          "depot: le nom d'origine survit, precede de son horodatage")
+
+# ─── 10 bis. LE PAIR N'EST PAS LE DECK ──────────────────────────────────────────────────────────
+# L'ACL de la socket borne QUI FRAPPE, elle n'autorise personne : un membre du groupe qui n'est pas
+# le deck n'a aucune raison de relayer une identite, et se voit refuser AVANT toute question.
+mod.DEPOSIT_PEER = "un-autre-service"
+POSTED.clear()
+_v = depose("alice", "x")
+check(_v == "FAIL:not_the_deck", "depot: un pair qui n'est pas le deck est refuse — %s" % _v)
+check(not POSTED, "depot: et la forge n'a rien recu")
+mod.DEPOSIT_PEER = MOI
+
+# ─── 10 ter. LE LOGIN RELAYE EST REVERIFIE AUPRES DE LA FORGE ───────────────────────────────────
+# Le deck affirme un login ; ce service ne le croit pas sur parole. La forge tranche a l'instant du
+# geste — un humain retire de l'equipe ce matin ne depose plus cet apres-midi.
+POSTED.clear()
+_v = depose("bob", "x")
+check(_v == "FAIL:not_a_worker", "depot: un login hors de l'equipe humans est refuse — %s" % _v)
+check(not POSTED, "depot: rien n'est ecrit pour un login refuse")
+
+# ─── 10 quater. LE CONTENU EST RECOUPE CONTRE SON EMPREINTE ─────────────────────────────────────
+# Les deux journaux sont independants : celui du deck ecrit ce qu'il a lu, celui-ci ce qu'il a recu.
+POSTED.clear()
+_v = depose("alice", "contenu", empreinte="0" * 64)
+check(_v == "FAIL:hash_mismatch", "depot: une empreinte qui ne correspond pas refuse le depot — %s" % _v)
+check(not POSTED, "depot: et rien ne part vers la forge")
+
+# ─── 10 quinquies. LE NOM EST UN NOM, JAMAIS UN CHEMIN ──────────────────────────────────────────
+for _nom, _label in ((".." , "deux points"), ("a/b", "une barre"), (".cache", "un nom cache"),
+                     ("", "un nom vide")):
+    _v = depose("alice", "x", nom=_nom)
+    check(_v == "FAIL:bad_name", "depot: « %s » refuse (%s) — %s" % (_nom, _label, _v))
+
+# ─── 10 sexies. LA BORNE DE TAILLE ──────────────────────────────────────────────────────────────
+POSTED.clear()
+_v = depose("alice", b"x" * (mod.DEPOSIT_MAX_BYTES + 1))
+check(_v == "FAIL:too_big", "depot: au-dela de la borne, refus — %s" % _v)
+check(not POSTED, "depot: un fichier trop gros ne part pas")
+_v = depose("alice", b"")
+check(_v == "FAIL:empty", "depot: un fichier vide est refuse — %s" % _v)
+
+# ─── 10 septies. LE DEPOT MANQUANT EST CREE, PAS REPROCHE ───────────────────────────────────────
+# Une fonctionnalite qui refuse jusqu'a ce qu'un admin joue un geste manuel est livree a moitie. Le
+# compte systeme a deja le droit de creer dans l'org : le premier depot cree la ready room, prive et
+# initialisee, puis ecrit. UN SEUL REJEU — deux ecritures pour une demande seraient un defaut.
+REPO_ABSENT[0] = True
+CREES.clear()
+POSTED.clear()
+_v = depose("alice", "premier depot")
+check(_v.startswith("OK:"), "depot: le premier depot CREE la ready room puis ecrit — %s" % _v[:40])
+check(len(CREES) == 1 and CREES[0].get("private") is True and CREES[0].get("auto_init") is True,
+      "depot: la ready room nait PRIVEE et INITIALISEE — l'API de contenu ecrit sur une branche (%s)"
+      % (CREES[0] if CREES else "-"))
+check(len(POSTED) == 2, "depot: une tentative, une creation, un rejeu — pas plus (%d)" % len(POSTED))
+
+# Et quand meme la creation echoue, la cause reste « pas de depot » : l'org ne repond pas non plus.
+ORG_ABSENTE[0] = True
+REPO_ABSENT[0] = True
+CREES.clear()
+_v = depose("alice", "x")
+check(_v == "FAIL:no_repo", "depot: si la creation echoue aussi, la cause est nommee — %s" % _v)
+ORG_ABSENTE[0] = False
+REPO_ABSENT[0] = False
+
+# ─── 10 octies. SANS JETON SYSTEME, LA CAUSE EST L'AUTORITE ─────────────────────────────────────
+# Et surtout pas « la forge n'a pas repondu » : l'une se repare en reposant un jeton, l'autre en
+# attendant. Le service demarre quand meme — deux portes sur trois n'en ont aucun usage.
+mod.SYSTEM_TOKEN_FILE = os.path.join(WORK, "system-absent.token")
+_v = depose("alice", "x")
+check(_v == "FAIL:no_authority", "depot: sans jeton systeme, la cause est l'autorite — %s" % _v)
+mod.SYSTEM_TOKEN_FILE = SYSTEM_TOKEN
 
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(0 if ok else 1)

@@ -106,6 +106,13 @@ runtime   /run/lcars/authority                         0750  lcars-authority:fle
 # cond : les deux sockets n'existent que si le service d'autorité tourne, et il refuse de démarrer sans jeton master
 runtime:cond /run/lcars/authority/catalogue.sock       0660  lcars-authority:fleet  any
 runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fleet  any
+# la porte de dépôt du deck, dans un répertoire à part : le cycle de vie partagé donne au parent le
+# groupe de la socket qu'on y pose, et l'y mêler aux deux portes d'au-dessus leur retirerait `fleet`.
+# Son groupe est celui de l'AUTORITÉ, et le deck le reçoit à l'exec (`console-landing.sh`, setpriv
+# --groups) : `lcars-console` ne se donne par adhésion à personne (MUR 5 ter), et `fleet` donnerait
+# au deck les jetons de rôle.
+runtime   /run/lcars/deposit                           0750  lcars-authority:lcars-authority  any
+runtime:cond /run/lcars/deposit/deposit.sock           0660  lcars-authority:lcars-authority  any
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any

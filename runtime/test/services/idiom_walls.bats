@@ -104,13 +104,14 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 # couture. Il s'ecarte lui-meme : ses formes de garde portent le mot.
 #
 # Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
-#   - « boite de reception » (l'inbox d'admiral, skill system-issues) et « boite aux lettres »
-#     (la branche d'outillage, ops-branch) ;
+#   - « boite de reception » (l'inbox d'admiral, skill system-issues), « boite aux lettres »
+#     (la branche d'outillage, ops-branch) et « boite de depot » (l'onglet du deck qui remet un
+#     fichier a la ready room) — trois emplois du mot francais qui ne designent pas le rail ;
 #   - `box-sizing` / `border-box` / `box-shadow` (le CSS du deck, dans console-deck.py) ;
 #   - « mail-in-a-box » et « out of the box » (idiomes), et les cadres ASCII `_box_*` de l'installeur.
 # `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
 I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
-I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad'
+I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|bo[iîÎ]tes? de d[éeÉE]p[oôÔ]t|_box_(emit|plain|pad)|_prov_box_pad'
 
 i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
   grep -rnIiE --exclude=idiom_walls.bats "$I20_RE" "$@" 2>/dev/null | grep -viE "$I20_EXCL" || true

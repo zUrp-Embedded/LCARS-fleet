@@ -114,6 +114,10 @@ services_env_body() {
   echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   echo "LCARS_LANDING_PORT=$PROV_DECK_PORT"
   echo "LCARS_MASTER_TOKEN_FILE=$PROV_MASTER_TOKEN_FILE"
+  # Le jeton du compte SYSTEME voyage lui aussi : la porte de dépôt écrit sur la forge avec lui,
+  # pendant que le master ne sert qu'aux questions d'autorité. Deux jetons, deux usages, un seul
+  # chemin déclaré de chaque côté.
+  echo "LCARS_SYSTEM_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
   echo "LCARS_UID_MAP_FILE=$PROV_UID_MAP_FILE"
   echo "LCARS_CONSOLE_GROUP=$PROV_CONSOLE_GROUP"
   echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"
