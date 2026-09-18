@@ -208,3 +208,29 @@ J
 
   [ "$n" -ge 4 ] || { echo "instrument casse : $n fragment(s) trouve(s), au moins 4 attendus"; return 1; }
 }
+
+# ⚠ UN REPERTOIRE COURANT ILLISIBLE FAIT MOURIR LE BEAM, ET SA PLAINTE NE PARLE DE RIEN. Mesure du
+# 2026-09-18 sur le banc 2004 : `lcars` lance depuis le home d'un AUTRE compte rend un « Kernel pid
+# terminated (logger) » avec une pile `code_server`, puis ecrit un crash dump. Le meme geste dans un
+# dossier lisible marche. Le refus nomme le dossier, le compte, et le geste qui repare.
+@test "un repertoire courant ILLISIBLE est un refus NOMME, avant tout — pas un crash du BEAM" {
+  [ "$(id -u)" -ne 0 ] || skip "a jouer sans privilege : root lit un repertoire en 000"
+  local mur="$TMP/mur"
+  mkdir -p "$mur"
+
+  # ⚠ ON N'ENTRE PAS DANS UN DOSSIER A 000 : le cas REEL est un dossier qu'on habite et dont les
+  # droits tombent — ce qui arrive des qu'un process garde le cwd d'un autre compte (`runuser`).
+  run bash -c "cd '$mur' && chmod 000 '$mur' && '$SCRIPT' help"
+  chmod 755 "$mur"
+
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"n'est pas lisible par"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"cd ~"* ]]
+  # ce que le crash rendait, et qu'on ne veut plus voir
+  [[ "$output" != *"Kernel pid terminated"* ]]
+}
+
+@test "un repertoire courant LISIBLE ne refuse rien — le garde n'est pas un blocage permanent" {
+  run bash -c "cd '$TMP' && '$SCRIPT' help"
+  [[ "$output" != *"n'est pas lisible"* ]] || { echo "$output"; return 1; }
+}

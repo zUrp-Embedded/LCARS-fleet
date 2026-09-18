@@ -288,6 +288,21 @@ _load_container_env() {
 # la dire, les autres portes meurent dessus.
 _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"; }
 
+# ⚠ UN REPERTOIRE COURANT QUE L'APPELANT NE LIT PAS FAIT MOURIR LE BEAM, ET SA PLAINTE NE PARLE DE
+# RIEN. Mesure du 2026-09-18 sur le banc 2004 : `lcars` lance par un humain depuis le home d'un
+# AUTRE (`drwxr-x---`) rend un « Kernel pid terminated (logger) » avec une pile `code_server`, puis
+# ecrit un crash dump — trois ecrans qui n'accusent ni le dossier ni le compte. Le meme geste, une
+# ligne plus bas dans le bon dossier, marche.
+#
+# Ce n'est pas le cas de production (le convergeur et les modules jouent depuis le home de l'humain),
+# c'est le cas de l'OPERATEUR qui tape la commande la ou il se trouve. Un refus nomme coute cinq
+# lignes ; le crash lui coute une demi-heure.
+_cwd_lisible() {
+  local ici; ici="$(pwd -P 2>/dev/null || true)"
+  [[ -n "$ici" && -r "$ici" && -x "$ici" ]] \
+    || die "le repertoire courant (${ici:-inconnu}) n'est pas lisible par $(id -un) — le BEAM y meurt sans rien dire d'utile. Se placer ailleurs (« cd ~ ») et rejouer"
+}
+
 # ⚠ LE JETON ATTERRIT DANS UN FICHIER, ET C'EST DELIBERE : les rails prennent un CHEMIN, et leur
 # passer le jeton en argument le mettrait dans `/proc/<pid>/cmdline`, que tout le monde lit.
 _authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"; }
@@ -978,6 +993,10 @@ cmd_approve() {
   fi
 }
 
+
+# Le repertoire courant est verifie AVANT le dispatch, et pour tous les verbes : `help` ne coute
+# rien, et tout le reste finit par lancer le BEAM ou git, qui meurent tous les deux sans le dire.
+_cwd_lisible
 
 case "${1:-help}" in
   spawn)  shift; cmd_spawn "$@" ;;
