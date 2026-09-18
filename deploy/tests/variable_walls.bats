@@ -165,29 +165,55 @@ bash_code() {
 }
 
 @test "MUR 5: le chemin du fichier de siege est le MEME partout, et le manifeste pose celui-la" {
-  local sites=(
-    "runtime/bin/fleet"
-    # le BEAM lit le siege dans Fleet.BootGuard (GUARD B), que config/runtime.exs appelle
-    "runtime/lib/fleet/boot_guard.ex"
-    # la politique de POPULATION vit ici, une seule fois — c'est ce site que le mur doit voir
-    "runtime/services/lib/module-protocol.sh"
-    "runtime/services/container/init.sh"
-  )
-  # les chemins déclarés : la constante de l'installeur, la forme shell `${LCARS_SEAT_UID_FILE:-<X>}`
-  # et la forme BEAM `System.get_env("LCARS_SEAT_UID_FILE", "<X>")`
-  local f vus=() v lus
+  # ⚠ LA POPULATION SE DERIVE, ELLE NE SE LISTE PLUS. Une liste de sites tenue a la main oublie le
+  # site suivant, et un mur qui n'ouvre pas un fichier ne rend RIEN sur lui : celle-ci en oubliait
+  # deux (`runtime/services/human-converger.sh` et `runtime/services/lib/human-protocol.sh`), qui
+  # portaient chacun leur propre defaut. Mesure du 2026-09-19. Le site, desormais, c'est « tout
+  # fichier suivi qui nomme la variable ».
+  local f vus=() v lus population=() declarants=0
   v="$(sed -n 's/^PROV_SEAT_UID_FILE=//p' "$REPO/deploy/installer-constants.env")"
   [ -n "$v" ] || { echo "MUR 5 — PROV_SEAT_UID_FILE illisible dans installer-constants.env" >&2; return 1; }
   vus+=("$v")
-  for f in "${sites[@]}"; do
+
+  while read -r f; do [ -n "$f" ] && population+=("$f"); done < <(
+    grep -rl --exclude-dir=_build --exclude-dir=deps --exclude-dir=.git --exclude-dir=tmp \
+         --exclude='*.bats' --exclude='*_test.exs' --exclude='*_test.py' \
+         LCARS_SEAT_UID_FILE "$REPO/runtime" "$REPO/deploy" 2>/dev/null \
+      | grep -vE '/tests?/' | sed "s|^$REPO/||" | sort
+  )
+  # Le plancher porte sur la RECHERCHE, pas sur des noms : une population effondree veut dire que
+  # le grep ne trouve plus ce qu'il cherchait, pas que le depot a change d'avis.
+  [ "${#population[@]}" -ge 3 ] || {
+    echo "MUR 5 — ${#population[@]} fichier(s) nomment LCARS_SEAT_UID_FILE : l'instrument ne mesure plus rien" >&2
+    return 1
+  }
+
+  # les chemins déclarés : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}`, la forme BEAM
+  # `System.get_env("LCARS_SEAT_UID_FILE", "<X>")` et l'attribut qui lui sert de défaut
+  for f in "${population[@]}"; do
     [ -r "$REPO/$f" ] || { echo "MUR 5 rompu — $f illisible" >&2; return 1; }
     lus="$(sed 's/#.*//' "$REPO/$f" \
              | sed -nE -e 's/.*LCARS_SEAT_UID_FILE:-([^}]+)\}.*/\1/p' \
                        -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p' \
                        -e 's/.*@seat_path_default "([^"]+)".*/\1/p')"
-    [ -n "$lus" ] || { echo "MUR 5 — aucune declaration lue dans $f : l'instrument ne lit plus la forme" >&2; return 1; }
-    while read -r v; do [ -n "$v" ] && vus+=("$v"); done <<<"$lus"
+    if [ -n "$lus" ]; then
+      declarants=$((declarants + 1))
+      while read -r v; do [ -n "$v" ] && vus+=("$v"); done <<<"$lus"
+      continue
+    fi
+    # ⚠ NOMMER LA VARIABLE N'EST PAS LA DECLARER : une carte ou un moduledoc a le droit d'en parler.
+    # Mais une ligne qui la nomme ET porte un chemin absolu sans que le mur sache le lire est une
+    # FORME QU'IL NE LIT PLUS — c'est ainsi qu'un site sort du contrat sans que rien ne rougisse.
+    grep -n 'LCARS_SEAT_UID_FILE' "$REPO/$f" | grep -q '/etc/' && {
+      echo "MUR 5 — $f nomme le fichier de siege AVEC un chemin, sous une forme que le mur ne lit pas :" >&2
+      grep -n 'LCARS_SEAT_UID_FILE' "$REPO/$f" | grep '/etc/' | sed 's/^/     /' >&2
+      return 1
+    }
   done
+  [ "$declarants" -ge 2 ] || {
+    echo "MUR 5 — $declarants declarant(s) lu(s) sur ${#population[@]} fichier(s) : rien a comparer" >&2
+    return 1
+  }
   local distinctes; distinctes="$(printf '%s\n' "${vus[@]}" | sort -u)"
   [ "$(printf '%s\n' "$distinctes" | wc -l)" -eq 1 ] || {
     echo "MUR 5 rompu — ${#vus[@]} declarations, PLUSIEURS chemins :" >&2
@@ -715,6 +741,30 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
         "$REPO/runtime/services/forge-recipe/forge.tf")"
   [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : la recette ne porte plus variable \"system_org\" avec un défaut" >&2; return 1; }
   [ "$lu" = "$attendu" ] || manque="$manque\n  la recette (system_org) : « $lu », attendu « $attendu »"
+  # ⚠ LA POPULATION FAIT PARTIE DU CONTRAT. La table dit COMMENT lire chaque site ; elle ne dit pas
+  # qu'il n'en existe pas un autre. Un fichier qui DÉCLARE un défaut d'org sans être couvert ici
+  # dérive en silence, et c'est la table qui aura tort — pas lui.
+  local -a couverts=() detectes=()
+  for l in "${lectures[@]}"; do IFS='|' read -r f _ _ <<<"$l"; couverts+=("$f"); done
+  couverts+=("runtime/config/runtime.exs" "runtime/lib/fleet/catalogue.ex")
+  while read -r f; do [ -n "$f" ] && detectes+=("$f"); done < <(
+    grep -rnE --exclude-dir=_build --exclude-dir=deps --exclude-dir=.git --exclude-dir=tmp \
+         --exclude-dir=node_modules 'LCARS_FORGE_ORG(:[-=]|", ?")' "$REPO/runtime" "$REPO/deploy" 2>/dev/null \
+      | grep -vE '/tests?/|_test\.|\.bats:' | sed "s|^$REPO/||; s|:.*||" | sort -u
+  )
+  [ "${#detectes[@]}" -ge 3 ] || {
+    echo "MUR 19 — ${#detectes[@]} déclarant(s) détecté(s) : l'instrument ne cherche plus la bonne forme" >&2
+    return 1
+  }
+  local d nonvus=""
+  for d in "${detectes[@]}"; do
+    printf '%s\n' "${couverts[@]}" | grep -qxF "$d" || nonvus="$nonvus $d"
+  done
+  [ -z "${nonvus// /}" ] || {
+    echo "MUR 19 — déclarant(s) d'un défaut d'org que ce mur NE LIT PAS :$nonvus" >&2
+    echo "→ ajoute-le à la table avec la forme exacte de sa ligne. Un site non lu dérive sans rougir." >&2
+    return 1
+  }
   [ -z "$manque" ] || { echo "MUR 19 rompu — des lecteurs de l'org système ne portent pas le nom que l'installeur décide :" >&2; printf '%b\n' "$manque" >&2; return 1; }
 }
 
