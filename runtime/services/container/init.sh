@@ -195,6 +195,7 @@ layout() {
   ensure_dir /var/lib/lcars                     0755 root:root || true
   ensure_dir /var/tmp/lcars                     0755 root:root || true
   ensure_dir /var/tmp/lcars/toolchain-work      0700 root:root || true
+  ensure_dir "${LCARS_DEPOSIT_SPOOL:-/var/tmp/lcars/deposit}" 2750 "${LCARS_DECK_USER:-lcars-system}:${LCARS_AUTHORITY_GROUP:-$LCARS_AUTHORITY_USER}" || true
   ensure_dir /etc/lcars                         0755 root:root || true
   ensure_dir /run/lcars                         0755 root:root || true
   ensure_dir /run/lcars/toolchain               2775 "root:$LCARS_FLEET_GROUP" || true

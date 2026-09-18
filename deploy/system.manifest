@@ -49,6 +49,9 @@ dir       /var/lib/lcars                               0755  root:root          
 # relu à chaque passe, sinon le premier venu possède le dossier où root télécharge puis exécute
 dir       /var/tmp/lcars                               0755  root:root           any
 dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
+# la zone de transit de la boîte de dépôt : le DECK y écrit, la PORTE y lit. sgid, pour que le
+# fichier naisse au groupe de la porte sans que le deck ait à le donner.
+dir       /var/tmp/lcars/deposit                       2750  lcars-system:lcars-authority  any
 
 dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux

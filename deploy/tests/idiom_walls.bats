@@ -512,13 +512,14 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 # portent le mot.
 #
 # Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
+#   - « boite de depot » (l'onglet du deck qui remet un fichier a un projet) ;
 #   - « boite de reception » (l'inbox d'admiral) et « boite aux lettres » (la branche d'outillage) ;
 #   - `box-sizing` / `border-box` / `box-shadow` (du CSS) ;
 #   - « mail-in-a-box » (l'ecole de `run_quiet`) et « out of the box » (une citation user, l'idiome) ;
 #   - `_box_emit` / `_box_plain` / `_box_pad` / `_prov_box_pad` : le CADRE ASCII des bannieres.
 # `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
 I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
-I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad'
+I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|bo[iîÎ]tes? de d[éeÉE]p[oôÔ]t|_box_(emit|plain|pad)|_prov_box_pad'
 
 i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
   grep -rnIiE --exclude=idiom_walls.bats "$I20_RE" "$@" 2>/dev/null | grep -viE "$I20_EXCL" || true

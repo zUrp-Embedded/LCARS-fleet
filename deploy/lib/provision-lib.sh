@@ -31,6 +31,7 @@ fi
 
 : "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
 : "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
+: "${PROV_DEPOSIT_SPOOL:=/var/tmp/lcars/deposit}"  # zone de transit de la boîte de dépôt (DISQUE, jamais /run : un tmpfs ferait de 50 Mo de transit 50 Mo de RAM)
 : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 : "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"

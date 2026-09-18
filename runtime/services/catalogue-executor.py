@@ -32,7 +32,6 @@ import struct
 import subprocess
 import sys
 import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -79,16 +78,22 @@ REQUEST_TIMEOUT = int(os.environ.get("LCARS_CATALOGUE_REQUEST_TIMEOUT", "30"))
 # l'humain est celui que la forge a nomme a la porte OIDC. Le login arrive donc SUR LE FIL, affirme
 # par un pair que le noyau, lui, nomme.
 #
-# CE QUE CE SERVICE AJOUTE A CETTE AFFIRMATION, et ce n'est pas rien :
+# ⚠ ET CE SERVICE NE REJUGE PAS L'IDENTITE, C'EST UN ARBITRAGE (user, 2026-09-18). Le deck REFUSE
+# d'ouvrir une session sans la forge : l'appartenance a l'equipe est deja etablie quand la requete
+# arrive ici. La redemander ne fermerait aucun scenario reel — la liste des projets proposes vient
+# des pods de la fleet de cette personne, donc d'un projet sur lequel elle travaille — et un deck
+# compromis affirmerait de toute facon un login legitime. La fraicheur d'une session et un poste
+# non verrouille sont la securite du DECK ; ce service en est le client, il reste a sa place.
+#
+# CE QUE CE SERVICE GARDE, parce que c'est SA responsabilite et pas celle du voisin :
 #   · le pair DOIT etre le compte du deck, pas n'importe quel membre du groupe ;
-#   · le login affirme DOIT etre de l'equipe humans, la forge interrogee a l'instant du geste ;
+#   · le nom DOIT etre un nom de fichier, jamais un chemin — il devient un chemin dans le depot ;
+#   · la taille DOIT tenir dans la borne, mesuree sur le fichier et pas sur ce qu'on annonce ;
 #   · le contenu DOIT correspondre a l'empreinte annoncee — deux recits qui se contredisent valent
 #     mieux qu'un seul qu'on croit ;
-#   · le depot est ecrit AU NOM de cet humain (auteur du commit) par le compte systeme (committer).
+#   · le depot du projet DOIT exister : on ne cree pas un depot de projet.
 #
-# CE QUE CE SERVICE NE PEUT PAS FAIRE, ET C'EST DIT PLUTOT QUE SOUS-ENTENDU : prouver que la
-# personne etait devant l'ecran. Un deck compromis deposerait au nom d'un autre humain de l'equipe.
-# L'attribution vaut ce que vaut la porte OIDC ; elle est traçable, elle n'est pas opposable.
+# Et le depot est ecrit AU NOM de cet humain (auteur du commit) par le compte systeme (committer).
 DEPOSIT_SOCKET_PATH = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit/deposit.sock")
 # ⚠ LE GROUPE DE CE SERVICE, ET LE DECK LE RECOIT A L'EXEC. Trois groupes etaient possibles et deux
 # sont refuses : `fleet` donnerait au deck les jetons de role, et `lcars-console` ne s'accorde par
@@ -100,8 +105,22 @@ DEPOSIT_SOCKET_PATH = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit
 # poser cette socket dans `/run/lcars/authority` retirerait `fleet` des deux autres portes.
 DEPOSIT_SOCKET_GROUP = os.environ.get("LCARS_AUTHORITY_GROUP", "lcars-authority")
 DEPOSIT_PEER = os.environ.get("LCARS_DECK_USER", "lcars-system")
-READY_ROOM_REPO = os.environ.get("LCARS_READY_ROOM_REPO", f"{FORGE_ORG}/ready-room")
-READY_ROOM_BRANCH = os.environ.get("LCARS_READY_ROOM_BRANCH", "main")
+# LA DESTINATION EST LE DEPOT DU PROJET, ET SA FACE WORKSHOP. Un projet a UN depot sur la forge et
+# trois faces qui sont trois BRANCHES de ce depot (`lib/fleet/layout.ex`) ; la ready room est un
+# repertoire de la face workshop. Le chemin ne porte ni login ni horodatage : le commit porte deja
+# l'auteur et la date, les repeter dans le chemin serait une seconde verite qui derive.
+WORKSHOP_BRANCH = os.environ.get("LCARS_WORKSHOP_BRANCH", "workshop")
+READY_ROOM_DIR = os.environ.get("LCARS_READY_ROOM_DIR", "ready-room")
+# ⚠ L'ORG D'UN PROJET EST LE NOM DU CATALOGUE QUI LE DECLARE, et elle est fixee a vie. Le pod ne
+# rend que le slug : c'est ici qu'on retrouve l'org, en demandant a la forge lequel des catalogues
+# INSTALLES porte ce depot. Deviner l'org serait une table de correspondance, donc une seconde
+# verite ; demander a la forge ne peut pas deriver.
+CATALOGUES_DIR = os.environ.get("LCARS_CATALOGUES_DIR", "/opt/lcars/var/catalogues")
+# LA ZONE DE TRANSIT : le deck y ecrit le fichier, ce service l'y lit, et RIEN d'autre n'en sort.
+# Sur disque et jamais sous `/run` — c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
+DEPOSIT_SPOOL = os.environ.get("LCARS_DEPOSIT_SPOOL", "/var/tmp/lcars/deposit")
+# Le temps d'un depot n'est pas le temps d'une question : 50 Mo ne traversent pas en 15 secondes.
+DEPOSIT_HTTP_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_HTTP_TIMEOUT", "300"))
 # Le compte qui POUSSE. L'humain est l'auteur, ce compte est le committer : c'est exactement la
 # distinction que git porte depuis toujours — quelqu'un a fait le travail, quelqu'un d'autre l'a
 # applique — et elle dit la verite des deux cotes sans inventer de jeton personnel.
@@ -112,8 +131,10 @@ SYSTEM_TOKEN_FILE = os.environ.get(
 # compte est rattache a la personne, avec son profil. Une adresse inventee rendrait un auteur
 # orphelin, et la trace visible — celle qu'un humain lit sans requete — serait perdue.
 HUMAN_EMAIL_DOMAIN = os.environ.get("LCARS_HUMAN_EMAIL_DOMAIN", "lcars.local")
-# 8 Mio : de quoi deposer un document ou une capture, pas de quoi faire du depot une archive.
-DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(8 * 1024 * 1024)))
+# 50 Mo, la meme borne des deux cotes. Elle vit dans le code des deux processus et se surcharge par
+# l'environnement : une borne que le deck croit plus haute que la porte ne fait que deplacer le
+# refus, elle ne laisse rien passer.
+DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 * 1000)))
 # UN NOM DE FICHIER, JAMAIS UN CHEMIN : le nom devient un segment d'URL et un chemin dans le depot.
 # Ni `/`, ni `..`, ni nom cache, et une longueur bornee.
 DEPOSIT_NAME_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -375,38 +396,143 @@ def deposit_message(login, name, digest):
             f"Deposit-Via: deck\n")
 
 
-def forge_put_file(repo, path, content_b64, message, login):
+def installed_orgs():
     """
-    Ecrit un fichier dans un depot par l'API de contenu (`POST /contents/<chemin>`), au nom de `login`.
+    Les catalogues installes sur cette machine, donc les orgs possibles d'un projet.
 
-    POST, ET PAS PUT : la creation refuse un chemin deja pris, la mise a jour l'ecrase. Un depot ne
-    remplace jamais un depot precedent — l'horodatage du chemin rend la collision improbable, et la
-    forge tranche si elle arrive quand meme.
+    ⚠ LE NOM SE LIT DANS LE MANIFESTE, ET LE REPERTOIRE EST UN REPLI. Le produit lit la meme
+    arborescence (`Fleet.Catalogue.installed_catalogues/0`) : un repertoire par catalogue, un
+    `catalogue.yaml` dedans, le nom a l'interieur. Pas de YAML ici — une seule scalaire est lue par
+    motif, et le nom du repertoire sert quand la ligne manque.
+    """
+    noms = []
+    try:
+        entrees = sorted(os.listdir(CATALOGUES_DIR))
+    except OSError as exc:
+        log(f"catalogues illisibles ({CATALOGUES_DIR}: {exc.strerror})")
+        return noms
+    for entree in entrees:
+        manifeste = os.path.join(CATALOGUES_DIR, entree, "catalogue.yaml")
+        nom = entree
+        try:
+            with open(manifeste, "r", encoding="utf-8") as fh:
+                for ligne in fh:
+                    trouve = re.match(r"name:\s*\"?([A-Za-z0-9][A-Za-z0-9-]*)\"?\s*$", ligne)
+                    if trouve:
+                        nom = trouve.group(1)
+                        break
+        except OSError:
+            continue
+        if nom not in noms:
+            noms.append(nom)
+    return noms
 
-    L'AUTEUR EST L'HUMAIN, LE COMMITTER EST LE COMPTE SYSTEME. C'est la reponse entiere a
-    « qui a pousse quoi » : la forge affiche l'humain sur le commit et journalise le compte systeme
-    sur la poussee. Aucun jeton personnel n'existe dans ce conteneur, et aucun n'est invente ici.
 
-    Rend le sha du commit. `NoAuthority` si la forge refuse notre jeton, `HTTPError` sinon — la
-    distinction est celle des autres portes, et pour la meme raison.
+def resolve_project(slug):
+    """
+    `<org>/<slug>` — l'org est celle du catalogue qui porte ce depot sur la forge.
+
+    Rend le nom complet, ou leve `LookupError` avec une cause : `unknown_project` quand aucun
+    catalogue installe ne porte ce depot, `ambiguous_project` quand plusieurs le portent. On ne
+    CHOISIT pas a la place de l'humain : l'org d'un projet est fixee a vie, en deviner une reviendrait
+    a deposer dans un autre projet que celui qu'il a nomme.
+    """
+    trouves = []
+    for org in installed_orgs():
+        url = (f"{FORGE_BASE_URL.rstrip('/')}/api/v1/repos/"
+               f"{urllib.parse.quote(org, safe='')}/{urllib.parse.quote(slug, safe='')}")
+        req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT):
+                trouves.append(f"{org}/{slug}")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                raise NoAuthority(f"la forge REFUSE le jeton systeme (HTTP {exc.code})") from exc
+            if exc.code != 404:
+                raise
+    if not trouves:
+        raise LookupError("unknown_project")
+    if len(trouves) > 1:
+        log(f"depot: « {slug} » existe dans {len(trouves)} catalogues : {', '.join(trouves)}")
+        raise LookupError("ambiguous_project")
+    return trouves[0]
+
+
+def blob_sha(repo, branch, path):
+    """
+    Le sha du blob DEJA en place a ce chemin, ou None.
+
+    ⚠ PAR L'ARBRE, PAS PAR LE CONTENU. `GET /contents/<chemin>` rendrait le fichier lui-meme, encode :
+    demander si un fichier de 50 Mo existe en le TELECHARGEANT est le genre de detail qui ne se voit
+    qu'en production. L'arbre ne rend que des noms et des sha.
+    """
+    owner, _, name = repo.partition("/")
+    url = (f"{FORGE_BASE_URL.rstrip('/')}/api/v1/repos/"
+           f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/git/trees/"
+           f"{urllib.parse.quote(branch, safe='')}?recursive=true&per_page=1000")
+    req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            arbre = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    for entree in arbre.get("tree") or []:
+        if entree.get("path") == path and entree.get("type") == "blob":
+            return entree.get("sha")
+    return None
+
+
+def _b64_body(prefix, spool, suffix, chunk=3 * 65536):
+    """Le corps JSON, par morceaux : l'entete, le contenu encode au fil du fichier, la fermeture."""
+    yield prefix
+    with open(spool, "rb") as fh:
+        while True:
+            brut = fh.read(chunk)
+            if not brut:
+                break
+            yield base64.b64encode(brut)
+    yield suffix
+
+
+def forge_put_file(repo, path, spool, taille, message, login, sha=None):
+    """
+    Ecrit un fichier dans un depot par l'API de contenu, au nom de `login`, SANS le charger.
+
+    ⚠ LE CORPS EST STREAME, ET C'EST CE QUI REND 50 Mo TENABLES. L'API veut du base64 dans du JSON ;
+    la longueur d'un base64 se calcule (`4×⌈n/3⌉`), donc on annonce la bonne `Content-Length` et on
+    encode le fichier par morceaux. Sans ca, un depot de 50 Mo existerait trois fois en memoire.
+
+    POST cree, PUT remplace : un `sha` fourni est celui du blob en place, et le remplacement est un
+    NOUVEAU commit — l'ancien contenu reste dans l'historique, c'est le travail de git.
+
+    L'AUTEUR EST L'HUMAIN, LE COMMITTER EST LE COMPTE SYSTEME : la forge affiche l'humain sur le
+    commit et journalise le compte systeme sur la poussee.
     """
     owner, _, name = repo.partition("/")
     url = (f"{FORGE_BASE_URL.rstrip('/')}/api/v1/repos/"
            f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/contents/"
            f"{urllib.parse.quote(path)}")
-    body = json.dumps({
-        "content": content_b64,
+    tete = {
         "message": message,
-        "branch": READY_ROOM_BRANCH,
+        "branch": WORKSHOP_BRANCH,
         "author": {"name": login, "email": f"{login}@{HUMAN_EMAIL_DOMAIN}"},
         "committer": {"name": SYSTEM_ACCOUNT, "email": f"{SYSTEM_ACCOUNT}@{HUMAN_EMAIL_DOMAIN}"},
-    }).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST", headers={
-        "Authorization": f"token {system_token()}",
-        "Content-Type": "application/json",
-    })
+    }
+    if sha:
+        tete["sha"] = sha
+    # Le prefixe est le JSON sans le contenu, ouvert sur la chaine ; `content` FERME l'objet.
+    prefix = json.dumps(tete)[:-1].encode("utf-8") + b', "content": "'
+    suffix = b'"}'
+    longueur = len(prefix) + 4 * ((taille + 2) // 3) + len(suffix)
+    req = urllib.request.Request(
+        url, data=_b64_body(prefix, spool, suffix), method=("PUT" if sha else "POST"),
+        headers={"Authorization": f"token {system_token()}",
+                 "Content-Type": "application/json",
+                 "Content-Length": str(longueur)})
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=DEPOSIT_HTTP_TIMEOUT) as resp:
             answer = json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
@@ -414,63 +540,55 @@ def forge_put_file(repo, path, content_b64, message, login):
         raise
     # ⚠ UN 2xx N'EST PAS UNE PREUVE DE FORME. On rend le sha que la forge nomme, ou on le dit : un
     # `OK` sans sha laisserait l'appelant annoncer un depot qu'il ne peut pas retrouver.
-    sha = (answer.get("commit") or {}).get("sha")
-    if not isinstance(sha, str) or not sha:
+    commit = (answer.get("commit") or {}).get("sha")
+    if not isinstance(commit, str) or not commit:
         raise ValueError("la forge a accepte sans nommer de commit")
-    return sha
+    return commit
 
 
-def forge_ensure_repo(repo):
+def spool_bounded(chemin):
     """
-    Cree le depot de la ready room s'il n'existe pas, et rend True s'il a fallu le creer.
+    Le fichier de transit, ou None si ce chemin n'est pas dans la zone de transit.
 
-    ⚠ CREER PLUTOT QUE REFUSER, ET C'EST UN ARBITRAGE. Un depot qui refuse « le depot n'existe pas »
-    jusqu'a ce qu'un admin joue un geste manuel est une fonctionnalite livree a moitie : personne ne
-    la decouvre au bon moment. Le compte systeme a DEJA le droit de creer dans l'org (recette de la
-    forge, `can_create_repos = true` pour l'equipe `system`) — la creation ne prend donc aucun
-    pouvoir nouveau, elle utilise celui qui existe.
-    ⚠ PRIVE ET INITIALISE : prive parce qu'un depot de fichiers deposes n'a aucune raison d'etre
-    public, initialise parce que l'API de contenu ecrit SUR UNE BRANCHE — un depot vide n'a pas de
-    `main`, et le premier depot echouerait sur une branche absente.
+    ⚠ LE CHEMIN VIENT D'UN AUTRE PROCESSUS, ET C'EST LA GARDE LA PLUS IMPORTANTE DE CE VERBE. Ce
+    service tourne avec l'autorite du conteneur : un chemin qu'il ouvrirait sans le borner pourrait
+    designer `/opt/lcars/var/tokens/...` — et le contenu partirait en commit, dans un depot, pour
+    toujours. La zone de transit est declaree a la table ; tout ce qui est ailleurs est refuse, et
+    un lien symbolique aussi (`realpath` decide, pas la chaine recue).
     """
-    owner, _, name = repo.partition("/")
-    base = f"{FORGE_BASE_URL.rstrip('/')}/api/v1"
-    url = f"{base}/repos/{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}"
-    req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
-    try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT):
-            return False
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise NoAuthority(f"la forge REFUSE le jeton systeme (HTTP {exc.code})") from exc
-        if exc.code != 404:
-            raise
+    zone = os.path.realpath(DEPOSIT_SPOOL)
+    vrai = os.path.realpath(chemin)
+    if vrai != zone and not vrai.startswith(zone + os.sep):
+        return None
+    if not os.path.isfile(vrai) or os.path.islink(chemin):
+        return None
+    return vrai
 
-    body = json.dumps({"name": name, "private": True, "auto_init": True,
-                       "default_branch": READY_ROOM_BRANCH,
-                       "description": "Ready room : ce que les humains deposent depuis le deck"
-                       }).encode("utf-8")
-    req = urllib.request.Request(f"{base}/orgs/{urllib.parse.quote(owner, safe='')}/repos",
-                                 data=body, method="POST",
-                                 headers={"Authorization": f"token {system_token()}",
-                                          "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT):
-        pass
-    log(f"depot: {repo} n'existait pas — cree (prive, initialise sur {READY_ROOM_BRANCH})")
-    return True
+
+def file_sha256(chemin, chunk=1024 * 1024):
+    """L'empreinte du fichier, lue par morceaux : on ne charge pas 50 Mo pour les resumer."""
+    h = hashlib.sha256()
+    with open(chemin, "rb") as fh:
+        while True:
+            morceau = fh.read(chunk)
+            if not morceau:
+                break
+            h.update(morceau)
+    return h.hexdigest()
 
 
 def serve_deposit(conn):
     """
     Un depot, un verdict.
 
-        -> deposit <login> <sha256> <nom de fichier>
-        -> <contenu en base64, UNE ligne>
-        <- "OK:<sha du commit> <chemin dans le depot>"
+        -> deposit <login> <slug> <sha256> <taille> <nom de fichier>
+        -> <chemin du fichier de transit>
+        <- "OK:<sha du commit> <org/slug> <chemin dans le depot>"
         <- "FAIL:<cause>"
 
-    La cause est un JETON, pas une phrase : le deck possede les mots de l'operateur, parce que c'est
-    lui que l'operateur regarde. Meme regle que `catalogue.sock`, et les causes ne se melangent pas.
+    Le fichier ne passe PAS par ce fil : le deck l'a ecrit dans la zone de transit et en donne le
+    chemin. La cause d'un refus est un JETON, pas une phrase — le deck possede les mots de
+    l'operateur, parce que c'est lui que l'operateur regarde.
     """
     wire = conn.makefile("rw", encoding="utf-8", newline="\n")
 
@@ -486,96 +604,99 @@ def serve_deposit(conn):
     if peer is None:
         log(f"refus depot: uid {uid} (pid {pid}) n'a pas de compte unix")
         return done("FAIL:unknown_peer")
-    # ⚠ L'ACL DE LA SOCKET BORNE QUI FRAPPE, ELLE N'AUTORISE RIEN. Le groupe `lcars-console` porte
-    # aussi les consoles ; seul le compte du deck relaie une identite, et on le nomme.
+    # ⚠ L'ACL DE LA SOCKET BORNE QUI FRAPPE, ELLE N'AUTORISE RIEN. Le groupe porte aussi les autres
+    # portes de ce service ; seul le compte du deck relaie une identite, et on le nomme.
     if peer != DEPOSIT_PEER:
         log(f"refus depot: le pair est « {peer} », pas le deck ({DEPOSIT_PEER})")
         return done("FAIL:not_the_deck")
 
     request = wire.readline().rstrip("\r\n")
-    verb, _, rest = request.partition(" ")
-    login, _, rest = rest.partition(" ")
-    digest, _, name = rest.partition(" ")
-    if verb != "deposit" or not LOGIN_RX.fullmatch(login or ""):
-        log(f"refus depot: requete « {request[:80]} » — verbe ou login invalide")
+    champs = request.split(" ", 5)
+    if len(champs) != 6 or champs[0] != "deposit":
+        log(f"refus depot: requete « {request[:80]} » — forme inattendue")
+        return done("FAIL:bad_request")
+    _verbe, login, slug, digest, taille_dite, name = champs
+    if not LOGIN_RX.fullmatch(login):
+        log(f"refus depot: login « {login[:40]} » refuse")
         return done("FAIL:bad_login")
-    if not DEPOSIT_NAME_RX.fullmatch(name or ""):
-        log(f"refus depot: {login} a nomme « {name[:80]} » — pas un nom de fichier")
-        return done("FAIL:bad_name")
-    if not re.fullmatch(r"[0-9a-f]{64}", digest or ""):
+    if not NAME_RX.fullmatch(slug):
+        log(f"refus depot: projet « {slug[:40]} » — pas un slug")
+        return done("FAIL:bad_project")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
         log(f"refus depot: {login} a annonce une empreinte qui n'en est pas une")
         return done("FAIL:bad_digest")
-
-    # ⚠ LA LIGNE EST BORNEE AVANT D'ETRE DECODEE. `readline()` sans borne laisse un pair remplir la
-    # memoire de ce service avec une seule ligne ; la borne porte donc sur les octets du FIL, d'ou
-    # la marge du base64 (4 octets pour 3) et de la fin de ligne.
-    ceiling = (DEPOSIT_MAX_BYTES * 4) // 3 + 1024
-    payload = wire.readline(ceiling + 1).rstrip("\r\n")
-    conn.settimeout(None)
-    if len(payload) > ceiling:
-        log(f"refus depot: {login} envoie plus que {DEPOSIT_MAX_BYTES} octets")
-        return done("FAIL:too_big")
+    if not DEPOSIT_NAME_RX.fullmatch(name):
+        log(f"refus depot: {login} a nomme « {name[:80]} » — pas un nom de fichier")
+        return done("FAIL:bad_name")
     try:
-        raw = base64.b64decode(payload, validate=True)
-    except (ValueError, TypeError):
-        log(f"refus depot: le contenu de {login} n'est pas du base64")
-        return done("FAIL:bad_base64")
-    if len(raw) > DEPOSIT_MAX_BYTES:
-        log(f"refus depot: {login} envoie {len(raw)} octets, la borne est {DEPOSIT_MAX_BYTES}")
-        return done("FAIL:too_big")
-    if not raw:
-        log(f"refus depot: {login} envoie un fichier vide")
+        taille = int(taille_dite)
+    except ValueError:
+        log(f"refus depot: taille « {taille_dite[:20]} » illisible")
+        return done("FAIL:bad_request")
+
+    spool = spool_bounded(wire.readline().rstrip("\r\n"))
+    conn.settimeout(None)
+    if spool is None:
+        log(f"refus depot: {login} designe un fichier hors de la zone de transit ({DEPOSIT_SPOOL})")
+        return done("FAIL:bad_spool")
+    # LA TAILLE SE MESURE SUR LE FICHIER, l'annonce ne fait que se recouper avec lui.
+    reelle = os.path.getsize(spool)
+    if reelle == 0:
+        log(f"refus depot: {login} depose un fichier vide")
         return done("FAIL:empty")
-    # LE CONTENU EST RECOUPE CONTRE L'EMPREINTE ANNONCEE, et ce n'est pas de la defense en
-    # profondeur : c'est ce qui rend les deux traces independantes. Le deck journalise l'empreinte
-    # qu'il a calculee, ce service verifie celle qu'il recoit ; un relais qui altere en passant se
-    # denonce ici.
-    got = hashlib.sha256(raw).hexdigest()
+    if reelle > DEPOSIT_MAX_BYTES or reelle != taille:
+        log(f"refus depot: {login} annonce {taille} octets, le fichier en fait {reelle} "
+            f"(borne {DEPOSIT_MAX_BYTES})")
+        return done("FAIL:too_big" if reelle > DEPOSIT_MAX_BYTES else "FAIL:size_mismatch")
+    # LES DEUX RECITS SE RECOUPENT ICI : le deck a calcule l'empreinte de ce qu'il a lu du
+    # navigateur, ce service calcule celle de ce qu'il trouve sur le disque. Un transit altere se
+    # denonce, et les deux journaux restent independants.
+    got = file_sha256(spool)
     if got != digest:
-        log(f"refus depot: {login} annonce {digest[:12]}… et envoie {got[:12]}…")
+        log(f"refus depot: {login} annonce {digest[:12]}… et le fichier vaut {got[:12]}…")
         return done("FAIL:hash_mismatch")
 
     try:
-        if not is_fleet_human(login):
-            log(f"refus depot: la forge dit que {login} n'est pas de l'equipe {HUMANS_TEAM}")
-            return done("FAIL:not_a_worker")
+        repo = resolve_project(slug)
+    except LookupError as exc:
+        log(f"refus depot: projet « {slug} » — {exc.args[0]}")
+        return done(f"FAIL:{exc.args[0]}")
     except NoAuthority as exc:
-        log(f"refus depot: ce conteneur n'a pas d'autorite utilisable — {exc}")
+        log(f"refus depot: {exc}")
         return done("FAIL:no_authority")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
-        log(f"refus depot: appartenance de {login} non lue ({exc})")
+        log(f"refus depot: projet « {slug} » non resolu ({exc})")
         return done("FAIL:forge_unreachable")
 
-    # UN DEPOT, UN CHEMIN, ET L'HORODATAGE EST DEVANT : deux depots du meme nom ne s'ecrasent pas,
-    # et le classement d'un repertoire est chronologique sans rien lire.
-    path = f"{login}/{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{name}"
+    path = f"{READY_ROOM_DIR}/{name}"
     message = deposit_message(login, name, got)
     try:
         try:
-            sha = forge_put_file(READY_ROOM_REPO, path, payload, message, login)
+            commit = forge_put_file(repo, path, spool, reelle, message, login)
         except urllib.error.HTTPError as exc:
-            # ⚠ UN SEUL REJEU, ET SEULEMENT SUR 404. Le depot manquant est la seule cause qu'on
-            # sache reparer ici ; rejouer sur autre chose ferait deux ecritures pour une demande.
-            if exc.code != 404 or not forge_ensure_repo(READY_ROOM_REPO):
+            # DEJA LA = ON REMPLACE, et c'est le contrat : l'ancien contenu reste dans l'historique,
+            # le commit dit qui a remplace quoi. Le sha du blob en place est ce que l'API exige pour
+            # distinguer un remplacement d'un ecrasement aveugle.
+            if exc.code not in (409, 422):
                 raise
-            sha = forge_put_file(READY_ROOM_REPO, path, payload, message, login)
+            sha = blob_sha(repo, WORKSHOP_BRANCH, path)
+            if not sha:
+                raise
+            log(f"depot: {path} existe deja dans {repo} — {login} le remplace")
+            commit = forge_put_file(repo, path, spool, reelle, message, login, sha=sha)
     except NoAuthority as exc:
         log(f"refus depot: {exc}")
         return done("FAIL:no_authority")
     except urllib.error.HTTPError as exc:
-        # 404 APRES la tentative de creation = ni le depot ni l'org ne repondent ; le reste est un
-        # refus de la forge sur ce contenu ou ce chemin. Les nommer separement evite d'envoyer
-        # l'operateur creer un depot qui existe.
-        cause = "no_repo" if exc.code == 404 else f"forge_refused:{exc.code}"
-        log(f"refus depot: la forge refuse {READY_ROOM_REPO}/{path} (HTTP {exc.code})")
-        return done(f"FAIL:{cause}")
+        log(f"refus depot: la forge refuse {repo}/{path} (HTTP {exc.code})")
+        return done(f"FAIL:forge_refused:{exc.code}")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
         log(f"refus depot: depot de {login} non ecrit ({exc})")
         return done("FAIL:forge_unreachable")
 
-    log(f"depot: {login} a depose « {name} » ({len(raw)} o, sha256 {got[:12]}…) "
-        f"dans {READY_ROOM_REPO}/{path} — commit {sha[:12]}")
-    return done(f"OK:{sha} {path}")
+    log(f"depot: {login} a depose « {name} » ({reelle} o, sha256 {got[:12]}…) "
+        f"dans {repo} ({WORKSHOP_BRANCH}) {path} — commit {commit[:12]}")
+    return done(f"OK:{commit} {repo} {path}")
 
 
 def run_gesture(name, emit):

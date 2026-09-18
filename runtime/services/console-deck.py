@@ -17,7 +17,6 @@
 
 import html
 import http.client
-import base64
 import hashlib
 import json
 import os
@@ -26,6 +25,7 @@ import secrets
 import select
 import socket
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -117,42 +117,51 @@ STATIC_FILES = {
 
 # ── LA BOITE DE DEPOT ───────────────────────────────────────────────────────────────────────────
 #
-# CE SERVEUR N'ECRIT RIEN, ET C'EST LE POINT. Il tourne sous `lcars-system`, avec deux groupes
-# accordes A L'EXEC (console-landing.sh) et aucun par adhesion : `lcars-console` pour joindre les
-# consoles, et celui du service d'autorite pour joindre CETTE porte. Il ne peut ecrire ni dans
-# `/home`, ni la ou vivent les jetons — `var/tokens` est en 0710 sur `fleet`, dont il n'est pas — et
-# ce depot-ci ne change pas ce contrat. Il RELAIE : un fichier, et un login deja authentifie par la
-# forge, vers la porte qui, elle, detient le jeton.
+# CE SERVEUR N'ECRIT QUE DANS SA ZONE DE TRANSIT, ET C'EST LE POINT. Il tourne sous `lcars-system`,
+# avec deux groupes accordes A L'EXEC (console-landing.sh) et aucun par adhesion : `lcars-console`
+# pour joindre les consoles, et celui du service d'autorite pour joindre la porte de depot. Il ne
+# peut ecrire ni dans `/home`, ni la ou vivent les jetons.
+#
+# LE FICHIER NE TRAVERSE PAS LA MEMOIRE. Le corps de la requete est ECRIT AU FIL DE L'EAU dans la
+# zone de transit, l'empreinte se calcule pendant l'ecriture, et ce qui part sur la socket est le
+# CHEMIN. Un base64 dans un corps JSON aurait coute un tiers de plus sur le fil et trois copies du
+# fichier en memoire — tenable a 8 Mio, absurde a 50 Mo.
 #
 # ⚠ L'ATTRIBUTION EST DECLARATIVE, ET ELLE EST DITE TELLE QUELLE DANS L'ONGLET. Le commit porte
-# l'humain comme AUTEUR ; la poussee, elle, reste celle du compte systeme, parce qu'aucun jeton
-# personnel n'existe dans ce conteneur. C'est une trace pour savoir qui a depose quoi, pas une
-# preuve opposable a celui qui la conteste.
+# l'humain comme AUTEUR ; la poussee reste celle du compte systeme, parce qu'aucun jeton personnel
+# n'existe dans ce conteneur. C'est une trace pour savoir qui a depose quoi, pas une preuve
+# opposable a celui qui la conteste.
 DEPOSIT_SOCKET = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit/deposit.sock")
-# La meme borne que la porte d'en face. Les deux se lisent : celle-ci refuse AVANT de lire le corps,
-# celle d'en face refuse ce qui aurait franchi ce serveur autrement.
-DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(8 * 1024 * 1024)))
-DEPOSIT_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_TIMEOUT", "30"))
-# Affiche, jamais decide : le depot cible est celui de la porte d'en face, qui lit la meme variable.
-READY_ROOM_REPO = os.environ.get("LCARS_READY_ROOM_REPO", f"{FORGE_ORG}/ready-room")
+# Sur DISQUE, jamais sous `/run` : c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
+DEPOSIT_SPOOL = os.environ.get("LCARS_DEPOSIT_SPOOL", "/var/tmp/lcars/deposit")
+# La meme borne que la porte d'en face, et les deux se lisent : celle-ci refuse au fil de la
+# lecture, celle d'en face mesure le fichier qu'elle trouve.
+DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 * 1000)))
+# Le temps d'un depot, pas celui d'une question : la porte pousse le fichier vers la forge pendant
+# que ce delai court.
+DEPOSIT_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_TIMEOUT", "600"))
+# Affiche, jamais decide : la porte lit les memes valeurs et tranche sur ce qu'elle lit, elle.
+WORKSHOP_BRANCH = os.environ.get("LCARS_WORKSHOP_BRANCH", "workshop")
+READY_ROOM_DIR = os.environ.get("LCARS_READY_ROOM_DIR", "ready-room")
 # Les causes que la porte rend sont des JETONS ; les phrases sont ici, parce que c'est cette page
 # que l'operateur regarde. Une cause inconnue se montre telle quelle plutot que d'etre lissee en
 # « erreur » : un jeton qu'on n'a pas prevu se cherche dans les logs, une phrase vague ne se cherche
 # nulle part.
 DEPOSIT_CAUSES = {
     "not_the_deck": "ce conteneur refuse le relais du deck — le service de depot ne le reconnait pas",
+    "bad_request": "le deck a mal formule la demande",
     "bad_login": "le deck a relaye un login que la porte refuse",
+    "bad_project": "nom de projet refuse",
     "bad_name": "nom de fichier refuse : lettres, chiffres, point, tiret et souligne, 128 au plus",
     "bad_digest": "empreinte du fichier illisible",
-    "bad_base64": "le contenu n'est pas arrive intact",
+    "bad_spool": "le fichier de transit n'est pas la ou la porte l'attend",
+    "size_mismatch": "la taille annoncee et le fichier ne concordent pas — rien n'est depose",
     "hash_mismatch": "le contenu recu ne correspond pas a son empreinte — rien n'est depose",
     "too_big": "fichier trop gros pour la boite de depot",
     "empty": "fichier vide",
-    "not_a_worker": "la forge ne te compte pas dans l'equipe humans",
+    "unknown_project": "aucun catalogue installe ne porte ce projet sur la forge",
+    "ambiguous_project": "ce nom de projet existe dans plusieurs catalogues — la porte ne choisit pas",
     "no_authority": "ce conteneur n'a pas de jeton utilisable pour deposer",
-    # La porte CREE la ready room si elle manque : rester sur « le depot n'existe pas » enverrait
-    # l'operateur creer ce qui vient d'echouer a se creer. Ici, ni le depot ni son org ne repondent.
-    "no_repo": f"la forge ne trouve ni {READY_ROOM_REPO} ni son organisation — rien n'est depose",
     "forge_unreachable": "la forge n'a pas repondu — rien n'est depose",
     "unknown_peer": "la porte de depot ne sait pas qui frappe",
     # Les trois dernieres ne viennent pas de la porte : c'est CE serveur qui les nomme, quand la
@@ -161,18 +170,6 @@ DEPOSIT_CAUSES = {
     "porte_muette": "le service de depot accepte et se tait — rien n'est confirme",
     "verdict_illisible": "la porte de depot a repondu quelque chose d'inattendu",
 }
-# L'ADMINITE EST UNE NOTION DE LA FORGE, ET ELLE N'EN A QU'UNE. Une equipe (`<org>:admins`) lue
-# dans les `groups` deja en main serait gratuite, et une SECONDE source de verite pour un fait que
-# la forge sait dire elle-meme. Deux sources sur le meme fait ne restent
-# d'accord que tant que personne ne touche a l'une des deux, et celle qui derive est toujours celle
-# qu'on ne relit pas.
-#
-# Le cout de la source unique est UN appel, et il est paye la ou il est le moins cher : au callback
-# OIDC, ou le jeton d'acces est deja en main pour l'appel `userinfo` qui le precede. Rien de plus
-# n'est stocke — ni le jeton, ni un credential de service : seul le booleen entre en session.
-#
-# ⚠ Ce qui existe ici est le MECANISME (l'acheminement de l'identite, la route, l'onglet) — pas les
-# POUVOIRS de l'admin, qui demandent chacun un endpoint systeme qui n'existe pas encore.
 
 # Nature d'une cible par-humain -> nom de la socket dans son repertoire.
 PER_HUMAN_TARGETS = {"console": "console.sock", "pod": "pod.sock"}
@@ -226,26 +223,25 @@ def unix_get(sock_path, path, timeout=2):
         conn.close()
 
 
-def deposit(login, name, raw):
+def deposit(login, projet, name, spool, taille, digest):
     """
-    Un depot relaye a la porte qui detient le jeton. Rend `(ok, cause_ou_detail)`.
+    Un depot relaye a la porte qui detient le jeton. Rend `(ok, detail_ou_cause)`.
 
     LE FIL EST VOLONTAIREMENT BETE, comme celui des deux autres portes : une ligne de requete, une
-    ligne de contenu, une ligne de verdict. Le base64 tient le binaire sur une ligne et c'est
-    exactement ce que l'API de contenu de la forge attend derriere — aucune conversion de plus.
+    ligne qui donne le CHEMIN du fichier de transit, une ligne de verdict. Le fichier lui-meme ne
+    passe pas par la socket — il est deja sur le disque, ecrit au fil de l'eau par la route qui l'a
+    recu.
 
     ⚠ L'EMPREINTE EST CALCULEE ICI ET VERIFIEE LA-BAS. Ce n'est pas une ceinture de plus : c'est ce
     qui rend les deux journaux independants. Celui-ci ecrit ce qu'il a lu du navigateur, celui d'en
-    face ce qu'il a recu du relais ; si les deux divergent un jour, on saura lequel a menti.
+    face ce qu'il trouve sur le disque ; un transit altere se denonce.
     """
-    digest = hashlib.sha256(raw).hexdigest()
-    payload = base64.b64encode(raw).decode("ascii")
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(DEPOSIT_TIMEOUT)
             sock.connect(DEPOSIT_SOCKET)
             wire = sock.makefile("rw", encoding="utf-8", newline="\n")
-            wire.write(f"deposit {login} {digest} {name}\n{payload}\n")
+            wire.write(f"deposit {login} {projet} {digest} {taille} {name}\n{spool}\n")
             wire.flush()
             verdict = (wire.readline() or "").rstrip("\r\n")
     except (ConnectionRefusedError, FileNotFoundError):
@@ -263,13 +259,57 @@ def deposit(login, name, raw):
         return False, "porte_fermee"
 
     if verdict.startswith("OK:"):
-        sha, _, path = verdict[3:].partition(" ")
-        print(f"[lcars-deck] depot de {login} : « {name} » ({len(raw)} o, sha256 {digest[:12]}…) "
-              f"-> {path} (commit {sha[:12]})", file=sys.stderr, flush=True)
-        return True, {"sha": sha, "path": path, "sha256": digest}
+        sha, _, reste = verdict[3:].partition(" ")
+        repo, _, chemin = reste.partition(" ")
+        print(f"[lcars-deck] depot de {login} : « {name} » ({taille} o, sha256 {digest[:12]}…) "
+              f"-> {repo} {chemin} (commit {sha[:12]})", file=sys.stderr, flush=True)
+        return True, {"sha": sha, "repo": repo, "path": chemin, "sha256": digest}
     cause = verdict[5:] if verdict.startswith("FAIL:") else "verdict_illisible"
     print(f"[lcars-deck] depot de {login} REFUSE : {cause}", file=sys.stderr, flush=True)
     return False, cause
+
+
+def spool_write(source, annonce):
+    """
+    Ecrit le corps de la requete dans la zone de transit, par tranches. Rend `(chemin, taille, sha)`.
+
+    ⚠ LA BORNE S'APPLIQUE AU FIL DE LA LECTURE, pas seulement sur la taille annoncee : un client qui
+    ment sur `Content-Length` ne doit pas pouvoir remplir le disque parce qu'on l'a cru. On lit ce
+    qui est annonce, on s'arrete a la borne, et le fichier part avec.
+
+    Le fichier nait dans un repertoire `setgid` : il herite du groupe de la porte, qui doit le LIRE.
+    Le mode est resserre a `0640` — le deck l'ecrit, la porte le lit, personne d'autre.
+    """
+    os.makedirs(DEPOSIT_SPOOL, exist_ok=True)
+    fd, chemin = tempfile.mkstemp(prefix="depot-", dir=DEPOSIT_SPOOL)
+    h = hashlib.sha256()
+    taille = 0
+    try:
+        os.fchmod(fd, 0o640)
+        with os.fdopen(fd, "wb") as sortie:
+            reste = annonce
+            while reste > 0:
+                morceau = source.read(min(1024 * 1024, reste))
+                if not morceau:
+                    break
+                taille += len(morceau)
+                if taille > DEPOSIT_MAX_BYTES:
+                    raise ValueError("depasse la borne")
+                h.update(morceau)
+                sortie.write(morceau)
+                reste -= len(morceau)
+    except BaseException:
+        spool_remove(chemin)
+        raise
+    return chemin, taille, h.hexdigest()
+
+
+def spool_remove(chemin):
+    """Le transit ne survit pas au depot, reussi ou non — sinon le disque se remplit en silence."""
+    try:
+        os.unlink(chemin)
+    except OSError as exc:
+        print(f"[lcars-deck] transit non nettoye : {chemin} ({exc})", file=sys.stderr, flush=True)
 
 
 def parse_target(path):
@@ -663,10 +703,13 @@ def state(only=None, admin=False, people=None):
                 "project": p.get("project_slug"),
             })
         hs.append(h)
-    # `deposit` voyage pour que la page sache QUOI DIRE — le depot vise et la borne — jamais pour
+    # `deposit` voyage pour que la page sache QUOI DIRE — la borne et la destination — jamais pour
     # decider : la porte d'en face lit les memes variables et retranche sur ce qu'elle lit, elle.
+    # LE PROJET, LUI, NE VOYAGE PAS ICI : la page le tire des pods qu'elle recoit deja, comme elle
+    # en tire les groupes de sa barre laterale. Une seconde liste serait une seconde verite.
     return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin),
-            "deposit": {"repo": READY_ROOM_REPO, "max_bytes": DEPOSIT_MAX_BYTES}}
+            "deposit": {"max_bytes": DEPOSIT_MAX_BYTES, "branch": WORKSHOP_BRANCH,
+                        "dir": READY_ROOM_DIR}}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -1230,22 +1273,44 @@ function depositPanel(s) {
   const cfg = s.deposit || {};
   const max = cfg.max_bytes || 0;
 
+  // LES PROJETS OUVERTS SORTENT DES PODS QU'ON A DEJA, comme les groupes de la barre laterale : un
+  // projet est ouvert quand un de ses pods vit, et l'ouvrir lance son architecte. Une seconde liste,
+  // calculee autrement, divergerait de ce que le rail affiche a gauche.
+  const ouverts = [...new Set(
+    (s.humans || []).flatMap(h => (h.pods || []).map(p => p.project).filter(Boolean))
+  )].sort();
+
   const n = el('div', 'note');
-  n.innerHTML = "Un fichier depose part dans <b>" + (cfg.repo || '?') + "</b>, sous ton login, " +
-    "avec <b>toi comme auteur du commit</b>. La poussee, elle, reste celle du compte systeme : " +
-    "ce conteneur n'a pas de jeton personnel. C'est une <b>trace</b> de qui a depose quoi, " +
-    "verifiable dans l'historique — pas une signature.<br><br>" +
-    "Taille maximale : <b>" + Math.floor(max / 1048576) + " Mio</b>. " +
-    "Le fichier arrive sur la face <b>workshop</b> a la convergence suivante.";
+  if (!ouverts.length) {
+    n.innerHTML = "<b>Aucun projet ouvert.</b> Un dépôt vise le dépôt d'un projet dont la fleet " +
+      "porte au moins un pod ; ouvre un projet, son architecte se lance, et il apparaîtra ici.";
+    wrap.appendChild(n);
+    return wrap;
+  }
+  n.innerHTML = "Le fichier part dans le dépôt du projet, branche <b>" + (cfg.branch || '?') +
+    "</b>, sous <b>" + (cfg.dir || '?') + "/</b>, avec <b>toi comme auteur du commit</b>. " +
+    "La poussée reste celle du compte système : ce conteneur n'a pas de jeton personnel. " +
+    "C'est une <b>trace</b> de qui a déposé quoi, vérifiable dans l'historique.<br><br>" +
+    "Taille maximale : <b>" + Math.floor(max / 1000000) + " Mo</b>. " +
+    "Un fichier du même nom est <b>remplacé</b> : l'ancien reste dans l'historique du dépôt.";
   wrap.appendChild(n);
 
+  const choix = document.createElement('select');
+  choix.style.cssText = 'background:#111;color:var(--or);border:2px solid var(--or);padding:6px 10px;margin-right:12px';
+  for (const proj of ouverts) {
+    const o = document.createElement('option');
+    o.value = proj; o.textContent = proj;
+    choix.appendChild(o);
+  }
   const pick = document.createElement('input');
   pick.type = 'file';
   const go = el('button', 'tab', 'Deposer');
   go.style.cssText = 'width:auto;padding:8px 18px;border:2px solid var(--or);margin:14px 0';
   const out = el('div', 'note');
   out.style.display = 'none';
-  wrap.appendChild(pick); wrap.appendChild(go); wrap.appendChild(out);
+  const ligne = el('div');
+  ligne.appendChild(choix); ligne.appendChild(pick);
+  wrap.appendChild(ligne); wrap.appendChild(go); wrap.appendChild(out);
 
   const say = (txt, bad) => {
     out.style.display = '';
@@ -1260,23 +1325,19 @@ function depositPanel(s) {
     go.disabled = true;
     say('depot en cours…');
     try {
-      // LE FICHIER EST LU ICI, EN BASE64, ET LE SERVEUR NE DEMONTE AUCUN MULTIPART : un corps JSON
-      // se lit en trois lignes la-bas, un multipart demande un analyseur — a une porte qui ECRIT,
-      // c'est de la surface qu'on ne veut pas.
-      const b64 = await new Promise((ok, ko) => {
-        const r = new FileReader();
-        r.onload = () => ok(String(r.result).split(',')[1] || '');
-        r.onerror = () => ko(r.error);
-        r.readAsDataURL(f);
-      });
-      const rep = await fetch('/deposit', {
+      // LE FICHIER EST LE CORPS, TEL QUEL. `fetch` prend l'objet File : le navigateur le lit depuis
+      // le disque en le transmettant, sans le charger en memoire, et le serveur l'ecrit au fil de
+      // l'eau. Le nom et le projet voyagent dans la ligne de requete.
+      const url = '/deposit?project=' + encodeURIComponent(choix.value) +
+                  '&name=' + encodeURIComponent(f.name);
+      const rep = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Deck-Csrf': CSRF },
-        body: JSON.stringify({ name: f.name, content: b64 }),
+        headers: { 'Content-Type': 'application/octet-stream', 'X-Deck-Csrf': CSRF },
+        body: f,
       });
       const j = await rep.json().catch(() => ({}));
       if (rep.ok && j.ok) {
-        say('depose : ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) + ')');
+        say('depose : ' + j.repo + ' ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) + ')');
         pick.value = '';
       } else {
         say('refuse : ' + (j.why || j.error || rep.status), true);
@@ -1318,7 +1379,7 @@ function build(s) {
   add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
   // BOITE DE DEPOT : un onglet pour tout le monde, parce que tout visiteur d'ici est de l'equipe
   // humans — la porte l'a deja etabli, et la porte d'en face le redemande a la forge.
-  add(null, 'Boite de depot', 'vers la ready room',
+  add(null, 'Boite de depot', 'vers un projet ouvert',
       { key: 'deposit', crumb: 'BOITE DE DEPOT', render: () => depositPanel(s) });
   // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
   // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
@@ -1574,15 +1635,18 @@ class Deck(BaseHTTPRequestHandler):
 
     # ─── LA SEULE ROUTE QUI ECRIT ───────────────────────────────────────────────────────────────
     #
-    # ⚠ ELLE N'ECRIT RIEN ICI. Le deck relaie un fichier a la porte qui detient le jeton ; ce
-    # process reste sans ecriture, sans jeton et sans groupe `fleet`. Ce qu'il apporte est ce que la
-    # porte d'en face ne peut pas savoir : QUI est devant l'ecran, etabli par la forge a l'entree.
+    # ⚠ ELLE N'ECRIT QUE DANS LA ZONE DE TRANSIT. Le deck pose le fichier sur le disque, en donne le
+    # chemin a la porte qui detient le jeton, et le retire ensuite. Ce process reste sans jeton,
+    # sans groupe `fleet`, et sans rien a ecrire ailleurs.
+    #
+    # ⚠ LE CORPS EST LE FICHIER, BRUT. Le nom et le projet voyagent dans la ligne de requete : un
+    # corps JSON aurait impose du base64, donc un tiers de plus sur le fil et trois copies en
+    # memoire. A 50 Mo, c'est la difference entre un depot et un incident.
     #
     # ⚠ `Content-Length` SUR CHAQUE SORTIE, y compris les refus : la classe est en HTTP/1.1, une
-    # reponse sans longueur laisserait le navigateur attendre une fin qui ne vient pas. C'est la
-    # « troisieme voie » que l'en-tete de cette classe annonce.
+    # reponse sans longueur laisserait le navigateur attendre une fin qui ne vient pas.
     def do_POST(self):
-        path, _, _query = self.path.partition("?")
+        path, _, query = self.path.partition("?")
         if path != "/deposit":
             self._send(404, "not found\n", "text/plain; charset=utf-8")
             return
@@ -1604,44 +1668,54 @@ class Deck(BaseHTTPRequestHandler):
             refuse(403, "jeton de page invalide — recharge la page")
             return
 
-        # LA BORNE PORTE SUR LE CORPS ANNONCE, AVANT DE LIRE. Le base64 pese un tiers de plus que le
-        # fichier, plus l'enveloppe JSON : la marge est celle du transport, pas une seconde regle.
-        ceiling = (DEPOSIT_MAX_BYTES * 4) // 3 + 4096
+        params = urllib.parse.parse_qs(query)
+        projet = (params.get("project") or [""])[0].strip()
+        # LE NOM EST REDUIT A SA DERNIERE COMPOSANTE : un navigateur rend `photo.png`, mais rien
+        # n'oblige un client a le faire. La porte refuse de toute facon ce qui n'est pas un nom
+        # simple ; ici on ne veut pas refuser un depot legitime pour un chemin que le systeme de
+        # l'humain a colle devant.
+        name = os.path.basename((params.get("name") or [""])[0].replace("\\", "/")).strip()
+        if not projet or not name:
+            refuse(400, "projet ou nom de fichier manquant")
+            return
+
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             refuse(400, "requete illisible")
             return
-        if length <= 0 or length > ceiling:
-            # `Connection: close` implicite : on ne draine pas un corps qu'on refuse, donc la
-            # connexion ne peut pas resservir.
+        if length <= 0:
+            refuse(400, "fichier vide ou sans nom")
+            return
+        if length > DEPOSIT_MAX_BYTES:
+            # On ne draine pas un corps qu'on refuse : la connexion ne peut pas resservir.
             self.close_connection = True
             refuse(413, "fichier trop gros pour la boite de depot")
             return
 
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8"))
-            name = body["name"]
-            raw = base64.b64decode(body["content"], validate=True)
-        except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError):
-            refuse(400, "requete illisible")
-            return
-        if not isinstance(name, str) or not raw:
-            refuse(400, "fichier vide ou sans nom")
-            return
-        if len(raw) > DEPOSIT_MAX_BYTES:
+            spool, taille, digest = spool_write(self.rfile, length)
+        except ValueError:
+            self.close_connection = True
             refuse(413, "fichier trop gros pour la boite de depot")
             return
+        except OSError as exc:
+            print(f"[lcars-deck] transit impossible ({DEPOSIT_SPOOL}) : {exc}",
+                  file=sys.stderr, flush=True)
+            refuse(503, "ce conteneur n'a pas de zone de transit ecrivable")
+            return
 
-        # LE NOM EST REDUIT A SA DERNIERE COMPOSANTE : un navigateur rend `photo.png`, mais rien
-        # n'oblige un client a le faire. La porte d'en face refuse de toute facon ce qui n'est pas
-        # un nom simple — ici on ne veut pas refuser un depot legitime pour un chemin que le
-        # systeme de l'humain a colle devant.
-        name = os.path.basename(name.replace("\\", "/")).strip()
-        ok, detail = deposit(sess["login"], name, raw)
+        try:
+            if taille == 0:
+                refuse(400, "fichier vide ou sans nom")
+                return
+            ok, detail = deposit(sess["login"], projet, name, spool, taille, digest)
+        finally:
+            spool_remove(spool)
+
         if ok:
-            self._send(200, json.dumps({"ok": True, "sha": detail["sha"], "path": detail["path"],
-                                        "sha256": detail["sha256"]}),
+            self._send(200, json.dumps({"ok": True, "sha": detail["sha"], "repo": detail["repo"],
+                                        "path": detail["path"], "sha256": detail["sha256"]}),
                        "application/json; charset=utf-8")
             return
         # La cause est un jeton ; la phrase vit dans `DEPOSIT_CAUSES`, ici, parce que c'est cette

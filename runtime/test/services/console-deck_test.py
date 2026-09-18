@@ -18,7 +18,6 @@
 # est bien ecrit, pas que la bibliotheque leve ce qu'on croit.
 
 import atexit
-import base64
 import hashlib
 import importlib.util
 import json
@@ -1312,22 +1311,25 @@ check(_resolve("manuel/../../hors-doc.html") is None,
       "doc: une traversee cachee au milieu du chemin est refusee comme les autres")
 
 
-# ─── LA BOITE DE DEPOT — LE DECK RELAIE, IL N'ECRIT RIEN ────────────────────────────────────────
+# ─── LA BOITE DE DEPOT — LE DECK RELAIE, IL N'ECRIT QUE SON TRANSIT ─────────────────────────────
 #
 # CE QUI EST EPINGLE ICI :
 #   · la porte d'abord : pas de session, pas de depot ; pas de jeton de page, pas de depot ;
-#   · ce qui part sur le fil est le login de la SESSION, jamais un login envoye par le navigateur ;
-#   · l'empreinte est calculee ICI, pour que les deux journaux soient independants ;
-#   · un nom qui porte un chemin est reduit a son dernier segment avant de partir ;
+#   · ce qui part sur le fil est le login de la SESSION et le projet de la REQUETE ;
+#   · le fichier est ECRIT dans la zone de transit, et c'est son CHEMIN qui part sur la socket ;
+#   · le transit est retire ensuite — depot accepte comme depot refuse ;
+#   · l'empreinte est calculee ici, pour que les deux journaux soient independants ;
 #   · « la porte est eteinte » et « la porte refuse » ne se disent pas de la meme facon.
 _dep_dir = tempfile.mkdtemp(prefix="lcars-deck-depot-")
 atexit.register(shutil.rmtree, _dep_dir, ignore_errors=True)
 _dep_sock = os.path.join(_dep_dir, "deposit.sock")
+_spool = os.path.join(_dep_dir, "spool")
+os.makedirs(_spool, exist_ok=True)
 RECU = []
 
 
-def fake_depot(verdict="OK:cafe1234 zoe/20260101T000000Z-note.md"):
-    """Une fausse porte de depot : elle note la requete et rend le verdict demande."""
+def fake_depot(verdict="OK:cafe1234 reverse/samyang-reverse ready-room/firmware.bin"):
+    """Une fausse porte : elle note la requete, LIT le fichier de transit, et rend le verdict."""
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     if os.path.exists(_dep_sock):
         os.unlink(_dep_sock)
@@ -1343,8 +1345,13 @@ def fake_depot(verdict="OK:cafe1234 zoe/20260101T000000Z-note.md"):
             with conn:
                 f = conn.makefile("rw", encoding="utf-8", newline="\n")
                 tete = (f.readline() or "").rstrip("\n")
-                corps = (f.readline() or "").rstrip("\n")
-                RECU.append((tete, corps))
+                chemin = (f.readline() or "").rstrip("\n")
+                try:
+                    with open(chemin, "rb") as fh:
+                        contenu = fh.read()
+                except OSError as exc:
+                    contenu = b"<illisible: %s>" % str(exc).encode()
+                RECU.append({"tete": tete, "chemin": chemin, "contenu": contenu})
                 f.write(verdict + "\n")
                 f.flush()
 
@@ -1352,12 +1359,15 @@ def fake_depot(verdict="OK:cafe1234 zoe/20260101T000000Z-note.md"):
     return srv
 
 
-def depose(port, cookie, csrf, nom="note.md", contenu=b"bonjour", brut=None):
-    """Un POST /deposit, tel que la page le fait."""
-    corps = brut if brut is not None else json.dumps(
-        {"name": nom, "content": base64.b64encode(contenu).decode("ascii")}).encode()
-    req = urllib.request.Request("http://127.0.0.1:%d/deposit" % port, data=corps, method="POST")
-    req.add_header("Content-Type", "application/json")
+def depose(port, cookie, csrf, projet="samyang-reverse", nom="firmware.bin", contenu=b"\x7fELF",
+           longueur=None):
+    """Un POST /deposit tel que la page le fait : le corps EST le fichier."""
+    url = "http://127.0.0.1:%d/deposit?project=%s&name=%s" % (
+        port, urllib.parse.quote(projet), urllib.parse.quote(nom))
+    req = urllib.request.Request(url, data=contenu, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    if longueur is not None:
+        req.add_header("Content-Length", str(longueur))
     if cookie:
         req.add_header("Cookie", cookie)
     if csrf is not None:
@@ -1371,13 +1381,13 @@ def depose(port, cookie, csrf, nom="note.md", contenu=b"bonjour", brut=None):
         except ValueError:
             return e.code, {}
     except (urllib.error.URLError, OSError):
-        # ⚠ UNE COUPURE EST UNE REPONSE. Un corps refuse AVANT d'etre lu n'est pas draine, donc la
-        # connexion ne peut pas resservir et l'envoi se casse cote client. Ce qui compte est que
-        # RIEN N'AIT ETE RELAYE — le cas l'affirme juste apres.
+        # ⚠ UNE COUPURE EST UNE REPONSE : un corps refuse AVANT d'etre lu n'est pas draine, donc
+        # l'envoi se casse cote client. Ce qui compte est que RIEN n'ait ete relaye.
         return 0, {"why": "connexion coupee"}
 
 
 deck.DEPOSIT_SOCKET = _dep_sock
+deck.DEPOSIT_SPOOL = _spool
 deck._sessions["s-dep"] = {"login": "zoe", "groups": ["fleet", "fleet:humans"],
                            "csrf": "jeton-de-page", "exp": time.time() + 600}
 c_dep = deck.SESSION_COOKIE + "=s-dep"
@@ -1389,23 +1399,39 @@ _code, _rep = depose(_dep_port, c_dep, "jeton-de-page")
 check(_code == 200 and _rep.get("ok"), "depot: un humain identifie depose (%s %s)" % (_code, _rep))
 check(len(RECU) == 1, "depot: la porte a recu UNE requete (%d)" % len(RECU))
 if RECU:
-    _tete, _corps = RECU[0]
-    check(_tete.split(" ")[0] == "deposit" and _tete.split(" ")[1] == "zoe",
-          "depot: le login qui part est celui de la SESSION (%s)" % _tete[:40])
-    check(_tete.split(" ")[2] == hashlib.sha256(b"bonjour").hexdigest(),
+    _champs = RECU[0]["tete"].split(" ")
+    check(_champs[0] == "deposit" and _champs[1] == "zoe",
+          "depot: le login qui part est celui de la SESSION (%s)" % RECU[0]["tete"][:40])
+    check(_champs[2] == "samyang-reverse",
+          "depot: le projet qui part est celui de la requete (%s)" % _champs[2])
+    check(_champs[3] == hashlib.sha256(b"\x7fELF").hexdigest(),
           "depot: l'empreinte est calculee par le deck — les deux journaux sont independants")
-    check(base64.b64decode(_corps) == b"bonjour", "depot: le contenu arrive intact")
+    check(_champs[4] == "4" and _champs[5] == "firmware.bin",
+          "depot: la taille et le nom voyagent avec (%s %s)" % (_champs[4], _champs[5]))
+    # ⚠ LE FICHIER EST SUR LE DISQUE QUAND LA PORTE LIT, et PLUS APRES : le transit ne survit pas.
+    check(RECU[0]["contenu"] == b"\x7fELF",
+          "depot: la porte lit le fichier dans la zone de transit (%r)" % RECU[0]["contenu"][:12])
+    check(RECU[0]["chemin"].startswith(_spool + os.sep),
+          "depot: le chemin donne est DANS la zone de transit (%s)" % RECU[0]["chemin"])
+    check(not os.path.exists(RECU[0]["chemin"]),
+          "depot: le transit est retire apres le depot")
 
-# ⚠ LE LOGIN DU NAVIGATEUR N'EST JAMAIS LU. Un corps qui en propose un ne change rien : le relais
-# prend celui de la session, et c'est ce qui rend l'attribution valable.
+# ⚠ LE LOGIN DU NAVIGATEUR N'EXISTE PAS : il n'y a plus de corps JSON ou en glisser un. Ce qui part
+# est la session, et le projet vient de la requete — deux sources, aucune du client.
 RECU.clear()
-_code, _rep = depose(_dep_port, c_dep, "jeton-de-page",
-                     brut=json.dumps({"name": "n.md", "login": "max",
-                                      "content": base64.b64encode(b"x").decode()}).encode())
-check(_code == 200 and RECU and RECU[0][0].split(" ")[1] == "zoe",
-      "depot: un login glisse dans le corps est IGNORE (%s)" % (RECU[0][0][:40] if RECU else "-"))
+_code, _rep = depose(_dep_port, c_dep, "jeton-de-page", projet="")
+check(_code == 400 and not RECU, "depot: sans projet, 400 et rien ne part (%s)" % _code)
+_code, _rep = depose(_dep_port, c_dep, "jeton-de-page", nom="")
+check(_code == 400 and not RECU, "depot: sans nom de fichier, 400 (%s)" % _code)
 
-# La porte d'abord : sans session, sans jeton de page, rien ne part.
+# Un nom qui porte un chemin est reduit a son dernier segment AVANT de partir.
+RECU.clear()
+depose(_dep_port, c_dep, "jeton-de-page", nom="../../etc/passwd")
+check(RECU and RECU[0]["tete"].endswith(" passwd"),
+      "depot: un nom qui porte un chemin est reduit a son dernier segment (%s)"
+      % (RECU[0]["tete"][-28:] if RECU else "-"))
+
+# La porte d'abord : sans session, sans jeton de page, rien ne part et rien ne transite.
 RECU.clear()
 _code, _rep = depose(_dep_port, None, "jeton-de-page")
 check(_code == 401 and not RECU, "depot: sans session, 401 et rien ne part (%s)" % _code)
@@ -1413,46 +1439,37 @@ _code, _rep = depose(_dep_port, c_dep, None)
 check(_code == 403 and not RECU, "depot: sans jeton de page, 403 (%s)" % _code)
 _code, _rep = depose(_dep_port, c_dep, "un-autre-jeton")
 check(_code == 403 and not RECU, "depot: avec un mauvais jeton de page, 403 (%s)" % _code)
-
-# ⚠ UNE SESSION SANS JETON NE VAUT PAS UN JETON VIDE : `compare_digest("","")` rend VRAI, et une
-# session nee avant ce champ aurait accepte une requete sans en-tete.
 deck._sessions["s-vieille"] = {"login": "zoe", "groups": ["fleet:humans"], "exp": time.time() + 600}
 _code, _rep = depose(_dep_port, deck.SESSION_COOKIE + "=s-vieille", "")
 check(_code == 403 and not RECU,
       "depot: une session sans jeton de page refuse l'en-tete vide (%s)" % _code)
+check(not os.listdir(_spool), "depot: un refus a la porte ne laisse aucun transit derriere lui")
 
-# Un nom qui porte un chemin est reduit a son dernier segment AVANT de partir.
-RECU.clear()
-depose(_dep_port, c_dep, "jeton-de-page", nom="../../etc/passwd")
-check(RECU and RECU[0][0].endswith(" passwd"),
-      "depot: un nom qui porte un chemin est reduit a son dernier segment (%s)"
-      % (RECU[0][0][-30:] if RECU else "-"))
-
-# Un fichier vide n'a rien a deposer, et la borne se lit avant le corps.
-_code, _rep = depose(_dep_port, c_dep, "jeton-de-page", contenu=b"")
-check(_code == 400, "depot: un fichier vide est refuse par le deck (%s)" % _code)
-# La borne est REDUITE pour ce cas : ce qu'on mesure est la regle, pas le debit de la boucle locale.
+# Les bornes : l'annonce est refusee avant lecture, et la lecture est bornee elle aussi.
 _max_vrai = deck.DEPOSIT_MAX_BYTES
 deck.DEPOSIT_MAX_BYTES = 64
 RECU.clear()
 _code, _rep = depose(_dep_port, c_dep, "jeton-de-page", contenu=b"x" * 65)
-check(_code == 413 and not RECU,
-      "depot: au-dela de la borne, refus et rien ne part (%s)" % _code)
-# Et le corps ANNONCE trop gros est refuse AVANT d'etre lu : la connexion se ferme, rien ne part.
-RECU.clear()
-_code, _rep = depose(_dep_port, c_dep, "jeton-de-page", contenu=b"x" * 40000)
-check(_code in (413, 0) and not RECU,
-      "depot: un corps annonce au-dela du plafond est refuse avant lecture (%s)" % _code)
+check(_code == 413 and not RECU, "depot: au-dela de la borne, refus et rien ne part (%s)" % _code)
+# ⚠ ET LA BORNE NE CROIT PAS L'ANNONCE : un client qui ment sur `Content-Length` ne doit pas
+# pouvoir remplir le disque parce qu'on l'a cru sur parole.
+_code, _rep = depose(_dep_port, c_dep, "jeton-de-page", contenu=b"y" * 200, longueur=10)
+check(_code in (200, 413, 0),
+      "depot: une annonce mensongere ne fait pas ecrire plus que la borne (%s)" % _code)
+check(not [f for f in os.listdir(_spool) if f.startswith("depot-")],
+      "depot: et aucun transit ne reste")
 deck.DEPOSIT_MAX_BYTES = _max_vrai
 
 # « LA PORTE REFUSE » ET « LA PORTE EST ETEINTE » NE SE DISENT PAS PAREIL : l'une se corrige, l'autre
 # se rallume. La phrase vient de la table du deck, la cause du fil.
 _porte.close()
 os.unlink(_dep_sock)
-_porte = fake_depot("FAIL:not_a_worker")
+_porte = fake_depot("FAIL:unknown_project")
 _code, _rep = depose(_dep_port, c_dep, "jeton-de-page")
-check(_code == 422 and "humans" in _rep.get("why", ""),
+check(_code == 422 and "catalogue" in _rep.get("why", ""),
       "depot: un refus de la porte devient une phrase, pas un jeton (%s %s)" % (_code, _rep))
+check(not [f for f in os.listdir(_spool) if f.startswith("depot-")],
+      "depot: un refus de la porte ne laisse pas le transit derriere")
 _porte.close()
 os.unlink(_dep_sock)
 _code, _rep = depose(_dep_port, c_dep, "jeton-de-page")
@@ -1464,6 +1481,5 @@ _code, _page, _ = fetch(_dep_port, "/", c_dep)
 check("Boite de depot" in _page, "depot: l'onglet est dans la page")
 check("jeton-de-page" in _page, "depot: le jeton de page y est ecrit, pour CETTE session")
 _dep_srv_http.shutdown()
-
 
 sys.exit(0 if ok else 1)

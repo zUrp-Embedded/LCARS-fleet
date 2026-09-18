@@ -51,6 +51,7 @@ prov_dirs() {
     "/var/lib/lcars 0755 root:root" \
     "/var/tmp/lcars 0755 root:root" \
     "/var/tmp/lcars/toolchain-work 0700 root:root" \
+    "$PROV_DEPOSIT_SPOOL 2750 ${PROV_SYSTEM_USER:-lcars-system}:${PROV_AUTHORITY_GROUP:-$PROV_AUTHORITY_USER}" \
     "/etc/lcars 0755 root:root"
   prov_runtime_dirs
 }
