@@ -186,19 +186,26 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
   # L'origin de la face : le depot de la forge quand on sait l'adresser, sinon AUCUN. Un origin qui
   # pointe vers l'arbre d'un operateur survivrait a sa suppression et ferait croire a un amont.
+  # ⚠ `set-url` EXIGE UN REMOTE QUI EXISTE, `add` EXIGE QU'IL N'EXISTE PAS, et RETIRER CE QUI
+  # N'EXISTE PAS est une erreur pour git. Les trois verbes se trompent de cible sur le mauvais etat
+  # de depart, et le refus parle alors de `remote` au lieu de parler de la face. Mesure du
+  # 2026-09-18 sur LCARS-beta : un arbre fraichement initialise (le cas du kit) n'a aucun origin, et
+  # `set-url` y mourait en « No such remote 'origin' ». On LIT d'abord, on ecrit ensuite.
   defp point_origin(code, org, name) do
+    present? =
+      match?({:ok, _}, GitOps.read(["-C", code, "remote", "get-url", "origin"], auth: false))
+
     case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
       %{url_prefix: base} when is_binary(base) and base != "" ->
         url = "#{String.trim_trailing(base, "/")}/#{org}/#{name}.git"
-        GitOps.run(["-C", code, "remote", "set-url", "origin", url], auth: false)
+        verbe = if present?, do: "set-url", else: "add"
+        GitOps.run(["-C", code, "remote", verbe, "origin", url], auth: false)
+
+      _ when present? ->
+        GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
 
       _ ->
-        # RETIRER CE QUI N'EXISTE PAS EST UNE ERREUR POUR GIT, pas pour nous : un arbre fraichement
-        # initialise (le cas du kit) n'a aucun origin, et le refus parlerait alors de `remote`.
-        case GitOps.read(["-C", code, "remote", "get-url", "origin"], auth: false) do
-          {:ok, _} -> GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
-          {:error, _} -> :ok
-        end
+        :ok
     end
   end
 

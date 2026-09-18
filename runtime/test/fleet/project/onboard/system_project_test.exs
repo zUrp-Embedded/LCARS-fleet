@@ -178,6 +178,43 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       assert journal =~ "deadbeef"
     end
 
+    # ⚠ `set-url` EXIGE UN REMOTE QUI EXISTE, `add` EXIGE QU'IL N'EXISTE PAS. Mesure du 2026-09-18
+    # sur LCARS-beta : la face batie depuis un kit n'a aucun origin, et `set-url` y mourait en
+    # « No such remote 'origin' » — un refus qui parlait de git au lieu de parler de la face.
+    test "l'origin de la face pointe la forge, qu'il faille l'AJOUTER ou le REECRIRE", ctx do
+      avant = Application.get_env(:lcars_fleet, :credentials_forge_auth)
+
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
+        url_prefix: "http://forge.test/"
+      })
+
+      on_exit(fn -> Application.put_env(:lcars_fleet, :credentials_forge_auth, avant) end)
+
+      racine = Path.join(ctx.tmp_dir, "projects")
+
+      attendu =
+        "http://forge.test/#{Fleet.Catalogue.bundled_name()}/#{Fleet.Layout.system_project()}.git"
+
+      # 1. un kit : la face est creee, elle n'a AUCUN origin — il faut l'AJOUTER
+      kit = Path.join(ctx.tmp_dir, "kit")
+      File.mkdir_p!(kit)
+      File.write!(Path.join(kit, "install.sh"), "#!/usr/bin/env bash\n")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: kit, code_root: racine)
+
+      face = Path.join(racine, Fleet.Layout.system_project())
+      {url, 0} = System.cmd("git", ["-C", face, "remote", "get-url", "origin"])
+      assert String.trim(url) == attendu
+
+      # 2. un clone : il en porte deja un, vers l'arbre de l'operateur — il faut le REECRIRE
+      racine2 = Path.join(ctx.tmp_dir, "projects2")
+      src = arbre_git(Path.join(ctx.tmp_dir, "src"), "main")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: src, code_root: racine2)
+
+      face2 = Path.join(racine2, Fleet.Layout.system_project())
+      {url2, 0} = System.cmd("git", ["-C", face2, "remote", "get-url", "origin"])
+      assert String.trim(url2) == attendu
+    end
+
     test "un kit SANS estampille se seme quand meme — le commit ne nomme alors aucune revision",
          ctx do
       racine = Path.join(ctx.tmp_dir, "projects")
