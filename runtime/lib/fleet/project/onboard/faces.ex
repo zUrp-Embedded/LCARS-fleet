@@ -119,20 +119,15 @@ defmodule Fleet.Project.Onboard.Faces do
 
   # Track each branch only after a successful push return; a push error can still be ambiguous.
   # Carry the successful prefix on failure because ops publishes before workshop.
-  # Explicit root modes avoid umask-dependent shared-group access: workshop writable, ops narrower.
-  # chmod applies to the face root only, not recursively to its contents.
+  # The mode comes from `Fleet.Layout` by branch, never from a literal here; chmod applies to the
+  # face root only, not recursively to its contents.
   @doc false
   @spec ensure_writer_faces(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:error, term(), [String.t()]}
   def ensure_writer_faces(full_name, url, dirs, name, opts) do
     faces = [
-      %{dir: dirs.ops, branch: Layout.ops_branch(), template: "ops", mode: 0o2755},
-      %{
-        dir: dirs.workshop,
-        branch: Layout.workshop_branch(),
-        template: "workshop",
-        mode: 0o2775
-      }
+      %{dir: dirs.ops, branch: Layout.ops_branch(), template: "ops"},
+      %{dir: dirs.workshop, branch: Layout.workshop_branch(), template: "workshop"}
     ]
 
     Enum.reduce_while(faces, {:ok, []}, fn %{branch: branch} = face, {:ok, published} ->
@@ -227,11 +222,26 @@ defmodule Fleet.Project.Onboard.Faces do
   def init_face(dir, url, branch) do
     File.mkdir_p!(Path.dirname(dir))
 
+    # ⚠ LE MODE SE POSE ICI, PARCE QUE C'EST ICI QUE LE REPERTOIRE NAIT. Les trois chemins qui
+    # batissent une face d'ecriture passent par ce verbe — creation d'un projet, adoption d'un
+    # arbre local, import d'une branche absente — et deux d'entre eux ne le posaient pas : la face
+    # naissait sous l'umask du BEAM (mesure du 2026-09-16 sur LCARS-beta : atelier en 2755 au lieu
+    # de 2775). Le laisser a l'appelant, c'est l'oublier dans l'appelant suivant.
+    #
     # `-t <branche>` : le pendant de `--single-branch` pour une face PUBLIEE et non clonee. Sans
     # lui, `remote add` pose le refspec large, et le premier fetch rapatrie les deux autres faces —
     # meme defaut, autre porte.
-    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false) do
-      GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
+    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false),
+         :ok <- GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false) do
+      apply_face_mode(dir, branch)
+    end
+  end
+
+  # Nil mode = no rule declared for this face (the code face, a feature branch): leave the umask.
+  defp apply_face_mode(dir, branch) do
+    case Layout.writer_face_mode(Layout.face_of(branch)) do
+      nil -> :ok
+      mode -> chmod_face(dir, mode)
     end
   end
 
@@ -241,7 +251,7 @@ defmodule Fleet.Project.Onboard.Faces do
   @spec ensure_face(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, :cloned | :published} | {:error, term()}
   def ensure_face(full_name, url, face, name, opts) do
-    %{dir: dir, branch: branch, template: template, mode: mode} = face
+    %{dir: dir, branch: branch, template: template} = face
 
     case Repo.repo_mod(opts).branch_exists?(full_name, branch, Repo.fc_opts(opts)) do
       {:error, reason} ->
@@ -253,13 +263,12 @@ defmodule Fleet.Project.Onboard.Faces do
         # `--single-branch` : cf. le bloc de `clone_main` — une face ne porte QUE sa branche.
         with :ok <-
                GitOps.run(["clone", "--single-branch", "--branch", branch, url, dir], auth: true),
-             :ok <- chmod_face(dir, mode) do
+             :ok <- apply_face_mode(dir, branch) do
           {:ok, :cloned}
         end
 
       {:ok, false} ->
         with :ok <- init_face(dir, url, branch),
-             :ok <- chmod_face(dir, mode),
              :ok <- Scaffold.face(dir, template, name, opts),
              :ok <- commit(dir, "chore(import): init #{branch}"),
              :ok <- publish_face(dir, branch) do

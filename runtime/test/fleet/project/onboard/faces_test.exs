@@ -7,6 +7,7 @@ defmodule Fleet.Project.Onboard.FacesTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Layout
   alias Fleet.Project.Onboard.Faces
 
   @moduletag :tmp_dir
@@ -108,7 +109,7 @@ defmodule Fleet.Project.Onboard.FacesTest do
       src = forge_repo!(tmp)
       blob = git!(src, ["rev-parse", "main:code.txt"])
       dir = Path.join([tmp, "doc", "garage"])
-      face = %{dir: dir, branch: "workshop", template: "workshop", mode: 0o2775}
+      face = %{dir: dir, branch: "workshop", template: "workshop"}
 
       assert {:ok, :cloned} =
                Faces.ensure_face("fleet/garage", forge_url(src), face, "garage",
@@ -130,6 +131,37 @@ defmodule Fleet.Project.Onboard.FacesTest do
 
       assert :ok = Faces.init_face(dir, "http://forge.example/fleet/garage.git", "ops")
       assert fetch_refspec(dir) == "+refs/heads/ops:refs/remotes/origin/ops"
+    end
+  end
+
+  # Sans mode explicite, la face nait sous l'umask du BEAM : l'atelier cesse d'etre ecrivable par le
+  # groupe et un depot humain s'y refuse, sans message. Le mode se pose donc la ou le repertoire
+  # nait, pas dans chacun des trois appelants — dont deux l'oubliaient.
+  describe "le MODE d'une face se pose ou elle nait" do
+    defp mode_of(dir), do: Bitwise.band(File.stat!(dir).mode, 0o7777)
+
+    test "init_face pose le mode DECLARE de la face d'ecriture, atelier et ops", %{tmp_dir: tmp} do
+      url = "http://forge.example/fleet/garage.git"
+      atelier = Path.join([tmp, "doc", "garage"])
+      ops = Path.join([tmp, "work", "garage"])
+
+      assert :ok = Faces.init_face(atelier, url, Layout.workshop_branch())
+      assert :ok = Faces.init_face(ops, url, Layout.ops_branch())
+
+      # Les deux, jamais un seul : une valeur attendue peut coincider avec l'umask du processus.
+      assert mode_of(atelier) == Layout.writer_face_mode("workshop")
+      assert mode_of(ops) == Layout.writer_face_mode("ops")
+      assert Layout.writer_face_mode("workshop") != Layout.writer_face_mode("ops")
+    end
+
+    test "aucune regle pour la face de CODE : l'umask decide, on n'invente pas un mode", %{
+      tmp_dir: tmp
+    } do
+      code = Path.join([tmp, "projects", "garage"])
+
+      assert Layout.writer_face_mode("code") == nil
+      assert :ok = Faces.init_face(code, "http://forge.example/fleet/garage.git", "main")
+      assert File.dir?(code)
     end
   end
 

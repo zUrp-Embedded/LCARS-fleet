@@ -1040,4 +1040,73 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end)
     |> Enum.map(fn {f, l} -> "#{f}:#{l}" end)
   end
+
+  # ⚠ LE MODE D'UNE FACE EST UN FAIT DE `Fleet.Layout`, PAS UN LITTERAL QU'ON RECOPIE. Trois chemins
+  # batissent une face d'ecriture — creation, adoption, import — et deux d'entre eux ne posaient
+  # aucun mode : le repertoire naissait sous l'umask du BEAM, l'atelier cessait d'etre ecrivable par
+  # le groupe, et un depot humain s'y refusait sans qu'aucun message ne le dise (mesure du
+  # 2026-09-16 sur LCARS-beta). Un littéral recopié est la forme que reprend ce défaut.
+  @writer_face_mode_rx ~r/0o2[0-7]{3}/
+  @face_mode_declaration "lib/fleet/layout.ex"
+
+  @doc """
+  Checks the setgid modes of the writer faces are declared ONCE, in `Fleet.Layout`.
+
+  Scans the Elixir sources of this tree for a setgid directory literal outside that declaration,
+  comments stripped. It does not check the values against the deployment manifest: the manifest
+  declares the face ROOTS, which `layout.face_roots_provisioned` covers, not a project's face
+  directory inside them.
+  """
+  @spec check_face_mode_single_source(String.t()) :: Support.result()
+  def check_face_mode_single_source(root) do
+    id = "layout.face_mode_single_source"
+
+    declares =
+      case File.read(Path.join(root, @face_mode_declaration)) do
+        {:ok, code} ->
+          case Regex.run(~r/@writer_face_modes\s+%\{[^}]*\}/, code) do
+            [map] -> length(Regex.scan(@writer_face_mode_rx, map))
+            nil -> 0
+          end
+
+        {:error, _} ->
+          0
+      end
+
+    sources =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.reject(fn path ->
+        rel = Path.relative_to(path, root)
+        rel == @face_mode_declaration or Support.checker_source?(rel)
+      end)
+
+    copies =
+      for path <- sources,
+          {line, texte} <- grep_lines(path, @writer_face_mode_rx),
+          Regex.match?(@writer_face_mode_rx, strip_comment(texte)),
+          do: "#{Path.relative_to(path, root)}:#{line}"
+
+    Support.measured_verdict(id, %{
+      remediation:
+        "read the mode from `Fleet.Layout.writer_face_mode/1` — a face mode written twice is a " <>
+          "face that stops being group-writable the day one copy moves, in silence",
+      broken: face_mode_broken(declares, sources),
+      findings: Enum.sort(copies),
+      note:
+        "#{declares} writer face mode(s) declared in #{@face_mode_declaration}, " <>
+          "#{length(sources)} other source(s) scanned"
+    })
+  end
+
+  # Two guards, because either half alone would pass on an empty measure: a declaration that no
+  # longer reads as literals, and a corpus this check never opened.
+  defp face_mode_broken(declares, sources) do
+    cond do
+      declares < 2 -> "#{@face_mode_declaration} no longer declares two writer face modes"
+      Support.measured_nothing?(sources) -> "no Elixir source scanned under lib/"
+      true -> nil
+    end
+  end
 end

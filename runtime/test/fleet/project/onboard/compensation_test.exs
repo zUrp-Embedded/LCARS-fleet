@@ -435,6 +435,19 @@ defmodule Fleet.Project.OnboardCompensationTest do
       assert face_mode(Path.join(o[:ops_root], "neuf")) == 0o2755
     end
 
+    # ⚠ LE CHEMIN DE LA CREATION L'OUBLIAIT. `build_writer_face` appelait `init_face` sans chmod,
+    # alors que l'import le posait : la face naissait sous l'umask du BEAM (mesure du 2026-09-16 sur
+    # LCARS-beta, atelier en 2755). Le mode se pose desormais dans `init_face`, par ou les trois
+    # chemins passent.
+    test "CREEES par un projet neuf : le mode est pose la aussi", %{tmp_dir: tmp} do
+      o = opts(tmp)
+
+      assert {:ok, %{repo: "fleet/tout-neuf"}} = ProjectOnboard.onboard("tout-neuf", o)
+
+      assert face_mode(Path.join(o[:workshop_root], "tout-neuf")) == 0o2775
+      assert face_mode(Path.join(o[:ops_root], "tout-neuf")) == 0o2755
+    end
+
     test "CLONEES : le mode est pose sur l'autre branche aussi", %{tmp_dir: tmp} do
       # Existing branches exercise clone-path chmod as well as creation-path chmod.
       o = opts(tmp)

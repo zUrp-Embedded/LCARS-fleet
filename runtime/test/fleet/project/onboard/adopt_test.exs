@@ -161,6 +161,20 @@ defmodule Fleet.Project.Onboard.AdoptTest do
     end
   end
 
+  # L'adoption batissait ses faces absentes par `init_face` sans poser leur mode, comme la creation.
+  test "after adopt, a CREATED writer face carries its declared mode", %{tmp_dir: tmp} do
+    o = opts(tmp)
+    build_local_main(o, "garage")
+
+    assert {:ok, _} = ProjectOnboard.adopt_project("garage", o)
+
+    mode = fn dir -> Bitwise.band(File.stat!(dir).mode, 0o7777) end
+
+    # Les deux, jamais un seul : une valeur attendue peut coincider avec l'umask du processus.
+    assert mode.(Path.join(o[:workshop_root], "garage")) == 0o2775
+    assert mode.(Path.join(o[:ops_root], "garage")) == 0o2755
+  end
+
   test "a PRESENT ops git dir is pushed AS-IS (no scaffold over the user's work)",
        %{tmp_dir: tmp} do
     o = opts(tmp)

@@ -51,6 +51,14 @@ defmodule Fleet.Layout do
   # Project faces include ops; the narrower producer-card enum excludes it.
   @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
 
+  # ⚠ LE MODE D'UNE FACE D'ECRITURE EST DECLARE ICI, ET NULLE PART AILLEURS. Sans mode explicite le
+  # repertoire nait sous l'umask du processus, qui depend de qui a lance le BEAM : la face atelier
+  # cesse d'etre ecrivable par le groupe et un depot humain s'y refuse, sans qu'aucun message ne le
+  # dise. Le setgid porte le groupe aux fichiers qui y naissent ; l'atelier est partage (g+w),
+  # l'ops ne l'est pas. La face de CODE n'en a pas : c'est un clone ordinaire sous sa racine
+  # declaree, et lui inventer un mode ici serait declarer une regle que personne n'a mesuree.
+  @writer_face_modes %{"workshop" => 0o2775, "ops" => 0o2755}
+
   # ⚠ LCARS IS A PROJECT OF THE FLEET IT INSTALLS (⚖ user 2026-09-16). The tree a machine was
   # installed from is not a loose checkout beside the projects: it is the CODE FACE of a project
   # like any other, adopted onto the forge with its ops and workshop faces. Naming it here is what
@@ -95,6 +103,16 @@ defmodule Fleet.Layout do
           "Fleet.Layout.face_branch/1: unknown face #{inspect(other)} — the schema enum allows " <>
             "#{inspect(Map.keys(@face_branches))}; an unknown value here bypassed it. Fix the caller."
   end
+
+  @doc """
+  Directory mode of a WRITER face (`workshop`, `ops`), or nil for any other face.
+
+  Nil is the answer for the code face and for anything that is not a face: those directories take
+  the process umask under their declared root. A caller that receives nil applies no mode; it must
+  not substitute one.
+  """
+  @spec writer_face_mode(String.t() | nil) :: non_neg_integer() | nil
+  def writer_face_mode(face), do: Map.get(@writer_face_modes, face)
 
   @doc """
   Names the face for a structural branch, or nil for feature branches and other inputs.

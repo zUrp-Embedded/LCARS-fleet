@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check.Boot
   alias Mix.Tasks.Lcars.Contracts.Check.Catalogue
   alias Mix.Tasks.Lcars.Contracts.Check.Runtime
+  alias Mix.Tasks.Lcars.Contracts.Check.SingleSource
   alias Mix.Tasks.Lcars.Contracts.Check.Support
   alias Mix.Tasks.Lcars.Contracts.Check.Types
 
@@ -138,6 +139,97 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       root = faces_root!("vide", nil)
 
       result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+  end
+
+  # Sans mode explicite une face d'écriture naît sous l'umask du BEAM : l'atelier cesse d'être
+  # écrivable par le groupe et un dépôt humain s'y refuse, sans message. Deux des trois chemins qui
+  # bâtissent une face l'oubliaient ; un littéral recopié est la forme que reprendrait ce défaut.
+  describe "layout.face_mode_single_source — le mode d'une face se déclare UNE fois" do
+    defp modes_root!(nom, declaration, autre) do
+      root = Fleet.TestEnv.tmp_path("modes-#{nom}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet", "project"]))
+      if declaration, do: File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), declaration)
+      if autre, do: File.write!(Path.join([root, "lib", "fleet", "project", "faces.ex"]), autre)
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp declaration_conforme,
+      do: """
+      defmodule Fleet.Layout do
+        @writer_face_modes %{"workshop" => 0o2775, "ops" => 0o2755}
+        def writer_face_mode(face), do: Map.get(@writer_face_modes, face)
+      end
+      """
+
+    test "le mode lu de Layout, aucune copie → pass" do
+      root =
+        modes_root!("ok", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          def mode(branch), do: Fleet.Layout.writer_face_mode(Fleet.Layout.face_of(branch))
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "un littéral recopié ailleurs → fail qui nomme le fichier et la ligne" do
+      root =
+        modes_root!("copie", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          def mode(_branch), do: 0o2775
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "lib/fleet/project/faces.ex:2"))
+    end
+
+    test "le même littéral dans un COMMENTAIRE n'est pas une copie" do
+      root =
+        modes_root!("commentaire", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          # l'atelier vaut 0o2775, l'ops 0o2755 — dit ici, décidé dans Layout
+          def mode(branch), do: Fleet.Layout.writer_face_mode(branch)
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "la déclaration réduite à un seul mode → INSTRUMENT BROKEN, pas un vert" do
+      root =
+        modes_root!(
+          "declaration",
+          """
+          defmodule Fleet.Layout do
+            @writer_face_modes %{"workshop" => 0o2775}
+          end
+          """,
+          "defmodule A do\nend\n"
+        )
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+
+    test "aucune source lue → INSTRUMENT BROKEN, jamais un vert par corpus vide" do
+      root = modes_root!("vide", declaration_conforme(), nil)
+
+      result = SingleSource.check_face_mode_single_source(root)
 
       assert result.status == :fail
       assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
