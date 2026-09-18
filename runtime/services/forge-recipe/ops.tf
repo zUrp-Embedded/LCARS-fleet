@@ -37,13 +37,16 @@ variable "store_repo" {
   default     = "_catalogues"
 }
 
-# LES APPROBATEURS DE `tool_request` : le siège — le master, compte n°1 de la forge, celui qui
-# installe. `cmd_apply` le résout par `/api/v1/user` avec le jeton master et le passe ici. PAS la
-# team `humans` : un manifeste d'outillage est appliqué par root sur le conteneur, et signer ça est
-# l'affaire de l'admin du système, pas d'une personne de fleet.
+# ⚠ CETTE VARIABLE NE SERT PLUS À NOMMER LES APPROBATEURS, et elle reste déclarée pour une raison :
+# `cmd_apply` la passe encore, et tofu refuse un `-var` qu'aucune variable ne déclare. Les
+# approbateurs sont désormais une TEAM (`local.approvers_team`), dont la composition se dérive du
+# drapeau site-admin de la forge — voir le bloc mesuré plus bas et `derive_admins` du geste.
+#
+# Elle disparaîtra avec le `-var` qui la porte, quand les gestes de forge passeront dans le client
+# Elixir (phase 7 du plan runtime).
 variable "approvers" {
   type        = list(string)
-  description = "Logins autorisés à approuver une PR vers tool_request — le siège, résolu par cmd_apply"
+  description = "N'est plus lue : les approbateurs sont la team dérivée du drapeau site-admin"
   default     = []
 }
 
@@ -199,23 +202,22 @@ resource "gitea_repository_file" "incidents_readme" {
   }
 }
 
-# ⚠ UN APPROBATEUR SANS ÉCRITURE N'EST PAS UN APPROBATEUR. Gitea EXIGE `write` sur le dépôt pour
-# retenir un compte dans `approval_whitelist_users` ; en dessous, il le RETIRE EN SILENCE et laisse
-# la whitelist activée et VIDE — donc une demande d'outil qu'aucune signature ne peut débloquer.
-# Mesuré le 2026-09-17 sur le banc 2003, sur les quatre niveaux : aucun accès (le siège est pourtant
-# site-admin de la forge) et `read` sont écartés, `write` et `admin` sont retenus. C'est `write`, le
-# plancher, et pas `admin` : un approbateur n'a pas à administrer ce qu'il signe.
+# ⚠ UNE WHITELIST DE PROTECTION N'ACCEPTE QUE DES MEMBRES D'UNE TEAM DE L'ORG. Un COLLABORATEUR de
+# dépôt en est écarté EN SILENCE, même site-admin, même propriétaire effectif, même en `write`
+# explicite : le PATCH rend 200, la liste reste vide, et rien n'apparaît dans le journal du
+# conteneur. Mesuré le 2026-09-18 sur le banc VIERGE 2004, quatre gestes d'une minute :
 #
-# La portée est CE DÉPÔT, jamais l'org système : le siège n'en devient pas membre. Ce que `write`
-# ouvrirait par ailleurs — un push libre sur les autres branches — est refermé juste en dessous,
-# par la protection de `main` et de `incidents`.
-resource "gitea_repository_collaborator" "approvers" {
-  for_each   = local.system_play ? toset(var.approvers) : toset([])
-  owner      = gitea_org.this.name
-  repo       = gitea_repository.ops[0].name
-  username   = each.value
-  permission = "write"
-}
+#     le siège, collaborateur `write`, site-admin   → écarté
+#     l'humain de démo, membre de `humans`          → retenu
+#     le siège, ajouté à la team `writers`          → retenu
+#     la team seule, sans aucun nom d'utilisateur   → retenue
+#
+# C'est donc la TEAM qui est nommée ici, et AUCUN compte. Sa composition se dérive du drapeau
+# site-admin de la forge à chaque passe du geste (`derive_admins`) : une liste de noms dans cette
+# recette serait une seconde table, et une table tenue à la main diverge (⚖ user 2026-09-18).
+#
+# Le collaborateur de dépôt a disparu avec elle : il ne servait qu'à cette whitelist, et il n'y
+# servait pas.
 
 # ⚠ `main` PORTE LE CONTRAT DU DÉPÔT, et `incidents` le registre que le pilote écrit. Ni l'un ni
 # l'autre ne se pousse à la main : le premier est semé par cette recette, le second par le runtime,
@@ -226,12 +228,16 @@ resource "gitea_repository_branch_protection" "main" {
   count                = local.system_play ? 1 : 0
   username             = gitea_org.this.name
   name                 = gitea_repository.ops[0].name
-  rule_name            = "main"
+  rule_name = "main"
+  # une TEAM, jamais des noms : Gitea écarte en silence un compte hors team (cf. le bloc mesuré
+  # plus bas). C'est la même team que celle qui approuve — pousser sur `main` et débloquer une
+  # demande d'outillage sont le même pouvoir sur ce dépôt.
   enable_push          = true
-  push_whitelist_users = var.approvers
+  push_whitelist_users = []
+  push_whitelist_teams = [local.approvers_team]
   # le compte systeme est proprietaire de l'org, donc admin du depot : sans ce verrou il passe outre
   block_admin_merge_override = true
-  depends_on                 = [gitea_repository_file.ops_readme]
+  depends_on                 = [gitea_repository_file.ops_readme, gitea_team.this]
 }
 
 resource "gitea_repository_branch_protection" "incidents" {
@@ -257,32 +263,33 @@ resource "gitea_repository_branch_protection" "tool_request" {
   username                        = gitea_org.this.name
   name                            = gitea_repository.ops[0].name
   rule_name                       = gitea_repository_branch.tool_request[0].name
-  required_approvals              = 1
-  dismiss_stale_approvals         = true
-  approval_whitelist_users        = var.approvers
+  required_approvals      = 1
+  dismiss_stale_approvals = true
+  # LA TEAM, ET AUCUN COMPTE : Gitea écarte en silence tout nom hors team (cf. le bloc mesuré
+  # ci-dessus). Sa composition se dérive du drapeau site-admin, elle ne se déclare pas ici.
+  approval_whitelist_users        = []
+  approval_whitelist_teams        = [local.approvers_team]
   block_merge_on_rejected_reviews = true
   # Le compte système est propriétaire de l'org, donc admin du dépôt, et c'est lui qui arme
   # l'auto-merge : sans ce verrou, un admin passe outre les approbations.
   block_admin_merge_override = true
-  # SEUL LE SIÈGE POUSSE DIRECTEMENT — pour que la recette puisse un jour changer les semences de
+  # SEULE CETTE TEAM POUSSE DIRECTEMENT — pour que la recette puisse un jour changer les semences de
   # cette branche (une fois la protection posée, un push hors liste est refusé, mesuré : « user
   # cannot commit to repo »). Le compte système n'y est pas : le runtime n'entre que par une PR.
+  # Même règle que pour l'approbation : une team, pas des noms.
   enable_push          = true
-  push_whitelist_users = var.approvers
-  # ⚠ L'APPROBATEUR DOIT AVOIR SON `write` AVANT QUE LA PROTECTION NE SOIT POSEE. Gitea evalue la
-  # whitelist A L'ECRITURE : un nom sans acces au depot est retire en silence, et le collaborateur
-  # qui arrive ENSUITE ne la repare pas — il faut un second apply pour que la liste prenne. Mesure
-  # du 2026-09-18 sur LCARS-beta : `_ops` pose, `lordzurp` collaborateur, et la protection avec
-  # « approbateurs : aucun ».
-  depends_on = [gitea_repository_file.tool_request_keep, gitea_repository_collaborator.approvers]
+  push_whitelist_users = []
+  push_whitelist_teams = [local.approvers_team]
+  depends_on           = [gitea_repository_file.tool_request_keep, gitea_team.this]
 
   lifecycle {
-    # SANS APPROBATEUR, LA PROTECTION EST OUVERTE : une liste vide veut dire « toute review d'un
-    # compte en écriture compte » — les bots. Une recette jouée sans `cmd_apply` (qui résout le
-    # siège) refuse ici plutôt que de poser une signature que personne ne donne.
+    # LA TEAM DOIT EXISTER, sinon la whitelist nomme le vide et la protection est ouverte : une liste
+    # vide veut dire « toute review d'un compte en écriture compte » — les bots. Sa COMPOSITION, elle,
+    # n'est pas l'affaire de cette recette : le geste la dérive du drapeau site-admin à chaque passe,
+    # et refuse si personne ne le porte.
     precondition {
-      condition     = !local.system_play || length(var.approvers) > 0
-      error_message = "approvers est vide : la protection de tool_request n'aurait aucun signataire — cmd_apply résout le siège (/api/v1/user) et le passe en -var approvers."
+      condition     = !local.system_play || contains(keys(local.teams), local.approvers_team)
+      error_message = "la team des approbateurs n'est pas déclarée : la protection de tool_request nommerait une team inexistante, donc aucun signataire."
     }
   }
 }

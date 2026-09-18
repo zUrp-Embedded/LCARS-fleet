@@ -44,6 +44,15 @@ if [[ " $* " == *" registration-token"* || "$*" == *registration-token* ]]; then
   printf '{"token":"REG-TOKEN-42"}'
   exit 0
 fi
+# La team des approbateurs, dérivée du drapeau site-admin par `derive_admins` : trois lectures et
+# une écriture. Sans elles, le geste refuse — à raison : une protection qui nomme une team vide ne
+# débloque personne (mesure du 2026-09-18, banc vierge 2004).
+case "$*" in
+  */api/v1/teams/9/members/*) printf '204'; exit 0 ;;
+  */api/v1/teams/9/members)   printf '[]'; exit 0 ;;
+  */api/v1/orgs/*/teams)      printf '[{"id":9,"name":"admins"}]'; exit 0 ;;
+  */api/v1/admin/users*)      printf '[{"login":"le-siege","is_admin":true,"active":true}]'; exit 0 ;;
+esac
 printf '%s' "${FAKE_AUTH_CODE:-200}"
 FAKE
   chmod +x "$BIN/curl"
@@ -64,6 +73,11 @@ FAKE
 body=""; [[ " \$* " == *" -n "* || " \$* " == *" -cn "* ]] || body="\$(cat)"
 case "\$*" in
   *'.id == 1'*) cat "$BATS_TEST_TMPDIR/master.out" 2>/dev/null || true ;;
+  # la team des approbateurs et sa composition, derivee du drapeau site-admin (\`derive_admins\`) :
+  # l'ID de la team, la liste des site-admins actifs, et les membres actuels
+  *'select(.name==\$n)'*) echo "\${FAKE_TEAM_ID:-9}" ;;
+  *'.is_admin == true'*)  printf '%s\n' \${FAKE_ADMINS-le-siege} ;;
+  *'.[].login'*)          printf '%s' "\${FAKE_MEMBRES:-}" ;;
   *'.login'*)   echo "le-siege" ;;
   *'[\$s]'*)    echo '["le-siege"]' ;;
   *) [[ "\$body" =~ \"token\":\"([^\"]*)\" ]] && printf '%s\n' "\${BASH_REMATCH[1]}" ;;

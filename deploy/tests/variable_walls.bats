@@ -807,3 +807,25 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ "$trouvees" -ge 4 ] \
     || { echo "MUR 23 — instrument cassé : $trouvees ligne(s) d'aide trouvée(s), au moins 4 attendues" >&2; return 1; }
 }
+
+# ⚠ MUR 24 — LA TEAM DES APPROBATEURS A UN NOM, ET DEUX LECTEURS. La recette la DÉCLARE et la nomme
+# dans ses protections (`local.approvers_team` de `forge-recipe/forge.tf`) ; le geste la COMPOSE à
+# partir du drapeau site-admin (`APPROVERS_TEAM` de `forge-gestures.sh`). Deux écritures d'un même
+# nom dérivent, et le jour où elles divergent la protection nomme une team que personne ne remplit :
+# elle est parfaitement posée et ne débloque personne. C'est le mode de défaillance le plus coûteux
+# de ce dépôt — celui qui a l'air d'avoir marché.
+#
+# Elle doit AUSSI être déclarée dans la table des teams de l'org système, sans quoi la recette nomme
+# une team qui n'existe pas.
+@test "MUR 24: la team des approbateurs porte le même nom dans la recette et dans le geste, et elle est déclarée" {
+  local recette geste
+  recette="$(sed -n 's/^  approvers_team *= *"\([^"]*\)".*/\1/p' "$REPO/runtime/services/forge-recipe/forge.tf")"
+  geste="$(sed -n 's/^APPROVERS_TEAM="\([^"]*\)".*/\1/p' "$REPO/runtime/services/forge-gestures.sh")"
+  [ -n "$recette" ] && [ -n "$geste" ] \
+    || { echo "MUR 24 — instrument cassé : recette « $recette », geste « $geste »" >&2; return 1; }
+  [ "$recette" = "$geste" ] \
+    || { echo "MUR 24 rompu — la recette nomme « $recette » et le geste compose « $geste » : la protection nommerait une team que personne ne remplit" >&2; return 1; }
+
+  grep -qE "^ *$recette = \{" "$REPO/runtime/services/forge-recipe/forge.tf" \
+    || { echo "MUR 24 rompu — « $recette » n'est pas dans la table des teams de l'org système : la recette nommerait une team inexistante" >&2; return 1; }
+}

@@ -42,6 +42,10 @@ SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 # dans l'org de leur catalogue. Meme defaut que `system_org` de la recette, `LCARS_FORGE_ORG` du
 # protocole et `PROV_FORGE_ORG_DEFAULT` de l'installeur — un mur bats tient les quatre d'accord.
 SYSTEM_ORG="${LCARS_FORGE_ORG:-lcars}"
+# La team des APPROBATEURS de `tool_request`. La recette la declare (`local.approvers_team` de
+# `forge-recipe/forge.tf`) et la nomme dans ses protections ; ce geste la COMPOSE (`derive_admins`).
+# Deux ecritures d'un meme nom derivent : un mur bats les tient d'accord.
+APPROVERS_TEAM="admins"
 # Le détenteur des secrets de forge : le compte que `put_secret` pose sur ce qu'il écrit, le seul qui
 # ouvrira ces fichiers (`PROV_AUTHORITY_USER` de `deploy/installer-constants.env` sur un poste).
 AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
@@ -407,6 +411,8 @@ cmd_apply() {
 
   publicize_org_members "$SYSTEM_ORG" "$tok" "$seed"
 
+  derive_admins "$SYSTEM_ORG" "$tok"
+
   demote_creator_from_owners "$SYSTEM_ORG" "$tok"
 
   # LE CATALOGUE STANDARD S'INSTALLE COMME N'IMPORTE QUEL CATALOGUE : son org, ses comptes de role,
@@ -421,6 +427,65 @@ cmd_apply() {
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
+}
+
+# ⚠ QUI APPROUVE UNE DEMANDE D'OUTILLAGE SE DERIVE, IL NE SE DECLARE PAS.
+#
+# Gitea n'accepte dans une whitelist de protection QUE les membres d'une team de l'org : un
+# collaborateur de depot, fut-il site-admin et proprietaire effectif, en est ecarte EN SILENCE — le
+# PATCH rend 200, la liste reste vide, et le journal du conteneur ne dit rien (mesure du 2026-09-18,
+# banc VIERGE 2004). La recette nomme donc une TEAM et aucun compte ; sa composition est ici.
+#
+# ⚖ user 2026-09-18 : « tu peux pas juste faire un truc qui se met a jour tout seul avec le flag
+# admin forge ? une autre table tenue a la main va diverger, c'est perdu d'avance ». Donc : les
+# membres de cette team sont EXACTEMENT les site-admins de la forge, recalcules a chaque passe. Rien
+# n'est tenu a la main, et un admin ajoute sur la forge devient approbateur a la passe suivante.
+#
+# ⚠ ET LE CALCUL EST TOTAL : on AJOUTE les admins absents et on RETIRE les membres qui ne le sont
+# plus. Une derivation qui n'ajoute jamais rien laisse la porte fermee ; une qui ne retire jamais
+# rien laisse approuver un compte qu'on a justement retire des admins.
+derive_admins() { # derive_admins <org> <jeton master>
+  local org="$1" tok="$2"
+  command -v jq >/dev/null || die "apply : jq absent — la team des approbateurs ne se derive pas, et la protection de tool_request nommerait une team vide"
+
+  # ⚠ PAS DE `head` DERRIERE `jq` : il ferme le tube, `jq` meurt en SIGPIPE, `pipefail` rend non
+  # zero et `set -e` tue le geste SANS UN MOT (mesure du 2026-09-18). `first(…)` fait le meme
+  # travail dans jq, sans tube a fermer.
+  local team_id
+  team_id="$(hcurl "$tok" -sS -m 15 "${FORGE_BASE_URL%/}/api/v1/orgs/$org/teams" 2>/dev/null \
+    | jq -r --arg n "$APPROVERS_TEAM" 'if type=="array" then (first(.[] | select(.name==$n) | .id) // "") else "" end' 2>/dev/null || true)"
+  [[ -n "$team_id" ]] \
+    || die "apply : la team « $APPROVERS_TEAM » n'est pas sur la forge — la recette la pose, et sans elle la protection de tool_request n'a aucun signataire"
+
+  # Les site-admins ACTIFS : un compte desactive ne signe rien, et Gitea l'ecarterait de toute facon.
+  local admins
+  admins="$(hcurl "$tok" -sS -m 20 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=200" 2>/dev/null \
+    | jq -r 'if type=="array" then (.[] | select(.is_admin == true and .active == true) | .login) else empty end' 2>/dev/null | sort -u)"
+  [[ -n "$admins" ]] \
+    || die "apply : la forge ne nomme AUCUN site-admin actif (/api/v1/admin/users) — personne ne pourrait approuver une demande d'outillage, et la protection serait un piege"
+
+  local membres
+  membres="$(hcurl "$tok" -sS -m 15 "${FORGE_BASE_URL%/}/api/v1/teams/$team_id/members" 2>/dev/null \
+    | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null | sort -u)"
+
+  local login code
+  while read -r login; do
+    [[ -n "$login" ]] || continue
+    code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 -X PUT \
+         "${FORGE_BASE_URL%/}/api/v1/teams/$team_id/members/$login" 2>/dev/null || true)"
+    [[ "$code" == "204" ]] \
+      || die "apply : « $login » est site-admin et n'entre pas dans la team « $APPROVERS_TEAM » (HTTP ${code:-aucune reponse}) — il ne pourrait pas approuver"
+    echo "forge-gestures: $APPROVERS_TEAM += $login (site-admin de la forge)"
+  done < <(comm -23 <(printf '%s\n' "$admins") <(printf '%s\n' "$membres"))
+
+  while read -r login; do
+    [[ -n "$login" ]] || continue
+    code="$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 15 -X DELETE \
+         "${FORGE_BASE_URL%/}/api/v1/teams/$team_id/members/$login" 2>/dev/null || true)"
+    [[ "$code" == "204" ]] \
+      || die "apply : « $login » n'est plus site-admin et ne sort pas de la team « $APPROVERS_TEAM » (HTTP ${code:-aucune reponse}) — il approuverait encore"
+    echo "forge-gestures: $APPROVERS_TEAM -= $login (n'est plus site-admin)"
+  done < <(comm -13 <(printf '%s\n' "$admins") <(printf '%s\n' "$membres"))
 }
 
 # ⚠ UN ETAT QUI DECRIT UNE AUTRE ORG N'EST PAS L'ETAT DE CE PLAY.

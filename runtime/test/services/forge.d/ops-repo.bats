@@ -37,6 +37,9 @@ setup() {
 stub_forge() {
   cat > "$BIN/curl" <<EOF
 #!/usr/bin/env bash
+# les membres de la team des approbateurs, en UNE variable : imbriquer des guillemets dans un
+# \${x:-defaut} a l'interieur d'un heredoc non protege casse la citation (mesure du 2026-09-18)
+MEMBRES_PAR_DEFAUT='[{"login":"le-siege"}]'
 w=0; url=""; method=GET
 for a in "\$@"; do
   case "\$a" in -w) w=1 ;; -X) method=NEXT ;; http*) url="\$a" ;; esac
@@ -55,6 +58,9 @@ case "\$url" in
                                                  if [[ -n '$4' ]]; then printf '%s' '$4'; code "\$(printf '\\n200')"; else printf '{"message":"The target couldn'"'"'t be found."}'; code "\$(printf '\\n404')"; fi ;;
   */branches/tool_request)                       code '$2' ;;
   */branches/incidents)                          code '$3' ;;
+  # la team des approbateurs : son ID se demande a l'org, ses membres a la team
+  */api/v1/orgs/*/teams)                         printf '[{"id":7,"name":"admins"}]'; code "\$(printf '\\n200')" ;;
+  */api/v1/teams/7/members)                      printf '%s' "\${STUB_MEMBRES:-\$MEMBRES_PAR_DEFAUT}"; code "\$(printf '\\n200')" ;;
   */api/v1/repos/*/_ops)                         code '$1' ;;
   *)                                             code 500 ;;
 esac
@@ -62,7 +68,10 @@ exit 0
 EOF
   chmod +x "$BIN/curl"
 }
-PROT='{"rule_name":"tool_request","required_approvals":1,"dismiss_stale_approvals":true,"enable_approvals_whitelist":true,"approvals_whitelist_username":["le-siege"]}'
+# ⚠ LA WHITELIST NOMME UNE TEAM, PAS DES COMPTES. Gitea ecarte en silence tout nom hors team
+# (mesure du 2026-09-18, banc VIERGE 2004) : la recette nomme `admins`, dont la composition se derive
+# du drapeau site-admin a chaque passe du geste.
+PROT='{"rule_name":"tool_request","required_approvals":1,"dismiss_stale_approvals":true,"enable_approvals_whitelist":true,"approvals_whitelist_username":[],"approvals_whitelist_teams":["admins"]}'
 
 rien_de_cree() {
   refute grep -q '^CURL:POST\|^CURL:PUT\|^CURL:DELETE' "$CALLS"
@@ -72,7 +81,7 @@ rien_de_cree() {
   stub_forge 200 200 200 "$PROT"
   run bash "$MODULE" check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request (une approbation de : le-siege, réapprobation à chaque push), main et incidents protégées"* ]]
+  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request (une approbation de la team « admins » : le-siege, réapprobation à chaque push), main et incidents protégées"* ]]
   rien_de_cree
   : > "$CALLS"
   run bash "$MODULE" apply
@@ -122,11 +131,20 @@ rien_de_cree() {
   [[ "$output" == *"FAIL  65-ops-repo: protection de lcars/_ops:tool_request illisible (HTTP sans réponse) — rien n'est conclu"* ]]
 }
 
-@test "protection AUTRE que celle de la recette (deux approbations, pas d'approbateur) : drift qui cite ce qui est lu" {
-  stub_forge 200 200 200 '{"required_approvals":2,"dismiss_stale_approvals":false,"approvals_whitelist_username":[]}'
+@test "protection AUTRE que celle de la recette (deux approbations, aucune team) : drift qui cite ce qui est lu" {
+  stub_forge 200 200 200 '{"required_approvals":2,"dismiss_stale_approvals":false,"approvals_whitelist_teams":[]}'
   run bash "$MODULE" check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"protégée AUTREMENT que la recette ne le dit (approbations « 2 », réapprobation « false », approbateurs « aucun »)"* ]]
+  [[ "$output" == *"protégée AUTREMENT que la recette ne le dit (approbations « 2 », réapprobation « false », teams approbatrices « aucune »)"* ]]
+}
+
+# ⚠ UNE TEAM VIDE NE SIGNE PAS DAVANTAGE QU'UNE LISTE VIDE. La protection peut etre parfaitement
+# posee et ne debloquer personne : c'est le meme piege, un cran plus loin.
+@test "la team nommee n'a AUCUN membre : drift qui le dit — la protection est posee, elle ne signe rien" {
+  STUB_MEMBRES='[]' stub_forge 200 200 200 "$PROT"
+  STUB_MEMBRES='[]' run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nomme la team « admins », qui n'a AUCUN membre"* ]] || { echo "$output"; return 1; }
 }
 
 @test "jeton systeme ABSENT : la protection n'est pas sondable — drift qui nomme le geste des jetons, pas un echec" {

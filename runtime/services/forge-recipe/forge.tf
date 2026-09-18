@@ -274,7 +274,26 @@ locals {
     # l'humain daily — READ. LE lock qui compte : voit + commente, ne relabellise ni ne crée. Rend
     # `stage/*` infalsifiable côté acteur indépendant, et `can_create_repos = false` EST ce lock.
     humans = { permission = "read", can_create_repos = false }
+
+    # ⚠ QUI APPROUVE UNE DEMANDE D'OUTILLAGE. Gitea n'accepte dans une whitelist de protection QUE
+    # les membres d'une team de l'org : un collaborateur de dépôt, fût-il site-admin et propriétaire
+    # effectif, en est écarté EN SILENCE (mesuré le 2026-09-18 sur le banc VIERGE 2004 — un PATCH
+    # qui rend 200 et une liste qui reste vide). La protection nomme donc cette TEAM et aucun compte.
+    #
+    # Sa composition ne se déclare nulle part : elle se DÉRIVE du drapeau site-admin de la forge, à
+    # chaque passe (`forge-gestures.sh`, `derive_admins`). Une table de noms tenue à la main
+    # divergerait — ⚖ user 2026-09-18 : « une autre table tenue à la main va diverger, c'est perdu
+    # d'avance ».
+    #
+    # WRITE, pas plus : approuver exige de pouvoir écrire sur le dépôt (mesuré : `read` est écarté
+    # comme l'absence de team). Ce que ce write ouvre par ailleurs est refermé par les protections
+    # de `main` et `incidents`.
+    admins = { permission = "write", can_create_repos = false }
   }) : local.base_teams
+
+  # LE NOM DE CETTE TEAM A UNE SEULE ÉCRITURE : la table ci-dessus la déclare, les protections de
+  # `ops.tf` la nomment par ce local, et le geste la compose par le même nom lu ici.
+  approvers_team = "admins"
 }
 
 # L'ORG SYSTÈME EST NOMMÉE, PAS DEVINÉE. Elle porte l'identité (`humans`, lue par le convergeur et

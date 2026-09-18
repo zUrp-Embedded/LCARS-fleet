@@ -74,6 +74,8 @@ EOF
   # curl : l'URL et la methode sont notees ; tout est « deja la » (200, corps vide ou liste vide)
   cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
+DEF_TEAMS='[{"id":9,"name":"admins"}]'
+DEF_ADMINS='[{"login":"le-siege","is_admin":true,"active":true}]'
 method=GET; url=""; fmt=""; out=""
 while [[ $# -gt 0 ]]; do
   case "$1" in -X) method="$2"; shift 2 ;; -w) fmt="$2"; shift 2 ;; -o) out="$2"; shift 2 ;;
@@ -83,7 +85,16 @@ done
 echo "CURL:$method ${url#http://forge.test}" >> "$CALLS"
 code=200
 case "$url" in
-  */members|*/teams|*/admin/users*) rep='[]' ;;
+  # la team des approbateurs : son ID se demande a l'org, ses membres a la team, et les site-admins
+  # a l'API d'administration. Les trois portent la derivation (`derive_admins`).
+  #
+  # ⚠ LES DEFAUTS SONT DES VARIABLES, PAS DES `${x:-…}` : le premier `}` d'un JSON FERME
+  # l'expansion, et le reste devient du texte (mesure du 2026-09-18 : `[{"id":9,"name":"admins"]}`).
+  */api/v1/orgs/*/teams) rep="${STUB_TEAMS:-$DEF_TEAMS}" ;;
+  */api/v1/teams/9/members) rep="${STUB_MEMBRES:-[]}" ;;
+  */api/v1/teams/9/members/*) rep=''; code="${STUB_TEAM_ECRITURE:-204}" ;;
+  */api/v1/admin/users*) rep="${STUB_ADMINS:-$DEF_ADMINS}" ;;
+  */members|*/teams) rep='[]' ;;
   */api/v1/user) [[ -n "${STUB_SANS_SIEGE:-}" ]] && rep='' || rep='{"login":"le-siege"}' ;;
   # le magasin des catalogues : pose par la recette, SONDE par le geste
   */api/v1/repos/*/_catalogues) rep=''; [[ -z "${STUB_SANS_MAGASIN:-}" ]] || code=404 ;;
@@ -508,4 +519,61 @@ etat_org() { # etat_org <dossier du play> <nom d org>
   apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -f "$LCARS_RECIPE_DIR/instance/terraform.tfstate" ]
+}
+
+# ─── 7. QUI APPROUVE SE DERIVE, IL NE SE DECLARE PAS ────────────────────────────────────────────
+#
+# ⚠ Gitea n'accepte dans une whitelist de protection QUE les membres d'une team de l'org : un
+# collaborateur de depot, fut-il site-admin, en est ecarte EN SILENCE (mesure du 2026-09-18, banc
+# VIERGE 2004). La recette nomme donc une TEAM et aucun compte ; sa composition est ici, et elle se
+# derive du drapeau site-admin de la forge.
+#
+# ⚖ user 2026-09-18 : « une autre table tenue a la main va diverger, c'est perdu d'avance ».
+
+@test "apply : les site-admins ABSENTS de la team y entrent — la composition se derive, elle ne se declare pas" {
+  STUB_ADMINS='[{"login":"le-siege","is_admin":true,"active":true},{"login":"ensign","is_admin":true,"active":true}]' \
+    STUB_MEMBRES='[]' apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+  grep -qx "CURL:PUT /api/v1/teams/9/members/le-siege" "$CALLS" || { grep '^CURL:' "$CALLS"; return 1; }
+  grep -qx "CURL:PUT /api/v1/teams/9/members/ensign" "$CALLS"
+  [[ "$output" == *"admins += le-siege (site-admin de la forge)"* ]]
+  [[ "$output" == *"admins += ensign (site-admin de la forge)"* ]]
+}
+
+@test "apply : un membre qui n'est PLUS site-admin en SORT — sinon il approuverait encore" {
+  STUB_ADMINS='[{"login":"le-siege","is_admin":true,"active":true}]' \
+    STUB_MEMBRES='[{"login":"le-siege"},{"login":"ancien"}]' apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+
+  grep -qx "CURL:DELETE /api/v1/teams/9/members/ancien" "$CALLS" || { grep '^CURL:' "$CALLS"; return 1; }
+  [[ "$output" == *"admins -= ancien (n'est plus site-admin)"* ]]
+  # celui qui est toujours admin n'est ni ajoute ni retire
+  refute grep -q "members/le-siege" "$CALLS"
+}
+
+@test "apply : un compte admin mais DESACTIVE n'entre pas — il ne signerait rien" {
+  STUB_ADMINS='[{"login":"le-siege","is_admin":true,"active":true},{"login":"dormant","is_admin":true,"active":false}]' \
+    STUB_MEMBRES='[]' apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  refute grep -q "members/dormant" "$CALLS"
+  grep -qx "CURL:PUT /api/v1/teams/9/members/le-siege" "$CALLS"
+}
+
+@test "apply : une forge SANS aucun site-admin actif est un refus NOMME — la protection serait un piege" {
+  STUB_ADMINS='[]' apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la forge ne nomme AUCUN site-admin actif"* ]] || { echo "$output"; return 1; }
+}
+
+@test "apply : la team ABSENTE de la forge est un refus qui renvoie a la recette" {
+  STUB_TEAMS='[{"id":9,"name":"humans"}]' apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la team « admins » n'est pas sur la forge"* ]] || { echo "$output"; return 1; }
+}
+
+@test "apply : une ecriture de team REFUSEE est un refus NOMME — l'approbateur ne signerait pas" {
+  STUB_MEMBRES='[]' STUB_TEAM_ECRITURE=403 apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"est site-admin et n'entre pas dans la team « admins » (HTTP 403)"* ]] || { echo "$output"; return 1; }
 }

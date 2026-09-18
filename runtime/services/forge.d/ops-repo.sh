@@ -95,12 +95,33 @@ mesure() {
   # pas `// empty` : en jq, `false // x` rend x — un `false` lu serait effacé
   ds="$(jq -r 'if .dismiss_stale_approvals == null then "" else (.dismiss_stale_approvals | tostring) end' <<<"$prot" 2>/dev/null || true)"
   # ⚠ UNE WHITELIST ACTIVÉE ET VIDE EST UN PIÈGE, PAS UNE PROTECTION OUVERTE : plus aucune signature
-  # ne compte, donc plus aucune demande d'outillage ne passe. Gitea la vide EN SILENCE quand
-  # l'approbateur n'a pas `write` sur le dépôt (mesuré le 2026-09-17 : même site-admin ne suffit
-  # pas). C'est pour ça que la liste est lue, et pas seulement le nombre d'approbations.
-  wl="$(jq -r '(.approvals_whitelist_username // []) | join(" ")' <<<"$prot" 2>/dev/null || true)"
+  # ne compte, donc plus aucune demande d'outillage ne passe.
+  #
+  # ⚠ ET ELLE SE LIT SUR LES TEAMS, PAS SUR LES NOMS. Gitea n'accepte dans une whitelist QUE les
+  # membres d'une team de l'org : un compte nommé là, fût-il site-admin et collaborateur en `write`,
+  # en est écarté EN SILENCE (mesuré le 2026-09-18 sur le banc VIERGE 2004). La recette nomme donc
+  # une team, dont la composition se dérive du drapeau site-admin à chaque passe du geste. Lire les
+  # noms ici rendrait « aucun » sur une protection parfaitement posée.
+  wl="$(jq -r '(.approvals_whitelist_teams // []) | join(" ")' <<<"$prot" 2>/dev/null || true)"
   if [[ "$ra" != "1" || "$ds" != "true" || -z "$wl" ]]; then
-    p_drift "$LCARS_OPS_REPO:$OPS_BRANCH protégée AUTREMENT que la recette ne le dit (approbations « ${ra:-?} », réapprobation « ${ds:-?} », approbateurs « ${wl:-aucun} ») ; $REMEDE"
+    p_drift "$LCARS_OPS_REPO:$OPS_BRANCH protégée AUTREMENT que la recette ne le dit (approbations « ${ra:-?} », réapprobation « ${ds:-?} », teams approbatrices « ${wl:-aucune} ») ; $REMEDE"
+    return 0
+  fi
+
+  # UNE TEAM VIDE NE SIGNE PAS DAVANTAGE QU'UNE LISTE VIDE. La protection nomme la team ; ce qui la
+  # rend vraie, c'est qu'elle ait au moins un membre — et ses membres sont les site-admins.
+  # la route des membres prend l'ID, pas le nom : il se demande a l'org
+  local org_sys team_id membres
+  org_sys="${LCARS_OPS_REPO%%/*}"
+  team_id="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 \
+      "${FORGE_BASE_URL%/}/api/v1/orgs/$org_sys/teams" 2>/dev/null \
+    | jq -r --arg n "$wl" 'if type=="array" then (.[] | select(.name==$n) | .id) else empty end' 2>/dev/null | head -1)"
+  membres=""
+  [[ -z "$team_id" ]] || membres="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 \
+      "${FORGE_BASE_URL%/}/api/v1/teams/$team_id/members" 2>/dev/null \
+    | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null | paste -sd" " || true)"
+  if [[ -z "$membres" ]]; then
+    p_drift "$LCARS_OPS_REPO:$OPS_BRANCH nomme la team « $wl », qui n'a AUCUN membre — aucune demande d'outillage ne peut être signée ; $REMEDE"
     return 0
   fi
 
@@ -120,7 +141,7 @@ mesure() {
     return 0
   fi
 
-  p_ok "$LCARS_OPS_REPO : dépôt, branches $OPS_BRANCH et $INCIDENTS_BRANCH, protection de $OPS_BRANCH (une approbation de : $wl, réapprobation à chaque push), main et $INCIDENTS_BRANCH protégées"
+  p_ok "$LCARS_OPS_REPO : dépôt, branches $OPS_BRANCH et $INCIDENTS_BRANCH, protection de $OPS_BRANCH (une approbation de la team « $wl » : $membres, réapprobation à chaque push), main et $INCIDENTS_BRANCH protégées"
 }
 
 pourquoi() { # pourquoi <branche> → ce qui manque sans elle
