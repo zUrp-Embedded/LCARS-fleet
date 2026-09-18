@@ -113,6 +113,12 @@ et refuse le build sur un drift. Le conteneur ne joue aucun module au démarrage
 | `store.sh` | les natures de volumes du magasin d'une instance et leurs noms |
 | `provision-audit.sh` | ce qui est apparu sur la machine entre deux instantanés et que la table ne déclare pas |
 
+⚠ **`provision-lib.sh` porte dix-neuf fonctions qui existent aussi dans le protocole du produit**
+(`runtime/services/lib/module-protocol.sh`), et ce n'est pas un accident de nommage : les unes sont
+le dialecte du rail (tag, compteurs, couleur, piège de sortie), les autres sont une dette. La note
+qui les sépare vit dans `runtime/services/README.md` ; leur composition fait foi dans
+`tests/transverse/homonymes.bats`, et un homonyme de plus y est un échec nommé.
+
 ## `docker/`
 
 `Dockerfile` (l'image, bâtie depuis le kit par les modules ; stages `runtime`, `verify`, `final`),

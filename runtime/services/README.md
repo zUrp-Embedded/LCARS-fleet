@@ -61,6 +61,31 @@ Trois familles de modules sont **utilisées en prod** et vivent donc ici, dans l
 
 L'installeur APPELLE ces modules ; il ne leur prête rien, et ils ne lui empruntent rien — c'est
 la frontière. Chaque dossier porte son README, qui instruit le protocole `<module> check|apply`.
+
+### Les homonymes des deux dialectes (RT-C-20)
+
+Dix-neuf fonctions portent le même nom ici (`lib/module-protocol.sh`) et chez l'installeur
+(`deploy/lib/provision-lib.sh`). **Deux familles, et elles n'ont pas le même statut.** Leur
+composition fait foi dans `deploy/tests/transverse/homonymes.bats` ; un homonyme de plus y est un
+échec nommé.
+
+**Homonymes PAR DESSEIN — le dialecte appartient au rail.** `p_step`, `p_ok`, `p_chg`, `p_drift`,
+`p_warn`, `p_fail`, `p_die`, `verdict_apply`, `verdict_check`. Même protocole, deux dialectes : le
+tag (`LCARS_MODULE_TAG` / `PROV_MODULE_TAG`), les compteurs, la couleur — l'installeur parle à un
+terminal, le produit à un journal. Les fondre donnerait à l'installeur le piège de sortie du
+produit (`LCARS_MODULE_RUN`), donc une autre sortie. L'accord de leurs VERDICTS est tenu à part, par
+`deploy/tests/transverse/verdict_parity.bats`.
+
+**Copies à résorber — aucune identité de rail.** `ensure_dir`, `ensure_mode`, `write_atomic`,
+`prov_owner`, `prov_refuse_symlink_path`, `run_quiet`, `read_token`, `env_field`, `lan_addr`,
+`advertise_addr` : des primitives de fichier et de réseau. Mesuré le 2026-09-19 — elles ne diffèrent
+que par le compteur qu'elles incrémentent et par la ponctuation de leurs phrases ; `env_field` et
+`lan_addr` sont déjà identiques au caractère près. C'est une dette, et la liste RÉTRÉCIT.
+
+⚠ **Le sens de la dépendance, si une source commune les réunit un jour : deploy → runtime, jamais
+l'inverse.** Le kit est un `git archive HEAD`, donc `runtime/` est posé à côté de `deploy/` dès le
+premier module — la source est atteignable. Le conteneur, lui, ne porte pas `deploy/` et ne doit
+rien lui devoir.
 Une machine posée (poste ou conteneur) porte cet arbre à `/opt/lcars/services/` ; un checkout, à
 `runtime/services/`.
 
