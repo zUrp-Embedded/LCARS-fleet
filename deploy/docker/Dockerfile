@@ -52,9 +52,11 @@ ENV TF_CLI_CONFIG_FILE=/opt/lcars/tofu/tofurc
 VOLUME ["/home", "/opt/lcars/var"]
 EXPOSE 22
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
-# ⚖ décision 3 : le port n'est PAS réécrit ici. L'image porte les faits du produit et le sonde lit
+# ⚖ décision 3 : le port n'est PAS réécrit ici. L'image porte les faits du produit et la sonde lit
 # le même fichier que tout le reste ; un second littéral serait le seul endroit qui ne bougerait pas.
+# ⚠ RIEN ENTRE `HEALTHCHECK` ET SON `CMD` : ses lecteurs prennent la ligne qui suit, et un
+# commentaire glissé là leur donne un commentaire à lire (mesuré le 2026-09-19).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
   CMD ["bash", "-c", ". /opt/lcars/services/lib/facts.sh; exec 3<>/dev/tcp/127.0.0.1/22 && { [ \"${LCARS_LANDING:-1}\" = 1 ] || exit 0; exec 4<>/dev/tcp/127.0.0.1/\"$LCARS_LANDING_PORT\"; }"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.sh"]

@@ -28,6 +28,12 @@ setup() {
   for n in $(sed -n 's/^PROV_HELPERS\(_DATA\)\{0,1\}=//p' "$R/deploy/installer-constants.env") lcars.bashrc; do
     cp "$RACINE_REELLE/runtime/services/$n" "$R/runtime/services/"
   done
+  # ⚖ décision 3 : les FAITS de la machine et leur lecteur shell voyagent par PROV_EMBEDDED, donc
+  # hors des deux listes ci-dessus — et `kit-verify` les exige, parce qu'un kit sans eux ne démarre
+  # ni l'installeur ni un geste du produit.
+  mkdir -p "$R/runtime/services/lib"
+  cp "$RACINE_REELLE/runtime/etc/facts.env" "$R/runtime/etc/"
+  cp "$RACINE_REELLE/runtime/services/lib/facts.sh" "$R/runtime/services/lib/"
   printf 'png' > "$R/assets/avatars/a.png"; printf 'ico' > "$R/assets/favicon/f.ico"
   printf '{"name":"doc"}\n' > "$R/assets/github.io/package.json"
   cp "$RACINE_REELLE/deploy/docker/docker-compose.yml" "$R/deploy/docker/"; printf '{}\n' > "$R/deploy/docker/lcars-hardened-seccomp.json"
