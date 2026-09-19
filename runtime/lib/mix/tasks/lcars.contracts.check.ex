@@ -99,6 +99,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Runtime.check_faces_single_branch(root),
         SingleSource.check_facts_single_source(root),
         SingleSource.check_facts_readers_wired(root),
+        SingleSource.check_facts_no_literal_alias(root),
         SingleSource.check_toolchain_branch_single_source(root),
         SingleSource.check_catalogue_roots_single_source(root),
         SingleSource.check_private_dir_single_source(root),

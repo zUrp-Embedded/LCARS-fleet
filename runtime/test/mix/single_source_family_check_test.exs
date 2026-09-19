@@ -183,6 +183,10 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     defp miroirs_compte(nom, tf) do
       [
         {"runtime/services/forge-recipe/forge.tf", tf},
+        # Le module RACINE de l'instance garde un defaut — personne ne lui passe le compte —, donc
+        # il est tenu comme MIROIR et pas interdit comme dans `forge.tf`.
+        {"runtime/services/forge-recipe/instance/accounts.tf",
+         ~s[variable "system_account" {\n  type = string\n  default = "#{nom}"\n}\n]},
         {"deploy/installer-constants.env", "PROV_SYSTEM_ACCOUNT=#{nom}\n"},
         {"runtime/services/forge-recipe/provision-forge-charte.sh", ~s[m="#{nom}:avatar.png"\n]},
         {"runtime/etc/facts.env", "LCARS_SYSTEM_ACCOUNT=#{nom}\n"}
@@ -412,6 +416,70 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
 
       assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
       assert ev =~ "INSTRUMENT BROKEN"
+    end
+  end
+
+  describe "facts.no_literal_alias — la valeur recopiee sous un nom raccourci" do
+    defp faits_alias,
+      do:
+        {"runtime/etc/facts.env",
+         "LCARS_SYSTEM_ACCOUNT=system_starfleet\nLCARS_FORGE_ORG=lcars\n"}
+
+    test "l'alias qui LIT le fait est la forme attendue → vert" do
+      root =
+        depot([
+          faits_alias(),
+          {"runtime/services/geste.sh",
+           ~s[SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"\nORG="$LCARS_FORGE_ORG"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_no_literal_alias(root)
+    end
+
+    test "⚠ LE CAS MESURE : un litteral sous le nom raccourci, que les 80 murs laissaient vert" do
+      root =
+        depot([
+          faits_alias(),
+          {"runtime/services/geste.sh", ~s[SYSTEM_ACCOUNT="system_starfleet_v2"\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_no_literal_alias(root)
+      assert ev =~ "services/geste.sh:1"
+      assert ev =~ "LCARS_SYSTEM_ACCOUNT"
+    end
+
+    test "le nom COMPLET recopie en litteral est refuse aussi" do
+      root =
+        depot([
+          faits_alias(),
+          {"runtime/services/geste.sh", ~s[LCARS_FORGE_ORG=autre-org\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_no_literal_alias(root)
+      assert ev =~ "LCARS_FORGE_ORG"
+    end
+
+    test "une TABLE DE TRADUCTION porte des noms face a des noms, pas une valeur → vert" do
+      root =
+        depot([
+          faits_alias(),
+          {"deploy/lib/provision-lib.sh",
+           "PROV_PRODUCT_NAMES=(\n  LCARS_SYSTEM_ACCOUNT=PROV_SYSTEM_ACCOUNT\n  LCARS_FORGE_ORG=PROV_FORGE_ORG\n)\n"},
+          {"runtime/services/geste.sh", ~s[A="$LCARS_SYSTEM_ACCOUNT"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_no_literal_alias(root)
+    end
+
+    test "un DECOR de banc pose ses litteraux a dessein — les temoins sont hors portee" do
+      root =
+        depot([
+          faits_alias(),
+          {"deploy/tests/banc.bats", ~s[SYSTEM_ACCOUNT="compte-de-banc"\n]},
+          {"runtime/services/geste.sh", ~s[A="$LCARS_SYSTEM_ACCOUNT"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_no_literal_alias(root)
     end
   end
 end

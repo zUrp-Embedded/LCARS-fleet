@@ -186,14 +186,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     Code.ensure_loaded?(mod)
   end
 
-  # Stops at # outside double quotes, toggling on every quote without escape handling.
-  # Single quotes, sigils, heredoc state and ?# are not parsed; false positives and negatives are possible.
+  # Stops at # outside double quotes AND outside `${…}`, toggling on every quote without escape
+  # handling. Single quotes, sigils, heredoc state and ?# are not parsed; false positives and
+  # negatives are possible.
+  #
+  # ⚠ THE `${…}` CLAUSE IS NOT A REFINEMENT, IT IS THE DIFFERENCE BETWEEN MEASURING A LINE AND
+  # MEASURING ITS FIRST HALF. `${path#/opt/lcars}` is shell's prefix-strip, not a comment: cutting
+  # there dropped everything after it, so every wall built on this function was blind to the rest of
+  # such a line. Measured 2026-09-19: seventy-nine lines of this repository carry that form.
   @doc false
   @spec strip_comment(String.t()) :: String.t()
   def strip_comment(line) do
     line
     |> String.to_charlist()
-    |> do_strip_comment([], false)
+    |> do_strip_comment([], false, 0)
     |> Enum.reverse()
     |> List.to_string()
   end
@@ -204,13 +210,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   def code_of(body),
     do: body |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1)
 
-  defp do_strip_comment([], acc, _in_str), do: acc
-  defp do_strip_comment([?# | _rest], acc, false), do: acc
+  defp do_strip_comment([], acc, _in_str, _depth), do: acc
 
-  defp do_strip_comment([?" | rest], acc, in_str),
-    do: do_strip_comment(rest, [?" | acc], not in_str)
+  # `${` opens an expansion — inside it, `#` and `%` are operators, and `}` closes it. Depth,
+  # not a flag: `${a:-${b#x}}` nests, and a flag would reopen the comment at the inner `}`.
+  defp do_strip_comment([?$, ?{ | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [?{, ?$ | acc], in_str, depth + 1)
 
-  defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
+  defp do_strip_comment([?} | rest], acc, in_str, depth) when depth > 0,
+    do: do_strip_comment(rest, [?} | acc], in_str, depth - 1)
+
+  defp do_strip_comment([?# | _rest], acc, false, 0), do: acc
+
+  defp do_strip_comment([?" | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [?" | acc], not in_str, depth)
+
+  defp do_strip_comment([c | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [c | acc], in_str, depth)
 
   # Missing files return no matches; other read errors raise. Absence checks need a population guard.
   # Matches raw lines, including documentation and strings.

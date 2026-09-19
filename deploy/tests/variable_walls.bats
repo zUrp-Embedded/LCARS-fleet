@@ -955,6 +955,17 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     [ -r "$f" ] || { echo "MUR 25 — instrument cassé : $f illisible" >&2; return 1; }
   done
 
+  # ⚠ ON MESURE DU CODE, PAS DE LA PROSE. `grep "$v="` sur le Dockerfile brut acceptait un nom
+  # ecrit dans un COMMENTAIRE — et ces fichiers en sont pleins, puisqu'ils documentent justement ces
+  # variables. Une phrase suffisait donc a declarer une orpheline « posee par le boot de l'image ».
+  # Les quatre sources se lisent desormais nettoyees, comme la table l'etait deja.
+  local net="$BATS_TEST_TMPDIR/sans-commentaires"; mkdir -p "$net"
+  sed 's/#.*//' "$faits"      > "$net/faits";      faits="$net/faits"
+  sed 's/#.*//' "$proto"      > "$net/proto";      proto="$net/proto"
+  sed 's/#.*//' "$boot"       > "$net/boot";       boot="$net/boot"
+  sed 's/#.*//' "$compose"    > "$net/compose";    compose="$net/compose"
+  sed 's/#.*//' "$dockerfile" > "$net/dockerfile"; dockerfile="$net/dockerfile"
+
   local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
                         | sed -nE 's/.*echo "((LCARS|FORGE|TF)_[A-Z_]+)=.*/\1/p' | sort -u)"
   [ "$(printf '%s\n' "$table" | grep -c .)" -ge 10 ] || {
@@ -985,4 +996,63 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     echo "MUR 25 — seulement $servis chemin(s) sur quatre exercés (fait=$par_fait dérivé=$par_derive compose=$par_compose boot=$par_boot) : l'instrument ne mesure presque rien" >&2
     return 1
   }
+}
+
+# ⚠ MUR 26 — LA TABLE DES MIROIRS EST COMPLETE, OU ELLE NE PROUVE RIEN.
+#
+# `prov_refuse_faits_divergents` compare chaque paire de `PROV_FACT_MIRRORS` au fait du produit, et
+# refuse la passe si l'une ment. C'est un instrument excellent — sur ce qu'il contient. Rien ne
+# tenait ce QU'IL CONTIENT : une constante homonyme d'un fait, ajoutée sans sa ligne dans la table,
+# n'était comparée à rien, et divergeait sans un mot (relecture hostile du 2026-09-19).
+#
+# La propriété : toute constante `PROV_X` dont le fait `LCARS_X` existe est DANS la table. La
+# réciproque n'est pas exigée — un fait peut n'avoir aucune constante (l'installeur ne décide pas
+# tout), et une constante peut n'être l'homonyme de rien.
+@test "MUR 26: toute constante homonyme d'un fait est DANS la table des miroirs" {
+  local lib="$REPO/deploy/lib/provision-lib.sh"
+  local cst="$REPO/deploy/installer-constants.env"
+  local faits="$REPO/runtime/etc/facts.env"
+  local f; for f in "$lib" "$cst" "$faits"; do
+    [ -r "$f" ] || { echo "MUR 26 — instrument cassé : $f illisible" >&2; return 1; }
+  done
+
+  local table; table="$(sed -n '/^PROV_FACT_MIRRORS=(/,/^)/p' "$lib" | sed 's/#.*//')"
+  [ "$(grep -cE '=LCARS_' <<<"$table")" -ge 10 ] || {
+    echo "MUR 26 — la table des miroirs ne se lit plus dans provision-lib.sh : l'instrument est cassé" >&2
+    return 1
+  }
+
+  # Les deux endroits où une constante naît : le fichier de constantes, et un défaut de la lib.
+  local declarees; declarees="$( { grep -oE '^PROV_[A-Z0-9_]+' "$cst"
+                                   sed 's/#.*//' "$lib" | grep -oE '^[[:space:]]*:[[:space:]]*"\$\{PROV_[A-Z0-9_]+' \
+                                     | grep -oE 'PROV_[A-Z0-9_]+'; } | sort -u)"
+  [ "$(grep -c . <<<"$declarees")" -ge 20 ] || {
+    echo "MUR 26 — moins de vingt constantes trouvées : l'instrument ne lit plus les constantes" >&2
+    return 1
+  }
+
+  local c court manquantes="" couvertes=0
+  for c in $declarees; do
+    court="${c#PROV_}"
+    # `_DEFAULT` : les deux constantes réglables portent le miroir sur leur DÉFAUT, pas sur le choix
+    # de l'opérateur — la table les nomme ainsi, et c'est la forme qu'on cherche.
+    grep -qE "^LCARS_${court%_DEFAULT}=" "$faits" || continue
+    # DEUX FORMES COUVRENT UNE CONSTANTE : elle-même, ou son jumeau `_DEFAULT`. Les deux constantes
+    # que l'opérateur peut régler (`PROV_FORGE_ORG`, `PROV_DECK_PORT`) ne sont PAS des miroirs — le
+    # miroir porte sur le défaut qu'elles prennent quand personne ne choisit.
+    if grep -qE "^[[:space:]]*${c}(_DEFAULT)?=LCARS_${court%_DEFAULT}$" <<<"$table"; then
+      couvertes=$((couvertes + 1))
+    else
+      manquantes="$manquantes $c/LCARS_${court%_DEFAULT}"
+    fi
+  done
+
+  [ -z "${manquantes// /}" ] || {
+    echo "MUR 26 rompu — constante(s) homonyme(s) d'un fait, hors de PROV_FACT_MIRRORS :$manquantes" >&2
+    echo "→ ajouter la paire « $manquantes » à PROV_FACT_MIRRORS dans deploy/lib/provision-lib.sh." >&2
+    echo "  Hors de la table, elle n'est comparée à rien : l'installeur pose ce que le produit n'ira pas lire." >&2
+    return 1
+  }
+  # GARDE D'INSTRUMENT : le mur a vraiment comparé des paires, il n'a pas filtré tout le monde.
+  [ "$couvertes" -ge 8 ] || { echo "MUR 26 — seulement $couvertes paire(s) vérifiée(s) : l'instrument ne mesure presque rien" >&2; return 1; }
 }

@@ -1088,4 +1088,26 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              "une couverture bornee qui ne se dit pas se lit comme une couverture complete"
     end
   end
+
+  describe "Support.strip_comment/1 — le `#` du shell n'est pas toujours un commentaire" do
+    test "⚠ `${x#/opt}` EST UNE EXPANSION : la ligne n'est plus coupee en deux" do
+      # Le defaut mesure : tout ce qui suivait ce `#` etait invisible a TOUS les murs batis sur
+      # cette fonction. Soixante-dix-neuf lignes du depot portent cette forme.
+      assert Support.strip_comment(~s[R="${p#/opt/lcars}"; T="$LCARS_PRIVATE_DIR"]) ==
+               ~s[R="${p#/opt/lcars}"; T="$LCARS_PRIVATE_DIR"]
+    end
+
+    test "les expansions IMBRIQUEES se referment une par une, pas d'un coup" do
+      assert Support.strip_comment(~s[A="${a:-${b#x}}" # ici seulement]) == ~s[A="${a:-${b#x}}" ]
+    end
+
+    test "un VRAI commentaire est toujours coupe, en debut comme en fin de ligne" do
+      assert Support.strip_comment("  # tout le reste") == "  "
+      assert Support.strip_comment(~s[A=1 # la suite]) == "A=1 "
+    end
+
+    test "un `#` dans une chaine reste dans le code" do
+      assert Support.strip_comment(~s[A="rouge #ff0000"]) == ~s[A="rouge #ff0000"]
+    end
+  end
 end

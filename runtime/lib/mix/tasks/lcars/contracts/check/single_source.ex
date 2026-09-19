@@ -455,6 +455,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
+        # The INSTANCE module is a root module: nobody passes it the account, so it keeps a default
+        # — and that default is a second literal the `forge.tf` rule above never looked at. Held as
+        # a MIRROR rather than forbidden: it must EQUAL the authority, and say so when it stops.
+        {"services/forge-recipe/instance/accounts.tf",
+         ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=\s*"#{e}"/s,
+         "the instance module's default"},
         {"../deploy/installer-constants.env", ~r/^PROV_SYSTEM_ACCOUNT=#{e}$/m,
          "the installer constant"},
         {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
@@ -489,7 +495,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
             note:
               "#{inspect(expected)} declared by ForgeIdentity @system_name; #{length(checked)} " <>
-                "sites checked (tofu RECEIVES it, it no longer copies it)" <>
+                "sites checked (the recipe RECEIVES it; only the instance root module " <>
+                "defaults it, and that default is compared here)" <>
                 skipped_note(skipped_labels)
           }
 
@@ -1299,6 +1306,107 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
           "#{length(sources)} source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
     })
+  end
+
+  @doc """
+  Refuses a shell variable that bears a machine fact's NAME and receives a LITERAL.
+
+  ⚖ Phase 5, the other half of `facts.single_source`. That wall keys on the fact's name inside an
+  expansion — `${LCARS_X:-literal}` — so it sees a second DEFAULT. It cannot see a second VALUE
+  under a shortened name: `SYSTEM_ACCOUNT="system_starfleet_v2"` names no fact and defaults nothing.
+  Measured 2026-09-19: that exact line left all eighty walls green, and the gesture then spoke to
+  the forge as an account nobody declared.
+
+  The rule is the product's own idiom turned into a property: every alias of a fact in this tree
+  reads `NAME="$LCARS_NAME"`. A right-hand side with no expansion in it is a COPY of the value, and
+  a copy is what the facts file exists to remove.
+
+  Scope is the shell of the product and the installer, tests excluded — a bench decor sets literals
+  on purpose, and that is what a decor is for. Array literals are skipped: the installer's
+  translation tables (`PROV_PRODUCT_NAMES`, `PROV_FACT_MIRRORS`) carry `LCARS_X=PROV_Y` pairs, which
+  are NAMES facing each other, not a value written twice. This is a check of FORM: it does not
+  prove the alias is read, nor that the fact it names carries what the caller expects.
+  """
+  @spec check_facts_no_literal_alias(String.t()) :: Support.result()
+  def check_facts_no_literal_alias(root) do
+    id = "facts.no_literal_alias"
+
+    remediation =
+      "assign the alias FROM the fact — `NAME=\"$LCARS_NAME\"` — after sourcing " <>
+        "`services/lib/facts.sh`. A literal under a fact's name is a second value that no wall " <>
+        "compares, and the day the fact moves, this copy stays"
+
+    keys = facts_keys(root)
+    sources = Enum.reject(facts_corpus(root), &facts_decor?(&1, root))
+    patterns = Enum.map(keys, &{&1, facts_alias_rx(&1)})
+
+    copies =
+      for path <- sources,
+          facts_langue(path) == :shell,
+          body = facts_body(path),
+          body != nil,
+          finding <- facts_alias_scan(body, facts_rel(path, root), patterns),
+          do: finding
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: copies |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} non-test source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  # `LCARS_X=…` with an unprefixed twin `X=…`: both are the fact's name, and both must read it.
+  defp facts_alias_rx(key) do
+    court = String.replace_prefix(key, "LCARS_", "")
+
+    Regex.compile!(
+      "^\\s*(?:export|local|declare|readonly|typeset)?\\s*(?:#{Regex.escape(key)}|" <>
+        "#{Regex.escape(court)})=(.*)$"
+    )
+  end
+
+  # An array literal opens on `NAME=(` and closes on a lone `)`. Its rows are name→name pairs, not
+  # assignments; scanning them would report the installer's translation tables as copies.
+  defp facts_alias_scan(body, rel, patterns) do
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reduce({false, []}, fn {texte, line}, {dans_tableau?, acc} ->
+      code = strip_comment(texte)
+
+      cond do
+        dans_tableau? -> {not Regex.match?(~r/^\s*\)\s*$/, code), acc}
+        Regex.match?(~r/^\s*[A-Za-z_][A-Za-z0-9_]*=\(\s*$/, code) -> {true, acc}
+        true -> {false, acc ++ facts_alias_hits(code, rel, line, patterns)}
+      end
+    end)
+    |> elem(1)
+  end
+
+  defp facts_alias_hits(code, rel, line, patterns) do
+    for {key, rx} <- patterns,
+        [_, valeur] <- [Regex.run(rx, code)],
+        facts_litteral?(valeur),
+        do: "#{rel}:#{line} (#{key})"
+  end
+
+  # A right-hand side with an expansion in it READS something; only one with none is a copy.
+  # An empty one declares nothing, and `$(…)`, `${…}` and `"$X"` all carry the `$`.
+  defp facts_litteral?(valeur) do
+    trimmed = String.trim(valeur)
+    trimmed != "" and not String.contains?(trimmed, "$")
+  end
+
+  # A bench decor sets literals ON PURPOSE — that is what a decor is. Refusing them would make the
+  # wall unplayable, and the witnesses are not the machine.
+  defp facts_decor?(path, root) do
+    path
+    |> facts_rel(root)
+    |> Path.split()
+    |> Enum.any?(&(&1 in ["test", "tests"]))
   end
 
   defp facts_cable?(body, :shell) do

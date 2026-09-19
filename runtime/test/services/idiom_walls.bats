@@ -194,6 +194,43 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
   refute grep -qE "$I18_RE" <<<'  export LCARS_SYSADMIN_UID=10001'
 }
 
+# ⚠ MUR I18 bis — LA POPULATION NOMMEE NE VOIT PAS ARRIVER LE SIXIEME LECTEUR.
+#
+# Le mur ci-dessus grep CINQ fichiers, et sa garde d'instrument exige qu'ils soient cinq. C'est ce
+# qu'il faut pour tenir la forme de ces cinq-la — et c'est exactement ce qui laisse passer un
+# SIXIEME : un geste neuf qui ouvrirait `login.defs` ou devinerait 1000 n'est dans aucune liste,
+# donc dans aucun grep. Releve hostile du 2026-09-19 (D7).
+#
+# Celui-ci ne nomme rien : il DECOUVRE. Tout le shell du produit qui parle de la borne doit etre
+# l'un des cinq. Un fichier de plus n'est pas interdit — il est REFUSE JUSQU'A ce que quelqu'un
+# l'ajoute a la population ci-dessus, ou le fasse passer par `uid_bounds_read`.
+@test "MUR I18 bis (produit) : aucun SIXIEME lecteur de la borne n'apparait hors de la population nommee" {
+  local root f hors="" vus=0
+  root="$(cd "$SERVICES/../.." && pwd)"
+  local bin_sh; mapfile -t bin_sh < <(ls "$root/runtime/bin"/* 2>/dev/null)
+
+  for f in "${SOURCES[@]}" "${bin_sh[@]}"; do
+    [ -f "$f" ] || continue
+    code "$f" | grep -qE 'UID_MIN|UID_MAX|login\.defs|PASSWD_DEFS' || continue
+    vus=$((vus + 1))
+    case "${f#"$root"/}" in
+      runtime/services/lib/uid-bounds.sh|runtime/services/lib/human-protocol.sh) ;;
+      runtime/services/human-converger.sh|runtime/services/console-humans.sh) ;;
+      runtime/bin/fleet) ;;
+      *) hors="$hors ${f#"$root"/}" ;;
+    esac
+  done
+
+  [ -z "${hors// /}" ] || {
+    echo "MUR I18 bis rompu — la borne systeme/humain est lue hors de la population nommee :$hors" >&2
+    echo "→ soit ce geste passe par « uid_bounds_read » (services/lib/uid-bounds.sh) et ne nomme plus" >&2
+    echo "  ni UID_MIN ni login.defs lui-meme, soit il rejoint la population de MUR I18 ci-dessus." >&2
+    return 1
+  }
+  # GARDE D'INSTRUMENT : si plus rien ne nommait la borne, ce mur serait vert sans rien mesurer.
+  [ "$vus" -eq 5 ] || { echo "MUR I18 bis — $vus fichier(s) nomment la borne, la population en declare cinq" >&2; return 1; }
+}
+
 # ─── MUR I20 : LE RAIL S'APPELLE `container` — PLUS AUCUN box / boite / boîte COTE PRODUIT ──────
 #
 # Le couple dit OU LCARS vit : `--workstation` (dans ce système) / le conteneur. `docker` reste le
