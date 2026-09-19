@@ -55,6 +55,24 @@ defmodule Fleet.Forge.ClientTest do
     end
   end
 
+  # Renvoie au test l'en-tete d'autorisation TEL QU'IL EST PARTI — liste vide comprise. Asserter
+  # sur le corps rendu ne distinguerait pas « pas d'en-tete » de « en-tete vide ».
+  defmodule AuthSpy do
+    @behaviour Plug
+
+    @impl Plug
+    def init(o), do: o
+
+    @impl Plug
+    def call(conn, _o) do
+      send(self(), {:auth_spy, Plug.Conn.get_req_header(conn, "authorization")})
+
+      conn
+      |> Plug.Conn.put_resp_header("content-type", "application/json")
+      |> Plug.Conn.send_resp(200, JSON.encode!([%{"id" => 7, "name" => "lcars-dispatched"}]))
+    end
+  end
+
   defp opts(handlers) do
     [
       base_url: "http://fake.test",
@@ -889,6 +907,58 @@ defmodule Fleet.Forge.ClientTest do
 
       assert {:error, {:config, :no_token_source}} =
                ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+    end
+
+    # `allow_anonymous` est la SEULE facon d'atteindre une forge sans jeton, et ces trois temoins
+    # tiennent ensemble sa forme : elle repond a l'ABSENCE de source, elle n'en degrade aucune, et
+    # elle n'envoie PAS « token "" » — que Gitea lit comme un identifiant malforme et refuse en 401
+    # au lieu de servir la ressource publique.
+    test "allow_anonymous sans aucune source → requete SANS en-tete d'autorisation" do
+      opts = [
+        base_url: "http://fake.test",
+        allow_anonymous: true,
+        req_options: [plug: {AuthSpy, %{}}]
+      ]
+
+      assert {:ok, :already_present} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+
+      assert_received {:auth_spy, autorisation}
+      assert autorisation == []
+    end
+
+    test "allow_anonymous ne degrade PAS un jeton nomme : il part authentifie" do
+      opts = [
+        base_url: "http://fake.test",
+        token: "t",
+        allow_anonymous: true,
+        req_options: [plug: {AuthSpy, %{}}]
+      ]
+
+      assert {:ok, :already_present} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+
+      assert_received {:auth_spy, autorisation}
+      assert autorisation == ["token t"]
+    end
+
+    @tag :tmp_dir
+    test "allow_anonymous ne rattrape PAS une source NOMMEE qui echoue — le fichier vide refuse",
+         %{tmp_dir: tmp_dir} do
+      vide = Path.join(tmp_dir, "jeton.vide")
+      File.write!(vide, "   \n")
+
+      opts = [
+        base_url: "http://fake.test",
+        token_file: vide,
+        allow_anonymous: true,
+        req_options: [plug: {AuthSpy, %{}}]
+      ]
+
+      assert {:error, {:config, {:token_file_empty, ^vide}}} =
+               ForgeClient.add_label("fleet/lcars", 42, "lcars-dispatched", opts)
+
+      refute_received {:auth_spy, _}
     end
 
     test "trims trailing slash on base_url" do

@@ -23,14 +23,38 @@
 # `runtime/etc/`, sur une machine posee `services/lib/` est sous `/opt/lcars/`, donc `/opt/lcars/etc/`.
 # Le meme chemin relatif resout les deux mondes. `LCARS_FACTS_FILE` passe devant, pour les temoins.
 
-LCARS_FACTS_FILE="${LCARS_FACTS_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/etc/facts.env}"
+LCARS_FACTS_FILE="${LCARS_FACTS_FILE:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)/etc/facts.env}"
 if [[ -r "$LCARS_FACTS_FILE" ]]; then
-  while IFS='=' read -r _cle _val; do
-    [[ "$_cle" == LCARS_* ]] || continue
-    [[ -n "${!_cle:-}" ]] || printf -v "$_cle" '%s' "$_val"
+  # ⚠ LA CLE SE VALIDE AVANT D'ETRE DEREFERENCEE. `${!_cle:-}` sur un nom qui n'est pas un
+  # identifiant — « LCARS_A B », « LCARS_X[0] » — n'est pas ignore par bash : il rend une erreur, et
+  # la boucle s'arrete la. Tous les faits SUIVANTS restaient alors vides, sans un mot. Le motif
+  # remplace `== LCARS_*`, qui laissait passer exactement ces noms-la.
+  #
+  # ⚠ LA DERNIERE OCCURRENCE GAGNE, comme chez les trois autres lecteurs (un dict Python, un
+  # `Map.new` Elixir, le dernier `=` de `env_field`). La version precedente gardait la PREMIERE,
+  # parce qu'elle ne distinguait pas « deja pose par l'environnement de l'appelant » de « deja pose
+  # par ce fichier » : un meme fichier lu par deux rails donnait deux valeurs sous un meme nom.
+  unset _lcars_pose 2>/dev/null
+  declare -A _lcars_pose=()
+  # `|| [[ -n "$_cle" ]]` : `read` rend faux sur une derniere ligne SANS saut de ligne, et sans ce
+  # rattrapage le dernier fait du fichier n'etait jamais lu.
+  while IFS='=' read -r _cle _val || [[ -n "$_cle" ]]; do
+    [[ "$_cle" =~ ^LCARS_[A-Z0-9_]+$ ]] || continue
+    case "${_lcars_pose[$_cle]:-}" in
+      env) : ;;
+      fichier) printf -v "$_cle" '%s' "$_val" ;;
+      *)
+        if [[ -n "${!_cle:-}" ]]; then
+          _lcars_pose["$_cle"]="env"
+        else
+          printf -v "$_cle" '%s' "$_val"
+          _lcars_pose["$_cle"]="fichier"
+        fi
+        ;;
+    esac
     export "${_cle?}"
   done < "$LCARS_FACTS_FILE"
-  unset _cle _val
+  unset _cle _val _lcars_pose
 else
   echo "FATAL ${LCARS_MODULE_TAG:-${0##*/}}: fichier de faits illisible ($LCARS_FACTS_FILE) — les faits de la machine ne se devinent pas. Sur un poste, « deploy/workstation up » le pose ; dans un conteneur, l'image le porte." >&2
   exit 1

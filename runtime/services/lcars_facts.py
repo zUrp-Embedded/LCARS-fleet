@@ -33,9 +33,14 @@ _CACHE = None
 
 
 def chemin():
-    """Le fichier de faits retenu, ou None si aucun candidat n'est lisible."""
+    """Le fichier de faits retenu, ou None si aucun candidat n'est lisible.
+
+    ``LCARS_FACTS_FILE`` nomme le fichier de façon EXCLUSIVE : nommé, il est le seul candidat, et
+    nommer un fichier illisible rend None au lieu de retomber sur un autre. Un lecteur qui répond
+    depuis un fichier autre que celui qu'on lui a désigné est pire qu'un lecteur qui refuse.
+    """
     nomme = os.environ.get("LCARS_FACTS_FILE")
-    for c in ((nomme,) if nomme else ()) + _CANDIDATS:
+    for c in (nomme,) if nomme else _CANDIDATS:
         if c and os.path.isfile(c):
             return c
     return None
@@ -47,9 +52,11 @@ def _charge():
         return _CACHE
     c = chemin()
     if c is None:
+        nomme = os.environ.get("LCARS_FACTS_FILE")
+        essayes = (nomme,) if nomme else _CANDIDATS
         raise FileNotFoundError(
             "fichier de faits introuvable (essayes : "
-            + ", ".join(x for x in _CANDIDATS)
+            + ", ".join(x for x in essayes)
             + ") — les faits de la machine ne se devinent pas"
         )
     faits = {}

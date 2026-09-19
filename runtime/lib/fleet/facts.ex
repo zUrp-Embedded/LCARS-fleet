@@ -23,16 +23,28 @@ defmodule Fleet.Facts do
 
   ## Where the file is
 
-  Three candidates, in order: `LCARS_FACTS_FILE` (witnesses and operators), `etc/facts.env` under
-  the current directory (a checkout, where Mix runs from `runtime/`), then `/opt/lcars/etc/facts.env`
-  (an installed machine, where the release lives beside the posed product tree). The checkout comes
-  first so a developer on a bench reads the tree under edit, not the one installed beside it.
+  `LCARS_FACTS_FILE` names the file EXCLUSIVELY: named, it is the only candidate, and naming one
+  that cannot be read raises instead of falling through. A reader that answers from another file
+  than the one it was told to read is worse than one that refuses.
+
+  Otherwise two candidates, in order: `etc/facts.env` under the current directory — only when that
+  directory is a CHECKOUT, which is to say it carries `mix.exs` beside it — then
+  `/opt/lcars/etc/facts.env`, the installed machine. The checkout comes first so a developer on a
+  bench reads the tree under edit, not the one installed beside it.
+
+  ⚠ THE `mix.exs` CONDITION IS A PRIVILEGE BOUNDARY, NOT A CONVENIENCE. `bin/fleet` does
+  `cd "$HOME"` before starting the BEAM, so an unconditional relative candidate resolves under the
+  home of the human who launched the fleet — and `~/etc/facts.env`, which that human owns and
+  writes, would outrank the system's. It redefines the system org, the token directory, the fleet
+  group. A release ships no `mix.exs`; a home directory has none; `mix` runs from `runtime/`, which
+  has one.
 
   Readers are injectable so the witnesses drive every branch without touching the machine.
   """
 
   @machine_file "/opt/lcars/etc/facts.env"
   @checkout_file "etc/facts.env"
+  @checkout_marker "mix.exs"
 
   @typedoc "Facts by name, as read from one file."
   @type t :: %{optional(String.t()) => String.t()}
@@ -109,13 +121,22 @@ defmodule Fleet.Facts do
   defp candidates(opts) do
     case Keyword.get(opts, :candidates) do
       nil ->
-        named = env_get("LCARS_FACTS_FILE", opts)
-        declared = if is_binary(named) and named != "", do: [named], else: []
-        declared ++ [@checkout_file, @machine_file]
+        case env_get("LCARS_FACTS_FILE", opts) do
+          named when is_binary(named) and named != "" -> [named]
+          _ -> checkout_candidate(opts) ++ [@machine_file]
+        end
 
       list ->
         list
     end
+  end
+
+  # The relative candidate exists only where the current directory IS a checkout. See the marker's
+  # note in the moduledoc: without this, `bin/fleet`'s `cd "$HOME"` hands a fleet human the system's
+  # facts. `:checkout_marker?` is the seam the witnesses drive.
+  defp checkout_candidate(opts) do
+    marker? = Keyword.get(opts, :checkout_marker?, fn -> File.regular?(@checkout_marker) end)
+    if marker?.(), do: [@checkout_file], else: []
   end
 
   defp env_get(name, opts) do

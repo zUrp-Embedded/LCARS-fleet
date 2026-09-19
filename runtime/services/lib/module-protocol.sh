@@ -84,8 +84,22 @@ verdict_check() { LCARS_VERDICT_RENDERED=1; [[ "$LCARS_FAILED" -gt 0 ]] && exit 
 # meme forme (`deploy/lib/provision-lib.sh`, PROVISION_RUN) : elle couvre ce qui meurt AVANT que le
 # geste ait source ce fichier — le geste absent, le protocole illisible.
 LCARS_VERDICT_RENDERED=0
+# ⚠ LE NETTOYAGE VIT ICI PARCE QUE LA GARDE POSSEDE DEJA LE TRAP EXIT, et qu'un geste qui poserait
+# le sien l'ECRASERAIT — bash n'en tient qu'un par signal, et la mort sans verdict cesserait d'etre
+# dite. Un geste enregistre donc ses temporaires, il ne les balaie pas lui-meme. Mesure du
+# 2026-09-19 : le convergeur des catalogues laissait un `mktemp` par passage, donc un par demarrage
+# de conteneur.
+LCARS_TEMPORAIRES=()
+lcars_temporaire() { # lcars_temporaire <chemin> — le fait retirer a la sortie, quelle qu'elle soit
+  # Un chemin VIDE ne s'enregistre pas : `rm -rf -- ""` se plaindrait sur stderr a chaque sortie,
+  # devant le verdict, pour une variable qu'un `mktemp` en echec a laissee intacte.
+  [[ -n "${1:-}" ]] && LCARS_TEMPORAIRES+=("$1")
+  return 0
+}
 _lcars_exit_guard() {
   local rc=$?
+  # AVANT TOUT LE RESTE : la branche « mort sans verdict » sort, et ce qui la suit n'est pas joue.
+  [[ "${#LCARS_TEMPORAIRES[@]}" -eq 0 ]] || rm -rf -- "${LCARS_TEMPORAIRES[@]}"
   [[ "$LCARS_VERDICT_RENDERED" -eq 1 ]] && return 0
   printf 'ERREUR %s: mort avant de rendre son verdict (rc=%d)\n' "$LCARS_MODULE_TAG" "$rc" >&2
   exit 3

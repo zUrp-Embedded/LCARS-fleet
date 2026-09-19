@@ -94,23 +94,51 @@ seed_local() {
 # ─── LA REGLE DE SURETE : on ne supprime QUE sur une lecture reussie ─────────────────────────────
 
 @test "porte ILLISIBLE a l'apply : rien n'est supprime, et le refus le DIT" {
-  stub_porte 1 '' 'UNREADABLE {:http, 500, "boom"}'
+  stub_porte 1 '' 'UNREADABLE lcars/_catalogues {:http, 500, "boom"}'
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"materiel laisse EN L'ETAT"* ]]
+  # LE DEPOT EST NOMME, et c'est ce que la porte a DIT, pas la chaine par defaut de ce module :
+  # illisible est le cas ou l'operateur a le plus besoin de savoir ou aller regarder.
+  [[ "$output" == *"lcars/_catalogues"* ]]
   # LE TEMOIN CENTRAL DE CE FICHIER : le materiel a survecu a une lecture ratee.
   [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "porte ILLISIBLE au check : DRIFT, jamais « rien n'est installe »" {
-  stub_porte 1 '' 'UNREADABLE :timeout'
+  stub_porte 1 '' 'UNREADABLE lcars/_catalogues :timeout'
   fake_git
   run bash "$MOD" check
   [ "$status" -ne 0 ]
-  [[ "$output" == *"magasin des catalogues ILLISIBLE"* ]]
+  [[ "$output" == *"magasin des catalogues ILLISIBLE (lcars/_catalogues)"* ]]
+}
+
+@test "porte ILLISIBLE qui ne nomme RIEN : le refus reste lisible, sans inventer de depot" {
+  # La porte est censee nommer le magasin, mais elle peut mourir avant (BEAM tue, stderr vide).
+  # Le repli est la chaine par defaut de ce module — jamais un nom devine.
+  stub_porte 1 '' ''
+  fake_git
+  run bash "$MOD" check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"magasin des catalogues ILLISIBLE (le magasin des catalogues)"* ]]
+}
+
+@test "aucun temporaire ne survit a la passe : la garde du protocole les retire" {
+  # Mesure du 2026-09-19 : le fichier des signatures fuyait a chaque passage, donc a chaque
+  # demarrage de conteneur. TMPDIR est a nous : ce qui reste dedans a fui.
+  #
+  # ⚠ LCARS_MODULE_RUN EST CE QUI ARME LA GARDE, et donc le nettoyage : sans lui, le protocole ne
+  # pose aucun trap — c'est le LANCEUR qui l'arme (le boot du conteneur, un module de l'installeur),
+  # pas le geste. Un temoin qui joue le geste nu ne mesurerait pas le chemin reel.
+  export LCARS_MODULE_RUN=1
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  stub_porte 0 "$(signe web)"
+  fake_git
+  run bash "$MOD" check
+  [ "$(find "$TMPDIR" -type f | wc -l)" -eq 0 ]
 }
 
 @test "⚠ LA PORTE ABSENTE N'EST PAS UNE FORGE VIDE : refus, materiel intact" {
@@ -170,6 +198,21 @@ seed_local() {
   [ "$status" -eq 0 ]
   refute [[ "$output" == *"pas-un-catalogue"* ]]
   [ -d "$LCARS_CATALOGUES_DIR/pas-un-catalogue" ]
+}
+
+@test "… ET IL N'EST PAS COMPTE NON PLUS : un magasin ABSENT reste une REPONSE" {
+  # Le meme repertoire, sur l'autre chemin. Le comptage se faisait par `find -type d`, donc il
+  # comptait ce dossier-la : « magasin ABSENT alors que 1 catalogue(s) sont installes ici », un
+  # DRIFT sur un catalogue que rien ne peut nommer. Deux enumerations du meme dossier, deux
+  # reponses — `local_installed` est la seule definition d'un catalogue installe.
+  stub_porte 2 '' 'ABSENT lcars/_catalogues'
+  fake_git
+  mkdir -p "$LCARS_CATALOGUES_DIR/pas-un-catalogue"
+
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rien d'installe ici"* ]]
+  refute [[ "$output" == *"RIEN n'est supprime"* ]]
 }
 
 # ─── LA CONVERGENCE : ce qui reste au shell, et que rien d'autre ne tiendrait ────────────────────

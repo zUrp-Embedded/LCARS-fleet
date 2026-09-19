@@ -70,17 +70,28 @@ forge_installed() {
   local cli; cli="$(lcars_cli)"
   [[ -r "$cli" ]] || { POURQUOI="porte catalogue-installed injouable ($cli illisible) — $REMEDE_RELEASE"; return 1; }
 
+  # ENREGISTRE, PAS BALAYE ICI : ce fichier est lu par l'appelant APRES le retour de cette fonction
+  # (`done < "$SIGNATURES"`), et la garde du protocole le retire a la sortie du geste — poser un
+  # trap EXIT ici ecraserait le sien.
   SIGNATURES="$(mktemp)" || { POURQUOI="fichier temporaire impossible à créer (mktemp)"; return 1; }
+  lcars_temporaire "$SIGNATURES"
 
   # ⚠ STDOUT PORTE LA MESURE, STDERR LA PLAINTE, ET ON NE LES MELANGE PAS : la porte reclame stdout
   # pour elle seule, precisement pour qu'une ligne de journal du BEAM ne passe pas devant un constat.
   local err rc=0
   err="$(mktemp)" || { POURQUOI="fichier temporaire impossible à créer (mktemp)"; return 1; }
+  lcars_temporaire "$err"
   FORGE_BASE_URL="$FORGE_BASE_URL" bash "$cli" tool catalogue-installed >"$SIGNATURES" 2>"$err" || rc=$?
 
-  # « ABSENT <depot> » nomme le magasin : on le retient pour que les phrases d'ici le nomment aussi.
+  # « ABSENT <depot> » ET « UNREADABLE <depot> … » nomment tous deux le magasin : on le retient pour
+  # que les phrases d'ici le nomment aussi. Sans la seconde, un magasin ILLISIBLE — le cas ou
+  # l'operateur a le plus besoin de savoir ou regarder — n'etait dit que « le magasin des
+  # catalogues », la chaine par defaut de ce fichier.
   local dit; dit="$(tr '\n' ' ' < "$err" | cut -c1-300)"
-  case "$dit" in ABSENT\ *) MAGASIN="${dit#ABSENT }"; MAGASIN="${MAGASIN%% *}" ;; esac
+  case "$dit" in
+    ABSENT\ *)     MAGASIN="${dit#ABSENT }";     MAGASIN="${MAGASIN%% *}" ;;
+    UNREADABLE\ *) MAGASIN="${dit#UNREADABLE }"; MAGASIN="${MAGASIN%% *}" ;;
+  esac
   rm -f "$err"
 
   case "$rc" in
@@ -134,9 +145,12 @@ say_leftover() {
 #   - du materiel en local : c'est un DRIFT, et on n'efface RIEN — la regle de surete du module.
 # Rend 0 quand l'appelant peut continuer (rien a effacer), 1 quand il doit s'arreter la.
 magasin_absent() { # magasin_absent <check|apply>
-  local n=0
-  [[ -d "$LCARS_CATALOGUES_DIR" ]] \
-    && n="$(find "$LCARS_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  # ⚠ ON COMPTE DES CATALOGUES, PAS DES REPERTOIRES, et `local_installed` est la SEULE definition
+  # d'un catalogue installe : un dossier sans `catalogue.yaml` n'en est pas un — ce module le dit
+  # partout ailleurs, et son temoin l'epingle. Le `find -type d` d'avant en comptait un quand meme,
+  # donc transformait « rien d'installe ici » en DRIFT, avec une phrase qui annoncait « 1
+  # catalogue(s) » que rien ne pouvait nommer (relecture hostile du 2026-09-19).
+  local n; n="$(local_installed | grep -c . || true)"
   if [[ "$n" -gt 0 ]]; then
     p_drift "magasin des catalogues ABSENT ($MAGASIN) alors que $n catalogue(s) sont installes ici ($LCARS_CATALOGUES_DIR) — leur source est injoignable, RIEN n'est supprime. Le depot est pose par la recette de la forge (sur un poste « deploy/workstation up » ; pour un conteneur « deploy/container forge-apply » depuis l'hote) ; s'il existe, il est peut-etre prive — ce geste le lit en anonyme"
     return 1
@@ -146,9 +160,12 @@ magasin_absent() { # magasin_absent <check|apply>
 }
 
 forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, selon ce qui est deja la
-  local n=0
-  [[ -d "$LCARS_CATALOGUES_DIR" ]] \
-    && n="$(find "$LCARS_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  # ⚠ ON COMPTE DES CATALOGUES, PAS DES REPERTOIRES, et `local_installed` est la SEULE definition
+  # d'un catalogue installe : un dossier sans `catalogue.yaml` n'en est pas un — ce module le dit
+  # partout ailleurs, et son temoin l'epingle. Le `find -type d` d'avant en comptait un quand meme,
+  # donc transformait « rien d'installe ici » en DRIFT, avec une phrase qui annoncait « 1
+  # catalogue(s) » que rien ne pouvait nommer (relecture hostile du 2026-09-19).
+  local n; n="$(local_installed | grep -c . || true)"
   if [[ "$n" -gt 0 ]]; then
     p_drift "adresse de forge inconnue alors que $n catalogue(s) sont déjà installés ici ($LCARS_CATALOGUES_DIR) — leur autorité est injoignable, rien ne peut être comparé ni convergé. Sur un poste, « deploy/workstation up » écrit $LCARS_PRIVATE_DIR/forge.url ; pour un conteneur, « FORGE_BASE_URL=<url> deploy/container config » depuis l'hôte, puis « deploy/container up »"
   else

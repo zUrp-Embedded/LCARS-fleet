@@ -87,3 +87,36 @@ lit() { # lit <fichier de faits> <expression apres le source>
   [ "$status" -eq 0 ]
   [ "$output" = "flottille/_ops|/ailleurs/jetons/capitaine.gitea_token" ]
 }
+
+# ─── CE QUE LA RELECTURE HOSTILE DU 2026-09-19 A MESURE ─────────────────────────────────────────
+
+@test "une CLE MALFORMEE ne tronque plus la lecture : les faits SUIVANTS arrivent" {
+  # `${!_cle:-}` sur « LCARS_A B » n'est pas ignore par bash : c'est une erreur, et la boucle
+  # s'arretait la. Tout ce qui suivait la ligne fautive restait VIDE, sans un mot.
+  printf 'LCARS_A B=x\nLCARS_FLEET_GROUP=flotte\n' > "$DECOR"
+  run lit "$DECOR" 'printf "%s" "${LCARS_FLEET_GROUP:-VIDE}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "flotte" ]
+}
+
+@test "cle repetee : la DERNIERE gagne, comme chez les trois autres lecteurs" {
+  printf 'LCARS_FLEET_GROUP=premier\nLCARS_FLEET_GROUP=dernier\n' > "$DECOR"
+  run lit "$DECOR" 'printf "%s" "$LCARS_FLEET_GROUP"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "dernier" ]
+}
+
+@test "cle repetee : l'environnement gagne quand meme, sur TOUTES les occurrences" {
+  printf 'LCARS_FLEET_GROUP=premier\nLCARS_FLEET_GROUP=dernier\n' > "$DECOR"
+  run env LCARS_FLEET_GROUP=pose_par_l_appelant \
+    bash -c "set -euo pipefail; LCARS_FACTS_FILE='$DECOR'; . '$FAITS_SH'; printf '%s' \"\$LCARS_FLEET_GROUP\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "pose_par_l_appelant" ]
+}
+
+@test "une derniere ligne SANS saut de ligne est un fait, pas un oubli" {
+  printf 'LCARS_FLEET_GROUP=flotte\nLCARS_PRIVATE_DIR=/sans/saut' > "$DECOR"
+  run lit "$DECOR" 'printf "%s" "${LCARS_PRIVATE_DIR:-VIDE}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "/sans/saut" ]
+}

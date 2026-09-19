@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 2026.257
+# STARDATE: 2026.263
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -76,6 +76,7 @@ PYTESTS=(
   "$HERE/services/console-deck_test.py"
   "$HERE/crosscutting/uninstructed_commands_test.py"
   "$HERE/services/catalogue-executor_test.py"
+  "$HERE/services/facts_test.py"
 )
 
 # Politique bats-absent : warning compte (defaut) vs echec dur. Overridable par env pour le jour du

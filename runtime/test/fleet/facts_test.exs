@@ -96,7 +96,7 @@ defmodule Fleet.FactsTest do
       assert Facts.path(opts) == ctx.faits
     end
 
-    test "`LCARS_FACTS_FILE` passes in front of both, like on the shell side", ctx do
+    test "`LCARS_FACTS_FILE` REPLACES both, like on the shell side", ctx do
       autre = Path.join(ctx.tmp_dir, "autre.env")
       File.write!(autre, "LCARS_FLEET_GROUP=flottille\n")
 
@@ -119,6 +119,38 @@ defmodule Fleet.FactsTest do
 
     test "a value may carry `=`; only the first one splits" do
       assert Facts.parse("LCARS_X=a=b\n") == %{"LCARS_X" => "a=b"}
+    end
+  end
+
+  describe "where the file is" do
+    @tag :tmp_dir
+    test "LCARS_FACTS_FILE names the file EXCLUSIVELY: named-but-missing does NOT fall through",
+         %{tmp_dir: tmp_dir} do
+      # Reviewer's case: a witness or an operator names a file, the file is not there, and the
+      # reader silently answers from the machine's own. Being told which file to read and reading
+      # another is worse than refusing.
+      absent = Path.join(tmp_dir, "pas-la.env")
+
+      env = fn
+        "LCARS_FACTS_FILE" -> absent
+        _ -> nil
+      end
+
+      assert Facts.path(env: env) == nil
+      assert_raise File.Error, fn -> Facts.load!(env: env) end
+    end
+
+    test "the relative candidate exists only in a CHECKOUT — `bin/fleet` cd's to $HOME" do
+      # `bin/fleet` does `cd "$HOME"` before starting the BEAM. Unconditionally, `etc/facts.env`
+      # would resolve under the home of the human who launched the fleet — a file that human owns
+      # and writes, outranking the system's. `mix.exs` is what a checkout has and a home has not.
+      env = fn _ -> nil end
+
+      # Sans le marqueur, le candidat relatif N'EXISTE PAS : ce qui reste est la machine, qu'elle
+      # porte le fichier ou non. Asserter sur `/opt/lcars/...` ferait dependre le temoin de l'etat
+      # de la machine qui le joue.
+      refute Facts.path(env: env, checkout_marker?: fn -> false end) == "etc/facts.env"
+      assert Facts.path(env: env, checkout_marker?: fn -> true end) == "etc/facts.env"
     end
   end
 

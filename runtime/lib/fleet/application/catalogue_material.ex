@@ -63,9 +63,21 @@ defmodule Fleet.Application.CatalogueMaterial do
     * `{:ok, signatures}` — the listing was read WHOLE. An empty list is a measure: the store
       exists and installs nothing.
     * `{:absent, repo}` — the store repository answered 404. Says nothing about what is installed.
-    * `{:error, reason}` — the listing could not be read. A partial list is never returned: the
-      forge client's pagination refuses a truncated one, because a short list read as complete
-      would make the converger erase the material of every catalogue past the boundary.
+    * `{:error, reason}` — the listing could not be read. No partial list is ever returned as
+      `:ok`: a page that fails aborts the whole read, because a short list taken for a complete
+      one would make the converger erase the material of every catalogue past the boundary.
+
+  ⚠ THE LIMIT OF THAT GUARANTEE, and it belongs here because the erasure hangs on it: it covers
+  pages that FAIL, not a forge that ends the listing early. `Transport.paginate/4` stops on an
+  empty page even when the server announces more, and trusts `X-Total-Count` — so a store that
+  answers an empty page mid-listing is indistinguishable from a complete one, and its catalogues
+  past that point read as uninstalled. Nothing downstream can tell the difference; the day this
+  matters, the fix is a snapshot ref in the request, not a claim in this docstring.
+
+  Reading is ANONYMOUS by design (`allow_anonymous: true`): a catalogue store is public by
+  construction, and a container that was never given any authority must still converge its
+  material. A caller that passes a token source keeps it — anonymity is only the answer to
+  having none.
 
   `opts` are forwarded to the forge client. `:store_repo`, `:base_url`, `:bundled`, `:forge_repo`
   and `:forge_files` are the test seams and never reach it.
@@ -78,7 +90,12 @@ defmodule Fleet.Application.CatalogueMaterial do
     lecteurs = %{
       repo: Keyword.get(opts, :forge_repo, ForgeRepo),
       files: Keyword.get(opts, :forge_files, Files),
-      opts: Keyword.drop(opts, [:store_repo, :base_url, :bundled, :forge_repo, :forge_files])
+      # `put_new`, so a caller that HAS an authority keeps it: this is the answer to having no
+      # token, never a downgrade of one that was named.
+      opts:
+        opts
+        |> Keyword.drop([:store_repo, :base_url, :bundled, :forge_repo, :forge_files])
+        |> Keyword.put_new(:allow_anonymous, true)
     }
 
     case lecteurs.repo.list_branches(depot, lecteurs.opts) do
@@ -196,8 +213,11 @@ defmodule Fleet.Application.CatalogueMaterial do
         IO.puts(:stderr, "ABSENT #{depot}")
         System.halt(2)
 
+      # LE DEPOT EN PREMIER, MEME FORME QUE « ABSENT <depot> », et pour la meme raison : c'est
+      # l'objet que l'operateur doit aller voir. Sans lui, l'appelant ne pouvait nommer que « le
+      # magasin des catalogues », sa propre chaine par defaut.
       {:error, raison} ->
-        IO.puts(:stderr, "UNREADABLE #{inspect(raison)}")
+        IO.puts(:stderr, "UNREADABLE #{Catalogue.store_repo()} #{inspect(raison)}")
         System.halt(1)
     end
   end
