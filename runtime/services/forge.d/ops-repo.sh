@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/forge.d/ops-repo.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-16
-# STATUS: PROTO-V2 — le depot du systeme (`<org systeme>/_ops`) : VERIFIE, jamais pose ici
+# STATUS: PROTO-V2 — le depot du systeme (`<org systeme>/_ops`) : APPELANT MINCE de la porte du release
 # JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
 # appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
 # `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
@@ -14,9 +14,20 @@
 # le banc beta (⚖ user 2026-09-16) — un registre ecrit sur une branche que rien n'avait creee, 380
 # echecs. Ici, ce qui manque est NOMME, et le remede est toujours le meme : rejouer la recette.
 #
+# ─── LA MESURE VIT DANS LE RELEASE, PAS ICI (phase 7) ───────────────────────────────────────────
+# Le client de forge du BEAM est le seul client de la forge ; ce fichier n'est plus qu'un APPELANT
+# MINCE. Il rassemble ce qu'il faut pour ouvrir la porte, la joue UNE fois, et relaie chacun de ses
+# constats dans le dialecte du protocole. Il ne juge rien : la porte mesure, le protocole compte.
+#
+# ⚠ UN SEUL EVAL, ET C'EST POURQUOI LA PORTE REND TOUT D'UN COUP. Un `lcars_fleet eval` coute
+# 0,27 s et 89 Mo ; un appelant qui en ferait un par question paierait ce prix dix fois.
+#
+# ⚠ LE JETON PART PAR L'ENVIRONNEMENT, JAMAIS PAR L'ARGV. `/proc/<pid>/environ` n'est lisible que
+# par le proprietaire et root ; un argv l'est par tout le monde. Meme forme que
+# `forge-gestures.sh` pour `tool catalogue-source`.
+#
 # `check` et `apply` font la meme mesure : il n'y a rien a appliquer. Le verdict est celui du
-# protocole : apply 0 conforme · 1 echec (la forge ne repond pas de facon lisible) · 2 drift (un
-# objet manque, la recette le pose) ; check 0 · 1 drift · 2 echec (`verdict_check`).
+# protocole : apply 0 conforme · 1 echec · 2 drift ; check 0 · 1 drift · 2 echec.
 
 set -euo pipefail
 
@@ -25,130 +36,60 @@ set -euo pipefail
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
-# Nue, pas `readonly` : les temoins sourcent la tete d'un module pour epingler une fonction, et un
-# second `source` dans le meme shell mourrait en « readonly variable ». Le gel du nom est tenu par
-# le contrat `toolchain.branch_single_source`, pas par l'attribut.
-OPS_BRANCH="tool_request"
-# La branche du registre d'incidents — meme nom que `Fleet.Pilot.IncidentRegistry.Store` (defaut de
-# `:pilot_incident_registry_branch`), tenu par ops-repo.bats.
-INCIDENTS_BRANCH="incidents"
 : "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/_ops}"
 
-# Le depot et ses branches sont publics : aucune autorite pour les lire. La protection, elle, ne se
-# lit qu'avec un droit d'administration sur le depot — le compte systeme en est proprietaire.
-code_of() { # code_of <chemin d'API> → le code HTTP, ou vide si la forge ne repond pas
-  curl -sS -o /dev/null -w '%{http_code}' -m 10 "${FORGE_BASE_URL%/}/api/v1$1" 2>/dev/null || true
+# La CLI du release : celle que l'appelant designe, celle du PATH, sinon la voisine de cet arbre.
+# Meme resolution que `forge.d/tokens.sh` — trois chemins, un seul ordre.
+_lcars_cli() {
+  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
+  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
+  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
 }
 
-# Le code HTTP est lu AVEC le corps : la forge rend un JSON sur 404 (« The target couldn't be
-# found ») comme sur 200, et un corps seul ferait passer une protection ABSENTE pour une protection
-# AUTRE. Rendu : « <code> <corps> », code vide si la forge ne repond pas.
-protection_of() { # protection_of <branche>
-  [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || return 0
-  local out
-  out="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 -w '\n%{http_code}' \
-       "${FORGE_BASE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branch_protections/$1" 2>/dev/null)" || return 0
-  printf '%s %s' "${out##*$'\n'}" "${out%$'\n'*}"
-}
-
-REMEDE="la recette de la forge le pose : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
+REMEDE_RELEASE="la release n'est pas posée : sur un poste, « deploy/workstation up » la pose ; dans un conteneur, l'image la porte"
 
 mesure() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || { p_drift "FORGE_BASE_URL non posé — le dépôt du système n'a pas pu être vérifié"; return 0; }
-  if ! curl -fsS -m 10 -o /dev/null "${FORGE_BASE_URL%/}/api/v1/version" 2>/dev/null; then
-    p_drift "forge injoignable ($FORGE_BASE_URL) — état du dépôt $LCARS_OPS_REPO INCONNU (ce geste ne conclut pas sans mesure)"
-    return 0
-  fi
 
-  local code
-  code="$(code_of "/repos/$LCARS_OPS_REPO")"
-  case "$code" in
-    200) ;;
-    404) p_drift "dépôt $LCARS_OPS_REPO ABSENT — sans lui aucune demande d'outillage, aucun registre d'incidents, aucune escalade ; $REMEDE"; return 0 ;;
-    *)   p_fail "$LCARS_OPS_REPO : la forge ne dit pas s'il existe (HTTP ${code:-sans réponse}) — rien n'est conclu"; return 0 ;;
-  esac
+  local cli; cli="$(_lcars_cli)"
+  [[ -r "$cli" ]] || { p_drift "porte ops-repo injouable ($cli illisible) — $REMEDE_RELEASE"; return 0; }
 
-  local b manque=0
-  for b in "$OPS_BRANCH" "$INCIDENTS_BRANCH"; do
-    code="$(code_of "/repos/$LCARS_OPS_REPO/branches/$b")"
-    case "$code" in
-      200) ;;
-      404) manque=1; p_drift "$LCARS_OPS_REPO:$b ABSENTE — $(pourquoi "$b") ; $REMEDE" ;;
-      *)   manque=1; p_fail "$LCARS_OPS_REPO:$b : la forge ne dit pas si elle existe (HTTP ${code:-sans réponse})" ;;
-    esac
-  done
-  [[ "$manque" -eq 0 ]] || return 0
-
-  # La protection : sans elle, une demande d'outillage se merge sans signature — un manifeste
-  # applique par root sur le conteneur, que personne n'a lu.
-  local prot ra ds wl pcode
+  # Le jeton SYSTEME : la protection ne se lit qu'avec un droit d'administration sur le depot, et le
+  # compte systeme est proprietaire de l'org. Son absence n'est pas une non-conformite du depot :
+  # c'est une mesure qu'on ne peut pas faire, et le geste des jetons la rendra possible.
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || {
-    p_drift "protection de $LCARS_OPS_REPO:$OPS_BRANCH non sondable — jeton système absent ($LCARS_SYSTEM_TOKEN_FILE), le geste des jetons le minte"
+    p_drift "protection de $LCARS_OPS_REPO non sondable — jeton système absent ($LCARS_SYSTEM_TOKEN_FILE), le geste des jetons le minte"
     return 0; }
-  prot="$(protection_of "$OPS_BRANCH")"; pcode="${prot%% *}"; prot="${prot#* }"
-  case "$pcode" in
-    200) ;;
-    404) p_drift "$LCARS_OPS_REPO:$OPS_BRANCH SANS protection — une PR d'outillage se mergerait sans signature ; $REMEDE"; return 0 ;;
-    *)   p_fail "protection de $LCARS_OPS_REPO:$OPS_BRANCH illisible (HTTP ${pcode:-sans réponse}) — rien n'est conclu (le compte système lit la protection en tant que propriétaire de l'org)"; return 0 ;;
-  esac
-  ra="$(jq -r '.required_approvals // empty' <<<"$prot" 2>/dev/null || true)"
-  # pas `// empty` : en jq, `false // x` rend x — un `false` lu serait effacé
-  ds="$(jq -r 'if .dismiss_stale_approvals == null then "" else (.dismiss_stale_approvals | tostring) end' <<<"$prot" 2>/dev/null || true)"
-  # ⚠ UNE WHITELIST ACTIVÉE ET VIDE EST UN PIÈGE, PAS UNE PROTECTION OUVERTE : plus aucune signature
-  # ne compte, donc plus aucune demande d'outillage ne passe.
-  #
-  # ⚠ ET ELLE SE LIT SUR LES TEAMS, PAS SUR LES NOMS. Gitea n'accepte dans une whitelist QUE les
-  # membres d'une team de l'org : un compte nommé là, fût-il site-admin et collaborateur en `write`,
-  # en est écarté EN SILENCE (mesuré le 2026-09-18 sur le banc VIERGE 2004). La recette nomme donc
-  # une team, dont la composition se dérive du drapeau site-admin à chaque passe du geste. Lire les
-  # noms ici rendrait « aucun » sur une protection parfaitement posée.
-  wl="$(jq -r '(.approvals_whitelist_teams // []) | join(" ")' <<<"$prot" 2>/dev/null || true)"
-  if [[ "$ra" != "1" || "$ds" != "true" || -z "$wl" ]]; then
-    p_drift "$LCARS_OPS_REPO:$OPS_BRANCH protégée AUTREMENT que la recette ne le dit (approbations « ${ra:-?} », réapprobation « ${ds:-?} », teams approbatrices « ${wl:-aucune} ») ; $REMEDE"
-    return 0
-  fi
+  local tok; tok="$(tr -d '[:space:]' < "$LCARS_SYSTEM_TOKEN_FILE" || true)"
+  [[ -n "$tok" ]] || {
+    p_drift "protection de $LCARS_OPS_REPO non sondable — jeton système VIDE ($LCARS_SYSTEM_TOKEN_FILE), le geste des jetons le remintera"
+    return 0; }
 
-  # UNE TEAM VIDE NE SIGNE PAS DAVANTAGE QU'UNE LISTE VIDE. La protection nomme la team ; ce qui la
-  # rend vraie, c'est qu'elle ait au moins un membre — et ses membres sont les site-admins.
-  # la route des membres prend l'ID, pas le nom : il se demande a l'org
-  local org_sys team_id membres
-  org_sys="${LCARS_OPS_REPO%%/*}"
-  team_id="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 \
-      "${FORGE_BASE_URL%/}/api/v1/orgs/$org_sys/teams" 2>/dev/null \
-    | jq -r --arg n "$wl" 'if type=="array" then (.[] | select(.name==$n) | .id) else empty end' 2>/dev/null | head -1)"
-  membres=""
-  [[ -z "$team_id" ]] || membres="$(forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -sS -m 10 \
-      "${FORGE_BASE_URL%/}/api/v1/teams/$team_id/members" 2>/dev/null \
-    | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null | paste -sd" " || true)"
-  if [[ -z "$membres" ]]; then
-    p_drift "$LCARS_OPS_REPO:$OPS_BRANCH nomme la team « $wl », qui n'a AUCUN membre — aucune demande d'outillage ne peut être signée ; $REMEDE"
-    return 0
-  fi
+  # ⚠ STDOUT PORTE LA MESURE, STDERR LA PLAINTE, ET ON NE LES MELANGE PAS : la porte reclame stdout
+  # pour elle seule, precisement pour qu'une ligne de journal du BEAM ne passe pas devant un constat.
+  local err out rc=0
+  err="$(mktemp)" || { p_fail "fichier temporaire impossible à créer (mktemp) — la porte ops-repo n'a pas été jouée"; return 0; }
+  out="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$tok" bash "$cli" tool ops-repo 2>"$err")" || rc=$?
 
-  # `main` et `incidents` : le `write` qu'un approbateur reçoit pour SIGNER ne doit pas devenir un
-  # droit d'écrire partout. Sans ces deux protections, il l'est — et rien ne le dirait.
-  local b libre=""
-  for b in main "$INCIDENTS_BRANCH"; do
-    prot="$(protection_of "$b")"; pcode="${prot%% *}"
-    case "$pcode" in
-      200) ;;
-      404) libre="${libre:+$libre, }$b" ;;
-      *)   p_fail "protection de $LCARS_OPS_REPO:$b illisible (HTTP ${pcode:-sans réponse}) — rien n'est conclu"; return 0 ;;
+  if [[ "$rc" -ne 0 ]]; then
+    p_fail "porte ops-repo en échec (code $rc) — rien n'est conclu sur $LCARS_OPS_REPO : $(tr '\n' ' ' < "$err" | cut -c1-300)"
+    rm -f "$err"; return 0
+  fi
+  rm -f "$err"
+
+  # ⚠ LE SILENCE SE LIRAIT COMME UNE CONFORMITE. Une porte qui ne rend rien n'a rien mesure.
+  [[ -n "$out" ]] || { p_fail "porte ops-repo : AUCUNE mesure rendue — rien n'en est conclu sur $LCARS_OPS_REPO"; return 0; }
+
+  local g p
+  while IFS=$'\t' read -r g p; do
+    [[ -n "$g$p" ]] || continue
+    case "$g" in
+      ok)    p_ok    "$p" ;;
+      drift) p_drift "$p" ;;
+      fail)  p_fail  "$p" ;;
+      *)     p_fail "porte ops-repo : ligne illisible « $(printf '%s' "$g" | cut -c1-60) » — la mesure n'est pas relayée" ;;
     esac
-  done
-  if [[ -n "$libre" ]]; then
-    p_drift "$LCARS_OPS_REPO : $libre SANS protection — les approbateurs de $OPS_BRANCH ont « write » sur ce dépôt pour pouvoir signer, et sans ces protections ce droit devient un push libre ; $REMEDE"
-    return 0
-  fi
-
-  p_ok "$LCARS_OPS_REPO : dépôt, branches $OPS_BRANCH et $INCIDENTS_BRANCH, protection de $OPS_BRANCH (une approbation de la team « $wl » : $membres, réapprobation à chaque push), main et $INCIDENTS_BRANCH protégées"
-}
-
-pourquoi() { # pourquoi <branche> → ce qui manque sans elle
-  case "$1" in
-    "$OPS_BRANCH")       printf '%s' "un pod qui demande un outil n'a pas de base de PR, et le réconciliateur échoue à chaque tick sur son head" ;;
-    "$INCIDENTS_BRANCH") printf '%s' "le pilote ne peut pas écrire son registre d'incidents, et le dira à chaque synchronisation" ;;
-  esac
+  done <<< "$out"
 }
 
 case "${1:?usage: ops-repo.sh <check|apply>}" in

@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
   @doc """
-  Compares five named shell/Python mirrors with Fleet.Toolchain.branch/0.
+  Compares four named shell/Python mirrors with Fleet.Toolchain.branch/0.
 
   The executor and converger must agree on the branch whose head they request
   and accept. This check does not verify signatures, branch protection or head
@@ -29,7 +29,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "services/forge.d/ops-repo.sh",
+      # ⚠ `services/forge.d/ops-repo.sh` N'EST PLUS UN MIROIR, et c'est un progres, pas un oubli :
+      # depuis la phase 7 il n'ecrit plus ce nom, il DEMANDE la mesure au release, qui lit
+      # `Fleet.Toolchain.branch/0`. Une ecriture de moins ne se remplace pas par une ligne ici.
       # The recipe lays the branch and its protection; the gesture only verifies.
       "services/forge-recipe/ops.tf",
       "services/admiral/skills/system-issues/list.sh",

@@ -37,9 +37,8 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
 
     defp autorite_branche, do: toolchain(~s[  def branch, do: "#{@branche}"\n])
 
-    defp cinq_miroirs(contenu) do
+    defp quatre_miroirs(contenu) do
       for rel <- [
-            "runtime/services/forge.d/ops-repo.sh",
             "runtime/services/forge-recipe/ops.tf",
             "runtime/services/admiral/skills/system-issues/list.sh",
             "runtime/bin/lcars-toolchain-converge",
@@ -48,26 +47,26 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
           do: {rel, contenu}
     end
 
-    test "les cinq miroirs portent le litteral → vert" do
-      root = depot([autorite_branche() | cinq_miroirs(~s[BRANCHE="#{@branche}"\n])])
+    test "les quatre miroirs portent le litteral → vert" do
+      root = depot([autorite_branche() | quatre_miroirs(~s[BRANCHE="#{@branche}"\n])])
 
       assert %{status: :pass} = SingleSource.check_toolchain_branch_single_source(root)
     end
 
     test "un miroir qui ne porte pas le litteral est nomme" do
-      [premier | reste] = cinq_miroirs(~s[BRANCHE="#{@branche}"\n])
+      [premier | reste] = quatre_miroirs(~s[BRANCHE="#{@branche}"\n])
       {rel, _} = premier
       root = depot([autorite_branche(), {rel, ~s[BRANCHE="autre/branche"\n]} | reste])
 
       assert %{status: :fail, evidence: ev} =
                SingleSource.check_toolchain_branch_single_source(root)
 
-      assert Enum.any?(ev, &(&1 =~ "ops-repo.sh"))
+      assert Enum.any?(ev, &(&1 =~ "ops.tf"))
     end
 
     test "⚠ UN REGLAGE REND LA BRANCHE TUNABLE — et c'est une borne de SECURITE qui tombe" do
       # A matching literal must not hide a recognised environment-derived branch.
-      [premier | reste] = cinq_miroirs(~s[BRANCHE="#{@branche}"\n])
+      [premier | reste] = quatre_miroirs(~s[BRANCHE="#{@branche}"\n])
       {rel, _} = premier
 
       for {contenu, attendu} <- [
@@ -89,7 +88,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       root =
         depot([
           toolchain(~s[  def branch, do: "lcars/" <> "toolchain"\n])
-          | cinq_miroirs(~s[BRANCHE="#{@branche}"\n])
+          | quatre_miroirs(~s[BRANCHE="#{@branche}"\n])
         ])
 
       assert %{status: :fail, note: note} =

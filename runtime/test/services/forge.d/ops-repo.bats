@@ -2,13 +2,16 @@
 # SOURCE: runtime/test/services/forge.d/ops-repo.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-16
-# STATUS: temoins de forge.d/ops-repo.sh — le depot du systeme est VERIFIE, jamais pose par ce geste
+# STATUS: temoins de forge.d/ops-repo.sh — l'APPELANT MINCE de la porte du release
 #
-# CE QUE CES TEMOINS TIENNENT (⚖ user 2026-09-16) : la recette de la forge pose le depot du systeme,
-# ses branches et la protection de `tool_request` ; ce geste mesure et NOMME ce qui manque, avec le
-# remede qui est toujours la recette. Il ne cree rien : aucun POST, aucun PUT, aucun git. Un objet
-# absent est un DRIFT (rc 2), une forge qui ne repond pas lisiblement est un ECHEC (rc 1), et `check`
-# comme `apply` font exactement la meme mesure.
+# CE QUE CES TEMOINS TIENNENT. La MESURE vit desormais dans le release
+# (`Fleet.Application.OpsRepo`, temoins en ExUnit) ; ce fichier n'en tient plus la logique, il tient
+# ce qui reste au shell et que rien d'autre ne tiendrait :
+#   · les gardes AVANT la porte — sans elles, l'appelant paierait un eval pour rien et rendrait une
+#     plainte du BEAM la ou l'operateur attend une phrase ;
+#   · le RELAI de chaque gravite dans le dialecte du protocole, et le verdict qui en decoule ;
+#   · les deux refus d'une porte qui ne mesure pas : muette, ou en echec ;
+#   · le jeton qui part par l'ENVIRONNEMENT et jamais par l'argv.
 
 # shellcheck disable=SC2016,SC2030,SC2031
 
@@ -19,214 +22,157 @@ setup() {
   [ -f "$MODULE" ]
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   export LCARS_MODULE_TAG=65-ops-repo
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
   export FORGE_BASE_URL="http://forge.test"
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$LCARS_PRIVATE_DIR"
   export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/system_starfleet.gitea_token"
-  printf 'SYS\n' > "$LCARS_SYSTEM_TOKEN_FILE"
+  printf 'SYS-TOKEN\n' > "$LCARS_SYSTEM_TOKEN_FILE"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
+  export LCARS_CLI="$BATS_TEST_TMPDIR/lcars"
   unset LCARS_OPS_REPO
 }
 
-# stub_forge <depot> <tool_request> <incidents> <protection JSON ou vide ou "000"> [main] [inc]
-# Les codes des sondes, dans l'ordre des questions ; la protection est un corps JSON (ou rien).
-# Les deux derniers sont les codes des protections de `main` et `incidents` — defaut 200, parce que
-# la recette les pose : un banc qui ne les aurait pas est le cas PARTICULIER, pas le decor normal.
-# ⚠ L'ORDRE DES MOTIFS EST LE TEMOIN : l'URL du depot est un prefixe de celles des branches et de la
-# protection ; les plus longues se testent en premier.
-stub_forge() {
-  cat > "$BIN/curl" <<EOF
+# stub_porte <code de sortie> <ce que la porte imprime sur stdout> [plainte sur stderr]
+# Note l'argv complet et la presence du jeton dans l'environnement, pour que les temoins mesurent
+# COMMENT la porte est appelee et pas seulement ce qu'elle rend.
+stub_porte() {
+  cat > "$LCARS_CLI" <<EOF
 #!/usr/bin/env bash
-# les membres de la team des approbateurs, en UNE variable : imbriquer des guillemets dans un
-# \${x:-defaut} a l'interieur d'un heredoc non protege casse la citation (mesure du 2026-09-18)
-MEMBRES_PAR_DEFAUT='[{"login":"le-siege"}]'
-w=0; url=""; method=GET
-for a in "\$@"; do
-  case "\$a" in -w) w=1 ;; -X) method=NEXT ;; http*) url="\$a" ;; esac
-  [[ "\$method" == NEXT && "\$a" != -X ]] && method="\$a"
-done
-[[ " \$* " == *" -K "* ]] && cat >/dev/null
-echo "CURL:\$method \${url#http://forge.test}" >> "\$CALLS"
-code() { [[ \$w -eq 1 ]] && printf '%s' "\$1"; return 0; }
-case "\$url" in
-  */api/v1/version)                              [[ "${FORGE_MUETTE:-}" == 1 ]] && exit 7; exit 0 ;;
-  */branch_protections/main)                     [[ '${5:-200}' == 000 ]] && exit 7
-                                                 if [[ '${5:-200}' == 200 ]]; then printf '{"branch_name":"main"}'; code "\$(printf '\\n200')"; else printf '{"message":"nope"}'; code "\$(printf '\\n${5:-200}')"; fi ;;
-  */branch_protections/incidents)                [[ '${6:-200}' == 000 ]] && exit 7
-                                                 if [[ '${6:-200}' == 200 ]]; then printf '{"branch_name":"incidents"}'; code "\$(printf '\\n200')"; else printf '{"message":"nope"}'; code "\$(printf '\\n${6:-200}')"; fi ;;
-  */branch_protections/tool_request)             [[ '$4' == 000 ]] && exit 7
-                                                 if [[ -n '$4' ]]; then printf '%s' '$4'; code "\$(printf '\\n200')"; else printf '{"message":"The target couldn'"'"'t be found."}'; code "\$(printf '\\n404')"; fi ;;
-  */branches/tool_request)                       code '$2' ;;
-  */branches/incidents)                          code '$3' ;;
-  # la team des approbateurs : son ID se demande a l'org, ses membres a la team
-  */api/v1/orgs/*/teams)                         printf '[{"id":7,"name":"admins"}]'; code "\$(printf '\\n200')" ;;
-  */api/v1/teams/7/members)                      printf '%s' "\${STUB_MEMBRES:-\$MEMBRES_PAR_DEFAUT}"; code "\$(printf '\\n200')" ;;
-  */api/v1/repos/*/_ops)                         code '$1' ;;
-  *)                                             code 500 ;;
-esac
-exit 0
+printf 'ARGV:%s\n' "\$*" >> "$CALLS"
+printf 'ENVTOK:%s\n' "\${FORGE_TOKEN:-}" >> "$CALLS"
+printf 'ENVURL:%s\n' "\${FORGE_BASE_URL:-}" >> "$CALLS"
+printf '%s' '${3:-}' >&2
+printf '%s' '$2'
+exit ${1}
 EOF
-  chmod +x "$BIN/curl"
-}
-# ⚠ LA WHITELIST NOMME UNE TEAM, PAS DES COMPTES. Gitea ecarte en silence tout nom hors team
-# (mesure du 2026-09-18, banc VIERGE 2004) : la recette nomme `admins`, dont la composition se derive
-# du drapeau site-admin a chaque passe du geste.
-PROT='{"rule_name":"tool_request","required_approvals":1,"dismiss_stale_approvals":true,"enable_approvals_whitelist":true,"approvals_whitelist_username":[],"approvals_whitelist_teams":["admins"]}'
-
-rien_de_cree() {
-  refute grep -q '^CURL:POST\|^CURL:PUT\|^CURL:DELETE' "$CALLS"
+  chmod +x "$LCARS_CLI"
 }
 
-@test "tout est la : conforme (rc 0), une ligne qui nomme le depot, les deux branches et les approbateurs — et rien n'est cree" {
-  stub_forge 200 200 200 "$PROT"
+CONFORME='ok	lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request'
+
+@test "conforme : la phrase de la porte est relayée en OK, et les deux verbes rendent 0" {
+  stub_porte 0 "$CONFORME"
   run bash "$MODULE" check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents, protection de tool_request (une approbation de la team « admins » : le-siege, réapprobation à chaque push), main et incidents protégées"* ]]
-  rien_de_cree
-  : > "$CALLS"
+  [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt, branches tool_request et incidents"* ]]
+
   run bash "$MODULE" apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"OK    65-ops-repo: lcars/_ops : dépôt"* ]]
-  rien_de_cree
 }
 
-@test "depot ABSENT : drift (rc 2) qui dit ce qui manque sans lui, et nomme la recette — rien n'est cree" {
-  stub_forge 404 404 404 ""
-  run bash "$MODULE" apply
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"DRIFT 65-ops-repo: dépôt lcars/_ops ABSENT — sans lui aucune demande d'outillage, aucun registre d'incidents, aucune escalade ; la recette de la forge le pose : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"* ]]
-  refute grep -q 'branches/' "$CALLS"
-  rien_de_cree
-}
-
-@test "depot dont l'existence est INCONNUE (HTTP 500) : echec (check rc 2) — rien n'est conclu" {
-  stub_forge 500 200 200 "$PROT"
-  run bash "$MODULE" check
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  65-ops-repo: lcars/_ops : la forge ne dit pas s'il existe (HTTP 500) — rien n'est conclu"* ]]
-}
-
-@test "une branche ABSENTE : un drift par branche, chacun dit ce qui manque sans elle, et la protection n'est pas sondee" {
-  stub_forge 200 404 404 "$PROT"
-  run bash "$MODULE" apply
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"DRIFT 65-ops-repo: lcars/_ops:tool_request ABSENTE — un pod qui demande un outil n'a pas de base de PR"*"la recette de la forge le pose"* ]]
-  [[ "$output" == *"DRIFT 65-ops-repo: lcars/_ops:incidents ABSENTE — le pilote ne peut pas écrire son registre d'incidents"* ]]
-  refute grep -q 'branch_protections' "$CALLS"
-  rien_de_cree
-}
-
-@test "branches la, protection ABSENTE (404 avec un corps JSON, comme la forge le rend) : drift qui dit qu'une PR se mergerait sans signature" {
-  stub_forge 200 200 200 ""
+@test "un DRIFT : check rend 1, apply rend 2 — les deux dialectes du meme constat" {
+  stub_porte 0 'drift	lcars/_ops:tool_request ABSENTE — ; la recette le pose'
   run bash "$MODULE" check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 65-ops-repo: lcars/_ops:tool_request SANS protection — une PR d'outillage se mergerait sans signature ; la recette de la forge le pose"* ]]
-  [[ "$output" != *"AUTREMENT"* ]]
-}
+  [[ "$output" == *"DRIFT 65-ops-repo: lcars/_ops:tool_request ABSENTE"* ]]
 
-@test "protection ILLISIBLE (la forge ne repond pas sur cette sonde) : echec, rien n'est conclu — ni absente ni autre" {
-  stub_forge 200 200 200 000
   run bash "$MODULE" apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL  65-ops-repo: protection de lcars/_ops:tool_request illisible (HTTP sans réponse) — rien n'est conclu"* ]]
+  [ "$status" -eq 2 ]
 }
 
-@test "protection AUTRE que celle de la recette (deux approbations, aucune team) : drift qui cite ce qui est lu" {
-  stub_forge 200 200 200 '{"required_approvals":2,"dismiss_stale_approvals":false,"approvals_whitelist_teams":[]}'
+@test "un ECHEC : check rend 2, apply rend 1" {
+  stub_porte 0 'fail	lcars/_ops : la forge ne dit pas s'"'"'il existe — rien n'"'"'est conclu'
   run bash "$MODULE" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"protégée AUTREMENT que la recette ne le dit (approbations « 2 », réapprobation « false », teams approbatrices « aucune »)"* ]]
-}
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  65-ops-repo: lcars/_ops : la forge ne dit pas"* ]]
 
-# ⚠ UNE TEAM VIDE NE SIGNE PAS DAVANTAGE QU'UNE LISTE VIDE. La protection peut etre parfaitement
-# posee et ne debloquer personne : c'est le meme piege, un cran plus loin.
-@test "la team nommee n'a AUCUN membre : drift qui le dit — la protection est posee, elle ne signe rien" {
-  STUB_MEMBRES='[]' stub_forge 200 200 200 "$PROT"
-  STUB_MEMBRES='[]' run bash "$MODULE" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"nomme la team « admins », qui n'a AUCUN membre"* ]] || { echo "$output"; return 1; }
-}
-
-@test "jeton systeme ABSENT : la protection n'est pas sondable — drift qui nomme le geste des jetons, pas un echec" {
-  rm -f "$LCARS_SYSTEM_TOKEN_FILE"
-  stub_forge 200 200 200 "$PROT"
   run bash "$MODULE" apply
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"protection de lcars/_ops:tool_request non sondable — jeton système absent"*"le geste des jetons le minte"* ]]
-  refute grep -q 'branch_protections' "$CALLS"
+  [ "$status" -eq 1 ]
 }
 
-@test "forge injoignable : DRIFT (rc 2) — pas converge, pas casse, rien n'est conclu" {
-  FORGE_MUETTE=1 stub_forge 200 200 200 "$PROT"
-  FORGE_MUETTE=1 run bash "$MODULE" apply
+@test "plusieurs constats : chacun est relayé, et l'ECHEC gagne sur le DRIFT" {
+  stub_porte 0 'drift	une branche manque
+fail	une protection est illisible'
+  run bash "$MODULE" check
   [ "$status" -eq 2 ]
-  [[ "$output" == *"forge injoignable (http://forge.test) — état du dépôt lcars/_ops INCONNU"* ]]
-  refute grep -q 'repos/' "$CALLS"
+  [[ "$output" == *"DRIFT 65-ops-repo: une branche manque"* ]]
+  [[ "$output" == *"FAIL  65-ops-repo: une protection est illisible"* ]]
 }
 
-@test "sans FORGE_BASE_URL : drift qui le dit" {
+# ⚠ LE SILENCE SE LIRAIT COMME UNE CONFORMITE : une porte qui ne rend rien n'a rien mesuré.
+@test "porte MUETTE : ECHEC nommé, jamais un vert" {
+  stub_porte 0 ''
+  run bash "$MODULE" check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUCUNE mesure rendue"* ]]
+}
+
+@test "porte en ECHEC : le code et sa plainte sont dits, et rien n'est conclu" {
+  stub_porte 3 '' 'Authority: jeton refusé par la forge'
+  run bash "$MODULE" check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"porte ops-repo en échec (code 3)"* ]]
+  [[ "$output" == *"jeton refusé par la forge"* ]]
+  [[ "$output" == *"rien n'est conclu"* ]]
+}
+
+@test "ligne ILLISIBLE : ECHEC qui la montre — une gravité inconnue ne se relaie pas en silence" {
+  stub_porte 0 'peut-etre	ça dépend'
+  run bash "$MODULE" check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ligne illisible"* ]]
+}
+
+# Les gardes : ce qui manque AVANT la porte se dit ici, et la porte n'est PAS jouée — sinon
+# l'opérateur reçoit une plainte du BEAM là où il attend une phrase, et on paie un eval pour rien.
+@test "FORGE_BASE_URL absent : drift, et la porte n'est pas ouverte" {
+  stub_porte 0 "$CONFORME"
   unset FORGE_BASE_URL
-  stub_forge 200 200 200 "$PROT"
   run bash "$MODULE" check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FORGE_BASE_URL non posé — le dépôt du système n'a pas pu être vérifié"* ]]
+  [[ "$output" == *"FORGE_BASE_URL non posé"* ]]
+  refute grep -q '^ARGV:' "$CALLS"
 }
 
-@test "le depot systeme suit LCARS_OPS_REPO quand l'hote le nomme" {
-  export LCARS_OPS_REPO=flotte/_ops
-  stub_forge 404 404 404 ""
+@test "CLI illisible : drift qui nomme la release, et la porte n'est pas ouverte" {
+  export LCARS_CLI="$BATS_TEST_TMPDIR/pas-de-cli"
   run bash "$MODULE" check
-  [[ "$output" == *"dépôt flotte/_ops ABSENT"* ]]
-  grep -q '^CURL:GET /api/v1/repos/flotte/_ops$' "$CALLS"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"porte ops-repo injouable"* ]]
+  [[ "$output" == *"release n'est pas posée"* ]]
 }
 
-# ─── ce que le geste ne fait plus, et les noms qu'il tient ──────────────────────────────────────
-
-@test "le geste ne cree RIEN : ni git, ni POST, ni PUT, ni depot temporaire — la recette pose" {
-  refute grep -q 'git \|git push\|mktemp\|-X POST\|-X PUT' "$MODULE"
+@test "jeton système ABSENT : drift qui nomme le geste des jetons, porte non ouverte" {
+  stub_porte 0 "$CONFORME"
+  rm -f "$LCARS_SYSTEM_TOKEN_FILE"
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"jeton système absent"* ]]
+  refute grep -q '^ARGV:' "$CALLS"
 }
 
-@test "les noms des branches sont GELES dans le module — tool_request (contrat toolchain.branch_single_source) et incidents (le defaut du registre)" {
-  grep -q '^OPS_BRANCH="tool_request"$' "$MODULE"
-  grep -q '^INCIDENTS_BRANCH="incidents"$' "$MODULE"
-  refute grep -q 'BRANCH:-\|BRANCH:=' "$MODULE"
-  # le meme nom que le registre du pilote
-  grep -q ':pilot_incident_registry_branch, "incidents")' "$BATS_TEST_DIRNAME/../../../lib/fleet/pilot/incident_registry/store.ex"
+@test "jeton système VIDE : drift distinct de l'absence, porte non ouverte" {
+  stub_porte 0 "$CONFORME"
+  : > "$LCARS_SYSTEM_TOKEN_FILE"
+  run bash "$MODULE" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"jeton système VIDE"* ]]
+  refute grep -q '^ARGV:' "$CALLS"
 }
 
-@test "la tete du module se SOURCE deux fois dans un meme shell — aucune constante readonly (M11)" {
-  run bash -c "source <(sed -n '1,/^: \"\${LCARS_OPS_REPO/p' '$MODULE'); source <(sed -n '1,/^: \"\${LCARS_OPS_REPO/p' '$MODULE'); echo ok"
+# ⚠ `/proc/<pid>/environ` n'est lisible que par le propriétaire et root ; un argv l'est par tout le
+# monde. Ce témoin est la seule chose qui tienne cette règle sur ce chemin.
+@test "le jeton part par l'ENVIRONNEMENT, jamais par l'argv" {
+  stub_porte 0 "$CONFORME"
+  run bash "$MODULE" check
   [ "$status" -eq 0 ]
-  [[ "$output" == *ok* ]]
+  grep -q '^ENVTOK:SYS-TOKEN$' "$CALLS"
+  grep -q '^ENVURL:http://forge.test$' "$CALLS"
+  refute grep -q '^ARGV:.*SYS-TOKEN' "$CALLS"
 }
 
-@test "main ou incidents SANS protection : drift qui dit pourquoi le « write » d'un approbateur devient un push libre" {
-  # Gitea EXIGE `write` sur le depot pour retenir un approbateur dans la whitelist (mesure du
-  # 2026-09-17 : meme site-admin ne suffit pas). Ce droit, donne pour SIGNER, ouvre le push sur
-  # toute branche que rien ne protege — et sans ce drift, rien ne le dirait.
-  stub_forge 200 200 200 "$PROT" 404 200
+@test "UN SEUL eval par passe : la porte est ouverte une fois, et elle reçoit le verbe attendu" {
+  stub_porte 0 "$CONFORME"
   run bash "$MODULE" check
-  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"DRIFT"*"lcars/_ops : main SANS protection"*"« write » sur ce dépôt pour pouvoir signer"* ]] || { echo "$output"; return 1; }
-  rien_de_cree
-
-  : > "$CALLS"
-  stub_forge 200 200 200 "$PROT" 200 404
-  run bash "$MODULE" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"lcars/_ops : incidents SANS protection"* ]] || { echo "$output"; return 1; }
-
-  # les deux : une seule ligne qui les nomme toutes les deux
-  : > "$CALLS"
-  stub_forge 200 200 200 "$PROT" 404 404
-  run bash "$MODULE" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"lcars/_ops : main, incidents SANS protection"* ]] || { echo "$output"; return 1; }
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^ARGV:' "$CALLS")" -eq 1 ]
+  grep -q '^ARGV:tool ops-repo$' "$CALLS"
 }
 
-@test "une protection de main ILLISIBLE est un echec, jamais une absence : rien n'est conclu" {
-  stub_forge 200 200 200 "$PROT" 500 200
-  run bash "$MODULE" check
-  [ "$status" -eq 2 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"protection de lcars/_ops:main illisible (HTTP 500)"*"rien n'est conclu"* ]] || { echo "$output"; return 1; }
+@test "mode inconnu : FATAL avant toute mesure, jamais un verdict" {
+  stub_porte 0 "$CONFORME"
+  run bash "$MODULE" reconcile
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mode inconnu"* ]]
+  refute grep -q '^ARGV:' "$CALLS"
 }
