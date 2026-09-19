@@ -141,6 +141,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Tests.check_test_dirs_mirror_source(root),
         Tests.check_witness_naming(root),
         Tests.check_negations_bite(root),
+        Tests.check_async_no_global_env(root),
         Tests.check_refute_copies_agree(root),
         Types.check_public_functions_documented(root)
         # Bounded rework belongs to StepRunConsumer's forge rail (`max_rework_rounds`).

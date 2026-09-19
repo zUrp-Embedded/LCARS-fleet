@@ -13,6 +13,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check.Runtime
   alias Mix.Tasks.Lcars.Contracts.Check.SingleSource
   alias Mix.Tasks.Lcars.Contracts.Check.Support
+  alias Mix.Tasks.Lcars.Contracts.Check.Tests
   alias Mix.Tasks.Lcars.Contracts.Check.Types
 
   # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. La population vient de DEUX racines
@@ -233,6 +234,117 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert result.status == :fail
       assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+  end
+
+  # ⚠ UN TÉMOIN ASYNC QUI POSE UNE CLEF GLOBALE FAIT ROUGIR LE VOISIN, ET JAMAIS LUI-MÊME. Trois
+  # fois en une soirée le 2026-09-19 : `role_token_unavailable` dans la chaîne du pilote,
+  # `forge_auth_malformed` dans WorktreeSync. `test_helper.exs` le disait en prose ; ceci le tient.
+  describe "tests.async_no_global_env — l'env de l'application est GLOBAL" do
+    defp temoins_root!(nom, fichiers) do
+      root = Fleet.TestEnv.tmp_path("async-env-#{nom}")
+      File.mkdir_p!(Path.join(root, "test"))
+
+      for {rel, corps} <- fichiers do
+        chemin = Path.join([root, "test", rel])
+        File.mkdir_p!(Path.dirname(chemin))
+        File.write!(chemin, corps)
+      end
+
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp module_async(corps),
+      do: "defmodule A do\n  use ExUnit.Case, async: true\n#{corps}end\n"
+
+    defp module_serial(corps),
+      do: "defmodule B do\n  use ExUnit.Case, async: false\n#{corps}end\n"
+
+    test "async et sans clef globale → pass" do
+      root =
+        temoins_root!("ok", [
+          {"a_test.exs", module_async("  test \"x\" do\n    assert 1 == 1\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "async ET Application.put_env(:lcars_fleet, …) → fail qui nomme le fichier et la ligne" do
+      root =
+        temoins_root!("coupable", [
+          {"a_test.exs",
+           module_async("  setup do\n    Application.put_env(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "a_test.exs:4"))
+    end
+
+    test "la MÊME mutation dans un module serial → pass (c'est la fenêtre qui nuit)" do
+      root =
+        temoins_root!("serial", [
+          {"a_test.exs", module_async("  test \"x\" do\n    assert 1 == 1\n  end\n")},
+          {"b_test.exs",
+           module_serial("  setup do\n    Application.put_env(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "la couture de test compte aussi : TestEnv.put_env_restoring est une mutation" do
+      root =
+        temoins_root!("testenv", [
+          {"a_test.exs",
+           module_async("  setup do\n    TestEnv.put_env_restoring(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "a_test.exs:4"))
+    end
+
+    test "la mutation en COMMENTAIRE n'en est pas une" do
+      root =
+        temoins_root!("commentaire", [
+          {"a_test.exs",
+           module_async(
+             "  # jadis : Application.put_env(:lcars_fleet, :x, 1)\n  test \"x\" do\n    assert 1 == 1\n  end\n"
+           )}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "aucun témoin lu → INSTRUMENT BROKEN" do
+      root = temoins_root!("vide", [])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+
+    test "des témoins mais AUCUN async → INSTRUMENT BROKEN, le lecteur a perdu la forme" do
+      root =
+        temoins_root!("forme", [
+          {"b_test.exs", module_serial("  test \"x\" do\n    assert 1 == 1\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "lost the form"))
     end
   end
 

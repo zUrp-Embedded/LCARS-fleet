@@ -13,7 +13,11 @@ defmodule Fleet.Application.CatalogueStoresTest do
        pas une ; un manifeste illisible garde son catalogue INSTALLE, identite non prouvee ;
     4. le message de la tete voyage avec la branche : la fraicheur se lit sans second appel.
   """
-  use ExUnit.Case, async: true
+  # ⚠ SERIAL : ce module pose une clef de l'env de l'APPLICATION, qui est global. En async, tout
+  # temoin qui la lit pendant la fenetre recoit la valeur du voisin et rougit ailleurs, sans
+  # rapport avec ce qu'il mesure (`test_helper.exs` le dit deja : « tests changing that global
+  # configuration must serialize and restore it »). Restaurer ne suffit pas : c'est la FENETRE.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
