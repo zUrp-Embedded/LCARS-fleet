@@ -218,6 +218,63 @@ defmodule Fleet.Project.Onboard.SystemProjectTest do
       assert String.trim(url2) == attendu
     end
 
+    # ⚠ L'URL CHANGE DE MONDE, LE REFSPEC DOIT SUIVRE. Mesure du 2026-09-19 sur le banc VIERGE 2005 :
+    # la face de code du projet du systeme portait `+refs/heads/*:refs/remotes/origin/*` pointe sur
+    # le depot de la forge — un fetch nu y aurait rapatrie les faces `ops` et `workshop`. Sur CE
+    # chemin l'adoption ne se joue pas (le depot existe deja), donc rien ne resserrait apres coup.
+    test "le refspec de la face SUIT l'origin : resserre sur main, par les deux chemins", ctx do
+      avant = Application.get_env(:lcars_fleet, :credentials_forge_auth)
+
+      Application.put_env(:lcars_fleet, :credentials_forge_auth, %{
+        url_prefix: "http://forge.test/"
+      })
+
+      on_exit(fn -> Application.put_env(:lcars_fleet, :credentials_forge_auth, avant) end)
+
+      attendu = "+refs/heads/main:refs/remotes/origin/main"
+
+      # Le KIT : la face nait sans origin, le refspec se pose avec lui.
+      kit = Path.join(ctx.tmp_dir, "kit")
+      File.mkdir_p!(kit)
+      File.write!(Path.join(kit, "install.sh"), "#!/usr/bin/env bash\n")
+      racine = Path.join(ctx.tmp_dir, "projects")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: kit, code_root: racine)
+
+      assert refspec(Path.join(racine, Fleet.Layout.system_project())) == attendu
+
+      # Le CLONE : le refspec vient de l'arbre de l'operateur et designe SES branches.
+      racine2 = Path.join(ctx.tmp_dir, "projects2")
+      src = arbre_git(Path.join(ctx.tmp_dir, "src"), "main")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: src, code_root: racine2)
+
+      assert refspec(Path.join(racine2, Fleet.Layout.system_project())) == attendu
+    end
+
+    # ⚠ LA FACE N'HERITE PAS DES PASSES DE L'OPERATEUR. Un clone de son arbre ramenait toutes ses
+    # branches — ses passes, ses worktrees d'agents. `ensure_main` NOMME sans deplacer, donc la
+    # branche de l'operateur reste ; elle reste SEULE.
+    test "la face ne porte pas les autres branches de l'arbre de l'operateur", ctx do
+      src = arbre_git(Path.join(ctx.tmp_dir, "src"), "passe16/en-cours")
+      {_, 0} = System.cmd("git", ["-C", src, "branch", "une-autre"])
+      {_, 0} = System.cmd("git", ["-C", src, "branch", "et-encore-une"])
+
+      racine = Path.join(ctx.tmp_dir, "projects")
+      assert {:ok, :adopted} = adopte({:ok, %{}}, from: src, code_root: racine)
+
+      face = Path.join(racine, Fleet.Layout.system_project())
+      {out, 0} = System.cmd("git", ["-C", face, "branch", "--format=%(refname:short)"])
+      branches = out |> String.split("\n", trim: true) |> Enum.sort()
+
+      assert "main" in branches
+      refute "une-autre" in branches
+      refute "et-encore-une" in branches
+    end
+
+    defp refspec(face) do
+      {out, 0} = System.cmd("git", ["-C", face, "config", "--get-all", "remote.origin.fetch"])
+      String.trim(out)
+    end
+
     test "un kit SANS estampille se seme quand meme — le commit ne nomme alors aucune revision",
          ctx do
       racine = Path.join(ctx.tmp_dir, "projects")

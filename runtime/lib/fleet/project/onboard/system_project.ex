@@ -174,7 +174,13 @@ defmodule Fleet.Project.Onboard.SystemProject do
     # `--no-hardlinks` : la face doit survivre a la suppression de l'arbre de l'operateur. Et
     # l'`origin` local qu'un clone laisse derriere ne reste pas : le remote de cette face est le
     # depot de la forge, celui que le geste d'installation a pose.
-    with :ok <- GitOps.run(["clone", "--no-hardlinks", from, code], auth: false),
+    #
+    # `--single-branch` : sans lui, la face herite de TOUTES les branches de l'arbre de l'operateur
+    # — ses passes, ses worktrees d'agents. Mesure du 2026-09-19 : il tient aussi sur un clone
+    # local, refspec compris. La branche de l'operateur reste (`ensure_main` nomme, il ne deplace
+    # rien), mais elle reste SEULE.
+    with :ok <-
+           GitOps.run(["clone", "--no-hardlinks", "--single-branch", from, code], auth: false),
          :ok <- ensure_main(code),
          :ok <- point_origin(code, org, name) do
       Logger.info("SystemProject: code face seeded at #{code} from #{from}.")
@@ -197,9 +203,21 @@ defmodule Fleet.Project.Onboard.SystemProject do
 
     case Application.get_env(:lcars_fleet, :credentials_forge_auth) do
       %{url_prefix: base} when is_binary(base) and base != "" ->
-        url = "#{String.trim_trailing(base, "/")}/#{org}/#{name}.git"
-        verbe = if present?, do: "set-url", else: "add"
-        GitOps.run(["-C", code, "remote", verbe, "origin", url], auth: false)
+        # ⚠ L'URL CHANGE DE MONDE, LE REFSPEC DOIT SUIVRE. Il vient du clone de l'arbre de
+        # l'operateur et designe les branches de CET arbre ; pointe sur le depot de la forge, il y
+        # rapatriera les faces `ops` et `workshop` au premier fetch nu. Mesure du 2026-09-19 sur le
+        # banc VIERGE 2005 : la face de code du projet du systeme portait
+        # `+refs/heads/*:refs/remotes/origin/*`, parce que sur CE chemin l'adoption ne se joue pas —
+        # le depot existe deja, pose par la structure de la forge — et que c'est elle qui
+        # resserrait. Ici le resserrage ne depend de personne.
+        #
+        # `Faces.set_origin/3` porte deja le « on LIT d'abord, on ecrit ensuite » : l'ecrire une
+        # seconde fois ici en ferait deux verites d'un meme geste.
+        Onboard.Faces.set_origin(
+          code,
+          "#{String.trim_trailing(base, "/")}/#{org}/#{name}.git",
+          Layout.code_branch()
+        )
 
       _ when present? ->
         GitOps.run(["-C", code, "remote", "remove", "origin"], auth: false)
