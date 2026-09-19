@@ -82,4 +82,13 @@ defmodule Fleet.Pilot do
   @doc "Onboarding of a fresh project (repo + its three faces + scaffold) — cf. `Fleet.Project.Onboard.onboard/2`."
   @spec onboard(String.t(), keyword()) :: {:ok, term()} | {:error, term()}
   defdelegate onboard(name, opts \\ []), to: Fleet.Project.Onboard
+
+  @doc """
+  Branch the incident registry writes to — cf. `Fleet.Pilot.IncidentRegistry.Store.branch/0`.
+
+  Exposed so the gesture that VERIFIES the system repository names the same branch as the writer:
+  a second writing of that name is a branch the registry writes and nothing checks.
+  """
+  @spec incident_registry_branch() :: String.t()
+  defdelegate incident_registry_branch, to: Fleet.Pilot.IncidentRegistry.Store, as: :branch
 end

@@ -290,6 +290,16 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
       opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
         Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
+  @doc """
+  Branch this store writes the registry to (`:pilot_incident_registry_branch`, default
+  `incidents`).
+
+  Public because the gesture that VERIFIES the system repository must name the same branch:
+  a second writing of that name is a branch the registry writes and nothing checks.
+  """
+  @spec branch() :: String.t()
+  def branch, do: branch([])
+
   defp branch(opts),
     do:
       opts[:branch] ||

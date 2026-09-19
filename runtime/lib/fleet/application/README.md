@@ -23,6 +23,10 @@ restated, only pointed at.
   (`available`, `installed`, `updatable`) and the release doors `lcars catalogue …` read.
 - `Fleet.Application.CatalogueVerify` — standalone proof of one catalogue root with the daemon's
   own boot checks, without starting a fleet (`mix lcars.catalogue.verify`).
+- `Fleet.Application.OpsRepo` — MEASURES the system repository `<org>/_ops` (its two branches, the
+  protection of the manifest branch, the team that signs) and NAMES what is missing; the recipe
+  places, this concludes nothing it could not read. Release door `lcars tool ops-repo`, which
+  prints one `<severity>\t<sentence>` line per finding and leaves the verdict to its caller.
 - `Fleet.Roster` (`lib/fleet/roster.ex`, its own boundary, a dep of the root — not boot code) —
   the forge roster a catalogue implies: role logins and the five provisioning lists tofu reads
   (`tfvars/1`).

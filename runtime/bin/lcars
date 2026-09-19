@@ -632,7 +632,11 @@ cmd_tool() {
     catalogue-source)
       local name="${2:?tool catalogue-source: nom de catalogue requis}"
       _tool_run "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")" ;;
-    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project)" ;;
+    ops-repo)
+      # MESURE le depot du systeme et rend une ligne « <gravite>\t<phrase> » par constat, code 0
+      # quel que soit l'etat : le VERDICT appartient au protocole de l'appelant, pas a la porte.
+      _tool_run 'Fleet.Application.OpsRepo.eval_check()' ;;
+    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project|ops-repo)" ;;
   esac
 }
 

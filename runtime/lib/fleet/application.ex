@@ -23,6 +23,9 @@ defmodule Fleet.Application do
       # CatalogueDeposits calls Forge through injectable modules; indirect dispatch can
       # evade Boundary analysis, so declare the dependency explicitly.
       Fleet.Forge,
+      # OpsRepo names the system repository and its protected branch from their single
+      # declaration, instead of writing them a second time inside a release door.
+      Fleet.Toolchain,
       # Attach warning-and-above persistence before catalogue checks can fail.
       Fleet.DurableLog
     ],
