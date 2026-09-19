@@ -64,7 +64,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       repo: Keyword.get(opts, :repo),
       branch: Keyword.get(opts, :branch),
       last_result: nil,
-      rejected_sha: nil
+      rejected_sha: nil,
+      # Les branches de demande SANS PR vues au tick precedent : une seconde vue les condamne.
+      orphelines_vues: MapSet.new()
     }
 
     _ = PeriodicCheck.schedule(:reconcile, state.interval_ms)
@@ -88,10 +90,15 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       rescue
         e ->
           Logger.error("ToolchainReconciler: passe en échec — #{Exception.message(e)}")
-          {{:error, {:raised, Exception.message(e)}}, state.rejected_sha}
+          {{:error, {:raised, Exception.message(e)}}, state.rejected_sha, state.orphelines_vues}
       end
 
-    %{state | last_result: elem(result, 0), rejected_sha: elem(result, 1)}
+    %{
+      state
+      | last_result: elem(result, 0),
+        rejected_sha: elem(result, 1),
+        orphelines_vues: elem(result, 2)
+    }
   end
 
   # Cache the head rejected by {:converger_failed, 2, _} until a different head is read.
@@ -129,28 +136,87 @@ defmodule Fleet.Admiral.ToolchainReconciler do
           {unreachable(reason), state.rejected_sha}
       end
 
-    drain_pass(repo, branch, result)
-    {result, rejected}
+    {result, rejected, drain_pass(repo, branch, result, state.orphelines_vues)}
   end
 
   # Closed-without-merge PRs leave the branch unchanged, so drain them separately.
   # Merged PRs require this pass's successful branch result. Issue labels carry the
   # waiting state; failures may leave partial effects for a later tick.
-  defp drain_pass(repo, branch, branch_result) do
+  defp drain_pass(repo, branch, branch_result, orphelines_vues) do
     # Request server-side base filtering, then recheck the base locally.
     case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
         Enum.each(prs, &maybe_drain(&1, repo, branch, branch_result))
+        balaie_orphelines(repo, branch, prs, orphelines_vues)
 
       {:error, reason} ->
         Logger.warning(
           "ToolchainReconciler: passe de drain — PR illisibles (#{inspect(reason)}), " <>
             "les verrous restent posés, le tick suivant retentera"
         )
+
+        orphelines_vues
     end
   rescue
     e ->
       Logger.warning("ToolchainReconciler: passe de drain en échec — #{Exception.message(e)}")
+      orphelines_vues
+  end
+
+  # ⚠ UNE BRANCHE DE DEMANDE SANS PR N'EST VUE PAR PERSONNE. Le drain s'accroche aux PR : une
+  # branche qui n'en a jamais eu — une demande morte entre sa création et l'ouverture de sa PR —
+  # reste sur le dépôt du système pour toujours. Mesuré le 2026-09-19 sur le banc 2005, et les trois
+  # `lcars/toolchain-*` de LCARS-beta sont dans ce cas. `forget_request_branch/2` disait déjà
+  # l'intention : « leaving it would let the runtime grow branches on the system repo at will ».
+  #
+  # ⚠ DEUX TICKS, JAMAIS UN. Entre la création de la branche et l'ouverture de sa PR il y a deux
+  # appels à la forge ; balayer sur une seule vue tuerait une demande en cours de route. Une branche
+  # orpheline vue DEUX passes de suite est abandonnée pour de bon.
+  defp balaie_orphelines(repo, branch, prs, vues_avant) do
+    case forge().list_branches(repo, []) do
+      {:ok, branches} ->
+        avec_pr = MapSet.new(prs, &Payload.head_ref/1)
+
+        orphelines =
+          branches
+          |> Enum.map(& &1.name)
+          |> Enum.filter(&(Fleet.Toolchain.request_branch?(&1) and &1 != branch))
+          |> Enum.reject(&MapSet.member?(avec_pr, &1))
+          |> MapSet.new()
+
+        orphelines
+        |> MapSet.intersection(vues_avant)
+        |> Enum.each(&supprime_orpheline(repo, &1))
+
+        orphelines
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: branches illisibles (#{inspect(reason)}) — le balayage des " <>
+            "branches de demande sans PR attend le tick suivant"
+        )
+
+        vues_avant
+    end
+  end
+
+  defp supprime_orpheline(repo, nom) do
+    case forge().delete_branch(repo, nom, []) do
+      {:ok, :deleted} ->
+        Logger.info(
+          "ToolchainReconciler: branche de demande ORPHELINE #{repo}:#{nom} supprimée — " <>
+            "aucune PR ne l'a jamais portée (vue deux passes de suite)"
+        )
+
+      {:ok, :absent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: orpheline #{repo}:#{nom} NON supprimée (#{inspect(reason)}) — " <>
+            "le tick suivant retentera"
+        )
+    end
   end
 
   defp maybe_drain(pr, repo, branch, branch_result) do

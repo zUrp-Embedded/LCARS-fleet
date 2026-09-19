@@ -40,6 +40,12 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       send(:persistent_term.get({__MODULE__, :test_pid}), {:deleted, repo, branch})
       :persistent_term.get({__MODULE__, :delete_result}, {:ok, :deleted})
     end
+
+    # Les branches que la forge porte : par defaut, aucune de la famille des demandes.
+    def list_branches(_repo, _opts),
+      do:
+        {:ok,
+         :persistent_term.get({__MODULE__, :branches}, [%{name: "main", sha: "s", message: ""}])}
   end
 
   defmodule ForgeDown do
@@ -548,6 +554,65 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
       assert {:error, {:converger_mute, ^path, "OK:"}} = R.check_now(server)
       refute R.applied_sha() == "sha-1"
+    end
+  end
+
+  # ⚠ LE DRAIN S'ACCROCHE AUX PR : une branche de demande qui n'en a JAMAIS eu — une demande morte
+  # entre sa création et l'ouverture de sa PR — n'est vue par personne et reste pour toujours.
+  # Mesuré le 2026-09-19 sur le banc 2005, et les trois `lcars/toolchain-*` de LCARS-beta.
+  describe "les branches de demande SANS PR" do
+    defp pose_branches(noms) do
+      :persistent_term.put(
+        {ForgeUp, :branches},
+        Enum.map(noms, &%{name: &1, sha: "s", message: ""})
+      )
+
+      on_exit(fn -> :persistent_term.erase({ForgeUp, :branches}) end)
+    end
+
+    test "une orpheline vue DEUX passes de suite est supprimée", %{server: server} do
+      pose_branches(["main", "tool_request", "tool_request-abandonnee"])
+
+      # Première passe : elle est VUE, jamais touchée — la demande pourrait être en vol.
+      {:ok, :converged, _} = R.check_now(server)
+      refute_received {:deleted, _, "tool_request-abandonnee"}
+
+      # Seconde : deux vues de suite, elle est abandonnée pour de bon.
+      {:ok, :up_to_date} = R.check_now(server)
+      assert_received {:deleted, "lcars/_ops", "tool_request-abandonnee"}
+    end
+
+    test "la branche PROTÉGÉE et les branches d'un autre monde ne sont JAMAIS touchées", %{
+      server: server
+    } do
+      pose_branches(["main", "tool_request", "incidents", "feature/quelque-chose"])
+
+      {:ok, :converged, _} = R.check_now(server)
+      {:ok, :up_to_date} = R.check_now(server)
+
+      refute_received {:deleted, _, _}
+    end
+
+    test "une branche qui PORTE une PR n'est pas balayée — le drain s'en occupe", %{
+      server: server
+    } do
+      pose_branches(["main", "tool_request", "tool_request-avec-pr"])
+
+      :persistent_term.put({ForgeUp, :prs}, [
+        PayloadFixture.pull(
+          number: 7,
+          state: "open",
+          merged: false,
+          base_ref: Fleet.Toolchain.branch(),
+          head_ref: "tool_request-avec-pr",
+          body: "demande\n" <> Fleet.Toolchain.workitem_marker("fleet/p", 1)
+        )
+      ])
+
+      {:ok, :converged, _} = R.check_now(server)
+      {:ok, :up_to_date} = R.check_now(server)
+
+      refute_received {:deleted, _, "tool_request-avec-pr"}
     end
   end
 end
