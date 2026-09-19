@@ -73,7 +73,7 @@ RECIPE_DIR="${LCARS_RECIPE_DIR:-$RECIPE_SOURCE}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
 # que le verrou d'apply y vit — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
-CATALOGUE_WORK="${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}"
+CATALOGUE_WORK="$LCARS_CATALOGUES_WORK"
 # LE MAGASIN DES CATALOGUES : UN DEPOT, UNE BRANCHE PAR CATALOGUE (⚖ user 2026-09-16). Il vit dans
 # l'org SYSTEME — tout ce qui est systeme y vit —, et « quels catalogues sont installes » devient UNE
 # question a la forge (les branches de ce depot) la ou c'etait une recherche sur tous les depots

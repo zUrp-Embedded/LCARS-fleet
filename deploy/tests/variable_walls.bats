@@ -925,3 +925,64 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   grep -qE "^ *$recette = \{" "$REPO/runtime/services/forge-recipe/forge.tf" \
     || { echo "MUR 24 rompu — « $recette » n'est pas dans la table des teams de l'org système : la recette nommerait une team inexistante" >&2; return 1; }
 }
+
+# ⚠ MUR 25 — LE JUMEAU CONTENEUR DE MUR 7 : CE QU'UN DAEMON LIT LUI PARVIENT SUR LES DEUX RAILS.
+#
+# MUR 7 tient une moitié : ce que l'installeur DÉCIDE et qu'un daemon lit voyage par `services.env`.
+# Cette table n'existe QUE sur le poste — un conteneur n'a pas de `services.env`, et rien ne disait
+# comment les mêmes daemons obtiennent les mêmes valeurs là-bas. Mesure du 2026-09-19 : sur les
+# quatorze noms transportés, DEUX n'atteignaient le rail conteneur par aucun chemin
+# (`LCARS_CATALOGUES_WORK`, un fait écrit en littéral à deux endroits ; `LCARS_UID_MAP_FILE`, la
+# même dérivation écrite aux deux bouts du rail). Ils marchaient — par un défaut recopié, c'est-à-dire
+# par la chose même que la décision 3 retire.
+#
+# LES QUATRE CHEMINS LÉGITIMES vers un daemon du conteneur, et il n'y en a pas d'autre :
+#   · un FAIT de la machine (`runtime/etc/facts.env`), que le protocole source ;
+#   · une DÉRIVATION d'un fait, écrite une fois dans le protocole des modules ;
+#   · l'ENVIRONNEMENT du compose (ce que l'opérateur ou le banc décide à l'instanciation) ;
+#   · un EXPORT du boot de l'image (ce que le conteneur établit lui-même, comme le siège).
+#
+# Un nom qui n'emprunte aucun des quatre est LU VIDE dans le conteneur — ou, pire, repose sur un
+# littéral recopié chez son lecteur, qui dérivera de la table le jour où quelqu'un bougera l'une.
+@test "MUR 25: chaque variable que services.env transporte atteint AUSSI le rail conteneur" {
+  local svc="$REPO/deploy/modules.d/64-services.sh"
+  local faits="$REPO/runtime/etc/facts.env"
+  local proto="$REPO/runtime/services/lib/module-protocol.sh"
+  local boot="$REPO/runtime/services/container/boot.sh"
+  local compose="$REPO/deploy/docker/docker-compose.yml"
+  local dockerfile="$REPO/deploy/docker/Dockerfile"
+  local f; for f in "$svc" "$faits" "$proto" "$boot" "$compose" "$dockerfile"; do
+    [ -r "$f" ] || { echo "MUR 25 — instrument cassé : $f illisible" >&2; return 1; }
+  done
+
+  local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
+                        | sed -nE 's/.*echo "((LCARS|FORGE|TF)_[A-Z_]+)=.*/\1/p' | sort -u)"
+  [ "$(printf '%s\n' "$table" | grep -c .)" -ge 10 ] || {
+    echo "MUR 25 — la table de transport ne se lit plus dans services_env_body : l'instrument est cassé" >&2
+    return 1
+  }
+
+  local v orphelines="" par_fait=0 par_derive=0 par_compose=0 par_boot=0
+  for v in $table; do
+    if grep -qE "^$v=" "$faits"; then par_fait=$((par_fait + 1)); continue; fi
+    if grep -qE "^: \"\\\$\{$v:=" "$proto"; then par_derive=$((par_derive + 1)); continue; fi
+    if grep -qE "^[[:space:]]+$v:" "$compose"; then par_compose=$((par_compose + 1)); continue; fi
+    if grep -qE "(^|[[:space:]])export $v([=[:space:]]|$)" "$boot" \
+       || grep -qE "(^|[[:space:]])$v=" "$dockerfile"; then par_boot=$((par_boot + 1)); continue; fi
+    orphelines="$orphelines $v"
+  done
+
+  [ -z "${orphelines// /}" ] || {
+    echo "MUR 25 rompu — lues par un daemon, posées par services.env, et RIEN ne les pose dans le conteneur :$orphelines" >&2
+    echo "→ un fait (runtime/etc/facts.env), une dérivation dans le protocole, l'environnement du compose," >&2
+    echo "  ou un export du boot de l'image. Sans l'un des quatre, le daemon les lit VIDES là-bas." >&2
+    return 1
+  }
+  # GARDE D'INSTRUMENT : les quatre chemins servent vraiment, sinon ce mur mesurerait un seul cas.
+  local servis=0
+  for v in "$par_fait" "$par_derive" "$par_compose" "$par_boot"; do [ "$v" -gt 0 ] && servis=$((servis + 1)); done
+  [ "$servis" -ge 3 ] || {
+    echo "MUR 25 — seulement $servis chemin(s) sur quatre exercés (fait=$par_fait dérivé=$par_derive compose=$par_compose boot=$par_boot) : l'instrument ne mesure presque rien" >&2
+    return 1
+  }
+}

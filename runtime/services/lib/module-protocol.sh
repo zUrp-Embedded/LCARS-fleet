@@ -41,6 +41,10 @@ LCARS_CHANGED=0
 : "${LCARS_SYSTEM_TOKEN_FILE:=$LCARS_PRIVATE_DIR/$LCARS_SYSTEM_ACCOUNT.gitea_token}"
 : "${LCARS_MASTER_TOKEN_FILE:=$LCARS_PRIVATE_DIR/forge-master.token}"
 : "${LCARS_FORGE_SEED_FILE:=$LCARS_PRIVATE_DIR/forge-seed.pass}"
+# La carte forge_id -> uid. Elle etait DERIVEE DEUX FOIS — par le convergeur d'humains et par l'init
+# du conteneur — donc la meme regle ecrite aux deux bouts du meme rail, et l'installeur la
+# transportait une troisieme fois par `services.env`. Elle l'est ici, une fois (⚖ phase 5).
+: "${LCARS_UID_MAP_FILE:=$LCARS_PRIVATE_DIR/forge-uid.map}"
 # Le depot du systeme vit dans l'org systeme : derive, pour qu'une org renommee par l'installeur
 # emmene son depot. L'installeur le transporte aussi (services.env) pour les daemons qui ne
 # sourcent pas ce protocole ; le runtime le lit dans `runtime.exs`.

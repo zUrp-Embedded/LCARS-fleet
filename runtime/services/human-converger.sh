@@ -147,7 +147,7 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
 }
 
 # le repertoire est un fait, le nom du fichier une regle : la carte se DERIVE, elle ne se recopie pas
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$LCARS_PRIVATE_DIR/forge-uid.map}"
+UID_MAP_FILE="$LCARS_UID_MAP_FILE"
 
 uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
   [[ -r "$UID_MAP_FILE" ]] || return 0

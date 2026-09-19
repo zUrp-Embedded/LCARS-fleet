@@ -43,7 +43,7 @@ FORGE_URL_ENV="${FORGE_BASE_URL:-}"
 LCARS_UID="${LCARS_UID:-1000}"
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$LCARS_PRIVATE_DIR/forge-uid.map}"
+UID_MAP_FILE="$LCARS_UID_MAP_FILE"
 HOST_KEYS_DIR="${LCARS_HOST_KEYS_DIR:-/home/.lcars-container/ssh}"
 STORE_ROOT="${LCARS_STORE_ROOT:-}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/admiral/skills}"
@@ -205,7 +205,7 @@ layout_table() { # chemin mode proprietaire — les memes que deploy/system.mani
     "/opt/lcars/var 0755 root:root" \
     "$LCARS_PRIVATE_DIR 0710 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
     "$LCARS_CATALOGUES_DIR 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
-    "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu} 0700 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
+    "$LCARS_CATALOGUES_WORK 0700 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
     "/var/lib/lcars 0755 root:root" \
     "/var/tmp/lcars 0755 root:root" \
     "/var/tmp/lcars/toolchain-work 0700 root:root" \
