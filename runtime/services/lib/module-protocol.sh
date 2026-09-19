@@ -116,9 +116,13 @@ fi
 # N'ETABLIT LE SIEGE. Ce n'est pas un oubli : ici les appelants ecrivent `v="$(seat_uid)"` sous
 # `set -e`, ou un code non nul tuerait le module au lieu de lui laisser dire pourquoi. Le fait
 # « pas de siege » se lit donc a la valeur VIDE, et l'appelant en decide.
+# LE CHEMIN DU SIEGE, ECRIT UNE FOIS. Ses lecteurs le nomment dans leurs refus — « ce fichier est
+# absent » n'aide personne si le message invente un autre chemin que celui qu'on a lu.
+seat_uid_file() { printf '%s' "${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"; }
+
 seat_uid() { # -> l'uid du siege, ou rien (l'appelant dit ce que « rien » lui fait)
   local f v
-  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  f="$(seat_uid_file)"
   if [[ -r "$f" ]]; then
     v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
     [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }

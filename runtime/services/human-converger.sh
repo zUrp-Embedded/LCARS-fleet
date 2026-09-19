@@ -44,8 +44,10 @@ HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
 # Le revoquer poserait `nologin` sur le sysadmin et fermerait la machine sur lui — l'enfermement
 # dehors.
-SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-# L'uid se lit par `seat_uid` du protocole, source plus bas : ce daemon n'en tient pas une copie.
+# NI L'UID NI SON CHEMIN NE SE RECOPIENT ICI : `seat_uid` et `seat_uid_file` vivent dans le
+# protocole, source plus bas. Ce daemon n'en tenait qu'une moitie — le chemin, gardé pour le nommer
+# dans son refus — et une moitie de copie derive comme une copie entiere.
+SEAT_UID_FILE=""
 SYSADMIN_UID=""
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
@@ -81,8 +83,11 @@ LCARS_MODULE_TAG="lcars-converger"
 # shellcheck source=lib/human-protocol.sh
 . "$HUMAN_PROTOCOL"
 unset LCARS_HUMAN_PROTOCOL_HOST
-# GUARD A lit le siege par la politique du protocole (fichier, puis LCARS_SYSADMIN_UID).
+# GUARD A lit le siege par la politique du protocole (fichier, puis LCARS_SYSADMIN_UID), et le
+# CHEMIN vient du meme endroit : un refus qui nommerait un autre fichier que celui qu'on a lu
+# enverrait l'operateur regarder a cote.
 SYSADMIN_UID="$(seat_uid)"
+SEAT_UID_FILE="$(seat_uid_file)"
 
 # LES COMPTES DE ROLE, DEMANDES AU PRODUIT. Vide = la release n'a pas repondu, et `reserved` le lit
 # comme « je ne sais pas » : elle reserve alors TOUT nom. Meme doctrine que les bornes d'uid juste

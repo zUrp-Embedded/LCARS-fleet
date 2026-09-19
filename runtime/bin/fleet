@@ -187,10 +187,17 @@ apply_start_flags() {
 }
 
 # LA PREMIERE DES DEUX POLITIQUES DU SIEGE (l'autre est `seat_uid` du protocole des modules) : ici,
-# le FICHIER SEUL fait foi. Aucune variable n'est lue — pas meme en repli — parce que ce lanceur
-# REFUSE un lancement : s'il acceptait `LCARS_SYSADMIN_UID`, il suffirait de la reposer pour
-# desarmer la garde. Le fichier est `root:root`, hors de portee de celui qu'il arrete.
+# le FICHIER SEUL fait foi — AUCUNE VALEUR ne vient d'une variable, pas meme en repli. S'il
+# acceptait `LCARS_SYSADMIN_UID`, il suffirait de la reposer pour desarmer la garde.
 # AUCUN REPLI — fichier absent ou illisible = machine NON PROVISIONNEE, un etat et pas une valeur.
+#
+# ⚠ ET CE QUE CETTE GARDE NE FAIT PAS, DIT ICI PARCE QUE LE CONTRAIRE Y ETAIT ECRIT. `LCARS_SEAT_UID_FILE`
+# deplace le CHEMIN : c'est une couture de temoin, et quiconque peut la poser peut donc designer un
+# autre fichier. Le commentaire d'avant affirmait « aucune variable n'est lue » et « le fichier est
+# root:root, hors de portee de celui qu'il arrete » — les deux etaient faux, et la seconde ne dit
+# rien du chemin. `Fleet.BootGuard`, le jumeau Elixir de cette garde, l'ecrit juste depuis toujours :
+# « cooperative launch hygiene, not an anti-adversary boundary ». Elle arrete une ERREUR — lancer la
+# fleet sous le siege ou sous root — pas l'operateur qui possede la machine.
 seat_uid() {
   local f v
   f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
