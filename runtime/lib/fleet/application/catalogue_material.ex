@@ -1,0 +1,214 @@
+defmodule Fleet.Application.CatalogueMaterial do
+  @moduledoc """
+  Measures what the forge INSTALLS, for the converger that lays the local material.
+
+  ⚠ THIS IS NOT `CatalogueStores`, AND THE DIFFERENCE IS THE ONE THAT MATTERS. That module answers
+  `lcars catalogue list`, where prudence buys an honest listing: an absent store repository is
+  `{:ok, %{}}`, because a forge carrying no installed catalogue is not a forge in error. Here the
+  reader ERASES on what it is told — `forge.d/catalogues.sh` removes the material of a catalogue the
+  forge no longer installs — so "the store is absent" and "the store installs nothing" MUST NOT
+  collapse into one answer. Gitea returns the same 404 for four different facts: the repository was
+  never created, it is private and this reads anonymously, the system org was renamed, or someone
+  deleted it. One of those four means "nothing is installed"; the other three justify erasing
+  nothing. `{:absent, repo}` is therefore its own answer, and the converger decides.
+
+  ## What signs a branch
+
+  One branch per catalogue, and a branch is the store of `x` only when BOTH hold:
+
+    * its `#{Fleet.Catalogue.manifest_file()}` read AT THAT BRANCH declares `name: x` at COLUMN
+      ZERO. In YAML an indented `name:` belongs to the key above it, so a `name:` under `roles:`
+      declares a role — accepting it would let the first nested name steal the catalogue's
+      identity. A branch with no manifest is not a catalogue (the store's own default branch
+      carries a README), and says nothing;
+    * the catalogue's ORG exists. A source without its role accounts is an interrupted install, and
+      its projects would have nowhere to be born.
+
+  A read that does not conclude — the manifest unreadable, the org's existence unknown — is a HOLD,
+  never a refusal: its material is left exactly as it is.
+
+  The catalogue the release carries is excluded. Its store lives on the forge like any other, but
+  its material IS the release, and `Fleet.Catalogue` ignores an installed directory of that name:
+  cloning it would lay a dead tree.
+
+  ## What this does NOT do
+
+  It lays nothing, clones nothing, erases nothing. The measure is the release's; the convergence
+  and the verdict belong to the caller's protocol, and both rails map the same findings to their
+  own dialect.
+
+  **Last revised**: 2026-09-19
+  """
+
+  alias Fleet.Catalogue
+  alias Fleet.Forge.Client.Files
+  alias Fleet.Forge.Client.Repo, as: ForgeRepo
+
+  require Logger
+
+  @manifest Catalogue.manifest_file()
+
+  @typedoc """
+  What one branch signs.
+
+  `:ok` carries the clone address, `:hold` the half of the reading that did not conclude
+  (`"manifeste"` or `"proprietaire"`), `:warn` a branch that answered and is NOT a store — the
+  sentence an operator needs to understand why their catalogue is not installed.
+  """
+  @type signature :: %{gravite: :ok | :hold | :warn, nom: String.t(), arg: String.t()}
+
+  @doc """
+  Reads the store repository and signs its branches.
+
+    * `{:ok, signatures}` — the listing was read WHOLE. An empty list is a measure: the store
+      exists and installs nothing.
+    * `{:absent, repo}` — the store repository answered 404. Says nothing about what is installed.
+    * `{:error, reason}` — the listing could not be read. A partial list is never returned: the
+      forge client's pagination refuses a truncated one, because a short list read as complete
+      would make the converger erase the material of every catalogue past the boundary.
+
+  `opts` are forwarded to the forge client. `:store_repo`, `:base_url`, `:bundled`, `:forge_repo`
+  and `:forge_files` are the test seams and never reach it.
+  """
+  @spec mesure(keyword()) :: {:ok, [signature()]} | {:absent, String.t()} | {:error, term()}
+  def mesure(opts \\ []) do
+    depot = Keyword.get(opts, :store_repo, Catalogue.store_repo())
+    embarque = Keyword.get(opts, :bundled, Catalogue.bundled_name())
+
+    lecteurs = %{
+      repo: Keyword.get(opts, :forge_repo, ForgeRepo),
+      files: Keyword.get(opts, :forge_files, Files),
+      opts: Keyword.drop(opts, [:store_repo, :base_url, :bundled, :forge_repo, :forge_files])
+    }
+
+    case lecteurs.repo.list_branches(depot, lecteurs.opts) do
+      {:ok, branches} ->
+        {:ok, signe_toutes(branches, depot, embarque, url_du_magasin(depot, opts), lecteurs)}
+
+      {:error, :not_found} ->
+        {:absent, depot}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # L'adresse de clone est celle du MAGASIN, pas celle du catalogue : une branche par catalogue,
+  # donc un seul depot a cloner, sur la branche qui porte son nom.
+  defp url_du_magasin(depot, opts) do
+    base =
+      Keyword.get(opts, :base_url) ||
+        Keyword.get(Application.get_env(:lcars_fleet, :pilot_forge, []), :base_url) || ""
+
+    "#{String.trim_trailing(base, "/")}/#{depot}.git"
+  end
+
+  defp signe_toutes(branches, depot, embarque, url, lecteurs) do
+    Enum.flat_map(branches, &signe(&1, depot, embarque, url, lecteurs))
+  end
+
+  defp signe(%{name: branche}, depot, embarque, url, lecteurs) when branche != embarque do
+    case lecteurs.files.get_file(depot, @manifest, Keyword.put(lecteurs.opts, :ref, branche)) do
+      {:ok, %{content: yaml}} ->
+        identifie(Catalogue.manifest_name(yaml), branche, depot, url, lecteurs)
+
+      # Pas de manifeste : la branche par defaut du magasin porte un README, et c'est normal.
+      {:error, :not_found} ->
+        []
+
+      {:error, raison} ->
+        Logger.warning(
+          "CatalogueMaterial: #{depot}:#{branche} carries a #{@manifest} that could not be read " <>
+            "(#{inspect(raison)}) — HELD, and its local material is left exactly as it is."
+        )
+
+        [%{gravite: :hold, nom: branche, arg: "manifeste"}]
+    end
+  end
+
+  # La branche du catalogue embarque, et toute entree dont la forme n'est pas celle d'une branche.
+  defp signe(_entree, _depot, _embarque, _url, _lecteurs), do: []
+
+  defp identifie({:ok, branche}, branche, depot, url, lecteurs) do
+    proprietaire(lecteurs.repo.org_exists?(branche, lecteurs.opts), branche, depot, url)
+  end
+
+  defp identifie({:ok, autre}, branche, depot, _url, _lecteurs) do
+    [
+      %{
+        gravite: :warn,
+        nom: branche,
+        arg:
+          "#{depot}:#{branche} se déclare « #{autre} » — ce n'est pas le magasin de #{branche}, " <>
+            "il n'est pas signé et rien n'est cloné sous ce nom"
+      }
+    ]
+  end
+
+  defp identifie({:error, :no_name_in_manifest}, branche, depot, _url, _lecteurs) do
+    [
+      %{
+        gravite: :warn,
+        nom: branche,
+        arg:
+          "#{depot}:#{branche} répond, mais son #{@manifest} ne déclare aucun « name: » en " <>
+            "COLONNE ZÉRO — non signé. En YAML un « name: » indenté appartient à la clé du dessus"
+      }
+    ]
+  end
+
+  # L'ORG DU CATALOGUE EST L'AUTRE MOITIE DE L'INSTALLATION. 404 = pas d'org, donc pas installe ;
+  # une absence de reponse ne conclut rien, et son materiel survit au balayage.
+  defp proprietaire({:ok, true}, branche, _depot, url),
+    do: [%{gravite: :ok, nom: branche, arg: url}]
+
+  defp proprietaire({:ok, false}, _branche, _depot, _url), do: []
+
+  defp proprietaire({:error, raison}, branche, depot, _url) do
+    Logger.warning(
+      "CatalogueMaterial: the org '#{branche}' of #{depot}:#{branche} could not be read " <>
+        "(#{inspect(raison)}) — HELD, and its local material is left exactly as it is."
+    )
+
+    [%{gravite: :hold, nom: branche, arg: "proprietaire"}]
+  end
+
+  @doc """
+  Release door: one line per signature, and a code that says what was read.
+
+  `0` the store was read whole (the lines are the measure, an empty output means it installs
+  nothing) · `2` the store is ABSENT · `1` it could not be read. The caller's protocol owns the
+  verdict; this door owns the distinction between the three, which is what keeps material from
+  being erased on a forge that simply did not answer.
+  """
+  @spec eval_check() :: no_return()
+  def eval_check do
+    Fleet.ReleaseDoor.claim_stdout!()
+
+    case avec_transport(fn -> mesure() end) do
+      {:ok, signatures} ->
+        for %{gravite: g, nom: n, arg: a} <- signatures,
+            do: IO.puts("#{String.upcase(to_string(g))}\t#{n}\t#{a}")
+
+        System.halt(0)
+
+      {:absent, depot} ->
+        IO.puts(:stderr, "ABSENT #{depot}")
+        System.halt(2)
+
+      {:error, raison} ->
+        IO.puts(:stderr, "UNREADABLE #{inspect(raison)}")
+        System.halt(1)
+    end
+  end
+
+  # Une porte `eval` charge l'app sans la demarrer : req et le pool Finch de la forge se montent ici.
+  defp avec_transport(fun) do
+    with {:ok, _} <- Application.ensure_all_started(:req),
+         {:ok, _} <- Supervisor.start_link([Fleet.Forge.finch_spec()], strategy: :one_for_one) do
+      fun.()
+    else
+      {:error, raison} -> {:error, {:transport, raison}}
+    end
+  end
+end

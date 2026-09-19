@@ -13,10 +13,11 @@ defmodule Fleet.CatalogueStoreAddressTest do
   """
   use ExUnit.Case, async: true
 
-  @mirrors [
-    "services/forge-gestures.sh",
-    "services/forge.d/catalogues.sh"
-  ]
+  # ⚖ PHASE 7 : ILS ETAIENT DEUX, IL N'EN RESTE QU'UN. `forge.d/catalogues.sh` — le CONVERGEUR —
+  # ne connait plus l'adresse : il la recoit de la porte `catalogue-installed`, qui la tient de
+  # `Fleet.Catalogue`. L'ecrivain (`forge-gestures.sh`) la porte encore, et c'est lui qu'on tient.
+  @mirrors ["services/forge-gestures.sh"]
+  @converger "services/forge.d/catalogues.sh"
 
   test "l'autorite est un litteral GELE — sinon il n'y a rien a comparer" do
     # Require a readable literal so the authority cannot silently escape the comparison.
@@ -34,7 +35,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
     assert Fleet.Catalogue.store_branch("web-demo") == "web-demo"
   end
 
-  test "les DEUX ecrivains shell portent exactement le nom de depot que le BEAM declare" do
+  test "l'ECRIVAIN shell porte exactement le nom de depot que le BEAM declare" do
     expected = Fleet.Catalogue.store_name()
 
     for rel <- @mirrors do
@@ -47,11 +48,26 @@ defmodule Fleet.CatalogueStoreAddressTest do
     end
   end
 
+  test "⚠ LE CONVERGEUR N'ECRIT PLUS D'ADRESSE — il la RECOIT, et c'est ce qui les tient d'accord" do
+    # Une copie de plus serait une copie a tenir. Le convergeur demande la mesure a la porte, qui
+    # lit `Fleet.Catalogue` : l'accord n'est plus une egalite a verifier, c'est une seule source.
+    body = File.read!(@converger)
+
+    refute body =~ ~r/^STORE_REPO=/m,
+           "#{@converger} redeclare une adresse de magasin — elle lui vient de la porte " <>
+             "`catalogue-installed`, et une seconde ecriture recommencerait a deriver"
+
+    assert body =~ "catalogue-installed",
+           "#{@converger} n'appelle plus la porte qui lui donne l'adresse : il ne converge plus rien"
+  end
+
   test "TEMOIN de non-vacuite : les fichiers existent et portent bien la ligne" do
     # Explicit fixture-presence check; File.read! and the comparison also fail if files vanish.
     for rel <- @mirrors do
       assert File.exists?(rel), "#{rel} a disparu — ce temoin ne mesure plus l'adresse"
       assert File.read!(rel) =~ ~r/^STORE_REPO=/m, "#{rel} ne declare plus `STORE_REPO`"
     end
+
+    assert File.exists?(@converger), "#{@converger} a disparu — ce temoin ne mesure plus rien"
   end
 end

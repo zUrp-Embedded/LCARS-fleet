@@ -18,157 +18,78 @@ set -euo pipefail
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
-# LE MAGASIN DES CATALOGUES : UN DEPOT DU SYSTEME, UNE BRANCHE PAR CATALOGUE (⚖ user 2026-09-16).
-# `Fleet.Catalogue` en est l'autorite ; `forge-gestures.sh` ECRIT dessus ; ce geste LIT. Un temoin
-# tient les trois d'accord. L'org systeme se lit dans le protocole (une org renommee emmene ses
-# depots), le nom du depot est un litteral — c'est la meme adresse pour toutes les installations.
-STORE_REPO="_catalogues"
-STORE_FULL="${LCARS_FORGE_ORG}/${STORE_REPO}"
-MANIFEST="catalogue.yaml"
-# La page que la forge sert, et le budget de pages. Gitea borne la page a SA limite (50 par defaut) :
-# demander 100 n'en rend pas 100, donc la fin de liste se lit a une page COURTE, jamais a la taille
-# demandee. Le budget borne une forge qui repondrait toujours plein.
-PAGE_LIMIT=50
-PAGES_MAX=40
-
-
-# LE CATALOGUE DE LA RELEASE N'EST PAS SUIVI ICI. Son magasin est sur la forge — il s'installe comme
-# les autres (`forge-gestures apply`) —, mais son materiel est la release elle-meme, et
-# `Fleet.Catalogue` ignore un dossier installe de ce nom : le cloner poserait un arbre mort. Son nom
-# se demande a la release (`lcars tool catalogue-root`, puis le `name:` du manifeste, colonne zero).
-# Sans reponse, rien n'est exclu et c'est DIT : un arbre mort de plus n'est pas une panne.
-# `lcars_cli` vit dans le protocole : trois gestes la cherchaient, avec le meme corps.
-bundled_name() {
-  local cli root
-  cli="$(lcars_cli)"
-  [[ -r "$cli" ]] || return 0
-  root="$(bash "$cli" tool catalogue-root 2>/dev/null | tail -n1)" || root=""
-  [[ -n "$root" && -r "$root/$MANIFEST" ]] || return 0
-  awk '/^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, ""); sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' "$root/$MANIFEST"
-}
-BUNDLED="$(bundled_name)"
-
-#   * l'IDENTITE — `manifest.name == <nom de la branche>`. C'est ce qui decide. Une branche posee
-#     sous le nom d'un catalogue mais dont le manifeste ne se declare pas a ce nom n'est pas le
-#     magasin de ce catalogue : le cloner le servirait sous un nom qu'il ne revendique pas, et le
-#     roster du mint en descendrait. 404 sur le manifeste = cette branche ne porte pas un catalogue
-#     (reponse — c'est le cas de `main`, qui porte le README du magasin) ; illisible = HOLD ;
-#   * l'ORG DU CATALOGUE — sa source sans ses comptes de role est un install interrompu, et ses
-#     projets n'auraient nulle part ou naitre. 200 = org, 404 = pas d'org, le reste est une ABSENCE
-#     de reponse et ne conclut rien (HOLD) ;
-#   * LA PAGINATION — le serveur borne la page a SA limite (`api.MAX_RESPONSE_ITEMS`, 50 par defaut
-#     sur Gitea), et une liste partielle lue comme entiere ferait SUPPRIMER le materiel des
-#     catalogues au-dela de la borne. Les pages sont donc suivies jusqu'a une page COURTE, avec un
-#     budget ; une page pleine au budget est un refus, jamais une convergence sur une liste partielle.
+# ─── LA MESURE VIT DANS LE RELEASE, PAS ICI (phase 7) ───────────────────────────────────────────
 #
-# ⚠ ET LA REGLE QUI TIENT TOUT LE MODULE : ON NE SUPPRIME QUE SUR UNE LECTURE REUSSIE. « Le magasin
+# Le client de forge du BEAM est le seul client de la forge. Ce geste ne PARLE PLUS a la forge : il
+# ouvre la porte `catalogue-installed` UNE fois et converge le materiel local sur ce qu'elle rend.
+# Sont partis avec elle : la pagination des branches du magasin, la lecture du manifeste de chaque
+# branche, la verification de l'org du catalogue, la dependance a `jq`, et les trois litteraux que
+# ce fichier recopiait — le nom du magasin, celui du manifeste, et le nom du catalogue embarque.
+#
+# ⚠ UN SEUL EVAL, ET C'EST POURQUOI LA PORTE REND TOUT D'UN COUP. Un `lcars_fleet eval` coute
+# 0,27 s et 89 Mo ; un appelant qui en ferait un par branche paierait ce prix a chaque catalogue.
+#
+# CE QUI RESTE ICI, et qui ne peut pas etre ailleurs : POSER le materiel. Cloner, mettre a jour,
+# retirer — des gestes de systeme de fichiers joues en root sur le cache de la machine.
+REMEDE_RELEASE="la release n'est pas posée : sur un poste, « deploy/workstation up » la pose ; dans un conteneur, l'image la porte"
+
+# ⚠ LA REGLE QUI TIENT TOUT LE MODULE : ON NE SUPPRIME QUE SUR UNE LECTURE REUSSIE. « Le magasin
 # n'existe pas » est une reponse quand il n'y a rien en local, et un DRIFT des qu'il y a du materiel
 # a effacer : un depot prive lu en anonyme, une org renommee, une recette jamais jouee rendent le
 # meme 404 qu'une forge qui n'a rien installe, et trois de ces quatre causes ne justifient aucun
-# effacement (relecture hostile du 2026-09-17).
+# effacement (relecture hostile du 2026-09-17). C'est le CODE de la porte qui porte cette
+# distinction — 0 lu entier · 2 magasin ABSENT · 1 illisible —, et ce geste la relaie telle quelle.
 #
-# Sorties, TOUJOURS trois champs : « OK <nom> <url> » / « HOLD <nom> <cause> ». La cause est portee
-# parce qu'il y a DEUX facons de ne pas savoir — le manifeste ou l'org — et qu'un refus qui nomme la
+# Sorties de la porte, TOUJOURS trois champs separes par une TABULATION :
+#   OK   <nom> <url de clone>  — la branche est signee : manifeste a son nom, et l'org existe
+#   HOLD <nom> <moitie>        — « manifeste » ou « proprietaire » : la lecture n'a pas conclu
+#   WARN <nom> <phrase>        — la branche a repondu et n'est PAS un magasin ; l'operateur a
+#                                besoin de la phrase pour comprendre pourquoi son catalogue
+#                                n'est pas installe. Rien n'est clone, rien n'est retenu.
+# La moitie est portee parce qu'il y a DEUX facons de ne pas savoir, et qu'un refus qui nomme la
 # mauvaise envoie l'operateur regarder le mauvais objet.
-# rc=1 forge muette, illisible ou liste tronquee · rc=2 magasin ABSENT (404) · rc=0 liste signee.
+#
+# rc=1 forge muette, illisible ou liste tronquee · rc=2 magasin ABSENT · rc=0 liste signee.
+#
+# ⚠ LA MESURE ATTERRIT DANS UN FICHIER, PAS DANS UNE SUBSTITUTION, et ce n'est pas un detail :
+# `x="$(forge_installed)"` jouerait la fonction dans un SOUS-SHELL, et le nom du magasin qu'elle
+# retient de la porte mourrait avec lui — les phrases d'ici nommeraient « le magasin des
+# catalogues » a la place du depot que l'operateur doit aller voir (mesure du 2026-09-19).
+#
+# MAGASIN porte le nom que la porte a lu, quand elle a pu le dire : le recopier ici en ferait une
+# seconde ecriture qui deriverait.
+MAGASIN="le magasin des catalogues"
+SIGNATURES=""
+# ⚠ CETTE FONCTION NE REND AUCUN CONSTAT, ET C'EST DELIBERE. Ne pas avoir pu lire le magasin est UN
+# fait, que l'appelant dit UNE fois, en DRIFT : rien n'est casse, la mesure n'a pas pu etre faite et
+# rien n'est efface. Un `p_fail` ici dirait la meme chose deux fois, et a une gravite que le geste
+# ne merite pas — mesure du 2026-09-19 : `50-catalogues check` rendait 2 la ou son temoin attend 1.
+# POURQUOI porte la cause, que l'appelant colle a sa phrase.
+POURQUOI=""
 forge_installed() {
-  # ⚠ `jq` EST UN PREREQUIS DE CETTE LECTURE, et son absence ne doit pas ressembler a une forge vide :
-  # sans lui, le corps ne se lit pas, et « aucune branche » ferait effacer tout le cache.
-  command -v jq >/dev/null 2>&1 || return 1
+  local cli; cli="$(lcars_cli)"
+  [[ -r "$cli" ]] || { POURQUOI="porte catalogue-installed injouable ($cli illisible) — $REMEDE_RELEASE"; return 1; }
 
-  local page=1 body code noms recues
-  while :; do
-    [[ "$page" -le "$PAGES_MAX" ]] || return 1
-    body="$(curl -sS -m 20 -w '\n%{http_code}' \
-      "$FORGE_BASE_URL/api/v1/repos/$STORE_FULL/branches?page=$page&limit=$PAGE_LIMIT" 2>/dev/null)" \
-      || return 1
-    code="${body##*$'\n'}"
-    body="${body%$'\n'*}"
+  SIGNATURES="$(mktemp)" || { POURQUOI="fichier temporaire impossible à créer (mktemp)"; return 1; }
 
-    case "$code" in
-      200) : ;;
-      404) return 2 ;;
-      *)   return 1 ;;
-    esac
+  # ⚠ STDOUT PORTE LA MESURE, STDERR LA PLAINTE, ET ON NE LES MELANGE PAS : la porte reclame stdout
+  # pour elle seule, precisement pour qu'une ligne de journal du BEAM ne passe pas devant un constat.
+  local err rc=0
+  err="$(mktemp)" || { POURQUOI="fichier temporaire impossible à créer (mktemp)"; return 1; }
+  FORGE_BASE_URL="$FORGE_BASE_URL" bash "$cli" tool catalogue-installed >"$SIGNATURES" 2>"$err" || rc=$?
 
-    # LE CORPS DOIT ETRE UN TABLEAU JSON. Un proxy, une page d'erreur ou un corps tronque rendent 200
-    # avec autre chose : lu comme une liste vide, il ferait effacer le materiel de TOUS les catalogues.
-    noms="$(printf '%s' "$body" | jq -r 'if type == "array" then (.[].name // empty) else error("pas un tableau") end' 2>/dev/null)" \
-      || return 1
-    recues="$(printf '%s' "$body" | jq -r 'length' 2>/dev/null)" || return 1
+  # « ABSENT <depot> » nomme le magasin : on le retient pour que les phrases d'ici le nomment aussi.
+  local dit; dit="$(tr '\n' ' ' < "$err" | cut -c1-300)"
+  case "$dit" in ABSENT\ *) MAGASIN="${dit#ABSENT }"; MAGASIN="${MAGASIN%% *}" ;; esac
+  rm -f "$err"
 
-    local nom
-    while read -r nom; do
-      [[ -n "$nom" ]] || continue
-      signe_branche "$nom"
-    done <<< "$noms"
-
-    # Une page COURTE est la derniere : la suivante serait vide. Une page PLEINE demande la suivante.
-    [[ "$recues" -ge "$PAGE_LIMIT" ]] || return 0
-    page=$((page + 1))
-  done
-}
-
-# Ce qu'une branche du magasin signe, ou ne signe pas. Imprime une ligne de la liste signee, ou rien.
-signe_branche() { # signe_branche <branche>
-  local name="$1" declared drc code
-  # le catalogue de la release n'est suivi par personne ici : son materiel EST la release
-  [[ -z "$BUNDLED" || "$name" != "$BUNDLED" ]] || return 0
-
-  drc=0
-  declared="$(declared_name "$name")" || drc=$?
-  [[ "$drc" -eq 2 ]] && { printf 'HOLD %s manifeste\n' "$name"; return 0; }
-  # Pas de manifeste : la branche par defaut du magasin porte un README, et c'est normal.
-  [[ "$drc" -eq 1 ]] && return 0
-
-  if [[ "$declared" != "$name" ]]; then
-    if [[ -z "$declared" ]]; then
-      echo "${LCARS_MODULE_TAG:-catalogues}: $STORE_FULL:$name repond, mais son $MANIFEST ne declare aucun" \
-           "\`name:\` en COLONNE ZERO — non signe. En YAML un \`name:\` indente appartient a la cle du dessus." >&2
-    else
-      echo "${LCARS_MODULE_TAG:-catalogues}: $STORE_FULL:$name se declare \`$declared\` — ce n'est pas le magasin" \
-           "de $name, il n'est pas signe." >&2
-    fi
-    return 0
-  fi
-
-  # L'ORG DU CATALOGUE EST L'AUTRE MOITIE DE L'INSTALLATION : sa source sans ses comptes de role est
-  # un install interrompu, et ses projets n'auraient nulle part ou naitre.
-  code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
-  case "$code" in
-    200) printf 'OK %s %s\n' "$name" "${FORGE_BASE_URL%/}/${STORE_FULL}.git" ;;
-    404) : ;;
-    *)   printf 'HOLD %s proprietaire\n' "$name" ;;
+  case "$rc" in
+    0) return 0 ;;
+    # rien a lire : le magasin est absent, et l'appelant decide ce que ca veut dire ici
+    2) : > "$SIGNATURES"; return 2 ;;
+    *) POURQUOI="porte catalogue-installed en échec (code $rc) — $dit"; return 1 ;;
   esac
 }
-
-# Le `name:` que la branche `$1` du magasin declare. rc=0 avec le nom sur stdout · rc=1 pas de
-# manifeste (une REPONSE : cette branche ne porte pas un catalogue) · rc=2 la forge n'a pas repondu
-# (une ABSENCE de reponse, qui ne conclut rien). Le code de sortie et pas une sentinelle dans la sortie : un nom de
-# catalogue est une chaine libre, et toute valeur reservee finit par etre celle de quelqu'un.
-#
-# ⚠ COLONNE ZERO, meme regle que `CatalogueDeposits.manifest_name/1` et pour la meme raison : en YAML
-# un `name:` INDENTE appartient a la cle du dessus (`roles:\n  name: dev` declare un role), donc
-# accepter une indentation laisserait le premier `name:` imbrique voler l'identite du catalogue.
-#
-# `-sS` sans `-f` : le corps ET le code sont necessaires, et `-f` avalerait le corps sur un 404.
-#
-declared_name() {
-  local raw code body
-  raw="$(curl -sS -m 10 -w '\n%{http_code}' "$FORGE_BASE_URL/api/v1/repos/$STORE_FULL/raw/$MANIFEST?ref=$1" 2>/dev/null)" \
-    || raw=$'\n000'
-  code="${raw##*$'\n'}"
-  body="${raw%$'\n'*}"
-
-  case "$code" in
-    200) printf '%s' "$body" | awk '
-           /^name:/ { sub(/^name:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/"/, "");
-                      sub(/[ \t]+$/, ""); if ($0 != "") { print; exit } }' ;;
-    404) return 1 ;;
-    *)   return 2 ;;
-  esac
-}
-
 local_installed() {
   local d
   [[ -d "$LCARS_CATALOGUES_DIR" ]] || return 0
@@ -217,10 +138,10 @@ magasin_absent() { # magasin_absent <check|apply>
   [[ -d "$LCARS_CATALOGUES_DIR" ]] \
     && n="$(find "$LCARS_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
   if [[ "$n" -gt 0 ]]; then
-    p_drift "magasin des catalogues ABSENT ($STORE_FULL) alors que $n catalogue(s) sont installes ici ($LCARS_CATALOGUES_DIR) — leur source est injoignable, RIEN n'est supprime. Le depot est pose par la recette de la forge (sur un poste « deploy/workstation up » ; pour un conteneur « deploy/container forge-apply » depuis l'hote) ; s'il existe, il est peut-etre prive — ce geste le lit en anonyme"
+    p_drift "magasin des catalogues ABSENT ($MAGASIN) alors que $n catalogue(s) sont installes ici ($LCARS_CATALOGUES_DIR) — leur source est injoignable, RIEN n'est supprime. Le depot est pose par la recette de la forge (sur un poste « deploy/workstation up » ; pour un conteneur « deploy/container forge-apply » depuis l'hote) ; s'il existe, il est peut-etre prive — ce geste le lit en anonyme"
     return 1
   fi
-  p_ok "magasin des catalogues absent de la forge ($STORE_FULL) et rien d'installe ici — la fleet tourne sur le catalogue de la release"
+  p_ok "magasin des catalogues absent de la forge ($MAGASIN) et rien d'installe ici — la fleet tourne sur le catalogue de la release"
   return 0
 }
 
@@ -237,25 +158,30 @@ forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, sel
 
 check() {
   say_leftover
-  [[ -n "$BUNDLED" ]] || p_warn "nom du catalogue de la release inconnu (« lcars tool catalogue-root » ne repond pas) — son magasin, s'il est sur la forge, sera suivi comme un catalogue installe"
   if [[ -z "$FORGE_BASE_URL" ]]; then
     forge_inconnue check
     verdict_check
   fi
 
-  local signed status name arg url rc=0
-  signed="$(forge_installed)" || rc=$?
+  local status name arg url rc=0
+  forge_installed || rc=$?
   if [[ "$rc" -eq 2 ]]; then
     magasin_absent check
     verdict_check
   elif [[ "$rc" -ne 0 ]]; then
-    p_drift "magasin des catalogues ILLISIBLE ($STORE_FULL) — l'etat installe des catalogues n'a pas pu etre lu (forge muette, reponse inattendue, liste tronquee, ou jq absent)"
+    p_drift "magasin des catalogues ILLISIBLE ($MAGASIN) — l'etat installe des catalogues n'a pas pu etre lu : $POURQUOI"
     verdict_check
   fi
 
   local seen=" "
-  while read -r status name arg; do
+  # ⚠ `|| [[ -n … ]]` : `read` rend faux sur une DERNIERE ligne sans saut, et le corps ne la verrait
+  # jamais. La porte en pose un, mais une mesure entiere perdue sur un octet manquant ferait
+  # effacer le materiel de tous les catalogues.
+  while IFS=$'\t' read -r status name arg || [[ -n "$status$name$arg" ]]; do
     [[ -n "$name" ]] || continue
+    # WARN : la branche a repondu et n'est PAS un magasin. Elle n'entre PAS dans `seen` — rien ne la
+    # retient, et du materiel local de ce nom reste un reliquat que le balayage doit voir.
+    if [[ "$status" == "WARN" ]]; then p_warn "$arg"; continue; fi
     seen="$seen$name "
     if [[ "$status" == "HOLD" ]]; then
       p_drift "catalogue $name : $arg illisible sur la forge — rien n'est conclu"
@@ -271,7 +197,7 @@ check() {
     else
       p_ok "catalogue $name a jour"
     fi
-  done <<< "$signed"
+  done < "$SIGNATURES"
 
   local have
   while read -r have; do
@@ -286,16 +212,15 @@ apply() {
   # Dit AUSSI a l'apply : c'est le geste que l'operateur lance apres une mise a jour, donc celui ou
   # le demenagement vient d'avoir lieu. Le taire ici le reserverait a qui pense a jouer un doctor.
   say_leftover
-  [[ -n "$BUNDLED" ]] || p_warn "nom du catalogue de la release inconnu (« lcars tool catalogue-root » ne repond pas) — son magasin, s'il est sur la forge, sera suivi comme un catalogue installe"
   [[ -n "$FORGE_BASE_URL" ]] || { forge_inconnue apply; verdict_apply; }
 
-  local signed rc=0
-  signed="$(forge_installed)" || rc=$?
+  local rc=0
+  forge_installed || rc=$?
   if [[ "$rc" -eq 2 ]]; then
     magasin_absent apply || verdict_apply
-    signed=""
+
   elif [[ "$rc" -ne 0 ]]; then
-    p_drift "magasin des catalogues ILLISIBLE ($STORE_FULL) — materiel laisse EN L'ETAT, rien n'est supprime (forge muette, reponse inattendue, liste tronquee, ou jq absent)"
+    p_drift "magasin des catalogues ILLISIBLE ($MAGASIN) — materiel laisse EN L'ETAT, rien n'est supprime : $POURQUOI"
     verdict_apply
   fi
 
@@ -305,8 +230,11 @@ apply() {
   mkdir -p "$LCARS_CATALOGUES_DIR"
 
   local status name arg url dir seen=" "
-  while read -r status name arg; do
+  while IFS=$'\t' read -r status name arg || [[ -n "$status$name$arg" ]]; do
     [[ -n "$name" ]] || continue
+    # WARN : la branche a repondu et n'est PAS un magasin. Elle n'entre PAS dans `seen` — un
+    # materiel local de ce nom est un reliquat, et le balayage doit pouvoir le retirer.
+    if [[ "$status" == "WARN" ]]; then p_warn "$arg"; continue; fi
     # HOLD entre dans `seen` et nulle part ailleurs : son materiel survit au balayage (on n'a pas pu
     # lire le type du proprietaire, on ne conclut rien), et rien n'est clone sous un nom non signe.
     seen="$seen$name "
@@ -349,7 +277,7 @@ apply() {
       rm -rf "$dir.tmp"
       p_drift "catalogue $name : clone impossible depuis $url"
     fi
-  done <<< "$signed"
+  done < "$SIGNATURES"
 
   local have
   while read -r have; do

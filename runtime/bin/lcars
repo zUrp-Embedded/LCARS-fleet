@@ -34,7 +34,7 @@ PROG="$(basename "$0")"
 # `system-project` depuis `3420d477`, `ops-repo` depuis `c6e48370` (mesure du 2026-09-19 sur le banc
 # 2005, l'aide lue par-dessus l'epaule d'un operateur). Un mur tient cette liste d'accord avec les
 # branches que `cmd_tool` dispatche vraiment.
-TOOL_PORTES="verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project|ops-repo"
+TOOL_PORTES="verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project|ops-repo|catalogue-installed"
 
 die() { echo "lcars: $*" >&2; exit 1; }
 
@@ -650,6 +650,12 @@ cmd_tool() {
       # MESURE le depot du systeme et rend une ligne « <gravite>\t<phrase> » par constat, code 0
       # quel que soit l'etat : le VERDICT appartient au protocole de l'appelant, pas a la porte.
       _tool_run 'Fleet.Application.OpsRepo.eval_check()' ;;
+    catalogue-installed)
+      # MESURE ce que la forge INSTALLE : une ligne « <OK|HOLD|WARN>\t<nom>\t<arg> » par branche
+      # signee du magasin. Le CODE porte la distinction qui empeche d'effacer a tort : 0 le magasin
+      # a ete lu ENTIER (aucune ligne = il n'installe rien), 2 le magasin est ABSENT, 1 il n'a pas
+      # pu etre lu. Le convergeur (`forge.d/catalogues.sh`) decide, la porte mesure.
+      _tool_run 'Fleet.Application.CatalogueMaterial.eval_check()' ;;
     *) die "tool: porte inconnue '${1:-}' ($TOOL_PORTES)" ;;
   esac
 }
