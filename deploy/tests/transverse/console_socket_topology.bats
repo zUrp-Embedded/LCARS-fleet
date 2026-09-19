@@ -276,7 +276,14 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
     run bash "$BATS_TEST_DIRNAME/../../../runtime/services/console-humans.sh"
   [ "$status" -eq 0 ]
   [[ "$output" != *"zoe"* ]]
-  [[ "$output" == *"bornes d'uid illisibles"* ]]
+  # ⚠ ON EPINGLE LA PROPRIETE, PAS LA FORMULE. L'assertion cherchait « bornes d'uid illisibles »,
+  # une phrase que la phase 5 a remplacee en centralisant la lecture : le refus dit maintenant
+  # laquelle des deux bornes manque ET dans quel fichier. Elle est meilleure, et le temoin rougissait
+  # sur un comportement juste. Ce qui doit tenir : aucune liste, et un refus qui NOMME le fichier a
+  # reparer — sans lui, l'operateur ne sait pas ou regarder.
+  [[ "$output" == *"UID_MIN illisible"* ]]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/nexistepas"* ]]
+  [[ "$output" == *"aucune liste rendue"* ]]
 }
 
 @test "console-humans rend TROIS colonnes — login, uid, et le home qu'il vient de valider" {

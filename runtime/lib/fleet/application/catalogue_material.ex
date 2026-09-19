@@ -179,7 +179,26 @@ defmodule Fleet.Application.CatalogueMaterial do
   defp proprietaire({:ok, true}, branche, _depot, url),
     do: [%{gravite: :ok, nom: branche, arg: url}]
 
-  defp proprietaire({:ok, false}, _branche, _depot, _url), do: []
+  # ⚠ UNE BRANCHE QUI DISPARAIT DE LA LISTE FAIT EFFACER SON MATERIEL, ET CE CAS-CI LE FAISAIT SANS
+  # UN MOT. Rendre `[]` melangeait deux faits que rien ne distinguait ensuite : « cette entree n'est
+  # pas un catalogue » (une branche par defaut, le catalogue embarque — legitimement muets) et « ce
+  # catalogue a bien un manifeste a son nom, mais son org n'existe pas ». Le second est le seul cas
+  # ou de la matiere INSTALLEE est retiree sur une reponse de la forge, et c'est celui ou l'operateur
+  # a besoin d'une phrase : l'org renommee et l'org supprimee rendent le meme 404 qu'une installation
+  # jamais faite. WARN est exactement ce vocabulaire — « la branche a repondu et n'est PAS un
+  # magasin ; rien n'est clone, rien n'est retenu » —, donc le materiel part comme avant, dit.
+  defp proprietaire({:ok, false}, branche, depot, _url) do
+    [
+      %{
+        gravite: :warn,
+        nom: branche,
+        arg:
+          "#{depot}:#{branche} porte un manifeste à son nom, mais l'org « #{branche} » n'existe " <>
+            "pas sur cette forge — non signé, rien n'est cloné sous ce nom. Une org renommée ou " <>
+            "supprimée répond comme une installation jamais faite"
+      }
+    ]
+  end
 
   defp proprietaire({:error, raison}, branche, depot, _url) do
     Logger.warning(

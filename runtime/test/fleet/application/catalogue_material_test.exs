@@ -116,8 +116,14 @@ defmodule Fleet.Application.CatalogueMaterialTest do
     end
 
     test "SANS ORG, la branche ne signe pas : une source sans ses comptes de rôle est un install interrompu" do
-      assert {:ok, []} =
+      # ⚠ ELLE NE SIGNE PAS, ET ELLE LE DIT. Rendre `[]` faisait disparaitre la branche de la liste,
+      # donc effacer son materiel local — sur une reponse de la forge, et sans une phrase. WARN
+      # garde ce comportement (rien n'est retenu, rien n'est clone) et le rend lisible : une org
+      # renommee ou supprimee repond comme une installation jamais faite.
+      assert {:ok, [%{gravite: :warn, nom: "web", arg: phrase}]} =
                mesure(branches: ["web"], manifestes: %{"web" => "name: web\n"}, orgs: [])
+
+      assert phrase =~ "l'org « web » n'existe pas"
     end
 
     test "le catalogue EMBARQUE n'est jamais suivi — son materiel EST la release" do

@@ -21,6 +21,15 @@ DECOR_SUPPORT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 decor_pose() {
   export LCARS_DECOR_ROOT="$BATS_TEST_TMPDIR/decor"
   export DECOR_BIN="$BATS_TEST_TMPDIR/decor-bin"
+  # ⚠ LES PRIMITIVES DU PRODUIT SONT NOMMÉES ICI, ET C'EST UNE DETTE DE LA PHASE 6. Depuis que
+  # `env_field`, `read_token`, `ensure_dir`, `ensure_mode` et `write_atomic` ne sont plus écrites
+  # deux fois, `provision-lib.sh` source celles du PRODUIT — et un témoin qui recopie la lib dans un
+  # faux arbre `deploy/` seul ne les y trouve pas. Le bouchon se déclenche alors, `read_token` rend
+  # la chaîne VIDE, et la suite parle à la forge en ANONYME. Mesuré le 2026-09-20 : 89 cas de
+  # `deploy/gate.sh` rouges pour cette seule cause, dont tout le banc, sur « le jeton master ne
+  # s'authentifie pas ». Un décor recopie déjà la vraie lib de l'installeur : il désigne de la même
+  # façon la vraie lib du produit, au lieu de fabriquer une copie de plus qui dériverait.
+  export PROV_PRIMITIVES_SH="$DECOR_SUPPORT_DIR/../../../runtime/services/lib/primitives.sh"
   mkdir -p "$LCARS_DECOR_ROOT/opt/lcars/var/tokens" "$LCARS_DECOR_ROOT/etc/lcars" \
            "$LCARS_DECOR_ROOT/usr/local/bin" "$DECOR_BIN"
   export PATH="$DECOR_BIN:$PATH"
