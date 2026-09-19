@@ -23,6 +23,7 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
     @catalogues_dirname "catalogues"
     @installed_catalogues_root "/opt/lcars/var/catalogues"
     @runtime_root "/run/lcars"
+    @state_dirname ".lcars"
 
     def face_root("code"), do: @code_root
     def face_root("workshop"), do: @workshop_root
@@ -34,6 +35,7 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
   @racine_opt_intruse "/opt/lcars" <> "2"
   @racine_run_intruse "/run/" <> "old-lcars"
   @racine_run_prefixe "/run/lcars" <> "x"
+  @etat_intrus "." <> "lcars-old"
 
   defp depot(opts) do
     root = Fleet.TestEnv.tmp_path("layout_verrous")
@@ -159,6 +161,59 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
         )
 
       assert %{status: :pass, evidence: []} = SingleSource.check_runtime_root_single_source(root)
+    end
+  end
+
+  describe "layout.state_dir_single_source — le jumeau PAR HUMAIN de la racine /run" do
+    test "un second nom d'etat sous $HOME est nomme" do
+      root =
+        depot(
+          fichiers: [
+            {"runtime/bin/fleet", "S=$HOME/.lcars/run/api.sock\n"},
+            {"runtime/bin/lcars", "X=$HOME/#{@etat_intrus}/run/tmux-sock\n"}
+          ]
+        )
+
+      assert %{status: :fail, evidence: ev} = SingleSource.check_state_dir_single_source(root)
+      assert @etat_intrus in ev
+    end
+
+    test "`~/` et `$HOME/` sont LA MEME forme — un mur qui n'en lirait qu'une ne lit rien" do
+      root =
+        depot(
+          fichiers: [
+            {"runtime/bin/fleet", "S=$HOME/.lcars/run/api.sock\n"},
+            {"runtime/bin/lcars", "AIDE=~/#{@etat_intrus}/forges\n"}
+          ]
+        )
+
+      assert %{status: :fail, evidence: ev} = SingleSource.check_state_dir_single_source(root)
+      assert @etat_intrus in ev
+    end
+
+    test "⚠ LES AUTRES NOMS SOUS $HOME NE SONT PAS LE NOTRE — et ce mur n'a rien a en dire" do
+      # `~/.local/bin/claude` est le rail vendor, `~/.claude` sa configuration : accuser ces noms
+      # ferait de ce mur un garde du HOME de l'humain, ce qu'il n'est pas.
+      root =
+        depot(
+          fichiers: [
+            {"runtime/bin/fleet",
+             "S=$HOME/.lcars/run/api.sock\nV=$HOME/.local/bin/claude\nC=~/.claude/skills\n" <>
+               "G=$HOME/.config/git\n"}
+          ]
+        )
+
+      assert %{status: :pass, evidence: []} = SingleSource.check_state_dir_single_source(root)
+    end
+
+    test "⚠ UNE AUTORITE ILLISIBLE → rien n'a ete compare, et le mur le DIT" do
+      # Le heredoc retire l'indentation commune : la ligne stockee porte DEUX espaces, pas quatre.
+      sans = String.replace(@layout, "  @state_dirname \".lcars\"\n", "")
+
+      root = depot(layout: sans, fichiers: [{"runtime/bin/fleet", "S=$HOME/.lcars/run\n"}])
+
+      assert %{status: :fail, note: note} = SingleSource.check_state_dir_single_source(root)
+      assert note =~ "the authority is unreadable"
     end
   end
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.259
+# STARDATE: 2026.262
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -289,11 +289,13 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   [[ "$output" != *"credentials claude absentes"* ]]   # la porte suivante n'est PAS atteinte
 }
 
-@test "GUARD B: la phrase du refus est CELLE du protocole des humains — un temoin tient l'egalite, pas un commentaire" {
-  # `bin/fleet` ne source pas `lib/human-protocol.sh` (un vocabulaire de module, pas de lanceur) :
-  # il en porte cinq lignes. Ce qui garantit que les deux disent la MEME chose au meme moment est
-  # ce temoin : le remede du protocole (`UID_BOUNDS_WHY`), sur le meme fichier — absent, puis
-  # sans UID_MAX — doit se lire tel quel dans le refus du lanceur, borne manquante comprise.
+@test "GUARD B: la phrase du refus est CELLE du protocole des humains — meme LECTURE, pas deux copies" {
+  # ⚖ Phase 5 : ce temoin tenait l'EGALITE de deux ecritures — `bin/fleet` portait cinq lignes de
+  # lecture parce qu'il « ne peut pas sourcer le protocole » (vrai : un vocabulaire de module).
+  # Les deux sourcent maintenant la meme LECTURE (`lib/uid-bounds.sh`), qui n'impose rien et
+  # n'imprime rien. Le temoin reste, et mesure autre chose : que le lanceur RELAIE bien la cause
+  # au lieu d'en reformuler une — un refus qui nommerait la mauvaise borne enverrait l'operateur
+  # reparer le mauvais objet.
   local lib="$BATS_TEST_DIRNAME/../../services/lib"
   local variant defs expected
   for variant in absent sans-max; do

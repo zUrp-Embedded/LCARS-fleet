@@ -42,6 +42,14 @@ load_env() {
   ERL_COOKIE="${LCARS_FLEET_ERL_COOKIE:-lcars}"
   [[ -n "${LCARS_FLEET_ERL_NODE:-}" ]] && DIST_ON=1 || true
 }
+# ⚖ Phase 5 : la frontiere systeme/humain se LIT, une fois pour tout le produit. Ce lanceur est
+# atteint par un symlink depuis le PATH, et bash ne le resout pas : le voisin resout le checkout,
+# la racine du produit resout la machine — meme forme que pour les faits.
+UID_BOUNDS_SH="${LCARS_UID_BOUNDS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/uid-bounds.sh}"
+[[ -r "$UID_BOUNDS_SH" ]] || UID_BOUNDS_SH=/opt/lcars/services/lib/uid-bounds.sh
+# shellcheck source=../services/lib/uid-bounds.sh
+. "$UID_BOUNDS_SH"
+
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 SESSION="${LCARS_FLEET_SESSION:-fleet}"
 DAEMON_SOCK="${LCARS_FLEET_SOCK:-$HOME/.lcars/run/fleet.sock}"
@@ -218,32 +226,24 @@ cmd_start() {
   # EXPLICITE (`useradd -u ${LCARS_UID:-1000}` dans l'init de l'instance, le compte qui installe sur
   # un poste), hors du `forge_id + UID_OFFSET` par lequel
   # le convergeur derive les humains — d'ou une condition, et non un intervalle.
-  local _uid _uid_min _uid_max _missing _defs
+  local _uid
   _uid="$(id -u)"
-  _defs="${PASSWD_DEFS:-/etc/login.defs}"
-  # ⚠ `|| true` LOAD-BEARING : sous `set -euo pipefail`, un `login.defs` absent fait echouer `awk`,
-  # donc la substitution, donc le script — qui MEURT SANS UN MOT avant d'avoir garde quoi que ce soit.
-  _uid_min="$(awk '$1 == "UID_MIN" {print $2; exit}' "$_defs" 2>/dev/null || true)"
-  _uid_max="$(awk '$1 == "UID_MAX" {print $2; exit}' "$_defs" 2>/dev/null || true)"
-  # ⚠ AUCUN REPLI SUR 1000 NI SUR 60000, et c'est delibere — la politique du BEAM que ce lanceur
-  # lance (config/runtime.exs, R-no-uid-min) et du protocole des humains (`uid_bounds`) : un
-  # login.defs illisible n'est pas « la frontiere est a 1000 », c'est « la frontiere n'est pas
-  # etablie », et une garde qui ne peut pas mesurer refuse. Le BEAM refuserait derriere de toute
-  # facon ; autant que le lanceur le dise, avec le meme mot. DEUX BORNES, comme le protocole, la
-  # console et le BEAM (lot 15) : au-dessus de UID_MAX vivent `nobody` (65534, sur toute machine)
-  # et les comptes de service hauts — et une seule borne lisible n'etablit pas la frontiere.
-  # Cinq lignes plutot qu'un `source` du protocole — il pose un vocabulaire fait pour un module,
-  # pas pour ce lanceur — et `fleet.bats` tient l'egalite de la phrase avec `UID_BOUNDS_WHY` du
-  # protocole, sur chacune des deux bornes.
-  _missing=""
-  [[ "$_uid_min" =~ ^[0-9]+$ ]] || _missing=UID_MIN
-  [[ -n "$_missing" || "$_uid_max" =~ ^[0-9]+$ ]] || _missing=UID_MAX
-  [[ -z "$_missing" ]] || die "refus de lancer une fleet sous l'uid $_uid : la frontiere systeme/humain n'est pas etablie ($_missing illisible dans $_defs) — la borne est declaree par le systeme, pas par ce processus : repare $_defs"
-  if (( _uid < _uid_min )); then
-    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte SYSTEME (uid < UID_MIN=$_uid_min, declare dans $_defs). Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
+  # ⚖ Phase 5 : LA LECTURE N'EST PLUS ICI. Elle etait de cinq lignes, sous un temoin d'egalite avec
+  # `UID_BOUNDS_WHY` du protocole, parce que ce lanceur « ne peut pas sourcer le protocole » — vrai,
+  # il pose un vocabulaire fait pour un module. Mais il peut sourcer une LECTURE, qui n'impose rien
+  # et n'imprime rien : `services/lib/uid-bounds.sh`. Le temoin d'egalite n'a plus d'objet — il n'y
+  # a plus deux phrases a tenir egales, il n'y en a qu'une.
+  #
+  # ⚠ AUCUN REPLI SUR 1000 NI SUR 60000 : un `login.defs` illisible n'est pas « la frontiere est a
+  # 1000 », c'est « la frontiere n'est pas etablie », et une garde qui ne peut pas mesurer refuse.
+  # DEUX BORNES : au-dessus de UID_MAX vivent `nobody` (65534, sur toute machine) et les comptes de
+  # service hauts. C'est la politique du BEAM que ce lanceur lance (R-no-uid-min), avec le meme mot.
+  uid_bounds_read || die "refus de lancer une fleet sous l'uid $_uid : $UID_BOUNDS_WHY"
+  if (( _uid < UID_MIN )); then
+    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte SYSTEME (uid < UID_MIN=$UID_MIN, declare dans $UID_BOUNDS_FILE). Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
   fi
-  if (( _uid > _uid_max )); then
-    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte HORS DE LA PLAGE DES HUMAINS (uid > UID_MAX=$_uid_max, declare dans $_defs) : nobody et les comptes de service hauts n'y sont pas. Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
+  if (( _uid > UID_MAX )); then
+    die "refus de lancer une fleet sous l'uid $_uid — c'est un compte HORS DE LA PLAGE DES HUMAINS (uid > UID_MAX=$UID_MAX, declare dans $UID_BOUNDS_FILE) : nobody et les comptes de service hauts n'y sont pas. Le BEAM herite de cet uid et ses pods avec. Lance-la sous un compte humain de la fleet."
   fi
   local _seat; _seat="$(seat_uid)"
   if (( _uid == _seat )); then

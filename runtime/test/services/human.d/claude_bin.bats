@@ -37,6 +37,8 @@ setup() {
   # Le decor recopie le protocole pour y surcharger `human_home`.
   cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
   cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
+  # ⚖ phase 5 : le protocole des humains SOURCE la lecture de la frontiere, posee a cote de lui
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/uid-bounds.sh" "$SANDBOX/lib/uid-bounds.sh"
   # ⚖ decision 3 : le protocole SOURCE le lecteur des faits. Le decor n'emporte pas l'arbre du
   # produit : on lui NOMME le vrai lecteur, qui resout les vrais faits depuis son propre chemin.
   export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../../services/lib/facts.sh"

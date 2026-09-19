@@ -33,7 +33,7 @@ setup() {
   # ni l'installeur ni un geste du produit.
   mkdir -p "$R/runtime/services/lib"
   cp "$RACINE_REELLE/runtime/etc/facts.env" "$R/runtime/etc/"
-  cp "$RACINE_REELLE/runtime/services/lib/facts.sh" "$R/runtime/services/lib/"
+  cp "$RACINE_REELLE/runtime/services/lib/facts.sh" "$RACINE_REELLE/runtime/services/lib/uid-bounds.sh" "$R/runtime/services/lib/"
   printf 'png' > "$R/assets/avatars/a.png"; printf 'ico' > "$R/assets/favicon/f.ico"
   printf '{"name":"doc"}\n' > "$R/assets/github.io/package.json"
   cp "$RACINE_REELLE/deploy/docker/docker-compose.yml" "$R/deploy/docker/"; printf '{}\n' > "$R/deploy/docker/lcars-hardened-seccomp.json"

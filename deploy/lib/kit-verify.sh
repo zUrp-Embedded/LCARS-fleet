@@ -66,6 +66,10 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
     [[ -r "$stage/$src" ]] \
       || manques+=("$src absent — sans les faits de la machine, ni l'installeur ni un geste du produit ne démarrent")
   done
+  # ⚖ phase 5 : l'unique lecture shell de la frontière système/humain, sourcée par le protocole des
+  # humains, la console et le lanceur. Sans elle, aucun des trois ne sait qui est un humain.
+  [[ -r "$stage/runtime/services/lib/uid-bounds.sh" ]] \
+    || manques+=("runtime/services/lib/uid-bounds.sh absent — la frontière système/humain ne se lit plus : ni console, ni convergence, ni lancement")
 
   local t
   for t in avatars favicon; do

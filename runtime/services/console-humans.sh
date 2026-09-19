@@ -18,11 +18,14 @@ VERBOSE=0
 # ⚠ AUCUN DEFAUT SUR CES BORNES, PARCE QU'IL SERAIT FAIL-OPEN : elles decident qui RECOIT une
 # console, et un UID_MIN reel a 2000 devine a 1000 ouvre un shell web a tout ce qui vit entre les
 # deux. Illisibles, on ne rend aucune liste et on le dit.
-DEFS="${PASSWD_DEFS:-/etc/login.defs}"
-UID_MIN="$(awk '/^UID_MIN/ {print $2}' "$DEFS" 2>/dev/null | head -n1 || true)"
-UID_MAX="$(awk '/^UID_MAX/ {print $2}' "$DEFS" 2>/dev/null | head -n1 || true)"
-if ! [[ "$UID_MIN" =~ ^[0-9]+$ && "$UID_MAX" =~ ^[0-9]+$ ]]; then
-  echo "[humans] bornes d'uid illisibles ($DEFS) — la frontiere systeme/humain n'est pas etablie, aucune liste rendue" >&2
+# ⚖ Phase 5 : la LECTURE vit dans `lib/uid-bounds.sh`, une fois pour tout le produit. Ce script
+# garde son mot a lui — une liste vide, pas une panne — mais plus sa copie de la lecture.
+UID_BOUNDS_SH="${LCARS_UID_BOUNDS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/uid-bounds.sh}"
+[[ -r "$UID_BOUNDS_SH" ]] || UID_BOUNDS_SH=/opt/lcars/services/lib/uid-bounds.sh
+# shellcheck source=lib/uid-bounds.sh
+. "$UID_BOUNDS_SH"
+if ! uid_bounds_read; then
+  echo "[humans] $UID_BOUNDS_WHY — aucune liste rendue" >&2
   exit 0
 fi
 

@@ -709,6 +709,63 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   end
 
   @doc """
+  Checks every per-human state directory in the corpus against Layout's `@state_dirname`.
+
+  ⚖ Phase 5. `/run/lcars` — the MACHINE's socket root — has been held since the runtime_root check;
+  its twin, the HUMAN's state directory, was held by nothing while the shell wrote it twenty-four
+  times (`$HOME/.lcars/run/tmux-sock`, `~/.lcars/fleet.env`, `$HOME/.lcars/forge.d`…). A second
+  name here means a launcher that writes a socket where the CLI does not look and the BEAM does
+  not listen — for one human, on one machine, and only once the fleet is started another way.
+
+  The scan reads `$HOME/<name>` and `~/<name>` and stops at the next slash, so
+  `$HOME/.lcars/run/api.sock` counts as `.lcars`. It does not resolve paths, does not inspect
+  dynamically assembled ones, and proves nothing about what a running machine creates.
+  """
+  @spec check_state_dir_single_source(String.t()) :: Support.result()
+  def check_state_dir_single_source(root) do
+    id = "layout.state_dir_single_source"
+
+    remediation =
+      "every per-human state path starts with `Fleet.Layout` `@state_dirname` — a second name is " <>
+        "a socket written where nobody listens, and the two sides only meet on a machine"
+
+    expected = layout_literal(root, "state_dirname")
+
+    if is_nil(expected) do
+      unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@state_dirname")
+    else
+      # `$HOME/x` et `~/x` : les deux formes du meme chemin, tronquees au premier `/` suivant.
+      {vus, porteurs} =
+        scan_corpus_roots(
+          root,
+          ~r{(?:\$HOME/|~/)\.?[A-Za-z0-9_.-]+},
+          &String.replace(&1, ~r{^(?:\$HOME/|~/)}, "")
+        )
+
+      # `.lcars` seul est tenu ici ; les autres noms sous $HOME appartiennent a leur proprietaire
+      # (`.local`, `.claude`, `.config`…) et ce mur n'a rien a en dire.
+      intruses =
+        vus
+        |> Enum.filter(&String.contains?(&1, "lcars"))
+        |> Enum.reject(&(&1 == expected))
+        |> Enum.sort()
+
+      roots_verdict(id, remediation, %{
+        autorite_vue?: Enum.member?(vus, expected),
+        attendue: "occurrence of $HOME/#{expected} in the corpus",
+        intruses: intruses,
+        note_ok:
+          "every per-human LCARS path starts with #{inspect(expected)}, declared by " <>
+            "Fleet.Layout @state_dirname (#{MapSet.size(vus)} distinct name(s) under $HOME " <>
+            "across #{porteurs} files)",
+        note_ko:
+          "authority says #{inspect(expected)} — #{length(intruses)} other LCARS name(s) under " <>
+            "$HOME: " <> Enum.join(intruses, ", ")
+      })
+    end
+  end
+
+  @doc """
   Checks recognised /home/projects roots against Layout face_root attribute clauses,
   plus the explicitly exempt agents' work tree.
 

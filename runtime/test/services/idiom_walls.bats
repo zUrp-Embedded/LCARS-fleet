@@ -143,15 +143,15 @@ i2_user_hit() { # stdin : du code -> les lignes fautives, rc 0 s'il y en a
 # de la frontiere ; et `… / 1000` dans `bin/fleet` convertit des millisecondes.
 I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 
-@test "MUR I18 (produit) : aucun litteral 1000/60000 comme repli de borne d'uid dans les quatre lecteurs du produit" {
+@test "MUR I18 (produit) : aucun litteral 1000/60000 comme repli de borne d'uid dans les cinq fichiers du produit" {
   local root f hits=0 pop=0 trouve
   root="$(cd "$SERVICES/../.." && pwd)"
-  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : les quatre lecteurs de la borne cote produit — le
-  # protocole (la regle), le convergeur et la console (ses appelants), le lanceur (sa copie de cinq
-  # lignes, sous temoin d'egalite dans bin/fleet.bats). Aucun chemin de deploy/ ici : le jumeau.
-  for f in "$SERVICES/lib/human-protocol.sh" "$SERVICES/human-converger.sh" "$SERVICES/console-humans.sh" \
-           "$root/runtime/bin/fleet"; do
-    [ -f "$f" ] || { echo "lecteur absent : $f — la population du mur n'est plus de quatre" >&2; return 1; }
+  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : la LECTURE (`lib/uid-bounds.sh`, ⚖ phase 5) et ses
+  # quatre appelants — le protocole (qui la dit une fois), le convergeur, la console, le lanceur.
+  # Aucun chemin de deploy/ ici : le jumeau.
+  for f in "$SERVICES/lib/uid-bounds.sh" "$SERVICES/lib/human-protocol.sh" "$SERVICES/human-converger.sh" \
+           "$SERVICES/console-humans.sh" "$root/runtime/bin/fleet"; do
+    [ -f "$f" ] || { echo "fichier absent : $f — la population du mur n'est plus de cinq" >&2; return 1; }
     case "$f" in "$root"/deploy/*) echo "MUR I18 (produit) lit deploy/ : $f — c'est l'affaire du jumeau" >&2; return 1 ;; esac
     pop=$((pop + 1))
     trouve="$(code "$f" | grep -nE "$I18_RE" | grep -iE 'uid' || true)"
@@ -162,8 +162,26 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
     fi
   done
   [ "$hits" -eq 0 ]
-  # GARDE D'INSTRUMENT : quatre lecteurs, pas un de moins.
-  [ "$pop" -eq 4 ]
+  # GARDE D'INSTRUMENT : cinq fichiers, pas un de moins.
+  [ "$pop" -eq 5 ]
+
+  # ⚖ PHASE 5 — ET LA LECTURE N'EST ECRITE QU'UNE FOIS. Le repli interdit ci-dessus n'etait que la
+  # moitie du probleme : quatre copies de la meme lecture derivent aussi par leur MOTIF (la console
+  # avait `/^UID_MIN/`, qui matche une clef dont UID_MIN n'est que le prefixe, la ou les trois
+  # autres avaient `$1 == "UID_MIN"`). Le discriminant n'est pas l'usage des bornes — le convergeur
+  # les passe legitimement a `awk -v` — mais QUI OUVRE LE FICHIER : un seul le nomme.
+  local ouvreurs=0
+  for f in "$SERVICES/lib/uid-bounds.sh" "$SERVICES/lib/human-protocol.sh" "$SERVICES/human-converger.sh" \
+           "$SERVICES/console-humans.sh" "$root/runtime/bin/fleet"; do
+    if code "$f" | grep -qE 'PASSWD_DEFS|login\.defs'; then
+      ouvreurs=$((ouvreurs + 1))
+      case "$f" in
+        "$SERVICES/lib/uid-bounds.sh") ;;
+        *) echo "MUR I18 rompu — ${f#"$root"/} nomme login.defs : la lecture vit dans lib/uid-bounds.sh, et le chemin retenu se lit dans UID_BOUNDS_FILE" >&2; return 1 ;;
+      esac
+    fi
+  done
+  [ "$ouvreurs" -eq 1 ] || { echo "MUR I18 — $ouvreurs fichier(s) nomment login.defs : l'instrument ne cherche plus la bonne forme" >&2; return 1; }
   # Le mur mord : les trois formes qui vivaient cote produit, presentees au meme grep, sont vues…
   local forme
   for forme in '  [[ "$_uid_min" =~ ^[0-9]+$ ]] || _uid_min=1000' \

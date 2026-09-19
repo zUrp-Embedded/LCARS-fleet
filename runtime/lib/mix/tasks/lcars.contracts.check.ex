@@ -104,6 +104,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         SingleSource.check_system_account_single_source(root),
         SingleSource.check_platform_root_single_source(root),
         SingleSource.check_runtime_root_single_source(root),
+        SingleSource.check_state_dir_single_source(root),
         SingleSource.check_face_roots_single_source(root),
         SingleSource.check_face_mode_single_source(root),
         SingleSource.check_ops_repo_single_source(root),
