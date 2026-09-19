@@ -234,3 +234,44 @@ J
   run bash -c "cd '$TMP' && '$SCRIPT' help"
   [[ "$output" != *"n'est pas lisible"* ]] || { echo "$output"; return 1; }
 }
+
+# ⚠ LA LISTE DES PORTES OUTIL S'ECRIVAIT TROIS FOIS : l'aide, le refus d'une porte inconnue, et le
+# `case` qui dispatche. L'aide a vieilli sans bruit — elle ignorait `system-project` depuis
+# `3420d477` et `ops-repo` depuis `c6e48370`, lues par-dessus l'epaule d'un operateur sur le banc
+# 2005 le 2026-09-19. MUR 22 ne tient que les verbes de PREMIER niveau ; rien ne tenait ceux-ci.
+_portes_declarees() {
+  sed -n 's/^TOOL_PORTES="\(.*\)"$/\1/p' "$SCRIPT" | tr '|' '\n' | awk '{print $1}' | sort -u
+}
+
+# Les etiquettes du `case` de cmd_tool, `a|b)` compris, `*)` exclu.
+_portes_dispatchees() {
+  awk '/^cmd_tool\(\) \{/{on=1} on && /^\}/{exit} on' "$SCRIPT" \
+    | sed -n 's/^    \([a-z0-9|_-]*\))$/\1/p' | tr '|' '\n' | sort -u
+}
+
+@test "MUR: les portes DECLAREES sont exactement celles que cmd_tool dispatche" {
+  local d p
+  d="$(_portes_declarees)"; p="$(_portes_dispatchees)"
+  [ -n "$d" ] || { echo "TOOL_PORTES ne se lit plus dans $SCRIPT — l'instrument ne mesure rien" >&2; return 1; }
+  [ "$(printf '%s\n' "$d" | wc -l)" -ge 4 ] || { echo "seulement $(printf '%s\n' "$d" | wc -l) porte(s) declaree(s) : la forme a change" >&2; return 1; }
+  [ "$d" = "$p" ] || {
+    echo "declarees : $(echo "$d" | tr '\n' ' ')" >&2
+    echo "dispatchees: $(echo "$p" | tr '\n' ' ')" >&2
+    echo "→ une porte nommee d'un seul cote est une porte que l'aide promet et que le script refuse," >&2
+    echo "  ou l'inverse : un operateur la cherche et ne la trouve pas." >&2
+    return 1
+  }
+}
+
+@test "MUR: l'aide ET le refus nomment la meme liste, parce qu'ils la LISENT au meme endroit" {
+  run bash -c "cd '$TMP' && '$SCRIPT' help"
+  local aide="$output"
+  run bash -c "cd '$TMP' && '$SCRIPT' tool porte-qui-nexiste-pas"
+  local refus="$output"
+
+  local porte
+  while read -r porte; do
+    [[ "$aide"  == *"$porte"* ]] || { echo "l'aide ne nomme pas « $porte »" >&2; return 1; }
+    [[ "$refus" == *"$porte"* ]] || { echo "le refus ne nomme pas « $porte »" >&2; return 1; }
+  done < <(_portes_declarees)
+}

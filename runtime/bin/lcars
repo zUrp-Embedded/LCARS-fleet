@@ -20,6 +20,13 @@ TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
 PROG="$(basename "$0")"
 
+# ⚠ LES PORTES OUTIL, DECLAREES UNE FOIS. L'aide et le refus d'une porte inconnue les nommaient
+# chacun de leur cote : l'aide a vieilli sans bruit, et une porte s'ajoutait sans y apparaitre —
+# `system-project` depuis `3420d477`, `ops-repo` depuis `c6e48370` (mesure du 2026-09-19 sur le banc
+# 2005, l'aide lue par-dessus l'epaule d'un operateur). Un mur tient cette liste d'accord avec les
+# branches que `cmd_tool` dispatche vraiment.
+TOOL_PORTES="verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project|ops-repo"
+
 die() { echo "lcars: $*" >&2; exit 1; }
 
 usage() {
@@ -51,13 +58,12 @@ USAGE
       Attache ce terminal sur la session tmux du pod (Ctrl-b d rend la main sans
       tuer le pod).
 
-  $PROG tool {verify|roles|roles-tfvars|catalogue-root|catalogue-source} [arguments]
+  $PROG tool {$TOOL_PORTES}
       Les PORTES OUTIL du release — des evaluations d'une ligne, sous un uid sans pouvoir quand
-      l'appelant est root : verify <root> · roles [root] · roles-tfvars [root] · catalogue-root ·
-      catalogue-source <nom>. \`forge-gestures.sh\`, le geste des jetons et l'enrolement d'un
+      l'appelant est root. \`forge-gestures.sh\`, le geste des jetons et l'enrolement d'un
       catalogue (\`deploy/lib/enroll-catalogue.sh\`) les appellent ici ; le boot de l'image
-      (container/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
-      la fleet.
+      (container/boot.sh) delegue ici les memes mots. Elles lisent le catalogue ou MESURENT la
+      forge ; aucune ne parle a la fleet.
 
   $PROG catalogue list
       Ce que la FORGE porte : installes, disponibles, et ceux dont la source a bouge.
@@ -636,7 +642,7 @@ cmd_tool() {
       # MESURE le depot du systeme et rend une ligne « <gravite>\t<phrase> » par constat, code 0
       # quel que soit l'etat : le VERDICT appartient au protocole de l'appelant, pas a la porte.
       _tool_run 'Fleet.Application.OpsRepo.eval_check()' ;;
-    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>|system-project|ops-repo)" ;;
+    *) die "tool: porte inconnue '${1:-}' ($TOOL_PORTES)" ;;
   esac
 }
 
