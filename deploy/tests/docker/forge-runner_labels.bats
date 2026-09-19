@@ -19,6 +19,8 @@ setup() {
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
   # ⚖ décision 3 : les faits du produit ne sont pas dans cet arbre — on les lui NOMME.
   export PROV_PRODUCT_FACTS_FILE="$vrai/../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$vrai/../runtime/services/lib/primitives.sh"
   { grep -v '^PROV_RUNNER_LABELS=' "$vrai/installer-constants.env"; echo 'PROV_RUNNER_LABELS=shell:docker://alpine:temoin'; } \
     > "$BATS_TEST_TMPDIR/arbre/deploy/installer-constants.env"
   SRC="$BATS_TEST_TMPDIR/arbre/deploy/docker/forge-runner.sh"

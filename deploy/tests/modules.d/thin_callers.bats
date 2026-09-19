@@ -29,7 +29,7 @@ racine_doublee() { # racine_doublee <corps du geste>
   cp "$DEPLOY/../runtime/services/lib/module-protocol.sh" "$ROOT/runtime/services/lib/"
   # ⚖ décision 3 : le protocole SOURCE le lecteur des faits, et les faits vivent sous `runtime/etc`.
   # Une racine doublée qui n'emporte que le protocole ferait mourir chaque geste au sourcing.
-  cp "$DEPLOY/../runtime/services/lib/facts.sh" "$ROOT/runtime/services/lib/"
+  cp "$DEPLOY/../runtime/services/lib/facts.sh" "$DEPLOY/../runtime/services/lib/primitives.sh" "$ROOT/runtime/services/lib/"
   cp "$DEPLOY/../runtime/etc/facts.env" "$ROOT/runtime/etc/"
   local c
   for c in "${CALLERS[@]}"; do

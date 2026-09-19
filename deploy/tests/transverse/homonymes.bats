@@ -26,12 +26,28 @@ setup() {
 # (l'installeur parle a un terminal, le produit a un journal) et le piege de sortie. Les fondre
 # donnerait a l'installeur le piege du produit, donc une autre sortie. L'accord de leurs VERDICTS
 # est tenu a part, par `verdict_parity.bats`.
-DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_check"
+#
+# ⚖ `_compte_pose` EST UN HOMONYME NEUF, ET VOULU (phase 6) : c'est le crochet par lequel les
+# primitives partagees comptent une pose sans savoir dans quel rail elles tournent — le produit
+# incremente `LCARS_CHANGED`, l'installeur `PROV_CHANGED`. Un compteur PARTAGE ferait lire a un
+# rail le travail de l'autre ; deux corps d'une ligne, chacun chez soi, est la bonne forme.
+DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_check _compte_pose"
 
-# AUCUNE IDENTITE DE RAIL : des primitives de fichier et de reseau. Mesure du 2026-09-19 : elles ne
-# different que par le compteur qu'elles incrementent et la ponctuation de leurs phrases, et deux
-# d'entre elles sont deja identiques au caractere pres. Cette liste est la DETTE ; elle RETRECIT.
-COPIES="advertise_addr ensure_dir ensure_mode env_field lan_addr prov_owner prov_refuse_symlink_path read_token run_quiet write_atomic"
+# AUCUNE IDENTITE DE RAIL : des primitives de fichier et de reseau. Cette liste est la DETTE ; elle
+# RETRECIT.
+#
+# ⚖ PHASE 6, PREMIERE MOITIE SOLDEE (2026-09-19). `env_field`, `read_token`, `ensure_dir`,
+# `ensure_mode` et `write_atomic` vivent dans `runtime/services/lib/primitives.sh`, que les DEUX
+# libs sourcent — le sens deja permis, l'installeur appelant le produit. Elles ne sont plus des
+# homonymes : il n'y a plus qu'un corps. Et ce n'etait pas qu'une redondance — `ensure_mode` du
+# produit RELISAIT le mode apres `chmod`, celui de l'installeur non.
+#
+# CE QUI RESTE PORTE UNE IDENTITE DE RAIL, et chacune dit laquelle :
+#   advertise_addr, lan_addr      l'installeur connait l'adresse que l'operateur a choisie ;
+#   prov_owner                    sa clause de DECOR (sous un decor, tout appartient au joueur) ;
+#   prov_refuse_symlink_path      son refus porte le vocabulaire du decor ;
+#   run_quiet                     l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`).
+COPIES="advertise_addr lan_addr prov_owner prov_refuse_symlink_path run_quiet"
 
 noms() { grep -oE '^[a-z_][a-z0-9_]*\(\)' "$1" | tr -d '()' | sort -u; }
 

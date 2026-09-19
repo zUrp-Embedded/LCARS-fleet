@@ -22,6 +22,8 @@ setup() {
   cp "$src/lib/provision-lib.sh" "$src/lib/provision-audit.sh" "$src/lib/docker-endpoint.sh" "$sbx/lib/"
   # ⚖ décision 3 : les faits du produit ne sont pas dans ce bac à sable — on les lui NOMME.
   export PROV_PRODUCT_FACTS_FILE="$src/../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$src/../runtime/services/lib/primitives.sh"
   printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: human\nexit 0\n' > "$sbx/modules.d/10-x.sh"
   RUNNER="$sbx/provision"
   MANIFEST="$sbx/system.manifest"

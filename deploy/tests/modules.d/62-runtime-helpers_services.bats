@@ -60,6 +60,8 @@ declare_couvre() {
       lib/human-protocol.sh)      continue ;;  # human-converger.sh, human.d
       lib/module-protocol.sh)     continue ;;  # provision-lib, 63-forge-tokens
       lib/facts.sh)               continue ;;  # module-protocol.sh, et tout script du produit qui n'est pas un module
+      lib/uid-bounds.sh)          continue ;;  # human-protocol.sh, console-humans.sh, bin/fleet
+      lib/primitives.sh)          continue ;;  # module-protocol.sh, et deploy/lib/provision-lib.sh (le sens permis)
     esac
     bad+=("$base")
   done < <(cd "$SERVICES" && find . -type f -not -path '*/__pycache__/*' | sed 's#^\./##' | sort)

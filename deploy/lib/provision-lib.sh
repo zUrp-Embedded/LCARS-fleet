@@ -367,28 +367,6 @@ prov_refuse_symlink_path() {
   return 0
 }
 
-write_atomic() {
-  local dest="$1" mode="$2" owner="${3:-}"
-  local dir tmp
-  owner="$(prov_owner "$owner")"
-  prov_refuse_symlink_path "$dest" || return 1
-  dir="$(dirname "$dest")"
-  [[ -d "$dir" ]] || { p_fail "write_atomic : dossier absent : $dir"; return 1; }
-  tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic : tmp impossible dans $dir"; return 1; }
-  cat > "$tmp" || { rm -f "$tmp"; p_fail "write_atomic : écriture du tampon ratée (disque plein ? quota ?) : $dest"; return 1; }
-  if [[ -f "$dest" ]] && cmp -s "$tmp" "$dest"; then
-    rm -f "$tmp"
-    ensure_mode "$dest" "$mode" "$owner"   # le contenu est bon ; mode/owner convergés à part
-    return $?
-  fi
-  chmod "$mode" "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: chmod $mode: $dest"; return 1; }
-  if [[ -n "$owner" ]]; then
-    chown "$owner" "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: chown $owner: $dest"; return 1; }
-  fi
-  mv -f "$tmp" "$dest" || { rm -f "$tmp"; p_fail "write_atomic: mv final: $dest"; return 1; }
-  PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "$dest"
-}
 
 prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
   local o="$1" g
@@ -398,29 +376,46 @@ prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend 
   printf '%s:%s' "${o%:}" "$g"
 }
 
-ensure_mode() {
-  local path="$1" mode="$2" owner="${3:-}"
-  local cur_mode cur_owner changed=0
-  owner="$(prov_owner "$owner")"
-  prov_refuse_symlink_path "$path" || return 1
-  [[ -e "$path" ]] || { p_fail "ensure_mode: absent: $path"; return 1; }
-  cur_mode="$(stat -c '%a' "$path")"
-  local want_mode="${mode#0}"
-  if [[ "$cur_mode" != "$want_mode" ]]; then
-    chmod u-s,g-s,o-t "$path" 2>/dev/null || true
-    chmod "$mode" "$path" || { p_fail "ensure_mode: chmod $mode refusé: $path"; return 1; }
-    changed=1
-  fi
-  if [[ -n "$owner" ]]; then
-    cur_owner="$(stat -c '%U:%G' "$path")"
-    if [[ "$cur_owner" != "$owner" ]]; then
-      chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
-      changed=1
-    fi
-  fi
-  if [[ "$changed" -eq 1 ]]; then PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
-  return 0
-}
+# ─── LES PRIMITIVES CONVERGENTES : UNE SOURCE, LES DEUX RAILS (⚖ phase 6, RT-C-20) ──────────────
+#
+# `env_field`, `read_token`, `ensure_dir`, `ensure_mode` et `write_atomic` étaient écrites ICI *et*
+# dans `runtime/services/lib/module-protocol.sh` — dix corps pour cinq gestes. Les deux copies
+# avaient déjà dérivé, et pas seulement en prose : `ensure_mode` du produit RELISAIT le mode après
+# `chmod` et refusait s'il n'avait pas pris ; celui d'ici ne le faisait pas. Un `chmod` qui
+# n'aboutit pas était compté comme posé sur ce rail et refusé sur l'autre.
+#
+# LE SENS DE LA DÉPENDANCE EST CELUI QUI EST DÉJÀ PERMIS : l'installeur APPELLE le produit
+# (`prov_geste` joue `runtime/services/forge.d/*.sh` sur le protocole du produit). Il peut donc
+# sourcer une lib du produit ; l'inverse resterait interdit.
+#
+# Ce que cette lib fournit à ces primitives est son DIALECTE — `p_fail`, `p_chg`, `prov_owner` (avec
+# sa clause de décor, qui lui appartient), `prov_refuse_symlink_path` — et son compteur de poses.
+# Bash résout les fonctions À L'APPEL : chacune parle donc la langue de son hôte.
+_compte_pose() { PROV_CHANGED=$((PROV_CHANGED + 1)); }
+PROV_PRIMITIVES_SH="${PROV_PRIMITIVES_SH:-}"
+if [[ -z "$PROV_PRIMITIVES_SH" ]]; then
+  PROV_PRIMITIVES_SH="$_PROV_LIB_DIR/../../runtime/services/lib/primitives.sh"
+  [[ -r "$PROV_PRIMITIVES_SH" ]] || PROV_PRIMITIVES_SH="$_PROV_LIB_DIR/../../services/lib/primitives.sh"
+fi
+# ⚠ PAS DE REFUS AU SOURCING, MEME REGLE QUE POUR LES FAITS : cette lib est sourcée par tout ce qui
+# LIT la machine (`doctor`, `list`, `mesure`, `accept`, `pack`), et un arbre incomplet est
+# exactement celui qu'on veut diagnostiquer. Mais ne RIEN définir laisserait la première pose mourir
+# sur un « command not found », la mort sans nom que ce dépôt refuse partout ailleurs. Les cinq noms
+# existent donc toujours : absentes, ce sont des refus qui DISENT ce qui manque.
+if [[ -r "$PROV_PRIMITIVES_SH" ]]; then
+  # shellcheck source=../../runtime/services/lib/primitives.sh
+  . "$PROV_PRIMITIVES_SH"
+else
+  _prov_sans_primitives() {
+    p_fail "primitives du produit illisibles ($PROV_PRIMITIVES_SH) — « $1 » ne peut rien poser. Cet arbre ne porte pas runtime/services/lib/primitives.sh ; sur une machine, « deploy/workstation up » la pose."
+    return 1
+  }
+  env_field()    { _prov_sans_primitives env_field; }
+  read_token()   { _prov_sans_primitives read_token; }
+  ensure_dir()   { _prov_sans_primitives ensure_dir; }
+  ensure_mode()  { _prov_sans_primitives ensure_mode; }
+  write_atomic() { _prov_sans_primitives write_atomic; }
+fi
 
 prov_check_mode() { # prov_check_mode <chemin> <mode> <propriétaire> → 0 conforme · 1 écart dit en DRIFT · 2 absent, rien de dit
   local cur want
@@ -432,15 +427,6 @@ prov_check_mode() { # prov_check_mode <chemin> <mode> <propriétaire> → 0 conf
   return 1
 }
 
-ensure_dir() {
-  local path="$1" mode="$2" owner="${3:-}"
-  prov_refuse_symlink_path "$path" || return 1
-  if [[ ! -d "$path" ]]; then
-    mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "dir $path"
-  fi
-  ensure_mode "$path" "$mode" "$owner"
-}
 
 prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
   local path="$1" mode="$2" owner="${3:-}"
@@ -981,7 +967,6 @@ prov_seat_record() { # prov_seat_record <login> <uid> — la ligne du siège, su
   chmod 0640 "$PROV_UID_MAP_FILE"
 }
 
-env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
 
 arch_tag() {
   local deb; deb="$(dpkg --print-architecture 2>/dev/null || true)"
@@ -994,10 +979,6 @@ arch_tag() {
   esac
 }
 
-read_token() { # read_token <fichier> — le jeton sans blancs, ou rien : jamais un message, jamais un echec
-  [[ -n "${1:-}" && -r "$1" ]] && tr -d '[:space:]' < "$1"
-  return 0
-}
 
 # forge_api <méthode> <url> <sortie> [--token-file <f> | --basic <login> <f>] [--json <filtre jq> [--arg <nom> <valeur> | --rawfile <nom> <f>]…] [option curl…]
 #   → le code HTTP sur stdout ; rend 0 pour un 2xx · 3 pour un 3xx · 4 pour un 4xx · 5 pour un 5xx · 1 sans réponse entière

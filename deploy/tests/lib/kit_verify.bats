@@ -33,7 +33,8 @@ setup() {
   : > "$K/runtime/services/lcars.bashrc"
   # ⚖ décision 3 : les faits de la machine et leur lecteur shell voyagent par PROV_EMBEDDED
   mkdir -p "$K/runtime/services/lib"
-  : > "$K/runtime/etc/facts.env"; : > "$K/runtime/services/lib/facts.sh"; : > "$K/runtime/services/lib/uid-bounds.sh"
+  : > "$K/runtime/etc/facts.env"; : > "$K/runtime/services/lib/facts.sh"
+  : > "$K/runtime/services/lib/uid-bounds.sh"; : > "$K/runtime/services/lib/primitives.sh"
 }
 
 constante() { sed -n "s/^$1=//p" "$BATS_TEST_DIRNAME/../../installer-constants.env"; }

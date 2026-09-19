@@ -24,6 +24,8 @@ setup() {
   # sable qui ne copie que `deploy/` n'a pas l'arbre du produit : on lui NOMME le vrai fichier,
   # comme un opérateur le ferait. La résolution des deux candidats est tenue ailleurs (provision-lib.bats).
   export PROV_PRODUCT_FACTS_FILE="$SRC/../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$SRC/../runtime/services/lib/primitives.sh"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
   # prov_lock_path exige un emplacement sûr : sans lui, tout apply refuse son verrou

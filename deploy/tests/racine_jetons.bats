@@ -41,10 +41,13 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   vu="$(sed -n 's/^LCARS_PRIVATE_DIR=//p' "$R/runtime/etc/facts.env")"
   [ "$vu" = "$ATTENDU" ] || { echo "le fait LCARS_PRIVATE_DIR : « $vu » ≠ « $ATTENDU »"; bad=1; }
 
+  # ⚖ Phase 5 : `LCARS_UID_MAP_FILE` ne se dérive plus ICI. Elle l'était aux DEUX bouts du rail — le
+  # convergeur et l'init du conteneur — plus un troisième transport par `services.env`. La règle
+  # vit dans le protocole des modules, une fois ; le convergeur la LIT.
   local bad_sites=0
   declare -A derivations=(
     ["$R/runtime/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-\$LCARS_PRIVATE_DIR/'
-    ["$R/runtime/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-\$LCARS_PRIVATE_DIR/'
+    ["$R/runtime/services/lib/module-protocol.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:=\$LCARS_PRIVATE_DIR/'
     ["$R/runtime/services/forge-gestures.sh|PRIVATE_DIR"]='PRIVATE_DIR="\$LCARS_PRIVATE_DIR"'
   )
   local cle f

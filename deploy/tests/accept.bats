@@ -22,6 +22,8 @@ setup() {
   # ⚖ décision 3 : la lib refuse au sourcing sans les faits du produit, que ce bac à sable ne copie
   # pas (il n'a que `deploy/`). On les lui NOMME, comme un opérateur le ferait.
   export PROV_PRODUCT_FACTS_FILE="$BATS_TEST_DIRNAME/../../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$BATS_TEST_DIRNAME/../../runtime/services/lib/primitives.sh"
   MOD="$SANDBOX/deploy/accept"
   decor_pose
   TOKENS="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"

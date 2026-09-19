@@ -38,6 +38,8 @@ setup() {
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$ARBRE/deploy/lib/"
   # ⚖ décision 3 : les faits du produit ne sont pas dans cet arbre — on les lui NOMME.
   export PROV_PRODUCT_FACTS_FILE="$vrai/../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$vrai/../runtime/services/lib/primitives.sh"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS)=' "$vrai/installer-constants.env"
     printf '%s\n' PROV_FORGE_INTERNAL_URL=http://forge-temoin:3000 PROV_RUNNER_LABELS=shell:docker://alpine:temoin

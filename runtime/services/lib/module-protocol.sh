@@ -128,16 +128,15 @@ seat_uid() { # -> l'uid du siege, ou rien (l'appelant dit ce que « rien » lui 
   return 0
 }
 
-# ─── Les lectures ──────────────────────────────────────────────────────────────────────────────
-# Un champ d'un fichier d'environnement (`CLE=valeur`, la derniere occurrence gagne) — jamais un
-# `source` : un fichier d'env n'est pas du code qu'on execute sous root.
-env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
-
-# Un jeton se lit sans blancs, ou rien : jamais un message, jamais un echec.
-read_token() { # read_token <fichier>
-  [[ -n "${1:-}" && -r "$1" ]] && tr -d '[:space:]' < "$1"
-  return 0
-}
+# ─── Les lectures et les mutations convergentes ────────────────────────────────────────────────
+# ⚖ Phase 6 : `env_field`, `read_token`, `ensure_dir`, `ensure_mode` et `write_atomic` ne sont plus
+# ecrites ici. Elles vivaient AUSSI dans `deploy/lib/provision-lib.sh`, et les deux copies avaient
+# deja derive — `ensure_mode` relisait le mode apres `chmod` d'un cote et pas de l'autre. Source
+# unique dans `lib/primitives.sh`, qui parle le dialecte de son hote (`p_fail`, `p_chg`) et compte
+# ses poses par `_compte_pose` : un compteur partage ferait lire a un rail le travail de l'autre.
+_compte_pose() { LCARS_CHANGED=$((LCARS_CHANGED + 1)); }
+# shellcheck source=primitives.sh
+. "${LCARS_PRIMITIVES_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/primitives.sh}"
 
 # La forge, authentifiee par un fichier de jeton : l'en-tete arrive par STDIN (`-K -`), jamais par
 # argv — un `ps` ne doit pas le voir. Sans jeton lisible, la requete part nue : c'est a la forge de
@@ -195,63 +194,6 @@ prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend 
   [[ "$o" == *: ]] || { printf '%s' "$o"; return 0; }
   g="$(id -gn -- "${o%:}" 2>/dev/null)" || { printf '%s' "$o"; return 0; }
   printf '%s:%s' "${o%:}" "$g"
-}
-ensure_mode() { # ensure_mode <chemin> <mode> [proprietaire]
-  local path="$1" mode="$2" owner="${3:-}"
-  local cur_mode cur_owner changed=0
-  owner="$(prov_owner "$owner")"
-  prov_refuse_symlink_path "$path" || return 1
-  [[ -e "$path" ]] || { p_fail "ensure_mode: absent: $path"; return 1; }
-  cur_mode="$(stat -c '%a' "$path")"
-  local want_mode="${mode#0}"
-  if [[ "$cur_mode" != "$want_mode" ]]; then
-    chmod u-s,g-s,o-t "$path" 2>/dev/null || true
-    chmod "$mode" "$path" || { p_fail "ensure_mode: chmod $mode refusé: $path"; return 1; }
-    changed=1
-  fi
-  if [[ -n "$owner" ]]; then
-    cur_owner="$(stat -c '%U:%G' "$path")"
-    if [[ "$cur_owner" != "$owner" ]]; then
-      chown "$owner" "$path" || { p_fail "ensure_mode: chown $owner refusé: $path"; return 1; }
-      changed=1
-    fi
-  fi
-  [[ "$(stat -c '%a' "$path")" == "$want_mode" ]] || { p_fail "ensure_mode: mode ≠ $want_mode après chmod: $path"; return 1; }
-  if [[ "$changed" -eq 1 ]]; then LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
-  return 0
-}
-ensure_dir() { # ensure_dir <chemin> <mode> [proprietaire]
-  local path="$1" mode="$2" owner="${3:-}"
-  prov_refuse_symlink_path "$path" || return 1
-  if [[ ! -d "$path" ]]; then
-    mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
-    LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "dir $path"
-  fi
-  ensure_mode "$path" "$mode" "$owner"
-}
-# Un fichier s'ecrit ENTIER puis bascule : personne ne lit un tampon a moitie ecrit, et un contenu
-# identique ne compte pas pour un changement.
-write_atomic() { # write_atomic <dest> <mode> [proprietaire]  < contenu
-  local dest="$1" mode="$2" owner="${3:-}"
-  local dir tmp
-  owner="$(prov_owner "$owner")"
-  prov_refuse_symlink_path "$dest" || return 1
-  dir="$(dirname "$dest")"
-  [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }
-  tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic: tmp impossible dans $dir"; return 1; }
-  cat > "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: ecriture du tampon RATEE (disque plein ? quota ?): $dest"; return 1; }
-  if [[ -f "$dest" ]] && cmp -s "$tmp" "$dest"; then
-    rm -f "$tmp"
-    ensure_mode "$dest" "$mode" "$owner"
-    return $?
-  fi
-  chmod "$mode" "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: chmod $mode: $dest"; return 1; }
-  if [[ -n "$owner" ]]; then
-    chown "$owner" "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: chown $owner: $dest"; return 1; }
-  fi
-  mv -f "$tmp" "$dest" || { rm -f "$tmp"; p_fail "write_atomic: mv final: $dest"; return 1; }
-  LCARS_CHANGED=$((LCARS_CHANGED + 1))
-  p_chg "$dest"
 }
 
 # ─── L'adresse annoncee ────────────────────────────────────────────────────────────────────────

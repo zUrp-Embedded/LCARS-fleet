@@ -19,6 +19,8 @@ setup() {
      "$REPO/deploy/lib/bench.sh" "$REPO/deploy/lib/forge-bootstrap.sh" "$ARBRE/deploy/lib/"
   # ⚖ décision 3 : les faits du produit ne sont pas dans cet arbre — on les lui NOMME.
   export PROV_PRODUCT_FACTS_FILE="$REPO/runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$REPO/runtime/services/lib/primitives.sh"
   cp "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" "$ARBRE/deploy/docker/"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_SSH_PORT_DEFAULT|PROV_DECK_PORT_DEFAULT|PROV_MASTER_TOKEN_FILE|PROV_FORGE_SEED_FILE)=' "$REPO/deploy/installer-constants.env"

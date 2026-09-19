@@ -39,6 +39,8 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
   # ⚖ phase 5 : le protocole des humains SOURCE la lecture de la frontiere, posee a cote de lui
   cp "$BATS_TEST_DIRNAME/../../../services/lib/uid-bounds.sh" "$SANDBOX/lib/uid-bounds.sh"
+  # ⚖ phase 6 : le protocole des modules SOURCE les primitives convergentes, posees a cote de lui
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/primitives.sh" "$SANDBOX/lib/primitives.sh"
   # ⚖ decision 3 : le protocole SOURCE le lecteur des faits. Le decor n'emporte pas l'arbre du
   # produit : on lui NOMME le vrai lecteur, qui resout les vrais faits depuis son propre chemin.
   export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../../services/lib/facts.sh"
