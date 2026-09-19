@@ -277,3 +277,34 @@ advertise_addr() { # advertise_addr <bind>
   fi
   return 0
 }
+
+# ⚠ LA CLI DU RELEASE, CHERCHEE UNE FOIS. Trois gestes la cherchaient chacun de leur cote, avec le
+# meme corps : ce que l'appelant designe, puis le PATH, puis la voisine de cet arbre.
+lcars_cli() {
+  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
+  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
+  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
+}
+
+# ⚠ LES ROLES SONT UN FAIT DU PRODUIT, PAS UN PLANCHER DE L'APPELANT (⚖ decision 2 du plan runtime).
+# Ils se demandent au release : le catalogue embarque, puis chaque catalogue installe. Une liste
+# ecrite a la main est une seconde verite qui derive — elle l'etait cinq fois dans cet arbre.
+#
+# ⚠ ET L'ECHEC EST UN ECHEC, jamais une liste vide. Un appelant qui confondrait les deux prendrait
+# « aucun compte de role » pour une machine sans roles, alors qu'il n'a rien pu lire : rend 1, et
+# c'est a l'appelant de decider ce que « je ne sais pas » lui fait.
+lcars_roles() { # -> la liste des logins de role, ou 1 si la release ne repond pas
+  local cli root brut=""
+  cli="$(lcars_cli)"
+  [[ -r "$cli" ]] || return 1
+  brut="$(bash "$cli" tool roles 2>/dev/null || true)"
+  if [[ -d "${LCARS_CATALOGUES_DIR:-}" ]]; then
+    for root in "$LCARS_CATALOGUES_DIR"/*/; do
+      [[ -f "${root}catalogue.yaml" ]] || continue
+      brut+=$'\n'"$(bash "$cli" tool roles "${root%/}" 2>/dev/null || true)"
+    done
+  fi
+  brut="$(printf '%s\n' "$brut" | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+  [[ -n "$brut" ]] || return 1
+  printf '%s' "$brut"
+}

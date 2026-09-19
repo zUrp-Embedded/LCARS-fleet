@@ -64,6 +64,20 @@ EOF
   # malformees pour le garde d'arithmetique). Fermer le canal fichier rend leur declaration
   # effective ; y poser une valeur les ecraserait toutes par une seule.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
+
+  # ⚠ LE QUATRIEME SEAM : LE ROSTER DE ROLES VIENT DU PRODUIT (⚖ decision 2). Le SUT ne porte plus
+  # de liste ecrite a la main — il la demande au release (`lcars tool roles`) — et un roster
+  # ILLISIBLE lui fait reserver TOUT nom, par la meme doctrine que les bornes d'uid. Sans cette
+  # CLI de banc, ce fichier ne mesurerait plus l'admission mais le refus global : tous ses temoins
+  # « passe » rougiraient sur du code juste. La liste est celle que ses propres cas attendent.
+  cat > "$BATS_TEST_TMPDIR/lcars" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == tool && "$2" == roles ]] || exit 64
+printf '%s\n' system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe \
+              fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/lcars"
+  export LCARS_CLI="$BATS_TEST_TMPDIR/lcars"
 }
 
 # Helper: source the SUT in a fresh shell and run a predicate on <login>.
@@ -73,7 +87,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # rendaient rien. `|| rc=$?` fait de l'appel une condition, l'exception que `set -e` prevoit.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI'
     source '$SUT'
     reserved '$1' && exit 1
     valid_login '$1' || exit 1
@@ -193,7 +207,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "un home existant IMPOSE son uid — le chemin fait foi, pas l'ordre d'iteration" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
     source '$SUT'
     uid_of_home zoe"
@@ -209,7 +223,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "sans home, uid_of_home ne rend RIEN — il ne devine pas" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT\"
     source '$SUT'
     echo \"[\$(uid_of_home jamaisvue)]\""
@@ -239,7 +253,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # epingle donc les deux moities : pas de derivation, et jamais l'uid du siege.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map' LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
     # \`getent\` double : sans ca ce temoin rend un uid libre de la MACHINE qui le joue.
@@ -260,7 +274,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # l'ID de forge, pas sur le nom : Gitea conserve l'id au renommage.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     mkdir -p \"\$LCARS_HOME_ROOT\"
     printf '7\t1042\tancien_nom\n' > \"\$LCARS_UID_MAP_FILE\"
@@ -275,7 +289,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # couple qui correspond au home REELLEMENT pose sur le disque.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid2.map' GROUP='$(id -gn)'
     source '$SUT'
     uid_map_record 12 1012 zoe
@@ -292,7 +306,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # remis a l'endroit. La forge fait autorite sur QUI EST LA ; le disque sur ce qui est deja ecrit.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
     source '$SUT'
     home_uid=\$(uid_of_home zoe)
@@ -313,7 +327,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # un chemin de trop.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
     mkdir -p \"$BATS_TEST_TMPDIR/b6\"
@@ -382,7 +396,7 @@ once_with() { # once_with <script> — source le convergeur + converge_once extr
   mkdir -p "$BATS_TEST_TMPDIR/homes"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_SYSADMIN_UID=1000
     export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
     source '$SUT'
@@ -449,7 +463,7 @@ EOF
 converged() { # converged -> la liste calculee
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     # ⚠ 1000 EN DUR, ET C'ETAIT '\${LCARS_SYSADMIN_UID:-1000}'. Le repli lisait l'environnement du
     # LANCEUR : un operateur qui exporte cette variable pour tout autre motif retunait la premisse
     # des deux GUARD A sans le savoir. Mesure : \`LCARS_SYSADMIN_UID=1001\` a l'appel de la suite,
@@ -462,7 +476,7 @@ converged() { # converged -> la liste calculee
 absent() { # absent <membres de la team…>
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     absent_humans $*"
 }
@@ -557,7 +571,7 @@ EOF
 @test "6-surface: roster_of ne rend que les logins — la charge de la forge porte l'id devant" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     printf '15\talice\n3\tbob\n' | roster_of"
   [ "$status" -eq 0 ]
@@ -571,7 +585,7 @@ EOF
   # brute en roster, `absent_humans` ne retrouvait aucun login et les designait TOUS LES DEUX.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     mapfile -t roster < <(printf '1001\talice\n1002\tbob\n' | roster_of)
     absent_humans \"\${roster[@]}\""
@@ -583,7 +597,7 @@ EOF
   passwd_fixture; group_fixture "alice,bob,carol"
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     mapfile -t roster < <(printf '1001\talice\n' | roster_of)
     absent_humans \"\${roster[@]}\""
@@ -641,7 +655,7 @@ revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent 
   SUDO_FORMES="$BATS_TEST_TMPDIR/sudo-formes.log"; : > "$SUDO_FORMES"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     export LCARS_SYSADMIN_UID=1000 LCARS_SUDO_BIN=\"\${LCARS_SUDO_BIN:-$BATS_TEST_TMPDIR/sudo}\"
     export SUDO_FORMES='$SUDO_FORMES' SUDO_TABLE='${SUDO_TABLE:-}'
     source '$SUT'
@@ -721,7 +735,7 @@ revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent 
   mkdir -p "$BATS_TEST_TMPDIR/homes"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE' LCARS_SYSADMIN_UID=1000
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE' LCARS_SYSADMIN_UID=1000
     export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
     source '$SUT'
@@ -976,7 +990,7 @@ exit 2'
 # bornes lisibles, RIEN (2026-09-05), jamais un defaut.
 floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   run bash -c "set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI'
     source '$SUT' >/dev/null 2>&1
     $1"
 }
@@ -1077,7 +1091,7 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   mkdir -p "$BATS_TEST_TMPDIR/homes"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_SYSADMIN_UID=1000
     export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
     source '$SUT'

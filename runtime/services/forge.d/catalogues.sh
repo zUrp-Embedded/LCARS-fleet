@@ -37,14 +37,10 @@ PAGES_MAX=40
 # `Fleet.Catalogue` ignore un dossier installe de ce nom : le cloner poserait un arbre mort. Son nom
 # se demande a la release (`lcars tool catalogue-root`, puis le `name:` du manifeste, colonne zero).
 # Sans reponse, rien n'est exclu et c'est DIT : un arbre mort de plus n'est pas une panne.
-_lcars_cli() {
-  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
-  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
-  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
-}
+# `lcars_cli` vit dans le protocole : trois gestes la cherchaient, avec le meme corps.
 bundled_name() {
   local cli root
-  cli="$(_lcars_cli)"
+  cli="$(lcars_cli)"
   [[ -r "$cli" ]] || return 0
   root="$(bash "$cli" tool catalogue-root 2>/dev/null | tail -n1)" || root=""
   [[ -n "$root" && -r "$root/$MANIFEST" ]] || return 0

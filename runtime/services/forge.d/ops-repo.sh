@@ -38,20 +38,15 @@ set -euo pipefail
 
 : "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/_ops}"
 
-# La CLI du release : celle que l'appelant designe, celle du PATH, sinon la voisine de cet arbre.
-# Meme resolution que `forge.d/tokens.sh` — trois chemins, un seul ordre.
-_lcars_cli() {
-  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
-  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
-  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
-}
+# La CLI du release vient du protocole (`lcars_cli`) : celle que l'appelant designe, celle du PATH,
+# sinon la voisine de cet arbre — un seul corps pour tous les gestes.
 
 REMEDE_RELEASE="la release n'est pas posée : sur un poste, « deploy/workstation up » la pose ; dans un conteneur, l'image la porte"
 
 mesure() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || { p_drift "FORGE_BASE_URL non posé — le dépôt du système n'a pas pu être vérifié"; return 0; }
 
-  local cli; cli="$(_lcars_cli)"
+  local cli; cli="$(lcars_cli)"
   [[ -r "$cli" ]] || { p_drift "porte ops-repo injouable ($cli illisible) — $REMEDE_RELEASE"; return 0; }
 
   # Le jeton SYSTEME : la protection ne se lit qu'avec un droit d'administration sur le depot, et le

@@ -85,6 +85,10 @@ STORE_FULL="$SYSTEM_ORG/$STORE_REPO"
 # (`/opt/lcars/forge-gestures.sh`, celle que lancent l'executeur de catalogue et le boot), dont le
 # `../bin` ne designe rien. Un candidat n'est rendu que s'il existe ; aucun candidat rend vide, et
 # `need_cli` refuse en nommant ce qui a ete cherche.
+# ⚠ CELLE-CI N'EST PAS `lcars_cli` DU PROTOCOLE, ET C'EST VOULU. La version partagee calcule son
+# repli depuis l'emplacement du protocole ; celle-ci doit couvrir la copie A PLAT de ce fichier, ou
+# `../bin` ne designe rien, et RENDRE VIDE pour que `need_cli` refuse en nommant ce qui a ete
+# cherche. Deux besoins differents, deux corps — pas une copie oubliee.
 _lcars_cli() {
   local here cand
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }

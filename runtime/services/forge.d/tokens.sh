@@ -21,11 +21,7 @@ A4_SCRIPT="${LCARS_ROLE_TOKENS_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 
 # embarque (« lcars tool roles-tfvars » sans argument), plus ceux de chaque catalogue installe, plus
 # le plancher que l'appelant apporte (`LCARS_ROLES` — l'installeur en a un ; le conteneur n'en a pas
 # besoin, la release porte le sien).
-_lcars_cli() {
-  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
-  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
-  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
-}
+# `lcars_cli` vit dans le protocole : trois gestes la cherchaient, avec le meme corps.
 # LES ROSTERS, PAR ORG. Une ligne « <org> <login>… » par catalogue (celui de la release, puis chaque
 # catalogue installe), et le plancher `LCARS_ROLES` de l'appelant sur la ligne de la release. Un
 # compte de role est membre de l'org de SON catalogue — sa recette le place dans ses teams — et de
@@ -34,7 +30,7 @@ _lcars_cli() {
 # adhesion ne se sonde pas.
 org_rosters() {
   local cli root
-  cli="$(_lcars_cli)"
+  cli="$(lcars_cli)"
   if [[ -r "$cli" ]] && command -v jq >/dev/null; then
     printf '%s %s\n' \
       "$(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '.org // ""' 2>/dev/null || true)" \

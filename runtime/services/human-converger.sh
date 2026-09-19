@@ -27,7 +27,10 @@ ORG="${LCARS_FORGE_ORG:-lcars}"
 TEAM="${LCARS_HUMANS_TEAM:-humans}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
-ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
+# ROLES se lit APRES le protocole (`lcars_roles`, plus bas) : c'est un fait du produit, pas une
+# liste ecrite ici. Une copie de plus derivait sans que rien ne la tienne — le mur
+# `roles.provisioning_locked` en epingle quatre et ne voyait pas celle-ci.
+ROLES=""
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
@@ -81,6 +84,12 @@ unset LCARS_HUMAN_PROTOCOL_HOST
 # GUARD A lit le siege par la politique du protocole (fichier, puis LCARS_SYSADMIN_UID).
 SYSADMIN_UID="$(seat_uid)"
 
+# LES COMPTES DE ROLE, DEMANDES AU PRODUIT. Vide = la release n'a pas repondu, et `reserved` le lit
+# comme « je ne sais pas » : elle reserve alors TOUT nom. Meme doctrine que les bornes d'uid juste
+# en dessous — on ne cree personne sur une frontiere devinee.
+ROLES="$(lcars_roles || true)"
+[[ -n "$ROLES" ]] || p_warn "roster de roles ILLISIBLE (la release ne repond pas a « lcars tool roles ») — aucun humain ne sera cree ce tour : un compte de role adopte comme humain recevrait un home et une console"
+
 # ─── L'ADMISSION ────────────────────────────────────────────────────────────────────────────────
 # Ces trois predicats decident si un login de la forge devient un user Linux. C'est la seule partie
 # qui, en se trompant, cree un compte que personne ne voulait — donc elle est definie AVANT le
@@ -93,6 +102,10 @@ reserved() { # reserved <login> -> 0 si le nom est interdit
   local login=$1 lo
   lo="${login,,}"
   [[ "$lo" == "${SYSTEM_ACCOUNT,,}" ]] && return 0
+  # ⚠ ROSTER ILLISIBLE : TOUT NOM EST RESERVE. Une liste vide ne veut pas dire « cette machine n'a
+  # aucun compte de role », elle veut dire qu'on n'a pas pu lire — et adopter un compte de role
+  # comme humain lui donnerait un home, un shell fleet et une console.
+  [[ -n "$ROLES" ]] || return 0
   local r
   for r in $ROLES; do [[ "$lo" == "${r,,}" ]] && return 0; done
   # Un nom deja porte par un compte HORS de la plage des humains — sous UID_MIN (`sshd`), au-dessus
