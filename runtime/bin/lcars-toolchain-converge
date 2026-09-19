@@ -45,7 +45,7 @@ STORE="${LCARS_STORE_ROOT:-}"
 # ⚠ DEUX CANDIDATS, ET LE SECOND N'EST PAS UN OUBLI : ce geste est COPIE dans le PATH (pas lie), et
 # un poste y appelle aussi `bin/lcars` par un symlink. Le voisin resout le checkout, la racine du
 # produit resout la machine — la meme ancre que `boot.sh` pour le protocole des modules.
-FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/facts.sh}"
+FACTS_SH="${LCARS_FACTS_SH:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../services/lib/facts.sh}"
 [[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
 # shellcheck source=../services/lib/facts.sh
 . "$FACTS_SH"

@@ -413,7 +413,39 @@ STUB
   '
   [ "$status" -eq 0 ]
   [[ "$output" == *"composant symlink"* ]]
-  [[ "$output" != *"ensure_mode: absent"* ]]
+  # ⚠ LA CHAINE EST CELLE DE LA PRIMITIVE, ESPACES COMPRIS : elle dit « ensure_mode : absent : … »,
+  # et l'assertion a longtemps cherché « ensure_mode: absent », qui n'existe nulle part — elle
+  # passait donc même si le lien cassé avait été dit ABSENT, ce qu'elle est seule à interdire.
+  [[ "$output" != *"absent"* ]]
+}
+
+@test "primitives absentes : le bouchon appelé en \$(…) imprime son FAIL mais PERD le compteur" {
+  # C'est la mesure qui justifie `prov_exige_primitives`, pas une preference de style : le sous-shell
+  # de la substitution emporte `PROV_FAILED`. Le temoin epingle le piege pour qu'on cesse de croire
+  # qu'un bouchon fail-loud suffit quand la primitive RENVOIE une valeur.
+  run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod PROV_PRIMITIVES_SH=/nonexistent/primitives.sh
+    source \"\$LIB\"
+    v=\"\$(read_token /peu-importe)\" || true
+    [ -z \"\$v\" ]
+    [ \"\$PROV_FAILED\" -eq 0 ]"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"primitives du produit illisibles"* ]]
+}
+
+@test "primitives absentes : prov_exige_primitives refuse dans le shell principal, en nommant le fichier" {
+  run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod PROV_PRIMITIVES_SH=/nonexistent/primitives.sh
+    source \"\$LIB\"
+    prov_exige_primitives 'provision apply'"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"provision apply"* ]]
+  [[ "$output" == *"/nonexistent/primitives.sh"* ]]
+  [[ "$output" == *"anonyme"* ]]
+}
+
+@test "primitives présentes : prov_exige_primitives ne dit rien et laisse passer" {
+  module_sh 'prov_exige_primitives "provision apply"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "write_atomic : refuse d'écrire à travers un parent lien" {

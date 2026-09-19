@@ -1239,6 +1239,109 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end)
   end
 
+  # ⚠ C'EST LE `source` QU'ON CHERCHE, PAS LE NOM DU FICHIER. Premiere ecriture de ce mur : il
+  # cherchait la chaine « facts.sh » n'importe ou dans le corps. Commenter la ligne
+  # `. "$FACTS_SH"` le laissait VERT — l'affectation `FACTS_SH="…/facts.sh"` juste au-dessus
+  # portait encore la chaine. Un mur qui cherche un nom mesure une intention ; celui-ci mesure un
+  # GESTE : une ligne de code qui SOURCE, dont la cible mene aux faits.
+  # ⚠ DEUX FORMES, ET LA SECONDE N'EST PAS UNE FACILITE : le `HEALTHCHECK` du Dockerfile source
+  # `/opt/lcars/services/lib/facts.sh` EN DUR, parce qu'il n'a ni voisin ni variable — il tourne
+  # dans l'image, ou le chemin du produit EST le fait. Ne reconnaitre que la variable rendait ce
+  # fichier « debranche » alors qu'il est le plus litteralement branche du depot.
+  # ⚠ ET L'ANCRE N'EST PLUS LE DEBUT DE LIGNE : ce meme `source` vit au milieu d'un `CMD` JSON, donc
+  # derriere un guillemet. Un `source` COMMENTE ne repasse pas pour autant — `facts_cable?` retire
+  # les commentaires AVANT d'appliquer ce motif, et c'est la que la mesure du debranchement tient.
+  @facts_source_shell ~r/(?:^|[;&|(]|["']\s*)\s*(?:\.|source)\s+["']?(?:\$\{?(?:LCARS_FACTS_SH|FACTS_SH|LCARS_MODULE_PROTOCOL|MODULE_PROTOCOL|LCARS_HUMAN_PROTOCOL|HUMAN_PROTOCOL)\b|[^\s"';|&]*\/(?:facts|module-protocol|human-protocol)\.sh\b)/m
+  @facts_cablage %{python: ["lcars_facts"], elixir: ["Fleet.Facts"]}
+
+  @doc """
+  Refuses a file that NAMES a machine fact without being WIRED to a reader of `etc/facts.env`.
+
+  ⚖ Phase 5, la moitie manquante. Les murs de cette famille tiennent tous la meme chose : que la
+  VALEUR d'un fait ne soit ecrite qu'une fois. Aucun ne tenait son APPROVISIONNEMENT. Mesure du
+  2026-09-19 : commenter le `. "$FACTS_SH"` de `services/console.sh` laisse les 80 murs verts, et
+  le lanceur pose son repertoire de socket SANS GROUPE — parce que `$LCARS_CONSOLE_GROUP` vaut la
+  chaine vide. Avant cette passe, le fichier portait `${LCARS_CONSOLE_GROUP:-lcars-console}` : une
+  propriete verifiable statiquement, remplacee par une propriete que rien ne mesurait.
+
+  Etre cable, c'est porter l'un des signes de son langage : sourcer `lib/facts.sh`, ou sourcer un
+  protocole qui le source (`LCARS_MODULE_PROTOCOL`, `LCARS_HUMAN_PROTOCOL`), ou importer
+  `lcars_facts`, ou appeler `Fleet.Facts`. C'est une verification de FORME : elle ne prouve pas que
+  le fichier source est lisible a l'execution, ni que la valeur arrive.
+  """
+  @spec check_facts_readers_wired(String.t()) :: Support.result()
+  def check_facts_readers_wired(root) do
+    id = "facts.readers_wired"
+
+    remediation =
+      "source le lecteur des faits (`services/lib/facts.sh`, ou un protocole qui le source ; " <>
+        "`lcars_facts` en Python, `Fleet.Facts` en Elixir) — un fichier qui NOMME un fait sans " <>
+        "etre branche le lit VIDE, et rien d'autre ne le dit"
+
+    keys = facts_keys(root)
+    sources = facts_corpus(root)
+
+    debranches =
+      for path <- sources,
+          langue = facts_langue(path),
+          langue != nil,
+          body = facts_body(path),
+          body != nil,
+          facts_nomme?(body, keys, langue),
+          not facts_cable?(body, langue),
+          do: facts_rel(path, root)
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: debranches |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  defp facts_cable?(body, :shell) do
+    body
+    |> String.split("\n")
+    |> Enum.map(&strip_comment/1)
+    |> Enum.any?(&Regex.match?(@facts_source_shell, &1))
+  end
+
+  defp facts_cable?(body, langue),
+    do: Enum.any?(@facts_cablage[langue], &String.contains?(body, &1))
+
+  defp facts_langue(path) do
+    case Path.extname(path) do
+      ".py" -> :python
+      ".ex" -> :elixir
+      ".exs" -> :elixir
+      ".sh" -> :shell
+      ".bash" -> :shell
+      # `bin/lcars`, `bin/fleet` : sans extension, et ce sont des scripts shell.
+      "" -> :shell
+      _ -> nil
+    end
+  end
+
+  defp facts_body(path) do
+    case File.read(path) do
+      {:ok, body} -> if String.contains?(body, <<0>>), do: nil, else: body
+      _ -> nil
+    end
+  end
+
+  # Le shell NOMME un fait par une expansion ; le Python et l'Elixir par une chaine litterale.
+  defp facts_nomme?(body, keys, :shell) do
+    code = Enum.map_join(String.split(body, "\n"), "\n", &strip_comment/1)
+    Enum.any?(keys, &Regex.match?(Regex.compile!("\\$\\{?#{Regex.escape(&1)}\\b"), code))
+  end
+
+  defp facts_nomme?(body, keys, _langue) do
+    code = Enum.map_join(String.split(body, "\n"), "\n", &strip_comment/1)
+    Enum.any?(keys, &String.contains?(code, "\"#{&1}\""))
+  end
+
   defp facts_keys(root) do
     case File.read(Path.join(root, @facts_file)) do
       {:ok, body} ->

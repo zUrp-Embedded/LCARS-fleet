@@ -254,6 +254,9 @@ fi
 
 # ─── Verrou (apply) ─────────────────────────────────────────────────────────────────────────────
 if [[ "$CMD" == "apply" ]]; then
+  # AVANT LE VERROU, parce que ce refus ne dépend d'aucun état de la machine : les primitives sont
+  # une propriété de L'ARBRE, et prendre un verrou pour le relâcher aussitôt ne renseigne personne.
+  prov_exige_primitives "provision apply" || exit 1
   LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply refusé"
   exec 9>"$LOCK"
   flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"

@@ -12,6 +12,28 @@ SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$BIN_DIR")"
 
+# ⚖ Phase 5 : la frontiere systeme/humain se LIT, une fois pour tout le produit.
+#
+# ⚠ RESOLUE ICI, ET C'EST TOUT LE POINT : le `cd "$HOME"` ci-dessous rendrait une ancre relative
+# fausse — « cd: runtime/bin: No such file or directory », substitution vide, puis un source qui
+# meurt SANS UN MOT sous `set -e` (mesure du 2026-09-19, `bash runtime/bin/fleet start`).
+#
+# ⚠ ET C'EST `readlink -f "${BASH_SOURCE[0]}"`, NI `$0` NI `BASH_SOURCE` NU. Trois mondes, un seul
+# idiome qui les couvre : SOURCE par un temoin, `$0` vaut « bash » ; atteint par le SYMLINK du PATH
+# (`/usr/local/bin/fleet`), `BASH_SOURCE[0]` porte le lien NON RESOLU et le voisin designe
+# `/usr/local/services/lib`, qui n'existe pas — le repli en dur rattrapait par accident, pas par
+# construction, et pas du tout depuis un checkout lie dans le PATH.
+UID_BOUNDS_SH="${LCARS_UID_BOUNDS_SH:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../services/lib/uid-bounds.sh}"
+[[ -r "$UID_BOUNDS_SH" ]] || UID_BOUNDS_SH=/opt/lcars/services/lib/uid-bounds.sh
+# ⚠ UN REFUS NOMME, pas la plainte de bash : sans ce garde, les deux candidats absents donnent
+# « line 28: …: No such file or directory » et le lanceur meurt sous `set -e` sans dire quoi reparer.
+[[ -r "$UID_BOUNDS_SH" ]] || {
+  echo "fleet: lecture de la frontière système/humain introuvable ($UID_BOUNDS_SH) — cette installation est incomplète. Sur un poste, « deploy/workstation up » la pose ; dans un conteneur, l'image la porte." >&2
+  exit 1
+}
+# shellcheck source=../services/lib/uid-bounds.sh
+. "$UID_BOUNDS_SH"
+
 cd "$HOME" || { echo "fleet: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD fiable" >&2; exit 1; }
 
 ERL_NODE="fleet_$(id -un)@127.0.0.1"
@@ -42,14 +64,6 @@ load_env() {
   ERL_COOKIE="${LCARS_FLEET_ERL_COOKIE:-lcars}"
   [[ -n "${LCARS_FLEET_ERL_NODE:-}" ]] && DIST_ON=1 || true
 }
-# ⚖ Phase 5 : la frontiere systeme/humain se LIT, une fois pour tout le produit. Ce lanceur est
-# atteint par un symlink depuis le PATH, et bash ne le resout pas : le voisin resout le checkout,
-# la racine du produit resout la machine — meme forme que pour les faits.
-UID_BOUNDS_SH="${LCARS_UID_BOUNDS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/uid-bounds.sh}"
-[[ -r "$UID_BOUNDS_SH" ]] || UID_BOUNDS_SH=/opt/lcars/services/lib/uid-bounds.sh
-# shellcheck source=../services/lib/uid-bounds.sh
-. "$UID_BOUNDS_SH"
-
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 SESSION="${LCARS_FLEET_SESSION:-fleet}"
 DAEMON_SOCK="${LCARS_FLEET_SOCK:-$HOME/.lcars/run/fleet.sock}"

@@ -18,7 +18,7 @@ set -euo pipefail
 # ⚠ DEUX CANDIDATS : ce CLI est atteint par un SYMLINK depuis le PATH, et bash ne le resout pas —
 # `dirname "$0"` rend alors `/usr/local/bin`, ou rien de ce produit ne vit. Le voisin resout le
 # checkout, la racine du produit resout la machine.
-FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/facts.sh}"
+FACTS_SH="${LCARS_FACTS_SH:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../services/lib/facts.sh}"
 [[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
 # shellcheck source=../services/lib/facts.sh
 . "$FACTS_SH"

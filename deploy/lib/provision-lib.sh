@@ -402,10 +402,12 @@ fi
 # exactement celui qu'on veut diagnostiquer. Mais ne RIEN définir laisserait la première pose mourir
 # sur un « command not found », la mort sans nom que ce dépôt refuse partout ailleurs. Les cinq noms
 # existent donc toujours : absentes, ce sont des refus qui DISENT ce qui manque.
+PROV_PRIMITIVES_ABSENTES=0
 if [[ -r "$PROV_PRIMITIVES_SH" ]]; then
   # shellcheck source=../../runtime/services/lib/primitives.sh
   . "$PROV_PRIMITIVES_SH"
 else
+  PROV_PRIMITIVES_ABSENTES=1
   _prov_sans_primitives() {
     p_fail "primitives du produit illisibles ($PROV_PRIMITIVES_SH) — « $1 » ne peut rien poser. Cet arbre ne porte pas runtime/services/lib/primitives.sh ; sur une machine, « deploy/workstation up » la pose."
     return 1
@@ -416,6 +418,19 @@ else
   ensure_mode()  { _prov_sans_primitives ensure_mode; }
   write_atomic() { _prov_sans_primitives write_atomic; }
 fi
+
+# ⚠ LE BOUCHON NE SUFFIT PAS, ET C'EST UNE PROPRIÉTÉ DU SHELL, PAS UN OUBLI : `env_field` et
+# `read_token` RENDENT une valeur, donc leurs appelants les jouent en `$(…)`. Le `p_fail` du bouchon
+# s'exécute alors dans un SOUS-SHELL : la phrase part bien sur stderr, mais le compteur qu'elle
+# incrémente meurt avec lui — FAIL imprimé, verdict VERT. Pire pour `read_token` : le bouchon rend la
+# chaîne vide, que `forge_api` lit comme « pas de jeton » et transforme en requête ANONYME.
+# Le refus appartient donc à CELUI QUI POSE, une fois, avant le premier module — là où il est dans le
+# shell principal et où son code de sortie compte encore.
+prov_exige_primitives() { # prov_exige_primitives <geste> → 0 présentes · 1 absentes, la cause dite
+  [[ "$PROV_PRIMITIVES_ABSENTES" == 1 ]] || return 0
+  echo "$1 : primitives du produit illisibles ($PROV_PRIMITIVES_SH) — cet arbre ne porte pas runtime/services/lib/primitives.sh. Rien n'est posé : une pose sans elles écrirait des jetons vides et lirait la forge en anonyme. Sur une machine, « deploy/workstation up » les pose ; dans un kit, « deploy/pack.sh » les embarque." >&2
+  return 1
+}
 
 prov_check_mode() { # prov_check_mode <chemin> <mode> <propriétaire> → 0 conforme · 1 écart dit en DRIFT · 2 absent, rien de dit
   local cur want

@@ -51,6 +51,9 @@ say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 
 [[ "$EUID" -ne 0 ]] || die "pack.sh ne se lance pas en root : l'installeur généré refuse root, et le build se fait sous l'humain"
+# `read_token` sert ici en `$(…)` : bouchonnée, elle rendrait la chaîne vide et la connexion au
+# registre partirait en ANONYME sans que rien ne rougisse. Le refus est ici, dans le shell principal.
+prov_exige_primitives "pack" || exit 1
 [[ -z "${LCARS_PACK_TOKEN+x}" ]] \
   || die "LCARS_PACK_TOKEN n'est pas lu : le gate, npm et leurs scripts en hériteraient — le jeton se donne par fichier, LCARS_PACK_TOKEN_FILE=<fichier>"
 
