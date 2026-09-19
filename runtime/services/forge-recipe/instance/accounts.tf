@@ -95,7 +95,7 @@ resource "gitea_user" "system_role" {
 # holds no forge account and no role token — every forge write it causes goes through the SYSTEM ».
 # Une ressource `gitea_user` pour lui creerait, en SITE-ADMIN, le compte que la donnee dit ne pas
 # exister — et aucun gate ne l'attraperait : le verrou a quatre listes (`roles.provisioning_locked`)
-# impose canon == forge.tf == ROLES == PROV_ROLES mais EXCLUT starfleet sur `forge_identity`
+# impose canon == forge.tf == ROLES mais EXCLUT starfleet sur `forge_identity`
 # (l'asymetrie vit dans la donnee, volontairement), et les ressources AUTONOMES de ce fichier
 # (`system`, `human`) sont hors de la boucle des roles.
 #

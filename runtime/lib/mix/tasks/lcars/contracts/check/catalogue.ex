@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Compare forge-identity logins in both directions, including ReservedSeats.
-  # PROV_ROLES is the floor the workstation installer hands the token minter (LCARS_ROLES).
+  # The installer carries NO role floor: the product declares the roles (`lcars tool roles`).
   @doc false
   @spec check_roles_provisioning_locked(String.t()) :: Support.result()
   def check_roles_provisioning_locked(root) do
@@ -85,7 +85,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
-    constants_path = Path.expand("../deploy/installer-constants.env", root)
 
     # Absence of deploy skips both Terraform and deploy lists, even though forge.tf is in-tree.
     # A present tree with unreadable anchors fails; the token-minter list is always required.
@@ -107,13 +106,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
          ),
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
-           "its account"},
-        {"installer-constants.env PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
-         read_list(constants_path, ~r/^PROV_ROLES=(.*)$/m, :plain),
-         "add/remove the role in PROV_ROLES of deploy/installer-constants.env (the floor the " <>
-           "workstation installer hands the token minter as LCARS_ROLES; the minter adds the " <>
-           "release roster and the installed catalogues' rosters, and the container passes no " <>
-           "floor)"}
+           "its account"}
+        # ⚠ `installer-constants.env PROV_ROLES` N'EST PLUS UNE LISTE, ET C'EST UN GAIN : depuis la
+        # décision 2 (2026-09-19) l'installeur ne porte aucun plancher de rôles. Le produit les
+        # déclare, `lcars tool roles` les rend, et une écriture de moins ne se remplace pas par une
+        # ligne ici. Trois listes suffisent — le canon, la recette, le minteur.
       ]
 
     {lists, skipped} = split_out_of_scope(lists)
@@ -134,11 +131,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       broken: if(canon == [], do: "canon catalogue empty/not found — fail-closed"),
       findings: evidence,
       note:
-        "four-list STRICT equality (BL-6-45)" <>
+        "three-list STRICT equality (BL-6-45)" <>
           placement_note <>
           ": canon{forge_identity} PROJECTED into " <>
           "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
-          "ROLES == PROV_ROLES — any delta is a defect, named" <>
+          "ROLES — any delta is a defect, named (the installer carries NO role floor since 2026-09-19)" <>
           skipped_note(skipped)
     })
   end
