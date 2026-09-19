@@ -12,13 +12,19 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ⚖ Decision 3 : le compte systeme est un FAIT de la machine. Le voisin resout le checkout, la
+# racine du produit resout la machine — voir `lcars-toolchain-converge` pour le pourquoi des deux.
+FACTS_SH="${LCARS_FACTS_SH:-$SCRIPT_DIR/../services/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=../services/lib/facts.sh
+. "$FACTS_SH"
 FORGE=""
 REPO=""
 TOKEN_FILE=""
 OUT_DIR=""
 VENDOR_IDENTITY="$SCRIPT_DIR/claude_launch.identity"
 FILTER_REPO_BIN="${FILTER_REPO_BIN:-git-filter-repo}"
-SYSTEM_EMAIL="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}@lcars.local"
+SYSTEM_EMAIL="$LCARS_SYSTEM_ACCOUNT@lcars.local"
 # D2 — les bulles de merge sont NORMALES sur un main, des deux cotes : l'aplatissement ne sert que la
 # branche d'une MR upstream, d'ou le defaut a vide.
 LINEARIZE=""

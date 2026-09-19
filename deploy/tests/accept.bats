@@ -19,6 +19,9 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../accept" "$SANDBOX/deploy/"
   cp "$BATS_TEST_DIRNAME/../lib/provision-lib.sh" "$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh" "$SANDBOX/deploy/lib/"
   cp "$BATS_TEST_DIRNAME/../installer-constants.env" "$BATS_TEST_DIRNAME/../system.manifest" "$SANDBOX/deploy/"
+  # ⚖ décision 3 : la lib refuse au sourcing sans les faits du produit, que ce bac à sable ne copie
+  # pas (il n'a que `deploy/`). On les lui NOMME, comme un opérateur le ferait.
+  export PROV_PRODUCT_FACTS_FILE="$BATS_TEST_DIRNAME/../../runtime/etc/facts.env"
   MOD="$SANDBOX/deploy/accept"
   decor_pose
   TOKENS="$LCARS_DECOR_ROOT/opt/lcars/var/tokens"

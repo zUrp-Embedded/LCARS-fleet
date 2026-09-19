@@ -21,12 +21,18 @@ ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
 
 FORGE="${FORGE_BASE_URL:-}"
-# Litteraux DUPLIQUES de `provision-lib.sh`, que ce script ne source pas : il tourne en boucle, hors
-# d'un cycle de provisionnement. C'est un temoin qui epingle leur egalite, faute de pouvoir la deriver.
-ORG="${LCARS_FORGE_ORG:-lcars}"
-TEAM="${LCARS_HUMANS_TEAM:-humans}"
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
+# ⚖ Decision 3 : CES LITTERAUX NE SONT PLUS ICI. Ils l'etaient, dupliques de `provision-lib.sh`, et
+# le commentaire d'alors disait « faute de pouvoir la deriver » — c'est ce « faute de » qui est
+# tombe. Ce daemon tourne hors d'un cycle de provisionnement et ne peut pas sourcer le protocole des
+# modules avant sa garde de siege ; il lit les FAITS, qui ne dependent d'aucun cycle.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+ORG="$LCARS_FORGE_ORG"
+TEAM="$LCARS_HUMANS_TEAM"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
+TOKEN_FILE="${FORGE_TOKEN_FILE:-$LCARS_PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token}"
 # ROLES se lit APRES le protocole (`lcars_roles`, plus bas) : c'est un fait du produit, pas une
 # liste ecrite ici. Une copie de plus derivait sans que rien ne la tienne — le mur
 # `roles.provisioning_locked` en epingle quatre et ne voyait pas celle-ci.
@@ -38,7 +44,7 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
 # la console a la source, pour ses deux consommateurs a la fois.
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
-GROUP="${LCARS_FLEET_GROUP:-fleet}"
+GROUP="$LCARS_FLEET_GROUP"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # GUARD A — L'UID DU SIEGE N'EST JAMAIS CONVERGE NI REVOQUE. Garde keye sur l'UID, PAS sur un login :
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
@@ -140,7 +146,8 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
   stat -c %u "$h" 2>/dev/null || true
 }
 
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
+# le repertoire est un fait, le nom du fichier une regle : la carte se DERIVE, elle ne se recopie pas
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$LCARS_PRIVATE_DIR/forge-uid.map}"
 
 uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
   [[ -r "$UID_MAP_FILE" ]] || return 0

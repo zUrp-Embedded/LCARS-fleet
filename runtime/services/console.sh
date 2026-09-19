@@ -25,6 +25,13 @@
 
 set -euo pipefail
 
+# ⚖ Decision 3 : le groupe qui traverse les sockets de console est un FAIT de la machine, lu ici,
+# ecrit dans `etc/facts.env`. Ce script n'est pas un module et ne source pas leur protocole.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+
 # Pas de defaut : il n'y a pas d'humain unique (`LCARS_HUMAN`). Une console vise un login
 # EXPLICITE (`--human`) ou toute la liste (`--all`) ; une invocation nue se refuse au lieu de deviner.
 HUMAN=""
@@ -69,7 +76,7 @@ command -v ttyd >/dev/null || { echo "console.sh: ttyd absent de l'image" >&2; e
 # que c'est lui qui rend la socket groupe-inscriptible : le prochain bug de permission se
 # chercherait du mauvais cote.
 CONSOLE_SOCK_ROOT="${LCARS_CONSOLE_SOCK_ROOT:-/run/lcars/console}"
-CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
+CONSOLE_GROUP="$LCARS_CONSOLE_GROUP"
 
 # ─── UNE CONSOLE VIVANTE SE MESURE EN S'Y CONNECTANT ────────────────────────────────────────────
 #

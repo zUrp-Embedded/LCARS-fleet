@@ -32,7 +32,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
+# ⚠ LE MODULE VOISIN, PAS UN PAQUET : `lcars_facts.py` est POSE a cote de ce fichier par les deux
+# rails, et c'est ce qui rend l'import valide sans installation. Meme forme que `lcars_socket` chez
+# l'executeur de catalogue.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lcars_facts  # noqa: E402 -- apres le sys.path, c'est la condition de l'import
+
+PORT = int(lcars_facts.get("LCARS_LANDING_PORT"))
 # ⚠ `console-humans.sh` EST la regle, ce fichier la LIT — il ne refait pas le filtre a cote, avec des
 # bornes qui divergeraient.
 HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh")
@@ -49,7 +55,7 @@ HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh
 # by the access token we just obtained: nothing to verify, because nothing untrusted carried it.
 # ONE name for the file, the one the gesture that writes it uses (forge.d/deck-oidc.sh):
 # the container points it under its state volume, the workstation keeps the protocol default.
-OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json")
+OIDC_CONFIG = lcars_facts.get("LCARS_DECK_OIDC_FILE")
 # Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
 # registration is deliberate — an account is inert on its own, and the single admin gesture that
 # enrolls somebody is adding them here. A member gets `["<org>", "<org>:humans"]`; a self-registered
@@ -59,8 +65,8 @@ OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json"
 # et une paire chez le convergeur, c'est un renommage d'org qui casse en SILENCE et dans UN SEUL
 # sens : la forge emet `<org>:humans`, cette page compare a `lcars:humans` et REFUSE tout humain non
 # admin, pendant que le convergeur continue de creer leurs comptes.
-FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "lcars")
-HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("LCARS_HUMANS_TEAM", "humans"))
+FORGE_ORG = lcars_facts.get("LCARS_FORGE_ORG")
+HUMANS_TEAM = "%s:%s" % (FORGE_ORG, lcars_facts.get("LCARS_HUMANS_TEAM"))
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
 PENDING_TTL = 600

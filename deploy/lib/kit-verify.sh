@@ -59,6 +59,14 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
     [[ -r "$stage/$src" ]] || manques+=("62-runtime-helpers pose $src hors de ses listes, et le kit ne le porte pas")
   done
 
+  # ⚖ décision 3 : les FAITS DE LA MACHINE et leur lecteur shell voyagent par PROV_EMBEDDED, donc
+  # hors des listes ci-dessus. Sans eux, l'installeur refuse au sourcing et AUCUN geste du produit
+  # ne démarre : un kit qui les oublie est un kit qui ne s'installe pas, et il faut le dire ici.
+  for src in runtime/etc/facts.env runtime/services/lib/facts.sh; do
+    [[ -r "$stage/$src" ]] \
+      || manques+=("$src absent — sans les faits de la machine, ni l'installeur ni un geste du produit ne démarrent")
+  done
+
   local t
   for t in avatars favicon; do
     [[ -d "$stage/assets/$t" ]] || manques+=("assets/$t absent — 44-media en dépend")

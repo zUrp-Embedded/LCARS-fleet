@@ -36,6 +36,8 @@ setup() {
   mkdir -p "$ARBRE/deploy/docker" "$ARBRE/deploy/lib"
   cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-compose.bench.yml" "$vrai/docker/runner-network.yml" "$ARBRE/deploy/docker/"
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$ARBRE/deploy/lib/"
+  # ⚖ décision 3 : les faits du produit ne sont pas dans cet arbre — on les lui NOMME.
+  export PROV_PRODUCT_FACTS_FILE="$vrai/../runtime/etc/facts.env"
   CONSTANTES="$ARBRE/deploy/installer-constants.env"
   { grep -vE '^(PROV_FORGE_INTERNAL_URL|PROV_RUNNER_LABELS)=' "$vrai/installer-constants.env"
     printf '%s\n' PROV_FORGE_INTERNAL_URL=http://forge-temoin:3000 PROV_RUNNER_LABELS=shell:docker://alpine:temoin

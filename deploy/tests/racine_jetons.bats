@@ -31,20 +31,32 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
 
 # le protocole des modules du produit et le RoleToken du BEAM : tenus par le contrat
 # SingleSource.check_private_dir_single_source (runtime/lib/mix/tasks/lcars/contracts/check/single_source.ex)
-@test "BASH : les défauts du convergeur et du geste de forge disent ce que la constante déclare" {
-  local bad=0
-  declare -A sites=(
-    ["$R/runtime/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
-    ["$R/runtime/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
-    ["$R/runtime/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'
+# ⚖ DÉCISION 3 (2026-09-19) : CES TROIS SITES N'ÉCRIVENT PLUS DE RACINE. Le convergeur et le geste
+# de forge lisaient chacun `${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}` — trois copies d'un chemin
+# qu'il fallait tenir égales. La racine est un FAIT (`runtime/etc/facts.env`), lu par
+# `services/lib/facts.sh`. Ce qui se mesure ici n'a pas changé de nature : que la racine posée par
+# l'installeur et celle que le produit lit soient la même. La population, elle, est passée à UNE.
+@test "BASH : le fait du produit dit ce que la constante déclare, et les trois sites en dérivent" {
+  local bad=0 vu
+  vu="$(sed -n 's/^LCARS_PRIVATE_DIR=//p' "$R/runtime/etc/facts.env")"
+  [ "$vu" = "$ATTENDU" ] || { echo "le fait LCARS_PRIVATE_DIR : « $vu » ≠ « $ATTENDU »"; bad=1; }
+
+  local bad_sites=0
+  declare -A derivations=(
+    ["$R/runtime/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-\$LCARS_PRIVATE_DIR/'
+    ["$R/runtime/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-\$LCARS_PRIVATE_DIR/'
+    ["$R/runtime/services/forge-gestures.sh|PRIVATE_DIR"]='PRIVATE_DIR="\$LCARS_PRIVATE_DIR"'
   )
-  local cle f vu
-  for cle in "${!sites[@]}"; do
+  local cle f
+  for cle in "${!derivations[@]}"; do
     f="${cle%%|*}"
-    vu="$(racine_de "$f" "${sites[$cle]}")"
-    [ "$vu" = "$ATTENDU" ] || { echo "${cle##*|} dans $(basename "$f") : « $vu » ≠ « $ATTENDU »"; bad=1; }
+    grep -qE -- "${derivations[$cle]}" "$f" \
+      || { echo "${cle##*|} dans $(basename "$f") ne dérive plus du fait : il en réécrirait un"; bad_sites=1; }
+    # et aucun des trois ne redonne un défaut littéral à la racine
+    refute grep -qE 'LCARS_PRIVATE_DIR:-/' "$f"
   done
   [ "$bad" -eq 0 ]
+  [ "$bad_sites" -eq 0 ]
 }
 
 @test "PYTHON : les deux défauts de l'exécuteur de catalogue s'accordent" {

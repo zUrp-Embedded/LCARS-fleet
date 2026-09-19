@@ -19,7 +19,13 @@ set -euo pipefail
 # fichier est posé sur les deux rails : par l'installeur sur un poste, par l'init du démarrage dans un
 # conteneur — une session ssh n'hérite pas de l'environnement du service. Même ordre que le protocole
 # des gestes de forge.
-FORGE_URL_FILE="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}/forge.url"
+# ⚖ Decision 3 : le repertoire des jetons et le compte systeme sont des FAITS de la machine.
+# `../../../lib` resout un checkout comme une machine posee — l'arbre `services/` est copie entier.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=../../../lib/facts.sh
+. "$FACTS_SH"
+FORGE_URL_FILE="$LCARS_PRIVATE_DIR/forge.url"
 FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/dev/null | tr -d '[:space:]' || true)}}"
 # ⚠ LE JETON SYSTEME, PAS LE MASTER, ET C'EST UNE CORRECTION DE PRIVILEGE. Ce script ne fait que
 # DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : le dépôt système (`lcars/_ops`) est
@@ -37,9 +43,11 @@ FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/
 # l'equipe `humans` de la forge, avec trente secondes de peremption — et un refus qui dirait « il
 # est lisible par le groupe fleet » enverrait chercher une adhesion. La question se pose a
 # `roles.sock` : le service la porte a la forge A L'INSTANT du geste.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
-OPS_REPO="${LCARS_OPS_REPO:-lcars/_ops}"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
+AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-$LCARS_LINK_DIR/lcars-authority-ask}"
+# Le depot du systeme vit dans l'org systeme : une DERIVATION du fait, la meme que celle du
+# protocole des modules — une org renommee par l'installeur emmene son depot.
+OPS_REPO="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source`. Reglable a moitie, il ferait relever une boite aux lettres
 # pendant que les demandes atterrissent dans une autre.

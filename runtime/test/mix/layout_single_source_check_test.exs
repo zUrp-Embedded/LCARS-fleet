@@ -214,30 +214,30 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
 
   describe "layout.catalogue_roots_single_source — la fleet lit ou l'image n'a jamais ecrit" do
     # Include both source creators and readers of the two catalogue roots.
+    # ⚖ Decision 3 : la CLI ne porte plus ses propres defauts, elle lit le FAIT. Le geste de forge
+    # DERIVE son catalogue de demonstration du fait (il nomme le sous-arbre, pas la racine).
     defp miroirs(shipped, installed) do
       [
-        {"runtime/bin/lcars",
-         "CAT_SHIPPED=\"${LCARS_CATALOGUES_SHIPPED:-#{shipped}}\"\n" <>
-           "CAT_DIR=\"${LCARS_CATALOGUES_DIR:-#{installed}}\"\n"},
+        {"runtime/etc/facts.env",
+         "LCARS_CATALOGUES_SHIPPED=#{shipped}\nLCARS_CATALOGUES_DIR=#{installed}\n"},
         {"runtime/services/forge-gestures.sh",
-         "D=\"${LCARS_DEMO_CATALOGUE:-#{shipped}/web-demo}\"\n" <>
-           "I=\"${LCARS_CATALOGUES_DIR:-#{installed}}\"\n"},
+         "D=\"${LCARS_DEMO_CATALOGUE:-$LCARS_CATALOGUES_SHIPPED/web-demo}\"\n"},
         {"deploy/system.manifest", "dir #{installed} 0755 root root\n"},
         {"deploy/installer-constants.env", "PROV_CATALOGUES_DIR=#{installed}\n"}
       ]
     end
 
-    test "les six miroirs d'accord → vert, et la preuve NOMME les fichiers lus" do
+    test "les cinq miroirs d'accord → vert, et la preuve NOMME les fichiers lus" do
       root = depot(fichiers: miroirs("/opt/lcars/catalogues", "/opt/lcars/var/catalogues"))
 
       assert %{status: :pass, evidence: ev, note: note} =
                SingleSource.check_catalogue_roots_single_source(root)
 
-      # Le mur porte sa preuve meme au vert : les six miroirs vivent dans quatre arbres, dont deux
-      # hors artefact — « vert » sans la liste ne dirait pas COMBIEN ont ete lus.
+      # Le mur porte sa preuve meme au vert : les miroirs vivent dans trois arbres, dont un hors
+      # artefact — « vert » sans la liste ne dirait pas COMBIEN ont ete lus.
       assert Enum.any?(ev, &(&1 =~ "system.manifest"))
-      assert Enum.any?(ev, &(&1 =~ "bin/lcars"))
-      assert note =~ "6 checked copies"
+      assert Enum.any?(ev, &(&1 =~ "etc/facts.env"))
+      assert note =~ "5 checked copies"
     end
 
     test "⚠ LE CREATEUR QUI DERIVE — une ligne de manifeste qui ne suit pas l'autorite est nommee" do
@@ -308,7 +308,8 @@ defmodule Mix.Tasks.Lcars.Contracts.LayoutSingleSourceCheckTest do
          "defmodule Fleet.Credentials.RoleToken do\n  @default_dir \"#{@jetons}\"\nend\n"},
         {"deploy/installer-constants.env",
          "PROV_ROOT=/opt/lcars\nPROV_TOKENS_DIR=#{constante}\n"},
-        {"runtime/services/lib/module-protocol.sh", ": \"${LCARS_PRIVATE_DIR:=#{@jetons}}\"\n"},
+        # ⚖ Decision 3 : le protocole des modules n'ecrit plus ce defaut — il source le FAIT.
+        {"runtime/etc/facts.env", "LCARS_PRIVATE_DIR=#{@jetons}\n"},
         {"deploy/system.manifest", "dir #{@jetons} 0710 lcars-authority:fleet any\n"}
       ]
     end

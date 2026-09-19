@@ -31,6 +31,9 @@ setup() {
   for n in $(constante PROV_HELPERS) $(constante PROV_HELPERS_DATA); do : > "$K/runtime/services/$n"; done
   : > "$K/runtime/bin/lcars-toolchain-converge"; : > "$K/runtime/bin/lcars-authority-ask"
   : > "$K/runtime/services/lcars.bashrc"
+  # ⚖ décision 3 : les faits de la machine et leur lecteur shell voyagent par PROV_EMBEDDED
+  mkdir -p "$K/runtime/services/lib"
+  : > "$K/runtime/etc/facts.env"; : > "$K/runtime/services/lib/facts.sh"
 }
 
 constante() { sed -n "s/^$1=//p" "$BATS_TEST_DIRNAME/../../installer-constants.env"; }
@@ -154,4 +157,18 @@ verifie() { run bash -c "$LIBS; kit_verifie '$K' '$REL_KIT'"; }
   verifie
   [[ "$output" == *"tar"* ]] || { echo "le refus ne dit pas ce qui n'a pas eu lieu : $output"; return 1; }
   [[ "$output" == *"listes"* ]] || { echo "le refus ne dit pas ou chercher : $output"; return 1; }
+}
+
+@test "KIT : sans les faits de la machine, il est REFUSE — rien ne demarrerait" {
+  rm -f "$K/runtime/etc/facts.env"
+  verifie
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime/etc/facts.env absent"* ]]
+}
+
+@test "KIT : sans le lecteur shell des faits, il est REFUSE aussi" {
+  rm -f "$K/runtime/services/lib/facts.sh"
+  verifie
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime/services/lib/facts.sh absent"* ]]
 }

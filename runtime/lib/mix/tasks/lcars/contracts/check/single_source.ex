@@ -217,15 +217,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     else
       shipped = Path.join(platform, dirname)
 
+      # ⚖ Decision 3: the shell has ONE declaration of these two roots, `etc/facts.env`, and every
+      # script reads it (`services/lib/facts.sh`). The mirrors that used to sit in `bin/lcars` and
+      # `forge-gestures.sh` are gone — checking them here would pin a literal that no longer exists.
       mirrors = [
-        {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
-         "the CLI's shipped-catalogue default"},
-        {"bin/lcars", ~r/CAT_DIR="\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}"/,
-         "the CLI's installed-catalogue default"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-#{Regex.escape(shipped)}\//,
+        {"etc/facts.env", ~r/^LCARS_CATALOGUES_SHIPPED=#{Regex.escape(shipped)}$/m,
+         "the machine fact the shell and the Python read (shipped)"},
+        {"etc/facts.env", ~r/^LCARS_CATALOGUES_DIR=#{Regex.escape(installed)}$/m,
+         "the machine fact the shell and the Python read (installed)"},
+        # A DERIVATION of the fact, not a copy of it: the gesture names the sub-tree, never the root.
+        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-\$LCARS_CATALOGUES_SHIPPED\//,
          "the demo catalogue the forge gesture publishes"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}/,
-         "the installed root the forge gesture reads"},
         # Le createur de l'arbre livre est unique depuis le 2026-09-11 : `62-runtime-helpers`
         # embarque `catalogues/` du kit sous la racine, sur un poste comme dans l'image. Le `COPY`
         # de l'image d'avant etait un jumeau ; il n'y a plus de second createur a tenir d'accord.
@@ -298,8 +300,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the BEAM's role-token directory"},
       {"../deploy/installer-constants.env", ~r/^PROV_TOKENS_DIR=(.+)$/m,
        "the installer constant"},
-      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
-       "the product module protocol's default"}
+      # ⚖ Decision 3: the shell declares it ONCE, as a machine fact. `services/lib/facts.sh` is the
+      # only reader; the module protocol sources it and no longer writes a default of its own.
+      {"etc/facts.env", ~r/^LCARS_PRIVATE_DIR=(.+)$/m, "the machine fact the product reads"}
     ]
   end
 
@@ -456,19 +459,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the installer constant"},
         {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
-        {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the human converger's fallback"},
-        {"services/forge-gestures.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the forge gesture's fallback"},
-        {"services/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the token minter's fallback"},
-        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the admiral skill's fallback"},
-        {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
-        {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,
-         "the publish rewrite's system email"},
-        {"config/runtime.exs", ~r/FORGE_BOT_LOGIN"\)\s*\|\|\s*"#{e}"/,
-         "the runtime's push-account fallback"}
+        # ⚖ Decision 3: SIX shell fallbacks used to be listed here — the converger, the forge
+        # gesture, the token minter, the admiral skill, the CLI and the publish rewrite. They read
+        # the machine fact now, so there is ONE declaration to hold instead of six to keep equal.
+        {"etc/facts.env", ~r/^LCARS_SYSTEM_ACCOUNT=#{e}$/m,
+         "the machine fact the shell, the Python and the Elixir read"}
       ]
 
       {checked, skipped} =
@@ -834,22 +829,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         "default"
       )
     else
-      e = Regex.escape(expected)
-
-      # The gesture and the protocol DERIVE the repo from the org (an org the installer renamed
-      # takes its repository along); only the repository half is a literal there.
+      # ⚖ Decision 3: NO copy freezes the whole address any more. Every mirror DERIVES the repo
+      # from the org fact (an org the installer renamed takes its repository along); only the
+      # repository half is a literal, and that half is a rule, not a fact.
       repo_half = expected |> String.split("/", parts: 2) |> List.last() |> Regex.escape()
 
       mirrors = [
         {"services/forge.d/ops-repo.sh",
          ~r/LCARS_OPS_REPO:=\$\{LCARS_FORGE_ORG\}\/#{repo_half}\}/,
          "the ops-repo gesture's fallback (derived from the org)"},
-        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
-         "the seat skill's fallback"},
-        {"bin/lcars-toolchain-converge", ~r/LCARS_OPS_REPO:-#{e}\}/,
-         "the toolchain converger's fallback"},
-        {"services/privileged-executor.py", ~r/os\.environ\.get\("LCARS_OPS_REPO",\s*"#{e}"\)/,
-         "the root executor's ops-repo fallback"}
+        # ⚖ Decision 3: these two derive from the org fact like the gesture does, instead of
+        # freezing the whole address — the org half is a fact, the repository half a rule.
+        {"services/admiral/skills/system-issues/list.sh",
+         ~r/LCARS_OPS_REPO:-\$LCARS_FORGE_ORG\/#{repo_half}\}/,
+         "the seat skill's fallback (derived from the org)"},
+        {"bin/lcars-toolchain-converge", ~r/LCARS_OPS_REPO:-\$LCARS_FORGE_ORG\/#{repo_half}\}/,
+         "the toolchain converger's fallback (derived from the org)"},
+        {"services/privileged-executor.py",
+         ~r/"LCARS_OPS_REPO",\s*"%s\/#{repo_half}"\s*%\s*lcars_facts\.get\("LCARS_FORGE_ORG"\)/s,
+         "the root executor's ops-repo fallback (derived from the org fact)"}
       ]
 
       {checked, skipped} =
@@ -1108,6 +1106,130 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     cond do
       declares < 2 -> "#{@face_mode_declaration} no longer declares two writer face modes"
       Support.measured_nothing?(sources) -> "no Elixir source scanned under lib/"
+      true -> nil
+    end
+  end
+
+  # ── Les faits de la machine (⚖ decision 3) ──────────────────────────────────────────────────
+  @facts_file "etc/facts.env"
+  # Les deux lecteurs du fichier — le seul du shell, le seul du Python. Ils le NOMMENT, forcement.
+  @facts_readers ~w(services/lib/facts.sh services/lcars_facts.py lib/fleet/facts.ex)
+  @facts_scan ~w(.sh .bash .py .ex .exs .env)
+  # Les repertoires ou vit du code qui pourrait rejouer un defaut. `priv/` porte du catalogue (de la
+  # prose de SP, pas du code de la machine) et reste dehors, comme partout ailleurs dans ce module.
+  @facts_trees ~w(bin services config lib ../deploy)
+
+  @doc """
+  Refuses a SECOND default for any machine fact declared in `etc/facts.env`.
+
+  A fact is written once and read by four languages. A reader that writes `${LCARS_X:-literal}`,
+  `System.get_env("LCARS_X", literal)` or `environ.get("LCARS_X", literal)` reintroduces the
+  duplicate the file exists to remove, and the copy that drifts is always the one nobody rereads.
+
+  Derivations are allowed and unaffected: `${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}` names a RULE,
+  not a fact, and its own wall holds it. Only a literal default for a DECLARED fact key is refused.
+
+  Scope is the shell, Python and Elixir of the product plus the installer tree; `priv/` (catalogue
+  prose) and the checkers themselves are out. An absent installer tree is named, not silently passed.
+  """
+  @spec check_facts_single_source(String.t()) :: Support.result()
+  def check_facts_single_source(root) do
+    id = "facts.single_source"
+
+    remediation =
+      "read the fact instead of re-defaulting it: source `services/lib/facts.sh` (shell), " <>
+        "`lcars_facts.get` (Python) or `Fleet.Facts.get!` (Elixir). A fact written twice is a " <>
+        "fact that splits the day one copy moves, and nothing says so"
+
+    keys = facts_keys(root)
+    sources = facts_corpus(root)
+    # Compile once, read each file once: sixteen facts times four hundred files is six thousand
+    # reads of the same bytes, and this check runs on every gate.
+    patterns = Enum.map(keys, &{&1, facts_default_rx(&1)})
+    copies = Enum.flat_map(sources, &facts_copies(&1, root, patterns))
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: copies |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  # A NUL-bearing file is not source: reading it as text would scan a provider binary line by line.
+  defp facts_copies(path, root, patterns) do
+    case File.read(path) do
+      {:ok, body} ->
+        if String.contains?(body, <<0>>),
+          do: [],
+          else: facts_scan(body, facts_rel(path, root), patterns)
+
+      _ ->
+        []
+    end
+  end
+
+  defp facts_scan(body, rel, patterns) do
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {texte, line} ->
+      code = strip_comment(texte)
+
+      for {key, rx} <- patterns, Regex.match?(rx, code), do: "#{rel}:#{line} (#{key})"
+    end)
+  end
+
+  defp facts_keys(root) do
+    case File.read(Path.join(root, @facts_file)) do
+      {:ok, body} ->
+        ~r/^([A-Z][A-Z0-9_]*)=/m
+        |> Regex.scan(body)
+        |> Enum.map(&List.last/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp facts_corpus(root) do
+    @facts_trees
+    |> Enum.map(&Path.expand(&1, root))
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.flat_map(&Support.corpus_files/1)
+    |> Enum.filter(&(Path.extname(&1) in @facts_scan or Path.extname(&1) == ""))
+    |> Enum.reject(fn path ->
+      rel = Path.relative_to(path, root)
+      rel in @facts_readers or Support.checker_source?(rel) or not File.regular?(path)
+    end)
+    |> Enum.sort()
+  end
+
+  # Le voisin s'écrit `../deploy/x`, comme partout ailleurs dans ce module : une preuve absolue
+  # porte le chemin de la MACHINE qui a joué le mur, que personne ne peut retrouver ailleurs.
+  defp facts_rel(path, root) do
+    parent = Path.dirname(root)
+
+    cond do
+      String.starts_with?(path, root <> "/") -> Path.relative_to(path, root)
+      String.starts_with?(path, parent <> "/") -> Path.join("..", Path.relative_to(path, parent))
+      true -> path
+    end
+  end
+
+  # `${K:-lit}` / `${K:=lit}` in shell, `get_env("K", lit)` in Elixir, `get("K", "lit")` in Python.
+  # A default that is itself an expansion (`${K:-$OTHER}`) is a derivation and stays legal.
+  defp facts_default_rx(key) do
+    k = Regex.escape(key)
+    Regex.compile!("\\$\\{#{k}:[-=][^$}][^}]*\\}|[gG]et(?:_env)?\\(\\s*[\"']#{k}[\"']\\s*,")
+  end
+
+  defp facts_broken(keys, sources) do
+    cond do
+      Support.measured_nothing?(keys) -> "#{@facts_file} declares no machine fact"
+      Support.measured_nothing?(sources) -> "no source scanned for a second default"
       true -> nil
     end
   end

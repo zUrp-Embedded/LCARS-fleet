@@ -13,10 +13,23 @@ setup() {
 
   ATTENDU="$(env -i PATH="$PATH" bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
   BIN_REL="$ATTENDU/rel/lcars_fleet/bin/lcars_fleet"
+  # ⚖ décision 3 : le produit ne recopie plus le préfixe, il le LIT (`runtime/etc/facts.env`). Le
+  # fait se résout donc avant la lecture des chemins — sinon `$LCARS_PREFIX/rel/…` se lirait
+  # « /rel/… » et ce mur accuserait une dérivation correcte. L'égalité des deux est mesurée à part.
+  FAIT_PREFIXE="$(sed -n 's/^LCARS_PREFIX=//p' "$R/runtime/etc/facts.env")"
 }
 
-# Tout chemin absolu du fichier qui se termine par le binaire de release.
-bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
+@test "le préfixe que le produit LIT est celui que l'installeur DÉCLARE" {
+  [ -n "$FAIT_PREFIXE" ]
+  [ "$FAIT_PREFIXE" = "$ATTENDU" ] \
+    || { echo "le fait LCARS_PREFIX « $FAIT_PREFIXE » ≠ la constante « $ATTENDU »" >&2; return 1; }
+}
+
+# Tout chemin absolu du fichier qui se termine par le binaire de release, le fait résolu.
+bins_de() {
+  sed "s#\\\$LCARS_PREFIX#$FAIT_PREFIXE#g" "$1" 2>/dev/null \
+    | grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet'
+}
 porteurs_de_release() {
   grep -rlE '/rel/lcars_fleet/bin/lcars_fleet' "$R/deploy" "$R/runtime" \
     --exclude-dir=tests --exclude-dir=test --exclude-dir=_build --exclude-dir=deps \

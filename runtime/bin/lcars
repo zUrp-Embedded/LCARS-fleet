@@ -14,6 +14,15 @@
 
 set -euo pipefail
 
+# ⚖ Decision 3 : LES FAITS DE LA MACHINE SE LISENT, ILS NE SE RECOPIENT PAS (`etc/facts.env`).
+# ⚠ DEUX CANDIDATS : ce CLI est atteint par un SYMLINK depuis le PATH, et bash ne le resout pas —
+# `dirname "$0"` rend alors `/usr/local/bin`, ou rien de ce produit ne vit. Le voisin resout le
+# checkout, la racine du produit resout la machine.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=../services/lib/facts.sh
+. "$FACTS_SH"
+
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
@@ -263,11 +272,10 @@ cmd_attach() {
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
 
-# LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout`) : un fait ecrit deux fois, dans deux
-# langages qui ne peuvent pas s'appeler. Changer ici sans l'autre cote donne une CLI qui lit un cache
-# sur lequel rien ne tourne — et elle l'affiche en mode DEGRADE, quand rien ne permet de la recouper.
-CAT_DIR="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}"
-CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
+# LE CACHE INSTALLE EST AUSSI CONNU D'ELIXIR (`Fleet.Layout`) : deux langages qui ne peuvent pas
+# s'appeler lisent le MEME fait (`etc/facts.env`), au lieu d'en tenir chacun une copie.
+CAT_DIR="$LCARS_CATALOGUES_DIR"
+CAT_SHIPPED="$LCARS_CATALOGUES_SHIPPED"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
 # rien ne l'installe et rien ne le supprime — il est la, toujours.
 CAT_BUNDLED="fleet"
@@ -292,7 +300,7 @@ _load_container_env() {
 
 # Un seul defaut, pose ici. L'appelant decide de son absence : `catalogue list` la rend en 127 pour
 # la dire, les autres portes meurent dessus.
-_release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"; }
+_release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-$LCARS_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"; }
 
 # ⚠ UN REPERTOIRE COURANT QUE L'APPELANT NE LIT PAS FAIT MOURIR LE BEAM, ET SA PLAINTE NE PARLE DE
 # RIEN. Mesure du 2026-09-18 sur le banc 2004 : `lcars` lance par un humain depuis le home d'un
@@ -311,10 +319,10 @@ _cwd_lisible() {
 
 # ⚠ LE JETON ATTERRIT DANS UN FICHIER, ET C'EST DELIBERE : les rails prennent un CHEMIN, et leur
 # passer le jeton en argument le mettrait dans `/proc/<pid>/cmdline`, que tout le monde lit.
-_authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"; }
+_authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-$LCARS_LINK_DIR/lcars-authority-ask}"; }
 
 _forge_account() {
-  printf '%s\n' "${FORGE_PUSH_ACCOUNT:-${FORGE_BOT_LOGIN:-system_starfleet}}"
+  printf '%s\n' "${FORGE_PUSH_ACCOUNT:-${FORGE_BOT_LOGIN:-$LCARS_SYSTEM_ACCOUNT}}"
 }
 
 # Materialise le jeton dans <dir>, rend son chemin. Le client porte deja la cause sur stderr : on ne

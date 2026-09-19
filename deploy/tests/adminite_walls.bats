@@ -146,10 +146,15 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   attendu="$(sed -n 's/^PROV_AUTHORITY_USER=\([a-z-]*\)$/\1/p' "$REPO/deploy/installer-constants.env")"
   [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans installer-constants.env" >&2; return 1; }
 
-  code_of "$REPO/runtime/services/container/boot.sh" \
-    | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
-      echo "MUR 4 bis rompu — le boot du conteneur ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
-      code_of "$REPO/runtime/services/container/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
-      return 1
-    }
+  # ⚖ décision 3 : le boot du conteneur ne POSE plus ce nom, il le LIT — il source
+  # `services/lib/facts.sh`, comme les modules qu'il lance. La copie à tenir est donc le FAIT.
+  grep -q "^LCARS_AUTHORITY_USER=${attendu}\$" "$REPO/runtime/etc/facts.env" || {
+    echo "MUR 4 bis rompu — le fait de la machine ne déclare pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
+    grep -n 'LCARS_AUTHORITY_USER' "$REPO/runtime/etc/facts.env" >&2
+    return 1
+  }
+  code_of "$REPO/runtime/services/container/boot.sh" | grep -q 'facts\.sh' || {
+    echo "MUR 4 bis rompu — le boot du conteneur ne lit plus les faits : il devinerait « $attendu »" >&2
+    return 1
+  }
 }

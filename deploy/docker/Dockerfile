@@ -53,7 +53,9 @@ VOLUME ["/home", "/opt/lcars/var"]
 EXPOSE 22
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
-  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22 && { [ \"${LCARS_LANDING:-1}\" = 1 ] || exit 0; exec 4<>/dev/tcp/127.0.0.1/\"${LCARS_LANDING_PORT:-20999}\"; }"]
+# ⚖ décision 3 : le port n'est PAS réécrit ici. L'image porte les faits du produit et le sonde lit
+# le même fichier que tout le reste ; un second littéral serait le seul endroit qui ne bougerait pas.
+  CMD ["bash", "-c", ". /opt/lcars/services/lib/facts.sh; exec 3<>/dev/tcp/127.0.0.1/22 && { [ \"${LCARS_LANDING:-1}\" = 1 ] || exit 0; exec 4<>/dev/tcp/127.0.0.1/\"$LCARS_LANDING_PORT\"; }"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.sh"]
 

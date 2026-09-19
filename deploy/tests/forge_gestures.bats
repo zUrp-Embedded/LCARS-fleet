@@ -26,6 +26,11 @@ load refute
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../runtime/services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
+  # ⚖ decision 3 : le geste SOURCE le lecteur des faits, qu'il cherche a cote de lui puis sous la
+  # racine du produit (`/opt/lcars/services/lib`) — aucune des deux sous un decor, et les copies A
+  # PLAT de `_flat_copy` en sont le cas limite. On le NOMME ici : la resolution des deux mondes est
+  # tenue par son propre temoin (`runtime/test/services/faits.bats`), pas par ce fichier.
+  export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../runtime/services/lib/facts.sh"
 
   BIN="$BATS_TEST_TMPDIR/bin"
   PRIV="$BATS_TEST_TMPDIR/private"
@@ -609,6 +614,13 @@ mkdir -p /opt/lcars/var
 install -d -m 0700 -o autorite-double -g autorite-double /opt/lcars/var/tofu
 # le compte d'autorite ne traverse pas l'arbre du depot : il joue la copie posee, comme sur la machine
 install -m 0755 "$SCRIPT" /opt/lcars/forge-gestures.sh
+# ⚖ decision 3 : une machine porte ses FAITS et leur lecteur sous la racine du produit. Ce decor
+# EST une machine (tmpfs sur /opt) : il les pose la ou 62-runtime-helpers les pose, et la
+# surcharge de l'arbre est retiree — c'est la resolution reelle qui doit jouer ici.
+unset LCARS_FACTS_SH
+install -d -m 0755 /opt/lcars/services/lib /opt/lcars/etc
+install -m 0644 "$(dirname "$SCRIPT")/lib/facts.sh" /opt/lcars/services/lib/facts.sh
+install -m 0644 "$(dirname "$SCRIPT")/../etc/facts.env" /opt/lcars/etc/facts.env
 export LCARS_AUTHORITY_USER=autorite-double
 SCRIPT="$SCRIPT"
 sous_autorite() { # sous_autorite <scenario> — joue le verrou comme install le prend, sous le compte d'autorite

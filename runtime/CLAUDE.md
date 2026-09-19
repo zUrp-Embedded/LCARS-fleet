@@ -32,7 +32,7 @@ machine. Ce qui n'est pas ici : les modules de l'installeur, sa lib, ses terrain
 | `lib/fleet/*.ex` sans dossier | les modules **foundation** : vocabulaire et validation purs, `deps: []` |
 | `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (78 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` ; et `test.view`, la lecture d'un témoin sans sa prose (voir `test/README.md`) |
 | `bin/` | les launchers N0/N1 des pods, `fleet` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
-| `etc/` | lancement et release : `fleet.env.template` (catalogue des env vars), `release.manifest` — les outils d'install (`deploy-release.sh`, `enroll-catalogue.sh`) vivent dans `deploy/lib/` |
+| `etc/` | lancement et release : `facts.env` (les FAITS de la machine, écrits une fois, lus par les quatre langages), `fleet.env.template` (catalogue des env vars), `release.manifest` — les outils d'install (`deploy-release.sh`, `enroll-catalogue.sh`) vivent dans `deploy/lib/` |
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |

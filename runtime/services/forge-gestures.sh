@@ -28,31 +28,34 @@
 set -euo pipefail
 
 # Chemins et noms se lisent dans l'environnement : sur un poste, l'installeur les passe depuis ses
-# constantes (`prov_product_env`), un témoin les pose dans son décor. Les défauts sont ceux d'un
-# conteneur.
-PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
+# constantes (`prov_product_env`), un témoin les pose dans son décor. Ce qui n'y est pas est un FAIT
+# de la machine, et un fait ne se recopie plus ici (⚖ décision 3) : il se lit dans `etc/facts.env`.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+PRIVATE_DIR="$LCARS_PRIVATE_DIR"
 # Le compte intégré, résolu une fois : `TF_VAR_builtin_human` et le verbe `builtin-human` lisent
 # celui-ci. Vide par défaut : un déploiement de travail ne fabrique pas d'humain, les personnes
 # s'enrôlent par la page d'inscription. Un banc le nomme (`bench-up.sh`, `install.sh --bench`).
 BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
 # Les deux projections de catalogue lisent le compte système ici ; le contrat
-# `forge.system_account_single_source` tient ce défaut d'accord avec `Fleet.Credentials.ForgeIdentity`.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
+# `forge.system_account_single_source` tient le FAIT d'accord avec `Fleet.Credentials.ForgeIdentity`.
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
 # L'org SYSTEME : l'identite (team `humans`) et le depot du systeme (`_ops`). Les projets vivent
-# dans l'org de leur catalogue. Meme defaut que `system_org` de la recette, `LCARS_FORGE_ORG` du
-# protocole et `PROV_FORGE_ORG_DEFAULT` de l'installeur — un mur bats tient les quatre d'accord.
-SYSTEM_ORG="${LCARS_FORGE_ORG:-lcars}"
+# dans l'org de leur catalogue.
+SYSTEM_ORG="$LCARS_FORGE_ORG"
 # La team des APPROBATEURS de `tool_request`. La recette la declare (`local.approvers_team` de
 # `forge-recipe/forge.tf`) et la nomme dans ses protections ; ce geste la COMPOSE (`derive_admins`).
 # Deux ecritures d'un meme nom derivent : un mur bats les tient d'accord.
 APPROVERS_TEAM="admins"
 # Le détenteur des secrets de forge : le compte que `put_secret` pose sur ce qu'il écrit, le seul qui
 # ouvrira ces fichiers (`PROV_AUTHORITY_USER` de `deploy/installer-constants.env` sur un poste).
-AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
-# Le groupe qui TRAVERSE `/opt/lcars/var/tokens` — jamais celui qui lit. Meme defaut que partout ailleurs
+AUTHORITY_USER="$LCARS_AUTHORITY_USER"
+# Le groupe qui TRAVERSE le repertoire des jetons — jamais celui qui lit. Le meme fait que partout ailleurs
 # dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
 # et la table diraient deux choses differentes du meme objet.
-FLEET_GROUP="${LCARS_FLEET_GROUP:-fleet}"
+FLEET_GROUP="$LCARS_FLEET_GROUP"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 # ⚠ NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des jetons de ROLE
 # (`<login>.gitea_token`, plus bas). Le premier lecteur qui globbera ce repertoire ne doit pas
@@ -94,7 +97,7 @@ _lcars_cli() {
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
   if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for cand in "${LCARS_LINK_DIR:-/usr/local/bin}/lcars" "$here/../bin/lcars"; do
+  for cand in "$LCARS_LINK_DIR/lcars" "$here/../bin/lcars"; do
     [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
   done
   return 0
@@ -105,7 +108,7 @@ tool() { bash "$LCARS_CLI" tool "$@"; }
 need_cli() {
   [[ -n "$LCARS_CLI" && -r "$LCARS_CLI" ]] && return 0
   local vu="$LCARS_CLI"
-  [[ -n "$vu" ]] || vu="ni « lcars » sur le PATH, ni ${LCARS_LINK_DIR:-/usr/local/bin}/lcars, ni $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/lcars"
+  [[ -n "$vu" ]] || vu="ni « lcars » sur le PATH, ni $LCARS_LINK_DIR/lcars, ni $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bin/lcars"
   die "portes outil du release introuvables ($vu).
   Ce script les appelle pour résoudre, vérifier et enrôler un catalogue (« lcars tool … »). Sur un
   poste, « deploy/workstation up » pose la CLI ; dans un conteneur, l'image la porte.
@@ -615,7 +618,7 @@ seed_system_project() { # $1=jeton master  $2=org du catalogue embarque
 #
 # ⚠ REPOSEE A CHAQUE APPLY, en force-push : un admin qui l'edite en place perd ses modifications.
 # NON FATAL — une demo qui ne part pas est une demo absente, pas un deploiement casse.
-DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"
+DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-$LCARS_CATALOGUES_SHIPPED/web-demo}"
 
 # ─── LA REFERENCE, DEPOSEE AU MEME ENDROIT ──────────────────────────────────────────────────────
 # Elle vit DANS LE RELEASE et n'a jamais eu besoin de la forge pour tourner : ce qu'elle gagne a y
@@ -958,7 +961,7 @@ cmd_install() {
     echo "forge-gestures: $name installe (org, comptes, teams, sa source sur $STORE_FULL:$name, materiel pose)"
   else
     # la forge porte l'installation, mais cette machine ne sert pas encore le catalogue : ce n'est pas un succes
-    die "install: $name est posé sur la forge (org, comptes, source sur $STORE_FULL:$name), mais son matériel local n'a pas pu être posé dans ${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues} (cause au-dessus) — tant qu'il manque, ses projets naissent du squelette du catalogue livré. Il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »"
+    die "install: $name est posé sur la forge (org, comptes, source sur $STORE_FULL:$name), mais son matériel local n'a pas pu être posé dans $LCARS_CATALOGUES_DIR (cause au-dessus) — tant qu'il manque, ses projets naissent du squelette du catalogue livré. Il se repose au prochain démarrage du conteneur, ou sur un poste par « deploy/workstation up »"
   fi
 }
 
@@ -970,7 +973,7 @@ cmd_install() {
 # `local a="$1" b="/base/$a"` le `$a` n'est pas celui qu'on vient d'ecrire — `b` vaut `/base/`.
 install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
   local name="$1"
-  local dir="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}/$name"
+  local dir="$LCARS_CATALOGUES_DIR/$name"
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
   GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 --branch "$name" \

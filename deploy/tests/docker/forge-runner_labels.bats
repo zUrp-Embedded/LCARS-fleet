@@ -17,6 +17,8 @@ setup() {
   mkdir -p "$BATS_TEST_TMPDIR/arbre/deploy/docker" "$BATS_TEST_TMPDIR/arbre/deploy/lib"
   cp "$vrai/docker/forge-runner.sh" "$vrai/docker/runner-compose.yml" "$vrai/docker/runner-network.yml" "$BATS_TEST_TMPDIR/arbre/deploy/docker/"
   cp "$vrai/lib/provision-lib.sh" "$vrai/lib/docker-endpoint.sh" "$BATS_TEST_TMPDIR/arbre/deploy/lib/"
+  # ⚖ décision 3 : les faits du produit ne sont pas dans cet arbre — on les lui NOMME.
+  export PROV_PRODUCT_FACTS_FILE="$vrai/../runtime/etc/facts.env"
   { grep -v '^PROV_RUNNER_LABELS=' "$vrai/installer-constants.env"; echo 'PROV_RUNNER_LABELS=shell:docker://alpine:temoin'; } \
     > "$BATS_TEST_TMPDIR/arbre/deploy/installer-constants.env"
   SRC="$BATS_TEST_TMPDIR/arbre/deploy/docker/forge-runner.sh"

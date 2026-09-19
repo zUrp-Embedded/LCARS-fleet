@@ -19,7 +19,8 @@ end
 # Share the Forge account between API calls and git push credentials. FORGE_BOT_LOGIN
 # is the launcher-provided fallback; LCARS_SYSTEM_ACCOUNT belongs to provisioning.
 forge_push_account =
-  System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") || "system_starfleet"
+  System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") ||
+    Fleet.Facts.get!("LCARS_SYSTEM_ACCOUNT")
 
 # Eval tools need Forge API configuration too. Account tokens are requested on use;
 # an explicitly supplied FORGE_TOKEN remains a literal token in Application config.
@@ -41,9 +42,10 @@ end
 
 # The system org carries the fleet's identity and the system's own repositories (`_ops`, the
 # catalogue store `_catalogues`): the machine names it (services.env, loaded by bin/fleet), and an
-# org the installer renamed takes its repositories along. The literal is the same default as the
-# shell protocol's — MUR 19 holds them equal.
-system_org = System.get_env("LCARS_FORGE_ORG", "lcars")
+# org the installer renamed takes its repositories along. ⚖ Decision 3: the literal is NOT written
+# here any more. It is a machine fact, read from `etc/facts.env` by Fleet.Facts — the same file the
+# shell protocol and the Python services read, so MUR 19 has one source to hold instead of four.
+system_org = Fleet.Facts.get!("LCARS_FORGE_ORG")
 
 config :lcars_fleet,
   catalogue_system_org: system_org,

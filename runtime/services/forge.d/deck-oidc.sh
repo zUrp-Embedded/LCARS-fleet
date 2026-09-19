@@ -16,7 +16,7 @@ set -euo pipefail
 
 APP_NAME="lcars-deck"
 TOKEN_FILE="$LCARS_SYSTEM_TOKEN_FILE"
-OIDC_GROUP="${LCARS_SYSTEM_GROUP:-${LCARS_SYSTEM_USER:-lcars-system}}"
+OIDC_GROUP="$LCARS_SYSTEM_GROUP"
 
 callback_uris() {
   # DEUX ECRITURES DE LA LOOPBACK, PARCE QU'OAUTH2 COMPARE DES CHAINES. `localhost` et `127.0.0.1`
@@ -26,7 +26,7 @@ callback_uris() {
   # entre par l'autre, APRES son identification (mesure du 2026-08-18).
   local out="http://127.0.0.1:$LCARS_LANDING_PORT/auth/callback http://localhost:$LCARS_LANDING_PORT/auth/callback" o u
 
-  advertise_addr "${LCARS_DECK_BIND:-0.0.0.0}"
+  advertise_addr "$LCARS_DECK_BIND"
   if [[ -z "$LCARS_ADVERTISE_WHY" && -n "$LCARS_ADVERTISE" ]]; then
     u="http://$LCARS_ADVERTISE:$LCARS_LANDING_PORT/auth/callback"
     case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac

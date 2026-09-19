@@ -111,12 +111,13 @@ EOF
   [ ! -s "$CALLS" ]
 }
 
-@test "le défaut du fichier est le répertoire des jetons de l'installation, celui que l'init du conteneur écrit" {
-  # Une session ssh ne porte pas LCARS_PRIVATE_DIR : le défaut de list.sh et celui du protocole des
-  # modules (que l'init applique) doivent désigner le même dossier.
-  local defaut_list defaut_protocole
-  defaut_list="$(sed -n 's|^FORGE_URL_FILE="\${LCARS_PRIVATE_DIR:-\([^}]*\)}/forge.url"$|\1|p' "$LIST")"
-  defaut_protocole="$(sed -n 's|^: "\${LCARS_PRIVATE_DIR:=\([^}]*\)}"$|\1|p' "$BATS_TEST_DIRNAME/../../../../../services/lib/module-protocol.sh")"
-  [ -n "$defaut_list" ]
-  [ "$defaut_list" = "$defaut_protocole" ]
+@test "le répertoire des jetons n'est plus un défaut de ce skill : c'est LE FAIT de la machine" {
+  # Une session ssh ne porte pas LCARS_PRIVATE_DIR. ⚖ Décision 3 : le skill ne s'en écrit plus un
+  # défaut — il SOURCE `services/lib/facts.sh`, le même lecteur que le protocole des modules, donc
+  # le même dossier par construction. Ce qui se mesure ici est cette lecture, et le fait derrière.
+  local racine="$BATS_TEST_DIRNAME/../../../../.."
+  grep -q 'FORGE_URL_FILE="\$LCARS_PRIVATE_DIR/forge.url"' "$LIST"
+  grep -q 'facts\.sh' "$LIST"
+  refute grep -q 'LCARS_PRIVATE_DIR:-' "$LIST"
+  [ -n "$(sed -n 's|^LCARS_PRIVATE_DIR=||p' "$racine/etc/facts.env")" ]
 }

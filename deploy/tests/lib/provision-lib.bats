@@ -1395,3 +1395,48 @@ forge_adresse() { module_sh 'echo "$PROV_FORGE_DU_POSTE|$PROV_FORGE_URL|$PROV_FO
   [ "$status" -eq 0 ]
   [ "$output" = "0||" ]
 }
+
+# ─── LES FAITS DU PRODUIT (⚖ décision 3) ────────────────────────────────────────────────────────
+#
+# La lib LIT `runtime/etc/facts.env`, qui fait autorité, et refuse une constante qui en diverge. Le
+# fichier de constantes ne peut pas le référencer : `docker compose --env-file` et `env_field` le
+# lisent sans shell. Il reste donc un MIROIR — et un miroir se tient, sinon il ment à `compose`.
+
+@test "les faits du produit sont chargés dans leur propre tableau, pas en LCARS_*" {
+  module_sh '
+    [ "${PROV_FAITS[LCARS_FLEET_GROUP]}" = fleet ]
+    [ -z "${LCARS_FLEET_GROUP:-}" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "l'arbre tel qu'il est : aucune constante ne ment sur son fait" {
+  module_sh 'prov_refuse_faits_divergents'
+  [ "$status" -eq 0 ]
+}
+
+@test "une constante qui diverge de son fait est REFUSÉE, et la paire est nommée" {
+  module_sh 'PROV_FLEET_GROUP=flotte; prov_refuse_faits_divergents'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PROV_FLEET_GROUP=flotte"* ]]
+  [[ "$output" == *"LCARS_FLEET_GROUP=fleet"* ]]
+}
+
+@test "un fait disparu est REFUSÉ aussi — un miroir sans original n'est pas un accord" {
+  module_sh 'unset "PROV_FAITS[LCARS_HUMANS_TEAM]"; prov_refuse_faits_divergents'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"LCARS_HUMANS_TEAM absent"* ]]
+}
+
+@test "⚠ UN FICHIER DE FAITS ILLISIBLE NE TUE PAS AU SOURCING — l'arbre fautif est celui qu'on sonde" {
+  run bash -c "set -euo pipefail; PROV_PRODUCT_FACTS_FILE=/nexistepas source '$LIB'; echo \"lus=\$PROV_FAITS_LUS\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "lus=0" ]
+}
+
+@test "⚠ MAIS CE QUI POSE LE REFUSE, et le refus nomme le fichier cherché" {
+  run bash -c "set -euo pipefail; PROV_PRODUCT_FACTS_FILE=/nexistepas source '$LIB'; prov_refuse_faits_divergents"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"faits du produit illisibles"* ]]
+  [[ "$output" == *"/nexistepas"* ]]
+}

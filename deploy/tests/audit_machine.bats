@@ -20,6 +20,8 @@ setup() {
   mkdir -p "$sbx/lib" "$sbx/modules.d"
   cp "$src/provision" "$src/installer-constants.env" "$sbx/"
   cp "$src/lib/provision-lib.sh" "$src/lib/provision-audit.sh" "$src/lib/docker-endpoint.sh" "$sbx/lib/"
+  # ⚖ décision 3 : les faits du produit ne sont pas dans ce bac à sable — on les lui NOMME.
+  export PROV_PRODUCT_FACTS_FILE="$src/../runtime/etc/facts.env"
   printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: human\nexit 0\n' > "$sbx/modules.d/10-x.sh"
   RUNNER="$sbx/provision"
   MANIFEST="$sbx/system.manifest"

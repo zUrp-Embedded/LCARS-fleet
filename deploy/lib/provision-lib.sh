@@ -30,6 +30,93 @@ prov_load_constants "$PROV_CONSTANTS_FILE"
 prov_canon() { printf '%s' "${1#"${LCARS_DECOR_ROOT:-}"}"; }   # le chemin tel que le manifeste le déclare
 prov_decor() { printf '%s%s' "${LCARS_DECOR_ROOT:-}" "$1"; }    # un chemin système, sous le décor s'il y en a un
 
+# ─── LES FAITS DU PRODUIT, ET L'INSTALLEUR EST UN LECTEUR COMME LES AUTRES ───────────────────────
+#
+# ⚖ Décision 3 du plan runtime (R6). Un fait de la machine — le groupe `fleet`, l'org système, le
+# répertoire des jetons — s'écrit UNE fois, dans `runtime/etc/facts.env`, et quatre langages le
+# lisent : le shell du produit (`services/lib/facts.sh`), son Python (`lcars_facts.py`), son Elixir
+# (`Fleet.Facts`), et cette lib.
+#
+# ⚠ CE FICHIER-CI NE PEUT PAS DISPARAÎTRE POUR AUTANT : `installer-constants.env` est une DONNÉE que
+# `docker compose --env-file` et `env_field` lisent sans shell — elle ne peut référencer aucun autre
+# fichier. Les constantes qui portent un fait restent donc un MIROIR, et un miroir se tient : la
+# table ci-dessous les apparie, et `prov_refuse_faits_divergents` refuse la divergence AVANT qu'un
+# module ne pose quoi que ce soit. Le mur `facts.single_source` tient la même paire à la porte.
+#
+# Les faits vivent dans leur propre tableau : les y verser en `LCARS_*` écraserait les entrées de
+# l'OPÉRATEUR que cette lib lit sous ces noms (`LCARS_BUILTIN_HUMAN`, `LCARS_DECOR_ROOT`…).
+# Deux candidats : un checkout (`deploy/lib/../../runtime/etc`) et la copie posée sous la racine du
+# produit (`/opt/lcars/deploy/lib/../../etc`). Un appelant qui NOMME le fichier passe devant les
+# deux — c'est ce que font les témoins, et le même ordre que les trois autres lecteurs.
+# ⚠ DEUX NOMS, ET CE N'EST PAS UN DÉTAIL. `PROV_PRODUCT_FACTS_FILE` est l'ENTRÉE (ce que l'appelant
+# nomme) ; `PROV_FAITS_FICHIER` est le chemin RETENU, que la lib écrit. Hors mode POSIX, bash range
+# une assignation posée en préfixe d'un `source` (`VAR=x . lib`) dans un environnement TEMPORAIRE
+# qu'il défait au retour — y réécrire n'y survit pas. Le chemin retenu doit donc porter un autre nom,
+# sans quoi le premier lecteur meurt sur une variable non liée, loin de la cause (mesuré le 2026-09-19).
+PROV_FAITS_FICHIER="${PROV_PRODUCT_FACTS_FILE:-}"
+if [[ -z "$PROV_FAITS_FICHIER" ]]; then
+  PROV_FAITS_FICHIER="$_PROV_LIB_DIR/../../runtime/etc/facts.env"
+  [[ -r "$PROV_FAITS_FICHIER" ]] || PROV_FAITS_FICHIER="$_PROV_LIB_DIR/../../etc/facts.env"
+fi
+declare -A PROV_FAITS=()
+PROV_FAITS_LUS=0
+# ⚠ PAS DE REFUS AU SOURCING, ET C'EST LA MÊME RÈGLE QUE `prov_refuse_homonymes` : cette lib est
+# sourcée par tout ce qui LIT la machine (`doctor`, `list`, `mesure`, `accept`, `pack`), et un arbre
+# dont les faits manquent est exactement celui qu'on veut diagnostiquer. Le refus appartient à ce
+# qui POSE — `prov_refuse_faits_divergents`, que `deploy/provision apply` appelle avant tout module.
+# Rien ici ne DÉRIVE d'un fait : les constantes portent leurs valeurs, les faits servent à les VÉRIFIER.
+prov_load_facts() { # prov_load_facts <fichier> — mêmes règles que les constantes : donnée, jamais exécutée
+  local l k v
+  [[ -r "$1" ]] || return 0
+  PROV_FAITS_LUS=1
+  while IFS= read -r l || [[ -n "$l" ]]; do
+    k="${l%%=*}"; v="${l#*=}"
+    [[ "$k" != "$l" && "$k" =~ ^LCARS_[A-Z0-9_]*$ ]] || continue
+    [[ "$v" != /* ]] || v="${LCARS_DECOR_ROOT:-}$v"
+    PROV_FAITS["$k"]="$v"
+  done < "$1"
+}
+prov_load_facts "$PROV_FAITS_FICHIER"
+
+# la constante de l'installeur, puis le fait du produit qu'elle recopie
+PROV_FACT_MIRRORS=(
+  PROV_PREFIX=LCARS_PREFIX
+  PROV_LINK_DIR=LCARS_LINK_DIR
+  PROV_TOKENS_DIR=LCARS_PRIVATE_DIR
+  PROV_FLEET_GROUP=LCARS_FLEET_GROUP
+  PROV_CONSOLE_GROUP=LCARS_CONSOLE_GROUP
+  PROV_AUTHORITY_USER=LCARS_AUTHORITY_USER
+  PROV_SYSTEM_USER=LCARS_SYSTEM_USER
+  PROV_SYSTEM_ACCOUNT=LCARS_SYSTEM_ACCOUNT
+  PROV_HUMANS_TEAM=LCARS_HUMANS_TEAM
+  PROV_CATALOGUES_DIR=LCARS_CATALOGUES_DIR
+  PROV_DECK_OIDC_FILE=LCARS_DECK_OIDC_FILE
+  # les deux que l'opérateur peut régler : le miroir porte sur le DÉFAUT, pas sur son choix
+  PROV_FORGE_ORG_DEFAULT=LCARS_FORGE_ORG
+  PROV_DECK_PORT_DEFAULT=LCARS_LANDING_PORT
+)
+prov_refuse_faits_divergents() { # rc 1 et la paire nommée si une constante ment sur son fait
+  local p cst fait ecarts=()
+  if [[ "$PROV_FAITS_LUS" -eq 0 ]]; then
+    printf 'ÉCHEC : faits du produit illisibles (%s) — cet arbre ne porte pas `runtime/etc/facts.env`,\n' "$PROV_FAITS_FICHIER" >&2
+    printf '       donc rien ne dit que ce que l'"'"'installeur va poser est ce que le produit ira lire.\n' >&2
+    return 1
+  fi
+  for p in "${PROV_FACT_MIRRORS[@]}"; do
+    cst="${p%%=*}"; fait="${p#*=}"
+    [[ -v "PROV_FAITS[$fait]" ]] \
+      || { ecarts+=("$fait absent de $PROV_FAITS_FICHIER, alors que $cst le recopie"); continue; }
+    [[ "${!cst}" == "${PROV_FAITS[$fait]}" ]] \
+      || ecarts+=("$cst=${!cst} mais $fait=${PROV_FAITS[$fait]}")
+  done
+  [[ "${#ecarts[@]}" -eq 0 ]] && return 0
+  printf 'ÉCHEC : les constantes de l'"'"'installeur et les faits du produit ne disent pas la même chose (%d) :\n' "${#ecarts[@]}" >&2
+  printf '  · %s\n' "${ecarts[@]}" >&2
+  printf '       Le fait fait autorité (%s). Une constante qui en diverge fait poser à\n' "$PROV_FAITS_FICHIER" >&2
+  printf '       l'"'"'installeur un objet que le produit ira chercher ailleurs.\n' >&2
+  return 1
+}
+
 : "${PROV_FORGE_BASE:=$PROV_FORGE_BASE_DEFAULT}"
 : "${PROV_FORGE_ORG:=$PROV_FORGE_ORG_DEFAULT}"
 # le dépôt du système, dans l'org système : dérivé, jamais choisi à part (un choix à part diverge)
@@ -114,6 +201,10 @@ p_warn() { printf '%sWARN  %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2
 p_fail() { printf '%sFAIL  %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
 p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; exit 1; }
 
+# ⚠ `PROV_FACTS_FILE` N'EST PAS `PROV_PRODUCT_FACTS_FILE`, ET L'HOMONYMIE COÛTE CHER : celui-ci est
+# la MESURE du préflight, en ÉCRITURE, dont `deploy/provision` fixe le chemin ; l'autre est le
+# fichier de faits du PRODUIT, en lecture seule. Mesuré le 2026-09-19 : les nommer pareil a fait
+# écrire le préflight DANS `runtime/etc/facts.env`, qui a gagné quarante lignes de mesures.
 p_fact() { # p_fact <nom> <valeur…>
   [[ -n "${PROV_FACTS_FILE:-}" ]] || return 0
   printf '%s=%s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_FACTS_FILE" || true

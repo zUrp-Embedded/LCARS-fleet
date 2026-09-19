@@ -13,7 +13,13 @@ set -euo pipefail
 FOREGROUND=0
 [[ "${1:-}" == "--foreground" ]] && FOREGROUND=1
 
-PORT="${LCARS_LANDING_PORT:-20999}"
+# ⚖ Decision 3 : le port, le groupe de console et l'identite du deck sont des FAITS de la machine,
+# pas des litteraux de ce script. Ils se lisent, ils ne se recopient pas.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+PORT="$LCARS_LANDING_PORT"
 DECK_PY="${LCARS_CONSOLE_DECK:-/opt/lcars/console-deck.py}"
 
 say() { echo "[lcars-landing] $*"; }
@@ -23,13 +29,13 @@ command -v python3 >/dev/null || { echo "console-landing.sh: python3 absent de l
 
 # ⚠ ET SURTOUT PAS le groupe `fleet` : il porte deja la lecture de `/opt/lcars/runtime` et d'ailleurs.
 # Le reutiliser aurait ete plus rapide, et aurait accorde tout le reste par la meme occasion.
-CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
+CONSOLE_GROUP="$LCARS_CONSOLE_GROUP"
 getent group "$CONSOLE_GROUP" >/dev/null 2>&1 || {
   echo "console-landing.sh: groupe $CONSOLE_GROUP absent — le deck ne pourrait joindre aucune console" >&2
   exit 1
 }
 
-DECK_USER="${LCARS_DECK_USER:-lcars-system}"
+DECK_USER="${LCARS_DECK_USER:-$LCARS_SYSTEM_USER}"
 DECK_GROUP="${LCARS_DECK_GROUP:-$DECK_USER}"
 getent passwd "$DECK_USER" >/dev/null 2>&1 || {
   echo "console-landing.sh: compte $DECK_USER absent — le deck n'a pas d'identite a lui (« provision apply --only 21-service-accounts » le pose ; dans le conteneur, c'est l'image qui le porte)" >&2

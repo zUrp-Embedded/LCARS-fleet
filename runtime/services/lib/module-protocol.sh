@@ -30,34 +30,26 @@ LCARS_CHANGED=0
 : "${LCARS_DUMP_LINES:=40}"
 : "${LCARS_MODULE_MODE:=apply}"
 
-# ─── Les defauts que les modules lisent ────────────────────────────────────────────────────────
-: "${LCARS_PREFIX:=/opt/lcars/runtime}"
-: "${LCARS_LINK_DIR:=/usr/local/bin}"
-: "${LCARS_FLEET_GROUP:=fleet}"
-: "${LCARS_PRIVATE_DIR:=/opt/lcars/var/tokens}"
-: "${LCARS_AUTHORITY_USER:=lcars-authority}"
-: "${LCARS_SYSTEM_USER:=lcars-system}"
+# ─── Les faits, puis ce qui s'en derive ────────────────────────────────────────────────────────
+# ⚠ LES FAITS NE SONT PLUS ECRITS ICI : ils vivent dans `etc/facts.env`, que le Python, l'Elixir et
+# l'installeur lisent aussi (⚖ decision 3), et `lib/facts.sh` est l'unique lecteur du shell.
+# Ce qui suit se DERIVE d'un fait — une regle, pas un fait — et se derive donc chez le lecteur.
+# shellcheck source=facts.sh
+. "${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/facts.sh}"
+
 : "${LCARS_SYSTEM_GROUP:=$LCARS_SYSTEM_USER}"
-: "${LCARS_SYSTEM_ACCOUNT:=system_starfleet}"
 : "${LCARS_SYSTEM_TOKEN_FILE:=$LCARS_PRIVATE_DIR/$LCARS_SYSTEM_ACCOUNT.gitea_token}"
 : "${LCARS_MASTER_TOKEN_FILE:=$LCARS_PRIVATE_DIR/forge-master.token}"
 : "${LCARS_FORGE_SEED_FILE:=$LCARS_PRIVATE_DIR/forge-seed.pass}"
-: "${LCARS_FORGE_ORG:=lcars}"
 # Le depot du systeme vit dans l'org systeme : derive, pour qu'une org renommee par l'installeur
 # emmene son depot. L'installeur le transporte aussi (services.env) pour les daemons qui ne
 # sourcent pas ce protocole ; le runtime le lit dans `runtime.exs`.
 : "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/_ops}"
-: "${LCARS_HUMANS_TEAM:=humans}"
-: "${LCARS_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
-: "${LCARS_LEGACY_CATALOGUES_DIR:=/home/catalogues}"
 # L'adresse de la forge : celle de l'hote (`FORGE_BASE_URL`), sinon celle que l'install a gravee.
 # Vide reste vide — les modules lisent « pas de forge » et le disent, ils n'inventent pas.
 : "${FORGE_BASE_URL:=$(cat "$LCARS_PRIVATE_DIR/forge.url" 2>/dev/null || true)}"
 : "${FORGE_PUBLIC_URL:=$(cat "$LCARS_PRIVATE_DIR/forge.public.url" 2>/dev/null || true)}"
 : "${FORGE_PUBLIC_URL:=$FORGE_BASE_URL}"
-: "${LCARS_LANDING_PORT:=20999}"
-: "${LCARS_DECK_BIND:=0.0.0.0}"
-: "${LCARS_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${LCARS_DECK_ORIGINS:=}"
 
 # ─── Le vocabulaire ────────────────────────────────────────────────────────────────────────────

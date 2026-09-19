@@ -41,14 +41,17 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
 
 # bats test_tags=structure
 @test "le poste garde le defaut du protocole, celui des constantes — la, /etc persiste" {
+  # ⚖ decision 3 : le protocole n'ecrit plus ce chemin, il SOURCE le fait. Ce qui doit s'accorder
+  # avec la constante de l'installeur est donc `runtime/etc/facts.env`, pas un defaut de plus.
   local poste; poste="$(constante PROV_DECK_OIDC_FILE)"
   [ -n "$poste" ]
-  grep -qxF ": \"\${LCARS_DECK_OIDC_FILE:=$poste}\"" "$PROTO"
+  grep -qxF "LCARS_DECK_OIDC_FILE=$poste" "$DOCKER/../../runtime/etc/facts.env"
+  grep -q 'facts\.sh' "$PROTO"
 }
 
 # bats test_tags=structure
 @test "le deck LIT le fichier sous le MEME nom que le geste qui l'ecrit — un seul nom" {
-  grep -q 'os.environ.get("LCARS_DECK_OIDC_FILE"' "$DOCKER/../../runtime/services/console-deck.py"
+  grep -q 'lcars_facts.get("LCARS_DECK_OIDC_FILE"' "$DOCKER/../../runtime/services/console-deck.py"
   refute grep -q '"LCARS_DECK_OIDC"' "$DOCKER/../../runtime/services/console-deck.py"
   grep -q 'LCARS_DECK_OIDC_FILE' "$DOCKER/../../runtime/services/forge.d/deck-oidc.sh"
 }

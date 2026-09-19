@@ -49,6 +49,13 @@ resolu() { # le code qui pose, les constantes remplacées par leur valeur et « 
     [[ "$k" =~ ^PROV_[A-Z0-9_]+$ ]] || continue
     c="${c//\$\{$k\}/$v}"; c="${c//\$$k/$v}"
   done < <(sort -r "$BATS_TEST_DIRNAME/../../installer-constants.env")
+  # ⚖ décision 3 : le produit nomme ces chemins par leur FAIT (`runtime/etc/facts.env`) et non plus
+  # par un littéral recopié. Les faits se résolvent donc comme les constantes — sans quoi un objet
+  # de la table paraîtrait sans poseur alors que son poseur le nomme, mieux qu'avant.
+  while IFS='=' read -r k v; do
+    [[ "$k" =~ ^LCARS_[A-Z0-9_]+$ ]] || continue
+    c="${c//\$\{$k\}/$v}"; c="${c//\$$k/$v}"
+  done < <(sort -r "$BATS_TEST_DIRNAME/../../../runtime/etc/facts.env")
   sed -E 's/\$\(prov_decor "?([^")]*)"?\)/\1/g' <<<"$c"
 }
 

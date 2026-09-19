@@ -151,11 +151,16 @@ bash_code() {
       rompu=1
     }
   }
-  check runtime/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
-  check runtime/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check runtime/services/container/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail conteneur"
-  check runtime/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
-  check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
+  # ⚖ DECISION 3 (2026-09-19) : QUATRE copies du nombre ont disparu. Le lanceur, le serveur du deck,
+  # le pont du rail conteneur et le protocole des modules ecrivaient chacun « 20999 » ; ils LISENT
+  # le fait maintenant (`runtime/etc/facts.env`, un lecteur par langage). Ce qui se mesure ici est
+  # donc : le FAIT porte le nombre que l'installeur decide, et les lecteurs le lisent sans le
+  # reecrire. Une copie qui reviendrait serait prise par `facts.single_source`.
+  check runtime/etc/facts.env         "^LCARS_LANDING_PORT=$attendu\$"        "le fait de la machine"
+  check runtime/services/console-landing.sh   'PORT="\$LCARS_LANDING_PORT"'   "la lecture du lanceur"
+  check runtime/services/console-deck.py      'lcars_facts\.get\("LCARS_LANDING_PORT"\)' "la lecture du serveur"
+  check runtime/services/container/boot.sh    "^\s*export LCARS_LANDING_PORT\$" "le pont du rail conteneur"
+  check deploy/docker/Dockerfile      'facts\.sh;.*LCARS_LANDING_PORT'        "la sonde de sante"
   check deploy/docker/docker-compose.yml "\\\$\{PROV_DECK_PORT_DEFAULT:\?[^}]*\}\"$" "la publication du port, lue dans les constantes"
 
   [ "$rompu" -eq 0 ] || {
@@ -245,8 +250,11 @@ bash_code() {
     sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
       echo "MUR 6 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }
   }
-  need runtime/services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
-  need runtime/services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
+  # ⚖ DECISION 3 : les deux lanceurs ecrivaient chacun le nom ; ils LISENT le fait maintenant, qui
+  # le porte une fois. L'egalite mesuree reste la meme — entre l'installeur, le fait et le manifeste.
+  need runtime/etc/facts.env                "^LCARS_CONSOLE_GROUP=$nom\$"          "le fait de la machine"
+  need runtime/services/console.sh          'CONSOLE_GROUP="\$LCARS_CONSOLE_GROUP"' "la lecture du lanceur de console"
+  need runtime/services/console-landing.sh  'CONSOLE_GROUP="\$LCARS_CONSOLE_GROUP"' "la lecture du lanceur de deck"
   need deploy/system.manifest      "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans installer-constants.env." >&2; return 1; }
@@ -278,6 +286,12 @@ bash_code() {
       # posee par le daemon lui-meme (assignation dont la droite ne se relit pas) : pas une lecture
       if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" | sed "s/.*$v=//" | grep -qv "$v"; then continue; fi
       j="$(jumeau "$v")"; [ -n "$j" ] || continue
+      # ⚖ décision 3 : UN FAIT N'A PAS BESOIN DE TRANSPORT. Une constante qui n'est qu'un MIROIR
+      # d'un fait du produit (`PROV_FACT_MIRRORS`) n'est pas « décidée par l'installeur » : le
+      # daemon la lit lui-même dans `etc/facts.env`. Celles que l'opérateur peut régler gardent
+      # leur défaut dans la lib (`: "${PROV_X:=…}"`) et restent prises par la branche suivante.
+      grep -qE "^[[:space:]]*$j=LCARS_" "$lib" \
+        && ! grep -qE "^[[:space:]]*:[[:space:]]*\"\\\$\{$j:=" "$lib" && continue
       # décidée par l'installeur : un défaut de la lib, ou une constante qui n'est pas un chemin canonique (ceux-là s'accordent par les murs de chemins)
       grep -qE "^[[:space:]]*:[[:space:]]*\"\\\$\{$j:=|^$j=[^/]" "$lib" "$REPO/deploy/installer-constants.env" || continue
       decidees="$decidees$v\n"
@@ -454,9 +468,14 @@ PYX
   local rompu=0
   need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
       echo "MUR 13 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }; }
-  need13 runtime/services/forge.d/deck-oidc.sh "OIDC_GROUP=\"\\\$\{LCARS_SYSTEM_GROUP:-\\\$\{LCARS_SYSTEM_USER:-$nom\}\}\"" \
-                                     "le groupe du secret OIDC, dérivé du compte"
-  need13 runtime/services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
+  # ⚖ décision 3 : le nom s'écrit UNE fois côté produit, dans `etc/facts.env`. Le geste OIDC et le
+  # lanceur du deck le DÉRIVENT (groupe éponyme, identité du service) au lieu de le recopier.
+  need13 runtime/etc/facts.env "^LCARS_SYSTEM_USER=$nom\$"                                 "le fait de la machine"
+  need13 runtime/services/lib/module-protocol.sh 'LCARS_SYSTEM_GROUP:=\$LCARS_SYSTEM_USER\}' \
+                                     "le groupe éponyme, dérivé du compte"
+  need13 runtime/services/forge.d/deck-oidc.sh 'OIDC_GROUP="\$LCARS_SYSTEM_GROUP"' \
+                                     "le groupe du secret OIDC, lu du protocole"
+  need13 runtime/services/console-landing.sh 'LCARS_DECK_USER:-\$LCARS_SYSTEM_USER\}'      "l'identite sous laquelle le deck tourne"
   need13 deploy/system.manifest      "^anchor[[:space:]]+/etc/lcars/deck-oidc.json[[:space:]]+0640[[:space:]]+root:$nom" \
                                      "le proprietaire du secret OIDC"
   [ "$rompu" -eq 0 ] || return 1
@@ -689,30 +708,33 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     || { echo "MUR 18 rompu — 20-groups ne relie plus l'appartenance du siège à la traversée du dossier des jetons" >&2; return 1; }
 
   # 4. et c'est bien ce chemin que le skill lit — sinon les trois faits ci-dessus ne servent personne
-  grep -q 'LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens' "$REPO/runtime/services/admiral/skills/system-issues/list.sh" \
+  # ⚖ décision 3 : le skill ne recopie plus le chemin, il lit le FAIT (`etc/facts.env`, par
+  # `services/lib/facts.sh`). Ce qui se mesure reste le même : c'est bien LÀ qu'il va chercher.
+  grep -q 'FORGE_URL_FILE="\$LCARS_PRIVATE_DIR/forge.url"' "$REPO/runtime/services/admiral/skills/system-issues/list.sh" \
     || { echo "MUR 18 rompu — le skill du siège ne lit plus forge.url dans le dossier des jetons" >&2; return 1; }
+  grep -q '^LCARS_PRIVATE_DIR=/opt/lcars/var/tokens$' "$REPO/runtime/etc/facts.env" \
+    || { echo "MUR 18 rompu — le fait ne déclare plus le dossier des jetons que le manifeste pose" >&2; return 1; }
 }
 
-# ⚠ MUR 19 — L'ORG SYSTÈME A UN NOM, ÉCRIT HUIT FOIS. L'installeur le décide (`PROV_FORGE_ORG_DEFAULT`),
-# le protocole des gestes, les deux daemons python et le convergeur le lisent en `LCARS_FORGE_ORG` avec
-# un défaut, la recette le porte en `system_org`, le geste de forge en `SYSTEM_ORG`, et le dépôt système
-# (`Fleet.Toolchain.ops_repo/0`, ses copies shell) vit dans cette org. Aucun de ces lecteurs ne peut
-# dériver le nom d'un autre (un daemon en boucle ne source pas la lib de l'installeur ; tofu ne lit pas
-# l'env du produit), donc l'égalité se mesure. Une seule copie qui diverge, et la team `humans` ou le
-# dépôt `_ops` sont cherchés dans une org qui n'existe pas — sans qu'aucun message ne nomme la cause.
-@test "MUR 19: l'org système porte le même nom chez l'installeur, le protocole, la recette, le geste, les daemons et le dépôt système" {
+# ⚠ MUR 19 — L'ORG SYSTÈME A UN NOM. L'installeur le décide (`PROV_FORGE_ORG_DEFAULT`), la recette
+# le porte en `system_org`, `Fleet.Catalogue` en `@system_org_default`, et le dépôt système
+# (`Fleet.Toolchain.ops_repo/0`) vit dans cette org. Aucun de ces lecteurs ne peut dériver le nom
+# d'un autre (tofu ne lit pas l'env du produit), donc l'égalité se mesure. Une seule copie qui
+# diverge, et la team `humans` ou le dépôt `_ops` sont cherchés dans une org qui n'existe pas — sans
+# qu'aucun message ne nomme la cause.
+#
+# ⚖ DÉCISION 3 (2026-09-19) : il en restait HUIT, il en reste QUATRE. Le protocole des gestes, le
+# geste de forge, le convergeur d'humains, les deux daemons python et le runtime lisaient chacun
+# `LCARS_FORGE_ORG` avec SON défaut ; ils lisent maintenant LE FAIT (`runtime/etc/facts.env`, un
+# lecteur par langage). Ce mur tient la même propriété sur une population plus petite — et le mur
+# `facts.single_source` interdit qu'une septième copie revienne.
+@test "MUR 19: l'org système porte le même nom chez l'installeur, le fait du produit, la recette et le dépôt système" {
   local attendu; attendu="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
   [ -n "$attendu" ] || { echo "MUR 19 — PROV_FORGE_ORG_DEFAULT illisible dans installer-constants.env" >&2; return 1; }
 
   local -a lectures=(
-    "runtime/services/lib/module-protocol.sh|^: \"\\\${LCARS_FORGE_ORG:=\([^}]*\)}\"\$|le protocole des gestes"
-    "runtime/services/forge-gestures.sh|^SYSTEM_ORG=\"\\\${LCARS_FORGE_ORG:-\([^}]*\)}\"\$|le geste de forge"
-    "runtime/services/human-converger.sh|^ORG=\"\\\${LCARS_FORGE_ORG:-\([^}]*\)}\"\$|le convergeur d'humains"
-    "runtime/services/catalogue-executor.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|l'exécuteur de catalogue"
-    "runtime/services/console-deck.py|^FORGE_ORG = os.environ.get(\"LCARS_FORGE_ORG\", \"\([^\"]*\)\")\$|le deck"
+    "runtime/etc/facts.env|^LCARS_FORGE_ORG=\(.*\)\$|le fait de la machine, lu par le shell, le Python et l'Elixir"
     "runtime/lib/fleet/toolchain.ex|^  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, \"\([^/\"]*\)/[^\"]*\")\$|le dépôt système du runtime"
-    "runtime/services/admiral/skills/system-issues/list.sh|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le skill du siège"
-    "runtime/bin/lcars-toolchain-converge|^OPS_REPO=\"\\\${LCARS_OPS_REPO:-\([^/}]*\)/[^}]*}\"\$|le convergeur d'outillage"
   )
   local l f motif qui lu manque=""
   for l in "${lectures[@]}"; do
@@ -726,16 +748,33 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : Fleet.Catalogue ne déclare plus @system_org_default" >&2; return 1; }
   [ "$lu" = "$attendu" ] || manque="$manque\n  Fleet.Catalogue (runtime/lib/fleet/catalogue.ex) : « $lu », attendu « $attendu »"
 
-  # le runtime : hors de la table (sa ligne porte un « || » d'Elixir, que le séparateur mangerait)
-  lu="$(sed -n 's/.*System.get_env("LCARS_FORGE_ORG", "\([^"]*\)").*/\1/p' "$REPO/runtime/config/runtime.exs" | head -n1)"
-  [ -n "$lu" ] || { echo "MUR 19 — instrument cassé : runtime.exs ne dérive plus le dépôt du système de l'org" >&2; return 1; }
-  [ "$lu" = "$attendu" ] || manque="$manque\n  le runtime (runtime/config/runtime.exs) : « $lu », attendu « $attendu »"
+  # ⚖ décision 3 : le runtime, les deux daemons python et le geste de forge NE PORTENT PLUS de
+  # défaut — ils LISENT le fait. Ce qui se mesure ici n'est donc plus une valeur recopiée mais
+  # l'appel au lecteur : un site qui recommencerait à écrire un nom serait, lui, pris par
+  # `facts.single_source` (le mur du gate runtime).
+  local -a lecteurs=(
+    "runtime/config/runtime.exs|Fleet.Facts.get!(\"LCARS_FORGE_ORG\")|le runtime"
+    "runtime/services/console-deck.py|lcars_facts.get(\"LCARS_FORGE_ORG\")|le deck"
+    "runtime/services/catalogue-executor.py|lcars_facts.get(\"LCARS_FORGE_ORG\")|l'exécuteur de catalogue"
+    "runtime/services/forge-gestures.sh|SYSTEM_ORG=\"\$LCARS_FORGE_ORG\"|le geste de forge"
+    "runtime/services/human-converger.sh|ORG=\"\$LCARS_FORGE_ORG\"|le convergeur d'humains"
+  )
+  local appel
+  for l in "${lecteurs[@]}"; do
+    IFS='|' read -r f appel qui <<<"$l"
+    grep -qF "$appel" "$REPO/$f" \
+      || { echo "MUR 19 rompu — $qui ($f) ne lit plus le fait : « $appel » introuvable" >&2; return 1; }
+  done
 
-  # le geste ops-repo et le protocole DÉRIVENT le dépôt de l'org : une org renommée l'emmène
+  # les quatre DÉRIVATIONS du dépôt : une org renommée emmène son dépôt, dans les trois langages
   grep -q '^: "\${LCARS_OPS_REPO:=\${LCARS_FORGE_ORG}/_ops}"$' "$REPO/runtime/services/forge.d/ops-repo.sh" \
     || { echo "MUR 19 rompu — le geste ops-repo ne dérive plus le dépôt du système de l'org" >&2; return 1; }
   grep -q '^: "\${LCARS_OPS_REPO:=\${LCARS_FORGE_ORG}/_ops}"$' "$REPO/runtime/services/lib/module-protocol.sh" \
     || { echo "MUR 19 rompu — le protocole ne dérive plus le dépôt du système de l'org" >&2; return 1; }
+  grep -q 'LCARS_OPS_REPO:-\$LCARS_FORGE_ORG/_ops}' "$REPO/runtime/services/admiral/skills/system-issues/list.sh" \
+    || { echo "MUR 19 rompu — le skill du siège ne dérive plus le dépôt du système de l'org" >&2; return 1; }
+  grep -q 'LCARS_OPS_REPO:-\$LCARS_FORGE_ORG/_ops}' "$REPO/runtime/bin/lcars-toolchain-converge" \
+    || { echo "MUR 19 rompu — le convergeur d'outillage ne dérive plus le dépôt du système de l'org" >&2; return 1; }
   # la recette : le défaut de `system_org`, lu dans son bloc et pas ailleurs
   lu="$(awk '/^variable "system_org" \{/ { in_bloc = 1 } in_bloc && /^  default/ { gsub(/.*= *"|".*/, ""); print; exit }' \
         "$REPO/runtime/services/forge-recipe/forge.tf")"
@@ -746,14 +785,20 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # dérive en silence, et c'est la table qui aura tort — pas lui.
   local -a couverts=() detectes=()
   for l in "${lectures[@]}"; do IFS='|' read -r f _ _ <<<"$l"; couverts+=("$f"); done
-  couverts+=("runtime/config/runtime.exs" "runtime/lib/fleet/catalogue.ex")
+  couverts+=("runtime/lib/fleet/catalogue.ex")
+  # ⚖ décision 3 : la forme cherchée inclut `LCARS_FORGE_ORG=` en tête de ligne — c'est celle du
+  # FAIT, et la population serait vide sans elle. `services/lib/facts.sh` est le LECTEUR du
+  # fichier : il nomme la clef sans la déclarer, et son exclusion est nommée ici, pas devinée.
   while read -r f; do [ -n "$f" ] && detectes+=("$f"); done < <(
     grep -rnE --exclude-dir=_build --exclude-dir=deps --exclude-dir=.git --exclude-dir=tmp \
-         --exclude-dir=node_modules 'LCARS_FORGE_ORG(:[-=]|", ?")' "$REPO/runtime" "$REPO/deploy" 2>/dev/null \
+         --exclude-dir=node_modules 'LCARS_FORGE_ORG(:[-=]|", ?")|^LCARS_FORGE_ORG=' "$REPO/runtime" "$REPO/deploy" 2>/dev/null \
       | grep -vE '/tests?/|_test\.|\.bats:' | sed "s|^$REPO/||; s|:.*||" | sort -u
   )
-  [ "${#detectes[@]}" -ge 3 ] || {
-    echo "MUR 19 — ${#detectes[@]} déclarant(s) détecté(s) : l'instrument ne cherche plus la bonne forme" >&2
+  # ⚖ décision 3 : il n'en reste qu'UN, et c'est le but. Le seuil n'est plus « au moins trois » mais
+  # « au moins le fait » : une population vide voudrait dire que l'instrument a perdu sa forme, et
+  # un déclarant de plus que le fait est un doublon qui revient.
+  printf '%s\n' "${detectes[@]}" | grep -qxF "runtime/etc/facts.env" || {
+    echo "MUR 19 — instrument cassé : ${#detectes[@]} déclarant(s) détecté(s), et le FAIT n'en est pas" >&2
     return 1
   }
   local d nonvus=""
@@ -827,7 +872,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   humain="$(sed -n 's/^PROV_BENCH_HUMAN_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
   org="$(sed -n 's/^PROV_FORGE_ORG_DEFAULT=//p' "$REPO/deploy/installer-constants.env")"
   catalogue="$(sed -n 's/^PROV_BUNDLED_CATALOGUE=//p' "$REPO/deploy/installer-constants.env")"
-  compte="$(sed -n 's/^SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-\([^}]*\)}"$/\1/p' "$REPO/runtime/services/forge-gestures.sh")"
+  # ⚖ décision 3 : le compte système est un FAIT, lu par le geste de forge au lieu d'y être recopié
+  compte="$(sed -n 's/^LCARS_SYSTEM_ACCOUNT=//p' "$REPO/runtime/etc/facts.env")"
   [ -n "$humain" ] && [ -n "$org" ] && [ -n "$catalogue" ] && [ -n "$compte" ] \
     || { echo "MUR 23 — instrument cassé : humain « $humain », org « $org », catalogue « $catalogue », compte « $compte »" >&2; return 1; }
 

@@ -532,16 +532,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Compare Layout literals with CLI shell defaults and the installer constant, excluding env
+  # Compare Layout literals with the machine facts and the installer constant, excluding env
   # overrides. No deploy tree skips its mirror; a present tree with a missing anchor fails.
+  # ⚖ Decision 3: the shell half used to be `bin/lcars`'s own defaults. The CLI reads the facts
+  # file now, so what has to agree with Layout is the FACT, not a copy of it in a script.
   @doc false
   @spec check_catalogue_paths_locked(String.t()) :: Support.result()
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
-    cli = "bin/lcars"
+    facts = "etc/facts.env"
     constants = "../deploy/installer-constants.env"
     layout_src = read_or_empty(root, layout)
-    cli_src = read_or_empty(root, cli)
+    facts_src = read_or_empty(root, facts)
     constants_src = read_or_empty(root, constants)
 
     # Read declared path literals so this comparison does not depend on loaded runtime values.
@@ -564,7 +566,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     deploy? = File.dir?(Path.expand("../deploy", root))
 
     sources =
-      [{cli, &shell_default(cli_src, &1), expected || %{}}] ++
+      [{facts, &installer_constant(facts_src, &1), expected || %{}}] ++
         if deploy?,
           do: [{constants, &installer_constant(constants_src, &1), constants_expected(expected)}],
           else: []
@@ -584,9 +586,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
     measured_verdict("catalogue.install_paths_locked", %{
       remediation:
-        "make bin/lcars and deploy/installer-constants.env agree with Fleet.Layout (@platform_root, " <>
-          "@catalogues_dirname, @installed_catalogues_root) — provisioning that converges a " <>
-          "directory the runtime does not read reports every catalogue installed and serves none",
+        "make etc/facts.env and deploy/installer-constants.env agree with Fleet.Layout " <>
+          "(@platform_root, @catalogues_dirname, @installed_catalogues_root) — provisioning that " <>
+          "converges a directory the runtime does not read reports every catalogue installed and " <>
+          "serves none",
       broken:
         if(is_nil(expected),
           do: "#{layout}: a catalogue path attribute is gone or renamed"
@@ -600,7 +603,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
           ]
         ),
       note:
-        "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}" <>
+        "3 catalogue paths, one fact each, agreed between #{layout} and #{facts}" <>
           if(deploy?,
             do: " and #{constants}",
             else:
@@ -625,15 +628,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Shell assignment (:=) and fallback (:-) carry the same default value.
-  defp shell_default(source, var) do
-    case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
-      [_, default] -> default
-      nil -> nil
-    end
-  end
-
-  # La lib lit ce fichier comme une donnée : la valeur se compare telle qu'écrite, sans expansion.
+  # Une donnée `CLE=valeur` : `installer-constants.env` et `etc/facts.env` ont la MÊME forme, et se
+  # comparent telles qu'écrites, sans expansion — c'est ce qui fait qu'un lecteur n'a pas à parler shell.
   defp installer_constant(source, var) do
     case Regex.run(~r/^#{var}=(.*)$/m, source) do
       [_, value] -> value

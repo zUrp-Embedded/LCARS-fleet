@@ -33,7 +33,16 @@ set -euo pipefail
 STORE="${LCARS_STORE_ROOT:-}"
 [[ -n "$STORE" ]] \
   || { echo "lcars-toolchain-converge: LCARS_STORE_ROOT non posé — l'unité du geste le porte (depuis /etc/lcars/services.env) ; à la main, « LCARS_STORE_ROOT=<racine> » devant la commande" >&2; exit 1; }
-OPS_REPO="${LCARS_OPS_REPO:-lcars/_ops}"
+# ⚖ Decision 3 : l'org systeme est un FAIT, le depot du systeme une DERIVATION de ce fait — la meme
+# que celle du protocole des modules, pour qu'une org renommee emmene son depot.
+# ⚠ DEUX CANDIDATS, ET LE SECOND N'EST PAS UN OUBLI : ce geste est COPIE dans le PATH (pas lie), et
+# un poste y appelle aussi `bin/lcars` par un symlink. Le voisin resout le checkout, la racine du
+# produit resout la machine — la meme ancre que `boot.sh` pour le protocole des modules.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../services/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=../services/lib/facts.sh
+. "$FACTS_SH"
+OPS_REPO="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}"
 FORGE="${FORGE_BASE_URL:-}"
 # `FORGE_TOKEN` est une entree EXPLICITE posee sur l'unite, jamais un chemin que ce script irait
 # ouvrir : savoir OU trouver un secret, c'est deja avoir le droit de le lire.

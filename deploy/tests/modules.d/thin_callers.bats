@@ -24,9 +24,13 @@ setup() {
 # une racine de dépôt dont les gestes sont des doublures ; lib, modules et protocole sont les vrais
 racine_doublee() { # racine_doublee <corps du geste>
   ROOT="$BATS_TEST_TMPDIR/racine"
-  mkdir -p "$ROOT/deploy" "$ROOT/runtime/services/forge.d" "$ROOT/runtime/services/lib"
+  mkdir -p "$ROOT/deploy" "$ROOT/runtime/services/forge.d" "$ROOT/runtime/services/lib" "$ROOT/runtime/etc"
   cp -a "$DEPLOY/lib" "$DEPLOY/modules.d" "$DEPLOY/installer-constants.env" "$DEPLOY/system.manifest" "$ROOT/deploy/"
   cp "$DEPLOY/../runtime/services/lib/module-protocol.sh" "$ROOT/runtime/services/lib/"
+  # ⚖ décision 3 : le protocole SOURCE le lecteur des faits, et les faits vivent sous `runtime/etc`.
+  # Une racine doublée qui n'emporte que le protocole ferait mourir chaque geste au sourcing.
+  cp "$DEPLOY/../runtime/services/lib/facts.sh" "$ROOT/runtime/services/lib/"
+  cp "$DEPLOY/../runtime/etc/facts.env" "$ROOT/runtime/etc/"
   local c
   for c in "${CALLERS[@]}"; do
     printf '#!/usr/bin/env bash\nset -euo pipefail\n. "$LCARS_MODULE_PROTOCOL"\n%s\n' "$1" > "$ROOT/runtime/services/forge.d/${c#*:}.sh"

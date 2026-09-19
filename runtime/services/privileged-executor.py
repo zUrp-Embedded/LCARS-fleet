@@ -40,19 +40,24 @@ import urllib.request
 # rails, et c'est ce qui rend l'import valide sans installation.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'import
+import lcars_facts  # noqa: E402 -- meme raison : le lecteur des faits est pose a cote
 
 SOCKET_PATH = os.environ.get(
     "LCARS_TOOLCHAIN_SOCKET", "/run/lcars/privileged/toolchain.sock"
 )
 # ⚠ CETTE ACL BORNE QUI PEUT FRAPPER, ELLE N'AUTORISE RIEN : un membre du groupe ne gagne pas a
 # frapper ce qu'il n'obtiendrait en attendant le tick suivant du reconciliateur.
-SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
+SOCKET_GROUP = lcars_facts.get("LCARS_FLEET_GROUP")
 SOCKET_MODE = 0o660
 
 CONVERGE_BIN = os.environ.get(
     "LCARS_TOOLCHAIN_CONVERGE_BIN", "/usr/local/bin/lcars-toolchain-converge"
 )
-OPS_REPO = os.environ.get("LCARS_OPS_REPO", "lcars/_ops")
+# Le depot du systeme vit dans l'org systeme : une DERIVATION du fait, la meme des deux cotes du
+# rail — une org que l'installeur a renommee emmene son depot, sans qu'on la reecrive ici.
+OPS_REPO = os.environ.get(
+    "LCARS_OPS_REPO", "%s/_ops" % lcars_facts.get("LCARS_FORGE_ORG")
+)
 # ⚠ Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source` : reglable ici seulement, il ferait converger le conteneur sur une
 # branche pendant que les demandes atterrissent dans une autre.

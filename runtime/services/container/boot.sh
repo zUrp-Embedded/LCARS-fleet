@@ -61,6 +61,9 @@ LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
+# ⚖ Decision 3 : ce boot LANCE des modules (qui sourcent le protocole) mais n'en est pas un — il
+# lit donc les faits lui-meme, par le meme unique lecteur, au lieu de recopier leurs valeurs.
+FACTS_SH="${LCARS_FACTS_SH:-${MODULE_PROTOCOL%/*}/facts.sh}"
 # Un chemin en dur rend le bloc des gestes intestable, et un temoin qui ne peut pas le jouer ne dit
 # rien de ce qu'il fait quand un geste meurt.
 GESTES_DIR="${LCARS_FORGE_GESTURES_DIR:-/opt/lcars/services/forge.d}"
@@ -86,10 +89,12 @@ for _f in "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FI
     || say "verdict du boot precedent NON retire ($_f) — « container status » pourrait le lire comme l'etat present"
 done
 unset _f
-[[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
-  echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
+[[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" && -r "$FACTS_SH" ]] || {
+  echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL, $FACTS_SH) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
 }
+# shellcheck source=../lib/facts.sh
+. "$FACTS_SH"
 init_rc=0
 LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_RUN=1 \
   bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
@@ -277,7 +282,7 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
       while IFS= read -r _m; do
         [[ -n "$_m" ]] || continue
         is_fleet_human "$_m" && exit 0
-      done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+       done < <(getent group "$LCARS_FLEET_GROUP" | cut -d: -f4 | tr ',' '\n')
       exit 1 ) || pop_rc=$?
   fi
   case "$pop_rc" in 0) humans_rc=0 ;; 2) humans_rc=2 ;; esac
@@ -329,7 +334,7 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
     # `redirect_uris` OAuth2) et le deck lisent la même valeur dans ce conteneur. L'ENTRÉE publiée
     # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « container up » la traduit en
     # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
-    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
+    export LCARS_LANDING_PORT
     launch "home du conteneur (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"
@@ -343,7 +348,6 @@ fi
 # lit l'uid du pair que le noyau pose sur la socket, demande à la forge si ce login y porte
 # `is_admin`, et joue le geste. Séparer « prouver qui tu es » de « exécuter » est ce qui supprime le
 # groupe unix, sa projection, son cache et son rattrapage de dérive.
-LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
    && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
   # ⚠ `setpriv` PARCE QUE CE RAIL N'A PAS SYSTEMD. Sur le poste, `User=` de l'unite fait ce drop ;
@@ -366,7 +370,7 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # ⚠ ICI ET NULLE PART AILLEURS : sur docker, `prov_runtime_dirs` ne declare AUCUN dossier de
   # `/run/lcars`, precisement pour qu'il n'y ait jamais deux createurs. `install -d` ne repose pas
   # le mode d'un dossier existant, donc un desaccord entre deux poseurs serait SILENCIEUX.
-  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "${LCARS_FLEET_GROUP:-fleet}" /run/lcars/authority \
+  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "$LCARS_FLEET_GROUP" /run/lcars/authority \
     || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \

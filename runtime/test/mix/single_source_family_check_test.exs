@@ -114,15 +114,18 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       [
         {"runtime/services/forge.d/ops-repo.sh",
          ~s[: "${LCARS_OPS_REPO:=${LCARS_FORGE_ORG}/#{depot}}"\n]},
+        # ⚖ Decision 3 : les trois DERIVENT le depot de l'org, comme le geste — l'org est un fait,
+        # la moitie « depot » une regle. Plus aucune copie ne gele l'adresse entiere.
         {"runtime/services/admiral/skills/system-issues/list.sh",
-         ~s[R="${LCARS_OPS_REPO:-#{depot_nom}}"\n]},
-        {"runtime/bin/lcars-toolchain-converge", ~s[R="${LCARS_OPS_REPO:-#{depot_nom}}"\n]},
+         ~s[R="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/#{depot}}"\n]},
+        {"runtime/bin/lcars-toolchain-converge",
+         ~s[R="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/#{depot}}"\n]},
         {"runtime/services/privileged-executor.py",
-         ~s[r = os.environ.get("LCARS_OPS_REPO", "#{depot_nom}")\n]}
+         ~s[r = os.environ.get("LCARS_OPS_REPO", "%s/#{depot}" % lcars_facts.get("LCARS_FORGE_ORG"))\n]}
       ]
     end
 
-    test "les deux miroirs d'accord → vert" do
+    test "les quatre miroirs d'accord → vert" do
       root = depot([autorite_ops(@ops) | miroirs_ops(@ops)])
       assert %{status: :pass} = SingleSource.check_ops_repo_single_source(root)
     end
@@ -137,7 +140,8 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
           geste,
           skill,
           conv,
-          {rel, ~s[r = os.environ.get("LCARS_OPS_REPO", "lcars/autre")\n]}
+          {rel,
+           ~s[r = os.environ.get("LCARS_OPS_REPO", "%s/autre" % lcars_facts.get("LCARS_FORGE_ORG"))\n]}
         ])
 
       assert %{status: :fail, evidence: ev} = SingleSource.check_ops_repo_single_source(root)
@@ -172,25 +176,22 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
         {"runtime/lib/fleet/credentials/forge_identity.ex",
          "defmodule Fleet.Credentials.ForgeIdentity do\n  @system_name \"#{nom}\"\nend\n"}
 
+    # ⚖ Decision 3 : SIX replis shell ont disparu de cette liste (le convergeur, le geste de forge,
+    # le frappeur de jetons, le skill de l'amiral, la CLI, la reecriture de publication). Ils lisent
+    # le FAIT maintenant : il reste une declaration shell, `etc/facts.env`, au lieu de six a tenir
+    # egales. Ce qui est mesure ici n'a pas change de nature, seulement de population.
     defp miroirs_compte(nom, tf) do
       [
         {"runtime/services/forge-recipe/forge.tf", tf},
         {"deploy/installer-constants.env", "PROV_SYSTEM_ACCOUNT=#{nom}\n"},
         {"runtime/services/forge-recipe/provision-forge-charte.sh", ~s[m="#{nom}:avatar.png"\n]},
-        {"runtime/services/human-converger.sh", ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
-        {"runtime/services/forge-gestures.sh", ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
-        {"runtime/services/provision-role-tokens.sh", ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
-        {"runtime/services/admiral/skills/system-issues/list.sh",
-         ~s[A="${LCARS_SYSTEM_ACCOUNT:-#{nom}}"\n]},
-        {"runtime/bin/lcars", ~s[L="${FORGE_BOT_LOGIN:-#{nom}}"\n]},
-        {"runtime/bin/publish-transform.sh", ~s[E="${LCARS_SYSTEM_ACCOUNT:-#{nom}}@lcars"\n]},
-        {"runtime/config/runtime.exs", ~s[l = System.get_env("FORGE_BOT_LOGIN") || "#{nom}"\n]}
+        {"runtime/etc/facts.env", "LCARS_SYSTEM_ACCOUNT=#{nom}\n"}
       ]
     end
 
     @tf_sans_defaut ~s[variable "system_account" {\n  type = string\n}\n]
 
-    test "les dix miroirs d'accord, et la recette SANS defaut → vert" do
+    test "les quatre miroirs d'accord, et la recette SANS defaut → vert" do
       root = depot([identite(@compte) | miroirs_compte(@compte, @tf_sans_defaut)])
       assert %{status: :pass} = SingleSource.check_system_account_single_source(root)
     end
@@ -208,22 +209,21 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       assert note =~ "default"
     end
 
-    test "un miroir ordinaire qui a derive est nomme" do
+    test "un miroir ordinaire qui a derive est nomme — ici LE FAIT lui-meme" do
       [tf | reste] = miroirs_compte(@compte, @tf_sans_defaut)
-      [_bin_lcars_derive | _] = reste
 
       root =
         depot([
           identite(@compte),
           tf,
-          {"runtime/bin/lcars", ~s[L="${FORGE_BOT_LOGIN:-autre_compte}"\n]}
-          | Enum.reject(reste, fn {r, _} -> r == "runtime/bin/lcars" end)
+          {"runtime/etc/facts.env", "LCARS_SYSTEM_ACCOUNT=autre_compte\n"}
+          | Enum.reject(reste, fn {r, _} -> r == "runtime/etc/facts.env" end)
         ])
 
       assert %{status: :fail, note: note} =
                SingleSource.check_system_account_single_source(root)
 
-      assert note =~ "bin/lcars"
+      assert note =~ "etc/facts.env"
     end
 
     test "⚠ LA CONSTANTE DE L'INSTALLEUR QUI DERIVE est nommee — un defaut dans la lib n'en tient pas lieu" do
@@ -302,6 +302,115 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       root = depot([{"runtime/lib/a.ex", "defmodule A do\nend\n"}])
 
       assert %{status: :fail, evidence: [ev]} = SingleSource.check_config_single_default(root)
+      assert ev =~ "INSTRUMENT BROKEN"
+    end
+  end
+
+  describe "facts.single_source — un fait qui se redonne un defaut ailleurs" do
+    # ⚖ Decision 3. Le fichier de faits est l'autorite ; ce mur refuse le SECOND defaut, dans
+    # n'importe lequel des quatre langages. Une DERIVATION (`${K:-$AUTRE}`) reste legale : elle
+    # nomme une regle, pas un fait, et son propre mur la tient.
+    defp faits(contenu), do: {"runtime/etc/facts.env", contenu}
+
+    defp deux_faits,
+      do: faits("# les faits\nLCARS_FLEET_GROUP=fleet\nLCARS_FORGE_ORG=lcars\n")
+
+    test "aucun lecteur ne redonne de defaut → vert" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/geste.sh", ~s[G="$LCARS_FLEET_GROUP"\n]},
+          {"runtime/lib/fleet/x.ex",
+           ~s[defmodule X do\n  def g, do: Fleet.Facts.get!("LCARS_FLEET_GROUP")\nend\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_single_source(root)
+    end
+
+    test "un `${FAIT:-litteral}` dans le shell est nomme, avec sa ligne et sa clef" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/geste.sh", ~s[#!/bin/bash\nG="${LCARS_FLEET_GROUP:-fleet}"\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
+      assert ev =~ "services/geste.sh:2"
+      assert ev =~ "LCARS_FLEET_GROUP"
+    end
+
+    test "un `System.get_env(\"FAIT\", litteral)` en Elixir est nomme aussi" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/config/runtime.exs", ~s[org = System.get_env("LCARS_FORGE_ORG", "lcars")\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
+      assert ev =~ "LCARS_FORGE_ORG"
+    end
+
+    test "un `environ.get(\"FAIT\", litteral)` en Python est nomme aussi" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/x.py", ~s[G = os.environ.get("LCARS_FLEET_GROUP", "fleet")\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
+      assert ev =~ "LCARS_FLEET_GROUP"
+    end
+
+    test "L'ARBRE VOISIN EST DANS LA PORTEE, et sa preuve s'ecrit `../deploy/…`" do
+      root =
+        depot([
+          deux_faits(),
+          {"deploy/lib/x.sh", ~s[G="${LCARS_FLEET_GROUP:-fleet}"\n]}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
+      assert ev =~ "../deploy/lib/x.sh"
+    end
+
+    test "une DERIVATION reste legale : elle nomme une regle, pas un fait" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/geste.sh", ~s[R="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_single_source(root)
+    end
+
+    test "un defaut en COMMENTAIRE n'est pas un second defaut" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/geste.sh",
+           ~s[# jadis : G="${LCARS_FLEET_GROUP:-fleet}"\nG="$LCARS_FLEET_GROUP"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_single_source(root)
+    end
+
+    test "les DEUX lecteurs du fichier sont hors portee — ils le nomment par construction" do
+      root =
+        depot([
+          deux_faits(),
+          {"runtime/services/lib/facts.sh", ~s[G="${LCARS_FLEET_GROUP:-fleet}"\n]},
+          {"runtime/services/lcars_facts.py",
+           ~s[G = os.environ.get("LCARS_FLEET_GROUP", "fleet")\n]},
+          # un tiers dans la portee, sinon la mesure serait vide et le verdict « instrument casse »
+          {"runtime/services/geste.sh", ~s[G="$LCARS_FLEET_GROUP"\n]}
+        ])
+
+      assert %{status: :pass} = SingleSource.check_facts_single_source(root)
+    end
+
+    test "⚠ UN FICHIER DE FAITS VIDE → INSTRUMENT CASSE, jamais « aucun doublon »" do
+      root = depot([faits("# rien\n"), {"runtime/services/geste.sh", "vrai\n"}])
+
+      assert %{status: :fail, evidence: [ev]} = SingleSource.check_facts_single_source(root)
       assert ev =~ "INSTRUMENT BROKEN"
     end
   end

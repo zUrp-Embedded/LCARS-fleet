@@ -191,6 +191,11 @@ unset _mesure
 # et le journal en est un : une machine installée avant ce refus le rejouerait telle quelle.
 [[ "$CMD" != apply ]] || prov_refuse_homonymes || exit 1
 
+# Même règle pour les faits du produit : ce qui POSE refuse une constante qui ment sur son fait
+# (⚖ décision 3), ce qui LIT ne refuse rien. Un kit dont les deux fichiers ont divergé poserait des
+# objets que le produit irait chercher ailleurs, sans qu'aucun module ne rougisse.
+[[ "$CMD" != apply ]] || prov_refuse_faits_divergents || exit 1
+
 # l'uid du siège vient du compte qui a lancé le runner, jamais de --human
 if [[ -z "${LCARS_SYSADMIN_UID:-}" ]]; then
   _seat_login="${SUDO_USER:-$(id -un)}"

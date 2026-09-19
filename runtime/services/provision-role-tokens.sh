@@ -53,11 +53,15 @@
 set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
-# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `LCARS_PRIVATE_DIR` est la SSoT
-# (`provision-lib.sh`) ; un litteral ici serait un SECOND endroit qui decide ou vivent les jetons,
-# et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
-# operateur lance a la main hors du rail.
-TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
+# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `LCARS_PRIVATE_DIR` est un FAIT de la machine
+# (`etc/facts.env`, ⚖ decision 3) ; un litteral ici serait un SECOND endroit qui decide ou vivent
+# les jetons, et celui qui derive est toujours celui qu'on ne relit pas. Le fait se lit meme quand
+# un operateur lance ce script a la main, hors du rail — c'est justement pour ce cas-la qu'il existe.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+TOKENS_DIR="$LCARS_PRIVATE_DIR"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh LCARS_ROLES) — a partial
@@ -65,8 +69,8 @@ TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # check misses exactly that).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
-OWNER="${LCARS_AUTHORITY_USER:-lcars-authority}"
-DIR_GROUP="${LCARS_FLEET_GROUP:-fleet}"
+OWNER="$LCARS_AUTHORITY_USER"
+DIR_GROUP="$LCARS_FLEET_GROUP"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
 # ⚠ THE SYSTEM ACCOUNT'S SCOPES ARE WIDER THAN A ROLE'S, AND EACH ADDITION IS MEASURED:
@@ -80,7 +84,7 @@ SCOPES="write:repository,write:issue"
 #
 # Listing `read:user` too would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
 # `write:user` alone, which subsumes the read.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
 SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
 MASTER_TOKEN_FILE=""

@@ -20,6 +20,10 @@ setup() {
   mkdir -p "$SANDBOX/lib" "$SANDBOX/modules.d"
   cp "$SRC/provision" "$SRC/installer-constants.env" "$SRC/system.manifest" "$SANDBOX/"
   cp "$SRC/lib/provision-lib.sh" "$SRC/lib/provision-audit.sh" "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/"
+  # ⚖ décision 3 : la lib LIT les faits du produit et refuse au sourcing s'ils manquent. Un bac à
+  # sable qui ne copie que `deploy/` n'a pas l'arbre du produit : on lui NOMME le vrai fichier,
+  # comme un opérateur le ferait. La résolution des deux candidats est tenue ailleurs (provision-lib.bats).
+  export PROV_PRODUCT_FACTS_FILE="$SRC/../runtime/etc/facts.env"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
   # prov_lock_path exige un emplacement sûr : sans lui, tout apply refuse son verrou
