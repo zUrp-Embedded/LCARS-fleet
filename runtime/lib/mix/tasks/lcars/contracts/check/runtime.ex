@@ -1050,7 +1050,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
            |> Enum.sort()
            |> Enum.map(&"#{rel}: #{&1}")) ++
             face_token(rel, bodies, :init_face, ~s("-t"), "track a single branch (remote add -t)") ++
-            face_token(rel, bodies, :set_origin, "remote.origin.fetch", "narrow the face refspec"),
+            refspec_ecrit(rel, bodies),
         note: "#{map_size(bodies)} function(s) read in #{rel}"
       })
     else
@@ -1076,6 +1076,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   defp face_def_body(_), do: nil
+
+  # ⚠ LE RESSERRAGE EST UN FAIT DU FICHIER, PAS D'UNE FONCTION NOMMEE. Cette regle a d'abord vise le
+  # corps de `set_origin` ; elle a rougi le jour ou credo a demande d'en extraire une fonction
+  # (2026-09-19), alors que le contrat n'avait pas bouge d'un mot. Un mur qui epingle un decoupage
+  # interne refuse un refactor sans defaut. Ce qu'on exige tient en deux faits : la PORTE existe et
+  # accepte une branche, et le fichier ECRIT le refspec quelque part.
+  defp refspec_ecrit(rel, bodies) do
+    porte =
+      if Map.has_key?(bodies, :set_origin),
+        do: [],
+        else: ["#{rel}: set_origin NOT FOUND — this rule measures nothing"]
+
+    ecrit =
+      if bodies |> Map.values() |> Enum.any?(&String.contains?(&1, "remote.origin.fetch")),
+        do: [],
+        else: [
+          "#{rel}: nothing narrows the face refspec (`remote.origin.fetch` is never written)"
+        ]
+
+    porte ++ ecrit
+  end
 
   # An absent function is a BROKEN measure, never a silent pass: the rule would stop applying.
   defp face_token(rel, bodies, name, token, what) do

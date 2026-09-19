@@ -80,20 +80,57 @@ defmodule Fleet.Project.Onboard.Faces do
   @spec set_origin(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
   def set_origin(dir, url, branch \\ nil) do
     with :ok <- put_origin(dir, url) do
-      if branch do
-        GitOps.run(
-          [
-            "-C",
-            dir,
-            "config",
-            "remote.origin.fetch",
-            "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"
-          ],
-          auth: false
-        )
-      else
+      narrow_to(dir, branch)
+    end
+  end
+
+  defp narrow_to(_dir, nil), do: :ok
+
+  defp narrow_to(dir, branch) do
+    refspec = "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"
+
+    with :ok <-
+           GitOps.run(["-C", dir, "config", "remote.origin.fetch", refspec], auth: false) do
+      drop_foreign_tracking(dir, branch)
+    end
+  end
+
+  # ⚠ REPOINTER `origin` CHANGE DE MONDE, ET LES REFS DE L'ANCIEN SURVIVENT. Mesure du 2026-09-19
+  # sur le banc 2005 : la face du projet du systeme suivait `origin/passe16/deploy-assaini` — la
+  # branche de l'arbre de l'operateur, que la forge ne porte PAS — et n'avait pas `origin/main`,
+  # qu'elle porte. Le refspec resserre empeche d'en creer d'autres ; il n'efface pas les anciennes.
+  # Une face qui dit de sa forge ce qui est faux egare la premiere lecture qui s'y fie.
+  #
+  # Effacement LOCAL (`update-ref -d`), jamais un `remote prune` : aucune question n'est posee a la
+  # forge, et rien n'est supprime chez elle.
+  defp drop_foreign_tracking(dir, branch) do
+    garde = "refs/remotes/origin/#{branch}"
+
+    case GitOps.read(
+           ["-C", dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin"],
+           auth: false
+         ) do
+      {:ok, sortie} ->
+        sortie
+        |> String.split("\n", trim: true)
+        |> Enum.reject(&(&1 == garde))
+        |> Enum.reduce_while(:ok, &supprime_ref(dir, &1, &2))
+
+      # Un depot sans refs distantes n'a rien a elaguer : `for-each-ref` ne rend rien, et un refus
+      # de lecture ne doit pas faire echouer la pose de l'origin qui, elle, a reussi.
+      {:error, _} ->
         :ok
-      end
+    end
+  end
+
+  # ⚠ `--no-deref` N'EST PAS UNE PRECAUTION, C'EST LE CONTRAT. `origin/HEAD` est un symref vers
+  # `origin/<defaut>` ; sans ce drapeau, `update-ref -d` suit le lien et efface LA CIBLE — donc la
+  # seule ref qu'on voulait garder. Mesure du 2026-09-19 : le temoin a rendu une face sans aucune
+  # ref distante la ou elle devait en garder une.
+  defp supprime_ref(dir, ref, :ok) do
+    case GitOps.run(["-C", dir, "update-ref", "--no-deref", "-d", ref], auth: false) do
+      :ok -> {:cont, :ok}
+      {:error, _} = err -> {:halt, err}
     end
   end
 

@@ -136,6 +136,48 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert Enum.any?(result.evidence, &(&1 =~ "set_origin NOT FOUND"))
     end
 
+    # La règle vise le FICHIER, pas le découpage : elle a rougi le 2026-09-19 sur un refactor demandé
+    # par credo, alors que le contrat n'avait pas bougé. Ce qu'elle exige, c'est que quelqu'un écrive
+    # le refspec — peu importe quelle fonction privée le fait.
+    test "le resserrage sorti dans une fonction privée reste conforme" do
+      corps = """
+      defmodule Fleet.Project.Onboard.Faces do
+        def clone_main(url, dir) do
+          GitOps.run(["clone", "--single-branch", "--branch", "main", url, dir], auth: true)
+        end
+
+        def init_face(dir, url, branch) do
+          GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
+        end
+
+        def set_origin(dir, url, branch), do: narrow_to(dir, branch)
+
+        defp narrow_to(dir, b) do
+          GitOps.run(["-C", dir, "config", "remote.origin.fetch", b], auth: false)
+        end
+      end
+      """
+
+      root = faces_root!("extrait", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "PERSONNE n'écrit le refspec → fail nommé" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace("remote.origin.fetch", "remote.origin.url")
+
+      root = faces_root!("sans-refspec", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "nothing narrows the face refspec"))
+    end
+
     test "source ABSENTE → INSTRUMENT BROKEN, pas un pass" do
       root = faces_root!("vide", nil)
 

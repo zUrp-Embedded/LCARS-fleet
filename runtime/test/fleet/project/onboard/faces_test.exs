@@ -189,6 +189,42 @@ defmodule Fleet.Project.Onboard.FacesTest do
       assert fetch_refspec(wide) == "+refs/heads/main:refs/remotes/origin/main"
     end
 
+    # ⚠ REPOINTER `origin` CHANGE DE MONDE. Mesure du 2026-09-19, banc 2005 : la face du projet du
+    # systeme suivait `origin/passe16/deploy-assaini`, une branche que la forge ne porte pas, et
+    # n'avait pas `origin/main`, qu'elle porte. Le refspec resserre empeche d'en creer d'autres ; il
+    # n'efface pas les anciennes.
+    test "les refs de l'ANCIEN monde s'effacent : une face ne ment pas sur sa forge", %{
+      tmp_dir: tmp
+    } do
+      src = forge_repo!(tmp)
+      face = Path.join([tmp, "projects", "repointee"])
+      {_, 0} = System.cmd("git", ["clone", "-q", src, face], stderr_to_stdout: true)
+
+      # Le clone de l'arbre d'origine a pose SES branches en suivi : trois mondes de trop.
+      assert "origin/ops" in remote_branches(face)
+      assert "origin/workshop" in remote_branches(face)
+
+      assert :ok = Faces.set_origin(face, "http://forge.example/fleet/repointee.git", "main")
+
+      assert fetch_refspec(face) == "+refs/heads/main:refs/remotes/origin/main"
+      assert remote_branches(face) == ["origin/main"]
+      # `origin/HEAD` designait l'ancien monde lui aussi : il part avec les autres.
+      assert git!(face, ["for-each-ref", "--format=%(refname)", "refs/remotes/origin"]) ==
+               "refs/remotes/origin/main"
+    end
+
+    test "aucune ref distante : rien a elaguer, et la pose de l'origin reussit quand meme", %{
+      tmp_dir: tmp
+    } do
+      dir = Path.join([tmp, "projects", "neuve"])
+      File.mkdir_p!(dir)
+      {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", dir], stderr_to_stdout: true)
+
+      assert :ok = Faces.set_origin(dir, "http://forge.example/fleet/neuve.git", "main")
+      assert fetch_refspec(dir) == "+refs/heads/main:refs/remotes/origin/main"
+      assert remote_branches(dir) == []
+    end
+
     test "WITHOUT a branch the refspec is left alone: the import scratch pushes three", %{
       tmp_dir: tmp
     } do
