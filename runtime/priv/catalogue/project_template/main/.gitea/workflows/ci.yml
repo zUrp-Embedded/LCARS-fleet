@@ -28,9 +28,25 @@ name: CI
 # version du head). Corriger ce fichier DANS ta branche et repousser suffit : la PR se débloque
 # elle-même. Il n'y a rien à merger d'abord, rien à sortir de la PR, et pas de chicken-egg.
 #
-# TU CHANGES D'IMAGE ? Mets le nom que tu veux sur `container:`. TU EN VEUX UNE PLUS PETITE pour un
-# projet mono-langage (ex. `python:3-slim`) ? Vérifie qu'elle porte node si tu gardes `checkout` —
-# sinon repli : `container:` sur une image qui l'a, ou `git clone` manuel avec le token du job.
+# ⚠ IL TE MANQUE UN LANGAGE ? UNE ACTION DE SETUP, COMME TOUT LE MONDE. C'est le mécanisme
+# standard des forges, et il marche ici : `uses:` se résout, et le job a du réseau. L'image porte
+# le socle (node, python3, bash, git) ; le reste se télécharge AU JOB, et la version que tu veux :
+#
+#     - uses: erlef/setup-beam@v1        # elixir/erlang    - uses: actions/setup-go@v5
+#     - uses: actions/setup-node@v4      # une autre node   - uses: actions/setup-java@v4
+#     - uses: actions/setup-python@v5    # une autre python - uses: dtolnay/rust-toolchain@stable
+#
+# Ajoute aussi `actions/cache@v4` si le téléchargement pèse : c'est le même geste que partout.
+#
+# ⚠ ET SURTOUT PAS LE RAIL D'OUTILLAGE (`tool_request`). Ce rail-là sert les PODS, qui tournent
+# sandboxés SANS sortie réseau : un agent ne peut rien télécharger, d'où un geste privilégié
+# approuvé par un humain. La CI, elle, a du réseau — elle télécharge. Demander une convergence
+# privilégiée pour un outil de CI, c'est payer une approbation humaine pour trois lignes de YAML,
+# et poser sur la machine un outil dont le job n'aurait de toute façon rien vu.
+#
+# TU CHANGES QUAND MÊME D'IMAGE ? Mets le nom que tu veux sur `container:` — pour un projet
+# mono-langage (ex. `python:3-slim`) c'est plus rapide qu'un setup. Vérifie qu'elle porte node si
+# tu gardes `checkout` — sinon repli : `git clone` manuel avec le token du job.
 
 on:
   push:

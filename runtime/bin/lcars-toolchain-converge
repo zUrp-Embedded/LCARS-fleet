@@ -4,6 +4,13 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO — l'UNIQUE geste privilegie du rail d'outillage : appliquer un manifeste deja signe
 #
+# ⚠ CE RAIL SERT LES PODS, PAS LA CI, et l'absence de lien vers le runner n'est PAS un manque.
+# Un pod tourne sandboxe, sa sortie reseau passe par un proxy d'egress : un agent ne peut rien
+# telecharger, d'ou un geste privilegie approuve par un humain. Un job de CI, lui, a du reseau — il
+# declare son outillage avec une action de setup (`erlef/setup-beam`, `actions/setup-*`), comme sur
+# toutes les forges. Ce script ne doit RIEN monter dans le runner : l'isolation du dind rootless
+# est un choix, et la reproduire ici paierait une approbation humaine pour trois lignes de YAML.
+#
 # Il n'interprete RIEN : il lit des champs TYPES d'un manifeste deja signe et joue des gabarits de
 # commande fixes. Aucun champ libre — `evidence` existe pour l'humain qui signe, pas pour ce script.
 #

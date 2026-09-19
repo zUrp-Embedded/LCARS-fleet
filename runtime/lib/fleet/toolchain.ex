@@ -6,6 +6,12 @@ defmodule Fleet.Toolchain do
   Callers open a PR containing the rendered manifest; human approval precedes reconciliation
   and privileged convergence. This module neither calls the forge nor installs tools.
 
+  ⚠ THIS RAIL SERVES PODS, NOT CI. A pod is sandboxed and reaches the network through an egress
+  proxy: an agent cannot download its own toolchain, which is why a privileged, human-approved
+  gesture exists at all. A CI job has network — it declares its toolchain with a setup action
+  (`erlef/setup-beam`, `actions/setup-*`), the way every forge does it. That the rail does not
+  reach the runner is the separation working, not a gap to close.
+
   `ecosystem` identifies the manifest; `evidence` explains the request to the human approver.
   MCP supplies the input schema, while `validate_form/1` separately requires one of apt
   (container packages), installer (SDK store), or sysroot (target tree). Combining forms
