@@ -320,6 +320,23 @@ defmodule Fleet.Pilot.StepDispatcherTest do
                StepDispatcher.dispatch_issue(payload, opts)
     end
 
+    # ⚠ SANS `:repo` DANS SES OPTS, UN PRODUCTEUR EST NE SANS DEPOT. `Spawner.pod_info/1` ne rend
+    # que `Keyword.get(data.opts, :repo)`, et c'est CE champ que les outils MCP lisent : sans lui,
+    # `request_toolchain` refuse en `:pod_repo_unbound`. Mesure du 2026-09-19, banc 2005 : le rail
+    # d'outillage n'avait jamais ete parcouru parce qu'il ne POUVAIT pas l'etre. Le depot voyageait
+    # bien jusqu'au dispatcher — il ne montait simplement pas dans le pod.
+    test "le pod nait LIE a son depot : `:repo` est dans ses opts" do
+      payload = eng_issue()
+
+      assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
+               StepDispatcher.dispatch_issue(payload, dispatch_opts())
+
+      assert_received {:spawned, "issue-42", spawn_opts}
+      assert spawn_opts[:repo] == "lordzurp/lcars-test"
+      # Le slug reste derive, il ne remplace pas le depot : deux faits, deux champs.
+      assert spawn_opts[:project_slug] == "lcars-test"
+    end
+
     test "resolved project → injected into spawn_opts (:project, F-03 pinned base_sha)" do
       payload = eng_issue()
 

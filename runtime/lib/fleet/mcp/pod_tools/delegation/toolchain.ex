@@ -50,13 +50,16 @@ defmodule Fleet.MCP.PodTools.Delegation.Toolchain do
         work_item_id: work_item.id
       )
 
-    # Retry may encounter an existing branch; this also ignores unrelated creation failures.
-    _ = forge.create_branch(repo, branch, base, [])
-
-    # PR body identifies the issue for reconciler draining even on close-without-merge.
-    # The issue label blocks dispatch; the comment adds human context and a PR marker.
-    # Label failure aborts the remaining steps; comment failure is logged and tolerated.
+    # ⚠ L'ADRESSE SE RESOUT AVANT QUE LA BRANCHE N'EXISTE. Elle ne demande rien a la forge — elle
+    # lit l'identite du pod et le numero du work-item — donc la faire passer d'abord ne coute rien
+    # et evite une branche que plus personne ne reclame : un refus laissait jusqu'ici un
+    # `tool_request-<id>` orphelin, sans manifeste ni PR (les `lcars/toolchain-*` de LCARS-beta).
     with {:ok, item_repo, item_issue} <- workitem_address(pod_id, work_item),
+         # Retry may encounter an existing branch; this also ignores unrelated creation failures.
+         _ = forge.create_branch(repo, branch, base, []),
+         # PR body identifies the issue for reconciler draining even on close-without-merge.
+         # The issue label blocks dispatch; the comment adds human context and a PR marker.
+         # Label failure aborts the remaining steps; comment failure is logged and tolerated.
          {:ok, _} <-
            forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
          {:ok, pr} <-
@@ -145,7 +148,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Toolchain do
   end
 
   # Derive the related repo from identity and number from issue_id, never request arguments.
-  # Unbound/unparseable addresses refuse after branch creation has already been attempted.
+  # Unbound/unparseable addresses refuse BEFORE the branch exists: nothing is left behind.
   defp workitem_address(pod_id, work_item) do
     with {:ok, %{repo: repo}} when is_binary(repo) and repo != "" <-
            Gate.resolve_identity(pod_id),

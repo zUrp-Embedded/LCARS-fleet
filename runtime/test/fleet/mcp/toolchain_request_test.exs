@@ -212,6 +212,22 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       refute_received {:put_file, _, _, _, _}
     end
 
+    # ⚠ UN REFUS NE LAISSE PLUS DE BRANCHE DERRIERE LUI. Mesure du 2026-09-19 sur le banc 2005 : la
+    # branche etait creee AVANT que l'adresse du work-item ne soit resolue, et un pod sans depot
+    # lie laissait un `tool_request-<id>` sans manifeste ni PR — les `lcars/toolchain-*` orphelines
+    # de LCARS-beta. L'adresse ne demande rien a la forge : la resoudre d'abord ne coute rien.
+    test "depot du pod NON lie : refus typé, et AUCUNE branche n'est creee" do
+      pod = "pod-sans-depot-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :pod_repo_unbound} = Toolchain.request_toolchain(req(), pod)
+
+      refute_received {:create_branch, _, _, _}
+      refute_received {:put_file, _, _, _, _}
+      refute_received {:open_pr, _, _, _, _, _}
+    end
+
     test "la séquence est branche -> fichier -> PR, et le fichier va sur la BRANCHE" do
       pod = "pod-sequence-#{System.unique_integer([:positive])}"
       item = enqueue!(pod)
