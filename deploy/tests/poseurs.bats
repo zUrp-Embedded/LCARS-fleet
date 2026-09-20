@@ -79,3 +79,75 @@ embarque() { sed -n "s/^$1=//p" "$DEPLOY/installer-constants.env" | tr ' ' '\n' 
     || { echo "lu sous product_tree mais PAS dans EMBEDDED :$manquants"; return 1; }
 }
 
+
+# ⚠ MUR : AUCUN PROPRIETAIRE N'EST UN LITTERAL DE SERVICE — LA GENERALISATION DE CELUI DU DESSUS
+#
+# Le temoin de `44-media` porte deja la phrase qui explique POURQUOI un mur textuel est necessaire
+# ici : « sous un decor tout appartient a qui le joue : le proprietaire ne se mesure pas, il se lit
+# dans le code ». Ce n'est pas une facon de parler. `prov_owner` rend le joueur du banc quoi qu'on
+# lui demande des que `LCARS_DECOR_ROOT` est pose, donc `prov_check_mode` compare le joueur au
+# joueur : LA MOITIE « PROPRIETAIRE » DE LA VERIFICATION EST TAUTOLOGIQUE DANS TOUT LE CORPUS DE
+# BANC, et `ensure_mode` ne pose jamais le proprietaire demande. Un module qui reclamerait
+# « lcars-systeme:flotte » au lieu de « lcars-system:fleet » passerait tous les bancs au vert.
+#
+# La compensation existait pour UN module sur la quinzaine de sites qui passent un proprietaire.
+# Celui-ci la porte a tous, et la propriete est celle que l'arbre tient deja (mesure du 2026-09-20,
+# quinze sites, aucun ecart) : un proprietaire est DERIVE — du manifeste, d'une constante, d'une
+# variable — ou c'est `root`, qui ne derive de rien et n'appartient a personne d'autre.
+#
+# ⚠ `root` EST LA SEULE EXCEPTION, ET ELLE EST STRUCTURELLE : aucune constante ne le declare parce
+# qu'il n'y a rien a declarer. Un nom de service, lui, est cree par l'installeur, nomme dans
+# `system.manifest`, et lu par le produit : trois endroits qui doivent dire la meme chose.
+
+# origine <fichier> <argument> — resout UN niveau : « $X » devient la droite de « X=… » du fichier
+_poseur_origine() {
+  local f="$1" a="$2" nom rhs
+  if [[ "$a" =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$ ]]; then
+    nom="${BASH_REMATCH[1]}"
+    rhs="$(sed -n "s/^${nom}=//p" "$f" | head -n1)"
+    [[ -z "$rhs" ]] || a="$rhs"
+  fi
+  printf '%s' "$a"
+}
+
+# reste <expression> — retire tout ce qui est DERIVE, et rend ce qui a ete ecrit en dur
+_poseur_reste() {
+  printf '%s' "$1" \
+    | sed -E 's/\$\(prov_manifest_owner[^)]*\)/root/g' \
+    | sed -E 's/\$\(prov_owner[[:space:]]*//g; s/\)//g' \
+    | sed -E 's/\$\{[^}]*\}//g' \
+    | sed -E 's/\$[A-Za-z_][A-Za-z0-9_]*//g' \
+    | tr -d "\"' ("
+}
+
+@test "MUR: tout proprietaire pose est DERIVE (manifeste, constante, variable) ou vaut root" {
+  local repo f arg src r sites=0 fautifs=""
+  repo="$(cd "$DEPLOY/.." && pwd)"
+
+  # ⚠ LE CHEMIN DE LA PREUVE SE LIT TEL QU'ON LE TAPE : `$MODS` vaut « …/tests/../modules.d », et
+  # une evidence en « deploy/tests/../modules.d/48-forge-host.sh » n'est retrouvable par personne.
+  for f in "$repo"/deploy/modules.d/*.sh "$repo"/runtime/services/container/*.sh "$repo"/runtime/services/*.sh \
+           "$repo"/runtime/services/forge.d/*.sh "$repo"/runtime/services/human.d/*.sh; do
+    [ -f "$f" ] || continue
+    while IFS= read -r arg; do
+      [ -n "$arg" ] || continue
+      sites=$((sites + 1))
+      src="$(_poseur_origine "$f" "$arg")"
+      r="$(_poseur_reste "$src")"
+      [[ "$r" =~ ^(root)?:?(root)?$ ]] || fautifs="$fautifs ${f#"$repo"/}:«$arg»"
+    done < <(sed 's/#.*//' "$f" \
+              | grep -oE '(ensure_dir|ensure_mode|write_atomic|prov_check_mode) "[^"]*" [0-9]{3,4} "[^"]*"' \
+              | sed -E 's/.* [0-9]+ "//; s/"$//')
+  done
+
+  [ -z "${fautifs// /}" ] || {
+    echo "proprietaire(s) ecrit(s) en dur :$fautifs" >&2
+    echo "→ un nom de service est cree par l'installeur, declare dans deploy/system.manifest et lu" >&2
+    echo "  par le produit : ecrit en dur ici, il derive sans que rien ne rougisse — SOUS UN DECOR" >&2
+    echo "  le proprietaire n'est PAS pose (prov_owner rend le joueur), donc aucun banc ne le voit." >&2
+    echo "  Le prendre de « prov_manifest_owner », d'une constante PROV_*/LCARS_*, ou dire root." >&2
+    return 1
+  }
+  # GARDE D'INSTRUMENT : sans population, ce mur serait vert en ne lisant rien.
+  [ "$sites" -ge 12 ] || { echo "MUR — seulement $sites site(s) lus : l'extraction ne trouve plus les poses" >&2; return 1; }
+}
