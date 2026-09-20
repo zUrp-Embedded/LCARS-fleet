@@ -1472,3 +1472,65 @@ forge_adresse() { module_sh 'echo "$PROV_FORGE_DU_POSTE|$PROV_FORGE_URL|$PROV_FO
   [[ "$output" == *"faits du produit illisibles"* ]]
   [[ "$output" == *"/nexistepas"* ]]
 }
+
+# ─── `prov_runner_ecart` : LA MESURE QUE LES DEUX RAILS POSENT ──────────────────────────────────
+#
+# ⚖ 2026-09-20. Un runner qui a derive ne tombe PAS en panne : il ne prend plus les jobs. Des labels
+# qui ne correspondent plus laissent la CI accepter du travail que rien ne sert — le mode de
+# defaillance le plus silencieux du rail. `49-forge-runner.sh` posait la question ; le doctor du
+# conteneur (`deploy/container status`) ne la posait PAS, donc un banc au runner derive se presentait
+# en bonne sante. La mesure vit desormais dans la lib, et les deux la jouent.
+
+_ecart_decor() { # _ecart_decor <url> <labels> — un faux docker qui rend l'env d'un runner
+  cat > "$DECOR_BIN/docker" <<SH
+#!/usr/bin/env bash
+[[ "\$*" == *"inspect"* ]] || exit 1
+printf 'GITEA_INSTANCE_URL=%s\nGITEA_RUNNER_LABELS=%s\n' '$1' '$2'
+SH
+  chmod +x "$DECOR_BIN/docker"
+}
+
+@test "prov_runner_ecart : conforme → rien, et le silence est la seule forme du vert" {
+  decor_pose
+  _ecart_decor "http://forge:3000" "ubuntu-latest:docker://x"
+  module_sh 'e="$(prov_runner_ecart bt-runner-act-1 "http://forge:3000" "ubuntu-latest:docker://x")"; [ -z "$e" ]'
+  [ "$status" -eq 0 ]
+}
+
+@test "prov_runner_ecart : des LABELS qui ont derive sont dits, avec l'attendu" {
+  decor_pose
+  _ecart_decor "http://forge:3000" "ubuntu-24.04:docker://x"
+  module_sh 'prov_runner_ecart bt-runner-act-1 "http://forge:3000" "ubuntu-latest:docker://x"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"porte les labels ubuntu-24.04:docker://x"* ]]
+  [[ "$output" == *"attendu ubuntu-latest:docker://x"* ]]
+}
+
+@test "prov_runner_ecart : une ADRESSE qu'un job n'atteint pas passe DEVANT les labels" {
+  decor_pose
+  _ecart_decor "http://127.0.0.1:3000" "autres:labels"
+  module_sh 'prov_runner_ecart bt-runner-act-1 "http://10.0.0.5:3000" "ubuntu-latest:docker://x"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"vise http://127.0.0.1:3000"* ]]
+  [[ "$output" == *"attendu http://10.0.0.5:3000"* ]]
+}
+
+@test "prov_runner_ecart : une attente VIDE ne se compare pas — on n'invente pas l'attendu" {
+  # Le doctor du conteneur n'a pas l'adresse annoncée du banc : il passe une attente vide plutôt
+  # qu'une adresse devinée, et seuls les labels sont alors mesurés.
+  decor_pose
+  _ecart_decor "http://n-importe-quoi:3000" "ubuntu-latest:docker://x"
+  module_sh 'e="$(prov_runner_ecart bt-runner-act-1 "" "ubuntu-latest:docker://x")"; [ -z "$e" ]'
+  [ "$status" -eq 0 ]
+}
+
+@test "prov_runner_ecart : ⚠ CE QU'ON N'A PAS PU LIRE N'EST PAS UN ECART" {
+  # docker muet, conteneur absent, environnement vide : la fonction rend VIDE. Transformer une
+  # non-lecture en derive enverrait reparer ce qui n'est peut-etre pas casse.
+  decor_pose
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$DECOR_BIN/docker"; chmod +x "$DECOR_BIN/docker"
+  module_sh 'e="$(prov_runner_ecart bt-runner-act-1 "http://forge:3000" "des:labels")"; [ -z "$e" ]'
+  [ "$status" -eq 0 ]
+  module_sh 'e="$(prov_runner_ecart "" "http://forge:3000" "des:labels")"; [ -z "$e" ]'
+  [ "$status" -eq 0 ]
+}

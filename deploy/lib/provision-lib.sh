@@ -151,6 +151,34 @@ PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"
 PROV_RUNNER_PROJECT="${PROV_FORGE_BASE}-runner"
 PROV_FORGE_NET="${PROV_FORGE_PROJECT}_default"
 
+# ⚠ UN RUNNER QUI DÉRIVE NE TOMBE PAS EN PANNE : IL NE PREND PLUS LES JOBS. Des labels qui ne
+# correspondent plus, ou une adresse de forge qu'un conteneur de job n'atteint pas, ne cassent rien
+# de visible — la CI accepte les jobs, et personne ne les sert. C'est le mode de défaillance le plus
+# silencieux du rail, et il mérite d'être MESURÉ des deux côtés.
+#
+# ⚖ Elle vit ICI et pas dans `49-forge-runner.sh` parce que le doctor du conteneur
+# (`deploy/container status`) doit poser la même question : ce module la jouait seul, donc un banc
+# dont le runner avait dérivé se présentait en bonne santé. Une seconde écriture aurait divergé —
+# c'est la leçon que ce chantier vient de payer deux fois.
+#
+# ⚠ ELLE NE CONCLUT RIEN QUAND ELLE N'A PAS PU LIRE. Conteneur absent, docker muet, environnement
+# illisible : elle rend VIDE, comme « conforme ». C'est délibéré et c'est la règle du dépôt — ce
+# qu'on n'a pas pu lire ne se transforme pas en écart. L'appelant qui a besoin de distinguer les
+# deux mesure la présence du conteneur lui-même.
+prov_runner_ecart() { # prov_runner_ecart <conteneur> <url attendue> <labels attendus> → l'écart, ou rien
+  local conteneur="$1" url_attendue="$2" labels_attendus="$3" env url labels
+  [[ -n "$conteneur" ]] || return 0
+  env="$("${PROV_DOCKER_BIN:-docker}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$conteneur" 2>/dev/null)" || return 0
+  [[ -n "$env" ]] || return 0
+  url="$(env_field <(printf '%s\n' "$env") GITEA_INSTANCE_URL)"
+  labels="$(env_field <(printf '%s\n' "$env") GITEA_RUNNER_LABELS)"
+  if [[ -n "$url" && -n "$url_attendue" && "$url" != "$url_attendue" ]]; then
+    printf "vise %s, qu'un job n'atteint pas (attendu %s)\n" "$url" "$url_attendue"
+  elif [[ -n "$labels" && -n "$labels_attendus" && "$labels" != "$labels_attendus" ]]; then
+    printf 'porte les labels %s (attendu %s)\n' "$labels" "$labels_attendus"
+  fi
+}
+
 # sous --bench (PROV_FORGE_MONTEE), la forge est celle du poste et un FORGE_BASE_URL résiduel n'y change
 # rien. Une forge fournie vient de FORGE_BASE_URL, ou du mode « fournie » que 48 grave dans forge.mode,
 # avec forge.url. Dans un conteneur sans forge fournie, l'adresse reste vide : le geste du produit la

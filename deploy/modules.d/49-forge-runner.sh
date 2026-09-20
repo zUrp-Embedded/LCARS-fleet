@@ -36,16 +36,10 @@ en_ligne() { jq '[.[] | select(.status != "offline")] | length' <<<"$RUNNERS"; }
 # un réenrôlement enregistre un runner neuf sous le même nom : les enregistrements plus anciens, hors ligne, sont périmés
 perimes() { jq -r 'group_by(.name)[] | (max_by(.id).id) as $neuf | .[] | select(.id != $neuf and .status == "offline") | .id' <<<"$RUNNERS"; }
 
-runner_ecart() { # runner_ecart → ce qui sépare le runner de ce poste de ce que cette passe lui donnerait ; vide s'il est conforme ou sans conteneur lisible
-  local env url labels
-  env="$("${PROV_DOCKER_BIN:-docker}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PROV_RUNNER_PROJECT-act-1" 2>/dev/null)" || return 0
-  url="$(env_field <(printf '%s\n' "$env") GITEA_INSTANCE_URL)"
-  labels="$(env_field <(printf '%s\n' "$env") GITEA_RUNNER_LABELS)"
-  if [[ -n "$url" && "$url" != "$JOB_URL" ]]; then
-    printf "vise %s, qu'un job n'atteint pas (attendu %s)\n" "$url" "$JOB_URL"
-  elif [[ -n "$labels" && "$labels" != "$PROV_RUNNER_LABELS" ]]; then
-    printf 'porte les labels %s (attendu %s)\n' "$labels" "$PROV_RUNNER_LABELS"
-  fi
+# ⚖ La mesure vit dans la lib (`prov_runner_ecart`) : le doctor du conteneur pose la MÊME question,
+# et une seconde écriture aurait divergé. Ce module lui donne ce que cette passe donnerait au runner.
+runner_ecart() { # runner_ecart → ce qui sépare le runner de ce poste de ce que cette passe lui donnerait
+  prov_runner_ecart "$PROV_RUNNER_PROJECT-act-1" "$JOB_URL" "$PROV_RUNNER_LABELS"
 }
 
 retirer_perimes() {

@@ -563,6 +563,26 @@ cmd_status() {
     000)   echo "  deck        : rien ne répond sur $deck" ;;
     *)     echo "  deck        : $deck rend HTTP $deck_http" ;;
   esac
+  # ⚠ UN RUNNER QUI A DÉRIVÉ NE TOMBE PAS EN PANNE : IL NE PREND PLUS LES JOBS. Des labels qui ne
+  # correspondent plus laissent la CI accepter des jobs que rien ne sert — et jusqu'ici ce doctor ne
+  # posait pas la question, donc un banc au runner dérivé se présentait en bonne santé. La mesure est
+  # celle du rail poste, à la lettre : `prov_runner_ecart` de la lib, que `49-forge-runner` appelle
+  # aussi. L'ADRESSE n'est pas comparée ici — elle demanderait l'adresse annoncée du banc, que ce
+  # geste n'a pas ; la fonction saute une attente vide plutôt que d'en inventer une.
+  if [[ "$(project_config_files)" == *docker-compose.bench.yml* ]]; then
+    local runner ecart
+    runner="${PROJECT%-fleet}-runner-act-1"
+    if ! "$DOCKER" inspect -f '{{.State.Status}}' "$runner" >/dev/null 2>&1; then
+      echo "  runner CI   : aucun conteneur « $runner » — ce banc ne sert aucun job"
+    else
+      ecart="$(prov_runner_ecart "$runner" "" "$PROV_RUNNER_LABELS")"
+      if [[ -z "$ecart" ]]; then
+        echo "  runner CI   : $runner conforme (labels de PROV_RUNNER_LABELS)"
+      else
+        echo "  runner CI   : $runner $ecart — la CI accepte des jobs que rien ne servira ; « $relancer »"
+      fi
+    fi
+  fi
   if [[ -n "$tampon" ]]; then
     if [[ -n "$rev" && ( "$rev" == "$tampon"* || "$tampon" == "$rev"* ) ]]; then
       echo "  image       : vérifiée ($tampon) — la révision qui tourne est celle du build"
