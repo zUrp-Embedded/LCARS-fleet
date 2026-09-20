@@ -64,9 +64,11 @@ DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_ch
 #   prov_owner       sa clause de DECOR — une ligne, qui lit `LCARS_DECOR_ROOT`.
 #                    ⚠ ELLE COUTE UNE MESURE : sous un decor elle rend LE JOUEUR quoi qu'on
 #                    demande, donc `prov_check_mode` compare le joueur au joueur et la moitie
-#                    « proprietaire » est tautologique dans tout le corpus de banc. La compensation
-#                    est textuelle (`poseurs.bats`) et ne couvre qu'un module sur la dizaine qui
-#                    posent un proprietaire. Ce n'est pas une dette de duplication, c'est un TROU.
+#                    « proprietaire » est tautologique dans tout le corpus de banc. Ce n'est pas une
+#                    dette de duplication, c'est un TROU — et il est desormais compense a la
+#                    LECTURE, sur les quinze sites qui posent un proprietaire : `poseurs.bats`,
+#                    « tout proprietaire pose est DERIVE ou vaut root ». Le trou demeure ; ce qui
+#                    change est qu'on ne peut plus y tomber sans qu'un mur le dise.
 #   run_quiet        l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`), le produit
 #                    imprime et rend 1. ⚠ ET LA DIVERGENCE QUI COMPTE N'EST PAS CELLE-LA : cote
 #                    installeur un echec LEVE LE VERDICT tout seul (`p_fail`), cote produit il ne
