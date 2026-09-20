@@ -71,8 +71,17 @@ defmodule Fleet.Application.CatalogueMaterial do
   pages that FAIL, not a forge that ends the listing early. `Transport.paginate/4` stops on an
   empty page even when the server announces more, and trusts `X-Total-Count` — so a store that
   answers an empty page mid-listing is indistinguishable from a complete one, and its catalogues
-  past that point read as uninstalled. Nothing downstream can tell the difference; the day this
-  matters, the fix is a snapshot ref in the request, not a claim in this docstring.
+  past that point read as uninstalled.
+
+  MEASURED 2026-09-20, against a disposable Gitea carrying 121 branches, queried exactly as
+  `paginate/4` queries (`?page=N&limit=50`): pages of 50, 50, 21, then 0 — a correct, stable
+  `X-Total-Count` of 121 throughout. Gitea FILLS its pages until exhaustion and only empties AFTER
+  the end, so pagination stops on `121 >= 121` and the empty page is never fetched. The truncating
+  shape is not reachable from this forge by a plain listing: it would take a mass branch deletion
+  DURING the walk, on a store already holding more than fifty catalogues — below that there is one
+  page and no second request. `test/fleet/forge/client/pagination_truncation_test.exs` pins both
+  halves. No guard is warranted here; the day the transport is reworked, a snapshot ref in the
+  request is the place to close it.
 
   Reading is ANONYMOUS by design (`allow_anonymous: true`): a catalogue store is public by
   construction, and a container that was never given any authority must still converge its
