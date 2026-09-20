@@ -1026,12 +1026,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     }
   end
 
+  # ⚠ `:skip`, PAS `:pass`. Ce mur n'a RIEN mesure : l'arbre qu'il lit n'est pas dans cet artefact.
+  # Rendre `pass` faisait dire « verifie » a une ligne qui disait « pas verifie » dans sa note.
   @spec out_of_scope(String.t(), String.t(), [String.t()]) :: Support.result()
   defp out_of_scope(id, sujet, absents) do
     %{
       id: id,
       remediation: "—",
-      status: :pass,
+      status: :skip,
       evidence: [],
       note:
         "NOT CHECKED here — #{sujet} in this artifact (runtime-only context)" <>

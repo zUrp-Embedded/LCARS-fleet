@@ -9,11 +9,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @typedoc """
   A check verdict. Empty-population failures use `:fail` with an INSTRUMENT BROKEN
   diagnostic; they are not a separate status.
+
+  ⚠ `:skip` IS NOT A WEAK `:pass`, AND C'EST POUR CA QU'IL EXISTE. Un mur rend `:skip` quand il n'a
+  RIEN MESURE — parce que l'arbre qu'il lit n'est pas dans cet artefact (un release ne porte que
+  `runtime/`, pas `deploy/` ni `assets/`). Avant ce mot, ces cas rendaient `:pass` avec une note
+  « NOT CHECKED here », et un relecteur a lu la ligne comme un faux vert : il avait raison, « pass »
+  ne doit pas pouvoir vouloir dire « pas verifie ».
+
+  `:skip` ne fait pas echouer la porte — un artefact runtime-only serait rouge par construction —
+  mais il se COMPTE a part, et le resume le dit.
   """
   @type result :: %{
           id: String.t(),
           remediation: String.t(),
-          status: :pass | :fail,
+          status: :pass | :fail | :skip,
           evidence: [String.t()],
           note: String.t()
         }

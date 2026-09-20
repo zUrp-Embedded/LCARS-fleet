@@ -419,6 +419,63 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
     end
   end
 
+  describe "hors perimetre — `:skip`, et surtout PAS `:pass`" do
+    # ⚖ user 2026-09-20. Un artefact runtime-only ne porte pas `deploy/` : les murs qui le lisent
+    # n'y mesurent RIEN. Ils rendaient `pass` sous une note « NOT CHECKED here », qu'un relecteur a
+    # lu comme un faux vert — a raison. `:skip` ne fait pas echouer la porte (l'artefact serait rouge
+    # par construction), il rend la ligne HONNETE et se compte a part dans le resume.
+    defp depot_sans_deploy(fichiers) do
+      root = Fleet.TestEnv.tmp_path("verrous_skip")
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      runtime = Path.join(root, "runtime")
+      File.mkdir_p!(Path.join(runtime, "lib/fleet/credentials"))
+
+      for {rel, contenu} <- fichiers do
+        chemin = Path.join(root, rel)
+        File.mkdir_p!(Path.dirname(chemin))
+        File.write!(chemin, contenu)
+      end
+
+      runtime
+    end
+
+    # ⚠ « DEPLOY ABSENT » NE SUFFIT PAS A FAIRE UN SAUT, et c'est une mesure, pas une supposition :
+    # ce mur porte TROIS declarations, et avec `deploy/` hors perimetre il en compare encore DEUX,
+    # en nommant celle qu'il n'a pas lue. Il rend alors `:pass` — a juste titre, il a mesure. Le saut
+    # ne se declenche qu'en dessous de deux declarations lisibles, faute de quoi il n'y a rien a
+    # comparer : aucune autorite n'est designee ici, c'est l'ACCORD qui est l'invariant.
+    # Le cas « il mesure vraiment et rend `:pass` » a son temoin ailleurs
+    # (`layout_single_source_check_test.exs`) : il n'est pas redouble ici.
+    test "une seule declaration lisible → `:skip`, et la note dit ce qui n'a pas ete lu" do
+      root =
+        depot_sans_deploy([
+          {"runtime/lib/fleet/credentials/role_token.ex",
+           ~s[defmodule R do\n  @default_dir "/opt/lcars/var/tokens"\nend\n]}
+        ])
+
+      assert %{status: :skip, note: note, evidence: []} =
+               SingleSource.check_private_dir_single_source(root)
+
+      assert note =~ "NOT CHECKED here"
+      assert note =~ "fewer than two declarations present"
+    end
+
+    test "deux declarations sur trois → il COMPARE, donc `:pass` : le saut n'est pas contagieux" do
+      root =
+        depot_sans_deploy([
+          {"runtime/lib/fleet/credentials/role_token.ex",
+           ~s[defmodule R do\n  @default_dir "/opt/lcars/var/tokens"\nend\n]},
+          {"runtime/etc/facts.env", "LCARS_PRIVATE_DIR=/opt/lcars/var/tokens\n"}
+        ])
+
+      assert %{status: :pass, note: note} = SingleSource.check_private_dir_single_source(root)
+
+      # Et il DIT quand meme ce qu'il n'a pas lu — un `pass` partiel qui se tait vaut un faux vert.
+      assert note =~ "installer-constants.env"
+    end
+  end
+
   describe "facts.no_literal_alias — la valeur recopiee sous un nom raccourci" do
     defp faits_alias,
       do:

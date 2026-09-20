@@ -43,11 +43,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     unless quiet?, do: IO.puts(render_yaml(overall, checks))
 
     fails = Enum.count(checks, &(&1.status == :fail))
+    skips = Enum.count(checks, &(&1.status == :skip))
 
-    Mix.shell().info(
+    # ⚠ LES SAUTS SE COMPTENT A PART, ET C'EST TOUT LE POINT DE `:skip`. Un mur qui n'a rien mesure —
+    # parce que l'arbre qu'il lit n'est pas dans cet artefact — rendait `pass` sous une note « NOT
+    # CHECKED here » : le resume annoncait donc N murs verifies dont certains ne l'etaient pas. Le
+    # compte est desormais lisible d'un coup d'oeil, et un saut qui apparait la ou on n'en attend pas
+    # se voit.
+    resume =
       "contracts.check: #{overall} — #{fails} fail, " <>
-        "#{Enum.count(checks, &(&1.status == :pass))} pass"
-    )
+        "#{Enum.count(checks, &(&1.status == :pass))} pass" <>
+        if(skips == 0, do: "", else: ", #{skips} skip (rien mesure ici)")
+
+    Mix.shell().info(resume)
 
     if overall == :fail, do: exit({:shutdown, 1})
   end
@@ -151,6 +159,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # Bounded rework belongs to StepRunConsumer's forge rail (`max_rework_rounds`).
       ]
 
+    # ⚠ UN SAUT NE FAIT PAS ECHOUER LA PORTE, et ce n'est pas une indulgence : un artefact
+    # runtime-only ne PORTE pas `deploy/` ni `assets/`, donc les murs qui les lisent y seraient
+    # rouges par construction. Ce que `:skip` change est la LISIBILITE du rapport, pas le verdict.
     overall = if Enum.any?(checks, &(&1.status == :fail)), do: :fail, else: :pass
 
     {overall, checks}
