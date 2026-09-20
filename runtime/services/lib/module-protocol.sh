@@ -188,21 +188,8 @@ run_quiet() {
 
 # ─── Les mutations ─────────────────────────────────────────────────────────────────────────────
 # Aucune mutation privilegiee ne traverse un symlink : un chemin qu'on n'a pas pose ne se suit pas.
-prov_refuse_symlink_path() {
-  local path="$1" cur="" part
-  local -a parts
-  [[ "$path" == /* ]] || { p_fail "mutation privilegiee REFUSEE — chemin relatif: $path"; return 1; }
-  IFS='/' read -ra parts <<< "${path#/}"
-  for part in "${parts[@]}"; do
-    [[ -z "$part" ]] && continue
-    cur="$cur/$part"
-    if [[ -L "$cur" ]]; then
-      p_fail "mutation privilegiee REFUSEE — composant symlink: $cur -> $(readlink "$cur")"
-      return 1
-    fi
-  done
-  return 0
-}
+# ⚖ PHASE 6, ETAPE 2 : `prov_refuse_symlink_path` a rejoint `lib/primitives.sh`, que ce fichier
+# source plus haut. Les deux corps etaient identiques a la ponctuation pres — il n'y en a plus qu'un.
 prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
   local o="$1" g
   [[ "$o" == *: ]] || { printf '%s' "$o"; return 0; }

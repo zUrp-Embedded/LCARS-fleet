@@ -42,12 +42,19 @@ DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_ch
 # homonymes : il n'y a plus qu'un corps. Et ce n'etait pas qu'une redondance — `ensure_mode` du
 # produit RELISAIT le mode apres `chmod`, celui de l'installeur non.
 #
+# ⚖ PHASE 6, ETAPE 2 (2026-09-20). `prov_refuse_symlink_path` sort de cette liste : il vit dans
+# `primitives.sh`, comme les cinq de l'etape 1. Il y etait declare « son refus porte le vocabulaire
+# du decor » — et la mesure dit le contraire. Les deux corps etaient IDENTIQUES, ligne pour ligne, a
+# la ponctuation du message pres ; aucun ne portait le moindre vocabulaire de decor. La
+# justification etait fausse, et c'est elle qui gardait vingt lignes ecrites deux fois hors de la
+# dette. ⚠ UNE LIGNE DE CETTE LISTE EST UNE DECISION QUI SE RELIT : une justification qu'on n'a pas
+# remesuree depuis qu'elle a ete ecrite n'est plus une justification, c'est une habitude.
+#
 # CE QUI RESTE PORTE UNE IDENTITE DE RAIL, et chacune dit laquelle :
 #   advertise_addr, lan_addr      l'installeur connait l'adresse que l'operateur a choisie ;
 #   prov_owner                    sa clause de DECOR (sous un decor, tout appartient au joueur) ;
-#   prov_refuse_symlink_path      son refus porte le vocabulaire du decor ;
 #   run_quiet                     l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`).
-COPIES="advertise_addr lan_addr prov_owner prov_refuse_symlink_path run_quiet"
+COPIES="advertise_addr lan_addr prov_owner run_quiet"
 
 noms() { grep -oE '^[a-z_][a-z0-9_]*\(\)' "$1" | tr -d '()' | sort -u; }
 

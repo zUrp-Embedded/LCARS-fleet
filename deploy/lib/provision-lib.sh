@@ -344,28 +344,16 @@ prov_lock_path() { # prov_lock_path → le chemin du verrou de l'apply, dans un 
   printf '%s\n' "$lock"
 }
 
-prov_refuse_symlink_path() {
-  local path="$1" cur="" part
-  local -a parts
-
-  [[ "$path" == /* ]] || {
-    p_fail "mutation privilégiée refusée — chemin relatif : $path"
-    return 1
-  }
-
-  IFS='/' read -ra parts <<< "${path#/}"
-
-  for part in "${parts[@]}"; do
-    [[ -z "$part" ]] && continue
-    cur="$cur/$part"
-    if [[ -L "$cur" ]]; then
-      p_fail "mutation privilégiée refusée — composant symlink : $cur -> $(readlink "$cur")"
-      return 1
-    fi
-  done
-
-  return 0
-}
+# ⚖ PHASE 6, ÉTAPE 2 : `prov_refuse_symlink_path` a rejoint `runtime/services/lib/primitives.sh`,
+# que cette lib source plus bas. Il était déclaré « identité de rail — son refus porte le vocabulaire
+# du décor » ; mesure du 2026-09-20 : les deux corps étaient IDENTIQUES ligne pour ligne, à la
+# ponctuation du message près, et aucun ne portait le moindre vocabulaire de décor. La garde
+# elle-même n'a pas bougé : on n'écrit jamais À TRAVERS un lien, et le chemin est remonté composant
+# par composant depuis la racine.
+#
+# ⚠ ET IL EST APPELÉ AVANT D'ÊTRE DÉFINI — par `prov_ensure_parent_dir` ci-dessus, et par
+# `prov_scaffold_dir` plus bas. C'est légal et voulu : bash résout les fonctions À L'APPEL, et
+# aucune de ces fonctions ne s'exécute avant que le `source` des primitives ne soit passé.
 
 
 prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend le groupe de connexion de user ; les coreutils uutils (Ubuntu 26.04) ignorent la forme nue
@@ -417,6 +405,10 @@ else
   ensure_dir()   { _prov_sans_primitives ensure_dir; }
   ensure_mode()  { _prov_sans_primitives ensure_mode; }
   write_atomic() { _prov_sans_primitives write_atomic; }
+  # ⚠ SIXIÈME BOUCHON DEPUIS LA PHASE 6 ÉTAPE 2, et le plus important de tous : sans lui, la garde
+  # qui refuse d'écrire À TRAVERS un lien mourrait sur « command not found ». Un refus qui n'existe
+  # pas est un refus qui ne refuse rien, et celui-là protège des mutations jouées en root.
+  prov_refuse_symlink_path() { _prov_sans_primitives prov_refuse_symlink_path; }
 fi
 
 # ⚠ LE BOUCHON NE SUFFIT PAS, ET C'EST UNE PROPRIÉTÉ DU SHELL, PAS UN OUBLI : `env_field` et

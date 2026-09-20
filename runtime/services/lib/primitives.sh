@@ -29,10 +29,37 @@
 #                              lise le travail de l'autre ;
 #   · `prov_owner`           — le proprietaire a poser, ou rien. L'installeur y ajoute sa clause de
 #                              decor (sous un decor, tout appartient a qui le joue) : c'est une
-#                              identite de rail, elle reste chez lui ;
-#   · `prov_refuse_symlink_path` — le refus d'ecrire a travers un lien.
+#                              identite de rail, elle reste chez lui.
 #
 # Un hote qui n'en fournirait pas un mourrait a la premiere convergence, pas en silence.
+#
+# ⚠ `prov_refuse_symlink_path` N'EST PLUS ATTENDU DE L'HOTE : IL VIT ICI (⚖ phase 6, etape 2). Il
+# etait declare « identite de rail — son refus porte le vocabulaire du decor », et la mesure du
+# 2026-09-20 dit le contraire : les deux corps etaient IDENTIQUES, ligne pour ligne, a la
+# ponctuation du message pres. Il n'y avait aucun vocabulaire de decor dedans. Vingt lignes ecrites
+# deux fois, dont l'une pouvait deriver sans que rien ne le dise — exactement ce que la premiere
+# moitie de la phase 6 a retire pour les cinq autres primitives.
+
+# ⚠ LA GARDE LA PLUS CHERE DU FICHIER : on n'ecrit jamais A TRAVERS un lien. Un seul composant
+# symlink sur le chemin d'une mutation privilegiee suffit a faire poser root un fichier ailleurs
+# que la ou l'appelant croit — le chemin est donc remonte composant par composant, depuis la racine.
+# Un chemin RELATIF est refuse d'entree : il se resout depuis le repertoire courant, que ce fichier
+# ne controle pas.
+prov_refuse_symlink_path() { # prov_refuse_symlink_path <chemin absolu>
+  local path="$1" cur="" part
+  local -a parts
+  [[ "$path" == /* ]] || { p_fail "mutation privilégiée refusée — chemin relatif : $path"; return 1; }
+  IFS='/' read -ra parts <<< "${path#/}"
+  for part in "${parts[@]}"; do
+    [[ -z "$part" ]] && continue
+    cur="$cur/$part"
+    if [[ -L "$cur" ]]; then
+      p_fail "mutation privilégiée refusée — composant symlink : $cur -> $(readlink "$cur")"
+      return 1
+    fi
+  done
+  return 0
+}
 
 # Le champ d'un fichier `CLE=valeur`, lu comme une DONNEE — jamais source, jamais execute. La
 # DERNIERE occurrence gagne, comme le ferait un shell qui sourcerait le fichier.
