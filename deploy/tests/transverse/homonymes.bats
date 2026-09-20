@@ -58,10 +58,21 @@ DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_ch
 #
 # CE QUI RESTE PORTE UNE IDENTITE DE RAIL, et chacune a ete REMESUREE le 2026-09-20 :
 #   advertise_addr   l'installeur a une branche WSL/NAT que le produit n'a pas, et le produit
-#                    honore un `LCARS_ADVERTISE` deja pose que l'installeur recalcule ;
-#   prov_owner       sa clause de DECOR — une ligne, qui lit `LCARS_DECOR_ROOT` ;
+#                    honore un `LCARS_ADVERTISE` deja pose que l'installeur recalcule.
+#                    ⚠ LEUR NOYAU COMMUN EST TENU A PART, sans fusion : `advertise_parity.bats` —
+#                    les trois jokers, le bind nomme, le repli nomme sur 127.0.0.1.
+#   prov_owner       sa clause de DECOR — une ligne, qui lit `LCARS_DECOR_ROOT`.
+#                    ⚠ ELLE COUTE UNE MESURE : sous un decor elle rend LE JOUEUR quoi qu'on
+#                    demande, donc `prov_check_mode` compare le joueur au joueur et la moitie
+#                    « proprietaire » est tautologique dans tout le corpus de banc. La compensation
+#                    est textuelle (`poseurs.bats`) et ne couvre qu'un module sur la dizaine qui
+#                    posent un proprietaire. Ce n'est pas une dette de duplication, c'est un TROU.
 #   run_quiet        l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`), le produit
-#                    imprime et rend 1.
+#                    imprime et rend 1. ⚠ ET LA DIVERGENCE QUI COMPTE N'EST PAS CELLE-LA : cote
+#                    installeur un echec LEVE LE VERDICT tout seul (`p_fail`), cote produit il ne
+#                    compte RIEN — l'appelant le possede. Le code rendu diverge aussi : 1 aplati
+#                    contre le code reel. Les trois cas sont dans `verdict_parity.bats`, dont un
+#                    MUR qui refuse un appelant produit sans verdict.
 COPIES="advertise_addr prov_owner run_quiet"
 
 noms() { grep -oE '^[a-z_][a-z0-9_]*\(\)' "$1" | tr -d '()' | sort -u; }

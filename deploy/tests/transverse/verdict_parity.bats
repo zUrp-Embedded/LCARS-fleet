@@ -106,3 +106,67 @@ verdict_product()   { bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1; LCARS_FAILE
     [[ "$output" != *"OK    "* ]] || { echo "$m a mesuré avant de refuser : $output" >&2; return 1; }
   done
 }
+
+# ─── `run_quiet` : DEUX CORPS, ET LA DIVERGENCE QUI COMPTE EST CELLE DU VERDICT ────────────────
+#
+# ⚖ PHASE 6, ETAPE 2 (mesure du 2026-09-20). `run_quiet` reste dans la liste des copies de
+# `homonymes.bats`, et sa ligne disait seulement « l'installeur CAPTURE et dumpe ». C'est vrai et
+# c'est le moins important. Remesure des deux corps :
+#
+#   |                        | produit                        | installeur                     |
+#   |------------------------|--------------------------------|--------------------------------|
+#   | code rendu sur echec   | 1, APLATI                      | le code reel de la commande    |
+#   | qui leve le verdict    | L'APPELANT — rien n'est compte | `p_fail`, donc PROV_FAILED     |
+#   | ce qui est imprime     | la sortie de la commande       | + « commande en echec (rc=…) » |
+#
+# LA SECONDE LIGNE EST UN PIEGE, et c'est pour ca qu'elle est epinglee ici plutot que decrite
+# ailleurs : cote installeur, un `run_quiet` qui echoue REND LE MODULE ROUGE tout seul ; cote
+# produit, il ne rend rien rouge du tout. Les deux appelants du produit (`human.d/40-claude-bin.sh`)
+# font `p_fail` puis `verdict_apply` eux-memes — c'est sain, et c'est ce que ces temoins figent.
+# Un troisieme appelant ecrit par quelqu'un qui connait l'installeur aurait un echec MUET.
+
+@test "run_quiet : le produit ne compte RIEN — l'appelant possede son verdict" {
+  run bash -c "set +e; . '$PRODUCT' >/dev/null 2>&1
+    run_quiet bash -c 'echo boum; exit 3'; rc=\$?
+    printf 'rc=%s failed=%s' \"\$rc\" \"\$LCARS_FAILED\""
+  [ "$status" -eq 0 ]
+  # Le code est APLATI a 1, la ou l'installeur rend 3 (son temoin l'epingle dans provision-lib.bats).
+  [[ "$output" == *"rc=1"* ]] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"failed=0"* ]] || { echo "le produit s'est mis a compter : $output" >&2; return 1; }
+  [[ "$output" == *boum* ]] || { echo "la sortie de la commande n'est pas remontee : $output" >&2; return 1; }
+}
+
+@test "run_quiet : l'installeur COMPTE, et rend le code reel — l'ecart est assume, pas subi" {
+  run bash -c "set +e; . '$INSTALLER' >/dev/null 2>&1
+    PROVISION_MODULE=temoin
+    run_quiet bash -c 'echo boum; exit 3'; rc=\$?
+    printf 'rc=%s failed=%s' \"\$rc\" \"\$PROV_FAILED\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rc=3"* ]] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"failed=1"* ]] || { echo "$output" >&2; return 1; }
+}
+
+@test "MUR : tout appelant produit de run_quiet possede son verdict — sinon l'echec est MUET" {
+  # La propriete que la divergence ci-dessus rend necessaire. Elle se lit dans le code : un
+  # `run_quiet` du produit doit etre suivi, dans sa branche d'echec, d'un `p_fail` ou d'un `p_die`.
+  local f n bloc manquants=""
+  while IFS= read -r f; do
+    while IFS= read -r n; do
+      # les dix lignes qui suivent l'appel : la branche d'echec y est, ou elle n'existe pas.
+      # ⚠ COMMENTAIRES RETIRES AVANT LE GREP. Premiere ecriture de ce mur : il cherchait « p_fail »
+      # dans le texte brut, donc un verdict COMMENTE le satisfaisait. Mesure du 2026-09-20 : deux
+      # tentatives de falsification l'ont laisse vert d'affilee, parce que chacune laissait le mot
+      # dans la ligne qu'elle neutralisait. Un mur qui accepte sa propre mise hors service ne mesure
+      # rien — meme lecon que la premiere version de `facts.readers_wired`.
+      bloc="$(sed -n "${n},$((n + 10))p" "$f" | sed 's/#.*//')"
+      grep -qE 'p_fail|p_die' <<<"$bloc" || manquants="$manquants ${f#"$REPO"/}:$n"
+    done < <(grep -nE '(^|[^_[:alnum:]])run_quiet ' "$f" | grep -v 'run_quiet() {' | cut -d: -f1)
+  done < <(grep -rlE '(^|[^_[:alnum:]])run_quiet ' "$REPO/runtime/services" --include='*.sh' | grep -v '/lib/module-protocol.sh')
+
+  [ -z "${manquants// /}" ] || {
+    echo "appel(s) de run_quiet sans verdict cote produit :$manquants" >&2
+    echo "→ cote produit run_quiet ne compte RIEN : sans p_fail/p_die dans la branche d'echec, le" >&2
+    echo "  module rend 0 sur une commande ratee. Cote installeur le meme nom compte tout seul." >&2
+    return 1
+  }
+}
