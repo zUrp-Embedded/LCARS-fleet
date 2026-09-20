@@ -409,6 +409,9 @@ else
   # qui refuse d'écrire À TRAVERS un lien mourrait sur « command not found ». Un refus qui n'existe
   # pas est un refus qui ne refuse rien, et celui-là protège des mutations jouées en root.
   prov_refuse_symlink_path() { _prov_sans_primitives prov_refuse_symlink_path; }
+  # `lan_addr` rend une valeur : son bouchon dit la cause et ne rend RIEN — ce que `advertise_addr`
+  # traite déjà comme « aucune adresse de sortie détectée » et replie sur 127.0.0.1, en le disant.
+  lan_addr() { _prov_sans_primitives lan_addr; }
 fi
 
 # ⚠ LE BOUCHON NE SUFFIT PAS, ET C'EST UNE PROPRIÉTÉ DU SHELL, PAS UN OUBLI : `env_field` et
@@ -688,7 +691,8 @@ wsl_networking_mode() {
   echo nat
 }
 
-lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
+# ⚖ PHASE 6, ETAPE 2 : `lan_addr` a rejoint `lib/primitives.sh` — les deux corps etaient identiques
+# OCTET POUR OCTET, et sa justification etait celle d.`advertise_addr`, heritee par voisinage.
 
 # un conteneur de job tourne dans le daemon embarqué du runner : ni le nom de service de la forge, ni
 # une adresse de loopback (la sienne) ne l'atteignent, seul le port publié sur une adresse de l'hôte

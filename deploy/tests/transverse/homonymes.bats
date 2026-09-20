@@ -50,11 +50,19 @@ DIALECTE="p_step p_ok p_chg p_drift p_warn p_fail p_die verdict_apply verdict_ch
 # dette. ⚠ UNE LIGNE DE CETTE LISTE EST UNE DECISION QUI SE RELIT : une justification qu'on n'a pas
 # remesuree depuis qu'elle a ete ecrite n'est plus une justification, c'est une habitude.
 #
-# CE QUI RESTE PORTE UNE IDENTITE DE RAIL, et chacune dit laquelle :
-#   advertise_addr, lan_addr      l'installeur connait l'adresse que l'operateur a choisie ;
-#   prov_owner                    sa clause de DECOR (sous un decor, tout appartient au joueur) ;
-#   run_quiet                     l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`).
-COPIES="advertise_addr lan_addr prov_owner run_quiet"
+# ⚠ DEUXIEME JUSTIFICATION FAUSSE DE LA MEME LISTE, MEME JOUR. `lan_addr` sort aussi : ses deux
+# corps etaient identiques OCTET POUR OCTET. Sa ligne disait « advertise_addr, lan_addr — l'installeur
+# connait l'adresse que l'operateur a choisie » : c'est vrai d'`advertise_addr`, qui sait WSL et son
+# mode NAT, et FAUX de `lan_addr`, qui ne sait rien de l'operateur et demande au noyau quelle source
+# il mettrait sur un paquet sortant. Une justification VOISINE, heritee par la virgule.
+#
+# CE QUI RESTE PORTE UNE IDENTITE DE RAIL, et chacune a ete REMESUREE le 2026-09-20 :
+#   advertise_addr   l'installeur a une branche WSL/NAT que le produit n'a pas, et le produit
+#                    honore un `LCARS_ADVERTISE` deja pose que l'installeur recalcule ;
+#   prov_owner       sa clause de DECOR — une ligne, qui lit `LCARS_DECOR_ROOT` ;
+#   run_quiet        l'installeur CAPTURE et dumpe (`run_capture`, `prov_dump_last`), le produit
+#                    imprime et rend 1.
+COPIES="advertise_addr prov_owner run_quiet"
 
 noms() { grep -oE '^[a-z_][a-z0-9_]*\(\)' "$1" | tr -d '()' | sort -u; }
 

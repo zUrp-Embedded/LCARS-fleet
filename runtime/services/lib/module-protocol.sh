@@ -201,7 +201,8 @@ prov_owner() { # prov_owner <user[:group]> → user:group — « user: » prend 
 # L'adresse que les liens et les retours OAuth doivent porter : celle du bind s'il en nomme une,
 # sinon l'adresse de sortie de la machine. L'appelant qui en sait plus (l'installeur, qui connait
 # WSL et son mode NAT) la POSE dans `LCARS_ADVERTISE` avant d'appeler : ici on ne la recalcule pas.
-lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
+# ⚖ PHASE 6, ETAPE 2 : `lan_addr` a rejoint `lib/primitives.sh` — les deux corps etaient identiques
+# OCTET POUR OCTET, et sa justification etait celle d.`advertise_addr`, heritee par voisinage.
 advertise_addr() { # advertise_addr <bind>
   local bind="${1:-0.0.0.0}"
   if [[ -n "${LCARS_ADVERTISE:-}" ]]; then

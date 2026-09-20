@@ -61,6 +61,17 @@ prov_refuse_symlink_path() { # prov_refuse_symlink_path <chemin absolu>
   return 0
 }
 
+# ⚖ PHASE 6, ETAPE 2 : `lan_addr` vit ici. Les deux rails en portaient le corps OCTET POUR OCTET, et
+# la dette le gardait dehors sous la justification d'`advertise_addr` — « l'installeur connait
+# l'adresse que l'operateur a choisie ». C'est vrai d'`advertise_addr`, qui sait WSL et son mode NAT.
+# Ce n'est pas vrai de CELUI-CI : il ne sait rien de l'operateur, il demande au noyau quelle source
+# il mettrait sur un paquet sortant. Une justification voisine, heritee sans etre remesuree.
+#
+# ⚠ RIEN N'EST DEMANDE A L'HOTE : pas de `p_fail`, pas de compteur. Elle ne rend RIEN plutot qu'une
+# erreur quand il n'y a pas de route — l'appelant decide ce que « pas d'adresse de sortie » lui fait,
+# et les deux rails en font le meme repli nomme sur 127.0.0.1.
+lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
+
 # Le champ d'un fichier `CLE=valeur`, lu comme une DONNEE — jamais source, jamais execute. La
 # DERNIERE occurrence gagne, comme le ferait un shell qui sourcerait le fichier.
 env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
