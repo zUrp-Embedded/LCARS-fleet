@@ -14,6 +14,20 @@ defmodule Mix.GateCompositionTest do
 
   defp string_steps, do: gate_steps() |> Enum.filter(&is_binary/1)
 
+  # ⚠ UNE ETAPE PEUT ETRE UNE FONCTION, ET UN PLANCHER NE DOIT PAS DEVENIR INVISIBLE EN CHANGEANT
+  # DE FORME. `dialyzer` est passe de chaine a `&dialyzer_gate/1` pour tourner en `MIX_ENV=test` ;
+  # une assertion qui ne regarde que les chaines aurait alors declare la chaine INTACTE en ne voyant
+  # plus rien. Le nom d'une fonction capturee est lisible : on cherche le plancher sous ses DEUX
+  # formes.
+  defp nom_des_etapes do
+    Enum.map(gate_steps(), fn
+      step when is_binary(step) -> step
+      step when is_function(step) -> step |> Function.info(:name) |> elem(1) |> to_string()
+    end)
+  end
+
+  defp plancher_present?(nom), do: Enum.any?(nom_des_etapes(), &String.contains?(&1, nom))
+
   test "l'instrument voit bien la chaine — elle n'est ni vide ni reduite a des fonctions" do
     steps = gate_steps()
     assert length(steps) >= 6, "la chaine gate ne porte que #{length(steps)} etapes"
@@ -28,11 +42,24 @@ defmodule Mix.GateCompositionTest do
           "format --check-formatted",
           "compile --warnings-as-errors",
           "lcars.contracts.check",
-          "lcars.topology --check",
-          "dialyzer"
+          "lcars.topology --check"
         ] do
       assert step in string_steps(), "`mix gate` a perdu l'etape #{inspect(step)}"
     end
+
+    assert plancher_present?("dialyzer"),
+           "`mix gate` a perdu Dialyzer — sous l'une ou l'autre de ses formes"
+  end
+
+  test "Dialyzer tourne en `test`, pas en `dev` — sinon il n'analyse pas test/support" do
+    # La chaine s'execute en `dev`, ou `elixirc_paths` vaut `["lib"]`. Dialyzer y voyait 1
+    # avertissement la ou l'environnement complet en voit 6, et le filtre nominatif de
+    # `test/support/cover_otp27.ex` ne pouvait jamais correspondre — ce que `list_unused_filters`
+    # fait echouer. Le pas est donc un SOUS-PROCESSUS qui pose MIX_ENV, comme celui d'ExUnit.
+    refute "dialyzer" in string_steps(),
+           "l'etape dialyzer est redevenue une chaine : elle tournerait en `dev`, sans test/support"
+
+    assert plancher_present?("dialyzer")
   end
 
   test "6-139 — Sobelow est DANS la chaine, au seuil mesure" do
